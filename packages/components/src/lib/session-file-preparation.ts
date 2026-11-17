@@ -1,4 +1,3 @@
-import { authorizePlaintextAttachmentPreparation } from './attachment-workspace-access';
 import { uploadProtectedAttachment } from './encrypted-session-attachment';
 import { requireWorkspaceFeature } from '@/lib/workspace-feature';
 import { type WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
@@ -34,11 +33,8 @@ export function prepareSessionFile(
   }
 ): Promise<SessionFilePayload> {
   return resources.run(async (signal) => {
-    if (args.content.mode !== 'protected')
-      await authorizePlaintextAttachmentPreparation(args.workspaceId, signal, args.accountId);
     throwIfSendAborted(signal);
     requireWorkspaceFeature(args.content, 'attachments');
-    if (!args.token) throw new SessionFilePreparationAuthError();
     const progress = (value: SessionFileUploadProgress) => {
       if (!signal.aborted) args.onProgress?.(value);
     };
@@ -70,6 +66,7 @@ export function prepareSessionFile(
         encryption,
       };
     }
+    if (!args.token) throw new SessionFilePreparationAuthError();
     const [hash, preview] = await Promise.allSettled([
       computeSha256Hex(args.file, { signal, onProgress: progress }),
       computeTextPreviewable(args.file),

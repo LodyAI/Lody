@@ -1,8 +1,14 @@
-import type { ReactNode, RefObject } from 'react';
+import { useEffect, useRef, type ComponentProps, type ReactNode, type RefObject } from 'react';
 import { useReducedMotion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { Dialog } from '@/ui/dialog';
 import { WORKSPACE_FOCUS_SCOPES } from '@/atoms/focus-layer';
+
+type DialogActions = NonNullable<ComponentProps<typeof Dialog.Root>['actionsRef']>['current'];
+
+/** Longer than the 220ms slide and the backdrop fade: a close that has not finished by
+ * then never started its exit transition. */
+export const COMPACT_NAVIGATION_CLOSE_SETTLE_MS = 600;
 
 export function CompactNavigationDialog({
   open,
@@ -19,8 +25,31 @@ export function CompactNavigationDialog({
 }) {
   const { t } = useTranslation();
   const reduceMotion = useReducedMotion();
+  const actionsRef = useRef<DialogActions>(null);
+  const settleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    const opened = wasOpen.current;
+    wasOpen.current = open;
+    if (open || !opened) return undefined;
+    // A close that begins before the opening frame finishes has no transition to wait
+    // for, and Base UI then keeps the backdrop and the inert background forever. Finish
+    // that exit ourselves so the window never stays unusable.
+    settleTimer.current = setTimeout(
+      () => actionsRef.current?.unmount(),
+      COMPACT_NAVIGATION_CLOSE_SETTLE_MS
+    );
+    return () => clearTimeout(settleTimer.current);
+  }, [open]);
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root
+      open={open}
+      onOpenChange={onOpenChange}
+      actionsRef={actionsRef}
+      onOpenChangeComplete={(nowOpen) => {
+        if (!nowOpen) clearTimeout(settleTimer.current);
+      }}
+    >
       <Dialog.Content
         container={container}
         aria-label={t('sidebar.navigationMenu')}

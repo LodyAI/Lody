@@ -1,3 +1,6 @@
+import { canReadSessionForCliRequester } from '@/lib/cloud-cli-port';
+import { LODY_AUTH_URL } from '@/utils/const';
+import { isContainedSession } from '@lody/shared';
 import { createToolHelpServer, LODY_HELP_INSTRUCTIONS } from './tool-help';
 import { registerAndroidEmulatorPreviewTool } from './android-emulator-tool';
 import { resolveSessionPullRequests } from '@lody/shared';
@@ -5,11 +8,7 @@ import { turnNotificationAudience } from '@/lib/notifications/turn-notification-
 import { registerAgentRoleTools } from './agent-role-tools';
 import { proposeAgentRole } from '@/lib/agent-role-proposal';
 import { batchPage } from '@/orchestration/inbox/batch-page';
-import {
-  buildSessionGroupRenamePatch,
-  buildSessionTabRenamePatch,
-  isSessionCollaborationStopped,
-} from '@lody/shared';
+import { isSessionCollaborationStopped } from '@lody/shared';
 import {
   assertMachineFlockCacheSufficient,
   MACHINE_CATALOG_RETRY_GUIDANCE,
@@ -146,6 +145,8 @@ import {
   type ResolvedTurnDispatchConfig,
   type SessionLiveStatusBatchItem,
   type DelegatedSessionRequester,
+  assertSessionManagementAccess,
+  SessionManagementAccessDeniedError,
 } from '@/commands/session';
 import { classifyMachinePresence, type MachinePresence } from '@/commands/session-machine-presence';
 import type {
@@ -188,7 +189,9 @@ import {
   discoveryCursor,
 } from '@/lib/discovery-query';
 import {
+  runWithSessionHistoryRequester,
   getDaemonWorkspace,
+  readBoundDaemonOwnerAccess,
   getSessionCommandEnvironment,
 } from '@/lib/session-command-environment';
 import { createSessionToolRegistrar, type SessionToolHandlers } from './session-tool-router';
@@ -345,10 +348,10 @@ const SESSION_CREATE_WORK_CONTEXT_DESCRIPTION =
 const SESSION_CREATE_EFFECTS_GUIDANCE = [
   'Inspect lody_session_create_options.current: workContext local worktree:true = project/session marked as worktree; absent = neither marks it. github = repository worktree; chat = no project. local rootPath = original directory, not session worktree; git.branchName = recorded session branch. Discovery is not auto-injected into prompts.',
   'useCurrentSessionAsParent: explicitly false for sidebar conversations (recommended); true only for user-requested Tabs sharing actual directory/worktree + uncommitted files. Tabs require same machine, forbid workContext and nesting.',
-  'Independent workContext (target machine):\n- chat: separate directory, no project.\n- local + projectId, worktree:false/omitted: original directory, shared files/uncommitted changes if caller already there; does not select caller session worktree. branch omitted keeps checkout; explicit branch can switch it.\n- local + worktree:true: new isolated worktree; base = branch, else original current branch/default fallback.\n- github + repo: separate worktree; branch = preferred base, not new branch name. Omitted prefers main/default fallback; unavailable explicit bases can also fall back: verify exact-version tasks.\nNew worktrees do not copy uncommitted files. Same-machine/project non-worktree callers need no Tab to share their original directory.',
+  'Independent workContext (target machine):\n- chat: separate directory, no project.\n- local + projectId, worktree:false/omitted: original directory, shared files/uncommitted changes if caller already there; does not select caller session worktree. branch omitted keeps checkout; explicit branch can switch it.\n- local + worktree:true: new isolated worktree; base = branch, else original current branch/default fallback.\n- github + repo: separate worktree; branch = preferred base, not new branch name. Omitted prefers main/default fallback; unavailable explicit bases can also fall back.\nNew worktrees do not copy uncommitted files. Same-machine/project non-worktree callers need no Tab to share their original directory.',
   'workContext omitted: non-Role independent = chat. Role + GitHub caller = caller repo/project base. Role + same-machine Local Project = shared Tab only if parent selector also omitted; false yields chat. Role + remote Local Project = workspace-enabled linked GitHub repo (main/default base), else chat; no local branch/file transfer.',
   'Non-Role: default caller machine/config if applicable, else unique matching/sole target config; ambiguity needs agentConfigId. Omitted compatible mode/model/options inherit matching-provider caller history, else provider defaults. Role: overrides manual machineId/agentConfigId/all run selectors with frozen target/prompt/config; multiple machines need agentRoleMachineId. workContext/mcpServerIds still apply. Omitted MCPs = target-project/workspace defaults, not caller selection; [] = none. Permissions grant access, not directory/file transfer; stay within user authorization.',
-  'History is never copied, even for Tabs. prompt must carry task/context/constraints/code version/completion criteria. Agent-origin input names source Session for authorized lody_session_history reads. Single attachments transfer selected caller-workspace files, not mount/sync.',
+  'History is never copied, even for Tabs; the target sees only prompt and attachments. Agent-origin input names source Session for authorized lody_session_history reads. Single attachments transfer selected caller-workspace files, not mount/sync.',
 ].join('\n\n');
 
 const SessionWorkContextInputSchema = z.discriminatedUnion('kind', [
@@ -908,7 +911,7 @@ const SessionCreateManyToolInputSchema = z
       .array(SessionCreateBatchPublishedItemSchema)
       .max(1_000)
       .describe(
-        '1-20 creates merged over defaults. Directory/history sharing follows each item configuration.'
+        '1-20 creates merged over defaults. Keep per-item prompts concise; for long custom prompts, call lody_session_create individually or in small batches.'
       ),
   })
   .strict()
@@ -924,7 +927,12 @@ const SessionChatManyToolInputSchema = z
   .object({
     ...BatchCommandEnvelopeSchema,
     defaults: SessionChatBatchItemSchema.optional(),
-    items: z.array(SessionChatBatchItemSchema).max(1_000),
+    items: z
+      .array(SessionChatBatchItemSchema)
+      .max(1_000)
+      .describe(
+        '1-20 chats merged over defaults. Keep per-item prompts concise; for long custom prompts, call lody_session_chat individually or in small batches.'
+      ),
   })
   .strict();
 
@@ -978,13 +986,6 @@ const SessionTitleToolInputSchema = z
   .max(MAX_MCP_SESSION_TITLE_CHARS)
   .describe(`New session title, up to ${MAX_MCP_SESSION_TITLE_CHARS} characters.`);
 
-const SessionRenameScopeSchema = z
-  .enum(['tab', 'group'])
-  .optional()
-  .describe(
-    "tab (default) renames this conversation tab only. group renames the sidebar title of a root Session's conversation group; its tabs keep their own titles."
-  );
-
 const SessionRenameToolInputSchema = z
   .object({
     sessionId: z
@@ -994,7 +995,6 @@ const SessionRenameToolInputSchema = z
       .optional()
       .describe('Target session id, or current. Defaults to current.'),
     title: SessionTitleToolInputSchema,
-    scope: SessionRenameScopeSchema,
   })
   .strict();
 
@@ -1002,7 +1002,6 @@ const SessionRenameManyItemSchema = z
   .object({
     sessionId: z.string().trim().min(1).describe('Target session id, or current.'),
     title: SessionTitleToolInputSchema,
-    scope: SessionRenameScopeSchema,
   })
   .strict();
 
@@ -1242,6 +1241,9 @@ const jsonTextResult = (value: unknown, isError = false) =>
   textResult(JSON.stringify(value, null, 2), isError);
 
 const normalizeMcpError = (error: unknown) => {
+  if (error instanceof SessionManagementAccessDeniedError) {
+    return makeLodyError(error.code, error.message, error.retryable);
+  }
   if (error instanceof LodyOperationStoreError) {
     return error.toLodyError();
   }
@@ -1987,7 +1989,6 @@ const sessionSummaryForMcp = (
 ) => ({
   id: session.id,
   ...(session.title ? { title: session.title } : {}),
-  ...(session.groupTitle?.trim() ? { groupTitle: session.groupTitle.trim() } : {}),
   createdAt: isoTimestamp(session.createdAt),
   lastActivityAt: isoTimestamp(session.lastMessageAt ?? session.createdAt),
   archived: session.isArchived === true,
@@ -2396,39 +2397,85 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
   const auth = getCliAuthContextOrThrow('mcp');
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
   const requestedSessionId = resolveMcpSessionId(input.sessionId, ctx);
-  return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-    const sessionId = (await createSessionIdResolver(manager)(requestedSessionId)) as SessionId;
-    const session = await readCurrentSessionMeta(manager, sessionId);
-    if (!session) {
-      throw new LodyOperationStoreError(
-        'SESSION_NOT_FOUND',
-        `Session not found: ${sessionId}`,
-        false
+  const identity = buildInvocationIdentity(await resolveInvokingTurnSource());
+  const requester = { userId: identity.userId, machineId: auth.machineId };
+  return await runWithSessionHistoryRequester(requester, () =>
+    withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
+      const sessionId = (await createSessionIdResolver(manager)(requestedSessionId)) as SessionId;
+      const session = await readCurrentSessionMeta(manager, sessionId);
+      if (!session) {
+        throw new LodyOperationStoreError(
+          'SESSION_NOT_FOUND',
+          `Session not found: ${sessionId}`,
+          false
+        );
+      }
+      const parent = session.parentSessionId
+        ? await readCurrentSessionMeta(manager, session.parentSessionId as SessionId)
+        : undefined;
+      const root = isContainedSession(session, parent) ? parent! : session;
+      const nativeOwner = await readBoundDaemonOwnerAccess({
+        auth,
+        manager,
+        workspaceId: workspace.id as WorkspaceId,
+        machineId: session.machineId,
+        requesterUserId: requester.userId,
+      });
+      const allowed = manager.isEncryptedWorkspace()
+        ? await manager.authorizeEncryptedSessionRead({
+            machineId: session.machineId,
+            rootSessionId: root.id,
+            requesterUserId: requester.userId,
+            sessionOwnerUserId: root.userId,
+            localProjectId:
+              session.project?.kind === 'local' ? session.project.localProjectId : undefined,
+          })
+        : nativeOwner !== undefined
+          ? nativeOwner
+          : getSessionCommandEnvironment() !== undefined
+            ? requester.userId === auth.userId && session.machineId === auth.machineId
+            : await canReadSessionForCliRequester({
+                token: auth.token,
+                authBaseUrl: LODY_AUTH_URL,
+                workspaceId: workspace.id,
+                machineId: session.machineId,
+                sessionId: session.id,
+                rootSessionId: root.id,
+                sessionOwnerUserId: root.userId,
+                localProjectId:
+                  session.project?.kind === 'local' ? session.project.localProjectId : undefined,
+                requester,
+              });
+      if (!allowed)
+        throw new LodyOperationStoreError(
+          'SESSION_HISTORY_DENIED',
+          'Session history is not shared with this requester.',
+          false
+        );
+      return await readSessionDocForMcp(
+        manager,
+        session,
+        auth.machineId,
+        async (sessionDoc) => {
+          const backend = await createSessionBackend(sessionDoc, session);
+          // Bounded business paging: `limit` counts displayable turns, the cursor is a
+          // raw position, and entries removed by the 128 KiB byte cap stay reachable.
+          return await buildSessionHistoryForReader({
+            sessionId,
+            history: backend.history,
+            limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
+            ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
+            direction: input.direction,
+            role: input.role,
+            since: input.since,
+            maxChars: input.maxChars,
+            maxBytes: MAX_MCP_SESSION_HISTORY_BYTES,
+          });
+        },
+        REMOTE_SESSION_HISTORY_SYNC_WAIT_MS
       );
-    }
-    return await readSessionDocForMcp(
-      manager,
-      session,
-      auth.machineId,
-      async (sessionDoc) => {
-        const backend = await createSessionBackend(sessionDoc, session);
-        // Bounded business paging: `limit` counts displayable turns, the cursor is a
-        // raw position, and entries removed by the 128 KiB byte cap stay reachable.
-        return await buildSessionHistoryForReader({
-          sessionId,
-          history: backend.history,
-          limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
-          ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
-          direction: input.direction,
-          role: input.role,
-          since: input.since,
-          maxChars: input.maxChars,
-          maxBytes: MAX_MCP_SESSION_HISTORY_BYTES,
-        });
-      },
-      REMOTE_SESSION_HISTORY_SYNC_WAIT_MS
-    );
-  });
+    })
+  );
 };
 
 const selectMachineMetasForOptions = (
@@ -2947,6 +2994,7 @@ const buildSessionCurrentInfo = async (
     ...(session.openedByRootSessionId
       ? { openedByRootSessionId: session.openedByRootSessionId }
       : {}),
+    ...(session.agentRoleId ? { agentRoleId: session.agentRoleId } : {}),
     workContext: await buildSessionWorkContext(
       manager,
       workspaceId,
@@ -3741,11 +3789,7 @@ const mapWithConcurrency = async <T, R>(
   return output;
 };
 
-type ResolvedSessionRenameItem = {
-  sessionId: SessionId;
-  title: string;
-  scope: 'tab' | 'group';
-};
+type ResolvedSessionRenameItem = { sessionId: SessionId; title: string };
 
 const resolveSessionRenameItems = (
   items: readonly z.infer<typeof SessionRenameManyItemSchema>[],
@@ -3755,7 +3799,6 @@ const resolveSessionRenameItems = (
   const resolved = items.map((item) => ({
     sessionId: resolveMcpSessionId(item.sessionId, ctx) as SessionId,
     title: item.title,
-    scope: item.scope ?? 'tab',
   }));
   if (new Set(resolved.map((item) => item.sessionId)).size !== resolved.length) {
     throw new LodyOperationStoreError(
@@ -3774,12 +3817,7 @@ const applySessionRenameItems = async (
   await mapWithConcurrency(items, 5, async (item) => {
     try {
       await rename(item);
-      return {
-        sessionId: item.sessionId,
-        ok: true as const,
-        title: item.title,
-        scope: item.scope,
-      };
+      return { sessionId: item.sessionId, ok: true as const, title: item.title };
     } catch (error) {
       return {
         sessionId: item.sessionId,
@@ -3792,10 +3830,11 @@ const applySessionRenameItems = async (
 const persistSessionRenameItems = async (
   manager: LoroDocumentManager,
   items: readonly ResolvedSessionRenameItem[],
-  syncReason: string
+  syncReason: string,
+  assertCanManage: (sessionId: SessionId) => Promise<SessionMeta>
 ): Promise<Awaited<ReturnType<typeof applySessionRenameItems>>> => {
   const results = await applySessionRenameItems(items, async (item) => {
-    const session = await readCurrentSessionMeta(manager, item.sessionId);
+    let session = await readCurrentSessionMeta(manager, item.sessionId);
     if (!session) {
       throw new LodyOperationStoreError(
         'SESSION_NOT_FOUND',
@@ -3803,19 +3842,11 @@ const persistSessionRenameItems = async (
         false
       );
     }
-    if (item.scope === 'group' && session.parentSessionId) {
-      throw new LodyOperationStoreError(
-        'COMMAND_REJECTED',
-        `Session ${item.sessionId} is a child tab; only a root Session has a group title.`,
-        false
-      );
-    }
-    await manager.repo.upsertDocMeta(
-      getSessionRoomId(item.sessionId),
-      item.scope === 'group'
-        ? buildSessionGroupRenamePatch(item.title)
-        : buildSessionTabRenamePatch(session, item.title)
-    );
+    session = await assertCanManage(item.sessionId);
+    await manager.repo.upsertDocMeta(getSessionRoomId(item.sessionId), {
+      title: item.title,
+      titleSource: 'user',
+    } satisfies Partial<SessionMeta>);
   });
   if (results.some((item) => item.ok)) {
     await ensureWorkspaceMetaSynced(manager, syncReason);
@@ -3833,7 +3864,11 @@ const renameSessionItems = async (
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
     const reason = `mcp.session_rename_many:${ctx.sessionId}`;
     await syncWorkspaceMetaForRead(manager, reason);
-    return await persistSessionRenameItems(manager, resolved, reason);
+    const identity = buildInvocationIdentity(await resolveInvokingTurnSource());
+    const delegatedRequester = toDelegatedSessionRequester(identity);
+    return await persistSessionRenameItems(manager, resolved, reason, (sessionId) =>
+      assertSessionManagementAccess({ auth, workspace, manager, sessionId, delegatedRequester })
+    );
   });
 };
 
@@ -4682,6 +4717,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
         'Session mentions use [@Title](lody://session/<sessionId>?workspace=<workspaceId>); old transcripts may use session://<sessionId>.',
         'To read that conversation, pass the full URI as sessionId to lody_session_history. The workspace must match this tool context. Bare session IDs are also accepted; use the exact child session ID to read a child conversation.',
         'Paginate with nextCursor when you need older turns.',
+        'Agent Role mentions use [Agent Role: <name> (agentRoleId: <id>)], plus agentRoleMachineId for a Role on several machines; lody_session_create accepts these ids to run a Session with that Role.',
         LODY_HELP_INSTRUCTIONS,
         SESSION_COLLABORATION_GUIDANCE,
         LODY_SKILL_INSTRUCTIONS,
@@ -5310,10 +5346,11 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
   registerSessionTool(
     SESSION_CREATE_MANY_TOOL_NAME,
     {
-      summary: 'Delegate multiple tasks to new conversations, choosing each execution environment.',
+      summary:
+        'Delegate multiple concise tasks to new conversations, choosing each execution environment.',
       title: 'Create multiple Lody sessions',
       description:
-        'Create 1-20 sessions in one durable asynchronous Operation. Reuse operationId on retry. Items override defaults shallowly; nested workContext/configOptionValues replace wholesale. Set defaults.useCurrentSessionAsParent=false or choose per item. Each merged item follows the rules below; ordered failures are isolated. Attachments require single create. Results arrive after turn release or with next user input; do not poll operation_get.\n\n' +
+        'Create 1-20 sessions in one durable asynchronous Operation. Best for short prompts or shared defaults.prompt; when items carry long custom prompts, call lody_session_create individually or in small batches (2-3) to avoid oversized tool-call streaming timeouts. Reuse operationId on retry. Items override defaults shallowly; nested workContext/configOptionValues replace wholesale. Set defaults.useCurrentSessionAsParent=false or choose per item. Each merged item follows the rules below; ordered failures are isolated. Attachments require single create. Results arrive after turn release or with next user input; do not poll operation_get.\n\n' +
         SESSION_CREATE_EFFECTS_GUIDANCE +
         '\n\n' +
         SESSION_COLLABORATION_GUIDANCE +
@@ -5335,10 +5372,10 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     SESSION_CHAT_MANY_TOOL_NAME,
     {
       summary:
-        'Send work to multiple existing conversations; busy targets may be steered and item failures are isolated.',
+        'Send concise work to multiple existing conversations; busy targets may be steered and item failures are isolated.',
       title: 'Chat multiple Lody sessions',
       description:
-        'Send 1-20 chats in one durable asynchronous Operation. Items override defaults shallowly; nested objects replace wholesale. Ordered failures are isolated: successful siblings remain sent, so do not retry them under new ids. deliveries contains {index, delivery} only for items sent by this call; absent entries are uncertain or retries.\n\n' +
+        'Send 1-20 chats in one durable asynchronous Operation. Best for short prompts or shared defaults.prompt; when items carry long custom prompts, call lody_session_chat individually or in small batches (2-3) to avoid oversized tool-call streaming timeouts. Items override defaults shallowly; nested objects replace wholesale. Ordered failures are isolated: successful siblings remain sent, so do not retry them under new ids. deliveries contains {index, delivery} only for items sent by this call; absent entries are uncertain or retries.\n\n' +
         SESSION_CHAT_EFFECTS_GUIDANCE +
         '\n\n' +
         SESSION_COLLABORATION_GUIDANCE +
@@ -5580,16 +5617,16 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
   registerSessionTool(
     SESSION_RENAME_TOOL_NAME,
     {
-      summary: 'Set a conversation Tab title or its sidebar group title.',
+      summary: 'Set the title of one Session.',
       title: 'Rename a Lody session',
       description:
-        "Set the title of one Session. Omit sessionId (or pass current) to rename the current Session. scope tab (default) renames that conversation tab; scope group renames the sidebar title of a root Session's tab group. The two titles are independent. The durable rename is treated as a user-directed title and is not replaced by later automatic title generation.",
+        'Set the title of one Session. Omit sessionId (or pass current) to rename the current Session. The durable rename is treated as a user-directed title and is not replaced by later automatic title generation.',
       inputSchema: SessionRenameToolInputSchema,
     },
     async (args: SessionRenameToolInput) => {
       try {
         const [item] = await renameSessionItems({
-          items: [{ sessionId: args.sessionId ?? 'current', title: args.title, scope: args.scope }],
+          items: [{ sessionId: args.sessionId ?? 'current', title: args.title }],
         });
         if (!item) {
           throw new Error('Session rename returned no result.');
@@ -5604,10 +5641,10 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
   registerSessionTool(
     SESSION_RENAME_MANY_TOOL_NAME,
     {
-      summary: 'Rename multiple conversation Tab/group titles with isolated per-item failures.',
+      summary: 'Rename multiple Sessions with isolated per-item failures.',
       title: 'Rename multiple Lody sessions',
       description:
-        "Set titles for 1-20 Sessions; each item's scope chooses the tab title (default) or a root Session's group title. Session ids must be unique. Results preserve input order and failures are isolated per item; successful renames remain applied when another item fails.",
+        'Set titles for 1-20 Sessions. Session ids must be unique. Results preserve input order and failures are isolated per item; successful renames remain applied when another item fails.',
       inputSchema: SessionRenameManyToolInputSchema,
     },
     async (args: SessionRenameManyToolInput) => {
@@ -5635,13 +5672,24 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
         const auth = getCliAuthContextOrThrow('mcp');
         const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
         return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
+          const delegatedRequester = toDelegatedSessionRequester(
+            buildInvocationIdentity(await resolveInvokingTurnSource())
+          );
           const archive = async (rawSessionId: string) => {
             const sessionId = resolveMcpSessionId(rawSessionId, ctx);
             try {
               const archivedChildSessionIds = await runSessionOperationWithSyncedMetadata(
                 manager,
                 sessionId as SessionId,
-                'archive'
+                'archive',
+                (targetId) =>
+                  assertSessionManagementAccess({
+                    auth,
+                    workspace,
+                    manager,
+                    sessionId: targetId,
+                    delegatedRequester,
+                  })
               );
               return { ok: true as const, sessionId, archivedChildSessionIds };
             } catch (error) {

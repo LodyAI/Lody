@@ -3,8 +3,8 @@
 Conversation rendering for a Session: the message stream, assistant turn folding,
 the outline rail, and the markdown/terminal/file content surfaces.
 
-Builtin DeepSeek Harness separates thought disclosures from tool groups. Thoughts
-start open, tools closed, and explicit toggles remain respected. DSH thought prose
+Every provider shows thoughts in disclosures separate from tool groups.
+Explicit toggles remain respected. Thought prose
 uses the same Markdown typography as ordinary answers, aligned with its disclosure
 label and shown in secondary text color; tool
 labels and details retain their compact process styling. While streaming,
@@ -22,7 +22,7 @@ the reasoning behind those rules.
 
 | Area                    | Owner                                                                                             | Contract                                                                                |
 | ----------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Stream                  | `view.tsx`, `build-chat-stream-items.ts`                                                          | Stable Virtua rows and scroll.                                                          |
+| Stream                  | `view.tsx`, `build-chat-stream-items.ts`                                                          | Stable rows and the conversation scroll engine.                                         |
 | User rows               | `view.tsx`                                                                                        | Multi-member sender metadata and desktop profile.                                       |
 | Turns                   | `assistant-turn-render-blocks.ts`                                                                 | Activity groups and foldable segments.                                                  |
 | Outline                 | `conversation-outline-*`                                                                          | Round ticks and navigation.                                                             |
@@ -291,6 +291,35 @@ states, and the "no output" status).
   unmodified wheel is never taken either way:
   [mermaid-diagram-rendering.md](mermaid-diagram-rendering.md).
 
+## Manual disclosures
+
+Opening or closing a work group, tool group, command detail or terminal detail
+switches the conversation to reading mode and holds the clicked header at its
+screen position. This also applies at the bottom: manually inspecting work takes
+precedence over following new output. The reader can resume following by scrolling
+to the real bottom or using the scroll-to-latest control.
+
+Mobile also expands in place. If the details would start entirely below the
+viewport, it reveals up to 96px (at most a quarter of the viewport), keeping the
+header visible. Already visible details cause no adjustment. Closing a long body
+near the end may need temporary space below the conversation to avoid a browser
+scroll-range clamp; the engine bounds it to one viewport and shrinks it as the
+reader scrolls or new output fills it.
+
+Headers opt in with `data-conversation-disclosure`: `group` details become sibling
+rows, while `inline` details expand within their row. The scroll adapter captures
+the header before React changes the body, then the engine's ordinary reading
+anchor owns all positioning. Mobile checks the actual detail position after the
+new layout settles, including inline body padding and a group header's removed
+tail reserve. Nested file links remain file actions.
+
+`tests/conversation-scroll-engine.test.ts` covers header anchoring, later output,
+bounded collapse space and mobile reveal thresholds.
+`tests/engine-conversation-scroller.test.tsx` covers real click/state commits and
+keyboard focus. `tests/e2e/conversation-scroll-engine.spec.ts` exercises the actual
+command details in the `CommandDisclosureDesktop` and `CommandDisclosureMobile`
+stories. Native device touch acceptance remains separate from browser coverage.
+
 ## Subagent tasks
 
 `subagent-task-panel.tsx` renders a turn's `subagent_task` items as one card of
@@ -411,7 +440,7 @@ records lifecycle, alternatives, and platform verification limits.
 ## Message authors
 
 `message-author-identity.tsx` renders frozen Agent/Role identity in input avatars.
-Assistant replies do not show an author identity entry or its popover. It reads no catalogs or source documents. Human profiles remain
+Assistant replies do not show an author identity entry or its popover. It reads no catalogs or source documents. When session navigation is available, `view.tsx` also renders an inline source-conversation return link in the user message metadata row using the cached session title (or the generic source label). Human profiles remain
 in `view.tsx`; execution controls continue to describe the receiving turn. The
 [identity contract](../../../../../specs/message-author-identity.md) defines capture,
 recovery and legacy behavior.

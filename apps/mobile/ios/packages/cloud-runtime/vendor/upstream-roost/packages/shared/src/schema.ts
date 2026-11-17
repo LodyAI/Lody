@@ -1,0 +1,1622 @@
+import type { SessionProjectRun } from './workspace-project';
+import type { SessionEntry, SessionFileDiff } from './session-data/domain';
+import { InferInputType, InferType, schema } from 'loro-mirror';
+import {
+  ACPSessionId,
+  AcpConfigOptionValue,
+  AgentBrandId,
+  AgentConfigId,
+  AgentConfigCliType,
+  AgentRoleId,
+  AgentType,
+  AcpCapabilityCacheEntry,
+  AcpCommandSummary,
+  BuiltinRuntimeOverrides,
+  CustomAcpLaunchSpec,
+  LocalProjectHistoryProvider,
+  LocalProjectId,
+  LocalProjectMeta,
+  IssuePRMention,
+  MachineId,
+  MessageContent,
+  ProjectRef,
+  PreviewCandidate,
+  PreviewConnection,
+  Role,
+  SessionId,
+  WorktreeCleanupScriptConfig,
+  WorktreeSetupScriptConfig,
+} from '.';
+import type { PlanEntry } from '@agentclientprotocol/sdk';
+import type { MachineProtocolCapabilities } from './machine-protocol-capabilities';
+export * from 'loro-mirror';
+import type { RateLimit } from 'acp-extension-core';
+
+export const RATE_LIMIT_ENTRY_KEY_SEPARATOR = '::';
+const PROVIDER_RATE_LIMIT_ENTRY_KEY_PREFIX = 'provider';
+
+/**
+ * Known limitId values used to distinguish rate limit tiers.
+ * - `codex`: standard Codex limit
+ * - `codex_bengalfox`: Codex Spark limit
+ */
+export const CODEX_SPARK_LIMIT_ID = 'codex_bengalfox';
+
+export const getRateLimitEntryKey = (
+  cliType: string,
+  limitId: string | null | undefined,
+  agentConfigId?: AgentConfigId | null
+): string => {
+  const id = limitId?.trim() || cliType;
+  if (agentConfigId) {
+    return [
+      PROVIDER_RATE_LIMIT_ENTRY_KEY_PREFIX,
+      encodeURIComponent(agentConfigId),
+      encodeURIComponent(cliType),
+      encodeURIComponent(id),
+    ].join(RATE_LIMIT_ENTRY_KEY_SEPARATOR);
+  }
+  return `${cliType}${RATE_LIMIT_ENTRY_KEY_SEPARATOR}${id}`;
+};
+
+export const parseRateLimitEntryKey = (
+  key: string
+): {
+  agentConfigId: AgentConfigId | null;
+  cliType: string;
+  limitId: string | null;
+} => {
+  const parts = key.split(RATE_LIMIT_ENTRY_KEY_SEPARATOR);
+  if (
+    parts.length === 4 &&
+    parts[0] === PROVIDER_RATE_LIMIT_ENTRY_KEY_PREFIX &&
+    parts[1] &&
+    parts[2] &&
+    parts[3]
+  ) {
+    try {
+      return {
+        agentConfigId: decodeURIComponent(parts[1]) as AgentConfigId,
+        cliType: decodeURIComponent(parts[2]),
+        limitId: decodeURIComponent(parts[3]),
+      };
+    } catch {
+      // Malformed scoped keys stay unreadable rather than being attributed to
+      // an unrelated provider through the legacy parser below.
+      return { agentConfigId: null, cliType: '', limitId: null };
+    }
+  }
+
+  const separatorIndex = key.indexOf(RATE_LIMIT_ENTRY_KEY_SEPARATOR);
+  if (separatorIndex === -1) {
+    return {
+      agentConfigId: null,
+      cliType: key,
+      limitId: null,
+    };
+  }
+
+  const cliType = key.slice(0, separatorIndex);
+  const limitId = key.slice(separatorIndex + RATE_LIMIT_ENTRY_KEY_SEPARATOR.length);
+  if (!limitId) {
+    return {
+      agentConfigId: null,
+      cliType,
+      limitId: null,
+    };
+  }
+
+  return {
+    agentConfigId: null,
+    cliType,
+    limitId,
+  };
+};
+
+/**
+ * Session Status - Simplified State Machine
+ *
+ * Core states:
+ * - idle: waiting for user input
+ * - running: agent processing turn (heartbeat-driven)
+ * - requestPermission: waiting for user permission response
+ * - initializing: session setup/resume
+ *
+ * See specs/session-status.md for full design.
+ */
+export type InitializingStage = 'git-clone' | 'managed-runtime' | 'acp' | 'resuming';
+export type SessionRunningActivity = 'image_generation';
+export type SessionRunningPhase = 'finalizing';
+export type PermissionRequestKind = 'permission' | 'ask_user_question';
+
+export type SessionStatus =
+  | { type: 'idle' }
+  | { type: 'running'; activity?: SessionRunningActivity; phase?: SessionRunningPhase }
+  | { type: 'requestPermission' }
+  | {
+      type: 'initializing';
+      stage?: InitializingStage;
+      detail?: string;
+    };
+
+export type SessionStatusType = SessionStatus['type'];
+
+/**
+ * Configuration for automatic session title generation.
+ */
+export type TitleGenerationConfig = {
+  /** Config option values to set on the title-generation ACP session (e.g. model, reasoning_effort). */
+  configOptionValues?: Record<string, AcpConfigOptionValue>;
+};
+
+export type AgentConfigMeta = {
+  codexAuth?: import('./codex-auth-profile').CodexAuthProfile;
+  id: AgentConfigId;
+  /**
+   * Parent machine this config belongs to. Configs are scoped per-machine because
+   * each machine has its own binaries, auth state, env, and rate-limit context.
+   *
+   * Legacy configs written before this field existed are normalized by the one-time
+   * migration tracked in docs/backward-compatibility.md (BC-AGENT-CONFIG-MACHINE-
+   * ASSOCIATION); see also plans/20260420-machine-agent-settings.md. Consumers should filter
+   * out configs without a resolved machineId while the migration is running.
+   */
+  machineId: MachineId;
+  name: string;
+  description: string | undefined;
+  cliType: AgentConfigCliType;
+  agentType: AgentType;
+  /**
+   * Launch spec for `cliType: 'custom'` configs: the exact command + args the
+   * owning machine spawns. Absent for builtin/registry configs, whose launch is
+   * resolved from static tables. `agentType` stays a per-config unique slug so
+   * capability caches keyed by `cliType:agentType` never collide across configs.
+   */
+  customAcp?: CustomAcpLaunchSpec;
+  /**
+   * Optional user-specified runtime path for a builtin agent. This is an
+   * advanced override; normal builtin agents use Lody-managed runtimes.
+   */
+  runtimeOverrides?: BuiltinRuntimeOverrides;
+  /** Local gateway metadata consumed by Lody before launch, outside process env. */
+  magpieGatewayUrl?: string;
+  env: Record<string, string>;
+  prompt?: string;
+  /** Title generation settings. When set, enables automatic title generation for this agent. */
+  titleGeneration?: TitleGenerationConfig;
+  /**
+   * Provider brand this config was created for (e.g. a "DeepSeek over Claude Code"
+   * preset). Optional and forward-compatible: the runtime stays `builtin`/`claude`,
+   * but the UI renders the brand's icon instead of the Claude icon. Absent for
+   * plain Kimi/Claude/Codex/registry agents; for configs created before this field
+   * existed, the brand is inferred from `env.ANTHROPIC_BASE_URL` at render time
+   * (see resolveAgentBrandId).
+   */
+  brandId?: AgentBrandId;
+};
+
+/**
+ * Session history storage: `items` vs legacy `contents`
+ *
+ * The new storage is `items`, a CRDT-friendly structured representation of `MessageContent[]`.
+ * However, we intentionally do NOT model the full `MessageContent` shape in the Loro schema.
+ *
+ * Tradeoff & decision:
+ * - Loro schema: keep it flexible with `schema.Any()` (plus a minimal `validate` guard below).
+ *   This makes the persisted schema forward-compatible with new `MessageContent` variants or
+ *   extra fields emitted by agents/clients without requiring a schema migration.
+ * - TypeScript API: still treat `items` as `MessageContent[]` at the application boundary.
+ *   All producers/consumers in CLI/Web should use `MessageContent` as the canonical type.
+ *
+ * Insertion policy (NOT a migration or a new validation constraint):
+ * - The history item catchall is `schema.Any({ defaultLoroText: false })` so a brand-new
+ *   string field is stored as a plain primitive. A new turn's ordinary metadata
+ *   (`toolCallId`/`status`/`title`/`kind`/`locations[].path`) is therefore not wrapped in
+ *   a `LoroText`, which removes thousands of unnecessary containers across a long session.
+ * - Text containers are reserved for fields that genuinely grow while streaming. They are
+ *   declared explicitly (outer `text`/`markdown`/`content`/`steps`) instead of leaning on
+ *   deep inference, which also avoids emitting `insert-container` for schema-less nested
+ *   strings whose per-container infer options are not persisted across a restart.
+ * - Editing an existing string neither migrates nor rewraps it: the shared
+ *   `HistoryWriter` diffs against the stored container kind, so a legacy `LoroText` keeps
+ *   its container id and a legacy primitive stays primitive (`history-materializer.ts`).
+ *
+ * Validation stays separate from this storage hint: the permissive `validate` guard below
+ * still accepts unknown item types from newer peers, and no schema here rejects an old
+ * payload (see the `storageSchema` hints).
+ */
+export type SessionHistoryItem = MessageContent;
+export type SessionHistoryItems = MessageContent[];
+
+const historyItemAnySchema = schema.Any({ defaultLoroText: false });
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isWorktreeScriptHistoryStep = (value: unknown): boolean =>
+  isRecord(value) &&
+  typeof value.command === 'string' &&
+  (value.status === 'in_progress' || value.status === 'completed' || value.status === 'failed') &&
+  typeof value.output === 'string';
+
+/**
+ * Insertion hints for the nested payloads of tool content and worktree steps.
+ *
+ * Nested metadata is ordinary data, so the catchall defaults to *primitive* and only
+ * the fields that genuinely stream are declared as `LoroText`. A blanket
+ * `defaultLoroText: true` here built Text for `terminal_command.command`, `args[]`,
+ * diff `path`, `steps[].command` and every other string — the container growth this
+ * change exists to remove. The catchall stays permissive so an anomalous legacy shape
+ * is never a validation failure or a rewrite trigger; `history-materializer.ts` reads
+ * `storageSchema`, and the hints are inert for every reader.
+ */
+const historyNestedPayloadSchema = schema.Any({ defaultLoroText: false });
+const historyToolContentSchema = schema
+  .LoroMap({
+    type: schema.String({ required: false }),
+    // Only streaming payload fields; everything else inherits the primitive catchall.
+    text: schema.LoroText({ required: false }),
+    output: schema.LoroText({ required: false }),
+    // The ACP `content` block nests its own text payload.
+    content: schema
+      .LoroMap(
+        {
+          type: schema.String({ required: false }),
+          text: schema.LoroText({ required: false }),
+        },
+        { required: false }
+      )
+      .catchall(historyNestedPayloadSchema),
+  })
+  .catchall(historyNestedPayloadSchema);
+const historyScriptStepSchema = schema
+  .LoroMap({
+    // Only the step output streams; `command`/`status`/timestamps are metadata.
+    output: schema.LoroText({ required: false }),
+  })
+  .catchall(historyNestedPayloadSchema);
+
+const historyMessageItemSchema = schema
+  .LoroMap(
+    {
+      type: schema.String<MessageContent['type']>(),
+      text: schema.LoroText({ required: false }),
+      run: schema.Any({
+        storageSchema: schema
+          .LoroMap(
+            {
+              items: schema.LoroList(
+                schema
+                  .LoroMap({
+                    text: schema.LoroText({ required: false }),
+                    content: schema.Any({
+                      storageSchema: schema.LoroList(historyToolContentSchema, undefined, {
+                        required: false,
+                      }),
+                    }),
+                  })
+                  .catchall(historyNestedPayloadSchema)
+              ),
+            },
+            { required: false }
+          )
+          .catchall(historyNestedPayloadSchema),
+      }),
+      // Streaming fields: a hint, not a validation constraint on old/future payloads.
+      markdown: schema.Any({ storageSchema: schema.LoroText({ required: false }) }),
+      content: schema.Any({
+        storageSchema: schema.LoroList(historyToolContentSchema, undefined, { required: false }),
+      }),
+      steps: schema.Any({
+        storageSchema: schema.LoroList(historyScriptStepSchema, undefined, { required: false }),
+      }),
+      // `file` item: the mutable lifecycle fields `transport`/`machineId` are
+      // carried through the `.catchall(...)` below (like every other variant's
+      // payload fields, e.g. image's `imageId`/`sizeBytes`). They are plain
+      // scalar string keys, so the CLI backfill flips `transport` 'local' -> 'r2'
+      // (and clears `machineId`) with a single `LoroMap.set` — see the
+      // round-trip + field-overwrite coverage in tests/session-input.test.ts.
+    },
+    {
+      required: true,
+      validate(value: unknown) {
+        if (typeof value !== 'object' || value === null) return 'Expected object';
+        const v = value as Record<string, unknown>;
+        const type = v.type;
+        if (typeof type !== 'string') return 'Missing type';
+
+        switch (type) {
+          case 'text':
+          case 'thought':
+            return typeof v.text === 'string' ? true : 'Missing text';
+          case 'image':
+            return typeof v.imageId === 'string' &&
+              typeof v.mimeType === 'string' &&
+              typeof v.sizeBytes === 'number'
+              ? true
+              : 'Missing image metadata';
+          case 'file':
+            if (
+              typeof v.fileId !== 'string' ||
+              typeof v.fileName !== 'string' ||
+              typeof v.mimeType !== 'string' ||
+              typeof v.sizeBytes !== 'number' ||
+              typeof v.sha256 !== 'string' ||
+              typeof v.textPreview !== 'boolean' ||
+              (v.transport !== 'r2' && v.transport !== 'local') ||
+              typeof v.uploadedAt !== 'number'
+            ) {
+              return 'Missing file metadata';
+            }
+            // transport='local' means the bytes only live on one machine pending
+            // relay backfill; machineId is required to render the pending state.
+            if (
+              v.transport === 'local' &&
+              (typeof v.machineId !== 'string' || v.machineId === '')
+            ) {
+              return "machineId is required when transport is 'local'";
+            }
+            return true;
+          case 'image_group':
+            return Array.isArray(v.images) && v.images.length > 0 ? true : 'Missing images';
+          case 'plan':
+            return Array.isArray(v.entries) ? true : 'Missing entries';
+          case 'proposed_plan':
+            return typeof v.turnId === 'string' &&
+              typeof v.markdown === 'string' &&
+              typeof v.status === 'string' &&
+              typeof v.isLatest === 'boolean'
+              ? true
+              : 'Missing proposed plan metadata';
+          case 'goal':
+            return typeof v.threadId === 'string' &&
+              typeof v.objective === 'string' &&
+              typeof v.status === 'string' &&
+              (v.tokensUsed === undefined || typeof v.tokensUsed === 'number') &&
+              (v.timeUsedSeconds === undefined || typeof v.timeUsedSeconds === 'number') &&
+              (v.createdAt === undefined || typeof v.createdAt === 'number') &&
+              (v.updatedAt === undefined || typeof v.updatedAt === 'number')
+              ? true
+              : 'Missing goal metadata';
+          case 'tool_call':
+            return typeof v.toolCallId === 'string' && typeof v.status === 'string'
+              ? true
+              : 'Missing toolCallId/status';
+          case 'subagent_task':
+            return typeof v.taskId === 'string' && typeof v.status === 'string'
+              ? true
+              : 'Missing taskId/status';
+          case 'available_commands':
+            return Array.isArray(v.commands) ? true : 'Missing commands';
+          case 'system_notice':
+            return typeof v.name === 'string' ? true : 'Missing name';
+          case 'operation_progress':
+            return typeof v.operationId === 'string' &&
+              (v.operationKind === 'session_create' || v.operationKind === 'session_create_many') &&
+              Array.isArray(v.items) &&
+              v.items.every(
+                (item) =>
+                  isRecord(item) &&
+                  isRecord(item.target) &&
+                  typeof item.target.sessionId === 'string' &&
+                  typeof item.target.userTurnId === 'string' &&
+                  (item.label === undefined || typeof item.label === 'string') &&
+                  typeof item.status === 'string' &&
+                  ['created', 'running', 'succeeded', 'failed', 'cancelled'].includes(item.status)
+              )
+              ? true
+              : 'Missing operation progress metadata';
+          case 'operation_completion_batch':
+            return typeof v.batchId === 'string' &&
+              typeof v.memberCount === 'number' &&
+              Number.isInteger(v.memberCount) &&
+              v.memberCount > 0
+              ? true
+              : 'Missing operation batch metadata';
+          case 'operation_completion':
+            return typeof v.deliveryId === 'string' &&
+              typeof v.operationId === 'string' &&
+              typeof v.operationKind === 'string' &&
+              typeof v.completion === 'object' &&
+              v.completion !== null
+              ? true
+              : 'Missing operation completion metadata';
+          case 'worktree_script':
+            return typeof v.phase === 'string' &&
+              typeof v.status === 'string' &&
+              Array.isArray(v.steps) &&
+              v.steps.every(isWorktreeScriptHistoryStep)
+              ? true
+              : 'Missing worktree script metadata';
+          case 'comment_reference':
+            return typeof v.source === 'string' &&
+              typeof v.path === 'string' &&
+              typeof v.lineNumber === 'number' &&
+              typeof v.side === 'string' &&
+              typeof v.commentBody === 'string' &&
+              typeof v.authorName === 'string'
+              ? true
+              : 'Missing comment reference metadata';
+          case 'visual_annotation_reference':
+            return v.source === 'visual_annotation' &&
+              typeof v.commentId === 'string' &&
+              typeof v.body === 'string' &&
+              typeof v.anchor === 'object' &&
+              v.anchor !== null
+              ? true
+              : 'Missing visual annotation reference metadata';
+          default:
+            // Synced history may contain variants written by newer peers.
+            // Rejecting one here blocks every subsequent Mirror.setState,
+            // including unrelated user messages and control-field updates.
+            // Preserve the opaque item without extending MessageContentSchema's
+            // accepted input types. Known variants keep their existing guards.
+            return true;
+        }
+      },
+    }
+  )
+  .catchall(historyItemAnySchema);
+
+export type SerializedLoroOpId = `${string}:${number}`;
+
+export type FileDiffCodeCollabCheckpoint = NonNullable<SessionFileDiff['cc']>;
+export type FileDiff = SessionFileDiff;
+
+export type ParsedSerializedLoroOpId = {
+  readonly peer: string;
+  readonly counter: number;
+};
+
+export function serializeLoroOpId(input: {
+  readonly peer: string | number;
+  readonly counter: number;
+}): SerializedLoroOpId {
+  const peer = String(input.peer);
+  if (!/^\d+$/u.test(peer)) {
+    throw new Error('Loro OpId peer must be a non-negative integer string');
+  }
+  if (!Number.isSafeInteger(input.counter) || input.counter < 0) {
+    throw new Error('Loro OpId counter must be a non-negative safe integer');
+  }
+  return `${peer}:${input.counter}`;
+}
+
+export function parseSerializedLoroOpId(input: string): ParsedSerializedLoroOpId | undefined {
+  const match = /^(\d+):(\d+)$/u.exec(input);
+  if (!match) return undefined;
+  const peer = match[1];
+  const counter = Number(match[2]);
+  if (peer === undefined || !Number.isSafeInteger(counter) || counter < 0) {
+    return undefined;
+  }
+  return { peer, counter };
+}
+
+export function normalizeFileDiffCodeCollabCheckpoint(
+  value: unknown
+): FileDiffCodeCollabCheckpoint | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.v !== 1 || typeof record.fileId !== 'string' || record.fileId.length === 0) {
+    return undefined;
+  }
+  const opId = typeof record.opId === 'string' ? parseSerializedLoroOpId(record.opId) : undefined;
+  const baseOpId =
+    typeof record.baseOpId === 'string' ? parseSerializedLoroOpId(record.baseOpId) : undefined;
+  if (record.opId !== undefined && opId === undefined) return undefined;
+  if (record.baseOpId !== undefined && baseOpId === undefined) return undefined;
+  if (record.base !== undefined && record.base !== 'missing') return undefined;
+  if (record.deleted !== undefined && record.deleted !== true) return undefined;
+  return {
+    v: 1,
+    fileId: record.fileId,
+    ...(typeof record.opId === 'string' ? { opId: record.opId as SerializedLoroOpId } : {}),
+    ...(typeof record.baseOpId === 'string'
+      ? { baseOpId: record.baseOpId as SerializedLoroOpId }
+      : {}),
+    ...(record.base === 'missing' ? { base: 'missing' as const } : {}),
+    ...(record.deleted === true ? { deleted: true as const } : {}),
+  };
+}
+
+export function normalizeFileDiff(value: unknown): FileDiff | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (typeof record.filePath !== 'string' || record.filePath.length === 0) return undefined;
+  const add = typeof record.add === 'number' && Number.isFinite(record.add) ? record.add : 0;
+  const del = typeof record.del === 'number' && Number.isFinite(record.del) ? record.del : 0;
+  const cc = normalizeFileDiffCodeCollabCheckpoint(record.cc);
+  return {
+    filePath: record.filePath,
+    add,
+    del,
+    ...(cc === undefined ? {} : { cc }),
+  };
+}
+
+export type SessionPlanEntry = Pick<PlanEntry, 'status' | 'content' | 'priority'>;
+
+export const sessionPlanEntrySchema = schema.LoroMap({
+  status: schema.String<SessionPlanEntry['status']>(),
+  content: schema.String(),
+  priority: schema.String<SessionPlanEntry['priority']>(),
+});
+
+export type SessionHistorySendStatus = 'timeout';
+export type SessionHistoryStatus =
+  | 'prepared'
+  | 'pending'
+  | 'pending_apply'
+  | 'delivery_unknown'
+  | 'seen'
+  | 'processing'
+  | 'handled'
+  | 'failed'
+  | 'canceled';
+type SessionHistoryStatusReadable = {
+  role: Role;
+  read?: boolean;
+  status?: SessionHistoryStatus;
+};
+
+const issuePrMentionSchema = schema.LoroMap({
+  type: schema.String<IssuePRMention['type']>(),
+  title: schema.String(),
+  url: schema.String(),
+  number: schema.Number(),
+});
+
+// Loro Mirror passes null through transforms without invoking encode/decode.
+// The transform therefore gives this optional string its domain-level explicit
+// None state while retaining a primitive string in the CRDT when an id exists.
+const agentRoleIdSchema = schema
+  .String<AgentRoleId>({ required: false })
+  .transform<AgentRoleId | null>({
+    decode: (value) => value,
+    encode: (value) => value,
+  });
+
+const acpSessionConfigSchema = schema
+  .LoroMap(
+    {
+      prompt: schema.String(),
+      inputBlocks: schema.Any({ required: false }),
+      cliType: schema.String<AgentConfigCliType>(),
+      agentType: schema.String(),
+      modeId: schema.String({ required: false }),
+      modelId: schema.String({ required: false }),
+      issuePRMentions: schema.LoroList(issuePrMentionSchema, undefined, { required: false }),
+      resume: schema.String({ required: false }),
+      /** Config option values (configId → value) for setSessionConfigOption */
+      configOptionValues: schema.Any({ required: false }),
+      /** Workspace MCP catalog ids selected for this session (string[]). */
+      memory: schema.Any({ required: false }),
+      mcpServerIds: schema.Any({ required: false }),
+      /** Agent Role selected for this Turn; null is explicit None. */
+      agentRoleId: agentRoleIdSchema,
+      agentRoleRevision: schema.Number({ required: false }),
+      agentRoleSnapshot: schema.Any({ required: false }),
+      chainDepth: schema.Number({ required: false }),
+      _lodyAutomation: schema.Any({ required: false }),
+    },
+    { required: false }
+  )
+  .catchall(schema.Any());
+
+export const sessionPreviewDocSchema = schema.LoroMap(
+  {
+    candidate: schema.Any({ required: false }),
+    connection: schema.Any({ required: false }),
+  },
+  { required: false }
+);
+
+export const sessionExternalHistoryCursorDocSchema = schema.LoroMap(
+  {
+    importedTurnHashes: schema.LoroList(schema.String(), undefined, { required: false }),
+    hashVersion: schema.Number({ required: false }),
+    // One atomic value: concurrent clients must not merge half of two baselines.
+    storedHistoryBaseline: schema.String({ required: false }),
+  },
+  { required: false }
+);
+
+export const resolveSessionHistoryStatus = (
+  entry: SessionHistoryStatusReadable | null | undefined
+): SessionHistoryStatus | undefined => {
+  if (!entry || entry.role !== 'user') {
+    return undefined;
+  }
+  if (typeof entry.status === 'string') {
+    return entry.status as SessionHistoryStatus;
+  }
+  if (entry.read === true) {
+    return 'seen';
+  }
+  if (entry.read === false) {
+    return 'pending';
+  }
+  return undefined;
+};
+
+export const getLegacyReadForSessionHistoryStatus = (
+  status: SessionHistoryStatus | undefined
+): boolean | undefined => {
+  if (!status) {
+    return undefined;
+  }
+  return status !== 'pending' && status !== 'pending_apply';
+};
+
+export const isSessionHistoryDelivered = (
+  entry: SessionHistoryStatusReadable | null | undefined
+): boolean => {
+  const status = resolveSessionHistoryStatus(entry);
+  if (status) {
+    return (
+      status !== 'prepared' &&
+      status !== 'pending' &&
+      status !== 'pending_apply' &&
+      status !== 'delivery_unknown'
+    );
+  }
+  return entry?.read === true;
+};
+
+/**
+ * User input no execution has claimed. `seen` is only the CLI's read receipt:
+ * the turn still needs its dispatch pointer and has not started.
+ */
+export const isSessionHistoryStatusAwaitingStart = (
+  status: SessionHistoryStatus | undefined
+): boolean => status === 'pending' || status === 'seen';
+
+export const isSessionHistoryPendingForDispatch = (
+  entry: SessionHistoryStatusReadable | null | undefined
+): boolean => {
+  const status = resolveSessionHistoryStatus(entry);
+  return status === 'pending' || status === 'seen' || status === 'processing';
+};
+
+export const sessionHistorySchema = schema.LoroMap({
+  id: schema.String(),
+  userTurnId: schema.String({ required: false }),
+  // Provider-native assistant turn boundary emitted by the ACP adapter.
+  // Lody stores and returns this opaque value without interpreting it.
+  acpTurnId: schema.String({ required: false }),
+  items: schema.LoroList(historyMessageItemSchema, undefined, { required: false }),
+  // Plan attached to this turn, updated via notification updates during the agent's response
+  plan: schema.LoroList(sessionPlanEntrySchema, undefined, { required: false }),
+  timestamp: schema.String(),
+  startedAt: schema.Number({ required: false }),
+  endedAt: schema.Number({ required: false }),
+  // Total time in milliseconds spent waiting for permission approvals during this turn.
+  // Effective agent working time = (endedAt - Date.parse(timestamp)) - permissionWaitMs
+  permissionWaitMs: schema.Number({ required: false }),
+  role: schema.String<Role>(),
+  status: schema.String<SessionHistoryStatus>({ required: false }),
+  scheduleRun: schema.LoroMap(
+    {
+      scheduleId: schema.String(),
+      turnId: schema.String(),
+      title: schema.String(),
+      definitionFingerprint: schema.String({ required: false }),
+      manualRunKey: schema.String({ required: false }),
+    },
+    { required: false }
+  ),
+  /** Encrypted only: the shared member's active Turn this machine-authored input was
+   * derived from. Covered by the input's signature check; never display data. */
+  derivedFrom: schema.LoroMap(
+    { sessionId: schema.String(), userTurnId: schema.String() },
+    { required: false }
+  ),
+  /** Encrypted only: this machine wrote the row by promoting a queue item. The row's
+   * signer is then not its author, so the start needs the input's own evidence. */
+  queuedInput: schema.Boolean({ required: false }),
+  /** Encrypted only: the signed execution intent record, written in the same commit
+   * as the content it covers. See `e2ee-execution-intent.ts`. */
+  e2eeIntent: schema.String({ required: false }),
+  cancellationReason: schema.String<'user_stop'>({ required: false }),
+  inputConfig: acpSessionConfigSchema,
+  /**
+   * @deprecated Use `status` instead.
+   * Kept temporarily so existing persisted docs and older UI logic remain readable.
+   */
+  read: schema.Boolean({ required: false }),
+  userId: schema.String({ required: false }),
+  author: schema.Any({ required: false }),
+  modelInfo: schema.Any({ required: false }),
+  // Assistant turns: tokens and optional estimated cost this turn consumed,
+  // summed from adapter usage deltas. A primitive JSON value
+  // (`SessionTurnTokenUsage`), replaced whole on each write.
+  tokenUsage: schema.Any({ required: false }),
+  // FileDiff 此次对话有哪些文件变更，和具体变更行数
+  fileDiff: schema.Any(),
+  // Indicates whether the agent's response for this turn has finished
+  // For assistant turns: set to true when agent completes response
+  // For user turns: always true (user messages are complete when created)
+  finished: schema.Boolean({ required: false }),
+  // Send status for user messages - only set when message delivery failed (e.g., timeout)
+  // Cleared when message is successfully retried
+  sendStatus: schema.String<SessionHistorySendStatus>({ required: false }),
+});
+
+export type PrStatus = 'open' | 'closed' | 'merged' | 'draft';
+
+export type SessionPullRequestMeta = {
+  url: string;
+  status: PrStatus;
+};
+
+export type SessionPullRequestLegacyMetaFields = {
+  /** Deprecated legacy detail. New writes derive this from `url` when needed. */
+  number?: number;
+  /** Deprecated legacy detail. New writes derive this from `url` or session project when needed. */
+  repository?: string;
+  /** Deprecated legacy detail. Branch lives on `SessionMeta.branchName` / `ProjectRef`. */
+  branch?: string;
+  /** Deprecated legacy detail. PR details cache should provide the head SHA when needed. */
+  headCommitSha?: string;
+  /** Deprecated legacy ordering detail. New writes keep array order instead. */
+  reportedAt?: string;
+};
+
+export type SessionPullRequestMetaWithLegacy = SessionPullRequestMeta &
+  Partial<SessionPullRequestLegacyMetaFields>;
+
+export function getSessionPullRequestLegacyFields(
+  pr: SessionPullRequestMeta | null | undefined
+): Partial<SessionPullRequestLegacyMetaFields> {
+  return (pr ?? {}) as Partial<SessionPullRequestLegacyMetaFields>;
+}
+
+export function normalizeSessionPullRequestMeta(value: unknown): SessionPullRequestMeta | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const url = typeof record.url === 'string' ? record.url.trim() : '';
+  const status = record.status;
+  if (
+    !url ||
+    (status !== 'open' && status !== 'closed' && status !== 'merged' && status !== 'draft')
+  ) {
+    return null;
+  }
+  return { url, status };
+}
+
+/** Rollup CI state of a PR's head commit: success/failure/pending/error/expected. */
+export type SessionPullRequestCiState = 's' | 'f' | 'p' | 'e' | 'x';
+
+/**
+ * Merge readiness reported by the provider (GitHub `mergeStateStatus`):
+ * clean / blocked (protection rules) / dirty (conflicts) / behind (needs
+ * rebase) / unstable (checks failing but mergeable). Absent = unknown
+ * (provider still computing); drafts are already covered by `PrStatus`.
+ */
+export type SessionPullRequestMergeState = 'c' | 'b' | 'd' | 'h' | 'u';
+
+/**
+ * Product-level merge readiness. `y` means the PR is cleanly mergeable with
+ * successful or no CI. Legacy: the CLI poller used to compute this (factoring
+ * in review decision and unresolved review threads) and write it as `r`; the
+ * reconciler no longer writes `r` and deletes it on touch, so consumers must
+ * derive readiness from `s`/`m` via `deriveSessionPullRequestReadiness`.
+ */
+export type SessionPullRequestReadiness = 'y' | 'n';
+
+/**
+ * Compact per-PR CI + merge/readiness record synced by the CLI PR poller.
+ * Single-letter codes keep one entry under 50B — repo meta is costly sync state
+ * and the budget for these signals together is 50B (see plan
+ * `plans/20260717-cli-pr-status-poller.md` §5). `t` is the epoch SECOND of
+ * the last change to `s`, `m`, or `r` (not of the last poll).
+ */
+export type SessionPullRequestStateMeta = {
+  s?: SessionPullRequestCiState;
+  m?: SessionPullRequestMergeState;
+  r?: SessionPullRequestReadiness;
+  t: number;
+};
+
+/**
+ * Derive merge readiness from the poller-synced CI (`s`) and merge (`m`)
+ * codes. A PR is ready when GitHub reports a clean merge state and CI is
+ * either successful or absent. The legacy `r` field is intentionally ignored:
+ * nothing writes it anymore and a stale value must not authorize a merge.
+ */
+export function deriveSessionPullRequestReadiness(
+  state: SessionPullRequestStateMeta | null | undefined
+): SessionPullRequestReadiness | null {
+  if (!state || state.m !== 'c') {
+    return null;
+  }
+  return state.s === undefined || state.s === 's' ? 'y' : null;
+}
+
+export type LineChange = {
+  add: number;
+  del: number;
+};
+
+export type SessionDiffStats = {
+  allChange: LineChange;
+};
+
+export type SessionContextWindowUsage = {
+  size: number;
+  used: number;
+};
+
+export type SessionTitleSource = 'user' | 'generated' | 'draft';
+
+const DRAFT_SESSION_TITLE_MAX_CHARS = 50;
+
+/**
+ * Placeholder title for a new Session: the prompt's first non-empty line. Stored
+ * with `titleSource: 'draft'` so a generated title still replaces it; ACP-owned
+ * titles (e.g. Codex) only arrive after the first turn ends.
+ */
+export const deriveDraftSessionTitle = (prompt: string): string | undefined =>
+  prompt
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.length > 0)
+    ?.slice(0, DRAFT_SESSION_TITLE_MAX_CHARS);
+
+/**
+ * Sidebar title of a root Session's conversation group (all of its tabs). It is
+ * independent of the root tab's own `title`; absent means the group still shows
+ * the root title (Sessions created before group titles, or not yet named).
+ */
+export const getSessionGroupTitle = (
+  meta: Pick<SessionMeta, 'title' | 'groupTitle'> | null | undefined
+): string | undefined => meta?.groupTitle?.trim() || meta?.title?.trim() || undefined;
+
+/**
+ * Root-Session meta fields that copy a newly generated root title into the group
+ * title exactly once: while the group has no title of its own, or only a draft.
+ * Returns undefined for child Sessions and for groups that are already named.
+ * `rootTitleApplied` says whether the root tab title itself accepted the write,
+ * which is what keeps an absent group showing the root title until then.
+ */
+export const resolveGeneratedGroupTitleUpdate = (
+  meta: Pick<SessionMeta, 'parentSessionId' | 'groupTitle' | 'groupTitleSource'> | null | undefined,
+  title: string,
+  rootTitleApplied: boolean
+): Pick<SessionMeta, 'groupTitle' | 'groupTitleSource'> | undefined => {
+  if (!meta || meta.parentSessionId) return undefined;
+  const hasGroupTitle = Boolean(meta.groupTitle?.trim());
+  const eligible = hasGroupTitle ? meta.groupTitleSource === 'draft' : rootTitleApplied;
+  return eligible ? { groupTitle: title, groupTitleSource: 'generated' } : undefined;
+};
+
+/**
+ * Meta patch for a user rename of one tab. Renaming a root tab whose group has no
+ * title of its own first freezes the group at the root's current title, so the
+ * sidebar keeps its name instead of following the tab.
+ */
+export const buildSessionTabRenamePatch = (
+  meta:
+    | Pick<SessionMeta, 'parentSessionId' | 'title' | 'titleSource' | 'groupTitle'>
+    | null
+    | undefined,
+  title: string
+): Partial<SessionMeta> => {
+  const patch: Partial<SessionMeta> = { title, titleSource: 'user' };
+  const currentTitle = meta?.title?.trim();
+  if (meta && !meta.parentSessionId && !meta.groupTitle?.trim() && currentTitle) {
+    patch.groupTitle = currentTitle;
+    patch.groupTitleSource = meta.titleSource ?? 'user';
+  }
+  return patch;
+};
+
+/** Meta patch for a user rename of a conversation group's sidebar title. */
+export const buildSessionGroupRenamePatch = (title: string): Partial<SessionMeta> => ({
+  groupTitle: title,
+  groupTitleSource: 'user',
+});
+
+export type ExternalAcpHistorySyncMeta = {
+  provider: LocalProjectHistoryProvider;
+  source: 'local-acp-history';
+  /** Original ACP session id used only as an import source key, not a resumable Lody session id. */
+  sourceAcpSessionId: ACPSessionId;
+  sourceUpdatedAt?: string;
+  replayDigest?: string;
+  /**
+   * Canonical-hash version `replayDigest` was computed with. Absent means v1
+   * (written before hash versions existed). It versions the digest only; the
+   * session doc cursor carries its own version for `importedTurnHashes`.
+   */
+  hashVersion?: number;
+  importedTurnCount: number;
+  /** @deprecated Legacy bulky cursor. New writes do not store per-turn hashes in meta. */
+  importedTurnHashes?: string[];
+  lastSyncAt: number;
+  status?: 'synced' | 'sync_conflict' | 'metadata_only';
+  conflictReason?: string;
+};
+
+export type SessionPreviewDocState = {
+  candidate?: PreviewCandidate;
+  connection?: PreviewConnection;
+};
+
+export type SessionPreviewCandidateMeta = Pick<PreviewCandidate, 'status' | 'updatedAt'>;
+
+export type SessionPreviewConnectionMeta = Pick<PreviewConnection, 'status' | 'updatedAt'>;
+
+export type SessionExternalHistoryCursorDocState = {
+  importedTurnHashes?: string[];
+  /**
+   * Canonical-hash version `importedTurnHashes` were computed with. Absent means
+   * v1. It is deliberately independent of `ExternalAcpHistorySyncMeta.hashVersion`:
+   * a conflict marker may advance only the metadata while this cursor stays v1, and
+   * a v1 cursor must never be read as v2 (that manufactures a false prefix_mismatch).
+   */
+  hashVersion?: number;
+  /** Versioned JSON bound to this cursor's source hashes, not the metadata digest. */
+  storedHistoryBaseline?: string;
+};
+
+/** Logical changes in an owner history publication. */
+export type SessionHistoryChange =
+  | { readonly kind: 'structure'; readonly from: number; readonly to: number }
+  | { readonly kind: 'changed'; readonly ids: readonly string[] };
+
+/**
+ * Legacy/fallback launch config shape. New writers must not persist this per session;
+ * resolve customAcp/env from AgentConfigMeta and worktree scripts from project config.
+ */
+export type SessionLaunchConfig = {
+  codexAuth?: import('./codex-auth-profile').CodexAuthProfile;
+  customAcp?: CustomAcpLaunchSpec;
+  runtimeOverrides?: BuiltinRuntimeOverrides;
+  magpieGatewayUrl?: string;
+  env?: Record<string, string>;
+  worktreeSetup?: WorktreeSetupScriptConfig;
+  worktreeCleanup?: WorktreeCleanupScriptConfig;
+};
+
+/**
+ * A future-firing task scheduled by the agent (cron job or one-shot wakeup) that
+ * keeps a session "alive" after the current turn ends. Surfaced above the composer so
+ * the user knows the session will trigger again. NOT persisted anywhere: derived on the
+ * fly from the Cron / ScheduleWakeup `tool_call` items already in session history (see
+ * `collectPendingScheduledTasksFromHistory`).
+ */
+export type PendingScheduledTask = {
+  /** Stable id: cron job id, or a fixed key for the session's single pending wakeup. */
+  id: string;
+  kind: 'cron' | 'wakeup';
+  /**
+   * When this task set entry was last recorded, epoch ms. For calls persisted with
+   * `recordedAtMs` this is the tool call's own first-sighting stamp (the true creation
+   * moment); older history falls back to the owning turn's START — never its `endedAt`,
+   * which merged cron-fire turns can push past a one-shot's fire minute.
+   */
+  createdAtMs: number;
+  /**
+   * Wakeup fire time (epoch ms); also the runtime-committed fire time of a one-shot cron
+   * whose CronCreate output carried a `nextFireAt` line. Absent for recurring cron jobs
+   * (they resolve from their schedule expression relative to now).
+   */
+  scheduledForMs?: number;
+  /** Cron schedule expression / human-readable schedule string. */
+  humanSchedule?: string;
+  /** True for recurring cron jobs; false/undefined for one-shot cron or wakeups. */
+  recurring?: boolean;
+  /** True if the cron job is persisted to disk (survives CLI restart); false = session-only. */
+  durable?: boolean;
+  /** Short description of what will happen when it fires (the scheduled prompt/reason). */
+  summary?: string;
+  /**
+   * IANA timezone of the execution machine that created the cron (e.g. `America/New_York`).
+   * Cron expressions are interpreted in the machine's LOCAL time (`0 9 * * *` = 9am there),
+   * so the panel must resolve fire times in this zone — not the viewer's browser zone — or
+   * the displayed time drifts when the two differ. Absent for wakeups (relative delay) and
+   * for pre-existing history; callers fall back to the viewer's local zone then.
+   */
+  timeZone?: string;
+};
+
+export type SessionHistoryBackendKind = 'loro' | 'roost';
+
+/** Missing discriminator means a legacy session and must remain pinned to Loro. */
+export const LEGACY_SESSION_HISTORY_BACKEND: SessionHistoryBackendKind = 'loro';
+
+/** Explicit backend selected by the renderer when the Roost experiment is enabled. */
+export const ROOST_SESSION_HISTORY_BACKEND: SessionHistoryBackendKind = 'roost';
+
+/**
+ * Default for creation paths without a renderer feature-gate decision.
+ * Existing sessions keep their persisted choice; only an explicit opt-in selects Roost.
+ */
+export const NEW_SESSION_HISTORY_BACKEND: SessionHistoryBackendKind =
+  LEGACY_SESSION_HISTORY_BACKEND;
+
+/**
+ * Resolve the immutable history backend choice for an opened session.
+ *
+ * Keep this policy in the shared package so the CLI and renderer cannot
+ * accidentally assign different meanings to a missing discriminator while a
+ * document is still being bootstrapped.
+ */
+export const resolveSessionHistoryBackendKind = (
+  meta?: Pick<{ historyBackend?: SessionHistoryBackendKind }, 'historyBackend'> | null
+): SessionHistoryBackendKind => meta?.historyBackend ?? LEGACY_SESSION_HISTORY_BACKEND;
+
+export type SessionQueuePromotionState =
+  | 'prepared'
+  | 'history_accepted'
+  | 'activation_published'
+  | 'queue_consumed';
+
+export type SessionQueuePromotionRecord = {
+  queueCid: string;
+  userTurnId: string;
+  state: SessionQueuePromotionState;
+  updatedAt: number;
+};
+
+export type SessionSteerOperationRecord = {
+  operationId: string;
+  userTurnId: string;
+  expectedTurnId: string;
+  cancellationPolicy: 'promote' | 'preserve';
+  phase: 'prepared' | 'submitted' | 'settled';
+  delivery: 'not_submitted' | 'applied' | 'not_applied' | 'unknown';
+  status: 'pending' | 'processing' | 'handled' | 'failed' | 'canceled' | 'delivery_unknown';
+  updatedAt: number;
+};
+
+/** Independent lifecycle register per canonical GitHub PR URL (not association membership). */
+export type SessionPullRequestLifecycle = { s: PrStatus; u: number };
+export type SessionPullRequestLifecycleFields = {
+  [field: `prLifecycle:${string}`]: SessionPullRequestLifecycle | undefined;
+};
+
+export type SessionMeta = SessionPullRequestLifecycleFields & {
+  /** Latest assistant's actual model; null means no assistant history, absent means unknown. */
+  lastModel?: { modelId?: string; name?: string } | null;
+  id: SessionId;
+  machineId: MachineId;
+  createdAt: string;
+  /** Feedback post id bound at session start, when the session originates from lody-feedback. */
+  fromFeedbackPostId?: string;
+  /** 36-byte UUID activation index; content lives in the session control doc. */
+  notificationId?: string;
+  lastMessageAt?: number;
+  lastReadAt?: number;
+  /**
+   * Timestamp of the last transition into an active status (running/initializing/
+   * requestPermission). No longer refreshed periodically. Live working state is
+   * read from ephemeral session presence instead of this durable metadata.
+   */
+  lastRunningSeen?: number;
+  title?: string;
+  /** Indicates whether the current title was entered by a user, generated by the agent, or copied from a draft tab prompt. */
+  titleSource?: SessionTitleSource;
+  /**
+   * Root Sessions only: the conversation group's sidebar title, independent of
+   * the root tab's `title`. Read through `getSessionGroupTitle`.
+   */
+  groupTitle?: string;
+  /** Provenance of `groupTitle`; a generated title is copied into it at most once. */
+  groupTitleSource?: SessionTitleSource;
+  userId: string;
+  status?: SessionStatus;
+  isArchived?: boolean;
+  /** User-owned tree execution barrier; inherited through containment and precise opener links. */
+  collaborationStopped?: boolean;
+  /** Shared tab visibility only; closing never changes the session lifecycle. */
+  isTabClosed?: boolean;
+  origin?: 'lody' | 'external-acp';
+  /** When true, this session is pinned to the top of the sidebar list. */
+  isPinned?: boolean;
+  cliType: AgentConfigCliType;
+  agentType: AgentType;
+  /** Backend selected when this session was created. Missing means legacy Loro. */
+  historyBackend?: SessionHistoryBackendKind;
+  agentConfigId?: AgentConfigId;
+  /**
+   * Agent Role this session was created from, and the Role revision that was
+   * resolved when its create Operation was accepted.
+   *
+   * Provenance only. Execution is governed by the already-frozen agent config
+   * and dispatch config, so nothing may re-read the mutable Role catalog from
+   * these fields: a later Role edit or delete must not change execution.
+   */
+  agentRoleId?: AgentRoleId;
+  agentRoleRevision?: number;
+  /** Schedule provenance only, a UUID of at most 50 UTF-8 bytes. */
+  scheduleId?: string;
+  acpSessionId?: ACPSessionId;
+  /** Exact Session or child Tab that created/opened this session, when known. */
+  openedBySessionId?: SessionId;
+  /**
+   * Root Session that owns `openedBySessionId` when the opener is a child Tab.
+   * Omitted when the exact opener is already a root Session. Keeping this
+   * companion pointer makes the cross-Session route self-contained: clients
+   * can open the root route and restore the precise Tab even if the opener's
+   * metadata has not synced yet.
+   */
+  openedByRootSessionId?: SessionId;
+  /** Project binding for this session (GitHub repo or local project). */
+  project?: ProjectRef;
+  projectRun?: SessionProjectRun;
+  repoFullName?: string;
+  /** Base branch selected when the session starts (starting point). */
+  baseBranch?: string;
+  /** Runtime working branch for the session (changes as session runs). */
+  branchName?: string;
+  /** True if this session runs inside a git worktree (local or GitHub). */
+  isWorktree?: boolean;
+  /** Machine-owned association order; status is a compatibility projection. */
+  pullRequests?: SessionPullRequestMeta[];
+  /**
+   * CI rollup + merge/readiness per associated PR URL, written by the CLI PR
+   * poller (compact single-letter codes, ≤50B/entry). Independent of both
+   * association ordering and provider-versioned lifecycle registers.
+   */
+  pullRequestState?: Record<string, SessionPullRequestStateMeta>;
+  contextWindowUsage?: SessionContextWindowUsage;
+  /**
+   * Latest user history entry published for dispatch. Owned by dispatch
+   * producers; execution terminal bookkeeping must never rewrite it.
+   */
+  latestUserMsgId?: string;
+  /** Daemon-owned steer results awaiting history projection or ordinary dispatch claim. */
+  steerTurnStatuses?: Record<
+    string,
+    'pending' | 'processing' | 'handled' | 'failed' | 'canceled' | 'delivery_unknown'
+  >;
+  /** Durable provider-delivery evidence, keyed by stable steer operation id. */
+  steerOperationLedger?: Record<string, SessionSteerOperationRecord>;
+  /** Recoverable queue promotion receipts, keyed by the stable operation id. */
+  queuePromotionLedger?: Record<string, SessionQueuePromotionRecord>;
+  /** Stop request marker into the Session control doc; legacy values directly name the target turn. */
+  lastCanceledTurn?: string;
+  /** Latest user history entry id that the machine has fully handled. */
+  lastHandledUserMsgId?: string;
+  /** User history entry id currently being processed by the machine. */
+  processingUserMsgId?: string;
+  /**
+   * Legacy latest missing-history acknowledgement. Read with the retained map;
+   * producers must not clear this receipt when publishing a fresh activation.
+   */
+  lastMissingHistoryUserMsgId?: string;
+  /** Host-owned append-only acknowledgements; a newer timeout must not revive an older input. */
+  missingHistoryUserMsgIds?: Record<string, true>;
+  /**
+   * Exact dispatch activation retired because its history entry is already
+   * terminal — the turn ran, only the pointer was stale. Recorded beside the
+   * producer-owned pointers instead of rewriting them, because there is no CAS
+   * against a concurrent send. It suppresses only a matching pointer, and the
+   * turn it names is terminal, so a later settlement may replace it freely.
+   */
+  settledActivationUserMsgId?: string;
+  /** Goal thread id the user dismissed from the banner after it reached a terminal state.
+   *  The banner stays hidden until a goal with a different threadId arrives. */
+  dismissedGoalThreadId?: string;
+  // 当前 codespace 相比基础分支(默认main)的代码变更统计
+  diffStats?: SessionDiffStats;
+  /** True if workspace has uncommitted changes (staged or unstaged) */
+  workspaceDirty?: boolean;
+  /**
+   * True if the working branch has local commits its upstream lacks. Tracked
+   * separately from `workspaceDirty` because they go stale at different moments:
+   * committing clears `workspaceDirty` while the remote — and therefore the PR
+   * head a reviewer reads — is still behind. Consumers that ask "is the PR head
+   * the author's latest work?" must check BOTH.
+   */
+  workspaceUnpushed?: boolean;
+  /** If set, this session is a child tab of another session and shares its workspace directory. */
+  parentSessionId?: SessionId;
+  /**
+   * Sparse presentation override for a child session. Absence keeps the existing
+   * top-tab behavior; side-panel children stay out of the tab strip and are
+   * rendered as durable conversation panels instead.
+   */
+  childSessionPlacement?: 'side-panel';
+  /** History entry id pinned at the top of this session's chat. When empty or undefined, no pin banner is shown. */
+  pinnedHistoryId?: string;
+  /** Preview candidate summary for list/header UI; full state lives in session doc `preview`. */
+  previewCandidate?: SessionPreviewCandidateMeta;
+  /** Last agent-started simulator operation (UUID only); UI discovery hint, never live state or authority. */
+  iosSimulatorPreviewRequestId?: string;
+  androidEmulatorPreviewRequestId?: string;
+  /** Preview connection summary for list/header UI; full state lives in session doc `preview`. */
+  previewConnection?: SessionPreviewConnectionMeta;
+  /** External native history projection cursor for imported sessions. */
+  externalHistory?: ExternalAcpHistorySyncMeta;
+  /** Monotonic-ish signal used to wake the owning CLI when the CRDT message queue changes. */
+  messageQueueUpdatedAt?: number;
+  /** Control-document causal frontier captured after the queue mutation named by updatedAt. */
+  messageQueueUpdateVersion?: {
+    updatedAt: number;
+    frontiers: { peer: `${number}`; counter: number }[];
+  };
+  /** Last queue signal whose control mutation was observed and whose queue was drained. */
+  messageQueueCheckedAt?: number;
+  /**
+   * When the session started waiting on a human answer, cleared when the request
+   * resolves. A list-rendering summary of the durable truth in history (a
+   * permission request with no outcome), so surfaces can show "waiting on you"
+   * without opening session documents.
+   *
+   * Unlike `status`, this is not repaired by the heartbeat TTL: a machine that
+   * goes offline mid-question is still waiting on the user, and that is exactly
+   * when the signal matters.
+   */
+  awaitingUserSince?: number;
+  /**
+   * Historical auto-review pointer, retained for stored metadata compatibility.
+   * The retired review automation no longer reads or acts on this field.
+   */
+  autoReview?: { runId: string; t: number };
+};
+
+/** Match a retained missing-payload acknowledgement, including legacy metadata. */
+export function isMissingHistoryUserTurn(
+  meta: Pick<SessionMeta, 'lastMissingHistoryUserMsgId' | 'missingHistoryUserMsgIds'> | undefined,
+  turnId: string | undefined
+): boolean {
+  return (
+    !!turnId &&
+    (meta?.lastMissingHistoryUserMsgId === turnId ||
+      meta?.missingHistoryUserMsgIds?.[turnId] === true)
+  );
+}
+
+/**
+ * Resolve the dispatch activation a machine still owes work for.
+ *
+ * The pointer pair alone is NOT the answer: the negative-ack ledger and terminal slot retire an
+ * activation without rewriting the producer-owned pointers, so raw
+ * `latestUserMsgId !== lastHandledUserMsgId` reports pending work forever once
+ * either fires. `missingHistoryUserMsgIds` preserves every failed identity (including the legacy
+ * `lastMissingHistoryUserMsgId` marker); `settledActivationUserMsgId` retires a turn
+ * whose history entry is already terminal. Every consumer that asks "does this
+ * session still owe a turn?" — dispatch, idle GC, MCP status —
+ * must go through here, or they disagree with the watcher and hang.
+ */
+export function getPendingUserTurnActivationId(meta: SessionMeta): string | undefined {
+  const settledUserTurnId = meta.settledActivationUserMsgId;
+  if (
+    typeof meta.processingUserMsgId === 'string' &&
+    meta.processingUserMsgId.length > 0 &&
+    !isMissingHistoryUserTurn(meta, meta.processingUserMsgId) &&
+    meta.processingUserMsgId !== settledUserTurnId
+  ) {
+    return meta.processingUserMsgId;
+  }
+  if (
+    typeof meta.latestUserMsgId === 'string' &&
+    meta.latestUserMsgId.length > 0 &&
+    meta.latestUserMsgId !== meta.lastHandledUserMsgId &&
+    !isMissingHistoryUserTurn(meta, meta.latestUserMsgId) &&
+    meta.latestUserMsgId !== settledUserTurnId
+  ) {
+    return meta.latestUserMsgId;
+  }
+  return Object.keys(meta.steerTurnStatuses ?? {}).find(
+    (id) =>
+      meta.steerTurnStatuses?.[id] === 'pending' &&
+      !isMissingHistoryUserTurn(meta, id) &&
+      id !== settledUserTurnId
+  );
+}
+
+export function hasPendingUserTurnActivation(meta: SessionMeta): boolean {
+  return getPendingUserTurnActivationId(meta) !== undefined;
+}
+
+export type SessionLegacyMetaFields = {
+  /** Deprecated legacy snapshot; new writes keep goal state in session history. */
+  latestGoal?: Extract<MessageContent, { type: 'goal' }> | null;
+  /** Deprecated launch state; new writes store this in AgentConfigMeta. */
+  customAcp?: CustomAcpLaunchSpec;
+  /** Deprecated launch state; new writes store this in AgentConfigMeta. */
+  env?: Record<string, string>;
+  /** Deprecated launch state; new writes store this in project worktree config. */
+  worktreeSetup?: WorktreeSetupScriptConfig;
+  /** Deprecated launch state; new writes store this in project worktree config. */
+  worktreeCleanup?: WorktreeCleanupScriptConfig;
+};
+
+export type NeedToDeleteSessionQueueItem =
+  | boolean
+  | {
+      repoFullName?: string;
+      branchName?: string;
+      baseBranchName?: string;
+      requestedAt?: number;
+      localProjectId?: LocalProjectId;
+      originalRootPath?: string;
+      isWorktree?: boolean;
+      keptWorktreePath?: string;
+    };
+
+export const sessionSchema = schema.LoroMap({
+  id: schema.String<SessionId>(),
+});
+
+export const messageQueueItemSchema = schema.LoroMap({
+  task: schema.String(),
+  project: schema.Any({ required: false }),
+  userId: schema.String(),
+  userTurnId: schema.String({ required: false }),
+  /** Stable queue promotion identity; legacy rows derive it from userTurnId/$cid. */
+  operationId: schema.String({ required: false }),
+  timestamp: schema.String(),
+  isEditing: schema.Boolean({ required: false }),
+  // Calibrated server time (`getServerNow()`) when the current editor entered the row.
+  // Used as a lease so the CLI dispatcher does not block the queue forever if the
+  // editing client never gets a chance to clear `isEditing` (hard close / crash /
+  // killed tab). See `popMessageQueue` in `apps/cli/src/lib/loro/doc.ts`.
+  editingStartedAt: schema.Number({ required: false }),
+  acpSessionConfig: acpSessionConfigSchema,
+  /** Encrypted only: the author's signed execution intent; promotion copies it. */
+  e2eeIntent: schema.String({ required: false }),
+});
+
+export type MessageQueueItem = Omit<InferType<typeof messageQueueItemSchema>, 'project'> & {
+  project: ProjectRef | undefined;
+};
+export type MessageQueueItemInput = Omit<
+  InferInputType<typeof messageQueueItemSchema>,
+  'project' | 'acpSessionConfig'
+> & {
+  project: ProjectRef | undefined;
+  acpSessionConfig?: import('./ai').ACPSessionConfig &
+    Pick<import('./ai').SessionTurnInputConfig, '_lodyAutomation'>;
+};
+
+const sessionForkOperationDocSchema = schema.LoroMap(
+  {
+    id: schema.String(),
+    sourceSessionId: schema.String<SessionId>(),
+    sourceTurnId: schema.String(),
+    requestedByUserId: schema.String(),
+    targetContext: schema.String<'shared' | 'new-worktree'>(),
+    capturedHeadSha: schema.String({ required: false }),
+    sourceWasDirty: schema.Boolean({ required: false }),
+    state: schema.String<'preparing' | 'failed'>(),
+    phase: schema.String<'preparing-worktree' | 'running-setup' | 'starting-agent' | 'committing'>({
+      required: false,
+    }),
+    error: schema.LoroMap(
+      {
+        code: schema.String(),
+        message: schema.String(),
+      },
+      { required: false }
+    ),
+    createdAt: schema.String(),
+    updatedAt: schema.String(),
+  },
+  { required: false }
+);
+
+/**
+ * ACP-reported runtime configuration after a Turn has started. This is shared
+ * control state, not transcript content: `basedOnUserTurnId` supplies the
+ * causal fence that prevents a late update from changing a newer Turn's
+ * composer baseline.
+ */
+export type SessionAcpRuntimeConfigSnapshot = {
+  acpSessionId: ACPSessionId;
+  basedOnUserTurnId: string;
+  revision: number;
+  modeId?: string;
+  modelId?: string;
+  configOptionValues?: Record<string, AcpConfigOptionValue>;
+  /** Actual commands for this ACP session; an empty list clears the menu. */
+  availableCommands?: AcpCommandSummary[];
+};
+
+export type SessionAcpRuntimeConfigPatch = Omit<
+  SessionAcpRuntimeConfigSnapshot,
+  'basedOnUserTurnId' | 'revision'
+>;
+
+const sessionAcpRuntimeConfigDocSchema = schema.LoroMap(
+  {
+    acpSessionId: schema.String<ACPSessionId>(),
+    basedOnUserTurnId: schema.String(),
+    revision: schema.Number(),
+    modeId: schema.String({ required: false }),
+    modelId: schema.String({ required: false }),
+    configOptionValues: schema.Any({ required: false }),
+    availableCommands: schema.LoroList(
+      schema.LoroMap({
+        name: schema.String(),
+        description: schema.String({ required: false }),
+      }),
+      undefined,
+      { required: false }
+    ),
+  },
+  { required: false }
+);
+
+/**
+ * Root schema for a session doc.
+ *
+ * Synced docs outlive the builds that write them: a client on a newer schema
+ * can add a root key that older clients do not declare. Adding an optional
+ * root field is therefore safe, but only because every Mirror over a synced
+ * doc is constructed with `ignoreUnknownProperties` — without it loro-mirror
+ * rejects the whole state with `Unknown property: <key>` and the older client
+ * can never write to that doc again. Removing or repurposing an existing root
+ * field is still a breaking change.
+ *
+ * See `packages/shared/tests/session-doc-forward-compat.test.ts`.
+ */
+export const sessionDocSchema = schema({
+  session: sessionSchema,
+  history: schema.LoroList(sessionHistorySchema, (item) => item.id),
+  mq: schema.LoroMovableList(messageQueueItemSchema, (item) => item.$cid, { required: false }),
+  /** Explicit human-send outbox. Never inferred from user role or Agent authors. */
+  humanInputReceipts: schema
+    .LoroMap({}, { required: false })
+    .catchall(schema.LoroMap({ userId: schema.String() })),
+  /** Latest Stop only; metadata carries its marker, not its payload. */
+  cancelRequest: schema.LoroMap(
+    { id: schema.String(), turnId: schema.String() },
+    { required: false }
+  ),
+  /** Temporary durable state for an asynchronous Session fork. Removed on success. */
+  forkOperation: sessionForkOperationDocSchema,
+  notification: schema.LoroMap(
+    {
+      id: schema.String(),
+      recipientId: schema.String(),
+      turnId: schema.String(),
+      outcome: schema.String(),
+      presentation: schema.LoroMap(
+        {
+          kind: schema.String<'conversation' | 'schedule'>(),
+          conversationTitle: schema.String({ required: false }),
+          scheduleName: schema.String({ required: false }),
+          projectName: schema.String({ required: false }),
+          pullRequestNumber: schema.Number({ required: false }),
+        },
+        { required: false }
+      ),
+      createdAt: schema.Number(),
+    },
+    { required: false }
+  ),
+  preview: sessionPreviewDocSchema,
+  externalHistoryCursor: sessionExternalHistoryCursorDocSchema,
+  acpRuntimeConfig: sessionAcpRuntimeConfigDocSchema,
+});
+
+/**
+ * How this machine is hosted.
+ * - `user`: owned by a user, running a local CLI.
+ * - `cloud`: managed by Lody's cloud runtime (not exposed in the UI yet).
+ *
+ * Absent values read as `'user'` via `getMachineHostType()`.
+ */
+export type MachineHostType = 'user' | 'cloud';
+
+export type MachineMeta = {
+  id: MachineId;
+  name: string;
+  /** User id that owns/logged into this machine. Used for UI scoping. */
+  ownerUserId?: string;
+  /** See `MachineHostType`. Treat absent as `'user'`. */
+  hostType?: MachineHostType;
+  cliVersion: string;
+  os: string;
+  supportRegistryAgentTypes?: string[];
+  sessions: SessionId[];
+  /**
+   * @deprecated Legacy registration timestamp; no longer written. Machine
+   * online detection reads ephemeral machine presence only — never this field.
+   */
+  lastSeen?: number;
+  /** Version string for the machine RPC protocol implementation. */
+  rpcVersion?: string;
+  /** True when this machine can handle local project history sync/import over Streams RPC. */
+  supportsLocalProjectHistoryRpc?: boolean;
+  /** Versioned daemon protocols available to remote and local clients. */
+  protocolCapabilities?: MachineProtocolCapabilities;
+  /**
+   * IANA zone of the machine's clock, e.g. `Asia/Shanghai` (under 50 bytes,
+   * rewritten only at registration). Schedules owned by this machine are
+   * authored on this clock; absent on older CLIs.
+   */
+  timeZone?: string;
+};
+
+/**
+ * Fields that may still exist on older machine doc metadata but are no longer
+ * part of the current MachineMeta contract. New writers must use the machine
+ * Flock doc for this state.
+ */
+export type MachineLegacyMetaFields = {
+  acpCapabilities?: Record<string, AcpCapabilityCacheEntry>;
+  localProjects?: Record<LocalProjectId, LocalProjectMeta>;
+  workspacePaths?: Record<SessionId, string>;
+  needToArchiveSessions?: Record<SessionId, boolean>;
+  needToDeleteSessions?: Record<SessionId, NeedToDeleteSessionQueueItem>;
+  raceLimits?: Record<string, RateLimit>;
+};
+
+/**
+ * UI/CLI read model after overlaying machine Flock doc rows and legacy fallback
+ * metadata. This type is intentionally separate from MachineMeta so root repo
+ * metadata does not look like a cheap place for bulky machine state.
+ */
+export type MachineViewMeta = MachineMeta &
+  Omit<MachineLegacyMetaFields, 'raceLimits'> & {
+    raceLimits: Record<string, RateLimit>;
+  };
+
+export const getMachineHostType = (meta: Pick<MachineMeta, 'hostType'>): MachineHostType =>
+  meta.hostType ?? 'user';
+
+export type SessionDoc = InferInputType<typeof sessionDocSchema>;
+export type SessionDocMeta = Omit<SessionDoc, '$cid' | 'history'> & {
+  session: { id: SessionId };
+  history: SessionHistory[];
+  mq?: MessageQueueItem[];
+};
+export type Session = SessionMeta & SessionDocMeta;
+export type SessionToCreate = Omit<
+  SessionMeta,
+  'id' | 'createdAt' | 'chatId' | 'status' | 'isArchived' | 'isTabClosed' | 'diffStats'
+> &
+  SessionLaunchConfig & {
+    sessionId?: SessionId;
+  };
+export type SessionToUpdate = Pick<Session, 'id' | 'status' | 'history'>;
+export type SessionToDelete = Pick<Session, 'id'>;
+export type SessionHistoryInput = SessionEntry;
+export type SessionHistory = Omit<SessionHistoryInput, '$cid'> & {
+  $cid?: string;
+};
+export type SessionHistoryParsed = Omit<SessionHistory, 'items' | 'fileDiff'> & {
+  items: MessageContent[];
+  fileDiff?: FileDiff[] | undefined;
+};
+
+export const resolveActiveAssistantTurnId = (
+  history:
+    | ReadonlyArray<Pick<SessionHistoryInput, 'id' | 'role' | 'finished' | 'endedAt'> | undefined>
+    | null
+    | undefined
+): string | undefined => {
+  if (!history?.length) {
+    return undefined;
+  }
+
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index];
+    if (!entry || entry.role !== 'assistant') {
+      continue;
+    }
+    if (entry.finished === true || typeof entry.endedAt === 'number') {
+      return undefined;
+    }
+    return entry.id;
+  }
+
+  return undefined;
+};
+
+export type WorkspaceDoc = {
+  sessions: WorkspaceSession[];
+  agentConfigs: WorkspaceAgentConfig[];
+};
+export type Workspace = WorkspaceDoc;
+export type WorkspaceSession = { id: SessionId; isDeleted: boolean };
+export type WorkspaceAgentConfig = { id: AgentConfigId; isDeleted: boolean };

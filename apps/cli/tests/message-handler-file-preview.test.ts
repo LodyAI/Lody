@@ -222,7 +222,9 @@ describe('MessageHandler file preview workspace lifecycle', () => {
           () => false
         );
       expect({ admitted, handled, disk: diskSnapshot() }).toEqual({
-        admitted: false,
+        // Preparing a scoped history frame is allowed; the receiver still needs
+        // the separate session grant. The legacy query entry never handles it.
+        admitted: method === 'session/history-read',
         handled: false,
         disk: before,
       });
@@ -645,7 +647,7 @@ describe('MessageHandler file preview workspace lifecycle', () => {
       },
     };
     const config = { id: 'config', machineId, cliType: 'builtin', agentType: 'sorbet' };
-    document.getAgentConfigById = async () => config as never;
+    document.getAgentConfigForMachineLaunch = async () => config as never;
     const providerId = '提供商 / 账户';
     const control = new LocalControlHandler({
       machineId,

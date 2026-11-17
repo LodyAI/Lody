@@ -26,6 +26,10 @@ The source order is:
   LodyAI identity;
 - non-owner requester: resolved Lody/GitHub identity, neutral LodyAI identity.
 
+The ownership boundary still holds. The order changed later: an approved requester comes first,
+the owner's identity is left to Git, and an unapproved non-owner commits as LodyAI
+([native identity note](../bug-fix/2026-11-16-native-owner-git-identity.md)).
+
 The non-owner path does not read machine Git configuration. GitHub PR, comment, merge, and push
 authorization remains controlled by the separately requester-bound GitHub token.
 

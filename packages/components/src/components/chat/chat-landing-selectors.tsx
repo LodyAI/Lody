@@ -166,7 +166,6 @@ export interface BranchSelectorProps {
   value: string | null;
   onChange: (value: string) => void;
   options: AcpSessionSelectOption[];
-  tone: ChatLandingTone;
   placeholder?: string;
   searchPlaceholder?: string;
   emptyText?: string;
@@ -186,7 +185,6 @@ export function BranchSelector({
   value,
   onChange,
   options,
-  tone,
   placeholder = 'Branch',
   searchPlaceholder,
   emptyText,
@@ -208,7 +206,6 @@ export function BranchSelector({
       align="start"
       side="top"
       avoidCollisions={false}
-      tone={tone}
       placeholderIcon={GitBranch}
       searchable={!loading && options.length > 6}
       searchPlaceholder={searchPlaceholder}
@@ -254,7 +251,6 @@ export function BranchSelector({
 export interface MachineSelectorProps {
   value: MachineId | null;
   onChange: (machineId: MachineId) => void;
-  tone: ChatLandingTone;
   disabled?: boolean;
   /**
    * When true, the selector renders a loading placeholder instead of being
@@ -275,7 +271,6 @@ export interface MachineSelectorProps {
 export function MachineSelector({
   value,
   onChange,
-  tone,
   disabled = false,
   loading = false,
   className,
@@ -307,7 +302,6 @@ export function MachineSelector({
       placeholderIcon={Monitor}
       disabled={disabled || loading || machineOptions.length === 0}
       align="start"
-      tone={tone}
       searchable={!loading && machineOptions.length > 5}
       searchPlaceholder={t('chat.machineSelector.searchPlaceholder', 'Search machines')}
       emptyText={t('chat.machineSelector.emptyText', 'No machines online')}

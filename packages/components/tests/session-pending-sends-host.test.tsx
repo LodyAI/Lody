@@ -66,7 +66,9 @@ function harness() {
   const runtime = {
     workspaceId: 'workspace-1' as WorkspaceId,
     pendingSends,
-    repo: { getDocMeta: async (id: string) => (metas.has(id) ? { meta: metas.get(id) } : undefined) },
+    repo: {
+      getDocMeta: async (id: string) => (metas.has(id) ? { meta: metas.get(id) } : undefined),
+    },
   } as unknown as WorkspaceRuntime;
   const hold = () =>
     pendingSends.enqueue({
@@ -77,7 +79,14 @@ function harness() {
       delivery: { kind: 'dispatch' },
       creation,
       attachments: [
-        { id: 'a', kind: 'image', source: new Blob(['x']), name: 'a.png', mimeType: 'image/png', lastModified: 0 },
+        {
+          id: 'a',
+          kind: 'image',
+          source: new Blob(['x']),
+          name: 'a.png',
+          mimeType: 'image/png',
+          lastModified: 0,
+        },
       ],
     });
   return { runtime, pendingSends, preparation, hold };

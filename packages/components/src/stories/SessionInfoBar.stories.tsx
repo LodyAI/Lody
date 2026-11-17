@@ -165,6 +165,7 @@ function StoryHarness({
   branch = 'feat/presence-machine-online-session-status',
   workspaceLocation = null,
   pr = openPr,
+  prHistory,
   diffStat = { add: 128, del: 42 },
   width = 760,
   initialStage,
@@ -190,7 +191,8 @@ function StoryHarness({
     path?: string | null;
   } | null;
   pr?: SessionPullRequestMeta | null;
-  diffStat?: { add: number; del: number } | null;
+  prHistory?: SessionInfoBarProps['prHistory'];
+  diffStat?: SessionInfoBarProps['diffStat'];
   width?: number;
   initialStage?: 'status' | 'goal' | 'schedule' | 'context';
   withPreview?: boolean;
@@ -247,6 +249,8 @@ function StoryHarness({
         workspaceLocation={workspaceLocation}
         pr={pr}
         onOpenPr={fn()}
+        prHistory={prHistory}
+        onOpenHistoryPr={fn()}
         contextActions={contextActions}
         onOpenAllChanges={fn()}
         onOpenBrowser={withPreview ? fn() : undefined}
@@ -277,6 +281,20 @@ type Story = StoryObj<typeof meta>;
 /* ── Context / status matrix ─────────────────────────────────────────── */
 
 export const ContextOnly: Story = { args: {} };
+
+/** Binary, empty-file and permission changes retain the workspace review entry. */
+export const ZeroLineChanges: Story = {
+  args: { pr: null, projectName: null, branch: null, diffStat: { add: 0, del: 0, files: 2 } },
+};
+
+export const ZeroLineChangesMobile: Story = {
+  args: { ...ZeroLineChanges.args, compactMachineInfo: true, width: 375 },
+};
+
+/** Mixed comparisons keep the ordinary text line summary. */
+export const MixedTextAndBinaryChanges: Story = {
+  args: { pr: null, diffStat: { add: 12, del: 3, files: 3 } },
+};
 
 const LOCAL_MACHINE: SessionMachineInfo = {
   machineId: 'story-machine' as SessionMachineInfo['machineId'],
@@ -394,6 +412,21 @@ export const ContextWithMachineRemoved: Story = {
 };
 
 export const NoPr: Story = { args: { pr: null } };
+
+/** A conversation that created several PRs: the marker shows the current one and lists all. */
+const prHistoryMeta = {
+  pullRequests: [
+    { url: 'https://github.com/loro-dev/lody/pull/2850', status: 'closed' },
+    { url: 'https://github.com/loro-dev/lody/pull/2871', status: 'merged' },
+    { url: 'https://github.com/loro-dev/lody/pull/2894', status: 'open' },
+  ],
+} as SessionMeta;
+export const PrHistory: Story = {
+  args: {
+    pr: prHistoryMeta.pullRequests![2],
+    prHistory: getSessionGitHubState(prHistoryMeta).pullRequestHistory,
+  },
+};
 
 function ObservationHarness({ ownerMeta }: { ownerMeta: SessionMeta }) {
   const { t } = useTranslation();

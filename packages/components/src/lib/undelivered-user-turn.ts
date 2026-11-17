@@ -1,5 +1,7 @@
 import {
   historyItemsToInputBlocks,
+  isMissingHistoryUserTurn,
+  type SessionMeta,
   isSessionHistoryDelivered,
   normalizeSessionInputBlocks,
   type SessionHistoryInput,
@@ -7,7 +9,7 @@ import {
 } from '@lody/shared';
 
 /**
- * Missing-history negative acknowledgement (`SessionMeta.lastMissingHistoryUserMsgId`)
+ * Retained missing-history negative acknowledgement
  * display derivation. The marker permanently excludes its exact turn from every
  * dispatch path; the row surfaces that turn as a clickable "not delivered"
  * label whose confirmation dialog resends the same content as a NEW message —
@@ -17,7 +19,7 @@ import {
 type UserTurnStatusReadable = Pick<SessionHistoryInput, 'id' | 'role' | 'read' | 'status'>;
 
 /**
- * True when the missing-history marker names this exact entry and the entry is
+ * True when a missing-history acknowledgement names this exact entry and the entry is
  * still non-terminal (pending / unseen) — i.e. it visibly never executed.
  * Exact-id match only: a marker naming a different turn must not leak onto
  * unrelated rows, and an entry that later reached a terminal state shows its
@@ -25,12 +27,18 @@ type UserTurnStatusReadable = Pick<SessionHistoryInput, 'id' | 'role' | 'read' |
  */
 export const isUndeliveredUserTurnEntry = (
   missingHistoryUserMsgId: string | undefined,
-  entry: UserTurnStatusReadable | null | undefined
+  entry: UserTurnStatusReadable | null | undefined,
+  missingHistoryUserMsgIds?: SessionMeta['missingHistoryUserMsgIds']
 ): boolean => {
-  if (!missingHistoryUserMsgId || !entry || entry.role !== 'user') {
+  if (!entry || entry.role !== 'user') {
     return false;
   }
-  return entry.id === missingHistoryUserMsgId && !isSessionHistoryDelivered(entry);
+  return (
+    isMissingHistoryUserTurn(
+      { lastMissingHistoryUserMsgId: missingHistoryUserMsgId, missingHistoryUserMsgIds },
+      entry.id
+    ) && !isSessionHistoryDelivered(entry)
+  );
 };
 
 /**

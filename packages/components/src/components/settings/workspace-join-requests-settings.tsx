@@ -4,7 +4,7 @@ import {
   useLegacyWorkspaceQuery,
 } from '@/hooks/use-legacy-workspace-query';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
-import { useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Check, Copy, Link2, RotateCw, X } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -106,9 +106,11 @@ const styles = stylex.create({
 export function WorkspaceJoinRequestsSettings({
   workspaceId,
   onOpenBilling,
+  onMembersChanged,
 }: {
   workspaceId: string;
   onOpenBilling?: () => void;
+  onMembersChanged?: () => Promise<unknown>;
 }) {
   const { t } = useTranslation();
   const state = useLegacyWorkspaceQuery(cloudOperations.workspaceJoinRequests.getOwnerState, {
@@ -125,6 +127,45 @@ export function WorkspaceJoinRequestsSettings({
     workspaceId,
   });
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  const memberRefresh = useRef<Promise<void> | null>(null);
+  const memberRefreshPending = useRef(false);
+  const refreshMembers = useCallback(() => {
+    if (!live.current || !onMembersChanged) return Promise.resolve();
+    memberRefreshPending.current = true;
+    if (!memberRefresh.current) {
+      memberRefresh.current = Promise.resolve().then(async () => {
+        try {
+          while (memberRefreshPending.current && live.current) {
+            memberRefreshPending.current = false;
+            try {
+              await onMembersChanged();
+            } catch {
+              // A cache failure must not report a committed approval as failed.
+              console.warn('Workspace member list refresh pending');
+            }
+          }
+        } finally {
+          memberRefresh.current = null;
+        }
+      });
+    }
+    return memberRefresh.current;
+  }, [onMembersChanged]);
+  const observedVersion = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const version = state?.membershipVersion;
+    if (version === undefined) return;
+    const previous = observedVersion.current;
+    observedVersion.current = version;
+    if (previous !== version) void refreshMembers();
+  }, [state?.membershipVersion, refreshMembers]);
   const [expiresInDays, setExpiresInDays] = useState('30');
   const activeLink = state?.activeLink ?? null;
   const joinUrl = activeLink ? getAppShareUrl(`/join/${activeLink.token}`) : null;
@@ -350,7 +391,9 @@ export function WorkspaceJoinRequestsSettings({
           void run(`approve:${approvalId}`, async () => {
             await refreshSeatTerms({ workspaceId });
             await reviewRequest({ requestId: approvalId, decision: 'approved' });
+            if (!live.current) return;
             setApprovalId(null);
+            void refreshMembers();
           });
         }}
       />

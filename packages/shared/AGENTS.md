@@ -6,6 +6,8 @@ Discover archive/restore/delete from one ready Repo snapshot, never UI caches.
 Archive uses `collectSessionArchiveTargets`; restore/delete keep direct containment.
 Exact deletion bypasses discovery: [relations](../../specs/session-relations.md).
 
+Snapshot compression is available only through `@lody/shared/streams-snapshot-codec`. Keep its runtime imports out of the shared root so Convex isolate bundles can use protocol helpers without loading Node compression dependencies.
+
 ## Session history
 
 - History tolerates unknown string item types without rewriting or blocking unrelated writes.
@@ -57,6 +59,9 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
 - Mirror's text-event optimization ships upstream in pinned `loro-mirror`; no local patch
   exists and no storage schema or write validation depends on it.
 - Subagent events must preserve run identity and root ownership.
+
+Missing-history acknowledgements are exact-ID receipts; only the serialized host watcher adds them. `isMissingHistoryUserTurn`
+reads the retained map and legacy scalar; new activation must not clear old acknowledgements.
 
 ## Machine protocol negotiation
 

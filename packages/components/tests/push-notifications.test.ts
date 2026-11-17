@@ -38,6 +38,7 @@ async function setup() {
   const module = await import('../src/lib/push-notifications');
   const records = new Map<string, { token: string; bundleId?: string }>();
   const remove = module.installPushPort({
+    selfHostedEnabled: true,
     register: async (input) => {
       records.set(input.installationId, { token: input.token, bundleId: input.bundleId });
     },
@@ -92,6 +93,7 @@ describe('push client ownership', () => {
     expect(await t.client.User.PushSubscription.getOptedIn()).toBe(true);
     t.remove();
     t.module.installPushPort({
+      selfHostedEnabled: true,
       register: async () => {
         throw new Error('unavailable');
       },

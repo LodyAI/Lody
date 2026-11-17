@@ -30,8 +30,8 @@ import kotlin.math.roundToInt
 @Composable
 fun ChatTabsMenu(tabs: List<CatalogSession>, closed: List<CatalogSession>, currentId: String,
                  creating: Boolean, busy: String?, onSelect: (String) -> Unit, onNew: () -> Unit,
-                 onClose: (String) -> Unit, onRestore: (String) -> Unit) {
-    var history by remember { mutableStateOf(false) }
+                 onClose: (String) -> Unit, onRestore: (String) -> Unit, initialHistory: Boolean = false, showNew: Boolean = true) {
+    var history by remember(initialHistory) { mutableStateOf(initialHistory) }
     BackHandler(history) { history = false }
     AnimatedContent(history, transitionSpec = {
         val direction = if (targetState) 1 else -1
@@ -57,7 +57,7 @@ fun ChatTabsMenu(tabs: List<CatalogSession>, closed: List<CatalogSession>, curre
                     SwipeTabRow(tab, tab.id == currentId, busy, { onSelect(tab.id) }, { onClose(tab.id) })
                 } }
                 HorizontalDivider(color = LodyTheme.colors.borderSubtle)
-                DropdownMenuItem(text = { Text(stringResource(R.string.chat_new_tab), color = LodyTheme.colors.accentFg) },
+                if (showNew) DropdownMenuItem(text = { Text(stringResource(R.string.chat_new_tab), color = LodyTheme.colors.accentFg) },
                     enabled = !creating && busy == null, leadingIcon = { Icon(LodyIcons.Plus, null, tint = LodyTheme.colors.accentFg, modifier = Modifier.size(LodyIconSize.md)) }, onClick = onNew)
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_closed_tabs), color = LodyTheme.colors.textSecondary) },
                     leadingIcon = { Icon(LodyIcons.Sessions, null, tint = LodyTheme.colors.textSecondary, modifier = Modifier.size(LodyIconSize.md)) },

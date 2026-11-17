@@ -1,4 +1,5 @@
 import { clsx } from 'clsx';
+import { SessionFileImagePreview } from '../sessions/session-file-image-preview';
 import { collectFileDownload } from '@/lib/file-download';
 import { downloadBytesAsFile } from '@/lib/download-file';
 import { shareFileBytesNatively } from '@/lib/session-file-native-save';
@@ -9,6 +10,7 @@ import type { SessionLocalAttachment } from '@lody/shared';
 import { AgentRoleProposalNotice } from './agent-role-proposal-notice';
 import type { AgentRoleProposalMeta } from '@lody/shared';
 import { MessageAuthorIdentity } from './message-author-identity';
+import { useSessionLinkNavigator } from './session-link-context';
 import * as stylex from '@stylexjs/stylex';
 import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import { button as buttonTokens } from '@lody/ui/button/button.tokens.stylex';
@@ -157,6 +159,7 @@ import {
   Circle,
   Clock3,
   Copy,
+  CornerLeftUp,
   FileText,
   Globe,
   Info,
@@ -865,7 +868,7 @@ const viewStyles = stylex.create({
   userBubbleFrame: {
     position: 'relative',
     minWidth: 0,
-    maxWidth: '100%',
+    maxWidth: 'min(100%, 800px)',
   },
   userBubbleFrameEditing: { width: '100%' },
   userBubbleFrameFitted: { width: 'fit-content' },
@@ -2299,32 +2302,21 @@ type AssistantTurnLayout = ReturnType<typeof buildAssistantTurnRenderLayout> & {
 const EMPTY_SUBAGENT_TASKS: ReturnType<typeof collectSubagentTasks> = [];
 
 // Assistant-turn layout (block grouping + subagent-task collection) is derived
-// from the message and provider display policy. `buildChatStreamItems`
+// from the message alone. `buildChatStreamItems`
 // hands back a stable parsed-message object for unchanged turns and a fresh one
 // whenever the turn changes. Keying the cache by that reference lets only the
 // streaming turn recompute; without it, each streamed token re-runs these
 // O(items) passes for every turn in the whole conversation.
-const assistantTurnLayoutCache = new WeakMap<
-  SessionHistoryParsed,
-  { showThoughts: boolean; layout: AssistantTurnLayout }
->();
+const assistantTurnLayoutCache = new WeakMap<SessionHistoryParsed, AssistantTurnLayout>();
 
-const getAssistantTurnLayout = (
-  message: SessionHistoryParsed,
-  showThoughts: boolean
-): AssistantTurnLayout => {
+const getAssistantTurnLayout = (message: SessionHistoryParsed): AssistantTurnLayout => {
   const cached = assistantTurnLayoutCache.get(message);
-  if (cached?.showThoughts === showThoughts) return cached.layout;
+  if (cached) return cached;
   const layout: AssistantTurnLayout = {
-    ...buildAssistantTurnRenderLayout(
-      message.id,
-      message.items,
-      message.finished === true,
-      showThoughts
-    ),
+    ...buildAssistantTurnRenderLayout(message.id, message.items, message.finished === true, true),
     subagentTasks: collectSubagentTasks(message.items),
   };
-  assistantTurnLayoutCache.set(message, { showThoughts, layout });
+  assistantTurnLayoutCache.set(message, layout);
   return layout;
 };
 
@@ -2345,7 +2337,6 @@ type AssistantTurnRowsCacheEntry = {
   activeSearchBlockId: string | null | undefined;
   expansionVersion: number;
   copyContextAvailable: boolean;
-  showThoughts: boolean;
   nextIsUser: boolean;
 };
 const assistantTurnRowsCache = new WeakMap<SessionMessageItem, AssistantTurnRowsCacheEntry>();
@@ -2361,7 +2352,6 @@ export const buildChatVirtualRows = ({
   expansionVersion,
   copyContextAvailable = false,
   groupCreatedSessions = true,
-  showThoughts = false,
   selectionLayouts,
 }: {
   selectionLayouts?: ReadonlyMap<string, SelectionTurnLayout>;
@@ -2374,7 +2364,6 @@ export const buildChatVirtualRows = ({
   expansionVersion: number;
   copyContextAvailable?: boolean;
   groupCreatedSessions?: boolean;
-  showThoughts?: boolean;
 }): ChatVirtualRow[] => {
   const rows: ChatVirtualRow[] = [];
 
@@ -2462,7 +2451,6 @@ export const buildChatVirtualRows = ({
       cachedRows.scopedAssistantActions === scopedAssistantActions &&
       cachedRows.activeSearchBlockId === activeSearchBlockId &&
       cachedRows.copyContextAvailable === copyContextAvailable &&
-      cachedRows.showThoughts === showThoughts &&
       cachedRows.nextIsUser === nextIsUser &&
       cachedRows.expansionVersion === expansionVersion
     ) {
@@ -2470,10 +2458,7 @@ export const buildChatVirtualRows = ({
       continue;
     }
 
-    const { blocks, segments, entries, subagentTasks } = getAssistantTurnLayout(
-      message,
-      showThoughts
-    );
+    const { blocks, segments, entries, subagentTasks } = getAssistantTurnLayout(message);
     const cachedState = selectionLayout?.expandState ?? getExpandState(message.id);
     const cachedExpansion = cachedState.expandedGroups;
     // Collapse into a "Worked for …" summary ONLY when the turn both finished and
@@ -2530,9 +2515,7 @@ export const buildChatVirtualRows = ({
         block.entries,
         selectionSearchBlockId
       );
-      const thoughtOnly =
-        showThoughts && block.entries.every((entry) => entry.content.type === 'thought');
-      const expanded = isSearchExpanded || (cachedExpansion[block.key] ?? thoughtOnly);
+      const expanded = isSearchExpanded || (cachedExpansion[block.key] ?? false);
       const isActive =
         isLastAssistantMessage && message.finished !== true && blockIndex === blocks.length - 1;
       const lastEntry = block.entries[block.entries.length - 1];
@@ -2543,7 +2526,7 @@ export const buildChatVirtualRows = ({
       );
 
       const visibleEntries = block.entries.filter((entry) =>
-        entry.content.type === 'thought' ? showThoughts : entry.content.kind !== 'think'
+        entry.content.type === 'thought' || entry.content.kind !== 'think'
       );
       if (visibleEntries.length === 0) return;
 
@@ -2746,7 +2729,6 @@ export const buildChatVirtualRows = ({
       activeSearchBlockId,
       expansionVersion,
       copyContextAvailable,
-      showThoughts,
       nextIsUser,
     });
     rows.push(...assistantRows);
@@ -2986,15 +2968,6 @@ export const SessionChatStreamView = forwardRef<
     },
     ref
   ) => {
-    const thoughtVisibilityAtom = useMemo(
-      () =>
-        selectAtom(
-          sessionMetaAtomFamily(getSessionRoomId(sessionId)),
-          (meta) => meta?.cliType === 'builtin' && meta.agentType === 'deepseek'
-        ),
-      [sessionId]
-    );
-    const showThoughts = useAtomValue(thoughtVisibilityAtom);
     const listRef = useRef<ConversationListHandle>(null);
     const messageSelection = useContext(MessageSelectionContext);
     const nativeTextSelectionActiveRef = useRef(false);
@@ -3056,10 +3029,8 @@ export const SessionChatStreamView = forwardRef<
             [groupKey]: expanded,
           },
         });
-        // Toggling must not scroll: the header stays where the reader clicked
-        // and the rows open or fold beneath it. The scroll engine keeps a
-        // non-following reader from being pulled to the end by the commit's
-        // observer deliveries; a reader following the tail is left there.
+        // The disclosure marker lets the scroll engine hold the clicked header
+        // before these rows change, including when the reader was following.
         setAssistantExpansionVersion((version) => version + 1);
       },
       []
@@ -3100,7 +3071,6 @@ export const SessionChatStreamView = forwardRef<
         activeSearchBlockId,
         expansionVersion: assistantExpansionVersion,
         copyContextAvailable,
-        showThoughts,
         selectionLayouts,
         groupCreatedSessions: messageSelection === null,
       });
@@ -3131,7 +3101,6 @@ export const SessionChatStreamView = forwardRef<
       return merged;
     }, [
       messageSelection,
-      showThoughts,
       selectionLayouts,
       activeSearchBlockId,
       assistantActions,
@@ -3989,6 +3958,7 @@ export const MessageRowView = memo(function MessageRowView({
         timestampLabel={timestampLabel}
         hasWideContent={hasWideContent}
         conversationFontSize={conversationFontSize}
+        onNavigateSession={onNavigateSession}
         onEdit={onEdit}
         onResendUndelivered={onResendUndelivered}
         editMentionContext={editMentionContext}
@@ -4887,7 +4857,12 @@ const AgentWarningNoticeBody = ({
               'sessions.systemNotices.agentWarning.stopTerminationFailed',
               'Could not stop the task'
             )
-          : t('sessions.systemNotices.agentWarning.title', 'Agent warning');
+          : source === 'nativeWorkInterrupted'
+            ? t(
+                'sessions.systemNotices.agentWarning.nativeWorkInterrupted',
+                'Background work was interrupted'
+              )
+            : t('sessions.systemNotices.agentWarning.title', 'Agent warning');
   const guidance =
     source === 'sessionCancelFailed'
       ? t(
@@ -4904,7 +4879,12 @@ const AgentWarningNoticeBody = ({
               'sessions.systemNotices.agentWarning.stopTerminationFailedGuidance',
               'The task may still be running. Try restarting Lody’s background service on this machine.'
             )
-          : undefined;
+          : source === 'nativeWorkInterrupted'
+            ? t(
+                'sessions.systemNotices.agentWarning.nativeWorkInterruptedGuidance',
+                'The agent stopped before its background tasks finished, so their results may be missing.'
+              )
+            : undefined;
   return (
     <div
       {...stylex.props(viewStyles.noticeStack, !inTurn && viewStyles.noticeStackIndented)}
@@ -5048,6 +5028,62 @@ function getDefaultOpenWorktreeScriptStepIndexes(
   return [];
 }
 
+const selectSourceSessionTitle = (session: SessionMeta | null | undefined): string | null =>
+  session?.title?.trim() || null;
+
+const MessageAuthorSourceLink = memo(function MessageAuthorSourceLink({
+  sourceSessionId,
+  isMobile,
+  onNavigate,
+}: {
+  sourceSessionId: SessionId;
+  isMobile: boolean;
+  onNavigate: (target: SessionNavigationTarget) => void;
+}) {
+  const { t } = useTranslation();
+  const titleAtom = useMemo(
+    () =>
+      selectAtom(
+        sessionMetaAtomFamily(getSessionRoomId(sourceSessionId)),
+        selectSourceSessionTitle
+      ),
+    [sourceSessionId]
+  );
+  const sourceTitle = useAtomValue(titleAtom);
+  const openSourceLabel = t('sessions.messageAuthor.source', 'Open source conversation');
+  const displayLabel = sourceTitle ?? openSourceLabel;
+  const accessibleLabel = sourceTitle ? `${openSourceLabel}: ${sourceTitle}` : openSourceLabel;
+
+  return (
+    <>
+      <span {...stylex.props(conversationSurface.metadataSeparator)} aria-hidden="true">
+        ·
+      </span>
+      <button
+        type="button"
+        {...stylex.props(
+          conversationSurface.metadataSourceLink,
+          isMobile && conversationSurface.mobileMetadataSourceLink
+        )}
+        onClick={(event) => {
+          event.stopPropagation();
+          onNavigate({ sessionId: sourceSessionId });
+        }}
+        title={accessibleLabel}
+        aria-label={accessibleLabel}
+        data-testid="user-message-source-session-link"
+      >
+        <CornerLeftUp
+          {...stylex.props(conversationSurface.metadataSourceIcon)}
+          strokeWidth={2}
+          aria-hidden="true"
+        />
+        <span {...stylex.props(conversationSurface.metadataSourceTitle)}>{displayLabel}</span>
+      </button>
+    </>
+  );
+});
+
 const UserMessageRowView = ({
   message,
   sessionId,
@@ -5056,6 +5092,7 @@ const UserMessageRowView = ({
   timestampLabel,
   hasWideContent,
   conversationFontSize,
+  onNavigateSession,
   onEdit,
   onResendUndelivered,
   editMentionContext,
@@ -5067,6 +5104,7 @@ const UserMessageRowView = ({
   timestampLabel: string;
   hasWideContent: boolean;
   conversationFontSize: ConversationFontSize;
+  onNavigateSession?: (target: SessionNavigationTarget) => void;
   onEdit?: (message: SessionHistoryParsed, edit: UserMessageEditSubmission) => Promise<boolean>;
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
   /** Composer-equivalent mention wiring for the inline editor; absent on
@@ -5077,6 +5115,14 @@ const UserMessageRowView = ({
   const { copyContext } = useContext(SessionChatActionContext);
   const copyWorkspaceId = useSessionCopyWorkspaceId();
   const isMobile = useIsMobile();
+  const sessionLinkNavigate = useSessionLinkNavigator();
+  const navigateSourceSession = onNavigateSession ?? sessionLinkNavigate ?? undefined;
+  const sourceSessionId =
+    message.author?.kind === 'agent' &&
+    message.author.sessionId &&
+    message.author.sessionId !== sessionId
+      ? (message.author.sessionId as SessionId)
+      : null;
   const mobileActionsRevealed = useMobileMessageActionsRevealed(message.id);
   // The RPC fast-path ACK overlays "delivered" before the entry's CRDT status
   // flip syncs back (the machine may run the whole turn before it can see the
@@ -5085,9 +5131,15 @@ const UserMessageRowView = ({
   const rpcDelivered = rpcDeliveredTurns.has(getRpcDeliveredTurnKey(sessionId, message.id));
   const isPendingApply = message.status === 'pending_apply' && !rpcDelivered;
   const isDeliveryUnknown = message.status === 'delivery_unknown';
-  const recoveryLabel = isDeliveryUnknown
-    ? t('sessions.messageStatus.deliveryUnknown', 'Application unknown')
-    : t('sessions.messageStatus.notDelivered', 'Not delivered');
+  // A forced machine update cancelled this turn; Continue resends it as a new
+  // message instead of replaying it automatically.
+  const isUpdateInterrupted =
+    message.status === 'canceled' && message.cancellationReason === 'machine_update';
+  const recoveryLabel = isUpdateInterrupted
+    ? t('sessions.messageStatus.interruptedByUpdate', 'Interrupted by update')
+    : isDeliveryUnknown
+      ? t('sessions.messageStatus.deliveryUnknown', 'Application unknown')
+      : t('sessions.messageStatus.notDelivered', 'Not delivered');
   const isDelivered = !isPendingApply && (isSessionHistoryDelivered(message) || rpcDelivered);
   // Missing-history recovery negatively acknowledged this exact turn
   // (`SessionMeta.lastMissingHistoryUserMsgId`): the entry is visible but kept
@@ -5098,7 +5150,8 @@ const UserMessageRowView = ({
   const sessionMeta = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
   const isUndelivered = isUndeliveredUserTurnEntry(
     sessionMeta?.lastMissingHistoryUserMsgId,
-    message
+    message,
+    sessionMeta?.missingHistoryUserMsgIds
   );
   const pinCtx = useSessionPin();
   const showSendingSpinner =
@@ -5187,7 +5240,10 @@ const UserMessageRowView = ({
     >
       <div {...stylex.props(conversationSurface.author)}>
         {message.author?.kind === 'agent' ? (
-          <MessageAuthorIdentity author={message.author} />
+          <MessageAuthorIdentity
+            author={message.author}
+            onNavigateSession={navigateSourceSession}
+          />
         ) : (
           <UserMessageAuthorAvatar
             user={user}
@@ -5215,9 +5271,18 @@ const UserMessageRowView = ({
       >
         <div {...stylex.props(conversationSurface.metadata)} data-testid="user-message-metadata">
           {message.author?.kind === 'agent' ? (
-            <span title={message.author.role?.name ?? message.author.name}>
-              {message.author.role?.name ?? message.author.name}
-            </span>
+            <>
+              <span title={message.author.role?.name ?? message.author.name}>
+                {message.author.role?.name ?? message.author.name}
+              </span>
+              {sourceSessionId && navigateSourceSession ? (
+                <MessageAuthorSourceLink
+                  sourceSessionId={sourceSessionId}
+                  isMobile={isMobile}
+                  onNavigate={navigateSourceSession}
+                />
+              ) : null}
+            </>
           ) : showSenderIdentity && user?.name ? (
             <span {...stylex.props(viewStyles.userName)} title={user.name}>
               {user.name}
@@ -5226,7 +5291,7 @@ const UserMessageRowView = ({
           {timestampLabel ? (
             <span {...stylex.props(viewStyles.tabular)}>{timestampLabel}</span>
           ) : null}
-          {isUndelivered || isDeliveryUnknown ? (
+          {isUndelivered || isDeliveryUnknown || isUpdateInterrupted ? (
             onResendUndelivered ? (
               <button
                 type="button"
@@ -5278,7 +5343,7 @@ const UserMessageRowView = ({
                 item's `min-width:auto` resolves to the content's min-content, which WebKit
                 (Safari / iOS Capacitor WebView) computes WITHOUT honoring the inner
                 `overflow-wrap:anywhere`. The item then refuses to shrink below a long
-                unbreakable line, the content grows to its `sm:max-w-[800px]` cap, and being
+                unbreakable line, the content grows to its 800px cap, and being
                 right-aligned (`justify-end`) it overflows the column on the left. Chromium
                 honors overflow-wrap here so it doesn't repro there — hence "only sometimes". */}
             <div
@@ -5472,6 +5537,7 @@ const UserMessageRowView = ({
       {onResendUndelivered ? (
         <ResendUndeliveredDialog
           deliveryUnknown={isDeliveryUnknown}
+          updateInterrupted={isUpdateInterrupted}
           open={resendDialogOpen}
           onOpenChange={setResendDialogOpen}
           isResending={isResending}
@@ -5559,14 +5625,43 @@ const ResendUndeliveredDialog = ({
   isResending,
   onConfirm,
   deliveryUnknown = false,
+  updateInterrupted = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   isResending: boolean;
   onConfirm: () => void;
   deliveryUnknown?: boolean;
+  updateInterrupted?: boolean;
 }) => {
   const { t } = useTranslation();
+  if (updateInterrupted)
+    return (
+      <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
+              {t('sessions.messageStatus.interruptedByUpdate', 'Interrupted by update')}
+            </AlertDialog.Title>
+            <AlertDialog.Description>
+              {t(
+                'sessions.resendUndelivered.updateDescription',
+                'A machine update interrupted this message. Work it already did is kept. Continue sends the same content as a new message.'
+              )}
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={isResending}>
+              {t('common.cancel', 'Cancel')}
+            </AlertDialog.Cancel>
+            <AlertDialog.Action disabled={isResending} onClick={onConfirm}>
+              {isResending ? <Spinner className="h-3.5 w-3.5" strokeWidth={2} /> : null}
+              {t('sessions.resendUndelivered.continue', 'Continue')}
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
+    );
   return (
     <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
       <AlertDialog.Content>
@@ -6098,6 +6193,7 @@ function ProcessDisclosureButton({
         onExpandedChange(next);
       }}
       aria-expanded={expanded}
+      data-conversation-disclosure="group"
     >
       {/* Label first on every layout: it starts on the prose rail, and the
           chevron (always shown on touch, hover-only on desktop) trails it. */}
@@ -7646,7 +7742,7 @@ function useImageBlobUrls(
   }, [open]);
 
   useEffect(() => {
-    if (!open || activeIndex === -1 || !workspaceId || !authToken) {
+    if (!open || activeIndex === -1 || !workspaceId) {
       return undefined;
     }
 
@@ -7657,20 +7753,23 @@ function useImageBlobUrls(
     let active = true;
     indicesToLoad.forEach((i) => {
       const entry = entries[i];
-      if (!entry) {
+      if (!entry || (!authToken && entry.transport !== 'local' && !entry.localImageId)) {
         return;
       }
 
       void getSessionImageBlobUrl({
         workspaceId,
-        sessionId: entry.sessionId,
-        imageId: entry.imageId,
+        ...entry,
+        mimeType: entry.mimeType,
+        sizeBytes: entry.sizeBytes,
+        transport: entry.transport,
+        machineId: entry.machineId,
         encryption: entry.encryption,
         attachmentToken:
           attachmentRuntime?.workspaceId === workspaceId
             ? attachmentRuntime.attachmentToken
             : undefined,
-        token: authToken,
+        token: authToken ?? '',
         variant: 'original',
       })
         .then((url) => {
@@ -7753,6 +7852,7 @@ const ImagePreviewDialog = ({
     [entries, onActiveImageKeyChange]
   );
 
+  const readonlyPresentation = useContext(SessionReadonlyContext);
   const handleClose = useCallback(() => {
     markupRequest.current += 1;
     onOpenChange(false);
@@ -7761,6 +7861,7 @@ const ImagePreviewDialog = ({
   return (
     <>
       <ZoomableImageViewer
+        allowExport={!readonlyPresentation}
         open={open && !markupFile}
         onClose={handleClose}
         images={images}
@@ -7860,9 +7961,9 @@ export const WorkspaceUserImageBlock = ({
   const imageLoadUnavailableLabel = t('sessions.imageLoadUnavailable', 'Unable to load image');
   const imageLoadFailedLabel = t('sessions.imageLoadFailed', 'Failed to load image');
   const cachedThumbnailUrl =
-    workspaceId && authToken
+    workspaceId && (authToken || entry.transport === 'local' || entry.localImageId)
       ? peekSessionImageUrl(
-          { workspaceId, sessionId: entry.sessionId, imageId: entry.imageId },
+          { workspaceId, ...entry, transport: entry.transport, machineId: entry.machineId },
           useNativeIOSShareSafeImageUrl
         )
       : null;
@@ -7873,7 +7974,7 @@ export const WorkspaceUserImageBlock = ({
 
     setLocalActiveImageKey(null);
 
-    if (!workspaceId || !authToken) {
+    if (!workspaceId || (!authToken && entry.transport !== 'local' && !entry.localImageId)) {
       setThumbnailBlobUrl(null);
       setIsThumbnailLoading(false);
       setThumbnailLoadingError(imageLoadUnavailableLabel);
@@ -7883,7 +7984,7 @@ export const WorkspaceUserImageBlock = ({
     }
 
     const cachedUrl = peekSessionImageUrl(
-      { workspaceId, sessionId: entry.sessionId, imageId: entry.imageId },
+      { workspaceId, ...entry, transport: entry.transport, machineId: entry.machineId },
       useNativeIOSShareSafeImageUrl
     );
     if (cachedUrl) {
@@ -7904,14 +8005,17 @@ export const WorkspaceUserImageBlock = ({
 
     void loadImageUrl({
       workspaceId,
-      sessionId: entry.sessionId,
-      imageId: entry.imageId,
+      ...entry,
+      mimeType: entry.mimeType,
+      sizeBytes: entry.sizeBytes,
+      transport: entry.transport,
+      machineId: entry.machineId,
       encryption: entry.encryption,
       attachmentToken:
         attachmentRuntime?.workspaceId === workspaceId
           ? attachmentRuntime.attachmentToken
           : undefined,
-      token: authToken,
+      token: authToken ?? '',
       variant: 'thumbnail',
       thumbnailWidth,
       thumbnailHeight,
@@ -7938,6 +8042,12 @@ export const WorkspaceUserImageBlock = ({
   }, [
     authToken,
     entry.imageId,
+    entry.mimeType,
+    entry.sizeBytes,
+    entry.localImageId,
+    entry.storageSessionId,
+    entry.transport,
+    entry.machineId,
     entry.encryption,
     attachmentRuntime,
     entry.sessionId,
@@ -8146,6 +8256,80 @@ const localAttachmentStyles = stylex.create({
   actionGlyph: { width: space[4], height: space[4] },
 });
 
+const localAttachmentImageStyles = stylex.create({
+  frame: { width: 320, maxWidth: '100%', height: 320 },
+});
+
+function LocalAttachmentImage({
+  attachment,
+  workspaceId,
+  sessionId,
+}: {
+  attachment: SessionLocalAttachment;
+  workspaceId: string;
+  sessionId: SessionId;
+}) {
+  const { t } = useTranslation();
+  // The parent keys this owner by the complete reference and workspace scope.
+  const attachmentRef = useRef(attachment);
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setUrl(null);
+    setFailed(false);
+    void (async () => {
+      try {
+        const ipc = getIpcServices();
+        if (!ipc) throw new Error('Local attachment unavailable');
+        const preview = await ipc.machineRpc.previewFile({
+          machineId: attachmentRef.current.machineId,
+          path: attachmentRef.current.path,
+          workspaceRoot: null,
+        });
+        if (!active) return;
+        if (preview?.status !== 'resource' || preview.kind !== 'binary')
+          throw new Error('Local image preview unavailable');
+        setUrl(preview.url);
+      } catch {
+        if (active) setFailed(true);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [workspaceId, sessionId, attempt]);
+
+  if (url)
+    return (
+      <div
+        {...stylex.props(localAttachmentImageStyles.frame)}
+        onErrorCapture={() => {
+          setUrl(null);
+          setFailed(true);
+        }}
+      >
+        <SessionFileImagePreview path={attachment.fileName} url={url} />
+      </div>
+    );
+  return (
+    <SessionFileCardLayout
+      fileName={attachment.fileName}
+      mimeType={attachment.mimeType}
+      subtitle={
+        failed
+          ? t('sessions.localAttachmentUnavailable', 'Local attachment unavailable')
+          : t('sessions.markdownImage.loading', 'Loading image…')
+      }
+      actionIcon={failed ? null : <Spinner xstyle={localAttachmentStyles.actionGlyph} />}
+      failed={failed}
+      isInteractive={failed}
+      onClick={() => setAttempt((value) => value + 1)}
+    />
+  );
+}
+
 export const LocalAttachmentCard = ({
   attachment,
   sessionId,
@@ -8162,7 +8346,13 @@ export const LocalAttachmentCard = ({
   const { openLocalFile } = useContext(SessionChatActionContext);
   const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
-  const binding = `${workspaceId}:${sessionId}:${attachment.referenceId}:${machineId}`;
+  const binding = JSON.stringify([
+    workspaceId,
+    sessionId,
+    attachment.machineId,
+    attachment.path,
+    machineId,
+  ]);
   const currentBinding = useRef<string | null>(binding);
   currentBinding.current = binding;
   useEffect(
@@ -8172,11 +8362,17 @@ export const LocalAttachmentCard = ({
     []
   );
   const remote = machineId !== attachment.machineId;
-  const available =
-    !readonly &&
-    sessionId === attachment.sessionId &&
-    !!workspaceId &&
-    (remote ? !!runtime : !!openLocalFile);
+  const available = !readonly && !!workspaceId && (remote ? !!runtime : !!openLocalFile);
+  if (!readonly && !remote && workspaceId && attachment.kind === 'image') {
+    return (
+      <LocalAttachmentImage
+        key={JSON.stringify([workspaceId, sessionId, attachment])}
+        attachment={attachment}
+        workspaceId={workspaceId}
+        sessionId={sessionId}
+      />
+    );
+  }
   return (
     <SessionFileCardLayout
       fileName={attachment.fileName}
@@ -8210,8 +8406,8 @@ export const LocalAttachmentCard = ({
               attachment.machineId as MachineId,
               {
                 sessionId,
-                path: attachment.fileName,
-                attachment: { ...attachment, sessionId },
+                path: attachment.path,
+                attachment,
                 ...range,
               },
               session?.parentSessionId ?? sessionId
@@ -8237,27 +8433,20 @@ export const LocalAttachmentCard = ({
             });
           return;
         }
-        const ipc = getIpcServices();
-        if (!ipc) {
-          setOpening(false);
-          setError(t('sessions.localAttachmentUnavailable', 'Local attachment unavailable'));
-          return;
-        }
-        void ipc.localProjects
-          .resolveLocalAttachment({ workspaceId, sessionId, attachment })
-          .then((filePath) => {
-            if (currentBinding.current === binding)
-              openLocalFile?.(filePath, { pathKind: 'canonical' });
-          })
-          .catch(() =>
-            setError(t('sessions.localAttachmentUnavailable', 'Local attachment unavailable'))
-          )
-          .finally(() => setOpening(false));
+        openLocalFile?.(attachment.path, { pathKind: 'canonical' });
+        setOpening(false);
       }}
     />
   );
 };
 
+/**
+ * Container for a run of adjacent `file` blocks. Owns the workspace/token
+ * atoms, machine-name resolution, download, and the in-app preview dialog, then
+ * renders the pure `SessionFileCard`s. Adjacent file blocks are aggregated into
+ * one list (decision #3) at the call site; this component handles however many
+ * it is handed.
+ */
 export const SessionFileGroup = (props: Parameters<typeof WorkspaceSessionFileGroup>[0]) => {
   const readonly = useContext(SessionReadonlyContext);
   return readonly ? (
@@ -8277,6 +8466,7 @@ export const WorkspaceSessionFileGroup = ({
   align?: 'start' | 'end';
 }) => {
   const { t } = useTranslation();
+  const readonlyPresentation = useContext(SessionReadonlyContext);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const authToken = useAtomValue(authTokenAtom);
   const attachmentRuntime = useAtomValue(runtimeAtom);
@@ -8386,7 +8576,7 @@ export const WorkspaceSessionFileGroup = ({
             key={`${file.sha256}-${index}`}
             file={file}
             onPreview={handlePreview}
-            onDownload={handleDownload}
+            onDownload={readonlyPresentation ? undefined : handleDownload}
             isDownloading={downloadingId === file.fileId}
           />
         ))}
@@ -8404,7 +8594,7 @@ export const WorkspaceSessionFileGroup = ({
           }}
           file={previewFile}
           status={previewStatus}
-          onDownload={handleDownload}
+          onDownload={readonlyPresentation ? undefined : handleDownload}
           isDownloading={downloadingId === previewFile.fileId}
         />
       ) : null}
@@ -8421,7 +8611,7 @@ const SessionFileBlockCard = ({
 }: {
   file: SessionFilePayload;
   onPreview: (file: SessionFilePayload) => void;
-  onDownload: (file: SessionFilePayload) => void;
+  onDownload?: (file: SessionFilePayload) => void;
   isDownloading: boolean;
 }) => {
   const machineMeta = useAtomValue(
@@ -8816,6 +9006,7 @@ const CollapsibleCard = ({
         )}
         onClick={canToggle ? () => setExpanded(!isExpanded) : onActivate}
         aria-expanded={canToggle ? isExpanded : undefined}
+        data-conversation-disclosure={canToggle ? 'inline' : undefined}
       >
         <div {...stylex.props(viewStyles.collapsibleHeaderRow)}>
           {canToggle && showDisclosureIcon ? (

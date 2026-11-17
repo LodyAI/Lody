@@ -261,7 +261,6 @@ export interface BillingOverviewData {
   effectivePlanTier: 'free' | 'plus' | 'enterprise';
   entitlementSource: 'free' | 'stripe' | 'stripe_gift' | 'enterprise';
   offerKey: string | null;
-  yearlyEarlyBirdEligible: boolean;
   promotionalEntitlementEndsAt: number | null;
   /** Entire granted gift window, including a gift phase that starts later. */
   giftStartsAt: number | null;

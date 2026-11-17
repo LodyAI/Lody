@@ -1,3 +1,4 @@
+import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
 import {
   MachineAcpAuthenticateResponseSchema,
   MachineAcpAuthenticationProgressMessageSchema,
@@ -21,7 +22,6 @@ import {
 import type { AgentConfigId, MachineProviderRateLimitsRefreshResponse } from '@lody/shared';
 import { createWorkspacePendingSends } from './workspace-pending-sends';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
-import { migrateLegacySessionSends } from '../lib/legacy-session-send-migration';
 import { createSessionSendResources } from '@/lib/session-send-resources';
 import { waitForScheduleWriteSync, withScheduleWrite } from './schedule-write-sync';
 import {
@@ -49,6 +49,7 @@ import {
   type MachineMeta,
   type MachineProtocolCapabilities,
   negotiatedAcpCapabilitiesRefreshForce,
+  negotiatedAcpModelOptionsRead,
 } from '@lody/shared';
 import {
   LoroRepo,
@@ -117,7 +118,6 @@ import {
   getServerNow,
   collectOnlineMachineIdsFromPresence,
   previewVisualCommentDocSchema,
-  streamsSnapshotCodec,
   base64ToBytes,
   parseLodyPresenceStates,
   LODY_PRESENCE_TTL_MS,
@@ -268,11 +268,23 @@ export type WorkspaceE2eeTransport = {
     machineId: string,
     args: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
   ) => Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
+  signScheduleDeclaration?: (
+    document: Pick<import('@lody/shared').ScheduleDocument, 'definition' | 'prompt' | 'message'>,
+    manualRunKey?: string
+  ) => Promise<string>;
   acceptDispatchResponse?: (
     machineId: string,
     args: import('@lody/shared/e2ee-rpc').E2eeDispatchInput,
     frame: string
   ) => Promise<import('@lody/shared/e2ee-rpc').E2eeDispatchAck>;
+  /** Optional iroh route; see `E2eeWorkspaceRuntime.irohReady`/`irohCall`. */
+  irohPath?: (machineId: string) => Promise<'direct' | 'relay' | 'none'>;
+  irohReady?: (machineId: string) => Promise<boolean>;
+  irohCall?: (
+    machineId: string,
+    envelope: { id: string; frame: string },
+    timeoutMs: number
+  ) => Promise<string[]>;
 };
 type RuntimeDeps = {
   content: WorkspaceStreamsContent;
@@ -370,7 +382,7 @@ const DOC_STREAM_CREATE_TIMEOUT_MS = 10_000;
 const MACHINE_RPC_TRANSPORT_READY_TIMEOUT_MS = 30_000;
 const LOCAL_MACHINE_ID_READY_TIMEOUT_MS = 2_000;
 const MACHINE_RESTART_RPC_TIMEOUT_MS = 30_000;
-const MACHINE_UPGRADE_RPC_TIMEOUT_MS = 120_000;
+const MACHINE_UPGRADE_RPC_TIMEOUT_MS = 12 * 60_000;
 const ACP_CAPABILITIES_STARTUP_MACHINE_CONCURRENCY = 2;
 const ACP_CAPABILITIES_STARTUP_NAVIGATION_COOLDOWN_MS = 30_000;
 
@@ -671,8 +683,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let localPresenceUnsubscribe: (() => void) | null = null;
   let transportAttached = false;
   let authToken: string | null = null;
-  // Assigned once the send resources exist; runs after the first meta sync.
-  let startLegacySendMigration: (() => void) | null = null;
   let resumePendingInputs: (() => void) | null = null;
   let cloudTransportAttached = false;
   let cloudTransportAttachPromise: Promise<void> | null = null;
@@ -1433,6 +1443,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   };
 
   function handleMachineAcpBinaryProgress(message: MachineAcpBinaryProgressMessage): void {
+    // Model-option reading is progress of one refresh, not runtime install
+    // state: only that refresh's caller shows it, through its own `onProgress`.
+    if (message.status === 'reading-model-options') return;
     const key = getMachineAcpBinaryPendingKey(message.machineId as MachineId, message.agentType);
     machineAcpBinaryProgressSnapshots.set(key, message);
     const listeners = machineAcpBinaryProgressListeners.get(key);
@@ -1982,6 +1995,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         accept: native.acceptDispatchResponse,
         prepareFeature: native.prepareFeatureRpc,
         acceptFeature: native.acceptFeatureRpcResponse,
+        ...(native.irohReady && native.irohCall
+          ? { iroh: { ready: native.irohReady, call: native.irohCall, path: native.irohPath } }
+          : {}),
         closeClient: async () => {
           await encryptedRpcToken?.close();
           encryptedRpcToken = undefined;
@@ -2200,7 +2216,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   ): Promise<void> => {
     try {
       const client = await getMachineRpcClient(message.machineId);
-      const response = await client.requestMachineStatus({ timeoutMs: 30000 });
+      const response = await client.requestMachineStatus({
+        timeoutMs: 30000,
+        includeDisk: message.includeDisk,
+        includeDaemonUpdate: message.includeDaemonUpdate,
+      });
       handleMachineStatusResponse(
         response ?? {
           type: 'machine/status_response',
@@ -2254,6 +2274,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     try {
       const client = await getMachineRpcClient(message.machineId);
       const response = await client.requestMachineRestart({
+        ...(message.restoreMachineId ? { restoreMachineId: message.restoreMachineId } : {}),
         requesterUserId: message.requesterUserId,
         requestToken: message.requestToken,
         requestId: message.requestId,
@@ -2293,6 +2314,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         requestToken: message.requestToken,
         requestId: message.requestId,
         targetVersion: message.targetVersion,
+        upgrade: message.upgrade,
         timeoutMs: MACHINE_UPGRADE_RPC_TIMEOUT_MS,
       });
       handleMachineUpgradeResponse(
@@ -2482,6 +2504,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       const response = await client.requestMachineAcpCapabilitiesRefresh({
         configId: message.configId,
         force: message.force,
+        ...(message.readModelOptions ? { readModelOptions: true as const } : {}),
         onProgress: (progress) => {
           if (!options.signal?.aborted) {
             handleMachineAcpBinaryProgress({ ...progress, machineId: message.machineId });
@@ -2539,13 +2562,16 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     // negotiated once here rather than per transport. A daemon that did not
     // advertise the capability has no cache to opt out of, so dropping the field
     // still gives every forced caller the probe it asked for.
-    const { force: requestedForce, ...baseMessage } = message;
+    const {
+      force: requestedForce,
+      readModelOptions: requestedModelOptions,
+      ...baseMessage
+    } = message;
+    const protocolCapabilities = await getMachineProtocolCapabilities(message.machineId);
     const negotiatedMessage = {
       ...baseMessage,
-      ...negotiatedAcpCapabilitiesRefreshForce(
-        { protocolCapabilities: await getMachineProtocolCapabilities(message.machineId) },
-        requestedForce
-      ),
+      ...negotiatedAcpCapabilitiesRefreshForce({ protocolCapabilities }, requestedForce),
+      ...negotiatedAcpModelOptionsRead({ protocolCapabilities }, requestedModelOptions),
     };
     if (signal?.aborted) return null;
 
@@ -4066,7 +4092,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           }
           initialMetaSyncCompleted = true;
           initialMetaSyncFailed = false;
-          startLegacySendMigration?.();
           resumePendingInputs?.();
           currentMetaTracker.markFirstSynced();
           // Dual watches its local binding here; its marker is cleared by the
@@ -6090,30 +6115,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       });
   };
   if (initialMetaSyncCompleted) resumePendingInputs();
-  if (deps.accountId && !protectedContent) {
-    const accountId = deps.accountId;
-    let migrationStarted = false;
-    startLegacySendMigration = () => {
-      if (migrationStarted || disposePromise) return;
-      migrationStarted = true;
-      void migrateLegacySessionSends({
-        accountId,
-        workspaceId,
-        runtime: {
-          repo,
-          writer: workspaceWriter,
-          sendResources,
-          requestSessionDispatchTurn,
-          requestSessionSteer,
-          contentMode: protectedContent ? 'e2ee' : 'plaintext',
-          attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
-        },
-      }).catch((error: unknown) => {
-        console.warn('Legacy pending messages could not be migrated', error);
-      });
-    };
-    if (initialMetaSyncCompleted) startLegacySendMigration();
-  }
   // All acquired connection resources have a close path before startup can fail.
   const abortInitialization = () => {
     void dispose().catch(() => {});
@@ -6172,6 +6173,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       : {}),
     attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
     ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
+    ...(protectedContent && deps.e2ee?.signScheduleDeclaration
+      ? { signScheduleDeclaration: deps.e2ee.signScheduleDeclaration }
+      : {}),
     repo,
     accountId: deps.accountId ?? null,
     pendingSends,

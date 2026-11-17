@@ -1,8 +1,9 @@
 import removalVector from '../../../e2ee-core/test/ledger-v1-vector.json';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
+import { useState } from 'react';
 import { E2eeWorkspaceControlPage } from '@/components/pages/e2ee-workspace-control-page';
-import { appendLedgerHistory } from '@/lib/e2ee-ledger-history';
+import { appendLedgerHistory, type VerifiedLedgerHistory } from '@/lib/e2ee-ledger-history';
 
 // Synthetic signed protocol fixture. No user history or private device key.
 const genesisHash = '18cb6fa187326e2f18402cba33ef7f316b8a71b0e1d026da9b79c60f6b7055de';
@@ -60,6 +61,10 @@ export const VerifiedLocalGenesis: Story = {
       localPin: genesisHash,
     }),
   },
+};
+// Right after creation on the creating device: the getting-started list leads the overview.
+export const GettingStarted: Story = {
+  args: { ...VerifiedLocalGenesis.args, workspaceName: 'Cipher Lab', recoveryReady: false },
 };
 export const UnconfirmedGenesis: Story = {
   args: {
@@ -183,9 +188,84 @@ export const OwnerMemberControls: Story = {
   },
 };
 
+// Real signed records just before and after the vector's independent removal. Removing
+// the member reloads the list; the first key update fails and the retry succeeds.
+const removalHistory = (count: number) =>
+  appendLedgerHistory(
+    null,
+    {
+      ...memberPage,
+      checkpoint: { headHash: removalVector.records[count - 1]!.hash, length: count },
+      position: `p1:synthetic-workspace:${count}:offset:0`,
+      recordsHex: removalVector.records.slice(0, count).map((record) => record.hex),
+    },
+    {
+      workspaceId: memberPage.workspaceId,
+      genesisHash: memberPage.genesisHash,
+      localPin: memberPage.genesisHash,
+    }
+  );
+export const RemovalKeyUpdateFailed: Story = {
+  args: { ...OwnerMemberControls.args, workspaceName: 'Cipher Lab', initialTab: 'members' },
+  render: function Render(args) {
+    const [history, setHistory] = useState<VerifiedLedgerHistory>(() =>
+      removalHistory(removalVector.records.length - 2)
+    );
+    const [failures, setFailures] = useState(1);
+    return (
+      <E2eeWorkspaceControlPage
+        {...args}
+        history={history}
+        memberManagement={{
+          actorRole: 'owner',
+          remove: async () => setHistory(removalHistory(removalVector.records.length - 1)),
+          setRole: async () => {},
+          rotate: async () => {
+            if (failures > 0) {
+              setFailures(failures - 1);
+              throw new Error('e2ee_restart-required');
+            }
+          },
+        }}
+      />
+    );
+  },
+};
+
 export const CustodyLocked: Story = {
   args: { failure: { kind: 'custody-locked', code: 'locked' } },
 };
+export const IdentityLost: Story = {
+  args: { failure: { kind: 'local-identity', code: 'missing' } },
+};
+export const UpdateRequired: Story = {
+  args: { failure: { kind: 'upgrade', code: 'capability' }, onCheckForUpdates: fn() },
+};
 export const CustodyIndeterminate: Story = {
   args: { failure: { kind: 'custody-indeterminate', code: 'indeterminate' } },
+};
+
+// The console as Settings opens it: the same frame inside a 1000×760 dialog.
+export const ConsoleInSettings: Story = {
+  args: { ...TeamHistory.args, workspaceName: 'Cipher Lab', presentation: 'modal' },
+  render: (args) => (
+    <div style={{ width: 1000, height: 760, margin: 24, borderRadius: 16, overflow: 'hidden' }}>
+      <E2eeWorkspaceControlPage {...args} />
+    </div>
+  ),
+};
+// A member without administrator permission: same tabs, one sentence instead of controls.
+export const MemberView: Story = {
+  args: {
+    ...TeamHistory.args,
+    workspaceName: 'Cipher Lab',
+    memberRole: 'member',
+    initialTab: 'members',
+  },
+};
+export const OwnerMembersTab: Story = {
+  args: { ...OwnerMemberControls.args, workspaceName: 'Cipher Lab', initialTab: 'members' },
+};
+export const SecurityCodeTab: Story = {
+  args: { ...TeamHistory.args, workspaceName: 'Cipher Lab', initialTab: 'security' },
 };

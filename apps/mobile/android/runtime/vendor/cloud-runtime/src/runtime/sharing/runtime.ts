@@ -1,3 +1,8 @@
+declare const LODY_MOBILE_WORKER_URL: string;
+const workerOrigin =
+  typeof LODY_MOBILE_WORKER_URL === 'undefined'
+    ? 'https://api.lody.ai'
+    : LODY_MOBILE_WORKER_URL;
 import type { Session } from '../../models/catalog.ts';
 import type {
   ShareEntry,
@@ -348,7 +353,7 @@ export function createSharingRuntime(deps: {
         ) => {
           signal.throwIfAborted();
           const response = await (deps.fetch ?? fetch)(
-            `https://api.lody.ai/api/share-deployments/${deployment.deploymentId}${path}`,
+            `${workerOrigin}/api/share-deployments/${deployment.deploymentId}${path}`,
             {
               method,
               signal,

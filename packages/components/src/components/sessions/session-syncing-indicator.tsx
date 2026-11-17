@@ -36,7 +36,7 @@ export function SessionSyncingIndicator({
       <Spinner diameter="calc(var(--spacing) * 3)" aria-hidden="true" />
       <span className={labelClassName}>
         {variant === 'updating'
-          ? t('sessions.contentSync.updating', 'Updating')
+          ? t('sessions.contentSync.updating', 'Syncing')
           : t('common.syncing', 'Syncing')}
       </span>
     </span>

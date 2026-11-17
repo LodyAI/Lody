@@ -20,9 +20,9 @@ from simulator import DEVICE_TYPES, run_with_simulator, SimulatorPool
 CHAT = ROOT / 'apps/ios/verification/kit/chat'
 # Each retained scene owns its services in Swift and exercises production controllers.
 BATCHES = {
-    'pages': ['onboarding', 'home', 'home-settings', 'home-workspace', 'home-states', 'navigation', 'licenses', 'create-parity', 'model-memory', 'project-picker', 'branch-picker', 'project-history', 'project-history-entry', 'directory', 'project', 'activity', 'notifications', 'diagnostics', 'settings-baseline', 'appearance', 'queued-message-behavior'],
-    'send': ['send', 'send-queue', 'send-guide', 'send-interrupt', 'send-rounds', 'send-scroll-guide', 'send-scroll-queue', 'send-scroll-normal', 'session-native', 'session-simulator', 'permission-native', 'item-details', 'edit-message', 'session-share', 'agent-error', 'native-diff', 'native-workspace-changes', 'native-file-content'],
-    'settings': ['agents-settings', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'mcp-settings', 'memory-settings', 'memory-states', 'published-shares', 'published-share-states', 'agent-roles', 'archived-sessions'],
+    'pages': ['onboarding', 'home', 'home-grouping-crash', 'home-settings', 'home-workspace', 'schedules', 'home-states', 'navigation', 'licenses', 'create-parity', 'model-memory', 'project-picker', 'branch-picker', 'directory', 'project', 'activity', 'notifications', 'diagnostics', 'settings-baseline', 'preferences', 'queued-message-behavior'],
+    'send': ['send', 'send-queue', 'send-guide', 'send-interrupt', 'send-rounds', 'send-scroll-guide', 'send-scroll-queue', 'send-scroll-normal', 'session-native', 'proposal-cards', 'session-simulator', 'permission-native', 'item-details', 'edit-message', 'session-share', 'agent-error', 'native-diff', 'native-workspace-changes', 'native-file-content'],
+    'settings': ['agents-settings', 'agents-presets', 'agents-pi', 'agents-auth-methods', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'agent-roles'],
 }
 SUITES = {
     'settings-workspace': BATCHES['settings'],
@@ -35,29 +35,28 @@ SUITES = {
 CORE_SUITES = {name for name in SUITES if name.startswith('core')}
 PHONE_CASES = [case for batch in BATCHES.values() for case in batch]
 PAD_CASES = ['devices-pad', 'session-delete-pad', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'session-search-pad', 'wide-panel', 'pad-layout']
-CASES = PHONE_CASES + PAD_CASES + ['session-delete', 'session-search', 'devices', 'workspace-general', 'morph', 'sheet-zoom-project', 'mentions-production']
-HOME_CASES = {'home-states', 'session-search', 'session-search-pad', 'morph', 'sheet-zoom-project', 'mentions-production', 'home', 'home-settings', 'home-workspace', 'licenses', 'navigation', 'project-history-entry', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'session-delete', 'session-delete-pad', 'devices', 'devices-pad', 'workspace-general'}
+CASES = PHONE_CASES + PAD_CASES + ['toast', 'session-delete', 'session-search', 'devices', 'workspace-general', 'morph', 'sheet-zoom-project', 'mentions-production']
+HOME_CASES = {'home-grouping-crash', 'schedules', 'home-states', 'session-search', 'session-search-pad', 'morph', 'sheet-zoom-project', 'mentions-production', 'home', 'home-settings', 'home-workspace', 'licenses', 'navigation', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'session-delete', 'session-delete-pad', 'devices', 'devices-pad', 'workspace-general'}
 PREVIEW = {
+    'toast': 'session-preview-live',
     'role-mention-chat': 'mention-chat',
     'role-mention-sheet': 'mention-sheet',
     'agent-roles': 'agent-roles-preview',
-    'archived-sessions': 'archived-sessions-preview',
     'session-native': 'session-preview-live',
+    'proposal-cards': 'session-preview-cards-role-create',
     'session-simulator': 'session-preview-live',
     'permission-native': 'permission-native-preview',
     'native-diff': 'file-diff-preview',
     'native-workspace-changes': 'workspace-changes-preview',
     'native-file-content': 'file-content-preview',
-    'published-shares': 'published-shares-preview',
-    'published-share-states': 'published-shares-readonly',
-    'memory-settings': 'memory-preview',
-    'memory-states': 'memory-states-preview',
-    'mcp-settings': 'mcp-settings-preview',
     'ai-usage': 'ai-usage-preview',
     'github-settings': 'github-settings-preview',
     'project-visibility': 'project-visibility-preview',
     'prompt-shortcuts': 'prompt-shortcuts-preview',
-    'agents-settings': 'settings-preview',
+    'agents-settings': 'agent-providers-preview',
+    'agents-presets': 'agent-presets-preview',
+    'agents-pi': 'agent-pi-preview',
+    'agents-auth-methods': 'agent-auth-methods-preview',
     'settings-form-backgrounds': 'settings-forms-preview',
     'machine-settings': 'machine-settings-preview',
     'settings-baseline': 'settings-baseline-live',
@@ -105,14 +104,13 @@ PREVIEW = {
     'mcp-files': 'file-preview',
     'chat-performance': 'chat-performance',
     'chat-stream-performance': 'chat-stream-performance',
-    'project-history': 'project-history-preview',
     'directory': 'directory-preview',
     'project': 'project-preview',
     'activity': 'activity-preview',
     'project-picker': 'project-picker-preview',
     'branch-picker': 'create-parity',
     'settings': 'settings-preview',
-    'appearance': 'appearance-preview',
+    'preferences': 'preferences-preview',
     'queued-message-behavior': 'queued-message-behavior-preview',
     'model-memory': 'model-memory',
     'create-parity': 'create-parity',
@@ -154,28 +152,26 @@ PREVIEW = {
     'composer-fullscreen': 'composer-success',
     'inbox': 'inbox-preview',
     'onboarding': 'onboarding-preview',
-    'community-notice': 'community-notice',
 }
 READY = {
+    'toast': 'session-preview-probe',
     'role-mention-sheet': 'create-session-input',
     'agent-roles': 'list-unavailable-action',
-    'archived-sessions': 'archived-preview-writes',
     'session-native': 'session-preview-probe',
+    'proposal-cards': 'session-preview-probe',
     'session-simulator': 'session-preview-probe',
     'permission-native': 'permission-preview-probe',
     'native-diff': 'diff-preview:changes:docs/superpowers/.diff-check.md',
     'native-workspace-changes': 'file:src/greeting.ts',
     'native-file-content': 'file:report.md',
-    'published-shares': 'list-unavailable-action',
-    'published-share-states': 'share:own',
-    'memory-settings': 'list-unavailable-action',
-    'memory-states': 'machine:not_installed',
-    'mcp-settings': 'setting:mcp::docs',
     'ai-usage': 'list-unavailable-action',
     'github-settings': 'list-unavailable-action',
     'project-visibility': 'visibility:m1:same',
     'prompt-shortcuts': 'list-unavailable-action',
-    'agents-settings': 'settings-agent',
+    'agents-settings': 'provider-machine-picker',
+    'agents-presets': 'provider-machine-picker',
+    'agents-pi': 'provider-machine-picker',
+    'agents-auth-methods': 'provider-auth-start',
     'settings-form-backgrounds': 'form-machine',
     'machine-settings': 'list-notice-action',
     'settings-baseline': 'settings-baseline-ready',
@@ -218,14 +214,13 @@ READY = {
     'html-preview': 'file-links:answer',
     'file-selection': 'file-links:answer',
     'mcp-files': 'file-links:answer',
-    'project-history': 'history-project:["studio","demo"]',
     'directory': 'studio',
     'project': 'project-live',
     'activity': 'activity-running',
     'project-picker': 'create-session-input',
     'branch-picker': 'create-session-input',
     'settings': 'settings-machine',
-    'appearance': 'appearance',
+    'preferences': 'app-icon',
     'queued-message-behavior': 'queued-message-behavior',
     'model-memory': 'create-session-input',
     'create-parity': 'create-session-input',
@@ -260,8 +255,7 @@ READY = {
     'composer-rich': 'create-session-input',
     'composer-fullscreen': 'session-input',
     'inbox': 'inbox-wait',
-    'onboarding': 'onboarding-connect',
-    'community-notice': 'community-notice',
+    'onboarding': 'auth.native.github',
 }
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument(
@@ -442,6 +436,8 @@ try:
                     launch = ['launch', args.udid, 'ai.lody.mobile', '--ui-verify']
                     if case in HOME_CASES:
                         launch.append('--ui-verify-home')
+                    if case == 'home-grouping-crash':
+                        launch.append('--ui-verify-sticky-groups')
                     if case in {'session-search', 'session-search-pad'}:
                         launch.append('--ui-verify-search')
                     if case in {'morph', 'sheet-zoom-project', 'mentions-production', 'home', 'home-settings', 'home-workspace', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar'}:
@@ -517,14 +513,16 @@ try:
                     ui.axe('tap', '--label', 'Image Fixture')
                     ui.element('preview-image:attachment:ui-verify-image')
                 ui.capture('before')
-                script = Path(__file__).with_name(f'{case}.py') if case in ['workspace-changes', 'simulator-preview', 'item-details', 'message-details', 'message-share', 'pull-request', 'project-history-entry', 'project-history', 'project-picker', 'branch-picker', 'notifications', 'user-mentions', 'file-preview', 'html-preview', 'chat-performance', 'chat-stream-performance', 'settings', 'appearance', 'queued-message-behavior', 'send', 'send-handoff', 'send-rounds', 'send-queue', 'steer', 'send-guide', 'send-interrupt', 'smooth-scroll', 'composer', 'composer-glass', 'composer-video', 'markdown', 'mermaid', 'duration', 'process-counts', 'process-failed', 'agent-error', 'proposed-plan', 'changes', 'inline-diff', 'background', 'inbox', 'home', 'home-settings', 'home-workspace', 'home-states', 'ipad', 'licenses', 'navigation', 'model-memory', 'onboarding', 'community-notice', 'context-menu', 'chat-chrome', 'title-rename', 'composer-rich', 'composer-fullscreen'] else CHAT / ('composer.py' if case.startswith('composer-') else f'{case}.py')
+                script = Path(__file__).with_name(f'{case}.py') if case in ['toast', 'workspace-changes', 'simulator-preview', 'item-details', 'message-details', 'message-share', 'pull-request', 'project-picker', 'branch-picker', 'notifications', 'user-mentions', 'file-preview', 'html-preview', 'chat-performance', 'chat-stream-performance', 'settings', 'preferences', 'queued-message-behavior', 'send', 'send-handoff', 'send-rounds', 'send-queue', 'steer', 'send-guide', 'send-interrupt', 'smooth-scroll', 'composer', 'composer-glass', 'composer-video', 'markdown', 'mermaid', 'duration', 'process-counts', 'process-failed', 'agent-error', 'proposed-plan', 'changes', 'inline-diff', 'background', 'inbox', 'home', 'home-settings', 'schedules', 'home-workspace', 'home-states', 'ipad', 'licenses', 'navigation', 'model-memory', 'onboarding', 'context-menu', 'chat-chrome', 'title-rename', 'composer-rich', 'composer-fullscreen'] else CHAT / ('composer.py' if case.startswith('composer-') else f'{case}.py')
+                if case == 'home-grouping-crash':
+                    script = Path(__file__).with_name('home-grouping-crash.py')
                 if case.startswith('send-scroll-'):
                     script = Path(__file__).with_name('send-scroll.py')
                 if case in {'devices', 'devices-pad'}:
                     script = Path(__file__).with_name('devices.py')
-                if case in ('diagnostics', 'directory', 'project', 'activity', 'settings-baseline', 'workspace-general', 'machine-settings', 'settings-form-backgrounds', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'mcp-settings', 'memory-settings', 'memory-states', 'published-shares', 'published-share-states', 'agent-roles'):
+                if case in ('diagnostics', 'directory', 'project', 'activity', 'settings-baseline', 'workspace-general', 'machine-settings', 'settings-form-backgrounds', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'agent-roles'):
                     script = Path(__file__).with_name(f'{case}.py')
-                if case in ('archived-sessions', 'session-native', 'session-simulator', 'permission-native', 'native-diff', 'native-workspace-changes', 'native-file-content'):
+                if case in ('session-native', 'proposal-cards', 'session-simulator', 'permission-native', 'native-diff', 'native-workspace-changes', 'native-file-content'):
                     script = Path(__file__).with_name(f'{case}.py')
                 if case == 'file-selection':
                     script = Path(__file__).with_name('file-selection.py')
@@ -573,7 +571,9 @@ try:
                 if case in ['send-transition', 'send-transition-handoff']:
                     script = Path(__file__).with_name('send-transition.py')
                 if case == 'agents-settings':
-                    script = Path(__file__).with_name('settings.py')
+                    script = Path(__file__).with_name('agent-providers.py')
+                if case in ('agents-presets', 'agents-pi', 'agents-auth-methods'):
+                    script = Path(__file__).with_name('agent-provider-advanced.py')
                 command = [sys.executable, str(script), args.udid]
                 if case in ['composer-success', 'composer-failure']:
                     command += ['--expect', case.removeprefix('composer-'), '--output', str(output)]
@@ -585,20 +585,24 @@ try:
                     command.append(case.removeprefix('send-scroll-'))
                 if case == 'agents-settings':
                     command.append('--agents-only')
+                if case in ('agents-presets', 'agents-pi', 'agents-auth-methods'):
+                    command.append(case)
                 check_timeout = 180
                 if case == 'morph':
                     # Send, open and dismiss loops; ~175s alone with the driver's HID padding.
                     check_timeout = 300
-                if case == 'mcp-settings':
-                    check_timeout = 300
                 if case == 'native-file-content':
                     # Source, links, HTML navigation and three feedback outcomes share this case.
                     check_timeout = 300
-                if case in ('agent-roles', 'memory-settings', 'memory-states', 'published-shares', 'published-share-states'):
+                if case == 'agent-roles':
                     check_timeout = 420
-                if case in ('settings', 'agents-settings'):
+                if case in ('settings', 'agents-settings', 'agents-presets', 'agents-pi', 'agents-auth-methods'):
                     # These cases visit several Settings contexts or editors; settings reaches ~300s under load.
                     check_timeout = 420
+                if case == 'agents-settings':
+                    # Full CRUD, setup, write-only env, ACP, operations and failure recovery
+                    # exceed seven minutes with native keyboard and scroll verification.
+                    check_timeout = 900
                 if case == 'settings-baseline':
                     # Six fixture scenarios plus page visits; ~305s under load.
                     check_timeout = 420
@@ -629,6 +633,10 @@ try:
                     # per-file upload states need multiple AXe round trips.
                     # Keep each gesture/animation assertion independently bounded.
                     check_timeout = 420
+                elif case == 'schedules':
+                    # List/editor rollback gates and cached-detail refreshes share this case.
+                    # Individual readiness assertions retain their own bounded deadlines.
+                    check_timeout = 600
                 elif case == 'mermaid':
                     # Six graph types, fallbacks, plan expansion and document copy.
                     check_timeout = 300
@@ -651,8 +659,8 @@ try:
                 elif case in ('session-search', 'mentions-production'):
                     # Long search and mention-kind loops reach ~290s alone.
                     check_timeout = 420
-                elif case == 'session-native':
-                    # Shared-feed details, PR draft handoff, previews and session actions.
+                elif case in ('session-native', 'proposal-cards'):
+                    # Shared-feed actions or seven proposal scenes with captures and navigation.
                     check_timeout = 420
                 elif case == 'ipad':
                     # Sidebar, both orientations, keyboard and two native creation flows.
@@ -668,7 +676,7 @@ try:
                 elif case in ('send-queue', 'send-guide'):
                     # Queue/steer/stop and guide rounds reach ~185s on the native fixtures.
                     check_timeout = 300
-                elif case in ('branch-picker', 'message-share', 'session-search-pad', 'chat-stream-performance', 'mention-chat', 'mention-sheet', 'appearance'):
+                elif case in ('branch-picker', 'message-share', 'session-search-pad', 'chat-stream-performance', 'mention-chat', 'mention-sheet', 'preferences'):
                     check_timeout = 300
                 check_started = time.monotonic()
                 with (output / 'check.log').open('w') as log:
@@ -678,7 +686,7 @@ try:
                 result['checkSeconds'] = round(time.monotonic() - check_started, 2)
                 ui.capture('after')
                 result['status'] = 'passed'
-                if case in ('appearance', 'queued-message-behavior'):
+                if case in ('preferences', 'queued-message-behavior'):
                     # These checks cold-launch the App; the next case needs a fresh process baseline.
                     launch_mode = None
             except Exception as error:

@@ -2,17 +2,28 @@ import Foundation
 
 struct PreferencesSnapshot: Codable, Equatable, Sendable {
   let accentColor: String
-  let darkBackground: String
   let queuedMessageBehavior: String
 }
 
 enum LodyPreferences {
   private static let queuedKey = "queuedMessageBehavior"
+  private static let developerKey = "developerModeEnabled"
+  private static let roostKey = "roostHistoryExperimentEnabled"
+
+  static var developerModeEnabled: Bool { UserDefaults.standard.bool(forKey: developerKey) }
+  static var roostHistoryEnabled: Bool { developerModeEnabled && UserDefaults.standard.bool(forKey: roostKey) }
+  static var roostHistoryExperimentEnabled: Bool { UserDefaults.standard.bool(forKey: roostKey) }
+
+  static func saveDeveloperMode(_ enabled: Bool) {
+    UserDefaults.standard.set(enabled, forKey: developerKey); changed()
+  }
+  static func saveRoostHistoryExperiment(_ enabled: Bool) {
+    UserDefaults.standard.set(enabled, forKey: roostKey); changed()
+  }
 
   static var snapshot: PreferencesSnapshot {
     PreferencesSnapshot(
-      accentColor: LodyAccentChoice.current.rawValue,
-      darkBackground: LodyDarkBackground.current.rawValue,
+      accentColor: "ink",
       queuedMessageBehavior: queuedMessageBehavior
     )
   }

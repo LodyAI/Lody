@@ -1,3 +1,5 @@
+export * from './daemon-release';
+export * from './daemon-update';
 import {
   LORO_CODE_COLLAB_FILE_INDEX_STREAM_SEGMENT,
   LORO_CODE_COLLAB_FILE_INDEX_SIGNAL_STREAM_SEGMENT,
@@ -31,6 +33,7 @@ export type {
 export * from './message';
 export * from './ai';
 export * from './acp-model-capabilities';
+export * from './acp-model-config-options';
 export * from './pi-provider-migration';
 export * from './message-quote';
 export * from './message-text-spans';
@@ -58,6 +61,7 @@ export * from './schedule-recurrence';
 export * from './schedule-registry';
 export * from './schedule-schema';
 export * from './schedule-authorization';
+export * from './e2ee-execution-intent';
 export * from './schedule-repository';
 export * from './cron-next-fire';
 export * from './scheduled-tasks-from-history';
@@ -93,7 +97,6 @@ export * from './reliable-message';
 export * from './worktree-paths';
 export * from './loro-streams-auth';
 export * from './rpc-secret';
-export * from './streams-snapshot-codec';
 export * from './presence';
 export * from './machine-monitor';
 export * from './machine-protocol-capabilities';
@@ -526,3 +529,9 @@ export * from './encrypted-attachment';
 export * from './device-preview';
 
 export * from './android-emulator';
+
+export {
+  isContainedSession,
+  sessionHistoryWriteIntentDigest,
+  type SessionAccessRecord,
+} from './session-access';

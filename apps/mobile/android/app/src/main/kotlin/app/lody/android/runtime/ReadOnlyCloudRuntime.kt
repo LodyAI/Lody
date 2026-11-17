@@ -13,6 +13,9 @@ internal class ReadOnlyCloudRuntime(
     override val scope: RuntimeScope,
     initialGrant: ShortLivedGrant,
     private val provider: GrantProvider,
+    private val shortcutCloud: ShortcutCloudProvider? = null,
+    private val previewTokens: PreviewTokenProvider? = null,
+    private val billing: BillingProvider? = null,
 ) : CloudRuntime {
     private val access = StreamAccess(scope.workspaceId, initialGrant.gatewayBaseUrl)
     private val runtime = WebViewRuntime(scope, WebViewCloudRuntime(context, "NetworkRuntime.html", access))
@@ -31,7 +34,10 @@ internal class ReadOnlyCloudRuntime(
         tasks.launch(start = CoroutineStart.UNDISPATCHED) {
             runtime.events.collect { event ->
                 if (event.generation != state.value.generation) return@collect
-                if (event.event == RuntimeEvent.GrantRequested) refresh()
+                val requested = event.event
+                if (requested == RuntimeEvent.GrantRequested) refresh()
+                else if (requested is RuntimeEvent.ShortcutCloudRequested) answer(requested, event.generation)
+                else if (requested is RuntimeEvent.PreviewTokenRequested) mint(requested, event.generation)
                 else mutableEvents.emit(event)
             }
         }
@@ -77,14 +83,75 @@ internal class ReadOnlyCloudRuntime(
             }
         }
     }
+    /** Answers a shortcutCloud request exactly once: `{value}` on success, null on any failure or deadline. */
+    private fun answer(request: RuntimeEvent.ShortcutCloudRequested, generation: Long) {
+        val calls = shortcutCloud
+        lifetime?.launch {
+            val value: JSONObject? = if (calls == null || request.operation !in ShortcutOperations) null else withTimeoutOrNull(60_000) {
+                try { JSONObject().put("value", calls.call(scope, request.operation, JSONObject(request.args)) ?: JSONObject.NULL) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { null }
+            }
+            if (state.value.generation != generation) return@launch
+            runCatching { runtime.call("shortcutCloudReply", JSONArray().put(request.requestId).put(value ?: JSONObject.NULL)) }
+        }
+    }
+    /**
+     * Answers a previewToken request exactly once: `{value: token}`, `{value: {status}}` for an HTTP
+     * refusal, or null on any failure, a foreign workspace or the deadline (under JS's 60 s).
+     */
+    private fun mint(request: RuntimeEvent.PreviewTokenRequested, generation: Long) {
+        val tokens = previewTokens
+        lifetime?.launch {
+            val value: JSONObject? = if (tokens == null) null else withTimeoutOrNull(55_000) {
+                try {
+                    val intent = JSONObject(request.intent)
+                    if (intent.optString("workspaceId") != scope.workspaceId) return@withTimeoutOrNull null
+                    when (val minted = tokens.mint(scope, intent)) {
+                        is String -> JSONObject().put("value", minted)
+                        is Int -> JSONObject().put("value", JSONObject().put("status", minted))
+                        else -> null
+                    }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { null }
+            }
+            if (state.value.generation != generation) return@launch
+            runCatching { runtime.call("previewTokenReply", JSONArray().put(request.requestId).put(value ?: JSONObject.NULL)) }
+        }
+    }
     override suspend fun setActive(active: Boolean) = withContext(Dispatchers.Main.immediate) {
         foreground = active
         if (!active) { grantJob?.cancel(); grantJob = null }
         runtime.setActive(active)
     }
-    override suspend fun execute(command: RuntimeCommand): RuntimeResult = runtime.execute(command)
+    override suspend fun execute(command: RuntimeCommand): RuntimeResult = when (command) {
+        // Writes the free-plan quotas gate carry the plan, read per write as on iOS.
+        is RuntimeCommand.CreateAndSend -> runtime.execute(command.copy(billing = entitlement()))
+        is RuntimeCommand.SendText -> runtime.execute(command.copy(billing = entitlement()))
+        is RuntimeCommand.MessageAction ->
+            runtime.execute(if (command.kind == "edit" && command.payload.optString("action") == "send") command.copy(billing = entitlement()) else command)
+        is RuntimeCommand.CreateTab -> runtime.execute(command.copy(billing = entitlement()))
+        is RuntimeCommand.TurnQuota -> runtime.execute(command.copy(billing = entitlement()))
+        RuntimeCommand.WorkspacePlan -> RuntimeResult.Plan(entitlement()?.optString("effectivePlanTier")?.ifBlank { null })
+        else -> runtime.execute(command)
+    }
+    private var cachedEntitlement: Pair<Long, JSONObject>? = null
+    /** The plan projection, cached for a minute after a successful read; a failed read is null (fail open). */
+    private suspend fun entitlement(): JSONObject? {
+        val provider = billing ?: return null
+        cachedEntitlement?.let { (at, value) -> if (System.nanoTime() - at < 60_000_000_000L) return JSONObject(value.toString()) }
+        val value = withTimeoutOrNull(15_000) {
+            try { provider.entitlement(scope) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+        } ?: return null
+        cachedEntitlement = System.nanoTime() to value
+        return JSONObject(value.toString())
+    }
     override suspend fun stop() = withContext(Dispatchers.Main.immediate) {
-        lifetime?.cancel(); lifetime = null; grantJob = null; firstGrant = null
+        lifetime?.cancel(); lifetime = null; grantJob = null; firstGrant = null; cachedEntitlement = null
         runtime.stop()
     }
 }
+
+private val ShortcutOperations = setOf("listAccessibleDocuments", "getStreamToken", "stageDocument", "activateDocument")

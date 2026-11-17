@@ -18,9 +18,19 @@ final class FileMarkdownView: MarkdownTextView {
     let blocks = rendered.rewrite { (node: MarkdownInlineNode) -> [MarkdownInlineNode] in
       if case let .image(source, _) = node { return [.text(imageMarker + source)] }
       if case let .html(source) = node { return [.text(htmlMarker + source)] }
-      guard case let .link(destination, children) = node,
-        ChatFileLink(destination) != nil else { return [node] }
-      return [.link(destination: destination, children: [.text(marker + destination)] + children)]
+      // Inline code that is exactly one Markdown file path reads as a file link, as on Web.
+      if case let .code(code) = node, let path = ChatFileLink.markdownCode(code) {
+        return [.link(destination: path, children: [.text(marker + path), .text(code)])]
+      }
+      guard case let .link(destination, children) = node else { return [node] }
+      // Children are rewritten first: an inline-code path inside an authored link stays its label.
+      let label = children.flatMap { child -> [MarkdownInlineNode] in
+        if case let .link(_, inner) = child, inner.count == 2, case let .text(tag) = inner[0], tag.hasPrefix(marker),
+          case let .text(code) = inner[1] { return [.code(code)] }
+        return [child]
+      }
+      guard ChatFileLink(destination) != nil else { return [.link(destination: destination, children: label)] }
+      return [.link(destination: destination, children: [.text(marker + destination)] + label)]
     }
     return MarkdownContent(blocks: blocks, rendered: source.rendered, highlightMaps: source.highlightMaps, locale: source.locale)
   }
@@ -320,6 +330,47 @@ enum ChatContextViewProbe {
       checks["rubyHeight-\(streaming)"] = rendered.measuredHeight > store.height(id: "plain", text: "Before Tokyo after", secondary: false, streaming: streaming, width: 300)
     }
     let url = FileManager.default.temporaryDirectory.appendingPathComponent("lody-markdown-hit-testing.json")
+    try? JSONSerialization.data(withJSONObject: checks, options: .sortedKeys).write(to: url, options: .atomic)
+  }
+
+  static func checkInlineCode() {
+    guard LodyUIVerify.enabled else { return }
+    let store = ChatMarkdownStore(traits: .current)
+    var checks: [String: Bool] = [:]
+    for secondary in [false, true] {
+      for streaming in [false, true] {
+        let rendered = store.view(id: "inline-\(secondary)-\(streaming)",
+          text: "Body `inline` and **`boldcode`** and [`linkedcode`](https://example.com)",
+          secondary: secondary, streaming: streaming, width: 300)
+        let text = (rendered.subviews.first as! FileMarkdownView).textLabelView.attributedText
+        let bodyRange = (text.string as NSString).range(of: "Body")
+        let bodyFont = text.attribute(.font, at: bodyRange.location, effectiveRange: nil) as? UIFont
+        checks["bodySize-\(secondary)-\(streaming)"] = bodyFont?.pointSize == UIFont.dynamic(of: secondary ? 15 : 16, compatibleWith: .current).pointSize
+        let heading = store.view(id: "heading-\(secondary)-\(streaming)", text: "## Heading",
+          secondary: secondary, streaming: streaming, width: 300)
+        let headingText = (heading.subviews.first as! FileMarkdownView).textLabelView.attributedText
+        let headingFont = headingText.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
+        checks["headingSize-\(secondary)-\(streaming)"] = headingFont?.pointSize == UIFont.dynamic(of: secondary ? 17 : 18, compatibleWith: .current).pointSize
+        for token in ["inline", "boldcode", "linkedcode"] {
+          let range = (text.string as NSString).range(of: token)
+          let key = "inline-\(token)-\(secondary)-\(streaming)"
+          guard range.location != NSNotFound else { checks[key] = false; continue }
+          let font = text.attribute(.font, at: range.location, effectiveRange: nil) as? UIFont
+          let color = text.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? UIColor
+          checks[key + "-bodySize"] = font != nil && font?.pointSize == bodyFont?.pointSize
+          checks[key + "-monospaced"] = font?.fontDescriptor.symbolicTraits.contains(.traitMonoSpace) == true
+          checks[key + "-color"] = color == (token == "linkedcode" ? .systemBlue : .secondaryLabel)
+        }
+      }
+    }
+    let rendered = store.view(id: "fenced", text: "```\nfenced\n```", secondary: false, streaming: false, width: 300)
+    func labels(_ view: UIView) -> [TextLabelView] {
+      (view as? TextLabelView).map { [$0] } ?? view.subviews.flatMap { labels($0) }
+    }
+    let code = labels(rendered).first { $0.attributedText.string.contains("fenced") }?.attributedText
+    checks["fencedColor"] = code?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor == .lodyInk
+    checks["fencedSize"] = (code?.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)?.pointSize == store.theme.fonts.code.pointSize
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("lody-inline-code.json")
     try? JSONSerialization.data(withJSONObject: checks, options: .sortedKeys).write(to: url, options: .atomic)
   }
 

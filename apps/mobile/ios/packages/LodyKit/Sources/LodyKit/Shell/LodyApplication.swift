@@ -1,5 +1,5 @@
+import GoogleSignIn
 import LodyCore
-import LodyDesignSystem
 import UIKit
 
 /// One scene owns the runtime and the application coordinators, independently of page lifetimes.
@@ -10,22 +10,20 @@ public final class LodyApplication {
   private let push = PushLifecycle()
 
   public func launch(_ application: UIApplication, options: [UIApplication.LaunchOptionsKey: Any]?) {
-    // Inter / JetBrains Mono for design-system surfaces (the Home chat list).
-    LodyFonts.register()
     _ = accent.application(application, didFinishLaunchingWithOptions: options)
     _ = push.application(application, didFinishLaunchingWithOptions: options)
   }
   public func active() { accent.applicationDidBecomeActive(.shared); push.applicationDidBecomeActive(.shared); shares.wake() }
+  public func pushToken(_ data: Data) { PushNotifications.shared.deviceToken(data) }
+  public func pushRegistrationFailed() { DiagnosticsStore.shared.record("notification", "apns_registration_failed") }
   public func background() { push.applicationDidEnterBackground(.shared) }
+  public func geometryChanged(in scene: UIWindowScene) { HomeController.current?.geometryChanged(in: scene) }
 
   private let runtime = DataRuntime(localStore: .shared)
   private var observers: [NSObjectProtocol] = []
   private var onboarding: LodyPageController?
   private var link: (route: String, user: String?)?
-  private var identified: String?
-  private var hasIdentified = false
   private let shares = NativeShareCoordinator()
-  private var offeredCommunity = false
 
   public func start(in window: UIWindow) {
     precondition(observers.isEmpty, "Lody supports one active scene")
@@ -53,6 +51,7 @@ public final class LodyApplication {
   }
 
   public func open(_ url: URL) {
+    if GIDSignIn.sharedInstance.handle(url) { return }
     guard let destination = AppLink.parse(url.absoluteString) else { return }
     switch destination {
     case .share: shares.wake()
@@ -78,53 +77,18 @@ public final class LodyApplication {
     guard !LodyUIVerify.enabled else { return }
     let auth = AuthSession.shared.snapshot
     guard auth.localReady, !auth.busy else { return }
-    let user = auth.account?.user.id
-    if !hasIdentified || identified != user {
-      hasIdentified = true
-      identified = user
-      PushNotifications.shared.identify(user)
-    }
     if auth.account == nil {
       shares.stop()
       guard onboarding == nil else { return }
       let regular = HomeController.current?.traitCollection.horizontalSizeClass == .regular
       let page = LodyShell.shared.presentNative(OnboardingController(), title: "", dismissible: false,
-        style: regular ? "formSheet" : "pageSheet", headerShown: false)
+        style: regular ? "formSheet" : "fullScreen", headerShown: false)
       onboarding = page
       page.onClose = { [weak self] in self?.onboarding = nil; self?.reconcile() }
       return
     }
     routeNotification()
     shares.reconcile()
-    if onboarding == nil { offerCommunityNotice() }
-  }
-
-  private func offerCommunityNotice() {
-    guard !offeredCommunity else { return }
-    offeredCommunity = true
-    Task {
-      do {
-        let seen = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
-          LocalStore.queue.async {
-            do {
-              let seen = try LocalStore.shared.read("communityNoticeSeen") == "true"
-              if !seen { try LocalStore.shared.write("communityNoticeSeen", "true") }
-              continuation.resume(returning: seen)
-            } catch { continuation.resume(throwing: error) }
-          }
-        }
-        guard !seen else { return }
-        let alert = UIAlertController(title: String(localized: "communityNotice.title", bundle: .lody),
-          message: String(localized: "communityNotice.message", bundle: .lody), preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: String(localized: "communityNotice.later", bundle: .lody), style: .cancel))
-        alert.addAction(UIAlertAction(title: String(localized: "communityNotice.star", bundle: .lody), style: .default) { _ in
-          UIApplication.shared.open(URL(string: "https://github.com/Innei/lody-ios")!)
-        })
-        LodyShell.shared.presenter?.present(alert, animated: true)
-      } catch {
-        DiagnosticsStore.shared.record("app", "community_notice_failed", fields: ["error": error.localizedDescription])
-      }
-    }
   }
 
   private func routeNotification() {
@@ -151,7 +115,7 @@ public final class LodyApplication {
     case .discard(let failure):
       DiagnosticsStore.shared.record("notification", "navigation_rejected", fields: ["reason": failure.rawValue])
       let keys: [NotificationNavigation.Failure: String] = [.wrongAccount: "wrongAccount", .unknownRoute: "unknown", .noWorkspace: "noWorkspace", .sessionMissing: "gone"]
-      LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue("notifications.route." + keys[failure]!), bundle: .lody), kind: "error")
+      LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue("notifications.route." + keys[failure]!), bundle: .lody), kind: .error)
     }
     if link != nil { link = nil }
     else if let id = pending?["id"] { PushNotifications.shared.acknowledge(id) }

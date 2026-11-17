@@ -1,7 +1,7 @@
-"""Photo resizing and selection in all composer hosts with an authorized local library."""
+"""Small-rounded photo grid and selection in all composer hosts with an authorized local library."""
 import sys
 from driver import UI
-from attachment_geometry import check_media_geometry
+from attachment_geometry import check_media_geometry, check_composer_attachment_targets
 import catalog
 
 ui = UI(*sys.argv[1:])
@@ -18,14 +18,6 @@ def tap(identifier):
            '--tap-style', 'physical', '--post-delay', '.6')
 
 
-def layout(mode):
-    title = catalog.text('native.chat.attachment.grid.' + mode)
-    if ui.element('attachment-photos-layout').get('AXValue') != title:
-        tap('attachment-photos-layout')
-    ui.wait(lambda items: any(i.get('AXUniqueId') == 'attachment-photos-layout'
-                             and i.get('AXValue') == title for i in items), 'Photo layout did not change')
-
-
 def count(expected):
     assert ui.element('attachment-photos-confirm').get('AXValue') == str(expected)
 
@@ -39,24 +31,14 @@ initial_attachments = {i.get('AXLabel') for i in ui.state() if (i.get('AXLabel')
 tap('session-attach')
 tap('attachment-menu-recentPhotos')
 ui.element('attachment-photo-0')
-layout('edgeToEdge')
 check_media_geometry(ui, 'attachment-photos-grid')
 # Neutral actions must retain white content over a locally dimmed clear-glass backing.
 ui.capture('neutral-glass-actions')
 tap('attachment-photo-0')
 tap('attachment-photo-2')
 count(2)
-ui.capture('selected-top-corners-white-numbers')
-# Exercise repeated resizing while selected; native checks guard cell identity
-# during the transition, and this recording covers the production overlay hosts.
-for _ in range(2):
-    for mode in ['inset', 'edgeToEdge']:
-        layout(mode)
-        count(2)
-        fourth_row = [ui.element('attachment-photo-' + str(i))['frame'] for i in [9, 10, 11]]
-        assert max(rect['y'] for rect in fourth_row) - min(rect['y'] for rect in fourth_row) < 1
-        assert fourth_row[0]['x'] < fourth_row[1]['x'] < fourth_row[2]['x']
-ui.capture('selected-after-repeated-resizing')
+ui.capture('selected-top-corners-contrasting-numbers')
+assert not any(i.get('AXUniqueId') == 'attachment-photos-layout' for i in ui.state()), 'Removed layout toggle is still visible'
 tap('attachment-photo-0')
 tap('attachment-photo-2')
 count(0)
@@ -86,10 +68,6 @@ for item in [row[0], row[-1]]:
     ui.axe('tap', '-x', str(rect['x']+rect['width']/2), '-y', str(y), '--tap-style', 'physical', '--post-delay', '.6')
 count(2)
 ui.capture('selected-corners-partially-scrolled')
-layout('inset')
-count(2)
-ui.capture('selected-inset-scrolled')
-layout('edgeToEdge')
 tap(row[0]['AXUniqueId'])
 count(1)
 ui.capture('selection-renumbered')
@@ -98,4 +76,7 @@ ui.wait(lambda items: not any(i.get('AXUniqueId') == 'attachment-photos-confirm'
 assert ui.element(field).get('AXValue') == draft, 'Photo import changed the draft'
 ui.wait(lambda items: any((i.get('AXLabel') or '').startswith(prefix) and i.get('AXLabel') not in initial_attachments for i in items), 'Selected photo did not reach the draft')
 ui.capture('selected-photo-attached')
-print('PASS: repeated edge/inset resizing, retained selection, both top corners, partial scroll, renumbering and draft-preserving import')
+photo_label = next(item['AXLabel'] for item in ui.state() if (item.get('AXLabel') or '').startswith(prefix) and item.get('AXLabel') not in initial_attachments)
+tap(field)
+check_composer_attachment_targets(ui, field, photo_label)
+print('PASS: small-rounded inset grid, retained selection, both top corners, partial scroll, renumbering and draft-preserving import')

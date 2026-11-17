@@ -38,6 +38,7 @@ import {
   themeRadius,
   themeSpace,
 } from '../../style/theme-scale.stylex';
+import { type ComposerInputElement, getComposerSelection } from '@/ui/mention/composer-input';
 
 const styles = stylex.create({
   /* The hint button. */
@@ -216,9 +217,9 @@ export interface ChatLandingViewProps {
   /** Callback when prompt changes */
   onPromptChange: (value: string) => void;
   /** Callback for prompt keydown events */
-  onPromptKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onPromptKeyDown?: (event: KeyboardEvent<ComposerInputElement>) => void;
   /** Callback for prompt paste events */
-  onPromptPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
+  onPromptPaste?: (event: ClipboardEvent<ComposerInputElement>) => void;
   /** Callback when files are dropped onto the composer */
   onImageDrop?: (files: File[]) => void;
   /** Placeholder text for the prompt textarea */
@@ -227,7 +228,7 @@ export interface ChatLandingViewProps {
   /** Mobile keyboard action hint for the prompt textarea */
   promptEnterKeyHint?: 'send' | 'enter';
   /** Ref for the prompt textarea */
-  promptRef?: Ref<HTMLTextAreaElement>;
+  promptRef?: Ref<ComposerInputElement>;
   /** Inline pasted text drafts rendered as protected tokens inside the textarea */
   pastedTextDrafts?: PastedTextDraft[];
   /** Callback when pasted text draft ranges change */
@@ -252,8 +253,6 @@ export interface ChatLandingViewProps {
   onFileRetry?: (id: string) => void;
   /** Per-turn MCP selection, rendered inside the composer's "+" menu. */
   mcp?: AttachmentAddMenuMcp;
-  /** @deprecated Use topSelector and footerSelector instead */
-  selector?: ReactNode;
   /** Selector node displayed above the textarea (e.g., repo, branch) */
   topSelector?: ReactNode;
   /** Selector node displayed inside the input footer (e.g., model, mode) */
@@ -384,7 +383,6 @@ export function ChatLandingView({
   onFileRemove,
   onFileRetry,
   mcp,
-  selector,
   topSelector,
   footerSelector,
   bottomBar,
@@ -436,7 +434,7 @@ export function ChatLandingView({
   );
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const handlePromptPasteWithSessionUrl = useCallback(
-    (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    (event: ClipboardEvent<ComposerInputElement>) => {
       const text = event.clipboardData.getData('text/plain');
       // Cmd/Ctrl+Shift+V keeps a conversation URL as a plain link.
       const sessionUrl = text
@@ -450,8 +448,7 @@ export function ChatLandingView({
           });
         } else {
           const target = event.currentTarget;
-          const at = target.selectionStart ?? target.value.length;
-          const replaceEnd = target.selectionEnd ?? at;
+          const { start: at, end: replaceEnd } = getComposerSelection(target);
           if (
             mentionActionsRef.current?.insertSessionMention(sessionUrl.sessionId, {
               at,
@@ -554,7 +551,7 @@ export function ChatLandingView({
       <div {...stylex.props(styles.fallbackDetail)}>{composerCrashed}</div>
       <textarea
         id={isMobile ? 'chat-prompt-mobile' : 'chat-prompt'}
-        ref={promptRef}
+        ref={promptRef as Ref<HTMLTextAreaElement>}
         value={submissionPending ? '' : promptValue}
         onChange={(event) => onPromptChange(event.target.value)}
         onKeyDown={onPromptKeyDown}
@@ -577,7 +574,7 @@ export function ChatLandingView({
         >
           {composerStatusMessage}
         </div>
-      ) : null}{' '}
+      ) : null}
       <div {...stylex.props(styles.fallbackActions)}>
         <div {...stylex.props(styles.fallbackSelectors)}>{selector ?? footerSelector}</div>
         <div {...stylex.props(styles.fallbackActionsEnd)}>
@@ -633,7 +630,7 @@ export function ChatLandingView({
         onFileRetry={submissionPending ? undefined : onFileRetry}
         mcp={mcp}
         topSelector={topSelector}
-        footerSelector={footerSelector ?? selector}
+        footerSelector={footerSelector}
         bottomBar={bottomBar}
         statusMessage={composerStatusMessage}
         statusTone={composerStatusTone}

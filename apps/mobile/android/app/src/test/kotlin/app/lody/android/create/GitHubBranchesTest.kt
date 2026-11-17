@@ -12,7 +12,7 @@ class GitHubBranchesTest {
             calls += url to token
             when {
                 url.contains("/convex/token") -> """{"token":"jwt"}"""
-                url.contains("convex.lody.ai") -> {
+                url == "${app.lody.android.BackendEnvironment.convex}/api/action" -> {
                     assertEquals("workspace", body!!.getJSONArray("args").getJSONObject(0).getString("workspaceId"))
                     """{"status":"success","value":{"success":true,"token":"repo-token"}}"""
                 }
@@ -23,7 +23,7 @@ class GitHubBranchesTest {
         val result = api.load(Credential("login"), "workspace", "Owner/Repo", 1)
         assertEquals(listOf("feature", "main"), result.names)
         assertEquals(listOf("login", "jwt", "repo-token", "repo-token"), calls.map { it.second })
-        assertEquals(listOf("backend.lody.ai", "convex.lody.ai", "api.github.com", "api.github.com"), calls.map { java.net.URI(it.first).host })
+        assertEquals(listOf(java.net.URI(app.lody.android.BackendEnvironment.site).host, java.net.URI(app.lody.android.BackendEnvironment.convex).host, "api.github.com", "api.github.com"), calls.map { java.net.URI(it.first).host })
         assertNull(result.nextPage)
     }
     @Test fun invalidRepositoryIsRejectedBeforeNetwork() = runTest {

@@ -1,6 +1,8 @@
 import { clsx } from 'clsx';
+import { useMySessionScope } from '@/hooks/use-visible-session-metas';
+import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
-import { getSessionGroupTitle, machineSupportsAndroidEmulatorProtocol } from '@lody/shared';
+import { machineSupportsAndroidEmulatorProtocol } from '@lody/shared';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { SessionHistoryAccessBoundary } from './session-history-access-boundary';
 import { useSessionForkCapabilities } from '@/hooks/use-session-fork-capabilities';
@@ -19,7 +21,6 @@ import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
-  Copy,
   Ellipsis,
   FileText,
   Folder,
@@ -34,6 +35,7 @@ import {
   Search,
   Trash2,
   Users,
+  SquareArrowOutUpRight,
 } from 'lucide-react';
 import { CuidaSidebarExpandOutline } from '@lody/ui';
 import { Spinner } from '@lody/ui/spinner';
@@ -1312,6 +1314,13 @@ const SessionDetail = ({
   const localHomeDir = useAtomValue(localHomeDirAtom);
   const user = useAtomValue(userAtom);
   const {
+    members: workspaceMembers,
+    isMultiMember: isMultiMemberWorkspace,
+    isLoading: sharingMembersLoading,
+    error: sharingMembersError,
+    retry: retrySharingMembers,
+  } = useWorkspaceMembers();
+  const {
     accessByMachineId: sharingMachineAccessById,
     accessByProjectKey: sharingProjectAccessByKey,
     machineVisibilityLoading,
@@ -1319,7 +1328,12 @@ const SessionDetail = ({
     showSessionSharing,
     resolve: resolveSessionSharing,
     shareWithTeam: shareSessionWithTeam,
-  } = useSessionSharing();
+  } = useSessionSharing({
+    members: workspaceMembers,
+    membersLoading: sharingMembersLoading,
+    membersError: sharingMembersError,
+    retryMembers: retrySharingMembers,
+  });
   const controlConnectionState = useAtomValue(lodyControlConnectionStateAtom);
   // The local-token route can render before Convex workspace access fills
   // currentWorkspaceIdAtom. The workspace runtime already resolved the same id
@@ -2017,7 +2031,8 @@ const SessionDetail = ({
     () => {
       activateSidebarTab('android-emulator');
       revealRightSidebar();
-    }
+    },
+    'device'
   );
   const workspaceOwnerSession =
     activeTabSession?.parentSessionId || isEmptyConversation ? activeSession : activeTabSession;
@@ -2087,8 +2102,8 @@ const SessionDetail = ({
     [postHog]
   );
 
-  // The window names the conversation group, not whichever tab is active.
-  useDocumentTitle(getSessionGroupTitle(activeSession));
+  // Set document title based on session title
+  useDocumentTitle(activeSession?.title);
 
   useEffect(() => {
     attemptedExternalHistoryRefreshKeysRef.current.clear();
@@ -2402,8 +2417,7 @@ const SessionDetail = ({
     setSessionPinned,
     transferSessionOwner,
   } = useSessionActions();
-  const { members: workspaceMembers, isMultiMember: isMultiMemberWorkspace } =
-    useWorkspaceMembers();
+  const getOwnerAccessReason = useSessionOwnerAccess();
   const handleTransferSessionOwner = useCallback(
     async (targetSessionId: SessionId, nextUserId: string) => {
       try {
@@ -5705,6 +5719,7 @@ const SessionDetail = ({
     ]
   );
 
+  const { currentUserId: myAccountId, ownedMachineIds } = useMySessionScope();
   const visibleMachineIds = useMemo(
     () => new Set(sharingMachineAccessById.keys()),
     [sharingMachineAccessById]
@@ -5730,7 +5745,8 @@ const SessionDetail = ({
       visibleLocalProjectKeys,
       machineVisibilityLoading,
       localProjectVisibilityLoading,
-      currentUserId: user?.id ?? null,
+      currentUserId: myAccountId,
+      ownedMachineIds,
     });
   }, [
     activeSession,
@@ -5744,6 +5760,8 @@ const SessionDetail = ({
     user?.id,
     visibleLocalProjectKeys,
     visibleMachineIds,
+    ownedMachineIds,
+    myAccountId,
   ]);
 
   /* One compact line per SessionDetail render into the crash-report ring
@@ -6087,6 +6105,7 @@ const SessionDetail = ({
         copyMarkdownRequestSeq={viewerTabSaveStates[tab.id]?.copyMarkdownRequestSeq ?? 0}
         sessionLinksEnabled={!!handleNavigateSession}
         defaultHtmlPreview={isMobile}
+        defaultReadOnly={isMobile}
         preferNativeMarkdownSelection={isMobile}
         onAddSelectionToChat={
           activeSession.isArchived
@@ -6311,7 +6330,7 @@ const SessionDetail = ({
     mobileMenuActions.push(
       {
         id: 'copy-path',
-        icon: <Copy {...stylex.props(detailStyles.icon14)} />,
+        icon: <Folder {...stylex.props(detailStyles.icon14)} />,
         label: t('sessions.copyPath', 'Copy path'),
         onClick: () =>
           handleCopyText(
@@ -6339,7 +6358,7 @@ const SessionDetail = ({
     });
     mobileMenuActions.push({
       id: 'copy-deeplink',
-      icon: <Link {...stylex.props(detailStyles.icon14)} />,
+      icon: <SquareArrowOutUpRight {...stylex.props(detailStyles.icon14)} />,
       label: t('sessions.copyDeepLink', 'Copy deeplink'),
       onClick: () => {
         void handleCopyUrl(undefined, undefined, 'deeplink');
@@ -6488,6 +6507,7 @@ const SessionDetail = ({
             isMultiMemberWorkspace && !activeSession.isArchived
               ? {
                   members: workspaceMembers,
+                  getDisabledReason: (userId) => getOwnerAccessReason(activeSession, userId),
                   ownerUserId: activeSession.userId,
                   onSelect: (userId) => {
                     void handleTransferSessionOwner(activeSession.id, userId);

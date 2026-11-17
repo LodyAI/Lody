@@ -1,7 +1,5 @@
 import { SessionPrIcon } from '../src/components/sidebar-row-shared';
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import React, { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';

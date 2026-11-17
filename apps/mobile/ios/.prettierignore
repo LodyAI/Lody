@@ -22,4 +22,6 @@ packages/lexical-swift/Sources/Lexical/Documentation.docc/
 
 packages/lody-core/.build/
 packages/lody-core/.swiftpm/
+packages/cloud-runtime/vendor/upstream-roost/
+packages/cloud-runtime/src/runtime/upstream-roost.js
 apps/macos/Resources/Generated/

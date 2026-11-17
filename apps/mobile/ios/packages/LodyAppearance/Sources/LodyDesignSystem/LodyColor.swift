@@ -5,12 +5,14 @@ import UIKit
 
 /// Semantic colors. Every value follows the trait collection's light / dark style.
 public enum LodyColor {
-    /// Screen background for plain lists and content (iOS systemBackground).
+    /// Screen background for plain lists and content (white / soft dark).
     public static let bgBase = Color(uiColor: LodyUIColor.bgBase)
-    /// Behind grouped lists and cards (iOS systemGroupedBackground).
+    /// Behind grouped lists and cards (grouped light / soft dark).
     public static let bgGrouped = Color(uiColor: LodyUIColor.bgGrouped)
     /// Cards and cells on bg.grouped, sheets, the composer (iOS secondarySystemGroupedBackground).
     public static let bgRaised = Color(uiColor: LodyUIColor.bgRaised)
+    /// Home while it lists archived chats: darker and greyer than bg.base, so the mode reads at a glance.
+    public static let bgArchived = Color(uiColor: LodyUIColor.bgArchived)
     /// Text fields and search bars: a flat translucent fill (iOS search field), no inset.
     public static let bgSunken = Color(uiColor: LodyUIColor.bgSunken)
     /// Custom menus, popovers and toasts; pair with an elevation.
@@ -161,6 +163,7 @@ public enum LodyColor {
         ("bg.base", bgBase),
         ("bg.grouped", bgGrouped),
         ("bg.raised", bgRaised),
+        ("bg.archived", bgArchived),
         ("bg.sunken", bgSunken),
         ("bg.overlay", bgOverlay),
         ("bg.inverse", bgInverse),
@@ -268,9 +271,10 @@ public enum LodyColor {
 
 /// UIKit mirror of `LodyColor` for views that are not SwiftUI.
 public enum LodyUIColor {
-    public static let bgBase = UIColor(lodyLight: 0xFFFFFFFF, dark: 0x000000FF)
-    public static let bgGrouped = UIColor(lodyLight: 0xF2F2F2FF, dark: 0x000000FF)
+    public static let bgBase = UIColor(lodyLight: 0xFFFFFFFF, dark: 0x111113FF)
+    public static let bgGrouped = UIColor(lodyLight: 0xF2F2F2FF, dark: 0x111113FF)
     public static let bgRaised = UIColor(lodyLight: 0xFFFFFFFF, dark: 0x1C1C1CFF)
+    public static let bgArchived = UIColor(lodyLight: 0xE4E4E7FF, dark: 0x0A0A0BFF)
     public static let bgSunken = UIColor(lodyLight: 0x0000000D, dark: 0xFFFFFF1A)
     public static let bgOverlay = UIColor(lodyLight: 0xFFFFFFFF, dark: 0x2B2B2BFF)
     public static let bgInverse = UIColor(lodyLight: 0x1C1C1CFF, dark: 0xFFFFFFFF)

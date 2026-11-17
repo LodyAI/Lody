@@ -24,6 +24,23 @@ class RuntimeOwnerDeviceTest {
         val runtime = withContext(Dispatchers.Main) { WebViewRuntime(scope, WebViewCloudRuntime(instrumentation.targetContext, "DebugRuntime.html")) }
         try { runtime.start(); ready(runtime); block(runtime) } finally { runtime.stop() }
     }
+    @Test fun productionDocumentsInitializeWasmBeforeAcceptingCommands() = runBlocking {
+        for (document in listOf("DataRuntime.html", "NetworkRuntime.html")) {
+            val runtime = withContext(Dispatchers.Main) {
+                WebViewRuntime(scope, WebViewCloudRuntime(instrumentation.targetContext, document))
+            }
+            try {
+                runtime.start()
+                ready(runtime)
+                assertEquals(RuntimeResult.Pong(true), runtime.execute(RuntimeCommand.Ping))
+                assertEquals(emptySet<String>(), (runtime.execute(RuntimeCommand.InspectSchema) as RuntimeResult.Schema).machineIds)
+                assertEquals(0, runtime.state.value.automaticRestarts)
+                if (document == "NetworkRuntime.html") {
+                    assertTrue(runtime.state.value.capabilities.contains("agentProviderAuth"))
+                }
+            } finally { runtime.stop() }
+        }
+    }
     @Test fun creationUsesTypedCommandsAcrossTheWebViewBridge() = runtimeTest { runtime ->
         val options = (runtime.execute(RuntimeCommand.GetCreationOptions(null)) as RuntimeResult.Options).value
         assertEquals("fixture-agent", options.agents.single().id)

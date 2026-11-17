@@ -277,7 +277,6 @@ function StoryShell({ project }: { project: MobileProjectContext }) {
           conversations={conversations}
           labels={{
             backAriaLabel: '返回',
-            allConversationsHeading: '全部对话',
             emptyConversations: '没有匹配的对话',
             settingsTab: '设置',
           }}

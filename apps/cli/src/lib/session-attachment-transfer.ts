@@ -197,6 +197,7 @@ export class SessionAttachmentTransfer {
     workspaceId: WorkspaceId;
     sessionId: SessionId;
     file: UploadableImageFile;
+    signal?: AbortSignal;
   }): Promise<UploadedSessionImage> {
     if (this.encrypted) {
       const result = await this.uploadProtected({
@@ -232,6 +233,7 @@ export class SessionAttachmentTransfer {
         Authorization: `Bearer ${this.token}`,
       },
       body: formData,
+      signal: args.signal,
     });
 
     if (!response.ok) {

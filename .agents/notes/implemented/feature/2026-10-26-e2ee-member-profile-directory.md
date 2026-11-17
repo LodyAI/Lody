@@ -11,7 +11,7 @@ The encrypted workspace ledger previously had no account directory connection, l
 
 ## Decision
 
-The public cloud DTO contains the workspace ID and profile entries with crypto user ID, nullable name and nullable image. It excludes account IDs, email addresses, public keys and roles. The cloud adapter binds completion to the same signed-in account and requested workspace. A separate route effect owns profile availability, account/workspace changes, refresh and unmount; failures retain numbered ledger labels, and the next refresh retries.
+The public cloud DTO contains the workspace ID and account profile entries with crypto user ID, nullable name and nullable image. Account profile entries exclude account IDs, email addresses, public keys and roles. Its optional device entries carry a signing public key and a bounded self-reported display profile; the UI resolves that key through the verified ledger device before attaching it. These labels never grant authorization. The cloud adapter binds completion to the same signed-in account and requested workspace. A separate route effect owns profile availability, account/workspace changes, refresh and unmount; failures retain numbered ledger labels, and the next refresh retries.
 
 The page maps profiles through the verified ledger's current crypto user IDs and membership IDs. It never treats a profile as a member or changes role/verification state. Historical removed-member labels remain numbered when no current directory entry exists. The route no longer maps the signed-in account onto the genesis member just because the device has pinned genesis: a joining device can also hold that pin.
 

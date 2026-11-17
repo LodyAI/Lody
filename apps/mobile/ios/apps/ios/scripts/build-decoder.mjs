@@ -1,8 +1,11 @@
+import { loadBackendConfig } from '../../../../backend-config.mjs';
 import { buildDataRuntime } from '../../../packages/cloud-runtime/scripts/build.mjs';
+import { buildUpstreamRoost } from '../../../packages/cloud-runtime/scripts/build-upstream-roost.mjs';
 import { build } from 'esbuild';
 import { mkdir, writeFile, readFile, copyFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
+await buildUpstreamRoost();
 const result = await build({
   entryPoints: [root + 'runtime/decoder/index.ts'],
   bundle: true,
@@ -16,7 +19,10 @@ await mkdir(output, { recursive: true });
 const markdownRepair = await build({
   // Shared with Android; see shared/markdown-repair/README.md.
   stdin: {
-    contents: await readFile(root + '../../../shared/markdown-repair/entry.js', 'utf8'),
+    contents: await readFile(
+      root + '../../../shared/markdown-repair/entry.js',
+      'utf8',
+    ),
     resolveDir: root,
   },
   bundle: true,
@@ -46,4 +52,9 @@ const license = await readFile(
 await writeFile(output + '/Flock-LICENSE.txt', license);
 console.log('Built isolated Flock decoder');
 
-await buildDataRuntime(output);
+const backends = loadBackendConfig();
+await buildDataRuntime(output, backends);
+await writeFile(
+  root + '.generated/backend-config.json',
+  JSON.stringify(backends),
+);

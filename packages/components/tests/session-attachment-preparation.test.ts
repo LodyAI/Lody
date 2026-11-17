@@ -25,6 +25,8 @@ import type { WorkspaceId } from '@lody/shared';
 import { createWorkspacePendingSends } from '../src/providers/workspace-pending-sends';
 import type { PendingSessionSend, PendingSessionSends } from '../src/lib/session-pending-sends';
 import type { SessionSendRuntime } from '../src/lib/session-send-delivery';
+import { encryptedDispatchSigner } from './helpers/encrypted-dispatch-signer';
+import { initI18n } from '../src/i18n';
 
 const upload = vi.hoisted(() => ({
   run: undefined as undefined | ((file: File, signal: AbortSignal) => Promise<unknown>),
@@ -41,41 +43,50 @@ const local = vi.hoisted(() => ({
   fail: false,
 }));
 vi.mock('../src/lib/electron', () => ({ isElectronRenderer: () => local.enabled }));
-vi.mock('../src/lib/electron-local-attachment', () => ({
-  prepareElectronLocalAttachment: async ({
-    attachment,
-    sessionId,
-    turnId,
-  }: {
-    attachment: { source: Blob; name: string; kind: string; localReferenceId: string };
-    sessionId: string;
-    turnId: string;
-  }) => {
-    if (local.fail) throw new Error('Local handoff failed');
-    local.files.push(await attachment.source.text());
-    return {
-      type: 'local_attachment',
-      referenceId: attachment.localReferenceId,
-      machineId: 'machine',
-      sessionId,
-      turnId,
-      kind: attachment.kind,
-      fileName: attachment.name,
-      mimeType: 'image/png',
-      sizeBytes: attachment.source.size,
-    };
-  },
-}));
 
 const cleanup: Array<() => Promise<void>> = [];
 beforeEach(() => {
   vi.stubGlobal('indexedDB', new IDBFactory());
+  vi.spyOn(electronIpc, 'getIpcServices').mockReturnValue({
+    localProjects: {
+      resolveLocalImage: async () => {
+        throw new Error('Local image snapshot unavailable');
+      },
+      prepareLocalImage: async (args: {
+        workspaceId: string;
+        sessionId: string;
+        machineId: string;
+        imageId: string;
+        fileName: string;
+        mimeType: string;
+        source: { bytes: ArrayBuffer };
+      }) => {
+        expect(args).not.toHaveProperty('turnId');
+        if (local.fail) return { ok: false, error: 'Local handoff failed' };
+        local.files.push(new TextDecoder().decode(args.source.bytes));
+        return {
+          ok: true,
+          image: {
+            imageId: args.imageId,
+            localImageId: args.imageId,
+            transport: 'local',
+            machineId: args.machineId,
+            storageSessionId: args.sessionId,
+            fileName: args.fileName,
+            mimeType: args.mimeType,
+            sizeBytes: args.source.bytes.byteLength,
+          },
+        };
+      },
+    },
+  } as never);
 });
 afterEach(async () => {
   for (const close of cleanup.splice(0)) await close();
   Object.assign(local, { enabled: false, machineId: null, files: [], fail: false });
   upload.run = undefined;
   clearSessionImageCache();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -101,7 +112,7 @@ function fixture(encrypted = false, token: string | null = 'token') {
   };
   const metas = new Map<string, Record<string, unknown>>([
     [getSessionRoomId(SESSION), { id: SESSION, machineId: MACHINE }],
-    [getMachineRoomId(MACHINE), { protocolCapabilities: { localAttachments: 1 } }],
+    [getMachineRoomId(MACHINE), { protocolCapabilities: {} }],
   ]);
   const resources = createSessionSendResources({
     acquire: async (sessionId) => {
@@ -414,21 +425,28 @@ it('retains a failed same-machine image without attempting cloud fallback', asyn
   const f = fixture(false, null);
   upload.run = async (file) => ready(file);
   f.pending.enqueue(send('blocked', ['image.png']));
+  await initI18n('en');
   const held = await failed(f.pending, 'blocked');
   expect(f.turns()).toEqual([]);
-  expect(held.error).toBe('Local handoff failed');
+  // The row tells the sender which step failed and what to do, with the host's reason.
+  expect(held.error).toBe(
+    "Lody on this computer couldn't prepare this attachment (Local handoff failed). Make sure the local agent is running and up to date, then continue sending."
+  );
+  expect(held.attachments[0]?.error).toBe(held.error);
   expect(await held.attachments[0]?.source?.text()).toBe('image.png');
 });
-it('uses transfer for a different machine even from a desktop', async () => {
-  Object.assign(local, { enabled: true, machineId: 'other' });
-  const f = fixture();
-  upload.run = async (file) => ready(file);
-  f.pending.enqueue(send('remote-image', ['remote.png']));
-  await f.delivered('remote-image');
-  expect(local.files).toEqual([]);
-  expect(f.turns()[0]?.items).toEqual(
-    expect.arrayContaining([expect.objectContaining({ type: 'image', imageId: 'remote.png' })])
-  );
+it('uses transfer for a different or unknown desktop local identity', async () => {
+  for (const machineId of ['other', null]) {
+    Object.assign(local, { enabled: true, machineId });
+    const f = fixture();
+    upload.run = async (file) => ready(file);
+    f.pending.enqueue(send('remote-image', ['remote.png']));
+    await f.delivered('remote-image');
+    expect(local.files).toEqual([]);
+    expect(f.turns()[0]?.items).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'image', imageId: 'remote.png' })])
+    );
+  }
 });
 
 it('admits an already prepared local file in an encrypted workspace without uploading it', async () => {
@@ -440,8 +458,14 @@ it('admits an already prepared local file in an encrypted workspace without uplo
     timestamp: '2026-10-27T00:00:00Z',
     items: [{ type: 'text', text: 'local file' }],
     fileDiff: [],
-    inputConfig: { inputBlocks: [{ type: 'text', text: 'local file' }] },
+    // The composer always names its agent; a member host signs only such an input.
+    inputConfig: {
+      inputBlocks: [{ type: 'text', text: 'local file' }],
+      cliType: 'builtin',
+      agentType: 'codex',
+    },
   };
+  const signer = encryptedDispatchSigner();
   const file = {
     type: 'file',
     transport: 'local',
@@ -455,7 +479,12 @@ it('admits an already prepared local file in an encrypted workspace without uplo
     machineId: MACHINE,
   };
   const result = await acceptSessionUserTurn(
-    { ...f.runtime, workspaceId: 'workspace', contentMode: 'e2ee' } as unknown as WorkspaceRuntime,
+    {
+      ...f.runtime,
+      workspaceId: 'workspace',
+      contentMode: 'e2ee',
+      prepareEncryptedDispatch: signer.prepareEncryptedDispatch,
+    } as unknown as WorkspaceRuntime,
     SESSION,
     entry as SessionHistory,
     { kind: 'dispatch' },
@@ -467,6 +496,12 @@ it('admits an already prepared local file in an encrypted workspace without uplo
   expect(f.turns()[0]?.items).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ type: 'file', transport: 'local', fileId: '/local/private.txt' }),
+    ])
+  );
+  // The signed input carries the prepared file, so the machine runs what was signed.
+  expect(signer.signed[0]?.inputConfig.inputBlocks).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ type: 'file', fileId: '/local/private.txt' }),
     ])
   );
 });
@@ -579,48 +614,75 @@ it('sends a same-machine image without cloud authentication or a cloud transfer'
   await until(f.pending, (sends) => sends.length === 0 || sends.some((s) => !!s.error));
   expect(f.turns()[0]?.items).toEqual(
     expect.arrayContaining([
-      expect.objectContaining({ type: 'local_attachment', kind: 'image' }),
+      expect.objectContaining({
+        type: 'image',
+        transport: 'local',
+        machineId: MACHINE,
+        storageSessionId: SESSION,
+        mimeType: 'image/png',
+        sizeBytes: 9,
+        imageId: expect.any(String),
+        localImageId: expect.any(String),
+      }),
       expect.objectContaining({ type: 'text', text: 'keep offline-image' }),
     ])
   );
+  const image = f.turns()[0]?.inputConfig?.inputBlocks?.find((block) => block.type === 'image');
+  expect(image?.imageId).toBe(image?.localImageId);
+  expect(local.files).toEqual(['image.png']);
+  if (!image) throw new Error('Expected a committed image');
+  const identity = { ...image, workspaceId: 'workspace' as WorkspaceId, sessionId: SESSION };
+  const url = peekSessionImageUrl(identity);
+  expect(url).toMatch(/^blob:/);
+  expect(
+    await getSessionImageBlobUrl({
+      ...identity,
+      transport: 'r2',
+      imageId: 'published-image',
+      token: '',
+    })
+  ).toBe(url);
+  clearSessionImageCache();
+  await expect(
+    getSessionImageBlobUrl({
+      ...identity,
+      transport: 'r2',
+      imageId: 'published-image',
+      token: '',
+    })
+  ).rejects.toThrow('Local image snapshot unavailable');
 });
 
-it('retains a same-machine draft when the daemon does not advertise local references', async () => {
+it('sends a same-machine image without daemon capability metadata', async () => {
   Object.assign(local, { enabled: true, machineId: 'machine' });
   const f = fixture(false, null);
   f.metas.set(getMachineRoomId(MACHINE), { protocolCapabilities: {} });
-  f.pending.enqueue(send('old-daemon', ['image.png']));
-  const held = await failed(f.pending, 'old-daemon');
-  expect(held.error).toContain('Update the local daemon');
-  expect(f.turns()).toEqual([]);
-  expect(await held.attachments[0]?.source?.text()).toBe('image.png');
+  f.pending.enqueue(send('no-capabilities', ['image.png']));
+  await f.delivered('no-capabilities');
+  expect(f.turns()[0]?.inputConfig?.inputBlocks).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ type: 'image', transport: 'local', machineId: MACHINE }),
+    ])
+  );
+  expect(local.files).toEqual(['image.png']);
 });
 
-it('passes an original path through the actual native bridge without reading file bytes', async () => {
+it('keeps an original path without host preparation or reading file bytes', async () => {
   const { prepareElectronLocalAttachment } = await vi.importActual<
     typeof import('../src/lib/electron-local-attachment')
   >('../src/lib/electron-local-attachment');
-  const referenceId = crypto.randomUUID();
   const expected = {
     type: 'local_attachment' as const,
-    referenceId,
+    path: '/synthetic/original.txt',
     machineId: 'machine',
-    sessionId: 'session',
-    turnId: 'turn',
     kind: 'file' as const,
     fileName: 'original.txt',
     mimeType: 'text/plain',
     sizeBytes: 9,
   };
-  let request: unknown;
-  const bridge = vi.spyOn(electronIpc, 'getIpcServices').mockReturnValue({
-    localProjects: {
-      prepareLocalAttachment: async (payload: unknown) => {
-        request = payload;
-        return { ok: true, attachment: expected };
-      },
-    },
-  } as never);
+  const bridge = vi.spyOn(electronIpc, 'getIpcServices').mockImplementation(() => {
+    throw new Error('Original paths do not need host preparation');
+  });
   try {
     const source = new Blob(['synthetic']);
     source.arrayBuffer = async () => {
@@ -631,7 +693,6 @@ it('passes an original path through the actual native bridge without reading fil
         workspaceId: 'workspace',
         sessionId: 'session',
         machineId: 'machine',
-        turnId: 'turn',
         signal: new AbortController().signal,
         attachment: {
           id: 'draft',
@@ -641,16 +702,9 @@ it('passes an original path through the actual native bridge without reading fil
           mimeType: 'text/plain',
           lastModified: 0,
           localSourcePath: '/synthetic/original.txt',
-          localReferenceId: referenceId,
         },
       })
     ).resolves.toEqual(expected);
-    expect(request).toMatchObject({
-      source: { path: '/synthetic/original.txt' },
-      referenceId,
-      turnId: 'turn',
-    });
-    expect((request as { source: unknown }).source).not.toHaveProperty('bytes');
   } finally {
     bridge.mockRestore();
   }
@@ -683,7 +737,7 @@ it('admits same-machine draft attachments without cloud identity', async () => {
     await f.delivered(input.id);
     expect(f.turns()[0]?.items).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ type: 'local_attachment', fileName: 'local.png' }),
+        expect.objectContaining({ type: 'image', transport: 'local', fileName: 'local.png' }),
       ])
     );
   } finally {

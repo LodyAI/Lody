@@ -9,6 +9,33 @@ permission requests, failures, and unread replies remain visible from the list.
 Tabs stay inside their conversation; independently opened child conversations
 retain their own status.
 
+In Chats’ project grouping, scrolling reveals a project icon index over the
+full-width list. Tap or slide through its icons to jump between visible groups;
+it hides after scrolling and interaction stop. An opaque capsule keeps the icons
+legible over conversation rows. Time/status grouping, search, and conversation
+pages keep their existing scrolling.
+
+iOS keeps application icon selection under Settings → Preferences. Android's
+settings home follows iOS's account, personal, workspace, conversation and
+additional sections; unfinished detail pages remain explicitly unavailable.
+Neither native client exposes a standalone Machines entry, MCP server management,
+Memory, or a separate Appearance page in settings. Agents keeps machine selection
+inside its own page, above the selected machine's provider list.
+Developer Mode is the last switch on the Settings home. With it on, a Roost
+switch appears directly below it; both clients then use Roost for new
+conversations when the selected machine supports it. Existing conversations retain
+their history backend.
+
+Workspace lists retain encrypted workspaces with a lock. Native clients currently
+require Lody Desktop to open them. Each backend's local encryption pins survive
+logout and restart and reject plaintext downgrades. New workspaces remain blocked
+until `e2eeWorkspaces:describe` confirms plaintext or explicitly admits an ordinary
+legacy workspace. A failed mode query shows a retry button; retry preserves login
+and the selected workspace. Mode queries share a six-second budget with at most
+four requests in flight and skip pinned encrypted workspaces. Plaintext cache
+writes are optional and cannot revoke successful online admission. Native creation,
+Outbox writes, Share export and attachment uploads all check plaintext admission.
+
 The clients are under active development. This source import does not establish
 an App Store, Play Store, or TestFlight release for this repository. The mobile
 clients currently use Lody Cloud; they are not a mobile frontend for the OSS
@@ -24,13 +51,14 @@ preserved; [ChatKit](https://github.com/Innei/ChatKit) remains a pinned submodul
 
 ## Repository layout
 
-| Directory | Purpose |
-| --- | --- |
-| [ios/](ios/README.md) | Swift/UIKit and SwiftUI client; XcodeGen, SwiftPM, and a separate pnpm workspace |
-| [android/](android/README.md) | Kotlin/Jetpack Compose client; Gradle and an npm-built protocol runtime |
-| `shared/markdown-repair/` | Markdown repair entry used by both clients |
+| Directory                     | Purpose                                                                          |
+| ----------------------------- | -------------------------------------------------------------------------------- |
+| [ios/](ios/README.md)         | Swift/UIKit and SwiftUI client; XcodeGen, SwiftPM, and a separate pnpm workspace |
+| [android/](android/README.md) | Kotlin/Jetpack Compose client; Gradle and an npm-built protocol runtime          |
+| `shared/markdown-repair/`     | Markdown repair entry used by both clients                                       |
 
-Appearance code, icons, and fonts are owned by each platform. The former shared
+Appearance code and icons are owned by each platform. iOS uses system fonts,
+including system monospaced fonts for code; Android bundles Inter and JetBrains Mono. The former shared
 design generator and preview project are not included. iOS keeps the existing
 `LodyDesignSystem` module API in `ios/packages/LodyAppearance`; Android keeps its
 appearance sources and resources under `android/app/src/main`.
@@ -45,6 +73,39 @@ git submodule update --init --recursive apps/mobile/ios/packages/chat-kit
 
 Mobile has independent dependency locks and toolchains. The root `pnpm install`,
 `pnpm check`, and desktop build do not install or validate the native clients.
+
+### Backend configuration
+
+Both clients read the optional, Git-ignored `apps/mobile/.env.local` at build
+configuration time. Copy `.env.example` in this directory to `.env.local` and
+set client-facing HTTPS origins:
+
+```dotenv
+CONVEX_URL=https://rpc.example.com
+CONVEX_SITE_URL=https://auth.example.com
+CF_WORKER_URL=https://worker.example.com
+```
+
+These are illustrative overrides; production defaults are owned by `backend-config.mjs`.
+Missing or empty values use those defaults.
+Process environment variables take precedence over the file. Configure all three
+for a fully local stack: Convex RPC, Convex HTTP Actions/auth, and CF Worker are
+separate interfaces. Do not copy server-internal HTTP addresses or secrets into
+this file. Files are parsed as data, not sourced as shell scripts.
+
+Use your local stack's public TLS endpoints and configure device trust for its
+CA; certificate verification is not bypassed. The host must be reachable from
+the selected simulator/device. A limited Worker ingress relay does not replace
+Worker upload/R2 routes. Streams endpoints still come from backend grants.
+
+After changes, regenerate/build iOS (`pnpm prebuild` from `ios/`) or rebuild
+Android with Gradle. Endpoint tuples select separate credential/cache namespaces;
+the production tuple retains existing production data. These values are built
+into the app, not read from the developer machine when the app launches.
+Roost history caches and pending inputs use the same endpoint namespace in
+addition to the account and workspace.
+Provider callback registrations must permit the selected auth origin; changing
+client endpoints does not configure OAuth providers or the backend itself.
 
 ### iOS
 
@@ -74,6 +135,60 @@ cd ..
 
 See the [Android README](android/README.md) for device setup and runtime ownership.
 
+## Conversation images
+
+Agents can send images into a conversation (`image` / `image_group` items, for
+example through an image upload tool). Both clients render them the same way:
+
+- One image is a rounded card at its own aspect ratio. Images that only tool work
+  separates (an image group, adjacent images or repeated upload calls) fan into
+  one stack of uniform cards, placed where the first image was; the tool rows
+  between them follow it. Prose ends a stack.
+- Swiping the top card left sends it to the back and brings up the next image;
+  swiping right brings the previous one back. A counter shows the position, and
+  VoiceOver / TalkBack actions move through the stack. A tap opens the viewer at
+  the top image, and the stack keeps the image the reader ended on.
+- The full-screen viewer pages through the images, zooms with pinch and double
+  tap, and toggles its controls with a tap. Swiping down (or up) closes it. A long
+  press, or the share button, offers Copy, Save and Share. These always read the
+  original image, never the 768 px thumbnail the cards use.
+
+iOS (`ChatTranscript.stackImages`, `ChatImageStackCell`, `ChatImagePreview`)
+pages through every image in the conversation, flies the photo back into its
+card on a swipe-down close, and saves with the Photos add-only permission
+(`NSPhotoLibraryAddUsageDescription`). The Photos change block runs on the
+framework's queue without main-actor isolation; completion and error feedback
+remain on the main actor.
+
+Android (`TurnLayout`, `chat/ImageViews`, `chat/SessionImages`) pages through the
+images of the turn. `SessionImageHttp` reads the Worker session-images endpoints
+with the verified account bearer, no redirects and a bounded body;
+`SessionImageSource` keeps decoded bitmaps in a process memory cache. Copy and
+Share hand a cache copy out through the `${applicationId}.images` FileProvider;
+Save writes to MediaStore `Pictures/Lody` without a storage permission and is
+offered on Android 10 and later.
+
+## Push notifications
+
+Both native clients select their push provider from the authenticated backend's
+`pushSubscriptions:configuration` response. `selfHostedEnabled: true` selects
+APNs on iOS or FCM on Android; `false` selects OneSignal. A failed configuration
+read is not permission to switch providers. OneSignal uses the original verified user ID as its external identity, unchanged;
+notification recipients and local account checks use that same user ID.
+
+Provider configuration does not enroll offline devices. Open the updated app and
+sign in to register with the selected provider. Direct push registration is bound
+to the authenticated login session, not just the account. Keep server credentials
+out of either native build. Delivery is best effort; successful registration or a
+provider acceptance does not prove the device displayed an alert.
+
+See [iOS push setup](ios/apps/ios/PUSH_NOTIFICATIONS.md) and
+[Android setup](android/README.md) for public client configuration and device
+verification. The [push boundary decision](../../.agents/notes/implemented/architecture/2026-10-16-direct-push-client.md#native-mobile-clients)
+explains provider identity and lifecycle ownership. These native clients are
+independent of the shared Web/Capacitor client; adopting them does not update that
+client's provider implementation.
+
 ## Licenses and acknowledgements
 
 The imported iOS client and shared cloud-runtime code retain their
@@ -85,7 +200,9 @@ this import does not relicense them under the repository’s root license.
 
 Please also see the [iOS acknowledgements](ios/README.md#acknowledgements) for
 FlowDown, unixzii, MarkdownView, Litext, Loro, AXe, baguette, and other contributors.
-Inter, JetBrains Mono, and Lucide notices accompany the native appearance assets.
+Android’s Inter and JetBrains Mono notices accompany its bundled fonts. Lucide
+notices accompany the native icon assets; iOS retains its imported font notices
+as attribution history.
 
 The imported platform `AGENTS.md` files retain their existing detailed native
 contracts with explicit word-budget exceptions. Splitting those contracts is

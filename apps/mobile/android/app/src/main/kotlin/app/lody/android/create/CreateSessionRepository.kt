@@ -10,6 +10,9 @@ interface CreationOptionsStore {
     suspend fun writeBranches(scope: RuntimeScope, repo: String, page: BranchPage) {}
     suspend fun selectBranch(scope: RuntimeScope, repo: String, name: String) {}
 
+    suspend fun readRunConfigs(scope: RuntimeScope): RunConfigPrefs? = null
+    suspend fun writeRunConfigs(scope: RuntimeScope, value: RunConfigPrefs) {}
+
     suspend fun readOptions(scope: RuntimeScope, projectId: String?): CreationOptions?
     suspend fun writeOptions(scope: RuntimeScope, projectId: String?, options: CreationOptions)
 }
@@ -23,6 +26,9 @@ interface CreationService {
     suspend fun selectBranch(scope: RuntimeScope, repo: String, name: String) {}
 
     suspend fun cachedOptions(scope: RuntimeScope, projectId: String?): CreationOptions? = null
+    /** The last selection per computer and recently used configurations (device-local). */
+    suspend fun runConfigs(scope: RuntimeScope): RunConfigPrefs? = null
+    suspend fun saveRunConfigs(scope: RuntimeScope, value: RunConfigPrefs) {}
     /** The workspace's Agent Roles for the Role row; none where there is no runtime. */
     suspend fun roles(scope: RuntimeScope): List<AgentRole> = emptyList()
     /** One mention category for the composer's @ panel; none where there is no runtime. */
@@ -32,6 +38,8 @@ interface CreationService {
     /** A prompt shortcut's body ({prompt, mentions}) for the composer; none without a runtime. */
     suspend fun shortcut(scope: RuntimeScope, id: String): org.json.JSONObject = throw IllegalStateException("shortcut_unavailable")
     suspend fun options(scope: RuntimeScope, projectId: String?): CreationOptions
+    /** Schedule targets: the agents of every readable computer, online or not (a schedule runs later, as on Web). */
+    suspend fun scheduleOptions(scope: RuntimeScope): CreationOptions = options(scope, null)
     suspend fun create(scope: RuntimeScope, request: CreateRequest): CreationReceipt
 }
 
@@ -71,6 +79,8 @@ class CreateSessionRepository(private val owner: RuntimeOwner, private val store
     override suspend fun selectBranch(scope: RuntimeScope, repo: String, name: String) = store.selectBranch(scope, repo, name)
 
     override suspend fun cachedOptions(scope: RuntimeScope, projectId: String?) = store.readOptions(scope, projectId)
+    override suspend fun runConfigs(scope: RuntimeScope) = store.readRunConfigs(scope)
+    override suspend fun saveRunConfigs(scope: RuntimeScope, value: RunConfigPrefs) = store.writeRunConfigs(scope, value)
     override suspend fun roles(scope: RuntimeScope): List<AgentRole> = owner.use(scope) {
         (it.execute(RuntimeCommand.ListAgentRoles) as RuntimeResult.Roles).value
     }
@@ -89,6 +99,9 @@ class CreateSessionRepository(private val owner: RuntimeOwner, private val store
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { /* Disk failure must not hide live choices. */ }
         value
+    }
+    override suspend fun scheduleOptions(scope: RuntimeScope): CreationOptions = owner.use(scope) {
+        (it.execute(RuntimeCommand.GetCreationOptions(null, includeOffline = true)) as RuntimeResult.Options).value
     }
     override suspend fun create(scope: RuntimeScope, request: CreateRequest): CreationReceipt = owner.use(scope) {
         (it.execute(RuntimeCommand.CreateAndSend(request)) as RuntimeResult.Created).value

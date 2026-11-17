@@ -266,6 +266,7 @@ const styles = stylex.create({
   },
   emptyGrid: {
     display: 'grid',
+    gridAutoRows: 'minmax(40px, 1fr)',
     gridTemplateColumns: {
       default: 'repeat(1, minmax(0, 1fr))',
       '@container empty-panel (min-width: 320px)': 'repeat(2, minmax(0, 1fr))',
@@ -354,8 +355,8 @@ const styles = stylex.create({
   },
   tabList: {
     display: 'flex',
-    width: 'max-content',
-    minWidth: '100%',
+    width: '100%',
+    minWidth: 0,
     height: '40px',
     alignItems: 'center',
     gap: space[1.5],
@@ -368,7 +369,8 @@ const styles = stylex.create({
       default: '180px',
       '@container side-tabs (width < 420px)': '175px',
     },
-    flexShrink: 0,
+    minWidth: '64px',
+    flexShrink: 1,
     alignItems: 'center',
     gap: space[1.5],
     borderRadius: 'var(--radius-md)',
@@ -380,7 +382,10 @@ const styles = stylex.create({
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
   },
   tabPadded: {
-    paddingInline: space[3],
+    paddingInline: '8px',
+  },
+  tabActive: {
+    minWidth: '100px',
   },
   tabCompact: {
     paddingInline: '8px',
@@ -401,12 +406,14 @@ const styles = stylex.create({
     backgroundColor: 'color-mix(in oklab, hsl(var(--ring)) 14%, transparent)',
   },
   // A split pair reads as one tab holding two: `@lody/ui`'s tab-strip tray
-  // with the focused member as its one raised key.
+  // with the focused member as its one raised key. The minimum includes two
+  // 64px tabs, a 2px gap and 4px padding; the active minimum adds 36px.
   group: {
     position: 'relative',
     display: 'flex',
     height: '32px',
-    flexShrink: 0,
+    minWidth: '134px',
+    flexShrink: 1,
     alignItems: 'center',
     gap: '2px',
     padding: '2px',
@@ -419,6 +426,7 @@ const styles = stylex.create({
     backgroundColor: 'color-mix(in oklab, hsl(var(--foreground)) 3.5%, transparent)',
   },
   groupActive: {
+    minWidth: '170px',
     backgroundColor: colors.trayBackground,
   },
   groupDetaching: {
@@ -464,6 +472,7 @@ const styles = stylex.create({
     flexShrink: 0,
   },
   tabLabel: {
+    minWidth: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
@@ -707,6 +716,8 @@ function SidePanelTab({
       role="tab"
       tabIndex={active ? 0 : -1}
       aria-selected={active}
+      aria-label={tab.label}
+      title={tab.label}
       drag={draggable ? 'x' : false}
       dragControls={dragControls}
       dragListener={false}
@@ -733,6 +744,7 @@ function SidePanelTab({
           stylex.defaultMarker(),
           styles.tab,
           tab.closeable ? styles.tabPadded : styles.tabCompact,
+          active && styles.tabActive,
           pillStyle,
           groupRole !== null && styles.groupMember,
           draggable && styles.tabDraggable,
@@ -930,6 +942,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
         axis="horizontal"
         compact
         viewportRef={viewportRef}
+        contentStyle={{ minWidth: 0, width: '100%' }}
         className={stylex.props(styles.viewport).className}
         // The strip sits in the window drag region; Electron hands pointer
         // events over a drag region to the OS, so the track would never see

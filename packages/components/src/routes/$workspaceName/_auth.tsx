@@ -1,4 +1,4 @@
-import { useCloudMutation } from '@lody/platform/react';
+import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { createFileRoute } from '@tanstack/react-router';
 import { AuthenticatedWorkspaceContent } from '@/components/authenticated-workspace-content';
@@ -207,16 +207,25 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
     postHog,
   ]);
 
+  const pushConfiguration = useCloudQuery(
+    cloudOperations.pushSubscriptions.configuration,
+    typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true ? 'skip' : {}
+  );
   const registerPush = useCloudMutation(cloudOperations.pushSubscriptions.register);
   const unregisterPush = useCloudMutation(cloudOperations.pushSubscriptions.unregister);
   useEffect(
-    () => installPushPort({ register: registerPush, unregister: unregisterPush }),
-    [registerPush, unregisterPush]
+    () =>
+      installPushPort({
+        register: registerPush,
+        unregister: unregisterPush,
+        selfHostedEnabled: pushConfiguration?.selfHostedEnabled,
+      }),
+    [registerPush, unregisterPush, pushConfiguration?.selfHostedEnabled]
   );
 
   useEffect(() => {
     const token = session?.session?.token;
-    if (!currentUser || !token) {
+    if (!currentUser || !token || !pushConfiguration) {
       return undefined;
     }
     if (typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true) {
@@ -232,7 +241,7 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
         console.error('Push login failed', loginError);
       }
     }, AUTH_ROUTE_PUSH_LOGIN_IDLE_TIMEOUT_MS);
-  }, [currentUser, session?.session?.token]);
+  }, [currentUser, session?.session?.token, pushConfiguration?.selfHostedEnabled]);
 
   useEffect(() => {
     if (!isNativeIOSAppShell()) {

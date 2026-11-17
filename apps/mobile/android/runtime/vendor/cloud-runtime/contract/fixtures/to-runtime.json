@@ -240,31 +240,7 @@
     "payload": {
       "workspaceId": "workspace-1",
       "userId": "user-1",
-      "kind": "mcp",
-      "remove": {
-        "kind": "mcp",
-        "id": "mcp-1",
-        "name": "Docs",
-        "readOnly": false,
-        "detail": "http",
-        "enabledByDefault": false,
-        "configured": true,
-        "updatedAt": 1700000000000
-      }
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "request",
-    "id": "req-memory",
-    "method": "memorySettings",
-    "payload": {
-      "workspaceId": "workspace-1",
-      "userId": "user-1",
-      "machineId": "machine-1",
-      "action": "import",
-      "memoryId": "memory-1"
+      "kind": "machine"
     }
   },
   {
@@ -289,19 +265,6 @@
         "machineId": "machine-1",
         "agentConfigId": "agent-1"
       }
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "request",
-    "id": "req-shares",
-    "method": "publishedShares",
-    "payload": {
-      "workspaceId": "workspace-1",
-      "userId": "user-1",
-      "action": "list",
-      "cursor": "cursor-1"
     }
   },
   {
@@ -396,34 +359,6 @@
     "v": 1,
     "gen": 3,
     "kind": "request",
-    "id": "req-projects-history",
-    "method": "localProjects",
-    "payload": {
-      "workspaceId": "workspace-1",
-      "browserId": "history-1",
-      "userId": "user-1",
-      "action": "history",
-      "history": {
-        "kind": "import",
-        "target": {
-          "machineId": "machine-1",
-          "machineName": "Studio",
-          "localProjectId": "p1",
-          "projectName": "App",
-          "rootPath": "/Users/dev/app",
-          "provider": {
-            "cliType": "builtin",
-            "agentType": "claude"
-          }
-        },
-        "acpSessionIds": ["acp-1", "acp-2"]
-      }
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "request",
     "id": "req-sharing",
     "method": "sessionSharing",
     "payload": {
@@ -472,6 +407,23 @@
       "command": {
         "action": "start",
         "udid": "00000000-0000-4000-8000-000000000001"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-emulator",
+    "method": "androidEmulatorControl",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "sessionId": "session-1",
+      "userId": "user-1",
+      "command": {
+        "action": "start",
+        "id": "Pixel_8",
+        "quality": "balanced"
       }
     }
   },
@@ -754,6 +706,17 @@
     "method": "probeSchema",
     "payload": {
       "workspaceId": "workspace-1"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "forget-input-1",
+    "method": "forgetPendingInput",
+    "payload": {
+      "sessionId": "session-1",
+      "inputId": "input-1"
     }
   }
 ]

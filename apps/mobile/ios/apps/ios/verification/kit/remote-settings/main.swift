@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 func agent(_ id: String, machine: String? = "m1", name: String? = "Studio", detail: String = "codex", readOnly: Bool? = nil) -> RemoteSetting {
   RemoteSetting(kind: "agent", id: id, name: id.capitalized, machineId: machine, machineName: name, readOnly: readOnly, detail: detail)
@@ -35,14 +36,6 @@ for (failed, connected) in [(true, true), (false, false)] {
   precondition(rows.allSatisfy { $0.status == "unknown" && $0.subtitle.hasPrefix("devices.unknown") }, "Stale presence is never live")
 }
 
-let mcp = RemoteSettingsSections.make(kind: "mcp", items: [
-  RemoteSetting(kind: "mcp", id: "a", name: "github", machineName: "Studio", enabledByDefault: true),
-  RemoteSetting(kind: "mcp", id: "b", name: "sentry", machineName: "Studio", readOnly: true, configured: false),
-], failed: false, connected: true)[0]
-precondition(mcp.rows[0].value == "settings.mcp.defaultOn" && mcp.rows[1].value == "settings.mcp.defaultOff")
-precondition(mcp.rows[1].trailingSymbol == "lock" && mcp.rows[1].subtitle == "Studio · settings.mcp.notConfigured")
-precondition(mcp.footer == "settings.remote.mcpHint")
-
 let subscription = AgentUsage(
   configs: [AgentUsageConfig(id: "codex-one", name: "", provider: "codex", eligible: true),
             AgentUsageConfig(id: "codex-two", name: "", provider: "codex", eligible: true),
@@ -58,7 +51,7 @@ precondition(rings.count == 2 && rings[0].rows.count == 3 && rings[0].headerStat
 precondition(rings[0].header == "Studio · devices.online")
 precondition(rings[0].visual?.type == "quotas" && rings[0].visual?.items.count == 1 && rings[0].visual?.dimmed == false,
              "One ring per provider per machine")
-precondition(rings[0].visual?.items[0].id == "usage:m1:codex:codex:0" && rings[1].visual?.items[0].id == "usage:m2:codex:codex:0")
+precondition(rings[0].visual?.items[0].id == "usage:m1:codex:shared:codex:0" && rings[1].visual?.items[0].id == "usage:m2:codex:shared:codex:0")
 precondition(rings[0].footer == "settings.usage.paceFooter\nsettings.usage.sharedShort")
 let offlinePresence = SettingsMachinePresence(state: "live", onlineMachineIds: [])
 for (failed, connected, presence, footer) in [
@@ -112,12 +105,11 @@ precondition(SavedRemoteSettings.parse(#"{"configs":[]}"#, kind: "agent") == nil
 precondition(SavedRemoteSettings.parse(nil, kind: "agent") == nil)
 
 struct Failure: Error, CustomStringConvertible { let description: String }
-let list = RemoteSettingsRequest(workspaceId: "w", kind: "mcp")
+let list = RemoteSettingsRequest(workspaceId: "w", kind: "agent")
 var edit = list
-edit.edit = RemoteSettingEdit(item: mcp.rows.isEmpty ? saved.items[0] : saved.items[0], name: "x")
-precondition(RemoteSettingsFailure.message(Failure(description: "setting_read_only"), request: list) == "settings.mcp.readOnly")
+edit.edit = RemoteSettingEdit(item: saved.items[0], name: "x")
+precondition(RemoteSettingsFailure.message(Failure(description: "setting_read_only"), request: list) == "settings.remote.readOnly")
 precondition(RemoteSettingsFailure.message(Failure(description: "setting_conflict"), request: edit) == "settings.remote.conflict")
-precondition(RemoteSettingsFailure.message(Failure(description: "mcp_connection_missing"), request: edit) == "settings.mcp.missingConnection")
 precondition(RemoteSettingsFailure.message(Failure(description: "offline"), request: list) == "settings.remote.loadFailed")
 precondition(RemoteSettingsFailure.message(Failure(description: "offline"), request: edit) == "settings.remote.saveFailed")
 let body = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(RemoteSettingsRequest(
@@ -126,3 +118,83 @@ let body = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(RemoteSe
 precondition((body["edit"] as! [String: Any])["enabledByDefault"] == nil && body["remove"] == nil, "Only the kind's fields are sent")
 
 print("PASS: remote settings sections, agent usage rings and pace, saved snapshots, failure mapping")
+
+let scopedQuotas = AgentUsage(configs: [AgentUsageConfig(id: "a", name: "Codex", provider: "codex", eligible: true, rateLimitsAvailable: true)], quotas: [
+  AgentQuota(id: "codex", provider: "codex", agentConfigId: "b", windows: []),
+  AgentQuota(id: "codex", provider: "codex", windows: []),
+  AgentQuota(id: "codex_bengalfox", provider: "codex", agentConfigId: "a", name: "Codex Spark", windows: []),
+])
+precondition(SessionUsageSelection.quota(scopedQuotas, configId: "a", provider: "codex", model: "gpt-5.3-codex") == nil)
+precondition(SessionUsageSelection.quota(scopedQuotas, configId: "a", provider: "codex", model: "gpt-5.3-codex-spark")?.id == "codex_bengalfox")
+precondition(SessionUsageSelection.quota(scopedQuotas, configId: "b", provider: "codex", model: nil) == nil)
+var unsupportedQuotas = scopedQuotas
+unsupportedQuotas.configs[0].rateLimitsAvailable = false
+precondition(SessionUsageSelection.quota(unsupportedQuotas, configId: "a", provider: "codex", model: nil) == nil)
+print("PASS: session quota exact account, model-specific Spark selection and capability gating")
+
+let providerSnapshot = AgentProviderSnapshot(
+  machines: [AgentProviderMachine(id: "m1", name: "Studio", online: true, readOnly: false, supportsSetup: true),
+             AgentProviderMachine(id: "empty", name: "Empty", online: false, readOnly: true)],
+  providers: [AgentProviderItem(id: "codex-one", machineId: "m1", name: "Codex", cliType: "builtin", agentType: "codex")],
+  setups: [], catalog: [])
+let providerSections = AgentProviderSections.make(providerSnapshot, selectedID: "m1", busy: false, usage: ["m1": subscription])
+precondition(providerSections[0].rows[0].id == "provider-machine-picker")
+precondition(providerSections[1].rows[0].menuActions.map(\.id) == ["edit", "refresh", "delete"])
+precondition(providerSections.first { $0.id == "provider-usage" }?.rows.isEmpty == false, "Provider page preserves subscription quota display")
+let emptyProviderSections = AgentProviderSections.make(providerSnapshot, selectedID: "empty", busy: false)
+precondition(emptyProviderSections[1].rows.map(\.id) == ["providers-empty"], "Read-only empty machines remain selectable without create")
+precondition(AgentProviderSections.picker(providerSnapshot.machines, selectedID: "empty")[0].rows.count == 2)
+let staleProviders = AgentProviderSections.make(providerSnapshot, selectedID: "m1", busy: true)
+precondition(staleProviders[1].rows.allSatisfy { $0.menuActions.isEmpty }, "Cached providers cannot authorize mutation actions")
+let refreshingProviders = AgentProviderSections.make(providerSnapshot, selectedID: "m1", busy: true,
+                                                    refreshing: (id: "codex-one", text: "Reading options for GPT-6 Astra (2/7)"))
+precondition(refreshingProviders[1].rows.first { $0.id == "provider:codex-one" }?.subtitle == "Reading options for GPT-6 Astra (2/7)",
+             "A provider being refreshed names the model whose options are being read")
+var mixedSnapshot = providerSnapshot
+mixedSnapshot.providers.append(AgentProviderItem(id: "codex-two", machineId: "m1", name: "Second", cliType: "builtin", agentType: "codex"))
+var mixedUsage = AgentUsage(configs: [
+  AgentUsageConfig(id: "codex-one", name: "First", provider: "codex", eligible: true),
+  AgentUsageConfig(id: "codex-two", name: "Second", provider: "codex", eligible: true),
+], quotas: [
+  AgentQuota(id: "codex", provider: "codex", windows: [UsageWindow(usedPercent: 10)]),
+  AgentQuota(id: "codex", provider: "codex", agentConfigId: "codex-one", windows: [UsageWindow(usedPercent: 40)]),
+  AgentQuota(id: "codex", provider: "codex", agentConfigId: "codex-two", windows: [UsageWindow(usedPercent: 70)]),
+])
+@MainActor func verifyMixedUsage() {
+  let sections = AgentProviderSections.make(mixedSnapshot, selectedID: "m1", busy: true, usage: ["m1": mixedUsage])
+  let rows = sections.first { $0.id == "provider-usage" }!.rows
+  precondition(rows.count == 2 && Set(rows.map(\.id)).count == 2)
+  precondition(Set(rows.compactMap(\.progress)) == Set([0.6, 1 - 0.7]), "Each configured account keeps its own quota")
+  var snapshot = NSDiffableDataSourceSnapshot<String, String>()
+  for section in sections {
+    snapshot.appendSections([section.id])
+    snapshot.appendItems(section.rows.map(\.id), toSection: section.id)
+  }
+  precondition(snapshot.numberOfItems == sections.reduce(0) { $0 + $1.rows.count })
+}
+verifyMixedUsage()
+mixedUsage.quotas.reverse()
+verifyMixedUsage()
+mixedUsage.quotas.removeAll { $0.agentConfigId == "codex-two" }
+let sharedFallback = RemoteSettingsSections.rings(agent("codex-two"), mixedUsage, now: now)
+precondition(sharedFallback.count == 1 && sharedFallback[0].fraction == 0.1, "Legacy shared quota is used only without an exact account quota")
+mixedUsage.quotas.removeAll { $0.agentConfigId == nil }
+precondition(RemoteSettingsSections.rings(agent("codex-two"), mixedUsage, now: now).isEmpty, "Never substitute another account's quota")
+print("PASS: provider machine selection, management gating and mixed shared/configured subscription quotas")
+
+var multiMachineProviders = providerSnapshot
+multiMachineProviders.providers.append(AgentProviderItem(id: "other", machineId: "empty", name: "Other", cliType: "builtin", agentType: "claude"))
+multiMachineProviders.setups = [AgentProviderSetup(id: "other-setup", machineId: "empty", name: "Other setup", agentType: "codex", status: "queued", attempt: 1)]
+var mutation = providerSnapshot
+mutation.providers[0].name = "Renamed"
+let mergedProviders = AgentProviderSections.merging(mutation, into: multiMachineProviders, machineID: "m1")
+precondition(mergedProviders.providers.first { $0.id == "codex-one" }?.name == "Renamed")
+precondition(AgentProviderSections.make(mergedProviders, selectedID: "empty", busy: false)[1].rows.contains { $0.id == "provider:other" }, "Switching machine after mutation retains its provider")
+precondition(mergedProviders.setups.map(\.id) == ["other-setup"], "Mutation retains other-machine setup")
+mutation.providers = []
+let deletedProviders = AgentProviderSections.merging(mutation, into: mergedProviders, machineID: "m1")
+precondition(deletedProviders.providers.map(\.id) == ["other"], "Empty target projection removes the deleted provider")
+mutation.machines.removeAll { $0.id == "empty" }
+let removedMachine = AgentProviderSections.merging(mutation, into: mergedProviders, machineID: "m1")
+precondition(removedMachine.providers.isEmpty && removedMachine.setups.isEmpty, "Removed machines cannot retain cached providers or setups")
+print("PASS: target-machine mutation merge preserves other machines and removes deleted targets")

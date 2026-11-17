@@ -58,6 +58,23 @@ fails open as on macOS. That probe is a process spawn, so it is cached for 30s: 
 monitor's 5s sweep cadence, forcing it would mean roughly 17k `powershell.exe` launches
 a day on an idle daemon.
 
+## Loro's WebAssembly heap
+
+Loro runs in one 32-bit WebAssembly instance, capped at 4 GiB regardless of host memory,
+and every Session doc the daemon caches lives there. None of the host signals above see
+it: a 128 GiB Linux host filled it with no host or cgroup pressure. The idle sweep
+therefore also reads the instance's `WebAssembly.Memory` size
+(`readLoroWasmHeapBytes`). Past `wasmPressureHeapBytes` (3 GiB) the sweep collects
+sessions idle for `wasmPressureIdleTimeoutMs` (2 minutes) instead of 20 minutes, with the
+same eligibility checks. It never refuses a turn.
+
+WebAssembly memory grows and never shrinks; Loro's allocator reuses freed space for later
+documents. Its size is a high-water mark, not live data, so once past the threshold the
+sweep stays aggressive until the daemon restarts. No JavaScript API reports live
+allocation, so a byte cap on loaded documents is not possible yet. The idle clock for a doc
+that only a reader cached is its last hand-out from `getOrCreateSessionDoc`. Rationale:
+[the heap-exhaustion note](../notes/implemented/bug-fix/2026-11-09-loro-wasm-heap-exhaustion.md).
+
 ## Two rules learned from a false refusal
 
 Never act on the cached sample — force a refresh once anything looks like pressure —

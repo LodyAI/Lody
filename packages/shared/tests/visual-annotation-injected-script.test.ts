@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  MANAGED_BROWSER_DOCUMENT_UNLOAD_MESSAGE_TYPE,
   MANAGED_BROWSER_NAVIGATION_REQUEST_MESSAGE_TYPE,
   MANAGED_BROWSER_READY_MESSAGE_TYPE,
   SET_ANNOTATION_MODE_MESSAGE_TYPE,
@@ -138,6 +139,31 @@ describe('visual annotation injected script', () => {
         payload: { url: 'https://example.com/docs' },
       },
       'https://app.example.test'
+    );
+  });
+
+  // Must run before the marked-document test: the unload listener is deliberately
+  // not removable by destroy(), so it outlives that test in this shared window.
+  it('does not send unload signals from application previews', () => {
+    const postMessage = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {});
+    installInjectedScript();
+    window.dispatchEvent(new Event('pagehide'));
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: MANAGED_BROWSER_DOCUMENT_UNLOAD_MESSAGE_TYPE }),
+      expect.anything()
+    );
+  });
+
+  it('signals the parent when page script unloads a marked static document', () => {
+    document.documentElement.setAttribute(STATIC_HTML_PREVIEW_DOCUMENT_MARKER, 'true');
+    const postMessage = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {});
+    installInjectedScript();
+    // Page script cannot switch the signal off through the exposed inspector API.
+    window.__lodyVisualCommentInspector?.destroy();
+    window.dispatchEvent(new Event('pagehide'));
+    expect(postMessage).toHaveBeenCalledWith(
+      { type: MANAGED_BROWSER_DOCUMENT_UNLOAD_MESSAGE_TYPE },
+      '*'
     );
   });
 

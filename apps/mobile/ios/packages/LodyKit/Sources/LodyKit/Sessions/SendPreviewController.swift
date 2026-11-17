@@ -4,6 +4,7 @@ import UIKit
 final class SendPreviewController: SessionController {
   private let fixture: SendPreviewFixture
   private let controls = UIStackView()
+  private let headerPreview: Bool
   private let statusLabel = UILabel()
   private let queueLabel = UILabel()
   private let requestLabel = UILabel()
@@ -16,10 +17,22 @@ final class SendPreviewController: SessionController {
       longContext: params["longContext"] as? Bool == true
     ))
     self.fixture = fixture
+    let headerPreview = params["headerPreview"] as? Bool == true
+    self.headerPreview = headerPreview
+    var environment = fixture.environment
+    // Visual fixtures must not restore pending sends from the durable send tests.
+    if headerPreview { environment.store = { _, _ in nil } }
     super.init(
       sessionId: SendPreviewFixture.sessionId,
-      source: SessionSource(changes: [SendPreviewFixture.change], read: { fixture.state }, write: { _, _, _ in }),
-      feed: fixture.feed, environment: fixture.environment
+      source: SessionSource(changes: [SendPreviewFixture.change], read: {
+        var state = fixture.state
+        if headerPreview {
+          state.userId = "ui-header-preview"
+          state.catalog.machineNames["fixture"] = "Studio MacBook Pro"
+        }
+        return state
+      }, write: { _, _, _ in }),
+      feed: fixture.feed, environment: environment
     )
   }
 
@@ -51,6 +64,7 @@ final class SendPreviewController: SessionController {
     if fixture.record == nil, !options.queue, !options.longContext {
       chat.setInitialAttachments(#"[{"id":"fixture-file","name":"fixture.txt","uri":"file:///tmp/lody-ui-fixture.txt","kind":"file"}]"#)
     }
+    if headerPreview { return }
     var buttons: [(String, String, () -> Void)] = [
       ("send-connect", "Live", { [weak self] in self?.fixture.connect() }),
       ("send-complete", "Ack", { [weak self] in self?.fixture.complete(failure: false) }),

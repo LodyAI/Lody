@@ -43,7 +43,7 @@ private final class ComposerHandoffPOCController: UIViewController {
   override func viewDidLoad() {
     super.viewDidLoad()
     title = "Composer Relay POC"
-    view.backgroundColor = .systemGroupedBackground
+    view.backgroundColor = .lodyGroupedBackground
     navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in self?.onClose?() })
     let description = UILabel()
     description.text = "One composer. Change pages, then send.\nOffline preview only."
@@ -100,7 +100,7 @@ private final class ComposerHandoffPOCController: UIViewController {
     }
     let source = UIViewController()
     source.title = "New conversation"
-    source.view.backgroundColor = .systemGroupedBackground
+    source.view.backgroundColor = .lodyGroupedBackground
     source.navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .cancel, primaryAction: UIAction { [weak self] _ in
       self?.moving = false
       self?.sheet?.dismiss(animated: true)

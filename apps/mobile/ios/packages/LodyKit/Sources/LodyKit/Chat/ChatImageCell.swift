@@ -4,6 +4,10 @@ import UIKit
 final class ChatImageCell: UICollectionViewCell {
   private var photo = UIImageView()
   var compact = false
+  /// Stack cards crop to their uniform card instead of letterboxing inside it.
+  var fills = false {
+    didSet { photo.contentMode = fills ? .scaleAspectFill : .scaleAspectFit }
+  }
   private let spinner = UIActivityIndicatorView(style: .medium)
   private let failure = UILabel()
   private var image: ChatImage?

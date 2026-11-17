@@ -2,7 +2,8 @@ import AVFoundation
 import UIKit
 
 /// The target Mac's DeviceKit bezel and geometry, in PNG pixels. Without it the
-/// display is shown alone; a drawn body would misstate the real hardware.
+/// display is shown alone; a drawn body would misstate the real hardware. Android
+/// emulators have no artwork and show a plain rounded screen.
 struct SimulatorExterior {
   let size: CGSize
   let screen: CGRect
@@ -10,8 +11,8 @@ struct SimulatorExterior {
   let buttons: [(id: String, frame: CGRect)]
   let image: UIImage?
 
-  static func plain(_ size: CGSize) -> SimulatorExterior {
-    SimulatorExterior(size: size, screen: CGRect(origin: .zero, size: size), radius: 0, buttons: [], image: nil)
+  static func plain(_ size: CGSize, radius: CGFloat = 0) -> SimulatorExterior {
+    SimulatorExterior(size: size, screen: CGRect(origin: .zero, size: size), radius: radius, buttons: [], image: nil)
   }
 }
 

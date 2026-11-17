@@ -1,10 +1,18 @@
 import { build } from 'esbuild';
+import { defaults } from '../../../../backend-config.mjs';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-export async function buildDataRuntime(output) {
+export async function buildDataRuntime(
+  output,
+  backends = { ...defaults, STORAGE_SUFFIX: '' },
+) {
   const result = await build({
+    define: {
+      LODY_MOBILE_WORKER_URL: JSON.stringify(backends.CF_WORKER_URL),
+      LODY_MOBILE_STORAGE_SUFFIX: JSON.stringify(backends.STORAGE_SUFFIX),
+    },
     plugins: [
       {
         name: 'bundled-loro-wasm',
@@ -38,6 +46,7 @@ export async function buildDataRuntime(output) {
     StreamsCrdt: '@loro-dev/streams-crdt',
     StreamsClient: '@loro-dev/streams-client',
     Fzstd: 'fzstd',
+    Immer: 'immer',
   })) {
     await writeFile(
       output + '/' + name + '-LICENSE.txt',

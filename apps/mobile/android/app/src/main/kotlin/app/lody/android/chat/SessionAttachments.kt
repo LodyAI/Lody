@@ -53,7 +53,7 @@ internal class SessionAttachmentUploads(private val resolver: ContentResolver) {
         items.map { item ->
             coroutineContext.ensureActive()
             val kind = if (item.image) "image" else "file"
-            val base = "https://api.lody.ai/api/workspaces/${segment(workspace)}/session-${if (item.image) "images" else "files"}"
+            val base = "${app.lody.android.BackendEnvironment.worker}/api/workspaces/${segment(workspace)}/session-${if (item.image) "images" else "files"}"
             val result = if (item.image) uploadImage(token, base, session, item) else uploadFile(token, base, session, item)
             val block = result.optJSONObject(kind)
             val id = block?.optString(if (item.image) "imageId" else "fileId").orEmpty()
@@ -205,6 +205,10 @@ internal class SessionAttachmentUploads(private val resolver: ContentResolver) {
         const val IMAGE_LIMIT = 5L * 1024 * 1024
         const val FILE_LIMIT = 100L * 1024 * 1024
         const val PART_SIZE = 16 * 1024 * 1024
+
+        /** Web's composer limit: a file (or a video, which uploads as one) over 100 MB is refused when picked. */
+        fun oversized(item: PendingAttachment): Boolean = !item.image && item.size > FILE_LIMIT
+        const val FILE_LIMIT_MB = (FILE_LIMIT / (1024 * 1024)).toInt()
 
         fun segment(value: String): String = URLEncoder.encode(value, "UTF-8").replace("+", "%20")
 

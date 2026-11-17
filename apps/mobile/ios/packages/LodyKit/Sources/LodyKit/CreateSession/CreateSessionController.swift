@@ -24,7 +24,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
   var onSelection: ((CreateSessionForm) -> Void)?
   var onSubmit: ((CreateSessionDraft?, [String: Any]) -> Void)?
   var onCancel: (() -> Void)?
-  var showMessage: ((String) -> Void)?
+  var showMessage: ((String, LodyToastKind) -> Void)?
   var restoreDraft: ((Int) -> Void)?
   private(set) var sending = false
   /// Pushed full screen: lead with a back button instead of the sheet's close button.
@@ -79,6 +79,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     dismissKeyboard.delegate = self
     view.addGestureRecognizer(dismissKeyboard)
     panelState.onPick = { [weak self] id, option in self?.optionPicked(id, option) }
+    panelState.onRetry = { [weak self] in self?.load() }
     panelState.onWorktree = { [weak self] on in
       guard let self, !self.sending else { return }
       self.form.current.worktree = on
@@ -177,18 +178,20 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
       if panelState.panel != panel { panelState.panel = panel }
       let rows = CreateSessionContext.runConfig(form)
       if panelState.runConfig != rows { panelState.runConfig = rows }
+      let recents = CreateSessionContext.recents(form)
+      if panelState.recents != recents { panelState.recents = recents }
     }
     renderComposer()
   }
 
   /// Web's run-config sheet from the composer chip: Agent (when there is a choice), Model,
-  /// Reasoning and Mode rows that expand in place.
+  /// Reasoning and Mode rows that expand in place, then the Plan and Fast switches when offered.
   private func presentRunConfig() {
     guard !sending, runConfigSheet == nil, !panelState.runConfig.isEmpty else { return }
     view.endEditing(true)
     panelState.openInSheet = nil
     let sheet = UIHostingController(rootView: CreateRunConfigSheet(state: panelState))
-    var contentHeight = CGFloat(panelState.runConfig.count) * (LodySize.controlMd + LodySpacing.xs * 2)
+    var contentHeight = CGFloat(panelState.runConfig.count + panelState.recents.count) * (LodySize.controlMd + LodySpacing.xs * 2)
       + LodySpacing.xl + LodySize.controlMd + LodySpacing.lg
     sheet.rootView = CreateRunConfigSheet(state: panelState, onHeightChange: { [weak sheet] height in
       guard height > 0, abs(contentHeight - height) > 1 else { return }
@@ -231,6 +234,11 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
       composerOptionChanged(["modelId": form.current.choice.modelId ?? "", "effort": option])
     case ("permission", _):
       composerOptionChanged(["permissionId": option])
+    case ("fast", _):
+      composerOptionChanged(["fast": option == CreateSessionContext.toggleOn])
+    case ("plan", _):
+      form.updateChoice(CreateLogic.withPlanMode(form.current.capability, form.current.choice, enabled: option == CreateSessionContext.toggleOn))
+      changed()
     case ("project", _):
       guard let project = form.projects.first(where: { $0.id == option }) else { return pickProject() }
       apply(project)
@@ -242,6 +250,11 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     case ("role", _):
       form.selectRole(option == CreateSessionContext.roleNoneOption ? nil : option)
       changed()
+    case (CreateSessionContext.recentRow, _):
+      form.selectRecent(option)
+      changed()
+      // A recent entry is a terminal "run it like this" choice (web closes its menu).
+      runConfigSheet?.dismiss(animated: true)
     default:
       break
     }
@@ -292,6 +305,9 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     onSelection?(form)
   }
 
+  /// The last options read failed; the host reads again when the runtime comes back.
+  var optionsFailed: Bool { form.current.failed }
+
   func load(background: Bool = false) {
     guard !sending else { return }
     if !background {
@@ -337,21 +353,6 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
       guard let roles = try? await self?.loadRoles?(), let self, !Task.isCancelled else { return }
       self.form.roles = roles
       self.render()
-    }
-  }
-
-  private func rowPressed(_ id: String) {
-    guard !sending else { return }
-    let page = form.current
-    switch id {
-    case "project": pickProject()
-    case "machine", "agent":
-      guard !page.failed, page.options != nil, !page.machines.isEmpty else { return load() }
-      if id == "agent" && page.agents.isEmpty { return load() }
-      id == "machine" ? pickMachine() : pickAgent()
-    case "model": pickModel()
-    case "branch": pickBranch()
-    default: break
     }
   }
 
@@ -534,10 +535,11 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     }
     if !form.deferUnresolved && form.current.github && form.current.branch.trimmingCharacters(in: .whitespaces).isEmpty {
       restore()
-      message(String(localized: "create.toast.branchRequired", bundle: .lody))
+      message(String(localized: "create.toast.branchRequired", bundle: .lody), kind: .warning)
       return false
     }
     form.updateChoice(form.current.choice)
+    if draft != nil { form.recordRecent() }
     if let value = form.prefs { onPrefs?(value) }
     sending = true
     renderComposer()
@@ -556,8 +558,8 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     if let restoreDraft { restoreDraft(restoreToken) } else { composer.restoreDraft(token: restoreToken) }
   }
 
-  func message(_ text: String) {
-    if let showMessage { return showMessage(text) }
+  func message(_ text: String, kind: LodyToastKind = .error) {
+    if let showMessage { return showMessage(text, kind) }
     let alert = UIAlertController(title: text, message: nil, preferredStyle: .alert)
     alert.addAction(UIAlertAction(title: String(localized: "common.ok", bundle: .lody), style: .default))
     present(alert, animated: true)

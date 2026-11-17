@@ -27,6 +27,7 @@ import {
   WorkspaceKeyReceptionNotice,
   type KeyReceptionWait,
 } from '../components/workspace-key-reception-notice';
+import { WorkspaceHostIdentityNotice } from '../components/workspace-host-identity-notice';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { LODY_PRESENCE_HEARTBEAT_MS, type MachineId, type WorkspaceId } from '@lody/shared';
@@ -94,7 +95,9 @@ import {
   type WorkspaceModeEvidence,
 } from '@/lib/e2ee-workspace-storage';
 import {
+  assertNoRetainedEncryptedIdentity,
   describeAuthenticatedWorkspace,
+  type HostIdentityStall,
   waitForWorkspaceContentAdmission,
   isWorkspaceModeRejection,
   WORKSPACE_MODE_ADMISSION_TIMEOUT_MS,
@@ -154,9 +157,12 @@ const resolveRuntimeEagerSyncSurface = (): EagerSyncSurface => {
 export function RuntimeProvider({ children }: { children: ReactNode }) {
   const platform = usePlatform();
   const { t } = useTranslation();
-  const [snapshotRecoveryWorkspace, setSnapshotRecoveryWorkspace] = useState<string | null>(null);
   const [keyUpdateWorkspace, setKeyUpdateWorkspace] = useState<string | null>(null);
   const [keyReceptionWait, setKeyReceptionWait] = useState<KeyReceptionWait | null>(null);
+  // Non-terminal: the workspace stays open and unclassified while the host is re-asked.
+  const [hostIdentityWait, setHostIdentityWait] = useState<
+    (Omit<HostIdentityStall, 'error'> & { workspaceId: string }) | null
+  >(null);
   const retryKeyUpdateRef = useRef<() => void>(() => {});
   // Use workspaceSlug for runtime initialization (available immediately from URL)
   // Use workspaceId for WebSocket connections (requires server response)
@@ -396,6 +402,23 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const knownEncryptedRef = useRef(knownEncrypted);
   knownEncryptedRef.current = knownEncrypted;
   const savedModeErrorType = savedMode.error ? describeErrorType(savedMode.error) : null;
+  // An encrypted workspace always syncs through the cloud, so the Run local agent
+  // setting (`cloud` <-> `dual`) never changes its runtime: keying the effect on the
+  // platform mode would tear down and reopen its native reader for nothing while the
+  // local agent starts. A verified plaintext descriptor wins over encrypted listing
+  // hints, and ordinary workspaces keep following the setting.
+  const verifiedDescriptor = effectiveWorkspaceId
+    ? savedMode.evidence.get(effectiveWorkspaceId)?.descriptor
+    : undefined;
+  const runtimeSyncMode =
+    modeCloud &&
+    knownEncrypted &&
+    !(verifiedDescriptor && !isEncryptedDescriptor(verifiedDescriptor))
+      ? 'cloud'
+      : platform.sync.mode;
+  // Only a dual runtime waits for the first setting snapshot; its arrival must not
+  // restart a cloud-only (or encrypted) runtime that never waited for it.
+  const runtimeSettingReady = runtimeSyncMode !== 'dual' || localAgentRuntimeReady;
   useWorkspaceModeProofPrefetch(platform, modeCloud ? accountId : null, workspaceSlug);
   const effectiveWorkspaceIdSource = isLocalPlatform
     ? effectiveWorkspaceId
@@ -572,7 +595,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     // dual local-first runtime or a cloud-only control runtime. Wait for that
     // first snapshot so a persisted opt-out never opens the local socket even
     // briefly and never flashes a false reconnecting state.
-    if (platform.sync.mode === 'dual' && !localAgentRuntimeReady) {
+    if (!runtimeSettingReady) {
       setControlConnectionState('idle');
       return undefined;
     }
@@ -591,7 +614,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
     setKeyUpdateWorkspace(null);
     setKeyReceptionWait(null);
-    setSnapshotRecoveryWorkspace(null);
+    setHostIdentityWait(null);
     let disposed = false;
     // Set when background verification closes a provisionally opened runtime.
     let retired = false;
@@ -677,15 +700,22 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     let nativeHasUsableKey = false;
     let nativeRefresh: Promise<void> | null = null;
     let nativeRefreshAgain = false;
+    let nativeLedgerStatus: import('@lody/platform').E2eeRuntimeStatus | undefined;
+    let unsubscribeNativeLedger: (() => void) | undefined;
     const acceptStatus = async (status: import('@lody/platform').E2eeRuntimeStatus) => {
       const native = encryptedRuntime;
       if (!native || !nativeLease || disposed || retired) return;
       const leased = nativeLease;
+      nativeLedgerStatus = status;
 
       encryptedAccess?.updateStatus(status);
       if (encryptedAccess && workspaceRuntime && encryptedAccess.needsUpdate()) {
         await encryptedAccess.transition({
-          install: () => (status.hasCurrentKey ? native.status(leased) : native.refresh(leased)),
+          // Explicit reception: omitted options skip the key round on a portable host.
+          install: () =>
+            status.hasCurrentKey
+              ? native.status(leased)
+              : native.refresh(leased, { keyMode: 'receive' }),
         });
         if (disposed || retired) return;
         if (encryptedAccess.phase() === 'ready') setKeyUpdateWorkspace(null);
@@ -709,7 +739,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       if (!native) return;
       const leased = nativeLease;
       const pending = native
-        .refresh(leased, { installKeys: !nativeHasUsableKey && workspaceRuntime === null })
+        .refresh(leased, {
+          keyMode: !nativeHasUsableKey && workspaceRuntime === null ? 'full' : 'none',
+        })
         .then(acceptStatus)
         .catch(async (error: unknown) => {
           if (disposed || retired) return;
@@ -765,6 +797,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     let encryptedAccess: ReturnType<typeof createE2eeContent> | null = null;
     const disposeRuntime = (): Promise<void> => {
       if (disposal) return disposal;
+      try {
+        unsubscribeNativeLedger?.();
+      } catch {
+        // Optional hint cleanup cannot prevent the reader and runtime from closing.
+      }
+      unsubscribeNativeLedger = undefined;
       const pending = (async () => {
         // Fence the native reader while independent renderer cleanup starts.
         // A stuck native call must reach its bounded close; awaiting the content
@@ -884,6 +922,25 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           if (disposed) return;
           if (descriptor.workspaceId !== effectiveWorkspaceId)
             throw new WorkspaceModeMismatchError();
+          // Background verification keeps asking a transiently unavailable host
+          // until this initialization ends; the workspace stays unclassified meanwhile.
+          await assertNoRetainedEncryptedIdentity({
+            runtime: encryptedRuntime,
+            storage: localStorage,
+            accountId: accountId!,
+            workspaceId: effectiveWorkspaceId,
+            descriptor,
+            signal: initializationAbort.signal,
+            deadlineMs: null,
+            onStall: ({ code, retry }) => {
+              if (!disposed)
+                setHostIdentityWait({ workspaceId: effectiveWorkspaceId, code, retry });
+            },
+            onRecover: () => {
+              if (!disposed) setHostIdentityWait(null);
+            },
+          });
+          if (disposed) return;
           if (isEncryptedDescriptor(descriptor)) {
             // Never keep the plaintext data plane for an encrypted workspace:
             // retire it first, then record the mode synchronously as sticky
@@ -971,6 +1028,18 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               signal: initializationAbort.signal,
             }));
           if (disposed) return;
+          if (!storedDescriptor) {
+            await assertNoRetainedEncryptedIdentity({
+              runtime: encryptedRuntime,
+              storage: localStorage,
+              accountId: accountId!,
+              workspaceId: effectiveWorkspaceId,
+              descriptor,
+              signal: initializationAbort.signal,
+              deadlineMs: WORKSPACE_MODE_ADMISSION_TIMEOUT_MS,
+            });
+            if (disposed) return;
+          }
           admit(descriptor);
           admitting = false;
           if (isEncryptedDescriptor(descriptor)) {
@@ -1014,6 +1083,35 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             nativeReaderOwner = status.readerOwner;
             nativeResource = { ...targetNative, signingPublicKey: status.signingPublicKey };
             if (disposed || retired) return;
+            nativeLedgerStatus = status;
+            if (platform.e2eeWorkspaces?.subscribeLedgerHead) {
+              try {
+                unsubscribeNativeLedger = platform.e2eeWorkspaces.subscribeLedgerHead(
+                  { workspaceId: effectiveWorkspaceId },
+                  (head) => {
+                    const local = nativeLedgerStatus;
+                    if (
+                      disposed ||
+                      retired ||
+                      !nativeLease ||
+                      !local ||
+                      head.workspaceId !== effectiveWorkspaceId ||
+                      head.genesisHash !== local.genesisHash
+                    )
+                      return;
+                    if (
+                      head.checkpoint.length > local.length ||
+                      (head.checkpoint.length === local.length &&
+                        head.checkpoint.headHash !== local.headHash)
+                    )
+                      refreshNative();
+                  },
+                  () => {}
+                );
+              } catch {
+                // Hints are optional; ordinary refresh remains available.
+              }
+            }
             nativeHasUsableKey = status.hasCurrentKey || status.writeEpoch != null;
             if (status.genesisHash !== descriptor.genesisHash)
               throw new WorkspaceModeMismatchError();
@@ -1070,10 +1168,6 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
                   );
               },
               onMemberRemoved: handleMemberRemoval,
-              onSnapshotRecoveryChange: (pending) => {
-                if (!disposed && !retired)
-                  setSnapshotRecoveryWorkspace(pending ? effectiveWorkspaceId : null);
-              },
               authToken: () => tokenRef.current,
             });
             encryptedAccess.updateStatus(status);
@@ -1125,7 +1219,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           eagerSyncSurface,
           // Platform assembly is the only authority for room topology. Do not
           // re-probe Electron or cloud configuration inside the runtime.
-          syncMode: encryptedAccess ? 'cloud' : platform.sync.mode,
+          syncMode: encryptedAccess ? 'cloud' : runtimeSyncMode,
           getAuthorizedMachineIds: () => {
             const snapshot = authorizedMachineIdsRef.current;
             return snapshot?.workspaceId === effectiveWorkspaceId ? snapshot.machineIds : null;
@@ -1241,7 +1335,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     clearPresenceStates,
     isLocalPlatform,
     modeCloud,
-    platform.sync.mode,
+    runtimeSyncMode,
     platform.e2eeWorkspaces,
     platform.identity.session,
     setContentMode,
@@ -1257,7 +1351,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     telemetryEnabled,
     workspaceSlug,
     effectiveWorkspaceId,
-    localAgentRuntimeReady,
+    runtimeSettingReady,
     admissionRetry,
     retryAdmission,
   ]);
@@ -1317,11 +1411,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             </button>
           </div>
         )}
-      {snapshotRecoveryWorkspace !== null &&
-        (snapshotRecoveryWorkspace === runtime?.workspaceId ||
-          snapshotRecoveryWorkspace === workspaceId) && (
-          <div role="status">{t('e2ee.content.snapshotRecoveryPending')}</div>
-        )}
+      {hostIdentityWait?.workspaceId === effectiveWorkspaceId && (
+        <WorkspaceHostIdentityNotice
+          code={hostIdentityWait.code}
+          onRetry={hostIdentityWait.retry}
+        />
+      )}
       {children}
       <SessionPendingSendsHost runtime={runtime} />
     </>

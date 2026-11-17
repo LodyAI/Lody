@@ -74,8 +74,8 @@ final class SessionShareController: UIViewController {
 
   override func viewDidLoad() {
     super.viewDidLoad()
-    view.backgroundColor = .systemGroupedBackground
-    hosting.view.backgroundColor = .systemGroupedBackground
+    view.backgroundColor = .lodyGroupedBackground
+    hosting.view.backgroundColor = .lodyGroupedBackground
     addChild(hosting)
     hosting.view.frame = view.bounds
     hosting.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]

@@ -1,8 +1,9 @@
-/** Restore from an unlocked vault with nothing known about the workspace. No
- * product flow calls this yet, so it changes no create, join or pairing path. */
-import { Effect, Result, type Scope } from 'effect';
+/** Authenticated recovery helpers for personal-device hosts. Explicit recovery
+ * preserves admission and custody checks; product rollout belongs to the host. */
+import { Effect, Exit, Result, Schema, type Scope } from 'effect';
 import {
   Bytes,
+  makeWorkspaceRecovery,
   RecoveryVaultError,
   type LedgerView,
   type RecoveryEntryReference,
@@ -10,7 +11,7 @@ import {
   type WorkspaceRecoveryInput,
   type WorkspaceRestorePlan,
 } from '@lody/e2ee-core';
-import { wipeRecoveryPackage } from '@lody/e2ee-core/protocol';
+import { verifyLedger, wipeRecoveryPackage } from '@lody/e2ee-core/protocol';
 import { fromHex } from './bytes';
 
 /** Workspaces this vault can restore: the live entries of its authenticated index. */
@@ -24,10 +25,13 @@ export interface VaultRestoreAnchor {
   readonly genesis: Bytes.GenesisHash;
   readonly membershipId: Bytes.MembershipId;
   readonly recovery: Bytes.SigningPublicKey;
+  readonly genesisRecord: Uint8Array;
 }
 
 /** The platform's connections, opened only once the package names the workspace. */
 export interface VaultRestorePorts {
+  /** The new personal device, created once the package names the workspace. */
+  readonly personalSigner: WorkspaceRecoveryInput['personalSigner'];
   readonly ledger: () => Effect.Effect<LedgerView, unknown>;
   readonly fetchCurrentEnvelope: WorkspaceRecoveryInput['fetchCurrentEnvelope'];
   readonly installed: WorkspaceRecoveryInput['installed'];
@@ -39,7 +43,6 @@ export interface VaultRestoreInput {
   readonly vault: RecoveryVault;
   readonly local: WorkspaceRecoveryInput['local'];
   readonly reference: RecoveryEntryReference;
-  readonly personalSigner: WorkspaceRecoveryInput['personalSigner'];
   readonly ports: (
     anchor: VaultRestoreAnchor
   ) => Effect.Effect<VaultRestorePorts, unknown, Scope.Scope>;
@@ -48,7 +51,7 @@ export interface VaultRestoreInput {
 /**
  * Build a restore plan whose genesis comes only from the authenticated package.
  * Core then verifies the ledger from it, the package checkpoint and the current
- * epoch commitment before R admits the new device. Private keys are wiped here.
+ * available committed epoch before R admits the new device. Private keys are wiped here.
  */
 export const prepareVaultRestore = Effect.fnUntraced(function* (input: VaultRestoreInput) {
   const { anchor, trust } = yield* Effect.acquireUseRelease(
@@ -60,6 +63,7 @@ export const prepareVaultRestore = Effect.fnUntraced(function* (input: VaultRest
             genesis: Result.getOrThrow(Bytes.genesisHash(fromHex(bundle.genesis))),
             membershipId: Result.getOrThrow(Bytes.membershipId(fromHex(bundle.membershipId))),
             recovery: Result.getOrThrow(Bytes.signingPublicKey(bundle.signingPublic)),
+            genesisRecord: new Uint8Array(bundle.trust.genesisRecord),
           },
           trust: { ...bundle.trust, genesisRecord: new Uint8Array(bundle.trust.genesisRecord) },
         }),
@@ -74,7 +78,7 @@ export const prepareVaultRestore = Effect.fnUntraced(function* (input: VaultRest
       local: input.local,
       genesis: anchor.genesis,
       membershipId: anchor.membershipId,
-      personalSigner: input.personalSigner,
+      personalSigner: ports.personalSigner,
       ledger: ports.ledger,
       installed: ports.installed,
       trust,
@@ -87,3 +91,224 @@ export const prepareVaultRestore = Effect.fnUntraced(function* (input: VaultRest
   };
   return plan;
 });
+
+/** One page of the service's ledger history. */
+export interface RecoveryHistoryPage {
+  readonly startIndex: number;
+  readonly recordsHex: readonly string[];
+  readonly nextCursor: string | null;
+  readonly checkpoint: unknown;
+}
+
+/** Read a complete history. Every continuation carries the first page's checkpoint, so
+ * one read describes one fixed ledger. */
+export const readRecoveryHistory = Effect.fnUntraced(function* <P extends RecoveryHistoryPage, E>(
+  read: (next?: {
+    readonly cursor: string;
+    readonly checkpoint: P['checkpoint'];
+  }) => Effect.Effect<P, E>
+) {
+  const first = yield* read();
+  const pages = [first];
+  for (let cursor = first.nextCursor; cursor; cursor = pages.at(-1)!.nextCursor) {
+    if (pages.length >= 256) return yield* Effect.fail(new RecoveryVaultError({ code: 'storage' }));
+    pages.push(yield* read({ cursor, checkpoint: first.checkpoint }));
+  }
+  return pages;
+});
+
+const RecoveryCheckpointSchema = Schema.Struct({ headHash: Schema.String, length: Schema.Number });
+
+/** Replay the complete served history from the package's genesis. Each call rereads it,
+ * because a restore must see its own admission. */
+export const recoveryLedger =
+  (input: {
+    readonly genesis: Bytes.GenesisHash;
+    readonly pages: () => Effect.Effect<readonly RecoveryHistoryPage[], unknown>;
+  }) =>
+  () =>
+    Effect.gen(function* () {
+      const pages = yield* input.pages();
+      const { records, checkpoint } = yield* Effect.try({
+        try: () => {
+          const first = pages[0];
+          const point = Result.getOrThrow(
+            Schema.decodeUnknownResult(RecoveryCheckpointSchema)(first?.checkpoint)
+          );
+          if (
+            !Number.isSafeInteger(point.length) ||
+            point.length < 1 ||
+            pages.at(-1)?.nextCursor !== null
+          )
+            throw new Error('invalid recovery checkpoint');
+          const records: Uint8Array[] = [];
+          for (const page of pages) {
+            const boundary = Result.getOrThrow(
+              Schema.decodeUnknownResult(RecoveryCheckpointSchema)(page.checkpoint)
+            );
+            if (
+              page.startIndex !== records.length ||
+              boundary.headHash !== point.headHash ||
+              boundary.length !== point.length
+            )
+              throw new Error('inconsistent recovery page');
+            records.push(...page.recordsHex.map(fromHex));
+          }
+          if (records.length !== point.length) throw new Error('incomplete recovery history');
+          return {
+            records,
+            checkpoint: {
+              head: Result.getOrThrow(Bytes.recordHash(fromHex(point.headHash))),
+              length: point.length,
+            },
+          };
+        },
+        catch: () => new RecoveryVaultError({ code: 'authentication' }),
+      });
+      return yield* Effect.fromResult(verifyLedger({ anchor: input.genesis, records, checkpoint }));
+    }) as Effect.Effect<LedgerView, unknown>;
+
+const restoreProgressKey = (workspaceId: string) => `restore-progress/${workspaceId}`;
+const RESTORE_OPEN = new TextEncoder().encode('open');
+const RESTORE_PARTIAL = new TextEncoder().encode('partial');
+const RESTORE_DONE = new TextEncoder().encode('done');
+const isOpen = (value: Uint8Array | null) =>
+  value !== null && new TextDecoder().decode(value) === 'open';
+
+const isIncomplete = (value: Uint8Array | null) =>
+  value !== null && ['open', 'partial'].includes(new TextDecoder().decode(value));
+
+/** True until admission, adoption and current-epoch key recovery have completed.
+ * Partial recovery stays retryable through R without another device admission. */
+export const recoveryRestoreIncomplete = (
+  local: WorkspaceRecoveryInput['local'],
+  workspaceId: string
+) => Effect.map(local.read(restoreProgressKey(workspaceId)), isIncomplete);
+
+/** One workspace a vault can restore onto this device. */
+export interface RecoveryRestoreTarget {
+  readonly id: string;
+  readonly name: string;
+  readonly genesisHash: string;
+  /**
+   * Whether this device already holds an identity for the workspace. `'unknown'` means the
+   * check itself failed (for example a busy lease): nothing is restored over it, and the
+   * workspace is reported `Failed` so the caller can retry, unless an earlier restore of
+   * it is open or partial, which resumes as usual.
+   */
+  readonly hasIdentity: () => boolean | 'unknown';
+  /** Connect only once the authenticated package names the workspace. */
+  readonly connect: (anchor: VaultRestoreAnchor) => Effect.Effect<
+    VaultRestorePorts & {
+      readonly personal: VaultRestorePorts['personalSigner'] & {
+        readonly encryptionPublicKey: Bytes.EncryptionPublicKey;
+      };
+      readonly recovered: () => readonly (readonly [number, Bytes.EpochKey])[];
+      /** Adopt the identity and install the keys. Must be safe to repeat. */
+      readonly adopt: (
+        recovered: readonly (readonly [number, Bytes.EpochKey])[]
+      ) => Effect.Effect<void, unknown>;
+    },
+    unknown,
+    Scope.Scope
+  >;
+}
+
+/**
+ * Restore every workspace a vault covers and this account can name. The genesis comes
+ * only from the authenticated package; ledger, checkpoint and key commitment are core's
+ * checks. Durable progress keeps a workspace retryable until its keys are installed, and
+ * one workspace's failure never stops the others.
+ */
+export const restoreVaultWorkspaces = Effect.fnUntraced(function* (input: {
+  readonly vault: RecoveryVault;
+  readonly local: WorkspaceRecoveryInput['local'];
+  readonly targets: readonly RecoveryRestoreTarget[];
+}) {
+  const results: {
+    readonly workspaceId: string;
+    readonly name: string;
+    readonly outcome: string;
+    readonly partialEpochKey?: boolean;
+  }[] = [];
+  for (const reference of yield* listVaultWorkspaces(input.vault)) {
+    const target = input.targets.find((row) => row.genesisHash === reference.genesis);
+    if (!target) continue;
+    const key = restoreProgressKey(target.id);
+    const progress = yield* input.local.read(key);
+    const identity = target.hasIdentity();
+    if (identity === 'unknown' && !isIncomplete(progress)) {
+      results.push({ workspaceId: target.id, name: target.name, outcome: 'Failed' });
+      continue;
+    }
+    if (identity === true && !isIncomplete(progress)) continue;
+    const attempt = Effect.scoped(
+      Effect.gen(function* () {
+        // A finished marker from an earlier vault must not hide this attempt's failure.
+        if (!isOpen(progress)) {
+          const opened = yield* input.local.compareAndSwap(key, progress, RESTORE_OPEN);
+          if (opened !== 'Committed')
+            return yield* Effect.fail(new RecoveryVaultError({ code: 'conflict' }));
+        }
+        let connected: Effect.Success<ReturnType<RecoveryRestoreTarget['connect']>> | undefined;
+        const plan = yield* prepareVaultRestore({
+          vault: input.vault,
+          local: input.local,
+          reference,
+          ports: (anchor) =>
+            Effect.tap(target.connect(anchor), (ports) =>
+              Effect.sync(() => {
+                connected = ports;
+              })
+            ),
+        });
+        const workflow = yield* makeWorkspaceRecovery(plan.workflow);
+        const result = yield* workflow.restoreFromRecovery({
+          personal: connected!.personal,
+          submitOriginalAsRecovery: plan.submitOriginalAsRecovery,
+        });
+        if (result.outcome === 'Committed') {
+          yield* connected!.adopt(connected!.recovered());
+          yield* input.local.compareAndSwap(
+            key,
+            RESTORE_OPEN,
+            result.partialEpochKey === true ? RESTORE_PARTIAL : RESTORE_DONE
+          );
+        }
+        return { outcome: result.outcome as string, partialEpochKey: result.partialEpochKey };
+      })
+    );
+    const exit = yield* Effect.exit(attempt);
+    results.push({
+      workspaceId: target.id,
+      name: target.name,
+      outcome: Exit.isSuccess(exit) ? exit.value.outcome : 'Failed',
+      ...(Exit.isSuccess(exit) ? { partialEpochKey: exit.value.partialEpochKey } : {}),
+    });
+  }
+  return results;
+});
+
+/** Restore transport for a personal host. The host owns identity and installation;
+ * these ports relay only signed history, R envelopes and the exact admission. */
+export interface PersonalHostRecoveryInput {
+  /** Exact retained offer when repairing an already admitted installation. It cannot replace package pins. */
+  readonly offer?: import('./pairing').PersonalPairingOffer;
+  readonly vault: RecoveryVault;
+  readonly local: WorkspaceRecoveryInput['local'];
+  readonly reference: RecoveryEntryReference;
+  readonly pages: () => Effect.Effect<import('./admission').PersonalHistoryPages, unknown>;
+  readonly fetchCurrentEnvelope: WorkspaceRecoveryInput['fetchCurrentEnvelope'];
+  readonly submitOriginalAsRecovery: (
+    ...args: [
+      ...Parameters<WorkspaceRestorePlan['submitOriginalAsRecovery']>,
+      deviceCredentialHash: string,
+    ]
+  ) => ReturnType<WorkspaceRestorePlan['submitOriginalAsRecovery']>;
+}
+
+/** Vault setup transports; personal signing and installed keys remain in the admitted session. */
+export type PersonalRecoverySetupInput = Pick<
+  WorkspaceRecoveryInput,
+  'vault' | 'local' | 'submitOriginal' | 'fetchCurrentEnvelope'
+>;

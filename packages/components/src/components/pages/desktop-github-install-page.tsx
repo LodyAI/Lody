@@ -1,3 +1,4 @@
+import { readGitHubInstallError } from '@/lib/github-installation-recovery';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Github } from 'lucide-react';
@@ -39,6 +40,9 @@ export function DesktopGithubInstallPage({ deepLink }: DesktopGithubInstallPageP
     }
   };
 
+  const installFailed = deepLink
+    ? readGitHubInstallError(new URL(deepLink).search) !== null
+    : false;
   const state = deepLink ? 'ask' : 'arrive';
   const openLabel = t('desktopGithubInstall.openButton', 'Open Lody Desktop');
 
@@ -49,10 +53,15 @@ export function DesktopGithubInstallPage({ deepLink }: DesktopGithubInstallPageP
     },
     ask: {
       title: t('desktopGithubInstall.title', 'Continue in Lody Desktop'),
-      description: t(
-        'desktopGithubInstall.description',
-        'GitHub is installed. Finish connecting it in the app.'
-      ),
+      description: installFailed
+        ? t(
+            'desktopGithubInstall.failedDescription',
+            'The installation was not connected. Open Lody Desktop to review the error and retry.'
+          )
+        : t(
+            'desktopGithubInstall.description',
+            'GitHub is installed. Finish connecting it in the app.'
+          ),
     },
   }[state];
 
@@ -75,7 +84,7 @@ export function DesktopGithubInstallPage({ deepLink }: DesktopGithubInstallPageP
         deepLink ? (
           <>
             {copyButton}
-            <Button render={<a href={deepLink} />} size="large">
+            <Button render={<a href={deepLink} aria-label={openLabel} />} size="large">
               {openLabel}
             </Button>
           </>

@@ -1,8 +1,8 @@
 import { control } from '@lody/ui/tokens/scales.stylex';
+import * as stylex from '@stylexjs/stylex';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Check, ChevronDown, Copy, UserRoundCog } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import * as stylex from '@stylexjs/stylex';
 
 import { UserAvatar } from '@/components/user-avatar';
 import { themeColors } from '../../style/theme-colors.stylex';
@@ -61,6 +61,7 @@ export type MobileSessionMenuOwner = {
   /** Current `SessionMeta.userId`; may name someone who already left. */
   ownerUserId: string;
   onSelect: (userId: string) => void;
+  getDisabledReason?: (userId: string) => string | null;
 };
 
 export type MobileSessionMenuSheetProps = {
@@ -388,22 +389,32 @@ export function MobileSessionMenuSheet({
                 <div {...stylex.props(styles.ownerList)}>
                   {owner.members.map((member) => {
                     const isOwner = member.userId === owner.ownerUserId;
+                    const disabledReason = owner.getDisabledReason?.(member.userId);
                     return (
                       <button
                         key={member.userId}
                         type="button"
+                        disabled={!!disabledReason}
+                        title={disabledReason ?? undefined}
                         onClick={() => {
+                          if (disabledReason) return;
                           if (!isOwner) run(() => owner.onSelect(member.userId));
                           else onOpenChange(false);
                         }}
-                        {...stylex.props(styles.memberRow)}
+                        {...stylex.props(
+                          styles.memberRow,
+                          Boolean(disabledReason) && ownerStyles.disabled
+                        )}
                       >
                         <UserAvatar
                           user={{ id: member.userId, name: member.name, image: member.image }}
                           size="small"
                           {...stylex.props(sheetSurface.shrink0)}
                         />
-                        <span {...stylex.props(styles.memberName)}>{member.name}</span>
+                        <span {...stylex.props(styles.memberName)}>
+                          {member.name}
+                          {disabledReason ? <span> — {disabledReason}</span> : null}
+                        </span>
                         {isOwner ? (
                           <Check {...stylex.props(styles.ownerCheck)} aria-hidden="true" />
                         ) : null}
@@ -439,3 +450,5 @@ export function MobileSessionMenuSheet({
     </Drawer>
   );
 }
+
+const ownerStyles = stylex.create({ disabled: { opacity: 0.5 } });

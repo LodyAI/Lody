@@ -10,6 +10,7 @@ import en from '../../../locales/en.json';
 import { userAtom } from '../src/atoms';
 import { localMachineIdAtom } from '../src/atoms/local-probe';
 import { runtimeAtom } from '../src/atoms/runtime';
+import { installCloudHttpPort } from '../src/lib/cloud-http-port';
 import { SessionLimitContinueAction } from '../src/components/schedules/quota-continue-action';
 import {
   findClaudeSessionLimit,
@@ -112,6 +113,32 @@ describe('Claude quota recovery action', () => {
     state.turns = [user, failure, { ...user, id: 'new-user' }];
     await render();
     expect(container.textContent).toBe('');
+  });
+  it('offers recovery for an encrypted Session on this machine, but not across machines', async () => {
+    getDefaultStore().set(runtimeAtom, { workspaceId: 'workspace', contentMode: 'e2ee' } as never);
+    await render();
+    expect(container.textContent).toContain('Enable automatic recovery');
+    const uninstall = installCloudHttpPort({
+      authBaseUrl: 'https://synthetic.invalid',
+      serverBaseUrl: null,
+      mintAutomationControlProof: async () => {
+        throw new Error('not minted in this test');
+      },
+    });
+    try {
+      getDefaultStore().set(localMachineIdAtom, 'other-machine' as never);
+      await render();
+      // Remote control rides workspace Machine RPC, which encrypted workspaces withhold.
+      expect(container.textContent).toBe('');
+      getDefaultStore().set(runtimeAtom, {
+        workspaceId: 'workspace',
+        contentMode: 'plaintext',
+      } as never);
+      await render();
+      expect(container.textContent).toContain('Enable automatic recovery');
+    } finally {
+      uninstall();
+    }
   });
   it('does not interpret user prose or unrelated errors as a quota failure', () => {
     expect(findClaudeSessionLimit([{ ...user, items: failure.items }])).toBeNull();

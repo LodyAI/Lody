@@ -3,6 +3,118 @@ import { readFileSync } from 'node:fs';
 import { measureTextareaScrollHeight } from '../../src/components/chat/textarea-measurement';
 import { compensateConversationScroll } from '../../src/components/ai-gui/conversation-list/scroll-compensation';
 
+test.describe('manual disclosures', () => {
+  test.beforeAll(async ({ browser }) => {
+    test.setTimeout(90_000);
+    // Transform the cold story/runtime graph before starting layout assertions.
+    const warmup = await browser.newPage();
+    try {
+      await warmup.goto('/iframe.html');
+      await warmup.evaluate(async () => {
+        const modulePath = '/src/stories/ConversationViewStream.stories.tsx';
+        await import(modulePath);
+      });
+    } finally {
+      await warmup.close();
+    }
+  });
+
+  for (const mobile of [false, true]) {
+    for (const visibleDetailPixels of [0, 16]) {
+      test(`command disclosure preserves its header (${mobile ? 'mobile' : 'desktop'}, visible detail=${visibleDetailPixels}px)`, async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width: mobile ? 390 : 1100, height: 700 });
+        await page.goto(
+          `/iframe.html?id=sessions-conversationview--command-disclosure-${mobile ? 'mobile' : 'desktop'}&viewMode=story`
+        );
+        const viewport = page.locator('[data-conversation-scroll-engine]');
+        await expect(viewport).toHaveAttribute('data-window-session-stream-ready', /.+/, {
+          timeout: 20_000,
+        });
+        const turn = page.locator('[data-assistant-turn-id="synthetic-disclosure-turn"]');
+        const group = turn.locator('button[data-conversation-disclosure="group"]').last();
+        const groupY = await group.evaluate((el) => el.getBoundingClientRect().top);
+        await group.click();
+        await expect(group).toHaveAttribute('aria-expanded', 'true');
+        await expect
+          .poll(() => group.evaluate((el) => el.getBoundingClientRect().top))
+          .toBeCloseTo(groupY, 0);
+        const command = turn.locator('button[data-conversation-disclosure="inline"]').first();
+        await expect(command).toBeVisible();
+        await command.click();
+        await expect(turn.locator('[data-tool-detail-sheet]')).toBeVisible();
+        const inset = await command.evaluate(
+          (button) =>
+            button.nextElementSibling!.firstElementChild!.getBoundingClientRect().top -
+            button.getBoundingClientRect().bottom
+        );
+        await command.click();
+        await expect(command).toHaveAttribute('aria-expanded', 'false');
+        // Position the header at the viewport edge using explicit reader input.
+        await command.evaluate(
+          (button, { visible, inset }) => {
+            const viewport = button.closest<HTMLElement>('[data-conversation-scroll-engine]')!;
+            viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -1 }));
+            viewport.scrollTop +=
+              button.getBoundingClientRect().bottom -
+              viewport.getBoundingClientRect().bottom +
+              inset +
+              visible;
+          },
+          { visible: visibleDetailPixels, inset }
+        );
+        await expect
+          .poll(() =>
+            command.evaluate((button, inset) => {
+              const viewport = button.closest<HTMLElement>('[data-conversation-scroll-engine]')!;
+              return (
+                viewport.getBoundingClientRect().bottom -
+                button.getBoundingClientRect().bottom -
+                inset
+              );
+            }, inset)
+          )
+          .toBeCloseTo(visibleDetailPixels, 0);
+        const before = await command.evaluate((el) => el.getBoundingClientRect().top);
+        const box = await command.boundingBox();
+        await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+        await expect(command).toHaveAttribute('aria-expanded', 'true');
+        await expect(turn.locator('[data-tool-detail-sheet]')).toBeVisible();
+        let expected = before - (mobile && visibleDetailPixels === 0 ? 96 : 0);
+        await expect
+          .poll(() => command.evaluate((el) => el.getBoundingClientRect().top))
+          .toBeCloseTo(expected, 0);
+        if (!mobile && visibleDetailPixels === 0) {
+          // Read further into the long output before closing it near the end.
+          expected = before - 160;
+          await command.evaluate((button, target) => {
+            const viewport = button.closest<HTMLElement>('[data-conversation-scroll-engine]')!;
+            viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: 1 }));
+            viewport.scrollTop += button.getBoundingClientRect().top - target;
+          }, expected);
+          await expect
+            .poll(() => command.evaluate((el) => el.getBoundingClientRect().top))
+            .toBeCloseTo(expected, 0);
+        }
+        await command.click();
+        await expect(command).toHaveAttribute('aria-expanded', 'false');
+        await expect
+          .poll(() => command.evaluate((el) => el.getBoundingClientRect().top))
+          .toBeCloseTo(expected, 0);
+        if (!mobile && visibleDetailPixels === 0) {
+          const room = viewport.locator('[data-conversation-reply-room]');
+          await expect
+            .poll(() => room.evaluate((el) => el.getBoundingClientRect().height))
+            .toBeGreaterThan(0);
+          await page.locator('[data-scroll-to-latest]').click();
+          await expect.poll(() => room.evaluate((el) => el.getBoundingClientRect().height)).toBe(0);
+        }
+      });
+    }
+  }
+});
+
 // This checks actual CSS overflow and anchor geometry with production controller
 // transactions. Native iOS compositor momentum still needs device acceptance.
 test('positive touch shifts preserve physical offsets and leave no leading gap', async ({

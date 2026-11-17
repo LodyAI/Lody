@@ -15,6 +15,18 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 | Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.                      |
 | Process lifetime | [Session](session.ts)                             | Owns ACP resources, confirmed termination, and bounded Codex refresh-start recovery. |
 
+## Machine identity recovery admission
+
+Fleet checks both active presence and registered execution owners before accepting
+identity recovery. It then synchronously seals every execution service. A queued
+request or preparation that resumes after the seal returns without starting a
+Turn, consuming its Inbox input or advancing history/dispatch status. The final
+check and Turn registration have no intervening await: registration makes Fleet
+refuse recovery, while a preceding seal prevents registration. Ordinary Stop and
+cleanup retain their existing cancellation/release behavior. The session rule
+budget allows 50 extra words for this cross-entry safety contract so existing
+binding rules remain complete.
+
 ## Automation ownership
 
 [Session authority](session-automation-authority.ts) admits actions requested by
@@ -97,7 +109,8 @@ A notification failure cannot replay Agent execution.
   message-handler's `beginConversationTurn`, stored/disposed via `SessionTransientStore` turn
   state; it creates the assistant entry when it opens.
 - `session-execution-service.ts` — runs one turn end-to-end: ACP prompt, turn ids,
-  lifecycle/error handling, GitHub/local project setup, and post-turn diffStats.
+  lifecycle/error handling, GitHub/local project setup, evidence-backed turn history,
+  and post-turn workspace refresh.
 - `acp-session-config-applier.ts` — resolves top-level and config-option selections,
   then applies mode, model, and dependent options in that order. This prevents model switches
   from resetting an already-applied effort. Reports rejected model selections through the GUI
@@ -119,12 +132,12 @@ A notification failure cannot replay Agent execution.
 - `workspace-git-service.ts` — observes checkout branches for local folders and worktrees,
   serializes reads/writes per owner Session, and publishes the last named branch. Execution
   binds, terminal turns, and authorized Code Collab activation/refresh use this service;
-  observation requires neither a running agent nor a GitHub remote.
-- `turn-post-processing-service.ts` — post-turn work (titles, notifications, diff stats,
-  and the `workspaceDirty`/`workspaceUnpushed` probes that drive the Info Bar's
+  observation requires neither a running agent nor a GitHub remote. Its `publishDiffStats`
+  serializes Code Collab's workspace totals and Member projections on that same owner queue.
+- `turn-post-processing-service.ts` — post-turn PR discovery and the
+  `workspaceDirty`/`workspaceUnpushed` probes that drive the Info Bar's
   Commit & Push action; both cancellation routes refresh the branch and run `syncWorkspaceGitState`,
-  which self-gates on the session's GitHub binding).
-- `session-diff-stats-target.ts` — chooses which writer owns a session's `diffStats`.
+  which self-gates on the session's GitHub binding. It never writes per-turn file summaries.
 - `session-access-policy.ts` — local-first dispatch access precheck (optimistic-allow cache,
   D11). It may allow owner-cached turns from the catalog snapshot, allow a workspace member
   whose backend allow for the same local project is under one hour old, deny `remote_missing`
@@ -175,8 +188,13 @@ would let a send published between the read and the write lose its activation an
 and unrun. The `settledActivationUserMsgId` slot may be replaced freely because the turn it
 names is terminal.
 
-The renderer derives a visible "not delivered" label for a marked entry from the marker plus
-its non-terminal status — no CLI repair write, no schema change. Recovery is a fresh send: the
+The host retains every negatively acknowledged input in `missingHistoryUserMsgIds`, alongside the
+legacy `lastMissingHistoryUserMsgId` scalar. Only its serialized watcher appends entries; producers
+publish fresh activation IDs without clearing these receipts. A timeout cannot mark a newer
+activation that arrived during recovery. [The storage decision](../../../../.agents/notes/implemented/bug-fix/2026-11-10-missing-history-acknowledgements.md) explains compatibility, retention and the single-host assumption.
+
+The renderer derives a visible "not delivered" label for a marked entry from these receipts plus
+its non-terminal status, without a CLI history-repair write or history-schema migration. Recovery is a fresh send: the
 label opens a confirmation dialog that re-sends the SAME content as a brand-new message
 through the ordinary producer path. The renderer retains the marker as a tombstone and
 supersedes the abandoned entry to `canceled`; it must never revive the old turn.
@@ -209,7 +227,12 @@ that follows another one in the chain yields one macrotask first
 Turn-scoped history LIST writes (assistant entry, ACP flushes, finalization, failure notices)
 wait until the user turn entry has synced into the CLI-local doc, because concurrent Loro list
 inserts can otherwise permanently order the reply before the user message. Status and meta map
-writes are never gated; some sit on the prompt critical path.
+writes are never gated; some sit on the prompt critical path. The original one-minute gate deadline
+also bounds its pre-open assistant-entry callback. Disposal releases existing waiters immediately.
+The deadline keeps the live callback eligible to add author/model metadata. Only disposal aborts
+later callback steps, even if timeout already opened the gate; already-issued writes remain
+owned and observed, and a late completion cannot release a successor gate. Finalization disposes
+its captured gate before persisting `finish-assistant`, closing the gap before turn-state cleanup.
 
 ### Why the pointer write is bundled with the history append
 
@@ -422,13 +445,17 @@ retries once, and returns personal identity disabled after two failures. Startup
 and agent launch. Late policy results have no side effects. This deadline also covers
 per-turn identity refresh; it is separate from network credential fallback.
 
-The effective identity becomes `GIT_AUTHOR_*`/`GIT_COMMITTER_*` in the session env (`session.ts`
-`updateGitIdentity`, re-applied per turn via the execution service's `bindReadySession`). When
-the turn requester is the machine owner, the repository/machine Git identity is used without a cloud profile lookup; missing local
-identity uses neutral LodyAI. Non-owner profile queries have a 60-second deadline; failed or
-timed-out entries are evicted so later turns can retry. A non-owner requester always uses their resolved
-Lody/GitHub identity and can never inherit the machine owner's Git config; if no usable requester
-identity exists, the neutral LodyAI identity is used. The cloud composition root owns hosted
+Precedence: for owner turns, the workdir repository's own configured identity; then an approved
+("Act as you") requester; then the owner's other native Git identity; then neutral LodyAI (`session.ts` `updateGitIdentity`, re-applied per turn via the execution
+service's `bindReadySession`). Only a decided identity is exported as
+`GIT_AUTHOR_*`/`GIT_COMMITTER_*`; the owner's identity is otherwise left to Git, so repository
+config and conditional includes apply. Repository identity of a Lody-managed shared GitHub clone
+is replaced by the owner's user-level identity or LodyAI
+([decision](../../../../.agents/notes/implemented/bug-fix/2026-11-16-native-owner-git-identity.md)).
+Owner turns skip the profile query unless approved, which adds one 3-second account lookup.
+Non-owner profile queries have a 60-second deadline; failed or timed-out entries are evicted so
+later turns can retry. A non-owner never inherits the machine owner's Git config and commits as
+LodyAI without approval. The cloud composition root owns hosted
 user resolution because the daemon does not own an end-user browser session; the local access
 port resolves only its synthetic owner and never performs network I/O. PR and push identity
 itself comes from the conversation-owner GitHub credential, not from git config. Identity
@@ -481,13 +508,9 @@ Every Session starts its ACP process and worktree when its first turn is dispatc
 Draft preparation, which started both while the user typed, was removed: its runtime was
 almost never adopted, and discarding it cost more than a cold start
 ([decision](../../../../.agents/notes/implemented/simplification/2026-10-16-remove-draft-session-preparation.md)).
-`session/prepare` and `session/prepare-cancel` still parse, because older desktops send
-them. The daemon answers both at once without work; prepare reports an accepted duplicate
-so an older desktop holds one lease per draft instead of re-asking after every pause.
-`worktree/legacy-speculative-worktrees.ts` handles worktrees an older daemon prepared:
-creation claims the Session's marker and reruns setup on its worktree. Only a worktree no
-Session adopted is rebuilt for a target mismatch: an adopted one keeps its branch, which
-resume restores by name. A sweep removes orphans whose Session never became durable.
+The `session/prepare` and `session/prepare-cancel` requests and the speculative-worktree
+markers older daemons left are no longer recognized
+([decision](../../../../.agents/notes/implemented/simplification/2026-11-16-drop-pre-october-compatibility.md)).
 
 Memory identity references travel with turn configuration. `Session.createAgent` maps
 them through `../lib/memory-providers.ts` at spawn; the execution service restarts a
@@ -535,14 +558,14 @@ Older owners retain the single-`readAll` compatibility path; v2 failures propaga
 without that fallback. Certified goals and recovery replay avoid preparing unrelated
 query fields; replay formats ordered members individually on the owner. Transcript
 queries reuse visibility flags for unchanged records. Sparse membership edits
-rebase existing fields only across a Native-certified local write interval. The [selected-history decision](../../../../.agents/notes/proposed/architecture/2026-10-31-roost-selective-history-reads.md)
+rebase existing fields only across a Native-certified local write interval. The [selected-history decision](../../../../.agents/notes/implemented/architecture/2026-10-31-roost-selective-history-reads.md)
 records the affected paths and memory measurements.
 
 Roost progress retains cursor, revision, count and change hints. Operation identities
 are verified by Native receipts; the control notification does not repeat an
 unused operation ID. Publication order, per-action persistence and the existing
 control schema/readers are retained. See the
-[control storage investigation](../../../../.agents/notes/proposed/architecture/2026-10-23-roost-control-storage.md).
+[control storage investigation](../../../../.agents/notes/rejected/architecture/2026-10-23-roost-control-storage.md).
 
 Dispatch reads pending identities, requested turns and completion evidence from
 body-free indexes, then hydrates only the selected input. The complete marker

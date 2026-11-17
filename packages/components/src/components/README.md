@@ -80,6 +80,30 @@ Mobile workspace creation and deletion use the Vaul-backed
 slotted-child styles keep precedence. The sheet still owns validation, pending
 state and keyboard handling.
 
+In the Project (Workspace) view the Details group adds a third switch, `Hide
+Empty Projects` (`sidebarHideEmptyProjectsAtom`, on by default). On, a project
+is listed only while it has Session rows after pinned-tree separation and opener
+placement, and an emptied machine section is hidden unless it still holds a
+multi-repository project with conversations; off, every registered project under
+each machine stays listed. The
+selection lives in `selectVisibleLocalProjectSections`
+(`lib/project-group-placement.ts`). Multi-repository projects that run anywhere
+sit with the GitHub repositories and stay listed only while they have
+conversations, whatever the switch says.
+
+Status organize mode lists the same rows as Updated, split into the native mobile
+Home's status groups in its order: Needs you, Just finished, Open pull requests,
+Running, Idle. `lib/sidebar-status-group.ts` classifies each row through the new-chat
+page's `homeNowReason` (`lib/home-now.ts`), so a session reads the same reason on
+both surfaces; rows that page leaves out (quiet for days, merged or closed PR) are
+Idle here. A conversation whose latest turn failed is under Needs you unless it is
+working again: the CLI writes the failed user turn into `SessionMeta.lastFailedUserMsgId`
+together with `lastHandledUserMsgId`, and `hasFailedLatestTurn` reads it only while the
+two match, so a later handled or canceled turn retires it without another write. Child
+Tabs roll their failure into the row. `buildSidebarUpdatedBuckets` feeds both the renderer and keyboard
+navigation, empty groups are skipped, and only Idle folds behind Show all. Group
+collapse and Show all share Updated's persisted per-bucket maps, keyed by group.
+
 ## Entry points and layout
 
 - Remote Add folder: `local-projects/use-remote-directory-picker.ts` owns navigation,
@@ -197,6 +221,10 @@ state and keyboard handling.
   presentation and settings navigation can still remount it: `LoroSidebar` saves
   its viewport offset by workspace in `atoms/sidebar-state.ts` and restores it
   before paint. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-26-sidebar-content-width-animation.md).
+- On wide mobile Web layouts, the workspace shows a centered 44 px grab target at
+  the sidebar seam. Dragging it or focusing the separator and using Left/Right
+  changes the saved width within 180–420 px. The desktop sidebar minimum is
+  240 px. The boot shell uses the same limits.
 
 ## Provider readiness
 
@@ -240,7 +268,10 @@ records the preservation boundary.
 visibility copy (`getSessionSharingLabel` / `getSessionSharingDescription`), the
 list-row `SessionSharingIndicator`, the `SessionArchivedBadge`, the team-share
 confirmation dialogs, and `SessionAccessControl` — the one header control
-carrying both team visibility and static publication.
+showing Private / Team read-only / Team can edit. Machine owners manage independent
+read grants through the platform `sessionAccess` port in both workspace modes;
+public publication remains a separate section. Read-only targets mount the
+independent history reader. See the draft [session access Spec](../../../../specs/session-access.md).
 
 Team visibility is resolved by `hooks/use-session-sharing.ts` over
 `lib/session-sharing.ts`. Static publication lives in `sharing/`, with
@@ -255,14 +286,3 @@ and the "…" menu open. Rationale:
 `terminal/terminal-theme.ts` resolves CSS colors synchronously through a disposable
 probe with transitions disabled, so the global reduced-motion rule cannot blank a
 terminal. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-09-terminal-reduced-motion-colors.md).
-
-## PR auto-archive
-
-`auto-archive-pr-watcher.tsx` keeps observed PR transitions separate from unfinished
-archive attempts. Its owning window retries the existing Session action with capped
-backoff and drops superseded work on scope changes. The action's automatic-only
-progress receipt records accepted targets; its cancellation check uses the
-authoritative snapshot before retry side effects, so restoring a partially archived
-Session or Tab supersedes the unfinished operation. Startup and restore still only
-establish the PR baseline.
-See the [retry decision](../../../../.agents/notes/implemented/bug-fix/2026-10-17-pr-auto-archive-retry.md).

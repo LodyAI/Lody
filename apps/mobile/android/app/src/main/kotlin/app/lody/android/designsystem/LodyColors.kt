@@ -16,6 +16,8 @@ class LodyColors(
     val bgRaised: Color,
     /** Text fields and search bars: a flat translucent fill (iOS search field), no inset. */
     val bgSunken: Color,
+    /** The Chats page while it lists archived chats: darker and greyer than bg.base (iOS bgArchived). */
+    val bgArchived: Color,
     /** Custom menus, popovers and toasts; pair with an elevation. */
     val bgOverlay: Color,
     /** Snackbars and tooltips; text uses text.inverse. */
@@ -165,6 +167,7 @@ class LodyColors(
         "bg.grouped" to bgGrouped,
         "bg.raised" to bgRaised,
         "bg.sunken" to bgSunken,
+        "bg.archived" to bgArchived,
         "bg.overlay" to bgOverlay,
         "bg.inverse" to bgInverse,
         "fill.pressed" to fillPressed,
@@ -274,6 +277,7 @@ val LodyLightColors = LodyColors(
     bgGrouped = Color(0xFFF2F2F2),
     bgRaised = Color(0xFFFFFFFF),
     bgSunken = Color(0x0D000000),
+    bgArchived = Color(0xFFE4E4E7),
     bgOverlay = Color(0xFFFFFFFF),
     bgInverse = Color(0xFF1C1C1C),
     fillPressed = Color(0xFFE5E5E5),
@@ -289,7 +293,7 @@ val LodyLightColors = LodyColors(
     textInverse = Color(0xFFFFFFFF),
     textOnAccent = Color(0xFFFFFFFF),
     textOnDanger = Color(0xFFFFFFFF),
-    textLink = Color(0xFF345FBD),
+    textLink = Color(0xFF186B95),
     iconPrimary = Color(0xFF1C1C1C),
     iconSecondary = Color(0xFF898989),
     iconTertiary = Color(0xFFAFAFAF),
@@ -378,10 +382,11 @@ val LodyLightColors = LodyColors(
 )
 
 val LodyDarkColors = LodyColors(
-    bgBase = Color(0xFF000000),
-    bgGrouped = Color(0xFF000000),
+    bgBase = Color(0xFF111113),
+    bgGrouped = Color(0xFF111113),
     bgRaised = Color(0xFF1C1C1C),
     bgSunken = Color(0x1AFFFFFF),
+    bgArchived = Color(0xFF0A0A0B),
     bgOverlay = Color(0xFF2B2B2B),
     bgInverse = Color(0xFFFFFFFF),
     fillPressed = Color(0xFF393939),
@@ -397,7 +402,7 @@ val LodyDarkColors = LodyColors(
     textInverse = Color(0xFF000000),
     textOnAccent = Color(0xFFFFFFFF),
     textOnDanger = Color(0xFFFFFFFF),
-    textLink = Color(0xFF80ABFF),
+    textLink = Color(0xFF7EC4E7),
     iconPrimary = Color(0xFFFFFFFF),
     iconSecondary = Color(0xFF8C8C8C),
     iconTertiary = Color(0xFF6C6C6C),

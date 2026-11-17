@@ -1,4 +1,3 @@
-import LodyDesignSystem
 import UIKit
 
 final class ChatComposerLiquidGlassSurfaceLayout: ChatComposerSurfaceLayout {
@@ -62,7 +61,7 @@ final class ChatComposerLiquidGlassSurfaceLayout: ChatComposerSurfaceLayout {
       NSLayoutConstraint.deactivate(sheet)
       NSLayoutConstraint.activate(pill)
       for constraint in pill where constraint.firstAttribute != .bottom {
-        constraint.constant = constraint.firstAttribute == .leading ? LodyLayout.screenPaddingX : -LodyLayout.screenPaddingX
+        constraint.constant = constraint.firstAttribute == .leading ? 12 : -12
       }
     }
     applyCorners()

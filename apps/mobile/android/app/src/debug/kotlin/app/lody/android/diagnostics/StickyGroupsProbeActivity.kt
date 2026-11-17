@@ -74,7 +74,7 @@ class StickyGroupsProbeActivity : ComponentActivity() {
                                     app.lody.android.chat.SessionInfoBar("loro-dev/lody", "investigate-billing-cycle",
                                         app.lody.android.runtime.CatalogPullRequest("loro-dev/lody", 4223, "open"), 3338, 249,
                                         listOf(app.lody.android.chat.SessionInfoBar.Action.CommitAndPush)),
-                                    "Mac", app.lody.android.create.CreateSessionModel.MachineKind.Desktop, {}, {},
+                                    {}, {},
                                 )
                             }
                         }

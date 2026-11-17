@@ -9,7 +9,12 @@ import { formatErrorMessage } from '@/utils/format-error';
 import { SpawnFailed, TerminationFailed } from '@lody/shared/node/process';
 import { spawnProcess, type ProcessExit } from '@lody/shared/node/process';
 import { errnoCode, NodeProcess, type NodeProcessApi } from '@lody/shared/node/process';
-import { terminateTree, type ProcessTree, type TreeSignal } from '@lody/shared/node/process';
+import {
+  terminateTree,
+  type ProcessTree,
+  type TerminationPolicy,
+  type TreeSignal,
+} from '@lody/shared/node/process';
 import {
   FORCED_TERMINATION,
   SandboxIoError,
@@ -41,6 +46,7 @@ export const makeCgroupContainer = Effect.fnUntraced(function* (options: {
   readonly fs: CgroupFs;
   readonly readSelfCgroupPath: () => Promise<string>;
   readonly configureProcess: (pid: number) => Effect.Effect<void>;
+  readonly terminationPolicy?: (force: boolean) => TerminationPolicy;
 }): Effect.fn.Return<
   ProcessContainer,
   SandboxUnavailable,
@@ -49,6 +55,10 @@ export const makeCgroupContainer = Effect.fnUntraced(function* (options: {
   const np = yield* NodeProcess;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const scope = yield* Effect.scope;
+  const forcedPolicy = options.terminationPolicy
+    ? options.terminationPolicy(true)
+    : FORCED_TERMINATION;
+  const releasePolicy = options.terminationPolicy ? options.terminationPolicy(false) : undefined;
   const io = <A>(operation: string, run: () => Promise<A>) =>
     Effect.tryPromise({
       try: run,
@@ -170,9 +180,10 @@ export const makeCgroupContainer = Effect.fnUntraced(function* (options: {
                       pids: yield* readEvents('pids.events'),
                     };
                     const limitsAtSpawn = yield* Ref.get(limits);
-                    const managed = yield* spawnProcess({ ...spec, processGroup: true }).pipe(
-                      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
-                    );
+                    const managed = yield* spawnProcess(
+                      { ...spec, processGroup: true },
+                      releasePolicy
+                    ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
                     // Track before attachment: a wrapper can fork children before
                     // its leader joins, or exit with ESRCH while they remain outside.
                     const releaseWhenDone = yield* registry.track(managed);
@@ -293,7 +304,7 @@ export const makeCgroupContainer = Effect.fnUntraced(function* (options: {
       } satisfies SessionResourceAccounting;
     }),
     cleanup: Effect.gen(function* () {
-      const terminated = yield* Effect.result(container.terminateAll(FORCED_TERMINATION));
+      const terminated = yield* Effect.result(container.terminateAll(forcedPolicy));
       if (Result.isFailure(terminated)) {
         yield* Effect.logWarning(terminated.failure.message);
         return;

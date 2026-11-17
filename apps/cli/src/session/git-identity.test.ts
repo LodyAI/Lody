@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_AI_GIT_AUTHOR_EMAIL,
+  probeMachineGitIdentity,
   readHostDefaultGitIdentity,
   resolveSessionGitIdentity,
 } from './git-identity';
@@ -12,50 +13,136 @@ import {
 const requester = { name: 'Requester', email: 'requester@example.com' };
 const machine = { name: 'Owner Machine', email: 'owner@example.com' };
 
+const machineSource = (
+  effective: { name?: string; email?: string },
+  options: {
+    untrusted?: boolean;
+    repository?: boolean;
+    userLevel?: { name?: string; email?: string };
+  } = {}
+) => ({
+  effective,
+  untrustedRepositoryIdentity: options.untrusted ?? false,
+  repositoryIdentity: options.repository ?? false,
+  userLevel: () => options.userLevel ?? {},
+});
+const neutral = { name: 'LodyAI', email: DEFAULT_AI_GIT_AUTHOR_EMAIL, inject: true };
+
 describe('resolveSessionGitIdentity', () => {
-  it('lets a requester with personal identity enabled commit as themselves on their own machine', () => {
+  it('exports an approved requester identity over the owner machine configuration', () => {
     expect(
       resolveSessionGitIdentity(requester, {
         preferMachineIdentity: true,
         personalIdentityEnabled: true,
-        machineIdentity: machine,
+        machine: machineSource(machine),
       })
-    ).toEqual(requester);
+    ).toEqual({ ...requester, inject: true });
   });
 
-  it('keeps the machine identity for the owner when personal identity is off', () => {
+  it('lets the owner repository identity win over an approved account identity', () => {
+    const repository = machineSource(machine, { repository: true });
+    expect(
+      resolveSessionGitIdentity(requester, {
+        preferMachineIdentity: true,
+        personalIdentityEnabled: true,
+        machine: repository,
+      })
+    ).toEqual({ ...machine, inject: false });
+    // The owner's repository config never applies to someone else's turn.
+    expect(
+      resolveSessionGitIdentity(requester, {
+        preferMachineIdentity: false,
+        personalIdentityEnabled: true,
+        machine: repository,
+      })
+    ).toEqual({ ...requester, inject: true });
+  });
+
+  it('leaves the owner identity to Git instead of overriding repository config', () => {
     expect(
       resolveSessionGitIdentity(requester, {
         preferMachineIdentity: true,
         personalIdentityEnabled: false,
-        machineIdentity: machine,
+        machine: machineSource(machine),
       })
-    ).toEqual(machine);
+    ).toEqual({ ...machine, inject: false });
   });
 
-  it('falls back to the machine identity when the personal account has no usable email', () => {
+  it('exports the email as name when the owner configured only an email', () => {
+    expect(
+      resolveSessionGitIdentity(requester, {
+        preferMachineIdentity: true,
+        machine: machineSource({ email: machine.email }),
+      })
+    ).toEqual({ name: machine.email, email: machine.email, inject: true });
+  });
+
+  it('replaces agent-writable shared-clone identity with the user-level identity', () => {
+    const polluted = machineSource(
+      { name: 'Fixture', email: 'fixture@example.com' },
+      { untrusted: true, userLevel: machine }
+    );
+    expect(
+      resolveSessionGitIdentity(requester, { preferMachineIdentity: true, machine: polluted })
+    ).toEqual({ ...machine, inject: true });
+    expect(
+      resolveSessionGitIdentity(requester, {
+        preferMachineIdentity: true,
+        machine: machineSource(
+          { email: 'fixture@example.com' },
+          { untrusted: true, userLevel: {} }
+        ),
+      })
+    ).toEqual(neutral);
+  });
+
+  it('falls back to the owner machine when the approved account has no usable email', () => {
     expect(
       resolveSessionGitIdentity(
         { name: 'Requester', email: '' },
-        { preferMachineIdentity: true, personalIdentityEnabled: true, machineIdentity: machine }
+        {
+          preferMachineIdentity: true,
+          personalIdentityEnabled: true,
+          machine: machineSource(machine),
+        }
       )
-    ).toEqual(machine);
+    ).toEqual({ ...machine, inject: false });
   });
 
-  it('never gives a non-owner the machine identity, even with personal identity off', () => {
+  it('exports LodyAI when the owner has no Git identity', () => {
+    expect(
+      resolveSessionGitIdentity(requester, {
+        preferMachineIdentity: true,
+        machine: machineSource({}),
+      })
+    ).toEqual(neutral);
+  });
+
+  it('never gives a non-owner the machine identity or an unapproved account email', () => {
     expect(
       resolveSessionGitIdentity(requester, {
         preferMachineIdentity: false,
         personalIdentityEnabled: false,
-        machineIdentity: machine,
+        machine: machineSource(machine),
       })
-    ).toEqual(requester);
+    ).toEqual(neutral);
+    expect(
+      resolveSessionGitIdentity(requester, {
+        preferMachineIdentity: false,
+        personalIdentityEnabled: true,
+        machine: machineSource(machine),
+      })
+    ).toEqual({ ...requester, inject: true });
     expect(
       resolveSessionGitIdentity(
         { name: 'x', email: '' },
-        { preferMachineIdentity: false, machineIdentity: machine }
-      ).email
-    ).toBe(DEFAULT_AI_GIT_AUTHOR_EMAIL);
+        {
+          preferMachineIdentity: false,
+          personalIdentityEnabled: true,
+          machine: machineSource(machine),
+        }
+      )
+    ).toEqual(neutral);
   });
 });
 
@@ -78,7 +165,8 @@ describe('readHostDefaultGitIdentity', () => {
     home = path.join(dir, process.platform === 'win32' ? 'home with space' : 'home "quoted"');
     xdg = path.join(home, '.config');
     mkdirSync(xdg, { recursive: true });
-    process.env = { ...originalEnv, HOME: home, XDG_CONFIG_HOME: xdg };
+    process.env.HOME = home;
+    process.env.XDG_CONFIG_HOME = xdg;
     for (const key of Object.keys(process.env)) {
       if (/^(GIT_|LODY_GIT_|SSH_)/.test(key)) delete process.env[key];
     }
@@ -92,7 +180,10 @@ describe('readHostDefaultGitIdentity', () => {
 
   afterEach(() => {
     process.chdir(originalCwd);
-    process.env = originalEnv;
+    for (const key of Object.keys(process.env)) {
+      if (!(key in originalEnv)) delete process.env[key];
+    }
+    Object.assign(process.env, originalEnv);
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -131,6 +222,9 @@ describe('readHostDefaultGitIdentity', () => {
     writeConfig(path.join(home, '.gitconfig'), identityConfig(machine.name, machine.email));
     process.env.GIT_CONFIG_GLOBAL = 'chosen config';
     writeConfig(path.join(dir, 'chosen config'), identityConfig(requester.name, requester.email));
+    expect(
+      execFileSync('git', ['config', '--global', '--get', 'user.name'], { encoding: 'utf8' }).trim()
+    ).toBe(requester.name);
     expect(readHostDefaultGitIdentity()).toEqual(requester);
 
     process.env.GIT_CONFIG_GLOBAL = '';
@@ -172,5 +266,65 @@ describe('readHostDefaultGitIdentity', () => {
     writeConfig(path.join(xdg, 'git/config'), identityConfig(machine.name, machine.email));
     writeConfig(path.join(home, '.gitconfig'), '[invalid');
     expect(readHostDefaultGitIdentity()).toEqual({ name: undefined, email: undefined });
+  });
+
+  it('keeps repository and conditional identity of an owner project native to Git', () => {
+    writeConfig(path.join(xdg, 'git/config'), identityConfig(machine.name, machine.email));
+    execFileSync('git', ['config', 'user.email', 'repo@example.com']);
+    const probed = probeMachineGitIdentity(dir);
+    expect(probed.effective).toEqual({ name: machine.name, email: 'repo@example.com' });
+    expect(probed.untrustedRepositoryIdentity).toBe(false);
+    expect(probed.repositoryIdentity).toBe(true);
+    expect(
+      resolveSessionGitIdentity(requester, {
+        preferMachineIdentity: true,
+        personalIdentityEnabled: true,
+        workdir: dir,
+      })
+    ).toEqual({ name: machine.name, email: 'repo@example.com', inject: false });
+    expect(
+      resolveSessionGitIdentity(requester, { preferMachineIdentity: true, workdir: dir })
+    ).toEqual({ name: machine.name, email: 'repo@example.com', inject: false });
+
+    execFileSync('git', ['config', '--unset', 'user.email']);
+    writeConfig(path.join(home, 'work-identity'), '[user]\nemail = work@example.com\n');
+    writeConfig(
+      path.join(home, '.gitconfig'),
+      `[includeIf "gitdir:${dir}/"]\npath = work-identity\n`
+    );
+    expect(probeMachineGitIdentity(dir).effective.email).toBe('work@example.com');
+  });
+
+  it('distrusts repository identity only in a Lody-managed shared clone', () => {
+    writeConfig(path.join(xdg, 'git/config'), identityConfig(machine.name, machine.email));
+    process.env.LODY_DATA_DIR = path.join(dir, 'data');
+    const bare = path.join(dir, 'data/repos/owner-repo/bare.git');
+    const worktree = path.join(dir, 'data/repos/owner-repo/worktrees/session');
+    execFileSync('git', ['init', '-q', '--bare', bare]);
+    execFileSync('git', ['-C', bare, 'config', 'user.email', 'fixture@example.com']);
+    execFileSync('git', ['-C', dir, 'commit', '-q', '--allow-empty', '-m', 'base'], {
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'T',
+        GIT_AUTHOR_EMAIL: 't@example.com',
+        GIT_COMMITTER_NAME: 'T',
+        GIT_COMMITTER_EMAIL: 't@example.com',
+      },
+    });
+    execFileSync('git', ['-C', dir, 'push', '-q', bare, 'HEAD:refs/heads/main']);
+    execFileSync('git', ['-C', bare, 'worktree', 'add', '-q', worktree, 'main']);
+
+    expect(probeMachineGitIdentity(worktree)).toMatchObject({
+      untrustedRepositoryIdentity: true,
+      repositoryIdentity: false,
+    });
+    expect(
+      resolveSessionGitIdentity(requester, { preferMachineIdentity: true, workdir: worktree })
+    ).toEqual({ ...machine, inject: true });
+
+    execFileSync('git', ['-C', bare, 'config', '--unset', 'user.email']);
+    expect(
+      resolveSessionGitIdentity(requester, { preferMachineIdentity: true, workdir: worktree })
+    ).toEqual({ ...machine, inject: false });
   });
 });

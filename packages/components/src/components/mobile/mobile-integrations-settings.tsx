@@ -1,3 +1,4 @@
+import { GitHubInstallationNotice } from '@/components/settings/github-installation-notice';
 import {
   useLegacyWorkspaceAction,
   useLegacyWorkspaceMutation,
@@ -196,6 +197,7 @@ function MobileCloudIntegrationsSettings() {
   const refreshPersonalGitHubProfile = useLegacyWorkspaceAction(
     cloudOperations.github.refreshPersonalGitHubProfile
   );
+  const [installNeedsAuthorization, setInstallNeedsAuthorization] = useState(false);
   const [connectingToGitHub, setConnectingToGitHub] = useState(false);
   const [updatingPersonalPreference, setUpdatingPersonalPreference] = useState(false);
   const [authorizingPersonalGitHub, setAuthorizingPersonalGitHub] = useState(false);
@@ -271,6 +273,12 @@ function MobileCloudIntegrationsSettings() {
       return;
     }
 
+    if (personalOperationSettings === undefined) return;
+    if (personalAuthorizationState !== 'authorized') {
+      setInstallNeedsAuthorization(true);
+      return;
+    }
+    setInstallNeedsAuthorization(false);
     const githubAppName = import.meta.env.VITE_GITHUB_APP_NAME || 'lodyai';
     const isElectron = isElectronRenderer();
     const popup = isElectron ? null : window.open('', '_blank');
@@ -319,6 +327,8 @@ function MobileCloudIntegrationsSettings() {
     currentWorkspaceId,
     currentWorkspaceSlug,
     getConvexErrorMessage,
+    personalAuthorizationState,
+    personalOperationSettings,
     t,
   ]);
 
@@ -399,7 +409,9 @@ function MobileCloudIntegrationsSettings() {
     try {
       if (authorizeInBrowser) {
         const opened = await openExternalUrl(
-          getPersonalGitHubAuthorizationUrl(currentWorkspaceSlug!)
+          getPersonalGitHubAuthorizationUrl(currentWorkspaceSlug!, {
+            installation: installNeedsAuthorization,
+          })
         );
         if (!opened) {
           throw new Error(
@@ -423,12 +435,24 @@ function MobileCloudIntegrationsSettings() {
     authedWorkspaceId,
     authorizeInBrowser,
     canAuthorizePersonalGitHub,
+    installNeedsAuthorization,
     currentWorkspaceSlug,
     t,
   ]);
 
   return (
-    <div id="github" {...stylex.props(styles.page, fold ? styles.foldPage : styles.unfoldPage)}>
+    <div
+      id="github"
+      {...stylex.props(styles.page, fold ? styles.foldPage : styles.unfoldPage)}
+    >
+      <GitHubInstallationNotice
+        needsAuthorization={
+          installNeedsAuthorization && personalAuthorizationState !== 'authorized'
+        }
+        authorized={personalAuthorizationState === 'authorized'}
+        onAuthorize={() => void handleAuthorizePersonalGitHub()}
+        disabled={!workspaceAuthReady || authorizingPersonalGitHub}
+      />
       <MobileSettingsFoldPanels
         upper={
           <>
@@ -474,9 +498,8 @@ function MobileCloudIntegrationsSettings() {
 
             {/* Personal identity. The toggle row owns the on/off state and
            the row's helper text mirrors the desktop card's lead line.
-           When enabled, the authorization status panel is appended
-           below the row inside the same card so the card visually
-           groups "the preference + its consequence". */}
+           Authorization also remains available with the operation preference
+           off, because connecting the App needs the independent personal grant. */}
             <MobileSettingsSection
               title={t('settings.integrations.github.personalIdentitySection', 'Personal Identity')}
             >
@@ -513,7 +536,7 @@ function MobileCloudIntegrationsSettings() {
                   )}
                 </MobileSettingsRow>
               </MobileSettingsRowGroup>
-              {personalIdentityEnabled ? (
+              {personalIdentityEnabled || personalAuthorizationState !== 'authorized' ? (
                 <div {...stylex.props(styles.identityPanel)}>
                   <GitHubPersonalIdentitySettingsCard
                     enabled={personalIdentityEnabled}

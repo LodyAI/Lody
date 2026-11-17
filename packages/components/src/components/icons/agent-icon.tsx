@@ -39,6 +39,7 @@ export function getAgentDisplayName(
   // Custom agentTypes are per-config uuid slugs; the config's `name` is the
   // real display name, which callers with access to the config should prefer.
   if (cliType === 'custom') return 'Custom Agent';
+  if (agentType === 'antigravity-acp') return 'Antigravity ACP (Legacy)';
   return registryNameMap.get(agentType) ?? agentType;
 }
 
@@ -66,7 +67,6 @@ export const AGENT_BRAND_ICONS: Record<AgentBrandId, BrandIconComponent> = {
 
 export type AgentIconSlug =
   | { kind: 'builtin'; agentType: BuiltinAgentType }
-  | { kind: 'preset'; preset: 'deepseek-claude' | 'deepseek-reasonix' }
   | { kind: 'registry'; agentType: string };
 
 export function AgentIcon({
@@ -128,7 +128,13 @@ export function AgentIcon({
     return <AnthropicIcon className={cls} />;
   }
   const raw =
-    REGISTRY_AGENT_ICON_SVGS[cliType === 'builtin' && agentType === 'pi' ? 'pi-acp' : agentType];
+    REGISTRY_AGENT_ICON_SVGS[
+      cliType === 'builtin' && agentType === 'antigravity'
+        ? 'antigravity-acp'
+        : cliType === 'builtin' && agentType === 'pi'
+          ? 'pi-acp'
+          : agentType
+    ];
   if (raw) {
     return <InlineSvg fillParent raw={raw} className={inlineGlyphClass} />;
   }

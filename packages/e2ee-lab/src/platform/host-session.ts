@@ -191,6 +191,7 @@ export const makeLabHostSession = Effect.fn('Lab.makeHostSession')(function* (in
         }),
       };
       const control = yield* makeLabControlGateway({
+        quotaPath: join(directory, 'ledger-quota.sqlite'),
         genesis: creation.genesis,
         stream: creation.stream,
         checkpoint: () =>

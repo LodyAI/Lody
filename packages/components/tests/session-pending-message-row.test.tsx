@@ -1,12 +1,10 @@
 // @vitest-environment jsdom
-
 // A failed pending send is an ordinary user message, not an error report: the
 // same reason must appear exactly ONCE (on the attachment that failed), the
 // message level must stay a short status, and an attachment that finished must
 // not be dragged into the failure. Regressions here are what made the row read
 // like a debug panel.
 
-// @vitest-environment jsdom
 // A failed pending send is an ordinary user message, not an error report: the
 // same reason must appear exactly ONCE (on the attachment that failed), the
 // message level must stay a short status, and an attachment that finished must

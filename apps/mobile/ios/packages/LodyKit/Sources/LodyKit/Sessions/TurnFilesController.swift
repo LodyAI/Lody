@@ -19,7 +19,7 @@ final class TurnFilesController: UIViewController, UICollectionViewDelegate {
   private var byPath: [String: File] = [:]
   private lazy var collection = UICollectionView(frame: .zero, collectionViewLayout: {
     var configuration = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
-    configuration.backgroundColor = .systemGroupedBackground
+    configuration.backgroundColor = .lodyGroupedBackground
     return UICollectionViewCompositionalLayout.list(using: configuration)
   }())
   private var dataSource: UICollectionViewDiffableDataSource<Int, String>!
@@ -34,7 +34,7 @@ final class TurnFilesController: UIViewController, UICollectionViewDelegate {
 
   override func viewDidLoad() {
     super.viewDidLoad()
-    view.backgroundColor = .systemGroupedBackground
+    view.backgroundColor = .lodyGroupedBackground
     collection.frame = view.bounds
     collection.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     collection.delegate = self

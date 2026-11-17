@@ -43,6 +43,7 @@ struct CreateSessionFixture {
     let params = params
     let scenario = scenario
     service.persistShare = false
+    service.workspaceMode = { _ in .plaintext }
     Self.write(CreateSessionService.prefsKey(userId: params.userId, workspaceId: params.workspaceId), "null")
     if scenario == "create-recovery" { Self.write("ui-device-options-error", "true") }
     service.options = { _, projectId in

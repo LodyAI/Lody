@@ -4,7 +4,27 @@ Binding rules live in [AGENTS.md](AGENTS.md) and in the scoped `AGENTS.md` of ea
 subdirectory; this file is the navigation index. Cross-module explanations live in
 [`.agents/docs/`](../../../../.agents/docs/AGENTS.md).
 
+## Bound Session command access
+
+Ordinary daemon-hosted Session history and metadata management borrow the existing
+workspace admission. A same-account caller on that daemon's own machine can use its
+local owner capability, corroborated by the current machine row; Session authorship
+never supplies this permission. Revoked workspace access still refuses. Other
+accounts and target machines use control-plane authorization, and missing cloud
+configuration refuses only that dependent operation. Encrypted workspaces retain
+their verified-ledger path. Roost sessions owned by this daemon keep the installed
+local backend; remote history still requires a signed proof.
+
+Cloud authorization adapters own endpoint validation. Tests inject synthetic
+endpoints or the authorization adapter itself, so a mocked port is not gated by a
+process-global deployment variable. Release CLI builds inject cloud endpoints;
+embedded clients pass them at startup, while local builds do not require them.
+
 ## Local persistence
+
+- `private-credential-file.ts` — publishes complete owner-only credential files
+  on POSIX using an exclusive temporary file and rename. Login and Git broker
+  state share it so replacement also removes permissive legacy file modes.
 
 - `local-workspace-catalog.ts` — cached workspace/identity discovery; mutations
   compose native FileLocks and keep the file write inside its lease. Read-cache
@@ -15,6 +35,12 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   rebuild it behind the invalid marker; offline and ordinary operations retain the error.
   [Recovery decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-catalog-recovery.md).
 
+- `machine-identity-restore.ts` — retained daemon restart intent and credential
+  backup/publication. Only the next supervised daemon worker commits the accepted
+  cloud operation, before opening runtimes. Unknown results retain their original
+  request and credentials. This remains in the existing Promise-based startup and
+  lifecycle boundary; it does not migrate Fleet or restart ownership to Effect.
+
 ## Resource discovery
 
 - `workspace-command-manager.ts` — overlapping standalone commands borrow one
@@ -22,6 +48,9 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   cleanup. Authorization scopes stay separate; a failed cleanup is reported once
   and never blocks later commands. Daemon-executed commands borrow the daemon's
   replica through `session-command-environment.ts` instead.
+  Workspace cleanup errors identify failed stages and recognized safe causes;
+  document failures also report unconfirmed persistence. Unknown raw error text
+  is not copied into messages that may reach MCP or synced history.
 - `discovery-query.ts` — strict query schemas, scope-bound keyset pagination and
   shared Session title/Machine/Agent/Role filters.
 - `resource-discovery.ts` — readable directory projections, Role availability,
@@ -213,6 +242,9 @@ provides LocalProjects. See the [decision](../../../../.agents/notes/implemented
   waiting for causal dependencies through the existing SQLite journal. A durable
   save does not establish complete synchronization or advance another replica's
   cursor. See the [persistence decision](../../../../.agents/notes/implemented/bug-fix/2026-10-22-loro-pending-persistence.md).
+  Released streams-crdt and LoroRepo builds own storage-failure recovery: a failed save no
+  longer spins the live-read loop ([read-loop decision](../../../../.agents/notes/implemented/bug-fix/2026-10-19-streams-read-loop-spin.md))
+  or re-downloads applied updates ([release adoption](../../../../.agents/notes/implemented/bug-fix/2026-10-23-storage-recovery-release-adoption.md)).
   `sqlite-lock-diagnostics.ts` logs, at most once a minute, which processes hold a
   workspace `repo.sqlite3` open when loro-repo or streams-crdt reports
   `database is locked`; it only observes (`lsof`) and never retries or blocks.
@@ -233,3 +265,13 @@ initialization-stall signals. `loro/session-active-presence-legacy.ts` is the
 MessageHandler construction/analytics entry. Visible Turns acquire the native lease;
 other lifecycle callbacks may update phases but cannot release it. Shutdown awaits
 those leases before closing documents. See the [presence guide](../../../../.agents/docs/cli-lib-loro-presence.md).
+
+## Managed daemon updates
+
+`managed-daemon-release.ts` verifies product/distribution signatures, bounds and
+resumes downloads, and owns versioned installations and per-operation records.
+`managed-daemon-ipc.ts` carries preparation over existing private supervisor IPC.
+`managed-process-observation.ts` records owned process groups and refuses a clean
+drain receipt when their termination is unknown. The fixed entry in
+`commands/daemon-runner.ts` owns selection, the uninterrupted Host lease and rollback;
+`session/machine-turn-admission.ts` pauses new turns across all workspaces.

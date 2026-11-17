@@ -1040,6 +1040,8 @@ fold layout. It adds no wrapper; callers keep scrolling and measurement on the s
 native viewport. See the [integration decision](../../.agents/notes/implemented/architecture/2026-11-07-stylex-main-integration.md)
 for the ownership and verification boundary.
 
+`contentStyle` can constrain the content wrapper's layout, for example to allow
+a horizontal tab strip to shrink to the viewport before its contents overflow.
 `scrollbarClassName` carries layout or interaction constraints on both tracks,
 such as hiding them during a parent frame's animation; track appearance stays token-owned.
 

@@ -68,6 +68,26 @@ const GROK_ACCOUNT_ENV = new Set([
   'GROK_WEB_SEARCH_MODEL',
 ]);
 
+// agy ACP and its zero-turn /usage command receive the same environment.
+// Only these proxy/locale settings are known not to change credential discovery;
+// unknown keys stay ineligible until their account semantics have been audited.
+const ANTIGRAVITY_NON_ACCOUNT_ENV = new Set([
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'ALL_PROXY',
+  'NO_PROXY',
+  'LANG',
+  'LANGUAGE',
+  'LC_ALL',
+  'LC_COLLATE',
+  'LC_CTYPE',
+  'LC_MESSAGES',
+  'LC_MONETARY',
+  'LC_NUMERIC',
+  'LC_TIME',
+  'TZ',
+]);
+
 /** Account eligibility only. Callers must also require the advertised quota
  * capability and select snapshots belonging to the exact Provider config. */
 export function isSubscriptionQuotaEligible(config: SubscriptionQuotaConfig): boolean {
@@ -88,6 +108,8 @@ export function isSubscriptionQuotaEligible(config: SubscriptionQuotaConfig): bo
       return !keys.some((key) => CODEX_ACCOUNT_ENV.has(key));
     case 'grok':
       return !keys.some((key) => GROK_ACCOUNT_ENV.has(key));
+    case 'antigravity':
+      return keys.every((key) => ANTIGRAVITY_NON_ACCOUNT_ENV.has(key));
     default:
       // Other builtin adapters retain their existing policy until their quota
       // credential paths have been audited.

@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act, useRef, useState } from 'react';
 import { createStore, Provider, useAtomValue } from 'jotai';
 import {

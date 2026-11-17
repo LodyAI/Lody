@@ -86,6 +86,8 @@ intent, but later wakeable receipts can proceed. Process identities are not jour
 restart orphan-process cleanup is deferred. The offline recovery command and startup PID
 proof are removed. See the [availability decision](../../../../.agents/notes/implemented/bug-fix/2026-10-29-inbox-no-durable-block.md).
 
+Shared SQLite `busy` failures stop the current retry/prepare pass: another receipt cannot acquire the same writer lock, and repeating its synchronous five-second wait would freeze the daemon repeatedly. One interruptible scope-owned retry starts after 250 ms, doubles to a two-second cap, and coalesces scan wakes during backoff. Explicit admission, Stop and submit do not depend on that flag. Successful scanning resets the delay; scope closure cancels the retry. Row-local errors and `SQLITE_FULL` still attempt independent work, retaining failed receipts and full Causes. The native five-second wait for an individual SQL call remains unchanged.
+
 Session admission locks retain waiters and holders until zero references. Projected
 receipt caches follow SQLite identities/statuses; release retries own a private receipt.
 

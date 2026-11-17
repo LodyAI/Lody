@@ -298,6 +298,9 @@ const toImagePayload = (
 
   return {
     imageId: block.imageId,
+    transport: block.transport,
+    machineId: block.machineId,
+    localImageId: block.localImageId,
     ...(block.encryption ? { encryption: block.encryption } : {}),
     mimeType: block.mimeType,
     fileName,
@@ -471,7 +474,11 @@ export const normalizeSessionInputBlocks = (
   if (
     !parsedInputBlocks.success &&
     Array.isArray(inputBlocks) &&
-    inputBlocks.some((block) => block?.type === 'local_attachment')
+    inputBlocks.some(
+      (block) =>
+        block?.type === 'local_attachment' ||
+        (block?.type === 'image' && block?.transport === 'local')
+    )
   ) {
     throw new Error('Invalid or unsupported local attachment input');
   }

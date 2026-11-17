@@ -4,9 +4,10 @@
 Parent `AGENTS.md` files also apply.
 
 Settings owns the workspace catalog surfaces (Providers, MCP servers, Agent
-Roles). The catalog's durability rule — a local Flock write is durable, and the
-upload that follows it is not something a settings surface waits on, reports, or
-rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
+Roles). Before saving a catalog row, follow the durability rule in
+[shared source contracts](../../../../shared/src/AGENTS.md#workspace-mcp--roles).
+Lody Agent connections and Sorbet endpoints follow
+[Lody Agent setup](README.md#lody-agent-setup).
 
 ## Layout and components
 
@@ -126,6 +127,11 @@ component details.
 
 ## Seat billing
 
+- Ordinary join approval refreshes the Better Auth member cache after commitment.
+  The existing owner-state subscription carries an optional roster version for
+  cross-device refresh. Cache or marker failure preserves approval; scope the
+  panel by account/workspace and retain changes arriving during a refresh.
+
 - Reuse `SeatCostNotice` in invitation and approval entry points. Approval must show
   the current cost and deferred collection policy before committing membership.
 - Removal/leave do not cancel accrued service fees. Deleted workspace invoices stay
@@ -133,3 +139,5 @@ component details.
   in personal Account settings; invoice details reuse `BillingInvoiceDetails`.
 
 - Billing telemetry: never infer payment from returns; exclude URLs, codes and raw errors.
+
+- GitHub installation: follow [authorization/recovery](README.md#github-installation).

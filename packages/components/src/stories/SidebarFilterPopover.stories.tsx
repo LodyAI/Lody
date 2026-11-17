@@ -76,6 +76,7 @@ function FilterShell({
   const [scope, setScope] = useState<SidebarChatScope>(scopeArg);
   const [showUpdatedProjectNames, setShowUpdatedProjectNames] = useState(true);
   const [showBranchNames, setShowBranchNames] = useState(false);
+  const [hideEmptyProjects, setHideEmptyProjects] = useState(true);
 
   return (
     <div {...stylex.props(storyLayout.row)}>
@@ -100,6 +101,10 @@ function FilterShell({
             <span {...stylex.props(storyLayout.label)}>Branch line:</span>{' '}
             <span {...stylex.props(storyLayoutStyles.label)}>{showBranchNames ? 'on' : 'off'}</span>
           </div>
+          <div className="mt-1">
+            <span className="text-sidebar-foreground-muted">Hide empty projects:</span>{' '}
+            <span className="font-medium">{hideEmptyProjects ? 'on' : 'off'}</span>
+          </div>
         </div>
         <p {...stylex.props(storyLayoutStyles.caption2)}>
           Click the filter icon to open the popover. Selections update the panel above.
@@ -115,6 +120,8 @@ function FilterShell({
           onShowUpdatedProjectNamesChange={setShowUpdatedProjectNames}
           showBranchNames={showBranchNames}
           onShowBranchNamesChange={setShowBranchNames}
+          hideEmptyProjects={hideEmptyProjects}
+          onHideEmptyProjectsChange={setHideEmptyProjects}
           {...(defaultOpen ? { side: 'top', align: 'end' } : null)}
         />
       </div>

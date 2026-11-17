@@ -121,23 +121,16 @@ electron-builder 的 `mac.provisioningProfile` 能否嵌入 Developer ID profile
 在 Mac 上按顺序执行，遇到第一个失败就停下：
 
 1. **签名。** 用 profile 和新授权项构建。`codesign -d --entitlements - Lody.app` 能列出这三项，`spctl -a -vv Lody.app` 接受，公证后能启动。这里启动失败是主要风险。
-2. **关联。** `curl https://app-site-association.cdn-apple.com/a/v1/vault.lody.ai` 返回文件，`sudo swcutil show` 列出应用和这个域名。
-3. **Ceremony。** 用一个最小原生模块为 `vault.lody.ai` 创建带 PRF 输入的平台 passkey，并锚定到 `BrowserWindow`。系统弹窗显示 RP，注册报告支持 PRF。
+2. **关联。** `curl https://app-site-association.cdn-apple.com/a/v1/lody.ai` 返回文件，`sudo swcutil show` 列出应用和这个域名。
+3. **Ceremony。** 用一个最小原生模块为 `lody.ai` 创建带 PRF 输入的平台 passkey，并锚定到 `BrowserWindow`。系统弹窗显示 RP，注册报告支持 PRF。
 4. **PRF。** 认证返回 32 字节，第二次认证以及通过 iCloud 钥匙串在第二台 Mac 上得到相同字节。
 5. **更新。** 从一个签名版本 Sparkle 更新到下一个后，第 2 到 4 步仍然正常。
 
 如果第 1 或第 2 步失败，Developer ID 就走不通这条路。退路是 macOS 上只用恢复文件，passkey 只留给 iPhone 和 Web 界面，这需要 owner 决定。
 
-## Web 解锁界面：最小计划
+## 同源网页恢复修订
 
-尚未开始，等 macOS 和 iPhone 在真机上通过后再做。已批准的形态见 [Spec](../../../../specs/e2ee/recovery-vault.zh.md#passkey-解锁)。最小构建：
-
-1. `vault.lody.ai` 上独立的静态应用，由已提供 AASA 的 Worker 提供，没有第三方脚本和遥测，使用严格 CSP 和独立的部署凭据。
-2. 基于 `navigator.credentials` 的浏览器 `E2eePasskeyPort`，复用 `@lody/e2ee-client`。浏览器不返回 PRF 时，在同一界面提供恢复文件。
-3. 只有一条流程：登录、解锁、恢复到这个域下的浏览器设备 C，再显示配对码，让普通 Web 应用或其他设备经 C 加入。
-4. V 从不存储，V、R 和 PRF 结果都不会进入普通 Web 应用。
-
-开始前要定：这个域下如何登录，又不共享普通应用的会话。控制这台主机的恶意运营方仍可尝试发起 ceremony，Spec 已接受这一点。
+owner 于 2026-11-10 指示取代专用主机方案：恢复直接在普通 `lody.ai` 客户端中完成，RP 为 `lody.ai`，不再创建设备 C、跨页通道或手动复制备用步骤。这把系统仪式的信任范围扩大到父域及子域，包括官网与统计脚本。仍须系统验证。[修订后的 Spec](../../../../specs/e2ee/recovery-vault.zh.md#passkey-解锁) 已由 zxch3n 于 2026-11-10 批准，但不据此启用功能。临时明文等实际操作结束后清理，加密重试记录保留。复用现有应用负责人：备份只租借并释放自己的 reader，恢复沿用原设备身份，失败不得关闭内容 reader。
 
 ## 后果与局限
 
@@ -149,3 +142,31 @@ electron-builder 的 `mac.provisioningProfile` 能否嵌入 Developer ID profile
 - 上面列出的后端工作。
 
 owner 已随 Spec 修订一并批准 R 凭据参数。
+
+## 网页恢复的取舍
+
+2026-11-09 批准的 PRF 加恢复文件仍保留。2026-11-10 同源方向用专用主机隔离换取在应用中直接完成操作。密码加 Secret Key 仍须完整 KDF 与包装协议审查；短密码不能作为 PRF 缺失时的自动降级。
+
+下表来源曾于 2026-11-10 查证，不代表产品验收。
+
+| 对象 | 已查证的机制与来源 | 对 Lody 的意义 |
+| --- | --- | --- |
+| 1Password 的密码＋Secret Key 路径 | [官方 SRP 说明](https://1password.com/blog/developers-how-we-use-srp-and-you-can-too)区分双秘密派生 2SKD 与不传密码的 SRP 认证；[Secret Key 说明](https://support.1password.com/secret-key-security/)解释随机秘密加强服务端密文的保护。 | 可以学用户现场开包的体验，不能只复制“密码”输入框便声称等同其安全模型；本提案不改 Lody 登录为 SRP。 |
+| Proton Pass | [安全模型](https://proton.me/blog/proton-pass-security-model)使用 SRP 认证、由密码经 bcrypt 保护用户钥，再打开 vault/item 密钥。 | 浏览器可做分层客户端解密；不证明密码包装可直接接到 Lody 已批准的恢复格式。 |
+| MetaMask 扩展的助记词路径 | [官方 passkey 说明](https://support.metamask.io/configure/wallet/passkeys/)描述本地密码保护 vault、passkey 包装本地加密钥；本地 vault 不随同步 passkey 自动出现在另一安装。此处 SRP 指 Secret Recovery Phrase，不是 Secure Remote Password。 | 扩展的本地保险库不等于普通网站从云端自助取回工作区；不推断其社交登录路径。 |
+| WhatsApp Web 的关联设备 | [官方多设备架构](https://engineering.fb.com/2021/07/14/security/whatsapp-multi-device/)描述各设备独立身份、通过手机扫码关联，关联后可独立连接。此来源是 2021 年的架构说明。 | 适合保留设备批准入口，不能满足“另一台设备不在手边也能首次解锁”。不据此声称其所有现行流程仍相同。 |
+| WebAuthn PRF | [W3C 标准](https://www.w3.org/TR/webauthn-3/#prf-extension)定义每凭据的 32 字节伪随机输出，可用于加密。 | 普通 passkey 签名不是解密钥；必须验证真实 PRF，兼容性不能只看浏览器名字。 |
+
+**归属与替代检查。** 本 proposed Note 仍拥有原生与恢复集成理由，仅网页计划被取代。历史批准记录保留；没有已实施 Note 被完整替代。
+
+**证据界限。** 本次核对了公开 Spec、`packages/e2ee-core/src/internal/recovery/crypto.ts`
+和固定向量位置，没有运行解锁或配对，也未验证私有部署和 Ryugi 画布。上文早期的
+产品接入、PR 状态与平台缺口是当时核查记录，本提案不把它们当作今天的已核实状态。
+
+### 可移植恢复 host 边界
+
+显式恢复命令拥有一个已准备身份和恢复密钥的 Scope。它先认证恢复包与账号，再准备
+身份，保留接纳原件，通过已验证获准的 session 安装密钥。取消和关闭沿用现有 owned
+host 排空，不新增后台负责人或替换路径。安装失败保留身份与原件供续做；独立工作区
+及已获准的内容仍可用。Chromium 用例覆盖坏包、错误账号、已撤销 R、安装失败、精确
+续做和持久重开；私有 Web 入口和部署仍须另行验收。

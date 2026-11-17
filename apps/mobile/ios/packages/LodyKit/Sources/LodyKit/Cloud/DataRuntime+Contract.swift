@@ -89,7 +89,7 @@ extension DataRuntime {
   }
 
   func perform<C: RuntimeCall>(_ call: C.Type, _ params: C.Params, timeout: Double? = nil) async throws -> C.Result {
-    guard health.ready, contractReady, let channel else {
+    guard let workspace, WorkspaceModePins.shared.mode(workspace) == .plaintext, health.ready, contractReady, let channel else {
       throw Self.failure("not_ready", String(localized: "native.runtime.sessionNotSynced", bundle: .lody))
     }
     do {

@@ -12,7 +12,7 @@ Translation: current
 ## 边界与决定
 
 - 可选公开接口只传邀请固定值、签名申请与进度。凭据和私钥留在按账号隔离的原生主进程。普通工作区和本地构建不会启动此流程。
-- 邮箱邀请与加入链接保留不同来源。仅已接受的定向邮箱邀请允许自动批准；链接申请必须显式批准。云端负责账号归属和席位预约，真实权限仍由签名账本授予。
+- 邮箱邀请与加入链接保留不同来源。仅当批准端自行核对邮箱邀请的签发者签名、签发者当前角色、有效期和由令牌派生的唯一申请编号后才允许自动批准（`source` 只是标签）；链接申请必须显式批准。云端负责账号归属和席位预约，真实权限仍由签名账本授予。
 - 加入设备在提交前保存完整原始 KeyPackage。批准设备在网络请求前保存每次原始签名记录。结果不明时重用原件；只有验证到占用原父节点的竞争记录，才允许针对新父节点重新签名，并保留旧尝试。
 - 换用新邀请前，先向已认证服务对账旧申请。只有已取消、已过期且未预约、或已拒绝的申请才能退役本地待处理意图；正在签入或已提交的申请继续恢复。安装和清理不会删除已安装的来源。
 - 新设备从独立保存的 genesis 开始，完整验证有大小上限的权限历史页。服务端角色或未验证快照不能建立本地身份。当前和保留 epoch 的密钥沿用现有信箱发放。
@@ -32,7 +32,7 @@ Translation: current
 
 已认证移除继续比较原账号、工作区、genesis、签名公钥和 credential，停止并排空原生 owner 后删除该实例。清理现已覆盖 `member_joins` 和 `personal_join_histories`，避免已安装来源阻塞或污染新邀请。凭据认证的邀请接口沿用统一移除错误分类和终态清理。旧凭据的迟到响应不能通过当前身份比较，因此不会删除新实例。
 
-`acceptMemberJoin`、`acceptPersonalHistory` 和 `acceptPersonalJoin` 共用移除标记完成规则：先验证签名接纳或历史及其与本地设备的绑定，再仅为同 genesis、不同签名公钥清除标记。准备申请和安装失败都保留标记。旧实例清理后，新邀请生成新设备和凭据；同一未决申请的重试继续使用原件。
+`acceptMemberJoin`、`acceptPersonalHistory` 和 `acceptPersonalJoin` 共用移除标记完成规则：先验证签名接纳或历史及其与本地设备的绑定，再仅为同 genesis、不同签名公钥清除标记。准备申请和安装失败都保留标记。旧实例清理后，新邀请生成新设备和凭据；同一未决申请的重试继续使用原件。如果已记下移除回执、但随后的删除失败（进程租约被占用或系统钥匙串暂不可用），准备新邀请时会先从回执接着完成删除，再准备新申请。被移除的工作区不会再出现在列表里，没有别的路径会重新打开它；不这样做的话，新邀请会一直被拒绝。
 
 渲染器沿用 #1982 唯一的本地数据定位：账号、工作区、genesis、签名公钥，正文命名空间再区分窗口。加入成功后进入现有加密运行时接纳流程，在打开正文前保存新定位，不能选择旧的仅按工作区命名的缓存或复活被移除实例。
 
@@ -44,9 +44,11 @@ Translation: current
 
 ## 准入后的派钥
 
-过去审批要等完整的 `refresh()` 结束才返回，其中包含最多四遍的 key round。在打包版的 B④ 运行里，中继已经提交了准入，审批桌面却又多等了 30 秒。这段时间管理员的审批卡一直是禁用状态，没有任何进度提示，邮件 worker 的调用也一直挂着。现在 `approveMemberJoin` 只做一次 ledger 摄入（`installKeys: false`），读取中继结果后就返回 `admitted`，同时带上 `keyDelivery: 'pending'`。派钥结果无法撤销准入。加入方设备本来就要等自己装好当前密钥后才显示"就绪"，所以不会出现显示已加入、却打不开工作区的情况。
+过去审批要等完整的 `refresh()` 结束才返回，其中包含最多四遍的 key round。在打包版的 B④ 运行里，中继已经提交了准入，审批桌面却又多等了 30 秒。这段时间管理员的审批卡一直是禁用状态，没有任何进度提示，邮件 worker 的调用也一直挂着。现在 `approveMemberJoin` 只做一次 ledger 摄入（`keyMode: 'none'`），读取中继结果后就返回 `admitted`，同时带上 `keyDelivery: 'pending'`。派钥结果无法撤销准入。加入方设备本来就要等自己装好当前密钥后才显示"就绪"，所以不会出现显示已加入、却打不开工作区的情况。
 
-派钥归主进程的 `E2eeIpc` 服务所有，不再依附于某个渲染端请求。每个账户和工作区同时只跑一轮，这一轮由主进程自己持有的 host reader 承载，所以即使关掉所有窗口也不会中断。host 原有的 key round 单飞和锁规则保持不变，派发对象也仍然只限于 ledger 中已验证的成员。每一轮都先在这个 reader 下 ingest 中继历史。只有拿到正面证据时，请求才标为 `delivered`：mailbox 在当前 epoch 下为被准入的设备存有 envelope（状态为 `EnvelopeStored` 或 `InstallationReported`），这也是 `KeyDistributor` 记录 `Observed` 之前用的判断。这一轮成功不算证据：sender 不 eligible、目标被 blocked、本机没有当前密钥、只是接上了别人的 round，这些情况都会以成功结束。每种情况都保持可重试，并各有原因码：`e2ee_admission_not_ingested`、`e2ee_key_sender_ineligible`、`e2ee_key_unavailable`、`e2ee_key_not_sent`、`e2ee_key_epoch_changed`、`e2ee_key_recipient_ineligible`、`e2ee_key_status_unavailable`。本地检查在 host 锁内完成，mailbox 状态查询在释放锁之后进行。设备公钥取自已验证的 KeyPackage，不用中继给的标签。失败时只记录公开的 `e2ee_*` 原因码，不记录密钥字节、token 或错误原因，同时保留 `pairingFailure`。之后按退避等待：从 10 秒开始，每失败一次翻倍，上限 5 分钟。到期后由下一次 `memberJoinRequests` 或 `memberKeyDeliveries` 调用触发重试；邮件 worker 和团队设置页每 10 秒都会轮询这两个接口。不另设定时器或循环。显式重试会跳过退避。只有永久性原因才算终态：成员被移除、设备被吊销、绑定缺失、`restart-required`。工作区已关闭仍可重试，因为下一轮会重新打开它。上述终态原因会直接清掉 slot，不再重试。这些原因即使嵌套在 `WorkspaceKeyRoundFailure` 的阶段 Result 里也能识别，识别发生在公开投影把它们压平成通用失败之前。团队设置页在派钥成功前显示"已加入 · 正在发送密钥"，失败时提供重试按钮。加入页补充说明：需要管理员的桌面端在线。
+派钥归主进程的 `E2eeIpc` 服务所有，不再依附于某个渲染端请求。每个账户和工作区同时只跑一轮，这一轮由主进程自己持有的 host reader 承载，所以即使关掉所有窗口也不会中断。host 原有的 key round 单飞和锁规则保持不变，派发对象也仍然只限于 ledger 中已验证的成员。每一轮都先在这个 reader 下 ingest 中继历史。只有拿到正面证据时，请求才标为 `delivered`：mailbox 在当前 epoch 下为被准入的设备存有 envelope（状态为 `EnvelopeStored` 或 `InstallationReported`），这也是 `KeyDistributor` 记录 `Observed` 之前用的判断。这一轮成功不算证据：sender 不 eligible、目标被 blocked、本机没有当前密钥、只是接上了别人的 round，这些情况都会以成功结束。每种情况都保持可重试，并各有原因码：`e2ee_admission_not_ingested`、`e2ee_key_sender_ineligible`、`e2ee_key_unavailable`、`e2ee_key_not_sent`、`e2ee_key_epoch_changed`、`e2ee_key_recipient_ineligible`、`e2ee_key_status_unavailable`。本地检查在 host 锁内完成，mailbox 状态查询在释放锁之后进行。设备公钥取自已验证的 KeyPackage，不用中继给的标签。失败时只记录公开的 `e2ee_*` 原因码，不记录密钥字节、token 或错误原因，同时保留 `pairingFailure`。之后按共享的 `KEY_DELIVERY_RETRY_DELAYS` 退避等待（500 毫秒、1.5 秒、4 秒、10 秒、40 秒、160 秒，然后两次 5 分钟），由 `services/e2ee-key-delivery.mts` 替 `E2eeIpc` 负责。到期后由下一次 `memberJoinRequests` 或 `memberKeyDeliveries` 调用触发重试；邮件 worker 和团队设置页每 10 秒都会轮询这两个接口。不另设定时器或循环。显式重试会跳过退避。只有永久性原因才算终态：成员被移除、设备被吊销、绑定缺失、`restart-required`。工作区已关闭仍可重试，因为下一轮会重新打开它。上述终态原因会直接清掉 slot，不再重试。这些原因即使嵌套在 `WorkspaceKeyRoundFailure` 的阶段 Result 里也能识别，识别发生在公开投影把它们压平成通用失败之前。团队设置页在派钥成功前显示"已加入 · 正在发送密钥"，失败时提供重试按钮。加入页补充说明：需要管理员的桌面端在线。
+
+请求方现在会在 `publish` 后约 30 ms 被中继实时提示唤醒，早于审批方第一次 `e2eeMailbox:put`：激活时拿不到密钥，只能进入轮询重试（Phase 3，2026-11-13）。因此 `deliverKeys` 可以返回一个首轮句柄：第 0 次尝试无论以何种方式结束都会完成，绝不等到退避休眠之后。可移植审批端用每次投递一个 `Deferred` 实现；桌面端用 slot 上的 `firstPass(accountId, workspaceId, requestId)`，slot 被丢弃时也会完成。共享流程在 `publish` 前与中继 access 并行等待所有句柄，上限为 `firstKeyDeliveryWaitMs`（默认 1.5 秒）。这个等待只做观察：慢、失败或卡住的尝试都不会阻塞、失败或扣留 `publish`，投递也不会因此被中断。被扣留的审批不等待。
 
 影响范围：触发条件是 key round 期间中继、mailbox 或 staging 请求变慢或失败。影响只落在这一轮所覆盖成员的派钥状态上，审批、请求列表和其他工作区都照常工作。恢复由服务实例负责，生命周期与应用一致；每个账户和工作区最多保留 32 条记录。退出、登出或切换账户时会关闭 owner，正在进行的一轮会以 `closed` 或 `account_mismatch` 失败，这条记录也不会显示给另一个账户。状态只保存在内存里。重启后，未完成的派发要等本设备下一次完整的 key round 时，由 core journal 重新发现，而不是靠这里的记录。这个缺口在本次改动之前就存在。
 

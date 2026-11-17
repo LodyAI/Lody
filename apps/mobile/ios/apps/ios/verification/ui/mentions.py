@@ -144,9 +144,9 @@ for kind, path, token in [
     assert token in value(), 'Selected reference missing: ' + token
 ui.capture('all-references')
 tap('session-send')
-ui.wait(lambda items: any('use lody mcp to query session[id: session-review] history' in str(i.get('AXLabel', '')) for i in items), 'Session reference did not expand in the sent transcript')
+ui.wait(lambda items: any('(lody://session/session-review)' in str(i.get('AXLabel', '')) for i in items), 'Session reference did not expand in the sent transcript')
 ui.wait(lambda items: any('$auth-review' in (i.get('custom_actions') or []) for i in items), 'Sent skill did not render as an actionable reference')
-ui.wait(lambda items: any('agent role[id: role-reviewer, name: Reviewer]' in str(i.get('AXLabel', '')) for i in items), 'Role reference did not expand in the sent transcript')
+ui.wait(lambda items: any('[Agent Role: Reviewer (agentRoleId: role-reviewer)]' in str(i.get('AXLabel', '')) for i in items), 'Role reference did not expand in the sent transcript')
 ui.capture('expanded-transcript')
 print('PASS: all seven references, actionable skill display and send-time session/Role expansion in the native transcript')
 

@@ -37,7 +37,7 @@ export type SessionFilePreviewPanelProps = {
   mobileSheet?: boolean;
   file: SessionFilePayload;
   status: SessionFilePreviewStatus;
-  onDownload: (file: SessionFilePayload) => void;
+  onDownload?: (file: SessionFilePayload) => void;
   isDownloading?: boolean;
 };
 
@@ -145,21 +145,23 @@ export function SessionFilePreviewPanel({
               <Copy {...stylex.props(styles.glyph)} />
             )}
           </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="small"
-            icon
-            onClick={() => onDownload(file)}
-            disabled={isDownloading}
-            aria-label={t('sessions.fileDownload', 'Download')}
-          >
-            {isDownloading ? (
-              <Spinner size="small" />
-            ) : (
-              <Download {...stylex.props(styles.glyph)} />
-            )}
-          </Button>
+          {onDownload ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="small"
+              icon
+              onClick={() => onDownload(file)}
+              disabled={isDownloading}
+              aria-label={t('sessions.fileDownload', 'Download')}
+            >
+              {isDownloading ? (
+                <Spinner size="small" />
+              ) : (
+                <Download {...stylex.props(styles.glyph)} />
+              )}
+            </Button>
+          ) : null}
           {/* Divider separates content actions (copy/download) from the window
               action (close), and the close sits inline in the same row instead
               of floating in the corner over the buttons. */}
@@ -189,16 +191,18 @@ export function SessionFilePreviewPanel({
               'Preview shows only the start of this file. Download the full file to see everything.'
             )}
           </span>
-          <Button
-            type="button"
-            variant="secondary"
-            size="small"
-            className={stylex.props(styles.shrink).className}
-            onClick={() => onDownload(file)}
-            disabled={isDownloading}
-          >
-            {t('sessions.fileDownloadFull', 'Download full file')}
-          </Button>
+          {onDownload ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="small"
+              className={stylex.props(styles.shrink).className}
+              onClick={() => onDownload(file)}
+              disabled={isDownloading}
+            >
+              {t('sessions.fileDownloadFull', 'Download full file')}
+            </Button>
+          ) : null}
         </div>
       ) : null}
 
@@ -217,9 +221,16 @@ export function SessionFilePreviewPanel({
               aria-hidden="true"
             />
             <span>{status.message}</span>
-            <Button type="button" variant="secondary" size="small" onClick={() => onDownload(file)}>
-              {t('sessions.fileDownload', 'Download')}
-            </Button>
+            {onDownload ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="small"
+                onClick={() => onDownload(file)}
+              >
+                {t('sessions.fileDownload', 'Download')}
+              </Button>
+            ) : null}
           </div>
         ) : renderHtml ? (
           <div {...stylex.props(styles.htmlPreview, mobileSheet && styles.sheetHtmlPreview)}>

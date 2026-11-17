@@ -4,7 +4,7 @@ import Security
 enum AuthKeychain {
   private static var query: [String: Any] { [
     kSecClass as String: kSecClassGenericPassword,
-    kSecAttrService as String: "ai.lody.mobile.auth",
+    kSecAttrService as String: "ai.lody.mobile.auth" + BackendEnvironment.storageSuffix,
     kSecAttrAccount as String: "better-auth-session",
   ] }
   static func read() throws -> String? {

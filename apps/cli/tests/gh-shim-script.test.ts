@@ -35,7 +35,6 @@ function harness(
     remote?: string;
     status?: number;
     permissions?: { push?: boolean; admin?: boolean };
-    policyFailures?: number;
     executions?: Array<{ code: number; stderr?: string; stdout?: string }>;
     prFailure?: 'rejected' | 'lost-response' | 'invalid-response' | 'metadata';
     bodyFiles?: Record<string, string>;
@@ -44,7 +43,6 @@ function harness(
   } = {}
 ) {
   const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
-  let policyFailures = options.policyFailures ?? 0;
   const actual: Array<string[]> = [];
   const identities: string[] = [];
   const pullRequests: Array<{
@@ -132,16 +130,6 @@ function harness(
     const endpoint = new URL(url).pathname;
     const body = JSON.parse(init.body ?? '{}');
     calls.push({ path: endpoint, body });
-    if (endpoint === '/github-auth-context' && policyFailures-- > 0)
-      return { ok: false, status: 503, json: async () => ({ error: 'policy_unavailable' }) };
-    if (endpoint === '/github-auth-context')
-      return {
-        ok: true,
-        json: async () => ({
-          allowLocalAuth: options.owner ?? true,
-          personalEnabled: options.personal ?? false,
-        }),
-      };
     if (body.source === 'personal' && !options.personal)
       return { ok: true, json: async () => ({ available: false }) };
     return {

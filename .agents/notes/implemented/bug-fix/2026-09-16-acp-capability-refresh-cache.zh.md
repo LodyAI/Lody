@@ -78,6 +78,28 @@ grok——既产生不了观测到的 `pi-acp`/`opencode`/`kimi` 请求，也不
 且年龄在 `ACP_CAPABILITY_REFRESH_CACHE_TTL_MS` 之内。该判定由
 `@lody/shared` 的 `decideAcpCapabilityRefreshCache` 拥有，并给出每种 miss 的原因，机器会记录它。
 
+### 后续修复：降级条目永不命中缓存（2026-11-08，#2441）
+
+此前只要版本、provenance、启动输入与寿命都吻合，缓存就会信任持久化条目——包括"探测本身成功但
+Agent 声明了一个 model 类型 select configOption、选项数为零"这种病态结果（Devin 3000.11.3 在
+`model_configs_v6` 缓存冷启动时返回 `options: []`，见 #2440）。这样的空模型列表一旦持久化，会在
+条目整个寿命内应答所有刷新请求；同时 `getAcpCapabilityCacheEntryAuthority` 仍称其为
+authoritative，于是 onboarding 和 Provider Settings 可能把模型选择器为空的 provider 显示为已
+验证。
+
+`getAcpCapabilityCacheStaleReason` 现在会在持久化 `configOptions` 显示空 model select 时以
+`empty-model-catalog` miss——直接读行，不持久化任何 flag——因此该规则出现之前写入的行同样生效。
+同一谓词也喂给 `getAcpCapabilityCacheEntryAuthority`：此类条目返回新增的 `degraded` 档位——所有
+`=== 'authoritative'` 的验证检查（onboarding 状态、provider test、session fork、steer）都不再
+接受它，而选择器构建把 `degraded` 当 `provisional` 处理，保留当前已选模型而不是渲染空列表。
+agent config 弹窗与 onboarding provider test 还会把空目录显示为验证失败（带专门的原因文案），
+而不是"passed"。此修复的早期版本持久化了 `modelsDegraded` flag、并在 `models` 非空时不判降级；
+评审后两者都被移除——flag 完全可派生，且选择器直接渲染 select，`models` 有值并不能让空 select
+可用。
+
+开销分析：降级条目在每次非强制刷新时重探，直到自愈。强制请求本来就重探；自动的启动刷新按
+config、按 runtime 生命周期做 latch，因此一个持续降级的 config 至多每次渲染端启动探一次。
+
 不显然的一点是如何算出"一次探测会打上的版本"。存下的版本是*启动器*产生的，对 managed builtin
 还包含已安装的 runtime 版本（`builtin-kimi:0.36.0`），单靠
 `getAcpCapabilitySourceVersion(input)` 复现不出来。因此
@@ -188,15 +210,15 @@ CLI 的进程内调用方——`session-execution-service.ts` 里认证后的校
 
 ## 全部调用方，以及各自是否 force
 
-| 调用方 | 是否 force | 原因 |
-| --- | --- | --- |
-| `create-workspace-runtime.ts` 启动扫描 | 否 | 它要的就是缓存；被消除的正是这项开销 |
-| `use-agent-role-schema-reconciliation.ts` | 否 | 它对照的是当前条目，不关心是谁产生的 |
-| `machine-agent-settings.tsx` 设置页刷新 | 是 | 有人改了启动输入之外的东西 |
-| `providers-screen.tsx` 引导 Provider 测试 | 是 | 它存在就是为了证明 Agent 能启动 |
-| `commands/agent-config.ts` `refresh-capabilities` | 是 | 与设置页同一意图；第一版漏掉了 |
-| `session-execution-service.ts` 认证后 | 是 | 新凭据会改变权限授予 |
-| `provider-setup-manager.ts` 校验 | 是 | 证明刚安装的 runtime 能启动 |
+| 调用方                                            | 是否 force | 原因                                 |
+| ------------------------------------------------- | ---------- | ------------------------------------ |
+| `create-workspace-runtime.ts` 启动扫描            | 否         | 它要的就是缓存；被消除的正是这项开销 |
+| `use-agent-role-schema-reconciliation.ts`         | 否         | 它对照的是当前条目，不关心是谁产生的 |
+| `machine-agent-settings.tsx` 设置页刷新           | 是         | 有人改了启动输入之外的东西           |
+| `providers-screen.tsx` 引导 Provider 测试         | 是         | 它存在就是为了证明 Agent 能启动      |
+| `commands/agent-config.ts` `refresh-capabilities` | 是         | 与设置页同一意图；第一版漏掉了       |
+| `session-execution-service.ts` 认证后             | 是         | 新凭据会改变权限授予                 |
+| `provider-setup-manager.ts` 校验                  | 是         | 证明刚安装的 runtime 能启动          |
 
 这是请求构造点的完整集合；该清查可用 `grep -rn "'machine/acp-capabilities-refresh'"` 过滤出
 请求字面量来复现。

@@ -18,7 +18,7 @@ def centred():
 
 ui.element('home-sync-status')
 centred()
-ui.axe('tap', '--id', 'home-tab-projects', '--post-delay', '.5')
+ui.axe('tap', '--id', 'home-tab-schedules', '--post-delay', '.5')
 assert not any(i.get('AXUniqueId') == 'home-sync-status' for i in ui.state())
 ui.axe('tap', '--id', 'home-tab-chats', '--post-delay', '.5')
 ui.element('home-sync-status')

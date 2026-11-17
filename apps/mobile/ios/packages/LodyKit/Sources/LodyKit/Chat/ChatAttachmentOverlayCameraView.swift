@@ -46,7 +46,7 @@ final class ChatAttachmentOverlayCameraView: UIView {
     clipsToBounds = true
     overrideUserInterfaceStyle = .dark
     controls.overrideUserInterfaceStyle = .dark
-    backgroundColor = .black
+    backgroundColor = .lodySoftDarkBackground
     layer.cornerCurve = .continuous
     preview.accessibilityIdentifier = "camera-viewfinder"
     preview.accessibilityLabel = String(localized: "native.chat.camera.photo", bundle: .lody)

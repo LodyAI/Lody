@@ -10,7 +10,7 @@ enum LodyListRowInteractions {
   ) -> UISwipeActionsConfiguration? {
     let actions = leading ? row.leadingActions : row.actions
     guard !actions.isEmpty else { return nil }
-    return UISwipeActionsConfiguration(actions: actions.map { action in
+    let configuration = UISwipeActionsConfiguration(actions: actions.map { action in
       let item = UIContextualAction(style: action.destructive ? .destructive : .normal, title: action.title) { _, _, done in
         perform(row.id, action.id)
         done(true)
@@ -19,6 +19,8 @@ enum LodyListRowInteractions {
       if let tint = lodyTint(action.tint) { item.backgroundColor = tint }
       return item
     })
+    if row.preview == "session" { configuration.performsFirstActionWithFullSwipe = false }
+    return configuration
   }
 
   static func menu(

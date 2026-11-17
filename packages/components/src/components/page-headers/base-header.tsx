@@ -1,3 +1,4 @@
+import { E2eeDeviceRequestsButton } from '@/components/pages/e2ee-automatic-pairing';
 import type { CSSProperties, ReactNode } from 'react';
 import { Menu } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -150,6 +151,8 @@ export function BaseHeader({
       >
         {title}
       </h2>
+
+      {isMobile && <E2eeDeviceRequestsButton className="ml-2 shrink-0" />}
 
       {/* Actions */}
       {actions && <div {...stylex.props(styles.actions)}>{actions}</div>}

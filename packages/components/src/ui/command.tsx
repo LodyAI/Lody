@@ -157,6 +157,15 @@ const CommandDialog = ({
   return (
     <Dialog.Root {...props}>
       {/* Keep the command layer above mention popovers; the modal owns its material. */}
+      {/* The mention / slash-command popover in the chat composer carries a hardcoded
+          z-index: 50 (from @diceui/shared's anchored positioner), and the shared dialog's
+          `z-[var(--z-dialog)]` resolves to `auto` (that CSS var is never defined). Without
+          an explicit z-index the palette renders *under* an open mention popover. Pin the
+          overlay AND content above it via --z-command-palette (with an inline fallback
+          so it works even though the var isn't globally defined). */}
+      {/* Fixed, screen-relative height (flex column overrides the dialog's default grid)
+          so the panel never resizes or shifts as the result list grows / shrinks / filters —
+          the list scrolls inside instead. */}
       <Dialog.Content
         closeButton={false}
         noAnimation

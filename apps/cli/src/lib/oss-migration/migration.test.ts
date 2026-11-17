@@ -728,10 +728,8 @@ describe('OSS migration', () => {
       const { original, manifest } = fixture();
       const attachment = {
         type: 'local_attachment' as const,
-        referenceId: '148aa46f-967a-45c1-b752-04e1bb81eb11',
         machineId: manifest.sourceMachineId,
-        sessionId: 'one',
-        turnId: 'u1',
+        path: '/tmp/local.txt',
         kind: 'file' as const,
         fileName: 'local.txt',
         mimeType: 'text/plain',

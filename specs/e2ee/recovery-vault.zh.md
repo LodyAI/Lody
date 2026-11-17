@@ -1,6 +1,7 @@
 # 恢复 vault
 
-Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库整库换新)
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#同源网页恢复)
+Previously approved revision: [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库整库换新)
 Translation: current
 
 [English](recovery-vault.md)
@@ -141,11 +142,28 @@ Passkey 解锁新增的风险见[下文](#passkey-解锁)。
 该平台的恢复跑通之前上线；两者并行开发，都放在默认关闭的开关之后。每个保险库仍然都会创建恢复文件。passkey
 丢失、iCloud 账号丢失或平台没有 PRF 时，文件仍是退路。
 
-**一个 RP，放在专用主机上。** 所有平台共用一个 RP ID，这样同步的 passkey 到处可用。RP ID 是专用的
-精确主机名 `vault.lody.ai`（owner 2026-11-06 决定），绝不用父域名或 Web 应用自身的主机名。浏览器允许 RP ID 及其子域名
-上的任何页面发起 ceremony，所以父域名 RP 会把所有子域名和它们下发的所有脚本都划进边界内。RP ID 以后
-无法更改，否则所有已注册的 passkey 都会失效。该主机只提供 apple-app-site-association 文件，以及获批时的
-下述 Web 界面，不放别的内容。将来的登录 passkey 必须使用另一个 RP，这样登录提示永远解不开 V。
+**一个 RP，直接在网页客户端里——2026-11-10 已批准修订。** 获批的 RP ID 为
+`lody.ai`，Mac、iOS、网页统一使用。它取代 2026-11-06 的 `vault.lody.ai` 专用主机方向，
+本次改变的安全边界已由 zxch3n 于 2026-11-10 批准，见上述批准记录。Owner 原话：“我可以改到 lody.ai 然后
+lody 网页版就和它一致，这样可以吗”“然后就都在网页端里面做就好了”。用 passkey 或
+恢复文件打开、首次创建空恢复文件、添加 passkey，都直接在现有网页客户端内完成；
+不再保留隔离源、浏览器第二设备身份、跨页交接或这条路径的手动配对码备用入口。
+
+代价必须如实说明：`lody.ai`、其所有子域及其下发的脚本都在 passkey 仪式边界内，
+包括官网营销页与统计脚本。它们可以发起恢复保险库的系统提示；系统弹窗和必要的
+用户验证仍是屏障，但不能证明网站代码可信。恢复文件和临时 V/R/PRF 会进入网页
+客户端内存；客户端代码被攻破时可能暴露保险库中的其他工作区。不得记录或持久化
+这些临时秘密，恢复界面不得启用遥测。
+
+未来的登录 passkey 必须使用不同 RP ID，并在与该 RP 匹配的 origin 上进行仪式；
+`lody.ai` 下换路径或改凭据名称不构成 RP 隔离。不得把登录断言/PRF 当作恢复授权。
+Mac/iOS 使用 `webcredentials:lody.ai`；官网关联文件只能含 `webcredentials`，不得
+恢复 `applinks`，Android App 链接撤销文件继续为空。
+
+按 owner 提供的上线前状态，E2EE 尚未上生产且没有已登记的恢复 passkey。只认最新
+RP/格式，不做迁移、旧 RP 重试或兼容包装；若已有凭据，换 RP 会使它们失效，这不是
+生产数据审计结论。功能保持默认关闭，上线与实测另行批准。恢复设置失败不阻塞
+已获准内容；第一台设备就是浏览器的工作区创建仍不支持。
 
 **Ceremony 约定。** 以下规则在所有平台上相同：
 
@@ -181,22 +199,9 @@ V，也看不到 PRF 结果。
 缺陷。第一阶段 iPhone 负责解锁和恢复。V 从不保留。只要这条路径存在，应用就不能引入 JavaScript 空中更新，
 否则它就落入下述 Web 风险。
 
-**Web。** Web 晚于 macOS 和 iPhone 上线。PRF 是否可用由真实 ceremony 判断，不靠浏览器名单。浏览器没有 PRF 时，
-用户在同一界面改用恢复文件，不做降级。该界面放在 RP 主机上，隔离且只解锁（owner 2026-11-06 决定）：独立的最小构建，没有第三方脚本和
-遥测，CSP 严格，部署凭据独立。C 留在这个源上，之后普通 Web 应用或其他设备通过 C 批准的普通配对加入。
-V、R 和 PRF 结果都不会进入普通 Web 应用。V 从不存进浏览器。
+**Web — 2026-11-10 已批准修订。** Web 在 macOS 和 iPhone 之后启用。`lody.ai` 普通网页版直接创建、打开保险库，并恢复此浏览器原有身份；不再使用隔离构建、中间设备 C 或跨页交接。PRF 能否使用取决于真实系统仪式；不支持时在同一页使用恢复文件。V、R 和 PRF 结果只在操作期间临时以明文存在，等实际调用结束后清理，不以明文持久化，也不进入遥测。已批准的加密恢复包和受保护重试记录仍须保留。首次登录可创建空保险库和恢复文件，但备份工作区必须由已有授权、持有工作区密钥的浏览器完成。本阶段不支持第一台设备就是浏览器时创建加密工作区。
 
-**Web 风险。** Web 代码由服务端下发，所以 RP 允许的源上一旦下发了被篡改的代码，它就能发起 ceremony、
-拿走 PRF 结果并取回包装，从而得到 V 和保险库里所有的 R。被攻破的浏览器设备只暴露该浏览器上的工作区；
-这条路径则覆盖所有已纳入保险库的工作区，并让攻击者在 R 被撤销前可以接纳设备。有三点必须说清楚：
-
-- _只解锁和页面内确认是产品规则，不是安全边界。_ 被篡改的代码会绕开它们，直接调用 WebAuthn。只解锁
-  仍然有用，因为这样 V 的日常使用不会发生在 Web 上。
-- _风险不限于 Web 用户。_ 在 Mac 上注册的 passkey 会同步，任何浏览器都能在 RP 主机上请求它，即使用户从不
-  用 Web。原生代码避开了服务端下发的 JavaScript，但凭据并不绑定应用。控制 RP 主机的运营者总能尝试这样做，
-  即使没有 Web 界面也一样。
-- _真正的屏障是用户批准加隔离。_ 系统提示会显示 RP 和凭据，页面代码画不出来。专用主机能排除对 Web 应用、
-  其依赖和其子域名的一般性攻破，但排除不了恶意运营者。
+**Web 风险。** `lody.ai` 及可请求父 RP 的子域代码，包括官网、统计脚本和被入侵的子域，都可尝试发起系统仪式。用户在系统弹窗确认后，恶意代码可能取得 V 和全部受覆盖的 R，危及保险库中的所有工作区，并可在 R 撤销前接纳设备。系统弹窗及必须的用户验证仍是屏障；页面内确认只是产品规则。原生应用中登记并同步的 passkey 同样受此风险影响，即使用户平常只用原生端。登录使用另一个 RP 可以防止正常登录代码误选恢复凭据，但无法阻止被入侵的登录子域请求父 RP `lody.ai`。2026-11-06 的专用主机隔离保证由本次已批准修订撤回。
 
 **其他认证器。** 没有白名单，也不要求 attestation：任何提供方只要真实 ceremony 返回满足约定的 PRF 结果就能工作。
 注册时没有报告 PRF，客户端就明确告诉用户，不登记这个 passkey，并引导用户使用恢复文件。Lody 只承诺并测试
@@ -212,8 +217,8 @@ macOS 和 iPhone 上的 iCloud 钥匙串。其他密码管理器和硬件密钥�
 
 ### Owner 决定
 
-2026-11-06 已决定：RP 主机是 `vault.lody.ai`；Web 是隔离的只解锁界面，晚于 macOS 和 iPhone，其他设备通过普通配对接入；
-该界面也接受恢复文件；passkey 功能要求 iOS 18.4；恢复和 passkey 现在并行开发。
+2026-11-06 的专用 RP 主机和隔离 Web 方向由上文 **2026-11-10 已批准修订**取代，
+依据为 owner 的新方向及上述明确批准记录。这不据此授权上线。iOS 18.4 的 passkey 能力要求、恢复与 passkey 默认关闭并行推进等决定不变。
 
 同日 owner 又决定了两项。认证器使用标准 WebAuthn 加 PRF，不设白名单，见[上文](#passkey-解锁)。
 可信锚是通过认证的恢复包里的 genesis，见[下文](#可信锚)。
@@ -306,6 +311,14 @@ genesis 重放完整的签名历史。历史必须包含恢复包里 `head` 和 
 **救不回来的情况。** 这个流程需要一台能用的个人设备。还能用的 passkey 可以先恢复出一台设备。设备、文件和 passkey
 都没有时，谁也打不开保险库，内容就丢了。
 
+## 密码解锁
+
+**共用 V 的多封装模型。** 恢复密码与恢复文件、passkey 封装同一个 32 字节主密钥 V，保持每个工作区成员身份只有一个恢复设备 R。首次创建保险库时，若当前设备支持 passkey 则优先推荐用 passkey 创建，否则回退推荐用恢复密码创建；离线恢复文件可在创建时生成或稍后补存。
+
+**KDF 与槽位格式。** 密码先做 Unicode NFC 规范化，要求至少 12 个码点且不超过 1024 个 UTF-8 字节。密钥派生使用 RFC 9106 Argon2id（默认 `m = 65536` KiB、`t = 3`、`p = 1`；校验上下界 `m in [19456, 262144]`、`t in [2, 10]`、`p in [1, 4]`）配合全新 32 字节随机盐，再经 HKDF-SHA256（salt 为 `vaultId`，用途为 `password-wrap`）与 XChaCha20-Poly1305 写入不可变 `password-wrap` 条目，并由索引中的 `password` 描述符（`entryId`、`salt`、`kdf`）通过 CAS 引用。
+
+**启用 Passkey 后的收敛建议。** 只要云端存在密码封装，拿到账号密文后的抗离线猜测上限仍取决于密码熵；当保险库同时启用了 passkey 与恢复密码时，界面会提示用户在确认其他设备可用 passkey 或已保存恢复文件后，通过索引 CAS 与 `deleteUnreferenced` 移除密码封装。若怀疑密码已泄露，仍须执行整库换新。
+
 ## 边界与验证
 
 core 定义平台中立的加密存储及本地日志端口，拥有密码学、索引选择、设置和恢复。
@@ -323,10 +336,13 @@ Lab 合成保护不代表生产钥匙串。登录控制读取，恢复文件控�
 
 - [`crypto.ts`](../../packages/e2ee-core/src/internal/recovery/crypto.ts) 要求同一对象里同时有 `enabled: true`
   和 `results.first`。真实认证结果没有 `enabled`，所以现有代码会拒绝它。[Lab 测试](../../packages/e2ee-lab/test/recovery-vault.test.ts)
-  能通过，是因为用了合成对象。这是代码和旧措辞的缺口，不是保证的降低。
+  能通过，是因为用了合成对象。这是代码和旧措辞的缺口，不是保证的降低。已被 [#2364](https://github.com/LodyAI/Lody/pull/2364) 修正：
+  注册看 `enabled`（`verifiedPasskeyRegistration`），解锁看 `results.first`（`verifiedPasskeyPrf`），见 [`crypto.ts`](../../packages/e2ee-core/src/internal/recovery/crypto.ts)。
 - [`vault.ts`](../../packages/e2ee-core/src/internal/recovery/vault.ts) 已经为每个凭据建一个 `prf-wrap` 条目，
   但 vaultId 和定位符要由调用方提供，这些条目也不在索引引用之内。
 - core 和 Lab 之外没有包使用保险库。[#2125](https://github.com/LodyAI/Lody/pull/2125) 是未合入的 draft PR，且有冲突。
+
+已运行：[`recovery-vault-vector.json`](../../packages/e2ee-core/test/recovery-vault-vector.json) 由独立生成器写出，固定恢复文件，file-wrap、prf-wrap、workspace-entry 和索引密文，`formatVersion: 1` 私钥包和 passkey 索引，并包含必须拒绝的输入。`recovery-package.test.ts` 分别用恢复文件和 passkey PRF 打开它。向量里的 nonce 固定只是为了可复现。
 
 外部来源：[WebAuthn Level 3](https://www.w3.org/TR/webauthn-3/) 用于 `enabled`、注册结果可选、用户验证 PRF、
 `user.id` 覆盖和 RP 范围；[Apple](https://developer.apple.com/documentation/authenticationservices/asauthorizationpublickeycredentialprfassertioninput-swift.struct)

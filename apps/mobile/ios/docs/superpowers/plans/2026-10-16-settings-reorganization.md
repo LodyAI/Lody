@@ -103,7 +103,7 @@
 | 项目             | 已支持约定范围：自有注册项目团队可见性                           | 不包含机器目录删除；未验团队在线消费                    | [SET-14](2026-10-16-settings/14-project-visibility-management.md)                                                      |
 | GitHub           | 部分支持：身份、仓库启停、安装网页和返回刷新                     | 个人授权在官方网页完成，无 iOS OAuth 回调               | [SET-15](2026-10-16-settings/15-github-integration-settings.md)                                                        |
 | AI 用量          | 部分支持：工作区汇总／趋势、四种时间范围                         | USD 为预估；无成员明细或真实账单对账                    | [SET-16](2026-10-16-settings/16-ai-usage.md)                                                                           |
-| 分享             | 已支持约定范围：已发布列表／详情、原生打开／复制、确认撤销       | 不含设置内发布／更新／重置；沿用会话分享表单            | [SET-17](2026-10-16-settings/17-published-shares-management.md)                                                        |
+| 分享             | 已移除（2026-11-11）：设置不再提供已发布分享入口                 | 会话分享表单保留；移动端不再提供列表／撤销              | [SET-17](2026-10-16-settings/17-published-shares-management.md)                                                        |
 | 关于             | 已支持约定范围：版本、构建、许可                                 | 未新增远程更新服务                                      | [SET-04](2026-10-16-settings/04-about-page.md)                                                                         |
 | 报告 Bug         | 未实施，用户跳过                                                 | 诊断导出保留，不等于报告已提交                          | [SET-18](2026-10-16-settings/18-bug-reporting.md)                                                                      |
 

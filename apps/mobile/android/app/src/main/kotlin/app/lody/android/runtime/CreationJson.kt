@@ -16,7 +16,7 @@ internal object CreationJson {
             val efforts = c.optJSONObject("reasoningEfforts") ?: JSONObject()
             CreationCapability(c.getString("machineId"), c.getString("cliType"), c.getString("agentType"), choices(c.optJSONArray("models")), choices(c.optJSONArray("modes")), efforts.keys().asSequence().associateWith { key ->
                 val a = efforts.getJSONArray(key); (0 until a.length()).map { a.getString(it) }
-            }, c.optString("agentConfigId").takeIf { it.isNotBlank() }, defaultModel, defaultEfforts, switches(config), c.optJSONObject("fastModes")?.let { modes -> modes.keys().asSequence().associateWith { modes.getBoolean(it) } }.orEmpty())
+            }, c.optString("agentConfigId").takeIf { it.isNotBlank() }, defaultModel, defaultEfforts, switches(config), c.optJSONObject("fastModes")?.let { modes -> modes.keys().asSequence().associateWith { modes.getBoolean(it) } }.orEmpty(), c.optBoolean("steer"))
         },
         value.optString("availability", "unknown"),
         value.optJSONArray("onlineMachineIds")?.let { ids -> (0 until ids.length()).map { ids.getString(it) }.toSet() },
@@ -75,4 +75,27 @@ internal object CreationJson {
             },
         )
     }
+
+    private fun selection(value: JSONObject) = RunSelection(
+        value.getString("agentId"), value.optString("modelId").ifBlank { null },
+        value.optString("modeId").ifBlank { null }, value.optString("effort").ifBlank { null },
+    )
+    private fun encodeSelection(value: RunSelection) = JSONObject().put("agentId", value.agentId)
+        .put("modelId", value.modelId).put("modeId", value.modeId).put("effort", value.effort)
+
+    fun runConfigs(value: JSONObject): RunConfigPrefs {
+        val machines = value.optJSONObject("machines")
+        return RunConfigPrefs(
+            machines?.keys()?.asSequence()?.associateWith { selection(machines.getJSONObject(it)) }.orEmpty(),
+            value.optJSONArray("recents").objects().map {
+                RecentRunConfig(it.getString("machineId"), selection(it.getJSONObject("selection")), it.optString("agentRoleId").ifBlank { null }, it.optLong("usedAt"))
+            },
+        )
+    }
+
+    fun encodeRunConfigs(value: RunConfigPrefs): JSONObject = JSONObject()
+        .put("machines", JSONObject().also { machines -> value.machines.forEach { (id, selection) -> machines.put(id, encodeSelection(selection)) } })
+        .put("recents", JSONArray(value.recents.map {
+            JSONObject().put("machineId", it.machineId).put("selection", encodeSelection(it.selection)).put("agentRoleId", it.agentRoleId).put("usedAt", it.usedAt)
+        }))
 }

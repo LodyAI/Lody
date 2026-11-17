@@ -25,6 +25,7 @@ type UpsertCliRuntimeIssueInput = {
 type CliRuntimeStateReporterOptions = {
   machineId?: MachineId;
   pid?: number;
+  cliVersion?: string;
   supervisor?: CliRuntimeState['supervisor'];
   trackBackendConnectionAge?: boolean;
   now?: () => number;
@@ -32,6 +33,7 @@ type CliRuntimeStateReporterOptions = {
 
 export class CliRuntimeStateReporter {
   private readonly pid: number;
+  private readonly cliVersion?: string;
   private readonly supervisor: CliRuntimeState['supervisor'];
   private phase: CliRuntimePhase = 'starting';
   private startupStage: CliRuntimeStartupStage | undefined = 'bootstrap';
@@ -45,11 +47,16 @@ export class CliRuntimeStateReporter {
   private connectedRoomCount = 0;
   private updatedAtMs: number;
   private readonly issuesByCode = new Map<string, CliRuntimeIssue>();
+  private readonly e2eeAccessWindows = new Map<
+    string,
+    { executionUntilMs: number; readUntilMs: number }
+  >();
   private readonly trackBackendConnectionAge: boolean;
   private readonly now: () => number;
 
   constructor(options: CliRuntimeStateReporterOptions = {}) {
     this.pid = options.pid ?? process.pid;
+    this.cliVersion = options.cliVersion;
     this.machineId = options.machineId;
     this.supervisor = options.supervisor;
     this.trackBackendConnectionAge = options.trackBackendConnectionAge ?? true;
@@ -197,6 +204,31 @@ export class CliRuntimeStateReporter {
     this.touch();
   }
 
+  /** An encrypted workspace relying on the backend-outage window, or `undefined` once its
+   * access is confirmed or refused again. Display only: the window's wall-clock ends. */
+  setE2eeAccessWindow(
+    workspaceId: string,
+    window: { executionUntilMs: number; readUntilMs: number } | undefined
+  ): void {
+    const previous = this.e2eeAccessWindows.get(workspaceId);
+    if (!window) {
+      if (!this.e2eeAccessWindows.delete(workspaceId)) return;
+      this.touch();
+      return;
+    }
+    const next = {
+      executionUntilMs: Math.max(0, Math.trunc(window.executionUntilMs)),
+      readUntilMs: Math.max(0, Math.trunc(window.readUntilMs)),
+    };
+    if (
+      previous?.executionUntilMs === next.executionUntilMs &&
+      previous.readUntilMs === next.readUntilMs
+    )
+      return;
+    this.e2eeAccessWindows.set(workspaceId, next);
+    this.touch();
+  }
+
   /** Local-only runtime state; never include storage paths or document contents. */
   reportStorageWriteFailure(): void {
     this.upsertIssue({
@@ -242,6 +274,7 @@ export class CliRuntimeStateReporter {
 
     return {
       schemaVersion: 1,
+      ...(this.cliVersion ? { cliVersion: this.cliVersion } : {}),
       phase: this.phase,
       startupStage: this.startupStage,
       connectivity: this.connectivity,
@@ -261,6 +294,9 @@ export class CliRuntimeStateReporter {
                 }),
           }
         : undefined,
+      ...(this.e2eeAccessWindows.size === 0
+        ? {}
+        : { e2eeAccessWindows: Object.fromEntries(this.e2eeAccessWindows) }),
       machineId: this.machineId,
       pid: this.pid,
       updatedAtMs: this.updatedAtMs,

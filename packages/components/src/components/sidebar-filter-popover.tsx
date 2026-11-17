@@ -1,9 +1,11 @@
 import { type ReactElement, type ReactNode, useId, useState } from 'react';
 import {
   Check,
+  CircleDot,
   Clock,
   Eye,
   Folder,
+  FolderX,
   GitBranch,
   SlidersHorizontal,
   UserRound,
@@ -137,8 +139,10 @@ export type SidebarFilterLabels = {
   detailsHeading: string;
   organizeProject: string;
   organizeUpdated: string;
+  organizeStatus: string;
   updatedProjectNames: string;
   showBranchNames: string;
+  hideEmptyProjects: string;
   showMyTasks: string;
   showAllTasks: string;
   emptyMyTasks: string;
@@ -155,8 +159,10 @@ const defaultLabels: SidebarFilterLabels = {
   detailsHeading: 'Details',
   organizeProject: 'Project',
   organizeUpdated: 'Updated',
+  organizeStatus: 'Status',
   updatedProjectNames: 'Show Project',
   showBranchNames: 'Show Branch',
+  hideEmptyProjects: 'Hide Empty Projects',
   showMyTasks: 'My Tasks',
   showAllTasks: 'All Tasks',
   emptyMyTasks: 'No tasks match this view',
@@ -177,6 +183,10 @@ export type SidebarFilterPopoverProps = {
   /** Whether rows with a branch show the branch segment on their meta line. */
   showBranchNames?: boolean;
   onShowBranchNamesChange?: (next: boolean) => void;
+  /** Project view only: whether projects without Session rows are hidden.
+      The switch renders only while {@link organize} is 'workspace'. */
+  hideEmptyProjects?: boolean;
+  onHideEmptyProjectsChange?: (next: boolean) => void;
   labels?: Partial<SidebarFilterLabels>;
   className?: string;
   triggerClassName?: string;
@@ -241,7 +251,7 @@ function SwitchRow({
   checked: boolean;
   onCheckedChange?: (next: boolean) => void;
   /** Names the segment this switch controls, for tests and story asserts. */
-  kind: 'project' | 'branch';
+  kind: 'project' | 'branch' | 'empty-projects';
 }) {
   const switchId = useId();
   const labelProps = stylex.props(styles.switchLabel, typography.option);
@@ -259,6 +269,7 @@ function SwitchRow({
         data-sidebar-filter-switch=""
         data-sidebar-filter-project-names={kind === 'project' ? '' : undefined}
         data-sidebar-filter-branch-names={kind === 'branch' ? '' : undefined}
+        data-sidebar-filter-hide-empty-projects={kind === 'empty-projects' ? '' : undefined}
       />
     </div>
   );
@@ -273,6 +284,8 @@ export function SidebarFilterPopover({
   onShowUpdatedProjectNamesChange,
   showBranchNames = false,
   onShowBranchNamesChange,
+  hideEmptyProjects = true,
+  onHideEmptyProjectsChange,
   labels,
   className,
   triggerClassName,
@@ -342,6 +355,12 @@ export function SidebarFilterPopover({
             selected={organize === 'updated'}
             onSelect={() => handleOrganizeSelect('updated')}
           />
+          <MenuOption
+            label={merged.organizeStatus}
+            icon={CircleDot}
+            selected={organize === 'status'}
+            onSelect={() => handleOrganizeSelect('status')}
+          />
         </div>
         <div className={menuSeparatorClassName} aria-hidden="true" />
         <div data-sidebar-filter-section="tasks">
@@ -376,6 +395,15 @@ export function SidebarFilterPopover({
             onCheckedChange={onShowBranchNamesChange}
             kind="branch"
           />
+          {organize === 'workspace' ? (
+            <SwitchRow
+              icon={FolderX}
+              label={merged.hideEmptyProjects}
+              checked={hideEmptyProjects}
+              onCheckedChange={onHideEmptyProjectsChange}
+              kind="empty-projects"
+            />
+          ) : null}
         </div>
       </Popover.Content>
     </Popover.Root>

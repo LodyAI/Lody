@@ -7,7 +7,7 @@ on:
 
 permissions:
   actions: read
-  contents: write
+  contents: read
   pull-requests: write
 
 concurrency:
@@ -25,14 +25,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout trusted reporting code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
       - name: Resolve current pull request
         id: target
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const associated = context.payload.workflow_run.pull_requests ?? []
@@ -62,7 +62,7 @@ jobs:
       - name: Find PR evidence
         if: steps.target.outputs.report == 'true'
         id: evidence
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const policy = await import(
@@ -85,7 +85,7 @@ jobs:
 
       - name: Download PR evidence
         if: steps.target.outputs.report == 'true' && steps.evidence.outputs.available == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ${{ steps.evidence.outputs.artifact-name }}
           path: pr-evidence

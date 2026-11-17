@@ -258,6 +258,22 @@ describe('findNextDispatchableUserTurn missing-history acknowledgement', () => {
     expect(findNextDispatchableUserTurn([lateTurn], meta)).toBeNull();
   });
 
+  it('keeps every failed identity retired after another timeout or producer clears the legacy marker', () => {
+    const fresh = { ...lateTurn, id: 'fresh' };
+    const meta = {
+      ...baseMeta,
+      latestUserMsgId: fresh.id,
+      missingHistoryUserMsgIds: { [lateTurn.id]: true as const, second: true as const },
+    } as SessionMeta;
+    expect(
+      findNextDispatchableUserTurn([lateTurn, { ...lateTurn, id: 'second' }, fresh], meta)
+    ).toEqual(fresh);
+    expect(getPendingUserTurnActivationId(meta)).toBe(fresh.id);
+    expect(
+      getPendingUserTurnActivationId({ ...meta, latestUserMsgId: lateTurn.id })
+    ).toBeUndefined();
+  });
+
   it('keeps the marker-matched turn excluded while a different turn dispatches normally', () => {
     const newerTurn = {
       ...lateTurn,
@@ -276,10 +292,9 @@ describe('findNextDispatchableUserTurn missing-history acknowledgement', () => {
     expect(getPendingUserTurnActivationId(meta)).toBe(newerTurn.id);
   });
 
-  it('dispatches the exact turn once an explicit redelivery re-aims the pointer and clears the marker', () => {
-    // The deliver-now producer write: latestUserMsgId re-aimed at the old
-    // entry, marker cleared, and lastHandledUserMsgId already advanced past a
-    // different turn the user resent in between.
+  it('dispatches an unmarked legacy pending input', () => {
+    // Legacy snapshots without any retained negative acknowledgement remain
+    // readable. New producers never erase recovery evidence to publish input.
     const redeliveredMeta = {
       ...baseMeta,
       latestUserMsgId: lateTurn.id,

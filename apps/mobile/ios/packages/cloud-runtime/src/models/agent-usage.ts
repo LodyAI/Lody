@@ -7,10 +7,17 @@ export type UsageWindow = {
 export type AgentQuota = {
   id: string;
   provider: string;
+  agentConfigId?: string | null;
   name?: string;
   windows: UsageWindow[];
 };
 export type AgentUsage = {
-  configs: { id: string; name: string; provider: string; eligible: boolean }[];
+  configs: {
+    id: string;
+    name: string;
+    provider: string;
+    eligible: boolean;
+    rateLimitsAvailable?: boolean;
+  }[];
   quotas: AgentQuota[];
 };

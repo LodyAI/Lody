@@ -2,53 +2,6 @@ import UIKit
 
 @MainActor
 enum RemoteSettingsPreviews {
-  static func mcp() -> UIViewController {
-    final class Fixture {
-      var rows = [
-        RemoteSetting(kind: "mcp", id: "docs", name: "Documentation", detail: "http", enabledByDefault: false, configured: true, updatedAt: 1),
-        RemoteSetting(kind: "mcp", id: "search", name: "Search", detail: "stdio", enabledByDefault: false, configured: true, updatedAt: 1),
-        RemoteSetting(kind: "mcp", id: "missing", name: "Needs setup", detail: "http", enabledByDefault: false, configured: false,
-                      updatedAt: 1),
-        RemoteSetting(kind: "mcp", id: "readonly", name: "Read only", readOnly: true, detail: "stdio", configured: true),
-      ]
-      var failSave = true
-      var failDelete = true
-    }
-    let fixture = Fixture()
-    let service: RemoteSettingsService = { request in
-      if let edit = request.edit {
-        let wanted = edit.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if fixture.rows.contains(where: { $0.id != edit.item.id && $0.name.lowercased() == wanted }) {
-          throw SettingsError(RemoteSettingsSections.remote("duplicate"))
-        }
-        if fixture.failSave {
-          fixture.failSave = false
-          throw SettingsError(RemoteSettingsSections.remote("saveFailed"))
-        }
-        fixture.rows = fixture.rows.map { row in
-          guard row.id == edit.item.id else { return row }
-          var next = row
-          next.name = edit.name.trimmingCharacters(in: .whitespacesAndNewlines)
-          next.enabledByDefault = edit.enabledByDefault
-          next.updatedAt = 2
-          return next
-        }
-      }
-      if let remove = request.remove {
-        if fixture.failDelete {
-          fixture.failDelete = false
-          throw SettingsError(RemoteSettingsSections.remote("conflict"))
-        }
-        fixture.rows.removeAll { $0.id == remove.id }
-      }
-      return fixture.rows
-    }
-    return RemoteSettingsController(
-      kind: "mcp", scope: SettingsActor(userId: "fixture", workspaceId: "offline-mcp"), service: service, cache: .memory(),
-      context: { RemoteSettingsContext() }, refreshUsage: {}
-    )
-  }
-
   static func machine() -> UIViewController {
     final class Fixture {
       var items = [
@@ -91,7 +44,7 @@ enum RemoteSettingsPreviews {
 
   static func editor(_ params: [String: Any]) -> UIViewController {
     let kind = params["kind"] as? String ?? "machine"
-    let item = RemoteSetting(kind: kind, id: "preview", name: "Studio", prompt: "Keep changes focused.", enabledByDefault: true)
+    let item = RemoteSetting(kind: kind, id: "preview", name: "Studio", prompt: "Keep changes focused.")
     return RemoteSettingEditorController(item: item, workspaceId: "settings-forms-preview") { _ in [] }
   }
 }

@@ -3,12 +3,12 @@ import UIKit
 
 /// iPhone Home's top-level destinations. iPad keeps the split view and does not show tabs.
 enum HomeTab: CaseIterable, Sendable {
-  case chats, projects, settings
+  case chats, schedules, settings
 
   var icon: LodyIcon {
     switch self {
     case .chats: .sessions
-    case .projects: .folder
+    case .schedules: .clock
     case .settings: .settings
     }
   }
@@ -16,7 +16,7 @@ enum HomeTab: CaseIterable, Sendable {
   var title: String {
     switch self {
     case .chats: String(localized: "home.tab.chats", bundle: .lody)
-    case .projects: String(localized: "inbox.section.projects", bundle: .lody)
+    case .schedules: String(localized: "schedules.title", bundle: .lody)
     case .settings: String(localized: "tabs.settings", bundle: .lody)
     }
   }
@@ -28,7 +28,9 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
   var onSelect: (HomeTab) -> Void = { _ in }
   var onCreate: () -> Void = {}
   var onDebug: () -> Void = {}
+  var canCreate = false { didSet { tab(forIdentifier: Self.createID)?.isEnabled = canCreate } }
   private static let createID = "home-new-session"
+  private var homeTabs: [UITab] = []
 
   override func viewDidLoad() {
     super.viewDidLoad()
@@ -41,14 +43,20 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
   }
 
   func install(navigation: @escaping (HomeTab) -> UINavigationController) {
-    tabs = HomeTab.allCases.map { destination in
-      let tab = UITab(title: destination.title, image: destination.icon.uiImage,
-        identifier: "home-tab-\(destination)") { _ in navigation(destination) }
-      tab.accessibilityIdentifier = tab.identifier
-      return tab
-    } + [UITab(title: String(localized: "tabs.newSession", bundle: .lody), image: LodyIcon.compose.uiImage,
-      identifier: Self.createID) { _ in UIViewController() }]
-    tabs.last?.accessibilityIdentifier = Self.createID
+    // Restore roots moved into the regular-width detail column even when UIKit has
+    // already resolved a tab's provider. Each navigation keeps its original UITab.
+    let navigations = HomeTab.allCases.map { ($0, navigation($0)) }
+    if homeTabs.isEmpty {
+      homeTabs = navigations.map { destination, controller in
+        let tab = UITab(title: destination.title, image: destination.icon.uiImage,
+          identifier: "home-tab-\(destination)") { _ in controller }
+        tab.accessibilityIdentifier = tab.identifier
+        return tab
+      } + [UITab(title: String(localized: "tabs.newSession", bundle: .lody), image: LodyIcon.compose.uiImage,
+        identifier: Self.createID) { _ in UIViewController() }]
+      homeTabs.last?.accessibilityIdentifier = Self.createID
+    }
+    tabs = homeTabs
     // iOS 27 supports a separate prominent action without misrepresenting it as Search.
     if #available(iOS 27.0, *) { prominentTabIdentifier = Self.createID }
   }
@@ -59,16 +67,15 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
     updateCreate(destination)
   }
 
-  /// On Projects the create action adds a project ("+"); elsewhere it starts a chat.
+  /// The create action keeps the compose glyph; on Schedules it adds a schedule, elsewhere it starts a chat.
   private func updateCreate(_ destination: HomeTab) {
     guard let create = tab(forIdentifier: Self.createID) else { return }
-    let projects = destination == .projects
-    create.image = projects ? LodyIcon.plus.uiImage : LodyIcon.compose.uiImage
-    create.title = String(localized: String.LocalizationValue(projects ? "projects.add.title" : "tabs.newSession"), bundle: .lody)
+    let schedules = destination == .schedules
+    create.title = String(localized: String.LocalizationValue(schedules ? "schedules.new" : "tabs.newSession"), bundle: .lody)
   }
 
   func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
-    if tab.identifier == Self.createID { onCreate(); return false }
+    if tab.identifier == Self.createID { if canCreate { onCreate() }; return false }
     return true
   }
 
@@ -92,9 +99,15 @@ final class HomeCompactNavigation: UINavigationController, UINavigationControlle
   override func viewDidLoad() {
     super.viewDidLoad()
     delegate = self
+    PageHeaderPopGestureDelegate.install(on: self)
+  }
+
+  func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
+    PageHeaderPopGestureDelegate.install(on: self)
   }
 
   func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
-    setNavigationBarHidden(viewController is HomeTabsController, animated: animated)
+    let page = (viewController as? UINavigationController)?.topViewController ?? viewController
+    setNavigationBarHidden(viewController is HomeTabsController || (page as? LodyPageController)?.ownsHeader == true, animated: animated)
   }
 }

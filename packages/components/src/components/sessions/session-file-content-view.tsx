@@ -9,10 +9,14 @@ import {
   Eye,
   EyeClosed,
   MessageCircle,
+  Pencil,
+  Play,
+  LockKeyhole,
   RefreshCw,
   Save,
   Search,
   ShieldAlert,
+  Square,
   WrapText,
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
@@ -117,8 +121,9 @@ import { FamiconsCloudOfflineOutline } from '@/components/icons/famicons-cloud-o
 import { SessionFileErrorState } from './session-file-error-state';
 import { SessionShikiTextViewer } from './session-shiki-text-viewer';
 import { ManagedPreviewSurface } from './managed-preview-surface';
+import { useTextBoundScriptOptIn } from './use-text-bound-script-opt-in';
 
-import { supportsCredentiallessManagedPreviewFrames } from './managed-preview-frame-cache';
+import { getExecutableHtmlPreviewSupport } from './managed-preview-frame-cache';
 import {
   buildStaticHtmlPreviewDocument,
   getStaticHtmlPreviewLogicalUrl,
@@ -469,6 +474,8 @@ export type SessionFileContentViewProps = {
   htmlPreviewRequestSeq?: number;
   /** Mobile file opens start in preview; desktop keeps explicit script opt-in. */
   defaultHtmlPreview?: boolean;
+  /** Require explicit editing on each mobile file open. */
+  defaultReadOnly?: boolean;
   saveRequestSeq?: number;
   copyMarkdownRequestSeq?: number;
   sessionLinksEnabled?: boolean;
@@ -535,6 +542,7 @@ function SessionFileContentViewImpl({
   focusRequestSeq,
   htmlPreviewRequestSeq,
   defaultHtmlPreview = false,
+  defaultReadOnly = false,
   saveRequestSeq,
   copyMarkdownRequestSeq,
   sessionLinksEnabled = false,
@@ -974,7 +982,13 @@ function SessionFileContentViewImpl({
     providerEntry.sourceState === 'live-collaborative' &&
     providerEntry.unavailableReason === undefined &&
     (fileProviderRole === 'host' || fileProviderRole === 'write');
-  const isProviderFileEditable = isActiveSurface && isProviderFileWritable;
+  const [editingTarget, setEditingTarget] = useState<string | null>(null);
+  const editingEnabled = !defaultReadOnly || editingTarget === contentTargetKey;
+  // Drawers stay mounted when closed; every subsequent open starts read-only.
+  useEffect(() => {
+    setEditingTarget(null);
+  }, [contentTargetKey, isActiveSurface]);
+  const isProviderFileEditable = isActiveSurface && isProviderFileWritable && editingEnabled;
 
   const editableFileId = isProviderFileWritable ? (providerEntry?.fileId ?? fileId ?? null) : null;
 
@@ -1190,7 +1204,7 @@ function SessionFileContentViewImpl({
   );
 
   const isTextFileReady = data.status === 'ready' && data.snapshot.kind === 'text';
-  const supportsHtmlPreview = supportsCredentiallessManagedPreviewFrames();
+  const htmlScriptSupport = getExecutableHtmlPreviewSupport();
   const htmlPreviewSource =
     data.status === 'ready' &&
     data.snapshot.kind === 'text' &&
@@ -1198,6 +1212,15 @@ function SessionFileContentViewImpl({
     isHtmlPath(normalizedPath)
       ? (latestEditorTextRef.current ?? data.snapshot.text)
       : null;
+  // WebKit has no credentialless frames, so HTML there runs scripts only after an
+  // explicit opt-in for this exact text; leaving rendered mode revokes it.
+  const {
+    optedIn: htmlScriptsOptedIn,
+    toggle: toggleHtmlScriptsOptIn,
+    revoke: revokeHtmlScriptsOptIn,
+  } = useTextBoundScriptOptIn(htmlPreviewSource);
+  const supportsHtmlPreview =
+    htmlScriptSupport === 'automatic' || (htmlScriptSupport === 'opt-in' && htmlScriptsOptedIn);
   const isHtmlTextFile = htmlPreviewSource !== null;
   const showHtmlRendered = isActiveSurface && isHtmlTextFile && htmlRenderMode === 'rendered';
   const htmlPreviewDocument = useMemo(
@@ -1214,12 +1237,13 @@ function SessionFileContentViewImpl({
 
   useEffect(() => {
     if (showHtmlRendered) return;
+    revokeHtmlScriptsOptIn();
     setHtmlAnnotationEnabled(false);
     setHtmlAnnotationAvailable(false);
     setHtmlPreviewLoading(false);
     setHtmlRuntimeError(null);
     setHtmlPreviewCommand(undefined);
-  }, [showHtmlRendered]);
+  }, [revokeHtmlScriptsOptIn, showHtmlRendered]);
 
   const handleHtmlAnnotationAvailabilityChange = useCallback((available: boolean) => {
     setHtmlAnnotationAvailable(available);
@@ -1233,6 +1257,7 @@ function SessionFileContentViewImpl({
   }, []);
   const handleHtmlBrowserStateChange = useCallback(() => undefined, []);
   const handleHtmlNavigationRequest = useCallback(() => {
+    revokeHtmlScriptsOptIn();
     setHtmlAnnotationEnabled(false);
     setHtmlRenderMode('code');
     toast.warning(
@@ -1241,7 +1266,7 @@ function SessionFileContentViewImpl({
         'Navigation is disabled for self-contained HTML previews.'
       )
     );
-  }, [tRef]);
+  }, [revokeHtmlScriptsOptIn, tRef]);
   const isProviderEditorDirty =
     saveStatus.kind === 'pending' ||
     saveStatus.kind === 'saving' ||
@@ -1263,7 +1288,8 @@ function SessionFileContentViewImpl({
     providerEditorDirtyRef.current = isProviderEditorDirty;
   }, [isProviderEditorDirty]);
   const canSaveProviderEditor =
-    isProviderFileEditable &&
+    isActiveSurface &&
+    isProviderFileWritable &&
     (saveStatus.kind === 'pending' ||
       saveStatus.kind === 'error' ||
       saveStatus.kind === 'conflict_pending');
@@ -1473,6 +1499,11 @@ function SessionFileContentViewImpl({
   const sessionFileShikiLanguage = isSessionFileShikiLanguage(sessionFileLanguageId)
     ? sessionFileLanguageId
     : null;
+  // Keep writable mobile editors mounted across mode changes to preserve drafts and undo.
+  const useProviderShikiViewer =
+    sessionFileShikiLanguage !== null &&
+    !isProviderFileEditable &&
+    !(defaultReadOnly && isProviderFileWritable);
   const canCopyFullMarkdown =
     data.status === 'ready' &&
     data.snapshot.kind === 'text' &&
@@ -1635,6 +1666,7 @@ function SessionFileContentViewImpl({
           viewerUrl={htmlPreviewLogicalUrl}
           logicalUrl={htmlPreviewLogicalUrl}
           documentHtml={htmlPreviewDocument}
+          scriptsOptedIn={htmlScriptsOptedIn}
           annotationEnabled={htmlAnnotationEnabled}
           command={htmlPreviewCommand}
           {...stylex.props(styles.fullSize)}
@@ -1682,7 +1714,7 @@ function SessionFileContentViewImpl({
       body = (
         <div {...stylex.props(styles.contentColumn)}>
           <div {...stylex.props(styles.contentFlexible)}>
-            {sessionFileShikiLanguage !== null && !isProviderFileEditable ? (
+            {useProviderShikiViewer && sessionFileShikiLanguage !== null ? (
               <SessionShikiTextViewer
                 key={liveFileId ?? normalizedPath}
                 path={normalizedPath}
@@ -1823,7 +1855,7 @@ function SessionFileContentViewImpl({
     !showMarkdownRendered &&
     !showCsvRendered &&
     !showHtmlRendered &&
-    !(sessionFileShikiLanguage !== null && !isProviderFileEditable) &&
+    !useProviderShikiViewer &&
     !(isMarkdownTextFile && preferNativeMarkdownSelection);
   const showWordWrapButton =
     isTextFileReady &&
@@ -1831,13 +1863,19 @@ function SessionFileContentViewImpl({
     !showMarkdownRendered &&
     !showCsvRendered &&
     !showHtmlRendered;
-  const showSaveButton = isProviderFileEditable && isTextFileReady;
+  const showEditModeButton = defaultReadOnly && isProviderFileWritable && isTextFileReady;
+  const showSaveButton =
+    isActiveSurface &&
+    isProviderFileWritable &&
+    isTextFileReady &&
+    (editingEnabled || isProviderEditorDirty);
   const showRefreshButton = shouldUseProviderFileContent && isTextFileReady && !showHtmlRendered;
   const showViewerTopBar =
     showPreviewToggle ||
     isMarkdownTextFile ||
     (isHtmlFile && isTextFileReady) ||
     showSearchButton ||
+    showEditModeButton ||
     showSaveButton ||
     showRefreshButton;
 
@@ -1869,7 +1907,7 @@ function SessionFileContentViewImpl({
                   }
                 }}
                 showLabel={
-                  isHtmlTextFile && supportsHtmlPreview
+                  isHtmlTextFile && htmlScriptSupport === 'automatic'
                     ? t('sessions.fileViewer.htmlPreview.show', 'Preview HTML (runs scripts)')
                     : t('sessions.fileViewer.preview.show', 'Preview')
                 }
@@ -1893,6 +1931,33 @@ function SessionFileContentViewImpl({
                 {...stylex.props(styles.toolButton)}
               >
                 <Copy {...stylex.props(styles.icon)} aria-hidden="true" />
+              </button>
+            ) : null}
+            {showHtmlRendered && htmlScriptSupport === 'opt-in' ? (
+              <button
+                type="button"
+                aria-pressed={htmlScriptsOptedIn}
+                onClick={() => {
+                  setHtmlAnnotationEnabled(false);
+                  toggleHtmlScriptsOptIn();
+                }}
+                title={
+                  htmlScriptsOptedIn
+                    ? t('sessions.fileViewer.htmlPreview.stopScripts', 'Stop scripts')
+                    : t('sessions.fileViewer.htmlPreview.runScripts', 'Run scripts')
+                }
+                aria-label={
+                  htmlScriptsOptedIn
+                    ? t('sessions.fileViewer.htmlPreview.stopScripts', 'Stop scripts')
+                    : t('sessions.fileViewer.htmlPreview.runScripts', 'Run scripts')
+                }
+                {...stylex.props(styles.toolButton, htmlScriptsOptedIn && styles.toolButtonActive)}
+              >
+                {htmlScriptsOptedIn ? (
+                  <Square {...stylex.props(styles.icon)} aria-hidden="true" />
+                ) : (
+                  <Play {...stylex.props(styles.icon)} aria-hidden="true" />
+                )}
               </button>
             ) : null}
             {showHtmlRendered && supportsHtmlPreview ? (
@@ -1967,6 +2032,40 @@ function SessionFileContentViewImpl({
                 <Search {...stylex.props(styles.icon)} aria-hidden="true" />
               </button>
             ) : null}
+            {showEditModeButton ? (
+              <Button
+                type="button"
+                variant="ghost"
+                icon
+                aria-pressed={editingEnabled}
+                aria-label={
+                  editingEnabled
+                    ? t('sessions.fileViewer.readOnly', 'Switch to read-only')
+                    : t('sessions.fileViewer.edit', 'Edit file')
+                }
+                title={
+                  editingEnabled
+                    ? t('sessions.fileViewer.readOnly', 'Switch to read-only')
+                    : t('sessions.fileViewer.edit', 'Edit file')
+                }
+                onClick={() => {
+                  setEditingTarget(editingEnabled ? null : contentTargetKey);
+                  if (!editingEnabled) {
+                    setSvgRenderMode('code');
+                    setMarkdownRenderMode('code');
+                    setCsvRenderMode('code');
+                    setHtmlAnnotationEnabled(false);
+                    setHtmlRenderMode('code');
+                  }
+                }}
+              >
+                {editingEnabled ? (
+                  <LockKeyhole {...stylex.props(styles.icon)} aria-hidden="true" />
+                ) : (
+                  <Pencil {...stylex.props(styles.icon)} aria-hidden="true" />
+                )}
+              </Button>
+            ) : null}
             {showSaveButton ? (
               <button
                 type="button"
@@ -2024,14 +2123,14 @@ function SessionFileContentViewImpl({
           </ScrollArea>
         )}
       </div>
-      {isProviderFileEditable && saveStatus.kind === 'conflict' ? (
+      {isActiveSurface && isProviderFileWritable && saveStatus.kind === 'conflict' ? (
         <SessionFileConflictActionRow onResolveConflict={handleSaveConflictResolve} t={t} />
       ) : null}
       {showRealtimeStatusBar ? (
         <SessionFileRealtimeStatusBar
           saveStatus={saveStatus}
           liveStatus={liveStatus}
-          showSaveStatus={isProviderFileEditable}
+          showSaveStatus={isActiveSurface && isProviderFileWritable}
           machineOffline={
             showProviderConnecting || shouldUseProviderFileContent ? isSessionMachineOffline : false
           }

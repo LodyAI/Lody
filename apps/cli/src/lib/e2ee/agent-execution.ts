@@ -1,13 +1,12 @@
-import type { ScheduleAuthorizationRequest } from '@lody/shared';
+import { turnExecutionDigest, type ScheduleAuthorizationRequest } from '@lody/shared';
 import { existsSync } from 'node:fs';
-import { Clock, Effect } from 'effect';
+import { Effect } from 'effect';
 import { z } from 'zod';
 import {
   RealtimeJournal,
   RealtimeJournalError,
   type RealtimeStartPermit,
 } from './realtime-journal';
-import { DERIVED_START_GRACE_MS, MAX_DERIVED_TURNS_PER_ORIGIN } from './derivation-limits';
 
 const attempt = <A>(body: () => A) => Effect.try({ try: body, catch: (cause) => cause });
 
@@ -19,9 +18,16 @@ export type RequesterAccess =
 export const encryptedMemberRequester = (cryptoUserId: string) => `e2ee-member:${cryptoUserId}`;
 const memberRequesterPrefix = encryptedMemberRequester('');
 
-const retainedIntentSchema = z.union([
-  z.tuple([z.literal(1), z.string(), z.string()]),
-  z.tuple([z.literal(1), z.string(), z.string(), z.string()]),
+/** Journal identity of one start: message ID plus the digest of what runs (owner decision
+ * 2026-11-10). A retired never-started message has no digest. */
+const retainedIntentSchema = z.tuple([
+  z.literal(2),
+  z.string(),
+  z.string(),
+  z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .nullable(),
 ]);
 
 const intentSchema = z.object({
@@ -43,8 +49,7 @@ export type ExecutionAuthorization =
       readonly principal?: 'owner' | 'member';
     }
   | { readonly _tag: 'Denied'; readonly reason: string };
-/** Machine-authored inputs derived from one shared member's active Turn: one level,
- * created while the origin is active, bounded by `derivation-limits.ts`. */
+/** The human-signed root shared by every hop of a machine-authored derivation. */
 export type DerivationOrigin = { readonly sessionId: string; readonly userTurnId: string };
 export type AuthorizeEncryptedExecution = (
   workspaceId: string,
@@ -55,18 +60,29 @@ export type VerifiedExecutionOriginal = {
   requesterDevice: string;
   /** Historical ledger actor, never the UI account ID. */
   requesterCryptoUserId: string;
-  expiresAt: number;
+  /** Verified ledger device kind: a machine cannot stand in for a human root. */
+  machineAuthored?: true;
   schedule?: ScheduleAuthorizationRequest;
-  /** Present only on a machine-authored input derived from a shared member's Turn. */
+  /** Present on machine-authored delegation; always points to the human-signed root. */
   derivedFrom?: DerivationOrigin;
-  /** The signed row's content when it is marked as promoted from a queue item. */
-  queued?: { timestamp: unknown; inputConfig: unknown; userId: unknown };
 };
-export type PendingExecutionOriginal = { state: 'pending-evidence'; expiresAt: number };
+/** Waiting on something that will arrive, never on time: a ledger read that could not complete. */
+export type PendingExecutionOriginal = { state: 'pending-evidence' };
+/** A definite refusal, shown to the user with its reason (owner decision 2026-11-10). */
+export type EncryptedRefusalReason =
+  | 'e2ee_signature_missing'
+  | 'e2ee_signature_invalid'
+  | 'e2ee_scope_mismatch'
+  | 'e2ee_sender_not_authorized'
+  | 'e2ee_machine_not_member';
+export type RefusedExecutionOriginal = { state: 'refused'; reason: EncryptedRefusalReason };
 export type ResolveVerifiedExecutionOriginal = (
   intent: EncryptedExecutionIntent,
   lookup?: { readonly origin?: boolean }
-) => Effect.Effect<VerifiedExecutionOriginal | PendingExecutionOriginal | undefined, unknown>;
+) => Effect.Effect<
+  VerifiedExecutionOriginal | PendingExecutionOriginal | RefusedExecutionOriginal | undefined,
+  unknown
+>;
 
 export type EncryptedExecutionClaim =
   | {
@@ -74,13 +90,13 @@ export type EncryptedExecutionClaim =
       permit: RealtimeStartPermit;
       /** `owner` only when the verified signer belongs to this machine owner's
        * membership; anything else, including an unstated principal, is `member`.
-       * `derived` is a shared member's derived input: it can derive nothing further. */
+       * `derived` retains a shared member root's authority across further delegation. */
       principal: 'owner' | 'member' | 'derived';
       /** The member's verified device, for derivation and agent control. */
       origin?: { readonly requesterDevice: string };
     }
-  | { state: 'denied'; reason?: 'e2ee_machine_not_shared' }
-  | { state: 'uncertain' | 'completed' | 'expired' | 'pending-evidence' };
+  | { state: 'denied'; reason?: 'e2ee_machine_not_shared' | EncryptedRefusalReason }
+  | { state: 'uncertain' | 'completed' | 'pending-evidence' };
 
 /** One owner per encrypted workspace. Journal opening stays lazy so a broken
  * execution log never prevents content sync or another workspace from starting. */
@@ -110,24 +126,21 @@ export function makeEncryptedAgentExecution(options: {
   };
   /** Whether this machine's own device may reach another machine. */
   authorizeMachineTarget?: (machineId: string) => Effect.Effect<boolean, unknown>;
+  /** New execution evidence: one document's frame (room ID) or a confirmed ledger read. */
+  subscribeEvidence?: (listener: (roomId?: string) => void) => () => void;
   /** Observation only, after the committed actual-start claim. */
   onClaim?: (userTurnId: string) => void;
 }) {
-  const derivedClaims = new Map<string, number>();
   const hex64 = /^[0-9a-f]{64}$/;
-  // A derivation origin is a shared member's own signed, non-derived, non-scheduled Turn.
-  const verifiedOrigin = Effect.fnUntraced(function* (ref: DerivationOrigin) {
-    const origin = yield* options.resolveVerifiedOriginal(
+  // Each lookup verifies the signed row in its workspace, including its provenance.
+  const readOrigin = (ref: DerivationOrigin) =>
+    options.resolveVerifiedOriginal(
       { workspaceId: options.workspaceId, sessionId: ref.sessionId, userTurnId: ref.userTurnId },
       { origin: true }
     );
-    if (
-      !origin ||
-      'state' in origin ||
-      !hex64.test(origin.requesterDevice) ||
-      !Number.isSafeInteger(origin.expiresAt)
-    )
-      return undefined;
+  const verifiedOrigin = Effect.fnUntraced(function* (ref: DerivationOrigin) {
+    const origin = yield* readOrigin(ref);
+    if (!origin || 'state' in origin || !hex64.test(origin.requesterDevice)) return undefined;
     return origin;
   });
   const authorizeAll = Effect.fnUntraced(function* (
@@ -154,20 +167,37 @@ export function makeEncryptedAgentExecution(options: {
       ...(owner ? { principal: 'owner' as const } : {}),
     };
   });
-  /** Write-time classification of an Agent-delegated input's driving Turn. `owner`
-   * keeps today's behavior; `member` must be recorded as `derivedFrom`; anything
-   * unverifiable, derived, or no longer authorized is `denied`. */
-  const classifyOrigin = Effect.fnUntraced(function* (
-    ref: DerivationOrigin
-  ): Effect.fn.Return<'owner' | 'member' | 'denied', unknown> {
-    const origin = yield* verifiedOrigin(ref);
-    if (!origin || origin.derivedFrom || !options.authorizeExecution) return 'denied';
-    // This machine's own, non-derived input (for example a Schedule run) is owner work.
-    if (origin.requesterDevice === options.selfDevice) return 'owner';
-    const result = yield* options.authorizeExecution(options.workspaceId, origin.requesterDevice);
-    if (result._tag === 'Authorized') return result.principal === 'owner' ? 'owner' : 'member';
-    return result.reason === 'e2ee_machine_not_shared' ? 'member' : 'denied';
+  /** Resolve a driving turn to its signed root, then recheck that root's authority.
+   * Stored derivations stay flat and human-rooted; Owner machine inputs continue without a root. */
+  const resolveDerivationOrigin = Effect.fnUntraced(function* (ref: DerivationOrigin) {
+    const driving = yield* verifiedOrigin(ref);
+    if (!driving || !options.authorizeExecution) return undefined;
+    if (driving.derivedFrom && (driving.requesterDevice !== options.selfDevice || driving.schedule))
+      return undefined;
+    const rootRef = driving.derivedFrom ?? ref;
+    const root = driving.derivedFrom ? yield* verifiedOrigin(rootRef) : driving;
+    if (
+      !root ||
+      root.derivedFrom ||
+      (root.schedule && root.requesterDevice !== options.selfDevice) ||
+      (driving.derivedFrom &&
+        (root.machineAuthored || root.schedule || root.requesterDevice === options.selfDevice))
+    )
+      return undefined;
+    const grant = yield* options.authorizeExecution(options.workspaceId, root.requesterDevice);
+    if (grant._tag !== 'Authorized' || grant.isCurrent?.() === false) return undefined;
+    if (root.machineAuthored && grant.principal !== 'owner') return undefined;
+    return {
+      principal: grant.principal === 'owner' ? ('owner' as const) : ('member' as const),
+      ...(!root.machineAuthored && root.requesterDevice !== options.selfDevice
+        ? { origin: rootRef }
+        : {}),
+    };
   });
+  const classifyOrigin = (ref: DerivationOrigin) =>
+    resolveDerivationOrigin(ref).pipe(
+      Effect.map((resolved) => resolved?.principal ?? ('denied' as const))
+    );
   /** Agent control on behalf of a shared member: that member's own rights for every
    * project the running turn reaches, under the same freshness gate as execution. */
   const authorizeAgentControl = (requesterDevice: string, localProjectIds?: readonly string[]) =>
@@ -184,10 +214,28 @@ export function makeEncryptedAgentExecution(options: {
   /** Who a verified input runs as. This machine's own rows keep the requester it wrote. */
   const verifiedRequester = Effect.fnUntraced(function* (
     verified: VerifiedExecutionOriginal
-  ): Effect.fn.Return<string | undefined, unknown> {
+  ): Effect.fn.Return<string | PendingExecutionOriginal | undefined, unknown> {
     if (verified.derivedFrom) {
-      const origin = yield* verifiedOrigin(verified.derivedFrom);
-      return origin ? encryptedMemberRequester(origin.requesterCryptoUserId) : undefined;
+      const origin = yield* readOrigin(verified.derivedFrom);
+      if (origin && 'state' in origin)
+        return origin.state === 'pending-evidence' ? origin : undefined;
+      if (
+        !origin ||
+        !hex64.test(origin.requesterDevice) ||
+        origin.derivedFrom ||
+        origin.machineAuthored ||
+        origin.schedule ||
+        origin.requesterDevice === options.selfDevice ||
+        !options.authorizeExecution
+      )
+        return undefined;
+      const grant = yield* options.authorizeExecution(options.workspaceId, origin.requesterDevice);
+      if (grant._tag !== 'Authorized')
+        return grant.reason === 'unavailable' ? { state: 'pending-evidence' as const } : undefined;
+      if (grant.isCurrent?.() === false) return undefined;
+      return grant.principal === 'owner'
+        ? options.machineUserId
+        : encryptedMemberRequester(origin.requesterCryptoUserId);
     }
     if (verified.requesterDevice === options.selfDevice || !options.ledgerIdentity)
       return undefined;
@@ -200,9 +248,13 @@ export function makeEncryptedAgentExecution(options: {
   ): Effect.fn.Return<{ state: 'pending' | 'denied' } | { userId?: string }, unknown> {
     const intent = yield* attempt(() => intentSchema.parse(input));
     const verified = yield* options.resolveVerifiedOriginal(intent);
-    if (verified && 'state' in verified) return { state: 'pending' };
+    // A refused signer goes on to the claim, which records the reason; never wait on it.
+    if (verified && 'state' in verified)
+      return { state: verified.state === 'refused' ? 'denied' : 'pending' };
     if (!verified) return { state: 'denied' };
     const userId = yield* verifiedRequester(verified);
+    if (typeof userId === 'object') return { state: 'pending' };
+    if (verified.derivedFrom && userId === undefined) return { state: 'denied' };
     return userId === undefined ? {} : { userId };
   });
   /** Local machine access for a verified requester; the service is never asked. */
@@ -244,7 +296,7 @@ export function makeEncryptedAgentExecution(options: {
     const verified = yield* options.resolveVerifiedOriginal(
       yield* attempt(() => intentSchema.parse(input))
     );
-    if (verified && 'state' in verified) return 'pending';
+    if (verified && 'state' in verified) return verified.state === 'refused' ? 'denied' : 'pending';
     return verified?.requesterDevice === options.selfDevice ? 'verified' : 'denied';
   });
   const claim = Effect.fnUntraced(function* (
@@ -259,15 +311,14 @@ export function makeEncryptedAgentExecution(options: {
       targetMachineId: options.targetMachineId,
       requestId: `agent-start:${intent.userTurnId}`,
     };
-    // Stable business evidence, separate from each transport's original frame.
-    // No prompt, plaintext response, or transport request id belongs here.
-    const frame = Buffer.from(JSON.stringify([1, intent.sessionId, intent.userTurnId]));
+    // Stable business evidence, separate from each transport's request. No prompt,
+    // plaintext response or transport request ID belongs here; only the content digest.
+    const digest = turnExecutionDigest({ inputConfig: intent.inputConfig }) ?? null;
+    const frame = Buffer.from(JSON.stringify([2, intent.sessionId, intent.userTurnId, digest]));
     const journal = yield* attempt(options.journal);
     const read = () => {
       const retained = journal.read(key);
       if (retained) {
-        // Earlier intent evidence included a display account ID. Match only the
-        // business identity, preserving those exact bytes and every start fence.
         const saved = retainedIntentSchema.parse(
           JSON.parse(Buffer.from(retained.frame).toString('utf8'))
         );
@@ -277,33 +328,25 @@ export function makeEncryptedAgentExecution(options: {
       return retained;
     };
     let retained = yield* attempt(read);
+    // One start per message ID: a started, finished or retired ID never starts again,
+    // whatever content a later edit carries.
     if (retained && retained.state !== 'received') return { state: retained.state };
     if (options.isExecutionOpen?.() === false) return { state: 'denied' };
     const verified = yield* options.resolveVerifiedOriginal(intent);
-    if (verified && 'state' in verified) {
-      // Snapshot timestamps can bound waiting, but never grant execution. A
-      // recovered signed original still defines the actual admission deadline.
-      return {
-        state:
-          (yield* Clock.currentTimeMillis) >= verified.expiresAt ? 'expired' : 'pending-evidence',
-      };
-    }
-    if (
-      !verified ||
-      !/^[0-9a-f]{64}$/.test(verified.requesterDevice) ||
-      !Number.isSafeInteger(verified.expiresAt) ||
-      verified.expiresAt < 0
-    )
-      return { state: 'denied' };
+    if (verified && 'state' in verified)
+      return verified.state === 'refused'
+        ? { state: 'denied', reason: verified.reason }
+        : { state: 'pending-evidence' };
+    if (!verified || !hex64.test(verified.requesterDevice)) return { state: 'denied' };
     const config = intent.inputConfig as { _lodyAutomation?: unknown } | undefined;
     if (config?._lodyAutomation !== undefined && verified.requesterDevice !== options.selfDevice)
       return { state: 'denied' };
     const authorizeExecution = options.authorizeExecution;
     if (!authorizeExecution) return { state: 'denied' };
-    // A derived input executes with its origin member's own rights, never as the
-    // machine that authored it; only this machine may author one, one level deep.
+    // A derived input uses its human root's current rights. Only this machine may
+    // author it, and the stored reference must already point directly to the root.
     let authorityDevice = verified.requesterDevice;
-    let originKey: string | undefined;
+    let originRef: DerivationOrigin | undefined;
     let originRequester: string | undefined;
     if (verified.derivedFrom) {
       if (
@@ -312,30 +355,40 @@ export function makeEncryptedAgentExecution(options: {
         verified.schedule
       )
         return { state: 'denied' };
-      const origin = yield* verifiedOrigin(verified.derivedFrom);
+      const origin = yield* readOrigin(verified.derivedFrom);
+      if (origin && 'state' in origin)
+        return { state: origin.state === 'pending-evidence' ? 'pending-evidence' : 'denied' };
       if (
         !origin ||
+        !hex64.test(origin.requesterDevice) ||
         origin.derivedFrom ||
+        origin.machineAuthored ||
         origin.schedule ||
         origin.requesterDevice === options.selfDevice
       )
         return { state: 'denied' };
-      if ((yield* Clock.currentTimeMillis) > origin.expiresAt + DERIVED_START_GRACE_MS)
-        return { state: 'expired' };
-      originKey = JSON.stringify([verified.derivedFrom.sessionId, verified.derivedFrom.userTurnId]);
-      if ((derivedClaims.get(originKey) ?? 0) >= MAX_DERIVED_TURNS_PER_ORIGIN)
-        return { state: 'denied' };
+      originRef = verified.derivedFrom;
       authorityDevice = origin.requesterDevice;
+      // The final authorization below determines whether the root is owner or member.
       originRequester = encryptedMemberRequester(origin.requesterCryptoUserId);
     }
     // Each touched project needs its own switch; every grant's fence must still hold.
     const authorizeTargets = (authorize: AuthorizeEncryptedExecution) =>
       authorizeAll(authorize, intent.workspaceId, authorityDevice, intent.localProjectIds);
+    // A ledger read that could not complete decides nothing: the turn waits and the
+    // watcher rechecks on the next confirmed read or its fallback timer.
+    const unavailable = () => Effect.succeed({ state: 'pending-evidence' as const });
     let authorization = yield* authorizeTargets(authorizeExecution);
     if (authorization._tag !== 'Authorized')
       return authorization.reason === 'e2ee_machine_not_shared'
         ? { state: 'denied', reason: 'e2ee_machine_not_shared' }
-        : { state: 'denied' };
+        : authorization.reason === 'unavailable'
+          ? yield* unavailable()
+          : authorization.reason === 'not-authorized'
+            ? { state: 'denied', reason: 'e2ee_sender_not_authorized' }
+            : authorization.reason === 'e2ee_machine_not_member'
+              ? { state: 'denied', reason: 'e2ee_machine_not_member' }
+              : { state: 'denied' };
     let scheduleCurrent: (() => boolean) | undefined;
     if (verified.schedule) {
       if (!options.authorizeSchedule) return { state: 'denied' };
@@ -346,56 +399,63 @@ export function makeEncryptedAgentExecution(options: {
       );
       if (schedule._tag !== 'Authorized')
         return {
-          state:
-            schedule.reason === 'e2ee_schedule_evidence_pending'
-              ? (yield* Clock.currentTimeMillis) < verified.expiresAt
-                ? 'pending-evidence'
-                : 'expired'
-              : 'denied',
+          state: schedule.reason === 'unavailable' ? 'pending-evidence' : 'denied',
           ...(schedule.reason === 'e2ee_machine_not_shared'
             ? { reason: 'e2ee_machine_not_shared' as const }
-            : {}),
+            : schedule.reason === 'e2ee_signature_missing' ||
+                schedule.reason === 'e2ee_signature_invalid'
+              ? { reason: schedule.reason }
+              : {}),
         };
       scheduleCurrent = schedule.isCurrent;
       // Schedule signer refreshes may advance the ledger snapshot. Recheck the
       // turn signer without dropping the independent Schedule source fences.
       authorization = yield* authorizeTargets(authorizeExecution);
-      if (authorization._tag !== 'Authorized')
+      if (authorization._tag !== 'Authorized') {
+        if (authorization.reason === 'unavailable') return yield* unavailable();
         return {
           state: 'denied',
           ...(authorization.reason === 'e2ee_machine_not_shared'
             ? { reason: 'e2ee_machine_not_shared' as const }
             : {}),
         };
+      }
     }
-    // Authorization can yield. Re-read before receive so concurrent channels
-    // reuse the first expiry instead of replacing or extending its evidence.
+    // Authorization can yield. Re-read before receive so concurrent channels share one
+    // record; a different signer or content under the same ID is a conflict.
     retained = yield* attempt(read);
-    if (retained && verified.expiresAt < retained.expiresAt) return { state: 'denied' };
-    if (retained && retained.requester !== verified.requesterDevice)
+    if (retained && retained.state !== 'received') return { state: retained.state };
+    if (
+      retained &&
+      (retained.requester !== verified.requesterDevice ||
+        !Buffer.from(retained.frame).equals(frame))
+    )
       return yield* Effect.fail(new RealtimeJournalError('identity_conflict'));
     const request = retained ?? {
       ...key,
       requester: verified.requesterDevice,
-      expiresAt: verified.expiresAt,
+      expiresAt: 0,
       frame,
     };
     const executionCurrent = authorization.isCurrent;
-    const principal = originKey
-      ? ('derived' as const)
-      : authorization.principal === 'owner'
-        ? ('owner' as const)
-        : ('member' as const);
+    const principal =
+      originRef && authorization.principal !== 'owner'
+        ? ('derived' as const)
+        : authorization.principal === 'owner'
+          ? ('owner' as const)
+          : ('member' as const);
     if (principal !== 'owner' && intent.requesterUserId === options.machineUserId)
       return { state: 'denied' };
     const expectedRequester = !options.ledgerIdentity
       ? undefined
-      : (originRequester ??
-        (verified.requesterDevice === options.selfDevice
-          ? undefined
-          : principal === 'owner'
-            ? options.machineUserId
-            : encryptedMemberRequester(verified.requesterCryptoUserId)));
+      : originRef && authorization.principal === 'owner'
+        ? options.machineUserId
+        : (originRequester ??
+          (verified.requesterDevice === options.selfDevice
+            ? undefined
+            : principal === 'owner'
+              ? options.machineUserId
+              : encryptedMemberRequester(verified.requesterCryptoUserId)));
     if (expectedRequester !== undefined && intent.requesterUserId !== expectedRequester)
       return { state: 'denied' };
     return yield* attempt(() => {
@@ -407,9 +467,16 @@ export function makeEncryptedAgentExecution(options: {
       )
         return { state: 'denied' as const };
       journal.receive(request);
+      if (
+        originRef &&
+        authorization.principal !== 'owner' &&
+        !journal.reserveDerivation(request, originRef)
+      )
+        return { state: 'denied' as const };
       const result = journal.claim(request);
+      // Execution records carry no deadline, so the journal never reports one expired.
+      if (result.state === 'expired') return { state: 'denied' as const };
       if (result.state === 'claimed') {
-        if (originKey) derivedClaims.set(originKey, (derivedClaims.get(originKey) ?? 0) + 1);
         try {
           options.onClaim?.(intent.userTurnId);
         } catch {
@@ -424,23 +491,69 @@ export function makeEncryptedAgentExecution(options: {
         : {
             ...result,
             principal,
-            ...(principal === 'member' ? { origin: { requesterDevice: authorityDevice } } : {}),
+            ...(principal === 'member' || principal === 'derived'
+              ? { origin: { requesterDevice: authorityDevice } }
+              : {}),
           };
     });
   });
+  /** A message cancelled before it started never starts later, even if its row turns
+   * pending again (owner decision 2026-11-10). A started or finished ID is unchanged. */
+  const retire = (input: { sessionId: string; userTurnId: string }) =>
+    attempt(() => {
+      const journal = options.journal();
+      const key = {
+        genesis: options.genesis,
+        workspaceId: options.workspaceId,
+        targetMachineId: options.targetMachineId,
+        requestId: `agent-start:${input.userTurnId}`,
+      };
+      if (journal.read(key)) return;
+      const request = {
+        ...key,
+        requester: 'retired',
+        expiresAt: 0,
+        frame: Buffer.from(JSON.stringify([2, input.sessionId, input.userTurnId, null])),
+      };
+      journal.receive(request);
+      const claimed = journal.claim(request);
+      if (claimed.state === 'claimed')
+        journal.finish(claimed.permit, Buffer.from('{"state":"retired"}'));
+    });
+  /** Inspect restart evidence without authorizing or claiming another execution. */
+  const readState = (input: { sessionId: string; userTurnId: string }) =>
+    attempt(() => {
+      const record = options.journal().read({
+        genesis: options.genesis,
+        workspaceId: options.workspaceId,
+        targetMachineId: options.targetMachineId,
+        requestId: `agent-start:${input.userTurnId}`,
+      });
+      if (!record) return undefined;
+      const saved = retainedIntentSchema.parse(
+        JSON.parse(Buffer.from(record.frame).toString('utf8'))
+      );
+      if (saved[1] !== input.sessionId || saved[2] !== input.userTurnId)
+        throw new RealtimeJournalError('identity_conflict');
+      return record.state;
+    });
   const complete = (permit: RealtimeStartPermit) =>
     attempt(() => {
       options.journal().finish(permit, Buffer.from('{"state":"settled"}'));
     });
   return {
     claim,
+    readState,
     complete,
+    retire,
     classifyOrigin,
+    resolveDerivationOrigin,
     authorizeAgentControl,
     automationEvidence,
     resolveRequester,
     verifyRequesterAccess,
     verifyMachineTarget,
+    subscribeEvidence: options.subscribeEvidence,
   };
 }
 export type EncryptedAgentExecution = ReturnType<typeof makeEncryptedAgentExecution>;

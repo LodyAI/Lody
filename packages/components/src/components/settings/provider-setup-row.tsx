@@ -111,6 +111,7 @@ export type ProviderSetupRowProps = {
   onDelete: (setup: ProviderSetupTask) => Promise<void>;
   /** Layout only. The row draws no surface: a list's card draws it. */
   className?: string;
+  showAuthentication?: boolean;
 };
 
 export function ProviderSetupRow({
@@ -119,6 +120,7 @@ export function ProviderSetupRow({
   onRetry,
   onDelete,
   className,
+  showAuthentication = true,
 }: ProviderSetupRowProps) {
   const { t } = useTranslation();
   const [actionPending, setActionPending] = useState<'retry' | 'delete' | null>(null);
@@ -341,7 +343,7 @@ export function ProviderSetupRow({
             </Button>
           </div>
         ) : null}
-        {setup.status === 'awaiting-auth' ? (
+        {showAuthentication && setup.status === 'awaiting-auth' ? (
           <AcpAuthenticationPanel
             codexAuthMode={config.codexAuth?.mode}
             machineId={setup.machineId}

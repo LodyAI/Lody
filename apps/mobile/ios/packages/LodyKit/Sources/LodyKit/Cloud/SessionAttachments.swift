@@ -43,7 +43,7 @@ enum SessionAttachments {
 
   static func imageDownloadURL(workspace: String, session: String, imageId: String) -> URL {
     let path = [workspace, session, imageId].map(segment)
-    return URL(string: "https://api.lody.ai/api/workspaces/\(path[0])/session-images/\(path[1])/\(path[2])")!
+    return URL(string: "\(BackendEnvironment.worker)/api/workspaces/\(path[0])/session-images/\(path[1])/\(path[2])")!
   }
 
   static func imageThumbnailURL(workspace: String, session: String, imageId: String, width: Int) -> URL {
@@ -59,8 +59,9 @@ enum SessionAttachments {
     ]
     return components.url!
   }
-  static func upload(_ attachments: [[String: Any]], workspace: String, session: String,
+  static func upload(_ attachments: [[String: Any]], workspace: String, session: String, pins: WorkspaceModePins = .shared,
     onProgress: @escaping ProgressHandler = { _, _, _ in }) async throws -> [[String: Any]] {
+    try pins.requirePlaintext(workspace)
     guard attachments.count <= 16,
           attachments.filter({ $0["kind"] as? String == "image" }).count <= 8,
           attachments.filter({ $0["kind"] as? String == "file" }).count <= 8 else {
@@ -91,34 +92,52 @@ enum SessionAttachments {
       guard size.isRegularFile == true, let count = size.fileSize, count > 0, count <= 100 * 1024 * 1024 else {
         throw error(String(localized: "native.attachment.error.empty", bundle: .lody))
       }
-      let base = "https://api.lody.ai/api/workspaces/\(segment(workspace))/session-\(kind == "image" ? "images" : "files")"
+      let base = "\(BackendEnvironment.worker)/api/workspaces/\(segment(workspace))/session-\(kind == "image" ? "images" : "files")"
       var responseStage: StaticString = kind == "image" ? "image_upload" : "file_upload"
       var result: [String: Any]
       if kind == "image" {
-        let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? ""
+        // The server checks the bytes against the declared type, so classify the content
+        // rather than the name: an edited Photos asset keeps its original `.PNG` name
+        // while its rendered data is JPEG or HEIC.
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+          throw error(String(localized: "native.attachment.error.imageRead", bundle: .lody))
+        }
+        let mime = (CGImageSourceGetType(source) as String?).flatMap { UTType($0)?.preferredMIMEType } ?? ""
         var bytes: Data
         var fileName = name
         var contentType = mime
+        let converted: Bool
         if ["image/png", "image/jpeg", "image/webp", "image/gif"].contains(mime), count <= 5 * 1024 * 1024 {
           bytes = try Data(contentsOf: url)
+          converted = false
+          if UTType(filenameExtension: (name as NSString).pathExtension)?.preferredMIMEType != mime,
+             let ext = UTType(mimeType: mime)?.preferredFilenameExtension {
+            fileName = (name as NSString).deletingPathExtension + "." + ext
+          }
         } else {
-          guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-                let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+          guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                   kCGImageSourceCreateThumbnailFromImageAlways: true,
                   kCGImageSourceThumbnailMaxPixelSize: 2048,
                   kCGImageSourceCreateThumbnailWithTransform: true,
                 ] as CFDictionary), let jpeg = UIImage(cgImage: image).jpegData(compressionQuality: 0.85) else {
             throw error(String(localized: "native.attachment.error.imageRead", bundle: .lody))
           }
-          bytes = jpeg; contentType = "image/jpeg"
+          bytes = jpeg; contentType = "image/jpeg"; converted = true
           fileName = (name as NSString).deletingPathExtension + ".jpg"
         }
+        DiagnosticsStore.shared.record("attachment", "image_prepared", fields: [
+          "attempt": attempt.uuidString, "session": DiagnosticsStore.correlation(session),
+          "sourceType": DiagnosticsStore.attachmentMediaType(mime),
+          "uploadType": DiagnosticsStore.attachmentMediaType(contentType),
+          "sourceBytes": String(count), "imageBytes": String(bytes.count),
+          "converted": String(converted),
+        ])
         guard bytes.count <= 5 * 1024 * 1024 else { throw error(String(localized: "native.attachment.error.imageTooLarge", bundle: .lody)) }
         let boundary = UUID().uuidString
         let safeName = fileName.replacingOccurrences(of: "\"", with: "_").replacingOccurrences(of: "\r", with: "_").replacingOccurrences(of: "\n", with: "_")
         var body = Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"sessionId\"\r\n\r\n\(session)\r\n--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(safeName)\"\r\nContent-Type: \(contentType)\r\n\r\n".utf8)
         body.append(bytes); body.append(Data("\r\n--\(boundary)--\r\n".utf8))
-        result = try await request(base + "/upload", token: token, stage: responseStage, attempt: attempt, headers: ["Content-Type": "multipart/form-data; boundary=\(boundary)"], body: body, onProgress: report)
+        result = try await request(base + "/upload", workspace: workspace, pins: pins, token: token, stage: responseStage, attempt: attempt, headers: ["Content-Type": "multipart/form-data; boundary=\(boundary)"], body: body, onProgress: report)
       } else {
         let file = try FileHandle(forReadingFrom: url)
         defer { try? file.close() }
@@ -135,9 +154,9 @@ enum SessionAttachments {
           "x-file-size-bytes": String(count), "x-file-text-preview": String(!prefix.contains(0) && String(data: prefix, encoding: .utf8) != nil)]
         let partSize = 16 * 1024 * 1024
         if count <= partSize {
-          result = try await request(base + "/upload", token: token, stage: responseStage, attempt: attempt, headers: headers, body: try file.readToEnd(), onProgress: report)
+          result = try await request(base + "/upload", workspace: workspace, pins: pins, token: token, stage: responseStage, attempt: attempt, headers: headers, body: try file.readToEnd(), onProgress: report)
         } else {
-          let created = try await request(base + "/multipart/create", token: token, stage: "multipart_create", attempt: attempt, headers: headers)
+          let created = try await request(base + "/multipart/create", workspace: workspace, pins: pins, token: token, stage: "multipart_create", attempt: attempt, headers: headers)
           guard let uploadId = created["uploadId"] as? String, !uploadId.isEmpty,
                 let fileId = created["fileId"] as? String, !fileId.isEmpty else { throw invalidResponse(stage: "multipart_create", attempt: attempt) }
           let path = base + "/multipart/" + segment(uploadId)
@@ -147,17 +166,17 @@ enum SessionAttachments {
             while let data = try file.read(upToCount: partSize), !data.isEmpty {
               let number = parts.count + 1
               let offset = Int64(parts.count * partSize)
-              let part = try await request(path + "/part/\(number)", token: token, stage: "multipart_part", attempt: attempt, method: "PUT", headers: identity.merging(["x-file-part-size-bytes": String(data.count)], uniquingKeysWith: { _, new in new }), body: data,
+              let part = try await request(path + "/part/\(number)", workspace: workspace, pins: pins, token: token, stage: "multipart_part", attempt: attempt, method: "PUT", headers: identity.merging(["x-file-part-size-bytes": String(data.count)], uniquingKeysWith: { _, new in new }), body: data,
                 onProgress: { sent, _ in report(offset + sent, Int64(count)) })
               guard let etag = part["etag"] as? String, !etag.isEmpty else { throw invalidResponse(stage: "multipart_part", attempt: attempt) }
               parts.append(["partNumber": number, "etag": etag])
               report(offset + Int64(data.count), Int64(count))
             }
             responseStage = "multipart_complete"
-            result = try await request(path + "/complete", token: token, stage: responseStage, attempt: attempt, headers: identity.merging(["Content-Type": "application/json"], uniquingKeysWith: { _, new in new }), body: JSONSerialization.data(withJSONObject: ["parts": parts]))
+            result = try await request(path + "/complete", workspace: workspace, pins: pins, token: token, stage: responseStage, attempt: attempt, headers: identity.merging(["Content-Type": "application/json"], uniquingKeysWith: { _, new in new }), body: JSONSerialization.data(withJSONObject: ["parts": parts]))
           } catch {
             // Cleanup also runs after cancellation; never retry message dispatch.
-            await Task.detached { _ = try? await request(path + "/abort", token: token, stage: "multipart_abort", attempt: attempt, method: "DELETE", headers: identity) }.value
+            await Task.detached { _ = try? await request(path + "/abort", workspace: workspace, pins: pins, token: token, stage: "multipart_abort", attempt: attempt, method: "DELETE", headers: identity) }.value
             throw error
           }
         }
@@ -185,7 +204,7 @@ enum SessionAttachments {
     guard let token = try AuthKeychain.read() else { throw error(String(localized: "native.attachment.error.signIn", bundle: .lody)) }
     let path = [workspace, session, fileId].map(segment)
     let kind = image ? "session-images" : "session-files"
-    var request = URLRequest(url: URL(string: "https://api.lody.ai/api/workspaces/\(path[0])/\(kind)/\(path[1])/\(path[2])")!, timeoutInterval: 120)
+    var request = URLRequest(url: URL(string: "\(BackendEnvironment.worker)/api/workspaces/\(path[0])/\(kind)/\(path[1])/\(path[2])")!, timeoutInterval: 120)
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     let (temporary, response) = try await URLSession.shared.download(for: request)
     defer { try? FileManager.default.removeItem(at: temporary) }
@@ -247,14 +266,17 @@ enum SessionAttachments {
       userInfo: [NSLocalizedDescriptionKey: "\(detail) (HTTP \(status))"])
   }
 
-  static func request(_ url: String, token: String, stage: StaticString, attempt: UUID, method: String = "POST", headers: [String: String], body: Data? = nil,
+  static func request(_ url: String, workspace: String? = nil, pins: WorkspaceModePins = .shared, token: String, stage: StaticString, attempt: UUID, method: String = "POST", headers: [String: String], body: Data? = nil,
     onProgress: (@Sendable (Int64, Int64) -> Void)? = nil) async throws -> [String: Any] {
     try Task.checkCancellation()
+    if let workspace, stage.description != "multipart_abort" { try pins.requirePlaintext(workspace) }
     var request = URLRequest(url: URL(string: url)!, timeoutInterval: 120)
     request.httpMethod = method; request.httpBody = body
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
-    var fields = ["stage": stage.description, "attempt": attempt.uuidString]
+    var fields = ["stage": stage.description, "attempt": attempt.uuidString,
+      "requestBytes": String(body?.count ?? 0)]
+    let started = ProcessInfo.processInfo.systemUptime
     DiagnosticsStore.shared.record("attachment", "request_started", fields: fields)
     let data: Data
     let response: URLResponse
@@ -270,6 +292,7 @@ enum SessionAttachments {
       }
     } catch {
       let failure = error as NSError
+      fields["elapsedMs"] = String(Int(max(0, ProcessInfo.processInfo.systemUptime - started) * 1000))
       if failure.domain == NSURLErrorDomain { fields["networkCode"] = String(failure.code) }
       DiagnosticsStore.shared.record("attachment", "transport_failed", fields: fields)
       let key: String
@@ -287,13 +310,44 @@ enum SessionAttachments {
       throw invalidResponse(stage: stage, attempt: attempt)
     }
     fields["httpStatus"] = String(response.statusCode)
+    fields["elapsedMs"] = String(Int(max(0, ProcessInfo.processInfo.systemUptime - started) * 1000))
+    fields["responseBytes"] = String(data.count)
+    switch response.mimeType?.lowercased() {
+    case "application/json", "application/problem+json": fields["responseType"] = "json"
+    case "text/html": fields["responseType"] = "html"
+    case "text/plain": fields["responseType"] = "text"
+    case nil: fields["responseType"] = "missing"
+    default: fields["responseType"] = "other"
+    }
+    fields["cfRay"] = response.value(forHTTPHeaderField: "CF-Ray")
+    fields["requestId"] = response.value(forHTTPHeaderField: "X-Request-ID")
     guard (200..<300).contains(response.statusCode) else {
-      // Only allowlisted error categories survive metadata filtering; never persist response text.
-      if data.count <= 64 * 1024,
-         let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-        let detail = value["error"] as? [String: Any]
-        let code = value["code"] as? String ?? detail?["code"] as? String ?? value["error"] as? String
-        fields["serverCode"] = DiagnosticsStore.attachmentServerCode(code)
+      // Classify bounded responses without persisting their text, keys or arbitrary codes.
+      fields["serverCodeState"] = "missing"
+      if data.isEmpty {
+        fields["responseBody"] = "empty"
+      } else if data.count > 64 * 1024 {
+        fields["responseBody"] = "too_large"
+      } else {
+        fields["serverErrorFingerprint"] = SHA256.hash(data: data).prefix(8).map { String(format: "%02x", $0) }.joined()
+        if let json = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) {
+          fields["responseBody"] = "json_other"
+          if let value = json as? [String: Any] {
+            fields["responseBody"] = "json_object"
+            let detail = value["error"] as? [String: Any]
+            let candidates = [value["code"], detail?["code"], value["error"], detail?["message"], value["message"]]
+              .compactMap { $0 as? String }.filter { !$0.isEmpty }
+            // An unrecognized top-level code must not mask a recognized nested category.
+            if let code = candidates.compactMap(DiagnosticsStore.attachmentServerCode).first {
+              fields["serverCode"] = code
+              fields["serverCodeState"] = "recognized"
+            } else if !candidates.isEmpty {
+              fields["serverCodeState"] = "unrecognized"
+            }
+          }
+        } else {
+          fields["responseBody"] = "invalid_json"
+        }
       }
       DiagnosticsStore.shared.record("attachment", "http_failed", fields: fields)
       throw uploadError(status: response.statusCode, serverCode: fields["serverCode"])

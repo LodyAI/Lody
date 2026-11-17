@@ -141,6 +141,29 @@ object LodyIcons {
         )
     }
 
+    val Clock: ImageVector by lazy {
+        lodyIcon(
+            "Clock",
+            "M2 12a10 10 0 1 0 20 0a10 10 0 1 0 -20 0Z",
+            "M12 6v6l4 2",
+        )
+    }
+
+    val Play: ImageVector by lazy {
+        lodyIcon(
+            "Play",
+            "M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z",
+        )
+    }
+
+    val Pause: ImageVector by lazy {
+        lodyIcon(
+            "Pause",
+            "M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z",
+            "M6 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z",
+        )
+    }
+
     val Close: ImageVector by lazy {
         lodyIcon(
             "Close",
@@ -268,6 +291,15 @@ object LodyIcons {
         )
     }
 
+    val Download: ImageVector by lazy {
+        lodyIcon(
+            "Download",
+            "M12 15V3",
+            "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4",
+            "m7 10 5 5 5-5",
+        )
+    }
+
     val Link: ImageVector by lazy {
         lodyIcon(
             "Link",
@@ -323,6 +355,40 @@ object LodyIcons {
             "Bell",
             "M10.268 21a2 2 0 0 0 3.464 0",
             "M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326",
+        )
+    }
+
+    val Mail: ImageVector by lazy {
+        lodyIcon(
+            "Mail",
+            "m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7",
+            "M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z",
+        )
+    }
+
+    val ArrowLeft: ImageVector by lazy {
+        lodyIcon(
+            "ArrowLeft",
+            "m12 19-7-7 7-7",
+            "M19 12H5",
+        )
+    }
+
+    val ArrowRight: ImageVector by lazy {
+        lodyIcon(
+            "ArrowRight",
+            "M5 12h14",
+            "m12 5 7 7-7 7",
+        )
+    }
+
+    val EyeOff: ImageVector by lazy {
+        lodyIcon(
+            "EyeOff",
+            "M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49",
+            "M14.084 14.158a3 3 0 0 1-4.242-4.242",
+            "M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143",
+            "m2 2 20 20",
         )
     }
 
@@ -488,6 +554,25 @@ object LodyIcons {
         )
     }
 
+    /** Lucide `fold-vertical`: squash and merge. */
+    val Squash: ImageVector by lazy {
+        lodyIcon(
+            "Squash",
+            "M12 22v-6", "M12 8V2", "M4 12H2", "M10 12H8", "M16 12h-2", "M22 12h-2",
+            "m15 19-3-3-3 3", "m15 5-3 3-3-3",
+        )
+    }
+
+    /** Lucide `layers`: rebase and merge. */
+    val Rebase: ImageVector by lazy {
+        lodyIcon(
+            "Rebase",
+            "M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z",
+            "m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65",
+            "m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65",
+        )
+    }
+
     val Merge: ImageVector by lazy {
         lodyIcon(
             "Merge",
@@ -645,6 +730,9 @@ object LodyIcons {
             "filter" to Filter,
             "sort" to Sort,
             "plus" to Plus,
+            "clock" to Clock,
+            "play" to Play,
+            "pause" to Pause,
             "close" to Close,
             "check" to Check,
             "back" to Back,
@@ -669,6 +757,10 @@ object LodyIcons {
             "pin" to Pin,
             "bell" to Bell,
             "eye" to Eye,
+            "eyeOff" to EyeOff,
+            "mail" to Mail,
+            "arrowLeft" to ArrowLeft,
+            "arrowRight" to ArrowRight,
             "lock" to Lock,
             "user" to User,
             "agent" to Agent,

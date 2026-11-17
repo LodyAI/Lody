@@ -198,18 +198,21 @@ function simulatorViewerUrl(value: string) {
   return url.href;
 }
 
-export async function iosSimulatorControl(
+/** One signed device-preview lifecycle call; the viewer URL is decrypted only for this request. */
+async function deviceControl(
   args: ControlArgs & { command: { action: string } },
+  platform: 'ios-simulator' | 'android-emulator',
 ) {
+  const method = `${platform}/control`;
   const recipient = await responseRecipient();
   const signed = await proof(args, {
-    action: 'ios-simulator',
+    action: platform,
     command: args.command,
     responseKey: recipient.key,
   });
   if (!signed.proof) return signed;
   const reply = await args.rpc(
-    'ios-simulator/control',
+    method,
     {
       sessionId: args.sessionId,
       requestedByUserId: args.userId,
@@ -225,7 +228,7 @@ export async function iosSimulatorControl(
   const { viewerUrlEnvelope, ...preview } = result.preview;
   if (!viewerUrlEnvelope) return { ...result, preview };
   const context = JSON.stringify([
-    'ios-simulator/control',
+    method,
     args.workspaceId,
     args.machineId,
     args.sessionId,
@@ -235,6 +238,18 @@ export async function iosSimulatorControl(
     await recipient.decrypt(viewerUrlEnvelope, context),
   );
   return { ...result, preview: { ...preview, viewerUrl } };
+}
+
+export function iosSimulatorControl(
+  args: ControlArgs & { command: { action: string } },
+) {
+  return deviceControl(args, 'ios-simulator');
+}
+
+export function androidEmulatorControl(
+  args: ControlArgs & { command: { action: string } },
+) {
+  return deviceControl(args, 'android-emulator');
 }
 
 function failure(reply: RpcReply): ControlResult {

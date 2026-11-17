@@ -1,6 +1,9 @@
 import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import type { SessionMeta } from '@lody/shared';
+import { SessionFileContentView } from '@/components/sessions/session-file-content-view';
+import { createFakeSessionFileProvider } from '@/lib/session-file-provider';
 import { fn } from 'storybook/test';
 import { Button } from '@lody/ui/button';
 
@@ -27,10 +30,12 @@ const storyLayout = stylex.create({
 
 function MobileFileViewerDrawerStory({
   error,
+  editable = false,
   long = false,
   rtl = false,
 }: {
   readonly error?: string;
+  readonly editable?: boolean;
   readonly long?: boolean;
   readonly rtl?: boolean;
 }) {
@@ -43,6 +48,26 @@ function MobileFileViewerDrawerStory({
       document.documentElement.dir = previous;
     };
   }, [rtl]);
+  const session = useMemo(
+    () =>
+      ({
+        id: 'mobile-file-story',
+        machineId: 'story-machine',
+      }) as SessionMeta,
+    []
+  );
+  const provider = useMemo(
+    () =>
+      createFakeSessionFileProvider({
+        files: [
+          { path: filePath, fileId: 'readme', kind: 'text', sourceState: 'live-collaborative' },
+        ],
+        snapshots: {
+          [filePath]: { kind: 'text', text: '# Project documentation\n\nReview before editing.\n' },
+        },
+      }),
+    []
+  );
 
   return (
     <main {...stylex.props(storyLayout.frame)} data-file-viewer-fixture data-rtl={rtl}>
@@ -58,6 +83,18 @@ function MobileFileViewerDrawerStory({
       >
         {error ? (
           <SessionFileErrorState message={error} />
+        ) : editable ? (
+          <SessionFileContentView
+            sessionId={session.id}
+            session={session}
+            filePath={filePath}
+            fileId="readme"
+            fileProvider={provider}
+            fileProviderRole="write"
+            active={open}
+            defaultReadOnly
+            preferNativeMarkdownSelection
+          />
         ) : (
           <pre {...stylex.props(viewerStory.source)}>
             {long
@@ -97,4 +134,8 @@ export const OutsideWorkspaceError: Story = {
 
 export const LongContentRTL: Story = {
   args: { long: true, rtl: true },
+};
+
+export const ReadOnlyWithEditToggle: Story = {
+  args: { editable: true },
 };

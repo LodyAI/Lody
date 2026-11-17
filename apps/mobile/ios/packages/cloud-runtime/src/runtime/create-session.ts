@@ -18,6 +18,7 @@ import { isThoughtLevel, validConfigValue } from '../protocol/capability';
 import { encodeFrame } from '../frames';
 import type { CreateSessionResult } from '../contract/methods.ts';
 import { clientFor } from './session';
+import { resolveNewSessionHistoryBackend } from './upstream-roost.js';
 import {
   quotaReason,
   workspaceSessionCount,
@@ -31,6 +32,7 @@ export type CreateSessionArgs = {
   machineId: string;
   agentConfigId: string;
   userId: string;
+  preferRoost?: boolean;
   title: string;
   branch?: string;
   /** Local projects: start in a new git worktree (web `project.useWorktree`). */
@@ -70,6 +72,102 @@ function metadataAgents(meta: Flock) {
   }));
 }
 
+const choices = (
+  value: unknown,
+  idKey: 'id' | 'modelId' | 'value',
+): CapabilityChoice[] =>
+  Array.isArray(value)
+    ? value.flatMap((item) => {
+        const entry = item as Record<string, unknown>;
+        const id = entry?.[idKey];
+        const name = entry?.name;
+        return typeof id === 'string' && id && typeof name === 'string'
+          ? [
+              {
+                id,
+                name,
+                ...(typeof entry.description === 'string'
+                  ? { description: entry.description }
+                  : {}),
+              },
+            ]
+          : [];
+      })
+    : [];
+
+/** Selector metadata safe for the UI: select/boolean only, no secret-looking ids. */
+function projectConfigOptions(raw: unknown): ConfigOption[] {
+  return (Array.isArray(raw) ? raw : []).flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const option = item as Record<string, unknown>;
+    if (
+      typeof option.id !== 'string' ||
+      !option.id ||
+      /(?:api[_-]?key|auth|bearer|credential|password|passwd|secret|token)/i.test(
+        option.id,
+      ) ||
+      typeof option.name !== 'string' ||
+      !['select', 'boolean'].includes(String(option.type))
+    )
+      return [];
+    const projected: ConfigOption = {
+      id: option.id,
+      name: option.name,
+      type: option.type as ConfigOption['type'],
+      options: choices(option.options, 'value'),
+      ...(typeof option.category === 'string'
+        ? { category: option.category }
+        : {}),
+      ...(typeof option.description === 'string'
+        ? { description: option.description }
+        : {}),
+    };
+    if (projected.type === 'select' && !projected.options.length) return [];
+    if (validConfigValue(projected, option.currentValue))
+      projected.currentValue = option.currentValue as string | boolean;
+    return [projected];
+  });
+}
+
+const isFastToggle = (option: ConfigOption) =>
+  ['fast-mode', 'fast'].includes(option.id) && option.type === 'boolean';
+
+/**
+ * Each model's own option list, as a requested refresh recorded it on desktop
+ * (`['acpModelConfigOptions', configId, modelId]` pointing at a shared
+ * `['acpModelConfigOptionsShape', configId, shapeId]` list). A pointer whose
+ * shape has not synced yet is unknown, never an empty list.
+ */
+function recordedModelOptions(
+  flock: { scan(): Iterable<{ key: Value[]; value?: Value }> },
+  configId: string,
+): Record<string, ConfigOption[]> {
+  const shapes = new Map<string, unknown>();
+  const pointers: [string, string][] = [];
+  for (const row of flock.scan()) {
+    const value = row.value as Record<string, unknown> | undefined;
+    if (!value || row.key.length !== 3 || row.key[1] !== configId) continue;
+    if (
+      row.key[0] === 'acpModelConfigOptionsShape' &&
+      value.version === 1 &&
+      Array.isArray(value.configOptions)
+    )
+      shapes.set(String(row.key[2]), value.configOptions);
+    else if (
+      row.key[0] === 'acpModelConfigOptions' &&
+      value.version === 1 &&
+      typeof value.shape === 'string'
+    )
+      pointers.push([String(row.key[2]), value.shape]);
+  }
+  const recorded: Record<string, ConfigOption[]> = {};
+  for (const [model, shape] of pointers) {
+    if (shapes.has(shape))
+      recorded[model] = projectConfigOptions(shapes.get(shape));
+  }
+  return recorded;
+}
+
 export function creationOptions(
   projectId: string | undefined,
   meta: Flock,
@@ -106,28 +204,6 @@ export function creationOptions(
       throw new Error('project_unavailable');
   }
   const capabilities = new Map<string, Capability & { fetchedAt: number }>();
-  const choices = (
-    value: unknown,
-    idKey: 'id' | 'modelId' | 'value',
-  ): CapabilityChoice[] =>
-    Array.isArray(value)
-      ? value.flatMap((item) => {
-          const entry = item as Record<string, unknown>;
-          const id = entry?.[idKey];
-          const name = entry?.name;
-          return typeof id === 'string' && id && typeof name === 'string'
-            ? [
-                {
-                  id,
-                  name,
-                  ...(typeof entry.description === 'string'
-                    ? { description: entry.description }
-                    : {}),
-                },
-              ]
-            : [];
-        })
-      : [];
 
   const agents = new Map<string, CreationOptions['agents'][number]>();
   const legacyAgents = metadataAgents(meta);
@@ -169,39 +245,9 @@ export function creationOptions(
         const fetchedAt = Number(value.fetchedAt) || 0;
         if ((capabilities.get(key)?.fetchedAt ?? -1) >= fetchedAt) continue;
         const efforts = value.modelReasoningEfforts;
-        const configOptions: ConfigOption[] = (
-          Array.isArray(value.configOptions) ? value.configOptions : []
-        ).flatMap((item) => {
-          if (!item || typeof item !== 'object') return [];
-          const option = item as Record<string, unknown>;
-          if (
-            typeof option.id !== 'string' ||
-            !option.id ||
-            /(?:api[_-]?key|auth|bearer|credential|password|passwd|secret|token)/i.test(
-              option.id,
-            ) ||
-            typeof option.name !== 'string' ||
-            !['select', 'boolean'].includes(String(option.type))
-          )
-            return [];
-          const projected: ConfigOption = {
-            id: option.id,
-            name: option.name,
-            type: option.type as ConfigOption['type'],
-            options: choices(option.options, 'value'),
-            ...(typeof option.category === 'string'
-              ? { category: option.category }
-              : {}),
-            ...(typeof option.description === 'string'
-              ? { description: option.description }
-              : {}),
-          };
-          if (projected.type === 'select' && !projected.options.length)
-            return [];
-          if (validConfigValue(projected, option.currentValue))
-            projected.currentValue = option.currentValue as string | boolean;
-          return [projected];
-        });
+        const configOptions: ConfigOption[] = projectConfigOptions(
+          value.configOptions,
+        );
         // Model controls are stored separately from the probe snapshot. Only merge
         // the declaration for this config and the same launch/source version.
         const declaration = configId
@@ -248,6 +294,25 @@ export function creationOptions(
             declaredEfforts[model] = [];
           if (control.fastMode !== undefined)
             fastModes[model] = control.fastMode;
+        }
+        // Each model's own options from a refresh that read every model. A
+        // declaration still decides effort and Fast, then `modelReasoningEfforts`;
+        // a model without a record keeps the snapshot, as before.
+        const recorded = configId ? recordedModelOptions(flock, configId) : {};
+        const recordedEfforts: Record<string, string[]> = {};
+        for (const [model, options] of Object.entries(recorded)) {
+          const effort = options.find(isThoughtLevel);
+          recordedEfforts[model] = effort?.options.map((o) => o.id) ?? [];
+          if (effort && !configOptions.some(isThoughtLevel)) {
+            // The snapshot's model had no effort control; another model has one.
+            const { currentValue: _current, ...control } = effort;
+            configOptions.push(control);
+          }
+          const fast = options.find(isFastToggle);
+          if (fastModes[model] === undefined)
+            fastModes[model] = fast !== undefined;
+          if (fast && !configOptions.some(isFastToggle))
+            configOptions.push({ ...fast, currentValue: false });
         }
         const binding =
           cliType === 'builtin'
@@ -304,6 +369,7 @@ export function creationOptions(
           configOptions,
           ...(Object.keys(fastModes).length ? { fastModes } : {}),
           reasoningEfforts: {
+            ...recordedEfforts,
             ...Object.fromEntries(
               Object.entries(
                 (efforts && typeof efforts === 'object'
@@ -454,6 +520,12 @@ export async function createSession(
     title: args.title.trim(),
     titleSource: 'draft',
     status: { type: 'idle' },
+    historyBackend: resolveNewSessionHistoryBackend(
+      machineMeta(replica.flock, agent.machineId) as {
+        protocolCapabilities?: Record<string, number>;
+      },
+      { preferred: args.preferRoost ? 'roost' : 'loro' },
+    ),
     isArchived: false,
     createdAt: new Date().toISOString(),
     cliType: agent.cliType,
@@ -549,7 +621,10 @@ function groupProjectId(group: WorkspaceProject, machineId: string): string {
 }
 
 /** A machine's merged metadata row (`['m', 'machine-<id>']` plus field rows). */
-function machineMeta(flock: Flock, machineId: string): Record<string, unknown> {
+export function machineMeta(
+  flock: Flock,
+  machineId: string,
+): Record<string, unknown> {
   const fields: Record<string, unknown> = {};
   const id = `machine-${machineId}`;
   for (const row of flock.scan()) {

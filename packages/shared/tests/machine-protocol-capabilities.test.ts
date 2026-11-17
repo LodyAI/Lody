@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   negotiatedAcpCapabilitiesRefreshForce,
+  negotiatedAcpModelOptionsRead,
   resolveNewSessionHistoryBackend,
 } from '../src/machine-protocol-capabilities';
 import {
@@ -76,6 +77,40 @@ describe('ACP capability refresh cache protocol capability', () => {
     expect(safeParseLocalSessionControlRequest(JSON.stringify(request)).success).toBe(true);
     // The regression this negotiation prevents: a previous-generation daemon
     // rejects the whole request rather than ignoring an unknown field.
+    expect(previousGenerationRequestSchema.safeParse(request).success).toBe(false);
+  });
+});
+
+describe('model option read negotiation', () => {
+  // What a daemon without `acpModelOptionsRead` parses: the same strict schema
+  // minus the field it never declared.
+  const previousGenerationRequestSchema = MachineAcpCapabilitiesRefreshRequestSchema.omit({
+    readModelOptions: true,
+  });
+  const buildRequest = (
+    machine: { protocolCapabilities?: Record<string, number> } | undefined
+  ) => ({
+    type: 'machine/acp-capabilities-refresh' as const,
+    machineId: 'machine-1',
+    workspaceId: 'workspace-1',
+    configId: 'config-1',
+    force: true,
+    ...negotiatedAcpModelOptionsRead(machine, true),
+  });
+
+  it('omits the field for a daemon that cannot read models', () => {
+    const request = buildRequest({ protocolCapabilities: { acpCapabilityRefreshCache: 1 } });
+
+    expect(Object.keys(request)).not.toContain('readModelOptions');
+    expect(previousGenerationRequestSchema.safeParse(request).success).toBe(true);
+  });
+
+  it('asks a current daemon to read every model, on both planes', () => {
+    const request = buildRequest({ protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES });
+
+    expect(request.readModelOptions).toBe(true);
+    expect(MachineAcpCapabilitiesRefreshRequestSchema.safeParse(request).success).toBe(true);
+    expect(safeParseLocalSessionControlRequest(JSON.stringify(request)).success).toBe(true);
     expect(previousGenerationRequestSchema.safeParse(request).success).toBe(false);
   });
 });

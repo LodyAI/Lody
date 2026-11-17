@@ -1,4 +1,4 @@
-"""Production iPad search, Glass FAB and chat composer hosts, without cloud."""
+"""Production iPad header search, bottom glass bar and chat composer hosts, without cloud."""
 import atexit
 import json
 import subprocess
@@ -22,7 +22,6 @@ def tap_label(label):
 
 
 def tap_row(identifier):
-    # UIKit's outline accessory inherits the parent's ID in AXe's tree.
     frame = max((item['frame'] for item in ui.state() if item.get('AXUniqueId') == identifier),
                 key=lambda value: value['width'] * value['height'])
     ui.axe('tap', '-x', str(frame['x'] + frame['width'] / 2), '-y', str(frame['y'] + frame['height'] / 2), '--tap-style', 'physical', '--post-delay', '.5')
@@ -30,7 +29,8 @@ def tap_row(identifier):
 
 def assert_selected(stage, identifier='ui-design', selected=True):
     # AXe 1.8 drops the Selected trait even when UIKit reports traits == 9.
-    # Read the real cell, without changing app state or introducing a test API.
+    # Read the real cell, without changing app state or introducing a test API. The Chats list
+    # marks the conversation open beside it with the Selected trait (a highlight, not UIKit selection).
     processes = subprocess.check_output(['xcrun', 'simctl', 'spawn', ui.udid, 'launchctl', 'list'], text=True)
     pid = next(line.split()[0] for line in processes.splitlines() if 'UIKitApplication:ai.lody.mobile[' in line)
     expression = '''({ NSMutableArray *q = [NSMutableArray array];
@@ -70,10 +70,7 @@ def assert_selected(stage, identifier='ui-design', selected=True):
     assert result.returncode == 0, result.stderr
     rows = json.loads(result.stdout.rsplit('SIDEBAR_STATE=', 1)[1].splitlines()[0])
     assert len(rows) == 1, (stage, identifier, rows)
-    if selected:
-        assert rows[0]['selected'] and rows[0]['selectedTrait'], (stage, identifier, rows)
-    else:
-        assert not rows[0]['selected'] and not rows[0]['selectedTrait'], (stage, identifier, rows)
+    assert rows[0]['selectedTrait'] == selected, (stage, identifier, rows)
 
 
 ui.element('ipad-detail-placeholder')
@@ -88,51 +85,19 @@ workspace = workspace_item['frame']
 fab = chrome['create']['frame']
 ui.capture('sidebar-glass-fab')
 
+# The native workspace menu retains full names and closes on current selection.
 tap_label(workspace_item['AXLabel'])
-labeled('我的超长工作区名称不能折行')
-edit_workspace = labeled(catalog.text('workspace.edit.action'))
-assert 'selected' not in str(edit_workspace.get('traits') or []).lower(), edit_workspace
+ui.wait(lambda items: any(i.get('AXLabel') == '我的超长工作区名称不能折行' for i in items), 'Missing workspace action')
 ui.capture('workspace-menu')
-tap_label(catalog.text('workspace.edit.action'))
-ui.element('workspace-name')
-ui.capture('workspace-editor')
-tap_label(catalog.text('workspace.edit.changeIcon'))
-
-
-# The photo picker runs out of process, so only point queries reach its controls.
-def picker_point(x, y):
-    return json.loads(ui.axe('describe-ui', '--point', f'{x},{y}'))
-
-
-cancel_point = (32, 84)
-ui.wait(lambda _items: picker_point(*cancel_point).get('AXLabel') == catalog.system('cancel') or None,
-        'Photo picker must present its cancel button', timeout=10)
-ui.capture('workspace-icon-picker')
-ui.axe('tap', '-x', '297', '-y', '323', '--post-delay', '1.5')
-ui.wait(
-    lambda _items: True if picker_point(*cancel_point).get('AXLabel') != catalog.system('cancel') else None,
-    'Photo picker must dismiss after selecting an icon',
-    timeout=10,
-)
-ui.element('workspace-name')
-ui.capture('workspace-icon-updated')
-tap_label(catalog.text('common.cancel'))
-pad.show_list(ui)
-tap_label(workspace_item['AXLabel'])
-edit_workspace = labeled(catalog.text('workspace.edit.action'))
-assert 'selected' not in str(edit_workspace.get('traits') or []).lower(), edit_workspace
-ui.capture('workspace-menu-after-edit')
 tap_label('我的超长工作区名称不能折行')
+ui.wait(lambda items: not any(i.get('AXLabel') == '我的超长工作区名称不能折行' for i in items), 'Native menu did not dismiss')
 
 # The sidebar stays beside the chat only in the wide layout.
 rotation.rotate(ui, 'landscape')
 atexit.register(rotation.restore_portrait, ui)
 pad.show_list(ui)
 
-# Selection belongs to the sidebar's detail, including across outline updates.
-parent_id = 'toggle:ui:local:lody'
-if not any(item.get('AXUniqueId') == 'ui-design' for item in ui.state()):
-    tap_row(parent_id)
+# Selection follows the conversation open beside the list, including across list updates.
 assert 44 <= ui.element('ui-design')['frame']['height'] <= 68
 ui.axe('tap', '--id', 'ui-design', '--tap-style', 'physical', '--post-delay', '.6')
 ui.element('chat-navigation-title')
@@ -169,28 +134,18 @@ ui.wait(lambda items: any(item.get('AXUniqueId') == 'a1:answer' and abs(item['fr
                           for item in items), 'The narrow detail did not restore its available width')
 ui.capture('reading-column-split-restored')
 
-tap_row(parent_id)
-ui.wait(lambda items: not any(item.get('AXUniqueId') == 'ui-design' for item in items), 'Project did not collapse')
-ui.capture('sidebar-collapsed')
-tap_row(parent_id)
-ui.element('ui-design')
+tap_row('label:pinned')
+ui.wait(lambda items: not any(item.get('AXUniqueId') == 'ui-pinned' for item in items), 'Pinned group did not collapse')
+ui.capture('list-group-collapsed')
+tap_row('label:pinned')
+ui.element('ui-pinned')
 assert_selected('restored')
-ui.capture('sidebar-selection-restored')
-
-ui.axe('tap', '--id', 'project:ui:empty', '--tap-style', 'physical', '--post-delay', '.6')
-ui.element('ipad-project-list')
-labeled(catalog.text('project.empty'))
-assert_selected('empty-project-push', 'project:ui:empty')
-assert_selected('empty-project-session-yields', selected=False)
-ui.capture('sidebar-project')
-ui.axe('tap', '--id', 'BackButton', '--tap-style', 'physical', '--post-delay', '.6')
-ui.element('ipad-inbox-list')
-assert_selected('empty-project-return', 'project:ui:empty', selected=False)
-assert_selected('empty-project-session-restored')
+ui.capture('list-selection-restored')
 
 # Business entry points share the same owner: workspace switching clears both
 # columns, then a real system deep link resolves its workspace and opens detail.
 tap_label(workspace_item['AXLabel'])
+ui.wait(lambda items: any(i.get('AXLabel') == '另一个工作区' for i in items), 'Missing workspace menu')
 tap_label('另一个工作区')
 ui.element('ipad-detail-placeholder')
 ui.wait(lambda items: not any(item.get('AXUniqueId') in ('ui-design', 'session-input') for item in items), 'Old workspace content survived the switch')
@@ -217,19 +172,19 @@ ui.capture('fab-opens-new-session')
 tap_label(catalog.text('accessibility.closeSheet', title=catalog.text('create.title')))
 ui.wait(lambda items: not any(item.get('AXUniqueId') == 'create-session-input' for item in items), 'New session did not close')
 
-field = pad.panel_chrome(ui)['search']['frame']
+pad.panel_chrome(ui)
+field = pad.open_search(ui)['frame']
 ui.axe('tap', '-x', str(field['x'] + field['width'] / 2), '-y', str(field['y'] + field['height'] / 2), '--post-delay', '.3')
 ui.axe('type', 'lody')
 ui.element('ui-design')
 ui.wait(lambda items: not any(item.get('AXUniqueId') == 'project:ui:empty' for item in items), 'Search did not filter projects')
 ui.element('project:ui:local:lody')
-ui.capture('sidebar-search')
+ui.capture('list-search')
 ui.axe('tap', '--id', 'project:ui:local:lody', '--tap-style', 'physical', '--post-delay', '.6')
 ui.element('ipad-project-list')
-assert_selected('search-project-push', 'project:ui:local:lody')
 ui.axe('tap', '--id', 'BackButton', '--tap-style', 'physical', '--post-delay', '.6')
 ui.element('ipad-inbox-list')
-assert_selected('search-project-return', 'project:ui:local:lody', selected=False)
+pad.close_search(ui)
 ui.axe('tap', '--id', 'ui-design', '--tap-style', 'physical', '--post-delay', '.8')
 ui.element('session-input')
 ui.element('chat-navigation-title')

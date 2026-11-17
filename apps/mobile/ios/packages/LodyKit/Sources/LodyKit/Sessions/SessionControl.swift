@@ -60,7 +60,7 @@ final class SessionControl {
         let state = (try? JSONSerialization.jsonObject(with: Data(result.utf8)) as? [String: Any])?["state"] as? String
         if state == "stopped" { self?.stoppedTurn = turn }
       } catch {
-        LodyToastOverlay.shared.show(message: String(localized: "native.chat.composer.controlError", bundle: .lody), kind: "error")
+        LodyToastOverlay.shared.show(message: String(localized: "native.chat.composer.controlError", bundle: .lody), kind: .error)
       }
       self?.inFlight = false
       self?.busy = ""

@@ -1,3 +1,4 @@
+import { composerText, expectComposerText } from './composer-text';
 import { expect, test, type Page } from '@playwright/test';
 
 const story = (name = 'inline') => `/iframe.html?id=chat-messagequotes--${name}&viewMode=story`;
@@ -49,13 +50,13 @@ test('native selection action does not resize or scroll the conversation, and qu
   const second = await selectPassage(page, 10);
   await page.getByRole('button', { name: 'Quote', exact: true }).click();
   await page.keyboard.insertText(' Question B? ');
-  const value = await input(page).inputValue();
+  const value = await composerText(input(page));
   expect(value.match(/\[Quote:/g)).toHaveLength(2);
   expect(value.indexOf('Question A?')).toBeLessThan(value.lastIndexOf('[Quote:'));
   expect(value.lastIndexOf('[Quote:')).toBeLessThan(value.indexOf('Question B?'));
   // A translucent cover leaks the native placeholder brackets through the icon.
   const coverAlpha = await page
-    .locator('[data-mention-highlighter="true"] [data-mention-value]')
+    .locator('[data-composer-editor] [data-mention-value]')
     .filter({ has: page.locator('svg') })
     .evaluateAll((chips) =>
       chips.map((chip) => {
@@ -68,7 +69,7 @@ test('native selection action does not resize or scroll the conversation, and qu
   expect(coverAlpha).toEqual([255, 255]);
   await page.screenshot({ path: testInfo.outputPath('inline-quotes.png') });
   await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await expect(input(page)).toHaveValue('');
+  await expectComposerText(input(page), '');
   const bubble = page.locator('[data-user-message-bubble]').last();
   await expect(bubble).toContainText('Question A?');
   await expect(bubble).toContainText('Question B?');
@@ -108,18 +109,18 @@ test('a quote has read-only preview, explicit removal and atomic undo/redo', asy
   await page.goto(story());
   await selectPassage(page, 11);
   await page.getByRole('button', { name: 'Quote', exact: true }).click();
-  const quoted = await input(page).inputValue();
+  const quoted = await composerText(input(page));
   await input(page).press('End');
   await input(page).press('Backspace');
-  await expect(input(page)).not.toHaveValue(quoted);
+  await expect.poll(() => composerText(input(page))).not.toBe(quoted);
   await input(page).press('ControlOrMeta+z');
-  await expect(input(page)).toHaveValue(quoted);
+  await expectComposerText(input(page), quoted);
   await input(page).press('ControlOrMeta+Shift+z');
-  await expect(input(page)).not.toHaveValue(quoted);
+  await expect.poll(() => composerText(input(page))).not.toBe(quoted);
   await input(page).press('ControlOrMeta+z');
-  // A click inside the painted quote is handled by the real textarea's chip hit testing.
+  // A click inside the painted quote opens it, through the editor's chip hit testing.
   const chip = page
-    .locator('[data-mention-highlighter="true"] [data-mention-value]')
+    .locator('[data-composer-editor] [data-mention-value]')
     .filter({ hasText: 'Quote:' })
     .first();
   const box = (await chip.boundingBox())!;
@@ -128,7 +129,7 @@ test('a quote has read-only preview, explicit removal and atomic undo/redo', asy
   await expect(page.getByLabel('Original quote', { exact: true })).toHaveAttribute('readonly', '');
   await page.getByRole('button', { name: 'Remove quote', exact: true }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
-  await expect(input(page)).toHaveValue('Explain this passage: ');
+  await expectComposerText(input(page), 'Explain this passage: ');
 });
 
 test('rejected sends preserve the narrow-screen quote draft', async ({ page }) => {
@@ -136,11 +137,110 @@ test('rejected sends preserve the narrow-screen quote draft', async ({ page }) =
   await page.goto(story('rejected'));
   await selectPassage(page, 11);
   await page.getByRole('button', { name: 'Quote', exact: true }).click();
-  const draft = await input(page).inputValue();
+  const draft = await composerText(input(page));
   await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await expect(input(page)).toHaveValue(draft);
+  await expectComposerText(input(page), draft);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test('a sent quote stays inside a narrow chat column in a wide window', async ({ page }) => {
+  // Desktop split panes narrow the chat column while the window stays wide, so
+  // window-width breakpoints must not lift the bubble's column bound.
+  await page.setViewportSize({ width: 1280, height: 780 });
+  await page.goto(story());
+  await selectPassage(page, 11);
+  await page.getByRole('button', { name: 'Quote', exact: true }).click();
+  await page.getByTestId('message-quote-add').click();
+  await expect.poll(() => composerText(input(page))).toContain('[Quote:');
+  await page.locator('#storybook-root').getByRole('button', { name: 'Send', exact: true }).click();
+  const bubble = page.locator('[data-user-message-bubble]').last();
+  await expect(bubble.getByRole('button').filter({ hasText: 'Quote:' })).toBeVisible();
+  await page.evaluate(() => {
+    document.body.style.width = '340px';
+  });
+  const metadata = page.getByTestId('user-message-metadata').last();
+  await expect
+    .poll(async () => {
+      const [bubbleBox, stackBox] = [
+        (await bubble.boundingBox())!,
+        (await metadata.boundingBox())!,
+      ];
+      return bubbleBox.x + bubbleBox.width - (stackBox.x + stackBox.width);
+    })
+    .toBeLessThanOrEqual(0.5);
+});
+
+// Short, mention-only, mixed chips, collapsed, long path, long English, long CJK,
+// an unbreakable URL, and mixed CJK/English/chips/URL — see `Chat/MessageTextChips`.
+const SENT_ROW_COUNT = 9;
+for (const wide of [false, true]) {
+  for (const [width, height] of [
+    [360, 780],
+    [600, 780],
+    [900, 780],
+    [1280, 780],
+    [1920, 1000],
+  ] as const) {
+    test(`sent bubbles hug the avatar without touching it at ${width}px${wide ? ' in wide mode' : ''}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      await page.addInitScript(
+        (value) => localStorage.setItem('lody-conversation-wide-mode', value),
+        String(wide)
+      );
+      await page.goto('/iframe.html?id=chat-messagetextchips--sent-rows&viewMode=story');
+      await expect(page.locator('[data-user-message-bubble]').first()).toBeVisible({
+        timeout: 15_000,
+      });
+      const viewport = page.locator('.chat-scrollbar');
+      const scrollTop = () => viewport.evaluate((node) => node.scrollTop);
+      const box = (await viewport.boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      // The list is virtualized and opens at the latest row: measure the mounted
+      // rows, then wheel up half a screen, until every row has been seen.
+      const measured = new Set<string>();
+      for (let step = 0; step < 40 && measured.size < SENT_ROW_COUNT; step += 1) {
+        const rows = await page.evaluate(() =>
+          [...document.querySelectorAll<HTMLElement>('[data-conversation-turn-id^="layout-user-"]')]
+            .map((row) => {
+              const bubble = row.querySelector('[data-user-message-bubble]');
+              const stack = row.querySelector(
+                '[data-testid="user-message-metadata"]'
+              )?.parentElement;
+              const avatar = stack?.previousElementSibling;
+              if (!bubble || !stack || !avatar) return null;
+              const rect = (node: Element) => node.getBoundingClientRect().toJSON() as DOMRect;
+              return {
+                id: row.dataset.conversationTurnId!,
+                bubble: rect(bubble),
+                stack: rect(stack),
+                avatar: rect(avatar),
+              };
+            })
+            .filter((row) => row !== null)
+        );
+        for (const { id, bubble: b, stack: s, avatar: a } of rows) {
+          measured.add(id);
+          expect(a.width, id).toBeGreaterThan(0);
+          expect(b.right, id).toBeLessThanOrEqual(a.left - 4);
+          expect(Math.abs(b.right - s.right), id).toBeLessThanOrEqual(0.5);
+          expect(b.left, id).toBeGreaterThanOrEqual(s.left - 0.5);
+          expect(b.width, id).toBeLessThanOrEqual(800.5);
+        }
+        const before = await scrollTop();
+        if (before === 0) break;
+        await page.mouse.wheel(0, -box.height / 2);
+        // Rows measured on mount can re-anchor the offset, so wait for movement only.
+        await expect.poll(scrollTop).not.toBe(before);
+      }
+      expect(measured.size).toBe(SENT_ROW_COUNT);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true
+      );
+    });
+  }
+}
 
 test('a continuous selection across text rows in one response is quoted in full', async ({
   page,
@@ -157,7 +257,7 @@ test('a continuous selection across text rows in one response is quoted in full'
   });
   await page.getByRole('button', { name: 'Quote', exact: true }).click();
   const chip = page
-    .locator('[data-mention-highlighter="true"] [data-mention-value]')
+    .locator('[data-composer-editor] [data-mention-value]')
     .filter({ hasText: 'Quote:' })
     .first();
   const box = (await chip.boundingBox())!;
@@ -184,7 +284,7 @@ test('a selection across separate message regions explains the boundary without 
 }) => {
   await page.goto(story());
   await expect(input(page)).toBeVisible();
-  const draft = await input(page).inputValue();
+  const draft = await composerText(input(page));
   await page.evaluate(() => {
     const start = document.querySelector(
       '[data-conversation-turn-id="quote-source-10"] p'
@@ -197,5 +297,5 @@ test('a selection across separate message regions explains the boundary without 
   const action = page.getByRole('button', { name: 'Quote passages separately', exact: true });
   await expect(action).toBeVisible();
   await action.click();
-  await expect(input(page)).toHaveValue(draft);
+  await expectComposerText(input(page), draft);
 });

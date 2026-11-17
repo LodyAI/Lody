@@ -23,6 +23,7 @@ import { getPastedTextCharacterCount, type PastedTextDraft } from '@/lib/pasted-
 import { registerBuiltInCommands } from '@/lib/commands';
 import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 import { SettingsStoryProviders } from './settings-story-shell';
+import type { ComposerInputElement } from '@/ui/mention/composer-input';
 
 const mergedStoryLayout = stylex.create({
   part1: {
@@ -300,7 +301,6 @@ const meta = {
     promptPlaceholder: undefined,
     promptRows: 3,
     promptRef: undefined,
-    selector: null,
     primaryAction: null,
     secondaryAction: undefined,
     className: undefined,
@@ -444,7 +444,7 @@ function DemoComposer({
 }) {
   const inlinePastedTextLabel = `[Pasted ${getPastedTextCharacterCount(samplePastedText)} chars]`;
   const inlinePastedTextPrompt = `Investigate this context ${inlinePastedTextLabel} and help me extract the root cause.`;
-  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const promptRef = useRef<ComposerInputElement>(null);
   const [prompt, setPrompt] = useState(
     initialPrompt ??
       (showPastedText
@@ -573,7 +573,7 @@ function DemoComposer({
       promptRows={promptRows ?? 3}
       pastedTextDrafts={pastedTextDrafts}
       onPastedTextDraftsChange={setPastedTextDrafts}
-      selector={selectorNode}
+      footerSelector={selectorNode}
       primaryAction={primaryActionNode}
       onAttachmentAddClick={attachmentsEnabled ? () => undefined : undefined}
       imageItems={resolvedImageItems}
@@ -610,7 +610,7 @@ function PromptSuggestionPreview({
   suggestion?: string;
 }) {
   const [prompt, setPrompt] = useState('');
-  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const promptRef = useRef<ComposerInputElement>(null);
   const composer = (
     <ChatComposer
       tone="light"
@@ -851,7 +851,7 @@ export const LandingWithPastedText: Story = {
 
 function ScheduledSendPreview({ pickerInitiallyOpen = false }: { pickerInitiallyOpen?: boolean }) {
   const { t, i18n } = useTranslation();
-  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const promptRef = useRef<ComposerInputElement>(null);
   const [text, setText] = useState(
     'Review these files tomorrow morning and summarize the remaining issues.'
   );

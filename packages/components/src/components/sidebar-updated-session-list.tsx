@@ -82,6 +82,11 @@ import {
   pinnedFirstRootRank,
   type OpenedBySessionTreeNode,
 } from '@/lib/session-opened-by-tree';
+import {
+  SIDEBAR_STATUS_GROUPS,
+  sidebarStatusGroup,
+  type SidebarStatusGroup,
+} from '@/lib/sidebar-status-group';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import type {
   LocalProjectHistoryProvider,
@@ -149,6 +154,8 @@ export type SidebarUpdatedItem = {
   hasUnreadMessages?: boolean;
   isOffline?: boolean;
   isWaitingPermission?: boolean;
+  /** The latest turn ended in failure; the Status view files the row under Needs you. */
+  hasFailedTurn?: boolean;
   prStatus?: PrStatus | null;
   prCiState?: SessionPullRequestCiState | null;
   prReadiness?: SessionPullRequestReadiness | null;
@@ -169,11 +176,14 @@ export type SidebarUpdatedItem = {
 
 /**
  * The Updated organize mode renders ONE section ("Chats") — a flat
- * recency-sorted list. The bucket plumbing (collapse / show-all state maps,
- * toggle callbacks) survives from the earlier today/week/older design, now
- * keyed by the single 'all' bucket.
+ * recency-sorted list keyed 'all'. The Status organize mode renders one
+ * section per {@link SidebarStatusGroup}, keyed by the group, skipping empty
+ * groups. Both share the collapse / show-all state maps.
  */
-export type SidebarUpdatedBucketKey = 'all';
+export type SidebarUpdatedBucketKey = 'all' | SidebarStatusGroup;
+
+/** How the list splits its rows: one recency list, or the status groups. */
+export type SidebarUpdatedGrouping = 'recency' | 'status';
 
 export type SidebarUpdatedSessionListLabels = {
   /** Header of the single flat list section. */
@@ -232,9 +242,41 @@ function getSortKey(item: SidebarUpdatedItem): number {
 
 type SidebarUpdatedBucket = {
   key: SidebarUpdatedBucketKey;
-  label: string;
   items: SidebarUpdatedItem[];
 };
+
+/**
+ * The list's sections in render order, each sorted pinned-first then by latest
+ * activity. Shared by the renderer and the keyboard navigation model so both
+ * walk the same rows.
+ */
+export function buildSidebarUpdatedBuckets(
+  items: SidebarUpdatedItem[],
+  grouping: SidebarUpdatedGrouping
+): SidebarUpdatedBucket[] {
+  if (!items.length) return [];
+  if (grouping === 'recency') return [{ key: 'all', items: sortUpdatedItems(items) }];
+  const byGroup = new Map<SidebarStatusGroup, SidebarUpdatedItem[]>();
+  for (const item of items) {
+    const group = sidebarStatusGroup(item);
+    const members = byGroup.get(group);
+    if (members) members.push(item);
+    else byGroup.set(group, [item]);
+  }
+  return SIDEBAR_STATUS_GROUPS.flatMap((key) => {
+    const members = byGroup.get(key);
+    return members ? [{ key, items: sortUpdatedItems(members) }] : [];
+  });
+}
+
+/**
+ * Whether a section folds past {@link SHOW_FULL_BUCKET_THRESHOLD} rows behind
+ * "Show all". Status groups other than idle are what needs a look, so they
+ * always list in full, as on mobile Home.
+ */
+export function updatedBucketCanFold(key: SidebarUpdatedBucketKey): boolean {
+  return key === 'all' || key === 'idle';
+}
 
 export function sortUpdatedItems(items: SidebarUpdatedItem[]): SidebarUpdatedItem[] {
   return [...items].sort((a, b) => {
@@ -409,6 +451,11 @@ export type SidebarUpdatedSessionListProps = {
    * for their branch/time line.
    */
   showBranchContext?: boolean;
+  /**
+   * 'recency' (default) renders one "Chats" section; 'status' renders the
+   * status groups, each with its own header.
+   */
+  grouping?: SidebarUpdatedGrouping;
 };
 
 const defaultLabels: SidebarUpdatedSessionListLabels = {
@@ -442,6 +489,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   onToggleFullBucket,
   headerAction,
   showProjectContext = false,
+  grouping = 'recency',
 }: SidebarUpdatedSessionListProps) {
   const { t } = useTranslation();
   const showBranchContext = useAtomValue(sidebarShowBranchNamesAtom);
@@ -454,6 +502,17 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
         t('sidebar.updated.empty.description', defaultLabels.emptyDescription),
     }),
     [labels, t]
+  );
+  const bucketLabels = useMemo<Record<SidebarUpdatedBucketKey, string>>(
+    () => ({
+      all: merged.heading,
+      attention: t('sidebar.status.attention', 'Needs you'),
+      finished: t('sidebar.status.finished', 'Just finished'),
+      pullRequest: t('sidebar.status.pullRequest', 'Open pull requests'),
+      running: t('sidebar.status.running', 'Running'),
+      idle: t('sidebar.status.idle', 'Idle'),
+    }),
+    [merged.heading, t]
   );
 
   const archiveLabels = useMemo(
@@ -502,10 +561,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   const canToggleBucket = typeof onToggleBucket === 'function';
   const canToggleFullBucket = typeof onToggleFullBucket === 'function';
 
-  const buckets = useMemo<SidebarUpdatedBucket[]>(() => {
-    if (!items.length) return [];
-    return [{ key: 'all', label: merged.heading, items: sortUpdatedItems(items) }];
-  }, [items, merged.heading]);
+  const buckets = useMemo(() => buildSidebarUpdatedBuckets(items, grouping), [items, grouping]);
 
   const sendStates = useAtomValue(sessionSendStatesAtom);
   // Updated mode is a flat firehose, so a bucket can hold the whole workspace
@@ -529,7 +585,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
           overflows: updatedBucketOverflowsPreview(bucket.items),
           nodes: getVisibleUpdatedItemTree(
             bucket.items,
-            canToggleFullBucket,
+            canToggleFullBucket && updatedBucketCanFold(bucket.key),
             Boolean(showFullBuckets?.[bucket.key]),
             collapsedOpenedBySessionIds
           ),
@@ -593,7 +649,8 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
           // Only a bucket that actually contains an opened Session enables the
           // tree wrapper. Unrelated top-level rows keep their flat geometry.
           const showTreeGutter = hasOpenedByTreeNesting(visibleNodes);
-          const showToggleFullList = canToggleFullBucket && overflows && !collapsed;
+          const showToggleFullList =
+            canToggleFullBucket && updatedBucketCanFold(bucket.key) && overflows && !collapsed;
           const toggleFullListLabel = showFull
             ? t('sessions.showLess', 'Show less')
             : t('sessions.showAll', 'Show all ({{count}})', { count: bucket.items.length });
@@ -609,7 +666,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
               {/* Same shared section header as Workspace mode, so section labels
                   read identically (13px medium) across organize modes. */}
               <SidebarSectionHeader
-                label={bucket.label}
+                label={bucketLabels[bucket.key]}
                 collapsed={collapsed}
                 activity={collapsedActivity}
                 action={bucketHeaderAction}
@@ -841,10 +898,11 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       }
     : undefined;
 
-  const canArchive = typeof onArchive === 'function';
+  const readOnly = item.sharing?.access === 'read';
+  const canArchive = !readOnly && typeof onArchive === 'function';
   const canMarkUnread = typeof onMarkUnread === 'function' && !item.hasUnreadMessages;
   const showInlineArchive = canArchive && !isMobile;
-  const canRename = typeof onRename === 'function';
+  const canRename = !readOnly && typeof onRename === 'function';
   const canTogglePin = typeof onTogglePin === 'function';
   const canCopyUrl = typeof onCopyUrl === 'function';
   // Copy URL stays available for private sessions (the link still works for
@@ -899,7 +957,11 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   const showProjectLine = showProjectContext && !isNestedChild;
   // The branch rides on the same second line as the project segment; nested
   // children skip it like the project context does.
-  const showBranchLine = showBranchContext && Boolean(branchName) && !isNestedChild;
+  const showBranchLine =
+    showBranchContext &&
+    (item.kind === 'github' || item.isWorktree === true) &&
+    Boolean(branchName) &&
+    !isNestedChild;
   const showMetaLine = showProjectLine || showBranchLine;
   const projectLabel = showProjectLine ? resolveUpdatedItemProjectLabel(item) : null;
   const titleNode = (

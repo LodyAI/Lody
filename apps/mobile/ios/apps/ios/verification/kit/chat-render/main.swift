@@ -123,10 +123,8 @@ processCell.configure(processRow, text: NSAttributedString(string: processRow.te
 processCell.layoutIfNeeded()
 let railCenter = LodyDesign.Rail.center - ChatReadingColumn.cellMargin
 let railText = LodyDesign.Rail.text - ChatReadingColumn.cellMargin
-precondition(!processCell.processGlyph.isHidden && abs(processCell.processGlyph.frame.midX - railCenter) < 0.5,
-  "The process glyph must sit on the rail center")
-precondition(processCell.processGlyph.kind == .done, "A finished process must draw the done glyph")
-precondition(abs(processCell.processTitle.frame.minX - railText) < 0.5, "Process line one must start at the rail text column")
+precondition(processCell.processGlyph.isHidden, "A finished process must hide the done glyph")
+precondition(processCell.processTitle.frame.minX == 0, "A completed process without a glyph starts at the text edge")
 precondition(processCell.label.isHidden && processCell.numericText.isHidden, "The rail row replaces the plain duration label")
 precondition(processCell.processDetail.text == processRow.detail && processCell.processDetail.numberOfLines == 1,
   "Line two must show the process summary on one line")
@@ -136,9 +134,10 @@ precondition(processCell.processDetail.frame.minX == processCell.processTitle.fr
 let titleText = processCell.processTitle.attributedText!
 let titleFont = titleText.attribute(.font, at: 0, effectiveRange: nil) as! UIFont
 let titleWeight = (titleFont.fontDescriptor.object(forKey: .traits) as? [UIFontDescriptor.TraitKey: Any])?[.weight] as? CGFloat ?? 0
-let titleSize = LodyDesign.font(.subheadline, size: 14.5, compatibleWith: processCell.traitCollection).pointSize
-precondition(abs(titleFont.pointSize - titleSize) < 0.1 && titleWeight >= UIFont.Weight.semibold.rawValue - 0.01,
-  "Line one uses 14.5 pt semibold, got \(titleFont.pointSize) weight \(titleWeight)")
+let titleSize = LodyDesign.mono(12, compatibleWith: processCell.traitCollection).pointSize
+precondition(abs(titleFont.pointSize - titleSize) < 0.1 && abs(titleWeight) < 0.01
+  && titleFont.fontDescriptor.symbolicTraits.contains(.traitMonoSpace),
+  "The whole process title uses regular 12 pt mono")
 let durationLabel = ChatWorkDuration.label(64_000)
 let durationRange = (titleText.string as NSString).range(of: durationLabel, options: .backwards)
 precondition(durationRange.location != NSNotFound, "Line one must carry the duration")
@@ -147,15 +146,14 @@ precondition(durationRunFont.fontDescriptor.symbolicTraits.contains(.traitMonoSp
   "The duration uses 12 pt mono")
 precondition(!processCell.processChevron.isHidden && processCell.processChevron.frame.maxX <= 358,
   "An actionable process row shows a trailing chevron")
-precondition(processCell.processTitle.frame.maxX <= processCell.processChevron.frame.minX, "Text must clear the chevron")
+let titleWidth = ceil(titleText.boundingRect(with: CGSize(width: processCell.processTitle.bounds.width, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil).width)
+precondition(abs(processCell.processChevron.frame.minX - min(342, processCell.processTitle.frame.minX + titleWidth + 2)) < 1,
+  "The chevron follows the title rather than the row edge: \(processCell.processChevron.frame) title \(processCell.processTitle.frame), measured \(titleWidth)")
 let separatorColor = UIColor.separator.resolvedColor(with: processCell.traitCollection).cgColor
 precondition(!processCell.contentView.subviews.contains {
   !$0.isHidden && $0.backgroundColor?.resolvedColor(with: processCell.traitCollection).cgColor == separatorColor
 }, "The process row draws no hairline")
-let trunk = processCell.processTree.path?.boundingBoxOfPath ?? .null
-precondition(!trunk.isNull && abs(trunk.midX - railCenter) < 0.5 && abs(trunk.maxY - processHeight) < 0.5
-  && trunk.minY >= processCell.processGlyph.frame.maxY,
-  "A process row with sub-agents draws a trunk from below its glyph to the row bottom")
+precondition(processCell.processTree.path == nil, "A completed process without a glyph has no rail trunk")
 precondition(processCell.accessibilityLabel == processRow.text + ", " + processRow.detail,
   "VoiceOver reads both process lines")
 
@@ -165,7 +163,8 @@ let liveCell = ChatCell(frame: CGRect(x: 0, y: 0, width: 358, height: liveHeight
 window.addSubview(liveCell)
 liveCell.configure(durationRow, text: NSAttributedString(string: durationRow.text))
 liveCell.layoutIfNeeded()
-precondition(liveCell.processGlyph.kind == .live, "A running process draws the live glyph")
+precondition(liveCell.processGlyph.isHidden, "A running duration has no loading glyph")
+precondition(liveCell.processTitle.frame.minX == 0, "Running duration aligns with message text")
 precondition(liveCell.processChevron.isHidden, "A process row that cannot open hides the chevron")
 precondition(liveCell.processDetail.isHidden, "A process row without a summary hides line two")
 precondition(liveCell.processTree.path == nil, "A process row without sub-agents draws no trunk")
@@ -175,6 +174,29 @@ var waitingRow = processRow
 waitingRow.attention = true
 liveCell.configure(waitingRow, text: NSAttributedString(string: waitingRow.text))
 precondition(liveCell.processGlyph.kind == .attention, "A process that needs attention draws the attention glyph")
+for style in [UIUserInterfaceStyle.light, .dark] {
+  for category in [UIContentSizeCategory.large, .accessibilityLarge] {
+    let traits = UITraitCollection(traitsFrom: [UITraitCollection(userInterfaceStyle: style), UITraitCollection(preferredContentSizeCategory: category)])
+    for row in [processRow, durationRow, waitingRow] {
+      let title = ChatCell.processTitle(row, traits: traits)
+      title.enumerateAttributes(in: NSRange(location: 0, length: title.length)) { attributes, _, _ in
+        let font = attributes[.font] as! UIFont
+        precondition(font == LodyDesign.mono(12, compatibleWith: traits), "Every status and duration run uses the same regular mono face")
+        let color = attributes[.foregroundColor] as! UIColor
+        precondition(color.resolvedColor(with: traits) == UIColor.lodySecondary.resolvedColor(with: traits))
+      }
+      let cell = ChatCell(frame: CGRect(x: 0, y: 0, width: 358, height: ChatCell.processHeight(for: row, width: 358, traits: traits)))
+      window.addSubview(cell)
+      cell.traitOverrides.preferredContentSizeCategory = category
+      cell.overrideUserInterfaceStyle = style
+      cell.configure(row, text: title)
+      cell.setNeedsLayout()
+      cell.layoutIfNeeded()
+      precondition(cell.processTitle.frame.height == ceil(LodyDesign.mono(12, compatibleWith: cell.traitCollection).lineHeight),
+        "Process layout measures the same font it renders")
+    }
+  }
+}
 print("Chat render: process rows draw the rail glyph, two lines, chevron and sub-agent trunk")
 
 let answerRow = ChatRow(id: "reply:answer", entryID: "reply", kind: "text", text: "计时完成。")
@@ -311,8 +333,7 @@ precondition(
 )
 precondition(resolved(failedLiveSummary.icon.tintColor, traits: traits) == resolved(.secondaryLabel, traits: traits),
   "The warning mark stays neutral")
-precondition((runningSummary.icon.image?.size.width ?? .greatestFiniteMagnitude) < (thoughtCell.icon.image?.size.width ?? 0),
-  "The process status pip must be smaller than thought and tool icons")
+
 precondition((failedLiveSummary.icon.image?.size.width ?? .greatestFiniteMagnitude) < (thoughtCell.icon.image?.size.width ?? 0),
   "The warning mark must stay in the process pip scale")
 precondition(ChatCell.leading(failedSummary.row!) == railText, "A summary with a mark starts at the rail text column")
@@ -320,8 +341,8 @@ precondition(abs(failedSummary.icon.frame.midX - railCenter) < 0.5, "The summary
 precondition(failedSummary.icon.frame.width == 8, "The process mark slot stays 8 points")
 precondition(abs(doneSummary.icon.frame.midY - doneSummary.label.frame.midY) <= 0.5,
   "The process pip must sit on the text baseline")
-precondition(doneSummary.label.frame.minX == railText, "Summary text must start at the rail text column")
-precondition(!doneSummary.processChevron.isHidden && doneSummary.label.frame.maxX <= doneSummary.processChevron.frame.minX,
+precondition(doneSummary.label.frame.minX == 0, "A summary without a mark starts at the text edge")
+precondition(!doneSummary.processChevron.isHidden && doneSummary.processChevron.frame.minX > doneSummary.label.frame.minX,
   "Summary rows open the activity through a trailing chevron")
 precondition(ChatCell.messageFont(for: doneSummary.row!, compatibleWith: traits).pointSize == 12.5 * UIFont.dynamicScale(compatibleWith: traits),
   "Summary rows use 12.5 pt text")
@@ -360,18 +381,8 @@ let warningSwapText = NSAttributedString(string: warningSwap.text, attributes: [
 ])
 markSwap.configure(warningSwap, text: warningSwapText)
 markSwap.layoutIfNeeded()
-if UIAccessibility.isReduceMotionEnabled {
-  precondition(!markSwap.icon.lastReplaceAnimated, "Reduce Motion must keep the process mark swap instant")
-} else {
-  precondition(markSwap.icon.lastReplaceAnimated, "Replacing the process pip with a warning mark must use a symbol replace")
-}
+// A healthy summary has no image to replace; adding attention must show the mark.
 markSwap.configure(warningSwap, text: warningSwapText)
-if !UIAccessibility.isReduceMotionEnabled {
-  precondition(
-    markSwap.icon.lastReplaceAnimated,
-    "A later process update must not cancel the pip-to-warning replace"
-  )
-}
 precondition(
   markSwap.icon.image?.pngData() == warnMark?.pngData(),
   "The leading mark must finish on the warning symbol"
@@ -411,23 +422,23 @@ precondition(glyphWidth(userFont, "1") < glyphWidth(userFont, "8"),
   "User messages keep proportional digits")
 print("Chat render: duration and process counts use tabular digits")
 
-// A long send lands at its source viewport height without discarding text.
+// A long message shows six measured lines without discarding text.
 let longBody = (1...18).map { "Line \($0): a complete message remains available after sending." }.joined(separator: "\n")
 let longRow = ChatRow(id: "long:user", entryID: "long", kind: "user", text: longBody)
 let longCell = ChatCell(frame: CGRect(x: 0, y: 0, width: 350, height: 164))
 window.addSubview(longCell)
-longCell.collapsedHeight = 140
 longCell.configure(longRow, text: NSAttributedString(string: longBody, attributes: [.font: UIFont.systemFont(ofSize: 17)]))
 longCell.layoutIfNeeded()
-precondition(longCell.messageContent.bounds.height == 140 && longCell.label.layer.mask != nil,
-  "Long messages must land in the composer viewport with a text-only fade")
+let sixLineHeight = ceil(longCell.label.lineAdvances(width: longCell.label.bounds.width).prefix(6).reduce(0, +))
+precondition(abs(longCell.label.bounds.height - sixLineHeight) < 1,
+  "Collapsed messages show exactly six measured lines above the disclosure")
 precondition(longCell.label.attributedTextValue.string == longBody && longCell.expandable,
   "Folding must preserve all text for expansion and copying")
 longCell.expanded = true
 longCell.setNeedsLayout()
 longCell.layoutIfNeeded()
 precondition(longCell.messageContent.bounds.height > 140 && longCell.label.layer.mask == nil,
-  "Expanding must expose the complete message and remove the fade")
+  "Expanding must expose the complete message")
 precondition(longCell.messageContent.disclosure.bounds.height >= 44,
   "Expanded messages must keep an accessible collapse target")
 longCell.expanded = false
@@ -442,7 +453,19 @@ longCell.configure(ChatRow(id: "short:user", entryID: "short", kind: "user", tex
 longCell.layoutIfNeeded()
 precondition(longCell.messageContent.bounds.height < 68 && !longCell.expandable && longCell.label.layer.mask == nil,
   "Reusing a folded cell for a short message must restore its natural height and clear the mask")
-print("Chat send: bounded landing, complete expansion, accessible collapse and short-message reuse passed")
+// The boundary follows laid-out lines even at larger accessibility sizes.
+for pointSize: CGFloat in [17, 28] {
+  for count in [6, 7] {
+    let body = Array(repeating: "Line", count: count).joined(separator: "\n")
+    longCell.configure(ChatRow(id: "boundary:user", entryID: "boundary", kind: "user", text: body),
+      text: NSAttributedString(string: body, attributes: [.font: UIFont.systemFont(ofSize: pointSize)]))
+    longCell.layoutIfNeeded()
+    precondition(longCell.expandable == (count > 6), "Only messages exceeding six lines fold")
+    let expected = ceil(longCell.label.lineAdvances(width: longCell.label.bounds.width).prefix(6).reduce(0, +))
+    precondition(abs(longCell.label.bounds.height - expected) < 1, "Six lines remain visible at larger font sizes")
+  }
+}
+print("Chat send: six-line boundary, complete expansion, accessible collapse and short-message reuse passed")
 
 let retryCell = ChatCell(frame: CGRect(x: 0, y: 0, width: 320, height: 44))
 retryCell.configure(ChatRow(id: "failed:pending", entryID: "failed", kind: "pending", text: "Retry", actionable: true), text: NSAttributedString(string: "Retry"))
@@ -920,3 +943,182 @@ memberCell.configure(memberRow, text: NSAttributedString(string: memberRow.text)
 precondition(memberCell.accessibilityValue?.contains("Alice") == true && memberCell.accessibilityValue != unresolvedIdentity)
 precondition(memberCell.row?.text == "Existing message")
 print("PASS: an existing user message reconfigures with the resolved member identity")
+
+// User actions remain accessible without an inline footer, and stale Edit actions cannot edit.
+var editableUserMessage = true
+var editedUserMessage = ""
+memberCell.canEdit = { editableUserMessage }
+memberCell.onEdit = { editedUserMessage = memberRow.entryID }
+memberCell.updateEditAccessibility()
+let copyUserAction = memberCell.accessibilityCustomActions!.first { $0.name == String(localized: "native.chat.copy", bundle: .lody) }!
+precondition(copyUserAction.actionHandler != nil, "User Copy remains accessible without a footer")
+let editUserAction = memberCell.accessibilityCustomActions!.first { $0.name == String(localized: "native.chat.editAction", bundle: .lody) }!
+precondition(editUserAction.actionHandler!(editUserAction))
+precondition(editedUserMessage == memberRow.entryID)
+editableUserMessage = false
+editedUserMessage = ""
+precondition(!editUserAction.actionHandler!(editUserAction))
+precondition(editedUserMessage.isEmpty)
+memberCell.updateEditAccessibility()
+precondition(memberCell.accessibilityCustomActions!.count == 1)
+longCell.configure(longRow, text: NSAttributedString(string: longBody, attributes: [.font: userFont]))
+longCell.layoutIfNeeded()
+precondition(longCell.messageContent.frame.minX >= 0)
+precondition(longCell.messageContent.frame.width > longCell.bounds.width * 0.8)
+precondition(longCell.messageContent.frame.maxX <= longCell.bounds.width - ChatCell.avatarSlot)
+print("PASS: user copy/edit eligibility and wider bubbles preserve the avatar column")
+
+let userMessages = try JSONDecoder().decode([ChatEntry].self, from: Data(#"[{"id":"user-menu","role":"user","status":"completed","finished":true,"items":[{"itemId":"prompt","type":"text","text":"Synthetic prompt"}]}]"#.utf8))
+let userRows = ChatTranscript(entries: userMessages).rows()
+precondition(userRows.map(\.kind) == ["user"], "User messages expose actions through long press, not an extra footer")
+precondition(userRows.first?.text == "Synthetic prompt")
+
+print("PASS: user messages retain text without an inline footer")
+
+let footer = ChatMessageActionsCell(frame: CGRect(x: 0, y: 0, width: 350, height: 44))
+window.addSubview(footer)
+footer.configure(ChatRow(id: "footer:meta", entryID: "footer", kind: "meta", text: "12:00"), copyable: true)
+let footerButtons = [footer.copyButton, footer.detailsButton, footer.forkButton]
+// The standalone renderer can resolve asset glyphs as empty images. Supply a
+// visible 16 pt fixture so this checks UIKit image geometry, not an empty frame.
+let footerGlyphImage = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16)).image { context in
+  UIColor.label.setFill()
+  context.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+}
+for button in footerButtons { button.setImage(footerGlyphImage, for: .normal) }
+footer.layoutIfNeeded()
+for (index, button) in footerButtons.enumerated() {
+  button.layoutIfNeeded()
+  let glyph = button.imageView!.convert(button.imageView!.bounds, to: footer)
+  precondition(glyph.width == 16 && abs(glyph.minX - CGFloat(index) * 32) < 1, "Footer glyphs start at the prose edge with 32 pt spacing")
+  precondition(button.bounds.width == 44 && button.bounds.height == 44, "Footer alignment preserves button targets")
+}
+let footerStack = footer.copyButton.superview as! UIStackView
+precondition(footerStack.arrangedSubviews.count == 3, "Agent footer exposes only Copy, Info and Fork")
+let footerTime = footer.contentView.subviews.compactMap { $0 as? UILabel }.first!
+let forkGlyph = footer.forkButton.imageView!.convert(footer.forkButton.imageView!.bounds, to: footer)
+precondition(footerTime.text == "12:00" && abs(footerTime.frame.minX - forkGlyph.maxX - 12) < 1,
+  "Timestamp follows Fork by 12 pt: time=\(footerTime.frame), glyph=\(forkGlyph)")
+footer.detailsButton.isHidden = true
+footer.setNeedsLayout()
+footer.layoutIfNeeded()
+footerStack.layoutIfNeeded()
+footer.forkButton.layoutIfNeeded()
+let compactForkGlyph = footer.forkButton.imageView!.convert(footer.forkButton.imageView!.bounds, to: footer)
+precondition(abs(compactForkGlyph.minX - 32) < 1 && abs(footerTime.frame.minX - compactForkGlyph.maxX - 12) < 1,
+  "Hiding Info closes its slot and keeps time 12 pt after Fork")
+print("Chat footer: Copy/Info/Fork targets, 32 pt glyph spacing and 12 pt timestamp gap passed")
+
+
+let operationCard = ChatOperationCard(id: "reply", kind: "reply", sessionId: "child", label: nil, status: "succeeded", detail: nil, reply: "Saved reply")
+var operationRow = ChatRow(id: "op", entryID: "op", kind: "operationCard", text: "Child conversation", actionable: true, operation: operationCard, detail: operationCard.opening)
+let operationCell = ChatOperationCell(frame: CGRect(x: 0, y: 0, width: 350, height: ChatOperationCell.height(operationRow, traits: .current)))
+operationCell.configure(operationRow)
+operationCell.layoutIfNeeded()
+precondition(operationCell.conversation.agentView.frame.maxX < operationCell.titleLabel.frame.minX)
+precondition(operationCell.titleLabel.frame.maxX <= operationCell.statusLabel.frame.minX)
+precondition(operationCell.statusLabel.frame.maxX <= operationCell.conversation.glyph.frame.minX)
+precondition(operationCell.detailLabel.frame.minX == operationCell.titleLabel.frame.minX)
+precondition(operationCell.detailLabel.frame.maxY <= operationCell.bounds.height)
+precondition(operationCell.contentView.backgroundColor == .clear, "Receipts use the conversation rail, without a filled box")
+precondition(operationCell.openButton.frame.width >= 44 && operationCell.openButton.frame.height >= 44)
+precondition(operationCell.bodyButton.frame.maxX <= operationCell.openButton.frame.minX)
+var operationDestination = ""
+operationCell.onReply = { operationDestination = "reply" }
+operationCell.onOpen = { operationDestination = "child" }
+operationCell.bodyButton.sendActions(for: .touchUpInside)
+precondition(operationDestination == "reply")
+operationCell.openButton.sendActions(for: .touchUpInside)
+precondition(operationDestination == "child")
+operationRow.actionable = false
+operationCell.configure(operationRow)
+precondition(!operationCell.openButton.isEnabled && operationCell.bodyButton.isEnabled, "Deleted targets still retain their saved reply")
+var liveOperation = operationRow
+liveOperation.operation = ChatOperationCard(id: "running", kind: "created", sessionId: "child", label: nil, status: "running", detail: nil, reply: nil)
+liveOperation.operationCLIType = "custom"
+liveOperation.detail = ""
+operationCell.configure(liveOperation)
+operationCell.layoutIfNeeded()
+precondition(operationCell.openButton.isHidden && operationCell.bodyButton.frame.width == operationCell.bounds.width,
+  "Created receipts open from the body, without a trailing arrow")
+precondition(operationCell.conversation.glyph.kind == .live && operationCell.conversation.glyph.isHidden, "Running rows show the Home working grid")
+precondition(operationCell.conversation.agentView.image != nil, "Custom agents keep their terminal mark")
+operationCell.configure(operationRow)
+operationCell.layoutIfNeeded()
+precondition(operationCell.conversation.glyph.kind == .done && !operationCell.conversation.glyph.isHidden, "Replacing a live row clears its running presentation")
+operationCell.prepareForReuse()
+operationCell.bodyButton.sendActions(for: .touchUpInside)
+precondition(operationDestination == "child", "Reused rows release their old navigation")
+print("Operation cards: separate reply/navigation targets, deleted-target reply access and reuse passed")
+
+// Contained Tabs keep one horizontal lane and exact-target actions; only root rows branch.
+let relationStrip = ConversationTabStrip(frame: CGRect(x: 0, y: 0, width: 300, height: 64))
+relationStrip.configure([
+  .init(id: "root", title: "Root", cliType: "custom"),
+  .init(id: "tab-one", title: "First Tab", status: "Running", glyph: .live),
+  .init(id: "tab-two", title: "Second Tab", current: true),
+])
+relationStrip.layoutIfNeeded()
+precondition(relationStrip.buttons.count == 3 && relationStrip.buttons.allSatisfy { $0.frame.minY == 0 && $0.frame.height == 64 })
+precondition(relationStrip.buttons[1].frame.minX >= relationStrip.buttons[0].frame.maxX)
+precondition(relationStrip.scroll.contentSize.width > relationStrip.bounds.width && relationStrip.scroll.contentSize.height == 64)
+precondition(!relationStrip.scroll.showsHorizontalScrollIndicator && !relationStrip.scroll.showsVerticalScrollIndicator)
+precondition(!relationStrip.fadesLeading && relationStrip.fadesTrailing)
+relationStrip.scroll.contentOffset.x = 80
+relationStrip.scrollViewDidScroll(relationStrip.scroll)
+precondition(relationStrip.fadesLeading && relationStrip.fadesTrailing)
+relationStrip.scroll.contentOffset.x = relationStrip.scroll.contentSize.width - relationStrip.bounds.width
+relationStrip.scrollViewDidScroll(relationStrip.scroll)
+precondition(relationStrip.fadesLeading && !relationStrip.fadesTrailing)
+var relationTarget = ""
+relationStrip.onSelect = { relationTarget = $0 }
+relationStrip.buttons[2].sendActions(for: .touchUpInside)
+precondition(relationTarget == "tab-two", "Horizontal Tabs open their exact target")
+precondition(relationStrip.buttons[2].accessibilityTraits.contains(.selected))
+precondition(relationStrip.contents[2].isCurrent && !relationStrip.contents[2].selectionBackground.isHidden)
+precondition(relationStrip.contents.prefix(2).allSatisfy { !$0.isCurrent && $0.selectionBackground.isHidden }, "Selection belongs only to the exact current Tab")
+precondition(relationStrip.contents[1].statusLabel.text == "" && relationStrip.buttons[1].accessibilityLabel?.contains("Running") == true, "Icons replace visible status words, preserving accessible status")
+relationStrip.configure([.init(id: "replacement", title: "Replacement")])
+relationStrip.layoutIfNeeded()
+precondition(!relationStrip.fadesLeading && !relationStrip.fadesTrailing && relationStrip.scroll.contentOffset.x == 0)
+
+var rootReceipt = operationRow
+rootReceipt.actionable = true
+rootReceipt.operation = ChatOperationCard(id: "root-reply", kind: "reply", sessionId: "root", label: nil, status: "succeeded", detail: nil, reply: "Root saved reply")
+var tabReceipt = ChatRow(id: "tab-receipt", entryID: operationRow.entryID, kind: "operationCard", text: "Tab reply")
+tabReceipt.operation = ChatOperationCard(id: "tab-reply", kind: "reply", sessionId: "tab-one", label: nil, status: "succeeded", detail: nil, reply: "Tab saved reply")
+tabReceipt.actionable = false
+tabReceipt.operationCurrent = true
+var childReceipt = ChatRow(id: "child-receipt", entryID: operationRow.entryID, kind: "operationCard", text: "Child reply")
+childReceipt.operation = ChatOperationCard(id: "child-reply", kind: "reply", sessionId: "opened-child", label: nil, status: "succeeded", detail: nil, reply: "Child saved reply")
+let groupedReceipts = ChatOperationGrouping.rows([rootReceipt, tabReceipt, childReceipt], roots: ["root": "root", "tab-one": "root", "opened-child": "opened-child"], opened: ["opened-child"])
+precondition(groupedReceipts.count == 2 && groupedReceipts[0].operationPeers.count == 2)
+precondition(!groupedReceipts[0].treeChild && groupedReceipts[1].treeChild, "Only opened-by conversations get child rails")
+operationCell.configure(groupedReceipts[0])
+operationCell.layoutIfNeeded()
+precondition(operationCell.tabStrip.contents[1].isCurrent && !operationCell.tabStrip.contents[0].isCurrent)
+precondition(operationCell.tabStrip.buttons.count == 2 && operationCell.tabStrip.buttons[0].frame.minY == operationCell.tabStrip.buttons[1].frame.minY)
+var peerReply = ""
+operationCell.onPeerReply = { peerReply = $0.card.reply ?? "" }
+operationCell.tabStrip.buttons[1].sendActions(for: .touchUpInside)
+precondition(peerReply == "Tab saved reply" && !operationCell.tabStrip.openButtons[1].isEnabled, "Deleted Tab keeps its full saved reply without a stale navigation action")
+operationCell.prepareForReuse()
+precondition(operationCell.tabStrip.buttons.isEmpty)
+print("Conversation Tabs: same-row grouping, horizontal overflow, edge fades, exact targets and saved replies passed")
+
+var selectedReceipt = operationRow
+selectedReceipt.operationCurrent = true
+operationCell.configure(selectedReceipt)
+operationCell.layoutIfNeeded()
+precondition(!operationCell.conversation.selectionBackground.isHidden && operationCell.bodyButton.accessibilityTraits.contains(.selected))
+precondition(operationCell.statusLabel.text?.isEmpty != false && operationCell.detailLabel.text == selectedReceipt.detail, "Receipt status chrome is hidden without removing reply excerpts")
+operationCell.configure(liveOperation)
+operationCell.layoutIfNeeded()
+precondition(operationCell.conversation.selectionBackground.isHidden && !operationCell.bodyButton.accessibilityTraits.contains(.selected), "Reconfiguration clears the old current target")
+precondition(operationCell.conversation.glyph.kind == .live && operationCell.statusLabel.text?.isEmpty != false)
+print("Relation chrome: exact-target background, accessible selection/status, preserved reply text and reuse passed")
+
+relationStrip.configure([.init(id: "failed", title: "Failed target", detail: "Saved error detail", status: "Failed", glyph: .failed)])
+relationStrip.layoutIfNeeded()
+precondition(relationStrip.contents[0].glyph.kind == .failed && relationStrip.contents[0].statusLabel.text == "")
+precondition(relationStrip.contents[0].detailLabel.text == "Saved error detail" && relationStrip.buttons[0].accessibilityLabel?.contains("Failed") == true)

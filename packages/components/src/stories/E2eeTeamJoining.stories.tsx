@@ -22,6 +22,7 @@ const request = {
   source: 'email' as const,
   state: 'pending' as const,
   expiresAt: offer.expiresAt,
+  offer,
 };
 const meta = {
   title: 'Components/E2eeTeamJoining',

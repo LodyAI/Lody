@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Context, Effect, Layer, Result } from 'effect';
 import { describe, expect, it } from 'vitest';
-import { Bytes } from '@lody/e2ee-core';
-import { encodeCbor } from '@lody/e2ee-core/protocol';
+import { Bytes, LedgerFeed, VerifiedLedger, type LedgerView } from '@lody/e2ee-core';
+import { encodeCbor, signLedgerSnapshot, type SnapshotTrust } from '@lody/e2ee-core/protocol';
 import {
   E2eePasskeyCancelled,
   enrollVaultPasskey,
@@ -13,11 +13,28 @@ import {
   type E2eePasskeyPort,
 } from '@lody/e2ee-client/passkey-unlock';
 import {
+  abandonWorkspaceRecovery,
   makeWorkspaceRecovery,
+  memoryRecoveryEpochKeys,
+  readWorkspaceRecoveryProgress,
   type RecoveryVault,
   type RecoverySubmitResult,
+  type WorkspaceRecoveryInput,
 } from '@lody/e2ee-core';
-import { replaceAccountVault } from '@lody/e2ee-client/vault-replacement';
+import {
+  readRecoveryHistory,
+  recoveryLedger,
+  recoveryRestoreIncomplete,
+  restoreVaultWorkspaces,
+  type VaultRestoreAnchor,
+} from '@lody/e2ee-client/recovery-restore';
+import {
+  abandonVaultReplacement,
+  planVaultReplacement,
+  recoveryFetchEnvelope,
+  recoverySubmitOriginal,
+  replaceAccountVault,
+} from '@lody/e2ee-client/vault-replacement';
 import { type RecoveryVaultLocalStore } from '@lody/e2ee-core/services';
 import {
   verifiedPasskeyPrf,
@@ -41,6 +58,7 @@ import {
   verifyLedger,
   hashRecordBytes,
   epochHistoryPacket,
+  restoreVerifiedState,
 } from '@lody/e2ee-core/protocol';
 import {
   decodeRecord,
@@ -52,11 +70,20 @@ import { prepareLedgerRecord, signLedgerRecord } from '@lody/e2ee-core/protocol'
 import { prepareEpochEnvelope } from '@lody/e2ee-core/protocol';
 import { commitEpochKey, sealHistoryPacket } from '@lody/e2ee-core/protocol';
 import { makeSqliteProtectedEpochKeys } from '@lody/e2ee-core/internal';
-import { LedgerLog, LedgerLogError, SubmissionJournal } from '@lody/e2ee-core/services';
+import {
+  WorkspaceScope,
+  LedgerViewSource,
+  LedgerViewSourceError,
+  LedgerLog,
+  LedgerLogError,
+  SubmissionJournal,
+} from '@lody/e2ee-core/services';
 import { submitRecord, acknowledgeSubmission } from '@lody/e2ee-core/internal';
 import {
   sqliteRecoveryVaultLocalStore,
   sqliteSubmissionJournal,
+  sqliteLedgerFeedStore,
+  sqliteLedgerPinStore,
 } from '@lody/e2ee-core/adapters/node-sqlite';
 import { generateDevice } from '../src/platform/device';
 import { labSyntheticProtector } from '../src/platform/synthetic-protection';
@@ -133,6 +160,111 @@ const replacementFixture = Effect.fnUntraced(function* (dir: string) {
       ledger: () => Effect.sync(f.view),
       protector: labSyntheticProtector,
     });
+  let compactView: LedgerView | undefined;
+  const ledger = () =>
+    Effect.sync(() => {
+      if (!compactView) return f.view();
+      const full = f.view();
+      compactView = ok(
+        extendLedger(compactView, f.records.slice(compactView.length), {
+          head: full.head,
+          length: full.length,
+        })
+      );
+      return compactView;
+    });
+  const advance = Effect.fnUntraced(function* () {
+    // 65 genuine, authorized records move the pending position outside the
+    // retained hash window without changing the recovery devices or epoch.
+    for (let n = 0; n < 33; n++) {
+      const peer = yield* generateDevice();
+      const admission = yield* prepareDeviceAdmission({
+        genesis: f.initial.genesis,
+        membershipId: f.membership,
+        encryptionPublicKey: peer.enc,
+        kind: 'personal',
+        signer: peer,
+      });
+      const commands =
+        n === 32
+          ? [admission]
+          : [admission, { _tag: 'RevokeDevice', target: peer.publicKey } as const];
+      for (const command of commands)
+        f.records.push(
+          new Uint8Array(
+            yield* signLedgerRecord(
+              ok(prepareLedgerCommand(f.view(), f.owner.publicKey, command)),
+              f.owner
+            )
+          )
+        );
+    }
+  });
+  const compact = Effect.fnUntraced(function* () {
+    const prefix = f.records.slice(0, f.records.length - 64);
+    const snapView = ok(
+      verifyLedger({
+        anchor: f.initial.genesis,
+        records: prefix,
+        checkpoint: { head: hashRecordBytes(prefix[prefix.length - 1]!), length: prefix.length },
+      })
+    );
+    const endorsed = yield* signLedgerSnapshot({
+      signer: f.owner,
+      ledger: () => Effect.succeed(snapView),
+    });
+    const trust: SnapshotTrust = {
+      source: 'external-confirmation',
+      genesis: f.initial.genesis,
+      head: snapView.head,
+      length: snapView.length,
+      endorser: f.owner.publicKey,
+      membershipId: f.membership,
+      role: 'owner',
+      kind: 'personal',
+      headSignature: endorsed.headSignature,
+    };
+    const stores = Layer.mergeAll(
+      sqliteLedgerFeedStore({ path: join(dir, 'compact-feed.sqlite'), mode: 'create-or-open' }),
+      sqliteLedgerPinStore({ path: join(dir, 'compact-pin.sqlite'), mode: 'create-or-open' })
+    ).pipe(Layer.provideMerge(Layer.succeed(WorkspaceScope, { genesis: f.initial.genesis })));
+    const context = yield* Layer.build(
+      LedgerFeed.layer({
+        origin: {
+          kind: 'snapshot',
+          snapshot: { bytes: endorsed.snapshot, trust, offset: 'compact:snap' },
+        },
+        expected: { head: snapView.head, length: snapView.length },
+        budget: { maxRecords: 1000, maxBytes: 1_000_000 },
+      }).pipe(Layer.provide(stores))
+    );
+    const feed = Context.get(context, LedgerFeed);
+    const full = f.view();
+    yield* feed.accept(
+      {
+        requestOffset: 'compact:snap',
+        nextOffset: 'compact:end',
+        records: f.records.slice(prefix.length),
+        upToDate: true,
+      },
+      { head: full.head, length: full.length }
+    );
+    const verified = VerifiedLedger.layer.pipe(
+      Layer.provide(stores),
+      Layer.provide(
+        Layer.succeed(LedgerViewSource, {
+          current: () =>
+            feed.current().pipe(
+              Effect.map((state) => state.view),
+              Effect.mapError((cause) => new LedgerViewSourceError({ cause }))
+            ),
+        })
+      )
+    );
+    const saved = yield* feed.rebase().pipe(Effect.provide(verified));
+    compactView = ok(restoreVerifiedState(saved.state));
+    return compactView;
+  });
   let intercept:
     | ((record: Uint8Array) => Effect.Effect<RecoverySubmitResult | void, unknown>)
     | null = null;
@@ -151,40 +283,50 @@ const replacementFixture = Effect.fnUntraced(function* (dir: string) {
       return result;
     });
   let envelopeFails = false;
-  const owner = (vault: RecoveryVault) =>
+  let envelopeHeld = false;
+  const credentials: Uint8Array[] = [];
+  const fetchEnvelope: WorkspaceRecoveryInput['fetchCurrentEnvelope'] = (
+    recipient,
+    epoch,
+    _identity,
+    credential
+  ) =>
+    Effect.gen(function* () {
+      credentials.push(new Uint8Array(credential));
+      if (envelopeFails) return yield* Effect.fail(new Error('synthetic no envelope'));
+      if (envelopeHeld) return { pending: true as const };
+      return {
+        sender: f.owner.publicKey,
+        frame: yield* prepareEpochEnvelope({
+          context: {
+            genesis: f.initial.genesis,
+            epoch: ok(Bytes.epochNumber(epoch)),
+            sender: f.owner.publicKey,
+            recipient,
+          },
+          key: f.epochKey,
+          signer: f.owner,
+          ledger: () => Effect.sync(f.view),
+        }),
+      };
+    });
+  const owner = (vault: RecoveryVault, keys: WorkspaceRecoveryInput['installed'] = installed) =>
     makeWorkspaceRecovery({
       vault,
       local: storage.local,
       genesis: f.initial.genesis,
       membershipId: f.membership,
       personalSigner: f.owner,
-      ledger: () => Effect.sync(f.view),
+      ledger,
       submitOriginal: submit,
-      installed,
+      installed: keys,
       trust: {
         source: 'synthetic device that verified the workspace',
         genesisRecord: f.initial.record,
         head: hex(f.view().head.toBytes()),
         length: f.records.length,
       },
-      fetchCurrentEnvelope: (recipient, epoch) =>
-        Effect.gen(function* () {
-          if (envelopeFails) return yield* Effect.fail(new Error('synthetic no envelope'));
-          return {
-            sender: f.owner.publicKey,
-            frame: yield* prepareEpochEnvelope({
-              context: {
-                genesis: f.initial.genesis,
-                epoch: ok(Bytes.epochNumber(epoch)),
-                sender: f.owner.publicKey,
-                recipient,
-              },
-              key: f.epochKey,
-              signer: f.owner,
-              ledger: () => Effect.sync(f.view),
-            }),
-          };
-        }),
+      fetchCurrentEnvelope: fetchEnvelope,
     });
   const recoveryDevices = () =>
     [...f.view().inspectState().devices]
@@ -216,8 +358,25 @@ const replacementFixture = Effect.fnUntraced(function* (dir: string) {
       ],
       finish,
     });
+  const submitOnce = (record: Uint8Array) =>
+    f.records.some((row) => hex(row) === hex(record))
+      ? Effect.succeed({ outcome: 'Committed' as const, record: new Uint8Array(record) })
+      : submit(record);
   return {
     f,
+    compact,
+    advance,
+    useView: (view: LedgerView) => {
+      compactView = view;
+    },
+    useFullHistory: () => {
+      compactView = undefined;
+    },
+    oldVault,
+    fetchEnvelope,
+    submitOnce,
+    local: storage.local,
+    seenCredentials: () => credentials,
     owner,
     oldR,
     newVault,
@@ -226,6 +385,9 @@ const replacementFixture = Effect.fnUntraced(function* (dir: string) {
     submit,
     recoveryDevices,
     replace,
+    holdEnvelope: (held: boolean) => {
+      envelopeHeld = held;
+    },
     failEnvelope: (fails: boolean) => {
       envelopeFails = fails;
     },
@@ -235,6 +397,149 @@ const replacementFixture = Effect.fnUntraced(function* (dir: string) {
   };
 });
 describe('encrypted recovery vault and genuine workflow', () => {
+  it.each([
+    { operation: 'setup', compacted: false },
+    { operation: 'restore', compacted: false },
+    { operation: 'replace', compacted: false },
+    { operation: 'setup', compacted: true },
+    { operation: 'restore', compacted: true },
+    { operation: 'replace', compacted: true },
+  ] as const)(
+    '$operation (compacted=$compacted) retains originals until verified displacement, then retries with the same device',
+    ({ operation, compacted }) =>
+      inDir(async (dir) => {
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const r = yield* replacementFixture(dir);
+              if (operation === 'restore') yield* r.newOwner.setup();
+              const workflow = operation === 'replace' ? r.oldOwner : r.newOwner;
+              const invoke = (): Effect.Effect<unknown, unknown> =>
+                operation === 'setup'
+                  ? workflow.setup()
+                  : operation === 'restore'
+                    ? workflow.restoreFromRecovery({
+                        personal: { ...r.f.personal, encryptionPublicKey: r.f.personal.enc },
+                        submitOriginalAsRecovery: (record, _identity, credential) => {
+                          credential.fill(0);
+                          return r.submit(record);
+                        },
+                      })
+                    : workflow.replace({ requestId: 'displaced-revoke', compromised: true });
+              const originals: Uint8Array[] = [];
+              let displace = false;
+              r.interceptSubmit((record) =>
+                Effect.gen(function* () {
+                  originals.push(record.slice());
+                  if (displace) {
+                    displace = false;
+                    const peer = yield* generateDevice();
+                    const command = yield* prepareDeviceAdmission({
+                      genesis: r.f.initial.genesis,
+                      membershipId: r.f.membership,
+                      encryptionPublicKey: peer.enc,
+                      kind: 'personal',
+                      signer: peer,
+                    });
+                    r.f.records.push(
+                      new Uint8Array(
+                        yield* signLedgerRecord(
+                          ok(prepareLedgerCommand(r.f.view(), r.f.owner.publicKey, command)),
+                          r.f.owner
+                        )
+                      )
+                    );
+                  }
+                  if (compacted && originals.length === 3) {
+                    yield* r.advance();
+                    return { outcome: 'Pending' as const, record: record.slice() };
+                  }
+                  return { outcome: 'Conflict' as const, record: record.slice() };
+                })
+              );
+              // A service hint alone cannot authorize another signature.
+              yield* Effect.result(invoke());
+              yield* Effect.result(invoke());
+              expect(originals).toHaveLength(2);
+              expect(originals[1]).toEqual(originals[0]);
+              displace = true;
+              yield* Effect.result(invoke());
+              expect(originals[2]).toEqual(originals[0]);
+              if (compacted) {
+                // The owner observes the advanced full head before feed retention,
+                // just as VerifiedLedger does before rebase. Its next Conflict is
+                // checked against the compact view, with the pending position gone.
+                yield* workflow.status();
+                const view = yield* r.compact();
+                expect(view.historyStart).toBeGreaterThanOrEqual(r.f.records.length - 65);
+                if (operation === 'restore') {
+                  // Package-checkpoint qualification still requires full history;
+                  // compact again only for the post-submission conflict proof.
+                  r.useFullHistory();
+                  r.interceptSubmit((record) =>
+                    Effect.sync(() => {
+                      originals.push(record.slice());
+                      r.useView(view);
+                      return { outcome: 'Conflict' as const, record: record.slice() };
+                    })
+                  );
+                }
+                yield* Effect.result(invoke());
+                expect(originals[3]).toEqual(originals[0]);
+              }
+
+              // Reopen the workflow to prove the replacement was persisted, not cached.
+              r.interceptSubmit(null);
+              // Restore must requalify the package's earlier checkpoint from full
+              // history. The conflicting submission above used the rebased view.
+              if (operation === 'restore') r.useFullHistory();
+              const reopened = yield* r.owner(
+                operation === 'replace' ? r.oldVault.vault : r.newVault.vault
+              );
+              if (operation === 'setup') {
+                expect((yield* reopened.setup()).status.recoverable).toBe(true);
+              } else if (operation === 'restore') {
+                expect(
+                  (yield* reopened.restoreFromRecovery({
+                    personal: { ...r.f.personal, encryptionPublicKey: r.f.personal.enc },
+                    submitOriginalAsRecovery: (record, _identity, credential) => {
+                      credential.fill(0);
+                      return r.submit(record);
+                    },
+                  })).outcome
+                ).toBe('Committed');
+                expect(
+                  r.f.view().inspectState().devices.has(hex(r.f.personal.publicKey.toBytes()))
+                ).toBe(true);
+              } else {
+                expect(
+                  (yield* reopened.replace({ requestId: 'displaced-revoke', compromised: true }))
+                    .recoverable
+                ).toBe(true);
+                expect(r.recoveryDevices()).not.toContain(r.oldR);
+              }
+              const oldBody = ok(decodeRecord(originals[0]!)).body;
+              const replacement = r.f.records
+                .map((raw) => ok(decodeRecord(raw)).body)
+                .find(
+                  (body) =>
+                    body.type === 'ordinary' &&
+                    oldBody.type === 'ordinary' &&
+                    body.operation.type === oldBody.operation.type &&
+                    (body.operation.type === 'admitDevice' &&
+                    oldBody.operation.type === 'admitDevice'
+                      ? body.operation.signingPublicKey.equals(oldBody.operation.signingPublicKey)
+                      : body.operation.type === 'revokeDevice' &&
+                        oldBody.operation.type === 'revokeDevice' &&
+                        body.operation.target.equals(oldBody.operation.target))
+                );
+              expect(replacement).toBeDefined();
+              expect(r.f.records.some((raw) => hex(raw) === hex(originals[0]!))).toBe(false);
+            })
+          )
+        );
+      })
+  );
   it('opens the same V from a recovery file and actual PRF result, authenticates AAD, rejects unsupported PRF and index rollback', async () =>
     inDir(async (dir) => {
       await Effect.runPromise(
@@ -1064,6 +1369,721 @@ describe('encrypted recovery vault and genuine workflow', () => {
         )
       );
     }));
+  it('revokes the old R first on a suspected leak, even while the new R cannot pass', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            let finished = 0;
+            const run = () =>
+              replaceAccountVault({
+                workspaces: [
+                  {
+                    name: 'synthetic workspace',
+                    setup: r.newOwner.setup,
+                    revokeOtherRecoveryDevices: r.newOwner.revokeOtherRecoveryDevices,
+                  },
+                ],
+                compromised: true,
+                finish: () =>
+                  Effect.sync(() => {
+                    finished += 1;
+                  }),
+              });
+            r.failEnvelope(true);
+            expect(Result.isFailure(yield* Effect.result(run()))).toBe(true);
+            expect(r.recoveryDevices()).not.toContain(r.oldR);
+            expect(finished).toBe(0);
+            r.failEnvelope(false);
+            expect(yield* run()).toEqual({ outcome: 'Committed' });
+            expect(r.recoveryDevices()).toHaveLength(1);
+            expect(finished).toBe(1);
+          })
+        )
+      );
+    }));
+  it('abandons a replacement by revoking only the new R, then starts again', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            yield* r.newOwner.setup();
+            expect(r.recoveryDevices()).toHaveLength(2);
+            let abandoned = 0;
+            const run = () =>
+              abandonVaultReplacement({
+                workspaces: [
+                  {
+                    name: 'synthetic workspace',
+                    revokeOwnRecoveryDevice: r.newOwner.revokeOwnRecoveryDevice,
+                  },
+                ],
+                abandon: () =>
+                  Effect.sync(() => {
+                    abandoned += 1;
+                  }),
+              });
+            expect(yield* run()).toEqual({ outcome: 'Committed' });
+            expect(r.recoveryDevices()).toEqual([r.oldR]);
+            expect(abandoned).toBe(1);
+            // Rerunning after a lost reply signs nothing new.
+            const before = r.f.records.length;
+            expect(yield* run()).toEqual({ outcome: 'Committed' });
+            expect(r.f.records).toHaveLength(before);
+          })
+        )
+      );
+    }));
+  it('abandons with the new file lost: the journal alone names the new R', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            yield* r.newOwner.setup();
+            const abandon = yield* abandonWorkspaceRecovery({
+              vaultId: r.newVault.vault.vaultId,
+              local: r.local,
+              genesis: r.f.initial.genesis,
+              membershipId: r.f.membership,
+              personalSigner: r.f.owner,
+              ledger: () => Effect.sync(r.f.view),
+              submitOriginal: r.submit,
+              genesisRecord: r.f.initial.record,
+            });
+            expect(yield* abandon.revokeOwnRecoveryDevice()).toEqual({ outcome: 'Committed' });
+            expect(r.recoveryDevices()).toEqual([r.oldR]);
+          })
+        )
+      );
+    }));
+  it('hands the envelope fetch the credential registered with this R', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            yield* r.newOwner.setup();
+            const index = yield* r.newVault.vault.readIndex();
+            const bundle = yield* r.newVault.vault.readEntry(index.value.entries[0]!);
+            const derived = deriveRecoveryAccessCredential(bundle);
+            wipeRecoveryPackage(bundle);
+            expect(r.seenCredentials().map(hex)).toContain(hex(derived.credential));
+          })
+        )
+      );
+    }));
+  it('maps service replies and asks for delivery once before giving up', async () => {
+    const appended: unknown[] = [];
+    let refreshed = 0;
+    const submit = recoverySubmitOriginal({
+      append: (request) =>
+        Effect.sync(() => {
+          appended.push(request);
+          return { status: appended.length === 1 ? 'committed' : 'conflict' } as const;
+        }),
+      refresh: () =>
+        Effect.sync(() => {
+          refreshed += 1;
+        }),
+    });
+    const f = await Effect.runPromise(fixture());
+    const record = f.initial.record;
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const hash = new Uint8Array(32).fill(9);
+        expect((yield* submit(record, { recoveryCredentialHash: hash })).outcome).toBe('Committed');
+        expect((yield* submit(record, null)).outcome).toBe('Conflict');
+      })
+    );
+    expect(refreshed).toBe(2);
+    expect(appended).toEqual([
+      {
+        requestId: hex(hashRecordBytes(record).toBytes()),
+        recordHex: hex(record),
+        credentialHash: hex(new Uint8Array(32).fill(9)),
+      },
+      { requestId: hex(hashRecordBytes(record).toBytes()), recordHex: hex(record) },
+    ]);
+    const sender = hex(f.owner.publicKey.toBytes());
+    let items: { sender: string; frame: Uint8Array }[] = [];
+    let delivered = 0;
+    const seen: string[] = [];
+    const fetch = recoveryFetchEnvelope({
+      mailbox: (credential) => {
+        seen.push(credential);
+        return { fetch: () => Effect.sync(() => ({ items, next: null })) };
+      },
+      deliver: () =>
+        Effect.sync(() => {
+          delivered += 1;
+          items = [{ sender, frame: new Uint8Array([7]) }];
+        }),
+    });
+    const recipient = f.personal.publicKey;
+    const found = await Effect.runPromise(
+      fetch(recipient, 0, undefined as never, new Uint8Array(32).fill(8))
+    );
+    expect(delivered).toBe(1);
+    expect(seen[0]).toBe(hex(new Uint8Array(32).fill(8)));
+    expect('frame' in found && found.frame).toEqual(new Uint8Array([7]));
+    items = [];
+    const silent = recoveryFetchEnvelope({
+      mailbox: () => ({ fetch: () => Effect.succeed({ items: [] }) }),
+      deliver: () => Effect.void,
+    });
+    expect(
+      await Effect.runPromise(silent(recipient, 0, undefined as never, new Uint8Array(32)))
+    ).toEqual({ pending: true });
+  });
+  it('waits for a slow delivery instead of failing, then finishes without a second R', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            let finished = 0;
+            const finish = () =>
+              Effect.sync(() => {
+                finished += 1;
+              });
+            r.holdEnvelope(true);
+            expect(yield* r.replace(r.newOwner, finish)).toEqual({
+              outcome: 'Pending',
+              step: 'setup',
+              workspace: 'synthetic workspace',
+            });
+            expect(r.recoveryDevices()).toContain(r.oldR);
+            expect(r.recoveryDevices()).toHaveLength(2);
+            expect(finished).toBe(0);
+            r.holdEnvelope(false);
+            expect(yield* r.replace(r.newOwner, finish)).toEqual({ outcome: 'Committed' });
+            expect(r.recoveryDevices()).toHaveLength(1);
+          })
+        )
+      );
+    }));
+  it('reports a restore as pending while the envelope is on its way', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            yield* r.newOwner.setup();
+            r.holdEnvelope(true);
+            const before = r.f.records.length;
+            const result = yield* r.newOwner.restoreFromRecovery({
+              personal: { ...r.f.personal, encryptionPublicKey: r.f.personal.enc },
+              submitOriginalAsRecovery: (record) => r.submit(record),
+            });
+            expect(result.outcome).toBe('Pending');
+            expect(r.f.records).toHaveLength(before);
+          })
+        )
+      );
+    }));
+  it('hands the recovery submission the credential of the R admitting the device', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            yield* r.newOwner.setup();
+            const index = yield* r.newVault.vault.readIndex();
+            const bundle = yield* r.newVault.vault.readEntry(index.value.entries[0]!);
+            const derived = deriveRecoveryAccessCredential(bundle);
+            wipeRecoveryPackage(bundle);
+            const seen: string[] = [];
+            const result = yield* r.newOwner.restoreFromRecovery({
+              personal: { ...r.f.personal, encryptionPublicKey: r.f.personal.enc },
+              submitOriginalAsRecovery: (record, _identity, credential) => {
+                seen.push(hex(credential));
+                return r.submit(record);
+              },
+            });
+            expect(result.outcome).toBe('Committed');
+            expect(seen).toEqual([hex(derived.credential)]);
+          })
+        )
+      );
+    }));
+  it('replays served history from the package genesis and refuses a partial or other ledger', async () => {
+    const [f, other] = await Effect.runPromise(Effect.all([fixture(), fixture()]));
+    const page = (records: readonly Uint8Array[], startIndex = 0) => ({
+      startIndex,
+      recordsHex: records.map(hex),
+      nextCursor: null,
+      checkpoint: {
+        headHash: hex(hashRecordBytes(records.at(-1) ?? f.initial.record).toBytes()),
+        length: records.length,
+      },
+    });
+    const ledger = (pages: readonly ReturnType<typeof page>[]) =>
+      Effect.runPromise(
+        Effect.result(
+          recoveryLedger({ genesis: f.initial.genesis, pages: () => Effect.succeed(pages) })()
+        )
+      );
+    expect(await ledger([page(f.records)])).toMatchObject({ _tag: 'Success' });
+    expect(await ledger([page(f.records, 1)])).toMatchObject({ _tag: 'Failure' });
+    expect(await ledger([page(other.records)])).toMatchObject({ _tag: 'Failure' });
+    expect(await ledger([])).toMatchObject({ _tag: 'Failure' });
+    expect(await ledger([page([])])).toMatchObject({
+      _tag: 'Failure',
+      failure: { code: 'authentication' },
+    });
+    expect(
+      await ledger([
+        {
+          ...page(f.records),
+          checkpoint: { headHash: hex(other.view().head.toBytes()), length: f.records.length },
+        },
+      ])
+    ).toMatchObject({ _tag: 'Failure' });
+    expect(
+      await ledger([
+        {
+          ...page(f.records),
+          checkpoint: { headHash: hex(f.view().head.toBytes()), length: f.records.length + 1 },
+        },
+      ])
+    ).toMatchObject({ _tag: 'Failure' });
+    expect(await ledger([{ ...page(f.records), recordsHex: ['zz'] }])).toMatchObject({
+      _tag: 'Failure',
+      failure: { code: 'authentication' },
+    });
+  });
+  it('installs recovered keys in SQLite and wipes temporary copies when the restore cache closes', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            yield* r.newOwner.setup();
+            const keys = memoryRecoveryEpochKeys();
+            const restorer = yield* r.owner(r.newVault.vault, keys);
+            const restored = yield* restorer.restoreFromRecovery({
+              personal: { ...r.f.personal, encryptionPublicKey: r.f.personal.enc },
+              submitOriginalAsRecovery: (record) => r.submit(record),
+            });
+            expect(restored.outcome).toBe('Committed');
+            const installed = yield* makeSqliteProtectedEpochKeys({
+              path: join(dir, 'new-device-keys.sqlite'),
+              mode: 'create',
+              genesis: r.f.initial.genesis,
+              recipient: r.f.personal.publicKey,
+              ledger: () => Effect.sync(r.f.view),
+              protector: labSyntheticProtector,
+            });
+            const entries = keys.entries();
+            expect(entries.length).toBeGreaterThan(0);
+            for (const [epoch, key] of entries) yield* installed.saveAndReload(epoch, key);
+            const borrowed = yield* keys.read(0);
+            keys.dispose();
+            for (const [epoch, key] of entries)
+              expect(Result.isFailure(commitEpochKey(r.f.initial.genesis, epoch, key))).toBe(true);
+            expect(Result.isFailure(commitEpochKey(r.f.initial.genesis, 0, borrowed))).toBe(true);
+            const read = yield* installed.read(0);
+            expect(
+              ok(commitEpochKey(r.f.initial.genesis, 0, read)).equals(
+                ok(epochHistoryPacket(r.f.view(), 0)).commitment
+              )
+            ).toBe(true);
+            expect(keys.entries()).toHaveLength(0);
+          })
+        )
+      );
+    }));
+  it('reads a ledger longer than one page with a fixed checkpoint', async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const f = yield* fixture();
+        for (let index = 0; index < 34; index++) {
+          const device = yield* generateDevice();
+          const admit = yield* prepareDeviceAdmission({
+            genesis: f.initial.genesis,
+            membershipId: f.membership,
+            encryptionPublicKey: device.enc,
+            kind: 'personal',
+            signer: device,
+          });
+          for (const command of [
+            admit,
+            { _tag: 'RevokeDevice', target: device.publicKey } as const,
+          ])
+            f.records.push(
+              new Uint8Array(
+                yield* signLedgerRecord(
+                  ok(prepareLedgerCommand(f.view(), f.owner.publicKey, command)),
+                  f.owner
+                )
+              )
+            );
+        }
+        expect(f.records.length).toBe(69);
+        const size = 25;
+        const fixed = { headHash: hex(f.view().head.toBytes()), length: f.records.length };
+        const history = (next?: { readonly cursor: string; readonly checkpoint: typeof fixed }) => {
+          if (next && next.checkpoint?.headHash !== fixed.headHash)
+            return Effect.fail(new Error('e2ee_invalid_cursor'));
+          const startIndex = next ? Number(next.cursor) : 0;
+          const end = startIndex + size;
+          return Effect.succeed({
+            startIndex,
+            checkpoint: fixed,
+            recordsHex: f.records.slice(startIndex, end).map(hex),
+            nextCursor: end < f.records.length ? String(end) : null,
+          });
+        };
+        const view = yield* recoveryLedger({
+          genesis: f.initial.genesis,
+          pages: () => readRecoveryHistory(history),
+        })();
+        expect(view.length).toBe(69);
+      })
+    );
+  });
+  it('retries a restore whose keys never installed, then leaves it alone', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            yield* r.newOwner.setup();
+            let adoptions = 0;
+            let hasIdentity = false;
+            const keys = memoryRecoveryEpochKeys();
+            const target = {
+              id: 'workspace',
+              name: 'Workspace',
+              genesisHash: hex(r.f.initial.genesis.toBytes()),
+              hasIdentity: () => hasIdentity,
+              connect: (anchor: VaultRestoreAnchor) =>
+                Effect.succeed({
+                  personalSigner: r.f.personal,
+                  personal: { ...r.f.personal, encryptionPublicKey: r.f.personal.enc },
+                  ledger: () => Effect.sync(r.f.view),
+                  installed: keys,
+                  fetchCurrentEnvelope: r.fetchEnvelope,
+                  submitOriginalAsRecovery: (record: Uint8Array) => r.submitOnce(record),
+                  acquirePersonal: () => Effect.fail(new Error('unused')),
+                  recovered: keys.entries,
+                  adopt: () =>
+                    Effect.suspend(() => {
+                      expect(anchor.genesis.equals(r.f.initial.genesis)).toBe(true);
+                      adoptions += 1;
+                      hasIdentity = true;
+                      return adoptions === 1
+                        ? Effect.fail(new Error('synthetic install failure'))
+                        : Effect.void;
+                    }),
+                }),
+            };
+            const run = () =>
+              restoreVaultWorkspaces({
+                vault: r.newVault.vault,
+                local: r.local,
+                targets: [target],
+              });
+            expect(yield* run()).toEqual([
+              { workspaceId: 'workspace', name: 'Workspace', outcome: 'Failed' },
+            ]);
+            expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(true);
+            expect(yield* run()).toEqual([
+              {
+                workspaceId: 'workspace',
+                name: 'Workspace',
+                outcome: 'Committed',
+                partialEpochKey: false,
+              },
+            ]);
+            expect(adoptions).toBe(2);
+            expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
+            expect(yield* run()).toEqual([]);
+            expect(adoptions).toBe(2);
+          })
+        )
+      );
+    }));
+  it('keeps a new vault restore retryable after an old vault restore finished', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            const second = yield* generateDevice();
+            let device = r.f.personal;
+            let hasIdentity = false;
+            let failInstall = false;
+            let adoptions = 0;
+            const target = () => {
+              const keys = memoryRecoveryEpochKeys();
+              return {
+                id: 'workspace',
+                name: 'Workspace',
+                genesisHash: hex(r.f.initial.genesis.toBytes()),
+                hasIdentity: () => hasIdentity,
+                connect: () =>
+                  Effect.succeed({
+                    personalSigner: device,
+                    personal: { ...device, encryptionPublicKey: device.enc },
+                    ledger: () => Effect.sync(r.f.view),
+                    installed: keys,
+                    fetchCurrentEnvelope: r.fetchEnvelope,
+                    submitOriginalAsRecovery: (record: Uint8Array) => r.submitOnce(record),
+                    acquirePersonal: () => Effect.fail(new Error('unused')),
+                    recovered: keys.entries,
+                    adopt: () =>
+                      Effect.scoped(
+                        Effect.gen(function* () {
+                          adoptions += 1;
+                          hasIdentity = true;
+                          const installed = yield* makeSqliteProtectedEpochKeys({
+                            path: join(dir, `restored-${adoptions}.sqlite`),
+                            mode: 'create',
+                            genesis: r.f.initial.genesis,
+                            recipient: device.publicKey,
+                            ledger: () => Effect.sync(r.f.view),
+                            protector: labSyntheticProtector,
+                          });
+                          if (failInstall)
+                            return yield* Effect.fail(new Error('synthetic install'));
+                          for (const [epoch, key] of keys.entries())
+                            yield* installed.saveAndReload(epoch, key);
+                        })
+                      ),
+                  }),
+              };
+            };
+            const run = (vault: RecoveryVault) =>
+              restoreVaultWorkspaces({ vault, local: r.local, targets: [target()] });
+            // The old vault restores and finishes.
+            expect(yield* run(r.oldVault.vault)).toEqual([
+              {
+                workspaceId: 'workspace',
+                name: 'Workspace',
+                outcome: 'Committed',
+                partialEpochKey: false,
+              },
+            ]);
+            expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
+            // Finished work is not repeated.
+            expect(yield* run(r.oldVault.vault)).toEqual([]);
+            // A new R passes and the old one is revoked; the local identity is rebuilt.
+            yield* r.newOwner.setup();
+            yield* r.newOwner.revokeOtherRecoveryDevices();
+            hasIdentity = false;
+            device = second;
+            failInstall = true;
+            expect(yield* run(r.newVault.vault)).toEqual([
+              { workspaceId: 'workspace', name: 'Workspace', outcome: 'Failed' },
+            ]);
+            expect(hasIdentity).toBe(true);
+            expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(true);
+            failInstall = false;
+            expect(yield* run(r.newVault.vault)).toEqual([
+              {
+                workspaceId: 'workspace',
+                name: 'Workspace',
+                outcome: 'Committed',
+                partialEpochKey: false,
+              },
+            ]);
+            expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
+            expect(yield* run(r.newVault.vault)).toEqual([]);
+          })
+        )
+      );
+    }));
+  it('stops a restore when its progress cannot be reopened', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            let connected = 0;
+            const target = {
+              id: 'workspace',
+              name: 'Workspace',
+              genesisHash: hex(r.f.initial.genesis.toBytes()),
+              hasIdentity: () => false,
+              connect: () =>
+                Effect.suspend(() => {
+                  connected += 1;
+                  return Effect.fail(new Error('unused'));
+                }),
+            };
+            const refusing = {
+              ...r.local,
+              compareAndSwap: () => Effect.succeed('Conflict' as const),
+            };
+            expect(
+              yield* restoreVaultWorkspaces({
+                vault: r.oldVault.vault,
+                local: refusing,
+                targets: [target],
+              })
+            ).toEqual([{ workspaceId: 'workspace', name: 'Workspace', outcome: 'Failed' }]);
+            expect(connected).toBe(0);
+          })
+        )
+      );
+    }));
+  it('reports a workspace whose identity cannot be checked as failed, then restores it', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            yield* r.newOwner.setup();
+            // The device holds no identity, but the check is briefly unavailable (for
+            // example a busy lease). That is neither "present" nor "absent".
+            let identity: boolean | 'unknown' = 'unknown';
+            let connected = 0;
+            const keys = memoryRecoveryEpochKeys();
+            const target = {
+              id: 'workspace',
+              name: 'Workspace',
+              genesisHash: hex(r.f.initial.genesis.toBytes()),
+              hasIdentity: () => identity,
+              connect: () =>
+                Effect.sync(() => {
+                  connected += 1;
+                  return {
+                    personalSigner: r.f.personal,
+                    personal: { ...r.f.personal, encryptionPublicKey: r.f.personal.enc },
+                    ledger: () => Effect.sync(r.f.view),
+                    installed: keys,
+                    fetchCurrentEnvelope: r.fetchEnvelope,
+                    submitOriginalAsRecovery: (record: Uint8Array) => r.submitOnce(record),
+                    acquirePersonal: () => Effect.fail(new Error('unused')),
+                    recovered: keys.entries,
+                    adopt: () =>
+                      Effect.sync(() => {
+                        identity = true;
+                      }),
+                  };
+                }),
+            };
+            const run = () =>
+              restoreVaultWorkspaces({
+                vault: r.newVault.vault,
+                local: r.local,
+                targets: [target],
+              });
+            // Reported for retry, and nothing is restored over an identity it cannot see.
+            expect(yield* run()).toEqual([
+              { workspaceId: 'workspace', name: 'Workspace', outcome: 'Failed' },
+            ]);
+            expect(connected).toBe(0);
+            expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
+            // Once the check works again, the retry restores it.
+            identity = false;
+            expect(yield* run()).toEqual([
+              {
+                workspaceId: 'workspace',
+                name: 'Workspace',
+                outcome: 'Committed',
+                partialEpochKey: false,
+              },
+            ]);
+            expect(connected).toBe(1);
+          })
+        )
+      );
+    }));
+  it('reads each workspace recovery stage from this device journal without V', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            const genesis = hex(r.f.initial.genesis.toBytes());
+            expect(yield* readWorkspaceRecoveryProgress(r.local, r.newVault.vault.vaultId)).toEqual(
+              []
+            );
+            r.failEnvelope(true);
+            yield* Effect.result(r.newOwner.setup());
+            expect(yield* readWorkspaceRecoveryProgress(r.local, r.newVault.vault.vaultId)).toEqual(
+              [
+                {
+                  genesis,
+                  membershipId: hex(r.f.membership.toBytes()),
+                  stage: 'registered',
+                  testedEpoch: null,
+                },
+              ]
+            );
+            r.failEnvelope(false);
+            yield* r.newOwner.setup();
+            expect(yield* readWorkspaceRecoveryProgress(r.local, r.newVault.vault.vaultId)).toEqual(
+              [
+                {
+                  genesis,
+                  membershipId: hex(r.f.membership.toBytes()),
+                  stage: 'recoverable',
+                  testedEpoch: 0,
+                },
+              ]
+            );
+          })
+        )
+      );
+    }));
+  it('reports an unreadable journal row as unknown instead of failing the whole read', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            const vaultId = r.newVault.vault.vaultId;
+            const genesis = hex(r.f.initial.genesis.toBytes());
+            yield* r.newOwner.setup();
+            const prefix = `vault-v1/${vaultId}/workspace/`;
+            // Rows that are not canonical CBOR or not a progress record.
+            yield* r.local.compareAndSwap(`${prefix}aa/bb`, null, Uint8Array.of(0xff, 0x00, 0x13));
+            yield* r.local.compareAndSwap(`${prefix}cc/dd`, null, Uint8Array.of(0x01));
+            // The store refuses empty writes, so an empty row can only come back from disk.
+            const damaged = {
+              ...r.local,
+              list: (at: string) =>
+                Effect.map(r.local.list(at), (found) => [
+                  ...found,
+                  { key: `${prefix}ee/ff`, value: new Uint8Array(0) },
+                ]),
+            };
+            const rows = yield* readWorkspaceRecoveryProgress(damaged, vaultId);
+            expect(rows).toEqual(
+              expect.arrayContaining([
+                { genesis: 'aa', membershipId: 'bb', stage: 'unknown', testedEpoch: null },
+                { genesis: 'cc', membershipId: 'dd', stage: 'unknown', testedEpoch: null },
+                { genesis: 'ee', membershipId: 'ff', stage: 'unknown', testedEpoch: null },
+                {
+                  genesis,
+                  membershipId: hex(r.f.membership.toBytes()),
+                  stage: 'recoverable',
+                  testedEpoch: 0,
+                },
+              ])
+            );
+            expect(rows).toHaveLength(4);
+          })
+        )
+      );
+    }));
+  it('names the workspaces a device cannot act on', () => {
+    expect(
+      planVaultReplacement(
+        [
+          { id: 'a', name: 'Alpha' },
+          { id: 'b', name: 'Beta' },
+        ],
+        new Set(['a'])
+      )
+    ).toEqual({ covered: [{ id: 'a', name: 'Alpha' }], uncovered: [{ id: 'b', name: 'Beta' }] });
+  });
   it('concurrent first setup on two durable clients reuses the winning R and leaves no duplicate ledger identity', async () =>
     inDir(async (dir) => {
       await Effect.runPromise(
@@ -1500,6 +2520,74 @@ describe('passkey wrapping of one vault master key', () => {
     return { storage, vault, recoveryFile };
   });
 
+  it('finishes a removal whose wrap deletion failed, and shows it unfinished until then', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const storage = yield* makeLabRecoveryVaultStore({
+              path: join(dir, 'vault.sqlite'),
+              mode: 'create',
+            });
+            let failDelete = false;
+            const store = {
+              ...storage.store,
+              deleteUnreferenced: (...args: Parameters<typeof storage.store.deleteUnreferenced>) =>
+                failDelete
+                  ? Effect.fail(new Error('synthetic lost delete'))
+                  : storage.store.deleteUnreferenced(...args),
+            };
+            const { vault } = yield* createRecoveryVault({
+              locator: 'https://synthetic.invalid/vault',
+              store,
+              local: storage.local,
+            });
+            const entryId = yield* vault.addPasskey(yield* passkey('credential-a', 21));
+            failDelete = true;
+            expect(Result.isFailure(yield* Effect.result(vault.removePasskey(entryId)))).toBe(true);
+            // The index no longer lists it, but its wrap still exists: not removed yet.
+            expect(yield* vault.listPasskeys()).toEqual([]);
+            expect(yield* storage.store.readEntry(vault.vaultId, entryId)).not.toBeNull();
+            expect(yield* vault.pendingPasskeyRemovals()).toEqual([
+              { entryId, label: 'Passkey credential-a' },
+            ]);
+            failDelete = false;
+            yield* vault.removePasskey(entryId);
+            expect(yield* storage.store.readEntry(vault.vaultId, entryId)).toBeNull();
+            expect(yield* vault.pendingPasskeyRemovals()).toEqual([]);
+            expect(Result.isFailure(yield* Effect.result(vault.removePasskey(entryId)))).toBe(true);
+          })
+        )
+      );
+    }));
+  it('never deletes an unlisted entry it has no record of removing', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const { storage, vault } = yield* created(dir);
+            const f = yield* fixture();
+            const bundle = yield* generateRecoveryPackage({
+              genesis: hex(f.initial.genesis.toBytes()),
+              membershipId: hex(f.membership.toBytes()),
+              generation: 0,
+              trust: {
+                source: 'synthetic',
+                genesisRecord: f.initial.record,
+                head: hex(f.view().head.toBytes()),
+                length: 1,
+              },
+            });
+            // An unreserved candidate, as another device's setup would leave it mid-way.
+            const candidate = yield* vault.upload(bundle);
+            wipeRecoveryPackage(bundle);
+            const refused = yield* Effect.result(vault.removePasskey(candidate.entryId));
+            expect(refused).toMatchObject({ _tag: 'Failure', failure: { code: 'conflict' } });
+            expect(yield* storage.store.readEntry(vault.vaultId, candidate.entryId)).not.toBeNull();
+          })
+        )
+      );
+    }));
   it('judges each ceremony on what WebAuthn actually reports for it', async () => {
     const first = output(1);
     const rejected = async (work: Effect.Effect<unknown, unknown>) =>

@@ -70,6 +70,7 @@ const meta = {
     machineName: 'Rems-MacBook-Pro.local',
     onCopyConversationHistory: fn(),
     onCopyUrl: fn(),
+    onCopyDeepLink: fn(),
     onShareWithTeam: fn(),
     sharing: {
       visibility: 'private',

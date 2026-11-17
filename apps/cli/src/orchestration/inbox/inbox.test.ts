@@ -1,6 +1,7 @@
 import type { LodyOperationItemResult, MachineId, SessionId, WorkspaceId } from '@lody/shared';
 import Database from 'better-sqlite3';
-import { Context, Deferred, Effect, Fiber, Layer, Scheduler } from 'effect';
+import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Scheduler } from 'effect';
+import { TestClock } from 'effect/testing';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -10,6 +11,8 @@ import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LodyOperationStore } from '../operation-store';
 import { inboxRepositoryLayer } from '../platform/inbox-repository';
+import { OrchestrationStorageFailure } from '../storage-error';
+import { InboxSqlite } from './sqlite';
 import { ExecutionMembers, makeExecutionOwner } from './execution-owner';
 import {
   batchDepth,
@@ -43,11 +46,16 @@ function fixture(now?: () => number) {
   };
   const sql = store.inbox;
   sql.activate(input.workspaceId, 'owner');
-  const add = (id: string, depth = 0, items: LodyOperationItemResult[] = []) => {
+  const add = (
+    id: string,
+    depth = 0,
+    items: LodyOperationItemResult[] = [],
+    sessionId = input.sessionId
+  ) => {
     store.accept({
       workspaceId: input.workspaceId as WorkspaceId,
       ownerMachineId: 'machine' as MachineId,
-      requesterSessionId: input.sessionId as SessionId,
+      requesterSessionId: sessionId as SessionId,
       requesterUserId: input.userId,
       operationId: id,
       kind: 'session_chat',
@@ -61,7 +69,7 @@ function fixture(now?: () => number) {
       deadlineAt: '2026-10-13T00:00:00.000Z',
       items,
     });
-    store.finish(input.sessionId as SessionId, id, { type: 'result', value: { items } });
+    store.finish(sessionId as SessionId, id, { type: 'result', value: { items } });
   };
   const release = (outcome: InboxRelease['outcome'] = 'normal', executionId = 'execution-1') =>
     sql.release({ ...input, executionId, outcome });
@@ -1422,4 +1430,345 @@ describe('manual Stop receipts', () => {
     f.add('agent-cancel', 0, [{ status: 'cancelled', target: stopped.target }]);
     expect(f.sql.pending('workspace')).toHaveLength(1);
   });
+});
+
+it.each(['error', 'defect'] as const)(
+  'keeps later Inbox turns available while one session cannot prepare and diagnostics fail (%s)',
+  async (failure) => {
+    const f = fixture();
+    f.add('poison-A');
+    f.add('first-B', 0, [], 'B');
+    const db = new Database(f.filename);
+    db.exec(
+      "CREATE TRIGGER fail_prepare_A BEFORE INSERT ON inbox_batches WHEN NEW.session_id='A' BEGIN SELECT RAISE(ABORT,'prepare A unavailable'); END;"
+    );
+    const received: string[] = [];
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const first = yield* Deferred.make<void>();
+            const second = yield* Deferred.make<void>();
+            let inbox: OperationInbox['Service'] | undefined;
+            const execution = Layer.succeed(InboxExecution, {
+              ready: () => inbox !== undefined,
+              admit: () => true,
+              report: () =>
+                failure === 'error'
+                  ? Effect.fail(new Error('diagnostic sink unavailable'))
+                  : Effect.die(new Error('diagnostic sink unavailable')),
+              launch: (batch) =>
+                Effect.gen(function* () {
+                  const current = inbox;
+                  if (!current) return yield* Effect.fail(new Error('Inbox not ready'));
+                  const id = `B-${received.length}`;
+                  expect(yield* current.begin(batch, id)).toBe(true);
+                  yield* current.submit(batch, batch, id, () => received.push(batch.sessionId));
+                  yield* current.settle(batch, 'settled');
+                  yield* current.release({ ...batch, executionId: id, outcome: 'normal' });
+                  yield* Deferred.succeed(received.length === 1 ? first : second, undefined);
+                }),
+            });
+            yield* Effect.gen(function* () {
+              inbox = yield* OperationInbox;
+              yield* inbox.wake;
+              yield* Deferred.await(first);
+              f.add('later-B', 0, [], 'B');
+              yield* inbox.wake;
+              yield* Deferred.await(second);
+              expect(received).toEqual(['B', 'B']);
+              expect(f.sql.pending('workspace').some((item) => item.input.sessionId === 'A')).toBe(
+                true
+              );
+            }).pipe(
+              Effect.provide(
+                OperationInbox.layer('workspace', 'owner').pipe(
+                  Layer.provide(Layer.merge(inboxRepositoryLayer(f.sql), execution))
+                )
+              )
+            );
+          })
+        )
+      );
+    } finally {
+      db.close();
+    }
+  }
+);
+
+it.each(['recover', 'dispose'] as const)(
+  'defers a shared SQLite write lock without multiplying native waits (%s)',
+  async (ending) => {
+    const f = fixture();
+    for (const id of ['A', 'B', 'C']) f.add(`result-${id}`, 0, [], id);
+    // Real lock contention, with native waiting disabled so the test depends on
+    // explicit lock ownership and TestClock, never elapsed wall-clock time.
+    const db = new Database(f.filename, { timeout: 0 });
+    const sql = new InboxSqlite(db);
+    const blocker = new Database(f.filename);
+    blocker.exec('BEGIN IMMEDIATE');
+    const attempts: string[] = [];
+    const received: string[] = [];
+    const diagnostics: unknown[] = [];
+    let locked = true;
+    try {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const busy = yield* Deferred.make<void>();
+              const completed = yield* Deferred.make<void>();
+              const base = yield* Effect.provide(InboxRepository, inboxRepositoryLayer(sql));
+              let inbox: OperationInbox['Service'];
+              const repo = Layer.succeed(InboxRepository, {
+                ...base,
+                prepare: (...args: Parameters<typeof base.prepare>) =>
+                  Effect.suspend(() => {
+                    if (locked) attempts.push(args[0].sessionId);
+                    return base.prepare(...args);
+                  }),
+              });
+              const execution = Layer.succeed(InboxExecution, {
+                ready: () => true,
+                admit: () => true,
+                report: (cause) =>
+                  Effect.gen(function* () {
+                    diagnostics.push(cause);
+                    yield* Deferred.succeed(busy, undefined);
+                  }),
+                launch: (batch) =>
+                  Effect.gen(function* () {
+                    const id = `execution-${batch.sessionId}`;
+                    expect(yield* inbox.begin(batch, id)).toBe(true);
+                    yield* inbox.submit(batch, batch, id, () => received.push(batch.sessionId));
+                    yield* inbox.settle(batch, 'settled');
+                    yield* inbox.release({ ...batch, executionId: id, outcome: 'normal' });
+                    if (received.filter((session) => session !== 'D').length === 3)
+                      yield* Deferred.succeed(completed, undefined);
+                  }),
+              });
+              yield* Effect.gen(function* () {
+                inbox = yield* OperationInbox;
+                yield* Deferred.await(busy);
+                yield* TestClock.adjust(0);
+                expect(attempts).toEqual(['A']);
+                const cause = diagnostics[0];
+                if (!Cause.isCause(cause)) throw new Error('Missing original storage cause');
+                expect(cause.reasons).toContainEqual(
+                  expect.objectContaining({
+                    error: expect.objectContaining({ kind: 'busy', code: 'SQLITE_BUSY' }),
+                  })
+                );
+                for (let i = 0; i < 5; i++) yield* inbox.wake;
+                yield* TestClock.adjust(249);
+                expect(attempts).toEqual(['A']);
+                expect(received).toEqual([]);
+                expect(
+                  db.prepare('SELECT COUNT(*) AS n FROM inbox_results WHERE consumed=0').get()
+                ).toEqual({ n: 3 });
+                yield* TestClock.adjust(1);
+                expect(attempts).toEqual(['A', 'A']);
+                for (const delay of [500, 1000, 2000]) {
+                  const before = attempts.length;
+                  yield* TestClock.adjust(delay - 1);
+                  expect(attempts).toHaveLength(before);
+                  yield* TestClock.adjust(1);
+                  expect(attempts).toEqual(Array.from({ length: before + 1 }, () => 'A'));
+                }
+                if (ending === 'dispose') return;
+                locked = false;
+                blocker.exec('ROLLBACK');
+                // The scanner's backoff must not fence explicit new admission.
+                const fresh = { ...f.input, sessionId: 'D', inputId: 'fresh-D' };
+                expect(yield* inbox.accept(fresh)).toBe(true);
+                expect(yield* inbox.begin(fresh, 'execution-D')).toBe(true);
+                yield* inbox.submit(undefined, fresh, 'execution-D', () => received.push('D'));
+                yield* inbox.release({ ...fresh, executionId: 'execution-D', outcome: 'normal' });
+                yield* TestClock.adjust(2000);
+                yield* Deferred.await(completed);
+                expect(received.toSorted()).toEqual(['A', 'B', 'C', 'D']);
+                expect(
+                  db.prepare('SELECT COUNT(*) AS n FROM inbox_results WHERE consumed=0').get()
+                ).toEqual({ n: 0 });
+              }).pipe(
+                Effect.provide(
+                  OperationInbox.layer('workspace', 'owner').pipe(
+                    Layer.provide(Layer.merge(repo, execution))
+                  )
+                )
+              );
+            })
+          );
+          // Scope closure cancels the owned retry; it must not touch the DB later.
+          const before = attempts.length;
+          yield* TestClock.adjust(10_000);
+          expect(attempts).toHaveLength(before);
+        }).pipe(Effect.provide(TestClock.layer()))
+      );
+    } finally {
+      if (blocker.inTransaction) blocker.exec('ROLLBACK');
+      blocker.close();
+      db.close();
+    }
+  }
+);
+
+it('retains every settlement and its original error when shared BUSY interrupts recovery', async () => {
+  const f = fixture();
+  const db = new Database(f.filename, { timeout: 0 });
+  const sql = new InboxSqlite(db);
+  const batches = ['A', 'B'].map((sessionId) => {
+    const input = { ...f.input, sessionId, inputId: `input-${sessionId}` };
+    sql.accept(input);
+    f.add(`result-${sessionId}`, 0, [], sessionId);
+    const batch = sql.prepare(input, 'owner');
+    if (!batch) throw new Error('Missing batch');
+    sql.begin(input, `execution-${sessionId}`, 'owner');
+    expect(sql.fence(batch, `execution-${sessionId}`)).toBe(true);
+    return batch;
+  });
+  const blocker = new Database(f.filename);
+  const [firstBatch, secondBatch] = batches;
+  if (!firstBatch || !secondBatch) throw new Error('Missing retained batches');
+  f.add('pending-C', 0, [], 'C');
+  const attempts: string[] = [];
+  let recovering = false;
+  try {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const base = yield* Effect.provide(InboxRepository, inboxRepositoryLayer(sql));
+          const deps = Layer.merge(
+            Layer.succeed(InboxRepository, {
+              ...base,
+              prepare: (...args: Parameters<typeof base.prepare>) =>
+                Effect.suspend(() => {
+                  if (recovering) attempts.push(`prepare-${args[0].sessionId}`);
+                  return base.prepare(...args);
+                }),
+              settle: (...args: Parameters<typeof base.settle>) =>
+                Effect.suspend(() => {
+                  if (!recovering)
+                    return Effect.fail(
+                      new OrchestrationStorageFailure(new Error('retain this receipt'))
+                    );
+                  attempts.push(args[0].sessionId);
+                  return base.settle(...args);
+                }),
+            }),
+            Layer.succeed(InboxExecution, {
+              ready: () => false,
+              admit: () => true,
+              launch: () => Effect.void,
+              report: () => Effect.void,
+            })
+          );
+          yield* Effect.gen(function* () {
+            const inbox = yield* OperationInbox;
+            yield* inbox.settle(firstBatch, 'unknown', 'original provider error');
+            yield* inbox.settle(secondBatch, 'settled');
+            yield* TestClock.adjust(0);
+            recovering = true;
+            blocker.exec('BEGIN IMMEDIATE');
+            const repo = yield* InboxRepository;
+            try {
+              const exit = yield* Effect.exit(
+                inbox.recoverSettlements(repo.settle, repo.release, repo.pause)
+              );
+              expect(attempts).toEqual(['A']);
+              expect(Exit.isFailure(exit)).toBe(true);
+              if (!Exit.isFailure(exit)) throw new Error('Missing BUSY failure');
+              expect(exit.cause.reasons).toContainEqual(
+                expect.objectContaining({ error: expect.objectContaining({ code: 'SQLITE_BUSY' }) })
+              );
+              // Background recovery must not proceed to C's preparation after
+              // the retained A receipt already hit the shared writer lock.
+              yield* inbox.wake;
+              yield* TestClock.adjust(0);
+              expect(attempts).toEqual(['A', 'A']);
+            } finally {
+              blocker.exec('ROLLBACK');
+            }
+            yield* inbox.recoverSettlements(repo.settle, repo.release, repo.pause);
+            expect(attempts).toEqual(['A', 'A', 'A', 'B']);
+            expect(
+              db
+                .prepare(
+                  "SELECT session_id,state,cause FROM inbox_batches WHERE session_id IN ('A','B') ORDER BY session_id"
+                )
+                .all()
+            ).toEqual([
+              { session_id: 'A', state: 'unknown', cause: 'original provider error' },
+              { session_id: 'B', state: 'settled', cause: null },
+            ]);
+          }).pipe(
+            Effect.provide(
+              OperationInbox.layer('workspace', 'owner').pipe(Layer.provideMerge(deps))
+            )
+          );
+        })
+      ).pipe(Effect.provide(TestClock.layer()))
+    );
+  } finally {
+    if (blocker.inTransaction) blocker.exec('ROLLBACK');
+    blocker.close();
+    db.close();
+  }
+});
+
+it('retains a failed settlement without blocking a later receipt from being recovered', async () => {
+  const f = fixture();
+  f.sql.accept(f.input);
+  f.add('A-result');
+  const b = { ...f.input, sessionId: 'B', inputId: 'B-input' };
+  f.sql.accept(b);
+  f.add('B-result', 0, [], 'B');
+  const aBatch = f.sql.prepare(f.input, 'owner');
+  const bBatch = f.sql.prepare(b, 'owner');
+  if (!aBatch || !bBatch) throw new Error('Missing test batch');
+  f.sql.begin(f.input, 'exec-A', 'owner');
+  f.sql.begin(b, 'exec-B', 'owner');
+  expect(f.sql.fence(aBatch, 'exec-A')).toBe(true);
+  expect(f.sql.fence(bBatch, 'exec-B')).toBe(true);
+  const db = new Database(f.filename);
+  db.exec(
+    "CREATE TRIGGER fail_settle BEFORE UPDATE ON inbox_batches WHEN OLD.state='submitting' BEGIN SELECT RAISE(ABORT,'settlement unavailable'); END;"
+  );
+  try {
+    const deps = Layer.merge(
+      inboxRepositoryLayer(f.sql),
+      Layer.succeed(InboxExecution, {
+        ready: () => false,
+        admit: () => true,
+        launch: () => Effect.void,
+        report: () => Effect.void,
+      })
+    );
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const inbox = yield* OperationInbox;
+          yield* inbox.settle(aBatch, 'unknown');
+          yield* inbox.settle(bBatch, 'settled');
+          db.exec(
+            "DROP TRIGGER fail_settle; CREATE TRIGGER fail_A BEFORE UPDATE ON inbox_batches WHEN OLD.session_id='A' BEGIN SELECT RAISE(ABORT,'A still unavailable'); END;"
+          );
+          const repo = yield* InboxRepository;
+          const recovered = yield* Effect.exit(
+            inbox.recoverSettlements(repo.settle, repo.release, repo.pause)
+          );
+          expect(recovered._tag).toBe('Failure');
+          expect(f.sql.getBatch(aBatch.batchId, f.input)?.state).toBe('submitting');
+          expect(f.sql.getBatch(bBatch.batchId, b)?.state).toBe('settled');
+          db.exec('DROP TRIGGER fail_A');
+          yield* inbox.recoverSettlements(repo.settle, repo.release, repo.pause);
+          expect(f.sql.getBatch(aBatch.batchId, f.input)?.state).toBe('unknown');
+        }).pipe(
+          Effect.provide(OperationInbox.layer('workspace', 'owner').pipe(Layer.provideMerge(deps)))
+        )
+      )
+    );
+  } finally {
+    db.close();
+  }
 });

@@ -1,9 +1,15 @@
 import { statusRefreshInterval } from './pr-poll-priority';
 import { collectStatusTargets } from './pr-poll-targets';
 import { selectWorkflowHead } from './workflow-runs';
-import { collectViewedSessionIdsFromPresence, getServerNow, type SessionId } from '@lody/shared';
+import {
+  collectViewedSessionIdsFromPresence,
+  getServerNow,
+  type LodyPresenceStateMap,
+  type SessionId,
+} from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
+import { reportIfWasmFault } from '@/lib/loro/wasm-runtime-health';
 import { buildPrPollBatchQuery, type PrPollBatchQuery } from './graphql-batch-builder';
 import type {
   GitHubGraphQlClient,
@@ -483,6 +489,23 @@ export class PrPollScheduler {
     return fingerprints;
   }
 
+  /**
+   * Presence only raises viewed Sessions to the high lane. This runs from timers
+   * with no caller to catch for it, so a failed read (a faulted Loro instance
+   * throws here) degrades to "nobody viewing" instead of an uncaught exception.
+   */
+  private readPresenceStates(runtime: WorkspaceRuntime): LodyPresenceStateMap {
+    try {
+      return runtime.handle.getPresenceStates() ?? {};
+    } catch (error) {
+      reportIfWasmFault(error);
+      this.deps.logger.debug(
+        `[pr-poller] Presence read failed for ${runtime.handle.workspaceId}: ${formatErrorMessage(error)}`
+      );
+      return {};
+    }
+  }
+
   /** Facts → schedulable targets: one pure pass over all ready workspaces. */
   private buildTargets(nowMs: number): SchedulableTarget[] {
     const { config } = this.deps;
@@ -491,10 +514,7 @@ export class PrPollScheduler {
       if (!runtime.ready) {
         continue;
       }
-      const viewed = collectViewedSessionIdsFromPresence(
-        runtime.handle.getPresenceStates() ?? {},
-        nowMs
-      );
+      const viewed = collectViewedSessionIdsFromPresence(this.readPresenceStates(runtime), nowMs);
       const highOwners = selectHighOwners(runtime.entries, viewed, nowMs, {
         activityWindowMs: config.activityWindowMs,
         highOwnerCap: config.highOwnerCap,

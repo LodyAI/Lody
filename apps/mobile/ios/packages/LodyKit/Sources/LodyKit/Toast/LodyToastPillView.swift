@@ -32,7 +32,7 @@ final class LodyToastPillView: UIView {
         for: .systemFont(ofSize: 15, weight: .semibold)
       )
       action.titleLabel?.adjustsFontForContentSizeCategory = true
-      action.tintColor = .systemBlue
+      action.tintColor = .label
       action.accessibilityIdentifier = "lody.toast.undo"
       action.accessibilityLabel = actionTitle
       actionButton = action

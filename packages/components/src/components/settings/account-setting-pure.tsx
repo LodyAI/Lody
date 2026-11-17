@@ -27,8 +27,9 @@ import { LinkedAccountsList, type LinkedAccountInfo } from './linked-accounts-li
 import { MobileAccountSettings } from '@/components/mobile/mobile-account-settings';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { UserAvatar } from '@/components/user-avatar';
-import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { settingsSurface } from './surface';
+import { describeCliApiKey } from './cli-api-key-display';
+import { Badge } from '@lody/ui/badge';
 
 const styles = stylex.create({
   loading: {
@@ -63,6 +64,8 @@ const styles = stylex.create({
   glyph: { width: '100%', height: '100%' },
 
   noteLoading: { display: 'flex', alignItems: 'center', gap: space[2] },
+  /** A token's "This computer" badge beside its Revoke answer. */
+  tokenControls: { display: 'inline-flex', alignItems: 'center', gap: space[2] },
 
   /** A dialog's body between its header and its answers. */
   dialogBody: { display: 'flex', flexDirection: 'column', gap: space[3] },
@@ -72,24 +75,7 @@ const styles = stylex.create({
   alignSelfStart: { alignSelf: 'flex-start' },
 });
 
-function formatCliApiKeyTimestamp(value: number | null, language: string): string | null {
-  if (value === null) {
-    return null;
-  }
-
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) {
-    return null;
-  }
-
-  return new Intl.DateTimeFormat(toIntlLocaleOrEn(language), {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
-}
+const EMPTY_MACHINE_NAMES: ReadonlyMap<string, string> = new Map();
 
 export interface AccountMember {
   id: string;
@@ -136,6 +122,13 @@ export interface AccountSettingsPureProps {
   pendingInvitations: Invitation[];
   workspaceJoinRequestsSlot?: ReactNode;
   workspaceOwnershipSlot?: ReactNode;
+  /**
+   * The encrypted workspace's security entry. It opens the workspace page inside
+   * the page column, so its heading and rows line up with the sections below.
+   */
+  workspaceSecuritySlot?: ReactNode;
+  /** An end-to-end encrypted workspace: leaving and deletion state their encryption consequences. */
+  encryptedWorkspace?: boolean;
   /** Account-only machine overview supplied by the runtime-aware container. */
   accountMachinesSlot?: ReactNode;
   accountBillingSlot?: ReactNode;
@@ -177,6 +170,10 @@ export interface AccountSettingsPureProps {
   onSetupPassword?: () => Promise<void>;
   canGenerateCliApiKey?: boolean;
   cliApiKeys?: CliApiKeyRecord[];
+  /** Machine id → display name, to say which machine each token signs in. */
+  cliApiKeyMachineNames?: ReadonlyMap<string, string>;
+  /** The machine this page runs on, if a local runtime is reachable. */
+  currentMachineId?: string | null;
   isLoadingCliApiKeys?: boolean;
   isCreatingCliApiKey?: boolean;
   hasGeneratedCliApiKey?: boolean;
@@ -197,6 +194,8 @@ export function AccountSettingsPure({
   pendingInvitations: initialPendingInvitations,
   workspaceJoinRequestsSlot,
   workspaceOwnershipSlot,
+  workspaceSecuritySlot,
+  encryptedWorkspace = false,
   accountMachinesSlot,
   accountBillingSlot,
   memberLimit = null,
@@ -229,6 +228,8 @@ export function AccountSettingsPure({
   onSetupPassword,
   canGenerateCliApiKey = false,
   cliApiKeys = [],
+  cliApiKeyMachineNames = EMPTY_MACHINE_NAMES,
+  currentMachineId = null,
   isLoadingCliApiKeys = false,
   isCreatingCliApiKey = false,
   hasGeneratedCliApiKey = false,
@@ -265,6 +266,14 @@ export function AccountSettingsPure({
   const [cliApiKeyDialogOpen, setCliApiKeyDialogOpen] = useState(false);
   const [cliApiKeyNote, setCliApiKeyNote] = useState('');
   const [cliApiKeyToRevoke, setCliApiKeyToRevoke] = useState<CliApiKeyRecord | null>(null);
+  const describeApiKey = (apiKey: CliApiKeyRecord) =>
+    describeCliApiKey(apiKey, {
+      machineNamesById: cliApiKeyMachineNames,
+      currentMachineId,
+      language: i18n.language,
+      t,
+    });
+  const cliApiKeyToRevokeDisplay = cliApiKeyToRevoke ? describeApiKey(cliApiKeyToRevoke) : null;
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
 
   // Profile: user display-name inline edit (mirrors the workspace name pattern).
@@ -484,70 +493,83 @@ export function AccountSettingsPure({
     }
   };
 
+  const securitySlot = surface === 'workspace' ? workspaceSecuritySlot : undefined;
+
   if (loading) {
     return (
-      <div {...stylex.props(styles.loading)}>
-        <Spinner size="large" />
-      </div>
+      <>
+        {securitySlot ? (
+          <div {...stylex.props(settingsSurface.container)}>{securitySlot}</div>
+        ) : null}
+        <div {...stylex.props(styles.loading)}>
+          <Spinner size="large" />
+        </div>
+      </>
     );
   }
 
   if (isMobile) {
     return (
-      <MobileAccountSettings
-        surface={surface}
-        currentUser={currentUser}
-        organization={organization}
-        role={role}
-        hasAdminPermission={hasAdminPermission}
-        members={members}
-        pendingInvitations={initialPendingInvitations}
-        workspaceJoinRequestsSlot={workspaceJoinRequestsSlot}
-        workspaceOwnershipSlot={workspaceOwnershipSlot}
-        memberLimit={memberLimit}
-        memberLimitReached={memberLimitReached}
-        billingUiAvailable={billingUiAvailable}
-        seatPreview={seatPreview}
-        onSignOut={onSignOut}
-        onInviteMember={onInviteMember}
-        onRemoveMember={onRemoveMember}
-        onUpdateRole={onUpdateRole}
-        onCopyInviteLink={onCopyInviteLink}
-        onCancelInvitation={onCancelInvitation}
-        onLeaveOrganization={onLeaveOrganization}
-        onDeleteOrganization={onDeleteOrganization}
-        deleteBillingGuard={deleteBillingGuard}
-        onDeleteAccount={onDeleteAccount}
-        onRenameOrganization={onRenameOrganization}
-        getInviteLink={getInviteLink}
-        onUpdateUserName={onUpdateUserName}
-        onUploadAvatar={onUploadAvatar}
-        linkedAccounts={linkedAccounts}
-        isLoadingLinkedAccounts={isLoadingLinkedAccounts}
-        onConnectAccount={onConnectAccount}
-        showLinkedAccounts={showLinkedAccounts}
-        hasPasswordCredential={hasPasswordCredential}
-        onChangePassword={onChangePassword}
-        onVerifyCurrentPassword={onVerifyCurrentPassword}
-        onSetupPassword={onSetupPassword}
-        canGenerateCliApiKey={canGenerateCliApiKey}
-        cliApiKeys={cliApiKeys}
-        isLoadingCliApiKeys={isLoadingCliApiKeys}
-        isCreatingCliApiKey={isCreatingCliApiKey}
-        hasGeneratedCliApiKey={hasGeneratedCliApiKey}
-        revokingCliApiKeyId={revokingCliApiKeyId}
-        onGenerateCliApiKey={onGenerateCliApiKey}
-        onCopyGeneratedCliApiKey={onCopyGeneratedCliApiKey}
-        onClearGeneratedCliApiKey={onClearGeneratedCliApiKey}
-        onRevokeCliApiKey={onRevokeCliApiKey}
-        accountMachinesSlot={accountMachinesSlot}
-        accountBillingSlot={accountBillingSlot}
-      />
+      <>
+        {securitySlot}
+        <MobileAccountSettings
+          surface={surface}
+          currentUser={currentUser}
+          organization={organization}
+          role={role}
+          hasAdminPermission={hasAdminPermission}
+          members={members}
+          pendingInvitations={initialPendingInvitations}
+          workspaceJoinRequestsSlot={workspaceJoinRequestsSlot}
+          workspaceOwnershipSlot={workspaceOwnershipSlot}
+          memberLimit={memberLimit}
+          memberLimitReached={memberLimitReached}
+          billingUiAvailable={billingUiAvailable}
+          seatPreview={seatPreview}
+          onSignOut={onSignOut}
+          onInviteMember={onInviteMember}
+          onRemoveMember={onRemoveMember}
+          onUpdateRole={onUpdateRole}
+          onCopyInviteLink={onCopyInviteLink}
+          onCancelInvitation={onCancelInvitation}
+          onLeaveOrganization={onLeaveOrganization}
+          onDeleteOrganization={onDeleteOrganization}
+          deleteBillingGuard={deleteBillingGuard}
+          onDeleteAccount={onDeleteAccount}
+          onRenameOrganization={onRenameOrganization}
+          getInviteLink={getInviteLink}
+          onUpdateUserName={onUpdateUserName}
+          onUploadAvatar={onUploadAvatar}
+          linkedAccounts={linkedAccounts}
+          isLoadingLinkedAccounts={isLoadingLinkedAccounts}
+          onConnectAccount={onConnectAccount}
+          showLinkedAccounts={showLinkedAccounts}
+          hasPasswordCredential={hasPasswordCredential}
+          onChangePassword={onChangePassword}
+          onVerifyCurrentPassword={onVerifyCurrentPassword}
+          onSetupPassword={onSetupPassword}
+          canGenerateCliApiKey={canGenerateCliApiKey}
+          cliApiKeys={cliApiKeys}
+          cliApiKeyMachineNames={cliApiKeyMachineNames}
+          currentMachineId={currentMachineId}
+          isLoadingCliApiKeys={isLoadingCliApiKeys}
+          isCreatingCliApiKey={isCreatingCliApiKey}
+          hasGeneratedCliApiKey={hasGeneratedCliApiKey}
+          revokingCliApiKeyId={revokingCliApiKeyId}
+          onGenerateCliApiKey={onGenerateCliApiKey}
+          onCopyGeneratedCliApiKey={onCopyGeneratedCliApiKey}
+          onClearGeneratedCliApiKey={onClearGeneratedCliApiKey}
+          onRevokeCliApiKey={onRevokeCliApiKey}
+          accountMachinesSlot={accountMachinesSlot}
+          accountBillingSlot={accountBillingSlot}
+        />
+      </>
     );
   }
 
   return (
     <div {...stylex.props(settingsSurface.container)}>
+      {securitySlot}
       {/* Profile: who the person is — email, display name, avatar, connected accounts. */}
       {surface === 'account' ? (
         <CompactSection title={t('settings.profile.title')}>
@@ -768,8 +790,11 @@ export function AccountSettingsPure({
               </AlertDialog.Title>
               <AlertDialog.Description>
                 {t('settings.account.cliAuth.revokeDialogDescription', {
-                  note: cliApiKeyToRevoke?.note ?? t('settings.account.cliAuth.recordNoteFallback'),
+                  note: cliApiKeyToRevokeDisplay?.title ?? '',
                 })}
+                {cliApiKeyToRevokeDisplay?.isCurrentMachine
+                  ? ` ${t('settings.account.cliAuth.revokeCurrentMachineWarning')}`
+                  : null}
               </AlertDialog.Description>
             </AlertDialog.Header>
             <AlertDialog.Footer>
@@ -956,39 +981,35 @@ export function AccountSettingsPure({
             </p>
           ) : (
             cliApiKeys.map((apiKey) => {
-              const createdAt = formatCliApiKeyTimestamp(apiKey.createdAt, i18n.language);
-              const lastRequest = formatCliApiKeyTimestamp(apiKey.lastRequest, i18n.language);
-              const sourceLabel =
-                apiKey.source === 'auto'
-                  ? t('settings.account.cliAuth.sourceAuto')
-                  : apiKey.source === 'manual'
-                    ? t('settings.account.cliAuth.sourceManual')
-                    : null;
-
+              const display = describeApiKey(apiKey);
               return (
                 <CompactRow
                   key={apiKey.id}
-                  label={apiKey.note || t('settings.account.cliAuth.recordNoteFallback')}
+                  label={display.title}
                   helper={[
                     apiKey.keyPreview,
-                    sourceLabel,
-                    createdAt,
-                    lastRequest
-                      ? t('settings.account.cliAuth.lastUsed', { at: lastRequest })
-                      : null,
+                    display.sourceLabel,
+                    display.lifetime,
+                    display.createdAt,
+                    display.lastUsed,
                   ]
                     .filter(Boolean)
                     .join(' · ')}
                 >
-                  <Button
-                    variant="secondary"
-                    size="small"
-                    onClick={() => setCliApiKeyToRevoke(apiKey)}
-                    disabled={revokingCliApiKeyId === apiKey.id}
-                  >
-                    {revokingCliApiKeyId === apiKey.id ? <Spinner size="small" /> : null}
-                    {t('settings.account.cliAuth.revokeButton')}
-                  </Button>
+                  <span {...stylex.props(styles.tokenControls)}>
+                    {display.isCurrentMachine ? (
+                      <Badge>{t('settings.account.cliAuth.currentMachine')}</Badge>
+                    ) : null}
+                    <Button
+                      variant="secondary"
+                      size="small"
+                      onClick={() => setCliApiKeyToRevoke(apiKey)}
+                      disabled={revokingCliApiKeyId === apiKey.id}
+                    >
+                      {revokingCliApiKeyId === apiKey.id ? <Spinner size="small" /> : null}
+                      {t('settings.account.cliAuth.revokeButton')}
+                    </Button>
+                  </span>
                 </CompactRow>
               );
             })
@@ -1037,7 +1058,11 @@ export function AccountSettingsPure({
           {role !== 'owner' && (
             <CompactRow
               label={t('workspace.danger.leaveWorkspace.title')}
-              helper={t('workspace.danger.leaveWorkspace.description')}
+              helper={t(
+                encryptedWorkspace
+                  ? 'workspace.danger.leaveWorkspace.encryptedDescription'
+                  : 'workspace.danger.leaveWorkspace.description'
+              )}
             >
               <Button
                 variant="secondary"
@@ -1052,7 +1077,11 @@ export function AccountSettingsPure({
           {role === 'owner' && (
             <CompactRow
               label={t('workspace.danger.deleteWorkspace.title')}
-              helper={t('workspace.danger.deleteWorkspace.description')}
+              helper={t(
+                encryptedWorkspace
+                  ? 'workspace.danger.deleteWorkspace.encryptedDescription'
+                  : 'workspace.danger.deleteWorkspace.description'
+              )}
             >
               <Button
                 variant="secondary"
@@ -1209,6 +1238,16 @@ export function AccountSettingsPure({
             </Dialog.Description>
           </Dialog.Header>
           <div {...stylex.props(styles.dialogForm)}>
+            {encryptedWorkspace ? (
+              <Alert.Root tone="danger" data-testid="e2ee-delete-consequences">
+                <Alert.Description>
+                  {t('workspace.danger.deleteWorkspace.encryptedLoss')}
+                </Alert.Description>
+                <Alert.Description>
+                  {t('workspace.danger.deleteWorkspace.encryptedDownloaded')}
+                </Alert.Description>
+              </Alert.Root>
+            ) : null}
             {billingUiAvailable && deleteBillingGuard?.kind === 'cancel-scheduled' ? (
               <Alert.Root tone="warning">
                 <Alert.Description>

@@ -1,5 +1,8 @@
 import { control } from '@lody/ui/tokens/scales.stylex';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { toast } from '@/lib/toast';
 import {
   AlarmClock,
@@ -23,19 +26,24 @@ import * as stylex from '@stylexjs/stylex';
 import { clsx } from 'clsx';
 import {
   getSessionPullRequestLegacyFields,
+  hasWorkspaceChanges,
   isSessionGoalCleared,
   isSessionGoalResumable,
   parseGitHubPrNumber,
   sanitizeGoalObjective,
   type GitHubCheckRun,
   type GitHubMergeMethod,
+  type LineChange,
   type PendingScheduledTask,
   type PrStatus,
   type SessionGoalCommand,
   type SessionGoalMessage,
   type SessionPullRequestCiState,
   type SessionPullRequestMeta,
+  type SessionPullRequestView,
 } from '@lody/shared';
+import { cn } from '@/lib/utils';
+import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { getGoalStatusPresentation } from '@/lib/session-goal-status';
@@ -1022,6 +1030,8 @@ export function ContextChip({
   workspaceLocation,
   pr,
   onOpenPr,
+  prHistory,
+  onOpenHistoryPr,
   actions,
   onOpenAllChanges,
   diffStat,
@@ -1039,11 +1049,16 @@ export function ContextChip({
   workspaceLocation?: { kind: WorkspaceLocationKind; path?: string | null } | null;
   pr?: SessionPullRequestMeta | null;
   onOpenPr?: () => void;
+  /** Every PR of this context, `pr` first (see `resolveSessionPullRequestHistory`).
+   *  With more than one, the PR marker opens this list instead of `pr` directly. */
+  prHistory?: readonly SessionPullRequestView[];
+  /** Open an older PR from the history list; the first entry uses `onOpenPr`. */
+  onOpenHistoryPr?: (view: SessionPullRequestView) => void;
   /** Agent-driven PR/worktree actions pinned after the context summary. */
   actions?: readonly ContextChipAction[];
   /** Open the complete working-tree diff. */
   onOpenAllChanges?: () => void;
-  diffStat?: { add: number; del: number } | null;
+  diffStat?: LineChange | null;
   prCiRuns?: readonly PrCiRun[];
   onOpenPrCiRun?: (run: PrCiRun) => void;
   /** CI verdict from session metadata, the same value the sidebar shows. Live
@@ -1051,7 +1066,7 @@ export function ContextChip({
   prCiState?: SessionPullRequestCiState | null;
 } & InfoBarItemMode) {
   const { t } = useTranslation();
-  const hasDiff = diffStat != null && diffStat.add + diffStat.del > 0;
+  const hasDiff = hasWorkspaceChanges(diffStat);
   const trimmedBranch = branch?.trim() || '';
   if (!pr && !projectName && !trimmedBranch && !hasDiff && !actions?.length) return null;
 
@@ -1097,8 +1112,18 @@ export function ContextChip({
     });
   };
 
+  const prMarker = (
+    <>
+      <SessionPrIcon prStatus={status ?? 'open'} prCiState={prCiState} />
+      {value ? <span className="hidden shrink-0 tabular-nums @[420px]:inline">{value}</span> : null}
+    </>
+  );
   const prControl = pr ? (
-    onOpenPr ? (
+    prHistory && prHistory.length > 1 ? (
+      <PrHistoryControl history={prHistory} onOpenCurrent={onOpenPr} onOpenOlder={onOpenHistoryPr}>
+        {prMarker}
+      </PrHistoryControl>
+    ) : onOpenPr ? (
       <button
         type="button"
         onClick={onOpenPr}
@@ -1106,13 +1131,11 @@ export function ContextChip({
         title={t('sessions.pr.openTab', 'Open pull request')}
         className={clsx(stylex.props(styles.prButton).className, INFO_BAR_TEXT_CLASS)}
       >
-        <SessionPrIcon prStatus={status ?? 'open'} prCiState={prCiState} />
-        {value ? <span {...stylex.props(styles.chipValue)}>{value}</span> : null}
+        {prMarker}
       </button>
     ) : (
       <span {...stylex.props(styles.prStatic)}>
-        <SessionPrIcon prStatus={status ?? 'open'} prCiState={prCiState} />
-        {value ? <span {...stylex.props(styles.chipValue)}>{value}</span> : null}
+        {prMarker}
       </span>
     )
   ) : undefined;
@@ -1138,7 +1161,8 @@ export function ContextChip({
   // like GitHub's (the PR's green and red), apart from the repo/branch text.
   // Under squeeze the action label truncates first; the totals clip last,
   // inside their own chip rather than past the bar.
-  const diffChip = hasDiff ? (
+  const diffChip =
+    hasDiff && diffStat ? (
     <button
       type="button"
       onClick={onOpenAllChanges}
@@ -1147,10 +1171,16 @@ export function ContextChip({
       title={t('sessions.detailTabs.allChanges', 'All Changes')}
       className={clsx(stylex.props(styles.diffChip).className, INFO_BAR_TEXT_CLASS)}
     >
-      <span {...stylex.props(styles.diffAdded)}>+{diffStat.add}</span>
-      <span {...stylex.props(styles.diffRemoved)}>−{diffStat.del}</span>
+      {diffStat.add + diffStat.del > 0 ? (
+        <>
+          <span {...stylex.props(styles.diffAdded)}>+{diffStat.add}</span>
+          <span {...stylex.props(styles.diffRemoved)}>−{diffStat.del}</span>
+        </>
+      ) : (
+        <span>{t('sessions.fileProvider.fileCount', '{{count}} files', { count: diffStat.files })}</span>
+      )}
     </button>
-  ) : null;
+    ) : null;
   const trailing =
     diffChip || actions?.length ? (
       <>
@@ -1187,6 +1217,137 @@ export function ContextChip({
       }
       trailing={trailing}
     />
+  );
+}
+
+const prHistoryStyles = stylex.create({
+  header: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: space[2],
+    padding: `${space[2]} ${space[2]} ${space[1]}`,
+    fontSize: text.footnoteSize,
+  },
+  title: { color: colors.label, fontWeight: 500 },
+  count: { color: colors.secondaryLabel },
+  list: { maxHeight: 280, overflowY: 'auto', padding: space[1], margin: 0, listStyle: 'none' },
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    width: '100%',
+    minHeight: '28px',
+    paddingInline: space[1.5],
+    borderWidth: 0,
+    borderRadius: '6px',
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    color: 'inherit',
+    font: 'inherit',
+    fontSize: text.footnoteSize,
+    textAlign: 'left',
+    cursor: 'pointer',
+  },
+  rowStatic: { cursor: 'default', backgroundColor: 'transparent' },
+  number: { flex: 1, color: colors.label, fontVariantNumeric: 'tabular-nums' },
+});
+
+/**
+ * The context stage's PR marker when the conversation has created more than
+ * one PR. The marker still shows the current PR; one click lists every PR so
+ * an earlier one is never lost when a newer one takes the stage.
+ */
+function PrHistoryControl({
+  history,
+  onOpenCurrent,
+  onOpenOlder,
+  children,
+}: {
+  history: readonly SessionPullRequestView[];
+  onOpenCurrent?: () => void;
+  onOpenOlder?: (view: SessionPullRequestView) => void;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const label = t('sessions.pr.history', 'Pull requests ({{count}})', { count: history.length });
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger
+        render={
+          <button
+            type="button"
+            aria-label={label}
+            title={label}
+            className={cn(
+              'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 font-medium text-muted-foreground transition-colors hover:bg-muted-foreground/10',
+              INFO_BAR_TEXT_CLASS,
+              open && 'bg-muted-foreground/10'
+            )}
+          >
+            {children}
+            <ChevronDown className="h-3 w-3 shrink-0" aria-hidden="true" />
+          </button>
+        }
+      />
+      <Popover.Content
+        side="top"
+        align="start"
+        sideOffset={8}
+        aria-label={label}
+        className="w-max max-w-[min(20rem,90vw)] border-border/60 p-0 shadow-xl"
+      >
+        {/* One child: the popup surface spaces its direct children apart. */}
+        <div>
+          <div {...stylex.props(prHistoryStyles.header)}>
+            <span {...stylex.props(prHistoryStyles.title)}>
+              {t('sessions.pr.historyTitle', 'Pull requests')}
+            </span>
+            <span {...stylex.props(prHistoryStyles.count)}>{history.length}</span>
+          </div>
+          <ul {...stylex.props(prHistoryStyles.list)}>
+            {history.map((view, index) => {
+              const isCurrent = index === 0;
+              const openPr = isCurrent
+                ? onOpenCurrent
+                : onOpenOlder
+                  ? () => onOpenOlder(view)
+                  : undefined;
+              const content = (
+                <>
+                  <SessionPrIcon prStatus={view.status} prCiState={view.ci} />
+                  <span {...stylex.props(prHistoryStyles.number)}>
+                    {view.number != null ? `#${view.number}` : 'PR'}
+                  </span>
+                  {isCurrent ? <Badge>{t('sessions.pr.historyCurrent', 'Current')}</Badge> : null}
+                </>
+              );
+              return (
+                <li key={view.url}>
+                  {openPr ? (
+                    <button
+                      type="button"
+                      title={view.url}
+                      aria-current={isCurrent ? 'true' : undefined}
+                      onClick={() => {
+                        setOpen(false);
+                        openPr();
+                      }}
+                      {...stylex.props(prHistoryStyles.row)}
+                    >
+                      {content}
+                    </button>
+                  ) : (
+                    <span {...stylex.props(prHistoryStyles.row, prHistoryStyles.rowStatic)}>
+                      {content}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      </Popover.Content>
+    </Popover.Root>
   );
 }
 

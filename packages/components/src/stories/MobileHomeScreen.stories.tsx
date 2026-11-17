@@ -308,7 +308,6 @@ function MobileHomeScreenStory({
             recentProjectsHeading: '最近常用',
             allLocalProjectsHeading: '全部项目',
             allGitHubReposHeading: '全部仓库',
-            allChatsHeading: '全部对话',
             emptyLocalProjects: '当前 workspace 没有已加入的本地项目',
             emptyGitHubProjects: '当前 workspace 没有已授权的 GitHub 仓库',
             emptyChats: '当前 workspace 还没有对话',

@@ -86,6 +86,7 @@ type StoryProps = {
    * anything gated on it, like the daemon-update banner) reads true. */
   presenceOnline?: boolean;
   showUpdate?: boolean;
+  showIdentityRestore?: boolean;
 };
 
 function StoryWrapper({
@@ -100,6 +101,7 @@ function StoryWrapper({
   canRevokeCredentials = false,
   presenceOnline = false,
   showUpdate = false,
+  showIdentityRestore = false,
 }: StoryProps) {
   const [store] = useState(() => {
     const nextStore = createStore();
@@ -120,10 +122,29 @@ function StoryWrapper({
     <Provider store={store}>
       <div {...stylex.props(storyStyles.panel)}>
         <MachineDetailPane
+          mode={showIdentityRestore ? 'devices' : 'agents'}
+          onRestoreIdentity={
+            showIdentityRestore
+              ? async () => {
+                  throw new Error('Preview only: no daemon was changed.');
+                }
+              : undefined
+          }
+          restoreIdentityCandidates={
+            showIdentityRestore
+              ? [
+                  {
+                    ...baseMachine,
+                    id: 'retired-windows-machine' as MachineId,
+                    name: 'Windows before reinstall',
+                  },
+                ]
+              : []
+          }
           machine={machine}
           configs={storyConfigs}
           isOwn={isOwn}
-          isLocal={isOwn}
+          isLocal={isOwn && !showIdentityRestore}
           ownerName={ownerName}
           sharedWithTeam={sharedWithTeam}
           canDelete={canDelete}
@@ -180,11 +201,7 @@ export const OwnWithProviders: Story = {
             },
           ],
         },
-        [getRateLimitEntryKey(
-          'codex',
-          CODEX_SPARK_LIMIT_ID,
-          'cfg-codex' as AgentConfigId
-        )]: {
+        [getRateLimitEntryKey('codex', CODEX_SPARK_LIMIT_ID, 'cfg-codex' as AgentConfigId)]: {
           limitId: CODEX_SPARK_LIMIT_ID,
           scope: { providerId: 'codex' },
           planName: 'Codex Spark',
@@ -253,5 +270,15 @@ export const DesktopDaemonUpdateBanner: Story = {
     canDelete: true,
     presenceOnline: true,
     showUpdate: true,
+  },
+};
+
+export const IdentityRecovery: Story = {
+  args: {
+    machine: { ...baseMachine, name: 'Remote Windows daemon', os: 'Windows' },
+    configs: [],
+    presenceOnline: true,
+    showRestart: true,
+    showIdentityRestore: true,
   },
 };

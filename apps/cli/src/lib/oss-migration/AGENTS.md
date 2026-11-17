@@ -18,7 +18,7 @@
   index/meta writes; never fall back to sync/ordinary append for conditional mutations.
   Discard tentative replicas on mismatch. Persist per-row receipts in the same sub-Flock
   append so retries preserve later user edits and tombstones.
-- Reject `local_attachment` references in preflight, including removed turns and legacy contents; the local registry is not migrated.
+- Reject `local_attachment` references in preflight, including removed turns and legacy contents; machine-local paths do not become cloud attachments.
 - Scan historical attachment references, freeze and validate all bytes before writes,
   scan descriptor write runs rather than intermediate field states; all recovered
   descriptors must match immutable bytes (never select history by disk contents), and retain HEAD archive mappings without rewriting historical CRDT operations.

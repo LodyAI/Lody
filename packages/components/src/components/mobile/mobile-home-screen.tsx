@@ -1534,9 +1534,6 @@ export type MobileHomeScreenLabels = {
      renders an "全部对话" label above the flat list. */
   allLocalProjectsHeading?: string;
   allGitHubReposHeading?: string;
-  /** @deprecated Chat list no longer shows a section heading in the
-     active (non-archived) mode. Kept for call-site compatibility. */
-  allChatsHeading?: string;
   /** Heading rendered above the Chat tab's list when the archive
      toggle is on. Falls back to "归档对话" when not provided. */
   archivedChatsHeading?: string;

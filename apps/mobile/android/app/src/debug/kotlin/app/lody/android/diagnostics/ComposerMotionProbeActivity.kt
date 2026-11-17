@@ -38,7 +38,7 @@ class ComposerMotionProbeActivity : ComponentActivity() {
                             referencePresentation = app.lody.android.chat.MentionPresentation(listOf(
                                 app.lody.android.runtime.MentionCandidate("fixture-session", "Fix sign-in", "session", insertText = "@session:fixture-session"),
                                 app.lody.android.runtime.MentionCandidate("fixture-role", "Reviewer", "role", insertText = "@role:fixture-role", emoji = "🧪"),
-                            ), LodyTheme.colors.accentDefault), onFocusChange = {}, enabled = true,
+                            ), LodyTheme.colors.accentOnSubtle, LodyTheme.colors.accentSubtle), onFocusChange = {}, enabled = true,
                             agentCliType = "builtin", agentType = "codex", roleEmoji = null, roleName = null,
                             agentName = "Codex", face = listOf("6.1 Sol", "Medium"), mode = null, modeLabel = null,
                             plan = false, fast = false, onRunConfig = {}, stoppable = false, stopping = false,

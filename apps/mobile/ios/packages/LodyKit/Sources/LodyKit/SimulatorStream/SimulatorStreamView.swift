@@ -1,4 +1,5 @@
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 
 @MainActor final class SimulatorStreamView: UIView {
   struct Source: Decodable, Equatable {
@@ -7,6 +8,9 @@ import UIKit
     let udid: String
     let name: String
     let operationId: String?
+    /// `android` streams have no artwork, use H.264 only and take Android controls.
+    let platform: String?
+    var android: Bool { platform == "android" }
   }
 
   private static let streams = NSMapTable<NSString, SimulatorStreamView>.strongToWeakObjects()
@@ -19,6 +23,7 @@ import UIKit
     return device.convert(device.bodyFrame, to: self)
   }
   var displayCornerRadius: CGFloat { device?.bodyCornerRadius ?? 12 }
+  var android: Bool { source?.android == true }
 
   static func shared(_ json: String) -> SimulatorStreamView? {
     guard let source = try? JSONDecoder().decode(Source.self, from: Data(json.utf8)),
@@ -32,6 +37,7 @@ import UIKit
 
   private static let buttons = ["home": "home", "app-switcher": "app-switcher", "lock": "lock",
                                 "volume-up": "volume-up", "volume-down": "volume-down", "action": "action"]
+  private static let androidButtons = ["back": "back", "home": "home", "app-switcher": "app-switcher"]
 
   private var source: Source?
   private var viewer: URL?
@@ -69,6 +75,11 @@ import UIKit
     status.font = .preferredFont(forTextStyle: .subheadline)
     status.adjustsFontForContentSizeCategory = true
     addSubview(status)
+    let fingers = FingerRecognizer()
+    fingers.stream = self
+    fingers.cancelsTouchesInView = false
+    fingers.delaysTouchesEnded = false
+    addGestureRecognizer(fingers)
     let center = NotificationCenter.default
     observers = [
       center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
@@ -106,8 +117,9 @@ import UIKit
     h264Disabled = false
     rtcDisabled = false
     transportRetries = 0
-    guard let viewer else { return setStatus("native.simulator.unavailable") }
-    if next.url != Self.fixtureURL {
+    guard let viewer else { return setStatus("unavailable") }
+    // Android gateways serve no DeviceKit artwork; never request it.
+    if next.url != Self.fixtureURL, !next.android {
       exteriorTask = Task { [weak self] in
         guard let loaded = await SimulatorRemote.exterior(viewer), let self, self.source == next else { return }
         self.exterior = loaded
@@ -143,12 +155,19 @@ import UIKit
   }
 
   private func install(_ size: CGSize) {
+    let previous = frameSize
     frameSize = size
-    if device == nil { installDevice() }
+    // Android rotates natively, so its frames turn landscape; reshape the plain screen.
+    let turned = source?.android == true && previous != .zero && (previous.width > previous.height) != (size.width > size.height)
+    if device == nil || turned { installDevice() }
   }
 
   private func installDevice() {
-    guard let shape = exterior ?? (frameSize == .zero ? nil : .plain(frameSize)) else { return }
+    var plain: SimulatorExterior?
+    if frameSize != .zero {
+      plain = .plain(frameSize, radius: source?.android == true ? min(frameSize.width, frameSize.height) * 0.05 : 0)
+    }
+    guard let shape = exterior ?? plain else { return }
     let previous = device
     let device = SimulatorDeviceView(exterior: shape)
     device.onButton = { [weak self] id in self?.perform(id) }
@@ -180,7 +199,7 @@ import UIKit
       }
       return
     }
-    if device == nil { setStatus("native.simulator.connecting") }
+    if device == nil { setStatus("connecting") }
     usingH264 = !h264Disabled
     let transport = SimulatorTransport(viewer: viewer, h264: usingH264)
     self.transport = transport
@@ -254,19 +273,20 @@ import UIKit
   }
 
   /// Transport loss retries H.264 twice per stream; a codec failure falls back to MJPEG
-  /// once. Neither replays input.
+  /// once. Neither replays input. Android has no MJPEG, so its codec failure ends the stream.
   private func failed(_ transport: SimulatorTransport, code: Int = 1000, codec: Bool = false) {
     guard self.transport === transport else { return }
-    let fallback = usingH264 && (codec || code == 4002)
-    let retry = usingH264 && !fallback
+    let rejected = usingH264 && (codec || code == 4002)
+    let retry = usingH264 && !rejected
     disconnect()
-    if fallback {
+    if rejected {
+      guard source?.android != true else { return setStatus("disconnected") }
       h264Disabled = true
       return connect()
     }
-    guard retry, transportRetries < 2 else { return setStatus("native.simulator.disconnected") }
+    guard retry, transportRetries < 2 else { return setStatus("disconnected") }
     transportRetries += 1
-    if device == nil { setStatus("native.simulator.connecting") }
+    if device == nil { setStatus("connecting") }
     retryTimer = Timer.scheduledTimer(withTimeInterval: transportRetries == 1 ? 0.5 : 1.5, repeats: false) { [weak self] _ in
       MainActor.assumeIsolated {
         self?.retryTimer = nil
@@ -358,21 +378,29 @@ import UIKit
     }
   }
 
+  /// `connecting`, `disconnected` or `unavailable`, worded for the device kind.
   private func setStatus(_ key: String) {
-    status.text = String(localized: String.LocalizationValue(key), bundle: .lody)
+    let prefix = source?.android == true ? "native.emulator." : "native.simulator."
+    status.text = String(localized: String.LocalizationValue(prefix + key), bundle: .lody)
     status.isHidden = false
     setNeedsLayout()
   }
 
-  func perform(_ action: String) {
-    guard let transport, let operationId = source?.operationId, !controlBusy else { return }
+  /// Fixed typed controls only. Android takes Back/Home/Recents, rotation, appearance and
+  /// pasted text; iOS keeps its hardware buttons and shake.
+  func perform(_ action: String, text: String? = nil) {
+    guard let transport, let source, let operationId = source.operationId, !controlBusy else { return }
     let control: [String: String]
-    if let button = Self.buttons[action] {
+    if let button = (source.android ? Self.androidButtons : Self.buttons)[action] {
       control = ["kind": "button", "button": button]
     } else if action == "rotate-left" || action == "rotate-right" {
       control = ["kind": "rotate", "direction": action == "rotate-left" ? "left" : "right"]
-    } else if action == "shake" {
+    } else if action == "shake", !source.android {
       control = ["kind": "shake"]
+    } else if source.android, action == "appearance-light" || action == "appearance-dark" {
+      control = ["kind": "appearance", "appearance": action == "appearance-light" ? "light" : "dark"]
+    } else if source.android, action == "text", let text, !text.isEmpty, text.utf16.count <= 16000 {
+      control = ["kind": "text", "text": text]
     } else {
       return
     }
@@ -384,29 +412,70 @@ import UIKit
     }
   }
 
-  override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-    guard finger == nil, !controlBusy, let transport, transport.mode == .webRTC || transport.mode == .webSocket, let device, let touch = touches.first,
-          device.display.bounds.contains(touch.location(in: device.display)) else { return }
+  /// Touches reach the device through a recognizer, not raw `touches…` overrides: the page's
+  /// zoom dismissal and iOS 26 content swipe-back recognizers delay or claim view touches, so
+  /// only the toolbar controls responded. Beginning on touch-down lets this recognizer exclude
+  /// those system gestures inside the display; touches elsewhere fail it at once.
+  private final class FingerRecognizer: UIGestureRecognizer {
+    weak var stream: SimulatorStreamView?
+    private var tracked: UITouch?
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+      guard tracked == nil else { return touches.forEach { ignore($0, for: event) } }
+      guard let touch = touches.first, let stream, stream.press(touch) else {
+        state = .failed
+        return
+      }
+      tracked = touch
+      touches.filter { $0 !== touch }.forEach { ignore($0, for: event) }
+      state = .began
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+      guard let tracked, touches.contains(tracked) else { return }
+      stream?.drag(tracked)
+      state = .changed
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+      guard let tracked, touches.contains(tracked) else { return }
+      stream?.release(tracked)
+      state = .ended
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+      guard let tracked, touches.contains(tracked) else { return }
+      stream?.lift()
+      state = .cancelled
+    }
+
+    override func reset() {
+      super.reset()
+      tracked = nil
+    }
+
+    override func canBePrevented(by preventing: UIGestureRecognizer) -> Bool { false }
+  }
+
+  private func press(_ touch: UITouch) -> Bool {
+    guard !compact, finger == nil, !controlBusy, let transport, transport.mode == .webRTC || transport.mode == .webSocket, let device,
+          device.display.bounds.contains(touch.location(in: device.display)) else { return false }
     let point = location(touch)
     finger = touch
     edge = point.y >= frameSize.height * 0.93 ? "bottom" : nil
     self.touch("touch1-down", point)
+    return true
   }
 
-  override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-    guard let finger, touches.contains(finger) else { return }
-    touch("touch1-move", location(finger))
+  private func drag(_ touch: UITouch) {
+    guard finger === touch else { return }
+    self.touch("touch1-move", location(touch))
   }
 
-  override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-    guard let finger, touches.contains(finger) else { return }
-    touch("touch1-up", location(finger))
-    self.finger = nil
-  }
-
-  override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-    guard let finger, touches.contains(finger) else { return }
-    lift()
+  private func release(_ touch: UITouch) {
+    guard finger === touch else { return }
+    self.touch("touch1-up", location(touch))
+    finger = nil
   }
 
   private func lift() {

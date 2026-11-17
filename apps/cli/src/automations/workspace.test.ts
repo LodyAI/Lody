@@ -101,12 +101,12 @@ async function workspaceFixture(
   const doc = new SessionDocument(repo as never, meta.id as SessionId, async () => {}, logger);
   composeTestSessionDoc(doc);
   const handle = await createAutomationWorkspaceLegacy({
-    hasUncertainLegacyQuota: () => false,
     verifyRemoteControl,
     lody: {
       documentManager: {
         repo,
-        retainQueuedInput: () => {},
+        isEncryptedWorkspace: () => false,
+        signMachineInput: async () => undefined,
         getOrCreateSessionDoc: async () => doc,
         getAgentConfigForMachineLaunch: async () => quota?.config,
       },

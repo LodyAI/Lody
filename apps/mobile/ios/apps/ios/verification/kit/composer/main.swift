@@ -1,7 +1,15 @@
 import ChatKit
+import LodyCore
 import AVFoundation
 import UIKit
 import UniformTypeIdentifiers
+
+// Keep the standalone composer host offline; shortcut service behavior has its own suite.
+@MainActor enum PromptShortcutsController {
+  static func body(id: String) async throws -> RuntimeContract.PromptShortcut {
+    throw NSError(domain: "ComposerOfflineFixture", code: 1)
+  }
+}
 
 @MainActor func descendants(_ view: UIView) -> [UIView] {
   [view] + view.subviews.flatMap(descendants)
@@ -225,46 +233,40 @@ precondition(
   actionVisual?.backgroundColor?.resolvedColor(with: actionComposer.traitCollection).isEqual(UIColor.lodyAccent.resolvedColor(with: actionComposer.traitCollection)) == true,
   "An actionable Send must render as an accent circular control"
 )
-let originalAccent = LodyAccentChoice.current.rawValue
-LodyAccentChoice.save("purple")
-RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-for host in [composer, actionComposer] {
-  let visual = descendants(host).first { $0.accessibilityIdentifier == "session-action-visual" }!
-  precondition(visual.backgroundColor?.resolvedColor(with: host.traitCollection).isEqual(UIColor.systemPurple.resolvedColor(with: host.traitCollection)) == true,
-    "Existing chat and sheet composers must recolor when the accent changes")
-}
-LodyAccentChoice.save("unknown")
-precondition(LodyAccentChoice.current == .purple, "An unknown accent must not replace the saved choice")
-for value in ["#FFFFAA", "#123abc"] {
-  LodyAccentChoice.save(value)
-  RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-  precondition(UserDefaults.standard.string(forKey: "accentColor") == value.uppercased())
-  precondition(LodyAccentChoice.hex(LodyAccentChoice.current.rawValue, dark: false) == value.uppercased())
-  precondition(LodyAccentChoice.hex(LodyAccentChoice.current.rawValue, dark: true) == value.uppercased())
-  for host in [composer, actionComposer] {
-    let visual = descendants(host).first { $0.accessibilityIdentifier == "session-action-visual" }!
-    precondition(visual.backgroundColor?.isEqual(LodyAccentChoice.current.color) == true,
-      "A custom accent must update existing chat and sheet send controls")
-    let symbol = descendants(visual).compactMap { $0 as? UIImageView }.first!
-    precondition(symbol.tintColor.isEqual(value == "#FFFFAA" ? UIColor.black : UIColor.white),
-      "Bright custom colors need a readable send glyph")
+let originalAccent = UserDefaults.standard.object(forKey: "accentColor")
+for legacy in ["purple", "#FFFFAA", "#123ABC"] {
+  UserDefaults.standard.set(legacy, forKey: "accentColor")
+  for style in [UIUserInterfaceStyle.light, .dark] {
+    for host in [composer, actionComposer] {
+      host.overrideUserInterfaceStyle = style
+      host.setComposerState(ready)
+      let visual = descendants(host).first { $0.accessibilityIdentifier == "session-action-visual" }!
+      let traits = host.traitCollection
+      precondition(visual.backgroundColor?.resolvedColor(with: traits) == UIColor.lodyInk.resolvedColor(with: traits),
+        "Legacy accent preferences cannot recolor Send in either host")
+      let symbol = descendants(visual).compactMap { $0 as? UIImageView }.first!
+      precondition(symbol.tintColor.resolvedColor(with: traits) == UIColor.lodyGround.resolvedColor(with: traits),
+        "Send uses contrasting Ground in light and dark mode")
+    }
   }
-  for invalid in ["#123", "#GGFFFF", "#12345678", "#123456\n", "unknown"] { LodyAccentChoice.save(invalid) }
-  precondition(LodyAccentChoice.current.rawValue == value.uppercased(), "Invalid values cannot overwrite a custom color")
 }
-LodyAccentChoice.save(originalAccent)
-RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-print("Composer: persisted accent changes update existing hosts and reject unknown choices")
+UserDefaults.standard.set(originalAccent, forKey: "accentColor")
+print("Composer: fixed Ink ignores legacy preferences in both hosts and appearances")
 
 actionInput.text = ""
 actionComposer.textViewDidChange(actionInput)
 actionComposer.setComposerState(
   #"{"editable":true,"canSend":true,"sending":false,"running":true,"canStop":true,"notice":"","reconnect":false,"placeholder":"任务"}"#
 )
-precondition(
-  actionVisual?.backgroundColor?.isEqual(UIColor.systemRed) == true,
-  "Stop must render as a red circular control"
-)
+for style in [UIUserInterfaceStyle.light, .dark] {
+  actionComposer.overrideUserInterfaceStyle = style
+  let traits = actionComposer.traitCollection
+  precondition(actionVisual?.backgroundColor?.resolvedColor(with: traits) == UIColor.lodyInk.resolvedColor(with: traits),
+    "Stop must render as an Ink circular control in both appearances")
+  let symbol = descendants(actionVisual!).compactMap { $0 as? UIImageView }.first!
+  precondition(symbol.tintColor.resolvedColor(with: traits) == UIColor.lodyGround.resolvedColor(with: traits),
+    "Stop uses the same contrasting Ground glyph as Send")
+}
 actionComposer.setComposerState(
   #"{"editable":true,"canSend":true,"sending":false,"running":true,"canStop":true,"stopping":true,"notice":"","reconnect":false,"placeholder":"任务"}"#
 )
@@ -347,7 +349,9 @@ precondition(restingBar.isDescendant(of: restingSurface) && !restingBar.isHidden
 precondition(restingBar.convert(restingBar.bounds, to: restingSurface).maxY <= restingInput.convert(restingInput.bounds, to: restingSurface).minY + 0.5,
   "The attachment row must sit above the text")
 let restingTile = restingBar.attachmentFrame(id: "resting-file")!
-precondition(abs(restingTile.height - 48) < 0.5, "Sheet attachments must be 48-point tiles; got \(restingTile)")
+precondition(abs(restingTile.height - 80) < 0.5, "Sheet attachments must be 80-point tiles; got \(restingTile)")
+let restingTextEdge = restingInput.convert(CGPoint(x: restingInput.textContainerInset.left + restingInput.textContainer.lineFragmentPadding, y: 0), to: restingBar).x
+precondition(abs(restingTile.minX - restingTextEdge) < 0.5, "Attachment and visible text must share their leading edge")
 let restingRemove = descendants(restingBar).compactMap { $0 as? UIButton }.first {
   $0.accessibilityLabel == String.localizedStringWithFormat(String(localized: "native.chat.attachment.remove", bundle: .lody), String(describing: "notes.txt"))
 }!
@@ -799,6 +803,29 @@ relayComposer.restoreDraft(token: 1)
 precondition(relayInput.text == "Keep until adopted", "An adopted send must remain restorable")
 print("Composer relay: prepare preserves draft, adoption consumes once, failure restores")
 
+// Pushed creation keeps focus until navigation removes the form.
+throwWindow.isHidden = false
+for dismisses in [false, true] {
+  let creationComposer = ChatComposerView(frame: CGRect(x: 0, y: 500, width: 390, height: 180))
+  creationComposer.cardStyle = true
+  creationComposer.dismissesKeyboardOnSend = dismisses
+  throwWindow.addSubview(creationComposer)
+  creationComposer.setComposerState(ready)
+  creationComposer.setInitialDraft("Creation keyboard handoff")
+  let creationInput = descendants(creationComposer).compactMap { $0 as? UITextView }.first!
+  precondition(creationInput.becomeFirstResponder())
+  creationComposer.commitSend(["id": "creation-focus-\(dismisses)", "queue": false])
+  precondition(creationInput.isFirstResponder == !dismisses,
+    "Only the pushed creation host retains focus through its send")
+  precondition(creationInput.text.isEmpty, "Retaining focus must still consume the draft")
+  creationComposer.restoreDraft(token: 1)
+  precondition(creationInput.text == "Creation keyboard handoff", "Failed creation restores the draft")
+  ChatSendHandoff.cancel(id: "creation-focus-\(dismisses)")
+  creationInput.resignFirstResponder()
+  creationComposer.removeFromSuperview()
+}
+print("Composer: pushed creation retains focus, ordinary send dismisses, failure restores")
+
 let queueComposer = ChatComposerView(frame: CGRect(x: 0, y: 0, width: 390, height: 244))
 let runningState = #"{"editable":true,"canSend":true,"sending":false,"running":true,"canStop":true,"notice":"","reconnect":false,"placeholder":"任务"}"#
 queueComposer.setComposerState(runningState)
@@ -1021,23 +1048,20 @@ precondition(ChatComposerView.grabberRelease(fromFullScreen: false, progress: 0.
 precondition(ChatComposerView.grabberRelease(fromFullScreen: false, progress: 0.6, translation: -100, velocity: 0) == .fullScreen,
   "Releasing past halfway opens full screen")
 precondition(!descendants(glassComposer).contains { $0.accessibilityIdentifier == "session-expand" }, "The grabber replaces the expand button")
-let glassFormat = descendants(glassComposer).compactMap { $0 as? ChatComposerFormatBar }.first!
-precondition(glassFormat.bounds.height < 0.5, "The default sheet has no format bar")
 _ = grabber!.accessibilityActivate()
 RunLoop.current.run(until: Date().addingTimeInterval(0.6))
 glassComposer.layoutIfNeeded()
-precondition(abs(glassFormat.bounds.height - 44) < 0.5 && !glassFormat.isHidden
-  && grabber!.accessibilityLabel == String(localized: "native.chat.composer.collapse", bundle: .lody),
-  "Activating the grabber must open full screen with the format bar")
+precondition(grabber!.accessibilityLabel == String(localized: "native.chat.composer.collapse", bundle: .lody),
+  "Activating the grabber must open full screen")
 _ = grabber!.accessibilityActivate()
 RunLoop.current.run(until: Date().addingTimeInterval(0.6))
 glassComposer.layoutIfNeeded()
-precondition(glassFormat.bounds.height < 0.5 && grabber!.accessibilityLabel == String(localized: "native.chat.composer.expand", bundle: .lody),
+precondition(grabber!.accessibilityLabel == String(localized: "native.chat.composer.expand", bundle: .lody),
   "Activating the grabber again must return to the default sheet")
 glassComposer.allowsFullScreen = false
 glassComposer.layoutIfNeeded()
 precondition(grabber!.isHidden, "Hosts without full screen have no grabber")
-print("Composer grabber: toggles full screen with the format bar and replaces the expand button")
+print("Composer grabber: toggles full screen and replaces the expand button")
 glassInput.resignFirstResponder()
 RunLoop.current.run(until: Date().addingTimeInterval(0.3))
 glassComposer.layoutIfNeeded()
@@ -1187,7 +1211,7 @@ removeMaterialAttachment("b.txt")
 precondition(materialBar.hasVisiblePills && materialHeight == withAttachment,
   "The final attachment reserves its height through dematerialization")
 RunLoop.main.run(until: Date().addingTimeInterval(0.4))
-precondition(!materialBar.hasVisiblePills && materialHeight == withAttachment - 60, "The emptied attachment row releases its 12-point inset and 48-point tile height; got \(withAttachment - materialHeight)")
+precondition(!materialBar.hasVisiblePills && materialHeight == withAttachment - 88, "The emptied attachment row releases its 8-point inset and 80-point tile height; got \(withAttachment - materialHeight)")
 materialInput.resignFirstResponder()
 print("Glass hosts: queue and final attachment retain their space through exit; unrelated pills retain identity")
 

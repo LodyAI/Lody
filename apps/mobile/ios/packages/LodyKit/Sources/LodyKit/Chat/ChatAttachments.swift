@@ -267,11 +267,13 @@ final class ChatAttachmentBar: CKAttachmentStrip {
   private var projected: [String: (source: ChatAttachment, item: CKAttachmentItem)] = [:]
 
   static let thumbnailRadius: CGFloat = 10
+  static let tileSide: CGFloat = 80
 
   init() {
     var style = CKAttachmentStyle()
     style.tiles = true
-    style.spacing = 6
+    style.spacing = 8
+    style.tileSide = Self.tileSide
     style.maximumWidth = 180
     super.init(style: style)
   }
@@ -298,7 +300,7 @@ final class ChatAttachmentBar: CKAttachmentStrip {
       if attachment.isImage { symbol = "photo" }
       else if type?.conforms(to: .movie) == true { symbol = "video" }
       else { symbol = "doc" }
-      let thumbnail = attachment.isImage ? ChatAttachment.thumbnail(attachment.url)?.preparingThumbnail(of: CGSize(width: 96, height: 96)) : nil
+      let thumbnail = attachment.isImage ? ChatAttachment.thumbnail(attachment.url)?.preparingThumbnail(of: CGSize(width: Self.tileSide * 3, height: Self.tileSide * 3)) : nil
       let item = CKAttachmentItem(id: attachment.id, name: attachment.name, symbol: symbol, thumbnail: thumbnail,
         detail: attachment.isImage ? nil : Self.detail(attachment.url),
         previewAccessibilityLabel: String.localizedStringWithFormat(String(localized: "native.chat.attachment.preview", bundle: .lody), String(describing: attachment.name)),

@@ -152,3 +152,14 @@ export const Neutral: Story = {
     },
   },
 };
+
+/** The agent process ended while it still reported background work after its Turn. */
+export const NativeWorkInterrupted: Story = {
+  args: {
+    message: warningMessage(
+      'The agent process ended while it still reported background work.',
+      'nativeWorkInterrupted'
+    ),
+    sessionId,
+  },
+};

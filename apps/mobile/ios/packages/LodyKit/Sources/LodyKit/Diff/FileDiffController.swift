@@ -212,7 +212,7 @@ class FileDiffController: UIViewController {
   private func copy(_ text: String?) {
     guard let text else { return }
     UIPasteboard.general.string = text
-    LodyToastOverlay.shared.show(message: String(localized: "diff.toast.copied", bundle: .lody), kind: "info")
+    LodyToastOverlay.shared.show(message: String(localized: "diff.toast.copied", bundle: .lody), kind: .neutral)
   }
 
   func preview() {
@@ -226,9 +226,9 @@ class FileDiffController: UIViewController {
       do {
         try await service.preview(request.sessionId, request.path, self)
       } catch let failure as FilePreviewFailure {
-        LodyToastOverlay.shared.show(message: failure.message, kind: "error")
+        LodyToastOverlay.shared.show(message: failure.message, kind: .error)
       } catch {
-        LodyToastOverlay.shared.show(message: String(localized: "diff.toast.previewFailed", bundle: .lody), kind: "error")
+        LodyToastOverlay.shared.show(message: String(localized: "diff.toast.previewFailed", bundle: .lody), kind: .error)
       }
     }
   }

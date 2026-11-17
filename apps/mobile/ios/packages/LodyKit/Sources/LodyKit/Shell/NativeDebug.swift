@@ -10,10 +10,14 @@ enum NativeDebug {
       catch { preconditionFailure("Invalid offline fixture: \(error)") }
     }
     let root: UIViewController
-    if LodyUIVerify.has("--ui-review-list") {
+    if _isDebugAssertConfiguration(), let review = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--ui-review-cards=") }) {
+      root = SessionPreviewController(scenario: "cards-" + String(review.dropFirst("--ui-review-cards=".count)))
+    } else if LodyUIVerify.has("--ui-review-list") {
       root = ChatListPreviewController()
     } else if LodyUIVerify.has("--ui-review-mentions") {
       root = SessionPreviewController(scenario: "mentions")
+    } else if LodyUIVerify.has("--ui-review-usage") || LodyUIVerify.has("--ui-review-usage-popup") {
+      root = SessionPreviewController(scenario: LodyUIVerify.has("--ui-review-usage-popup") ? "usage-popup" : "usage")
     } else if let review = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--ui-review-bar=") }) {
       root = SessionPreviewController(scenario: "bar-" + String(review.dropFirst("--ui-review-bar=".count)))
     } else {
@@ -31,6 +35,40 @@ enum NativeDebug {
     guard LodyUIVerify.enabled || _isDebugAssertConfiguration() else { return }
     guard let scenario = params["verifyCase"] else {
       LodyShell.shared.pushRootNative(NativeDebugController(), title: "Debug")
+      return
+    }
+    if scenario.hasPrefix("schedule-fixture-") {
+      ScheduleFixture.shared.control(String(scenario.dropFirst("schedule-fixture-".count)))
+      return
+    }
+    if scenario.hasPrefix("toast-") {
+      guard LodyUIVerify.enabled, let presenter = LodyShell.shared.presenter else { return }
+      LodyToastOverlay.shared.dismiss()
+      if ["toast-archive", "toast-unarchive", "toast-error"].contains(scenario) {
+        let session = SessionItem(id: "toast-session", title: "Toast verification", archived: scenario == "toast-unarchive")
+        let state = SessionListState(userId: "toast-user", workspaceId: "toast-workspace", catalog: SessionCatalog(sessions: [session]))
+        let source = SessionSource(changes: [], read: { state }, write: { _, _, _ in
+          if scenario == "toast-error" { throw NSError(domain: "ToastVerification", code: 1) }
+        })
+        SessionActions(source: source).perform("archive", row: session.id, from: presenter)
+      } else {
+        let kind: LodyToastKind = scenario == "toast-warning" ? .warning : .neutral
+        let key = scenario == "toast-warning" ? "create.toast.branchRequired" : "diff.toast.copied"
+        LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(key), bundle: .lody), kind: kind)
+      }
+      return
+    }
+    if scenario == "inline-code" {
+      let page = UIViewController()
+      page.view.backgroundColor = .lodyBackground
+      let store = ChatMarkdownStore(traits: page.traitCollection)
+      let markdown = store.view(id: "inline-preview",
+        text: "Body with `inline code` and **`bold code`**.\n\n```\nfenced code keeps its ink\n```",
+        secondary: false, streaming: false, width: 330)
+      markdown.frame = CGRect(x: 24, y: 120, width: 330, height: markdown.measuredHeight)
+      page.view.addSubview(markdown)
+      LodyShell.shared.pushRootNative(page, title: "Inline code")
+      ChatContextViewProbe.checkInlineCode()
       return
     }
     if scenario == "home-native-alert" {
@@ -55,15 +93,16 @@ enum NativeDebug {
     for (prefix, page) in variants where scenario.hasPrefix(prefix) && scenario != page {
       id = page; fields["scenario"] = String(scenario.dropFirst(prefix.count)); break
     }
-    if ["send-queue", "send-guide", "send-interrupt", "send-scroll-guide", "send-scroll-queue", "send-scroll-normal"].contains(scenario) {
+    if ["send-queue", "send-guide", "send-interrupt", "send-scroll-guide", "send-scroll-queue", "send-scroll-normal", "send-header-preview"].contains(scenario) {
       id = "send-preview"
-      fields["queue"] = scenario != "send-scroll-normal"
+      fields["queue"] = scenario != "send-scroll-normal" && scenario != "send-header-preview"
       fields["steer"] = scenario != "send-interrupt"
-      fields["longContext"] = scenario.hasPrefix("send-scroll-")
+      fields["longContext"] = scenario.hasPrefix("send-scroll-") || scenario == "send-header-preview"
+      fields["headerPreview"] = scenario == "send-header-preview"
       fields["queuedMessageBehavior"] = scenario.hasSuffix("guide") ? "guide" : "queue"
     }
     let aliases = ["pull-request-preview": "pull-request-native-preview", "permission-native-waiting": "permission-native-preview",
-      "appearance-preview": "settings", "diagnostics-settings-preview": "settings",
+      "diagnostics-settings-preview": "settings",
       "preferences-preview": "preferences", "queued-message-behavior-preview": "preferences",
       "project-preview-empty": "project-preview", "project-preview-offline": "project-preview"]
     id = aliases[id] ?? id
@@ -79,67 +118,67 @@ enum NativeDebug {
       }
       content = page
     }
-    if scenario.hasPrefix("session-preview-bar-") {
+    if scenario.hasPrefix("session-preview-bar-") || scenario.hasPrefix("session-preview-usage") || scenario.hasPrefix("session-preview-cards-") {
       LodyShell.shared.pushRootNative(content, title: "")
       return
     }
     let onboarding = content is OnboardingController
     let regular = LodyShell.shared.presenter?.traitCollection.horizontalSizeClass == .regular
+    // Sign-in covers the phone like web /login; elsewhere it is a sheet.
+    var style = regular ? "formSheet" : "pageSheet"
+    if onboarding && !regular { style = "fullScreen" }
     LodyShell.shared.presentNative(content, title: content.title ?? "", detents: [1], grabber: !onboarding,
-      dismissible: !onboarding, style: regular ? "formSheet" : "pageSheet",
+      dismissible: !onboarding, style: style,
       headerShown: !onboarding && !(content is CreateSessionHostController))
   }
 }
 
 final class NativeDebugController: UIViewController {
   private static let groups: [(id: String, header: String, rows: [(String, String, String)])] = [
-    ("ui", "界面验收", [
+    ("ui", String(localized: "debug.native.ui.verification", bundle: .lody), [
       ("create-recovery", "Device recovery verification", "desktopcomputer"),
-      ("pull-request-preview", "GitHub PR / CI 预览", "arrow.triangle.pull"),
-      ("project-picker-preview", "选择项目验收", "folder"),
-      ("notification-preview", "通知权限验收", "bell"),
-      ("push-subscription-verify", "验证 OneSignal 订阅", "bell.badge"),
-      ("permission-native-preview", "权限验收", "hand.raised"),
-      ("onboarding-preview", "登录引导验收", "hand.wave"),
-      ("project-history-preview", "项目会话同步验收", "arrow.triangle.2.circlepath"),
+      ("pull-request-preview", String(localized: "debug.native.github.pr.ci.preview", bundle: .lody), "arrow.triangle.pull"),
+      ("project-picker-preview", String(localized: "debug.native.project.picker.verification", bundle: .lody), "folder"),
+      ("notification-preview", String(localized: "debug.native.notification.permission.verification", bundle: .lody), "bell"),
+      ("push-subscription-verify", String(localized: "debug.native.verify.onesignal.subscription", bundle: .lody), "bell.badge"),
+      ("permission-native-preview", String(localized: "debug.native.permission.verification", bundle: .lody), "hand.raised"),
+      ("onboarding-preview", String(localized: "debug.native.onboarding.verification", bundle: .lody), "hand.wave"),
       ("directory-preview", "Folder browser", "folder"),
       ("project-preview", "Project page", "folder.badge.gearshape"),
       ("activity-preview", "Activity page", "bolt.horizontal"),
-      ("settings-preview", "远程设置验收", "gear"),
+      ("agent-providers-preview", "Agent providers", "sparkles"),
+      ("agent-presets-preview", "Agent provider presets", "sparkles"),
+      ("agent-auth-methods-preview", "Agent authentication methods", "sparkles"),
+      ("agent-pi-preview", "Agent Pi extensions", "sparkles"),
+      ("settings-preview", String(localized: "debug.native.remote.settings.verification", bundle: .lody), "gear"),
       ("settings-baseline-live", "Settings baseline", "gearshape.2"),
       ("ai-usage-preview", "AI usage", "chart.bar"),
-      ("mcp-settings-preview", "MCP 设置验收", "server.rack"),
-      ("memory-preview", "Memory acceptance", "brain"),
-      ("published-shares-preview", "Published shares acceptance", "link"),
-      ("memory-states-preview", "Memory states", "brain"),
-      ("agent-roles-preview", "Agent 角色验收", "person.crop.square"),
-      ("archived-sessions-preview", "Archived sessions", "archivebox"),
+      ("agent-roles-preview", String(localized: "debug.native.agent.role.verification", bundle: .lody), "person.crop.square"),
       ("session-preview-live", "Native session", "bubble.left"),
-      ("machine-settings-preview", "机器设置验收", "desktopcomputer"),
-      ("preferences-preview", "偏好设置验收", "slider.horizontal.3"),
+      ("machine-settings-preview", String(localized: "debug.native.machine.settings.verification", bundle: .lody), "desktopcomputer"),
+      ("preferences-preview", String(localized: "debug.native.preferences.verification", bundle: .lody), "slider.horizontal.3"),
       ("diagnostics-preview", "Diagnostics", "waveform.path.ecg"),
-      ("appearance-preview", "外观验收", "circle.lefthalf.filled"),
-      ("queued-message-behavior-preview", "排队消息行为验收", "arrow.uturn.forward"),
+      ("queued-message-behavior-preview", String(localized: "debug.native.queued.message.behavior.verification", bundle: .lody), "arrow.uturn.forward"),
       ("model-memory", "Model memory verification", "brain"),
       ("create-parity", "Create parity verification", "square.on.square"),
     ]),
-    ("chat", "聊天与输入", [
+    ("chat", String(localized: "debug.native.chat.and.input", bundle: .lody), [
       ("item-detail-preview", "Item details", "doc.text.magnifyingglass"),
       ("edit-message-preview", "Message editing", "pencil"),
       ("file-diff-preview", "Native diff", "plus.forwardslash.minus"),
       ("workspace-changes-preview", "Native workspace changes", "arrow.triangle.branch"),
       ("file-content-preview", "Native file content", "doc"),
-      ("agent-error-preview", "Agent 错误预览", "exclamationmark.circle"),
+      ("agent-error-preview", String(localized: "debug.native.agent.error.preview", bundle: .lody), "exclamationmark.circle"),
     ]),
-    ("send", "发送", [
-      ("send-preview", "离线发送验收", "paperplane"),
-      ("send-queue", "Queue 验收", "list.bullet"),
+    ("send", String(localized: "debug.native.sending", bundle: .lody), [
+      ("send-preview", String(localized: "debug.native.offline.send.verification", bundle: .lody), "paperplane"),
+      ("send-queue", String(localized: "debug.native.queue.verification", bundle: .lody), "list.bullet"),
       ("session-share-preview", "Conversation sharing", "link"),
-      ("send-guide", "引导发送验收", "arrow.uturn.forward"),
-      ("send-scroll-guide", "长上下文 · 直接插话", "arrow.uturn.forward"),
-      ("send-scroll-queue", "长上下文 · 队列插话", "list.bullet"),
-      ("send-scroll-normal", "长上下文 · 普通发送", "paperplane"),
-      ("send-interrupt", "Queue 中断验收", "stop.circle"),
+      ("send-guide", String(localized: "debug.native.guided.send.verification", bundle: .lody), "arrow.uturn.forward"),
+      ("send-scroll-guide", String(localized: "debug.native.long.context.direct.interjection", bundle: .lody), "arrow.uturn.forward"),
+      ("send-scroll-queue", String(localized: "debug.native.long.context.queued.interjection", bundle: .lody), "list.bullet"),
+      ("send-scroll-normal", String(localized: "debug.native.long.context.normal.send", bundle: .lody), "paperplane"),
+      ("send-interrupt", String(localized: "debug.native.queue.interrupt.verification", bundle: .lody), "stop.circle"),
     ]),
   ]
 
@@ -175,20 +214,20 @@ final class NativeDebugController: UIViewController {
         return LodyListRow.item(id, title, image: image, disclosure: id != "push-subscription-verify")
       })
     }
-    var hang = LodyListRow.item("runtime-hang", "卡死 WebView JS", image: "exclamationmark.triangle")
+    var hang = LodyListRow.item("runtime-hang", String(localized: "debug.native.hang.webview.javascript", bundle: .lody), image: "exclamationmark.triangle")
     hang.destructive = true
-    sections.append(.group("runtime", header: "数据运行时",
-      footer: "故障注入会暂时中断同步。看门狗应自动重建；连续故障达到上限后，请返回项目页下拉重新同步。", [
+    sections.append(.group("runtime", header: String(localized: "debug.native.data.runtime", bundle: .lody),
+      footer: String(localized: "debug.native.faultExplanation", bundle: .lody), [
         runtimeRow(),
         hang,
-        .item("runtime-restart", "模拟 WebContent 进程丢失", image: "arrow.clockwise"),
+        .item("runtime-restart", String(localized: "debug.native.simulate.webcontent.process.loss", bundle: .lody), image: "arrow.clockwise"),
       ]))
     list.setSections(sections)
   }
 
   private func runtimeRow() -> LodyListRow {
     guard let status = DataRuntime.current?.status() else {
-      return .item("runtime-state", "无法读取运行时状态", image: "cpu", action: false)
+      return .item("runtime-state", String(localized: "debug.native.runtime.status.unavailable", bundle: .lody), image: "cpu", action: false)
     }
     let generation = (status["generation"] as? Int).map { "#\($0)" }
     let details = [generation, status["reason"] as? String, status["lastStartReason"] as? String]
@@ -258,6 +297,17 @@ enum NativeHomeFixture {
     }
     statesCatalog = relative(fixture["statesCatalog"] as! [String: Any], now: Date().timeIntervalSince1970 * 1000)
     workspaces = fixture["workspaces"] as! [[String: Any]]
+    // Offline fixtures supply the explicit describe admission that a live account
+    // obtains from the server. Missing fields alone never authorize plaintext.
+    precondition(LodyUIVerify.enabled)
+    for workspace in workspaces {
+      precondition(workspace["admission"] as? String == "legacy-unclassified"
+        && workspace["contentMode"] == nil && workspace["contentModeVersion"] == nil
+        && workspace["genesisHash"] == nil && workspace["cryptoOrgId"] == nil,
+        "Home fixtures require an explicit legacy admission without encrypted evidence")
+      let mode = try WorkspaceModePins.shared.observe(workspace["id"] as! String, mode: .plaintext)
+      precondition(mode == .plaintext, "Home fixtures must not replace retained encrypted admission")
+    }
     for case let (photo, source as String) in fixture["photoCache"] as? [String: Any] ?? [:] {
       if let url = URL(string: photo), let data = URL(string: source) { LodyListPhoto.prime(url, from: data) }
     }
@@ -271,9 +321,10 @@ enum NativeHomeFixture {
         syncPreview = false; publish()
       }
     }
-    for key in ["inboxView", "inboxProjectSort", "inboxExpansion", "inboxPinOrder.ui-home.ui-home"] {
-      UserDefaults.standard.removeObject(forKey: key)
-    }
+    UserDefaults.standard.removeObject(forKey: "inboxProjectSort")
+    // Every offline Home run starts expanded, even after a failed interaction check.
+    UserDefaults.standard.removeObject(forKey: "homeFoldedOpeners")
+    UserDefaults.standard.removeObject(forKey: "homeCollapsedGroups")
     let catalogJSON = SessionController.json(["catalog": catalog, "syncedAt": 0])
     try LocalStore.queue.sync {
       let store = LocalStore.shared
@@ -306,7 +357,14 @@ enum NativeHomeFixture {
 
   static func apply(_ action: String, _ fields: [String: Any]) throws {
     switch action {
-    case "selectWorkspace": selected = fields["workspaceId"] as! String
+    case "selectWorkspace":
+      selected = fields["workspaceId"] as! String
+      if selected == "ui-states" {
+        // These synthetic rows have no owner; the design-state scene displays the
+        // whole workspace under project headings, independently of saved preferences.
+        HomeScope.store(.team)
+        HomeGrouping.store(.project)
+      }
     case "updateWorkspace", "updateWorkspaceIcon":
       let id = fields["workspaceId"] as! String
       guard let index = workspaces.firstIndex(where: { $0["id"] as? String == id }) else { preconditionFailure("Unknown fixture workspace") }
@@ -340,7 +398,7 @@ enum NativeHomeFixture {
   private static func publish() {
     let catalogs = ["ui-home": catalog, "ui-states": statesCatalog]
     let empty: [String: Any] = ["projects": [], "sessions": [], "machineIds": []]
-    let payload: [String: Any] = ["account": ["user": ["id": "ui-home", "name": "UI Preview", "email": ""], "workspaces": workspaces],
+    let payload: [String: Any] = ["account": ["user": ["id": "ui-home", "name": "UI Preview", "email": "preview@example.test"], "workspaces": workspaces],
       "workspaceId": selected, "catalog": catalogs[selected] ?? empty,
       "loading": syncPreview,
       "presence": ["workspaceId": selected, "presence": presence]]

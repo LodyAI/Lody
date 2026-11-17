@@ -5,7 +5,7 @@ struct SessionTabSelection {
   var defaults: UserDefaults = .standard
 
   private func key(user: String, workspace: String, root: String) -> String {
-    "session-tab-v1:" + [user, workspace, root].map { "\($0.utf8.count):\($0)" }.joined()
+    "session-tab-v1\(BackendEnvironment.storageSuffix):" + [user, workspace, root].map { "\($0.utf8.count):\($0)" }.joined()
   }
 
   func remember(_ session: SessionItem, all: [SessionItem], user: String, workspace: String) {

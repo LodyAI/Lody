@@ -108,3 +108,70 @@ export const IosSimulatorControlResult = z
     capabilities: z.record(z.string(), z.number().int()).optional(),
   })
   .meta({ id: 'IosSimulatorControlResult' });
+
+const avd = z.string().regex(/^[a-zA-Z0-9_.-]{1,200}$/);
+
+/** Android preview: exact AVD names (`id`), no bezel artwork, optional quality preset. */
+export const AndroidEmulatorControlParams = z
+  .object({
+    workspaceId: z.string().min(1),
+    sessionId: z.string().min(1),
+    userId: z.string(),
+    command: z.discriminatedUnion('action', [
+      z.object({ action: z.literal('list') }),
+      z.object({
+        action: z.literal('start'),
+        id: avd,
+        quality: z.enum(['saver', 'balanced', 'clear']).optional(),
+      }),
+      z.object({
+        action: z.literal('status'),
+        operationId: operationId.optional(),
+      }),
+      z.object({ action: z.literal('stop'), operationId }),
+    ]),
+  })
+  .meta({ id: 'AndroidEmulatorControlParams' });
+
+export const AndroidEmulatorControlResult = z
+  .object({
+    type: z.string().optional(),
+    sessionId: z.string().optional(),
+    success: z.boolean().optional(),
+    devices: z
+      .array(
+        z.object({
+          id: z.string().min(1),
+          name: z.string(),
+          runtime: z.string(),
+          deviceType: z.string(),
+          state: z.string(),
+          available: z.boolean(),
+          unavailableReason: z.string().optional(),
+          occupancy: z.enum(['available', 'this-session', 'other-session']),
+        }),
+      )
+      .optional(),
+    preview: z
+      .object({
+        operationId,
+        id: z.string().min(1),
+        phase: z.enum([
+          'preparing',
+          'booting',
+          'connecting',
+          'ready',
+          'closed',
+          'failed',
+        ]),
+        transport: z.enum(['local', 'remote']),
+        viewerUrl: z.string().min(1).optional(),
+        message: z.string().optional(),
+      })
+      .optional(),
+    error: z.string().optional(),
+    status: z.number().int().optional(),
+    message: z.string().optional(),
+    capabilities: z.record(z.string(), z.number().int()).optional(),
+  })
+  .meta({ id: 'AndroidEmulatorControlResult' });

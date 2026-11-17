@@ -9,8 +9,15 @@ export type CliApiKeyRecord = {
   source?: 'auto' | 'manual' | 'pairing' | null;
   createdAt: number | null;
   lastRequest: number | null;
+  /**
+   * When the key stops authorizing. Records that carry `machineIds` report the
+   * effective time (an auto key's idle limit included); older backends report
+   * only the stored expiry.
+   */
   expiresAt: number | null;
   enabled: boolean;
+  /** The owner's machines this key signs in. Absent from older backends. */
+  machineIds?: string[];
 };
 
 export type GenerateCliApiKeyResult =

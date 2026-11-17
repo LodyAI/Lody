@@ -1,6 +1,6 @@
 import UIKit
 
-struct LodyListAction {
+struct LodyListAction: Equatable {
   var id: String = ""
   var title: String = ""
   var symbol: String = ""
@@ -51,6 +51,8 @@ struct LodyListRow {
   var collapsedBadge: String = ""
   var collapsedImageTint: String = ""
   var monogram: String = ""
+  /// A glyph drawn in place of the leading icon (an Agent Role's emoji).
+  var emoji: String = ""
   var pinned: Bool = false
   var actions: [LodyListAction] = []
   var leadingActions: [LodyListAction] = []

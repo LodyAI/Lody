@@ -1,3 +1,4 @@
+import { sanitizeIrohDailyProperties } from '@/lib/iroh-daily';
 import type posthog from 'posthog-js';
 import { isConvexAuthErrorData } from '@lody/shared';
 import { isElectronRenderer } from '@/lib/electron';
@@ -5,7 +6,7 @@ import { readNativeAppInfo } from '@/lib/native-app-info';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { POSTHOG_INIT_PROPERTY_DENYLIST } from '@/lib/posthog-analytics';
 import { isResizeObserverLoopError } from '@/lib/resize-observer';
-import { postHogPrivacy } from '@/lib/posthog-privacy';
+import { postHogPrivacy, sanitizePostHogCapabilityUrl } from '@/lib/posthog-privacy';
 
 type PostHogOptions = NonNullable<Parameters<typeof posthog.init>[1]>;
 
@@ -140,6 +141,8 @@ function isResizeObserverLoopPostHogEvent(event: {
 export const POSTHOG_OPTIONS: PostHogOptions = {
   ...(POSTHOG_HOST ? { api_host: POSTHOG_HOST } : {}),
   defaults: '2026-01-30',
+  // OAuth and installation retry fragments carry capabilities, including in replay URL metadata.
+  disable_capture_url_hashes: true,
   autocapture: false,
   // The deferred controller records pageviews and pageleave itself so routes
   // visited before `posthog.init` retain their original timestamps, and a short
@@ -157,6 +160,10 @@ export const POSTHOG_OPTIONS: PostHogOptions = {
   // private code/chat/repo data. Mask raw content before rrweb emits events.
   disable_session_recording: true,
   session_recording: {
+    maskCapturedNetworkRequestFn: (request) => ({
+      ...request,
+      name: sanitizePostHogCapabilityUrl(request.name),
+    }),
     maskAllInputs: true,
     maskTextSelector: '*',
     maskTextFn: maskPostHogRecordingText,
@@ -186,6 +193,16 @@ export const POSTHOG_OPTIONS: PostHogOptions = {
     if (!safeEvent) return null;
     event = safeEvent as typeof event;
 
+    if (event.event === 'e2ee/iroh_daily') {
+      // The SDK can attach initial-person metadata outside `properties`. Keep
+      // only the event envelope, never its automatic $set/$set_once payloads.
+      return {
+        event: event.event,
+        uuid: event.uuid,
+        timestamp: event.timestamp,
+        properties: sanitizeIrohDailyProperties(event.properties ?? {}),
+      };
+    }
     const libraryVersion = readPostHogLibraryVersion();
     const mobileLibrary = readMobilePostHogLibrary();
     if (mobileLibrary) {
@@ -213,4 +230,3 @@ export const POSTHOG_OPTIONS: PostHogOptions = {
     return event;
   },
 };
-

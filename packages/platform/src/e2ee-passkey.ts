@@ -4,8 +4,8 @@
  * decides what a result proves. A host without a passkey path leaves it undefined.
  */
 
-/** The dedicated relying party. It can never change without orphaning every passkey. */
-export const E2EE_PASSKEY_RP_ID = 'vault.lody.ai';
+/** The recovery relying party. Pre-production uses only this current RP; login must use a different RP. */
+export const E2EE_PASSKEY_RP_ID = 'lody.ai';
 
 export interface E2eePasskeyRegistrationRequest {
   readonly rpId: string;

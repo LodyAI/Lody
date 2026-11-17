@@ -17,6 +17,9 @@ import UniformTypeIdentifiers
 private struct ChatComposerState: Decodable {
   var mentionItems: [ChatMentionItem]?
   var actionBar: ChatActionBarState?
+#if !LODY_SHARE_EXTENSION
+  var usage: ChatSessionUsage?
+#endif
   var editable = true
   var canSend = false
   var sending = false
@@ -195,30 +198,50 @@ private final class ComposerPasteJob: @unchecked Sendable {
 final class ChatComposerInput: TextView {
   var onPasteItems: (([NSItemProvider]) -> Bool)?
   var onPasteLongText: ((ComposerPaste) -> Bool)?
+  /// Return on a hardware keyboard sends, as on web; Shift-Return keeps inserting a line break.
+  /// Software keyboards never deliver key commands, so their Return still types a newline.
+  var onHardwareReturn: (() -> Void)?
+
+  private lazy var hardwareReturnCommand: UIKeyCommand = {
+    let command = UIKeyCommand(input: "\r", modifierFlags: [], action: #selector(hardwareReturn(_:)))
+    command.wantsPriorityOverSystemBehavior = true
+    return command
+  }()
+
+  override var keyCommands: [UIKeyCommand]? {
+    (super.keyCommands ?? []) + [hardwareReturnCommand]
+  }
+
+  @objc private func hardwareReturn(_ sender: Any?) {
+    onHardwareReturn?()
+  }
 
   static func makeEditorView() -> LexicalView {
     let theme = Theme()
     theme.root = [.font: UIFont.dynamic(of: 17), .foregroundColor: UIColor.label]
-    theme.setValue(.text, forSubtype: TextNodeThemeSubtype.code, value: [.fontFamily: "Menlo", .backgroundColor: UIColor.tertiarySystemFill])
     theme.code = [
-      .fontFamily: "Menlo", .paddingHead: 8.0, .paddingTail: -8.0,
+      .paddingHead: 8.0, .paddingTail: -8.0,
       .codeBlockCustomDrawing: CodeBlockCustomDrawingAttributes(background: .secondarySystemFill, border: .separator, borderWidth: 0.5),
     ]
     theme.quote = [
       .paddingHead: 12.0,
       .quoteCustomDrawing: QuoteCustomDrawingAttributes(barColor: .separator, barWidth: 3, rounded: true, barInsets: .zero),
     ]
-    setHeadingFont(of: theme, body: UIFont.dynamic(of: 17))
+    setContentFonts(of: theme, body: UIFont.dynamic(of: 17))
     let history = EditorHistoryPlugin()
     let config = EditorConfig(theme: theme, plugins: [ListPlugin(), LinkPlugin(), MarkdownShortcutPlugin(), history])
     let view = LexicalView(editorConfig: config, featureFlags: FeatureFlags(), textViewType: ChatComposerInput.self)
     try? view.editor.registerNode(nodeType: .lodyReference, class: ChatReferenceNode.self)
+    ChatReferenceNode.registerChipDrawing(in: view.editor)
     (view.textView as? ChatComposerInput)?.history = history
     return view
   }
 
   // Matches ChatMarkdownTheme's title font, which the transcript uses for every heading level.
-  private static func setHeadingFont(of theme: Theme, body: UIFont) {
+  private static func setContentFonts(of theme: Theme, body: UIFont) {
+    let code = UIFont.monospacedSystemFont(ofSize: body.pointSize, weight: .regular)
+    theme.setValue(.text, forSubtype: TextNodeThemeSubtype.code, value: [.font: code, .backgroundColor: UIColor.tertiarySystemFill])
+    theme.code?[.font] = code
     let font = UIFont.systemFont(ofSize: body.pointSize * 20 / 17, weight: .semibold)
     for tag in ["h1", "h2", "h3", "h4", "h5", "h6"] {
       theme.setValue(.heading, forSubtype: tag, value: [.font: font])
@@ -246,7 +269,7 @@ final class ChatComposerInput: TextView {
     didSet {
       guard let font, (editor.getTheme().root?[.font] as? UIFont) != font else { return }
       editor.getTheme().root?[.font] = font
-      Self.setHeadingFont(of: editor.getTheme(), body: font)
+      Self.setContentFonts(of: editor.getTheme(), body: font)
       try? editor.update { editor.dirtyType = .fullReconcile }
     }
   }
@@ -263,6 +286,17 @@ final class ChatComposerInput: TextView {
       return reference.referenceToken ?? legacy[reference.getTextContent()] ?? reference.getTextContent()
     }] + MarkdownExporter.gfm.transformers, escapesText: false, preservesNewlines: true)
     return (try? exporter.export(editor)) ?? (text ?? "")
+  }
+
+  /// The chips' UTF-16 ranges in `text`, so the sent bubble draws the same chips over the
+  /// shown text before the runtime's own reference spans arrive.
+  var chipReferences: [[String: Any]] {
+    var result: [[String: Any]] = []
+    textStorage.enumerateAttribute(.lodyReferenceChip, in: NSRange(location: 0, length: textStorage.length)) { value, range, _ in
+      guard value != nil, range.length > 0 else { return }
+      result.append(["start": range.location, "end": NSMaxRange(range), "kind": "mention"])
+    }
+    return result
   }
 
   /// The labels of the chips in the editor, in document order.
@@ -407,6 +441,8 @@ final class ChatComposerInput: TextView {
   }
 
   override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+    // While an input method is composing (pinyin, kana…), Return commits the candidate.
+    if action == #selector(hardwareReturn(_:)) { return isEditable && markedTextRange == nil && onHardwareReturn != nil }
     if action == #selector(pastePlainText(_:)) { return isEditable && UIPasteboard.general.hasStrings }
     if action == #selector(paste(_:)), isEditable, UIPasteboard.general.numberOfItems > 0 { return true }
     return super.canPerformAction(action, withSender: sender)
@@ -521,9 +557,9 @@ private enum ChatComposerActionMode {
 
   var color: UIColor {
     switch self {
-    case .send: LodyAccentChoice.current.color
+    case .send: LodyAccent.color
     case .loading: .systemGray
-    case .stop: .systemRed
+    case .stop: LodyAccent.color
     }
   }
 
@@ -583,14 +619,14 @@ private final class ChatComposerActionVisual: UIView {
 
   @objc private func refreshAccent() {
     backgroundColor = mode?.color
-    symbol.tintColor = mode == .send ? LodyAccentChoice.current.foregroundColor : .white
+    symbol.tintColor = mode == .loading ? .white : LodyAccent.foregroundColor
   }
 
   func render(_ nextMode: ChatComposerActionMode) {
     guard mode != nextMode else { return }
     let shouldAnimate = mode != nil && window != nil
     mode = nextMode
-    symbol.tintColor = nextMode == .send ? LodyAccentChoice.current.foregroundColor : .white
+    symbol.tintColor = nextMode == .loading ? .white : LodyAccent.foregroundColor
     guard shouldAnimate else {
       backgroundColor = nextMode.color
       applyContent(nextMode)
@@ -662,6 +698,12 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   /// The collapsed one-line composer's run-config affordance: the agent mark beside
   /// Send. Tapping it opens the composer and then its model panel.
   private let collapsedMark = UIButton(type: .system)
+  private let usageButton = UIButton(type: .system)
+  private var usageWidth: NSLayoutConstraint!
+#if !LODY_SHARE_EXTENSION
+  private weak var usagePanel: ChatUsagePanel?
+  var usageNow: () -> Date = Date.init
+#endif
   private var movingAgentMark: UIImageView?
   private weak var optionsPopover: ChatComposerModelPanel?
   private let attachmentBar = ChatAttachmentBar()
@@ -708,18 +750,20 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   private var composerOptions = ChatComposerOptions()
   private var composerExpanded = false
   var allowsFullScreen = false { didSet { updateComposer() } }
+  /// Host chrome below the safe area (a page-owned header) that full screen must stay under.
+  var fullScreenTopInset: CGFloat = 0 { didSet { if fullScreen { updateComposer() } } }
   private var fullScreen = false
   private let grabber = ChatComposerGrabber(frame: .zero)
   private var grabberHeight: NSLayoutConstraint!
   private var dragProgress: CGFloat?
   private var dragStart: CGFloat = 0
   private var dragDistance: CGFloat = 1
-  private lazy var formatBar = ChatComposerFormatBar(editor: input.editor)
-  private var formatHeight: NSLayoutConstraint!
   private let fullScreenDim = UIView()
   private var pendingDraft: (text: String, attachments: [ChatAttachment], state: String?)?
   private var sentStates: [String: String] = [:]
   var sendHandoff = true
+  /// A pushed creation host keeps its keyboard edge until the destination replaces it.
+  var dismissesKeyboardOnSend = true
   var autoFocus = false
   private var lastRestoreToken = 0
   private var hasInitialDraft = false
@@ -765,8 +809,10 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   var restsCollapsed = false {
     didSet { if restsCollapsed != oldValue { updateComposer() } }
   }
-  /// The card is open: always on the new-chat page; while editing in a conversation.
-  private var cardOpen: Bool { cardStyle && (!restsCollapsed || input.isFirstResponder) }
+  /// The card is open: always on the new-chat page; in a conversation while editing, and at
+  /// rest while a typed draft remains, so the prompt keeps showing its lines.
+  private var cardOpen: Bool { cardStyle && (!restsCollapsed || input.isFirstResponder || hasDraftText) }
+  private var hasDraftText: Bool { !input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
   private lazy var surfaceLayout: any ChatComposerSurfaceLayout = ChatComposerLiquidGlassSurfaceLayout(
     container: composer,
     inputSurface: inputSurface
@@ -843,6 +889,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     input.onPasteLongText = { [weak self] paste in
       self?.pasteLongText(paste) ?? false
     }
+    input.onHardwareReturn = { [weak self] in self?.submitFromKeyboard() }
     input.accessibilityIdentifier = "session-input"
     input.accessibilityLabel = String(localized: "native.chat.composer.input", bundle: .lody)
     hint.text = state.placeholder
@@ -926,8 +973,6 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     permissionButton.showsMenuAsPrimaryAction = true
     grabber.onToggle = { [weak self] in self?.toggleFullScreen() }
     grabber.onPan = { [weak self] in self?.dragGrabber($0) }
-    formatBar.clipsToBounds = true
-    formatBar.onChange = { [weak self] in self?.updateComposer() }
     fullScreenDim.backgroundColor = UIColor.black.withAlphaComponent(0.22)
     fullScreenDim.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     fullScreenDim.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(toggleFullScreen)))
@@ -962,15 +1007,21 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     for view in [mentionButton, modelButton, permissionButton] { controls.addArrangedSubview(view) }
     // Above the composer's glass, on the keyboard: not part of the merged glass surface.
     addSubview(mentionPanel)
-    for view in [attachmentBar, editorView, hint, formatBar, accessoryBar, attach, attachmentStack, controls, collapsedMark, send, grabber] {
+    for view in [attachmentBar, editorView, hint, accessoryBar, attach, attachmentStack, controls, collapsedMark, usageButton, send, grabber] {
       inputSurface.contentView.addSubview(view)
     }
-    for view in [composer, mentionPanel, mentionButton, permissionButton, queueView, actionBar, inputSurface, attachmentStack, notice, attachmentBar, quotaNotice, editorView, hint, formatBar, accessoryBar, send, attach, modelButton, controls, collapsedMark, grabber] {
+    for view in [composer, mentionPanel, mentionButton, permissionButton, queueView, actionBar, inputSurface, attachmentStack, notice, attachmentBar, quotaNotice, editorView, hint, accessoryBar, send, attach, modelButton, controls, collapsedMark, usageButton, grabber] {
       view.translatesAutoresizingMaskIntoConstraints = false
     }
+    usageWidth = usageButton.widthAnchor.constraint(equalToConstant: 0)
+    usageWidth.isActive = true
+    usageButton.isHidden = true
+    usageButton.accessibilityIdentifier = "session-usage"
+#if !LODY_SHARE_EXTENSION
+    usageButton.addTarget(self, action: #selector(presentUsage), for: .touchUpInside)
+#endif
     inputHeight = editorView.heightAnchor.constraint(equalToConstant: 48)
     accessoryHeight = accessoryBar.heightAnchor.constraint(equalToConstant: 0)
-    formatHeight = formatBar.heightAnchor.constraint(equalToConstant: 0)
     hintLeading = hint.leadingAnchor.constraint(equalTo: editorView.leadingAnchor, constant: 21)
     hintTop = hint.topAnchor.constraint(equalTo: editorView.topAnchor, constant: 13)
     noticeHeight = notice.heightAnchor.constraint(equalToConstant: 0)
@@ -1016,10 +1067,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       editorView.topAnchor.constraint(equalTo: attachmentBar.bottomAnchor),
       editorView.leadingAnchor.constraint(equalTo: inputSurface.contentView.leadingAnchor),
       editorView.trailingAnchor.constraint(equalTo: inputSurface.contentView.trailingAnchor), inputHeight,
-      formatBar.topAnchor.constraint(equalTo: editorView.bottomAnchor),
-      formatBar.leadingAnchor.constraint(equalTo: inputSurface.contentView.leadingAnchor),
-      formatBar.trailingAnchor.constraint(equalTo: inputSurface.contentView.trailingAnchor), formatHeight,
-      accessoryBar.topAnchor.constraint(equalTo: formatBar.bottomAnchor),
+      accessoryBar.topAnchor.constraint(equalTo: editorView.bottomAnchor),
       accessoryBar.leadingAnchor.constraint(equalTo: inputSurface.contentView.leadingAnchor),
       accessoryBar.trailingAnchor.constraint(equalTo: inputSurface.contentView.trailingAnchor),
       accessoryBar.bottomAnchor.constraint(equalTo: sheetContent.bottomAnchor), accessoryHeight,
@@ -1030,11 +1078,14 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       send.widthAnchor.constraint(equalToConstant: 44), send.heightAnchor.constraint(equalToConstant: 44),
       controls.leadingAnchor.constraint(equalTo: attach.trailingAnchor),
       controls.centerYAnchor.constraint(equalTo: send.centerYAnchor),
-      controls.trailingAnchor.constraint(lessThanOrEqualTo: send.leadingAnchor, constant: -2),
+      controls.trailingAnchor.constraint(lessThanOrEqualTo: usageButton.leadingAnchor, constant: -2),
       mentionButton.widthAnchor.constraint(equalToConstant: 44), mentionButton.heightAnchor.constraint(equalToConstant: 44),
       permissionButton.widthAnchor.constraint(equalToConstant: 44), permissionButton.heightAnchor.constraint(equalToConstant: 44),
       modelButton.heightAnchor.constraint(equalToConstant: 44),
-      collapsedMark.trailingAnchor.constraint(equalTo: send.leadingAnchor),
+      collapsedMark.trailingAnchor.constraint(equalTo: usageButton.leadingAnchor),
+      usageButton.trailingAnchor.constraint(equalTo: send.leadingAnchor),
+      usageButton.centerYAnchor.constraint(equalTo: send.centerYAnchor),
+      usageButton.heightAnchor.constraint(equalToConstant: 44),
       collapsedMark.centerYAnchor.constraint(equalTo: send.centerYAnchor),
       collapsedMark.heightAnchor.constraint(equalToConstant: 44),
     ])
@@ -1067,7 +1118,19 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     updateComposer()
   }
   private func saveDraft() {
+    draftSave?.cancel()
+    draftSave = nil
     onDraftChange?(input.draftEnvelope)
+  }
+  /// Typing persists shortly after it pauses, so a draft survives the app being killed
+  /// while the page is open, not only leaving the page or the app.
+  private var draftSave: DispatchWorkItem?
+  private func scheduleDraftSave() {
+    guard onDraftChange != nil else { return }
+    draftSave?.cancel()
+    let work = DispatchWorkItem { [weak self] in self?.saveDraft() }
+    draftSave = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
   }
   @objc private func appDidEnterBackground() {
     saveDraft()
@@ -1221,10 +1284,6 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     attachmentPages.push(OverlayPage(id: "recent-photos", layout: attachmentMediaLayout,
       appearance: ChatRecentPhotosView.initialAppearance) { [weak self] in
       let photos = ChatRecentPhotosView()
-      photos.onAppearanceChange = { [weak self] appearance in
-        guard let self, self.attachmentPages.pageID == "recent-photos" else { return }
-        self.attachmentPages.controller.updateAppearance(appearance)
-      }
       photos.onBack = { [weak self] in self?.attachmentPages.back() }
       photos.onLibrary = { [weak self] in
         self?.finishAttachmentOverlay { owner, controller in owner.libraryPicker.present(from: controller) }
@@ -1351,7 +1410,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     addAttachments([file])
     LodyToastOverlay.shared.show(
       message: String.localizedStringWithFormat(String(localized: "native.chat.composer.pasteAsFile", bundle: .lody), String(describing: file.name)),
-      kind: "success",
+      kind: .neutral,
       actionTitle: String(localized: "native.chat.composer.pasteUndo", bundle: .lody)
     ) { [weak self] in
       self?.undoPastedTextFile(id: file.id, paste: paste, location: location)
@@ -1379,7 +1438,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   private func fullScreenInputHeight(chrome: CGFloat) -> CGFloat {
     guard let superview, let host = owningController()?.view else { return ChatMessageContent.maximumCollapsedHeight }
     // Touches outside the superview never reach the composer, so the controller's safe area alone is not enough.
-    let top = max(host.convert(CGPoint(x: 0, y: host.safeAreaInsets.top), to: superview).y, superview.safeAreaInsets.top) + 8
+    let top = max(host.convert(CGPoint(x: 0, y: host.safeAreaInsets.top), to: superview).y, superview.safeAreaInsets.top) + fullScreenTopInset + 8
     return max(ChatMessageContent.maximumCollapsedHeight, frame.maxY - top - chrome)
   }
   @objc private func toggleFullScreen() {
@@ -1394,7 +1453,6 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       fullScreenDim.alpha = 0
       superview.addSubview(fullScreenDim)
       superview.bringSubviewToFront(self)
-      formatBar.refresh()
     }
     updateComposer()
     let changes = {
@@ -1429,7 +1487,6 @@ final class ChatComposerView: UIView, UITextViewDelegate {
         fullScreenDim.alpha = 0
         superview.addSubview(fullScreenDim)
         superview.bringSubviewToFront(self)
-        formatBar.refresh()
       }
       dragProgress = dragStart
     case .changed:
@@ -1553,8 +1610,8 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     attachmentBar.render(attachments)
     attachmentBar.isHidden = !expanded
     let showsAttachmentRow = expanded && attachmentBar.hasVisiblePills
-    attachmentHeight.constant = showsAttachmentRow ? 48 : 0
-    attachmentTop.constant = showsAttachmentRow ? 12 : 0
+    attachmentHeight.constant = showsAttachmentRow ? ChatAttachmentBar.tileSide : 0
+    attachmentTop.constant = showsAttachmentRow ? 8 : 0
     attachmentStack.render(attachments)
     attachmentStack.isHidden = expanded || attachments.isEmpty
     hint.text = attachments.isEmpty ? state.placeholder : String(localized: "native.chat.composer.addMessage", bundle: .lody)
@@ -1615,46 +1672,52 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     accessoryHeight.constant = expanded ? 48 : 0
     attachLeading.constant = expanded ? 8 : 2
     sheetContentBottom.constant = expanded && !cardStyle ? -ChatComposerLiquidGlassSurfaceLayout.sheetBleed : 0
-    formatHeight.constant = 44 * fullProgress
-    formatBar.alpha = fullProgress
-    formatBar.isHidden = fullProgress == 0
-    formatBar.accessibilityElementsHidden = !fullScreen
-    let verticalInset = expanded ? 14 : max(0, (48 - input.font!.lineHeight) / 2)
-    let topInset = showsGrabber ? 4 : verticalInset
-    var leadingInset: CGFloat = 20
+    var verticalInset = max(0, (48 - input.font!.lineHeight) / 2)
+    if expanded { verticalInset = cardStyle ? 10 : 14 }
+    var topInset = showsGrabber ? 4 : verticalInset
+    if showsAttachmentRow { topInset = 8 }
+    // UITextView adds line-fragment padding inside its text-container inset.
+    // Align the visible text and placeholder with the attachment row's 16 pt edge.
+    let expandedInset = 16 - input.textContainer.lineFragmentPadding
+    var leadingInset: CGFloat = expandedInset
     if !expanded {
       leadingInset = attachmentStack.isHidden ? 46 : 46 + attachmentStack.stackWidth + 8
     }
     input.textContainer.maximumNumberOfLines = expanded ? 0 : 1
     input.textContainer.lineBreakMode = expanded ? .byWordWrapping : .byTruncatingTail
+#if !LODY_SHARE_EXTENSION
+    renderUsage()
+#endif
     renderCollapsedMark()
     let showsMark = showsCollapsedMark(expanded: expanded)
-    var trailingInset: CGFloat = 46
+    var trailingInset: CGFloat = 46 + usageWidth.constant
     if showsMark { trailingInset += collapsedMarkWidth }
-    if expanded { trailingInset = 20 }
+    if expanded { trailingInset = expandedInset }
     input.textContainerInset = UIEdgeInsets(top: topInset, left: leadingInset, bottom: verticalInset, right: trailingInset)
-    hintLeading.constant = leadingInset + 5
+    hintLeading.constant = leadingInset + input.textContainer.lineFragmentPadding
     hintTop.constant = topInset
     let height = input.sizeThatFits(CGSize(width: max(1, input.bounds.width), height: .greatestFiniteMagnitude)).height
     let overflows = height > ChatMessageContent.maximumCollapsedHeight
-    let chrome = mentionHeight.constant + queueHeight.constant + queueGap.constant + actionBarHeight.constant + noticeHeight.constant + attachmentTop.constant + attachmentHeight.constant + quotaNoticeHeight.constant + accessoryHeight.constant + formatHeight.constant + grabberHeight.constant + (expanded ? 8 : 16)
-    // Card style rests at one line above its controls and opens to three while editing; the
-    // glass sheet keeps its taller writing area.
+    let chrome = mentionHeight.constant + queueHeight.constant + queueGap.constant + actionBarHeight.constant + noticeHeight.constant + attachmentTop.constant + attachmentHeight.constant + quotaNoticeHeight.constant + accessoryHeight.constant + grabberHeight.constant + (expanded ? 8 : 16)
+    // Attached media takes the third line's room so larger previews grow upward
+    // without adding an empty writing line. Typed text can still grow naturally.
     var minimumHeight: CGFloat = 132
     if cardStyle {
-      let lines: CGFloat = input.isFirstResponder ? 3 : 1
+      var lines: CGFloat = 1
+      if input.isFirstResponder { lines = showsAttachmentRow ? 2 : 3 }
       minimumHeight = topInset + verticalInset + lines * input.font!.lineHeight
     }
     let inlineHeight = expanded ? min(ChatMessageContent.maximumCollapsedHeight, max(minimumHeight, height)) : 48
     // A conversation's card opens with focus (the expansion's own animation carries it).
-    let cardFocusChanged = cardStyle && !restsCollapsed && cardFocused != input.isFirstResponder
+    // A conversation's card can also stay open across a focus change when a draft keeps it open.
+    let cardFocusChanged = cardStyle && !expansionChanged && cardFocused != input.isFirstResponder
     cardFocused = input.isFirstResponder
     if fullProgress > 0 {
-      let fullHeight = fullScreenInputHeight(chrome: chrome - formatHeight.constant + 44)
-      dragDistance = max(1, fullHeight + 44 - inlineHeight)
+      let fullHeight = fullScreenInputHeight(chrome: chrome)
+      dragDistance = max(1, fullHeight - inlineHeight)
       inputHeight.constant = inlineHeight + (fullHeight - inlineHeight) * fullProgress
     } else {
-      dragDistance = max(1, fullScreenInputHeight(chrome: chrome + 44) + 44 - inlineHeight)
+      dragDistance = max(1, fullScreenInputHeight(chrome: chrome) - inlineHeight)
       inputHeight.constant = inlineHeight
     }
     input.isScrollEnabled = expanded && (fullProgress > 0 || overflows)
@@ -1725,7 +1788,9 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     }
     var configuration = UIButton.Configuration.plain()
     configuration.image = face.withRenderingMode(.alwaysOriginal)
-    configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12)
+    // The 44 pt target keeps its width but leans its padding leading, so the mark sits close
+    // to the context ring and Send.
+    configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 18, bottom: 0, trailing: 6)
     collapsedMark.configuration = configuration
     collapsedMark.imageView?.alpha = movingAgentMark == nil ? 1 : 0
     collapsedMark.isEnabled = modelButton.isEnabled
@@ -1859,6 +1924,59 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     return room > 0 && named.size().width <= room ? named : compact
   }
 
+#if !LODY_SHARE_EXTENSION
+  private func renderUsage() {
+    let usage = state.usage
+    if let panel = usagePanel, panel.usage != usage { panel.dismiss(animated: false) }
+    let visible = usage?.visible == true
+    usageButton.isHidden = !visible
+    usageWidth.constant = 0
+    guard let usage, visible else {
+      usagePanel?.dismiss(animated: false)
+      return
+    }
+    // Sized to its content (ring, gap, percentage, 2 pt each side) so the agent mark, the ring
+    // and Send sit close together.
+    let font = UIFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+    let title = "\(Int((usage.percentage ?? 0).rounded()))%"
+    var config = UIButton.Configuration.plain()
+    config.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 2, bottom: 0, trailing: 2)
+    config.imagePadding = 4
+    config.baseForegroundColor = .secondaryLabel
+    config.title = title
+    config.image = ChatUsageRing.image(usage.percentage ?? 0)
+    config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+      var result = incoming
+      result.font = font
+      return result
+    }
+    let titleWidth = (title as NSString).size(withAttributes: [.font: font]).width
+    usageWidth.constant = ceil(ChatUsageRing.side + 4 + titleWidth + 4)
+    if usage.isContextCompacting == true {
+      config.title = nil
+      config.image = nil
+      config.showsActivityIndicator = true
+    }
+    usageButton.configuration = config
+    usageButton.accessibilityLabel = usage.isContextCompacting == true ? ChatSessionUsage.text("compacting") : ChatSessionUsage.text("title")
+    usageButton.accessibilityValue = ChatSessionUsage.used(usage.percentage ?? 0)
+  }
+
+  @objc func presentUsage() {
+    guard let usage = state.usage, usage.visible, let controller = presenter(), usagePanel == nil else { return }
+    let panel = ChatUsagePanel(usage: usage, now: usageNow)
+    panel.modalPresentationStyle = .popover
+    if let popover = panel.popoverPresentationController {
+      popover.sourceView = usageButton
+      popover.sourceRect = usageButton.bounds
+      popover.permittedArrowDirections = .down
+      popover.delegate = panel
+    }
+    usagePanel = panel
+    controller.present(panel, animated: true)
+  }
+#endif
+
   @objc private func presentComposerOptions() {
     if cardStyle, let onRunConfig {
       guard modelButton.isEnabled else { return }
@@ -1921,11 +2039,13 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   }
   @objc private func openMentions() { mentionPanel.open(input: input) }
   func textViewDidChangeSelection(_ textView: UITextView) {
-    if fullScreen { formatBar.refresh() }
     guard activeMentionItems != nil else { return }
     updateComposer()
   }
-  func textViewDidChange(_ textView: UITextView) { updateComposer() }
+  func textViewDidChange(_ textView: UITextView) {
+    updateComposer()
+    scheduleDraftSave()
+  }
   func textViewDidBeginEditing(_ textView: UITextView) { updateComposer() }
   func textViewDidEndEditing(_ textView: UITextView) {
     setFullScreen(false)
@@ -1945,6 +2065,12 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
     !relaying && (textView.text as NSString).length - range.length + (text as NSString).length <= 32000
   }
+  /// Return never stops a running turn: with nothing to send, Send is Stop, and only a tap means it.
+  private func submitFromKeyboard() {
+    guard hasDraftText || !attachments.isEmpty else { return }
+    submit()
+  }
+
   @objc private func submit() {
     guard send.isEnabled else { return }
     if previewBeforeSubmit?() == true { return }
@@ -1960,6 +2086,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     let body = input.markdown
     let payload: [String: Any] = [
       "id": id, "queue": queued, "guide": guiding, "text": body, "displayText": input.text ?? body,
+      "references": input.text == nil ? [] : input.chipReferences,
       "startedAt": Date().timeIntervalSince1970 * 1000,
       "attachments": attachments.map {
         ["id": $0.id, "name": $0.name, "uri": $0.url.absoluteString, "kind": $0.isImage ? "image" : "file"]
@@ -1986,6 +2113,9 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     takeDraft()
     saveDraft()
     pendingSendID = id
+    // A pushed creation page disappears with its keyboard. Ending editing earlier
+    // lowers the form before its destination can receive the flying message.
+    if dismissesKeyboardOnSend && input.isFirstResponder { input.resignFirstResponder() }
     updateComposer()
   }
   @objc private func reconnect() {

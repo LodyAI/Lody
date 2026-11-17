@@ -4,13 +4,24 @@ import { execFileSync as defaultExecFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-const EXCLUDED_FILTERS = ['!@lody/electron', '!acp-extension-codex', '!acp-extension-claude'];
+import { REST_PACKAGES } from '../../scripts/vitest-rest.config.mjs';
 
-// The two suites that dominate CI get their own runners. On a 4-vCPU runner
-// they are CPU-bound, so overlapping them in one job gains nothing; splitting
-// them across jobs does. `rest` runs every other package, then electron.
+const EXCLUDED_FILTERS = [
+  '!@lody/electron',
+  '!{**/acp-extension-*}',
+  '!acp-extension-codex',
+  '!acp-extension-claude',
+];
+
+// The two suites that dominate CI get their own sharded runners. On a 4-vCPU
+// runner they are CPU-bound, so overlapping them in one job gains nothing;
+// splitting them across jobs does. `rest` runs repository scripts, site-docs,
+// the single-boot aggregated Vitest workspace projects, then electron.
 const DEDICATED_PACKAGES = { components: '@lody/components', cli: 'lody' };
 const DEDICATED_WORKERS = 4;
+export const REST_PACKAGE_DIRS = Object.fromEntries(
+  REST_PACKAGES.map((dir) => [dir === 'ignore' ? '@loro-dev/ignore' : `@lody/${dir}`, dir])
+);
 export const TEST_GROUPS = [...Object.keys(DEDICATED_PACKAGES), 'rest'];
 
 function loadScope(scopePath) {
@@ -33,7 +44,7 @@ const filters = (names) => names.flatMap((name) => ['--filter', name]);
  */
 export function planCiTests({ scope, group, shard = null, full = false }) {
   if (!TEST_GROUPS.includes(group)) throw new Error(`Unknown test group: ${group}`);
-  if (shard !== null && (group !== 'components' || !/^[1-9]\d*\/[1-9]\d*$/.test(shard))) {
+  if (shard !== null && (!(group in DEDICATED_PACKAGES) || !/^[1-9]\d*\/[1-9]\d*$/.test(shard))) {
     throw new Error(`Invalid shard for group ${group}: ${shard}`);
   }
   const forceFull = full || !scope || scope.mode === 'full' || typeof scope.runTests !== 'boolean';
@@ -63,20 +74,26 @@ export function planCiTests({ scope, group, shard = null, full = false }) {
   const commands = [];
   if (runAll) {
     commands.push(['test:scripts']);
-    commands.push([
-      ...recursive,
-      ...filters([...EXCLUDED_FILTERS, ...dedicated.map((name) => `!${name}`)]),
-      'run',
-      'test',
-      '--maxWorkers=2',
-    ]);
+    commands.push(['--filter', '@lody/site-docs', 'run', 'test']);
+    commands.push(['test:rest', `--maxWorkers=${DEDICATED_WORKERS}`]);
   } else {
     const others = listed.filter((name) => name !== '@lody/electron' && !dedicated.includes(name));
-    if (others.length > 0) {
+    const restDirs = others
+      .filter((name) => name in REST_PACKAGE_DIRS)
+      .map((name) => REST_PACKAGE_DIRS[name]);
+    const nonRestPackages = others.filter((name) => !(name in REST_PACKAGE_DIRS));
+    if (restDirs.length > 0) {
+      commands.push([
+        'test:rest',
+        `--maxWorkers=${DEDICATED_WORKERS}`,
+        ...restDirs.map((dir) => `--project=${dir}:*`),
+      ]);
+    }
+    if (nonRestPackages.length > 0) {
       commands.push([
         ...recursive,
         ...filters(EXCLUDED_FILTERS),
-        ...filters(others),
+        ...filters(nonRestPackages),
         'run',
         'test',
         '--maxWorkers=2',

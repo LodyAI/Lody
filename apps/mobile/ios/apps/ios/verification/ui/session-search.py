@@ -18,7 +18,7 @@ def tap(item):
 
 def inbox_field():
     return ui.wait(lambda items: next((i for i in items
-        if (i.get('subrole') == 'AXSearchField' or i.get('AXUniqueId') == 'sidebar-search') and i.get('AXUniqueId') != 'chat-find-field'), None),
+        if i.get('subrole') == 'AXSearchField' and i.get('AXUniqueId') != 'chat-find-field'), None),
         'Missing Inbox search field')
 
 
@@ -57,7 +57,8 @@ def replace(field, text):
 def search(text):
     if pad:
         pad_layout.show_list(ui)
-    if not pad and not any(i.get('subrole') == 'AXSearchField' for i in ui.state()):
+    # iPhone and the iPad split column both expand the integrated search button into the field.
+    if not any(i.get('subrole') == 'AXSearchField' and i.get('AXUniqueId') != 'chat-find-field' for i in ui.state()):
         ui.axe('tap', '--id', 'magnifyingglass', '--post-delay', '.6')
     replace(inbox_field(), text)
 

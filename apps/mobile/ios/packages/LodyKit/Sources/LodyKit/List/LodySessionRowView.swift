@@ -2,7 +2,6 @@ import UIKit
 
 struct LodySessionRowContent: UIContentConfiguration {
   var row: LodyListRow
-  var density: LodyRowDensity = .regular
   var treeDown = false
   var expanded = true
   var onReview: (@MainActor () -> Void)?
@@ -18,7 +17,7 @@ struct LodySessionRowContent: UIContentConfiguration {
   }
 
   @MainActor var showsReview: Bool {
-    density == .regular && onReview != nil && LodyStatusGlyph.kind(for: row) == .attention
+    onReview != nil && LodyStatusGlyph.kind(for: row) == .attention
   }
 
   func makeContentView() -> UIView & UIContentView { LodySessionRowView(self) }
@@ -185,24 +184,12 @@ final class LodySessionRowView: UIView, UIContentView {
     )
   }
 
-  static func textLeading(for row: LodyListRow, density: LodyRowDensity) -> CGFloat {
-    let child = !row.parentId.isEmpty
-    if density == .compact {
-      return child ? LodyDesign.Rail.compactChildText : LodyDesign.Rail.compactText
-    }
-    return child ? LodyDesign.Rail.childText : LodyDesign.Rail.text
+  static func textLeading(for row: LodyListRow) -> CGFloat {
+    row.parentId.isEmpty ? LodyDesign.Rail.text : LodyDesign.Rail.childText
   }
 
-  static func glyphCenter(for row: LodyListRow, density: LodyRowDensity) -> CGFloat {
-    let child = !row.parentId.isEmpty
-    if density == .compact {
-      return child ? LodyDesign.Rail.compactChildCenter : LodyDesign.Rail.compactCenter
-    }
-    return child ? LodyDesign.Rail.childCenter : LodyDesign.Rail.center
-  }
-
-  static func trunk(for density: LodyRowDensity) -> CGFloat {
-    density == .compact ? LodyDesign.Rail.compactCenter : LodyDesign.Rail.center
+  static func glyphCenter(for row: LodyListRow) -> CGFloat {
+    row.parentId.isEmpty ? LodyDesign.Rail.center : LodyDesign.Rail.childCenter
   }
 
   @objc private func reviewTapped() {
@@ -218,42 +205,39 @@ final class LodySessionRowView: UIView, UIContentView {
     let row = content.row
     let child = !row.parentId.isEmpty
     let kind = LodyStatusGlyph.kind(for: row)
-    let compact = content.density == .compact
-    var vertical: CGFloat = child ? 11 : 8
-    if compact { vertical = 5 }
-    let trailing = compact ? 10 : LodyDesign.Rail.trailing
+    let vertical: CGFloat = child ? 11 : 8
     directionalLayoutMargins = .init(
-      top: vertical, leading: Self.textLeading(for: row, density: content.density), bottom: vertical, trailing: trailing
+      top: vertical, leading: Self.textLeading(for: row), bottom: vertical, trailing: LodyDesign.Rail.trailing
     )
-    minimumHeight.isActive = content.density == .compact || !child
-    glyphCenter.constant = Self.glyphCenter(for: row, density: content.density)
+    minimumHeight.isActive = !child
+    glyphCenter.constant = Self.glyphCenter(for: row)
     glyph.kind = kind
-    let size: CGFloat = (child ? 14 : 15) - (compact ? 1 : 0)
+    let size: CGFloat = child ? 14 : 15
     let titleFont = LodyDesign.font(.subheadline, size: size, weight: row.unread && !child ? .semibold : .regular)
     let titleColor: UIColor = row.destructive ? .systemRed : .lodyInk
     let titleText = NSMutableAttributedString(string: row.title, attributes: [.font: titleFont, .foregroundColor: titleColor])
     if child, !row.modelName.isEmpty {
       titleText.append(NSAttributedString(
         string: " · " + row.modelName,
-        attributes: [.font: Self.fonts(content.density).body, .foregroundColor: UIColor.lodySecondary]
+        attributes: [.font: Self.bodyFont, .foregroundColor: UIColor.lodySecondary]
       ))
     }
     Self.emphasize(titleText, in: NSRange(location: 0, length: (row.title as NSString).length), query: row.highlight)
     title.font = titleFont
     title.attributedText = titleText
     let showsReview = content.showsReview
-    time.font = Self.fonts(content.density).mono
+    time.font = Self.monoFont
     time.text = row.value
     time.isHidden = showsReview
     var metaRow = row
     if showsReview { metaRow.modelName = [row.modelName, row.value].filter { !$0.isEmpty }.joined(separator: " · ") }
-    let metaText = NSMutableAttributedString(attributedString: child ? NSAttributedString() : Self.meta(for: metaRow, density: content.density))
+    let metaText = NSMutableAttributedString(attributedString: child ? NSAttributedString() : Self.meta(for: metaRow))
     let showsChildren = content.showsChildren
     if showsChildren, metaText.length > 0 {
-      metaText.append(NSAttributedString(string: " · ", attributes: [.font: Self.fonts(content.density).body, .foregroundColor: UIColor.lodyTertiary]))
+      metaText.append(NSAttributedString(string: " · ", attributes: [.font: Self.bodyFont, .foregroundColor: UIColor.lodyTertiary]))
     }
     meta.attributedText = metaText
-    meta.numberOfLines = row.wrapSubtitle && !compact ? 2 : 1
+    meta.numberOfLines = row.wrapSubtitle ? 2 : 1
     applyChildren(content)
     let hasMeta = metaText.length > 0 || showsChildren
     meta.isHidden = !hasMeta
@@ -296,7 +280,7 @@ final class LodySessionRowView: UIView, UIContentView {
     }
     var fold = children.configuration ?? .plain()
     fold.attributedTitle = AttributedString(content.row.collapsedValue, attributes: AttributeContainer([
-      .font: Self.fonts(content.density).body, .foregroundColor: UIColor.lodySecondary,
+      .font: Self.bodyFont, .foregroundColor: UIColor.lodySecondary,
     ]))
     fold.image = UIImage(
       systemName: content.expanded ? "chevron.down" : "chevron.right",
@@ -310,7 +294,7 @@ final class LodySessionRowView: UIView, UIContentView {
     super.layoutSubviews()
     guard let content = configuration as? LodySessionRowContent else { return }
     let row = content.row
-    let x = Self.trunk(for: content.density)
+    let x = LodyDesign.Rail.center
     let mark = glyph.frame
     let path = UIBezierPath()
     if !row.parentId.isEmpty {
@@ -337,14 +321,11 @@ final class LodySessionRowView: UIView, UIContentView {
     CATransaction.commit()
   }
 
-  private static func fonts(_ density: LodyRowDensity) -> (body: UIFont, mono: UIFont) {
-    density == .compact
-      ? (LodyDesign.font(.footnote, size: 12), LodyDesign.mono(11))
-      : (LodyDesign.font(.footnote, size: 12.5), LodyDesign.mono(11.5))
-  }
+  private static var bodyFont: UIFont { LodyDesign.font(.footnote, size: 12.5) }
+  private static var monoFont: UIFont { LodyDesign.mono(11.5) }
 
-  static func meta(for row: LodyListRow, density: LodyRowDensity = .regular) -> NSAttributedString {
-    let body = fonts(density).body
+  static func meta(for row: LodyListRow) -> NSAttributedString {
+    let body = bodyFont
     let text = NSMutableAttributedString()
     if row.pinned, let pin = UIImage(systemName: "pin.fill") {
       let attachment = NSTextAttachment()

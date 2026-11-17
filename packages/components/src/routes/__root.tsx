@@ -1,3 +1,4 @@
+import { navigateToResolvedPath } from '@/lib/deep-link-path';
 import { receiveMagpieImportAtom } from '@/atoms/magpie-import';
 import { isMagpieImportLink } from '@lody/shared';
 import {
@@ -415,24 +416,6 @@ function RootOutletBoundary() {
   );
 }
 
-/**
- * Navigate to a resolved path that may carry a query string (e.g.
- * `/acme/settings/billing?checkout=success`). TanStack Router's `to` does not
- * parse an embedded query, so the path must be split and the query passed as
- * `search` — otherwise the route fails to match and (for the settings deep
- * links) the wrong tab opens.
- */
-function navigateToResolvedPath(navigate: ReturnType<typeof useNavigate>, path: string): void {
-  const queryIndex = path.indexOf('?');
-  if (queryIndex === -1) {
-    void navigate({ to: path, replace: true });
-    return;
-  }
-  const to = path.slice(0, queryIndex);
-  const search = Object.fromEntries(new URLSearchParams(path.slice(queryIndex + 1)));
-  void navigate({ to, search, replace: true });
-}
-
 function SessionDeepLinkRouter() {
   const store = useStore();
   const navigationTarget = useAtomValue(pendingSessionLinkAtom);
@@ -679,13 +662,6 @@ function DesktopDeepLinkRouter() {
         return;
       }
 
-      // Mid-onboarding the install was kicked off from the projects step —
-      // returning to /settings/github would leave the user behind the
-      // overlay once they finish. Land them on the workspace home so the
-      // overlay continues uninterrupted and the projects list refreshes.
-      if (location.pathname === '/onboarding') {
-        return;
-      }
       const target = 'settings';
       const targetPath = resolveDesktopGitHubInstallDeepLinkPath(url, location.pathname, {
         target,

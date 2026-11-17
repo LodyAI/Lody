@@ -16,9 +16,16 @@ for index, grouping in enumerate(['time', 'project', 'status', 'project'] * 2):
     ui.axe('drag', '--start-x', '220', '--start-y', '700', '--end-x', '220',
            '--end-y', '180', '--duration', '.6', '--post-delay', '.15')
     ui.axe('tap', '--label', catalog.text('inbox.settings.section.view'), '--post-delay', '.2')
-    ui.axe('tap', '--label', catalog.text('home.grouping.' + grouping), '--post-delay', '.4')
+    # Project also appears in the row-detail options; grouping is the upper menu section.
+    option = ui.wait(lambda items: min((i for i in items if i.get('AXLabel') == catalog.text('home.grouping.' + grouping)),
+                     key=lambda i: i['frame']['y'], default=None), 'Missing grouping option')
+    frame = option['frame']
+    ui.axe('tap', '-x', str(frame['x'] + frame['width'] / 2), '-y', str(frame['y'] + frame['height'] / 2), '--post-delay', '.4')
     ui.element('home-chat-list')
     assert any((i.get('AXLabel') or '').startswith('Conversation ') for i in ui.state()), 'Grouping must retain conversation rows'
     assert any(i.get('pid') == pid for i in ui.state()), 'App must remain alive across grouping updates'
+    assert any(i.get('type') == 'Heading' or 'Header' in i.get('traits', []) for i in ui.state()), 'Grouping labels must remain semantic headings'
+    if index < 3:
+        ui.capture('grouping-' + grouping)
 ui.capture('grouping-survived')
 print('PASS: scrolled list survived eight grouping changes without restarting')

@@ -448,7 +448,6 @@ function DemoLandingContent({
         onSelect={(option) => setSelectedRepo(option.value)}
         placeholder="Select repo"
         placeholderIcon={Github}
-        tone={tone}
         searchable
         searchPlaceholder="Search repos"
         xstyle={sceneStyles.repository}

@@ -64,7 +64,7 @@
     "./tooltip/tooltip.tokens.stylex": "./src/tooltip/tooltip.tokens.stylex.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsgo --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -85,6 +85,6 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "typescript": "catalog:",
-    "vitest": "^3.2.4"
+    "vitest": "catalog:"
   }
 }

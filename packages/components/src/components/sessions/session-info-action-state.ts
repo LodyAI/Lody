@@ -1,7 +1,6 @@
 import type {
   SessionPullRequestCiState,
   SessionPullRequestMergeState,
-  SessionPullRequestReadiness,
   PrStatus,
 } from '@lody/shared';
 
@@ -40,7 +39,6 @@ export function resolveSessionInfoBarGitHubActionIds({
   isAgentBusy,
   prCiState,
   prMergeState,
-  prReadiness,
   prStatus,
 }: {
   canShowGitHubActions: boolean;
@@ -59,7 +57,6 @@ export function resolveSessionInfoBarGitHubActionIds({
   isAgentBusy: boolean;
   prCiState?: SessionPullRequestCiState | null;
   prMergeState?: SessionPullRequestMergeState | null;
-  prReadiness?: SessionPullRequestReadiness | null;
   prStatus?: PrStatus | null;
 }): SessionInfoBarGitHubActionId[] {
   if (!canShowGitHubActions || isAgentBusy) return [];
@@ -97,7 +94,10 @@ export function resolveSessionInfoBarGitHubActionIds({
     if (prCiState === 'f' || prCiState === 'e') {
       actions.push('fix-ci-errors');
     }
-    if (canMutatePr && prReadiness === 'y') {
+    // Offer Merge whenever GitHub would accept it: clean, or unstable (checks
+    // still running or failing but not required). Blocked and behind need
+    // branch protection cleared first; dirty needs the conflicts resolved.
+    if (canMutatePr && (prMergeState === 'c' || prMergeState === 'u')) {
       actions.push('merge');
     }
     return actions;

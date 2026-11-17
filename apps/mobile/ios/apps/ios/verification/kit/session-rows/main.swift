@@ -76,14 +76,24 @@ let row = SessionRows.row(root, projectName: "Lody", now: now)
 precondition(row.subtitle == "Lody · main" && row.subtitleMono && row.modelName == "gpt-5")
 precondition(row.value == "time.compact.minutes" && row.accessibilityValue == "time.minutesAgo", "Rows draw a compact time and speak the full one")
 precondition(row.unread && row.badge == "inbox.badge.archived" && row.imageTint.isEmpty)
-precondition(row.actions.map(\.id) == ["read", "archive"] && row.actions[1].title == "session.action.unarchive")
-precondition(row.leadingActions.map(\.id) == ["pin"] && row.leadingActions[0].tint == "yellow")
-precondition(row.menuActions.map(\.id) == ["rename", "pin", "archive", "share", "delete"] && row.menuActions[4].destructive)
+precondition(row.actions.map(\.id) == ["archive"] && row.actions[0].title == "session.action.unarchive", "Archived rows swipe only to unarchive")
+precondition(row.leadingActions.isEmpty && row.menuActions.map(\.id) == ["archive", "share", "delete"] && row.menuActions[2].destructive)
+let openRow = SessionRows.row(chat, now: now)
+precondition(openRow.leadingActions.map(\.id) == ["pin"] && openRow.leadingActions[0].tint == "yellow")
+precondition(openRow.menuActions.map(\.id) == ["rename", "pin", "archive", "share", "delete"] && openRow.menuActions[4].destructive)
 precondition(row.preview == "session" && row.navigates && row.action && row.diff == ["add": 3, "del": 1])
 precondition(SessionRows.row(child).modelName == "session.notRun")
 var viewed = root
 viewed.lastViewedMessageAt = root.lastMessageAt
-precondition(!SessionRows.row(viewed).unread && SessionRows.isUnread(viewed), "A local view clears emphasis, not the read action")
+precondition(!SessionRows.row(viewed).unread && SessionRows.isUnread(viewed), "A local view clears emphasis without changing the server watermark")
+precondition(SessionRows.row(viewed).actions.map(\.id) == ["archive"], "Viewed output must not offer Mark Read")
+var laterOutput = viewed
+laterOutput.lastMessageAt = (viewed.lastMessageAt ?? 0) + 1
+precondition(SessionRows.row(laterOutput).unread)
+precondition(SessionRows.row(laterOutput).actions.map(\.id) == ["read", "archive"], "New output restores Mark Read")
+laterOutput.lastReadAt = laterOutput.lastMessageAt
+precondition(!SessionRows.row(laterOutput).unread)
+precondition(SessionRows.row(laterOutput).actions.map(\.id) == ["archive"], "Remote read removes Mark Read")
 let chatRow = SessionRows.row(chat)
 precondition(chatRow.badge == "inbox.badge.attention" && chatRow.imageTint == "warning" && chatRow.subtitle.isEmpty)
 
@@ -160,38 +170,9 @@ precondition(!inbox.flatMap(\.rows).contains { $0.id == "archived" }, "Archived 
 precondition(InboxSections.inbox(inboxCatalog, keyword: "archived", now: midday).flatMap(\.rows).map(\.id) == ["archived"])
 precondition(inbox[2].rows[0].imageTint == "blue" && inbox[4].rows[0].imageTint.isEmpty && inbox[1].rows[1].imageTint == "danger")
 precondition(inbox[1].rows[0].subtitle == "lody-ios" && inbox.flatMap(\.rows).allSatisfy { $0.diff.isEmpty })
-precondition(InboxSections.inbox(inboxCatalog, chatOnly: true, now: midday).isEmpty)
 
 let many = SessionCatalog(projects: [SessionProject(id: "p", name: "lody-ios", rootPath: "/Users/me/git/lody-ios"), SessionProject(id: "empty", name: "Empty")],
   sessions: (0..<6).map { item("s\($0)", at: midday - Double($0) * hour) } + [item("c1", project: "m:unassigned"), item("pin") { $0.pinned = true }])
-let projects = InboxSections.projects(many, now: midday)
-precondition(projects.map(\.id) == ["pinned", "empty", "p", "chat"], "\(projects.map(\.id))")
-precondition(projects[0].rows.map(\.id) == ["toggle:pinned", "pin"] && projects[0].headerExpanded == true)
-precondition(projects[1].rows[0].id == "project:empty" && projects[1].rows[0].badge == "0" && projects[1].rows[0].navigates)
-let lody = projects[2]
-precondition(lody.rows[0].id == "toggle:p" && lody.rows[0].subtitle == "~/git/lody-ios" && lody.rows[0].monogram == "l")
-precondition(lody.rows.dropFirst().map(\.id) == ["s0", "s1", "s2", "s3", "s4", "project:p"] && lody.rows.last?.title == "inbox.project.more")
-precondition(projects[3].rows.map(\.id) == ["toggle:chat", "c1"] && projects[3].rows[0].menuActions.map(\.id) == ["newChat"])
-let collapsed = InboxSections.projects(many, expanded: ["p": false], now: midday)[2]
-precondition(collapsed.headerExpanded == false && collapsed.rows[0].badge == "6" && collapsed.rows.count == lody.rows.count)
-
-var urgent = many
-urgent.projects.append(SessionProject(id: "z", name: "zeta"))
-urgent.sessions.append(item("z1", "waiting", project: "z", at: midday - 90 * day))
-precondition(InboxSections.projects(urgent, sort: .urgency, now: midday).map(\.id) == ["pinned", "z", "p", "empty", "chat"])
-precondition(InboxSections.projects(urgent, sort: .activity, now: midday).map(\.id) == ["pinned", "p", "z", "empty", "chat"])
-let spaced = InboxSections.projects(urgent, sort: .urgency, now: midday)
-precondition(spaced.dropFirst().map(\.gap) == [.group, .section, .section, .group],
-             "Pinned and Chat stand apart from the projects; projects sit a smaller step apart: \(spaced.map(\.gap))")
-var unpinnedCatalog = many
-unpinnedCatalog.sessions.removeAll { $0.pinned }
-precondition(InboxSections.projects(unpinnedCatalog, now: midday).filter { $0.id != "chat" }.allSatisfy { $0.gap == .section },
-             "Without a pinned group, projects only use the smaller step")
-let zetaParent = InboxSections.projects(urgent, now: midday).first { $0.id == "z" }!.rows[0]
-precondition(zetaParent.value == "inbox.project.attention" && zetaParent.imageTint == "warning")
-
-precondition(InboxSections.reconcilePinOrder(["b", "gone", "a"], pinned: ["a", "b", "c", "d"]) { ["c": 1, "d": 2][$0] ?? 0 } == ["d", "c", "b", "a"])
-precondition(InboxSections.orderPinned([item("x") { $0.pinned = true }, item("y", at: midday + 1) { $0.pinned = true }], pinOrder: ["x"]).map(\.id) == ["x", "y"])
 
 let hits = InboxSections.match(many, keyword: "LODY")
 precondition(hits.projectIds == ["p"] && hits.sessions.count == 7)
@@ -222,6 +203,10 @@ precondition(files[0]["add"] as? Int == 2 && files[0]["status"] as? String == "M
 precondition(files[1]["add"] as? Int == 5 && files[1]["del"] as? Int == 2 && files[1]["status"] as? String == "D")
 let envelope = SessionEnvelope.prepare(#"{"v":1,"status":"live","revision":4,"preview":{"label":"localhost:5173","active":true},"entries":[{"id":"e","items":[]}]}"#)!
 precondition(envelope.revision == 4 && envelope.entriesJSON.contains(#""fileDiffs":[]"#))
+let pendingEnvelope = SessionEnvelope.prepare(#"{"v":1,"status":"live","revision":5,"entries":[{"id":"server","role":"user","status":"pending","items":[]}],"pendingRoostInputs":[{"id":"server","role":"user","status":"pending","items":[],"inputState":"unknown"},{"id":"local","role":"user","status":"pending","items":[],"inputState":"unknown"}]}"#)!
+let pendingEntries = try JSONSerialization.jsonObject(with: Data(pendingEnvelope.entriesJSON.utf8)) as! [[String: Any]]
+precondition(pendingEntries.compactMap { $0["id"] as? String } == ["server", "local"])
+precondition(pendingEnvelope.transcript.entryIds == ["server"], "A local input must not be treated as owner history")
 precondition(SessionEnvelope.prepare("not json") == nil && SessionEnvelope.prepare(#"{"v":1,"overflow":true}"#)!.overflow)
 precondition(envelope.accepted(generation: 0, after: (-1, -1)), "A newer runtime generation resets the cursor")
 precondition(!envelope.accepted(generation: 0, after: (1, -1)), "Older generations drop")
@@ -229,8 +214,10 @@ precondition(!envelope.accepted(generation: 1, after: (1, 4)) && envelope.accept
 precondition(!SessionEnvelope(version: 2, revision: 9).accepted(generation: 5, after: (1, 1)), "Unknown envelope versions drop")
 print("PASS: session rows, inbox sections and session envelopes match the catalog projections")
 
-let toolsCatalog = SessionCatalog.decode(saved: Data(#"{"catalog":{"projects":[],"machineIds":["mac"],"machineSimulators":{"mac":"available"},"sessions":[{"id":"with-tools","pullRequests":[{"repository":"Innei/lody-ios","number":31,"status":"open","ci":"f"}],"iosSimulatorPreviewRequestId":"preview-request"}]}}"#.utf8))!
+let toolsCatalog = SessionCatalog.decode(saved: Data(#"{"catalog":{"projects":[],"machineIds":["mac"],"machineSimulators":{"mac":"available"},"machineEmulators":{"mac":"available","linux":"available"},"sessions":[{"id":"with-tools","pullRequests":[{"repository":"Innei/lody-ios","number":31,"status":"open","ci":"f"}],"iosSimulatorPreviewRequestId":"preview-request","androidEmulatorPreviewRequestId":"emulator-request"}]}}"#.utf8))!
 precondition(toolsCatalog.machineSimulators["mac"] == "available")
+precondition(toolsCatalog.machineEmulators["linux"] == "available" && toolsCatalog.machineSimulators["linux"] == nil)
+precondition(toolsCatalog.session("with-tools")?.androidEmulatorPreviewRequestId == "emulator-request")
 precondition(toolsCatalog.session("with-tools")?.pullRequests.first?.number == 31)
 precondition(toolsCatalog.session("with-tools")?.iosSimulatorPreviewRequestId == "preview-request")
 
@@ -330,3 +317,92 @@ var separateOpenedChat = runningTab
 separateOpenedChat.parentSessionId = nil
 separateOpenedChat.openedBySessionId = tabOwner.id
 precondition(tabRows([separateOpenedChat]).first?.imageTint == "")
+
+// Hiding the repeated project label must not erase raw repository identity used by
+// the index; an opened child from another project must not supply the root logo.
+let logoCatalog = SessionCatalog(projects: [
+  SessionProject(id: "logo-root", name: "Root", repoFullName: "synthetic-owner/root"),
+  SessionProject(id: "logo-child", name: "Child", repoFullName: "another-owner/child"),
+], sessions: [
+  SessionItem(id: "logo-session", projectId: "logo-root"),
+  SessionItem(id: "logo-opened", projectId: "logo-child", openedBySessionId: "logo-session"),
+])
+let logoGroups = InboxSections.home(logoCatalog, grouping: .project, now: now)
+precondition(logoGroups.count == 1 && logoGroups[0].id == "group:logo-root")
+precondition(logoGroups[0].rows[0].place.isEmpty)
+precondition(logoGroups[0].rows[0].repository == "synthetic-owner/root")
+precondition(logoGroups[0].rows[1].repository == "another-owner/child")
+print("PASS: project grouping hides presentation while retaining root and cross-project child repository identity")
+
+
+var relationRoot = SessionItem(id: "relation-root", title: "Root")
+var relationTab = SessionItem(id: "relation-tab", title: "Tab", parentSessionId: relationRoot.id)
+var relationChild = SessionItem(id: "relation-child", title: "Child", openedBySessionId: relationTab.id, openedByRootSessionId: relationRoot.id)
+var relationSibling = SessionItem(id: "relation-sibling", openedBySessionId: relationRoot.id)
+var relationGrandchild = SessionItem(id: "relation-grandchild", openedBySessionId: relationChild.id)
+var relationSide = SessionItem(id: "relation-side", childSessionPlacement: "side-panel", parentSessionId: relationRoot.id)
+var relationClosed = SessionItem(id: "relation-closed", isTabClosed: true, parentSessionId: relationRoot.id)
+let related = [relationRoot, relationTab, relationChild, relationSibling, relationGrandchild, relationSide, relationClosed]
+let relationTree = SessionRelations.tree(sessions: related, current: relationChild.id)
+precondition(relationTree.hasRelations)
+precondition(Set(relationTree.rows.flatMap { $0.sessions.map(\.id) }) == Set([relationRoot.id, relationTab.id, relationChild.id, relationSibling.id, relationGrandchild.id]))
+precondition(relationTree.rows.first { $0.session.id == relationChild.id }?.depth == 1)
+precondition(relationTree.rows.first { $0.session.id == relationGrandchild.id }?.depth == 2)
+precondition(relationTree.rows.count == 4, "Contained Tabs do not add hierarchy rows")
+precondition(relationTree.rows.first { $0.session.id == relationRoot.id }?.tabs.map(\.id) == [relationTab.id])
+precondition(!relationTree.rows.contains { $0.session.id == relationTab.id }, "Tabs share the root row")
+let branchRows = relationTree.rows
+let rootBranch = SessionRelations.branch(at: 0, rows: branchRows)
+let childBranch = SessionRelations.branch(at: branchRows.firstIndex { $0.session.id == relationChild.id }!, rows: branchRows)
+let grandchildBranch = SessionRelations.branch(at: branchRows.firstIndex { $0.session.id == relationGrandchild.id }!, rows: branchRows)
+let lastBranch = SessionRelations.branch(at: branchRows.count - 1, rows: branchRows)
+precondition(rootBranch.depth == 0 && rootBranch.ancestors.isEmpty)
+precondition(childBranch.depth == 1 && childBranch.continues, "Parent rail continues through its descendants to the next sibling")
+precondition(grandchildBranch.depth == 2 && grandchildBranch.ancestors == [0] && !grandchildBranch.continues)
+precondition(!lastBranch.continues, "Final child ends its curved branch without a dangling trunk")
+precondition(SessionRelations.target(relationTab.id, sessions: related) == relationTab.id)
+precondition(SessionRelations.target(relationTab.id, sessions: related.filter { $0.id != relationRoot.id }) == nil)
+precondition(!SessionRelations.tree(sessions: [relationRoot, relationTab], current: relationTab.id).hasRelations)
+precondition(!SessionRelations.tree(sessions: [relationRoot, relationChild], current: relationChild.id).hasRelations, "Missing precise opener must not fall back to openedByRootSessionId")
+precondition(SessionRelations.tree(sessions: related, current: relationClosed.id).rows.contains { $0.tabs.contains { $0.id == relationClosed.id } })
+relationRoot.archived = true
+precondition(SessionRelations.target(relationTab.id, sessions: [relationRoot, relationTab]) == nil)
+relationRoot.archived = false
+relationRoot.openedBySessionId = relationGrandchild.id
+let cycle = SessionRelations.tree(sessions: [relationRoot, relationTab, relationChild, relationGrandchild], current: relationChild.id)
+precondition(cycle.rows.count == 3 && Set(cycle.rows.flatMap { $0.sessions.map(\.id) }).count == 4)
+print("Related conversations: precise opener, containment, exact Tab targets, missing/archived roots and cycles passed")
+
+// A refresh rebuilds the projection, retaining whole families at the idle root limit.
+var idleCatalog = SessionCatalog(sessions: (0..<21).map {
+  SessionItem(id: "idle-root-\($0)", projectId: "p", lastMessageAt: Double(100 - $0), lastReadAt: 100)
+})
+idleCatalog.sessions.append(SessionItem(id: "idle-child", projectId: "other", openedBySessionId: "idle-root-19", lastMessageAt: 1, lastReadAt: 100))
+let limitedIdle = InboxSections.home(idleCatalog, grouping: .status, now: now).flatMap(\.rows)
+precondition(limitedIdle.count == 22 && limitedIdle.suffix(2).map(\.id) == ["idle-child", InboxSections.idleMoreId])
+precondition(limitedIdle.first { $0.id == "idle-child" }?.parentId == "idle-root-19")
+precondition(!limitedIdle.contains { $0.id == "idle-root-20" })
+precondition(InboxSections.home(idleCatalog, grouping: .status, idleExpanded: true, now: now).flatMap(\.rows).count == 23)
+idleCatalog.sessions[20].pinned = true
+idleCatalog.sessions[20].title = "Updated title"
+let refreshedIdle = InboxSections.home(idleCatalog, grouping: .status, now: now)
+precondition(refreshedIdle.first?.id == "pinned" && refreshedIdle.first?.rows.first?.title == "Updated title")
+precondition(!refreshedIdle.flatMap(\.rows).contains { $0.id == InboxSections.idleMoreId })
+for grouping in [HomeGrouping.time, .project, .status] {
+  let cycleRows = InboxSections.home(SessionCatalog(sessions: [cycleA, cycleB]), grouping: grouping, now: now).flatMap(\.rows)
+  precondition(cycleRows.map(\.id) == ["a", "b"] && cycleRows.allSatisfy { $0.parentId.isEmpty })
+}
+
+// Share/project ordering includes contained Tabs, ignores archives, and breaks ties by name.
+let sortProjects = [SessionProject(id: "b", name: "Beta"), SessionProject(id: "a", name: "Alpha"), SessionProject(id: "empty", name: "Empty"), SessionProject(id: "m:unassigned", name: "Chat")]
+var sortSessions = [
+  SessionItem(id: "sort-a", status: "idle", projectId: "a", lastMessageAt: 10),
+  SessionItem(id: "sort-b", status: "idle", projectId: "b", lastMessageAt: 10),
+  SessionItem(id: "sort-archive", status: "waiting", archived: true, projectId: "empty", lastMessageAt: 100),
+]
+precondition(InboxSections.sortProjects(sortProjects, sessions: sortSessions, sort: .activity).map(\.id) == ["a", "b", "empty"])
+sortSessions.append(SessionItem(id: "sort-tab", status: "waiting", projectId: "b", parentSessionId: "sort-b", lastMessageAt: 20))
+precondition(InboxSections.sortProjects(sortProjects, sessions: sortSessions, sort: .urgency).map(\.id) == ["b", "a", "empty"])
+precondition(InboxSections.sortProjects(sortProjects, sessions: sortSessions, sort: .activity).map(\.id) == ["b", "a", "empty"])
+precondition(InboxSections.sortProjects(sortProjects, sessions: sortSessions, sort: .name).map(\.id) == ["a", "b", "empty"])
+print("PASS: Home refresh, complete idle families, cycles and project sorting retain projection semantics")

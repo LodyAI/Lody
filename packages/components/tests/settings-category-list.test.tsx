@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -327,6 +325,20 @@ describe('SettingsCategoryList', () => {
 
     expect(navigateMock).toHaveBeenCalledWith({
       to: '/$workspaceName/settings/billing',
+      params: { workspaceName: 'acme' },
+      search: expect.any(Function),
+    });
+  });
+
+  it('lists Machines in a workspace without other members', async () => {
+    await renderList();
+
+    await act(async () => {
+      getButton('Machines').click();
+    });
+
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: '/$workspaceName/settings/machines',
       params: { workspaceName: 'acme' },
       search: expect.any(Function),
     });

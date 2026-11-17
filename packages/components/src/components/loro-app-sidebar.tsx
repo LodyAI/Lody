@@ -1,3 +1,9 @@
+import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
+import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
+import { E2eeMachineWindowPill, E2eeOfflineSummary } from '@/components/e2ee-offline-window';
+import { useMySessionScope } from '@/hooks/use-visible-session-metas';
+import { isSessionInMyScope } from '@/lib/session-visibility';
+import { E2eeDeviceRequestsButton } from '@/components/pages/e2ee-automatic-pairing';
 import { E2eeSettingsIcon } from './settings/e2ee/security-state';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { buildSessionLink } from '@lody/shared/session-link';
@@ -29,7 +35,6 @@ import { useLocation, useRouter } from '@tanstack/react-router';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
   findFreshSessionPresenceState,
-  getSessionGroupTitle,
   machineSupportsLocalProjectRemovalProtocol,
   resolveProjectGitHubRepo,
   resolveSessionHistoryBackendKind,
@@ -400,6 +405,7 @@ import {
   sidebarCollapsedAtom,
   sidebarLastWidthAtom,
   sidebarOrganizeModeAtom,
+  sidebarHideEmptyProjectsAtom,
   sidebarShowBranchNamesAtom,
   sidebarUpdatedShowProjectNamesAtom,
   sidebarUpdatedBucketCollapseStateAtom,
@@ -446,7 +452,10 @@ import {
   type SessionListRow,
 } from '@/components/session-list';
 import { projectEditorRequestAtom } from '@/atoms/project-editor';
-import { placeProjectGroups } from '@/lib/project-group-placement';
+import {
+  placeProjectGroups,
+  selectVisibleLocalProjectSections,
+} from '@/lib/project-group-placement';
 import {
   buildChildSessionsByParent,
   buildSessionListRows,
@@ -738,7 +747,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
 }: LocalProjectSessionItemProps) {
   const { t } = useTranslation();
   const moreActionsLabel = t('sessions.moreActions', 'More actions');
-  const title = getSessionGroupTitle(session) || defaultSessionTitle;
+  const title = (session.title ?? '').trim() || defaultSessionTitle;
   // Self-ticking on the shared sidebar timer: a tick re-renders only this row's
   // time label, not every row in the project section.
   const now = useStableNow(SIDEBAR_RELATIVE_TIME_REFRESH_MS);
@@ -765,7 +774,8 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
   const lineBoxClassName = showMetaLine
     ? clsx(stylex.props(appStyles.lineBox).className, SIDEBAR_ROW_LINE_CLASS)
     : stylex.props(appStyles.contents).className;
-  const showInlineArchive = !isMobile;
+  const readOnly = sharing?.access === 'read';
+  const showInlineArchive = !isMobile && !readOnly;
   const showWorktreeIcon = session.isWorktree === true;
   const isPinned = Boolean(session.isPinned);
   // Local-project sessions linked to a GitHub repo can carry a PR — the repo
@@ -776,7 +786,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
   const showPr = Boolean(prInfo.url);
   const prRepoFullName = resolveProjectGitHubRepo(session.project) ?? null;
   const [renameTarget, setRenameTarget] = useState<RenameSessionDialogTarget | null>(null);
-  const canRename = typeof onRename === 'function';
+  const canRename = !readOnly && typeof onRename === 'function';
   const canTogglePinned = typeof onTogglePinned === 'function';
   const canCopyUrl = typeof onCopyUrl === 'function';
   const canMarkUnread = typeof onMarkUnread === 'function' && !hasUnreadMessages;
@@ -1052,17 +1062,19 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           shareMenuState ||
           openerSessionId ||
           isElectronRenderer()) &&
-        true ? (
+        !readOnly ? (
           <ContextMenu.Separator />
         ) : null}
-        <ContextMenu.Item
-          icon={Archive}
-          onClick={() => {
-            onArchive(session.id);
-          }}
-        >
-          {contextMenuLabels.archive}
-        </ContextMenu.Item>
+        {!readOnly ? (
+          <ContextMenu.Item
+            icon={Archive}
+            onClick={() => {
+              onArchive(session.id);
+            }}
+          >
+            {contextMenuLabels.archive}
+          </ContextMenu.Item>
+        ) : null}
       </ContextMenu.Content>
     </ContextMenu.Root>
   ) : (
@@ -1859,7 +1871,7 @@ export function LoroAppSidebar({
   });
   const isMobile = useIsMobile();
   const multiWorkspaceAvailable = useAppCapability('multiWorkspace');
-  const { openSettings } = useOpenSettings();
+  const { openSettings, preloadSettings } = useOpenSettings();
 
   const user = useAtomValue(userAtom);
   const userId = user?.id ?? null;
@@ -1965,15 +1977,26 @@ export function LoroAppSidebar({
       workspaceId: scopedWorkspaceId,
       enabled: workspaceDataReady,
     });
+  const {
+    members: sharingMembers,
+    isLoading: sharingMembersLoading,
+    error: sharingMembersError,
+    retry: retrySharingMembers,
+  } = useWorkspaceMembers();
   const sessionsListLoading = Boolean(workspaceSlug) && !workspaceDataReady;
   const {
     machines: machineMetaMap,
+    sessionAccessViews,
     projects: visibleLocalProjectMap,
     showSessionSharing,
     resolve: resolveSessionSharing,
     shareWithTeam: shareSessionWithTeam,
   } = useSessionSharing({
     includeLocalProjectDetails: true,
+    members: sharingMembers,
+    membersLoading: sharingMembersLoading,
+    membersError: sharingMembersError,
+    retryMembers: retrySharingMembers,
     workspaceId: scopedWorkspaceId,
     enabled: workspaceDataReady,
   });
@@ -2053,6 +2076,7 @@ export function LoroAppSidebar({
     sidebarUpdatedShowProjectNamesAtom
   );
   const [showBranchNames, setShowBranchNames] = useAtom(sidebarShowBranchNamesAtom);
+  const [hideEmptyProjects, setHideEmptyProjects] = useAtom(sidebarHideEmptyProjectsAtom);
   const setSidebarCollapsed = useSetAtom(sidebarCollapsedAtom);
   const [sidebarLastWidth, setSidebarLastWidth] = useAtom(sidebarLastWidthAtom);
   const handleChatScopeChanged = useCallback(
@@ -2088,8 +2112,18 @@ export function LoroAppSidebar({
     },
     [postHog, setShowBranchNames]
   );
+  const handleHideEmptyProjectsChange = useCallback(
+    (next: boolean) => {
+      capturePostHogEvent(postHog, 'settings/changed', {
+        key: 'sidebar_hide_empty_projects',
+        value: next,
+      });
+      setHideEmptyProjects(next);
+    },
+    [postHog, setHideEmptyProjects]
+  );
   const sessionSidebarCodeChangesOnly = useAtomValue(sessionSidebarCodeChangesOnlyAtom);
-  const { archiveSession, markSessionUnread, setSessionPinned, updateSessionGroupTitle } =
+  const { archiveSession, markSessionUnread, setSessionPinned, updateSessionTitle } =
     useSessionActions();
   const { removeLocalProject } = useRemoveLocalProject();
   const presenceStates = useAtomValue(lodyPresenceStatesAtom);
@@ -2098,8 +2132,7 @@ export function LoroAppSidebar({
   const archiveSessionWithConfirmation = useArchiveSessionWithConfirmation(archiveSession);
   const rejectHistoryWrite = useCallback(
     (ids: string[]) => {
-      if (!workspaceHistoryReadable || !ids.some((id) => historyOnlySessionIds.has(id)))
-        return false;
+      if (!ids.some((id) => historyOnlySessionIds.has(id))) return false;
       toast.info(t('sessions.historyMachineUnavailable'));
       return true;
     },
@@ -2125,22 +2158,20 @@ export function LoroAppSidebar({
 
   const handleTogglePinSession = useCallback(
     (sessionId: string, nextPinned: boolean) => {
-      if (rejectHistoryWrite([sessionId])) return;
       void setSessionPinned(sessionId as SessionId, nextPinned).catch((error: unknown) =>
         toast.error(error instanceof Error ? error.message : String(error))
       );
     },
-    [rejectHistoryWrite, setSessionPinned]
+    [setSessionPinned]
   );
 
   const handleMarkSessionUnread = useCallback(
     (sessionId: string) => {
-      if (rejectHistoryWrite([sessionId])) return;
       void markSessionUnread(sessionId as SessionId).catch((error: unknown) =>
         toast.error(error instanceof Error ? error.message : String(error))
       );
     },
-    [markSessionUnread, rejectHistoryWrite]
+    [markSessionUnread]
   );
 
   const sessionById = useMemo(() => {
@@ -2152,12 +2183,12 @@ export function LoroAppSidebar({
   }, [allActiveSessions, sessions]);
   const sessionSharingById = useMemo(() => {
     const map = new Map<string, SessionSharingState>();
-    if (!showSessionSharing) return map;
     for (const [sessionId, session] of sessionById) {
-      map.set(sessionId, resolveSessionSharing(session));
+      if (showSessionSharing || historyOnlySessionIds.has(sessionId))
+        map.set(sessionId, resolveSessionSharing(session));
     }
     return map;
-  }, [resolveSessionSharing, sessionById, showSessionSharing]);
+  }, [resolveSessionSharing, sessionById, showSessionSharing, historyOnlySessionIds]);
 
   const copySessionUrl = useCallback(
     async (sessionId: string, successMessage: string) => {
@@ -2205,7 +2236,7 @@ export function LoroAppSidebar({
       }
       setPendingSessionShare({
         sessionId: sessionId,
-        title: getSessionGroupTitle(session) || defaultSessionTitle,
+        title: session?.title?.trim() || defaultSessionTitle,
         sharing,
       });
     },
@@ -2295,13 +2326,14 @@ export function LoroAppSidebar({
 
   // Shared by the task lists and the Workspace groups, which also render a
   // Local Project Session as a task row when it moves under its opener.
+  const { currentUserId: myAccountId } = useMySessionScope();
   const buildSidebarTaskRows = useCallback(
     (sourceSessions: SessionMeta[]) =>
       buildSessionListRows(
         sourceSessions,
         {
           scope,
-          currentUserId: userId,
+          currentUserId: myAccountId,
           defaultTitle: defaultSessionTitle,
           onlineMachineIds,
           members: activeOrganization?.members,
@@ -2319,6 +2351,7 @@ export function LoroAppSidebar({
       })),
     [
       activeOrganization?.members,
+      myAccountId,
       allActiveSessions,
       onlineMachineIds,
       liveSessionStatuses,
@@ -2359,9 +2392,9 @@ export function LoroAppSidebar({
   const handleRenameSession = useCallback(
     (sessionId: string, nextTitle: string) => {
       if (rejectHistoryWrite([sessionId])) return Promise.resolve();
-      return updateSessionGroupTitle(sessionId as SessionId, nextTitle);
+      return updateSessionTitle(sessionId as SessionId, nextTitle);
     },
-    [rejectHistoryWrite, updateSessionGroupTitle]
+    [rejectHistoryWrite, updateSessionTitle]
   );
   const [repoCollapseState, setRepoCollapseState] = useAtom(repoCollapseStateAtom);
   const [repoOrder, setRepoOrder] = useAtom(repoOrderAtom);
@@ -2542,8 +2575,7 @@ export function LoroAppSidebar({
       // its legacy `project` projection names the first member's folder.
       if (session.projectRun) continue;
       if (scope === 'my') {
-        if (!userId) continue;
-        if (session.userId !== userId) continue;
+        if (!isSessionInMyScope(session, myAccountId)) continue;
       }
 
       const key = `${session.machineId}:${project.localProjectId}`;
@@ -2564,7 +2596,7 @@ export function LoroAppSidebar({
     }
 
     return map;
-  }, [childSessionsByParent, scope, sessions, sessionsListLoading, userId]);
+  }, [childSessionsByParent, scope, sessions, sessionsListLoading, myAccountId]);
   // The ONE session-navigation callback for every sidebar surface (rows,
   // Updated items, keyboard nav). `tabSessionId` restores the precise child Tab
   // that "Go to Opener Session" points at.
@@ -2811,6 +2843,7 @@ export function LoroAppSidebar({
         hasUnreadMessages: task.hasUnreadMessages,
         isOffline: task.isOffline,
         isWaitingPermission: task.isWaitingPermission,
+        hasFailedTurn: task.hasFailedTurn,
         externalHistoryProvider: task.externalHistoryProvider ?? null,
         owner: task.owner ?? null,
         openedBySessionId: task.openedBySessionId ?? null,
@@ -2838,6 +2871,7 @@ export function LoroAppSidebar({
         hasUnreadMessages: task.hasUnreadMessages,
         isOffline: task.isOffline,
         isWaitingPermission: task.isWaitingPermission,
+        hasFailedTurn: task.hasFailedTurn,
         prStatus: task.prStatus,
         prCiState: task.prCiState,
         prReadiness: task.prReadiness,
@@ -2876,6 +2910,7 @@ export function LoroAppSidebar({
         hasUnreadMessages: task.hasUnreadMessages,
         isOffline: task.isOffline,
         isWaitingPermission: task.isWaitingPermission,
+        hasFailedTurn: task.hasFailedTurn,
         prStatus: task.prStatus,
         prCiState: task.prCiState,
         prReadiness: task.prReadiness,
@@ -2897,7 +2932,7 @@ export function LoroAppSidebar({
         const sessionsForProject = localProjectSessionsByKey.get(projectKey) ?? [];
         const sectionLabel = `${localSectionLabel} · ${project.name}`;
         for (const session of sessionsForProject) {
-          const title = getSessionGroupTitle(session) || defaultSessionTitle;
+          const title = (session.title ?? '').trim() || defaultSessionTitle;
           const activity = getEffectiveSessionActivitySummary(
             session,
             childSessionsByParent,
@@ -2929,6 +2964,7 @@ export function LoroAppSidebar({
             hasUnreadMessages: activity.hasUnreadMessages,
             isOffline,
             isWaitingPermission: activity.isWaitingPermission,
+            hasFailedTurn: activity.hasFailedTurn,
             prStatus: prInfo.status,
             prCiState: prInfo.ciState,
             prReadiness: prInfo.readiness,
@@ -3088,9 +3124,11 @@ export function LoroAppSidebar({
       showHeading: t('sidebar.filter.showHeading', 'Tasks'),
       organizeProject: t('sidebar.filter.organizeProject', 'Project'),
       organizeUpdated: t('sidebar.filter.organizeUpdated', 'Updated'),
+      organizeStatus: t('sidebar.filter.organizeStatus', 'Status'),
       detailsHeading: t('sidebar.filter.detailsHeading', 'Details'),
       updatedProjectNames: t('sidebar.filter.updatedProjectNames', 'Show Project'),
       showBranchNames: t('sidebar.filter.showBranchNames', 'Show Branch'),
+      hideEmptyProjects: t('sidebar.filter.hideEmptyProjects', 'Hide Empty Projects'),
       showMyTasks: t('sessions.sidebar.my', 'My Tasks'),
       showAllTasks: t('sessions.sidebar.team', 'All Tasks'),
       emptyMyTasks: t('sidebar.filter.emptyMyTasks', 'No tasks match this view'),
@@ -3124,6 +3162,8 @@ export function LoroAppSidebar({
       onShowUpdatedProjectNamesChange={handleShowUpdatedProjectNamesChange}
       showBranchNames={showBranchNames}
       onShowBranchNamesChange={handleShowBranchNamesChange}
+      hideEmptyProjects={hideEmptyProjects}
+      onHideEmptyProjectsChange={handleHideEmptyProjectsChange}
       labels={filterLabels}
       open={sidebarFilterOpen}
       onOpenChange={setSidebarFilterOpen}
@@ -3177,7 +3217,7 @@ export function LoroAppSidebar({
       projectGroupSessions.map((session) => session.projectGroup?.id)
     );
     const defined = workspaceProjects
-      .filter((project) => activeProjectIds.has(project.id))
+      .filter((project) => !hideEmptyProjects || activeProjectIds.has(project.id))
       .map((project, index) => ({ project, index }))
       .sort(
         (left, right) =>
@@ -3207,7 +3247,14 @@ export function LoroAppSidebar({
       ...defined,
       ...[...removed.values()].sort((left, right) => left.name.localeCompare(right.name)),
     ];
-  }, [projectGroupOrder, projectGroupSessions, repoCollapseState, userId, workspaceProjects]);
+  }, [
+    hideEmptyProjects,
+    projectGroupOrder,
+    projectGroupSessions,
+    repoCollapseState,
+    userId,
+    workspaceProjects,
+  ]);
   const projectGroupPlacement = useMemo(
     () =>
       placeProjectGroups({
@@ -3224,24 +3271,23 @@ export function LoroAppSidebar({
   );
   // Filter after pinned trees and opened-by placement have assigned each row
   // its final group. Keep the catalog above for Updated/Pinned and saved order.
+  // With "Hide Empty Projects" off, every catalog project stays listed.
   const localProjectSections = useMemo(
     () =>
-      catalogLocalProjectSections
-        .map((section) => ({
-          ...section,
-          projects: section.projects.filter(
-            (project) =>
-              (workspaceLocalProjectSessionsByKey.get(`${section.machineId}:${project.id}`)
-                ?.length ?? 0) > 0
-          ),
-        }))
-        .filter(
-          (section) =>
-            section.projects.length > 0 ||
-            (section.machineId &&
-              (projectGroupPlacement.byMachine.get(section.machineId)?.sessions.length ?? 0) > 0)
-        ),
-    [catalogLocalProjectSections, projectGroupPlacement, workspaceLocalProjectSessionsByKey]
+      selectVisibleLocalProjectSections({
+        sections: catalogLocalProjectSections,
+        hideEmptyProjects,
+        sessionCountOf: (machineId, projectId) =>
+          workspaceLocalProjectSessionsByKey.get(`${machineId}:${projectId}`)?.length ?? 0,
+        projectGroupSessionCountOf: (machineId) =>
+          projectGroupPlacement.byMachine.get(machineId)?.sessions.length ?? 0,
+      }),
+    [
+      catalogLocalProjectSections,
+      hideEmptyProjects,
+      projectGroupPlacement,
+      workspaceLocalProjectSessionsByKey,
+    ]
   );
   const showGithubWorktrees =
     sessionsListLoading ||
@@ -3336,6 +3382,10 @@ export function LoroAppSidebar({
             section.machineId && machineMeta
               ? {
                   machineId: section.machineId,
+                  needsSharingReview: sessionAccessViews?.get(section.machineId)?.needsResign,
+                  onReviewSharing: sessionAccessViews?.get(section.machineId)?.canManage
+                    ? () => openSettings('machines', { machineId: section.machineId! })
+                    : undefined,
                   name: machineMeta.name,
                   owner: machineMeta.ownerUserId
                     ? (membersByUserId.get(machineMeta.ownerUserId) ?? null)
@@ -3428,6 +3478,11 @@ export function LoroAppSidebar({
                       <span {...stylex.props(appStyles.clipped)}>{section.sectionLabel}</span>
                       {section.machineId && section.kind === 'remote' ? (
                         <SidebarMachineOfflinePill machineId={section.machineId} />
+                      ) : null}
+                      {/* Only an encrypted workspace's outage window has an entry, so this
+                          renders nothing for ordinary workspaces. */}
+                      {section.kind === 'local' ? (
+                        <E2eeMachineWindowPill workspaceId={scopedWorkspaceId} />
                       ) : null}
                     </span>
                   }
@@ -3636,6 +3691,7 @@ export function LoroAppSidebar({
         planTier: planTierByWorkspaceId.get(org.id) ?? null,
         memberCount:
           org.id === activeOrganization?.id ? (activeOrganization.members?.length ?? null) : null,
+        encrypted: isListedEncryptedWorkspace(org),
       }));
   }, [
     activeOrganization,
@@ -4135,8 +4191,8 @@ export function LoroAppSidebar({
         },
         updated: {
           items: updatedItems,
-          collapsed: updatedBucketCollapseState.all ?? false,
-          showFull: updatedBucketShowFullState.all ?? false,
+          collapsedBuckets: updatedBucketCollapseState,
+          showFullBuckets: updatedBucketShowFullState,
         },
       }),
     [
@@ -4150,8 +4206,8 @@ export function LoroAppSidebar({
       pinnedSectionCollapsed,
       repos,
       showFullSessionGroups,
-      updatedBucketCollapseState.all,
-      updatedBucketShowFullState.all,
+      updatedBucketCollapseState,
+      updatedBucketShowFullState,
       updatedItems,
       workspaceChatSessions,
       workspaceRepoSessions,
@@ -4214,13 +4270,19 @@ export function LoroAppSidebar({
         scrollStateKey={workspaceSlug}
         workspaceSwitcherEnabled={multiWorkspaceAvailable}
         connectionUiState={connectionUiState}
+        offlineDetail={<E2eeOfflineSummary workspaceId={resolvedWorkspaceId} />}
         workspaceSyncing={sessionsListLoading}
         isElectron={isElectron}
         // Traffic lights auto-hide in native fullscreen — drop the reserved
         // header inset so the sidebar's first row aligns with the top bar.
         isElectronMacOS={isElectronMacOS && !isElectronFullscreen}
         activeNav={activeNav}
-        topContent={sidebarTopContent ?? undefined}
+        topContent={
+          <>
+            <E2eeDeviceRequestsButton className="mb-2 w-full justify-start" />
+            {sidebarTopContent}
+          </>
+        }
         desktopFilterAction={sidebarFilterPopover ?? undefined}
         afterSessionListContent={sidebarChatsContent ?? undefined}
         bottomFloatingContent={sidebarBottomFloatingContent ?? undefined}
@@ -4234,12 +4296,14 @@ export function LoroAppSidebar({
         updatedSelectedItemId={updatedSelectedItemId}
         updatedBucketsCollapsed={updatedBucketCollapseState}
         updatedShowFullBuckets={updatedBucketShowFullState}
-        updatedIsLoading={organizeMode === 'updated' && sessionsListLoading}
+        updatedIsLoading={organizeMode !== 'workspace' && sessionsListLoading}
         onOrganizeModeChange={handleOrganizeModeChange}
         showUpdatedProjectNames={showUpdatedProjectNames}
         onShowUpdatedProjectNamesChange={handleShowUpdatedProjectNamesChange}
         showBranchNames={showBranchNames}
         onShowBranchNamesChange={handleShowBranchNamesChange}
+        hideEmptyProjects={hideEmptyProjects}
+        onHideEmptyProjectsChange={handleHideEmptyProjectsChange}
         onChatScopeChange={handleChatScopeChanged}
         onSelectUpdatedItem={handleSelectUpdatedItem}
         onTogglePinnedSection={handleTogglePinnedSection}
@@ -4275,6 +4339,7 @@ export function LoroAppSidebar({
         onFeedbackClicked={handleFeedbackClicked}
         onBugReportClicked={handleBugReportClicked}
         onSettingsClicked={handleSettingsClicked}
+        onSettingsIntent={() => preloadSettings()}
         settingsIcon={<E2eeSettingsIcon />}
         onInviteClicked={handleInviteClicked}
         onLinkRepoClicked={handleLinkRepoClicked}

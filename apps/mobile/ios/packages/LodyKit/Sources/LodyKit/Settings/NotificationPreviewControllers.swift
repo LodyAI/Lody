@@ -9,7 +9,7 @@ class NotificationPreviewHost: UIViewController {
 
   override func viewDidLoad() {
     super.viewDidLoad()
-    view.backgroundColor = .systemGroupedBackground
+    view.backgroundColor = .lodyGroupedBackground
     header.axis = .vertical
     header.alignment = .leading
     header.spacing = 8

@@ -18,7 +18,7 @@ final class ChatTabsState: ObservableObject {
   var resize: ((CGFloat) -> Void)?
   init(tabs: [ChatTabItem], closed: [ChatTabItem]) { self.tabs = tabs; self.closed = closed }
   var height: CGFloat {
-    let rows = showingClosed ? max(1, closed.count) + 1 : tabs.count + 2
+    let rows = showingClosed ? max(1, closed.count) + 1 : tabs.count + 1
     return min(420, CGFloat(rows) * LodySize.listRow + LodySpacing.xs * 2 + 1)
   }
 }
@@ -26,9 +26,7 @@ final class ChatTabsState: ObservableObject {
 /// A native swipe-action list inside the directory button's glass panel.
 struct ChatTabsPanel: View {
   @ObservedObject var state: ChatTabsState
-  let creating: Bool
   var onSelect: (String) -> Void
-  var onNew: () -> Void
   var onClose: (String) -> Void
   var onRestore: (String) -> Void
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -60,8 +58,6 @@ struct ChatTabsPanel: View {
         VStack(spacing: 0) {
           if !state.tabs.isEmpty { tabList(state.tabs, closed: false) }
           Divider().padding(.horizontal, LodySpacing.lg)
-          action("session.tabs.new", icon: .plus, secondary: false, action: onNew)
-            .disabled(creating || state.busy != nil).accessibilityIdentifier("newTab")
           action("session.tabs.closed", icon: .sessions, secondary: true) { changePage(true) }
             .accessibilityIdentifier("closedTabs")
         }

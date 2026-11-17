@@ -17,6 +17,16 @@ struct ChatMenuAction: Decodable, Equatable, Identifiable {
 /// the computer and live resources, the repository context with ±diff, and the repository
 /// action. Colour is kept for status (PR state, CI, diff), so Send stays the one accent on screen.
 struct ChatActionBarState: Decodable, Equatable {
+  #if !LODY_SHARE_EXTENSION
+  struct Machine: Decodable, Equatable {
+    let id: String
+    let workspaceId: String
+    let status: String
+    let members: [WorkspaceMember]
+  }
+
+  #endif
+
   struct Item: Decodable, Equatable, Identifiable {
     let id: String
     let symbol: String
@@ -41,7 +51,31 @@ struct ChatActionBarState: Decodable, Equatable {
     var repository: String?
     var prStatus: String?
     var prCI: String?
+    /// A PR write (merge, ready for review) is in flight: a spinner replaces the PR mark.
+    var busy: Bool?
     let actions: [ChatMenuAction]
+    /// A Project group: the popover lists these instead of one repository's actions.
+    var menuSubtitle: String?
+    var members: [Member]?
+  }
+
+  /// One repository or folder of a Project group conversation.
+  struct Member: Decodable, Equatable, Identifiable {
+    let id: String
+    let title: String
+    /// `github` or `local`.
+    let kind: String
+    let depth: Int
+    let submodule: Bool
+    /// Path (when it differs from the title) · branch, or the in-place note.
+    var detail: String?
+    var repository: String?
+    var branch: String?
+    var added: Int?
+    var removed: Int?
+    var prNumber: Int?
+    var prStatus: String?
+    var prCI: String?
   }
 
   struct Diff: Decodable, Equatable {
@@ -50,6 +84,7 @@ struct ChatActionBarState: Decodable, Equatable {
     let accessibilityLabel: String
     /// Opens the workspace changes; otherwise the counts are display only.
     var tap: Bool?
+    var files: Int?
   }
 
   /// The top repository action; [more] holds the rest in priority order.
@@ -75,6 +110,22 @@ struct ChatActionBarState: Decodable, Equatable {
 /// repository action, pinned trailing. Never scrolls: `ViewThatFits` takes the first stage that
 /// fits on one line — long labels capped, then the diff hidden, then the environment folded
 /// into one icon with a "+n" badge — and only at very large text moves the action to its own row.
+private struct ActionBarDiffSummary: View {
+  let diff: ChatActionBarState.Diff
+
+  var body: some View {
+    if diff.added + diff.removed > 0 {
+      HStack(spacing: 4) {
+        Text("+\(diff.added)").foregroundStyle(LodyColor.diffAddedText)
+        Text("−\(diff.removed)").foregroundStyle(LodyColor.diffRemovedText)
+      }
+    } else {
+      Text(String.localizedStringWithFormat(String(localized: "changes.fileCount", bundle: .lody), diff.files ?? 0))
+        .foregroundStyle(LodyColor.textSecondary)
+    }
+  }
+}
+
 struct ChatActionBarContent: View {
   var state = ChatActionBarState()
   var onAction: (String) -> Void = { _ in }
@@ -150,12 +201,13 @@ struct ChatActionBarContent: View {
   private var foldedEnvironment: some View {
     let items = environment
     let lead = items.first { $0.id == "machine" && $0.tint == "warning" }
-      ?? items.first { ["browser", "simulator"].contains($0.id) }
+      ?? items.first { ["browser", "simulator", "emulator"].contains($0.id) }
       ?? items[0]
     return Menu {
       ForEach(items) { item in
-        Button { open(item) } label: { Label(item.accessibilityLabel, systemImage: item.symbol) }
-          .disabled(item.id == "machine")
+        Button {
+          open(item)
+        } label: { Label(item.accessibilityLabel, systemImage: item.symbol) }
       }
     } label: {
       HStack(spacing: 2) {
@@ -178,24 +230,26 @@ struct ChatActionBarContent: View {
   }
 
   @ViewBuilder private func item(_ item: ChatActionBarState.Item) -> some View {
-    let actions = item.actions ?? []
-    Group {
-      if actions.isEmpty {
-        Button { open(item) } label: { glyph(item) }
-      } else if item.tap == true {
-        Menu { menu(actions, prefix: item.id, title: item.menuTitle) } label: { glyph(item) } primaryAction: { open(item) }
-      } else {
-        Menu { menu(actions, prefix: item.id, title: item.menuTitle) } label: { glyph(item) }
-      }
-    }
+    resourceItem(item)
     .buttonStyle(.plain)
     .accessibilityLabel(item.accessibilityLabel)
     .accessibilityIdentifier(Self.identifier(item.id))
   }
 
+  @ViewBuilder private func resourceItem(_ item: ChatActionBarState.Item) -> some View {
+    let actions = item.actions ?? []
+    if actions.isEmpty {
+      Button { open(item) } label: { glyph(item) }
+    } else if item.tap == true {
+      Menu { menu(actions, prefix: item.id, title: item.menuTitle) } label: { glyph(item) } primaryAction: { open(item) }
+    } else {
+      Menu { menu(actions, prefix: item.id, title: item.menuTitle) } label: { glyph(item) }
+    }
+  }
+
   private static func identifier(_ id: String) -> String {
     switch id {
-    case "browser", "simulator": "session-preview"
+    case "browser", "simulator", "emulator": "session-preview"
     default: "session-bar:" + id
     }
   }
@@ -220,7 +274,46 @@ struct ChatActionBarContent: View {
 
   /// PR or branch with the ±diff. Long labels are capped; once space runs short the diff becomes
   /// hidden counts that remain available in the menu.
-  private func contextCapsule(diffDot: Bool) -> some View {
+  @ViewBuilder private func contextCapsule(diffDot: Bool) -> some View {
+    if let context = state.context, let members = context.members {
+      groupCapsule(context, members: members, diffDot: diffDot)
+    } else {
+      repositoryCapsule(diffDot: diffDot)
+    }
+  }
+
+  /// A Project group: the repository and PR counts with the group-wide ±diff; the popover lists
+  /// every member.
+  private func groupCapsule(_ context: ChatActionBarState.Context, members: [ChatActionBarState.Member], diffDot: Bool) -> some View {
+    let label = HStack(spacing: 6) {
+      LodyIcon.projectGroup.image
+        .resizable().renderingMode(.template).scaledToFit().frame(width: LodyIconSize.sm, height: LodyIconSize.sm)
+        .foregroundStyle(Self.tint(context.tint))
+      Text(context.label).lineLimit(1).foregroundStyle(LodyColor.textPrimary)
+        .frame(maxWidth: 160, alignment: .leading).fixedSize(horizontal: true, vertical: false)
+      if let diff = state.diff, !diffDot {
+        ActionBarDiffSummary(diff: diff)
+        .font(.subheadline.weight(.medium).monospacedDigit())
+        .fixedSize()
+      }
+      Image(systemName: "chevron.down")
+        .font(.footnote.weight(.semibold))
+        .foregroundStyle(LodyColor.iconSecondary)
+    }
+    .padding(.horizontal, 12)
+    .frame(minHeight: ChatActionBarView.rowHeight)
+    .contentShape(Capsule())
+    return GroupMembersPopover(
+      title: context.menuTitle ?? "", subtitle: context.menuSubtitle ?? "", members: members, diff: state.diff,
+      onAction: { onAction("context:" + $0) }, label: label
+    )
+    .buttonStyle(.plain)
+    .glassEffect(.regular, in: .capsule)
+    .accessibilityLabel([context.accessibilityLabel, state.diff?.accessibilityLabel].compactMap { $0 }.joined(separator: ", "))
+    .accessibilityIdentifier("session-bar:context")
+  }
+
+  private func repositoryCapsule(diffDot: Bool) -> some View {
     let context = state.context
     var actions = context?.actions ?? []
     if let diff = state.diff, diff.tap == true {
@@ -230,7 +323,9 @@ struct ChatActionBarContent: View {
     }
     let label = HStack(spacing: 6) {
       if let context {
-          if let status = context.prStatus, !status.isEmpty {
+          if context.busy == true {
+            ProgressView().controlSize(.small)
+          } else if let status = context.prStatus, !status.isEmpty {
             LodyPullRequestIcon(status: status, ci: context.prCI)
           } else {
             Image(systemName: context.symbol).foregroundStyle(Self.tint(context.tint))
@@ -240,10 +335,7 @@ struct ChatActionBarContent: View {
         }
         if let diff = state.diff {
           if !diffDot || context == nil {
-            HStack(spacing: 4) {
-              Text("+\(diff.added)").foregroundStyle(LodyColor.diffAddedText)
-              Text("−\(diff.removed)").foregroundStyle(LodyColor.diffRemovedText)
-            }
+            ActionBarDiffSummary(diff: diff)
             .font(.subheadline.weight(.medium).monospacedDigit())
             .fixedSize()
           }
@@ -506,8 +598,7 @@ private struct ContextActionsPopover<Label: View>: View {
                 HStack(spacing: LodySpacing.xs) {
                   if let value = action.value { Text(verbatim: value) }
                   if action.id == "diff", let diff {
-                    Text("+\(diff.added)").foregroundStyle(LodyColor.diffAddedText)
-                    Text("−\(diff.removed)").foregroundStyle(LodyColor.diffRemovedText)
+                    ActionBarDiffSummary(diff: diff)
                   }
                 }
                 .fixedSize()
@@ -531,6 +622,137 @@ private struct ContextActionsPopover<Label: View>: View {
   }
 }
 
+/// The members of a Project group conversation, each with its branch, ±diff and current PR
+/// (web `SessionProjectMembersChip`). Every PR stays visible at once; a PR row opens that PR's
+/// page, and a member without one offers its branch to copy.
+private struct GroupMembersPopover<Label: View>: View {
+  let title: String
+  let subtitle: String
+  let members: [ChatActionBarState.Member]
+  let diff: ChatActionBarState.Diff?
+  let onAction: (String) -> Void
+  let label: Label
+  @State private var presented = false
+
+  var body: some View {
+    label
+      .accessibilityElement(children: .ignore)
+      .onTapGesture { presented = true }
+      .onLongPressGesture { presented = true }
+      .accessibilityAddTraits(.isButton)
+      .popover(isPresented: $presented, arrowEdge: .bottom) {
+        VStack(alignment: .leading, spacing: LodySpacing.xs) {
+          VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(LodyColor.textPrimary).lineLimit(1)
+            Text(subtitle).font(.footnote).foregroundStyle(LodyColor.textSecondary).lineLimit(1)
+          }
+          .padding(.horizontal, LodySpacing.md)
+          .padding(.top, LodySpacing.xs)
+          ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+              ForEach(members) { row($0) }
+            }
+          }
+          .scrollBounceBehavior(.basedOnSize)
+          .frame(maxHeight: 360)
+          if let diff, diff.tap == true {
+            Divider().padding(.horizontal, LodySpacing.md)
+            Button {
+              presented = false
+              onAction("diff")
+            } label: {
+              HStack(spacing: LodySpacing.md) {
+                Image(systemName: "plus.forwardslash.minus").frame(width: LodyIconSize.md)
+                Text(String(localized: "bar.group.allChanges", bundle: .lody)).lineLimit(1)
+                Spacer(minLength: 0)
+                ActionBarDiffSummary(diff: diff)
+              }
+              .font(.body.monospacedDigit())
+              .frame(minHeight: 44)
+              .padding(.horizontal, LodySpacing.md)
+              .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(LodyColor.textPrimary)
+            .accessibilityIdentifier("session-bar:group-diff")
+          }
+        }
+        .padding(LodySpacing.sm)
+        .frame(width: 340)
+        .fixedSize(horizontal: false, vertical: true)
+        .presentationCompactAdaptation(.popover)
+      }
+  }
+
+  @ViewBuilder private func row(_ member: ChatActionBarState.Member) -> some View {
+    let content = HStack(alignment: .center, spacing: LodySpacing.sm) {
+      icon(member).frame(width: LodyIconSize.md, height: LodyIconSize.md)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(member.title).font(.subheadline.monospaced()).foregroundStyle(LodyColor.textPrimary)
+          .lineLimit(1).truncationMode(.middle)
+        HStack(spacing: LodySpacing.xs) {
+          if let detail = member.detail, !detail.isEmpty {
+            Text(detail).lineLimit(1).truncationMode(.middle).foregroundStyle(LodyColor.textSecondary)
+          }
+          if let added = member.added, let removed = member.removed {
+            Text("+\(added)").foregroundStyle(LodyColor.diffAddedText).fixedSize()
+            Text("−\(removed)").foregroundStyle(LodyColor.diffRemovedText).fixedSize()
+          }
+        }
+        .font(.footnote.monospacedDigit())
+      }
+      Spacer(minLength: 0)
+      if let number = member.prNumber, let status = member.prStatus {
+        HStack(spacing: 4) {
+          LodyPullRequestIcon(status: status, ci: member.prCI)
+          Text(verbatim: "#\(number)").font(.subheadline.monospacedDigit()).foregroundStyle(LodyColor.textSecondary)
+        }
+        .fixedSize()
+      } else if member.branch != nil {
+        Button {
+          presented = false
+          onAction("memberBranch:" + member.id)
+        } label: {
+          Image(systemName: "doc.on.doc").font(.footnote)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(LodyColor.iconSecondary)
+        .accessibilityLabel(String(localized: "session.title.copyBranch", bundle: .lody))
+      }
+    }
+    .padding(.leading, LodySpacing.md + CGFloat(member.depth) * 14)
+    .padding(.trailing, LodySpacing.md)
+    .frame(minHeight: 52)
+    .contentShape(Rectangle())
+    if member.prNumber != nil {
+      Button {
+        presented = false
+        onAction("member:" + member.id)
+      } label: { content }
+      .buttonStyle(.plain)
+      .accessibilityElement(children: .combine)
+      .accessibilityHint(Text(String(localized: "bar.context.viewPR", bundle: .lody)))
+      .accessibilityIdentifier("session-bar:member:" + member.id)
+    } else {
+      content
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("session-bar:member:" + member.id)
+    }
+  }
+
+  @ViewBuilder private func icon(_ member: ChatActionBarState.Member) -> some View {
+    if member.submodule {
+      Image(systemName: "arrow.triangle.branch").foregroundStyle(LodyColor.iconSecondary)
+    } else if let repository = member.repository, member.kind == "github" {
+      RepositoryIcon(repository: repository, size: LodyIconSize.md, opacity: 0.8)
+    } else {
+      Image(systemName: "folder").foregroundStyle(LodyColor.iconSecondary)
+    }
+  }
+}
+
 private struct PrimaryActionFrame: PreferenceKey {
   static let defaultValue: CGRect = .zero
   static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
@@ -541,17 +763,34 @@ private struct PrimaryActionFrame: PreferenceKey {
 
 /// A native anchored menu rather than an action sheet's oversized pill buttons.
 final class MergeOptionsController: UIHostingController<MergeOptionsContent>, UIPopoverPresentationControllerDelegate {
+  /// The last method chosen, shared by the action bar and the PR page (web `usePreferredPrMergeMethod`).
+  static let preferenceKey = "lody.prMergeMethod"
+  static var preferred: String { UserDefaults.standard.string(forKey: preferenceKey) ?? "merge" }
+
   init(title: String, preferred: String, source: UIView, rect: CGRect, onMerge: @escaping (String) -> Void) {
-    let preferred = ["merge", "squash", "rebase"].contains(preferred) ? preferred : "merge"
-    super.init(rootView: MergeOptionsContent(title: title, preferred: preferred, onMerge: { _ in }))
+    super.init(rootView: MergeOptionsContent(title: title, preferred: MergeOptionsController.method(preferred), onMerge: { _ in }))
+    configure(onMerge)
+    popoverPresentationController?.sourceView = source
+    popoverPresentationController?.sourceRect = rect
+  }
+
+  /// Anchored to a toolbar item (the PR page's Merge button).
+  init(title: String, preferred: String, item: UIBarButtonItem, onMerge: @escaping (String) -> Void) {
+    super.init(rootView: MergeOptionsContent(title: title, preferred: MergeOptionsController.method(preferred), onMerge: { _ in }))
+    configure(onMerge)
+    popoverPresentationController?.sourceItem = item
+  }
+
+  private static func method(_ value: String) -> String { ["merge", "squash", "rebase"].contains(value) ? value : "merge" }
+
+  private func configure(_ onMerge: @escaping (String) -> Void) {
     rootView.onMerge = { [weak self] method in
+      UserDefaults.standard.set(method, forKey: Self.preferenceKey)
       self?.dismiss(animated: true) { onMerge(method) }
     }
     modalPresentationStyle = .popover
     view.backgroundColor = .clear
     preferredContentSize = sizeThatFits(in: CGSize(width: 300, height: CGFloat.greatestFiniteMagnitude))
-    popoverPresentationController?.sourceView = source
-    popoverPresentationController?.sourceRect = rect
     popoverPresentationController?.permittedArrowDirections = .down
     popoverPresentationController?.delegate = self
   }
@@ -565,6 +804,8 @@ struct MergeOptionsContent: View {
   let preferred: String
   var onMerge: (String) -> Void
   private var methods: [String] { [preferred] + ["merge", "squash", "rebase"].filter { $0 != preferred } }
+  /// One SF Symbol per method so the rows read apart at a glance.
+  private static let symbols = ["merge": "arrow.triangle.merge", "squash": "rectangle.compress.vertical", "rebase": "square.stack.3d.up"]
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       VStack(alignment: .leading, spacing: LodySpacing.xs) {
@@ -577,7 +818,8 @@ struct MergeOptionsContent: View {
       ForEach(methods, id: \.self) { method in
         Button { onMerge(method) } label: {
           HStack(spacing: LodySpacing.md) {
-            LodyIcon.merge.image.frame(width: LodyIconSize.md).foregroundStyle(LodyColor.iconSecondary)
+            Image(systemName: Self.symbols[method] ?? "arrow.triangle.merge")
+              .font(.body).frame(width: 24).foregroundStyle(LodyColor.iconSecondary)
             Text(String(localized: String.LocalizationValue("bar.merge." + method), bundle: .lody))
               .font(.body).frame(maxWidth: .infinity, alignment: .leading)
             if method == preferred { Image(systemName: "checkmark").font(.footnote.weight(.semibold)).foregroundStyle(LodyColor.iconSecondary) }
@@ -596,3 +838,70 @@ struct MergeOptionsContent: View {
     .fixedSize(horizontal: false, vertical: true)
   }
 }
+
+#if !LODY_SHARE_EXTENSION
+// The Share extension reuses composer chrome but has no conversation machine panel.
+/// Read-only machine details, fetched on presentation from the public visibility endpoint.
+struct ChatMachinePanel: View {
+  let name: String
+  let machine: ChatActionBarState.Machine
+  @State private var ownerID: String?
+  private var owner: WorkspaceMember? { machine.members.first { $0.id == ownerID } }
+  @State private var shared: Bool?
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack(spacing: 8) {
+        Image(systemName: "desktopcomputer")
+        Text(name).fontWeight(.medium).lineLimit(1)
+        Spacer(minLength: 8)
+        Label(String(localized: String.LocalizationValue("devices." + machine.status), bundle: .lody),
+          systemImage: machine.status == "online" ? "circle.fill" : "circle")
+          .font(.caption).foregroundStyle(.secondary)
+      }
+      HStack(spacing: 8) {
+        if let owner {
+          ChatOwnerAvatar(member: owner)
+          Text(owner.name)
+        } else {
+          Image(systemName: "person.crop.circle")
+          Text(String(localized: "devices.ownerUnknown", bundle: .lody))
+        }
+      }
+      Label(visibilityLabel, systemImage: visibilitySymbol)
+        .foregroundStyle(.secondary)
+    }
+    .font(.subheadline)
+    .padding(16)
+    .frame(idealWidth: 300, maxWidth: 360)
+    .task(id: machine.workspaceId + ":" + machine.id) {
+      ownerID = nil
+      shared = nil
+      guard !LodyUIVerify.enabled else { return }
+      do {
+        let rows = try await GitHubCloud.call("query", path: "machines:listVisibleMachines",
+          args: ["workspaceId": machine.workspaceId]) as? [[String: Any]]
+        try Task.checkCancellation()
+        guard let row = rows?.first(where: { $0["machineId"] as? String == machine.id }),
+          let ownerID = row["ownerUserId"] as? String,
+          let visibility = row["sharedWithTeam"] as? Bool else { return }
+        self.ownerID = ownerID
+        shared = visibility
+      } catch {
+        // Unknown is not private; never infer visibility from ownership or connectivity.
+      }
+    }
+  }
+
+  private var visibilitySymbol: String {
+    guard let shared else { return "questionmark.circle" }
+    return shared ? "person.2" : "lock"
+  }
+
+  private var visibilityLabel: String {
+    guard let shared else { return String(localized: "devices.visibilityUnknown", bundle: .lody) }
+    return String(localized: String.LocalizationValue(shared ? "devices.shared" : "devices.private"), bundle: .lody)
+  }
+}
+
+#endif

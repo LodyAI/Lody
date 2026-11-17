@@ -18,8 +18,14 @@ replace the Session as the continuation target.
 | Composition         | [workspace](workspace-legacy.ts)                                                                                                                    | Fleet lifetime, local control and existing source owners                                      |
 | Execution authority | [Session authority](../session/session-automation-authority.ts)                                                                                     | Admission barriers, release proof, group settlement and exact-input cancellation              |
 
-Automations currently run in plaintext workspaces. Encrypted workspaces remain unsupported
-under the shared workspace content policy; Fleet creates no automation runtime there.
+Automations run in plaintext and encrypted workspaces. In an encrypted workspace, the
+[Session adapter](actions/session-actions-legacy.ts) signs each queued continuation as this
+machine, and encrypted admission refuses an automation input without that signature, as it
+does for scheduled runs. The ledger stays machine-local, and continuation text enters the
+Session through its encrypted history. The PR poller is not registered there, so `github.*`
+reads stay `unknown`. Remote control rides workspace Machine RPC, which encrypted
+workspaces withhold. Fleet therefore installs the remote verifier, and the renderer offers
+remote controls, only where the shared content policy supports `rpc`.
 
 ## Register a condition
 
@@ -54,7 +60,7 @@ pass `--session SESSION_ID --workspace WORKSPACE_ID`. MCP `lody_automation` acce
 current Session by default. Pass `sessionId` to target another owned Session on the
 same machine; continuations return to the target Session. CLI and MCP share the same local control endpoint. The Electron Session
 UI uses that endpoint for local-machine waits and settings, and the remote machine
-control bridge for eligible remote Sessions. Encrypted workspaces and Web remain unsupported.
+control bridge for eligible remote Sessions. Encrypted workspaces have local-machine controls only; Web remains unsupported.
 The [general availability decision](../../../../.agents/notes/implemented/feature/2026-10-30-session-continuation-general-availability.md) explains the UI gate removal; the [UI design](../../../../.agents/notes/proposed/feature/2026-10-27-session-continuation-note-ui.md) records its presentation trade-offs.
 
 Optional `reason`, `intervalMs` (default 30 seconds, minimum 1 second) and

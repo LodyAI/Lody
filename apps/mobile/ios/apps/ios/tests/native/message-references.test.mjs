@@ -11,11 +11,11 @@ const item = {
   insertText: '@session:session-123',
 };
 test('expanded session references retain readable frozen labels and UTF-16 ranges', () => {
-  const text = '🙂 看看 use lody mcp to query session[id: session-123] history';
+  const text = '🙂 看看 [@修复登录](lody://session/session-123)';
   const spans = referenceSpans(text, [item]);
   assert.equal(
     text.slice(spans[0].start, spans[0].end),
-    'use lody mcp to query session[id: session-123] history',
+    '[@修复登录](lody://session/session-123)',
   );
   const result = presentMessageText(text, spans);
   assert.equal(result.text, '🙂 看看 @修复登录');

@@ -8,6 +8,7 @@ class PullRequestController: UIViewController {
   private let page: Page
   var investigate: ((String) async throws -> Void)?
   var external: (() -> Void)?
+  private weak var mergeItem: UIBarButtonItem?
 
   init(store: PullRequestStore, page: Page = .overview) {
     self.store = store
@@ -62,7 +63,8 @@ class PullRequestController: UIViewController {
   }
 
   private func overview(_ data: PullRequestSnapshot) -> [LodyListSection] {
-    var identity = row("pr-title", data.title, subtitle: [text("state." + data.state), data.author].filter { !$0.isEmpty }.joined(separator: " · "))
+    let conflicts = data.mergeable && data.mergeState == "d" ? String(localized: "bar.conflicts", bundle: .lody) : ""
+    var identity = row("pr-title", data.title, subtitle: [text("state." + data.state), conflicts, data.author].filter { !$0.isEmpty }.joined(separator: " · "))
     identity.imageAsset = ["merged": "lody-git-merge", "closed": "lody-git-pull-request-closed", "draft": "lody-git-pull-request-draft"][data.state] ?? "lody-git-pull-request"
     identity.imageTint = ["merged": "purple", "closed": "danger", "draft": "secondary"][data.state] ?? "blue"
     let summary = data.summary
@@ -133,8 +135,77 @@ class PullRequestController: UIViewController {
       action.isEnabled = store.data != nil && store.valid
     }
     parent.navigationItem.rightBarButtonItems = right
-    parent.toolbarItems = [github, UIBarButtonItem(systemItem: .flexibleSpace), action]
+    var toolbar = [github, UIBarButtonItem(systemItem: .flexibleSpace), action]
+    if case .overview = page, let write = writeItem() { toolbar += [.fixedSpace(0), write] }
+    parent.toolbarItems = toolbar
     if navigationController?.topViewController === parent { navigationController?.setToolbarHidden(false, animated: false) }
+  }
+
+  /// Web's PR panel: Merge while the PR is open (its method popover is the confirmation), then
+  /// Delete branch once merged while the PR's own head branch still exists.
+  private func writeItem() -> UIBarButtonItem? {
+    guard let data = store.data else { return nil }
+    let enabled = store.valid && store.error == nil && store.writing == nil && !store.loading
+    if data.mergeable {
+      let merging = store.writing == "merge"
+      let item = UIBarButtonItem(title: text(merging ? "merging" : "merge"), primaryAction: UIAction { [weak self] _ in self?.chooseMergeMethod() })
+      mergeItem = item
+      item.style = .prominent
+      item.isEnabled = enabled
+      item.accessibilityIdentifier = "pr-merge"
+      return item
+    }
+    guard data.canDeleteBranch || store.writing == "deleteBranch" else { return nil }
+    let deleting = store.writing == "deleteBranch"
+    let item = UIBarButtonItem(title: text(deleting ? "deletingBranch" : "deleteBranch"), primaryAction: UIAction { [weak self] _ in self?.confirmDeleteBranch() })
+    item.isEnabled = enabled
+    item.tintColor = .systemRed
+    item.accessibilityIdentifier = "pr-delete-branch"
+    return item
+  }
+
+  private func chooseMergeMethod() {
+    guard store.writing == nil, store.data?.mergeable == true, let item = mergeItem else { return }
+    let sheet = MergeOptionsController(title: "\(store.repository) #\(store.number)", preferred: MergeOptionsController.preferred, item: item) { [weak self] method in
+      self?.write(String(localized: "bar.merge.done", bundle: .lody)) { store in try await store.merge(method) }
+    }
+    present(sheet, animated: true)
+  }
+
+  private func confirmDeleteBranch() {
+    guard let data = store.data, data.canDeleteBranch else { return }
+    let alert = UIAlertController(title: text("deleteBranch.title"),
+      message: String.localizedStringWithFormat(String(localized: "pr.deleteBranch.message", bundle: .lody), data.headRef), preferredStyle: .alert)
+    alert.addAction(UIAlertAction(title: String(localized: "common.cancel", bundle: .lody), style: .cancel))
+    alert.addAction(UIAlertAction(title: text("deleteBranch"), style: .destructive) { [weak self] _ in
+      guard let self else { return }
+      write(text("deleteBranch.done")) { store in try await store.deleteBranch() }
+    })
+    present(alert, animated: true)
+  }
+
+  /// One GitHub write, never retried: an unknown result says so instead of claiming failure.
+  /// The write outlives the page (the store fences the account and workspace that started it).
+  private func write(_ done: String, _ run: @escaping @MainActor (PullRequestStore) async throws -> Void) {
+    let store = store
+    Task {
+      do {
+        try await run(store)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        LodyToastOverlay.shared.show(message: done, kind: .neutral)
+      } catch {
+        UINotificationFeedbackGenerator().notificationOccurred(.error)
+        LodyToastOverlay.shared.show(message: Self.writeError(error.localizedDescription), kind: .error)
+      }
+    }
+  }
+
+  private static func writeError(_ code: String) -> String {
+    let bar = ["not_mergeable", "head_changed", "authorization_required", "merge_unknown", "not_open", "forbidden"]
+    if bar.contains(code) { return String(localized: String.LocalizationValue("bar.error." + code), bundle: .lody) }
+    let page = ["delete_unknown": "deleteUnknown", "branch_protected": "branchProtected", "branch_not_deletable": "branchProtected", "not_merged": "notMerged"]
+    if let key = page[code] { return String(localized: String.LocalizationValue("pr.error." + key), bundle: .lody) }
+    return PullRequestStore.errorText(code)
   }
 
   private func press(_ id: String) {

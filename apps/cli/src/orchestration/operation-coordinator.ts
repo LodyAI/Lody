@@ -515,7 +515,9 @@ export class LodyOperationCoordinator {
           ...batch.config,
           cliType,
           agentType: batch.config.agentType ?? meta.agentType,
-          prompt: 'Review the completed results according to the current conversation request.',
+          // State only that results follow. Any instruction here, including telling the
+          // agent to review or not to review, steers every batch (orchestration/AGENTS.md).
+          prompt: 'The results returned by delegated work follow.',
           inputBlocks: undefined,
           resume: meta.acpSessionId ?? undefined,
           chainDepth: batch.chainDepth,

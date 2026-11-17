@@ -38,7 +38,7 @@ class PermissionController: UIViewController {
 
   override func viewDidLoad() {
     super.viewDidLoad()
-    view.backgroundColor = .systemGroupedBackground
+    view.backgroundColor = .lodyGroupedBackground
     list.frame = view.bounds
     list.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     view.addSubview(list)
@@ -141,6 +141,9 @@ class PermissionController: UIViewController {
     }
     render()
   }
+
+  /// Closes without an answer and without counting as the reader's dismissal.
+  func withdraw() { close() }
 
   func showInvalidRequest(_ message: String) {
     guard phase == .open else { return }

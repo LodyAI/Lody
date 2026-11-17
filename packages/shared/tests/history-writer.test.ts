@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { Loro, LoroList, LoroMap, LoroText } from 'loro-crdt';
 
 import { createSessionMirror } from '../src/session-mirror';
-import { type SessionHistory } from '../src/schema';
+import { normalizeSessionTurnInputConfig } from '../src/message-schemas';
+import { type SessionHistory, type SessionHistoryInput } from '../src/schema';
 import type { SessionId } from '../src/ids';
 import { createHistoryWriter, type StoredHistorySnapshot } from '../src/history-writer';
 import { applyNotificationOnHistory } from '../src/acp/history-apply';
@@ -1685,4 +1686,28 @@ describe('single history writer', () => {
       mirror.dispose();
     }
   );
+
+  it('persists stored steer provenance and keeps it readable after peer import', () => {
+    const steerEntry: SessionHistoryInput = {
+      id: 'guide',
+      role: 'user',
+      timestamp: '2026-01-01',
+      status: 'processing',
+      read: true,
+      items: [{ type: 'text', text: 'synthetic guide' }],
+      inputConfig: { prompt: 'synthetic guide', _lodyDeliveryKind: 'steer' },
+    };
+    const doc = new Loro();
+    const mirror = open(doc);
+    try {
+      mirror.historyWriter.append(steerEntry);
+      const peer = new Loro();
+      peer.import(doc.export({ mode: 'snapshot' }));
+      const stored = peer.getList('history').toJSON()[0];
+      expect(stored.inputConfig._lodyDeliveryKind).toBe('steer');
+      expect(normalizeSessionTurnInputConfig(stored.inputConfig)?._lodyDeliveryKind).toBe('steer');
+    } finally {
+      mirror.dispose();
+    }
+  });
 });

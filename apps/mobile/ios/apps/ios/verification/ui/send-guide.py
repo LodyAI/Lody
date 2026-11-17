@@ -19,7 +19,9 @@ def user_text(identifier):
 
 
 ui.axe('tap', '--id', 'send-connect')
-assert ui.element('session-stop')['enabled'], 'Running with no draft must offer Stop'
+ui.wait(lambda items: any(item.get('AXUniqueId') == 'session-stop' and item.get('enabled') for item in items),
+        'Running with no draft must offer Stop')
+ui.capture('stop-ready')
 ui.axe('tap', '--id', 'session-input')
 ui.type_into('session-input', 'steer on send')
 ui.wait(

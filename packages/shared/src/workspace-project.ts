@@ -218,7 +218,11 @@ export const SessionProjectMemberSchema = z.object({
   dirty: z.boolean().optional(),
   unpushed: z.boolean().optional(),
   diff: z
-    .object({ add: z.number().int().nonnegative(), del: z.number().int().nonnegative() })
+    .object({
+      add: z.number().int().nonnegative(),
+      del: z.number().int().nonnegative(),
+      files: z.number().int().nonnegative().optional(),
+    })
     .optional(),
 });
 export const SessionProjectRunSchema = z

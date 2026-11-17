@@ -25,6 +25,7 @@ import {
 } from './deepseek-harness';
 
 export const MANAGED_BUILTIN_RUNTIMES = [
+  { runtimeName: 'antigravity', agentType: 'antigravity', displayName: 'Antigravity' },
   { runtimeName: 'kimi-code', agentType: 'kimi', displayName: 'Kimi Code' },
   { runtimeName: 'devin', agentType: 'devin', displayName: 'Devin' },
   { runtimeName: 'grok-build', agentType: 'grok', displayName: 'Grok' },
@@ -64,6 +65,7 @@ export type AgentType = string;
  * Exhaustive on purpose: adding a builtin agent must not silently default it.
  */
 const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged'> = {
+  antigravity: 'none',
   pi: 'none',
   devin: 'none',
   claude: 'untagged',
@@ -139,6 +141,7 @@ export type CustomAcpLaunchSpec = {
  * manages the official runtime binary for the selected builtin agent.
  */
 export type BuiltinRuntimeOverrides = {
+  antigravityPath?: string;
   codexPath?: string;
   claudeCodeExecutable?: string;
   kimiPath?: string;
@@ -146,6 +149,13 @@ export type BuiltinRuntimeOverrides = {
   devinPath?: string;
   piPath?: string;
   piExtensions?: string[];
+  /**
+   * Builtin Antigravity only: launch `agy acp --dangerously-skip-permissions`,
+   * which approves every tool permission request inside agy. This is a launch
+   * policy, not a runtime replacement, so it does not count as an override in
+   * {@link hasBuiltinRuntimeOverrideValues}.
+   */
+  antigravitySkipPermissions?: boolean;
 };
 
 export const PI_EXTENSIONS_MAX_SELECTIONS = 32;
@@ -156,6 +166,7 @@ export const isBuiltinRuntimeOverrides = (value: unknown): value is BuiltinRunti
     return false;
   }
   const record = value as {
+    antigravityPath?: unknown;
     codexPath?: unknown;
     claudeCodeExecutable?: unknown;
     kimiPath?: unknown;
@@ -163,8 +174,12 @@ export const isBuiltinRuntimeOverrides = (value: unknown): value is BuiltinRunti
     devinPath?: unknown;
     piPath?: unknown;
     piExtensions?: unknown;
+    antigravitySkipPermissions?: unknown;
   };
   return (
+    (record.antigravitySkipPermissions === undefined ||
+      typeof record.antigravitySkipPermissions === 'boolean') &&
+    (record.antigravityPath === undefined || typeof record.antigravityPath === 'string') &&
     (record.codexPath === undefined || typeof record.codexPath === 'string') &&
     (record.claudeCodeExecutable === undefined ||
       typeof record.claudeCodeExecutable === 'string') &&
@@ -184,6 +199,13 @@ export const isBuiltinRuntimeOverrides = (value: unknown): value is BuiltinRunti
   );
 };
 
+/**
+ * Whether a runtime path or Pi extension selection replaces what Lody would
+ * launch by default. Launch policies such as `antigravitySkipPermissions` are
+ * excluded: they keep the managed runtime, static capabilities, title ownership
+ * and Provider setup. Use {@link hasPersistedBuiltinRuntimeOverrides} to decide
+ * whether the field is worth persisting.
+ */
 export const hasBuiltinRuntimeOverrideValues = (
   runtimeOverrides: BuiltinRuntimeOverrides | undefined
 ): boolean =>
@@ -191,6 +213,13 @@ export const hasBuiltinRuntimeOverrideValues = (
   Object.values(runtimeOverrides).some((value) =>
     Array.isArray(value) ? value.length > 0 : typeof value === 'string' && value.trim().length > 0
   );
+
+/** Whether `runtimeOverrides` carries anything a stored Provider must keep. */
+export const hasPersistedBuiltinRuntimeOverrides = (
+  runtimeOverrides: BuiltinRuntimeOverrides | undefined
+): boolean =>
+  hasBuiltinRuntimeOverrideValues(runtimeOverrides) ||
+  runtimeOverrides?.antigravitySkipPermissions === true;
 
 export const getBuiltinRuntimeOverrideSourceVersionSuffix = (
   runtimeOverrides: BuiltinRuntimeOverrides | undefined
@@ -379,7 +408,8 @@ export type AcpCommandSummary = {
 // with the same brackets — a Claude probe stored `{ opus: ['1m'] }` — and the
 // per-model effort picker would rebuild that model's ladder from it.
 // 11: provider command previews come only from probes, never project sessions.
-export const ACP_CAPABILITY_CACHE_VERSION = 11;
+// 12: official registry Antigravity supports Lody's /usage quota compatibility reader.
+export const ACP_CAPABILITY_CACHE_VERSION = 12;
 
 /**
  * One sign-in method an ACP agent advertised in its `initialize` response.
@@ -397,7 +427,12 @@ export type AcpAuthMethodSummary = {
   args?: string[];
 };
 
-export type AcpCapabilityAuthority = 'unavailable' | 'provisional' | 'authoritative';
+export type AcpCapabilityAuthority =
+  | 'unavailable'
+  | 'provisional'
+  | 'authoritative'
+  /** Probe succeeded but advertised a model selector with zero choices. */
+  | 'degraded';
 
 export type AcpCapabilityCacheEntry = {
   cliType: AgentConfigCliType;
@@ -429,6 +464,12 @@ export type AcpCapabilityCacheEntry = {
    * stored in the capability row itself; see `acp-model-capabilities.ts`.
    */
   declaredModelControls?: Record<string, AcpModelControls>;
+  /**
+   * Each model's own option list from the config's `acpModelConfigOptions`
+   * rows, attached by `getMachineFlockAcpCapabilities`. Never stored in the
+   * capability row itself; see `acp-model-config-options.ts`.
+   */
+  observedModelConfigOptions?: Record<string, AcpConfigOptionSummary[]>;
   /** Probe commands shown before a session reports its own list; [] confirms an empty probe. */
   availableCommands?: AcpCommandSummary[];
   /**
@@ -564,13 +605,41 @@ export const getAcpCapabilityCacheEntryAuthority = (
   if (!readableEntry) {
     return 'unavailable';
   }
-  return readableEntry.provenance === 'runtime' ? 'authoritative' : 'provisional';
+  if (readableEntry.provenance !== 'runtime') {
+    return 'provisional';
+  }
+  // A runtime-probed entry that advertises a model select with zero choices was
+  // read while the agent's catalog was unavailable — the picker the user sees
+  // renders that select directly, so the entry is verified-but-degraded rather
+  // than authoritative.
+  if (hasEmptyModelSelectOption(readableEntry.configOptions)) {
+    return 'degraded';
+  }
+  return 'authoritative';
 };
+
+/**
+ * Whether a normalized (or persisted) config-option list advertises a model
+ * selector with no choices. The agent clearly intends to expose model
+ * selection — it emitted the option — but produced an empty catalog, which is
+ * a probe-time degradation (cold upstream cache, startup race, auth lag), not
+ * an agent that legitimately has no values. Selectors render this select
+ * directly (they do not fall back to `models`), so an entry in this state must
+ * never answer a capability refresh or be presented as fully verified.
+ */
+export const hasEmptyModelSelectOption = (
+  configOptions: AcpConfigOptionSummary[] | undefined
+): boolean =>
+  (configOptions ?? []).some(
+    (option) =>
+      option.type === 'select' && option.category === 'model' && option.options.length === 0
+  );
 
 export type AcpCapabilityCacheStaleReason =
   | 'missing'
   | 'cache-version-mismatch'
-  | 'source-version-mismatch';
+  | 'source-version-mismatch'
+  | 'empty-model-catalog';
 
 export const getAcpCapabilityCacheStaleReason = (
   entry: AcpCapabilityCacheEntry | undefined,
@@ -584,6 +653,9 @@ export const getAcpCapabilityCacheStaleReason = (
   }
   if (entry.sourceVersion !== expectedSourceVersion) {
     return 'source-version-mismatch';
+  }
+  if (hasEmptyModelSelectOption(entry.configOptions)) {
+    return 'empty-model-catalog';
   }
   return undefined;
 };
@@ -732,6 +804,7 @@ export type StaticBuiltinAcpCapabilities = {
 export const CODEX_AUTO_REVIEW_MODE_ID = 'agent-auto-review';
 
 const BUILTIN_DEFAULT_MODE_IDS = {
+  antigravity: 'default',
   kimi: 'auto',
   // Grok advertises `default` / `plan`, not Codex `agent`. Injecting `agent`
   // makes Role/MCP session create fail with "Unsupported ACP mode".
@@ -1579,6 +1652,11 @@ export const SESSION_IMAGE_ALLOWED_MIME_TYPES = [
 ] as const;
 
 export type SessionImagePayload = {
+  /** Absent transport preserves the existing cloud image contract. */
+  transport?: 'local' | 'r2';
+  machineId?: string;
+  /** Immutable local snapshot identity retained after relay publication. */
+  localImageId?: string;
   encryption?: import('./encrypted-attachment').EncryptedAttachment;
   imageId: string;
   mimeType: string;
@@ -1633,13 +1711,11 @@ export function isSessionFileSourcePath(value: string): boolean {
   return !normalized.split('/').some((segment) => segment === '..');
 }
 
-/** A scoped host registration. Never a blob key or an upload candidate. */
+/** A machine-local path, never a blob key or an upload candidate. */
 export type SessionLocalAttachment = {
   type: 'local_attachment';
-  referenceId: string;
   machineId: string;
-  sessionId: string;
-  turnId: string;
+  path: string;
   kind: 'file' | 'image';
   fileName: string;
   mimeType: string;

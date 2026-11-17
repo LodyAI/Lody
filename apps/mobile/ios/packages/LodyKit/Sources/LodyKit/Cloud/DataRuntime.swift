@@ -17,6 +17,8 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
   private let localStore: LocalStore
   let billing = WorkspaceBilling()
   private var cacheErrorShown = false
+  // One diagnostic per opened session: every later projection of an oversized session repeats the same outcome.
+  private var overflowReported: String?
   private var timer: Timer?
   var attachmentTasks: [String: Task<Void, Never>] = [:]
   var attachmentAttempts: [String: UUID] = [:]
@@ -83,6 +85,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     })
   }
   func start(workspace: String, owner: String, userId: String) {
+    guard WorkspaceModePins.shared.mode(workspace) == .plaintext else { stop(); return }
     disposeView()
     if self.workspace != workspace || self.userId != userId {
       sessionId = nil; sessionSnapshot = nil; retainedSessions = []; reservedSessions = []; billing.clear()
@@ -224,13 +227,22 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       }
     }
     guard active, id == sessionId else { return }
+    if !fits, overflowReported != id {
+      overflowReported = id
+      DiagnosticsStore.shared.record("session-sync", "session_overflow", fields: [
+        "session": DiagnosticsStore.correlation(id), "sessionBytes": String(session.utf8.count),
+      ])
+    }
     let payload = fits ? session : #"{"v":1,"overflow":true}"#
     emitStatus(["sessionId": id, "session": payload])
   }
   func openSession(_ id: String) {
-    if sessionId != id { sessionSnapshot = nil }
+    if sessionId != id { sessionSnapshot = nil; overflowReported = nil }
     sessionId = id
     dispatch(RuntimeContract.Calls.OpenSession.self, .init(sessionId: id))
+  }
+  func loadOlderSession(_ id: String) {
+    dispatch(RuntimeContract.Calls.LoadOlderSession.self, .init(sessionId: id))
   }
   func watchSession(_ id: String) {
     sessionWatchers.retain(id)
@@ -302,6 +314,14 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     case .catalog(let value):
       guard value.catalog.utf8.count <= 12 * 1024 * 1024 else { return }
       publish("live", reason: "catalog", catalog: value.catalog)
+    case .agentProvidersChanged(let value):
+      NotificationCenter.default.post(name: .lodyProvidersChanged, object: value, userInfo: ["scopeKey": "\(userId):\(workspace ?? "")"])
+    case .agentProviderAuthChanged(let value):
+      NotificationCenter.default.post(name: .lodyProviderAuthChanged, object: value, userInfo: ["scopeKey": "\(userId):\(workspace ?? "")"])
+    case .agentProviderOperationProgress(let value):
+      NotificationCenter.default.post(name: .lodyProviderOperationProgress, object: value, userInfo: ["scopeKey": "\(userId):\(workspace ?? "")"])
+    case .agentProviderRefreshProgress(let value):
+      NotificationCenter.default.post(name: .lodyProviderRefreshProgress, object: value, userInfo: ["scopeKey": "\(userId):\(workspace ?? "")"])
     case .shareProgress(let value):
       NotificationCenter.default.post(name: .lodyShareProgress, object: value)
     case .machinePresence(let value):

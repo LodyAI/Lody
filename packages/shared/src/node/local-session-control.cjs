@@ -14,10 +14,17 @@ function isObjectRecord(value) {
 }
 
 function isLocalAttachment(value) {
-  return isObjectRecord(value) && value.type === 'local_attachment' &&
-    typeof value.referenceId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.referenceId) &&
-    ['machineId', 'sessionId', 'turnId', 'fileName', 'mimeType'].every(key => typeof value[key] === 'string' && value[key].length > 0) &&
-    (value.kind === 'file' || value.kind === 'image') && typeof value.sizeBytes === 'number' && Number.isSafeInteger(value.sizeBytes) && value.sizeBytes >= 0;
+  return (
+    isObjectRecord(value) &&
+    value.type === 'local_attachment' &&
+    ['machineId', 'path', 'fileName', 'mimeType'].every(
+      (key) => typeof value[key] === 'string' && value[key].length > 0
+    ) &&
+    (value.kind === 'file' || value.kind === 'image') &&
+    typeof value.sizeBytes === 'number' &&
+    Number.isSafeInteger(value.sizeBytes) &&
+    value.sizeBytes >= 0
+  );
 }
 
 function isStringRecord(value) {
@@ -48,6 +55,10 @@ function isConfigOptionValueRecord(value) {
   return Object.values(value).every(
     (item) => typeof item === 'string' || typeof item === 'boolean'
   );
+}
+
+function isOptionalPositiveInteger(value) {
+  return typeof value === 'undefined' || (Number.isInteger(value) && value > 0);
 }
 
 function isOptionalString(value) {
@@ -445,6 +456,7 @@ function isACPSessionConfig(value) {
   // this literal aligned with the TS source and its Bub parity test when
   // changing this feature.
   const isBuiltinAgentType =
+    agentType === 'antigravity' ||
     agentType === 'claude' ||
     agentType === 'codex' ||
     agentType === 'kimi' ||
@@ -537,6 +549,10 @@ function isLocalSessionControlRequest(value) {
 
   if (value.type === 'machine/restart' || value.type === 'machine/upgrade') {
     return (
+      (value.restoreMachineId === undefined ||
+        (value.type === 'machine/restart' &&
+          typeof value.restoreMachineId === 'string' &&
+          value.restoreMachineId.trim().length > 0)) &&
       typeof value.machineId === 'string' &&
       typeof value.workspaceId === 'string' &&
       typeof value.requesterUserId === 'string' &&
@@ -570,6 +586,7 @@ function isLocalSessionControlRequest(value) {
       typeof value.configId === 'string' &&
       value.configId.trim().length > 0 &&
       (typeof value.force === 'undefined' || typeof value.force === 'boolean') &&
+      (typeof value.readModelOptions === 'undefined' || value.readModelOptions === true) &&
       typeof value.cliType === 'undefined' &&
       typeof value.agentType === 'undefined' &&
       typeof value.customAcp === 'undefined' &&
@@ -592,6 +609,10 @@ function isLocalSessionControlRequest(value) {
       (value.action === 'start'
         ? typeof value.configId === 'string' &&
           value.configId.trim().length > 0 &&
+          (typeof value.methodId === 'undefined' ||
+            (typeof value.methodId === 'string' &&
+              value.methodId.trim().length > 0 &&
+              value.methodId.length <= 1024)) &&
           typeof value.authenticationRequestId === 'undefined' &&
           typeof value.authorizationCode === 'undefined' &&
           typeof value.interactionId === 'undefined' &&
@@ -632,7 +653,7 @@ function isLocalSessionControlRequest(value) {
       typeof value.customAcp === 'undefined' &&
       typeof value.runtimeOverrides === 'undefined' &&
       typeof value.env === 'undefined' &&
-      typeof value.methodId === 'undefined'
+      (value.action === 'start' || typeof value.methodId === 'undefined')
     );
   }
 
@@ -645,16 +666,6 @@ function isLocalSessionControlRequest(value) {
     );
   }
 
-  if (value.type === 'session/code-collab-host-start') {
-    return (
-      typeof value.machineId === 'string' &&
-      typeof value.workspaceId === 'string' &&
-      typeof value.sessionId === 'string' &&
-      typeof value.requestedByUserId === 'string' &&
-      value.requestedByUserId.trim().length > 0
-    );
-  }
-
   if (value.type === 'session/image-upload') {
     return (
       typeof value.machineId === 'string' &&
@@ -664,10 +675,47 @@ function isLocalSessionControlRequest(value) {
     );
   }
 
-  if (value.type === 'session/attachment-register' || value.type === 'session/attachment-resolve') {
-    if (!['machineId', 'workspaceId', 'sessionId'].every(key => typeof value[key] === 'string' && value[key].length > 0)) return false;
-    if (value.type === 'session/attachment-resolve') return isLocalAttachment(value.attachment);
-    return ['turnId', 'referenceId', 'path', 'fileName', 'mimeType'].every(key => typeof value[key] === 'string' && value[key].length > 0) && typeof value.managed === 'boolean' && (value.kind === 'file' || value.kind === 'image');
+  if (
+    value.type === 'session/image-prepare-local' ||
+    value.type === 'session/image-resolve-local'
+  ) {
+    if (
+      !['machineId', 'workspaceId', 'sessionId'].every(
+        (key) => typeof value[key] === 'string' && value[key].trim().length > 0
+      )
+    )
+      return false;
+    if (value.type === 'session/image-resolve-local') return isSessionImagePayload(value.image);
+    const source = value.source;
+    return (
+      typeof value.imageId === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.imageId) &&
+      typeof value.fileName === 'string' &&
+      value.fileName.trim().length > 0 &&
+      typeof value.mimeType === 'string' &&
+      SESSION_IMAGE_ALLOWED_MIME_TYPES.has(value.mimeType) &&
+      isObjectRecord(source) &&
+      Object.keys(source).length === 1 &&
+      ((typeof source.path === 'string' && source.path.trim().length > 0) ||
+        (typeof source.base64 === 'string' &&
+          source.base64.length > 0 &&
+          source.base64.length <= 27962028))
+    );
+  }
+
+  if (value.type === 'session/attachment-prepare') {
+    if (
+      !['machineId', 'workspaceId', 'sessionId'].every(
+        (key) => typeof value[key] === 'string' && value[key].length > 0
+      )
+    )
+      return false;
+    return (
+      ['path', 'fileName', 'mimeType'].every(
+        (key) => typeof value[key] === 'string' && value[key].length > 0
+      ) &&
+      (value.kind === 'file' || value.kind === 'image')
+    );
   }
 
   if (value.type === 'session/file-upload' || value.type === 'session/file-send-local') {
@@ -1042,7 +1090,8 @@ function isLocalSessionControlResponse(value) {
         value.status === 'installed' ||
         value.status === 'unsupported-platform' ||
         value.status === 'incompatible-host' ||
-        value.status === 'error') &&
+        value.status === 'error' ||
+        value.status === 'reading-model-options') &&
       (typeof value.downloadedBytes === 'undefined' ||
         (typeof value.downloadedBytes === 'number' &&
           Number.isInteger(value.downloadedBytes) &&
@@ -1058,22 +1107,12 @@ function isLocalSessionControlResponse(value) {
       isOptionalString(value.current) &&
       isOptionalString(value.required) &&
       isOptionalString(value.command) &&
-      isOptionalString(value.error)
-    );
-  }
-
-  if (value.type === 'session/code-collab-host-start_response') {
-    return (
-      typeof value.sessionId === 'string' &&
-      typeof value.success === 'boolean' &&
-      (typeof value.status === 'undefined' ||
-        value.status === 'started' ||
-        value.status === 'already-running' ||
-        value.status === 'disabled' ||
-        value.status === 'failed' ||
-        value.status === 'stopped') &&
       isOptionalString(value.error) &&
-      isOptionalString(value.message)
+      isOptionalString(value.configId) &&
+      isOptionalString(value.modelId) &&
+      isOptionalString(value.modelName) &&
+      isOptionalPositiveInteger(value.modelIndex) &&
+      isOptionalPositiveInteger(value.modelCount)
     );
   }
 
@@ -1126,9 +1165,33 @@ function isLocalSessionControlResponse(value) {
     );
   }
 
-  if (value.type === 'session/attachment-register_response' || value.type === 'session/attachment-resolve_response') {
-    return typeof value.sessionId === 'string' && typeof value.success === 'boolean' && isOptionalString(value.error) &&
-      (!value.success || (value.type === 'session/attachment-register_response' ? isLocalAttachment(value.attachment) : typeof value.path === 'string'));
+  if (value.type === 'session/image-prepare-local_response') {
+    return (
+      typeof value.sessionId === 'string' &&
+      typeof value.success === 'boolean' &&
+      isOptionalString(value.error) &&
+      (typeof value.image === 'undefined' || isSessionImagePayload(value.image)) &&
+      (!value.success || isSessionImagePayload(value.image))
+    );
+  }
+
+  if (value.type === 'session/image-resolve-local_response') {
+    return (
+      typeof value.sessionId === 'string' &&
+      typeof value.success === 'boolean' &&
+      isOptionalString(value.error) &&
+      isOptionalString(value.path) &&
+      (!value.success || (typeof value.path === 'string' && value.path.trim().length > 0))
+    );
+  }
+
+  if (value.type === 'session/attachment-prepare_response') {
+    return (
+      typeof value.sessionId === 'string' &&
+      typeof value.success === 'boolean' &&
+      isOptionalString(value.error) &&
+      (!value.success || isLocalAttachment(value.attachment))
+    );
   }
 
   if (value.type === 'session/file-send-local_response') {

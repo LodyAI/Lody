@@ -1,3 +1,4 @@
+import { ProductWindowIpcService } from '../product-window-ipc-service'
 import { join } from 'node:path'
 import { getLodyDataDir } from '@lody/shared/node/installation-profile'
 import { mainPlatformKind } from '../../platform'
@@ -9,12 +10,12 @@ import {
 } from '../../services/local-file-preview'
 import type { WebContents } from 'electron'
 import { localFileResources } from '../../services/local-file-resource-protocol'
-import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
+import { getIpcContext, IpcMethod } from 'electron-ipc-decorator'
 import type { LocalMachineRpcRequest } from '@lody/shared/local-machine-rpc'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 import { assertProductWindowSender } from '../assert-sender'
 
-export class MachineRpcIpc extends IpcService {
+export class MachineRpcIpc extends ProductWindowIpcService {
   static override readonly groupName = 'machineRpc'
 
   @IpcMethod()

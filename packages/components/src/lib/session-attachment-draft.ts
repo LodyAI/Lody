@@ -14,7 +14,7 @@ export type SessionAttachmentDraft = {
   /** Released only when a durable ready receipt replaces every source. */
   source?: Blob;
   localSourcePath?: string;
-  localReferenceId?: string;
+  localImageId?: string;
   name: string;
   mimeType: string;
   lastModified: number;
@@ -77,7 +77,7 @@ export function preparedDraftInput(
   const ready = attachments.map((item) => item.ready!);
   const key = (block: SessionInputBlock) =>
     block.type === 'local_attachment'
-      ? `local:${block.referenceId}`
+      ? `local:${JSON.stringify([block.machineId, block.path])}`
       : block.type === 'file'
         ? `file:${block.fileId}`
         : block.type === 'image'

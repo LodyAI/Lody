@@ -38,7 +38,6 @@ export interface OptionSelectorOption<TValue extends string | number = string> {
 }
 
 type SelectorSize = 'sm' | 'md' | 'lg';
-type SelectorTone = 'light' | 'dark';
 
 /**
  * The material the trigger takes from where it sits.
@@ -83,8 +82,6 @@ export interface OptionSelectorProps<TValue extends string | number = string> {
    * `toolbar` trigger is 24px at `sm` (inside a context pill) and 28px above.
    */
   size?: SelectorSize;
-  /** @deprecated The popup reads the palette in force; kept for callers. */
-  tone?: SelectorTone;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   renderTriggerValue?: (option?: OptionSelectorOption<TValue>) => ReactNode;

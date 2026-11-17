@@ -35,7 +35,7 @@ export type AgentRoleSnapshot = { roles: AgentRoleItem[]; agents: RoleAgent[] };
 export type RoleFields = Pick<
   AgentRoleItem,
   'name' | 'description' | 'promptPrefix' | 'visibility'
->;
+> & { emoji?: string };
 export type AgentRoleRequest = { workspaceId: string } & (
   | { action: 'list' }
   | {

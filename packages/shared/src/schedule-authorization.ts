@@ -14,16 +14,19 @@ export const ScheduleAuthorizationRequestSchema = z.object({
 });
 export type ScheduleAuthorizationRequest = z.infer<typeof ScheduleAuthorizationRequestSchema>;
 
-/** The transport signature, never a field in this record, supplies the author. */
+/** A declaration's author is its signed execution intent, written in the same commit
+ * (owner decision 2026-11-10); encrypted machines refuse a declaration without one. */
 export function recordScheduleAuthorization(
   doc: LoroDoc,
   document: ScheduleDocument,
-  manualRunKey?: string
+  manualRunKey?: string,
+  e2eeIntent?: string
 ): void {
   const record = doc.getList(SCHEDULE_AUTHORIZATIONS).pushContainer(new LoroMap());
   record.set('definitionFingerprint', scheduleDefinitionFingerprint(document));
   record.set('kind', manualRunKey ? 'manual' : 'definition');
   if (manualRunKey) record.set('manualRunKey', manualRunKey);
+  if (e2eeIntent) record.set('e2eeIntent', e2eeIntent);
   doc.commit();
 }
 

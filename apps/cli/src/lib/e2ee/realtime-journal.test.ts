@@ -593,7 +593,7 @@ describe('host-only E2EE realtime journal', () => {
     );
   });
 
-  it('retains the observed floor for never-claimed received requests across rollback and restart', () => {
+  it('recovers unclaimed requests after local clock correction and restart without replaying started IDs', () => {
     journal.receive(request);
     const completedPermit = takePermit(journal);
     const completed = journal.finish(completedPermit, outcome);
@@ -607,8 +607,8 @@ describe('host-only E2EE realtime journal', () => {
     expect(journal.claim(observed).state).toBe('expired');
     now = 1_000;
     const reopened = new RealtimeJournal(filename, () => now);
-    expect(reopened.claim(pending).state).toBe('expired');
-    expect(reopened.claim(observed).state).toBe('expired');
+    expect(reopened.claim(pending).state).toBe('claimed');
+    expect(reopened.claim(observed).state).toBe('claimed');
     expect(reopened.claim(started)).toMatchObject({
       state: 'existing',
       record: { state: 'uncertain' },
@@ -619,6 +619,23 @@ describe('host-only E2EE realtime journal', () => {
     expect(journal.retainResponse(startedPermit, { index: 0, frame: responseFrame })).toEqual(
       responseFrame
     );
+  });
+
+  it('accepts new requests in the same workspace after a five-minute local clock correction', () => {
+    now = 300_100;
+    const jumped = { ...request, requestId: 'during-forward-jump', expiresAt: now + 60_000 };
+    journal.receive(jumped);
+    const permit = takePermit(journal, jumped);
+    now = 100;
+    const reopened = new RealtimeJournal(filename, () => now);
+    const next = { ...request, requestId: 'after-correction' };
+    reopened.receive(next);
+    expect(reopened.claim(next).state).toBe('claimed');
+    expect(reopened.claim(jumped)).toMatchObject({
+      state: 'existing',
+      record: { state: 'uncertain' },
+    });
+    expect(journal.finish(permit, outcome)).toMatchObject({ state: 'completed', outcome });
   });
 
   it('isolates a forward clock observation from new workspaces while completed evidence remains readable', () => {
@@ -1081,7 +1098,7 @@ describe('host-only E2EE realtime journal', () => {
       targetMachineId: 'synthetic-machine',
       requestId: 'agent-start:user-turn',
     };
-    const gate = (open: () => RealtimeJournal, expiresAt = 1000) =>
+    const gate = (open: () => RealtimeJournal) =>
       makeEncryptedAgentExecution({
         machineUserId: 'synthetic-machine-account',
         genesis: key.genesis,
@@ -1092,7 +1109,6 @@ describe('host-only E2EE realtime journal', () => {
           Effect.succeed({
             requesterDevice: 'ab'.repeat(32),
             requesterCryptoUserId: '1e'.repeat(32),
-            expiresAt,
           }),
         authorizeExecution: () => Effect.succeed({ _tag: 'Authorized' }),
       });
@@ -1214,13 +1230,21 @@ describe('host-only E2EE realtime journal', () => {
       expect(journal.read(key)).toBeNull();
     });
 
-    it('preserves the first execution deadline through reauthorization and a backwards clock', async () => {
-      const first = gate(() => journal, 100);
-      expect(await Effect.runPromise(first.claim(intent))).toMatchObject({ state: 'expired' });
+    it('starts a message once whatever the clock says, and never a retired one', async () => {
+      // No deadline and no clock: a far-future, then a rolled-back clock both start it once.
+      now = 4_102_444_800_000;
+      const first = gate(() => journal);
+      expect(await Effect.runPromise(first.claim(intent))).toMatchObject({ state: 'claimed' });
       now = 1;
-      const retry = gate(() => new RealtimeJournal(filename, () => now));
-      expect(await Effect.runPromise(retry.claim(intent))).toMatchObject({ state: 'expired' });
-      expect(journal.read(key)).toMatchObject({ state: 'received', expiresAt: 100 });
+      const reopened = gate(() => new RealtimeJournal(filename, () => now));
+      expect(await Effect.runPromise(reopened.claim(intent))).toEqual({ state: 'uncertain' });
+      // A message cancelled before it started stays retired, even if its row is pending again.
+      const canceled = { ...intent, userTurnId: 'canceled-turn' };
+      await Effect.runPromise(reopened.retire(canceled));
+      expect(await Effect.runPromise(reopened.claim(canceled))).toEqual({ state: 'completed' });
+      // Retiring an already started message changes nothing.
+      await Effect.runPromise(reopened.retire(intent));
+      expect(journal.read(key)?.state).toBe('uncertain');
     });
 
     it('binds the business intent to its turn and session, independently of display account IDs', async () => {
@@ -1244,37 +1268,13 @@ describe('host-only E2EE realtime journal', () => {
       expect(journal.read(key)?.state).toBe('uncertain');
     });
 
-    it.each(['received', 'uncertain', 'completed'] as const)(
-      'preserves exact older %s evidence without binding display accounts',
-      async (state) => {
-        const frame = Buffer.from(
-          JSON.stringify([1, intent.sessionId, intent.userTurnId, 'earlier-display-account'])
-        );
-        const earlierRequest = { ...key, requester: 'ab'.repeat(32), expiresAt: 1000, frame };
-        journal.receive(earlierRequest);
-        if (state !== 'received') {
-          const result = journal.claim(earlierRequest);
-          if (result.state !== 'claimed') throw new Error('missing initial claim');
-          if (state === 'completed')
-            journal.finish(result.permit, Buffer.from('original settlement'));
-        }
-        const reopened = gate(() => new RealtimeJournal(filename, () => now));
-        expect(
-          await Effect.runPromise(
-            reopened.claim({ ...intent, requesterUserId: 'new-display-account' })
-          )
-        ).toMatchObject({ state: state === 'received' ? 'claimed' : state });
-        expect(Buffer.from(journal.read(key)?.frame ?? [])).toEqual(frame);
-        if (state === 'completed')
-          expect(journal.read(key)).toMatchObject({
-            state: 'completed',
-            outcome: Uint8Array.from(Buffer.from('original settlement')),
-          });
-        expect(
-          await Effect.runPromise(reopened.claim({ ...intent, requesterUserId: undefined }))
-        ).toEqual({ state: state === 'completed' ? 'completed' : 'uncertain' });
-      }
-    );
+    it('refuses other content under a message ID that already started', async () => {
+      const execution = gate(() => journal);
+      expect((await Effect.runPromise(execution.claim(intent))).state).toBe('claimed');
+      const edited = { ...intent, inputConfig: { prompt: 'edited after start' } };
+      expect(await Effect.runPromise(execution.claim(edited))).toEqual({ state: 'uncertain' });
+      expect(journal.read(key)?.state).toBe('uncertain');
+    });
 
     it('refuses a late authorization after the workspace closes without consuming a start', async () => {
       const entered = Promise.withResolvers<void>();
@@ -1350,6 +1350,7 @@ describe('host-only E2EE realtime journal', () => {
       requesterDevice: string;
       requesterCryptoUserId: string;
       expiresAt: number;
+      machineAuthored?: true;
       derivedFrom?: { sessionId: string; userTurnId: string };
     };
     const originals = new Map<string, Original>();
@@ -1390,7 +1391,7 @@ describe('host-only E2EE realtime journal', () => {
     it("runs a derived input with the member's own rights, never the machine owner's", async () => {
       originals.set('child-session/child-turn', signed(self, { derivedFrom: origin }));
       const execution = gate();
-      // A project shared with the member starts, as that member, and derives nothing further.
+      // A project shared with the member starts with that member's authority.
       expect(
         await Effect.runPromise(
           execution.claim({ ...derived, localProjectIds: ['shared-project'] })
@@ -1405,7 +1406,7 @@ describe('host-only E2EE realtime journal', () => {
       expect(authorized.at(-1)).toEqual([member, 'private-project']);
     });
 
-    it('rejects forged, chained, unverifiable, expired and over-limit derivations', async () => {
+    it('rejects forged, unflattened, unverifiable and over-limit derivations across restart', async () => {
       const deny = async (row: Original | undefined, rows = originals) => {
         const userTurnId = `turn-${rows.size}-${Math.random()}`;
         if (row) rows.set(`child-session/${userTurnId}`, row);
@@ -1415,24 +1416,29 @@ describe('host-only E2EE realtime journal', () => {
       };
       // Only this machine authors derivations; a member cannot claim one for itself.
       expect(await deny(signed(member, { derivedFrom: origin }))).toEqual({ state: 'denied' });
-      // One level: the origin may not itself be derived or machine-authored.
+      // A stored root must be non-derived and human-signed.
       originals.set('origin-session/origin-turn', signed(self, { derivedFrom: origin }));
       expect(await deny(signed(self, { derivedFrom: origin }))).toEqual({ state: 'denied' });
       originals.set('origin-session/origin-turn', signed(self));
       expect(await deny(signed(self, { derivedFrom: origin }))).toEqual({ state: 'denied' });
+      // Another machine's legacy row cannot stand in for a human-signed root.
+      originals.set('origin-session/origin-turn', signed(owner, { machineAuthored: true }));
+      expect(await deny(signed(self, { derivedFrom: origin }))).toEqual({ state: 'denied' });
+      expect(await Effect.runPromise(gate().resolveDerivationOrigin(origin))).toEqual({
+        principal: 'owner',
+      });
       // An origin that cannot be verified (absent, edited, other workspace) is refused.
       originals.delete('origin-session/origin-turn');
       expect(await deny(signed(self, { derivedFrom: origin }))).toEqual({ state: 'denied' });
-      // Started more than 15 minutes after the origin's signed deadline.
-      originals.set(
-        'origin-session/origin-turn',
-        signed(member, { expiresAt: Date.now() - 15 * 60_000 - 1_000 })
-      );
-      expect(await deny(signed(self, { derivedFrom: origin }))).toEqual({ state: 'expired' });
-      // At most twenty starts per origin.
+      // No time limit applies; at most twenty starts per origin do.
       originals.set('origin-session/origin-turn', signed(member));
-      const execution = gate();
+      let execution = gate();
+      authorized.length = 0;
       for (let index = 0; index < 21; index++) {
+        if (index === 15) {
+          journal = new RealtimeJournal(filename, () => now);
+          execution = gate();
+        }
         const userTurnId = `bounded-${index}`;
         originals.set(`child-session/${userTurnId}`, signed(self, { derivedFrom: origin }));
         const result = await Effect.runPromise(
@@ -1443,13 +1449,110 @@ describe('host-only E2EE realtime journal', () => {
       expect(authorized.every(([device]) => device === member)).toBe(true);
     });
 
+    it('accepts machine-signed Owner continuations without accepting machine-signed derived roots', async () => {
+      const execution = gate();
+      for (const device of [self, owner]) {
+        originals.set('origin-session/origin-turn', signed(device, { machineAuthored: true }));
+        expect(await Effect.runPromise(execution.resolveDerivationOrigin(origin))).toEqual({
+          principal: 'owner',
+        });
+      }
+      for (const device of [member, 'cc'.repeat(32)]) {
+        originals.set('origin-session/origin-turn', signed(device, { machineAuthored: true }));
+        expect(await Effect.runPromise(execution.resolveDerivationOrigin(origin))).toBeUndefined();
+      }
+      originals.set('origin-session/origin-turn', signed(owner, { machineAuthored: true }));
+      originals.set('child-session/child-turn', signed(self, { derivedFrom: origin }));
+      expect(
+        await Effect.runPromise(
+          execution.resolveDerivationOrigin({
+            sessionId: 'child-session',
+            userTurnId: 'child-turn',
+          })
+        )
+      ).toBeUndefined();
+      expect(await Effect.runPromise(execution.resolveRequester(derived))).toEqual({
+        state: 'denied',
+      });
+      expect(await Effect.runPromise(execution.claim(derived))).toEqual({ state: 'denied' });
+    });
+
+    it('flattens child and grandchild origins for both principals and rechecks withdrawal', async () => {
+      const child = { sessionId: 'child-session', userTurnId: 'child-turn' };
+      const grandchild = { sessionId: 'grandchild-session', userTurnId: 'grandchild-turn' };
+      for (const [device, principal] of [
+        [member, 'member'],
+        [owner, 'owner'],
+      ] as const) {
+        originals.set('origin-session/origin-turn', signed(device));
+        originals.set('child-session/child-turn', signed(self, { derivedFrom: origin }));
+        const execution = gate();
+        expect(await Effect.runPromise(execution.resolveDerivationOrigin(child))).toEqual({
+          principal,
+          origin,
+        });
+        originals.set('grandchild-session/grandchild-turn', signed(self, { derivedFrom: origin }));
+        expect(await Effect.runPromise(execution.resolveDerivationOrigin(grandchild))).toEqual({
+          principal,
+          origin,
+        });
+        originals.delete('origin-session/origin-turn');
+        expect(await Effect.runPromise(execution.resolveDerivationOrigin(child))).toBeUndefined();
+        expect(
+          await Effect.runPromise(execution.resolveRequester({ ...derived, ...grandchild }))
+        ).toEqual({ state: 'denied' });
+        expect(await Effect.runPromise(execution.claim({ ...derived, ...grandchild }))).toEqual({
+          state: 'denied',
+        });
+      }
+    });
+
+    it('extends a legacy control store without losing retired request fences', () => {
+      journal.receive(request);
+      journal.reset();
+      const legacy = new Database(`${filename}.control.sqlite`);
+      legacy.exec('DROP TABLE derived_claims; PRAGMA user_version = 1;');
+      legacy.close();
+      const reopened = new RealtimeJournal(filename, () => now);
+      expect(reopened.reserveDerivation(request, origin)).toBe(true);
+      expectCode(() => reopened.receive(request), 'archived_request');
+      expect(new RealtimeJournal(filename, () => now).reserveDerivation(request, origin)).toBe(
+        true
+      );
+    });
+
+    it('keeps quota receipts through retries, log reset and independent journal owners', () => {
+      const root = { sessionId: 'root', userTurnId: 'root' };
+      for (let i = 0; i < 20; i++) {
+        const input = { ...request, requestId: `quota-${i}` };
+        expect(journal.reserveDerivation(input, root)).toBe(true);
+        expect(new RealtimeJournal(filename, () => now).reserveDerivation(input, root)).toBe(true);
+      }
+      expect(journal.reserveDerivation({ ...request, requestId: 'overflow' }, root)).toBe(false);
+      journal.reset();
+      const reopened = new RealtimeJournal(filename, () => now);
+      expect(reopened.reserveDerivation({ ...request, requestId: 'after-reset' }, root)).toBe(
+        false
+      );
+      expect(
+        reopened.reserveDerivation(
+          { ...request, requestId: 'other-root' },
+          { ...root, userTurnId: 'other' }
+        )
+      ).toBe(true);
+      expect(reopened.reserveDerivation({ ...request, genesis: 'other-genesis' }, root)).toBe(true);
+      expect(reopened.reserveDerivation({ ...request, workspaceId: 'other-workspace' }, root)).toBe(
+        true
+      );
+    });
+
     it('decides at write time: owner unchanged, member only from its active turn on this machine', () => {
       const decide = (
         live: 'owner' | 'member' | undefined,
         verified: 'owner' | 'member' | 'denied',
         targetMachineId = 'machine'
       ) => decideEncryptedDerivation({ live, verified, targetMachineId, machineId: 'machine' });
-      expect(decide('owner', 'denied', 'other-machine')).toBe('owner');
+      expect(() => decide('owner', 'denied', 'other-machine')).toThrow('e2ee_derivation_denied');
       expect(decide(undefined, 'owner')).toBe('owner');
       expect(decide('member', 'member')).toBe('member');
       expect(() => decide('member', 'member', 'other-machine')).toThrow(

@@ -23,12 +23,24 @@ class SettingsController: UIViewController {
     list.frame = view.bounds
     list.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     list.setPlaceholder("")
+    // The main page shares the Chats list's design language; inner pages keep the flat settings rows.
+    list.setChatStyle(true)
     list.forwarded = { [weak self] name, body in
-      guard name == "rowPress", let id = body["id"] as? String else { return }
-      self?.open(id)
+      guard let self, let id = body["id"] as? String else { return }
+      if name == "rowToggle", let value = body["value"] as? Bool {
+        switch id {
+        case "developer-mode": LodyPreferences.saveDeveloperMode(value)
+        case "roost-history": LodyPreferences.saveRoostHistoryExperiment(value)
+        default: return
+        }
+        // Render now so the switch keeps the requested value instead of flicking back until the change notification.
+        self.render()
+      } else if name == "rowPress" {
+        self.open(id)
+      }
     }
     view.addSubview(list)
-    for name in source.changes + [UIApplication.didBecomeActiveNotification] {
+    for name in source.changes + [UIApplication.didBecomeActiveNotification, .lodyPreferencesDidChange] {
       observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
         MainActor.assumeIsolated { self?.render() }
       })
@@ -49,23 +61,22 @@ class SettingsController: UIViewController {
   private func open(_ id: String) {
     let workspace = state.account == nil ? nil : state.workspace
     let native = [
-      "preferences": "preferences", "appearance": "appearance-settings", "about": "about",
+      "preferences": "preferences", "about": "about",
     ]
     let workspacePages = [
       "agent-roles": "agent-roles", "prompt-shortcuts": "prompt-shortcuts", "project-visibility": "project-visibility",
-      "github-settings": "github-settings", "ai-usage": "ai-usage", "memory-settings": "memory-settings",
-      "published-shares": "published-shares",
+      "github-settings": "github-settings", "ai-usage": "ai-usage",
     ]
-    let remote = ["remote-machine": "machine", "remote-agent": "agent", "remote-mcp": "mcp"]
+    let remote = ["remote-agent": "agent"]
     if let page = native[id] {
       push(page, title: title(id))
     } else if let page = workspacePages[id], workspace != nil {
       push(page, title: title(id), params: state.scope)
     } else if let kind = remote[id], workspace != nil {
-      push("remote-settings", title: text("remote.\(kind)"), params: state.scope.merging(["kind": kind]) { _, new in new })
+      push("\(kind)-settings", title: text("remote.\(kind)"), params: state.scope)
     } else if id == "workspace-general", let workspace {
       var params: [String: Any] = [
-        "workspaceId": workspace.id, "name": workspace.name, "color": LodyAccentChoice.hex(.lodyAccent.resolvedColor(with: traitCollection)),
+        "workspaceId": workspace.id, "name": workspace.name, "color": LodyAccent.hex(.lodyAccent.resolvedColor(with: traitCollection)),
       ]
       params["image"] = workspace.image
       LodyShell.shared.presentNative(
@@ -73,10 +84,6 @@ class SettingsController: UIViewController {
       )
     } else if id == "account", state.account != nil {
       LodyShell.shared.pushNative(AccountController(source: source), title: String(localized: "account.title", bundle: .lody), from: self)
-    } else if id == "archived", workspace != nil {
-      push("archived-sessions", title: String(localized: "settings.archived.title", bundle: .lody))
-    } else if id == "project-history", workspace != nil {
-      push("project-history", title: text("history.title"), params: state.scope)
     } else if id == "diagnostics" {
       push("diagnostics", title: String(localized: "diagnostics.title", bundle: .lody))
     } else if id == "connection", workspace != nil, state.connection.state == "offline" {
@@ -95,10 +102,9 @@ class SettingsController: UIViewController {
 
   private func title(_ id: String) -> String {
     let keys = [
-      "preferences": "preferences.title", "appearance": "appearance.title", "about": "section.about",
+      "preferences": "preferences.title", "about": "section.about",
       "agent-roles": "roles.title", "prompt-shortcuts": "shortcuts.title", "project-visibility": "projects.title",
-      "github-settings": "github.title", "ai-usage": "aiUsage.title", "memory-settings": "memory.title",
-      "published-shares": "shares.title",
+      "github-settings": "github.title", "ai-usage": "aiUsage.title",
     ]
     return keys[id].map(text) ?? ""
   }

@@ -48,7 +48,7 @@ object AvatarImages {
     @Volatile private var disk: AvatarDiskCache? = null
 
     fun initialize(context: Context) {
-        disk = AvatarDiskCache(java.io.File(context.cacheDir, "avatars-v1"))
+        disk = AvatarDiskCache(java.io.File(context.cacheDir, "avatars-v1" + app.lody.android.BackendEnvironment.storageSuffix))
     }
 
     private fun decode(bytes: ByteArray): ImageBitmap? {

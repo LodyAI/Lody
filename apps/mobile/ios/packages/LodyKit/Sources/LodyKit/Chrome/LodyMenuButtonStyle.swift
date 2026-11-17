@@ -18,7 +18,7 @@ enum LodyMenuButtonStyle {
     button.subtitleLabel?.numberOfLines = 1
   }
 
-  static func apply(label: String, detail: String = "", avatar: UIImage, showsLabel: Bool = true, to button: UIButton) {
+  static func apply(label: String, avatar: UIImage, showsLabel: Bool = true, to button: UIButton) {
     var configuration = UIButton.Configuration.plain()
     configuration.image = avatar
     if !showsLabel {
@@ -42,10 +42,6 @@ enum LodyMenuButtonStyle {
       title.append(NSAttributedString(attachment: attachment))
     }
     configuration.attributedTitle = AttributedString(title)
-    configuration.attributedSubtitle = detail.isEmpty ? nil : AttributedString(
-      detail,
-      attributes: AttributeContainer([.font: LodyDesign.mono(11), .foregroundColor: UIColor.lodySecondary])
-    )
     apply(configuration, to: button)
   }
 

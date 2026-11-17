@@ -7,6 +7,12 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     LodyApplication.shared.launch(application, options: options)
     return true
   }
+  func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+    LodyApplication.shared.pushToken(deviceToken)
+  }
+  func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+    LodyApplication.shared.pushRegistrationFailed()
+  }
   func application(_ application: UIApplication, configurationForConnecting session: UISceneSession,
                    options: UIScene.ConnectionOptions) -> UISceneConfiguration {
     let configuration = UISceneConfiguration(name: "Default Configuration", sessionRole: session.role)
@@ -26,6 +32,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
   }
   func scene(_ scene: UIScene, openURLContexts contexts: Set<UIOpenURLContext>) {
     for context in contexts { LodyApplication.shared.open(context.url) }
+  }
+  func windowScene(_ windowScene: UIWindowScene, didUpdateEffectiveGeometry previousEffectiveGeometry: UIWindowScene.Geometry) {
+    LodyApplication.shared.geometryChanged(in: windowScene)
   }
   func sceneDidBecomeActive(_ scene: UIScene) { LodyApplication.shared.active() }
   func sceneDidEnterBackground(_ scene: UIScene) { LodyApplication.shared.background() }

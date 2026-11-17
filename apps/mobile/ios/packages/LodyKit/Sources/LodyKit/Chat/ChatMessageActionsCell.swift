@@ -4,16 +4,12 @@ import LodyDesignSystem
 /// Stable, visible touch targets below each message. Copy feedback belongs to the tapped row.
 final class ChatMessageActionsCell: UICollectionViewCell {
   let copyButton = UIButton(type: .system)
-  let editButton = UIButton(type: .system)
   let detailsButton = UIButton(type: .system)
   let forkButton = UIButton(type: .system)
-  let actionButton = UIButton(type: .system)
   private let label = UILabel()
   private let actions = UIStackView()
   private var identity = ""
-  private var user = false
   var entryID: String { identity }
-  var canEdit: (() -> Bool)?
   var onCopy: (() -> Void)?
 
   override init(frame: CGRect) {
@@ -26,19 +22,17 @@ final class ChatMessageActionsCell: UICollectionViewCell {
     actions.spacing = -LodySpacing.md
     for (button, icon, key) in [
       (copyButton, LodyIcon.copy, "native.chat.message.copy"),
-      (editButton, LodyIcon.edit, "native.chat.editAction"),
       (detailsButton, LodyIcon.info, "message.details.title"),
       (forkButton, LodyIcon.branch, "message.fork.title"),
-      (actionButton, LodyIcon.more, "native.chat.message.actions"),
     ] {
       button.setImage(Self.image(icon), for: .normal)
       button.tintColor = .secondaryLabel
+      button.contentHorizontalAlignment = .left
       button.accessibilityLabel = String(localized: String.LocalizationValue(key), bundle: .lody)
       button.widthAnchor.constraint(equalToConstant: 44).isActive = true
       button.heightAnchor.constraint(equalToConstant: 44).isActive = true
       actions.addArrangedSubview(button)
     }
-    actionButton.showsMenuAsPrimaryAction = true
     copyButton.addAction(UIAction { [weak self] _ in
       guard let self else { return }
       self.onCopy?()
@@ -62,27 +56,20 @@ final class ChatMessageActionsCell: UICollectionViewCell {
   required init?(coder: NSCoder) { fatalError() }
   func configure(_ row: ChatRow, copyable: Bool) {
     identity = row.entryID
-    user = row.kind == "userActions"
     label.text = row.text
-    label.isHidden = user
     copyButton.isEnabled = copyable
     copyButton.setImage(Self.image(.copy), for: .normal)
-    detailsButton.isHidden = user
-    forkButton.isHidden = user
-    actionButton.isHidden = user
-    updateEdit()
-    for (button, suffix) in [(copyButton,"copy"), (editButton,"edit"), (detailsButton,"details"), (forkButton,"fork"), (actionButton,"actions")] {
+    for (button, suffix) in [(copyButton,"copy"), (detailsButton,"details"), (forkButton,"fork")] {
       button.accessibilityIdentifier = row.id + ":" + suffix
     }
     setNeedsLayout()
   }
-  func updateEdit() { editButton.isHidden = !user || canEdit?() != true; setNeedsLayout() }
   override func layoutSubviews() {
     super.layoutSubviews()
     let count = CGFloat(actions.arrangedSubviews.filter { !$0.isHidden }.count)
     let width = count * 44 + max(0, count - 1) * actions.spacing
-    let timeX = width + LodySpacing.xs
+    let timeX = width - (44 - LodyIconSize.sm) + LodySpacing.md
     label.frame = CGRect(x: timeX, y: 0, width: max(0, bounds.width - timeX), height: 44)
-    actions.frame = CGRect(x: user ? max(0, bounds.width - width - ChatCell.avatarSlot) : 0, y: 0, width: width, height: 44)
+    actions.frame = CGRect(x: 0, y: 0, width: width, height: 44)
   }
 }

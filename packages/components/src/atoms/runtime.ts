@@ -437,6 +437,11 @@ export type WorkspaceRuntime = {
     },
     options?: { timeoutMs?: number }
   ) => Promise<SessionDispatchTurnResponse | null>;
+  /** Encrypted only: this device's signed schedule declaration, written in the same commit. */
+  signScheduleDeclaration?: (
+    document: Pick<import('@lody/shared').ScheduleDocument, 'definition' | 'prompt' | 'message'>,
+    manualRunKey?: string
+  ) => Promise<string>;
   /** Native original preparation plus an encrypted acceleration attempt; durable activation remains independent. */
   prepareEncryptedDispatch?: (
     machineId: string,

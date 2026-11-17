@@ -11,7 +11,7 @@ Translation: current
 
 ## 决策
 
-扩展现有的[会话对话 Story](../../../../packages/components/src/stories/SessionConversationPage.stories.tsx)，不另造一套视觉实现。阅读会话标识为内置 DeepSeek，因为对话渲染器会为该提供方展示思考正文。点击文件时，真实桌面 diff 面板或移动端抽屉使用合成文件提供方打开内容。标注变体使用真实托管预览组件、静态页面和内存评论存储，不模拟实时检查器或网络连接。[Story 指南](../../../docs/sessions-stories.md)负责说明入口和覆盖范围。
+扩展现有的[会话对话 Story](../../../../packages/components/src/stories/SessionConversationPage.stories.tsx)，不另造一套视觉实现。阅读会话标识为内置 DeepSeek；所有提供方都会展示思考正文。点击文件时，真实桌面 diff 面板或移动端抽屉使用合成文件提供方打开内容。标注变体使用真实托管预览组件、静态页面和内存评论存储，不模拟实时检查器或网络连接。[Story 指南](../../../docs/sessions-stories.md)负责说明入口和覆盖范围。
 
 ## 验证
 

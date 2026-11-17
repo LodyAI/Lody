@@ -2,6 +2,7 @@ import Foundation
 
 struct SessionListState: Equatable, Sendable {
   var userId = ""
+  var accountEmail = ""
   var workspaceId = ""
   var loading = false
   var connected = true
@@ -20,6 +21,8 @@ enum SessionWrite: Sendable {
   case pin(Bool)
   case read(Double)
   case rename(String)
+  /// The owner `SessionMeta.userId` (web Change owner); sharing stays a separate action.
+  case owner(String)
   case delete([String])
 }
 
@@ -95,7 +98,7 @@ final class SessionSource {
           if saved {
             NotificationCenter.default.post(name: .lodySessionViewsDidChange, object: nil)
           } else {
-            LodyToastOverlay.shared.show(message: String(localized: "catalog.toast.localSaveFailed", bundle: .lody), kind: "error")
+            LodyToastOverlay.shared.show(message: String(localized: "catalog.toast.localSaveFailed", bundle: .lody), kind: .error)
           }
         }
       }
@@ -140,7 +143,7 @@ enum SessionPublished {
     let selected = scoped ? published?.workspaceId : auth?.initialWorkspace
     let workspace = account.workspaces.first { $0.id == selected } ?? account.workspaces.first
     var state = SessionListState(
-      userId: account.user.id, workspaceId: workspace?.id ?? "", loading: !scoped, workspaces: account.workspaces
+      userId: account.user.id, accountEmail: account.user.email, workspaceId: workspace?.id ?? "", loading: !scoped, workspaces: account.workspaces
     )
     guard scoped, let published else { return state }
     state.loading = published.loading ?? false
@@ -206,7 +209,8 @@ enum SessionCatalogPreview {
     let workspaces = (try? JSONSerialization.data(withJSONObject: account?["workspaces"] ?? []))
       .flatMap { try? JSONDecoder().decode([AuthWorkspace].self, from: $0) } ?? []
     var next = SessionListState(
-      userId: (account?["user"] as? [String: Any])?["id"] as? String ?? "", workspaceId: workspaceId, workspaces: workspaces,
+      userId: (account?["user"] as? [String: Any])?["id"] as? String ?? "",
+      accountEmail: (account?["user"] as? [String: Any])?["email"] as? String ?? "", workspaceId: workspaceId, workspaces: workspaces,
       catalog: decoded
     )
     next.loading = payload["loading"] as? Bool ?? false

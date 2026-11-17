@@ -1,4 +1,5 @@
-import { getSessionGroupTitle, resolveSessionPrimaryPullRequest } from '@lody/shared';
+import { isSessionInMyScope } from '@/lib/session-visibility';
+import { hasFailedLatestTurn, resolveSessionPrimaryPullRequest } from '@lody/shared';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import type {
   LocalProjectHistoryProvider,
@@ -189,6 +190,8 @@ export type EffectiveSessionActivitySummary = {
   isWorking: boolean;
   isWaitingPermission: boolean;
   hasUnreadMessages: boolean;
+  /** The latest turn of the session or one of its child Tabs ended in failure. */
+  hasFailedTurn: boolean;
   latestMessageAt: number;
 };
 
@@ -204,6 +207,7 @@ export function getEffectiveSessionActivitySummary(
   let isWorking = liveStatus != null;
   let isWaitingPermission = liveStatus?.type === 'requestPermission';
   let hasUnreadMessages = sessionHasUnreadMessages(session);
+  let hasFailedTurn = hasFailedLatestTurn(session);
   let latestMessageAt =
     parseTimestamp(session.lastMessageAt) ?? parseTimestamp(session.createdAt) ?? 0;
 
@@ -220,6 +224,9 @@ export function getEffectiveSessionActivitySummary(
       if (!hasUnreadMessages && sessionHasUnreadMessages(child)) {
         hasUnreadMessages = true;
       }
+      if (!hasFailedTurn && hasFailedLatestTurn(child)) {
+        hasFailedTurn = true;
+      }
       const childMs = parseTimestamp(child.lastMessageAt) ?? parseTimestamp(child.createdAt) ?? 0;
       if (childMs > latestMessageAt) {
         latestMessageAt = childMs;
@@ -231,6 +238,7 @@ export function getEffectiveSessionActivitySummary(
     isWorking,
     isWaitingPermission,
     hasUnreadMessages,
+    hasFailedTurn,
     latestMessageAt,
   };
 }
@@ -284,7 +292,7 @@ export function mapSessionMetaToSessionListRow(
    */
   resolveOpenerRowId?: (openerSessionId: string | null | undefined) => string | null
 ): SessionListRow {
-  const title = getSessionGroupTitle(session) || defaultTitle;
+  const title = normalizeString(session.title) || defaultTitle;
   // Align with the info bar (`getSessionGitHubState`): the GitHub repo identity
   // lives on `session.project` for current writes; the legacy top-level
   // `repoFullName` is only a fallback. Reading just the legacy field
@@ -342,6 +350,7 @@ export function mapSessionMetaToSessionListRow(
     hasUnreadMessages,
     isOffline,
     isWaitingPermission: liveStatus?.type === 'requestPermission',
+    hasFailedTurn: hasFailedLatestTurn(session),
     isPinned: Boolean(session.isPinned),
     isWorktree: Boolean(session.isWorktree),
     externalHistoryProvider,
@@ -381,6 +390,7 @@ function aggregateChildStatus(
     activity.isWorking === task.isWorking &&
     activity.isWaitingPermission === task.isWaitingPermission &&
     activity.hasUnreadMessages === task.hasUnreadMessages &&
+    activity.hasFailedTurn === Boolean(task.hasFailedTurn) &&
     latestMessageAt === task.latestMessageAt
   ) {
     return task;
@@ -391,6 +401,7 @@ function aggregateChildStatus(
     isWorking: activity.isWorking,
     isWaitingPermission: activity.isWaitingPermission,
     hasUnreadMessages: activity.hasUnreadMessages,
+    hasFailedTurn: activity.hasFailedTurn,
     latestMessageAt,
   };
 }
@@ -461,7 +472,7 @@ export function buildSessionListRows(
       return [];
     }
     return sessions
-      .filter((session) => session.userId === currentUserId)
+      .filter((session) => isSessionInMyScope(session, currentUserId))
       .map((session) => mapAndAggregate(session));
   }
 

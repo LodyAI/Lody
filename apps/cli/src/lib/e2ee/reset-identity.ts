@@ -6,6 +6,7 @@ import {
   leaseE2eeIdentity,
   completedE2eeIdentityReset,
 } from '@lody/shared/node/e2ee-identity';
+import { clearCachedCliE2eeKeyring } from './custody';
 import { cliE2eeIdentityDirectory } from './workspace-legacy';
 
 /** Called only after Fleet drains this workspace. Does not create, admit or
@@ -30,7 +31,9 @@ export const resetCliE2eeIdentity = Effect.fnUntraced(function* (input: {
     },
     catch: () => new Error('e2ee_storage'),
   });
-  return yield* archiveE2eeIdentity(directory, input.now, input.resetId);
+  const archive = yield* archiveE2eeIdentity(directory, input.now, input.resetId);
+  clearCachedCliE2eeKeyring(join(directory, 'custody'));
+  return archive;
 });
 
 /** Receipt lookup does not open custody or stop a subsequently paired identity. */

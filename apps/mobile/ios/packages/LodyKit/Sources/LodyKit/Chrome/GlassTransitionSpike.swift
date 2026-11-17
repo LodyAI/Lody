@@ -27,7 +27,7 @@ import UIKit
 
   override func viewDidLoad() {
     super.viewDidLoad()
-    view.backgroundColor = .systemBackground
+    view.backgroundColor = .lodyBackground
     let stack = UIStackView()
     stack.axis = .vertical
     stack.spacing = 20

@@ -321,30 +321,9 @@ const styles = stylex.create({
   workspaceInset: { marginInline: themeSpace[3] },
 });
 import { useMobileSettingsFold } from './mobile-settings-fold-context';
+import { describeCliApiKey } from '../settings/cli-api-key-display';
 
-function formatCliApiKeyTimestamp(
-  value: number | null
-): { label: string; dateTime: string } | null {
-  if (value === null) {
-    return null;
-  }
-
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) {
-    return null;
-  }
-
-  return {
-    label: new Intl.DateTimeFormat(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(date),
-    dateTime: date.toISOString(),
-  };
-}
+const EMPTY_MACHINE_NAMES: ReadonlyMap<string, string> = new Map();
 
 export function MobileAccountSettings({
   surface = 'account',
@@ -386,6 +365,8 @@ export function MobileAccountSettings({
   onSetupPassword,
   canGenerateCliApiKey = false,
   cliApiKeys = [],
+  cliApiKeyMachineNames = EMPTY_MACHINE_NAMES,
+  currentMachineId = null,
   isLoadingCliApiKeys = false,
   isCreatingCliApiKey = false,
   hasGeneratedCliApiKey = false,
@@ -395,7 +376,7 @@ export function MobileAccountSettings({
   onClearGeneratedCliApiKey,
   onRevokeCliApiKey,
 }: AccountSettingsPureProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const isWorkspaceSurface = surface === 'workspace';
   const settingsFold = useMobileSettingsFold();
   const fold = settingsFold;
@@ -425,6 +406,14 @@ export function MobileAccountSettings({
   const [cliApiKeyDialogOpen, setCliApiKeyDialogOpen] = useState(false);
   const [cliApiKeyNote, setCliApiKeyNote] = useState('');
   const [cliApiKeyToRevoke, setCliApiKeyToRevoke] = useState<CliApiKeyRecord | null>(null);
+  const describeApiKey = (apiKey: CliApiKeyRecord) =>
+    describeCliApiKey(apiKey, {
+      machineNamesById: cliApiKeyMachineNames,
+      currentMachineId,
+      language: i18n.language,
+      t,
+    });
+  const cliApiKeyToRevokeDisplay = cliApiKeyToRevoke ? describeApiKey(cliApiKeyToRevoke) : null;
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
 
   const [userNameDraft, setUserNameDraft] = useState(currentUser?.name ?? '');
@@ -1022,14 +1011,10 @@ export function MobileAccountSettings({
                 </div>
               ) : (
                 cliApiKeys.map((apiKey, index) => {
-                  const createdAt = formatCliApiKeyTimestamp(apiKey.createdAt);
-                  const lastRequest = formatCliApiKeyTimestamp(apiKey.lastRequest);
-                  const sourceLabel =
-                    apiKey.source === 'auto'
-                      ? t('settings.account.cliAuth.sourceAuto')
-                      : apiKey.source === 'manual'
-                        ? t('settings.account.cliAuth.sourceManual')
-                        : null;
+                  const display = describeApiKey(apiKey);
+                  const details = [display.lifetime, display.createdAt, display.lastUsed].filter(
+                    Boolean
+                  );
 
                   return (
                     <div
@@ -1039,25 +1024,21 @@ export function MobileAccountSettings({
                       <div {...stylex.props(styles.keyBody)}>
                         <div {...stylex.props(styles.keyTitleLine)}>
                           <p {...stylex.props(styles.keyNote)}>
-                            {apiKey.note || t('settings.account.cliAuth.recordNoteFallback')}
+                            {display.title}
                           </p>
-                          {sourceLabel && <Badge>{sourceLabel}</Badge>}
-                          {createdAt && (
-                            <time dateTime={createdAt.dateTime} {...stylex.props(styles.keyTime)}>
-                              {createdAt.label}
-                            </time>
+                          {display.isCurrentMachine && (
+                            <Badge>{t('settings.account.cliAuth.currentMachine')}</Badge>
                           )}
+                          {display.sourceLabel && <Badge>{display.sourceLabel}</Badge>}
                         </div>
-                        {(apiKey.keyPreview || lastRequest) && (
+                        {(apiKey.keyPreview || details.length > 0) && (
                           <div {...stylex.props(styles.keyDetails)}>
                             {apiKey.keyPreview && (
                               <span {...stylex.props(styles.keyPreview)}>{apiKey.keyPreview}</span>
                             )}
-                            {lastRequest && (
-                              <span>
-                                {t('settings.account.cliAuth.lastUsed', { at: lastRequest.label })}
-                              </span>
-                            )}
+                            {details.map((detail) => (
+                              <span key={detail}>{detail}</span>
+                            ))}
                           </div>
                         )}
                       </div>
@@ -1248,8 +1229,11 @@ export function MobileAccountSettings({
               </AlertDialog.Title>
               <AlertDialog.Description>
                 {t('settings.account.cliAuth.revokeDialogDescription', {
-                  note: cliApiKeyToRevoke?.note ?? t('settings.account.cliAuth.recordNoteFallback'),
+                  note: cliApiKeyToRevokeDisplay?.title ?? '',
                 })}
+                {cliApiKeyToRevokeDisplay?.isCurrentMachine
+                  ? ` ${t('settings.account.cliAuth.revokeCurrentMachineWarning')}`
+                  : null}
               </AlertDialog.Description>
             </AlertDialog.Header>
             <AlertDialog.Footer>

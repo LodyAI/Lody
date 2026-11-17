@@ -1,0 +1,15 @@
+# Authentication and network (Android)
+
+Read before changing sign-in, credentials, avatars, native HTTP or the runtime's network gates. These rules bind every caller of the area, not only files in its directory.
+
+- Native authentication uses email/password, Google Credential Manager and provider-only Custom Tabs OAuth; the debug catalog probe reuses the native Home sign-in. The sign-in page reproduces web `/login` like iOS; change both platforms together ([Sign-in page](../native-auth.md#sign-in-page)). Offline diagnostics remain separate. Creation now exposes only typed creation options and a single create-and-send command; diagnostics and fault injection belong only in the debug source set.
+
+- AccountController owns native credentials and serializes login/restore/cancel/logout. Public UI state contains no bearer token, ID token, OAuth code or PKCE verifier. Native email and Google ID tokens use Better Auth; GitHub/Discord/Apple use the PKCE backend handoff, never Web login or Device Flow. Persist pending state/verifier encrypted under a separate Keystore alias before opening Custom Tabs; consume it before exchange and clear it on cancel/logout/replacement. Reject non-exact or mismatched callbacks without interrupting current login. Password reset is requested natively but completed only at the HTTPS website: never accept or deliver a reset bearer capability through a custom scheme. See [native auth setup](../native-auth.md).
+
+- Keystore stores the AES-GCM key; only ciphertext goes to noBackupFilesDir. Invalidated keys or tampered ciphertext require fresh login. Never import desktop credentials or log tokens/server bodies.
+
+- Avatars are display data: `Account.image` / `Workspace.image` come from `get-session` `user.image` / `organization/list` `logo`, HTTPS only (`httpsImage`), persisted with the account context. `home/AvatarImages` is the one exception to fixed endpoints: an unauthenticated HTTPS image GET (no credentials or cookies, same-protocol redirects only, 2 MiB cap, downsampled, memory and bounded disk cache); a failure keeps the monogram.
+
+- Native HTTP uses validated build-time endpoints (production by default; see [backend configuration](../backend-configuration.md)), bounded bodies, cancellation and no redirects/cookies/logging. NetworkRuntime is a local bundled asset whose CSP permits only the validated grant origin. Fetch and native interception both restrict requests to the selected workspace: catalog/session reads, meta appends, session create/append, dispatch RPC request append and response create/read. Provider settings additionally permit append-only POST to the selected workspace’s machine Flock; canonical agentProviders validates ownership and conflicts. Roles and shortcuts add [their gates](../runtime-snapshot.md). Reject redirects, remote scripts, stream deletes and machine-Flock creation.
+
+- The cloud runtime starts with the verified native account identity and watches machine presence; offline probes still omit identity. Network readiness and catalog synchronization are separate states; a WebView heartbeat never means cloud LIVE.

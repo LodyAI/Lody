@@ -115,7 +115,7 @@ final class FileQuickLookController: QLPreviewController, QLPreviewControllerDat
     loadTask?.cancel()
     var loading = UIContentUnavailableConfiguration.loading()
     loading.text = String(localized: "native.file.reading", bundle: .lody)
-    loading.background.backgroundColor = .systemBackground
+    loading.background.backgroundColor = .lodyBackground
     contentUnavailableConfiguration = loading
     spinner.startAnimating()
     let sessionId = sessionId
@@ -171,7 +171,7 @@ final class FileQuickLookController: QLPreviewController, QLPreviewControllerDat
 
   private func fail(_ message: String) {
     var failed = UIContentUnavailableConfiguration.empty()
-    failed.background.backgroundColor = .systemBackground
+    failed.background.backgroundColor = .lodyBackground
     failed.image = UIImage(systemName: "doc.badge.ellipsis")
     failed.text = (path as NSString).lastPathComponent
     failed.secondaryText = message

@@ -3,16 +3,36 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
+// Shared, non-executable .env.local parser; shell environment takes precedence.
+val backendJson = providers.exec {
+    commandLine("node", rootProject.file("../backend-config.mjs").absolutePath)
+}.standardOutput.asText.get()
+val backends = groovy.json.JsonSlurper().parseText(backendJson) as Map<*, *>
+
 android {
     namespace = "app.lody.android"
     compileSdk = 37
 
     defaultConfig {
         applicationId = "ai.lody.android"
+        // Public OAuth Web client ID, never a client secret. An explicit empty property disables Google clearly.
+        val googleClient = providers.gradleProperty("LODY_GOOGLE_WEB_CLIENT_ID")
+            .orElse("853929047386-vd1k5ashcs4i5pa66pa4iqbouk9ra57a.apps.googleusercontent.com").get()
+        require(googleClient.matches(Regex("[A-Za-z0-9._-]*")))
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$googleClient\"")
+        for (key in listOf("CONVEX_URL", "CONVEX_SITE_URL", "CF_WORKER_URL", "STORAGE_SUFFIX")) {
+            val name = if (key == "STORAGE_SUFFIX") "BACKEND_STORAGE_SUFFIX" else key
+            buildConfigField("String", name, groovy.json.JsonOutput.toJson(backends[key]))
+        }
         minSdk = 26
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
+        buildConfigField("String", "ONESIGNAL_APP_ID", "\"${providers.gradleProperty("LODY_ONESIGNAL_APP_ID").getOrElse("930dcd5c-3534-46aa-805d-f279f008f80b")}\"")
+        // Public Firebase client options, never a service-account key.
+        for (key in listOf("APP_ID", "API_KEY", "PROJECT_ID", "SENDER_ID")) {
+            buildConfigField("String", "FIREBASE_$key", "\"${providers.gradleProperty("LODY_FIREBASE_$key").getOrElse("")}\"")
+        }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -44,6 +64,12 @@ kotlin {
 }
 
 dependencies {
+    implementation(libs.credentials)
+    implementation(libs.credentials.play)
+    implementation(libs.googleid)
+    implementation(libs.browser)
+    implementation(libs.onesignal)
+    implementation(libs.firebase.messaging)
     implementation(libs.okhttp)
     implementation(libs.webkit)
     implementation(libs.coroutines.android)
@@ -63,6 +89,7 @@ dependencies {
     implementation(libs.markdown.parser)
     implementation(libs.markdown.renderer.m3)
     implementation(libs.markdown.renderer.code)
+    implementation(libs.androidsvg)
     testImplementation(libs.junit)
     androidTestImplementation(libs.test.runner)
     androidTestImplementation(libs.test.junit)
@@ -78,6 +105,7 @@ val generateRuntimeAssets = tasks.register<RuntimeAssets>("generateRuntimeAssets
     inputs.dir(rootProject.file("runtime/vendor"))
     inputs.dir(rootProject.file("runtime/src"))
     inputs.file(rootProject.file("runtime/build.mjs"))
+    inputs.property("backendStorageSuffix", backends["STORAGE_SUFFIX"].toString())
     inputs.file(rootProject.file("../shared/markdown-repair/entry.js"))
     inputs.file(rootProject.file("runtime/snapshot.mjs"))
     inputs.file(rootProject.file("runtime/package-lock.json"))

@@ -10,6 +10,8 @@ import {
 } from '../../style/theme-scale.stylex';
 import { pageSurface as surface } from './surface';
 import type { ReferralPolicy } from '@lody/cloud-api';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, ArrowRight, Building2, CreditCard } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
@@ -23,6 +25,25 @@ import { PricingPageLink } from '../shared/pricing-page-link';
 import { SubscribeConsentNotice } from '../shared/subscribe-consent-notice';
 import { formatUsd } from '../settings/billing-setting-pure';
 import { ReferralOfferNotice } from '../settings/referral-settings-pure';
+
+const styles = stylex.create({
+  page: {
+    boxSizing: 'border-box',
+    height: { default: '100vh', '@supports (height: 100dvh)': '100dvh' },
+    overflowY: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    padding: space[4],
+  },
+  content: {
+    width: '100%',
+    maxWidth: '28rem',
+    flexShrink: 0,
+    marginBlock: 'auto',
+  },
+});
 
 export interface CreateWorkspacePricing {
   monthlyAmountCents: number;
@@ -84,8 +105,8 @@ export function CreateWorkspacePage({
   const { t } = useTranslation();
 
   return (
-    <div {...stylex.props(surface.page)}>
-      <div {...stylex.props(surface.card)}>
+    <div data-testid="create-workspace-page" {...stylex.props(styles.page)}>
+      <div {...stylex.props(styles.content)}>
         {onBackToWorkspace ? (
           <Button
             type="button"

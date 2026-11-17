@@ -114,10 +114,12 @@ function StoryHarness({
   currentSessionId,
   defaultOpen,
   initialStopped = false,
+  width = 720,
 }: {
   currentSessionId: string;
   defaultOpen?: boolean;
   initialStopped?: boolean;
+  width?: number;
 }) {
   const [store] = useState(() => {
     const next = createStore();
@@ -129,7 +131,7 @@ function StoryHarness({
   tree.session = { ...tree.session, collaborationStopped: stopped };
   return (
     <Provider store={store}>
-      <div {...stylex.props(storyLayout.stack)} style={{ width: 720 }}>
+      <div {...stylex.props(storyLayout.stack)} style={{ width }}>
         {/* Room above the bar so the popover (side=top) stays visible. */}
         <div {...stylex.props(storyLayout.frame)} />
         <SessionInfoBar
@@ -192,4 +194,8 @@ export const ConfirmStop: Story = {
 
 export const CollaborationStopped: Story = {
   args: { currentSessionId: 'relations', defaultOpen: true, initialStopped: true },
+};
+
+export const NarrowTabRow: Story = {
+  args: { currentSessionId: 'relations-story', defaultOpen: true, width: 360 },
 };

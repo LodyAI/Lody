@@ -1,13 +1,17 @@
 import { SessionLimitNotice } from './session-limit-notice';
+import { buildDaemonInstallCommands } from '@/lib/daemon-installation';
+import { useMySessionScope } from '@/hooks/use-visible-session-metas';
+import { isSessionInMyScope } from '@/lib/session-visibility';
 import { McpDefaultsRecovery } from './mcp-defaults-recovery';
 import {
   useLegacyWorkspaceMutation,
   useLegacyWorkspaceQuery,
 } from '@/hooks/use-legacy-workspace-query';
 import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
-import { E2eeLocalAgentApproval } from '../e2ee-local-agent-approval';
+import { E2eeLocalAgentApproval, localAgentRunsWorkspace } from '../e2ee-local-agent-approval';
+import { useElectronCliDaemon } from '@/hooks/use-electron-cli-daemon';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
-import { bindAgentRoleTarget, getSessionGroupTitle, snapshotAgentRole } from '@lody/shared';
+import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import {
@@ -661,6 +665,7 @@ import {
   getChatLandingSelectedMachineProjectStatus,
   getEmptyLocalProjectsMessageKey,
   getSharingReviewActionTarget,
+  getChatLandingSharingReviewActionTarget,
   getSharingReviewSourceRevision,
   getSharingReviewSourcesReady,
   getSharingReviewTeamHasNoVisibleLocalResources,
@@ -672,6 +677,12 @@ import {
   getChatLandingVisibleComposerStatus,
   isChatLandingMachineReachable,
 } from './chat-landing-derived';
+import {
+  type ComposerInputElement,
+  getComposerSelection,
+  getComposerText,
+  setComposerSelection,
+} from '@/ui/mention/composer-input';
 
 interface ChatLandingProps {
   /** Committed mobile session surface; route completion alone is not presentation. */
@@ -871,6 +882,7 @@ function WorkspaceChatLanding({
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const localAgentEnabled = useAtomValue(localAgentEnabledAtom);
   const nativeE2ee = usePlatform().e2eeWorkspaces?.runtime;
+  const { state: localCliState } = useElectronCliDaemon();
   const workspaceRuntime = useAtomValue(runtimeAtom);
   const postHog = usePostHog();
   const multiWorkspaceAvailable = useAppCapability('multiWorkspace');
@@ -904,6 +916,7 @@ function WorkspaceChatLanding({
   const [machinePairing, setMachinePairing] = useState<{
     requestId: string;
     command: string;
+    windowsCommand: string;
     expiresAt: number;
   } | null>(null);
   const machinePairingSuccessNotifiedRef = useRef<string | null>(null);
@@ -939,6 +952,7 @@ function WorkspaceChatLanding({
     cloudOperations.localProjects.setLocalProjectSharedWithTeam
   );
   const cachedRepositories = useAtomValue(workspaceReposCacheAtomFamily(workspaceId));
+  const { currentUserId: myAccountId } = useMySessionScope();
   const visibleMachineIndex = useVisibleMachineMetas({
     machineFlockFamilies: CHAT_LANDING_MACHINE_FLOCK_FAMILIES,
   });
@@ -958,14 +972,18 @@ function WorkspaceChatLanding({
     isLoading: visibleLocalProjectsLoading,
   } = visibleLocalProjects;
   const getProjectShareErrorMessage = useConvexErrorMessage();
-  const { sessions: visibleActiveSessions, allActiveSessions: visibleAllActiveSessions } =
-    useVisibleSessionMetas();
+  const {
+    sessions: visibleActiveSessions,
+    allActiveSessions: visibleAllActiveSessions,
+    historyOnlySessionIds: activeReadOnlyIds,
+  } = useVisibleSessionMetas();
   useReportVisibleSessionsForEagerSync(
     'chat-landing',
     visibleActiveSessions,
     visibleAllActiveSessions
   );
-  const { archivedSessions: visibleArchivedSessions } = useVisibleArchivedSessionMetas();
+  const { archivedSessions: visibleArchivedSessions, historyOnlySessionIds: archivedReadOnlyIds } =
+    useVisibleArchivedSessionMetas();
   const showProjectSharing =
     legacyQueriesEnabled &&
     shouldShowSessionSharing({
@@ -1494,7 +1512,7 @@ function WorkspaceChatLanding({
   const [loadingLocalGitState, setLoadingLocalGitState] = useState(false);
 
   // ── Common refs ──
-  const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const promptTextareaRef = useRef<ComposerInputElement>(null);
   // Scope root for the keyboard-nav controller (arrow roving over the desktop landing's
   // config + composer column). Mobile/touch keeps native focus behavior.
   const keyboardNavRef = useRef<HTMLDivElement>(null);
@@ -1726,9 +1744,11 @@ function WorkspaceChatLanding({
         return false;
       }
 
-      const currentValue = promptTextareaRef.current?.value ?? prompt;
-      const selectionStart = promptTextareaRef.current?.selectionStart ?? null;
-      const selectionEnd = promptTextareaRef.current?.selectionEnd ?? null;
+      const promptInput = promptTextareaRef.current;
+      const currentValue = promptInput ? getComposerText(promptInput) : prompt;
+      const promptSelection = promptInput ? getComposerSelection(promptInput) : null;
+      const selectionStart = promptSelection?.start ?? null;
+      const selectionEnd = promptSelection?.end ?? null;
       const result = insertPastedTextDraft({
         currentValue,
         pastedText: normalizedText,
@@ -1764,7 +1784,7 @@ function WorkspaceChatLanding({
 
       requestAnimationFrame(() => {
         promptTextareaRef.current?.focus();
-        promptTextareaRef.current?.setSelectionRange(result.draft.end, result.draft.end);
+        setComposerSelection(promptTextareaRef.current, result.draft.end, result.draft.end);
       });
 
       return true;
@@ -2472,7 +2492,7 @@ function WorkspaceChatLanding({
     }
     setMachinePairing({
       requestId: result.value.request.id,
-      command: `npx lody@latest daemon start --auth ${result.value.token}`,
+      ...buildDaemonInstallCommands({ auth: result.value.token }),
       expiresAt: result.value.request.expiresAt,
     });
   }, [authToken, workspaceId]);
@@ -3169,7 +3189,7 @@ function WorkspaceChatLanding({
     contextType === 'local' ? handleSelectedLocalBranchChange : setSelectedBranch;
 
   // ── Prompt keydown ──
-  const handlePromptKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const handlePromptKeyDown = (event: KeyboardEvent<ComposerInputElement>) => {
     if (event.key !== 'Enter' || isImeComposingKeyboardEvent(event)) return;
     if (
       !shouldSubmitOnEnterForMobileKeyboardAction({
@@ -3197,7 +3217,7 @@ function WorkspaceChatLanding({
     [addFileAttachments, addFiles]
   );
   const handlePromptPaste = useCallback(
-    (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    (event: ClipboardEvent<ComposerInputElement>) => {
       const text = event.clipboardData.getData('text/plain');
 
       const pastedTextFile = text && isPastedTextTooLarge(text) ? createPastedTextFile(text) : null;
@@ -3902,7 +3922,6 @@ function WorkspaceChatLanding({
         value={currentBranch}
         onChange={setCurrentBranch}
         options={branchOptions}
-        tone={tone}
         placeholder={t('chat.branchPlaceholder')}
         searchPlaceholder={t('chat.branchSearchPlaceholder', { defaultValue: 'Search branches' })}
         emptyText={t('chat.branchEmpty', { defaultValue: 'No branches found' })}
@@ -5174,7 +5193,6 @@ function WorkspaceChatLanding({
      level (so the predicate reads from the same field accessors the
      grouping logic uses). Cap at 200. */
   const mobileHomeChats = useMemo<MobileConversationItem[]>(() => {
-    const myUserId = userId ?? null;
     /* `sessionListAtom` and `archivedSessionListAtom` live in
        different jotai atoms (see `atoms/doc-meta.ts`) — the active
        list excludes archived items and vice versa. Pick the right
@@ -5198,7 +5216,7 @@ function WorkspaceChatLanding({
     };
     return sourceSessions
       .filter((session) => {
-        if (chatScope === 'my' && myUserId && session.userId !== myUserId) return false;
+        if (chatScope === 'my' && !isSessionInMyScope(session, myAccountId)) return false;
         if (chatExcludedMachines.has(session.machineId)) return false;
         return true;
       })
@@ -5256,7 +5274,7 @@ function WorkspaceChatLanding({
         }
         return {
           id: session.id,
-          title: getSessionGroupTitle(session) || t('sessions.untitled', 'Untitled session'),
+          title: session.title?.trim() || t('sessions.untitled', 'Untitled session'),
           kind,
           branchName: session.branchName?.trim() || null,
           prNumber: prInfo.number,
@@ -5278,6 +5296,7 @@ function WorkspaceChatLanding({
           isOffline: !isOnline,
           hasUnreadMessages: activity.hasUnreadMessages,
           isPinned: Boolean(session.isPinned),
+          readOnly: activeReadOnlyIds.has(session.id) || archivedReadOnlyIds.has(session.id),
           machineId: session.machineId,
           /* Provenance for the list's opened-by tree. TWO fields, never
              merged: the precise opener drives navigation, the row id drives
@@ -5334,10 +5353,13 @@ function WorkspaceChatLanding({
     chatExcludedRepos,
     chatExcludedRunning,
     chatScope,
+    myAccountId,
     mobileChildSessionsByParent,
     mobileOpenerRowResolver,
     liveSessionStatuses,
     mobileHomeShowArchived,
+    activeReadOnlyIds,
+    archivedReadOnlyIds,
     onlineMachineIds,
     showProjectSharing,
     t,
@@ -5550,6 +5572,7 @@ function WorkspaceChatLanding({
     chatExcludedRepos,
     chatExcludedRunning,
     chatScope,
+    myAccountId,
     chatViewMode,
     mobileHomeMachines,
     mobileSheetRecency,
@@ -6102,7 +6125,6 @@ function WorkspaceChatLanding({
      the list it's given. */
   const mobileProjectConversations = useMemo<MobileConversationItem[]>(() => {
     if (!mobileProjectContext) return [];
-    const myUserId = userId ?? null;
     /* See mobileHomeChats: archived sessions live in a separate atom,
        not in `visibleSessions`. Pick the right source so the toggle
        actually surfaces items instead of always rendering empty. */
@@ -6123,7 +6145,7 @@ function WorkspaceChatLanding({
       return activity;
     };
     const projectScopedSessions = sourceSessions.filter((session) => {
-      if (chatScope === 'my' && myUserId && session.userId !== myUserId) return false;
+      if (chatScope === 'my' && !isSessionInMyScope(session, myAccountId)) return false;
       if (mobileProjectContext.kind === 'local') {
         if (session.machineId !== mobileProjectContext.machineId) return false;
         const key = getSessionLocalProjectKey(session);
@@ -6174,7 +6196,7 @@ function WorkspaceChatLanding({
         }
         return {
           id: session.id,
-          title: getSessionGroupTitle(session) || t('sessions.untitled', 'Untitled session'),
+          title: session.title?.trim() || t('sessions.untitled', 'Untitled session'),
           kind,
           branchName: session.branchName?.trim() || null,
           prNumber: prInfo.number,
@@ -6196,6 +6218,7 @@ function WorkspaceChatLanding({
           isOffline: !isOnline,
           hasUnreadMessages: activity.hasUnreadMessages,
           isPinned: Boolean(session.isPinned),
+          readOnly: activeReadOnlyIds.has(session.id) || archivedReadOnlyIds.has(session.id),
           machineId: session.machineId,
           /* See the home Chat-tab builder: precise opener for navigation, row
              id for nesting. An opener outside this project simply leaves the
@@ -6218,11 +6241,14 @@ function WorkspaceChatLanding({
       });
   }, [
     chatScope,
+    myAccountId,
     mobileChildSessionsByParent,
     mobileOpenerRowResolver,
     liveSessionStatuses,
     mobileProjectContext,
     mobileProjectShowArchived,
+    activeReadOnlyIds,
+    archivedReadOnlyIds,
     onlineMachineIds,
     t,
     teamMembersByUserId,
@@ -6357,6 +6383,7 @@ function WorkspaceChatLanding({
     chatExcludedPr,
     chatExcludedRunning,
     chatScope,
+    myAccountId,
     mobileHomeMachines,
     mobileProjectContext,
     setChatExcludedMachines,
@@ -6439,8 +6466,24 @@ function WorkspaceChatLanding({
       }}
     />
   ) : null;
+  const selectedSharingReviewActionTarget = getChatLandingSharingReviewActionTarget({
+    currentUserId: userId ?? null,
+    machineId: selectedMachineId,
+    localProjectIds:
+      projectGroupLaunchTarget?.kind === 'ready'
+        ? projectGroupLaunchTarget.members.flatMap((member) =>
+            member.source.kind === 'local' && member.source.machineId === selectedMachineId
+              ? [member.source.localProjectId]
+              : []
+          )
+        : contextType === 'local' && selectedLocalProject?.machineId === selectedMachineId
+          ? [selectedLocalProject.localProjectId]
+          : [],
+    machineAccessByMachineId: accessByMachineId,
+    localProjectAccessByKey: visibleLocalProjectAccess,
+  });
   const sharingReviewRow =
-    sharingReviewState.ready && sharingReviewState.active
+    sharingReviewState.ready && sharingReviewState.active && selectedSharingReviewActionTarget
       ? inboxRows?.find((item) => item.kind === 'sharing_review')
       : undefined;
   const sharingReviewNoticeNode = sharingReviewRow ? (
@@ -6451,23 +6494,18 @@ function WorkspaceChatLanding({
           {t('inbox.sharingReview.title', 'Review what your team can see')}
         </div>
         <p {...stylex.props(landingStyles.sharingReviewText)}>
-          {sharingReviewState.teamLooksEmpty
+          {selectedSharingReviewActionTarget === 'machines'
             ? t(
-                'inbox.sharingReview.emptyTeam',
-                'Nothing is visible in this team workspace yet. Ask a teammate to share a machine or project if you expected to see their conversations.'
+                'inbox.sharingReview.selectedMachine',
+                'The selected machine is private. Share it so your teammates can use it.'
               )
-            : sharingReviewState.privateMachineCount + sharingReviewState.privateProjectCount === 0
-              ? t(
-                  'inbox.sharingReview.noLocalResources',
-                  'No team machines or local projects are visible to you. A teammate may need to share them before their local conversations appear.'
-                )
-              : t(
-                  'inbox.sharingReview.landing',
-                  'Private machines and projects are only visible to you. Share the ones your teammates should be able to use.'
-                )}
+            : t(
+                'inbox.sharingReview.selectedProject',
+                'A selected project is private. Share it so your teammates can use it.'
+              )}
         </p>
         <div {...stylex.props(landingStyles.sharingReviewActions)}>
-          {sharingReviewState.actionTarget ? (
+          {selectedSharingReviewActionTarget ? (
             <button
               type="button"
               {...stylex.props(landingStyles.sharingReviewPrimary)}
@@ -6475,10 +6513,10 @@ function WorkspaceChatLanding({
                 void markInboxItemRead({ itemId: sharingReviewRow._id }).catch((error) =>
                   console.error('Failed to mark sharing review read', error)
                 );
-                openSettings(sharingReviewState.actionTarget ?? 'projects');
+                openSettings(selectedSharingReviewActionTarget);
               }}
             >
-              {sharingReviewState.actionTarget === 'machines'
+              {selectedSharingReviewActionTarget === 'machines'
                 ? t('inbox.sharingReview.actionDevices', 'Review machines')
                 : t('inbox.sharingReview.action', 'Review projects')}
             </button>
@@ -6552,6 +6590,7 @@ function WorkspaceChatLanding({
         workspaceId={runtime.workspaceId}
         runtime={nativeE2ee}
         enabled
+        localAgentRunning={localAgentRunsWorkspace(localCliState, runtime.workspaceId)}
       />
     ) : null;
   const composerNoticeNode =
@@ -6889,7 +6928,6 @@ function WorkspaceChatLanding({
             archiveToggleLabel: t('chat.mobileHome.archiveToggleLabel', '归档'),
             searchPlaceholder: t('chat.mobileProject.searchPlaceholder', '搜索对话'),
             clearSearchAriaLabel: t('common.clear', '清空'),
-            allConversationsHeading: t('chat.mobileHome.allChatsHeading', '全部对话'),
             archivedConversationsHeading: t('chat.mobileHome.archivedChatsHeading', '归档对话'),
             archiveSelection: {
               selectedCount: (count) =>
@@ -7088,7 +7126,6 @@ function WorkspaceChatLanding({
             recentLocalProjectsHeading: t('chat.mobileHome.recentLocalProjectsHeading', '最近常用'),
             allLocalProjectsHeading: t('chat.mobileHome.allLocalProjectsHeading', '全部项目'),
             allGitHubReposHeading: t('chat.mobileHome.allGitHubReposHeading', '全部仓库'),
-            allChatsHeading: t('chat.mobileHome.allChatsHeading', '全部对话'),
             archivedChatsHeading: t('chat.mobileHome.archivedChatsHeading', '归档对话'),
             archiveSelection: {
               selectedCount: (count) =>
@@ -7130,7 +7167,7 @@ function WorkspaceChatLanding({
             clearChatFilters: t('chat.mobileHome.clearFilters', '清除所有过滤'),
             /* First-run guide (no machines + no chats): the user installed
                the mobile app before ever connecting a computer, so walk them
-               through the two ways to connect one — the `lody daemon start`
+               through the two ways to connect one — the standalone installer
                one-liner on any machine, or the desktop app on their computer.
                The mobile app can't run agents itself — and the phone never
                opens the download page: both CTAs hand the command/link to the
@@ -7143,12 +7180,12 @@ function WorkspaceChatLanding({
               ),
               commandHeading: t(
                 'chat.mobileHome.onboarding.commandHeading',
-                'One command — on any machine'
+                'One command — macOS / Linux'
               ),
-              command: 'npx lody daemon start',
+              command: buildDaemonInstallCommands().command,
               commandHint: t(
                 'chat.mobileHome.onboarding.commandHint',
-                'Run it on a server, VM, or your own computer (Node.js 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x)). It signs the machine into your account — a machine without a browser prints a link you can open on this phone.'
+                'Run the installer on a macOS/Linux server, VM, or computer. Node.js is included. It prints a sign-in link you can open on this phone.'
               ),
               copyCommandLabel: t('chat.mobileHome.onboarding.copyCommand', 'Copy command'),
               shareCommandLabel: t('chat.mobileHome.onboarding.shareCommand', 'Send to computer'),
@@ -7393,6 +7430,9 @@ function WorkspaceChatLanding({
         machineId={pairedMachineId}
         machineName={observedMachinePairing?.machineName}
         command={machinePairingStatus === 'pending' ? (machinePairing?.command ?? null) : null}
+        windowsCommand={
+          machinePairingStatus === 'pending' ? (machinePairing?.windowsCommand ?? null) : null
+        }
         expiresAt={machinePairing?.expiresAt ?? null}
         creating={machinePairingCreating}
         createError={machinePairingCreateError}

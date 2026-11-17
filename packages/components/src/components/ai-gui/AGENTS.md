@@ -16,6 +16,7 @@ Ownership: [README.md](README.md).
   facts; its selection has no history lease.
   Map history indexes to rows. Collapsed activity is one row; expanded details
   are siblings, never nested scrollers or fixed-height panels.
+  Manual disclosure scrolling follows [the header-position contract](README.md#manual-disclosures).
 - Native selection retains its row corridor and history leases: hold prose/folding,
   keep actions live, release on clear. [Contract](README.md#native-text-selection).
 - `buildChatStreamItems()` must drop empty assistant entries and de-duplicate
@@ -52,10 +53,9 @@ Ownership: [README.md](README.md).
   `apps/cli/src/session/AGENTS.md`).
 - Thought/tool timelines are compact, transparent, 13px and glyph-free; verbs label
   steps. Execute calls are not cards. Disclosure labels lead, chevrons trail
-  (desktop: hover-only, body type, no fill). Only builtin DSH shows thoughts:
-  separate groups default thoughts open and tools closed; explicit toggles win.
-  DSH thought prose uses answer typography, secondary ink and shared work folding. Other providers
-  hide thoughts. Footers show config, not author identity.
+  (desktop: hover-only, body type, no fill). Every provider shows thoughts:
+  separate thought and tool groups default closed; explicit toggles win.
+  Thought prose uses answer typography, secondary ink and shared work folding. Footers show config, not author identity.
 - An expanded tool step is ONE `ToolDetailSheet` (`tool-call-detail.tsx`): composer
   fill + card shadow, no header restating the row, sections in content order. Only
   the command is highlighted, via the Shiki worker; output stays ANSI text. Drop
@@ -104,10 +104,10 @@ Ownership: [README.md](README.md).
   hosts require CSS typed division. Stream engine: live turns only;
   remounts show existing text immediately and animate only additions.
 - Rendering and search share CJK emphasis rules.
-- A Mermaid diagram in a message is a still preview until a pointer click
-  activates it, and an unmodified wheel is NEVER taken — activated or not.
-  Deactivation preserves pan/zoom and activation adds no outline; see the
-  [inline view contract](../../../../../specs/mermaid-inline-view.md).
+- A Mermaid diagram in a message is drawn inline, not as a card, and is a still
+  preview until a pointer click activates it. An unmodified wheel is NEVER taken
+  — activated or not. Deactivation preserves pan/zoom and activation adds no
+  outline; see the [inline view contract](../../../../../specs/mermaid-inline-view.md).
   `mermaid-diagram-viewer.tsx` stays the only full-screen surface, reached from
   the block's action bar. Invariants:
   [mermaid-diagram-rendering.md](mermaid-diagram-rendering.md).

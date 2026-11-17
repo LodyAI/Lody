@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
@@ -10,6 +10,7 @@ import {
 } from '../../style/theme-scale.stylex';
 import { Button } from '@lody/ui/button';
 import { Popover } from '@lody/ui/popover';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { useSessionActions } from '@/hooks/use-session-actions';
@@ -32,6 +33,7 @@ import {
   hasSessionRelations,
   type SessionRelationTreeNode,
 } from '@/lib/session-relation-tree';
+import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { useWorkingHandOver } from '@/ui/working-status-mark';
 import { PopoverActionChip } from './info-chip';
 
@@ -59,10 +61,8 @@ const styles = stylex.create({
   pill: {
     display: 'flex',
     height: themeSpace[7],
-    minWidth: 0,
-    flexGrow: 1,
-    flexShrink: 1,
-    flexBasis: themeSpace[0],
+    minWidth: '18ch',
+    flex: '1 1 0%',
     alignItems: 'center',
     gap: themeSpace[2],
     borderRadius: themeRadius.md,
@@ -79,7 +79,7 @@ const styles = stylex.create({
   },
   current: {
     borderColor: 'hsl(var(--foreground) / 0.15)',
-    backgroundColor: 'hsl(var(--muted-foreground) / 0.1)',
+    backgroundColor: colors.selectedFill,
     fontWeight: themeFontWeight.medium,
   },
   other: {
@@ -94,6 +94,7 @@ const styles = stylex.create({
   },
   title: {
     minWidth: 0,
+    width: 0,
     flexGrow: 1,
     flexShrink: 1,
     flexBasis: '0%',
@@ -117,6 +118,12 @@ const styles = stylex.create({
   status: { padding: space[2], fontSize: text.footnoteSize, color: colors.secondaryLabel },
   error: { padding: space[2], fontSize: text.footnoteSize, color: colors.destructive },
   tree: { maxHeight: 320, overflowY: 'auto', padding: space[1.5] },
+  scroll: { minWidth: 0, width: '100%' },
+  hiddenTrack: { display: 'none' },
+  row: { display: 'flex', gap: space[1], padding: `calc(${space[1]} / 2)` },
+  fade: (left: string, right: string) => ({
+    maskImage: `linear-gradient(to right, transparent, black ${left}, black calc(100% - ${right}), transparent)`,
+  }),
 });
 
 /**
@@ -327,25 +334,70 @@ function RelationTreeRow({
   onOpenSession: (target: SessionNavigationTarget) => void;
 }) {
   const rootId = node.session.id;
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ left: false, right: false });
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const content = contentRef.current;
+    if (!viewport || !content) return;
+    const update = () => {
+      const offset = Math.abs(viewport.scrollLeft);
+      const remaining = viewport.scrollWidth - viewport.clientWidth - offset;
+      const rtl = getComputedStyle(viewport).direction === 'rtl';
+      const next = {
+        left: rtl ? remaining > 1 : offset > 1,
+        right: rtl ? offset > 1 : remaining > 1,
+      };
+      setEdges((previous) =>
+        previous.left === next.left && previous.right === next.right ? previous : next
+      );
+    };
+    update();
+    const stopViewportResize = observeResizeOnAnimationFrame(viewport, update);
+    const stopContentResize = observeResizeOnAnimationFrame(content, update);
+    viewport.addEventListener('scroll', update, { passive: true });
+    return () => {
+      stopViewportResize();
+      stopContentResize();
+      viewport.removeEventListener('scroll', update);
+    };
+  }, []);
+  const fadeProps = stylex.props(
+    (edges.left || edges.right) &&
+      styles.fade(edges.left ? '12px' : '0px', edges.right ? '12px' : '0px')
+  );
   return (
     <div>
-      <div {...stylex.props(styles.relationRow)}>
-        <RelationPill
-          session={node.session}
-          target={{ sessionId: rootId }}
-          isCurrent={rootId === currentSessionId}
-          onOpenSession={onOpenSession}
-        />
-        {node.tabs.map((tab) => (
+      <ScrollArea
+        axis="horizontal"
+        viewportRef={viewportRef}
+        className={stylex.props(styles.scroll).className}
+        viewportClassName={fadeProps.className}
+        viewportStyle={fadeProps.style}
+        scrollbarClassName={stylex.props(styles.hiddenTrack).className}
+      >
+        <div
+          ref={contentRef}
+          {...stylex.props(styles.relationRow, styles.row)}
+        >
           <RelationPill
-            key={tab.id}
-            session={tab}
-            target={{ sessionId: rootId, tabSessionId: tab.id }}
-            isCurrent={tab.id === currentSessionId}
+            session={node.session}
+            target={{ sessionId: rootId }}
+            isCurrent={rootId === currentSessionId}
             onOpenSession={onOpenSession}
           />
-        ))}
-      </div>
+          {node.tabs.map((tab) => (
+            <RelationPill
+              key={tab.id}
+              session={tab}
+              target={{ sessionId: rootId, tabSessionId: tab.id }}
+              isCurrent={tab.id === currentSessionId}
+              onOpenSession={onOpenSession}
+            />
+          ))}
+        </div>
+      </ScrollArea>
       {node.children.length > 0 ? (
         // The trunk sits under the parent row's agent icon.
         <div {...stylex.props(styles.children)}>

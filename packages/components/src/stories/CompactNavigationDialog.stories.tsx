@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import * as stylex from '@stylexjs/stylex';
 import { Button, Popover } from '@lody/ui';
@@ -15,8 +15,13 @@ const styles = stylex.create({
   footer: { marginTop: 'auto' },
 });
 
-function Harness() {
-  const [open, setOpen] = useState(false);
+/** `closeOnMount` commits the dialog open and closes it before the first paint, as a
+ * narrow window does while its compact layout state is still settling. */
+function Harness({ closeOnMount = false }: { closeOnMount?: boolean }) {
+  const [open, setOpen] = useState(closeOnMount);
+  useLayoutEffect(() => {
+    if (closeOnMount) setOpen(false);
+  }, [closeOnMount]);
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const [machineOpen, setMachineOpen] = useState(false);
@@ -78,9 +83,12 @@ function Harness() {
 const meta = {
   title: 'Layout/CompactNavigationDialog',
   parameters: { layout: 'fullscreen' },
-  render: () => <Harness />,
+  render: (args: { closeOnMount?: boolean }) => <Harness {...args} />,
 } satisfies Meta;
 export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+
+/** The background stays usable: the closing dialog must finish and release it. */
+export const ClosedBeforeFirstPaint: Story = { args: { closeOnMount: true } };

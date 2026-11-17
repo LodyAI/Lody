@@ -128,10 +128,13 @@ import app.lody.android.designsystem.LodyTheme
 import app.lody.android.runtime.CatalogProject
 import app.lody.android.runtime.CatalogSnapshot
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.first
+import androidx.compose.runtime.snapshotFlow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService, runtimeScope: RuntimeScope, onSubmit: (CreateRequest) -> Unit, onBack: () -> Unit) {
+fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService, runtimeScope: RuntimeScope, onSubmit: (CreateRequest) -> Unit, onBack: () -> Unit, persistDraft: Boolean = false) {
     val dismissKeyboard = rememberKeyboardDismissal()
     val colors = LodyTheme.colors
     // Multi-repository projects (web Project groups), read once; listed as projects pinned to
@@ -152,7 +155,13 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
     val base = snapshot ?: CatalogSnapshot(0, emptyList(), emptyList(), emptyList())
     val catalog = base.copy(projects = base.projects.filterNot { CreateSessionModel.isGroup(it.id) } + groupProjects)
     var target by remember(catalog.revision == 0L) { mutableStateOf(CreateSessionModel.initial(catalog)) }
-    var prompt by rememberSaveable { mutableStateOf("") }
+    val draftContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    var prompt by rememberSaveable { mutableStateOf(if (persistDraft) app.lody.android.chat.ComposerDrafts.read(draftContext, runtimeScope, app.lody.android.chat.ComposerDrafts.CREATE) else "") }
+    // The typed new-chat text stays on the device until a chat is started with it.
+    var draftSubmitted by remember { mutableStateOf(false) }
+    LaunchedEffect(runtimeScope, prompt, draftSubmitted) {
+        if (persistDraft && !draftSubmitted) app.lody.android.chat.ComposerDrafts.write(draftContext, runtimeScope, app.lody.android.chat.ComposerDrafts.CREATE, prompt)
+    }
     // The field with its caret and IME composition; the @ panel reads the trigger at the caret.
     var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(prompt, androidx.compose.ui.text.TextRange(prompt.length))) }
     LaunchedEffect(prompt) {
@@ -181,10 +190,12 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
                     catch (_: Exception) { null }
                 }
             }
-            val merged = attachments + picked
+            val oversized = picked.filter(SessionAttachmentUploads::oversized)
+            val merged = attachments + (picked - oversized.toSet())
             val kept = merged.filter { it.image }.take(8) + merged.filter { !it.image }.take(8)
             attachments = merged.filter { it in kept }
-            if (kept.size < merged.size) snackbar.showSnackbar(attachLimit)
+            if (oversized.isNotEmpty()) snackbar.showSnackbar(context.getString(R.string.chat_attach_too_large, SessionAttachmentUploads.FILE_LIMIT_MB, oversized.first().name))
+            else if (kept.size < merged.size) snackbar.showSnackbar(attachLimit)
             else if (picked.size < uris.size) snackbar.showSnackbar(uploadFailed)
         }
     }
@@ -206,6 +217,13 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
     // composer only while it is still what will run (`CreateSessionModel.roleApplied`).
     var roles by remember(runtimeScope) { mutableStateOf<List<AgentRole>?>(null) }
     var roleId by rememberSaveable { mutableStateOf<String?>(null) }
+    // Device-local: the last selection per computer and recently used configurations.
+    var runPrefs by remember(runtimeScope) { mutableStateOf<RunConfigPrefs?>(null) }
+    LaunchedEffect(runtimeScope) {
+        runPrefs = try { repository.runConfigs(runtimeScope) ?: RunConfigPrefs() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { RunConfigPrefs() }
+    }
     LaunchedEffect(runtimeScope) {
         roles = try { repository.roles(runtimeScope) }
         catch (cancelled: CancellationException) { throw cancelled }
@@ -228,6 +246,12 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
     val roleItems = CreateSessionModel.roleItems(roles.orEmpty(), target.machineId, agents)
     val activeRole = roleItems.firstOrNull { it.role.id == roleId }
         ?.takeIf { CreateSessionModel.roleApplied(it, agent?.id, modelId, modeId, effort) }
+    // Web's Plan / Fast switches; null keeps the Role's pin or the agent's own value. Another agent clears them.
+    var planPick by rememberSaveable(agent?.id) { mutableStateOf<Boolean?>(null) }
+    var fastPick by rememberSaveable(agent?.id) { mutableStateOf<Boolean?>(null) }
+    val optionValues = CreateSessionModel.optionValues(
+        capability, activeRole?.let { CreateSessionModel.roleChoice(it.target).options }.orEmpty(), modelId, planPick, fastPick,
+    )
     LaunchedEffect(runtimeScope, agent?.id, optionsFresh, capability != null) {
         val selected = agent ?: return@LaunchedEffect
         if (optionsFresh) {
@@ -242,6 +266,15 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
     LaunchedEffect(runtimeScope, target.machineId) {
         // A Role binds one machine's agent exactly, so another computer clears it (web).
         agentId = null; modelId = null; modeId = null; effort = null; roleId = null
+        // Then the computer's last selection, once its agents are listed, unless one was picked meanwhile.
+        val machine = target.machineId ?: return@LaunchedEffect
+        val (prefs, loaded) = snapshotFlow { runPrefs to options }
+            .first { (prefs, loaded) -> prefs != null && loaded?.agents?.any { it.machineId == machine } == true }
+        if (agentId != null) return@LaunchedEffect
+        val saved = prefs?.machines?.get(machine) ?: return@LaunchedEffect
+        val chosen = loaded?.agents?.firstOrNull { it.machineId == machine && it.id == saved.agentId } ?: return@LaunchedEffect
+        val applied = CreateSessionModel.applicable(saved, loaded?.capability(chosen))
+        agentId = applied.agentId; modelId = applied.modelId; modeId = applied.modeId; effort = applied.effort
     }
     LaunchedEffect(runtimeScope) {
         optionsFresh = false
@@ -292,10 +325,25 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
                 // Role labels ("🧪 Reviewer") go out as their tokens (`@role:<id>`).
                 sessionId, turnId, target.projectId.takeUnless { target.chat }, chosen.machineId, chosen.id, mentions.resolve(prompt), branch.takeIf { github }, target.worktree, modelId, modeId, effort,
                 agentRoleId = activeRole?.role?.id,
-                configOptionValues = activeRole?.let { CreateSessionModel.roleChoice(it.target).options }.orEmpty(),
-            )
+                configOptionValues = optionValues,
+            ).let { request ->
+                // The first bubble shows the prompt as composed, chips included, not its tokens.
+                val (shown, references) = mentions.shown(prompt)
+                request.copy(displayText = shown, displayReferences = references)
+            }
             dismissKeyboard()
             val picked = attachments
+            // Recorded when a chat is started, never when a value changes (web).
+            val started = CreateSessionModel.started(
+                runPrefs ?: RunConfigPrefs(), chosen.machineId, RunSelection(chosen.id, modelId, modeId, effort),
+                activeRole?.role?.id, System.currentTimeMillis(),
+            )
+            runPrefs = started
+            // Outlives the page, which closes as the chat opens.
+            scope.launch(NonCancellable) {
+                try { repository.saveRunConfigs(runtimeScope, started) }
+                catch (_: Exception) { /* A failed write only loses the default. */ }
+            }
             scope.launch {
                 val blocks = try {
                     if (picked.isEmpty()) emptyList() else application.attachments.upload(runtimeScope, sessionId, picked)
@@ -305,6 +353,8 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
                     snackbar.showSnackbar(uploadFailed)
                     return@launch
                 }
+                draftSubmitted = true
+                if (persistDraft) app.lody.android.chat.ComposerDrafts.write(draftContext, runtimeScope, app.lody.android.chat.ComposerDrafts.CREATE, "")
                 onSubmit(request.copy(attachments = blocks))
             }
         }
@@ -383,7 +433,7 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
                     field,
                     onPromptChange = { if (!attempted && it.text.length <= 32000) { field = app.lody.android.chat.MentionPresentation.edit(field, it); prompt = field.text } },
                     onFocusChange = { composerFocused = it },
-                referencePresentation = mentions.presentation(LodyTheme.colors.accentDefault),
+                referencePresentation = mentions.presentation(LodyTheme.colors.accentOnSubtle, LodyTheme.colors.accentSubtle),
                     attachments = attachments,
                     onRemoveAttachment = { id -> if (!busy) attachments = attachments.filterNot { it.id == id } },
                     busy = busy,
@@ -411,7 +461,7 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
             )
             LaunchedEffect(runtimeScope, mentionSource) {
                 if (mentionSource.machineId == null) return@LaunchedEffect
-                mentions.load { category -> repository.mentions(runtimeScope, category, mentionSource) }
+                mentions.load(runtimeScope) { category -> repository.mentions(runtimeScope, category, mentionSource) }
             }
             app.lody.android.chat.MentionDock(
                 mentions, field, active = composerFocused && !attempted && !coverComposer,
@@ -433,7 +483,49 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
                     modifier = Modifier.padding(LodyLayout.screenPaddingX),
                 )
             }
+            val pickRole: (String) -> Unit = { id ->
+                roleItems.firstOrNull { it.role.id == id && it.unavailable == null }?.let { item ->
+                    val choice = CreateSessionModel.roleChoice(item.target)
+                    agentId = item.target.agentConfigId; modelId = choice.modelId; modeId = choice.modeId; effort = choice.effort
+                    roleId = item.role.id; planPick = null; fastPick = null
+                }
+            }
+            val currentKey = agent?.let { CreateSessionModel.recentKey(it.machineId, RunSelection(it.id, modelId, modeId, effort), activeRole?.role?.id) }
+            val recents = CreateSessionModel.recentItems(runPrefs?.recents.orEmpty(), target.machineId, agents, roleItems, currentKey)
             RunConfigSheet(
+                // Web's "Recently used": whole configurations, read like the chip; a pick applies all of it.
+                recents = recents.mapNotNull { record ->
+                    val recentAgent = agents.firstOrNull { it.id == record.selection.agentId } ?: return@mapNotNull null
+                    val recentCapability = options?.capability(recentAgent)
+                    val role = record.agentRoleId?.let { id -> roleItems.firstOrNull { it.role.id == id } }
+                    val selection = record.selection
+                    PickerOption(
+                        CreateSessionModel.recentKey(record), role?.role?.name ?: recentAgent.name, selected = false,
+                        subtitle = listOfNotNull(
+                            selection.modelId?.let { id -> recentCapability?.models?.firstOrNull { it.id == id }?.name ?: id },
+                            selection.effort,
+                            selection.modeId?.let { id -> recentCapability?.modes?.firstOrNull { it.id == id }?.name ?: id },
+                        ).joinToString(" · "),
+                        agent = (recentAgent.cliType to recentAgent.agentType).takeIf { role == null },
+                        emoji = role?.role?.emoji,
+                    )
+                },
+                onRecent = { key ->
+                    recents.firstOrNull { CreateSessionModel.recentKey(it) == key }?.let { record ->
+                        // Recorded as a Role: re-apply the Role, whose instruction rides with it.
+                        val recordedRole = record.agentRoleId
+                        if (recordedRole != null) pickRole(recordedRole)
+                        else {
+                            val recentAgent = agents.firstOrNull { it.id == record.selection.agentId }
+                            if (recentAgent != null) {
+                                val applied = CreateSessionModel.applicable(record.selection, options?.capability(recentAgent))
+                                agentId = applied.agentId; modelId = applied.modelId; modeId = applied.modeId; effort = applied.effort
+                                roleId = null; planPick = null; fastPick = null
+                            }
+                        }
+                    }
+                    runConfig = false
+                },
                 rows = buildList {
                     // Role sits above Agent because a Role answers every row under it (web). Shown
                     // once Roles are listed, even with none to pick: then it reads None.
@@ -462,21 +554,25 @@ fun CreateSessionScreen(snapshot: CatalogSnapshot?, repository: CreationService,
                     capability?.modes?.takeIf { it.isNotEmpty() }?.let { modes ->
                         add(RunConfigRow(MODE, stringResource(R.string.create_mode), modes.map { PickerOption(it.id, it.name, it.id == modeId) }))
                     }
+                    capability?.planOn(optionValues)?.let { on ->
+                        add(RunConfigRow(PLAN, stringResource(R.string.run_config_plan), emptyList(), toggle = on))
+                    }
+                    capability?.fastOn(optionValues, modelId)?.let { on ->
+                        add(RunConfigRow(FAST, stringResource(R.string.run_config_fast), emptyList(), toggle = on))
+                    }
                 },
                 defaultLabel = stringResource(R.string.create_default),
             ) { row, id ->
                 when (row) {
                     // None clears the name, not the values it seeded; picking a Role sets its
                     // agent and exactly what it pins.
-                    ROLE -> if (id == ROLE_NONE) roleId = null else roleItems.firstOrNull { it.role.id == id && it.unavailable == null }?.let { item ->
-                        val choice = CreateSessionModel.roleChoice(item.target)
-                        agentId = item.target.agentConfigId; modelId = choice.modelId; modeId = choice.modeId; effort = choice.effort
-                        roleId = item.role.id
-                    }
+                    ROLE -> if (id == ROLE_NONE) roleId = null else pickRole(id)
                     AGENT -> { agentId = id; modelId = null; modeId = null; effort = null }
                     MODEL -> { modelId = id; effort = null }
                     EFFORT -> effort = id
                     MODE -> modeId = id
+                    PLAN -> planPick = id == RUN_CONFIG_ON
+                    FAST -> fastPick = id == RUN_CONFIG_ON
                 }
             }
         }
@@ -489,6 +585,8 @@ private const val AGENT = "agent"
 private const val MODEL = "model"
 private const val EFFORT = "effort"
 private const val MODE = "mode"
+private const val PLAN = "plan"
+private const val FAST = "fast"
 
 @Composable
 private fun ContextPanel(catalog: CatalogSnapshot, target: CreateTarget, onSearchFocus: (Boolean) -> Unit, open: String?, onOpenChange: (String?) -> Unit, onlineMachines: Set<String>?, availableMachines: Set<String>?, onChange: (CreateTarget) -> Unit) {
@@ -567,34 +665,6 @@ private const val PROJECT = "project"
 private const val CHAT = "chat"
 private const val MORE = "more"
 
-internal data class PickerOption(
-    val id: String,
-    val title: String,
-    val selected: Boolean,
-    val subtitle: String = "",
-    val icon: ImageVector? = null,
-    val disabled: Boolean = false,
-    /** An agent's provider (cliType to agentType): leads with its mark instead of [icon]. */
-    val agent: Pair<String, String>? = null,
-    /** An Agent Role's emoji, shown instead of an icon. */
-    val emoji: String? = null,
-    val repository: String? = null,
-)
-
-/** The option's leading mark: the agent's provider mark, else its icon. */
-@Composable
-private fun OptionMark(option: PickerOption, size: androidx.compose.ui.unit.Dp) {
-    val tint = LodyTheme.colors.iconSecondary
-    when {
-        option.repository != null -> app.lody.android.home.RepositoryIcon(option.repository, size, opacity = 0.8f)
-        option.emoji != null -> Box(Modifier.size(size), contentAlignment = Alignment.Center) {
-            Text(option.emoji, fontSize = with(androidx.compose.ui.platform.LocalDensity.current) { (size * 0.85f).toSp() })
-        }
-        option.agent != null -> AgentMark(option.agent.first, option.agent.second, tint, Modifier.size(size))
-        option.icon != null -> Icon(option.icon, contentDescription = null, tint = tint, modifier = Modifier.size(size))
-    }
-}
-
 private fun CatalogProject.option(target: CreateTarget) = PickerOption(
     repository = repoFullName ?: id.removePrefix("github:").takeIf { CreateSessionModel.isGithub(id) },
     id = id,
@@ -608,162 +678,6 @@ private fun CatalogProject.option(target: CreateTarget) = PickerOption(
         else -> LodyIcons.Folder
     },
 )
-
-/**
- * A plain full-width line (no fill, as iOS); its options expand in place right below it. The
- * panel is bottom-anchored, so the list is revealed from its top edge and moves up with the
- * layout instead of sliding against it.
- */
-@Composable
-private fun PickerCard(
-    icon: ImageVector,
-    title: String,
-    placeholder: Boolean,
-    options: List<PickerOption>,
-    open: Boolean,
-    onToggle: () -> Unit,
-    onPick: (String) -> Unit,
-    searchOptions: List<PickerOption>? = null,
-    searchPlaceholder: String = "",
-    expandAllOn: String? = null,
-    onSearchFocus: (Boolean) -> Unit = {},
-    scopeLabel: String = "",
-    repository: String? = null,
-) {
-    val colors = LodyTheme.colors
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = LodySize.controlLg)
-                .clip(RoundedCornerShape(LodyRadius.md))
-                .clickable(enabled = options.isNotEmpty(), role = Role.Button, onClick = onToggle)
-                .semantics { contentDescription = title }
-                .padding(horizontal = LodySpacing.xs),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(LodySpacing.md),
-        ) {
-            if (repository != null) app.lody.android.home.RepositoryIcon(repository, LodyIconSize.md, opacity = 0.8f)
-            else Icon(icon, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.md))
-            Text(
-                title,
-                style = LodyTheme.typography.body,
-                color = if (placeholder) colors.textTertiary else colors.textPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.MiddleEllipsis,
-                modifier = Modifier.weight(1f),
-            )
-            if (options.isNotEmpty()) PopupIndicator()
-        }
-        AnimatedVisibility(
-            open,
-            enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-            exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
-        ) {
-            Column {
-                if (scopeLabel.isNotEmpty()) {
-                    Text(
-                        scopeLabel,
-                        style = LodyTheme.typography.footnote,
-                        color = colors.textTertiary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = LodySpacing.xs, vertical = LodySpacing.xs),
-                    )
-                }
-                OptionList(options, searchOptions, searchPlaceholder, onPick, expandAllOn, onSearchFocus = onSearchFocus)
-            }
-        }
-    }
-}
-
-/** The pop-up indicator (⌃⌄), drawn as a stacked up / down pair. */
-@Composable
-private fun PopupIndicator() {
-    val tint = LodyTheme.colors.iconTertiary
-    Column {
-        Icon(LodyIcons.Collapse, contentDescription = null, tint = tint, modifier = Modifier.size(LodyIconSize.xs))
-        Icon(LodyIcons.Expand, contentDescription = null, tint = tint, modifier = Modifier.size(LodyIconSize.xs))
-    }
-}
-
-/** The expanded options, aligned with the line (no indent or surface): search, then rows. */
-@Composable
-private fun OptionList(
-    options: List<PickerOption>,
-    searchOptions: List<PickerOption>?,
-    searchPlaceholder: String,
-    onPick: (String) -> Unit,
-    expandAllOn: String?,
-    expandsToContent: Boolean = false,
-    onSearchFocus: (Boolean) -> Unit = {},
-) {
-    val dismissKeyboard = rememberKeyboardDismissal()
-    val colors = LodyTheme.colors
-    val type = LodyTheme.typography
-    var query by remember { mutableStateOf("") }
-    var all by remember { mutableStateOf(false) }
-    val term = query.trim()
-    val shown = when {
-        term.isNotEmpty() -> (searchOptions ?: options).filter { "${it.title} ${it.subtitle}".contains(term, ignoreCase = true) }
-        all && searchOptions != null -> searchOptions
-        else -> options
-    }
-    Column(Modifier.fillMaxWidth()) {
-        if (searchOptions != null || options.size > 8) {
-            Row(
-                Modifier.fillMaxWidth().heightIn(min = LodySize.controlMd).padding(horizontal = LodySpacing.xs),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(LodySpacing.md),
-            ) {
-                Icon(LodyIcons.Search, contentDescription = null, tint = colors.iconTertiary, modifier = Modifier.size(LodyIconSize.md))
-                BasicTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    singleLine = true,
-                    textStyle = type.body.copy(color = colors.textPrimary),
-                    cursorBrush = SolidColor(colors.accentDefault),
-                    modifier = Modifier.weight(1f).onFocusChanged { onSearchFocus(it.isFocused) },
-                    decorationBox = { inner ->
-                        Box {
-                            if (query.isEmpty()) Text(searchPlaceholder, style = type.body, color = colors.textPlaceholder)
-                            inner()
-                        }
-                    },
-                )
-            }
-        }
-        val optionContent: @Composable (PickerOption) -> Unit = { option ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = LodySize.listRow)
-                        .clip(RoundedCornerShape(LodyRadius.md))
-                        .clickable(enabled = !option.disabled, role = Role.Button) { dismissKeyboard(); if (option.id == expandAllOn) all = true; onPick(option.id) }
-                        .semantics { selected = option.selected }
-                        .padding(horizontal = LodySpacing.xs, vertical = LodySpacing.xs),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(LodySpacing.md),
-                ) {
-                    OptionMark(option, LodyIconSize.md)
-                    Column(Modifier.weight(1f)) {
-                        Text(option.title, style = type.body, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        if (option.subtitle.isNotEmpty()) {
-                            Text(option.subtitle, style = type.footnote, color = colors.textTertiary, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
-                        }
-                    }
-                    if (option.selected) Icon(LodyIcons.Check, contentDescription = null, tint = colors.accentFg, modifier = Modifier.size(LodyIconSize.sm))
-                }
-        }
-        if (expandsToContent) {
-            Column { shown.forEach { option -> androidx.compose.runtime.key(option.id) { optionContent(option) } } }
-        } else {
-            LazyColumn(Modifier.heightIn(max = 280.dp)) {
-                items(shown, key = { it.id }) { option -> optionContent(option) }
-            }
-        }
-    }
-}
 
 /** Web's worktree chip as iOS draws it: a checkbox and the word, no fill. */
 @Composable
@@ -843,7 +757,13 @@ internal const val RUN_CONFIG_OFF = "off"
 
 /** Web's run-config sheet as iOS draws it: label + value rows whose options expand in place. */
 @Composable
-internal fun RunConfigSheet(rows: List<RunConfigRow>, defaultLabel: String, onPick: (String, String) -> Unit) {
+internal fun RunConfigSheet(
+    rows: List<RunConfigRow>,
+    defaultLabel: String,
+    recents: List<PickerOption> = emptyList(),
+    onRecent: (String) -> Unit = {},
+    onPick: (String, String) -> Unit,
+) {
     val colors = LodyTheme.colors
     var open by remember { mutableStateOf<String?>(null) }
     Column(
@@ -856,6 +776,16 @@ internal fun RunConfigSheet(rows: List<RunConfigRow>, defaultLabel: String, onPi
             color = colors.textPrimary,
             modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = LodySpacing.sm),
         )
+        if (recents.isNotEmpty()) {
+            Text(
+                stringResource(R.string.create_run_config_recent),
+                style = LodyTheme.typography.footnote,
+                color = colors.textTertiary,
+                modifier = Modifier.padding(horizontal = LodySpacing.xs),
+            )
+            OptionList(recents, null, "", onRecent, null, expandsToContent = true)
+            HorizontalDivider(color = colors.borderSubtle, modifier = Modifier.padding(vertical = LodySpacing.xs))
+        }
         rows.forEach { row ->
             val current = row.options.firstOrNull { it.selected }
             if (row.toggle != null) {
@@ -1070,7 +1000,7 @@ private fun ComposerButton(icon: ImageVector, label: String, onClick: () -> Unit
 
 /** Clear focus as well as hiding IME so it does not reopen after a picker closes. */
 @Composable
-private fun rememberKeyboardDismissal(): () -> Unit {
+internal fun rememberKeyboardDismissal(): () -> Unit {
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     return remember(focus, keyboard) { { focus.clearFocus(); keyboard?.hide(); Unit } }

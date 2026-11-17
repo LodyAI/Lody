@@ -21,8 +21,8 @@ internal class GitHubBranches(private val transport: BranchHttp = BranchHttpClie
 
     suspend fun load(credential: Credential, workspace: String, repo: String, page: Int): BranchPage {
         require(repo.matches(Regex("[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}")) && repo.substringAfter('/') !in listOf(".", "..") && page in 1..1000)
-        val auth = JSONObject(request("https://backend.lody.ai/api/auth/convex/token", credential.token))
-        val broker = JSONObject(request("https://convex.lody.ai/api/action", auth.getString("token"),
+        val auth = JSONObject(request("${app.lody.android.BackendEnvironment.site}/api/auth/convex/token", credential.token))
+        val broker = JSONObject(request("${app.lody.android.BackendEnvironment.convex}/api/action", auth.getString("token"),
             JSONObject().put("path", "github:getAccessTokenByRepoNameForClient").put("format", "convex_encoded_json")
                 .put("args", JSONArray().put(JSONObject().put("workspaceId", workspace).put("repoFullName", repo)))))
         check(broker.optString("status") == "success")

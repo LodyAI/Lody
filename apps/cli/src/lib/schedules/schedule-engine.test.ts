@@ -98,6 +98,7 @@ function harness(d = document()) {
     },
     pause: () => {
       d.definition.enabled = false;
+      d.definition.activationId = `${d.definition.activationId}-paused`;
       row = buildScheduleRegistryRow(d);
     },
   };
@@ -161,6 +162,32 @@ describe('Schedule worker handoff', () => {
     expect(findNextDispatchableUserTurn([turn], { latestUserMsgId: 'turn' } as never)?.id).toBe(
       'turn'
     );
+  });
+  it('revokes a queued manual run when paused before handoff', async () => {
+    const h = harness();
+    h.d.definition.trigger = { kind: 'manual' };
+    const row = buildScheduleRegistryRow(h.d);
+    h.store.planManual('workspace', h.d, row.definitionFingerprint, 'manual', 1);
+    h.pause();
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', 'schedule')).toMatchObject([
+      { manual: true, state: 'skipped', errorCode: 'ACTIVATION_REVOKED' },
+    ]);
+    expect(h.store.unfinished('workspace')).toEqual([]);
+  });
+  it('dispatches a new manual run while automatic scheduling stays paused', async () => {
+    const h = harness();
+    h.pause();
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', 'schedule')).toEqual([]);
+    const row = buildScheduleRegistryRow(h.d);
+    h.store.planManual('workspace', h.d, row.definitionFingerprint, 'after-pause', 1);
+    await h.engine.evaluate();
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', 'schedule')).toMatchObject([
+      { manual: true, activationId: h.d.definition.activationId, state: 'dispatched' },
+    ]);
+    expect(h.d.definition.enabled).toBe(false);
   });
   it('retains prepared input when scheduling is disabled', async () => {
     const h = harness();
@@ -323,16 +350,11 @@ describe('One-time complete messages', () => {
     d.message = { inputBlocks: [{ type: 'text', text: 'Frozen message' }], mcpServerIds: [] };
     return d;
   }
-  function legacyQuotaMessage(version = 1) {
+  function continuationMessage() {
     const d = message();
     const reset = 59_000;
     d.definition.scheduleId = uuidv5(
-      JSON.stringify([
-        version === 1 ? 'claude-quota-continue' : 'claude-quota-continue-v2',
-        'workspace',
-        'chat',
-        reset,
-      ]),
+      JSON.stringify(['continuation', 'workspace', 'chat', reset]),
       uuidv5.URL
     );
     d.definition.activationId = uuidv5('activation', d.definition.scheduleId);
@@ -341,28 +363,8 @@ describe('One-time complete messages', () => {
     d.message = { inputBlocks: [{ type: 'text', text: 'continue' }] };
     return d;
   }
-  it.each([1, 2])(
-    'drops a version %s unassociated quota reservation without delivering it',
-    async (version) => {
-      const d = legacyQuotaMessage(version);
-      const h = harness(d);
-      await h.engine.evaluate();
-      expect(h.store.history('workspace', d.definition.scheduleId)).toMatchObject([
-        { state: 'skipped', errorCode: 'LEGACY_QUOTA_UNASSOCIATED' },
-      ]);
-      expect(h.ports.dispatch).not.toHaveBeenCalled();
-      expect(h.ports.publish).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          messageState: 'failed',
-          blockedCode: 'LEGACY_QUOTA_UNASSOCIATED',
-        })
-      );
-      await new ScheduleEngine(h.ports).evaluate();
-      expect(h.ports.dispatch).not.toHaveBeenCalled();
-    }
-  );
-  it('preserves a legacy reservation with an already prepared or delivered input', async () => {
-    const d = legacyQuotaMessage();
+  it('dispatches an already prepared continuation input', async () => {
+    const d = continuationMessage();
     const h = harness(d);
     h.store.plan('workspace', d, buildScheduleRegistryRow(d).definitionFingerprint, 60_000);
     const run = h.store.unfinished('workspace')[0];
@@ -377,8 +379,8 @@ describe('One-time complete messages', () => {
     expect(h.store.history('workspace', d.definition.scheduleId)[0]?.state).toBe('dispatched');
     expect(h.ports.dispatch).toHaveBeenCalledOnce();
   });
-  it('reconciles an already delivered legacy input without dispatching again', async () => {
-    const d = legacyQuotaMessage();
+  it('reconciles an already delivered continuation input without dispatching again', async () => {
+    const d = continuationMessage();
     const h = harness(d);
     h.store.plan('workspace', d, buildScheduleRegistryRow(d).definitionFingerprint, 60_000);
     const run = h.store.unfinished('workspace')[0];
@@ -393,7 +395,7 @@ describe('One-time complete messages', () => {
     expect(h.ports.dispatch).not.toHaveBeenCalled();
   });
   it('keeps ordinary and edited scheduled messages', async () => {
-    const d = legacyQuotaMessage();
+    const d = continuationMessage();
     d.prompt = 'different message';
     d.message = { inputBlocks: [{ type: 'text', text: 'different message' }] };
     const h = harness(d);

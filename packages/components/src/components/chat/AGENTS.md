@@ -26,7 +26,9 @@ project.sharedWithTeam`. The selected Private segment opens `ProjectShareDialog`
   its value equals `visibleLocalMachineId`, never by ownership or Private access.
 - The sharing-review landing notice has two distinct durable actions: dismissal
   keeps the current source revision quiet, while "Don't remind me again"
-  suppresses that user's notice for the workspace across future revisions.
+  suppresses that user's notice for the workspace across future revisions. The
+  composer notice concerns only the selected machine and projects the user owns;
+  unrelated private resources remain in the workspace Inbox review.
 - Composer uses the DS card material without a border; its textarea is bare
   inside that surface, which owns the accent focus/drop ring. Shared material
   lives in `chat/composer-surface.ts`; the info bar uses the region rung.
@@ -55,6 +57,9 @@ project.sharedWithTeam`. The selected Private segment opens `ProjectShareDialog`
   [paste precedence](../../../../../specs/composer-paste-precedence.md).
 
 ## Invariants
+
+- My Tasks and personal summaries filter by session assignment (`userId`) only.
+  Machine ownership preserves access and management independently of that filter.
 
 - A landing selection follows the machine the user chose, not presence. Liveness may
   replace a restored selection only once per landing mount, when a synced room first

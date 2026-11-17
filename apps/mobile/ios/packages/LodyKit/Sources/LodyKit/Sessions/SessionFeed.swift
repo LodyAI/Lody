@@ -24,7 +24,10 @@ struct SessionFeedState: Equatable, Sendable {
   var overflow = false
   var entriesJSON = "[]"
   var billableTurnCount: Int?
+  var historyHasMore = false
+  var historyLoading = false
   var composerJSON: String?
+  var usageJSON: String?
   var preview: SessionBrowserPreview?
   var transcript = SessionTranscriptFacts()
   var isLiveUpdate = false
@@ -102,6 +105,7 @@ final class SessionFeed {
           self.state.entriesJSON = saved.entriesJSON
           self.state.transcript = saved.transcript
           self.state.preview = saved.preview
+          self.state.historyHasMore = saved.historyHasMore
           self.changed?()
         }
       }
@@ -178,7 +182,8 @@ final class SessionFeed {
       awaitingSnapshot = false
       state = SessionFeedState(
         status: "live", revision: revision, entriesJSON: envelope.entriesJSON,
-        billableTurnCount: envelope.billableTurnCount, composerJSON: envelope.composerJSON, preview: envelope.preview, transcript: envelope.transcript
+        billableTurnCount: envelope.billableTurnCount, historyHasMore: envelope.historyHasMore,
+        historyLoading: envelope.historyLoading, composerJSON: envelope.composerJSON, usageJSON: envelope.usageJSON, preview: envelope.preview, transcript: envelope.transcript
       )
       state.isLiveUpdate = isLiveUpdate
     } else {

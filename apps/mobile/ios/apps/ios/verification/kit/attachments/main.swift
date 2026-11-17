@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import UIKit
 
 enum AuthKeychain { static func read() throws -> String? { "synthetic-test-token" } }
@@ -7,6 +8,7 @@ final class UploadRecorder: @unchecked Sendable {
   private let lock = NSLock()
   private var storedRequests: [URLRequest] = []
   private var storedFailPart = false
+  private var storedImageParts: [(String, Data)] = []
   private var storedProgress: [(String, String, Int?)] = []
   private var storedBytes: [Int64] = []
   var progress: [(String, String, Int?)] {
@@ -25,6 +27,10 @@ final class UploadRecorder: @unchecked Sendable {
     get { lock.lock(); defer { lock.unlock() }; return storedRequests }
     set { lock.lock(); storedRequests = newValue; lock.unlock() }
   }
+  var imageParts: [(String, Data)] {
+    get { lock.lock(); defer { lock.unlock() }; return storedImageParts }
+    set { lock.lock(); storedImageParts = newValue; lock.unlock() }
+  }
   var failPart: Bool {
     get { lock.lock(); defer { lock.unlock() }; return storedFailPart }
     set { lock.lock(); storedFailPart = newValue; lock.unlock() }
@@ -41,6 +47,10 @@ final class UploadProtocol: URLProtocol {
     get { recorder.failPart }
     set { recorder.failPart = newValue }
   }
+  static var imageParts: [(String, Data)] {
+    get { recorder.imageParts }
+    set { recorder.imageParts = newValue }
+  }
   override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "api.lody.ai" }
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
   override func startLoading() {
@@ -52,6 +62,16 @@ final class UploadProtocol: URLProtocol {
       switch request.url!.lastPathComponent {
       case "bad-request":
         status = 400; body = #"{"error":"private-server-message"}"#
+      case "nested-code":
+        status = 400; body = #"{"code":"private-token","error":{"code":"BAD_REQUEST","message":"private-server-message"}}"#
+      case "message-code":
+        status = 400; body = #"{"error":{"message":"Bad request"}}"#
+      case "empty":
+        status = 400; body = ""
+      case "oversized":
+        status = 400; body = String(repeating: "x", count: 65537)
+      case "array":
+        status = 400; body = "[]"
       case "too-large":
         status = 413; body = "{}"
       case "format":
@@ -77,7 +97,9 @@ final class UploadProtocol: URLProtocol {
         return
       default: fatalError("Unknown diagnostic fixture")
       }
-      client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+      client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,
+        headerFields: ["Content-Type": request.url!.lastPathComponent == "html" ? "text/html; charset=utf-8" : "application/json",
+          "CF-Ray": "0123456789abcdef-SJC", "X-Request-ID": "12345678-1234-1234-1234-123456789abc"])!, cacheStoragePolicy: .notAllowed)
       client?.urlProtocol(self, didLoad: Data(body.utf8))
       client?.urlProtocolDidFinishLoading(self)
       return
@@ -113,6 +135,21 @@ final class UploadProtocol: URLProtocol {
       assert(uploaded.range(of: Data("name=\"sessionId\"\r\n\r\ns1\r\n".utf8)) != nil)
       assert(uploaded.range(of: Data("name=\"file\"".utf8)) != nil)
       assert(uploaded.count > 100)
+      // Mirror the server: the declared part type must match the image's magic bytes.
+      let header = uploaded.range(of: Data("Content-Type: ".utf8), options: .backwards)!
+      let end = uploaded.range(of: Data("\r\n\r\n".utf8), in: header.upperBound..<uploaded.endIndex)!
+      let declared = String(decoding: uploaded[header.upperBound..<end.lowerBound], as: UTF8.self)
+      let magic = ["image/png": [0x89, 0x50, 0x4e, 0x47], "image/jpeg": [0xff, 0xd8, 0xff], "image/gif": [0x47, 0x49, 0x46], "image/webp": [0x52, 0x49, 0x46, 0x46]]
+      let content = uploaded[end.upperBound...]
+      if let prefix = magic[declared], content.starts(with: prefix.map(UInt8.init)) {
+        Self.imageParts.append((declared, uploaded))
+      } else {
+        status = 400; body = ["success": false, "error": "Image content does not match mime type"]
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: try! JSONSerialization.data(withJSONObject: body))
+        client?.urlProtocolDidFinishLoading(self)
+        return
+      }
       body = ["image": ["type": "image", "imageId": "image1", "mimeType": "image/png", "fileName": "photo.png", "sizeBytes": 100]]
     } else if path.hasSuffix("/create") {
       assert(request.value(forHTTPHeaderField: "x-file-sha256")!.count == 64)
@@ -143,6 +180,16 @@ final class UploadProtocol: URLProtocol {
 
 @main struct Check {
   static func main() async throws {
+    let pinDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: pinDirectory) }
+    let pins = WorkspaceModePins(file: pinDirectory.appendingPathComponent("pins.json"))
+    try pins.observe("encrypted", mode: .e2ee)
+    for blocked in ["encrypted", "unknown"] {
+      do { _ = try await SessionAttachments.upload([], workspace: blocked, session: "s1", pins: pins); preconditionFailure("Blocked attachment upload") }
+      catch WorkspaceContentError.blocked { }
+    }
+    try pins.observe("w1", mode: .plaintext)
+    print("PASS: attachment upload rejects encrypted/unknown workspaces before reading credentials or bytes")
     let original = SessionAttachments.imageDownloadURL(workspace: "ws", session: "source", imageId: "img1")
     assert(original.absoluteString == "https://api.lody.ai/api/workspaces/ws/session-images/source/img1")
     assert(!original.path.contains("thumbnail"), "Full image download must not use the thumbnail route")
@@ -151,6 +198,7 @@ final class UploadProtocol: URLProtocol {
     assert(thumb.query == "width=768&fit=scale-down&quality=85")
     assert(thumb != original, "Lightbox preview must not reuse the thumbnail URL")
     URLProtocol.registerClass(UploadProtocol.self)
+    try DiagnosticsStore.shared.clear()
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -177,7 +225,7 @@ final class UploadProtocol: URLProtocol {
       ["id": url.lastPathComponent, "uri": url.absoluteString, "name": url.lastPathComponent, "kind": kind]
     }
     let smallProgress = UploadRecorder()
-    let small = try await SessionAttachments.upload([attachment(file)], workspace: "w1", session: "s1", onProgress: smallProgress.record)
+    let small = try await SessionAttachments.upload([attachment(file)], workspace: "w1", session: "s1", pins: pins, onProgress: smallProgress.record)
     assert(smallProgress.progress.first?.1 == "preparing" && smallProgress.progress.last?.1 == "complete")
     assert(smallProgress.progress.allSatisfy { $0.0 == "test.txt" })
     assert(small[0]["fileId"] as? String == "file1")
@@ -186,21 +234,40 @@ final class UploadProtocol: URLProtocol {
     let renderer = UIGraphicsImageRenderer(size: CGSize(width: 10, height: 10))
     try renderer.pngData { context in UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: 0, width: 10, height: 10)) }.write(to: image)
     let imageProgress = UploadRecorder()
-    let images = try await SessionAttachments.upload([attachment(image, "image")], workspace: "w1", session: "s1", onProgress: imageProgress.record)
+    let images = try await SessionAttachments.upload([attachment(image, "image")], workspace: "w1", session: "s1", pins: pins, onProgress: imageProgress.record)
     assert(imageProgress.progress.contains { $0.1 == "uploading" && $0.2 == 0 })
     assert(imageProgress.progress.last?.0 == "photo.png" && imageProgress.progress.last?.1 == "complete")
     assert(images[0]["imageId"] as? String == "image1")
+    // An edited Photos screenshot keeps its `.PNG` name while `.current` renders JPEG data.
+    let edited = root.appendingPathComponent("IMG_9744.PNG")
+    let jpegBytes = UIImage(contentsOfFile: image.path)!.jpegData(compressionQuality: 0.9)!
+    try jpegBytes.write(to: edited)
+    _ = try await SessionAttachments.upload([attachment(edited, "image")], workspace: "w1", session: "s1", pins: pins)
+    let editedPart = UploadProtocol.imageParts.last!
+    assert(editedPart.0 == "image/jpeg", "Declare the image type from its bytes, not its file extension")
+    assert(editedPart.1.range(of: Data("filename=\"IMG_9744.jpeg\"".utf8)) != nil, "Rename to match the uploaded type")
+    assert(editedPart.1.range(of: jpegBytes) != nil, "A supported image whose name lies must upload unchanged, not re-encoded")
+    let tiff = root.appendingPathComponent("converted.tiff")
+    let destination = CGImageDestinationCreateWithURL(tiff as CFURL, "public.tiff" as CFString, 1, nil)!
+    CGImageDestinationAddImage(destination, UIImage(contentsOfFile: image.path)!.cgImage!, nil)
+    assert(CGImageDestinationFinalize(destination))
+    _ = try await SessionAttachments.upload([attachment(tiff, "image")], workspace: "w1", session: "s1", pins: pins)
+    let disguised = root.appendingPathComponent("disguised.png")
+    try FileManager.default.copyItem(at: tiff, to: disguised)
+    _ = try await SessionAttachments.upload([attachment(disguised, "image")], workspace: "w1", session: "s1", pins: pins)
+    assert(UploadProtocol.imageParts.last!.0 == "image/jpeg", "Unsupported content behind an image extension converts to JPEG")
+    assert(UploadProtocol.imageParts.last!.1.range(of: Data("filename=\"disguised.jpg\"".utf8)) != nil)
     let video = root.appendingPathComponent("IMG_3933.mov")
     try Data("hi!".utf8).write(to: video)
     UploadProtocol.requests = []
-    let videos = try await SessionAttachments.upload([attachment(video, "image")], workspace: "w1", session: "s1")
+    let videos = try await SessionAttachments.upload([attachment(video, "image")], workspace: "w1", session: "s1", pins: pins)
     assert(videos[0]["fileId"] as? String == "file1")
     assert(UploadProtocol.requests.contains { $0.url!.path.contains("session-files") })
     assert(!UploadProtocol.requests.contains { $0.url!.path.contains("session-images") })
     try Data(repeating: 65, count: 16 * 1024 * 1024 + 1).write(to: file)
     UploadProtocol.requests = []
     let multipartProgress = UploadRecorder()
-    _ = try await SessionAttachments.upload([attachment(file)], workspace: "w1", session: "s1", onProgress: multipartProgress.record)
+    _ = try await SessionAttachments.upload([attachment(file)], workspace: "w1", session: "s1", pins: pins, onProgress: multipartProgress.record)
     let percentages = multipartProgress.progress.compactMap { $0.2 }
     assert(percentages == percentages.sorted() && percentages.first == 0 && percentages.last == 100,
       "Multipart progress must accumulate across parts without resetting")
@@ -210,7 +277,7 @@ final class UploadProtocol: URLProtocol {
     UploadProtocol.failPart = true
     let failedProgress = UploadRecorder()
     do {
-      _ = try await SessionAttachments.upload([attachment(file)], workspace: "w1", session: "s1", onProgress: failedProgress.record)
+      _ = try await SessionAttachments.upload([attachment(file)], workspace: "w1", session: "s1", pins: pins, onProgress: failedProgress.record)
       fatalError("Failed upload must not produce an attachment")
     } catch { assert(UploadProtocol.requests.last!.url!.lastPathComponent == "abort") }
     assert(!failedProgress.progress.contains { $0.1 == "complete" }, "A failed upload must never report completion")
@@ -235,7 +302,7 @@ final class UploadProtocol: URLProtocol {
       return $0["event"] as? String == "request_succeeded" && fields?["stage"] == "multipart_abort" && fields?["attempt"] == failedPartFields["attempt"]
     }, "Cleanup must not hide the failed part, and must share its attempt identifier")
     let httpFailures: [(String, Int, String?)] = [("bad-request", 400, nil), ("unauthorized", 401, "unauthorized"), ("quota", 403, "storage_quota_exceeded"),
-                                               ("too-large", 413, nil), ("format", 415, nil), ("unknown", 409, nil), ("rate", 429, "rate_limited"), ("private", 403, nil), ("html", 502, nil), ("malformed", 200, nil)]
+                                               ("nested-code", 400, "bad_request"), ("message-code", 400, "bad_request"), ("empty", 400, nil), ("oversized", 400, nil), ("array", 400, nil), ("too-large", 413, nil), ("format", 415, nil), ("unknown", 409, nil), ("rate", 429, "rate_limited"), ("private", 403, nil), ("html", 502, nil), ("malformed", 200, nil)]
     for (fixture, status, serverCode) in httpFailures {
       let attempt = UUID()
       do {
@@ -263,6 +330,25 @@ final class UploadProtocol: URLProtocol {
       let fields = events.last!["fields"] as! [String: String]
       assert(fields["stage"] == "image_upload" && fields["httpStatus"] == String(status))
       assert(fields["serverCode"] == serverCode && fields["networkCode"] == nil)
+      assert(fields["requestBytes"] == "0" && fields["responseBytes"].flatMap(Int.init) != nil)
+      assert(fields["elapsedMs"].flatMap(Int.init).map { $0 >= 0 } == true)
+      assert(fields["responseType"] == (fixture == "html" ? "html" : "json"))
+      assert(fields["cfRay"] == "0123456789abcdef-SJC")
+      assert(fields["requestId"] == "12345678-1234-1234-1234-123456789abc")
+      if fixture != "malformed" {
+        let bodyStates = ["empty": "empty", "oversized": "too_large", "array": "json_other", "html": "invalid_json"]
+        assert(fields["responseBody"] == (bodyStates[fixture] ?? "json_object"))
+        let unknownCode = ["bad-request", "unknown", "private"].contains(fixture)
+        var codeState = "missing"
+        if unknownCode { codeState = "unrecognized" }
+        if serverCode != nil { codeState = "recognized" }
+        assert(fields["serverCodeState"] == codeState)
+        if unknownCode {
+          assert(fields["serverErrorFingerprint"]?.count == 16, "Unknown errors remain correlatable without exporting their text")
+        }
+        if ["bad-request", "unknown"].contains(fixture) { assert(fields["serverErrorFingerprint"] == "127616598055cd1f") }
+        if ["empty", "oversized"].contains(fixture) { assert(fields["serverErrorFingerprint"] == nil) }
+      }
     }
     for (fixture, code) in [("timeout", NSURLErrorTimedOut), ("cancelled", NSURLErrorCancelled)] {
       let attempt = UUID()
@@ -282,14 +368,25 @@ final class UploadProtocol: URLProtocol {
       assert(event["event"] as? String == "transport_failed" && fields["networkCode"] == String(code))
       assert(fields["stage"] == "file_upload" && fields["httpStatus"] == nil)
     }
-    let (diagnosticText, _) = try diagnostics()
+    let (diagnosticText, finalRecords) = try diagnostics()
+    let prepared = finalRecords.first { $0["event"] as? String == "image_prepared" }?["fields"] as? [String: String]
+    assert(prepared?["sourceType"] == "image/png" && prepared?["uploadType"] == "image/png")
+    assert(prepared?["converted"] == "false")
+    let imageBytes = try Data(contentsOf: image).count
+    assert(prepared?["sourceBytes"] == String(imageBytes) && prepared?["imageBytes"] == String(imageBytes))
+    assert(prepared?["session"]?.count == 16 && prepared?["attempt"] != nil)
+    let converted = finalRecords.last { $0["event"] as? String == "image_prepared" }?["fields"] as? [String: String]
+    assert(converted?["converted"] == "true" && converted?["sourceType"] == "other" && converted?["uploadType"] == "image/jpeg")
+    let convertedBytes = Int(converted?["imageBytes"] ?? "") ?? 0
+    assert(convertedBytes > 0 && convertedBytes <= 5 * 1024 * 1024)
+    assert(converted?["attempt"] != prepared?["attempt"])
     for secret in ["synthetic-test-token", "private-token", "private-server-message", "private-filename", "private-url", "private-network-description", "private-file-contents", "api.lody.ai", "upload1", "test.txt"] {
       assert(!diagnosticText.contains(secret), "Export must exclude credentials, raw errors, URLs, upload IDs, filenames and attachment contents")
     }
     print("PASS: exported upload diagnostics distinguish HTTP, quota, transport and invalid-response failures without private data")
     let before = UploadProtocol.requests.count
     do {
-      _ = try await SessionAttachments.upload([attachment(URL(fileURLWithPath: "/etc/passwd"))], workspace: "w1", session: "s1")
+      _ = try await SessionAttachments.upload([attachment(URL(fileURLWithPath: "/etc/passwd"))], workspace: "w1", session: "s1", pins: pins)
       fatalError("Must reject files outside picker storage")
     } catch { assert(UploadProtocol.requests.count == before) }
     let downloadDirectory = root.appendingPathComponent("download")

@@ -1,5 +1,8 @@
 import { WorkspaceOwnershipTransfer } from '@/components/settings/workspace-ownership-transfer';
+import { E2eeSecurityPanel } from '@/components/settings/e2ee/security-panel';
 import type { Meta, StoryObj } from '@storybook/react';
+import { Button } from '@lody/ui/button';
+import { CompactRow } from '@/components/settings/compact-layout';
 import * as stylex from '@stylexjs/stylex';
 import type { ComponentProps } from 'react';
 import type { AgentConfigMeta, MachineId } from '@lody/shared';
@@ -192,10 +195,11 @@ export const WithCliAuthKey: Story = {
         keyPreview: 'lody_cli_abc******123456',
         note: 'CI runner',
         source: 'manual',
-        createdAt: Date.now() - 60_000,
-        lastRequest: Date.now() - 120_000,
+        createdAt: Date.UTC(2026, 9, 1, 9, 0),
+        lastRequest: Date.UTC(2026, 10, 12, 8, 0),
         expiresAt: null,
         enabled: true,
+        machineIds: [],
       },
       {
         id: 'key-2',
@@ -204,12 +208,44 @@ export const WithCliAuthKey: Story = {
         keyPreview: 'lody_cli_xyz******654321',
         note: null,
         source: 'auto',
-        createdAt: Date.now() - 600_000,
-        lastRequest: null,
+        createdAt: Date.UTC(2026, 9, 20, 10, 0),
+        lastRequest: Date.UTC(2026, 10, 12, 7, 30),
+        expiresAt: Date.UTC(2027, 1, 10, 7, 30),
+        enabled: true,
+        machineIds: ['machine-office-mac'],
+      },
+      {
+        id: 'key-3',
+        name: 'Lody CLI Token',
+        keyStart: 'lody_cli_',
+        keyPreview: 'lody_cli_pqr******987654',
+        note: null,
+        source: 'pairing',
+        createdAt: Date.UTC(2026, 7, 2, 21, 0),
+        lastRequest: Date.UTC(2026, 10, 10, 23, 0),
         expiresAt: null,
         enabled: true,
+        machineIds: ['machine-home-server'],
+      },
+      {
+        id: 'key-4',
+        name: 'Lody CLI Token',
+        keyStart: 'lody_cli_',
+        keyPreview: 'lody_cli_def******246810',
+        note: null,
+        source: 'auto',
+        createdAt: Date.UTC(2026, 5, 3, 12, 0),
+        lastRequest: null,
+        expiresAt: Date.UTC(2027, 1, 10, 0, 0),
+        enabled: true,
+        machineIds: ['machine-in-another-workspace'],
       },
     ],
+    cliApiKeyMachineNames: new Map([
+      ['machine-office-mac', 'Office MacBook'],
+      ['machine-home-server', 'Home server'],
+    ]),
+    currentMachineId: 'machine-office-mac',
     isCreatingCliApiKey: false,
     onGenerateCliApiKey: noop,
     onCopyGeneratedCliApiKey: noop,
@@ -249,6 +285,35 @@ export const OwnershipTransfer: Story = {
         onTransfer={noop}
       />
     ),
+  },
+};
+
+/** An encrypted workspace owner: transfer opens the encryption console; delete states
+ * that encrypted content cannot be recovered. Open "删除工作区" for the confirmation. */
+export const EncryptedWorkspaceDangerZone: Story = {
+  args: {
+    surface: 'workspace',
+    encryptedWorkspace: true,
+    workspaceOwnershipSlot: (
+      <CompactRow
+        label="转移所有权"
+        helper="在加密控制台的成员页选择新所有者。转出后你会变成管理员，这次变更会记入变更记录。"
+      >
+        <Button variant="secondary" size="small" tone="destructive">
+          转移…
+        </Button>
+      </CompactRow>
+    ),
+  },
+};
+
+/** An encrypted workspace member: leaving says what it means for this device's access. */
+export const EncryptedWorkspaceMemberLeave: Story = {
+  args: {
+    surface: 'workspace',
+    encryptedWorkspace: true,
+    role: 'member',
+    hasAdminPermission: false,
   },
 };
 
@@ -359,6 +424,42 @@ export const DesktopPaneWorkspace: Story = {
   args: {
     surface: 'workspace',
     pendingInvitations: mockPendingInvitations,
+  },
+  render: (args) => <DesktopPane {...args} />,
+};
+
+/** Settings > General for a solo encrypted workspace in the desktop pane: the security
+ * entry is the page's first section, on the same column as Workspace and Members. */
+export const DesktopPaneEncryptedWorkspace: Story = {
+  args: {
+    surface: 'workspace',
+    encryptedWorkspace: true,
+    hasAdminPermission: false,
+    members: mockMembers.slice(0, 1),
+    workspaceSecuritySlot: (
+      <E2eeSecurityPanel
+        state={{
+          epoch: 1,
+          rotationRequired: false,
+          updatePending: false,
+          mayRotate: true,
+          devices: [],
+        }}
+        onUpdate={() => {}}
+        onRetry={() => {}}
+        onOpenConsole={() => {}}
+      />
+    ),
+    workspaceOwnershipSlot: (
+      <CompactRow
+        label="转移所有权"
+        helper="在加密控制台的成员页选择新所有者。转出后你会变成管理员，这次变更会记入变更记录。"
+      >
+        <Button variant="secondary" size="small" tone="destructive">
+          转移…
+        </Button>
+      </CompactRow>
+    ),
   },
   render: (args) => <DesktopPane {...args} />,
 };

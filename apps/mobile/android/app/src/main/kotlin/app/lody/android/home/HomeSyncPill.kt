@@ -13,7 +13,6 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -48,15 +47,16 @@ import app.lody.android.designsystem.shadow
 import kotlinx.coroutines.delay
 
 /** Catalog connection as Home shows it: nothing while live. */
-enum class HomeSyncState { Live, Syncing, Offline }
+enum class HomeSyncState { Live, Syncing, Connecting }
 
-private enum class Shown { Syncing, Offline, Recovered }
+private enum class Shown { Syncing, Connecting, Recovered }
 
 /** How long "Connected" stays after trouble clears, as on web. */
 private const val RECOVERED_MILLIS = 1_200L
 
 /**
- * Centred floating status over the Home top bar. Syncing shows a spinner, offline a red dot, and a
+ * Centred floating status over the Home top bar. Syncing and reconnecting show a spinner (the
+ * runtime keeps retrying, so a lost connection reads as "Connecting", never "Offline"), and a
  * recovery shows "Connected" briefly before the pill leaves. It takes no touches.
  */
 @Composable
@@ -65,7 +65,7 @@ fun HomeSyncPill(state: HomeSyncState, modifier: Modifier = Modifier) {
     LaunchedEffect(state) {
         when (state) {
             HomeSyncState.Syncing -> shown = Shown.Syncing
-            HomeSyncState.Offline -> shown = Shown.Offline
+            HomeSyncState.Connecting -> shown = Shown.Connecting
             HomeSyncState.Live -> if (shown != null && shown != Shown.Recovered) {
                 shown = Shown.Recovered
                 delay(RECOVERED_MILLIS)
@@ -90,7 +90,7 @@ private fun Pill(shown: Shown) {
     val colors = LodyTheme.colors
     val (label, tint) = when (shown) {
         Shown.Syncing -> stringResource(R.string.home_syncing) to colors.textSecondary
-        Shown.Offline -> stringResource(R.string.home_offline) to colors.dangerDefault
+        Shown.Connecting -> stringResource(R.string.home_connecting) to colors.textSecondary
         Shown.Recovered -> stringResource(R.string.home_connected) to colors.successDefault
     }
     Row(
@@ -105,8 +105,7 @@ private fun Pill(shown: Shown) {
         horizontalArrangement = Arrangement.spacedBy(LodySpacing.xs),
     ) {
         when (shown) {
-            Shown.Syncing -> app.lody.android.designsystem.LodyLoadingIndicator(Modifier.size(LodyIconSize.xs), color = colors.textSecondary)
-            Shown.Offline -> Box(Modifier.size(LodySpacing.xs + LodySpacing.xxs).background(colors.dangerDefault, CircleShape))
+            Shown.Syncing, Shown.Connecting -> app.lody.android.designsystem.LodyLoadingIndicator(Modifier.size(LodyIconSize.xs), color = colors.textSecondary)
             Shown.Recovered -> Icon(LodyIcons.Check, contentDescription = null, tint = colors.successDefault, modifier = Modifier.size(LodyIconSize.xs))
         }
         Text(label, style = LodyTheme.typography.footnote, color = tint, maxLines = 1, overflow = TextOverflow.Ellipsis)

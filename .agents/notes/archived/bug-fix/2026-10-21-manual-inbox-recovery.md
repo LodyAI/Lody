@@ -94,5 +94,5 @@ cannot bind the temporary Host sockets: those integration cases remain unverifie
 here, rather than being bypassed. Native workflow/SQLite cases use explicit injected
 ports and do not claim to prove the OS lease. Validation is on
 Linux; no real user store, live daemon or native Windows process tree is recovered.
-The [Windows containment note](../../proposed/architecture/2026-10-21-windows-inbox-containment.md)
+The [Windows containment note](../../rejected/architecture/2026-10-21-windows-inbox-containment.md)
 records the separate stage 2 decision and acceptance bar.

@@ -101,7 +101,15 @@ final class ChatMarkdownView: UIView {
       // MarkdownView lays out synchronously inside setContentImmediately, adding
       // fresh code/table views at .zero. Completion folds the reply inside a
       // UIView animation block, which would grow them from the top-left corner.
-      UIView.performWithoutAnimation { block.view.setContentImmediately(source.content, theme: theme) }
+      // MarkdownView shares colors.code between inline and fenced code, and its
+      // decoration hook only receives plain text. CodeView's theme is internal.
+      func containsCode(_ node: MarkdownBlockNode) -> Bool {
+        if case .codeBlock = node { return true }
+        return node.children.contains(where: containsCode)
+      }
+      var blockTheme = theme
+      if !containsCode(source.node) { blockTheme.colors.code = .secondaryLabel }
+      UIView.performWithoutAnimation { block.view.setContentImmediately(source.content, theme: blockTheme) }
       if blockAnimation {
         block.label.prepare(animate: false, reset: true)
         block.label.finishAnimation()

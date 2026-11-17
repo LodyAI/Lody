@@ -1,5 +1,10 @@
 import { useEffect } from 'react';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
+import {
+  automaticAdmissionRefusal,
+  keepAutomaticAdmissions,
+  recordAutomaticAdmission,
+} from '@/lib/e2ee-admission-refusals';
 
 type Runtime = Pick<E2eeWorkspaceRuntime, 'status' | 'memberJoinRequests' | 'approveMemberJoin'> &
   Partial<Pick<E2eeWorkspaceRuntime, 'open' | 'close' | 'refresh'>>;
@@ -41,7 +46,7 @@ export function startEmailAdmissionWorker(
       }
       if (stopped) return;
       // Eligibility must recover from an initial offline refresh or later role change.
-      if (runtime.refresh) await runtime.refresh(workspaceId, { installKeys: false });
+      if (runtime.refresh) await runtime.refresh(workspaceId, { keyMode: 'none' });
       const status = await runtime.status(workspaceId);
       if (
         stopped ||
@@ -50,13 +55,25 @@ export function startEmailAdmissionWorker(
       )
         return;
       const requests = await runtime.memberJoinRequests(workspaceId);
+      keepAutomaticAdmissions(
+        workspaceId,
+        requests.items.map((request) => request.requestId)
+      );
       for (const request of requests.items) {
         if (stopped) break;
-        if (request.source !== 'email') continue;
+        // `source` only skips link requests early; the host signs only an invitation it
+        // verifies itself, anything else is refused and stays for explicit approval. A full
+        // free workspace would refuse the admission after it is signed.
+        if (request.source !== 'email' || request.memberLimitReached) continue;
         try {
           await runtime.approveMemberJoin(workspaceId, request.requestId, 'automatic');
-        } catch {
-          /* The host retains original bytes; another applicant can continue. */
+          recordAutomaticAdmission(workspaceId, request.requestId, null);
+        } catch (error) {
+          // The host retains original bytes and another applicant can continue. A verified
+          // refusal is shown on the request, with its original code, so an administrator
+          // approves it explicitly; offline and other transient failures change nothing.
+          const refusal = automaticAdmissionRefusal(error);
+          if (refusal) recordAutomaticAdmission(workspaceId, request.requestId, refusal);
         }
       }
     } catch {

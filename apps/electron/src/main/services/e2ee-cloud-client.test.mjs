@@ -196,6 +196,44 @@ for (const code of ['e2ee_staging_invalid', 'e2ee_staging_corrupt']) {
   })
 }
 
+void test('sharing heads ask for an inlined original and stop asking a backend that refuses the field', async () => {
+  const scope = {
+    workspaceId: 'workspace',
+    genesisHash: '11'.repeat(32),
+    machineId: 'machine',
+    ownerMembershipId: '22'.repeat(16),
+    generation: '33'.repeat(32)
+  }
+  const head = { ...scope, status: 'active', revision: 1, digest: '44'.repeat(32) }
+  for (const deployed of [true, false]) {
+    const sent = []
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(async (_url, init) => {
+            const args = JSON.parse(init.body).args[0]
+            sent.push(args.includeVersion ?? null)
+            if (args.includeVersion && !deployed)
+              return new Response(
+                'ArgumentValidationError: Object contains extra field `includeVersion` that is not in the validator.',
+                { status: 400 }
+              )
+            return response(head)
+          })
+          const sharing = client.machineSharing()
+          for (let i = 0; i < 2; i++)
+            assert.deepEqual(
+              yield* sharing.readHead({ ...scope, credential: access.credential }),
+              head
+            )
+        })
+      )
+    )
+    // An older backend costs one refused request per client, then plain reads.
+    assert.deepEqual(sent, deployed ? [true, true] : [true, null, null])
+  }
+})
+
 void test('staging cancellation rejects a late response and isolates other workspaces', async () => {
   const dto = encodeEpochStagedGroup(stagedGroup())
   const entered = Promise.withResolvers(),
@@ -639,6 +677,241 @@ void test('management ledger transport preserves the original record and refuses
   )
 })
 
+void test('management ledger transport reuses the cached position for delta reads', async () => {
+  const group = stagedGroup()
+  const historyCalls = []
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* build(async (_url, init) => {
+          const {
+            path,
+            args: [args]
+          } = JSON.parse(init.body)
+          assert.equal(path, 'e2eeWorkspaces:history')
+          historyCalls.push(args)
+          if (args.after === 'p1:w:1:first') {
+            return response({
+              workspaceId: access.workspaceId,
+              genesisHash: group.genesis,
+              checkpoint: { length: 2, headHash: '03'.repeat(32) },
+              startIndex: 1,
+              recordsHex: ['02'],
+              position: 'p1:w:2:second',
+              nextCursor: null
+            })
+          }
+          return response({
+            workspaceId: access.workspaceId,
+            genesisHash: group.genesis,
+            checkpoint: { length: 1, headHash: '02'.repeat(32) },
+            startIndex: 0,
+            recordsHex: ['01'],
+            position: 'p1:w:1:first',
+            nextCursor: null
+          })
+        })
+        const anchor = Result.getOrThrow(Bytes.genesisHash(Buffer.from(group.genesis, 'hex')))
+        const log = client.ledgerLog(access.workspaceId)
+        const first = yield* log.read(anchor)
+        assert.equal(first.records.length, 1)
+        const second = yield* log.read(anchor)
+        assert.equal(second.records.length, 2)
+        assert.deepEqual(
+          second.records.map((r) => Buffer.from(r).toString('hex')),
+          ['01', '02']
+        )
+        assert.deepEqual(historyCalls, [
+          { workspaceId: access.workspaceId },
+          { workspaceId: access.workspaceId, after: 'p1:w:1:first' }
+        ])
+      })
+    )
+  )
+})
+
+void test('the relay copy of a member invitation reaches the approving host intact for verification', async () => {
+  // Automatic email admission verifies this copy itself; dropping it here would silently
+  // turn every genuine email invitation into an explicit approval.
+  const offer = {
+    version: 1,
+    workspaceId: access.workspaceId,
+    genesisHash: '11'.repeat(32),
+    genesisRecordHex: 'abcd',
+    endorser: '22'.repeat(32),
+    token: '33'.repeat(32),
+    mode: 'email',
+    expiresAt: 9_000_000_000_000,
+    signature: '44'.repeat(64)
+  }
+  const reply = {
+    id: 'synthetic-request',
+    workspaceId: access.workspaceId,
+    accountId: 'synthetic-account',
+    keyPackageHex: 'abcd',
+    signingPublicKey: '55'.repeat(32),
+    requestId: '66'.repeat(16),
+    source: 'email',
+    state: 'pending',
+    expiresAt: 9_000_000_000_000,
+    offer
+  }
+  const read = await Effect.runPromise(
+    Effect.scoped(
+      Effect.flatMap(
+        build(async () => response(reply)),
+        (client) => client.memberRead({ ...access, requestId: reply.requestId })
+      )
+    )
+  )
+  assert.deepEqual(read.offer, offer)
+})
+
+void test('the member list stays usable when it holds an unsigned or unreadable invitation', async () => {
+  const offer = {
+    version: 1,
+    workspaceId: access.workspaceId,
+    genesisHash: '11'.repeat(32),
+    genesisRecordHex: 'abcd',
+    endorser: '22'.repeat(32),
+    token: '33'.repeat(32),
+    mode: 'email',
+    expiresAt: 9_000_000_000_000
+  }
+  const legacy = { ...offer, token: '34'.repeat(32) }
+  const item = {
+    id: 'synthetic-request',
+    workspaceId: access.workspaceId,
+    accountId: 'synthetic-account',
+    keyPackageHex: 'abcd',
+    signingPublicKey: '55'.repeat(32),
+    requestId: '66'.repeat(16),
+    source: 'email',
+    state: 'pending',
+    expiresAt: 9_000_000_000_000,
+    offer: { ...offer, signature: '44'.repeat(64) },
+    applicantName: 'Riley',
+    applicantEmail: 'r@example.test'
+  }
+  const pending = await Effect.runPromise(
+    Effect.scoped(
+      Effect.flatMap(
+        build(async () =>
+          response({
+            invitations: [offer, legacy, { token: 'not-an-offer' }],
+            unsignedInvitations: [{ token: legacy.token, email: 'legacy@synthetic.test' }],
+            items: [item],
+            hasMore: false,
+            seatPreview: { status: 'not_billed', reason: 'free' }
+          })
+        ),
+        (client) => client.memberPending(access)
+      )
+    )
+  )
+  // The applicant stays approvable, the unsigned invitation stays revocable by token and is
+  // marked for re-sending, and only the unreadable entry is left out.
+  assert.deepEqual(
+    pending.items.map((row) => row.requestId),
+    [item.requestId]
+  )
+  assert.deepEqual(pending.invitations, [
+    offer,
+    { ...legacy, needsReissue: true, email: 'legacy@synthetic.test' }
+  ])
+})
+
+for (const paymentAction of ['method_required', 'payment_required', 'refresh']) {
+  void test(`member approval preserves ${paymentAction} and its cost details for payment recovery`, async () => {
+    const seatPreview = {
+      status: 'billed',
+      interval: 'month',
+      unitAmount: 1000,
+      proratedAmount: 500,
+      currentPeriodEnd: null,
+      seatCount: 1,
+      nextSeatCount: 2,
+      nextRenewalAmount: 2000,
+      currency: 'usd',
+      paymentAction,
+      addedSeats: 1,
+      invoiceAt: null
+    }
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.flatMap(
+          build(async () => response({ invitations: [], items: [], hasMore: false, seatPreview })),
+          (client) => client.memberPending(access)
+        )
+      )
+    )
+    assert.deepEqual(result.seatPreview, seatPreview)
+  })
+}
+
+for (const invalid of [
+  { paymentAction: 'unknown' },
+  { addedSeats: 'one' },
+  { invoiceAt: 'tomorrow' }
+]) {
+  void test(`member approval refuses an invalid payment preview: ${JSON.stringify(invalid)}`, async () => {
+    const seatPreview = {
+      status: 'billed',
+      interval: 'month',
+      unitAmount: 1000,
+      proratedAmount: 500,
+      currentPeriodEnd: null,
+      seatCount: 1,
+      nextSeatCount: 2,
+      nextRenewalAmount: 2000,
+      ...invalid
+    }
+    await assert.rejects(
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.flatMap(
+            build(async () =>
+              response({ invitations: [], items: [], hasMore: false, seatPreview })
+            ),
+            (client) => client.memberPending(access)
+          )
+        )
+      ),
+      (error) => error.reason === 'invalid-response'
+    )
+  })
+}
+
+void test('an invitation refused for a still-waiting applicant keeps its code for the administrator', async () => {
+  const result = await Effect.runPromise(
+    Effect.scoped(
+      Effect.flatMap(
+        build(async () =>
+          Response.json(
+            {
+              status: 'error',
+              errorMessage: 'synthetic-private-cause',
+              errorData: { code: 'e2ee_member_invitation_request_pending' }
+            },
+            { status: 560 }
+          )
+        ),
+        (client) =>
+          Effect.result(
+            client.memberCreateInvitation({
+              ...access,
+              offer: { version: 1 },
+              email: 'legacy@synthetic.test'
+            })
+          )
+      )
+    )
+  )
+  assert.equal(result._tag, 'Failure')
+  assert.equal(result.failure.code, 'e2ee_member_invitation_request_pending')
+  assert.equal(JSON.stringify(result.failure).includes('synthetic-private-cause'), false)
+})
+
 void test('only exact authenticated member removal or device revocation carries a terminal signal', async () => {
   for (const code of ['e2ee_member_removed', 'e2ee_device_revoked', 'unauthorized']) {
     await Effect.runPromise(
@@ -846,7 +1119,7 @@ void test('relay calls reuse one unexpired Convex token, renew it near expiry an
         seen.push(new Headers(init.headers).get('authorization'))
         if (failNext) {
           failNext = false
-          return new Response('unavailable', { status: 503 })
+          return new Response('unauthorized', { status: 401 })
         }
         return response({ ...target, status: 'NeedsEnvelope', revision: 0 })
       },
@@ -911,4 +1184,474 @@ void test('a call that hits the 30 s deadline drops the reused Convex token', as
       })
     ).pipe(Effect.provide(TestClock.layer()))
   )
+})
+
+for (const mode of ['conflict', 'empty', 'misbound', 'paged']) {
+  void test(`post-CAS ledger suffix handles ${mode} reply hints and ingests each page`, async () => {
+    const group = stagedGroup()
+    const base = { head: Result.getOrThrow(Bytes.recordHash(Buffer.alloc(32, 2))), length: 1 }
+    const anchor = Result.getOrThrow(Bytes.genesisHash(Buffer.from(group.genesis, 'hex')))
+    const suffix = {
+      workspaceId: access.workspaceId,
+      genesisHash: group.genesis,
+      checkpoint: { headHash: group.recordHash, length: 2 },
+      startIndex: 1,
+      recordsHex: [Buffer.from(group.record).toString('hex')],
+      position: 'suffix-end',
+      nextCursor: null
+    }
+    const calls = [],
+      ingested = []
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(async (_url, init) => {
+            const {
+              path,
+              args: [args]
+            } = JSON.parse(init.body)
+            calls.push({ path, args })
+            if (path === 'e2eeWorkspaces:appendRecord')
+              return response({
+                status: mode === 'conflict' ? 'conflict' : 'committed',
+                recordHash: group.recordHash,
+                historyPage: {
+                  ...suffix,
+                  ...(mode === 'empty' ? { recordsHex: [] } : {}),
+                  ...(mode === 'misbound' ? { workspaceId: 'other-workspace' } : {}),
+                  ...(mode === 'paged' ? { nextCursor: 'unusable-inline-cursor' } : {})
+                }
+              })
+            assert.equal(path, 'e2eeWorkspaces:history')
+            assert.equal(args.after, 'retained-prefix')
+            return response(suffix)
+          })
+          const log = client.ledgerLog(access.workspaceId, undefined, {
+            position: () => Effect.succeed('retained-prefix'),
+            ingest: (page) =>
+              Effect.sync(() => {
+                ingested.push(page)
+              })
+          })
+          yield* log.observe(base)
+          const appended = yield* Effect.result(log.appendCas(anchor, base, group.record))
+          assert.equal(Result.isFailure(appended), mode === 'conflict')
+          const read = yield* log.readFrom(anchor, base)
+          assert.deepEqual(read.records, [group.record])
+          assert.equal(read.checkpoint.length, 2)
+          assert.equal(read.checkpoint.head.equals(hashRecordBytes(group.record)), true)
+          assert.deepEqual(ingested, [suffix])
+          assert.equal(
+            calls.filter((call) => call.path === 'e2eeWorkspaces:history').length,
+            mode === 'conflict' ? 0 : 1
+          )
+        })
+      )
+    )
+  })
+}
+
+void test('mailbox put and epoch staging inline receipts save post-write readbacks and stop asking older backends', async () => {
+  const group = stagedGroup(),
+    dto = encodeEpochStagedGroup(group),
+    frame = new Uint8Array([1, 2, 3, 4]),
+    frameHex = Buffer.from(frame).toString('hex'),
+    id = 'ab'.repeat(16)
+  for (const deployed of [true, false]) {
+    const calls = []
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(async (_url, init) => {
+            const {
+              path,
+              args: [args]
+            } = JSON.parse(init.body)
+            calls.push({ path, args })
+            if (path === 'e2eeMailbox:put') {
+              if (args.includeReceipt && !deployed)
+                return new Response(
+                  'ArgumentValidationError: Object contains extra field `includeReceipt` that is not in the validator.',
+                  { status: 400 }
+                )
+              return response(
+                deployed
+                  ? { frameHex, slot: { ...target, revision: 0, status: 'EnvelopeStored' } }
+                  : null
+              )
+            }
+            if (path === 'e2eeMailbox:read') return response(frameHex)
+            if (path === 'e2eeMailbox:status')
+              return response({ ...target, revision: 0, status: 'EnvelopeStored' })
+            if (path === 'e2eeEpochStaging:stageGroup') {
+              if (args.includeReadback && !deployed)
+                return new Response(
+                  'ArgumentValidationError: Object contains extra field `includeReadback` that is not in the validator.',
+                  { status: 400 }
+                )
+              return response(deployed ? { ok: true, group: dto } : { ok: true })
+            }
+            if (path === 'e2eeEpochStaging:readGroup') return response(dto)
+            throw new Error(`unexpected endpoint ${path}`)
+          })
+          const mailbox = client.mailbox(access)
+          yield* mailbox.put(id, frame)
+          assert.deepEqual(yield* mailbox.read(id), frame)
+          assert.deepEqual(yield* mailbox.status(target), {
+            ...target,
+            revision: 0,
+            status: 'EnvelopeStored'
+          })
+          // Single-use receipt: a second read/status goes back to the server.
+          assert.deepEqual(yield* mailbox.read(id), frame)
+          assert.deepEqual(yield* mailbox.status(target), {
+            ...target,
+            revision: 0,
+            status: 'EnvelopeStored'
+          })
+          // Second put on an older backend sends no includeReceipt flag.
+          yield* mailbox.put(id, frame)
+
+          // Stage in a round-scoped instance and read back on a fresh instance (matching makeRoundStaging).
+          yield* client.staging(access, undefined, 'round-1').stageGroup(group)
+          assert.deepEqual(
+            encodeEpochStagedGroup(yield* client.staging(access).readGroup(dto)),
+            dto
+          )
+          // Second readGroup hits the server after the single-use readback was consumed.
+          assert.deepEqual(
+            encodeEpochStagedGroup(yield* client.staging(access).readGroup(dto)),
+            dto
+          )
+          yield* client.staging(access, undefined, 'round-1').stageGroup(group)
+        })
+      )
+    )
+    const paths = calls.map((c) => c.path)
+    if (deployed) {
+      assert.deepEqual(paths, [
+        'e2eeMailbox:put',
+        'e2eeMailbox:read',
+        'e2eeMailbox:status',
+        'e2eeMailbox:put',
+        'e2eeEpochStaging:stageGroup',
+        'e2eeEpochStaging:readGroup',
+        'e2eeEpochStaging:stageGroup'
+      ])
+    } else {
+      assert.deepEqual(
+        calls.filter((c) => c.path === 'e2eeMailbox:put').map((c) => c.args.includeReceipt ?? null),
+        [true, null, null]
+      )
+      assert.deepEqual(
+        calls
+          .filter((c) => c.path === 'e2eeEpochStaging:stageGroup')
+          .map((c) => c.args.includeReadback ?? null),
+        [true, null, null]
+      )
+    }
+  }
+})
+
+void test('mailbox fetch inline slot primes self status cache, report invalidates it, and older backends fall back cleanly', async () => {
+  const frameHex = '01020304'
+  const slotStatus = { ...target, revision: 3, status: 'EnvelopeStored' }
+  const afterReportStatus = { ...target, revision: 4, status: 'InstallationReported' }
+  for (const deployed of [true, false]) {
+    const calls = []
+    let reported = false
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(async (_url, init) => {
+            const {
+              path,
+              args: [args]
+            } = JSON.parse(init.body)
+            calls.push({ path, args })
+            if (path === 'e2eeMailbox:fetch') {
+              if (args.includeSlot && !deployed)
+                return new Response(
+                  'ArgumentValidationError: Object contains extra field `includeSlot` that is not in the validator.',
+                  { status: 400 }
+                )
+              return response({
+                items: [{ sender, frameHex }],
+                next: null,
+                ...(deployed ? { slot: slotStatus } : {})
+              })
+            }
+            if (path === 'e2eeMailbox:status') {
+              return response(reported ? afterReportStatus : slotStatus)
+            }
+            if (path === 'e2eeMailbox:report') {
+              reported = true
+              return response(null)
+            }
+            throw new Error(`unexpected endpoint ${path}`)
+          })
+          const mailbox = client.mailbox(access)
+          const page = yield* mailbox.fetch(target.epoch, null, 10)
+          assert.equal(page.items.length, 1)
+          // 4 consecutive status reads (mirroring KeyReceiver) hit server 0 times when fetch primed slot,
+          // and 1 time (cached for the next 3) when older backend did not inline slot.
+          for (let i = 0; i < 4; i++) {
+            assert.deepEqual(yield* mailbox.status(target), slotStatus)
+          }
+          // Report must invalidate the cached slot status immediately.
+          yield* mailbox.report(new Uint8Array([9, 8, 7]))
+          assert.deepEqual(yield* mailbox.status(target), afterReportStatus)
+          // Second fetch after fallback does not resend includeSlot on older backend.
+          yield* mailbox.fetch(target.epoch, null, 10)
+        })
+      )
+    )
+    if (deployed) {
+      assert.deepEqual(
+        calls.map((c) => c.path),
+        ['e2eeMailbox:fetch', 'e2eeMailbox:report', 'e2eeMailbox:status', 'e2eeMailbox:fetch']
+      )
+    } else {
+      assert.deepEqual(
+        calls.filter((c) => c.path === 'e2eeMailbox:fetch').map((c) => c.args.includeSlot ?? null),
+        [true, null, null]
+      )
+      assert.equal(calls.filter((c) => c.path === 'e2eeMailbox:status').length, 2)
+    }
+  }
+})
+
+void test('concurrent mailbox status calls coalesce via batchStatus while single calls use status and fall back cleanly', async () => {
+  const slotA = { genesis: '11'.repeat(32), epoch: 1, recipient: 'aa'.repeat(32) }
+  const slotB = { genesis: '11'.repeat(32), epoch: 1, recipient: 'bb'.repeat(32) }
+  const statusOf = (slot) => ({ ...slot, revision: 2, status: 'NeedsEnvelope' })
+  for (const mode of ['batch', 'missing-fn', 'validation-error']) {
+    const calls = []
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(async (_url, init) => {
+            const {
+              path,
+              args: [args]
+            } = JSON.parse(init.body)
+            calls.push({ path, args })
+            if (path === 'e2eeMailbox:batchStatus') {
+              if (mode === 'missing-fn')
+                return new Response(
+                  'Could not find public function for ' + '"e2eeMailbox:batchStatus"',
+                  { status: 400 }
+                )
+              if (mode === 'validation-error')
+                return new Response('ArgumentValidationError: Unknown function', { status: 400 })
+              return response(args.slots.map(statusOf))
+            }
+            if (path === 'e2eeMailbox:status') return response(statusOf(args.slot))
+            throw new Error(`unexpected endpoint ${path}`)
+          })
+          const mailbox = client.mailbox(access)
+          // Single-slot call in its own microtask tick must use single status endpoint.
+          assert.deepEqual(yield* mailbox.status(slotA), statusOf(slotA))
+          // Wait > 200ms (or use distinct slots/epochs) — here distinct slots in the same tick coalesce.
+          const slotC = { genesis: '11'.repeat(32), epoch: 2, recipient: 'cc'.repeat(32) }
+          const slotD = { genesis: '11'.repeat(32), epoch: 2, recipient: 'dd'.repeat(32) }
+          const [resC, resD] = yield* Effect.all([mailbox.status(slotC), mailbox.status(slotD)], {
+            concurrency: 2
+          })
+          assert.deepEqual(resC, statusOf(slotC))
+          assert.deepEqual(resD, statusOf(slotD))
+          // Next concurrent batch after fallback does not retry batchStatus.
+          const slotE = { genesis: '11'.repeat(32), epoch: 3, recipient: 'ee'.repeat(32) }
+          const slotF = { genesis: '11'.repeat(32), epoch: 3, recipient: 'ff'.repeat(32) }
+          yield* Effect.all([mailbox.status(slotE), mailbox.status(slotF)], { concurrency: 2 })
+        })
+      )
+    )
+    if (mode === 'batch') {
+      assert.deepEqual(
+        calls.map((c) => c.path),
+        ['e2eeMailbox:status', 'e2eeMailbox:batchStatus', 'e2eeMailbox:batchStatus']
+      )
+    } else {
+      assert.equal(calls.filter((c) => c.path === 'e2eeMailbox:batchStatus').length, 1)
+      assert.equal(calls.filter((c) => c.path === 'e2eeMailbox:status').length, 5)
+    }
+  }
+})
+
+void test('E2EE cloud HTTP client recovers from transient 502/503/504 gateway blips with bounded backoff without masking 401/403/409/429/500/560 or e2ee_* refusals', async () => {
+  // 1. Recovers after 1 and 2 transient 502/503/504 responses using [60, 150] ms delays without burning token cache.
+  {
+    const delays = []
+    let minted = 0
+    let attempts = 0
+    const statuses = [502, 503]
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(
+            async () => {
+              const status = statuses[attempts]
+              attempts++
+              if (status !== undefined) return new Response('gateway blip', { status })
+              return response({ ...target, status: 'NeedsEnvelope', revision: 0 })
+            },
+            {
+              now: () => 1_000_000,
+              convexToken: async () => ({ data: { token: jwtExpiringAt(1_000 + 600, ++minted) } }),
+              retryDelay: async (ms) => {
+                delays.push(ms)
+              }
+            }
+          )
+          const res = yield* client.mailbox(access).status(target)
+          assert.equal(res.status, 'NeedsEnvelope')
+        })
+      )
+    )
+    assert.equal(attempts, 3)
+    assert.deepEqual(delays, [60, 150])
+    assert.equal(minted, 1)
+  }
+
+  // 2. Exhausting 3 consecutive 503 attempts surfaces unavailable and drops cached token.
+  {
+    const delays = []
+    let minted = 0
+    let attempts = 0
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(
+            async () => {
+              attempts++
+              if (attempts <= 3) return new Response('bad gateway', { status: 504 })
+              return response({ ...target, status: 'NeedsEnvelope', revision: 0 })
+            },
+            {
+              now: () => 1_000_000,
+              convexToken: async () => ({ data: { token: jwtExpiringAt(1_000 + 600, ++minted) } }),
+              retryDelay: async (ms) => {
+                delays.push(ms)
+              }
+            }
+          )
+          const failed = yield* Effect.result(client.mailbox(access).status(target))
+          assert.equal(failed._tag, 'Failure')
+          assert.equal(failed.failure.reason, 'unavailable')
+          assert.equal(attempts, 3)
+          assert.deepEqual(delays, [60, 150])
+          // Next call mints a fresh token and succeeds.
+          const recovered = yield* client.mailbox(access).status(target)
+          assert.equal(recovered.status, 'NeedsEnvelope')
+          assert.equal(minted, 2)
+        })
+      )
+    )
+  }
+
+  // 3. Non-retryable statuses (401, 403, 409, 429, 500, 560) and e2ee_* refusals (even inside 503) NEVER retry.
+  const nonRetryableCases = [
+    { status: 401, body: 'unauthorized', expectedReason: 'unavailable' },
+    { status: 403, body: 'forbidden', expectedReason: 'unavailable' },
+    { status: 409, body: 'conflict', expectedReason: 'unavailable' },
+    { status: 429, body: 'rate limited', expectedReason: 'unavailable' },
+    { status: 500, body: 'internal error', expectedReason: 'unavailable' },
+    {
+      status: 560,
+      body: JSON.stringify({
+        status: 'error',
+        errorMessage: 'device revoked',
+        errorData: { code: 'e2ee_device_revoked' }
+      }),
+      expectedInstance: E2eeDeviceRevokedError
+    },
+    {
+      status: 560,
+      body: JSON.stringify({
+        status: 'error',
+        errorMessage: 'member removed',
+        errorData: { code: 'e2ee_member_removed' }
+      }),
+      expectedInstance: E2eeMemberRemovedError
+    },
+    {
+      status: 503,
+      body: JSON.stringify({ code: 'e2ee_device_unauthorized' }),
+      expectedReason: 'unavailable'
+    }
+  ]
+  for (const testCase of nonRetryableCases) {
+    let attempts = 0
+    const delays = []
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(
+            async () => {
+              attempts++
+              return new Response(testCase.body, { status: testCase.status })
+            },
+            {
+              retryDelay: async (ms) => {
+                delays.push(ms)
+              }
+            }
+          )
+          const failed = yield* Effect.result(client.mailbox(access).status(target))
+          assert.equal(failed._tag, 'Failure')
+          if (testCase.expectedInstance)
+            assert.equal(failed.failure instanceof testCase.expectedInstance, true)
+          else assert.equal(failed.failure.reason, testCase.expectedReason)
+        })
+      )
+    )
+    assert.equal(attempts, 1, `status ${testCase.status} must not retry`)
+    assert.deepEqual(delays, [])
+  }
+
+  // 4. Caller AbortSignal aborts immediately during retry delay without waiting for the next attempt.
+  {
+    let attempts = 0
+    const controller = new AbortController()
+    const inDelay = Promise.withResolvers()
+    let abortedInDelay = false
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(
+            async () => {
+              attempts++
+              return new Response('unavailable', { status: 503 })
+            },
+            {
+              retryDelay: (_ms, signal) => {
+                inDelay.resolve()
+                return new Promise((_resolve, reject) => {
+                  signal.addEventListener(
+                    'abort',
+                    () => {
+                      abortedInDelay = true
+                      reject(new Error('aborted'))
+                    },
+                    { once: true }
+                  )
+                })
+              }
+            }
+          )
+          const fiber = yield* Effect.forkChild(
+            Effect.result(client.mailbox(access, controller.signal).status(target))
+          )
+          yield* Effect.promise(() => inDelay.promise)
+          controller.abort()
+          const result = yield* Fiber.join(fiber)
+          assert.equal(abortedInDelay, true)
+          assert.equal(result._tag, 'Failure')
+          assert.equal(result.failure.reason, 'unavailable')
+        })
+      )
+    )
+    assert.equal(attempts, 1)
+  }
 })

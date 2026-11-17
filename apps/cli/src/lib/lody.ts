@@ -1,3 +1,4 @@
+import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
 import { daemonLossObserver } from './e2ee/client-loss-observer';
 import type { AuthorizeEncryptedExecution, EncryptedAgentExecution } from './e2ee/agent-execution';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
@@ -35,6 +36,8 @@ import { traceAsync } from '@/utils/trace-span';
 import type { MemoryPressureSnapshotSource } from '@/monitor/memory-pressure-sampler';
 import type { WorkspaceWatchCoordinatorApi } from '@/lib/code-collab/workspace-watch-coordinator';
 import type { CloudPort } from '@lody/platform';
+import { assertRetainedE2eeModeAllowsOpen } from '@/lib/e2ee/retained-binding';
+import { encryptedRuntimeCloudPort } from '@/lib/e2ee/runtime-cloud-port';
 import type { DaemonWorkspaceAccess } from '@/lib/session-command-environment';
 
 const BUILTIN_AGENT_CONFIG_INITIAL_RETRY_DELAY_MS = 10_000;
@@ -43,8 +46,11 @@ const BUILTIN_AGENT_CONFIG_MAX_RETRY_DELAY_MS = 5 * 60_000;
 interface LodyOptions {
   /** A successful authenticated ledger read of this encrypted workspace; see Fleet. */
   onEncryptedAuthorityConfirmed?: (startedAt: AuthorityStamp) => void;
-  /** True while execution relies on an outage window. */
-  onEncryptedWindowNotice?: (active: boolean) => void;
+  /** True while execution relies on an outage window, with that window's ends. */
+  onEncryptedWindowNotice?: (
+    active: boolean,
+    window?: import('./e2ee/execution-authorization').E2eeAccessWindow
+  ) => void;
   remoteAutomation?: {
     handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
     control: (input: {
@@ -70,6 +76,12 @@ interface LodyOptions {
   localWorkspaceCatalog?: LocalWorkspaceCatalogService;
   memoryPressure: MemoryPressureSnapshotSource;
   machineLifecycleCapability: MachineLifecycleCapability;
+  hostsEncryptedWorkspace?: () => boolean;
+  prepareManagedUpgrade?: (
+    requestId: string,
+    target: string,
+    upgrade?: ManagedDaemonUpgradeOptions
+  ) => Promise<string>;
   closeSessionTerminals?: (sessionId: SessionId) => void;
   cleanupLocalProjectWorktreeSetupIfUnreferenced?: (
     localProjectId: LocalProjectId
@@ -86,9 +98,14 @@ interface LodyOptions {
     reason: 'member-removed' | 'device-revoked'
   ) => Promise<void>;
   onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
+  isMachineIdentityRestoreIdle?: () => boolean;
+  sealMachineIdentityRestore?: () => boolean;
   workspaceWatchCoordinator?: WorkspaceWatchCoordinatorApi;
   readWorkspaceAccess?: () => DaemonWorkspaceAccess;
   cloudPort: CloudPort;
+  /** A verified encrypted owner promoted in place by local pairing activation. `create`
+   * takes ownership: it closes this handle itself if it fails before returning. */
+  encryptedWorkspace?: CliE2eeWorkspaceLegacy;
 }
 export class Lody {
   private logger: Logger;
@@ -112,6 +129,19 @@ export class Lody {
   private builtinAgentRegistrationStarted = false;
 
   static async create(options: LodyOptions): Promise<Lody> {
+    const handed = options.encryptedWorkspace;
+    if (!handed) return Lody.createOwned(options);
+    try {
+      if (options.contentMode !== 'e2ee') throw new Error('e2ee_workspace_unavailable');
+      return await Lody.createOwned(options);
+    } catch (error) {
+      // Close is idempotent: an owner that already closed it returns the same receipt.
+      await handed.close().catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private static async createOwned(options: LodyOptions): Promise<Lody> {
     // Register the optional local Roost adapter before any session document can
     // resolve its backend. The selector remains metadata-driven, so legacy and
     // new Loro sessions continue to use the built-in backend by default.
@@ -122,6 +152,13 @@ export class Lody {
       options.contentMode !== 'e2ee'
     )
       throw new Error('workspace_mode_unsupported');
+    // Every runtime start re-checks the retained pairing binding, so neither a
+    // listing nor a stale cached row can open an encrypted workspace as plaintext.
+    assertRetainedE2eeModeAllowsOpen(options.userId, {
+      id: options.workspaceId,
+      contentMode: options.contentMode,
+      genesisHash: options.genesisHash,
+    });
     const encrypted = options.contentMode === 'e2ee';
     let e2ee: CliE2eeWorkspaceLegacy | undefined;
     let resolveRemovalOwner: (value: Lody | null) => void = () => {};
@@ -131,16 +168,13 @@ export class Lody {
     if (!workspaceSupports({ mode: encrypted ? 'protected' : 'plaintext' }, 'rpc')) {
       if (!options.genesisHash || !options.cloudPort.e2ee)
         throw new Error('e2ee_workspace_unavailable');
-      const { openCliE2eeWorkspaceLegacy } = await import('./e2ee/workspace-legacy');
-      e2ee = await openCliE2eeWorkspaceLegacy({
-        accountId: options.userId,
-        workspaceId: options.workspaceId,
-        genesisHash: options.genesisHash,
-        cloud: options.cloudPort.e2ee,
+      const callbacks = {
         onUnavailable: () => options.logger.debug('e2ee_background_unavailable'),
         onAuthorityConfirmed: options.onEncryptedAuthorityConfirmed,
-        onWindowNotice: options.onEncryptedWindowNotice,
-        onRemoved: async (reason, recorded) => {
+        onRemoved: async (
+          reason: 'member-removed' | 'device-revoked',
+          recorded: boolean
+        ): Promise<void> => {
           const owner = await removalOwner;
           if (!owner) return;
           owner.encryptedRevocation =
@@ -159,22 +193,24 @@ export class Lody {
             throw cause;
           }
         },
-      });
-      // Unimplemented channels cannot inherit their ordinary plaintext sinks.
-      options = {
-        ...options,
-        cloudPort: {
-          ...options.cloudPort,
-          streamsTokens: null,
-          notifications: null,
-          attachmentUpload: null,
-          remotePreview: null,
-          remoteAutomation: undefined,
-          sessionSharing: null,
-          prAssociation: null,
-          githubTokens: null,
-        },
       };
+      if (options.encryptedWorkspace) {
+        // Activation already verified admission and the current key on this owner.
+        e2ee = options.encryptedWorkspace;
+        e2ee.adopt(callbacks);
+      } else {
+        const { openCliE2eeWorkspaceLegacy } = await import('./e2ee/workspace-legacy');
+        e2ee = await openCliE2eeWorkspaceLegacy({
+          machineId: options.machineId,
+          accountId: options.userId,
+          workspaceId: options.workspaceId,
+          genesisHash: options.genesisHash,
+          cloud: options.cloudPort.e2ee,
+          onWindowNotice: options.onEncryptedWindowNotice,
+          ...callbacks,
+        });
+      }
+      options = { ...options, cloudPort: encryptedRuntimeCloudPort(options.cloudPort) };
     }
     let manager: LoroDocumentManager | undefined;
     let encryptedExecution: EncryptedAgentExecution | undefined;
@@ -191,6 +227,9 @@ export class Lody {
         machineUserId: options.cloudPort.identity.userId,
         ledgerIdentity: e2ee.ledgerIdentity,
         authorizeMachineTarget: e2ee.authorizeMachineTarget,
+        ...(typeof e2ee.subscribeExecutionEvidence === 'function'
+          ? { subscribeEvidence: e2ee.subscribeExecutionEvidence }
+          : {}),
         journal: lazyExecutionJournal(join(e2ee.repositoryDirectory, 'execution.sqlite'), Date.now),
         authorizeExecution: options.authorizeEncryptedExecution ?? e2ee.authorizeExecution,
         isExecutionOpen: e2ee.isExecutionOpen,
@@ -350,6 +389,8 @@ export class Lody {
         machineName: this.machineName,
         cliVersion: pkg.version,
         machineLifecycleCapability: options.machineLifecycleCapability,
+        hostsEncryptedWorkspace: options.hostsEncryptedWorkspace,
+        prepareManagedUpgrade: options.prepareManagedUpgrade,
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         ...(options.localWorkspaceCatalog
           ? { localWorkspaceCatalog: options.localWorkspaceCatalog }
@@ -360,6 +401,8 @@ export class Lody {
         onInboxAvailabilityChange: options.onInboxAvailabilityChange,
         onFatalAuthFailure: options.onFatalAuthFailure,
         onProcessLifecycleAction: options.onProcessLifecycleAction,
+        isMachineIdentityRestoreIdle: options.isMachineIdentityRestoreIdle,
+        sealMachineIdentityRestore: options.sealMachineIdentityRestore,
         workspaceWatchCoordinator: options.workspaceWatchCoordinator,
         readWorkspaceAccess: options.readWorkspaceAccess,
         remoteAutomation: options.remoteAutomation,
@@ -390,7 +433,9 @@ export class Lody {
       this.machineId,
       (input) => this.runtime.offerEncryptedRpcTurn(input),
       (event) => this.logger.debug('[e2ee-rpc-timing]', event),
-      (request, context) => this.runtime.handleEncryptedFeatureRpc(request, context)
+      (request, context) => this.runtime.handleEncryptedFeatureRpc(request, context),
+      (sessionId) => this.runtime.resolveSessionHistoryAccessTarget(sessionId),
+      (sessionId) => this.runtime.resolveSessionExecutionScope(sessionId)
     );
     this.documentManager.ensureMachineFlockDocJoined(this.machineId, { reason: 'lody-start' });
   }
@@ -568,6 +613,7 @@ export class Lody {
   }
 
   prepareForShutdown = () => this.runtime.prepareForShutdown();
+  stopNewIdentityRestoreDispatch = () => this.runtime.stopNewIdentityRestoreDispatch();
 
   cleanup = async () => {
     this.cleanedUp = true;
@@ -619,6 +665,10 @@ export class Lody {
 
   getActiveSessionCount(): number {
     return this.runtime.getActiveSessionCount();
+  }
+
+  isMachineIdentityRestoreIdle(): boolean {
+    return this.runtime.isMachineIdentityRestoreIdle();
   }
 
   async authorizeScheduleExecution(request: ScheduleAuthorizationRequest): Promise<boolean> {
@@ -714,10 +764,6 @@ export class Lody {
   async resolveAutomationWorkdir(sessionId: SessionId): Promise<string | null> {
     const manager = this.runtime.getSessionManager();
     return manager ? await manager.resolveSessionWorkdir(sessionId) : null;
-  }
-
-  onSessionTerminated(handler: (sessionId: SessionId) => void): () => void {
-    return this.runtime.onSessionTerminated(handler);
   }
 
   getConnectedRoomCount(): number {

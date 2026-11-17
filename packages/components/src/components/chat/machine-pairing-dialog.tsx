@@ -1,3 +1,5 @@
+import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { useEffect, useMemo, useState } from 'react';
 import { getServerNow, type MachinePairingStatus } from '@lody/shared';
 import {
@@ -9,7 +11,6 @@ import {
   Terminal,
   TerminalSquare,
 } from 'lucide-react';
-import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
@@ -177,6 +178,7 @@ export type MachinePairingDialogProps = {
   machineId?: string;
   machineName?: string;
   command: string | null;
+  windowsCommand?: string | null;
   expiresAt: number | null;
   creating: boolean;
   createError: string | null;
@@ -200,6 +202,7 @@ export function MachinePairingDialog({
   machineId,
   machineName,
   command,
+  windowsCommand,
   expiresAt,
   creating,
   createError,
@@ -209,6 +212,8 @@ export function MachinePairingDialog({
 }: MachinePairingDialogProps) {
   const { t } = useTranslation();
   const getConvexErrorMessage = useConvexErrorMessage();
+  const [commandPlatform, setCommandPlatform] = useState<'unix' | 'windows'>('unix');
+  const activeCommand = commandPlatform === 'windows' && windowsCommand ? windowsCommand : command;
   const [now, setNow] = useState(() => getServerNow());
 
   useEffect(() => {
@@ -222,8 +227,8 @@ export function MachinePairingDialog({
   );
 
   const copyCommand = async () => {
-    if (!command) return;
-    const copied = await writeTextToClipboard(command);
+    if (!activeCommand) return;
+    const copied = await writeTextToClipboard(activeCommand);
     if (copied) {
       toast.success(t('machinePairing.commandCopied', 'Command copied'));
     } else {
@@ -368,11 +373,33 @@ export function MachinePairingDialog({
                       </p>
                     </div>
                   </div>
+                  {windowsCommand ? (
+                    <div {...stylex.props(installerStyles.platforms)}>
+                      <Button
+                        type="button"
+                        size="small"
+                        variant={commandPlatform === 'unix' ? 'secondary' : 'ghost'}
+                        aria-pressed={commandPlatform === 'unix'}
+                        onClick={() => setCommandPlatform('unix')}
+                      >
+                        {t('machinePairing.unixShell', 'macOS / Linux')}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="small"
+                        variant={commandPlatform === 'windows' ? 'secondary' : 'ghost'}
+                        aria-pressed={commandPlatform === 'windows'}
+                        onClick={() => setCommandPlatform('windows')}
+                      >
+                        {t('machinePairing.windowsShell', 'Windows (PowerShell)')}
+                      </Button>
+                    </div>
+                  ) : null}
                   <div {...stylex.props(styles.command)}>
                     {/* `font-mono` is the app's own global class, and its rule
                         already names `code`, so the element keeps the mono face
                         without the class. */}
-                    <code {...stylex.props(styles.commandText)}>{command}</code>
+                    <code {...stylex.props(styles.commandText)}>{activeCommand}</code>
                     <Tooltip.Root>
                       <Tooltip.Trigger
                         render={
@@ -449,3 +476,7 @@ export function MachinePairingDialog({
     </Dialog.Root>
   );
 }
+
+const installerStyles = stylex.create({
+  platforms: { display: 'flex', gap: space[2], marginTop: space[3] },
+});

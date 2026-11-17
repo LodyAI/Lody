@@ -137,3 +137,22 @@ test('rejects legacy references constructed through renamed Convex factories', (
   assert.deepEqual(control.errors, []);
   assert.deepEqual(control.rows, []);
 });
+
+test('limits the imperative session-access composition exception to its owner and exact endpoints', () => {
+  for (const endpoint of ['listSessionAccess', 'setSessionReadSharedWithTeam']) {
+    const source = `import { cloudOperations } from '@/lib/cloud-api-operations'; client.query(cloudOperations.machines.${endpoint}, input);`;
+    assert.deepEqual(
+      auditLegacyCloudSource('packages/components/src/providers/cloud-session-access.ts', source)
+        .errors,
+      []
+    );
+    assert.equal(auditLegacyCloudSource(file, source).errors.length, 1);
+    assert.equal(
+      auditLegacyCloudSource(
+        'packages/components/src/providers/cloud-session-access.ts',
+        source.replace(endpoint, 'unreviewedMachineOperation')
+      ).errors.length,
+      1
+    );
+  }
+});

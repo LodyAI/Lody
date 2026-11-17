@@ -71,7 +71,6 @@ import {
   type CodeCollabV2SaveTextRequest,
   type CodeCollabV2SaveTextResponse,
   type CodeCollabV2TextFormat,
-  type SessionDiffStats,
   type SessionId,
 } from '@lody/shared';
 import { formatErrorMessage } from '@/utils/format-error';
@@ -103,6 +102,8 @@ import {
   createGitIgnoreScanFilter,
   relativeScanDirectory,
   listGitIgnoredPaths,
+  summarizeAllChanges,
+  type WorkspaceDiffSummary,
 } from './file-index-scan-core';
 import { closeDirectoryQuietly } from './directory-handle';
 import { CODE_COLLAB_IGNORED_DIRECTORY_NAMES } from './workspace-watch-path-policy';
@@ -159,7 +160,8 @@ export type CodeCollabV2FileIndexPublication = {
   readonly signal?: AbortSignal;
   readonly ownerSessionId: SessionId;
   readonly fileIndex: CodeCollabV2FileIndexState;
-  readonly allChangesDiffStats: SessionDiffStats | null;
+  readonly allChangesDiffStats: WorkspaceDiffSummary | null;
+  readonly memberDiffStats?: Readonly<Record<string, WorkspaceDiffSummary | null>>;
   readonly persistAllChangesDiffStats: boolean;
   readonly updatedAtMs: number;
   readonly reconcileRemote: boolean;
@@ -253,9 +255,15 @@ type ResolvedPath = {
 type OwnerSharedState = {
   fileTree: CodeCollabV2FileTreeState;
   allChanges: CodeCollabV2AllChangesState;
+  memberDiffStats?: Readonly<Record<string, WorkspaceDiffSummary | null>>;
   /** Explicitly initialized directories, most recent first; kept first under the FI budget. */
   expandedDirectories: string[];
 };
+
+type RootFileIndexSnapshot = Pick<
+  CodeCollabV2FileIndexPublication,
+  'fileIndex' | 'allChangesDiffStats' | 'memberDiffStats'
+>;
 
 class DiffManifestUnavailableError extends Error {
   constructor(readonly reason: 'base_unavailable' | 'turn_unavailable') {
@@ -269,11 +277,18 @@ type DiffManifestBase = {
   readonly unavailableReason?: 'not_a_git_worktree' | 'no_commits';
 };
 
+type GitDiffComparison = {
+  readonly repository: string;
+  readonly base: string;
+  readonly path: string;
+};
+
+type FileComparisonResult = 'changed' | 'unchanged' | 'unavailable';
+
 type OwnerPublishedSharedState = {
   readonly diffBaseVersion: string;
   readonly diffFileVersions: Readonly<Record<string, string>>;
   readonly fileIndex: CodeCollabV2FileIndexState;
-  readonly persistedAllChangesDiffStats: boolean;
 };
 
 type FileTreePathIndex = {
@@ -342,7 +357,7 @@ const FILE_INDEX_REPAIR_JITTER_FRACTION = 0.2;
 
 export class CodeCollabV2Service {
   private readonly servicesByRoot = new Map<string, CodeCollabV2Service>();
-  private readonly rootIndexes = new Map<SessionId, Map<string, CodeCollabV2FileIndexState>>();
+  private readonly rootIndexes = new Map<SessionId, Map<string, RootFileIndexSnapshot>>();
   private readonly rootPublishChains = new Map<
     SessionId,
     { readonly work: Promise<unknown>; readonly signal?: AbortSignal }
@@ -437,18 +452,41 @@ export class CodeCollabV2Service {
     const work = (
       previous ? settledOrAborted(previous.work, previous.signal) : Promise.resolve()
     ).then(async () => {
+      state.signal?.throwIfAborted();
       const roots =
-        this.rootIndexes.get(state.ownerSessionId) ?? new Map<string, CodeCollabV2FileIndexState>();
-      roots.set(rootId, state.fileIndex);
+        this.rootIndexes.get(state.ownerSessionId) ?? new Map<string, RootFileIndexSnapshot>();
+      roots.set(rootId, {
+        fileIndex: state.fileIndex,
+        allChangesDiffStats: state.allChangesDiffStats,
+        memberDiffStats: state.memberDiffStats,
+      });
       this.rootIndexes.set(state.ownerSessionId, roots);
       const fileIndex: CodeCollabV2FileIndexState = {};
-      for (const [id, entries] of roots)
-        for (const [relativePath, value] of Object.entries(entries))
+      let add = 0;
+      let del = 0;
+      let files = 0;
+      let complete = true;
+      let linesComplete = true;
+      const memberDiffStats = { ...state.memberDiffStats };
+      for (const [id, snapshot] of roots) {
+        for (const [relativePath, value] of Object.entries(snapshot.fileIndex))
           fileIndex[encodeSessionFilePath({ rootId: id, relativePath })] = value;
+        if (snapshot.allChangesDiffStats) {
+          files += snapshot.allChangesDiffStats.files;
+          if (snapshot.allChangesDiffStats.allChange) {
+            add += snapshot.allChangesDiffStats.allChange.add;
+            del += snapshot.allChangesDiffStats.allChange.del;
+          } else linesComplete = false;
+        } else complete = false;
+        if (id.startsWith('member:')) memberDiffStats[id.slice(7)] = snapshot.allChangesDiffStats;
+      }
       return publish({
         ...state,
         fileIndex,
-        allChangesDiffStats: summarizeFileIndexAllChanges(fileIndex),
+        allChangesDiffStats: complete
+          ? { files, allChange: linesComplete ? { add, del } : null }
+          : null,
+        memberDiffStats,
       });
     });
     const entry = { work, signal: state.signal };
@@ -473,15 +511,22 @@ export class CodeCollabV2Service {
         this.deps.resolveWorkspace(sessionId, { ...options, rootId }),
       publishFileIndex: this.deps.publishFileIndex
         ? async (state) => {
+            state.signal?.throwIfAborted();
             const indexes =
               this.rootIndexes.get(state.ownerSessionId) ??
-              new Map<string, CodeCollabV2FileIndexState>();
-            indexes.set(rootId, state.fileIndex);
+              new Map<string, RootFileIndexSnapshot>();
+            indexes.set(rootId, {
+              fileIndex: state.fileIndex,
+              allChangesDiffStats: state.allChangesDiffStats,
+              memberDiffStats: state.memberDiffStats,
+            });
             this.rootIndexes.set(state.ownerSessionId, indexes);
             // Publish through the parent's existing owner chain, retaining its main snapshot.
             return this.deps.publishFileIndex!({
               ...state,
-              fileIndex: indexes.get('main') ?? {},
+              fileIndex: indexes.get('main')?.fileIndex ?? {},
+              allChangesDiffStats: indexes.get('main')?.allChangesDiffStats ?? null,
+              memberDiffStats: indexes.get('main')?.memberDiffStats,
               bumpDiffPaths: state.bumpDiffPaths?.map((relativePath) =>
                 encodeSessionFilePath({ rootId, relativePath })
               ),
@@ -546,6 +591,13 @@ export class CodeCollabV2Service {
 
   private fileKey(relativePath: string): string {
     return encodeSessionFilePath({ rootId: this.deps.rootId ?? 'main', relativePath });
+  }
+
+  private relativeStorePaths(keys: readonly string[]): string[] {
+    return keys.flatMap((key) => {
+      const parsed = decodeSessionFilePath(key);
+      return parsed?.rootId === (this.deps.rootId ?? 'main') ? [parsed.relativePath] : [];
+    });
   }
 
   dispose(): void {
@@ -1029,6 +1081,7 @@ export class CodeCollabV2Service {
     });
     signal.throwIfAborted();
     state.allChanges = allChangesResult.allChanges;
+    state.memberDiffStats = summarizeMemberChanges(state.allChanges, resolved.projectRun);
     const allChangesMs = Date.now() - allChangesStartedAtMs;
     if (allChangesResult.source === 'git') {
       const scanStartedAtMs = Date.now();
@@ -1062,7 +1115,10 @@ export class CodeCollabV2Service {
         ),
         signal
       )) ?? [];
-    const candidatePaths = collectTurnRefreshCandidatePaths(state.allChanges, diffStorePaths);
+    const candidatePaths = collectTurnRefreshCandidatePaths(
+      state.allChanges,
+      this.relativeStorePaths(diffStorePaths)
+    );
     const directoryPaths = collectCandidateDirectoryPaths(candidatePaths);
     const scanStartedAtMs = Date.now();
     for (const directoryPath of directoryPaths) {
@@ -1530,6 +1586,7 @@ export class CodeCollabV2Service {
       digest?: string;
       bytes?: Buffer;
     };
+    let gitComparison: GitDiffComparison | undefined;
     const describe = async (side: 'old' | 'new'): Promise<Side> => {
       let source: DiffBlobSource;
       if (request.turnId !== undefined || (side === 'old' && page.base === 'diff-store')) {
@@ -1589,6 +1646,7 @@ export class CodeCollabV2Service {
           filePath = match.relativePath;
           base = page.memberBases?.[member.path] ?? 'HEAD';
         }
+        gitComparison = { repository, base, path: filePath };
         const tree = await runGit(repository, [
           '--literal-pathspecs',
           'ls-tree',
@@ -1661,7 +1719,7 @@ export class CodeCollabV2Service {
     };
     const base = await describe('old');
     const head = await describe('new');
-    const status =
+    let status: CodeCollabDiffManifestEntry['status'] =
       base.status === 'too_large' || head.status === 'too_large'
         ? 'too_large'
         : base.status === 'binary' || head.status === 'binary'
@@ -1671,6 +1729,20 @@ export class CodeCollabV2Service {
             : base.digest === head.digest
               ? 'not_changed'
               : 'ok';
+    if (status === 'not_changed' && gitComparison) {
+      const comparison = await compareGitFile(gitComparison);
+      if (comparison === 'unavailable') {
+        throw new CodeCollabV2ServiceError(
+          'transient_io',
+          'Git file comparison could not be read.',
+          {
+            path: resolved.workspacePath,
+            retryable: true,
+          }
+        );
+      }
+      if (comparison === 'changed') status = 'ok';
+    }
     const entry: CodeCollabDiffManifestEntry = {
       path: resolved.workspacePath,
       status,
@@ -1922,7 +1994,16 @@ export class CodeCollabV2Service {
         message: newSnapshot.message,
       };
     }
-    if (areDiffSnapshotsEqual(oldSnapshot.snapshot, newSnapshot.snapshot)) {
+    const comparison = await compareCurrentDiffSnapshots(oldSnapshot, newSnapshot.snapshot);
+    if (comparison === 'unavailable') {
+      return {
+        status: 'unavailable',
+        path: resolved.workspacePath,
+        reason: 'transient_io',
+        message: 'Git file comparison could not be read.',
+      };
+    }
+    if (comparison === 'unchanged') {
       return {
         status: 'unavailable',
         path: resolved.workspacePath,
@@ -2051,9 +2132,14 @@ export class CodeCollabV2Service {
         truncated = true;
         continue;
       }
-      if (areDiffSnapshotsEqual(oldSnapshot.snapshot, newSnapshot.snapshot)) {
-        // Listed as changed but base snapshot equals disk (also covers binary↔binary).
-        // Matches open-current-diff's not_changed.
+      const comparison = await compareCurrentDiffSnapshots(oldSnapshot, newSnapshot.snapshot);
+      if (comparison === 'unavailable') {
+        entries.push({ status: 'deferred', path: workspacePath, ...stats });
+        truncated = true;
+        continue;
+      }
+      if (comparison === 'unchanged') {
+        // Recheck the same pinned Git comparison, including metadata-only changes.
         entries.push({
           status: 'unavailable',
           path: workspacePath,
@@ -2520,13 +2606,23 @@ export class CodeCollabV2Service {
     options.signal?.throwIfAborted();
     replaceFileTreeEntries(state.fileTree, new Map(result.fileTreeEntries), fileTreeIndex);
     state.allChanges = result.allChanges;
+    state.memberDiffStats = summarizeMemberChanges(state.allChanges, resolved.projectRun);
     if (options.publish !== false) {
-      await this.publishPreparedOwnerFileIndex(resolved.ownerSessionId, result.fileIndex, options, {
-        startedAtMs,
-        cloneMs: 0,
-        buildMs: 0,
-        workerMs,
-      });
+      await this.publishPreparedOwnerFileIndex(
+        resolved.ownerSessionId,
+        result.fileIndex,
+        {
+          allChangesDiffStats: summarizeAllChanges(state.allChanges),
+          memberDiffStats: state.memberDiffStats,
+        },
+        options,
+        {
+          startedAtMs,
+          cloneMs: 0,
+          buildMs: 0,
+          workerMs,
+        }
+      );
     }
     return {
       entries: result.fileTreeEntries.length,
@@ -2624,6 +2720,7 @@ export class CodeCollabV2Service {
     });
     options.signal?.throwIfAborted();
     state.allChanges = allChanges.allChanges;
+    state.memberDiffStats = summarizeMemberChanges(state.allChanges, resolved.projectRun);
     await this.ensureAllChangesFileTreeEntries(
       resolved,
       state,
@@ -2753,15 +2850,12 @@ export class CodeCollabV2Service {
       )
     );
     let cachedSnapshotRawBytes = 0;
-    const changedPaths = (
+    const changedPaths = this.relativeStorePaths(
       await waitForCodeCollabTask(
         store.listChangedPaths({ ownerSessionId: resolved.ownerSessionId }),
         options.signal
       )
-    ).flatMap((key) => {
-      const parsed = decodeSessionFilePath(key);
-      return parsed?.rootId === (this.deps.rootId ?? 'main') ? [parsed.relativePath] : [];
-    });
+    );
     const processPath = async (workspacePath: string): Promise<void> => {
       options.signal?.throwIfAborted();
       const oldSnapshot = await store.getEarliestOldSnapshot({
@@ -3033,7 +3127,11 @@ export class CodeCollabV2Service {
     pinnedMemberBases?: Readonly<Record<string, string>>,
     options: { readonly allowDiffStoreFallback?: boolean } = {}
   ): Promise<
-    | { readonly status: 'ready'; readonly snapshot: InternalDiffSnapshot }
+    | {
+        readonly status: 'ready';
+        readonly snapshot: InternalDiffSnapshot;
+        readonly gitComparison?: GitDiffComparison;
+      }
     | { readonly status: 'unavailable' }
   > {
     if (resolved.projectRun) {
@@ -3167,16 +3265,26 @@ export class CodeCollabV2Service {
         } estimatedBytes=${estimatedBytes}`
       );
     }
-    await this.publishPreparedOwnerFileIndexNow(ownerSessionId, fileIndex, options, {
-      startedAtMs,
-      cloneMs,
-      buildMs,
-    });
+    await this.publishPreparedOwnerFileIndexNow(
+      ownerSessionId,
+      fileIndex,
+      {
+        allChangesDiffStats: summarizeAllChanges(allChanges),
+        memberDiffStats: state.memberDiffStats,
+      },
+      options,
+      {
+        startedAtMs,
+        cloneMs,
+        buildMs,
+      }
+    );
   }
 
   private async publishPreparedOwnerFileIndex(
     ownerSessionId: SessionId,
     fileIndex: CodeCollabV2FileIndexState,
+    stats: Pick<CodeCollabV2FileIndexPublication, 'allChangesDiffStats' | 'memberDiffStats'>,
     options: SharedStatePublishOptions = {},
     metrics: {
       readonly startedAtMs?: number;
@@ -3194,6 +3302,7 @@ export class CodeCollabV2Service {
         await this.publishPreparedOwnerFileIndexNow(
           ownerSessionId,
           fileIndex,
+          stats,
           { ...options, signal },
           metrics
         );
@@ -3279,6 +3388,7 @@ export class CodeCollabV2Service {
   private async publishPreparedOwnerFileIndexNow(
     ownerSessionId: SessionId,
     fileIndex: CodeCollabV2FileIndexState,
+    stats: Pick<CodeCollabV2FileIndexPublication, 'allChangesDiffStats' | 'memberDiffStats'>,
     options: SharedStatePublishOptions,
     metrics: {
       readonly startedAtMs?: number;
@@ -3309,14 +3419,14 @@ export class CodeCollabV2Service {
     );
     const equalityStartedAtMs = Date.now();
     const sameFileIndex = previous && codeCollabFileIndexStatesEqual(previous.fileIndex, fileIndex);
-    const persistedAllChangesDiffStats = options.persistAllChangesDiffStats === true;
+    const persistAllChangesDiffStats = options.persistAllChangesDiffStats === true;
     const equalityMs = Date.now() - equalityStartedAtMs;
     if (
       sameFileIndex &&
       !resetDiffGenerations &&
       bumpDiffPaths.length === 0 &&
       options.forcePublish !== true &&
-      (!persistedAllChangesDiffStats || previous.persistedAllChangesDiffStats)
+      !persistAllChangesDiffStats
     ) {
       this.logger.debug(
         `[code-collab] file-index publish skipped ownerSessionId=${ownerSessionId} paths=${pathCount} durationMs=${
@@ -3332,9 +3442,6 @@ export class CodeCollabV2Service {
       diffBaseVersion,
       diffFileVersions,
       fileIndex,
-      persistedAllChangesDiffStats:
-        persistedAllChangesDiffStats ||
-        (sameFileIndex === true && previous.persistedAllChangesDiffStats),
     };
     this.publishedStateByOwnerSessionId.set(ownerSessionId, nextPublishedState);
     const publishStartedAtMs = Date.now();
@@ -3349,7 +3456,7 @@ export class CodeCollabV2Service {
             fileIndex,
             resetDiffGenerations,
             bumpDiffPaths,
-            allChangesDiffStats: summarizeFileIndexAllChanges(fileIndex),
+            ...stats,
             persistAllChangesDiffStats: options.persistAllChangesDiffStats === true,
             updatedAtMs,
             reconcileRemote: options.forcePublish === true || previous === undefined,
@@ -3403,7 +3510,7 @@ export class CodeCollabV2Service {
       }
       if (!options.signal?.aborted || options.signal.reason instanceof CodeCollabTaskTimeoutError) {
         this.scheduleOwnerFileIndexRepair(ownerSessionId, {
-          persistAllChangesDiffStats: persistedAllChangesDiffStats,
+          persistAllChangesDiffStats,
         });
       }
       throw error;
@@ -3550,23 +3657,24 @@ function cloneAllChangesState(state: CodeCollabV2AllChangesState): CodeCollabV2A
   return next;
 }
 
-function summarizeFileIndexAllChanges(
-  fileIndex: CodeCollabV2FileIndexState
-): SessionDiffStats | null {
-  let add = 0;
-  let del = 0;
-  for (const value of Object.values(fileIndex)) {
-    const change = value === true || !('change' in value) ? undefined : value.change;
-    if (change === undefined) {
-      continue;
-    }
-    if (change === true || change.diff === undefined) {
-      return null;
-    }
-    add += change.diff[0];
-    del += change.diff[1];
+function summarizeMemberChanges(
+  changes: CodeCollabV2AllChangesState,
+  run: SessionProjectRun | undefined
+): Readonly<Record<string, WorkspaceDiffSummary | null>> | undefined {
+  if (!run) return undefined;
+  const members = Object.entries(run.members)
+    .filter(([, member]) => member.access !== 'additional' && member.access !== 'link')
+    .sort(([, a], [, b]) => b.path.length - a.path.length);
+  const grouped = new Map(
+    members.map(([id]) => [id, [] as [string, CodeCollabV2AllChangesValue][]])
+  );
+  for (const [file, change] of Object.entries(changes)) {
+    const owner = members.find(([, member]) => file.startsWith(member.path + '/'));
+    if (owner) grouped.get(owner[0])?.push([file, change]);
   }
-  return { allChange: { add, del } };
+  return Object.fromEntries(
+    [...grouped].map(([id, entries]) => [id, summarizeAllChanges(Object.fromEntries(entries))])
+  );
 }
 
 function normalizeWorkspacePath(
@@ -4328,38 +4436,79 @@ async function readGitBaseDiffSnapshot(
   workspacePath: string,
   maxBytes: number
 ): Promise<
-  | { readonly status: 'ready'; readonly snapshot: InternalDiffSnapshot }
+  | {
+      readonly status: 'ready';
+      readonly snapshot: InternalDiffSnapshot;
+      readonly gitComparison: GitDiffComparison;
+    }
   | { readonly status: 'unavailable' }
 > {
+  const ready = (snapshot: InternalDiffSnapshot) => ({
+    status: 'ready' as const,
+    snapshot,
+    gitComparison: { repository: workspaceRoot, base: baseCommit, path: workspacePath },
+  });
   const objectSpec = `${baseCommit}:${workspacePath}`;
   const exists = await runGit(workspaceRoot, ['cat-file', '-e', objectSpec]);
   if (!exists.ok) {
-    return { status: 'ready', snapshot: { kind: 'missing' } };
+    return ready({ kind: 'missing' });
   }
   const objectType = await runGit(workspaceRoot, ['cat-file', '-t', objectSpec]);
   if (!objectType.ok || objectType.stdout.trim() !== 'blob') {
-    return { status: 'ready', snapshot: { kind: 'binary' } };
+    return ready({ kind: 'binary' });
   }
   const objectSize = await runGit(workspaceRoot, ['cat-file', '-s', objectSpec]);
   const size = Number(objectSize.ok ? objectSize.stdout.trim() : NaN);
   if (Number.isFinite(size) && size > maxBytes) {
-    return { status: 'ready', snapshot: { kind: 'too_large' } };
+    return ready({ kind: 'too_large' });
   }
   const blob = await runGitBuffer(workspaceRoot, ['show', objectSpec], maxBytes + 1);
   if (!blob.ok) {
     return { status: 'unavailable' };
   }
   if (blob.stdout.byteLength > maxBytes) {
-    return { status: 'ready', snapshot: { kind: 'too_large' } };
+    return ready({ kind: 'too_large' });
   }
   if (hasBinaryNul(blob.stdout)) {
-    return { status: 'ready', snapshot: { kind: 'binary' } };
+    return ready({ kind: 'binary' });
   }
   try {
-    return { status: 'ready', snapshot: { kind: 'text', text: decodeUtf8(blob.stdout) } };
+    return ready({ kind: 'text', text: decodeUtf8(blob.stdout) });
   } catch {
-    return { status: 'ready', snapshot: { kind: 'binary' } };
+    return ready({ kind: 'binary' });
   }
+}
+
+async function compareGitFile(comparison: GitDiffComparison): Promise<FileComparisonResult> {
+  const result = await runGit(comparison.repository, [
+    '--literal-pathspecs',
+    'diff',
+    '--raw',
+    '--no-ext-diff',
+    '--no-textconv',
+    '--no-renames',
+    comparison.base,
+    '--',
+    comparison.path,
+  ]);
+  if (!result.ok) return 'unavailable';
+  return result.stdout.length === 0 ? 'unchanged' : 'changed';
+}
+
+async function compareCurrentDiffSnapshots(
+  base: { readonly snapshot: InternalDiffSnapshot; readonly gitComparison?: GitDiffComparison },
+  current: InternalDiffSnapshot
+): Promise<FileComparisonResult> {
+  const sameContent = areDiffSnapshotsEqual(base.snapshot, current);
+  if (
+    base.gitComparison &&
+    base.snapshot.kind === current.kind &&
+    (base.snapshot.kind === 'binary' || sameContent)
+  ) {
+    // Equal text can still have mode changes; binary markers carry no content identity.
+    return compareGitFile(base.gitComparison);
+  }
+  return sameContent ? 'unchanged' : 'changed';
 }
 
 async function diffSnapshotLineStats(
@@ -4382,8 +4531,8 @@ function areDiffSnapshotsEqual(left: InternalDiffSnapshot, right: InternalDiffSn
   if (left.kind !== right.kind) {
     return false;
   }
-  // A too-large marker carries no content identity, so it cannot prove equality.
-  if (left.kind === 'too_large') {
+  // Placeholder kinds carry no content identity, so they cannot prove equality.
+  if (left.kind === 'too_large' || left.kind === 'binary') {
     return false;
   }
   return left.kind !== 'text' || left.text === (right as { readonly text: string }).text;

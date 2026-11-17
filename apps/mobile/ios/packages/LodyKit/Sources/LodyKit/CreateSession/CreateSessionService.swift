@@ -10,6 +10,7 @@ struct CreateSessionService {
   var writePrefs: (_ key: String, _ prefs: CreatePrefs) -> Void
   var put: (_ userId: String, _ workspaceId: String, _ json: String) -> Task<Void, Error>
   var persistShare = true
+  var workspaceMode: (String) -> WorkspaceContentMode = { WorkspaceModePins.shared.mode($0) }
   var refreshCapability: (_ workspace: String, _ config: String) async throws -> Void = { _, _ in }
   var cachedOptions: (_ userId: String, _ workspaceId: String, _ projectId: String?) async -> CreationOptions? = { _, _, _ in nil }
   /// Agent Roles readable by this user (runtime `agentRoles` list); none without a runtime.

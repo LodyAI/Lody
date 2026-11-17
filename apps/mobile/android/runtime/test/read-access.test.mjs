@@ -55,7 +55,7 @@ test('only scoped catalog reads reach fetch, with cookies and redirects disabled
  for (const url of ['https://evil.example.org/ds/lody/workspace%3Ameta','https://streams.example.org/ds/lody/other%3Ameta','https://streams.example.org/ds/lody/workspace%3Arpc','https://streams.example.org/script.js']) {
   await assert.rejects(access.fetch(url),/network_denied/);
  }
- await assert.rejects(access.fetch('https://streams.example.org/ds/lody/workspace%3Amf%3Amachine',{method:'POST',body:'write'}),/network_denied/);
+ await assert.rejects(access.fetch('https://streams.example.org/ds/lody/workspace%3Amf%3Amachine',{method:'PUT',body:'write'}),/network_denied/);
  assert.equal(calls.length,1);
 });
 test('background aborts active response bodies and defers new requests until foreground',async()=>{
@@ -78,7 +78,13 @@ test('workspace session reads are allowed while other workspaces and deletes are
 
 test('creation permissions stay inside workspace and separate stream purposes', async()=>{
  const access=createReadAccess(async()=>new Response('ok'));access.configure(config);
- for(const [stream,method] of [['workspace:meta','POST'],['workspace:s:s1','PUT'],['workspace:s:s1','POST'],['workspace:rpc:req:m','POST'],['workspace:rpc:res:m:r','PUT'],['workspace:rpc:res:m:r','GET']])assert.equal(await(await access.fetch('https://streams.example.org/ds/lody/'+encodeURIComponent(stream),{method})).text(),'ok');
- for(const [stream,method] of [['other:s:s1','POST'],['workspace:mf:m','POST'],['workspace:meta','PUT'],['workspace:rpc:req:m','GET'],['workspace:rpc:res:m:r','POST'],['workspace:s:s1/bootstrap','POST']])await assert.rejects(access.fetch('https://streams.example.org/ds/lody/'+encodeURIComponent(stream),{method}),/network_denied/);
+ for(const [stream,method] of [['workspace:mf:m','POST'],['workspace:meta','POST'],['workspace:s:s1','PUT'],['workspace:s:s1','POST'],['workspace:rpc:req:m','POST'],['workspace:rpc:res:m:r','PUT'],['workspace:rpc:res:m:r','GET'],['workspace:wf:workspace','GET'],['workspace:wf:workspace','POST'],['workspace:wf:workspace','PUT'],['shortcut-index:workspace:u1:private','GET'],['shortcut-index:workspace:u1:workspace','POST'],['shortcut-body:doc-1','PUT'],['shortcut-body:doc-1','GET']])assert.equal(await(await access.fetch('https://streams.example.org/ds/lody/'+encodeURIComponent(stream),{method})).text(),'ok');
+ for(const [stream,method] of [['other:s:s1','POST'],['workspace:mf:m','PUT'],['workspace:mf:m','DELETE'],['other:mf:m','POST'],['workspace:meta','PUT'],['workspace:rpc:req:m','GET'],['workspace:rpc:res:m:r','POST'],['workspace:s:s1/bootstrap','POST'],['workspace:wf:workspace','DELETE'],['other:wf:workspace','GET'],['workspace:wf:other','GET'],['shortcut-index:other:u1:private','GET'],['shortcut-index:workspace:u1:public','GET'],['shortcut-body:doc-1','DELETE']])await assert.rejects(access.fetch('https://streams.example.org/ds/lody/'+encodeURIComponent(stream),{method}),/network_denied/);
  access.setActive(false);await assert.rejects(access.fetch('https://streams.example.org/ds/lody/workspace%3As%3As1',{method:'POST'}),/inactive_write/);
+});
+
+test('schedule streams: the registry and one schedule doc are created, read and appended inside the workspace',async()=>{
+ const access=createReadAccess(async()=>new Response('ok'));access.configure(config);
+ for(const [stream,method] of [['workspace:sr','GET'],['workspace:sr','POST'],['workspace:sr','PUT'],['workspace:sr/bootstrap','GET'],['workspace:schedule:s1','PUT'],['workspace:schedule:s1','POST'],['workspace:schedule:s1','GET']])assert.equal(await(await access.fetch('https://streams.example.org/ds/lody/'+encodeURIComponent(stream).replace('%2F','/'),{method})).text(),'ok');
+ for(const [stream,method] of [['workspace:sr','DELETE'],['other:sr','GET'],['other:schedule:s1','PUT'],['workspace:schedule:s1','DELETE'],['workspace:schedule:a:b','PUT'],['workspace:schedule:s1/bootstrap','POST']])await assert.rejects(access.fetch('https://streams.example.org/ds/lody/'+encodeURIComponent(stream).replace('%2F','/'),{method}),/network_denied/);
 });

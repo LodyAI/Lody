@@ -16,15 +16,21 @@ merging blocks for cross-paragraph selection. The preview sends no network
 writes. Sending preview input appends a local user message and starts a simulated
 reply. Tapping a tool in the process sheet simulates a failure.
 
-Each assistant turn starts with a static duration row. Local submission publishes
+Each assistant turn starts with a static, text-only duration row. Local submission publishes
 it immediately; an authoritative assistant shell takes over the same stable row
-before server process and answer rows render below it.
+before server process and answer rows render below it. Running command summaries
+shimmer; hidden thinking calls do not close the last visible tool group. Earlier
+groups stop shimmering when visible prose follows them, and Reduce Motion suppresses
+the animation. User bubbles collapse to six measured lines above Expand; expansion
+and copy retain the complete message. Agent footers contain Copy, Info and Fork,
+with prose-aligned glyphs 32 pt apart and time 12 pt after the last glyph.
+The footer has no More menu or message-sharing actions.
 
 Verify: scroll history; replay at the bottom; open the process entry while text
 arrives inside the process sheet; completion folds intermediate rows into the process entry with a 220 ms transition;
 check multiline input and interactive keyboard dismissal; repeat in dark mode.
 
-The RN page owns navigation and cloud actions; LodyKit owns collection cells,
+The native session controller owns navigation and cloud actions; LodyKit owns collection cells,
 Markdown, text pacing, expansion, measured row heights, keyboard and input state.
 MarkdownView parses Markdown, including unfinished input; the active tail is parsed
 on a serial background queue and parse results are cached by source text and streaming state.
@@ -117,3 +123,16 @@ Open it in a browser, adjust the position curve, arc, landing spring and squash,
 then copy the exported values into `ios/Chat/ChatThrowCurve.swift`. The page
 models the same tracks Swift samples into the position keyframes; `arcHeight`
 in the page is absolute, Swift scales it by path length (`arcRatio`).
+
+Operation-event coverage lives in the existing `session-runtime` suite and
+`chat-tools`, `chat-render`, and `session-rows` native cases. It checks persisted
+receipt preservation and reloads, progress updates, duplicate-success visibility,
+failures/cancellations/uncertain batches, saved replies, live title resolution,
+five-row grouping across creation records, separate reply/navigation targets, and
+cycle-safe relations with exact Tab targets and missing/archived opener roots.
+Rendering checks cover aligned provider/title/status rows and live-to-completed reuse;
+relation checks cover continuing ancestor rails and terminating final branches.
+Contained Tabs share their root row; rendering verifies horizontal overflow,
+directional fades without scrollbars, exact Tab targets and saved reply access.
+The native tree reads the current catalog and subscribes to the session source;
+it never owns a second history subscription.

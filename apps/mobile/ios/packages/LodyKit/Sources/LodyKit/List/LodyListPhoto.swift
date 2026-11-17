@@ -9,7 +9,7 @@ enum LodyListPhoto {
   private static let cache = NSCache<NSURL, UIImage>()
   private static let originals = NSCache<NSURL, UIImage>()
   private static var waiters: [URL: [(UIImage?) -> Void]] = [:]
-  private static let disk = PhotoDiskCache(directory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("avatars-v1"))
+  private static let disk = PhotoDiskCache(directory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("avatars-v1\(BackendEnvironment.storageSuffix)"))
   private static let photoIO = DispatchQueue(label: "ai.lody.avatar-cache", qos: .utility)
   private static var tasks: [URL: URLSessionDataTask] = [:]
 
@@ -117,6 +117,16 @@ enum LodyListPhoto {
       asset.register(draw(text, in: CGRect(x: 0, y: 0, width: side, height: side), traits: traits), with: traits)
     }
     return asset.image(with: .current)
+  }
+
+  /// An emoji as an untinted image, sized to sit where a row's symbol would.
+  static func emoji(_ glyph: String, side: CGFloat) -> UIImage {
+    let bounds = CGRect(x: 0, y: 0, width: side, height: side)
+    return UIGraphicsImageRenderer(bounds: bounds).image { _ in
+      let label = NSAttributedString(string: glyph, attributes: [.font: UIFont.systemFont(ofSize: side * 0.82)])
+      let size = label.size()
+      label.draw(at: CGPoint(x: (side - size.width) / 2, y: (side - size.height) / 2))
+    }.withRenderingMode(.alwaysOriginal)
   }
 
   private static func draw(_ text: String, in bounds: CGRect, traits: UITraitCollection) -> UIImage {

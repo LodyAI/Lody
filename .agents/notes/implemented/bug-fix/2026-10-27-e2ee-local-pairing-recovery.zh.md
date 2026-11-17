@@ -12,7 +12,7 @@ PR: [#1945](https://github.com/LodyAI/Lody/pull/1945)
 
 ## 决策与责任
 
-Core 保留现有 KEK、认证保护格式和用途域/genesis/公钥绑定。新凭证独占发布到 `device-credential-${genesis}-${signingKey}.sealed`，精确重试读取获胜原件。新位置缺失时可只读检查旧 genesis 位置，不复制或重写。必须校验 AEAD 和完整预期 AAD。仅在显式准备时，同 genesis、其他公钥的真实当前格式凭证被视为其他身份的保留证据，随后为新身份生成独立凭证。新位置损坏不能回退；旧位置损坏或属于其他 genesis 时不能借此创建凭证。这是同一当前格式的文件名兼容，不是迁移，也不支持旧保护格式。
+Core 保留现有 KEK、认证保护格式和用途域/genesis/公钥绑定。新凭证独占发布到 `device-credential-${genesis}-${signingKey}.sealed`，精确重试读取获胜原件。新位置损坏时按损坏失败。旧的仅含 genesis 的位置只在 2026-10-26 到 #1945 之间的未发布构建中写入，当时加密工作区尚未上线，因此不再读取。
 
 CLI 仅允许新的显式会话替换 device 原件丢失的已发布身份。旧 material、admission、runtime 目录保留。运行日志和已安装密钥存储的路径仍包含签名公钥，替代身份不会重开旧身份的 epoch 密钥密文。已发布凭证路径与未完成 generation 分开判断，保管或 device 创建前的临时失败仍可重试，无需回退所有权。旧 genesis 位置只有在没有同 key 新路径遮挡读取，且 AAD 与凭证 hash 完整验证后，才可被识别为已发布证据。未发布 creating generation 只要还有自己的原件凭证，就不能替换缺失的 device；同范围接管和 superseded fencing 保持。KEK/selector 缺失、不安全权限、device 非 ENOENT 错误仍失败。
 

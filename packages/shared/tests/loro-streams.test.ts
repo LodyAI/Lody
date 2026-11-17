@@ -1,4 +1,10 @@
+import { build } from 'esbuild';
+import { fileURLToPath } from 'node:url';
+import { runInNewContext } from 'node:vm';
+import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
 import { describe, expect, it } from 'vitest';
+import { LoroDoc } from 'loro-crdt';
+import { StreamsCrdt, createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
 
 import {
   DEFAULT_LORO_STREAMS_BASE_URL,
@@ -20,6 +26,30 @@ const workspaceId = 'workspace-1' as WorkspaceId;
 const sessionId = 'session-1' as SessionId;
 
 describe('loro streams helpers', () => {
+  it('lets a Convex isolate bundle and execute protocol helpers without loading snapshot compression', async () => {
+    const result = await build({
+      stdin: {
+        contents:
+          'import { getServerNow } from "@lody/shared"; globalThis.clockResult = getServerNow();',
+        resolveDir: fileURLToPath(new URL('..', import.meta.url)),
+      },
+      bundle: true,
+      platform: 'browser',
+      format: 'iife',
+      write: false,
+      logLevel: 'silent',
+    });
+    const context = {
+      Date: class extends Date {
+        static now() {
+          return 123456;
+        }
+      },
+      clockResult: 0,
+    };
+    runInNewContext(result.outputFiles[0]!.text, context);
+    expect(context.clockResult).toBe(123456);
+  });
   it('requires an injected base url and normalizes it', () => {
     expect(DEFAULT_LORO_STREAMS_BASE_URL).toBe('https://streams.invalid');
     expect(() => getLoroStreamsBaseUrl(undefined)).toThrow(/must be provided/);
@@ -149,4 +179,48 @@ describe('loro streams helpers', () => {
     expect(shardUrls?.other?.[1]).toBe('https://api-b.streams.example.com');
     expect(shardUrls?.largePostMinBytes).toBe(LORO_STREAMS_LARGE_POST_SHARD_MIN_BYTES);
   });
+});
+
+describe('Streams bootstrap with the Lody snapshot codec', () => {
+  it.each([false, true])(
+    'imports a real document snapshot (compressed=%s) at its continuation offset',
+    async (compressed) => {
+      const author = new LoroDoc();
+      author.getMap('state').set('value', 'restored');
+      author.commit();
+      const snapshot = author.export({ mode: 'snapshot' });
+      const body = compressed ? await streamsSnapshotCodec.compress(snapshot) : snapshot;
+      const replica = new LoroDoc();
+      const transport = new StreamsCrdt({
+        streamUrl: 'https://streams.example.com/v1/streams/snapshot-test',
+        adapter: createLoroDocAdapter(replica),
+        snapshotCodec: streamsSnapshotCodec,
+        fetch: async (input) => {
+          expect(String(input)).toContain('/bootstrap');
+          const bytes = Buffer.concat([
+            Buffer.from('--snapshot-boundary\r\nContent-Type: application/octet-stream\r\n\r\n'),
+            body,
+            Buffer.from('\r\n--snapshot-boundary--\r\n'),
+          ]);
+          return new Response(bytes, {
+            headers: {
+              'Content-Type': 'multipart/mixed; boundary=snapshot-boundary',
+              'Stream-Snapshot-Offset': '123',
+              'Stream-Next-Offset': '123',
+              'Stream-Up-To-Date': 'true',
+            },
+          });
+        },
+      });
+      try {
+        const result = await transport.catchup();
+        expect(result.ok).toBe(true);
+        expect(replica.toJSON()).toEqual(author.toJSON());
+      } finally {
+        await transport.close();
+        replica.free();
+        author.free();
+      }
+    }
+  );
 });

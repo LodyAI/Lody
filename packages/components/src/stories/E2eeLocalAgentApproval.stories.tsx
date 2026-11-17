@@ -31,7 +31,12 @@ const native = (
 const meta = {
   title: 'Components/E2eeLocalAgentApproval',
   component: E2eeLocalAgentApproval,
-  args: { workspaceId: 'synthetic-workspace', enabled: true, runtime: native('file') },
+  args: {
+    workspaceId: 'synthetic-workspace',
+    enabled: true,
+    localAgentRunning: false,
+    runtime: native('file'),
+  },
   parameters: { layout: 'centered' },
 } satisfies Meta<typeof E2eeLocalAgentApproval>;
 export default meta;

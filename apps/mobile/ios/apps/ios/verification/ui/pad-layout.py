@@ -54,10 +54,9 @@ def change_with_sheet(name, change):
 
 restore_portrait(ui)
 pad.show_list(ui)
-if not any(item.get('AXUniqueId') == 'ui-design' for item in ui.state()):
-    tap(max((item['frame'] for item in ui.state() if item.get('AXUniqueId') == 'toggle:ui:local:lody'),
-            key=lambda value: value['width'] * value['height']))
-ui.axe('tap', '--id', 'ui-design', '--tap-style', 'physical', '--post-delay', '.8')
+ui.axe('tap', '--label', catalog.text('inbox.settings.section.view'), '--post-delay', '.2')
+ui.axe('tap', '--label', catalog.text('home.scope.team'), '--post-delay', '.4')
+tap(ui.element('ui-design')['frame'])
 ui.element('session-input')
 title = chat_title()
 assert title, 'The session title is missing'
@@ -87,6 +86,21 @@ try:
     ui.wait(lambda items: not any(item.get('AXLabel') == close_activity for item in items) or None,
             'Activity did not close')
     session_kept('regular')
+
+    # A second collapse must reuse the existing UITab/controller association.
+    # Recreating tabs around the retained navigation controllers crashes UIKit.
+    for cycle in range(3):
+        set_width(ui, 'compact')
+        ui.element('BackButton')
+        session_kept(f'compact-repeat-{cycle}')
+        # A retained conversation can cover a detached Chats view. Exercise the
+        # list itself after every handoff, then reopen the retained conversation.
+        tap(ui.element('BackButton')['frame'])
+        ui.element('home-chat-list')
+        tap(ui.element('ui-design')['frame'])
+        session_kept(f'compact-reopened-{cycle}')
+        set_width(ui, 'regular')
+        session_kept(f'regular-repeat-{cycle}')
 finally:
     set_width(ui, 'system')
     restore_portrait(ui)

@@ -1,47 +1,47 @@
 {
   "name": "claude-code",
-  "sdkVersion": "0.3.316",
-  "version": "2.1.316",
+  "sdkVersion": "0.3.321",
+  "version": "2.1.321",
   "artifacts": {
     "darwin-arm64": {
-      "fileName": "anthropic-ai-claude-agent-sdk-darwin-arm64-0.3.316.tar.zst",
-      "sha256": "77842818e6098a550153e8d1c7a63b0983f125498b6c895110499f4f1c8b9b22",
-      "size": 119111692
+      "fileName": "anthropic-ai-claude-agent-sdk-darwin-arm64-0.3.321.tar.zst",
+      "sha256": "459f75172d7d4a6a73278b628362906cf44add8b5de7e7feda3755e67cb7a9e9",
+      "size": 124597896
     },
     "darwin-x64": {
-      "fileName": "anthropic-ai-claude-agent-sdk-darwin-x64-0.3.316.tar.zst",
-      "sha256": "3f4d7565a831cd1a52d7ed736b20e6af551d5b4fc2cc56f830282c65b951bf23",
-      "size": 125640115
+      "fileName": "anthropic-ai-claude-agent-sdk-darwin-x64-0.3.321.tar.zst",
+      "sha256": "b190aa28a35a795960046b75018931eab85cd59f0391ae08460e311c0a5339c1",
+      "size": 131380965
     },
     "linux-arm64": {
-      "fileName": "anthropic-ai-claude-agent-sdk-linux-arm64-0.3.316.tar.zst",
-      "sha256": "cc7b292a52e03e45a888de0e6023aa5c476617860f383401958f1baa25c436f5",
-      "size": 129920930
+      "fileName": "anthropic-ai-claude-agent-sdk-linux-arm64-0.3.321.tar.zst",
+      "sha256": "36cf53a81f8789b187915bb5539f52d3dc5a292c412ec3b55ad107b2d9a9c4fc",
+      "size": 136837432
     },
     "linux-x64": {
-      "fileName": "anthropic-ai-claude-agent-sdk-linux-x64-0.3.316.tar.zst",
-      "sha256": "04452f4a6c7a49a404fe0a87f6e52c24596ca4ed49cfaeef5c89e8c5b37d1802",
-      "size": 130783817
+      "fileName": "anthropic-ai-claude-agent-sdk-linux-x64-0.3.321.tar.zst",
+      "sha256": "d56fd9d2e86766c084322c869a1fe4531bbedde3e224b7c8dffce39adcd710eb",
+      "size": 137006232
     },
     "linux-arm64-musl": {
-      "fileName": "anthropic-ai-claude-agent-sdk-linux-arm64-musl-0.3.316.tar.zst",
-      "sha256": "28bd8b1093a30018e981a2bc34757693c0dd49adccc6dad0a37bdee3bad0945e",
-      "size": 124728334
+      "fileName": "anthropic-ai-claude-agent-sdk-linux-arm64-musl-0.3.321.tar.zst",
+      "sha256": "80e130ee271474932042a544f66b27f3f624eabd806fc933b6ecd0ce1a45a037",
+      "size": 130071194
     },
     "linux-x64-musl": {
-      "fileName": "anthropic-ai-claude-agent-sdk-linux-x64-musl-0.3.316.tar.zst",
-      "sha256": "477a6c399bf40a9e4a156de3009367480f17e6a5673e1c4ebaafb56d0df51bdf",
-      "size": 125318218
+      "fileName": "anthropic-ai-claude-agent-sdk-linux-x64-musl-0.3.321.tar.zst",
+      "sha256": "fa0cb4aa17673d8ddf0411b7c013d5650b4b6cdedc0dbc80de2e01c1674ad687",
+      "size": 130614790
     },
     "win32-arm64": {
-      "fileName": "anthropic-ai-claude-agent-sdk-win32-arm64-0.3.316.tar.zst",
-      "sha256": "74dbd4362c24b0d2a7bd80cec98532667c9674de1a1af4357c6e8805b054a8ea",
-      "size": 128509718
+      "fileName": "anthropic-ai-claude-agent-sdk-win32-arm64-0.3.321.tar.zst",
+      "sha256": "f590dcbb81e561a352f4be40179ddfc626207685d3b849a75ebed442233fd53b",
+      "size": 133883356
     },
     "win32-x64": {
-      "fileName": "anthropic-ai-claude-agent-sdk-win32-x64-0.3.316.tar.zst",
-      "sha256": "29748e83e96aaacaa0a2a886a252bc48b5aa6cef093cbc09abcc2c43d15cf2e1",
-      "size": 134754474
+      "fileName": "anthropic-ai-claude-agent-sdk-win32-x64-0.3.321.tar.zst",
+      "sha256": "5f2bfa0de7a4d59f0db6d07003f64a851b100838e1c5a0c318b4198bf49e9f98",
+      "size": 139515429
     }
   }
 }

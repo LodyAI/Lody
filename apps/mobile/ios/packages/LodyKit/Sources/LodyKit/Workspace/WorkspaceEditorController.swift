@@ -163,7 +163,7 @@ final class WorkspaceEditorController: LodyFormController {
         LodyShell.shared.finish(from: self, value: nil)
         closeForm()
       } catch {
-        LodyToastOverlay.shared.show(message: error.localizedDescription, kind: "error")
+        LodyToastOverlay.shared.show(message: error.localizedDescription, kind: .error)
       }
       saving = false
       busy = false
@@ -181,7 +181,7 @@ final class WorkspaceEditorController: LodyFormController {
         render()
         setImage(try await service.upload(workspaceId, file))
       } catch {
-        LodyToastOverlay.shared.show(message: error.localizedDescription, kind: "error")
+        LodyToastOverlay.shared.show(message: error.localizedDescription, kind: .error)
       }
       busy = false
       uploading(false)

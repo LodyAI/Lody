@@ -19,6 +19,12 @@ export type StageEpochGroupRequest = EpochStagingWorkspaceRequest & {
   readonly group: EpochStagedGroupDto;
   /** Persisted accounting round, outside all immutable signed bytes. */
   readonly round?: string;
+  /** Ask a backend that supports it to inline the stored group readback in the mutation reply. */
+  readonly includeReadback?: true;
+};
+export type StageEpochGroupReply = {
+  readonly ok: true;
+  readonly group?: EpochStagedGroupDto;
 };
 export type ReadEpochGroupRequest = EpochStagingWorkspaceRequest & {
   readonly key: EpochStagedGroupKeyDto;

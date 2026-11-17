@@ -8,32 +8,29 @@ function fixture(state='created') {
 }
 test('creation persists before first turn and supplies native identity',async()=>{const {c,calls}=fixture();assert.equal((await c.createAndSend(input)).state,'accepted');assert.deepEqual(calls.map(x=>x[0]),['create','ensure','send']);assert.equal(calls[0][1].userId,'u');assert.equal(calls[2][1].id,input.turnId);});
 test('unknown creation is never sent or replayed',async()=>{const {c,calls}=fixture('unknown');assert.equal((await c.createAndSend(input)).state,'unknown');await assert.rejects(c.createAndSend(input),/already_attempted/);assert.equal(calls.length,1);});
-test('invalid selection is rejected before any writes',async()=>{const {c,calls}=fixture();await assert.rejects(c.createAndSend({...input,agentConfigId:'wrong'}),/agent_unavailable/);assert.equal(calls.length,0);});
+test('invalid selection is rejected before any writes',async()=>{const {c,calls}=fixture();assert.equal((await c.createAndSend({...input,agentConfigId:'wrong'})).state,'rejected');assert.equal(calls.length,0);});
 test('cancellation after creation never advances to sending',async()=>{const {c,calls}=fixture();const ctl=new AbortController();ctl.abort();await assert.rejects(c.createAndSend(input,ctl.signal));assert.equal(calls.length,0);});
 test('a lost send acknowledgement is reported without replay',async()=>{
  const calls=[];const runtime={creationOptions:()=>({agents:[{id:'a',machineId:'m',cliType:'builtin',agentType:'codex'}],capabilities:[]}),createSession:async()=>({state:'created'}),ensureSession:async()=>true};
  const c=createCommands(runtime,async()=>{calls.push('send');throw Error('lost')},()=>({workspaceId:'w',userId:'u'}));
  assert.equal((await c.createAndSend(input)).state,'unknown');await assert.rejects(c.createAndSend(input),/already_attempted/);assert.equal(calls.length,1);
 });
-test('only advertised models can be sent',async()=>{const {c,calls}=fixture();await assert.rejects(c.createAndSend({...input,modelId:'invented'}),/invalid_model/);assert.equal(calls.length,0);});
+test('only advertised models can be sent',async()=>{const {c,calls}=fixture();assert.equal((await c.createAndSend({...input,modelId:'invented'})).state,'rejected');assert.equal(calls.length,0);});
 test('the local project reference carries an explicit worktree choice',async()=>{
- const {readFile}=await import('node:fs/promises');
- const source=await readFile(new URL('../vendor/cloud-runtime/src/runtime/create-session.ts',import.meta.url),'utf8');
- const {transform}=await import('esbuild');const vm=await import('node:vm');
- const start=source.indexOf('export async function createSession(');
- const code=(await transform(source.slice(start).replace('export async function','async function'),{loader:'ts'})).code;
+ const {build}=await import('esbuild'); const {Flock}=await import('@loro-dev/flock-wasm/base64');
+ const bundle=await build({stdin:{contents:"export { createSession } from './create-session.ts'",resolveDir:new URL('../vendor/cloud-runtime/src/runtime/',import.meta.url).pathname,loader:'ts'},bundle:true,format:'esm',platform:'browser',write:false,
+  plugins:[{name:'stream-fixture',setup(b){b.onResolve({filter:/^@loro-dev\/streams-client$/},()=>({path:'mock',namespace:'fixture'}));b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:'export class StreamsClient { async create(){return {ok:true,result:{}}} }'}));}}]});
+ const {createSession}=await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
+ const flock=new Flock('android-create-fixture');const replica={flock,client:{append:async()=>({ok:true,result:{}})}};
  for(const worktree of [false,true]) {
-  let meta;
-  class Flock {set(key,value){if(key[0]==='m')meta=value}commit(){}exportJson(){return {}}}
-  const context={Flock,crypto,Date,TextEncoder,attempted:new Set(),quotaReason:()=>undefined,workspaceSessionCount:()=>0,encodeFrame:x=>x,clientFor:async()=>({create:async()=>({ok:true})})};
-  vm.runInNewContext(code+';globalThis.create=createSession',context);
-  const result=await context.create({workspaceId:'w',sessionId:input.sessionId,machineId:'m',agentConfigId:'a',userId:'u',title:'hello',projectId:'m:local:p',useWorktree:worktree},{agents:[{id:'a',machineId:'m',cliType:'builtin',agentType:'codex'}],project:{id:'m:local:p'}},{flock:{get(){},scan(){return []},importJson(){}},client:{append:async()=>({ok:true})}},()=>{});
-  assert.equal(result.state,'created');assert.equal(meta.project.useWorktree===true,worktree);
+  const sessionId=crypto.randomUUID();
+  const result=await createSession({workspaceId:'w',sessionId,machineId:'m',agentConfigId:'a',userId:'u',title:'hello',projectId:'m:local:p',useWorktree:worktree},{agents:[{id:'a',machineId:'m',cliType:'builtin',agentType:'codex'}],project:{id:'m:local:p'}},replica,async()=>({token:'synthetic',gatewayBaseUrl:'https://example.invalid'}));
+  assert.equal(result.state,'created');assert.equal(flock.get(['m',`session-${sessionId}`]).project.useWorktree===true,worktree);
  }
 });
 test('models from another provider of the same type cannot be used',async()=>{
  const runtime={creationOptions:()=>({agents:[{id:'a',machineId:'m',cliType:'builtin',agentType:'codex'}],capabilities:[{machineId:'m',agentConfigId:'other',cliType:'builtin',agentType:'codex',models:[{id:'other-model'}]}]})};
- const c=createCommands(runtime,()=>{},()=>({workspaceId:'w',userId:'u'}));await assert.rejects(c.createAndSend({...input,modelId:'other-model'}),/invalid_model/);
+ const c=createCommands(runtime,()=>{},()=>({workspaceId:'w',userId:'u'}));assert.equal((await c.createAndSend({...input,modelId:'other-model'})).state,'rejected');
 });
 test('runtime projection preserves capabilities for providers of one agent type',async()=>{
  const {readFile}=await import('node:fs/promises'),{transform}=await import('esbuild'),vm=await import('node:vm');
@@ -58,7 +55,7 @@ test('thought-level choices validate and send without a per-model catalog',async
  const capability={machineId:'m',agentConfigId:'a',models:[],reasoningEfforts:{},configOptions:[{id:'thinking',type:'select',category:'thought_level',options:[{id:'high'}]}],reasoningEffortConfigId:'thinking'};
  const runtime={creationOptions:()=>({agents:[{id:'a',machineId:'m'}],capabilities:[capability]}),createSession:async()=>({state:'created'}),ensureSession:async()=>{}};
  const commands=createCommands(runtime,async value=>{sent=value;return {state:'accepted'}},()=>({userId:'u',workspaceId:'w'}));
- await assert.rejects(commands.createAndSend({...input,effort:'invented'}),/invalid_effort/);
+ assert.equal((await commands.createAndSend({...input,effort:'invented'})).state,'rejected');
  assert.equal((await commands.createAndSend({...input,effort:'high'})).state,'accepted');
  assert.equal(sent.reasoningEffort,'high');assert.equal(sent.reasoningEffortConfigId,'thinking');
 });
@@ -86,7 +83,7 @@ test('a new chat can start as an Agent Role bound to the chosen agent, with prov
  assert.equal(create.agentRoleId,'reviewer');assert.equal(create.agentRoleRevision,4);
  assert.equal(send.agentRoleId,'reviewer');assert.equal(send.agentConfigId,'a');assert.deepEqual(send.configOptionValues,{plan_mode:true});
  const other={...input,sessionId:'33333333-3333-4333-8333-333333333333',agentRoleId:'elsewhere'};
- await assert.rejects(c.createAndSend(other),/role_unavailable/,'a Role bound to another agent is refused before any write');
+ assert.equal((await c.createAndSend(other)).state,'rejected','a Role bound to another agent is refused before any write');
  assert.equal(calls.filter(x=>x[0]==='create').length,1);
  await assert.rejects(c.createAndSend({...other,agentRoleId:undefined,configOptionValues:{x:{}}}),/invalid_creation/);
 });
@@ -116,3 +113,29 @@ test('a conversation turn carries the agent switches it changed (Plan, Fast)',as
 
 test('attachment-only creation forwards uploads to the first turn',async()=>{const {c,calls}=fixture();const attachments=[{type:'image',imageId:'image-1',mimeType:'image/png',sizeBytes:10}];assert.equal((await c.createAndSend({...input,text:'',attachments})).state,'accepted');assert.deepEqual(calls.at(-1)[1].attachmentBlocks,attachments);});
 test('invalid attachments reject creation before writes',async()=>{const {c,calls}=fixture();await assert.rejects(c.createAndSend({...input,attachments:[{type:'video'}]}),/invalid_creation/);assert.equal(calls.length,0);});
+
+test('creation the runtime refused unread is rejected; an unanswered write stays unknown and is never replayed',async()=>{
+ for(const [code,state] of [['invalid_params','rejected'],['unsupported_method','rejected'],['runtime_timeout','unknown'],['invalid_result','unknown']]) {
+  const calls=[];
+  const runtime={creationOptions:()=>({agents:[{id:'a',machineId:'m',cliType:'builtin',agentType:'codex'}],capabilities:[]}),createSession:async()=>{calls.push('create');throw Error(code)},ensureSession:async()=>calls.push('ensure')};
+  const c=createCommands(runtime,async()=>{calls.push('send');return {state:'accepted'}},()=>({workspaceId:'w',userId:'u'}));
+  assert.equal((await c.createAndSend(input)).state,state,code);
+  await assert.rejects(c.createAndSend(input),/already_attempted/);
+  assert.deepEqual(calls,['create'],code);
+ }
+});
+test('a failed read of the creation options is rejected before any write',async()=>{
+ const calls=[];
+ const runtime={creationOptions:async()=>{throw Error('runtime_timeout')},createSession:async()=>calls.push('create')};
+ const c=createCommands(runtime,async()=>calls.push('send'),()=>({workspaceId:'w',userId:'u'}));
+ assert.equal((await c.createAndSend(input)).state,'rejected');assert.deepEqual(calls,[]);
+ const disconnected=createCommands(runtime,async()=>calls.push('send'),()=>undefined);
+ assert.equal((await disconnected.createAndSend(input)).state,'rejected');assert.deepEqual(calls,[]);
+});
+test('schedule targets ask for offline computers; new chats and the trailing signal never do',async()=>{
+ const seen=[];const runtime={creationOptions:a=>{seen.push(a);return {agents:[],capabilities:[]}}};
+ const c=createCommands(runtime,async()=>({}),()=>({workspaceId:'w',userId:'u'}));
+ const signal=new AbortController().signal;
+ await c.creationOptions(null,null,true,signal);await c.creationOptions(null,null,signal);await c.creationOptions(null,null,false,signal);
+ assert.deepEqual(seen,[{workspaceId:'w',includeOffline:true},{workspaceId:'w'},{workspaceId:'w'}]);
+});

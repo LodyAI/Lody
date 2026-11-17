@@ -160,7 +160,12 @@ const shortcutScope = {
 
 export const PromptShortcutsParams = z
   .discriminatedUnion('action', [
-    z.object({ ...shortcutScope, action: z.literal('list') }),
+    z.object({
+      ...shortcutScope,
+      action: z.literal('list'),
+      /** Re-read the access directory instead of reusing the runtime's recent copy. */
+      fresh: z.boolean().optional(),
+    }),
     z.object({
       ...shortcutScope,
       action: z.literal('read'),

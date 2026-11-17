@@ -168,7 +168,10 @@ function SidePanelTabBarStory({ pending = false }: { pending?: boolean }) {
 
   return (
     <div {...stylex.props(storyLayout.frame)}>
-      <div {...stylex.props(storyLayoutStylesStyles.stack)}>
+      <div
+        data-testid="side-panel-story-frame"
+        {...stylex.props(storyLayoutStylesStyles.stack)}
+      >
         <SessionSidePanelTabBar
           tabs={tabs}
           activeTabId={activeTabId}
@@ -237,7 +240,7 @@ function DeviceSplitStory({ initialSplit }: { initialSplit: SidePanelTabSplit | 
 
   return (
     <div {...stylex.props(mergedStoryLayout.part1)}>
-      <div {...stylex.props(mergedStoryLayout.part2)}>
+      <div data-testid="side-panel-story-frame" {...stylex.props(mergedStoryLayout.part2)}>
         <SessionSidePanelTabBar
           tabs={tabs}
           activeTabId={activeTabId}

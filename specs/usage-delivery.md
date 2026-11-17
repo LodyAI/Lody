@@ -44,8 +44,7 @@ session ID. The actual ACP session ID and session metadata stay unchanged. Repea
 delivery of a scope stays idempotent without modifying hosted persistence.
 Codex attributes native root-thread counter increments to the model frozen from
 the submitted turn parameters. A native turn is one accounting lifetime and its
-scope; for one release the CLI also reads the legacy Codex-only
-`_meta.codex.usageTurnId` as that scope. This keeps A's earlier tokens out of B's
+scope. This keeps A's earlier tokens out of B's
 new turn.
 Claude scopes each SDK result by its uuid, carrying only what that result added
 to the query-wide reading; a new query() after restart or clear-context counts

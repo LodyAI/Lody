@@ -69,6 +69,25 @@ export function resolveLodyAgentState({
     : { kind: 'unsupported' };
 }
 
+export function supportsLodyAgentConnections(
+  machine: MachineViewMeta,
+  localMachineId: MachineId | null
+) {
+  const local = machine.id === localMachineId;
+  return (
+    machineSupportsProtocolCapability(
+      machine,
+      local ? 'sorbetProviders' : 'sorbetProvidersRemote',
+      1
+    ) &&
+    machineSupportsProtocolCapability(
+      machine,
+      local ? 'sorbetCredentials' : 'sorbetCredentialsRemote',
+      1
+    )
+  );
+}
+
 const styles = stylex.create({
   page: { display: 'flex', flexDirection: 'column', gap: space[6] },
 });
@@ -137,6 +156,7 @@ export function LodyAgentSetting() {
 
 function LodyAgentMachine({ machine }: { machine: MachineViewMeta }) {
   const { t } = useTranslation();
+  const localMachineId = useAtomValue(localMachineIdAtom);
   const configs = useAtomValue(getAgentConfigsByMachineAtomFamily(machine.id));
   const setups = useAtomValue(getProviderSetupsByMachineAtomFamily(machine.id));
   const createSetup = useSetAtom(cmdCreateProviderSetupAtom);
@@ -188,74 +208,74 @@ function LodyAgentMachine({ machine }: { machine: MachineViewMeta }) {
       </SettingsEmptyList>
     );
   }
-  if (state.kind === 'setup') {
-    return (
-      <CompactSection boxed>
-        <ProviderSetupRow
-          setup={state.setup}
-          machine={machine}
-          onRetry={async (setup) => {
-            await retrySetup(setup.id);
-          }}
-          onDelete={async (setup) => {
-            await deleteSetup(setup.id);
-          }}
-        />
-      </CompactSection>
-    );
-  }
-  const { config } = state;
+  const setup = state.kind === 'setup' ? state.setup : undefined;
+  const config = state.kind === 'setup' ? state.setup.config : state.config;
+  const authenticated = () => setConnectionsVersion((version) => version + 1);
   return (
     <>
-      <LodyAgentConnectionsController
-        key={config.id}
-        machineId={machine.id}
-        configId={config.id}
-        supported={
-          machineSupportsProtocolCapability(machine, 'sorbetCredentials', 1) ||
-          machineSupportsProtocolCapability(machine, 'sorbetCredentialsRemote', 1)
-        }
-        refreshVersion={connectionsVersion}
-        signIn={(providerIds) => (
-          <AcpAuthenticationPanel
-            machineId={machine.id}
-            configId={config.id}
-            cliType={config.cliType}
-            agentType={config.agentType}
-            providerName={config.name}
-            runtimeOverrides={config.runtimeOverrides}
-            env={config.env}
-            compact
-            layout="rows"
-            excludedMethodIds={providerIds.map((id) => `sorbet:${id}:api_key`)}
-            onAuthenticated={() => setConnectionsVersion((version) => version + 1)}
+      {setup ? (
+        <CompactSection boxed>
+          <ProviderSetupRow
+            setup={setup}
+            showAuthentication={false}
+            machine={machine}
+            onRetry={async (task) => {
+              await retrySetup(task.id);
+            }}
+            onDelete={async (task) => {
+              await deleteSetup(task.id);
+            }}
           />
-        )}
-        endpointSignIn={(endpoint) => (
-          <AcpAuthenticationPanel
-            machineId={machine.id}
-            configId={config.id}
-            cliType={config.cliType}
-            agentType={config.agentType}
-            providerName={endpoint.name}
-            compact
-            layout="action"
-            onlyMethodId={`sorbet:${endpoint.id}:api_key`}
-            onAuthenticated={() => setConnectionsVersion((version) => version + 1)}
-          />
-        )}
-        onProvidersChanged={async () => {
-          const response = await refreshCapabilities({
-            machineId: machine.id,
-            configId: config.id,
-          });
-          // A Provider without credentials makes the agent require sign-in. That is the
-          // expected next step, not a failure; anything else must be visible.
-          if (!response.success && !response.authRequired)
-            throw new Error(response.error ?? 'ACP credential discovery failed');
-          setConnectionsVersion((version) => version + 1);
-        }}
-      />
+        </CompactSection>
+      ) : null}
+      {!setup || setup.status === 'awaiting-auth' ? (
+        <LodyAgentConnectionsController
+          key={config.id}
+          machineId={machine.id}
+          configId={config.id}
+          supported={supportsLodyAgentConnections(machine, localMachineId)}
+          refreshVersion={connectionsVersion}
+          signIn={(providerIds) => (
+            <AcpAuthenticationPanel
+              machineId={machine.id}
+              configId={config.id}
+              cliType={config.cliType}
+              agentType={config.agentType}
+              providerName={config.name}
+              runtimeOverrides={config.runtimeOverrides}
+              env={config.env}
+              compact
+              layout="rows"
+              excludedMethodIds={providerIds.map((id) => `sorbet:${id}:api_key`)}
+              onAuthenticated={authenticated}
+            />
+          )}
+          endpointSignIn={(endpoint) => (
+            <AcpAuthenticationPanel
+              machineId={machine.id}
+              configId={config.id}
+              cliType={config.cliType}
+              agentType={config.agentType}
+              providerName={endpoint.name}
+              compact
+              layout="action"
+              onlyMethodId={`sorbet:${endpoint.id}:api_key`}
+              onAuthenticated={authenticated}
+            />
+          )}
+          onProvidersChanged={async () => {
+            const response = await refreshCapabilities({
+              machineId: machine.id,
+              configId: config.id,
+            });
+            // A Provider without credentials makes the agent require sign-in. That is the
+            // expected next step, not a failure; anything else must be visible.
+            if (!response.success && !response.authRequired)
+              throw new Error(response.error ?? 'ACP credential discovery failed');
+            setConnectionsVersion((version) => version + 1);
+          }}
+        />
+      ) : null}
     </>
   );
 }

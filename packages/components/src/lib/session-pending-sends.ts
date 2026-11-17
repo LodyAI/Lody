@@ -12,7 +12,7 @@ export type PendingSessionSend = UserTurnSend & {
   /** The user turn id (`entry.id`). */
   id: string;
   workspaceId: string;
-  /** Machine that runs the conversation; decides the same-machine image fallback. */
+  /** Machine that runs the conversation; selects local preparation or transfer. */
   targetMachineId?: MachineId;
   attachments: SessionAttachmentDraft[];
   /** Set when preparation or the local write failed; blocks the conversation's FIFO. */

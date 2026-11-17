@@ -1,7 +1,7 @@
 """Attachment overlay in the production native CreateSessionController host."""
 import sys
 from driver import UI
-from attachment_geometry import check_media_geometry
+from attachment_geometry import check_media_geometry, check_composer_attachment_targets
 import catalog
 
 ui = UI(*sys.argv[1:])
@@ -37,4 +37,6 @@ preview = catalog.text('native.chat.attachment.preview', name='')
 ui.wait(lambda items: any((i.get('AXLabel') or '').startswith(preview) for i in items), 'Photo missing from native form draft')
 assert ui.element(field).get('AXValue') == draft
 ui.capture('native-form-attachment')
+photo_label = next(item['AXLabel'] for item in ui.state() if (item.get('AXLabel') or '').startswith(preview))
+check_composer_attachment_targets(ui, field, photo_label)
 print('PASS: native CreateSessionController preserves draft and attachment across permission and overlay handoff')

@@ -5,7 +5,8 @@ Scope: `packages/components`. The binding rules live in
 this page keeps the reasoning that would otherwise crowd them out.
 
 Native and opted-in browser notifications use the authenticated host operations
-in `lib/push-notifications.ts`; local Electron notifications remain host-owned.
+in `lib/push-notifications.ts`, selecting OneSignal unless the hosted configuration
+explicitly enables direct delivery; local Electron notifications remain host-owned.
 The [direct push client decision](../notes/implemented/architecture/2026-10-16-direct-push-client.md)
 explains registration ownership, logout fencing and the provider boundary.
 
@@ -251,11 +252,21 @@ carries preserved composer text across promotion, while `requestSessionDispatch`
 accelerates the already durable pointer. Binding draft and close rules remain in
 [the product-surface instructions](../../packages/components/src/components/AGENTS.md#entry-points-drafts-and-layout).
 
+`createWorkspaceAcceptedInputs` owns ready Roost input for browser and native
+hosts through their existing document and RPC ports. `createWorkspacePendingSends`
+adds the browser's held-attachment projection over that same coordinator. Hosts
+can supply device-local attachment admission and guide-outcome presentation;
+the shared coordinator retains input identity, acceptance lookup and delivery.
+`createSessionOperationScope` owns cancellable work independently of the browser's
+session-store cache; `createSessionSendResources` adds the existing cache borrows.
+
 Loro ready messages commit to the live local history document. A ready Roost
 input instead appears from the workspace's immutable input projection and saves
-to account/workspace-scoped IndexedDB without waiting for owner RPC. Normal rows
-reuse `UserChatBubble`, including ready media and mention spans, with the ordinary
-pending delivery circle and no separate acceptance badge. The circle remains
+to account/workspace-scoped IndexedDB without waiting for owner RPC. Its write
+transactions request strict durability because the pending record can hold the
+only copy until the owner accepts the input. Normal rows reuse `UserChatBubble`,
+including ready media and mention spans, with the ordinary pending delivery
+circle and no separate acceptance badge. The circle remains
 through local saving and unconfirmed owner work. A positive active owner receipt
 publishes the existing delivery overlay; both the local row and authoritative row
 use it, so history handoff cannot flash back to sending. A persisted `confirmed`

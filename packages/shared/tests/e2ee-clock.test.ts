@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Clock, Effect } from 'effect';
-import { chmodSync, mkdtempSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdtempSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { makeFileE2eeClock } from '../src/node/e2ee-clock-file';
@@ -26,7 +34,6 @@ afterEach(() => {
 });
 
 describe('E2EE file clock', () => {
-
   it.each([
     'rollback',
     'replacement',

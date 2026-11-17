@@ -37,9 +37,9 @@ def open_pr():
     f = entry['frame']
     ui.axe('tap', '-x', str(f['x']+f['width']/2), '-y', str(f['y']+f['height']/2), '--post-delay', '.7')
 
-take('P01','clean','点击机器 · 在线',lambda: tap('session-bar:machine'))
-take('P02','offline','点击机器 · 离线',lambda: tap('session-bar:machine'))
-take('P03','unknown','点击机器 · 未知',lambda: tap('session-bar:machine'))
+take('P01','clean','点击机器 · 在线',lambda: tap('chat-navigation-title'))
+take('P02','offline','点击机器 · 离线',lambda: tap('chat-navigation-title'))
+take('P03','unknown','点击机器 · 未知',lambda: tap('chat-navigation-title'))
 take('P04','clean','点击分支 · 复制分支',lambda: tap('session-bar:context'))
 take('P05','changes','点击分支和变更 · 上下文菜单',lambda: tap('session-bar:context'))
 take('P06','dirty','创建 PR 的更多操作',lambda: tap('session-bar:more'))

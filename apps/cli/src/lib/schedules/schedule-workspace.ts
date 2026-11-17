@@ -1,4 +1,3 @@
-import { LocalAttachmentStore } from '../session-local-attachments';
 import { notificationLabel } from '@lody/shared/notifications';
 import type { RepoRoomSubscription } from 'loro-repo';
 import {
@@ -50,10 +49,7 @@ import {
 import { createScheduleSyncGate } from './schedule-sync-gate';
 import { ScheduleStore } from './schedule-store';
 import { ScheduleEngine, ScheduleConfigurationError } from './schedule-engine';
-import {
-  isQuotaReservationCandidate,
-  isUnassociatedQuotaReservation,
-} from './legacy-quota-reservation';
+import { isQuotaReservationCandidate } from './quota-reservation';
 
 // Ticks plan Schedules serially, so this wait delays every other Schedule. A
 // timeout blocks only this definition until the next tick retries it.
@@ -62,7 +58,6 @@ const DEFINITION_SYNC_TIMEOUT_MS = 8_000;
 export type ScheduleWorkspaceHandle = {
   evaluate: () => Promise<void>;
   dispose: () => Promise<void>;
-  hasUncertainLegacyQuota: (sessionId: SessionId) => boolean;
 };
 
 export async function createScheduleWorkspace(args: {
@@ -87,11 +82,6 @@ export async function createScheduleWorkspace(args: {
 }): Promise<ScheduleWorkspaceHandle> {
   const { manager, workspace, auth } = args;
   const workspaceId = workspace.id as WorkspaceId;
-  const localAttachments = new LocalAttachmentStore({
-    accountId: auth.userId,
-    workspaceId,
-    machineId: auth.machineId,
-  });
   const repository = new ScheduleRepository(manager.repo, workspaceId);
   const store = new ScheduleStore<PreparedSessionInput>();
   const registry = await manager.repo.openFlockDoc(getScheduleRegistryFlockDocId(workspaceId));
@@ -228,22 +218,15 @@ export async function createScheduleWorkspace(args: {
         target
       );
       if (run.message) {
-        const inputBlocks = await Promise.all(
-          run.message.inputBlocks.map(async (block) => {
-            if (block.type !== 'local_attachment') return block;
-            if (
-              workspace.contentMode === 'e2ee' ||
-              block.sessionId !== run.sessionId ||
-              block.turnId !== 'schedule:' + run.scheduleId
-            )
-              throw new Error('Local attachment belongs to another scheduled message');
-
-            return localAttachments.inherit(block, {
-              sessionId: run.sessionId,
-              turnId: run.userTurnId,
-            });
-          })
-        );
+        const inputBlocks = run.message.inputBlocks;
+        if (
+          inputBlocks.some(
+            (block) =>
+              block.type === 'local_attachment' &&
+              (workspace.contentMode === 'e2ee' || block.machineId !== run.machineId)
+          )
+        )
+          throw new Error('Local attachment belongs to another machine');
         prepared = withScheduledMessageInput(
           prepared,
           ScheduledMessageSchema.parse({ ...run.message, inputBlocks })
@@ -447,14 +430,6 @@ export async function createScheduleWorkspace(args: {
   wake();
   return {
     evaluate,
-    hasUncertainLegacyQuota: (sessionId) =>
-      store
-        .unfinishedForSession(workspaceId, sessionId)
-        .some(
-          (run) =>
-            (run.prepared !== undefined || run.state === 'dispatched') &&
-            isUnassociatedQuotaReservation(run)
-        ),
     dispose: async () => {
       disposed = true;
       clearInterval(timer);

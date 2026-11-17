@@ -10,6 +10,46 @@ struct SessionPullRequest: Decodable, Equatable, Sendable {
   var merge: String? = nil
 }
 
+/// One repository or folder of a Project group conversation, in placement order.
+struct SessionProjectMember: Decodable, Equatable, Sendable {
+  var id: String
+  /// Path under the conversation's directory, e.g. `api/proto`.
+  var path: String
+  /// `github` or `local`.
+  var kind: String
+  var depth = 0
+  var submodule = false
+  /// `additional` / `link`: a local folder used in place, with no branch or PR.
+  var access: String?
+  var repoFullName: String?
+  var branch: String?
+  var diff: SessionDiff?
+  var dirty: Bool?
+  var unpushed: Bool?
+  /// The member repository's current PR (the last one recorded for it).
+  var pullRequest: SessionPullRequest?
+
+  /// Web `repoFullName ?? path`.
+  var identity: String { repoFullName ?? path }
+  var inPlace: Bool { access == "additional" || access == "link" }
+}
+
+struct SessionDiff: Decodable, Equatable, Sendable {
+  var add: Int
+  var del: Int
+  var files: Int?
+}
+
+/// The frozen Project group snapshot of a conversation (session meta `projectRun`).
+struct SessionProjectRun: Decodable, Equatable, Sendable {
+  var id: String
+  var name: String
+  var members: [SessionProjectMember]
+
+  /// Current PRs across members, one per repository.
+  var pullRequests: [SessionPullRequest] { members.compactMap(\.pullRequest) }
+}
+
 struct SessionItem: Equatable, Sendable {
   var id: String
   var title = ""
@@ -30,7 +70,13 @@ struct SessionItem: Equatable, Sendable {
   var lastMessageAt: Double?
   var lastReadAt: Double?
   var awaitingUserSince: Double?
+  /// Latest user turn the machine finished (session meta `lastHandledUserMsgId`).
+  var lastHandledUserMsgId: String?
+  /// Latest user turn that ended in failure (session meta `lastFailedUserMsgId`).
+  var lastFailedUserMsgId: String?
   var branchName: String?
+  /// Web `session.baseBranch || project.branch`; the Copy menu offers it beside a different current branch.
+  var baseBranch: String?
   var modelName: String?
   var modelNeverRan = false
   var diff: [String: Int] = [:]
@@ -41,9 +87,12 @@ struct SessionItem: Equatable, Sendable {
   var resume: String?
   var pullRequests: [SessionPullRequest] = []
   var iosSimulatorPreviewRequestId: String?
+  var androidEmulatorPreviewRequestId: String?
   /// Uncommitted changes / local commits the remote lacks (the action bar's Commit & Push).
   var workspaceDirty = false
   var workspaceUnpushed = false
+  /// Present for Project group conversations.
+  var projectRun: SessionProjectRun?
 
   var activityAt: Double { lastMessageAt ?? SessionItem.parse(createdAt) }
 
@@ -54,12 +103,22 @@ struct SessionItem: Equatable, Sendable {
   }
 }
 
+extension SessionItem {
+  /// The latest finished turn failed: web `hasFailedLatestTurn`. A later handled or canceled
+  /// turn moves `lastHandledUserMsgId` on, which retires the marker.
+  var latestTurnFailed: Bool {
+    guard let failed = lastFailedUserMsgId else { return false }
+    return failed == lastHandledUserMsgId
+  }
+}
+
 extension SessionItem: Decodable {
   private enum CodingKeys: String, CodingKey {
     case id, title, status, isTabClosed, archived, pinned, projectId, createdAt, openedBySessionId, openedByRootSessionId
-    case childSessionPlacement, parentSessionId, lastMessageAt, lastReadAt, awaitingUserSince, branchName, lastModel, diff, machineId
-    case cliType, agentType, resume, pullRequests, iosSimulatorPreviewRequestId, userId, agentConfigId
-    case workspaceDirty, workspaceUnpushed
+    case childSessionPlacement, parentSessionId, lastMessageAt, lastReadAt, awaitingUserSince, branchName, baseBranch, lastModel, diff, machineId
+    case lastHandledUserMsgId, lastFailedUserMsgId
+    case cliType, agentType, resume, pullRequests, iosSimulatorPreviewRequestId, androidEmulatorPreviewRequestId, userId, agentConfigId
+    case workspaceDirty, workspaceUnpushed, projectRun
   }
 
   private struct Model: Decodable {
@@ -70,6 +129,7 @@ extension SessionItem: Decodable {
   private struct Diff: Decodable {
     var add: Int?
     var del: Int?
+    var files: Int?
   }
 
   init(from decoder: any Decoder) throws {
@@ -93,20 +153,28 @@ extension SessionItem: Decodable {
     lastMessageAt = value(.lastMessageAt)
     lastReadAt = value(.lastReadAt)
     awaitingUserSince = value(.awaitingUserSince)
+    lastHandledUserMsgId = present(value(.lastHandledUserMsgId))
+    lastFailedUserMsgId = present(value(.lastFailedUserMsgId))
     branchName = present(value(.branchName))
+    baseBranch = present(value(.baseBranch))
     machineId = value(.machineId) ?? ""
     cliType = value(.cliType) ?? ""
     agentType = value(.agentType) ?? ""
     resume = present(value(.resume))
     pullRequests = value(.pullRequests) ?? []
     iosSimulatorPreviewRequestId = present(value(.iosSimulatorPreviewRequestId))
+    androidEmulatorPreviewRequestId = present(value(.androidEmulatorPreviewRequestId))
     workspaceDirty = value(.workspaceDirty) ?? false
     workspaceUnpushed = value(.workspaceUnpushed) ?? false
+    projectRun = value(.projectRun)
     modelNeverRan = values.contains(.lastModel) && ((try? values.decodeNil(forKey: .lastModel)) ?? false)
     if let model: Model = value(.lastModel) {
       modelName = [model.name, model.modelId].compactMap { $0 }.first { !$0.isEmpty } ?? ""
     }
-    if let diff: Diff = value(.diff), let add = diff.add, let del = diff.del { self.diff = ["add": add, "del": del] }
+    if let diff: Diff = value(.diff), let add = diff.add, let del = diff.del {
+      self.diff = ["add": add, "del": del]
+      if let files = diff.files { self.diff["files"] = files }
+    }
   }
 }
 
@@ -116,8 +184,14 @@ struct SessionProject: Decodable, Equatable, Sendable {
   var rootPath = ""
   var machineId = ""
   var repoFullName: String?
+  /// A multi-repository project's GitHub members (`projectRun`), in member order.
+  var repositories: [String] = []
+  /// A Project group (`group:<id>`): its member count, from the workspace's group list.
+  var memberCount: Int?
 
-  private enum CodingKeys: String, CodingKey { case id, name, rootPath, repoFullName, machineId }
+  var isGroup: Bool { id.hasPrefix("group:") }
+
+  private enum CodingKeys: String, CodingKey { case id, name, rootPath, repoFullName, machineId, repositories }
 
   init(id: String, name: String = "", rootPath: String = "", repoFullName: String? = nil) {
     self.id = id
@@ -133,6 +207,15 @@ struct SessionProject: Decodable, Equatable, Sendable {
     rootPath = (try? values.decodeIfPresent(String.self, forKey: .rootPath)) ?? ""
     machineId = (try? values.decodeIfPresent(String.self, forKey: .machineId)) ?? ""
     repoFullName = (try? values.decodeIfPresent(String.self, forKey: .repoFullName)) ?? nil
+    repositories = (try? values.decodeIfPresent([String].self, forKey: .repositories)) ?? []
+  }
+
+  /// GitHub repositories whose PRs belong to this project: its repository, or a group's members.
+  var githubRepositories: [String] {
+    var result = repositories
+    if let repoFullName, !repoFullName.isEmpty { result.insert(repoFullName, at: 0) }
+    if result.isEmpty, id.hasPrefix("github:") { result.append(String(id.dropFirst(7))) }
+    return result
   }
 }
 
@@ -143,7 +226,10 @@ struct SessionCatalog: Equatable, Sendable {
   var machineNames: [String: String] = [:]
   /// Computer id to OS (`darwin` / `win32` / `linux`), for its icon.
   var machineOs: [String: String] = [:]
+  /// Computer id to `available` / `upgrade-required` for iOS Simulator preview (Macs only).
   var machineSimulators: [String: String] = [:]
+  /// Computer id to `available` when its CLI offers Android Emulator preview, on any OS.
+  var machineEmulators: [String: String] = [:]
 
   func session(_ id: String) -> SessionItem? { sessions.first { $0.id == id } }
 
@@ -166,12 +252,14 @@ struct SessionCatalog: Equatable, Sendable {
       var machineNames: Lossy<[String: String]>?
       var machineOs: Lossy<[String: String]>?
       var machineSimulators: Lossy<[String: String]>?
+      var machineEmulators: Lossy<[String: String]>?
     }
     struct Saved: Decodable { var catalog: Shape }
     guard let shape = try? JSONDecoder().decode(Saved.self, from: saved).catalog else { return nil }
     return SessionCatalog(
       projects: shape.projects.compactMap(\.value), sessions: shape.sessions.compactMap(\.value) + pending,
-      machineIds: shape.machineIds.compactMap(\.value), machineNames: shape.machineNames?.value ?? [:], machineOs: shape.machineOs?.value ?? [:], machineSimulators: shape.machineSimulators?.value ?? [:]
+      machineIds: shape.machineIds.compactMap(\.value), machineNames: shape.machineNames?.value ?? [:], machineOs: shape.machineOs?.value ?? [:], machineSimulators: shape.machineSimulators?.value ?? [:],
+      machineEmulators: shape.machineEmulators?.value ?? [:]
     )
   }
 }

@@ -1,16 +1,14 @@
 import UIKit
 
+/// One workspace in the switcher panel: its logo (`photo`, the `monogram` until it loads) and name.
 struct LodyMenuItem: Equatable {
   var id: String = ""
   var title: String = ""
-  var symbol: String = ""
-  var selected: Bool?
-  var subtitle: String = ""
-  var disabled: Bool = false
-  var children: [LodyMenuItem] = []
-  /// A remote avatar (workspace logo) drawn as the item's image; `monogram` until it loads.
+  var selected = false
   var photo: String = ""
   var monogram: String = ""
+  var encrypted = false
+  var retrySelection = false
 }
 
 struct LodyMenuAvatar {
@@ -19,18 +17,21 @@ struct LodyMenuAvatar {
   var image: String = ""
 }
 
+/// The workspace capsule. Tapping it opens `WorkspaceSwitcherPanel` anchored below it: a UIMenu
+/// cannot keep long workspace names on one line with a trailing fade.
+@MainActor
 final class LodyMenuButton: UIView {
-  var onSelect: ([String: Any]) -> Void = { _ in }
-  var onSize: ([String: Any]) -> Void = { _ in }
   var selected: ((String) -> Void)?
   var sized: ((CGFloat) -> Void)?
   private let button = UIButton(type: .system)
   private var avatar = LodyMenuAvatar()
   private var photoURL: URL?
   private var photo: UIImage?
+  private var accountEmail = ""
   private var label = ""
   private var labelHidden = false
-  private var detail = ""
+  private var items: [LodyMenuItem] = []
+  private weak var panel: WorkspaceSwitcherPanel?
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError() }
@@ -38,7 +39,7 @@ final class LodyMenuButton: UIView {
   override init(frame: CGRect) {
     super.init(frame: frame)
     button.changesSelectionAsPrimaryAction = false
-    button.showsMenuAsPrimaryAction = true
+    button.addAction(UIAction { [weak self] _ in self?.presentPanel() }, for: .primaryActionTriggered)
     addSubview(button)
   }
 
@@ -50,6 +51,12 @@ final class LodyMenuButton: UIView {
   override func layoutSubviews() {
     super.layoutSubviews()
     button.frame = bounds
+  }
+
+  /// The capsule's identifier is on the control VoiceOver and UI checks actually reach.
+  override var accessibilityIdentifier: String? {
+    get { button.accessibilityIdentifier }
+    set { button.accessibilityIdentifier = newValue }
   }
 
   func setAccessibilityName(_ value: String) {
@@ -81,103 +88,62 @@ final class LodyMenuButton: UIView {
     apply()
   }
 
-  func setDetail(_ value: String) {
-    detail = value
-    apply()
-  }
-
-  private var items: [LodyMenuItem] = []
-  private var loadingPhotos = Set<URL>()
-
-  /// The item's avatar: a cached photo, else its monogram while the photo loads (the menu is
-  /// rebuilt once it arrives), else its SF Symbol.
-  private func image(_ item: LodyMenuItem) -> UIImage? {
-    let side: CGFloat = 24
-    if let url = LodyListPhoto.url(item.photo) {
-      if let photo = LodyListPhoto.cached(url) {
-        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in
-          photo.draw(in: CGRect(x: 0, y: 0, width: side, height: side))
-        }.withRenderingMode(.alwaysOriginal)
-      }
-      if loadingPhotos.insert(url).inserted {
-        LodyListPhoto.load(url) { [weak self] loaded in
-          guard let self else { return }
-          self.loadingPhotos.remove(url)
-          if loaded != nil, self.itemsContainPhoto(url) { self.rebuildMenu() }
-        }
-      }
-    }
-    if !item.monogram.isEmpty { return LodyListPhoto.monogram(item.monogram, side: side).withRenderingMode(.alwaysOriginal) }
-    return item.symbol.isEmpty ? nil : UIImage(systemName: item.symbol)
+  func setAccountEmail(_ value: String) {
+    let email = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard accountEmail != email else { return }
+    accountEmail = email
+    updateMenu()
   }
 
   func setItems(_ value: [LodyMenuItem]) {
     guard items != value else { return }
     items = value
-    rebuildMenu()
+    updateMenu()
   }
 
-  private func itemsContainPhoto(_ url: URL) -> Bool {
-    func contains(_ item: LodyMenuItem) -> Bool {
-      LodyListPhoto.url(item.photo) == url || item.children.contains(where: contains)
-    }
-    return items.contains(where: contains)
+  private func updateMenu() {
+    panel?.update(items: items, accountEmail: accountEmail)
+    if items.isEmpty { panel?.dismiss(animated: true) }
   }
 
-  private func rebuildMenu() {
-    let value = items
-    func action(_ item: LodyMenuItem, state: UIMenuElement.State = .off) -> UIAction {
-      let result = UIAction(
-        title: item.title,
-        image: image(item),
-        attributes: item.disabled ? .disabled : [],
-        state: state
-      ) { [weak self] _ in
-        self?.onSelect(["id": item.id])
-        self?.selected?(item.id)
-      }
-      result.subtitle = item.subtitle.isEmpty ? nil : item.subtitle
-      return result
+  private func presentPanel() {
+    guard !items.isEmpty, panel == nil, var presenter = owningController() else { return }
+    while let presented = presenter.presentedViewController, !presented.isBeingDismissed { presenter = presented }
+    let next = WorkspaceSwitcherPanel(
+      items: items, accountEmail: accountEmail, maxWidth: (window?.bounds.width ?? 375) - 32
+    ) { [weak self] id in self?.selected?(id) }
+    next.modalPresentationStyle = .popover
+    if let popover = next.popoverPresentationController {
+      popover.sourceView = button
+      popover.sourceRect = button.bounds
+      popover.permittedArrowDirections = [.up, .down]
+      popover.delegate = next
     }
+    panel = next
+    presenter.present(next, animated: true)
+  }
 
-    func element(_ item: LodyMenuItem) -> UIMenuElement {
-      if item.children.isEmpty { return action(item) }
-      return UIMenu(title: item.title, subtitle: item.subtitle.isEmpty ? nil : item.subtitle,
-        image: item.symbol.isEmpty ? nil : UIImage(systemName: item.symbol), children: item.children.map(element))
+  private func owningController() -> UIViewController? {
+    var responder: UIResponder? = next
+    while let current = responder {
+      if let controller = current as? UIViewController { return controller }
+      responder = current.next
     }
-
-    let choices = value.compactMap { item -> UIAction? in
-      guard let selected = item.selected else { return nil }
-      return action(item, state: selected ? .on : .off)
-    }
-    var children: [UIMenuElement] = []
-    if !choices.isEmpty {
-      children.append(UIMenu(options: [.displayInline, .singleSelection], children: choices))
-    }
-    let actions = value.compactMap { item in
-      item.selected == nil ? element(item) : nil
-    }
-    if !actions.isEmpty {
-      children.append(UIMenu(options: .displayInline, children: actions))
-    }
-    button.menu = UIMenu(children: children)
+    return nil
   }
 
   private func apply() {
     let tint = lodyTint(avatar.color)
     LodyMenuButtonStyle.apply(
       label: label,
-      detail: detail,
       avatar: LodyMenuButtonStyle.avatarImage(
         text: avatar.text,
         fill: tint ?? .lodyAccent,
-        foreground: tint == nil ? LodyAccentChoice.current.foregroundColor : .white,
+        foreground: tint == nil ? LodyAccent.foregroundColor : .white,
         photo: photo
       ),
       showsLabel: !labelHidden, to: button
     )
-    let width = LodyMenuButtonStyle.unconstrainedWidth(for: button)
-    onSize(["width": width])
-    sized?(width)
+    sized?(LodyMenuButtonStyle.unconstrainedWidth(for: button))
   }
 }

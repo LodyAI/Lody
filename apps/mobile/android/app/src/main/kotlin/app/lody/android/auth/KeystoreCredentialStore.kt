@@ -15,8 +15,8 @@ import javax.crypto.spec.GCMParameterSpec
 
 internal class KeystoreCredentialStore(context: Context, name: String = "account") : CredentialStore {
     init { require(name.matches(Regex("[a-zA-Z0-9_-]+"))) }
-    private val file = AtomicFile(File(context.noBackupFilesDir, "$name.enc"))
-    private val alias = "${context.packageName}.$name.v1"
+    private val file = AtomicFile(File(context.noBackupFilesDir, "$name${app.lody.android.BackendEnvironment.storageSuffix}.enc"))
+    private val alias = "${context.packageName}.$name${app.lody.android.BackendEnvironment.storageSuffix}.v1"
     private val associatedData = alias.toByteArray()
     private fun key(create: Boolean): SecretKey? {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }

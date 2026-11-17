@@ -56,8 +56,8 @@ const baseOptions = {
   },
   updated: {
     items: [] as SidebarUpdatedItem[],
-    collapsed: false,
-    showFull: false,
+    collapsedBuckets: {},
+    showFullBuckets: {},
   },
 };
 
@@ -125,12 +125,69 @@ describe('sidebar navigation model', () => {
           updatedItem('updated-old', '2026-07-16T08:00:00Z'),
           updatedItem('updated-new', '2026-07-16T11:00:00Z'),
         ],
-        collapsed: false,
-        showFull: false,
+        collapsedBuckets: {},
+        showFullBuckets: {},
       },
     });
 
     expect(sessionIds(items)).toEqual(['pinned', 'updated-new', 'updated-old']);
+  });
+
+  it('walks the Status groups in the mobile Home order, skipping folded groups and idle overflow', () => {
+    const at = (hour: number) => `2026-07-16T${String(hour).padStart(2, '0')}:00:00Z`;
+    const idle = Array.from({ length: 21 }, (_, index) => updatedItem(`idle-${index}`, at(index)));
+    const statusItems: SidebarUpdatedItem[] = [
+      ...idle,
+      { ...updatedItem('running', at(23)), isWorking: true, hasUnreadMessages: true },
+      { ...updatedItem('waiting', at(1)), isWaitingPermission: true },
+      { ...updatedItem('ci-failed', at(2)), prStatus: 'open', prCiState: 'f' },
+      { ...updatedItem('draft', at(3)), prStatus: 'draft', prCiState: 's' },
+      { ...updatedItem('unread', at(4)), hasUnreadMessages: true },
+      { ...updatedItem('open-pr', at(5)), prStatus: 'open', prCiState: 'p' },
+      { ...updatedItem('merged', at(22)), prStatus: 'merged' },
+      { ...updatedItem('failed', at(6)), hasFailedTurn: true },
+      // Working again after a failure: the agent may be fixing it.
+      { ...updatedItem('retrying', at(21)), hasFailedTurn: true, isWorking: true },
+    ];
+
+    const items = buildSidebarNavigationItems({
+      ...baseOptions,
+      organizeMode: 'status',
+      updated: { items: statusItems, collapsedBuckets: {}, showFullBuckets: {} },
+    });
+    const ids = sessionIds(items);
+    // Needs you (newest first), just finished, open pull requests, running, then idle.
+    expect(ids.slice(0, 8)).toEqual([
+      'failed',
+      'draft',
+      'ci-failed',
+      'waiting',
+      'unread',
+      'open-pr',
+      'running',
+      'retrying',
+    ]);
+    // A merged pull request is idle; idle alone folds to its first 20 rows.
+    expect(ids.slice(8)).toHaveLength(20);
+    expect(ids[8]).toBe('merged');
+    expect(items.find((item) => item.kind === 'session' && item.sessionId === 'unread')).toEqual({
+      kind: 'session',
+      sessionId: 'unread',
+      groupKey: '__status:finished__',
+    });
+
+    const folded = buildSidebarNavigationItems({
+      ...baseOptions,
+      organizeMode: 'status',
+      updated: {
+        items: statusItems,
+        collapsedBuckets: { attention: true, all: true },
+        showFullBuckets: { idle: true },
+      },
+    });
+    const foldedIds = sessionIds(folded);
+    expect(foldedIds.slice(0, 4)).toEqual(['unread', 'open-pr', 'running', 'retrying']);
+    expect(foldedIds).toHaveLength(4 + 22);
   });
 
   it('matches collapsed sections and each list preview limit', () => {
@@ -170,7 +227,7 @@ describe('sidebar navigation model', () => {
     const updatedPreview = buildSidebarNavigationItems({
       ...baseOptions,
       organizeMode: 'updated',
-      updated: { items: updatedItems, collapsed: false, showFull: false },
+      updated: { items: updatedItems, collapsedBuckets: {}, showFullBuckets: {} },
     });
     expect(sessionIds(updatedPreview)).toHaveLength(20);
 
@@ -178,7 +235,11 @@ describe('sidebar navigation model', () => {
       ...baseOptions,
       organizeMode: 'updated',
       pinnedItems: [updatedItem('pinned', '2026-07-16T12:00:00Z')],
-      updated: { items: updatedItems, collapsed: true, showFull: true },
+      updated: {
+        items: updatedItems,
+        collapsedBuckets: { all: true },
+        showFullBuckets: { all: true },
+      },
     });
     expect(sessionIds(updatedCollapsed)).toEqual(['pinned']);
   });
@@ -195,8 +256,8 @@ describe('sidebar navigation model opened-by tree', () => {
           { ...updatedItem('other', '2026-04-22T09:00:00.000Z') },
           { ...updatedItem('opened', '2026-04-22T08:00:00.000Z'), openedBySessionId: 'opener' },
         ],
-        collapsed: false,
-        showFull: false,
+        collapsedBuckets: {},
+        showFullBuckets: {},
       },
     });
 
@@ -214,8 +275,8 @@ describe('sidebar navigation model opened-by tree', () => {
           { ...updatedItem('opened', '2026-04-22T08:00:00.000Z'), openedBySessionId: 'opener' },
           updatedItem('other', '2026-04-22T07:00:00.000Z'),
         ],
-        collapsed: false,
-        showFull: false,
+        collapsedBuckets: {},
+        showFullBuckets: {},
       },
     });
 
@@ -234,8 +295,8 @@ describe('sidebar navigation model opened-by tree', () => {
           { ...updatedItem('opened', '2026-04-22T08:00:00.000Z'), openedBySessionId: 'opener' },
           updatedItem('other', '2026-04-22T07:00:00.000Z'),
         ],
-        collapsed: false,
-        showFull: false,
+        collapsedBuckets: {},
+        showFullBuckets: {},
       },
     });
 

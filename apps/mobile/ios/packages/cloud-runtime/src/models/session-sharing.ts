@@ -33,37 +33,3 @@ export type ShareProgress = {
   phase: 'capturing' | 'uploading' | 'publishing';
   percent?: number;
 };
-
-/** Credential-free projection of the official published inventory/management entry. */
-export type PublishedShare = {
-  shareId: string;
-  rootSessionId: string;
-  publisherUserId: string;
-  status: 'active' | 'revoked';
-  title: string;
-  revision: number;
-  credentialVersion: number;
-  createdAt: number;
-  updatedAt: number;
-  totalBytes?: number;
-  conversationCount?: number;
-  canManage: boolean;
-  canRevoke: boolean;
-  hasLocalLink: boolean;
-};
-export type PublishedSharePage = {
-  workspaceId: string;
-  userId: string;
-  page: PublishedShare[];
-  isDone: boolean;
-  continueCursor: string;
-};
-export type PublishedSharesRequest = { workspaceId: string } & (
-  | { action: 'list'; cursor?: string | null }
-  | {
-      action: 'detail' | 'copy' | 'open' | 'revoke';
-      shareId: string;
-      rootSessionId: string;
-      expectedRevision?: number;
-    }
-);

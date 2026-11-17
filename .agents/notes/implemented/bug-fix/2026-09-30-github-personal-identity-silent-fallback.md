@@ -55,7 +55,9 @@ So the selector behaved as specified. The defects were observability and state:
   then reports `missing` and the existing Authorize button re-links.
 - Commit identity: a requester with personal identity enabled commits as their
   Lody account. The machine owner otherwise gets the machine's **global** Git
-  identity; repository-level config is never consulted. `SessionManager`
+  identity; repository-level config is never consulted. (Later narrowed: only a Lody-managed
+  shared clone's repository identity is distrusted; see the
+  [native identity note](2026-11-16-native-owner-git-identity.md).) `SessionManager`
   resolves `{ preferMachineIdentity, personalIdentityEnabled }` from the
   credential policy per requester, including requester switches mid-session.
   Identity is still injected per agent process via `GIT_AUTHOR_*` /

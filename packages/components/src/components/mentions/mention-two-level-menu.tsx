@@ -980,7 +980,11 @@ export function MentionTwoLevelMenuBody({
             candidates.length === 0 &&
             (category.status === 'loading' || category.status === 'error')
         );
-        if (view.rankedCandidates.length === 0 && pendingGroups.length === 0) {
+        if (
+          view.rankedCandidates.length === 0 &&
+          pendingGroups.length === 0 &&
+          view.categories.length === 0
+        ) {
           return <Message>{noMatch(view.term)}</Message>;
         }
         return (
@@ -995,6 +999,9 @@ export function MentionTwoLevelMenuBody({
                 sourceLabel={category.label}
                 onSelect={() => onCandidateSelect?.(category, rank)}
               />
+            ))}
+            {view.categories.map((category) => (
+              <CategoryRow key={category.id} category={category} onNavigate={onCategoryNavigate} />
             ))}
             {pendingGroups.map(({ category }) => (
               <React.Fragment key={category.id}>

@@ -36,6 +36,16 @@ function context(genesis: Bytes.GenesisHash, epoch: number) {
     return { genesis: anchor.toBytes(), epoch: number, bytes };
   });
 }
+function historyAad(genesis: Bytes.GenesisHash, epoch: number, baseEpoch?: number) {
+  return Result.gen(function* () {
+    const checked = yield* context(genesis, epoch);
+    if (baseEpoch === undefined)
+      return concat([domain('epoch-history'), checked.genesis, checked.bytes]);
+    const base = yield* context(genesis, baseEpoch);
+    if (baseEpoch >= epoch - 1) return yield* fail('invalid-input');
+    return concat([domain('epoch-abandon-history'), checked.genesis, checked.bytes, base.bytes]);
+  });
+}
 function material(key: Bytes.EpochKey) {
   return Result.try({
     try: () => {
@@ -86,6 +96,7 @@ function commitMaterial(
 export function sealHistoryPacket(input: {
   readonly genesis: Bytes.GenesisHash;
   readonly epoch: number;
+  readonly baseEpoch?: number;
   readonly currentKey: Bytes.EpochKey;
   readonly previousKey: Bytes.EpochKey;
 }): Result.Result<Uint8Array, EpochKeyError> {
@@ -104,12 +115,13 @@ export function sealHistoryPacket(input: {
       catch: () => new EpochKeyError({ code: 'random-unavailable' }),
     });
     if (Result.isFailure(nonce)) return Result.fail(nonce.failure);
-    const aad = concat([domain('epoch-history'), checked.success.genesis, checked.success.bytes]);
+    const aad = historyAad(input.genesis, input.epoch, input.baseEpoch);
+    if (Result.isFailure(aad)) return Result.fail(aad.failure);
     return Result.try({
       try: () =>
         concat([
           nonce.success,
-          xchacha20poly1305(current.success, nonce.success, aad).encrypt(previous!),
+          xchacha20poly1305(current.success, nonce.success, aad.success).encrypt(previous!),
         ]),
       catch: () => new EpochKeyError({ code: 'history-invalid' }),
     });
@@ -121,6 +133,7 @@ export function sealHistoryPacket(input: {
 function openMaterial(input: {
   genesis: Bytes.GenesisHash;
   epoch: number;
+  baseEpoch?: number;
   currentKey: Uint8Array;
   packet: Uint8Array;
 }): Result.Result<Uint8Array, EpochKeyError> {
@@ -132,14 +145,14 @@ function openMaterial(input: {
     input.packet.length !== 72
   )
     return fail('invalid-input');
+  const aad = historyAad(input.genesis, input.epoch, input.baseEpoch);
+  if (Result.isFailure(aad)) return Result.fail(aad.failure);
   const packet = new Uint8Array(input.packet);
   return Result.try({
     try: () =>
-      xchacha20poly1305(
-        input.currentKey,
-        packet.subarray(0, 24),
-        concat([domain('epoch-history'), checked.success.genesis, checked.success.bytes])
-      ).decrypt(packet.subarray(24)),
+      xchacha20poly1305(input.currentKey, packet.subarray(0, 24), aad.success).decrypt(
+        packet.subarray(24)
+      ),
     catch: () => new EpochKeyError({ code: 'history-invalid' }),
   });
 }
@@ -147,6 +160,7 @@ function openMaterial(input: {
 export function openHistoryPacket(input: {
   readonly genesis: Bytes.GenesisHash;
   readonly epoch: number;
+  readonly baseEpoch?: number;
   readonly currentKey: Bytes.EpochKey;
   readonly packet: Uint8Array;
 }): Result.Result<Bytes.EpochKey, EpochKeyError> {
@@ -166,21 +180,30 @@ export function openHistoryPacket(input: {
     previous?.fill(0);
   }
 }
-/** All links/commitments from a real full verified view, or no returned keys. */
+/**
+ * Authenticate `latestKey` at `startEpoch` (the view's current epoch by default),
+ * then verify every link/commitment down to zero, or return no keys.
+ * Requires a genuine full verified view and 0 <= startEpoch <= its current epoch.
+ * The caller owns returned keys.
+ */
 export function recoverLedgerHistory(
   view: LedgerView,
-  latestKey: Bytes.EpochKey
+  latestKey: Bytes.EpochKey,
+  startEpoch?: number
 ): Result.Result<ReadonlyMap<number, Bytes.EpochKey>, EpochKeyError> {
   const scratch = new Map<number, Uint8Array>();
   try {
     // Authenticate the view before inspecting any property.
     const zero = epochHistoryPacket(view, 0);
     if (Result.isFailure(zero)) return fail('unauthorized');
-    const latestEpoch = view.inspectState().epoch.number;
+    const currentEpoch = view.inspectState().epoch.number;
+    const latestEpoch = startEpoch === undefined ? currentEpoch : startEpoch;
+    if (Result.isFailure(Bytes.epochNumber(latestEpoch)) || latestEpoch > currentEpoch)
+      return fail('invalid-input');
     const copied = material(latestKey);
     if (Result.isFailure(copied)) return Result.fail(copied.failure);
     scratch.set(latestEpoch, copied.success);
-    for (let epoch = latestEpoch; epoch >= 0; epoch--) {
+    for (let epoch = latestEpoch; ;) {
       const row = epochHistoryPacket(view, epoch);
       if (Result.isFailure(row)) return fail('history-invalid');
       const key = scratch.get(epoch)!;
@@ -198,10 +221,12 @@ export function recoverLedgerHistory(
           epoch,
           currentKey: key,
           packet: row.success.packet,
+          baseEpoch: row.success.baseEpoch,
         });
         if (Result.isFailure(prior)) return Result.fail(prior.failure);
-        scratch.set(epoch - 1, prior.success);
-      }
+        epoch = row.success.baseEpoch ?? epoch - 1;
+        scratch.set(epoch, prior.success);
+      } else break;
     }
     const result = new Map<number, Bytes.EpochKey>();
     for (const [epoch, key] of scratch) result.set(epoch, Result.getOrThrow(Bytes.epochKey(key)));

@@ -28,6 +28,8 @@ export interface ScrollAreaProps extends Omit<ComponentProps<'div'>, 'children'>
   viewportClassName?: string;
   viewportXstyle?: stylex.StyleXStyles;
   viewportStyle?: CSSProperties;
+  /** Layout constraints for the content wrapper. */
+  contentStyle?: CSSProperties;
   /** Layout/interaction constraints for both tracks; appearance belongs to the tokens. */
   scrollbarClassName?: string;
   scrollbarXstyle?: stylex.StyleXStyles;
@@ -46,6 +48,7 @@ export const ScrollArea = forwardRef<HTMLDivElement, ScrollAreaProps>(function S
     viewportClassName,
     viewportXstyle,
     viewportStyle,
+    contentStyle,
     scrollbarClassName,
     scrollbarXstyle,
     ...rest
@@ -105,7 +108,10 @@ export const ScrollArea = forwardRef<HTMLDivElement, ScrollAreaProps>(function S
             axis === 'vertical' && surface.verticalContent,
             contentFullHeight && contentStyles.fill
           )}
-          style={axis === 'vertical' ? { minWidth: 0 } : undefined}
+          style={{
+            ...(axis === 'vertical' ? { minWidth: 0 } : {}),
+            ...contentStyle,
+          }}
         >
           {children}
         </BaseScrollArea.Content>

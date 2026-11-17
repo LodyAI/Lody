@@ -50,6 +50,7 @@ test('String Catalog checks accept reordered arguments and reject broken transla
           'CFBundleDisplayName',
           'NSCameraUsageDescription',
           'NSLocalNetworkUsageDescription',
+          'NSPhotoLibraryAddUsageDescription',
           'NSPhotoLibraryUsageDescription',
         ].map((key) => [key, entry('Prompt')]),
       ),

@@ -12,6 +12,7 @@ export function resolveSessionDetailVisibilityState(args: {
   machineVisibilityLoading: boolean;
   localProjectVisibilityLoading: boolean;
   currentUserId?: string | null;
+  ownedMachineIds?: ReadonlySet<MachineId>;
 }): SessionDetailPresenceState {
   const { baseState, session } = args;
   if (baseState !== 'resolved' || !session || typeof session.machineId !== 'string') {
@@ -26,6 +27,7 @@ export function resolveSessionDetailVisibilityState(args: {
       machineVisibilityLoading: args.machineVisibilityLoading,
       localProjectVisibilityLoading: args.localProjectVisibilityLoading,
       currentUserId: args.currentUserId,
+      ownedMachineIds: args.ownedMachineIds,
     }
   );
   if (visibilityState === 'loading') return 'loading';

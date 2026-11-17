@@ -42,14 +42,36 @@ per batch, then launches a fresh app for each case. Run English only (`en`,
 
 `run.py` owns the executable inventory; `--help` lists available cases and suites.
 
-| Suite / batch                           | Coverage                                                                                                                                            |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `core`                                  | Onboarding, Home → Settings/Debug, navigation, sending, native session, create parity                                                               |
-| `core-home` / `core-send`               | The corresponding halves of core                                                                                                                    |
-| `pages` batch                           | Home/workspaces, creation/model memory, project/branch/history/directory, activity, notifications, diagnostics, appearance and preferences          |
-| `send` batch                            | Text send, queued/guide/interrupt turns, rounds, scroll behavior, session tools, permissions, editing, sharing, agent errors and native diffs/files |
-| `settings-workspace` / `settings` batch | Agents, prompt shortcuts, project visibility, GitHub, usage, MCP, memory, published shares, agent roles and archived sessions                       |
-| Individual iPad cases                   | Adaptive split, creation, chrome, sidebar, devices, search, deletion and wide panels                                                                |
+| Suite / batch                           | Coverage                                                                                                                                                |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `core`                                  | Onboarding, Home → Settings/Debug, navigation, sending, native session, create parity                                                                   |
+| `core-home` / `core-send`               | The corresponding halves of core                                                                                                                        |
+| `pages` batch                           | Home/workspaces, creation/model memory, project/branch/history/directory, activity, notifications, diagnostics and preferences (including the app icon) |
+| `send` batch                            | Text send, queued/guide/interrupt turns, rounds, scroll behavior, session tools, permissions, editing, sharing, agent errors and native diffs/files     |
+| `settings-workspace` / `settings` batch | Agents, prompt shortcuts, project visibility, GitHub, usage and agent roles                                                                             |
+| Individual iPad cases                   | Adaptive split, creation, chrome, sidebar, devices, search, deletion and wide panels                                                                    |
+| `toast`                                 | Archive/restore completion, archive failure, warning and copy notifications: localized accessibility labels, rendered glyph colors and dismissal        |
+
+`home-grouping-crash` (also in `pages`) launches the offline Home fixture with
+`--ui-verify-sticky-groups`: 54 conversations across three projects. It switches
+time/project/status grouping eight times while scrolled and checks that rows,
+semantic headings and the app process survive. Run it in light and dark with:
+
+```sh
+pnpm verify:ui --case home-grouping-crash --require-video --app /absolute/path/to/Lody.app
+```
+
+`pad-layout` checks rotation and size-class changes with a retained conversation,
+its draft and sheets, and returns to Chats to exercise a row after each compact
+handoff. Its width overrides preserve window bounds and do not simulate a held
+resize handle. For window-resize changes, also enable Windowed Apps on a leased
+iPad Simulator and record a physical corner drag across the compact/regular
+boundary: enlarge then shrink without lifting, shrink then enlarge, and enlarge
+then shrink with a release between them. Check Chats rows and Schedules after
+release, including gestures that end on either side of the boundary. A live
+process alone is insufficient: a detached list can leave an otherwise responsive
+tab bar above blank content. AXe 1.8 derives landscape touch mapping from the app
+window; use portrait hardware coordinates for this windowed check.
 
 The native boundaries are `LodyShell`, `AuthSession`, `CatalogSession`,
 `OutboxSession`, `LodyCore.AppRouting`, and feature preview controllers.
@@ -79,3 +101,28 @@ No desktop credentials, real turns or private user data belong in fixtures.
 For visual/interaction requirement alignment only, export a finished run with
 `acceptance-round.py` and ingest its claims through the acceptance tool. Ordinary
 regression runs remain programmatic gates and are not ingested.
+
+### Conversation proposal and file cards
+
+`proposal-cards` uses Debug-only synthetic transcript scenes for Role creation,
+updates, owner-only actions, saved/dismissed receipts, schedule creation/Open,
+failed and pending decisions, and agent-shared PDF/Markdown files. The runner
+captures light/dark appearances and exercises the fixture's decision transitions
+through production card controls. It does not verify cloud persistence or file downloads.
+
+```sh
+pnpm verify:ui --case proposal-cards --require-video --app /absolute/path/to/Lody.app
+```
+
+### Conversation usage
+
+`session-preview-usage` renders the production conversation with a synthetic 42%
+context ring beside Send. `session-preview-usage-popup` opens its native usage
+popover (84K / 200K, weekly and five-hour meters). The fixture clock is fixed;
+reset-time arrows independently toggle relative and concrete dates. These Debug
+scenes are reachable with `lody:///debug?verifyCase=<scene>` under `--ui-verify`.
+When AXe is unavailable, launch with `--ui-verify --ui-review-usage` or
+`--ui-verify --ui-review-usage-popup` using `simctl launch`; these bypass the
+Simulator's external-URL confirmation, not product navigation. Native `message-details` checks
+context normalization/window ordering/reset mode; `remote-settings` checks exact
+account, model and capability quota selection. Neither scene performs cloud I/O.

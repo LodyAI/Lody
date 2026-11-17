@@ -11,6 +11,7 @@ ui = UI(*sys.argv[1:])
 ui.element('ui-verify-ready')
 ui.axe('tap', '--label', catalog.text('create.title'), '--post-delay', '.5')
 ui.type_into('create-session-input', 'Immediate navigation test')
+ui.wait_for_keyboard('create-session-input')
 ui.capture('before')
 # Keep the transition evidence: a final screenshot alone misses an intermediate Home flash.
 with (ui.output / 'transition.log').open('w') as log:

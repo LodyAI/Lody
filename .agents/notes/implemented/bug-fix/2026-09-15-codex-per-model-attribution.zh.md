@@ -32,8 +32,8 @@ adapter 在异步提交请求前冻结模型，之后切换 UI 模型不会改�
 因此可能漏掉一条新增响应。
 
 事实更正：[用量计量范围](2026-09-25-usage-accounting-scopes.zh.md)之后用面向所有 provider
-的 Core `usageScopeId` 取代了仅限 Codex 的 turn 标记，因此 key 为 `:scope:`；CLI 只为
-Codex 兼容读取旧字段 `codex.usageTurnId`。计量身份与真实 ACP session ID 分开，
+的 Core `usageScopeId` 取代了仅限 Codex 的 turn 标记，因此 key 为 `:scope:`；CLI 不再
+读取旧字段 `codex.usageTurnId`。计量身份与真实 ACP session ID 分开，
 不修改会话路由或 metadata。分 turn key 使 A=10000、随后 B=2000 累计为
 12000，而不是按整段 session 取最大值。未标记 adapter 保持原有范围。
 不增加私有后端、session metadata baseline、磁盘 sidecar、

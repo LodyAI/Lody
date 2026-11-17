@@ -164,7 +164,10 @@ Lody 仍在走向完整的 local-first 支持。
 - `packages/ui` — Base UI 基础组件与 StyleX 设计令牌
 - `packages/platform` — 平台能力与集成
 - `packages/shared` — 共享 Schema、协议与工具
-- `packages/e2ee-core` — 端到端加密库：签名账本、密钥投递、服务与适配器（[中文导读](packages/e2ee-core/README.zh.md)，尚未接入产品）
+- `packages/e2ee-core` — 端到端加密库：签名账本、密钥投递、服务与适配器（[中文导读](packages/e2ee-core/README.zh.md)）。产品宿主见 [工作区引导](.agents/docs/e2ee-workspace-bootstrap.zh.md)
+- `packages/e2ee-client` — 个人设备 E2EE 宿主
+- `packages/e2ee-machine-sharing` — 机器服务共享策略
+- `packages/turn-diff-store` — 本地按内容寻址的回合快照
 - `site-docs` — 官网、文档与博客
 
 如果希望参与开发，请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)（含社区 PR 规模限制）。

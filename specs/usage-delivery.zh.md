@@ -33,8 +33,7 @@ CLI 合并待发累计快照，包括 Grok。失败 payload 保留原归属直�
 用量接口的计量身份；无范围更新沿用 ACP session ID。真实 ACP session ID 和 session
 metadata 不变；同一范围重复投递保持幂等，无需修改托管持久化逻辑。
 Codex 将 native 根 thread 计数的增量归给实际提交参数中冻结的模型，
-每个 native turn 是一个计量生命周期，也是它的范围；CLI 在一个版本内仍把旧的
-Codex 专用 `_meta.codex.usageTurnId` 读作该范围。因此 A 的历史用量不会记到 B 的新 turn。
+每个 native turn 是一个计量生命周期，也是它的范围。因此 A 的历史用量不会记到 B 的新 turn。
 Claude 以每条 SDK result 的 uuid 为范围，只携带该 result 对 query 级读数的新增；
 重启或 clear-context 后的新 query() 在新范围下从零计数。
 

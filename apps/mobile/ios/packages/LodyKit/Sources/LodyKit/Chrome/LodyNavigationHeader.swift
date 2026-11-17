@@ -28,9 +28,6 @@ final class LodyNavigationHeader: NSObject {
       apply()
     }
   }
-  var suspended = false {
-    didSet { if !suspended { apply() } }
-  }
 
   func refresh() { apply() }
 
@@ -57,7 +54,7 @@ final class LodyNavigationHeader: NSObject {
   }
 
   private func apply() {
-    guard !suspended, !applying, let item else { return }
+    guard !applying, let item else { return }
     applying = true
     defer { applying = false }
     if let title, item.title != title { item.title = title }

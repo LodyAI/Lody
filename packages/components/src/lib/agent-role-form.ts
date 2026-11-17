@@ -534,7 +534,10 @@ export const selectAuthorableAgentRoleConfigOptions = <T extends { configId: str
  * same. A boolean that is OFF is dropped instead, because "fast mode: false"
  * says nothing a missing chip does not.
  */
-export const buildAgentRoleRunConfigSummary = (runConfig: AgentRoleRunConfig): string[] => {
+export const buildAgentRoleRunConfigSummary = (
+  runConfig: AgentRoleRunConfig,
+  selectors?: Pick<AcpSelectorOptions, 'modelOptions' | 'modeOptions' | 'configOptionSelectors'>
+): string[] => {
   // A Role stores option IDS only — the capability's `category` is not part of
   // the row — so the id is tested as both, which also matches an agent whose
   // reasoning option is literally named after the category.
@@ -546,15 +549,28 @@ export const buildAgentRoleRunConfigSummary = (runConfig: AgentRoleRunConfig): s
 
   const describe = (entries: [string, string | boolean][]): string[] =>
     entries.flatMap(([configId, value]) => {
-      if (typeof value === 'boolean') return value ? [configId] : [];
+      const selector = selectors?.configOptionSelectors.find(
+        (entry) => entry.configId === configId
+      );
+      if (typeof value === 'boolean') return value ? [selector?.label ?? configId] : [];
       if (value === ACP_CONFIG_OPTION_OFF_VALUE) return [];
-      return [value];
+      return [selector?.options.find((option) => option.value === value)?.label ?? value];
     });
 
   return [
-    ...(runConfig.modelId ? [runConfig.modelId] : []),
+    ...(runConfig.modelId
+      ? [
+          selectors?.modelOptions.find((option) => option.value === runConfig.modelId)?.label ??
+            runConfig.modelId,
+        ]
+      : []),
     ...describe(reasoning),
-    ...(runConfig.modeId ? [runConfig.modeId] : []),
+    ...(runConfig.modeId
+      ? [
+          selectors?.modeOptions.find((option) => option.value === runConfig.modeId)?.label ??
+            runConfig.modeId,
+        ]
+      : []),
     ...describe(rest),
   ];
 };

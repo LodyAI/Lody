@@ -12,7 +12,6 @@ import {
 import {
   AgentConfigDialog,
   type AgentConfigDialogProps,
-  DEEPSEEK_CLAUDE_PRESET_ID,
   GLM_CLAUDE_PRESET_ID,
   GLM_ZAI_CREDENTIAL_MODE_ID,
   MIMO_CLAUDE_PRESET_ID,
@@ -330,27 +329,6 @@ function EditLongOptionListsWrapper() {
   );
 }
 
-function DeepSeekPresetWrapper() {
-  const [open, setOpen] = useState(true);
-  return (
-    <AgentConfigDialog
-      open={open}
-      onOpenChange={setOpen}
-      mode={{
-        kind: 'create',
-        initialForm: {
-          name: 'DeepSeek over Claude Code',
-          presetId: DEEPSEEK_CLAUDE_PRESET_ID,
-          presetToken: 'sk-storybook-demo-token',
-        },
-      }}
-      machine={makeMachineWithClaudeCaps()}
-      onSubmit={async () => {}}
-      onRefreshCapabilities={refreshCapabilities}
-    />
-  );
-}
-
 function DeepSeekHarnessWrapper({
   initialForm,
   config,
@@ -563,6 +541,40 @@ function PiExtensionsWrapper({
   );
 }
 
+function AntigravitySkipPermissionsWrapper({
+  supported = true,
+  enabled = false,
+}: {
+  supported?: boolean;
+  enabled?: boolean;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <AgentConfigDialog
+      open={open}
+      onOpenChange={setOpen}
+      mode={{
+        kind: 'edit',
+        config: {
+          ...existingConfig,
+          name: 'Antigravity',
+          agentType: 'antigravity',
+          ...(enabled ? { runtimeOverrides: { antigravitySkipPermissions: true } } : {}),
+        },
+      }}
+      machine={{
+        ...makeMachineWithClaudeCaps(),
+        protocolCapabilities: supported ? { antigravitySkipPermissions: 1 } : {},
+      }}
+      onSubmit={async () => {}}
+      onRefreshCapabilities={async (args) => ({
+        ...(await refreshCapabilities(args)),
+        agentType: 'antigravity',
+      })}
+    />
+  );
+}
+
 const meta = {
   title: 'Settings/AgentConfigDialog',
   parameters: { layout: 'fullscreen' },
@@ -577,6 +589,13 @@ export const PiExtensionsUnsupported: Story = {
   render: () => <PiExtensionsWrapper supported={false} />,
 };
 export const PiExtensionsScanError: Story = { render: () => <PiExtensionsWrapper scanError /> };
+
+export const AntigravitySkipPermissions: Story = {
+  render: () => <AntigravitySkipPermissionsWrapper enabled />,
+};
+export const AntigravitySkipPermissionsUnsupported: Story = {
+  render: () => <AntigravitySkipPermissionsWrapper supported={false} />,
+};
 
 export const Create: Story = {
   render: () => <CreateWrapper />,
@@ -602,10 +621,6 @@ export const EditLongOptionLists: Story = {
 /** Signing in again lives here, not on the provider list row. */
 export const EditEnvCredentialProvider: Story = {
   render: () => <EditWrapper config={envCredentialConfig} />,
-};
-
-export const DeepSeekPreset: Story = {
-  render: () => <DeepSeekPresetWrapper />,
 };
 
 export const DeepSeekHarness: Story = {
@@ -678,13 +693,6 @@ export const MobileEdit: Story = {
 
 export const MobileEditEnvCredentialProvider: Story = {
   render: () => <EditWrapper config={envCredentialConfig} />,
-  parameters: {
-    viewport: { defaultViewport: 'mobile1' },
-  },
-};
-
-export const MobileDeepSeekPreset: Story = {
-  render: () => <DeepSeekPresetWrapper />,
   parameters: {
     viewport: { defaultViewport: 'mobile1' },
   },

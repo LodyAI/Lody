@@ -6,7 +6,7 @@ import React, { useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { dialog as dialogTokens } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { SettingsPageActions, SettingsPageLead, useSettingsPane } from './settings-page-header';
-import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
+import { SettingsEmptyState, settingsRecordsCard } from './compact-layout';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@posthog/react';
@@ -406,6 +406,13 @@ export function PromptShortcutsList({
 }) {
   const { t } = useTranslation();
   const addLabel = t('settings.promptShortcuts.new', 'New Prompt Shortcut');
+  const showEmpty = entries.length === 0 && !loading;
+  const addButton = (
+    <Button size="small" variant="secondary" disabled={!canCreate || busy} onClick={onCreate}>
+      <Plus {...stylex.props(catalog.icon)} />
+      {addLabel}
+    </Button>
+  );
   return (
     <>
       {/* The page is named for this list, so the list takes no heading of its own. */}
@@ -416,21 +423,20 @@ export function PromptShortcutsList({
             {t('common.loading', 'Loading…')}
           </span>
         ) : null}
-        <Button size="small" variant="secondary" disabled={!canCreate || busy} onClick={onCreate}>
-          <Plus {...stylex.props(catalog.icon)} />
-          {addLabel}
-        </Button>
+        {showEmpty ? null : addButton}
       </SettingsPageActions>
 
       {entries.length === 0 ? (
-        loading ? null : (
-          <SettingsEmptyList>
-            {t(
-              'settings.promptShortcuts.empty',
-              'No Prompt Shortcuts yet. Save a Prompt you retype often and call it with /.'
+        showEmpty ? (
+          <SettingsEmptyState
+            title={t('settings.promptShortcuts.empty', 'No Prompt Shortcuts yet')}
+            description={t(
+              'settings.promptShortcuts.emptyHint',
+              'Save a Prompt you retype often and call it with /.'
             )}
-          </SettingsEmptyList>
-        )
+            action={addButton}
+          />
+        ) : null
       ) : (
         <div {...stylex.props(settingsRecordsCard)}>
           {entries.map((entry, index) => (

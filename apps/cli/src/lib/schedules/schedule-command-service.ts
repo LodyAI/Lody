@@ -25,7 +25,7 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { SYNC_CONFIRMATION_TIMEOUT_MS } from '@/lib/loro/timeout-utils';
-import type { AuthContext } from '../command-runtime';
+import { ensureWorkspaceMetaSynced, type AuthContext } from '../command-runtime';
 import type { LoroDocumentManager } from '../loro/doc';
 import type { WorkspaceSummary } from '../workspace';
 import { createSessionBackend } from '@/session/session-backend';
@@ -46,23 +46,33 @@ export type ScheduleCommandContext = {
   requesterSessionId?: SessionId;
 };
 
+export function assertScheduleCommandAllowed(
+  command: ScheduleCommand,
+  requesterSessionId?: SessionId
+) {
+  if (requesterSessionId && !['list', 'show', 'pause', 'propose'].includes(command.action))
+    throw new Error('Schedule enablement requires a human action');
+}
+
 /** Same domain operations for human CLI and the bounded MCP surface, on either transport. */
 export async function executeScheduleCommand(
   context: ScheduleCommandContext,
   input: ScheduleCommand
 ): Promise<unknown> {
   const command = ScheduleCommandSchema.parse(input);
+  assertScheduleCommandAllowed(command, context.requesterSessionId);
   const { manager, auth, localOnly, requesterSessionId } = context;
   const workspaceId = context.workspace.id as WorkspaceId;
   const repository = new ScheduleRepository(manager.repo, workspaceId, {
     protectedContent: context.workspace.contentMode === 'e2ee',
+    signDeclaration: (document, manualRunKey) =>
+      manager.signScheduleDeclaration(document, manualRunKey),
   });
   const sync = async (room: string) => {
     if (!localOnly) await manager.syncDocOrThrow(room, { reason: 'schedule:command' });
   };
   if (requesterSessionId) {
-    if (!['list', 'show', 'pause', 'propose'].includes(command.action))
-      throw new Error('Schedule enablement requires a human action');
+    if (!localOnly) await ensureWorkspaceMetaSynced(manager, 'schedule:requester');
     const record = await manager.repo.getDocMeta(getSessionRoomId(requesterSessionId));
     const meta = record?.meta as SessionMeta | undefined;
     if (
@@ -287,7 +297,7 @@ export async function executeScheduleCommand(
         items: [
           {
             type: 'text',
-            text: `Paused scheduled task: ${title}. Future runs stop after the owner machine syncs. Already submitted Sessions continue.`,
+            text: `Paused scheduled task: ${title}. Future runs stop after the owner machine syncs. Already running Sessions continue.`,
           },
         ],
         fileDiff: [],
