@@ -1,3 +1,4 @@
+export { recoveryHistoryBatcher } from './e2ee-recovery-history.mjs'
 import {
   Bytes,
   memoryRecoveryEpochKeys,
@@ -28,7 +29,8 @@ import {
   recoveryRestoreIncomplete,
   restoreVaultWorkspaces,
   type RecoveryHistoryPage,
-  type RecoveryRestoreTarget
+  type RecoveryRestoreTarget,
+  type VaultWorkspaceRestoreResult
 } from '@lody/e2ee-client/recovery-restore'
 import {
   abandonVaultReplacement,
@@ -838,29 +840,48 @@ export const setupWorkspacesRecovery = (
       if (vault.vaultId !== current) return yield* Effect.fail({ code: 'authentication' })
       yield* syncVaultMethodsSummary(vault)
       const local = yield* RecoveryVaultLocalStore
-      return yield* Effect.forEach(io.targets, (target) =>
-        Effect.map(
-          Effect.exit(
-            Effect.flatMap(
-              target.owner({
-                vault,
-                local,
-                submitOriginal: submitFor(target),
-                fetchCurrentEnvelope: recoveryFetchEnvelope(target)
-              }),
-              (owner) => owner.setup()
-            )
-          ),
-          (exit) =>
-            Exit.isSuccess(exit)
-              ? {
-                  workspaceId: target.id,
-                  outcome: exit.value.outcome,
-                  recoverable: exit.value.status.recoverable
-                }
-              : { workspaceId: target.id, outcome: 'Failed' as const, recoverable: false }
-        )
+      const lanes = new Map<string, Array<{ target: RecoveryWorkspaceTarget; position: number }>>()
+      io.targets.forEach((target, position) => {
+        const lane = lanes.get(target.id) ?? []
+        lane.push({ target, position })
+        lanes.set(target.id, lane)
+      })
+      const results = new Map<
+        number,
+        { workspaceId: string; outcome: string; recoverable: boolean }
+      >()
+      yield* Effect.forEach(
+        lanes.values(),
+        (lane) =>
+          Effect.gen(function* () {
+            for (const { target, position } of lane) {
+              const result = Effect.map(
+                Effect.exit(
+                  Effect.flatMap(
+                    target.owner({
+                      vault,
+                      local,
+                      submitOriginal: submitFor(target),
+                      fetchCurrentEnvelope: recoveryFetchEnvelope(target)
+                    }),
+                    (owner) => owner.setup()
+                  )
+                ),
+                (exit) =>
+                  Exit.isSuccess(exit)
+                    ? {
+                        workspaceId: target.id,
+                        outcome: exit.value.outcome,
+                        recoverable: exit.value.status.recoverable
+                      }
+                    : { workspaceId: target.id, outcome: 'Failed' as const, recoverable: false }
+              )
+              results.set(position, yield* result)
+            }
+          }),
+        { concurrency: 4, discard: true }
       )
+      return [...results].sort(([a], [b]) => a - b).map(([, result]) => result)
     }).pipe(Effect.provide(vaults(io)))
   )
 
@@ -899,96 +920,111 @@ export const recoveryRestoreTarget = <P extends RecoveryHistoryPage>(input: {
     readonly pages: readonly P[]
     readonly recovered: readonly (readonly [number, Bytes.EpochKey])[]
   }) => Effect.Effect<void, unknown>
-}): RecoveryRestoreTarget => ({
-  id: input.id,
-  name: input.name,
-  genesisHash: input.genesisHash,
-  hasIdentity: input.hasIdentity,
-  connect: (anchor) =>
-    Effect.gen(function* () {
-      const hexOf = (value: Uint8Array) => Buffer.from(value).toString('hex')
-      const genesisRecordHex = hexOf(anchor.genesisRecord)
-      const membershipId = hexOf(anchor.membershipId.toBytes())
-      const { device, credentialHash } = yield* input.identity({
-        genesisHash: input.genesisHash,
-        genesisRecordHex,
-        membershipId
-      })
-      const keys = memoryRecoveryEpochKeys()
-      yield* Effect.addFinalizer(() => Effect.sync(() => keys.dispose()))
-      const ledger = recoveryLedger({
-        genesis: anchor.genesis,
-        pages: () => readRecoveryHistory(input.history)
-      })
-      // Identity-bound across first admission, failed adoption and later R-only key repair.
-      const pairingSessionId = createHash('sha256')
-        .update('lody-e2ee/recovery-personal-join/v1\0')
-        .update(anchor.genesis.toBytes())
-        .update(device.publicKey.toBytes())
-        .update(anchor.recovery.toBytes())
-        .digest('hex')
-        .slice(0, 32)
-      return {
-        personalSigner: device,
-        personal: { ...device, encryptionPublicKey: device.enc },
-        ledger,
-        installed: keys,
-        fetchCurrentEnvelope: recoveryFetchEnvelope({
-          mailbox: input.mailbox,
-          // No device of this user is left to deliver; R's own envelope must already exist.
-          deliver: () => Effect.void,
-          staged: (credential, epoch) =>
-            Effect.flatMap(ledger(), (view) => {
-              const key = getCommittedEpochStagingKey(view, epoch)
-              return Result.isSuccess(key)
-                ? input.stagedGroup(credential, key.success)
-                : Effect.succeed(null)
-            })
-        }),
-        submitOriginalAsRecovery: (record, _identity, credential) =>
-          Effect.gen(function* () {
-            const admission = hexOf(hashRecordBytes(record).toBytes())
-            // A retry after a failed install: the admission already landed.
-            const pages = yield* readRecoveryHistory(input.history)
-            if (pages.some((page) => page.recordsHex.includes(hexOf(record)))) {
-              credential.fill(0)
-              return { outcome: 'Committed', record: new Uint8Array(record) } as const
-            }
-            const reply = yield* input.append({
-              workspaceId: input.id,
-              requestId: admission,
-              recordHex: hexOf(record),
-              credentialHash,
-              signerCredential: hexOf(credential)
-            })
-            credential.fill(0)
-            return {
-              outcome: reply.status === 'committed' ? 'Committed' : 'Conflict',
-              record: new Uint8Array(record)
-            } as const
-          }),
-        acquirePersonal: () => Effect.fail({ code: 'invalid-input' }),
-        recovered: keys.entries,
-        adopt: (recovered) =>
-          Effect.flatMap(readRecoveryHistory(input.history), (pages) =>
-            input.adopt({
-              genesisRecordHex,
-              membershipId,
-              endorser: hexOf(anchor.recovery.toBytes()),
-              pairingSessionId,
-              pages,
-              recovered
-            })
-          )
-      }
+}): RecoveryRestoreTarget => {
+  let prepared: Exit.Exit<P, unknown> | undefined
+  const read = (next?: Parameters<typeof input.history>[0]) =>
+    Effect.suspend(() => {
+      if (next || prepared === undefined) return input.history(next)
+      const page = prepared
+      prepared = undefined
+      return Exit.isSuccess(page) ? Effect.succeed(page.value) : Effect.failCause(page.cause)
     })
-})
+  return {
+    id: input.id,
+    name: input.name,
+    genesisHash: input.genesisHash,
+    hasIdentity: input.hasIdentity,
+    prepareHistory: () =>
+      Effect.map(Effect.exit(input.history()), (page) => {
+        prepared = page
+      }),
+    connect: (anchor) =>
+      Effect.gen(function* () {
+        const hexOf = (value: Uint8Array) => Buffer.from(value).toString('hex')
+        const genesisRecordHex = hexOf(anchor.genesisRecord)
+        const membershipId = hexOf(anchor.membershipId.toBytes())
+        const { device, credentialHash } = yield* input.identity({
+          genesisHash: input.genesisHash,
+          genesisRecordHex,
+          membershipId
+        })
+        const keys = memoryRecoveryEpochKeys()
+        yield* Effect.addFinalizer(() => Effect.sync(() => keys.dispose()))
+        const ledger = recoveryLedger({
+          genesis: anchor.genesis,
+          pages: () => readRecoveryHistory(read)
+        })
+        // Identity-bound across first admission, failed adoption and later R-only key repair.
+        const pairingSessionId = createHash('sha256')
+          .update('lody-e2ee/recovery-personal-join/v1\0')
+          .update(anchor.genesis.toBytes())
+          .update(device.publicKey.toBytes())
+          .update(anchor.recovery.toBytes())
+          .digest('hex')
+          .slice(0, 32)
+        return {
+          personalSigner: device,
+          personal: { ...device, encryptionPublicKey: device.enc },
+          ledger,
+          installed: keys,
+          fetchCurrentEnvelope: recoveryFetchEnvelope({
+            mailbox: input.mailbox,
+            // No device of this user is left to deliver; R's own envelope must already exist.
+            deliver: () => Effect.void,
+            staged: (credential, epoch) =>
+              Effect.flatMap(ledger(), (view) => {
+                const key = getCommittedEpochStagingKey(view, epoch)
+                return Result.isSuccess(key)
+                  ? input.stagedGroup(credential, key.success)
+                  : Effect.succeed(null)
+              })
+          }),
+          submitOriginalAsRecovery: (record, _identity, credential) =>
+            Effect.gen(function* () {
+              const admission = hexOf(hashRecordBytes(record).toBytes())
+              // A retry after a failed install: the admission already landed.
+              const pages = yield* readRecoveryHistory(input.history)
+              if (pages.some((page) => page.recordsHex.includes(hexOf(record)))) {
+                credential.fill(0)
+                return { outcome: 'Committed', record: new Uint8Array(record) } as const
+              }
+              const reply = yield* input.append({
+                workspaceId: input.id,
+                requestId: admission,
+                recordHex: hexOf(record),
+                credentialHash,
+                signerCredential: hexOf(credential)
+              })
+              credential.fill(0)
+              return {
+                outcome: reply.status === 'committed' ? 'Committed' : 'Conflict',
+                record: new Uint8Array(record)
+              } as const
+            }),
+          acquirePersonal: () => Effect.fail({ code: 'invalid-input' }),
+          recovered: keys.entries,
+          adopt: (recovered) =>
+            Effect.flatMap(readRecoveryHistory(input.history), (pages) =>
+              input.adopt({
+                genesisRecordHex,
+                membershipId,
+                endorser: hexOf(anchor.recovery.toBytes()),
+                pairingSessionId,
+                pages,
+                recovered
+              })
+            )
+        }
+      })
+  }
+}
 
 /** Restore every workspace a file, passkey or password covers. See `restoreVaultWorkspaces`. */
 export const restoreAccountWorkspaces = (
   io: RecoveryVaultIo & {
     readonly unlock: RecoveryUnlock
     readonly workspaces: readonly RecoveryRestoreTarget[]
+    readonly onResult?: (result: VaultWorkspaceRestoreResult) => Effect.Effect<void>
   }
 ) =>
   Effect.scoped(
@@ -998,7 +1034,8 @@ export const restoreAccountWorkspaces = (
       return yield* restoreVaultWorkspaces({
         vault,
         local: yield* RecoveryVaultLocalStore,
-        targets: io.workspaces
+        targets: io.workspaces,
+        onResult: io.onResult
       })
     }).pipe(Effect.provide(vaults(io)))
   )

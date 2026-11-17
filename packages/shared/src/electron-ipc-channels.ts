@@ -43,6 +43,11 @@ export type IpcPushMap = {
   'app.activatePreparedWindow': PreparedWindowTarget;
   /** Re-read hint only: the renderer learns the exact reason from its own refresh. */
   'e2ee.accessLost': { workspaceId: string };
+  /** Only the requesting document receives these adopted, non-secret outcomes. */
+  'e2ee.recoveryProgress': {
+    operationId: string;
+    result: { workspaceId: string; name: string; outcome: string; partialEpochKey?: boolean };
+  };
 };
 
 export type IpcSendMap = {
@@ -80,6 +85,7 @@ export const IPC_PUSH_CHANNELS = {
   appPrepareWindowTarget: 'app.prepareWindowTarget',
   appActivatePreparedWindow: 'app.activatePreparedWindow',
   e2eeAccessLost: 'e2ee.accessLost',
+  e2eeRecoveryProgress: 'e2ee.recoveryProgress',
 } as const satisfies { [K: string]: keyof IpcPushMap };
 
 export const IPC_SEND_CHANNELS = {

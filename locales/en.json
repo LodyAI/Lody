@@ -1,4 +1,5 @@
 {
+  "e2ee.recovery.restoreWorking": "{{name}}: restoring…",
   "e2ee.deviceIdentity.modelUnknown": "Model unavailable",
   "e2ee.deviceIdentity.osVersionUnavailable": "OS version unavailable",
   "e2ee.deviceIdentity.personal": "Personal device",
