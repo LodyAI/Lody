@@ -44,6 +44,26 @@ export function createEagerSyncWorkerClient(deps: EagerSyncWorkerClientDeps) {
   // Bounded fallback if browser storage refuses even the small rejection row.
   const rejections = new Map<string, { lastMessageAt: number; rejectedAt: number }>();
 
+  // These ports only read. Cancellation can abandon their result safely; a
+  // late read must never construct a Worker or retain the renderer's slot.
+  const readUntilCancelled = async <T>(
+    read: Promise<T>,
+    signal: AbortSignal
+  ): Promise<T | undefined> => {
+    const observed = read.catch(() => undefined);
+    if (signal.aborted) return undefined;
+    let abort: () => void = () => {};
+    const cancelled = new Promise<undefined>((resolve) => {
+      abort = () => resolve(undefined);
+      signal.addEventListener('abort', abort, { once: true });
+    });
+    try {
+      return await Promise.race([observed, cancelled]);
+    } finally {
+      signal.removeEventListener('abort', abort);
+    }
+  };
+
   const run = async (
     roomId: string,
     lastMessageAt: number,
@@ -82,16 +102,20 @@ export function createEagerSyncWorkerClient(deps: EagerSyncWorkerClientDeps) {
       if (!lock || signal.aborted || disposed) return 'skipped';
       // Re-read AFTER the claim: a previous owner may have committed while this
       // renderer was resolving its transport. No Worker/WASM on a cache hit.
-      const cached = await (deps.readSnapshot ?? readEagerSyncSnapshot)(deps.scope, roomId).catch(
-        () => undefined
+      const cached = await readUntilCancelled(
+        (deps.readSnapshot ?? readEagerSyncSnapshot)(deps.scope, roomId),
+        signal
       );
       if (signal.aborted || disposed) return 'skipped';
       if (cached?.plane === transport.plane && cached.lastMessageAt >= lastMessageAt) {
         return 'synced';
       }
       const rejected =
-        (await (deps.readRejection ?? readEagerSyncRejection)(key).catch(() => undefined)) ??
-        rejections.get(key);
+        (await readUntilCancelled(
+          (deps.readRejection ?? readEagerSyncRejection)(key, signal),
+          signal
+        )) ?? rejections.get(key);
+      if (signal.aborted || disposed) return 'skipped';
       const now = (deps.now ?? Date.now)();
       if (
         rejected &&
@@ -108,7 +132,7 @@ export function createEagerSyncWorkerClient(deps: EagerSyncWorkerClientDeps) {
         rejections.delete(key);
         rejections.set(key, row);
         if (rejections.size > 1000) rejections.delete(rejections.keys().next().value!);
-        await (deps.writeRejection ?? writeEagerSyncRejection)(row).catch(() => {});
+        await (deps.writeRejection ?? writeEagerSyncRejection)(row, signal).catch(() => {});
       }
       return outcome;
     });

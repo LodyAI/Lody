@@ -226,6 +226,31 @@ try {
   }
   assert.equal(downloads.length, 12);
   console.log('PASS independent account, plane and workspace claims');
+
+  for (const stage of ['snapshot', 'rejection']) {
+    const stalled = await page({ pendingRead: stage });
+    const room = `unanswered-${stage}`;
+    await start(stalled, 'stalled', room);
+    await stalled.evaluate(() => globalThis.enteredRead());
+    await stalled.evaluate(() => globalThis.cancel('stalled'));
+    assert.equal(await result(stalled, 'stalled'), 'skipped');
+    const lock = `lody:eager-sync:${JSON.stringify(['workspace', room, 'workspace', 'account', 'local'])}`;
+    // Native lock acquisition is the release receipt, not a sleep/poll heuristic.
+    await stalled.evaluate((key) => navigator.locks.request(key, () => {}), lock);
+    const successor = await page();
+    const index = downloads.length;
+    arrived = nextDownload();
+    await start(successor, 'successor', room);
+    assert.equal(
+      await Promise.race([arrived.then(() => 'download'), result(successor, 'successor')]),
+      'download'
+    );
+    release(index);
+    assert.equal(await result(successor, 'successor'), 'synced');
+    await stalled.close();
+    await successor.close();
+  }
+  console.log('PASS cancelled unanswered cache reads release native claims and queue slots');
 } finally {
   clearTimeout(watchdog);
   await browser?.close();

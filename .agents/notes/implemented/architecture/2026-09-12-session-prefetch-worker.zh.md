@@ -54,6 +54,11 @@ transport 相同的显式 Streams endpoint。
 中的已发布 Promise Repo／transport 消费边界。另建消费内核会扩大这次下载准入
 修复；跨窗口互斥由浏览器锁负责，进程内信号量不能代替它。
 
+缓存读取一直无响应时，取消会放弃只读结果，不再创建 Worker，也不占住 renderer
+槽位。拒绝元数据的数据库打开会随取消退役；迟到的数据库句柄直接关闭，不开始
+事务。已开始的拒绝写入会中止实际 IndexedDB 事务；锁要等真实的 `abort` 或
+`complete` 终止事件，不以调用方超时当成写入已经结束。
+
 任务取消由父线程终止 Worker，并发送本地 peer detach；这不依赖正在执行
 同步 WASM 的 Worker 处理取消消息。打开目标会话先取消对应后台任务，已有
 UI store 不参与预同步。导入缓存使用 CRDT merge，保留前台未上传编辑。

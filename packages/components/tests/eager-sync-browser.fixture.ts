@@ -4,6 +4,8 @@ import { readEagerSyncSnapshot } from '../src/providers/eager-sync-snapshot-cach
 let now = 0;
 let client: ReturnType<typeof createEagerSyncWorkerClient>;
 const results = new Map<string, Promise<unknown>>();
+let enteredRead: Promise<void>;
+let enterRead: () => void;
 const controllers = new Map<string, AbortController>();
 Object.assign(globalThis, {
   configure(
@@ -13,9 +15,17 @@ Object.assign(globalThis, {
       locks?: null;
       reject?: boolean;
       plane?: 'local' | 'cloud';
+      pendingRead?: 'snapshot' | 'rejection';
     } = {}
   ) {
     client?.dispose();
+    enteredRead = new Promise((resolve) => {
+      enterRead = resolve;
+    });
+    const pendingRead = async () => {
+      enterRead();
+      return new Promise<undefined>(() => {});
+    };
     const workspaceId = options.workspaceId ?? 'workspace';
     client = createEagerSyncWorkerClient({
       content: { mode: 'plaintext' },
@@ -24,6 +34,8 @@ Object.assign(globalThis, {
       authorizationScope: options.authorizationScope ?? 'account',
       locks: options.locks,
       now: () => now,
+      ...(options.pendingRead === 'snapshot' ? { readSnapshot: pendingRead } : {}),
+      ...(options.pendingRead === 'rejection' ? { readRejection: pendingRead } : {}),
       resolveTransport: async (roomId) =>
         options.plane === 'cloud'
           ? {
@@ -90,6 +102,7 @@ Object.assign(globalThis, {
     controllers.set(id, controller);
     results.set(id, client.prefetch(room, activity, controller.signal));
   },
+  enteredRead: () => enteredRead,
   result: (id: string) => results.get(id),
   cancel: (id: string) => controllers.get(id)?.abort(),
   advance: (ms: number) => {

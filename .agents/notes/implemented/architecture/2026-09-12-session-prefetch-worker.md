@@ -65,6 +65,12 @@ This keeps the published Promise Repo/transport consumer boundary from the
 Introducing another consumer kernel would expand this download-admission fix;
 the browser lock owns cross-window exclusion, which an in-process semaphore cannot.
 
+A cache read that does not answer cannot retain the renderer slot after cancellation:
+read results are abandoned without starting a Worker. Refusal metadata opens retire
+on cancellation and close any late database handle without starting a transaction.
+An active refusal write is aborted at the IndexedDB transaction itself; its terminal
+`abort` or `complete` event, rather than a waiter timeout, releases the claim.
+
 Task cancellation terminates the Worker from the parent thread and sends a local peer detach; this
 does not depend on a Worker that is executing synchronous WASM handling a cancel message. Opening the
 target session cancels the corresponding background task first, and the existing UI store takes no
