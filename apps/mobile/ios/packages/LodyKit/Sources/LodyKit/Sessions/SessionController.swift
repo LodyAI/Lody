@@ -243,12 +243,12 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     chat.setDirectoryTabs("", symbol: "")
     chat.setNavigationMachine(state.catalog.machineNames[session.machineId] ?? "")
     chat.setNavigationMachineState(state.presence.status(of: session.machineId))
-    let others = tabs.filter { $0.id != sessionId }.map { session in
+    let viewedTabs = tabs.map { session in
       var viewed = session
       if let at = tabViews[session.id] { viewed.lastViewedMessageAt = max(viewed.lastViewedMessageAt ?? -.infinity, at) }
       return viewed
     }
-    tabsButton.setStatus(DirectoryTabs.symbol(others))
+    tabsButton.setUnread(DirectoryTabs.hasBackgroundUnread(viewedTabs, currentId: sessionId))
     tabsButton.accessibilityLabel = String(format: String(localized: "session.tabs.count", bundle: .lody), tabs.count)
     // The trailing directory button opens the panel below the header.
     directoryTabs = tabs

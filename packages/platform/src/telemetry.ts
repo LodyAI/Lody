@@ -45,6 +45,17 @@ const SOURCES = [
   'unhandled',
 ];
 
+// This consumer reports readiness observations, never raw sync/provider errors.
+const WORKSPACE_SYNC_STAGES = [
+  'runtime_missing',
+  'runtime_init_failed',
+  'runtime_other_workspace',
+  'doc_meta_scan_pending',
+  'doc_meta_scan_failed',
+  'workspace_not_in_organizations',
+  'workspace_id_mismatch',
+];
+
 /** Do not accept arbitrary release labels: even a short string may be a secret. */
 function version(value: unknown): string | undefined {
   return typeof value === 'string' &&
@@ -100,6 +111,20 @@ export function redactedTelemetryException(
     'lody-cli',
     'lody-electron-main',
   ]);
+  const syncDiagnostics =
+    properties.operation === 'workspace_sync'
+      ? {
+          operation: 'workspace_sync',
+          stage: fixed(properties.stage, WORKSPACE_SYNC_STAGES),
+          failure_kind: fixed(properties.failure_kind, [
+            'rejected',
+            'scope_mismatch',
+            'target_not_listed',
+          ]),
+          handling_state: fixed(properties.handling_state, ['observed']),
+          retry_state: fixed(properties.retry_state, ['not_scheduled']),
+        }
+      : {};
   return {
     $exception_list: [{ type: errorType === 'unknown' ? 'Error' : errorType, value: code }],
     error_code: code,
@@ -113,6 +138,7 @@ export function redactedTelemetryException(
     $lib: lib,
     ...(appVersion ? { app_version: appVersion } : {}),
     ...(libVersion ? { $lib_version: libVersion } : {}),
+    ...syncDiagnostics,
     // Version is queryable metadata, not part of grouping across releases.
     $exception_fingerprint: `lody-redacted-v1:${platform}:${process}:${nativePlatform}:${source}:${errorType}:${code}`,
   };

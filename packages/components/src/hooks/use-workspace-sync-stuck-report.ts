@@ -57,15 +57,17 @@ function reportStuck(observation: Observation, stuckMs: number, thresholdMs: num
     blocker,
     stuck_ms: stuckMs,
     threshold_ms: thresholdMs,
-    workspace_id: observation.workspaceId,
     organizations_ready: observation.organizationsReady,
-    doc_meta_scan_error_type: observation.docMetaScanErrorType,
     connection_ui_state: observation.connectionUiState,
     control_connection_state: observation.controlConnectionState,
     online: observation.online,
     visibility: readVisibility(),
   };
-  console.warn('[workspace-sync] workspace data still not ready', properties);
+  console.warn('[workspace-sync] workspace data still not ready', {
+    ...properties,
+    workspace_id: observation.workspaceId,
+    doc_meta_scan_error_type: observation.docMetaScanErrorType,
+  });
   recordSessionRenderTrace(
     `workspace-sync stuck ${blocker} ${stuckMs}ms conn=${observation.connectionUiState}`
   );
@@ -74,7 +76,23 @@ function reportStuck(observation: Observation, stuckMs: number, thresholdMs: num
     // Only an online connection makes this an error: offline and reconnecting
     // already explain the wait, and the user sees them as such.
     if (observation.connectionUiState === 'online') {
-      deferredPostHog.captureException(new WorkspaceSyncStuckError(blocker), properties);
+      deferredPostHog.captureException(new WorkspaceSyncStuckError(blocker), {
+        operation: 'workspace_sync',
+        stage: blocker,
+        // A rejected scan/init is known; the underlying cause is not.
+        failure_kind:
+          blocker === 'runtime_init_failed' || blocker === 'doc_meta_scan_failed'
+            ? 'rejected'
+            : blocker === 'runtime_other_workspace' || blocker === 'workspace_id_mismatch'
+              ? 'scope_mismatch'
+              : blocker === 'workspace_not_in_organizations'
+                ? 'target_not_listed'
+                : 'unknown',
+        handling_state: 'observed',
+        // The initial scan's rejection has no retry owner. Other blockers do
+        // not establish whether their underlying work is currently retrying.
+        retry_state: blocker === 'doc_meta_scan_failed' ? 'not_scheduled' : 'unknown',
+      });
     }
   });
 }
@@ -90,9 +108,11 @@ function reportResolved(
     final_blocker: resolution === 'ready' ? null : latest.blocker,
     resolution,
     stuck_ms: stuckMs,
-    workspace_id: latest.workspaceId,
   };
-  console.info('[workspace-sync] stuck workspace data resolved', properties);
+  console.info('[workspace-sync] stuck workspace data resolved', {
+    ...properties,
+    workspace_id: latest.workspaceId,
+  });
   recordSessionRenderTrace(`workspace-sync ${resolution} after ${stuckMs}ms`);
   captureSafely(() => {
     capturePostHogEvent(deferredPostHog, 'workspace/sync_stuck_resolved', properties);

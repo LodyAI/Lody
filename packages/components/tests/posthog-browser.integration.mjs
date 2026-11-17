@@ -12,6 +12,7 @@ import { chromium, webkit } from '@playwright/test';
 
 const boundaryOnly = process.argv.includes('--boundary-only');
 const dailyOnly = process.argv.includes('--daily-only');
+const stuckOnly = process.argv.includes('--stuck-only');
 const root = fileURLToPath(new URL('..', import.meta.url));
 const require = createRequire(import.meta.url);
 const sdkDir = fileURLToPath(
@@ -25,7 +26,8 @@ const result = await build({
     alias: [
       { find: '@/components/error-boundary-fallback', replacement: 'fixture:boundary-fallback' },
       { find: '@', replacement: `${root}/src` },
-      { find: 'posthog-js', replacement: 'fixture:posthog' },
+      // Boundary/deferred probes use the script SDK; sync-stuck keeps its real ESM singleton.
+      ...(!stuckOnly ? [{ find: 'posthog-js', replacement: 'fixture:posthog' }] : []),
     ],
   },
   plugins: [
@@ -46,7 +48,10 @@ const result = await build({
     target: 'esnext',
     write: false,
     minify: false,
-    lib: { entry: `${root}/tests/posthog-browser.fixture.ts`, formats: ['es'] },
+    lib: {
+      entry: `${root}/tests/${stuckOnly ? 'posthog-sync-stuck-browser' : 'posthog-browser'}.fixture.ts`,
+      formats: ['es'],
+    },
     rollupOptions: { output: { inlineDynamicImports: true } },
   },
   worker: { format: 'es' },
@@ -225,7 +230,10 @@ async function setup(
       negative: insecure,
       compressed: useCompression,
       boundaryDeferred: deferBoundary,
+      stuckOnly: useStuckClient,
     }) => {
+      // The hook's deferred facade and the guarded transport must share one SDK.
+      if (useStuckClient) window.posthog = window.stuckPostHog;
       if (shellKind === 'electron') window.__LODY_ELECTRON__ = true;
       if (shellKind === 'ios' || shellKind === 'android') {
         window.__LODY_NATIVE__ = true;
@@ -283,7 +291,7 @@ async function setup(
         window.dispatchEvent(new Event('pagehide'));
       };
     },
-    { origin, shell, negative, compressed, boundaryDeferred }
+    { origin, shell, negative, compressed, boundaryDeferred, stuckOnly }
   );
   currentDistinctId = boundaryDeferred
     ? undefined
@@ -314,6 +322,116 @@ async function receiveRecording(page) {
   await response;
 }
 
+async function checkSyncStuck(page, label) {
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
+  await page.clock.pauseAt(new Date('2026-01-01T00:00:01Z'));
+  currentDistinctId = await page.evaluate(() => {
+    window.stuckProbe = window.createWorkspaceSyncStuckProbe();
+    return window.stuckProbe.client.get_distinct_id();
+  });
+  const reports = () => allEvents().filter((event) => event.event === '$exception');
+  const flush = async (expected = 0) => {
+    const response = page.waitForResponse((res) => res.url().includes('/barrier/'));
+    await page.evaluate(() => {
+      window.flush();
+      window.stuckProbe.client.capture(
+        'probe/barrier',
+        {},
+        {
+          send_instantly: true,
+          _url: location.origin + '/barrier/',
+        }
+      );
+    });
+    await response;
+    // Exception batches have their own queue; a barrier response alone is not
+    // evidence that those batches reached the receiver.
+    if (reports().length < expected) {
+      try {
+        for await (const _ of on(ingestion, 'batch', { signal: AbortSignal.timeout(15_000) })) {
+          if (reports().length >= expected) break;
+        }
+      } catch {
+        throw new Error(
+          `${label}: expected ${expected} exception reports, received ${reports().length}`
+        );
+      }
+    }
+  };
+  const render = (stage) => page.evaluate((value) => window.stuckProbe.render(value), stage);
+  await render('runtime_missing');
+  await page.clock.runFor(29_999);
+  await flush();
+  assert.equal(reports().length, 0, 'no premature report');
+  // Progress between blockers must retain the original episode deadline.
+  await render('doc_meta_scan_pending');
+  await page.clock.runFor(1);
+  await flush(1);
+  assert.equal(reports().length, 1);
+  assert.equal(reports()[0].properties.stage, 'doc_meta_scan_pending');
+  await page.evaluate(() => window.stuckProbe.connection('reconnecting'));
+  await render('doc_meta_scan_failed');
+  await page.evaluate(() => window.stuckProbe.connection('online'));
+  await page.clock.runFor(120_000);
+  await flush();
+  assert.equal(reports().length, 1, 'retries and stage changes do not create another report');
+  const stages = [
+    ['runtime_missing', 'unknown', 'unknown'],
+    ['runtime_init_failed', 'rejected', 'unknown'],
+    ['runtime_other_workspace', 'scope_mismatch', 'unknown'],
+    ['doc_meta_scan_pending', 'unknown', 'unknown'],
+    ['doc_meta_scan_failed', 'rejected', 'not_scheduled'],
+    ['workspace_not_in_organizations', 'target_not_listed', 'unknown'],
+    ['workspace_id_mismatch', 'scope_mismatch', 'unknown'],
+  ];
+  for (const [stage, failure, retry] of stages) {
+    const expected = reports().length + 1;
+    await render(null);
+    await render(stage);
+    await page.clock.runFor(30_000);
+    await flush(expected);
+    const properties = reports().at(-1).properties;
+    assert.equal(properties.operation, 'workspace_sync');
+    assert.equal(properties.stage, stage);
+    assert.equal(properties.failure_kind, failure);
+    assert.equal(properties.handling_state, 'observed');
+    assert.equal(properties.retry_state, retry);
+  }
+  assert.equal(reports().length, 8, 'each recovered episode can report independently');
+  await page.evaluate(() => {
+    const error = new AggregateError(
+      [new DOMException('STUCK_ABORT_SECRET', 'AbortError'), new Error('STUCK_CLEANUP_SECRET')],
+      'STUCK_MIXED_SECRET'
+    );
+    window.stuckProbe.client.captureException(error, {
+      operation: 'workspace_sync',
+      stage: 'STUCK_STAGE_SECRET',
+      failure_kind: 'STUCK_FAILURE_SECRET',
+      handling_state: 'STUCK_HANDLING_SECRET',
+      retry_state: 'STUCK_RETRY_SECRET',
+      unexpected: 'STUCK_EXTRA_SECRET',
+    });
+  });
+  await flush(9);
+  assert.equal(reports().length, 9, 'mixed interruption/cleanup failure remains visible');
+  for (const field of ['stage', 'failure_kind', 'handling_state', 'retry_state'])
+    assert.equal(reports().at(-1).properties[field], 'unknown');
+  assert.equal(
+    wire().includes('STUCK_'),
+    false,
+    'no workspace, error, or unknown diagnostic text escapes'
+  );
+  await page.evaluate(() => window.stuckProbe.close());
+  await flush();
+  assert.equal(reports().length, 9, 'cleanup adds no exception');
+  assert.equal(allEvents().filter((event) => event.event === 'workspace/sync_stuck').length, 8);
+  assert.equal(
+    allEvents().filter((event) => event.event === 'workspace/sync_stuck_resolved').length,
+    8
+  );
+  console.log(`${label}: sync-stuck real hook + fake clock + SDK ingestion PASS`);
+}
+
 try {
   for (const [name, engine, shells] of [
     ['chromium', chromium, ['web', 'electron', 'android']],
@@ -323,7 +441,7 @@ try {
     try {
       // Real product ErrorBoundary -> deferred controller -> locked SDK -> HTTP.
       // One failed upload retries the same UUID; React retries enqueue no extra event.
-      if (!dailyOnly && !negative) {
+      if (!dailyOnly && !stuckOnly && !negative) {
         for (const initialScope of [null, 'account/plain/workspace']) {
           received.length = 0;
           const { page } = await setup(browser, 'web', false, false, true);
@@ -413,7 +531,8 @@ try {
               `${name}/${initialScope ? 'ordinary' : 'restricted'}: boundary deferred, retries, privacy, recovery PASS`
             );
           } finally {
-            await page.close();
+            // Retire this probe's fake-clock context before other SDK modes run.
+            await page.context().close();
           }
         }
       }
@@ -423,6 +542,10 @@ try {
         received.length = 0;
         const { page } = await setup(browser, shell);
         try {
+          if (stuckOnly) {
+            await checkSyncStuck(page, `${name}/${shell}`);
+            continue;
+          }
           if (shell !== 'web' && !negative) {
             const { page: peer } = await setup(page.context(), shell);
             try {
@@ -692,7 +815,7 @@ try {
           await page.close();
         }
       }
-      if (dailyOnly) continue;
+      if (dailyOnly || stuckOnly) continue;
       received.length = 0;
       const compressedPage = (await setup(browser, 'web', false, true)).page;
       try {

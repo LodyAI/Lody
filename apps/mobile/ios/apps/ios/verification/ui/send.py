@@ -24,9 +24,11 @@ ui.axe('tap', '-x', str(frame['x'] + 40), '-y', str(frame['y'] + 20), '--post-de
 timer = ui.wait(lambda items: next((i for i in items if (i.get('AXUniqueId') or '').endswith(':delivery')), None), 'Offline delivery missing')
 assert timer['frame']['y'] >= frame['y'] - 1, 'Collapsed composer scrolled the delivery status above the transcript'
 turn = timer['AXUniqueId'].removesuffix(':delivery')
-assert timer['AXLabel'] == catalog.text('send.status.awaitingConnection'), 'Unacked send must show its delivery phase above the message'
+assert timer['AXLabel'] == catalog.text('send.status.awaitingConnection'), 'Unacked send must show its delivery phase below the message'
 assert ui.element('send-status')['AXLabel'] == 'Calls: 0 · waiting'
 assert ui.element(turn + ':user-text')['AXLabel'] == draft
+message = ui.element(turn + ':user-text')['frame']
+assert timer['frame']['y'] >= message['y'] + message['height'] - 1, 'Delivery status must follow the complete user message'
 assert not ui.element('session-input').get('AXValue')
 ui.element(turn + ':attachment:fixture-file')
 ui.capture('offline')

@@ -237,7 +237,6 @@ final class ChatTabsOverlay: UIView {
 /// Native bar item: shares the More button's glass background.
 final class DirectoryTabsButton: UIButton {
   private let status = UIImageView()
-  private var isUnread = false
   init() {
     super.init(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
     setImage(LodyIcon.sessions.uiImage?.preparingThumbnail(of: CGSize(width: LodyIconSize.md, height: LodyIconSize.md))?.withRenderingMode(.alwaysTemplate), for: .normal)
@@ -245,20 +244,20 @@ final class DirectoryTabsButton: UIButton {
     accessibilityIdentifier = "chat-directory-tabs"
     status.contentMode = .scaleAspectFit
     status.isUserInteractionEnabled = false
+    status.image = UIImage(systemName: "circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 6, weight: .semibold))
+    status.tintColor = LodyUIColor.accentDefault
+    status.isHidden = true
     addSubview(status)
     NSLayoutConstraint.activate([widthAnchor.constraint(equalToConstant: 44), heightAnchor.constraint(equalToConstant: 44)])
   }
   required init?(coder: NSCoder) { fatalError() }
   override func layoutSubviews() {
     super.layoutSubviews()
-    let size: CGFloat = isUnread ? 6 : 12
+    let size: CGFloat = 6
     status.frame = CGRect(x: bounds.maxX - 11 - size / 2, y: bounds.maxY - 11 - size / 2, width: size, height: size)
   }
-  func setStatus(_ symbol: String) {
-    isUnread = symbol == "circle.fill"
-    setNeedsLayout()
-    status.isHidden = symbol.isEmpty
-    status.image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: symbol == "circle.fill" ? 6 : 11, weight: .semibold))
-    status.tintColor = symbol == "exclamationmark.circle" ? LodyUIColor.dangerDefault : LodyUIColor.accentDefault
+  func setUnread(_ unread: Bool) {
+    accessibilityValue = unread ? String(localized: "session.relations.unread", bundle: .lody) : nil
+    status.isHidden = !unread
   }
 }

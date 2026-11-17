@@ -1069,9 +1069,9 @@ internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, clos
                     .semantics { contentDescription = title }) {
                     Icon(LodyIcons.Sessions, contentDescription = androidx.compose.ui.res.pluralStringResource(R.plurals.chat_directory_tabs, tabs.size, tabs.size), tint = colors.iconPrimary, modifier = Modifier.size(LodyIconSize.md))
                 }
-                if (tabs.any { !it.parentSessionId.isNullOrBlank() }) DirectoryTabs.attention(tabs.filter { it.id != currentId })?.let { attention ->
+                if (tabs.any { !it.parentSessionId.isNullOrBlank() } && DirectoryTabs.hasBackgroundUnread(tabs, currentId)) {
                     Box(Modifier.align(Alignment.BottomEnd).padding(end = LodySpacing.xs, bottom = LodySpacing.xs).size(LodyIconSize.xs + LodySpacing.xxs)
-                        .background(colors.bgOverlay, CircleShape), contentAlignment = Alignment.Center) { app.lody.android.home.AttentionGlyph(attention) }
+                        .background(colors.bgOverlay, CircleShape), contentAlignment = Alignment.Center) { app.lody.android.home.AttentionGlyph(app.lody.android.home.ChatAttention.Unread) }
                 }
                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = 420.dp)) {
                     ChatTabsMenu(tabs, closedTabs, currentId, creating, busy,

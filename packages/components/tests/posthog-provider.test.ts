@@ -386,6 +386,11 @@ it('rejects unrecognized diagnostic fields and versions rather than hashing secr
       $lib_version: '1.2.3-PRIVATE_TOKEN',
       app_version: 'PRIVATE_VERSION',
       release: 'PRIVATE_RELEASE',
+      operation: 'PRIVATE_OPERATION',
+      stage: 'doc_meta_scan_failed',
+      failure_kind: 'rejected',
+      handling_state: 'observed',
+      retry_state: 'not_scheduled',
       $exception_fingerprint: 'PRIVATE_FINGERPRINT',
       extra: { cause: 'PRIVATE_CAUSE' },
     },
@@ -396,5 +401,46 @@ it('rejects unrecognized diagnostic fields and versions rather than hashing secr
     platform: 'unknown',
   });
   expect(result?.properties).not.toHaveProperty('app_version');
+  expect(result?.properties).not.toHaveProperty('stage');
   expect(JSON.stringify(result)).not.toContain('PRIVATE_');
+});
+
+it('preserves fixed sync diagnostics through deferred capture and transport reprojection', () => {
+  const privacy = createPostHogPrivacy(() => null);
+  const sent: unknown[] = [];
+  const client = {
+    __loaded: false,
+    _send_request: (options: { data: unknown }) => sent.push(options.data),
+  };
+  privacy.attach(client as never);
+  const prepared = privacy.prepareException([
+    new Error('PRIVATE_MESSAGE'),
+    {
+      operation: 'workspace_sync',
+      stage: 'doc_meta_scan_failed',
+      failure_kind: 'rejected',
+      handling_state: 'observed',
+      retry_state: 'not_scheduled',
+      workspace_id: 'PRIVATE_WORKSPACE',
+    },
+  ]);
+  const event = privacy.beforeSend({
+    event: '$exception',
+    properties: prepared[1] as Record<string, unknown>,
+  });
+  client._send_request({ data: [event] });
+  client._send_request({ data: sent[0] });
+  expect(sent[1]).toEqual(sent[0]);
+  expect(sent[0]).toMatchObject([
+    {
+      properties: {
+        operation: 'workspace_sync',
+        stage: 'doc_meta_scan_failed',
+        failure_kind: 'rejected',
+        handling_state: 'observed',
+        retry_state: 'not_scheduled',
+      },
+    },
+  ]);
+  expect(JSON.stringify(sent)).not.toContain('PRIVATE_');
 });
