@@ -8,7 +8,7 @@ Read before changing the shell, page hosting and presentation, navigation, deep 
 
 - `HomeController` owns the adaptive UIKit split and list, session and inspector navigation controllers. Preserve native interactive pop. `SessionNavigation` handles session actions; tool pages use `LodyShell.presentDetail`. Keep sheets for transient flows and Debug demos.
 
-- A page that replaces the navigation bar with its own header (`LodyPageOwnedHeader`, such as the conversation's) lays that header out against `view.layoutGuide(for: .safeArea(cornerAdaptation: .horizontal))`: the plain safe area excludes a windowed iPad app's window controls, which a navigation bar avoids by itself.
+- A page that replaces the navigation bar with its own header (`LodyPageOwnedHeader`, such as the conversation's) keeps its 16 pt margin from the plain safe area and uses `view.layoutGuide(for: .safeArea(cornerAdaptation: .horizontal))` only as a floor: the plain safe area excludes a windowed iPad app's window controls, which a navigation bar avoids by itself, while the corner-adapted guide also insets for iPhone display corners and would double the margin.
 
 - Register page factories in `Shell/LodyNativePages.swift`. Controllers read Swift-owned state and observe NotificationCenter changes. Inject service closures for I/O; offline preview subclasses use scripted services. Use `String(localized:bundle:)` with `.lody` and edit `packages/LodyKit/Sources/LodyKit/Resources/Localizable.xcstrings` directly. Use Foundation format arguments and catalog plural variations; `InfoPlist.xcstrings` owns permission prompts.
 
