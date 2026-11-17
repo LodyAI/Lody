@@ -368,8 +368,8 @@ describe('createBackgroundSyncCoordinator', () => {
     expect(second.prefetcher.calls).toEqual([]);
   });
 
-  it('keeps failed activity out of high-water and retries only a newer revision during cooldown', async () => {
-    const { coordinator, prefetcher, activity } = setup({
+  it('does not advance syncedThrough on a failed prefetch (retry stays possible)', async () => {
+    const { coordinator, prefetcher, activity, time } = setup({
       activity: [{ sessionId: sid('a'), lastMessageAt: 100 }],
     });
     coordinator.start();
@@ -378,10 +378,11 @@ describe('createBackgroundSyncCoordinator', () => {
     await tick();
     expect(prefetcher.calls).toEqual([sid('a')]);
 
-    // Unchanged activity stays cooled without becoming successfully synced.
-    activity.emit({ sessionId: sid('a'), lastMessageAt: 100 });
+    activity.emit({ sessionId: sid('a'), lastMessageAt: 101 });
     await tick();
     expect(prefetcher.calls).toEqual([sid('a')]);
+    // Failure is not sync success: a later scheduling edge can retry after backoff.
+    time.advance(60 * 1000);
     activity.emit({ sessionId: sid('a'), lastMessageAt: 101 });
     await tick();
     expect(prefetcher.calls).toEqual([sid('a'), sid('a')]);
@@ -424,38 +425,33 @@ describe('createBackgroundSyncCoordinator', () => {
   });
 });
 
-it.each(['cache_rejected', 'failed'] as const)(
-  'does not turn %s into sync success or re-download on unrelated reseeds',
-  async (outcome) => {
-    const highWater = createFakeHighWaterStore();
-    const h = setup({
-      activity: [{ sessionId: sid('large'), lastMessageAt: 1 }],
-      highWaterStore: highWater.port,
-    });
-    h.coordinator.start();
-    await tick();
-    h.prefetcher.resolve(sid('large'), outcome);
-    await tick();
-    expect(highWater.values.get(sid('large'))).toBeUndefined();
-    h.activity.emit({ sessionId: sid('other'), lastMessageAt: 2 });
-    h.env.set({ visible: false });
-    h.env.set({ visible: true });
-    await tick();
-    expect(h.prefetcher.isPending(sid('large'))).toBe(false);
-    expect(h.coordinator.getState().queued).not.toContain(sid('large'));
-    // A real activity revision remains eligible immediately.
-    h.activity.emit({ sessionId: sid('large'), lastMessageAt: 3 });
-    await tick();
-    expect(h.prefetcher.isPending(sid('large'))).toBe(true);
-    h.prefetcher.resolve(sid('large'), outcome);
-    await tick();
-    h.time.advance(30 * 60 * 1000);
-    // Expiry does not install a polling loop. A later genuine scheduling edge retries.
-    expect(h.prefetcher.isPending(sid('large'))).toBe(false);
-    h.activity.emit({ sessionId: sid('other'), lastMessageAt: 4 });
-    await tick();
-    expect(h.prefetcher.isPending(sid('large'))).toBe(true);
-    h.coordinator.stop();
-    await tick();
-  }
-);
+it('does not turn cache rejection into sync success or re-download on unrelated reseeds', async () => {
+  const highWater = createFakeHighWaterStore();
+  const h = setup({
+    activity: [{ sessionId: sid('large'), lastMessageAt: 1 }],
+    highWaterStore: highWater.port,
+  });
+  h.coordinator.start();
+  await tick();
+  h.prefetcher.resolve(sid('large'), 'cache_rejected');
+  await tick();
+  expect(highWater.values.get(sid('large'))).toBeUndefined();
+  h.activity.emit({ sessionId: sid('other'), lastMessageAt: 2 });
+  h.env.set({ visible: false });
+  h.env.set({ visible: true });
+  await tick();
+  expect(h.prefetcher.isPending(sid('large'))).toBe(false);
+  expect(h.coordinator.getState().queued).not.toContain(sid('large'));
+  for (let activity = 3; activity < 20; activity++)
+    h.activity.emit({ sessionId: sid('large'), lastMessageAt: activity });
+  await tick();
+  expect(h.prefetcher.isPending(sid('large'))).toBe(false);
+  h.time.advance(30 * 60 * 1000);
+  // Expiry does not install a polling loop. A later genuine scheduling edge retries.
+  expect(h.prefetcher.isPending(sid('large'))).toBe(false);
+  h.activity.emit({ sessionId: sid('other'), lastMessageAt: 4 });
+  await tick();
+  expect(h.prefetcher.isPending(sid('large'))).toBe(true);
+  h.coordinator.stop();
+  await tick();
+});

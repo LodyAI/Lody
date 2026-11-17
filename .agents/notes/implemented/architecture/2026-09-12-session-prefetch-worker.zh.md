@@ -50,12 +50,11 @@ transport 相同的显式 Streams endpoint。
 消息先于 `start`：模块 Worker 的顶层 WASM 初始化尚未完成时就可能分派消息，
 立即发送的 `start` 会早于处理器注册而丢失。
 
-缓存拒绝返回 `cache_rejected`，不返回 `synced`，也不写同步 high-water。
-独立的有界 IndexedDB 索引按同一领取键及活动版本冷却三十分钟，跨窗口和重启
-保留；协调器在运行期也抑制重复播种。真实新活动可立即重试。到期后只在后续
-调度事件重试，不增加轮询定时器。最多保留 1000 条拒绝记录；元数据写失败时，
-运行期用有界内存兜底，但这不能跨窗口或重启保留拒绝。前台打开仍取消预取，
-沿已有合并和同步路径继续。128 MiB／64 条快照上限不变，缓存清理包含拒绝索引。
+缓存拒绝返回 `cache_rejected`；错误、缺依赖和期限到达返回 `failed`，两者都不推进 high-water。独立有界 IndexedDB 索引按同一领取键保存 kind、attempts 和 retryAt，跨窗口及重启保留。旧记录保守使用三十分钟等待。新活动及失败类别切换都不重置重试历史，只有成功提交缓存（包括其他窗口已完成的缓存）才重置。
+
+容量拒绝从三十分钟开始翻倍，最多二十四小时；失败从一分钟开始翻倍，无云 checkpoint 时最多二十四小时，有 checkpoint 时最多三十分钟。协调器采用客户端给出的 retryAt，元数据重新播种或更新的活动不能绕过截止时间。到期后仅在后续调度事件重试，不增加轮询。最多保留 1000 条记录；元数据写失败时有界内存兜底，但无法跨窗口或重载保留冷却。
+
+下载超时在 Worker 终止后使用独立、最长一秒的元数据 owner，避免已中止的任务信号丢弃失败记录。该 owner 中止实际 IndexedDB 事务，并持锁等到事务终态；普通取消仍可立即返回跳过。前台打开绕过后台准入，沿正常合并和同步路径继续。128 MiB／64 条快照上限不变，缓存清理包含重试索引。
 
 保留[回退决策](../simplification/2026-10-19-repo-upgrade-without-consumer-migration.zh.md)
 中的已发布 Promise Repo／transport 消费边界。另建消费内核会扩大这次下载准入
@@ -87,10 +86,10 @@ Web Locks 在共享同一数据库的调用者之间互斥条件写入与普通�
 后台预同步完全绕过 Mirror，但用户业务写入仍由原来的 HistoryWriter 负责。
 当前保证写入[草案 Spec](../../../../specs/session-background-prefetch.zh.md)。
 
-普通游标保存或删除拿锁失败时继续原来的安全操作；条件采用则保持严格拿锁。失败、缺依赖和期限到达同样进入三十分钟冷却，不推进活动 high-water。Worker 已终止后的失败记录使用独立、最长两秒的事务预算，避免下载期限已中止而丢失跨重载冷却。新的真实活动可立即绕过旧记录。
+普通游标保存或删除拿锁失败时继续原来的安全操作；条件采用仍严格依赖锁。
 
 ## 验证与限制
 
 [Worker 测试](../../../../packages/components/tests/eager-sync-worker.test.ts)使用真实 Loro 和受控 HTTP，验证跨次增量、旧行及无效 checkpoint、缺依赖、写入中断和 410 恢复。[冷加载测试](../../../../packages/components/tests/local-window-bootstrap.test.ts)覆盖先落盘后游标、独立窗口数据库、保留 pending imports、排除 live 文档及未上传编辑到达远端。两个入口都拒绝实际文档未覆盖的缓存 snapshotVersion。[游标测试](../../../../packages/components/tests/resilient-remote-cursor-store.test.ts)验证与普通写入竞争的条件插入及锁不可用时的降级。
 
-[协调器测试](../../../../packages/components/tests/background-sync-coordinator.test.ts)覆盖拒绝和失败冷却、不写虚假 high-water、新活动及事件驱动的到期重试。[浏览器验收](../../../../packages/components/tests/eager-sync-browser.integration.mjs)使用真实 Chromium 窗口、Worker、HTTP 与 IndexedDB，覆盖 claim、ready/start、取消、窗口关闭，以及拒绝、失败和期限到达记录跨重载保留。拒绝发生在下载合成字节之后，不分配 128 MiB 历史。不同 profile、origin 和 Electron partition 不共享浏览器 claim。安装后桌面与移动端、真实长历史性能和生产流量节省仍未验证；Worker 与 UI 仍共享设备资源。测试不含捕获的对话。
+[协调器测试](../../../../packages/components/tests/background-sync-coordinator.test.ts)覆盖持久指数退避、不写虚假 high-water、持续新活动、成功重置及事件驱动的到期重试。[浏览器验收](../../../../packages/components/tests/eager-sync-browser.integration.mjs)使用真实 Chromium 窗口、Worker、HTTP 与 IndexedDB，覆盖 claim、ready/start、取消、窗口关闭，以及拒绝、失败和期限到达记录跨重载保留。拒绝发生在下载合成字节之后，不分配 128 MiB 历史。不同 profile、origin 和 Electron partition 不共享浏览器 claim。安装后桌面与移动端、真实长历史性能和生产流量节省仍未验证；Worker 与 UI 仍共享设备资源。测试不含捕获的对话。

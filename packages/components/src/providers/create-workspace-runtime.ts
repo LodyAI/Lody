@@ -5715,6 +5715,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         },
         registry: roomSyncRegistry,
         prefetcher: {
+          getRetryAt: (sessionId) => eagerSyncWorkerClient?.getRetryAt(getSessionRoomId(sessionId)),
           prefetch: async (sessionId, lastMessageAt, signal) => {
             if (signal.aborted || materializedSessionIds.has(sessionId)) {
               return 'skipped';

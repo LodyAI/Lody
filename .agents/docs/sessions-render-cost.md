@@ -106,7 +106,7 @@ opens a foreground database. See the [ownership decision](../notes/implemented/a
 The coordinator uses concurrency/batch size 1, with 1.5-second batch cooldowns on
 desktop/web and 3 seconds on mobile. A renderer-wide queue also serializes runtime
 instances across workspace transitions; separate windows each have their own slot
-but share workspace cache rows. A twenty-second task deadline reports failure and releases the serial slot; dependency-incomplete catch-up also fails without updating the cache. Cancellation kills the worker even during
+but share workspace cache rows. Retry metadata persists exponential backoff; new activity cannot bypass capacity refusal or reset a failing room's deadline. Only a committed cache success resets retry history. A twenty-second task deadline reports failure and releases the serial slot; dependency-incomplete catch-up also fails without updating the cache. Cancellation kills the worker even during
 synchronous WASM work, and the parent withdraws its local peer. Local targets use
 the existing local readiness plane; remote targets use the same configured Streams
 endpoint as the mounted foreground transport. This isolates background

@@ -59,8 +59,8 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   rebuildable snapshot cache. Keep one worker per renderer; terminate before releasing
   its slot and cross-window workspace/room/authorization/plane lock. Detach local peers
   on cancellation. Recheck the checkpoint after claiming, before constructing
-  a worker; unavailable locks skip prefetch. Refused and failed activity cool separately
-  from sync success. Scope rows by workspace and room across windows.
+  a worker; unavailable locks skip prefetch. Refused and failed activity retain retry history
+  until success. Scope rows by workspace and room across windows.
   Use the timestamp-only high-water index as the pre-queue filter; it
   must not load snapshots, Docs, histories, or foreground cursors.
   Foreground acquisition cancels that room's prefetch and merges cached binary
