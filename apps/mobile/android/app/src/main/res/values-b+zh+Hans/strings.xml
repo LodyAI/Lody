@@ -372,7 +372,7 @@
     <string name="files_error_folder">无法读取此文件夹，电脑可能已离线。</string>
     <string name="files_empty_folder">此文件夹为空。</string>
     <string name="files_truncated">仅显示前 2000 项。</string>
-    <string name="files_markdown_only">目前仅支持预览 Markdown 文件。</string>
+    <string name="files_markdown_only">目前仅支持预览 Markdown 和 HTML 文件。</string>
     <string name="files_error_too_large">文件太大，无法预览。</string>
     <string name="files_error_not_found">此文件已不存在。</string>
     <string name="files_error_permission">电脑不允许读取此文件。</string>

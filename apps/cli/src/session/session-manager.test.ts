@@ -11,6 +11,7 @@ import {
   type AgentConfigMeta,
   type LocalProjectId,
   type MachineId,
+  type McpServerId,
   type RepoId,
   type SessionId,
   type SessionMeta,
@@ -1408,7 +1409,9 @@ describe('SessionManager failed agent creation', () => {
     expect(exit).not.toHaveBeenCalled();
     createAgent.mockResolvedValueOnce('acp-memory');
     const memory = { providerId: 'nowledge-mem', memoryId: 'reviewer' };
-    const reconfigured = await manager.createSession({ ...config, memory });
+    const mcpServerIds = ['server-a' as McpServerId];
+    const reconfigured = await manager.createSession({ ...config, memory, mcpServerIds });
+    expect(reconfigured.getMcpServerIds?.()).toEqual(mcpServerIds);
     expect(reconfigured.getMemoryBinding?.()).toEqual(memory);
     expect(manager.getSession(sessionId)).toBe(reconfigured);
     manager.detachSession(replacement);

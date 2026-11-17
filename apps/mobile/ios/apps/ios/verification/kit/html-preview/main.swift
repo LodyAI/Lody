@@ -10,6 +10,14 @@ assert(HTMLPreviewResource.path(relative, documentPath: "docs/intro page.html") 
 let absolute = HTMLPreviewResource.url(path: "/Users/example/project/demo.html", host: "preview")
 let image = URL(string: "./image.png", relativeTo: absolute)!.absoluteURL
 assert(HTMLPreviewResource.path(image, documentPath: "/Users/example/project/demo.html") == "/Users/example/project/image.png")
+let rootImage = URL(string: "/Users/example/shared/logo.png", relativeTo: absolute)!.absoluteURL
+assert(HTMLPreviewResource.path(rootImage, documentPath: "/Users/example/project/demo.html") == "/Users/example/shared/logo.png")
+assert(HTMLPreviewResource.path(URL(string: "/assets/app.js", relativeTo: base)!.absoluteURL, documentPath: "docs/intro page.html") == nil)
+let authored = Data(#"<img src="file:///Users/example/a%20b.png"><img src="FILE://localhost/C:/x.png">"#.utf8)
+let rewritten = String(decoding: HTMLPreviewResource.rewriteFileURLs(authored, host: "preview"), as: UTF8.self)
+assert(rewritten == #"<img src="lody-preview://preview/__lody_fs/Users/example/a%20b.png"><img src="lody-preview://preview/__lody_fs/C:/x.png">"#)
+assert(HTMLPreviewResource.path(URL(string: "lody-preview://preview/__lody_fs/Users/example/a%20b.png")!, documentPath: "docs/a.html") == "/Users/example/a b.png")
+assert(HTMLPreviewResource.path(URL(string: "lody-preview://preview/__lody_fs/C:/x.png")!, documentPath: "docs/a.html") == "C:/x.png")
 for value in ["http://localhost:5173/a", "http://127.0.0.1/a", "http://[::1]/a", "https://test.localhost/a"] {
   assert(HTMLPreviewResource.code(URL(string: value)!) == "local_service_unavailable")
 }
@@ -17,7 +25,7 @@ assert(HTMLPreviewResource.code(URL(string: "https://cdn.example.com/app.js")!) 
 assert(HTMLPreviewResource.code(URL(string: "file:///Users/example/a.png")!) == "local_file_unavailable")
 assert(HTMLPreviewResource.safeReference("https://user:secret@example.com/a?token=secret#secret") == "https://example.com/a")
 assert(HTMLPreviewResource.safeReference("./a.png?token=secret") == "./a.png")
-print("PASS: relative/absolute paths, loopback service classification and diagnostic credential redaction")
+print("PASS: relative/absolute/root paths, file URL routing, loopback service classification and diagnostic credential redaction")
 
 assert(HTMLPreviewText.isHTML("docs/demo.HTM"))
 assert(!HTMLPreviewText.isHTML("docs/demo.html.ts"))

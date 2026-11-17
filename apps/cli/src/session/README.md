@@ -15,6 +15,15 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 | Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.                      |
 | Process lifetime | [Session](session.ts)                             | Owns ACP resources, confirmed termination, and bounded Codex refresh-start recovery. |
 
+## MCP selection between turns
+
+Session records the MCP ids mounted at startup. Execution compares them with the
+next turn's frozen selection as sets. Adding, removing or replacing a selection
+retires the idle Agent through the existing reconfiguration path, then restores
+the conversation with the new MCP configuration through normal resume/replay. Unchanged selections,
+including a different order, keep the current Agent. A steer with changed MCP ids
+returns to dispatch as pending input so it runs after the active turn ends.
+
 ## Machine identity recovery admission
 
 Fleet checks both active presence and registered execution owners before accepting

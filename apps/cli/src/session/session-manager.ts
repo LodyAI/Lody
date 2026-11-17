@@ -222,6 +222,7 @@ export interface ISession {
   getAcpCapabilitySourceVersion?(): string | null;
   getProviderBinding?(): import('./automation-observations').ProviderBinding | undefined;
   getMemoryBinding?(): SessionConfig['memory'];
+  getMcpServerIds?(): Readonly<SessionConfig['mcpServerIds']>;
   getWorkdir(): string;
   /**
    * Host-side working directory for file operations.

@@ -5,6 +5,7 @@ import {
   type ACPSessionId,
   type AgentConfigMeta,
   type MachineId,
+  type McpServerId,
   type SessionGoalMessage,
   type SessionHistoryInput,
   type SessionId,
@@ -971,80 +972,99 @@ describe('SessionExecutionService', () => {
     expect(steerPrompt).not.toHaveBeenCalled();
   });
 
-  it('rejects a Codex steer whose requested configuration differs from the active turn', async () => {
-    const upsertDocMeta = vi.fn(async () => {});
-    const deps = createBaseDeps({
-      workspaceDocument: {
-        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
-        getOrCreateSessionDoc: vi.fn(async () =>
-          withHistoryPort({ updateHistory: vi.fn(async () => {}) })
-        ),
-      } as unknown as LoroDocumentManager,
-    });
-    const service = new SessionExecutionService(deps);
-    const sessionId = 'session-codex-steer-config' as SessionId;
-    const findSteerConfigMismatch = vi.fn(() => 'model requested gpt-next, active gpt-current');
-    const runtime = {
-      sessionId,
-      turnId: 'assistant:user-1',
-      session: {
-        agentClient: {
-          getAcknowledgedSteerCapability: vi.fn(() => ({
-            provider: 'codex',
-            appliedNotificationMethod: 'codex/steerApplied',
-            upstreamTurn: 'same',
-            configPolicy: 'active',
-          })),
-          findSteerConfigMismatch,
+  it.each([
+    { selection: 'model', configPolicy: 'active' },
+    { selection: 'MCP', configPolicy: 'active' },
+    { selection: 'MCP', configPolicy: 'apply' },
+  ] as const)(
+    'promotes steer with changed $selection under $configPolicy policy',
+    async ({ selection, configPolicy }) => {
+      const upsertDocMeta = vi.fn(async () => {});
+      const deps = createBaseDeps({
+        workspaceDocument: {
+          repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
+          getOrCreateSessionDoc: vi.fn(async () =>
+            withHistoryPort({ updateHistory: vi.fn(async () => {}) })
+          ),
+        } as unknown as LoroDocumentManager,
+      });
+      const service = new SessionExecutionService(deps);
+      const sessionId = 'session-codex-steer-config' as SessionId;
+      const findSteerConfigMismatch = vi.fn(() =>
+        selection === 'model' ? 'model requested gpt-next, active gpt-current' : null
+      );
+      const runtime = {
+        sessionId,
+        turnId: 'assistant:user-1',
+        session: {
+          agentClient: {
+            getAcknowledgedSteerCapability: vi.fn(() => ({
+              provider: 'codex',
+              appliedNotificationMethod: 'codex/steerApplied',
+              upstreamTurn: 'same',
+              configPolicy,
+            })),
+            findSteerConfigMismatch,
+          },
+          acpSessionId: 'acp-codex-steer-config' as ACPSessionId,
         },
-        acpSessionId: 'acp-codex-steer-config' as ACPSessionId,
-      },
-      promptInFlight: true,
-    };
-    (
-      service as unknown as {
-        turnRuntimeBySession: Map<SessionId, typeof runtime>;
-      }
-    ).turnRuntimeBySession.set(sessionId, runtime);
+        promptInFlight: true,
+      };
+      (
+        service as unknown as {
+          turnRuntimeBySession: Map<SessionId, typeof runtime>;
+        }
+      ).turnRuntimeBySession.set(sessionId, runtime);
 
-    await expect(
-      service.steerSession({
-        sessionId,
-        expectedTurnId: 'assistant:user-1',
-        userTurnId: 'user-2',
-        userId: 'user-1',
-        timestamp: '2026-07-11T00:00:00.000Z',
-        inputConfig: { prompt: 'change direction', modelId: 'gpt-next' },
-      })
-    ).resolves.toMatchObject({
-      applied: false,
-      disposition: 'unsupported',
-      error: expect.stringContaining('Active turn configuration differs'),
-    });
-    expect(findSteerConfigMismatch).toHaveBeenCalledOnce();
-    expect(deps.applyAcpModeAndModel).not.toHaveBeenCalled();
-    expect(deps.beginConversationTurn).not.toHaveBeenCalled();
+      await expect(
+        service.steerSession({
+          sessionId,
+          expectedTurnId: 'assistant:user-1',
+          userTurnId: 'user-2',
+          userId: 'user-1',
+          timestamp: '2026-07-11T00:00:00.000Z',
+          inputConfig: {
+            prompt: 'change direction',
+            ...(selection === 'model'
+              ? { modelId: 'gpt-next' }
+              : { mcpServerIds: ['server-a' as McpServerId] }),
+          },
+        })
+      ).resolves.toMatchObject({
+        applied: false,
+        disposition: 'unsupported',
+        error: expect.stringContaining(
+          selection === 'model'
+            ? 'Active turn configuration differs'
+            : 'MCP selection requires a new turn'
+        ),
+      });
+      if (selection === 'model') expect(findSteerConfigMismatch).toHaveBeenCalledOnce();
+      expect(deps.applyAcpModeAndModel).not.toHaveBeenCalled();
+      expect(deps.beginConversationTurn).not.toHaveBeenCalled();
 
-    findSteerConfigMismatch.mockReturnValue(null);
-    await expect(
-      service.steerSession({
-        sessionId,
-        expectedTurnId: 'assistant:user-1',
-        userTurnId: 'user-3',
-        userId: 'user-1',
-        timestamp: '2026-07-11T00:00:01.000Z',
-        inputConfig: { prompt: 'same configuration' },
-      })
-    ).resolves.toMatchObject({ applied: false, disposition: 'busy' });
-    expect(deps.applyAcpModeAndModel).not.toHaveBeenCalled();
-    // Neither guide reached Codex, so both are handed back to dispatch instead
-    // of being stranded in `pending_apply`.
-    const promoted = Object.assign(
-      {},
-      ...upsertDocMeta.mock.calls.map((call) => (call[1] as Partial<SessionMeta>).steerTurnStatuses)
-    );
-    expect(promoted).toEqual({ 'user-2': 'pending', 'user-3': 'pending' });
-  });
+      findSteerConfigMismatch.mockReturnValue(null);
+      await expect(
+        service.steerSession({
+          sessionId,
+          expectedTurnId: 'assistant:user-1',
+          userTurnId: 'user-3',
+          userId: 'user-1',
+          timestamp: '2026-07-11T00:00:01.000Z',
+          inputConfig: { prompt: 'same configuration' },
+        })
+      ).resolves.toMatchObject({ applied: false, disposition: 'busy' });
+      // Neither guide reached Codex, so both are handed back to dispatch instead
+      // of being stranded in `pending_apply`.
+      const promoted = Object.assign(
+        {},
+        ...upsertDocMeta.mock.calls.map(
+          (call) => (call[1] as Partial<SessionMeta>).steerTurnStatuses
+        )
+      );
+      expect(promoted).toEqual({ 'user-2': 'pending', 'user-3': 'pending' });
+    }
+  );
 
   it.each(['before', 'during-build'] as const)(
     'promotes a user-Stop steer before provider submission (Stop: %s)',

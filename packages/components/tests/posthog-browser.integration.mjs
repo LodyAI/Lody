@@ -192,6 +192,7 @@ async function setup(browser, shell = 'web', late = false, compressed = false) {
         window.__LODY_NATIVE__ = true;
         window.__LODY_APP_INFO__ = { native_platform: shellKind };
       }
+      window.__LODY_APP_INFO__ = { ...window.__LODY_APP_INFO__, app_version: '1.2.3' };
       window.observed = [];
       window.scope = null;
       window.installWorkspaceTelemetryScope(() => window.scope);
@@ -381,6 +382,13 @@ try {
               }))
             );
           await barrier(page);
+          const unknownArrived = () =>
+            allEvents().some((event) => event.properties.error_code === 'e2ee_feature_unavailable');
+          if (!negative && !unknownArrived()) {
+            for await (const _ of on(ingestion, 'batch', { signal: AbortSignal.timeout(15_000) })) {
+              if (unknownArrived()) break;
+            }
+          }
           assert.equal(
             allEvents().some((event) => event.event === '$snapshot'),
             false,
@@ -390,6 +398,39 @@ try {
           assert.ok(
             allEvents().some((event) => event.properties.error_code === 'e2ee_feature_unavailable')
           );
+
+          if (!negative) {
+            await page.evaluate(() => {
+              window.posthog.captureException(new TypeError('CATEGORY_PRIVATE_TYPE'));
+              window.posthog.captureException(new RangeError('CATEGORY_PRIVATE_RANGE'));
+            });
+            await barrier(page);
+            const categoriesArrived = () =>
+              ['TypeError', 'RangeError'].every((type) =>
+                allEvents().some((event) => event.properties.error_type === type)
+              );
+            if (!categoriesArrived()) {
+              for await (const _ of on(ingestion, 'batch', {
+                signal: AbortSignal.timeout(15_000),
+              })) {
+                if (categoriesArrived()) break;
+              }
+            }
+            const restricted = allEvents().filter((event) => event.event === '$exception');
+            const type = restricted.find((event) => event.properties.error_type === 'TypeError');
+            const range = restricted.find((event) => event.properties.error_type === 'RangeError');
+            assert.ok(type && range, 'restricted built-in categories reach ingestion');
+            assert.notEqual(
+              type.properties.$exception_fingerprint,
+              range.properties.$exception_fingerprint
+            );
+            assert.equal(type.properties.app_version, '1.2.3');
+            assert.equal(
+              type.properties.platform,
+              shell === 'web' ? 'web' : shell === 'electron' ? 'electron' : 'mobile'
+            );
+            assert.equal(wire().includes('CATEGORY_PRIVATE_'), false);
+          }
 
           await page.evaluate(() => {
             window.privateDom('PLAIN');
