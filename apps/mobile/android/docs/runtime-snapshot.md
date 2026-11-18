@@ -1,7 +1,7 @@
 # Shared runtime source and dependency updates
 
-`runtime/vendor/cloud-runtime` snapshots this monorepo's `apps/mobile/ios/packages/cloud-runtime`
-verbatim. `vendor/PROVENANCE.json` records the base commit and reviewed updates.
+`runtime/vendor/cloud-runtime` snapshots the pinned iOS submodule's
+`packages/cloud-runtime` verbatim. `vendor/PROVENANCE.json` records the base commit and reviewed updates.
 `vendor/SHA256.json` records every mirrored file. Each asset build checks the
 snapshot for changed, added or missing files and symlinks. The drift test modifies
 a disposable copy.
@@ -12,7 +12,7 @@ the iOS package, where the iOS asset build verifies the generated module.
 
 For an intentional update:
 
-1. Select and record a reviewed upstream commit. Export `apps/mobile/ios/packages/cloud-runtime` into a temporary directory using `git archive <commit> apps/mobile/ios/packages/cloud-runtime` and omit the two Roost authoring paths above.
+1. Select and record a reviewed upstream commit. Export `packages/cloud-runtime` from the iOS submodule into a temporary directory using `git -C apps/mobile/ios archive <commit> packages/cloud-runtime` and omit the two Roost authoring paths above.
 2. Compare that export against the current snapshot. Review protocol changes, licensing and browser dependencies. Preserve Android adaptation in `runtime/src`, outside the snapshot.
 3. Replace the snapshot only after reviewing the diff; update PROVENANCE and SHA256 together. Generate hashes with the exported `hashes()` function in `runtime/snapshot.mjs`, directed at the reviewed source directory. No build regenerates the manifest automatically.
 4. Run snapshot verification, `npm ci`, JS tests, asset build, JVM and Android bridge tests. Update `runtime/contract/fixtures.json` only for an intentional contract change. Capture actual WebView/WASM results and verify release assets contain no diagnostics.
@@ -65,7 +65,7 @@ References: https://github.com/advisories/GHSA-mrhx-c7xc-m3w5 and https://zod.de
 Bridge protocol 2 adds an explicit command capability handshake, `$cancel`, native command deadlines, and ordered message chunks. It wraps the original JS runtime; it does not change the upstream cloud protocol. Fixtures use synthetic catalog data matching the vendored event shapes, not captured user data. The offline document exposes `ping`, `setActive`, and `probeSchema`. The network document additionally advertises `connect`, `grant`, `watchSession`, `closeSession`, `creationOptions`, and `createAndSend`, used through the native scoped runtime. Session reads reuse the upstream Loro projection and emit typed text messages to Compose. Both network gates restrict reads and the creation/dispatch writes described below to the current workspace; returning to the list stops the session subscription.
 
 The snapshot carries every catalog field Android reads (session owner, `machineOs`, git
-state, PR merge state), the 16 MiB per-replica catalog input budget and per-config
+state, PR merge state), the 16 MiB per-window catalog input budget and per-config
 creation capabilities, so no bundle-time source adapters remain. A later difference
 belongs in the next re-snapshot, not in a patch over the snapshot. `catalog-budget.test.mjs`
 still runs the bundled watcher against a synthetic transport to pin the budget.
@@ -115,14 +115,25 @@ metadata as well as synced machine streams. The transcript windowing hunks in `p
 
 ## Catalog read recovery
 
+The full snapshot comes from merged iOS commit
+`ddce4386dc5894f270137e892cc0f7588b7d696d` (lody-ios #99), including the SDK
+upgrade from #100 adopted by Lody #2874. Both the catalog and session client
+retain `uploadTimeoutMs: 15000`.
+
+
 Catalog transport, authorization and rate-limit failures retry from the last
 successfully imported offset and cursor, retaining the verified in-memory Flock.
 The watcher reports failure and stays unhealthy until an `upToDate` response;
 partial catch-up cannot publish a synchronized catalog. An explicit Android
 `runtime_suspended` abort retains the grant; actual transport/auth failures
 invalidate it before retrying. Malformed responses, invalid cursors and corrupt
-imports still take the bootstrap recovery path. The cumulative input budget
-survives read retries, and `catalog_limit` remains terminal. Owner cancellation
+imports still take the bootstrap recovery path. The current catch-up window budget
+survives read retries and resets at `upToDate`. A limit while catching up an old
+replica falls back to a fresh bootstrap; only a fresh bootstrap exceeding the
+16 MiB / 100-page budget is terminal. Healthy metadata publishes independently
+of machine streams, retaining their last synchronized projections. Machine
+failures emit diagnostics and disable only that target; metadata failures retain
+workspace `syncError` semantics. Owner cancellation
 ends retries without publishing late results. Writes are never replayed.
 
 ## Android text creation
@@ -214,3 +225,13 @@ snapshot unchanged, with the verified identity, and answers the runtime's `share
 share-request operations stay unsupported. The network gates need no new streams: the preview calls
 use the existing machine RPC request and response streams. See [Remote previews](rules/previews.md).
 
+
+
+Catalog catch-up and cached settings now use exact decimal offset arithmetic and
+the last snapshot byte size to prefer a newer snapshot only when it is estimated
+to cost less. HEAD failures retain incremental recovery; the old replica remains
+usable until a replacement is complete and within budget. Frame imports yield
+macrotasks between 12 ms slices; individual JSON/Wasm calls remain atomic.
+Two machine initialization slots leave metadata and live reads independent.
+Publication coalesces bursts over 16 ms using the current scope, and catalog and
+provider projections share one machine scan.

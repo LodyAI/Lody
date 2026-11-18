@@ -1,7 +1,12 @@
 import { Flock } from '@loro-dev/flock-wasm/base64';
 import { decompress } from 'fzstd';
 import { clientFor } from './session';
-import { decodeFrames, encodeFrame } from '../frames';
+import { encodeFrame } from '../frames';
+import {
+  catalogImportCheckpoint,
+  importCatalogUpdates,
+  readCatalogRefresh,
+} from './catalog-sync';
 import type { RemoteSetting, SettingsRequest } from '../models/settings.ts';
 
 type Grant = () => Promise<{ token: string; gatewayBaseUrl: string }>;
@@ -20,7 +25,7 @@ type Cached = {
   flock: Flock;
   offset: string;
   cursor: string | undefined;
-  size: number;
+  snapshotBytes: number;
 };
 const replicas = new Map<string, Cached>();
 const SETTINGS_LIMIT = 8 * 1024 * 1024;
@@ -41,11 +46,12 @@ async function catchUp(
   cached: Cached,
   signal: AbortSignal,
 ) {
-  const apply = (bytes: Uint8Array) => {
-    cached.size += bytes.length;
-    if (cached.size > SETTINGS_LIMIT) throw new Error('catalog_limit');
-    for (const frame of decodeFrames(bytes))
-      cached.flock.importJson(JSON.parse(new TextDecoder().decode(frame)));
+  let size = 0;
+  const checkpoint = catalogImportCheckpoint(signal);
+  const apply = async (bytes: Uint8Array) => {
+    size += bytes.length;
+    if (size > SETTINGS_LIMIT) throw new Error('catalog_limit');
+    await importCatalogUpdates(cached.flock, bytes, checkpoint);
   };
   for (let page = 0; ; page++) {
     signal.throwIfAborted();
@@ -56,7 +62,7 @@ async function catchUp(
       signal,
     });
     if (!next.ok) throw new Error(next.result.code);
-    if (next.result.payload) apply(next.result.payload.body);
+    if (next.result.payload) await apply(next.result.payload.body);
     if (next.result.upToDate) {
       cached.offset = next.result.nextOffset;
       cached.cursor = next.result.cursor;
@@ -77,32 +83,47 @@ export async function openSettings(
 ) {
   const client = await clientFor(stream, grant);
   const cached = options.cached ? replicas.get(stream) : undefined;
+  let preparedBootstrap: Awaited<ReturnType<typeof readCatalogRefresh>>;
   if (cached) {
     try {
-      await catchUp(client, cached, signal);
-      return { flock: copy(cached.flock), client };
+      preparedBootstrap = await readCatalogRefresh(
+        client,
+        cached.offset,
+        cached.snapshotBytes,
+        SETTINGS_LIMIT,
+        signal,
+      );
+      if (!preparedBootstrap) {
+        await catchUp(client, cached, signal);
+        return { flock: copy(cached.flock), client };
+      }
+      replicas.delete(stream);
     } catch (error) {
       replicas.delete(stream);
       if (signal.aborted) throw error;
     }
   }
-  const initial = await client.bootstrap({ signal });
+  const initial = preparedBootstrap
+    ? { ok: true as const, result: preparedBootstrap }
+    : await client.bootstrap({ signal });
   if (!initial.ok) throw new Error(initial.result.code);
   const flock = new Flock(`lody-ios-settings-${crypto.randomUUID()}`);
   const data = initial.result;
+  const snapshotBytes = data.snapshot?.body.length ?? 0;
+  const checkpoint = catalogImportCheckpoint(signal);
   let size = 0;
   const bound = (bytes: Uint8Array) => {
     size += bytes.length;
     if (size > SETTINGS_LIMIT) throw new Error('catalog_limit');
   };
-  const apply = (bytes: Uint8Array) => {
+  const apply = async (bytes: Uint8Array) => {
     bound(bytes);
-    for (const frame of decodeFrames(bytes))
-      flock.importJson(JSON.parse(new TextDecoder().decode(frame)));
+    await importCatalogUpdates(flock, bytes, checkpoint);
   };
   if (data.snapshotOffset !== '-1' && data.snapshot) {
     const bytes = data.snapshot.body;
     bound(bytes);
+    await checkpoint(true);
     flock.importFile(
       bytes[0] === 0x28 &&
         bytes[1] === 0xb5 &&
@@ -112,7 +133,8 @@ export async function openSettings(
         : bytes,
     );
   }
-  for (const part of data.updates) apply(part.body);
+  await checkpoint();
+  for (const part of data.updates) await apply(part.body);
   let offset = data.nextOffset,
     cursor = data.cursor,
     upToDate = data.upToDate;
@@ -121,14 +143,14 @@ export async function openSettings(
     if (page >= 100) throw new Error('catalog_limit');
     const next = await client.readOnce({ offset, cursor, signal });
     if (!next.ok) throw new Error(next.result.code);
-    if (next.result.payload) apply(next.result.payload.body);
+    if (next.result.payload) await apply(next.result.payload.body);
     if (offset === next.result.nextOffset && !next.result.upToDate)
       throw new Error('stalled_cursor');
     ({ nextOffset: offset, cursor, upToDate } = next.result);
   }
   if (!options.cached) return { flock, client };
   if (replicas.size >= 64) replicas.delete(replicas.keys().next().value!);
-  replicas.set(stream, { flock, offset, cursor, size });
+  replicas.set(stream, { flock, offset, cursor, snapshotBytes });
   return { flock: copy(flock), client };
 }
 
