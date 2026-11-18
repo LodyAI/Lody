@@ -5752,6 +5752,7 @@
   "sessions.iosSimulator.controls.screenshotAttach": "将截屏附加到消息",
   "sessions.iosSimulator.controls.screenshotSave": "保存截屏",
   "sessions.iosSimulator.controls.shake": "摇动",
+  "sessions.iosSimulator.controls.toggleKeyboard": "显示／隐藏模拟器键盘",
   "sessions.iosSimulator.controls.typeText": "输入文字…",
   "sessions.iosSimulator.controls.updateHint": "请更新 {{machine}} 上的 Lody 以使用模拟器控件",
   "sessions.iosSimulator.controls.view": "显示",

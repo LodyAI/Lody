@@ -7,7 +7,7 @@ export const IosSimulatorDeviceControlSchema = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('button'),
-      button: z.enum(['home', 'app-switcher', 'lock', 'volume-up', 'volume-down', 'action']),
+      button: z.enum(['home', 'app-switcher', 'lock', 'volume-up', 'volume-down', 'action', 'software-keyboard']),
     })
     .strict(),
   z.object({ kind: z.literal('rotate'), direction: z.enum(['left', 'right']) }).strict(),

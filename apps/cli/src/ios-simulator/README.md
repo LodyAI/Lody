@@ -33,8 +33,10 @@ There is no wildcard-origin reply. Web parents retain their exact-origin handsha
 live frames never enter React, RPC, or synchronized documents. An explicitly requested
 screenshot transfers one bounded PNG to the parent for saving or staging as a composer
 attachment; capture never sends a message automatically. Input text and deep links also
-stay out of workspace RPC. Device controls advertise `iosSimulatorControls: 1` independently
-of lifecycle protocol compatibility.
+stay out of workspace RPC. Device controls advertise `iosSimulatorControls: 2` independently
+of lifecycle protocol compatibility. Version 1 covers the original device controls. Version 2
+adds a software keyboard toggle for focused text fields on iPhone and iPad. The reply
+acknowledges the command without reporting keyboard visibility.
 
 ## Two-finger input
 
