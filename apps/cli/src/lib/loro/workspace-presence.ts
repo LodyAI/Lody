@@ -46,6 +46,7 @@ export interface PresenceStream {
   readonly stats: PresenceStats;
 }
 export interface PresenceRemoteOptions {
+  readonly webSocketEnabled?: boolean;
   readonly streamsBaseUrl: string;
   readonly bucketId?: string;
   readonly shardHostSuffix?: string;

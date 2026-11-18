@@ -55,6 +55,20 @@ import {
   type WorkspaceStreamsContent,
 } from '../src/providers/workspace-streams-transport';
 
+const sdkOptions = vi.hoisted(() => [] as unknown[]);
+vi.mock('loro-repo/transport/streams', async (importOriginal) => {
+  const sdk = await importOriginal<typeof import('loro-repo/transport/streams')>();
+  return {
+    ...sdk,
+    StreamsTransportAdapter: class extends sdk.StreamsTransportAdapter {
+      constructor(options: ConstructorParameters<typeof sdk.StreamsTransportAdapter>[0]) {
+        sdkOptions.push(options);
+        super(options);
+      }
+    },
+  };
+});
+
 const streamsBaseUrl = 'https://streams.checkpoint.invalid';
 const tail100 = '00000000000000000100';
 const keyA = ['m', 'doc-a', 'title'];
@@ -174,6 +188,24 @@ afterEach(async () => {
 });
 
 describe('renderer Streams checkpoints are bound to the replica that loaded them', () => {
+  it.each([undefined, false, true])(
+    'passes foreground WS opt-in %s while the installed HTTP SDK still syncs',
+    async (enabled) => {
+      const server = createMetaServer();
+      const tab = await openTab(`ws-opt-in-${++sequence}` as WorkspaceId);
+      const transport = transportFor(tab, undefined, undefined, undefined, undefined, enabled);
+      const options = sdkOptions.at(-1);
+      if (enabled)
+        expect(options).toMatchObject({
+          webSocket: { enabled: true, url: streamsBaseUrl, authPoolKey: tab.workspaceId },
+        });
+      else expect(options).not.toHaveProperty('webSocket');
+      const result = await transport.syncMeta(tab.repo.getMeta());
+      expect(result.ok).toBe(true);
+      expect(tab.repo.getMeta().get(keyA)).toBe('A');
+      expect(server.bootstraps()).toBe(1);
+    }
+  );
   it('bootstraps a tab that hydrated before a sibling tab advanced the shared databases', async () => {
     const workspaceId = `ws-tabs-${++sequence}` as WorkspaceId;
     const server = createMetaServer();
@@ -197,10 +229,12 @@ function transportFor(
   content?: WorkspaceStreamsContent,
   cursorStore?: RemoteCursorStore,
   auth?: Parameters<typeof createWorkspaceStreamsTransport>[0]['auth'],
-  incompleteRecoveryScope?: object
+  incompleteRecoveryScope?: object,
+  webSocketEnabled?: boolean
 ) {
   const transport = createWorkspaceStreamsTransport({
     repo: tab.repo,
+    webSocketEnabled,
     incompleteRecoveryScope,
     recoverFlockCheckpointsOnTimeout: true,
     workspaceId: tab.workspaceId,

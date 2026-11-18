@@ -16,6 +16,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 ## Streams connection cardinality
 
+- WebSocket defaults off; enabling it must retain HTTP shards and HTTP-only prefetch.
 - Discovery/refresh reuse existing workspace Machine Flock/RPC transports, with no
   subscription per request. Connections follow workspace/machine topology; more configs
   add serialized RPCs only. Release unowned handles and subscriptions.
