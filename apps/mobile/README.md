@@ -77,6 +77,15 @@ git submodule update --init --recursive apps/mobile/ios
 iOS changes are committed in [LodyAI/lody-ios](https://github.com/LodyAI/lody-ios)
 from `apps/mobile/ios`, then this repository updates the submodule pointer.
 
+A checkout from before the switch still holds ignored files (`node_modules`, the
+generated Xcode project, ChatKit's old checkout) in `apps/mobile/ios`, which blocks
+the submodule. After pulling, move that directory aside, then initialize:
+
+```sh
+mv apps/mobile/ios /tmp/lody-ios-before-submodule
+git submodule update --init --recursive apps/mobile/ios
+```
+
 Mobile has independent dependency locks and toolchains. The root `pnpm install`,
 `pnpm check`, and desktop build do not install or validate the native clients.
 
