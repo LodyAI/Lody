@@ -704,6 +704,24 @@ export const WaitingForOwnerHistory: Story = {
   },
 };
 
+export const LocalConversationSync: Story = {
+  render: function Render() {
+    const [sync] = useState(() => {
+      const store = createConversationSync(false);
+      store.update('document', { phase: 'confirmed', route: 'local' });
+      return store;
+    });
+    return (
+      <div className="h-96 w-96 max-w-full content-center">
+        <SessionInfoBar
+          status={null}
+          syncDetails={<SessionSyncDetails sync={sync} browserOnline />}
+        />
+      </div>
+    );
+  },
+};
+
 /** With no items and no syncing the bar still hides entirely. */
 export const EmptyNotSyncingHidden: Story = {
   args: {

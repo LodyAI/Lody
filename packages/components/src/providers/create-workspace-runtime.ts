@@ -5047,9 +5047,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     }
 
     const backendKind = resolveSessionHistoryBackendKind(sessionMeta);
-    const conversationSync = electronLocalDataPlane
-      ? undefined
-      : createConversationSync(backendKind === 'roost');
+    const conversationSync = createConversationSync(backendKind === 'roost');
     let rendererSessionDataFactory = deps.createSessionData;
     let disposeReaderObservation = () => {};
     let conversation: ReturnType<typeof createConversationSession>;
@@ -5099,11 +5097,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           readerWakes.clear();
         };
         rendererSessionDataFactory = createRoostSessionDataFactoryForMachine({
-          onHistorySync: (step) => conversationSync?.update('history', step),
+          onHistorySync: (step) => conversationSync.update('history', step),
           onHistoryRoute: (route) => {
-            const history = conversationSync?.getSnapshot().history;
+            const history = conversationSync.getSnapshot().history;
             if (history && history.route !== route)
-              conversationSync?.update('history', { phase: 'syncing', route });
+              conversationSync.update('history', { phase: 'syncing', route });
           },
           coherentInspection: () => machineSupportsSessionHistoryInspection(ownerMachineMeta),
           incremental: () => machineSupportsSessionHistoryIncremental(ownerMachineMeta),
@@ -5208,7 +5206,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       joinRetryAttempt = 0;
       stopDocumentObservation?.();
       stopDocumentObservation = undefined;
-      conversationSync?.update('document', { phase: 'connecting' });
+      conversationSync.update('document', { phase: 'connecting' });
       cloudRepairUnsubscribe?.();
       cloudRepairUnsubscribe = null;
       if (roomSub) {
@@ -5255,11 +5253,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
               const binding = readinessBindingForDocRoom(joinedSub, roomId);
               syncTracker.attach(binding);
               stopDocumentObservation?.();
-              stopDocumentObservation = conversationSync
-                ? observeConversationDocument(binding, (step) =>
-                    conversationSync.update('document', step)
-                  )
-                : undefined;
+              stopDocumentObservation = observeConversationDocument(binding, (step) =>
+                conversationSync.update('document', step)
+              );
               cloudRepairUnsubscribe?.();
               cloudRepairUnsubscribe = watchCloudBindingForRepair(joinedSub);
             },
@@ -5281,7 +5277,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           resolveFirstSynced = null;
         } catch (error) {
           syncTracker.markFirstSyncFailed();
-          if (!roomSub) conversationSync?.update('document', { phase: 'retrying', reason: 'read' });
+          if (!roomSub) conversationSync.update('document', { phase: 'retrying', reason: 'read' });
           // A returned subscription keeps self-healing inside the SDK; only a
           // join that never produced one needs a fresh attempt.
           if (!roomSub && !disposed && syncLeaseCount > 0) {

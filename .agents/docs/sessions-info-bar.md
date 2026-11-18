@@ -92,7 +92,7 @@ sharing when permitted.
   copies the worktree checkout path) + toasts. Remote/repo-only sessions have no
   local path → `workspaceLocation` is null and the leading icon stays an inert
   branch glyph.
-  The cloud conversation's sync control sits at the right edge outside the
+  The conversation's sync control sits at the right edge outside the
   cluster and stage model on both layouts. It opens per-conversation routes
   as diagrams with an arrow in the direction conversation data is received.
   Each diagram names the source, any relay and the receiving device. It

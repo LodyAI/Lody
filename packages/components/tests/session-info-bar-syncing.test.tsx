@@ -86,7 +86,7 @@ describe('SessionInfoBar ambient information', () => {
     );
   });
 
-  it('adds the server as the source once the conversation has a selected route', () => {
+  it('adds the local runtime as the source once the conversation has a selected route', () => {
     const sync = createConversationSync(false);
     act(() =>
       root.render(withTestI18n(<SessionSyncDetails sync={sync} browserOnline />, testI18n))
@@ -96,9 +96,9 @@ describe('SessionInfoBar ambient information', () => {
     expect(dialog.querySelector('[role="img"]')).toBeNull();
     expect(dialog.textContent).toContain('Waiting to identify the sync source');
 
-    act(() => sync.update('document', { phase: 'confirmed', route: 'cloud' }));
+    act(() => sync.update('document', { phase: 'confirmed', route: 'local' }));
     expect(dialog.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe(
-      'Lody server syncs data to This device'
+      'Local Lody runtime syncs data to This device'
     );
   });
 

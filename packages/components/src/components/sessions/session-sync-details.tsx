@@ -14,6 +14,7 @@ import {
   Server,
   Smartphone,
   Tablet,
+  Terminal,
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useState, useSyncExternalStore } from 'react';
@@ -263,6 +264,7 @@ export function SessionSyncDetails({
   const title = t('sessions.syncDetails.title');
   const device = { label: t('sessions.syncDetails.device'), icon: currentDeviceIcon() };
   const server = { label: t('sessions.syncDetails.server'), icon: Server };
+  const localRuntime = { label: t('sessions.syncDetails.localRuntime'), icon: Terminal };
   const target = { label: machineName || t('sessions.syncDetails.target'), icon: Monitor };
   return (
     <Popover.Root>
@@ -297,7 +299,7 @@ export function SessionSyncDetails({
         <ol {...stylex.props(styles.steps)}>
           {entries.map(({ id, label, step }, index) => {
             const ownerHistory = id === 'history' && step.route === 'cloud';
-            const source = ownerHistory ? target : server;
+            const source = step.route === 'local' ? localRuntime : ownerHistory ? target : server;
             const disconnected = !browserOnline && step.route === 'cloud';
             const messagesUnconfirmed = unconfirmed && (id === 'history' || !snapshot.history);
             const stepPhase = disconnected
@@ -332,7 +334,7 @@ export function SessionSyncDetails({
                     {phases[stepPhase]}
                   </span>
                 </div>
-                {step.route === 'cloud' ? (
+                {step.route ? (
                   <SyncFlow
                     source={source}
                     relay={ownerHistory ? server : undefined}

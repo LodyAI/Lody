@@ -2341,6 +2341,7 @@
   "sessions.syncDetails.ownerError": "目标电脑返回错误",
   "sessions.syncDetails.readFailed": "读取更新失败",
   "sessions.syncDetails.sessionState": "会话状态",
+  "sessions.syncDetails.localRuntime": "本机 Lody 运行时",
   "sessions.syncDetails.messages": "会话消息",
   "sessions.syncDetails.device": "当前设备",
   "sessions.syncDetails.server": "Lody 服务器",
