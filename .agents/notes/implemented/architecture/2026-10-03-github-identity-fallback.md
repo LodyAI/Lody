@@ -60,7 +60,7 @@ the missing helper, so its passing result did not validate production preparatio
 
 Owner refresh now updates shell eligibility and context together. A changed owner
 retires the existing runtime (including terminals holding old environment tokens)
-and fails the current operation explicitly; the next turn can create a fresh runtime.
+before the same turn can submit its pending prompt under a fresh lease.
 Participant changes without owner transfer do not terminate the runtime.
 Session and host preparation install the same pinned managed helper for Git credential
 requests, including LFS paths; non-owner host children also scrub inherited GitHub

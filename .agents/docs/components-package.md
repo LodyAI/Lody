@@ -446,3 +446,14 @@ Project members or existing group runs and disables standalone display; otherwis
 it runs normal deletion. Dependency checks stay internal. Cleanup-result notifications
 remain available for earlier commands that explicitly requested cleanup. Behavior and scope:
 [Spec](../../specs/multi-repo-projects.md#direct-folder-selection-and-standalone-visibility).
+
+## Streams WebSocket rollout
+
+Foreground workspace runtimes default to HTTP. An explicit
+`streamsWebSocketEnabled` overrides `VITE_LORO_STREAMS_WS_ENABLED`; the environment
+opts in only with `true` or `1`. Durable and ephemeral transports then forward
+`webSocket: { enabled: true, url: streamsBaseUrl, authPoolKey: workspaceId }`.
+Presence retains its sharded HTTP URL for fallback. Disposable eager-sync workers
+receive no WS option. Structural option spreads compile with the pinned SDKs;
+WS activation additionally requires released SDKs that implement URL override and
+Repo forwarding. Physical connection reuse is not proven by HTTP compatibility tests.

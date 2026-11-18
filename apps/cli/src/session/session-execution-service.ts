@@ -7550,7 +7550,7 @@ export class SessionExecutionService {
 
       const applyPromptConfig = (
         targetSession: ISession,
-        triggerReason: 'initial' | 'stale_acp_recovery'
+        triggerReason: 'initial' | 'stale_acp_recovery' | 'owner_change'
       ): Effect.Effect<void, unknown, never> =>
         self.tryPromise((signal) =>
           traceAsync(
@@ -7573,21 +7573,34 @@ export class SessionExecutionService {
           )
         );
 
-      const validatePromptCredentials = Effect.fnUntraced(function* (
+      const validatePromptCredentials = (
         targetSession: ISession,
-        triggerReason: 'initial' | 'stale_acp_recovery'
-      ): Effect.fn.Return<void, unknown, never> {
-        // Validate this runtime's owner-bound authority before submitting a turn.
-        yield* self.tryPromise(() =>
+        triggerReason: 'initial' | 'stale_acp_recovery' | 'owner_change'
+      ) =>
+        self.tryPromise(() =>
           traceAsync(
             self.deps.logger,
             'execution.validate_credentials',
             { sessionId, turnId, triggerReason },
-            async () =>
-              await self.deps.sessionManager.validateSessionCredentials(targetSession, userId)
+            () =>
+              self.deps.sessionManager.validateSessionCredentials(
+                targetSession,
+                userId,
+                triggerReason === 'initial' ? 'replace-before-prompt' : undefined
+              )
           )
         );
-        return undefined;
+
+      const restoreRetiredSession = Effect.fnUntraced(function* () {
+        runtime.cancellationDrain = undefined;
+        session = null;
+        runtime.session = undefined;
+        runtime.pendingSession = undefined;
+        yield* abortIfCancelled();
+        const replacement = yield* restoreMissingSession(ctx);
+        bindReadySession(replacement);
+        yield* acpReplaySuppression.release;
+        return replacement;
       });
 
       // Inbox has already crossed its durable start fence before prompt submission.
@@ -7634,14 +7647,7 @@ export class SessionExecutionService {
                 self.deps.sessionManager.retireSessionForReconfiguration(activeSession)
               );
               runtime.disconnectedTransport = false;
-              runtime.cancellationDrain = undefined;
-              session = null;
-              runtime.session = undefined;
-              runtime.pendingSession = undefined;
-
-              const restoredSession = yield* restoreMissingSession(ctx);
-              bindReadySession(restoredSession);
-              yield* acpReplaySuppression.release;
+              const restoredSession = yield* restoreRetiredSession();
               yield* applyPromptConfig(restoredSession, 'stale_acp_recovery');
               yield* maybeRecordHistoryReplayNotice();
               yield* validatePromptCredentials(restoredSession, 'stale_acp_recovery');
@@ -7679,11 +7685,19 @@ export class SessionExecutionService {
 
       yield* abortIfCancelled();
 
-      const promptBlocks = yield* self.tryPromise(() => promptBlocksPromise);
+      let promptBlocks = yield* self.tryPromise(() => promptBlocksPromise);
 
       yield* abortIfCancelled();
 
-      yield* validatePromptCredentials(activeSession, 'initial');
+      const ownerChanged =
+        (yield* validatePromptCredentials(activeSession, 'initial')) === 'retired';
+      if (ownerChanged) {
+        const replacement = yield* restoreRetiredSession();
+        yield* applyPromptConfig(replacement, 'owner_change');
+        yield* maybeRecordHistoryReplayNotice();
+        promptBlocks = yield* self.tryPromise(buildPromptBlocksForCurrentResumeState);
+        yield* validatePromptCredentials(replacement, 'owner_change');
+      }
       runtime.project = project;
 
       yield* abortIfCancelled();
@@ -7692,7 +7706,9 @@ export class SessionExecutionService {
 
       yield* abortIfCancelled();
 
-      yield* promptWithStaleACPRecovery(promptBlocks);
+      // The owner handoff permits one submission. A disconnect after that handoff
+      // cannot establish that the replacement did not consume the prompt.
+      yield* ownerChanged ? prompt(promptBlocks) : promptWithStaleACPRecovery(promptBlocks);
 
       const completedTurnId = runtime.turnId;
       const completedUserTurnId = runtime.userTurnId ?? executionUserTurnId;
@@ -8380,7 +8396,10 @@ export class SessionExecutionService {
             yield* self.tryPromise(() => self.assertEncryptedScopeWithin(allowed, scopeInputs()));
             sessionConfig.authorizeExecutionInputs = self.encryptedInputGuard(allowed);
           }
-          const session = yield* self.startWithTransientRetry({
+          // Session creation enriches its config with the acquired credential environment.
+          // Preserve launch inputs for a replacement before handing them to the manager.
+          const replacementConfig = { ...sessionConfig, resume: true };
+          let session = yield* self.startWithTransientRetry({
             sessionId,
             runtime,
             config: sessionConfig,
@@ -8449,26 +8468,29 @@ export class SessionExecutionService {
           self.deps.logger.debug(
             `[${sessionId}] session ready (workdir=${session.getWorkdir()} acpSessionId=${session.acpSessionId ?? 'null'})`
           );
-          yield* self.tryPromise((signal) =>
-            traceAsync(
-              self.deps.logger,
-              'execution.apply_acp_mode_model',
-              { sessionId, turnId },
-              async () =>
-                await self.deps.applyAcpModeAndModel(
-                  session,
-                  {
-                    ...agentConfig,
-                    configOptionValues: agentConfig.configOptionValues,
-                  },
-                  {
-                    sessionDoc,
-                    basedOnUserTurnId: userTurnId,
-                    signal,
-                  }
-                )
-            )
-          );
+          const configurePrompt = (target: ISession) =>
+            self.tryPromise((signal) =>
+              traceAsync(
+                self.deps.logger,
+                'execution.apply_acp_mode_model',
+                { sessionId, turnId },
+                async () =>
+                  await self.deps.applyAcpModeAndModel(
+                    target,
+                    {
+                      ...agentConfig,
+                      configOptionValues: agentConfig.configOptionValues,
+                    },
+                    {
+                      sessionDoc,
+                      basedOnUserTurnId: userTurnId,
+                      signal,
+                    }
+                  )
+              )
+            );
+
+          yield* configurePrompt(session);
 
           yield* abortIfCancelled();
 
@@ -8478,13 +8500,37 @@ export class SessionExecutionService {
 
           yield* openAssistantEntry();
 
-          const promptBlocks = yield* self.tryPromise(() => promptBlocksPromise);
-          yield* self.tryPromise(() =>
+          let promptBlocks = yield* self.tryPromise(() => promptBlocksPromise);
+          const validation = yield* self.tryPromise(() =>
             self.deps.sessionManager.validateSessionCredentials(
               session,
-              sessionConfig.requesterUserId
+              sessionConfig.requesterUserId,
+              'replace-before-prompt'
             )
           );
+          if (validation === 'retired') {
+            runtime.session = undefined;
+            yield* abortIfCancelled();
+            if (authorizedIds) {
+              yield* self.tryPromise(() =>
+                self.assertEncryptedScopeWithin(authorizedIds, scopeInputs())
+              );
+            }
+            session = yield* trackPendingSession(
+              () => self.deps.sessionManager.createSession(replacementConfig),
+              { terminateOnCancel: true }
+            );
+            bindSession(session);
+            yield* abortIfCancelled({ terminateSession: true });
+            yield* configurePrompt(session);
+            promptBlocks = yield* self.tryPromise(() => startPromptBlocksBuild(session));
+            yield* self.tryPromise(() =>
+              self.deps.sessionManager.validateSessionCredentials(
+                session,
+                sessionConfig.requesterUserId
+              )
+            );
+          }
           yield* abortIfCancelled();
 
           yield* prompt(promptBlocks);

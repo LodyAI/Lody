@@ -33,6 +33,20 @@ import {
   type SessionDetailPresenceState,
 } from '../src/lib/session-detail-presence';
 
+const sdkEphemeralOptions = vi.hoisted(() => [] as unknown[]);
+vi.mock('@loro-dev/streams-crdt/loro', async (importOriginal) => {
+  const sdk = await importOriginal<typeof import('@loro-dev/streams-crdt/loro')>();
+  return {
+    ...sdk,
+    EphemeralStreamCrdt: class extends sdk.EphemeralStreamCrdt {
+      constructor(options: ConstructorParameters<typeof sdk.EphemeralStreamCrdt>[0]) {
+        sdkEphemeralOptions.push(options);
+        super(options);
+      }
+    },
+  };
+});
+
 describe('workspace-presence-transport', () => {
   type JoinResult = Awaited<ReturnType<PresenceTransportLike['join']>>;
 
@@ -129,6 +143,43 @@ describe('workspace-presence-transport', () => {
   };
 
   describe('WorkspacePresenceTransport', () => {
+    it.each([undefined, false, true])(
+      'retains sharded HTTP presence with WS opt-in %s',
+      async (enabled) => {
+        let selected: unknown;
+        const presence = new WorkspacePresenceTransport({
+          workspaceId: 'workspace-ws' as WorkspaceId,
+          presenceShardId: '07',
+          createStore: () => new FakePresenceStore(),
+          createTransport: (args) => {
+            selected = args;
+            return new FakePresenceTransport();
+          },
+        });
+        try {
+          presence.start({
+            baseUrl: 'https://api.streams.test',
+            shardHostSuffix: 'streams.test',
+            auth: async () => 'token',
+            webSocketEnabled: enabled,
+          });
+          expect(selected).toMatchObject({
+            streamUrl: expect.stringContaining('https://presence-07.streams.test/'),
+          });
+          if (enabled)
+            expect(selected).toMatchObject({
+              webSocket: {
+                enabled: true,
+                url: 'https://api.streams.test',
+                authPoolKey: 'workspace-ws',
+              },
+            });
+          else expect(selected).not.toHaveProperty('webSocket');
+        } finally {
+          await presence.stop();
+        }
+      }
+    );
     it.each([false, true])(
       'drops invalid viewing routes without throwing or retaining a heartbeat (started=%s)',
       async (started) => {
@@ -724,7 +775,13 @@ describe('session-viewing-presence-bridge', () => {
   class ProductionPresenceTransport extends WorkspacePresenceTransport {
     open(store: EphemeralStore, auth: EphemeralRoomAuthCallback = async () => 'test-token') {
       return this.createTransport({
-        streamUrl: 'https://streams.example.com/v1/streams/presence?ephemeral=presence',
+        streamUrl:
+          'https://presence-07.streams.example.com/ds/lody/workspace-test%3Ameta?ephemeral=presence',
+        webSocket: {
+          enabled: true,
+          url: 'https://api.streams.example.com',
+          authPoolKey: 'workspace-test',
+        },
         store,
         auth,
       });
@@ -788,6 +845,14 @@ describe('session-viewing-presence-bridge', () => {
           workspaceId: 'workspace-test' as WorkspaceId,
         });
         const transport = factory.open(store);
+        expect(sdkEphemeralOptions.at(-1)).toMatchObject({
+          webSocket: {
+            enabled: true,
+            url: 'https://api.streams.example.com',
+            authPoolKey: 'workspace-test',
+          },
+          streamUrl: expect.stringContaining('https://presence-07.streams.example.com/'),
+        });
         try {
           const result = await transport.join({});
           if (!result.ok) throw new Error(JSON.stringify(result.error));
