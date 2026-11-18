@@ -54,7 +54,7 @@ Ownership: [README.md](README.md).
 - Thought/tool timelines are compact, transparent, 13px and glyph-free; verbs label
   steps. Execute calls are not cards. Disclosure labels lead, chevrons trail
   (desktop: hover-only, body type, no fill). Every provider shows thoughts:
-  separate thought and tool groups default closed; explicit toggles win.
+  adjacent thoughts and tools share one default-closed group; explicit toggles win.
   Thought prose uses answer typography, secondary ink and shared work folding. Footers show config, not author identity.
 - An expanded tool step is ONE `ToolDetailSheet` (`tool-call-detail.tsx`): composer
   fill + card shadow, no header restating the row, sections in content order. Only

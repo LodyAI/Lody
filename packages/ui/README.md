@@ -677,6 +677,9 @@ viewport takes no pointer, so the page under a toast stays usable; each toast
 takes it back for its own close button. Each toast also excludes its card from
 Electron's native window drag region, so controls remain clickable where the
 portalled card overlaps the titlebar; gaps between cards do not claim that region.
+Toast presses stay within the notification surface so they do not dismiss a mobile
+conversation drawer underneath. Mouse hover pauses auto-dismiss; touch release or
+cancellation resumes it, and compatibility mouse events do not count as hover.
 
 The other half is the wait. A `Progress` is a well-rung track with `accent`
 running in it, because the rules give that colour to live state and name the

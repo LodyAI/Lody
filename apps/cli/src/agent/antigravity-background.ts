@@ -128,6 +128,7 @@ export class AntigravitySessionTracker {
   private turnEndedAtMs: number | null = null;
   private lastActivityAtMs = 0;
   private inWakeup = false;
+  private expiredPendingWork = false;
 
   constructor(timings?: Partial<AntigravityPollTimings>) {
     this.timings = { ...DEFAULT_ANTIGRAVITY_POLL_TIMINGS, ...timings };
@@ -142,6 +143,7 @@ export class AntigravitySessionTracker {
     this.turnToolIds = new Set();
     this.turnEndedAtMs = null;
     this.inWakeup = false;
+    this.expiredPendingWork = false;
   }
 
   /** Record a tool notification Lody received live on stdout. */
@@ -192,12 +194,16 @@ export class AntigravitySessionTracker {
       this.pending = Math.max(0, this.pending - 1);
     }
     const endedAtMs = this.turnEndedAtMs;
-    if (
-      endedAtMs === null ||
-      nowMs - endedAtMs >= this.timings.maxDurationMs ||
-      (this.pending === 0 && !this.inWakeup)
-    ) {
+    if (endedAtMs === null || (this.pending === 0 && !this.inWakeup)) {
       this.pending = 0;
+      this.inWakeup = false;
+      this.expiredPendingWork = false;
+      return { settled: true, state: 'idle', backgroundTaskCount: 0 };
+    }
+    if (nowMs - endedAtMs >= this.timings.maxDurationMs) {
+      this.pending = 0;
+      this.inWakeup = false;
+      this.expiredPendingWork = true;
       return { settled: true, state: 'idle', backgroundTaskCount: 0 };
     }
     return {
@@ -208,6 +214,11 @@ export class AntigravitySessionTracker {
           : 'idle',
       backgroundTaskCount: Math.max(1, this.pending),
     };
+  }
+
+  /** True when the monitor reached its protection cap with unconfirmed background work left. */
+  hasExpiredPendingWork(): boolean {
+    return this.expiredPendingWork;
   }
 
   private countTurnBackgroundWork(): number {

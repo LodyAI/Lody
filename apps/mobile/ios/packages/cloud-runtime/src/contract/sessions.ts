@@ -168,6 +168,11 @@ export const ForgetPendingInputParams = z
   .object({ sessionId, inputId: z.string().min(1).max(256) })
   .meta({ id: 'ForgetPendingInputParams' });
 
+export const RetryPendingInputResult = z
+  .object({ state: z.enum(['pending', 'accepted', 'settled']) })
+  .meta({ id: 'RetryPendingInputResult' });
+export type RetryPendingInputResult = z.infer<typeof RetryPendingInputResult>;
+
 export const SendTurnParams = z
   .object({
     sessionId,

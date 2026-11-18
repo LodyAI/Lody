@@ -115,6 +115,15 @@ pre {
   .dark .markdown-renderer a {
     color: hsl(200 69% 70%);
   }
+  /* Reference/link colours must yield to the same selected foreground as prose. */
+  [data-composer-editor] [data-mention-value][data-selected] {
+    color: HighlightText;
+  }
+
+  /* A link rendered as a reference label (GitHub PR / issue): a link-blue
+     tinted chip (no border) instead of the prose underline, so it reads as
+     clickable at a glance. The hue is the prose link's (`.text-markdown-link`). Outranks the
+     renderer's `[&_a]:` link variants in this same layer. */
   .markdown-renderer :is(a, button, span).markdown-reference-chip {
     --reference-chip-hue: 200 72% 34%;
     color: hsl(var(--reference-chip-hue));
@@ -1254,6 +1263,14 @@ pre {
   [data-composer-editor][data-system-selection]::selection {
     background-color: Highlight;
     color: HighlightText;
+  }
+
+  /* Atomic mentions paint one selection surface from the editor's range.
+     Native text fragments must not add a second rectangle or recolour the icon. */
+  [data-composer-editor][data-system-selection] [data-mention-value]::selection,
+  [data-composer-editor][data-system-selection] [data-mention-value] *::selection {
+    background-color: transparent;
+    color: inherit;
   }
 
   /* Pro focus style: only show on keyboard navigation */

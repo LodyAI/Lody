@@ -5824,6 +5824,7 @@ const SessionDetail = ({
         onDeleteSession: handleRequestDeleteCurrentSession,
         onOpenSearch: handleOpenSearch,
         onCopyConversationHistory: exportAllowed ? handleCopyConversationHistory : undefined,
+        onCopyUrl: (linkFormat) => handleCopyUrl(undefined, undefined, linkFormat),
         onRequestRename: canRenameCurrentSession ? handleRenameCurrentSession : undefined,
         onForkSession:
           !activeDraftTab && activeTabSession && canForkSession(activeTabSession)
@@ -5865,6 +5866,7 @@ const SessionDetail = ({
     handleOpenSearch,
     exportAllowed,
     handleCopyConversationHistory,
+    handleCopyUrl,
     activeDraftTab,
     canRenameCurrentSession,
     handleRenameCurrentSession,

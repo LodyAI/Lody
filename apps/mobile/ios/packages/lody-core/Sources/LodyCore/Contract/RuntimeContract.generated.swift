@@ -6377,6 +6377,27 @@ extension RuntimeContract {
     }
   }
 
+  public enum RetryPendingInputResultState: String, Codable, Sendable, Equatable, CaseIterable {
+    case pending = "pending"
+    case accepted = "accepted"
+    case settled = "settled"
+  }
+
+  public struct RetryPendingInputResult: Codable, Sendable, Equatable {
+    public var state: RetryPendingInputResultState
+    public init(state: RetryPendingInputResultState) {
+      self.state = state
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.state = try c.decode(RetryPendingInputResultState.self, forKey: Key("state"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.state, forKey: Key("state"))
+    }
+  }
+
   public struct RuntimeError: Codable, Sendable, Equatable {
     public var code: String
     public var retryable: Bool
@@ -9059,7 +9080,7 @@ extension RuntimeContract {
     }
     public enum RetryPendingInput: RuntimeCall {
       public typealias Params = RuntimeContract.ForgetPendingInputParams
-      public typealias Result = RuntimeContract.Empty
+      public typealias Result = RuntimeContract.RetryPendingInputResult
       public static let method = "retryPendingInput"
       public static let timeout: Double = 30
       public static func result(_ value: RuntimeContract.CallResult) -> Result? {
@@ -9269,7 +9290,7 @@ extension RuntimeContract {
     case renameSession(RuntimeContract.Empty)
     case respondPermission(RuntimeContract.RespondPermissionResult)
     case restoreSessions(RuntimeContract.Empty)
-    case retryPendingInput(RuntimeContract.Empty)
+    case retryPendingInput(RuntimeContract.RetryPendingInputResult)
     case scheduleCommand(RuntimeContract.ScheduleCommandResult)
     case scheduleDetail(RuntimeContract.ScheduleDetail)
     case schedules(RuntimeContract.SchedulesResult)
@@ -9390,7 +9411,7 @@ extension RuntimeContract {
         case "renameSession": message = .result(id: id, .renameSession(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))
         case "respondPermission": message = .result(id: id, .respondPermission(try c.decode(RuntimeContract.RespondPermissionResult.self, forKey: Key("payload"))))
         case "restoreSessions": message = .result(id: id, .restoreSessions(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))
-        case "retryPendingInput": message = .result(id: id, .retryPendingInput(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))
+        case "retryPendingInput": message = .result(id: id, .retryPendingInput(try c.decode(RuntimeContract.RetryPendingInputResult.self, forKey: Key("payload"))))
         case "scheduleCommand": message = .result(id: id, .scheduleCommand(try c.decode(RuntimeContract.ScheduleCommandResult.self, forKey: Key("payload"))))
         case "scheduleDetail": message = .result(id: id, .scheduleDetail(try c.decode(RuntimeContract.ScheduleDetail.self, forKey: Key("payload"))))
         case "schedules": message = .result(id: id, .schedules(try c.decode(RuntimeContract.SchedulesResult.self, forKey: Key("payload"))))

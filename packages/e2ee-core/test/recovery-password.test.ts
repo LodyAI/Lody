@@ -112,33 +112,76 @@ describe('recovery vault password & passkey-first workflows', () => {
     expect(() => normalizeRecoveryPassword('x'.repeat(1025))).toThrow();
   });
 
-  it('creates and opens a vault with DEFAULT_PASSWORD_KDF and NFC-equivalent password', async () => {
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const harness = makeStores();
-          const { vault } = yield* createRecoveryVaultWithPassword({
-            locator: 'https://api.lody.test',
-            password: 'caf\u00e9-battery-staple',
-            kdf: DEFAULT_PASSWORD_KDF,
-            store: harness.store,
-            local: harness.journal,
-          });
-          expect(yield* vault.hasPassword()).toBe(true);
-          expect(yield* vault.hasRecoveryFile()).toBe(false);
+  it.each(['individual', 'batch'] as const)(
+    'opens a vault with DEFAULT_PASSWORD_KDF and NFC-equivalent password via %s reads',
+    async (mode) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const harness = makeStores();
+            const { vault } = yield* createRecoveryVaultWithPassword({
+              locator: 'https://api.lody.test',
+              password: 'caf\u00e9-battery-staple',
+              kdf: DEFAULT_PASSWORD_KDF,
+              store: harness.store,
+              local: harness.journal,
+            });
+            expect(yield* vault.hasPassword()).toBe(true);
+            expect(yield* vault.hasRecoveryFile()).toBe(false);
 
-          const reopened = yield* openRecoveryVaultWithPassword({
-            vaultId: vault.vaultId,
-            locator: vault.locator,
-            password: 'cafe\u0301-battery-staple',
-            store: harness.store,
-            local: harness.journal,
-          });
-          expect(reopened.vaultId).toBe(vault.vaultId);
-        })
-      )
-    );
-  });
+            if (mode === 'batch')
+              harness.store.readEntries = (_vault, ids) =>
+                Effect.forEach(ids, (id) => harness.store.readEntry(_vault, id));
+            const reopened = yield* openRecoveryVaultWithPassword({
+              vaultId: vault.vaultId,
+              locator: vault.locator,
+              password: 'cafe\u0301-battery-staple',
+              store: harness.store,
+              local: harness.journal,
+            });
+            expect(reopened.vaultId).toBe(vault.vaultId);
+          })
+        )
+      );
+    }
+  );
+
+  it.each(['reordered', 'truncated'] as const)(
+    'refuses a %s batch rather than deriving from the wrong ciphertext slot',
+    async (mode) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const harness = makeStores();
+            const { vault } = yield* createRecoveryVaultWithPassword({
+              locator: 'https://api.lody.test',
+              password: 'synthetic-battery-staple',
+              kdf: FAST_KDF,
+              store: harness.store,
+              local: harness.journal,
+            });
+            harness.store.readEntries = (vaultId, ids) =>
+              Effect.map(
+                Effect.forEach(ids, (id) => harness.store.readEntry(vaultId, id)),
+                (entries) => (mode === 'truncated' ? entries.slice(1) : entries.reverse())
+              );
+            const outcome = yield* Effect.result(
+              openRecoveryVaultWithPassword({
+                vaultId: vault.vaultId,
+                locator: vault.locator,
+                password: 'synthetic-battery-staple',
+                store: harness.store,
+                local: harness.journal,
+              })
+            );
+            expect(Result.isFailure(outcome) && outcome.failure).toMatchObject({
+              code: 'authentication',
+            });
+          })
+        )
+      );
+    }
+  );
 
   it('shares one master key V across passkey creation, password wrap, and offline recovery file', async () => {
     await Effect.runPromise(

@@ -34,11 +34,8 @@ Parent/child scopes apply. `CLAUDE.md` symlinks here; edit `AGENTS.md` only.
   the synced compact state agrees, and a close that never finishes is unmounted.
 - All lists use `lib/session-opened-by-tree.ts`; `sidebar-navigation-model.ts`
   owns matching keyboard navigation.
-- Keep `openedBySessionId` (precise opener) distinct from `openedByRowSessionId`
-  (row). `buildSidebarOpenerRowResolver` in `sessions/session-list-rows.ts` walks
-  `parentSessionId` to root using sidebar `allActiveSessions`, never visible rows.
-  Preserve the precise opener and independent child workspace; `parentSessionId`
-  children stay out of `sessionListAtom` rows.
+- Before changing opener identity or child workspace ownership, read
+  [session provenance rules](sessions/AGENTS.md#opener-provenance).
 - Opener and unrelated top-level rows retain flat-list alignment. In the leading slot,
   an opener shows disclosure and a child shows ├/└; hover swaps either for ⋯ at the same
   7px centre. Draw nesting regardless of working/unread/waiting status. Only children
@@ -137,6 +134,10 @@ Parent/child scopes apply. `CLAUDE.md` symlinks here; edit `AGENTS.md` only.
   Project. Retried saves reuse registrations; source paths stay out of definitions.
 
 E2EE/terminals: read [rules](e2ee/AGENTS.md).
+
+## Crash diagnostics
+
+ErrorBoundary uploads one fixed-vocabulary exception per failure episode, including retries, until healthy content commits.
 
 ## Automation markers
 

@@ -7,8 +7,9 @@ Translation: current
 
 ## Abstract
 
-The core implements vault-v1 recovery, but no product uses it. A user who loses every
-paired device therefore loses their encrypted workspaces. On 2026-10-31 the owner decided
+The desktop recovery host now consumes vault-v1 recovery and supports file/password
+restoration. Installed-device ceremonies and the complete product acceptance described
+here remain separate from host tests. On 2026-10-31 the owner decided
 the six integration questions, relayed by the E2EE coordinator:
 
 - one vault per account;
@@ -32,7 +33,8 @@ than replaces, the six decisions above. Nothing here has been tested on a real d
 ## Problem
 
 The MVP asks users to pair at least two devices. The vault covers the case where no
-device survives, but only `packages/e2ee-core` and the Lab consume it. The
+device survives. The desktop host now consumes the core workflows; this proposal
+retains the wider platform and acceptance requirements. The
 [open contracts note](../architecture/2026-10-15-e2ee-open-contracts.md) lists the vault
 as implemented in core only. [#2125](https://github.com/LodyAI/Lody/pull/2125) adds a
 default-off desktop loop: create the account vault and its file, then check a file. It
@@ -197,13 +199,13 @@ The following was checked in official public sources on 2026-11-10. This is not
 reverse engineering, device testing or an independent security audit. Implications
 for Lody are design judgments:
 
-| Product | Verified mechanism and source | Implication for Lody |
-| --- | --- | --- |
+| Product                                 | Verified mechanism and source                                                                                                                                                                                                                                                                                                                  | Implication for Lody                                                                                                                                         |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 1Password password plus Secret Key path | Its [SRP explanation](https://1password.com/blog/developers-how-we-use-srp-and-you-can-too) distinguishes two-secret derivation from authentication without transmitting the password. Its [Secret Key guide](https://support.1password.com/secret-key-security/) explains strengthening protection of server ciphertext with a random secret. | Borrow local unlocking, without claiming an equivalent model from merely adding a password field. This proposal does not migrate Lody authentication to SRP. |
-| Proton Pass | Its [security model](https://proton.me/blog/proton-pass-security-model) describes SRP authentication, password/bcrypt protection of the user key, then vault/item keys. | Layered client decryption can work in browsers; its password wrapper does not establish compatibility with Lody recovery formats. |
-| MetaMask Extension seed-phrase path | Its [passkey guide](https://support.metamask.io/configure/wallet/passkeys/) describes a password-protected local vault and passkey wrapping of the local encryption key. Syncing a passkey does not transfer that vault to another installation. Here SRP means Secret Recovery Phrase, not Secure Remote Password. | An extension-local vault does not establish ordinary website recovery of cloud workspace keys. No inference about its social-login path. |
-| WhatsApp Web linked devices | Its [multi-device architecture](https://engineering.fb.com/2021/07/14/security/whatsapp-multi-device/) describes independent identities, phone QR linking and independent operation afterward. This is a 2021 architecture source. | Keep device approval as an alternative; it does not supply first unlock without another device. No claim that every current flow is unchanged. |
-| WebAuthn PRF | The [W3C specification](https://www.w3.org/TR/webauthn-3/#prf-extension) defines per-credential 32-byte pseudorandom outputs usable for encryption. | A normal passkey signature is not a decryption key. Verify actual PRF rather than a browser name. |
+| Proton Pass                             | Its [security model](https://proton.me/blog/proton-pass-security-model) describes SRP authentication, password/bcrypt protection of the user key, then vault/item keys.                                                                                                                                                                        | Layered client decryption can work in browsers; its password wrapper does not establish compatibility with Lody recovery formats.                            |
+| MetaMask Extension seed-phrase path     | Its [passkey guide](https://support.metamask.io/configure/wallet/passkeys/) describes a password-protected local vault and passkey wrapping of the local encryption key. Syncing a passkey does not transfer that vault to another installation. Here SRP means Secret Recovery Phrase, not Secure Remote Password.                            | An extension-local vault does not establish ordinary website recovery of cloud workspace keys. No inference about its social-login path.                     |
+| WhatsApp Web linked devices             | Its [multi-device architecture](https://engineering.fb.com/2021/07/14/security/whatsapp-multi-device/) describes independent identities, phone QR linking and independent operation afterward. This is a 2021 architecture source.                                                                                                             | Keep device approval as an alternative; it does not supply first unlock without another device. No claim that every current flow is unchanged.               |
+| WebAuthn PRF                            | The [W3C specification](https://www.w3.org/TR/webauthn-3/#prf-extension) defines per-credential 32-byte pseudorandom outputs usable for encryption.                                                                                                                                                                                            | A normal passkey signature is not a decryption key. Verify actual PRF rather than a browser name.                                                            |
 
 **Ownership and supersession.** This existing proposed note retains the shared native
 and recovery rationale; only its Web plan is superseded. Historical approval records
@@ -225,3 +227,63 @@ Installation failure preserves identity and original for retry; independent bind
 and already admitted content remain usable. Chromium tests cover bad packages,
 wrong accounts, revoked R, failed installation, exact retry and persistent reopen.
 The private Web entry and deployment remain separate acceptance.
+
+## Restore scheduling
+
+The host calls `restoreVaultWorkspaces` inside its account-bound vault Scope. The
+shared workflow admits at most four workspace lanes; references naming the same
+target remain sequential because they share an identity and restore-progress key.
+Results retain the authenticated index order, independently of completion order.
+An unavailable workspace can no longer prevent another workspace from starting
+its verified restoration. The parent joins child fibers and their finalizers before
+its vault owner can release master-key copies. No detached task or timeout changes
+who owns the original admission. Per-attempt failures remain results and preserve
+the existing retry journal; failures outside an attempt keep their original batch
+failure semantics. The regression uses real crypto, Deferred gates and TestClock.
+
+Password unlock uses an additive, optional `readEntries` capability for the fixed
+eight immutable ciphertext slots (1–8 distinct ids, 256 KiB combined bodies).
+Missing entries stay null and count/id mismatches fail before derivation. Stores
+without the capability retain four concurrent original reads. Cloud adapters fall
+back only for an exact missing endpoint, never authorization or malformed responses.
+Newest-two selection, Argon2id parameters, active-index authentication, rollback
+pins and cleanup are unchanged.
+
+Main's authorized batch setup opens the vault once and admits four distinct
+workspace lanes, preserving same-workspace ordering. Preparation/network waits
+can overlap; shared index mutations retain core's mutex and CAS. Per-item failures
+keep journals and do not undo successful siblings; parent scope joins all work.
+
+Each recovery operation creates an Effect RequestResolver with a 1 ms collection
+window and no cache. Restore stages the first raw history page before package
+network I/O, consumes it once under package-pinned verification, and rereads after
+admission; this lets independent workspaces reach the first batch together.
+Fresh concurrent history requests use the existing
+`historyBatch` endpoint, at most 64 distinct workspace ids per request. Duplicate
+ids go into later batches with their original credentials, cursor and checkpoint;
+responses are checked for count/order and resolved independently. An older server
+that definitively lacks historyBatch uses the equivalent original reads, bounded
+to four in flight. Mutable authority is never reused across rounds or accounts.
+The existing cloud request owner retains auth and 30-second request deadlines.
+The installed RequestResolver forks its batch driver outside the requesting fiber:
+therefore each admitted request waiter is uninterruptible until that bounded batch
+settles. This retains the owning scope on cancellation, rather than releasing a
+vault while its batch still runs. A Deferred regression proves this drain. One
+slow history item can delay its transport batch until the existing deadline;
+per-workspace result/adoption work outside that request remains independent.
+
+Restore's optional observer runs only after verified adoption and attempt cleanup;
+its failure is ignored without affecting the durable result. Main sends non-secret
+outcomes only to the initiating document, with its random operation id, reader
+lifetime and original auth generation checked at delivery. Queue admission and
+final return also reject a changed generation, including same-account re-login.
+The UI subscribes before invoking, detaches on settlement, and fences late callbacks
+and final results on account/port changes or unmount. It renders independent rows
+(keyed by workspace id), so an installed workspace is visible and usable while a
+peer still waits. Admission with missing newer keys stays explicitly partial.
+Leaving the UI does not cancel main's producer, erase originals or claim drain.
+
+Deterministic regressions use Deferred gates, a virtual clock and real restore
+crypto; endpoint tests cover foreign/missing/deleting accounts, malformed bounds
+and oversized replies. These changes do not establish native ceremony or installed
+product acceptance.

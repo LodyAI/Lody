@@ -17,9 +17,11 @@
   Freeze activity time before waking successors; never lower activity metadata.
   Shutdown cancels confirmation before the Host drain; begun writes remain owned.
 - A Turn whose agent still reports native work at release publishes success only
-  after that work settles; if the process ends first, it records an interruption
-  notice and alerts an `unknown` result. That wait holds no write and is not owned
-  bookkeeping; a newer Turn or shutdown withdraws it
+  after that work settles; if the process ends first (including ACP child exit or
+  reaching Antigravity's cap unsettled), it awaits an interruption notice on a live
+  document before flushing completion and alerts an `unknown` result. That wait
+  holds no write and is not owned bookkeeping; a newer Turn, Stop, archive/delete,
+  or shutdown withdraws it
   ([decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-18-gc-respects-native-agent-work.md#completion-signals)).
 - MessageHandler consumes the actual AttentionItem (source, scope, outcome) and
   `notifyTurnOutcome` submits mobile through the legacy-named cloud adapter. It

@@ -3,7 +3,8 @@ import type {
   RecoveryVaultStore as VaultStore,
 } from '@lody/e2ee-core/services';
 import { describe, expect, it } from 'vitest';
-import { Effect, Result } from 'effect';
+import { Deferred, Effect, Exit, Fiber, Result } from 'effect';
+import { TestClock } from 'effect/testing';
 import { signLedgerSnapshot } from '@lody/e2ee-core/protocol';
 import { envelopeFixture } from '../../e2ee-core/test/keys/fixture';
 import { assertPersonalAdmission, verifyPersonalHistory } from '../src/admission';
@@ -100,8 +101,8 @@ describe('portable personal host admission boundary', () => {
   });
 });
 
-it.each(['partial', 'adopt-failure'] as const)(
-  'retries vault restoration on the admitted device after %s',
+it.each(['partial', 'adopt-failure', 'blocked-peer'] as const)(
+  'recovers current keys without duplicate admission across %s',
   async (failure) => {
     const { Layer } = await import('effect');
     const { Bytes, RecoveryVaults, makeWorkspaceRecovery, memoryRecoveryEpochKeys } =
@@ -116,6 +117,8 @@ it.each(['partial', 'adopt-failure'] as const)(
       sealHistoryPacket,
       prepareLedgerRecord,
       signLedgerRecord,
+      generateRecoveryPackage,
+      wipeRecoveryPackage,
     } = await import('@lody/e2ee-core/protocol');
     const { disposeEpochKey } = await import('../../e2ee-core/src/internal/foundation/epoch-key');
     const { encodeCbor } = await import('../../e2ee-core/src/internal/foundation/cbor');
@@ -173,6 +176,31 @@ it.each(['partial', 'adopt-failure'] as const)(
             locator: 'retry-test',
           });
           recoveryFile.fill(0);
+          const entered = Deferred.makeUnsafe<void>();
+          const release = Deferred.makeUnsafe<void>();
+          const adopted = Deferred.makeUnsafe<void>();
+          let blockedStarts = 0;
+          let startsAtAdoption = 0;
+          if (failure === 'blocked-peer') {
+            // Two old membership entries for one unavailable workspace must
+            // share one sequential lane, while another workspace installs keys.
+            for (const membershipId of ['44', '55']) {
+              const bundle = yield* generateRecoveryPackage({
+                genesis: '11'.repeat(32),
+                membershipId: membershipId.repeat(16),
+                generation: 0,
+                trust: {
+                  source: 'synthetic',
+                  genesisRecord: records[0]!,
+                  head: hex(view().head.toBytes()),
+                  length: view().length,
+                },
+              });
+              const reference = yield* vault.upload(bundle);
+              wipeRecoveryPackage(bundle);
+              yield* vault.reserve(reference);
+            }
+          }
           const installed = memoryRecoveryEpochKeys();
           const next = ok(Bytes.epochKey(new Uint8Array(32).fill(0x72)));
           yield* Effect.addFinalizer(() =>
@@ -264,7 +292,7 @@ it.each(['partial', 'adopt-failure'] as const)(
               ledger: () => Effect.sync(view),
             }),
           };
-          if (failure === 'adopt-failure') envelopes.set(1, latest);
+          if (failure !== 'partial') envelopes.set(1, latest);
           let hasIdentity = false,
             failAdoption = failure === 'adopt-failure';
           const personal = {
@@ -278,6 +306,8 @@ it.each(['partial', 'adopt-failure'] as const)(
             hasIdentity: () => hasIdentity,
             connect: () =>
               Effect.gen(function* () {
+                startsAtAdoption = blockedStarts;
+                yield* Deferred.succeed(adopted, undefined);
                 const keys = memoryRecoveryEpochKeys();
                 yield* Effect.addFinalizer(() => Effect.sync(() => keys.dispose()));
                 return {
@@ -305,6 +335,68 @@ it.each(['partial', 'adopt-failure'] as const)(
                 };
               }),
           };
+          if (failure === 'blocked-peer') {
+            const blocked: typeof target = {
+              id: 'unavailable',
+              name: 'Unavailable',
+              genesisHash: '11'.repeat(32),
+              hasIdentity: () => false,
+              connect: () =>
+                Effect.gen(function* () {
+                  blockedStarts++;
+                  yield* Deferred.succeed(entered, undefined);
+                  yield* Deferred.await(release);
+                  return yield* Effect.fail(new Error('workspace unavailable'));
+                }),
+            };
+            const completed = yield* Deferred.make<void>();
+            let completedBeforeRelease = false;
+            const restoring = yield* Effect.forkChild(
+              restoreVaultWorkspaces({
+                vault,
+                local,
+                targets: [blocked, target],
+                onResult: (row) =>
+                  Effect.gen(function* () {
+                    if (row.workspaceId === target.id && row.outcome === 'Committed') {
+                      completedBeforeRelease = blockedStarts === 1;
+                      yield* Deferred.succeed(completed, undefined);
+                      // A disappeared observer cannot undo this installed identity.
+                      return yield* Effect.die('synthetic observer detached');
+                    }
+                  }),
+              })
+            );
+            yield* Deferred.await(entered);
+            const observing = yield* Effect.forkChild(
+              Effect.exit(Deferred.await(adopted).pipe(Effect.timeout('10 seconds')))
+            );
+            yield* TestClock.adjust(10_000);
+            const observed = yield* Fiber.join(observing);
+            if (Exit.isSuccess(observed)) yield* Deferred.await(completed);
+            yield* Deferred.succeed(release, undefined);
+            const results = yield* Fiber.join(restoring);
+            expect(
+              Exit.isSuccess(observed),
+              'another workspace must begin restoring while its peer is held'
+            ).toBe(true);
+            expect(
+              startsAtAdoption,
+              'two references to one workspace must not restore concurrently'
+            ).toBe(1);
+            expect(
+              completedBeforeRelease,
+              'a verified workspace result is reported before the held peer settles'
+            ).toBe(true);
+            expect(results.map(({ workspaceId, outcome }) => ({ workspaceId, outcome }))).toEqual([
+              { workspaceId: 'unavailable', outcome: 'Failed' },
+              { workspaceId: 'unavailable', outcome: 'Failed' },
+              { workspaceId: 'workspace', outcome: 'Committed' },
+            ]);
+            expect(yield* recoveryRestoreIncomplete(local, 'workspace')).toBe(false);
+
+            return;
+          }
           const run = () => restoreVaultWorkspaces({ vault, local, targets: [target] });
           const progress = () =>
             new TextDecoder().decode(journal.get('restore-progress/workspace'));
@@ -337,6 +429,7 @@ it.each(['partial', 'adopt-failure'] as const)(
           expect(yield* run()).toEqual([]);
         })
       ).pipe(
+        Effect.provide(TestClock.layer({ warningDelay: '1 hour' })),
         Effect.provide(
           RecoveryVaults.layer.pipe(
             Layer.provide(

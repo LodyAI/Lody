@@ -560,6 +560,31 @@ describe('Time rules a person opens', () => {
     });
   });
 
+  it('accepts a custom step far beyond a day, as a proposal or the CLI may store', async () => {
+    open({ kind: 'interval', everyMs: 90 * 60_000, anchorAt: '2026-09-06T00:00:00.000Z' });
+    const minutesField = () =>
+      container.querySelector<HTMLInputElement>(
+        `[aria-label="${en['schedules.repeat.customMinutes']}"]`
+      )!;
+    expect(minutesField().value).toBe('90');
+    await act(async () => {
+      const input = minutesField();
+      input.focus();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+        input,
+        '200000'
+      );
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.blur();
+    });
+    submit();
+    expect(onSave.mock.calls[0]![0].trigger).toEqual({
+      kind: 'interval',
+      everyMs: 200_000 * 60_000,
+      anchorAt: new Date(NOW).toISOString(),
+    });
+  });
+
   it('reopens a typed step in the custom field rather than as a preset', () => {
     open({ kind: 'interval', everyMs: 5 * 3_600_000, anchorAt: '2026-09-06T00:00:00.000Z' });
     expect(repeatValue()).toBe(en['schedules.repeat.hours']);

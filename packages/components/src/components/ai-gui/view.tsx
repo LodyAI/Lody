@@ -662,6 +662,7 @@ const viewStyles = stylex.create({
   mtHalf: { marginTop: themeSpace[0.5] },
   breakWords: { overflowWrap: 'break-word' },
   roundedMd: { borderRadius: themeRadius.md },
+  resendSpinner: { width: 14, height: 14 },
   spinnerSm: {
     height: themeSpace[3],
     width: themeSpace[3],
@@ -2313,7 +2314,7 @@ const getAssistantTurnLayout = (message: SessionHistoryParsed): AssistantTurnLay
   const cached = assistantTurnLayoutCache.get(message);
   if (cached) return cached;
   const layout: AssistantTurnLayout = {
-    ...buildAssistantTurnRenderLayout(message.id, message.items, message.finished === true, true),
+    ...buildAssistantTurnRenderLayout(message.id, message.items, message.finished === true),
     subagentTasks: collectSubagentTasks(message.items),
   };
   assistantTurnLayoutCache.set(message, layout);
@@ -2525,8 +2526,8 @@ export const buildChatVirtualRows = ({
         (lastEntry.content.type === 'thought' || lastEntry.content.kind === 'think')
       );
 
-      const visibleEntries = block.entries.filter((entry) =>
-        entry.content.type === 'thought' || entry.content.kind !== 'think'
+      const visibleEntries = block.entries.filter(
+        (entry) => entry.content.type === 'thought' || entry.content.kind !== 'think'
       );
       if (visibleEntries.length === 0) return;
 
@@ -5655,7 +5656,9 @@ const ResendUndeliveredDialog = ({
               {t('common.cancel', 'Cancel')}
             </AlertDialog.Cancel>
             <AlertDialog.Action disabled={isResending} onClick={onConfirm}>
-              {isResending ? <Spinner className="h-3.5 w-3.5" strokeWidth={2} /> : null}
+              {isResending ? (
+                <Spinner {...stylex.props(viewStyles.resendSpinner)} strokeWidth={2} />
+              ) : null}
               {t('sessions.resendUndelivered.continue', 'Continue')}
             </AlertDialog.Action>
           </AlertDialog.Footer>
@@ -6556,11 +6559,8 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
   fontSize: ConversationFontSize;
 }) {
   const { t } = useTranslation();
-  /* Only builtin DSH exposes these thought rows. Reuse answer sizing,
-     preserving thought search identity and the separate disclosure label.
-     The thought is prose on the rail, with no glyph: it is the agent's own
-     words, and an icon beside every paragraph of it read as a list of
-     objects. The group header already says "Thought". */
+  // Thoughts keep answer typography and their original search identity inside
+  // the shared activity group; its summary describes the adjacent tool calls.
   return (
     <ActivityProcessStep flush>
       <span {...stylex.props(viewStyles.visuallyHidden)}>

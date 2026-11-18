@@ -24,3 +24,9 @@ build/release guarantees; mixed suites keep only their qualifying cases.
 - Label-only translation fixtures use `test-i18n.tsx`: own an independent instance
   and wrap each renderer root in its provider. Do not replace the global i18next
   instance or mock the `react-i18next` module just to supply labels.
+
+- Workspace Streams fixtures load replicas through the same Repo passed to
+  `src/providers/workspace-streams-transport.ts:createWorkspaceStreamsTransport`.
+  Its `createRepoStreamsPersistence` wiring checks replica ownership; the Repo
+  transport's `retireOnStaleReplica` rejects unregistered Docs before the intended
+  network scenario runs. Leave registered replica cleanup to `repo.destroy()`.

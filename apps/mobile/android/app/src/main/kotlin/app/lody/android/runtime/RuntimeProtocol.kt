@@ -189,14 +189,14 @@ internal object RuntimeProtocol {
         return DirectoryListing(entries, json.optBoolean("truncated"))
     }
 
-    /** Upstream `readFile`: text, binary (contents not kept), or the computer's error code. */
+    /** Upstream `readFile`: text, binary (base64 body and MIME type), or the computer's error code. */
     fun file(json: JSONObject, requested: String): FileContent {
         val path = json.optString("path").ifBlank { requested }
         val bytes = (json.opt("bytes") as? Number)?.toLong() ?: 0L
         return when {
             json.optString("status") != "ok" -> FileContent.Failed(path, json.optString("code").ifBlank { "read_failed" })
             json.optString("kind") == "text" && json.has("text") -> FileContent.Text(path, json.optString("text"), bytes)
-            json.optString("kind") == "binary" -> FileContent.Binary(path, bytes)
+            json.optString("kind") == "binary" -> FileContent.Binary(path, bytes, json.optString("mimeType").ifBlank { null }, json.optString("base64"))
             else -> FileContent.Failed(path, "read_failed")
         }
     }

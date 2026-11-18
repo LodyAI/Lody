@@ -11,6 +11,15 @@ import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getFunctionName, type FunctionReference } from 'convex/server';
+import { ConvexError } from 'convex/values';
+import {
+  defineCloudQuery,
+  defineCloudAction,
+  defineCloudMutation,
+  definePublicCloudQuery,
+} from '@lody/platform';
+import { cloudPlatformApi, useCloudPlatformClient } from '@/providers/cloud-platform-api';
+import type { AuthenticatedConvexContextValue } from '@/hooks/use-authenticated-convex';
 import type {
   PlatformProvider,
   E2eeRuntimeFactory,
@@ -96,6 +105,10 @@ vi.mock('@/providers/convex-provider', () => ({ useAuthSignOut: () => async () =
 vi.mock('convex/react', async (importOriginal) => ({
   ...(await importOriginal<typeof import('convex/react')>()),
   useConvex: () => fixture.cloudClient,
+  useAction: (reference: FunctionReference<'action'>) => (args: unknown) =>
+    fixture.cloudClient.action(reference, args),
+  useMutation: (reference: FunctionReference<'mutation'>) => (args: unknown) =>
+    fixture.cloudClient.mutation(reference, args),
 }));
 vi.mock('@/hooks/use-recoverable-convex-query', () => ({
   usePublicConvexQuery: () => undefined,
@@ -1181,4 +1194,243 @@ describe('authoritative session access cloud port', () => {
     await expect(read).rejects.toThrow('session_access_scope_changed');
   });
   const token = {};
+});
+
+describe('cloud authentication request lifecycle', () => {
+  const pending = defineCloudQuery<Record<string, never>, string[]>(
+    'cloudAccount',
+    'e2eeAutomaticPairing:pending'
+  );
+  const grant = defineCloudAction<Record<string, never>, string>(
+    'cloudAccount',
+    'promptShortcuts:getStreamToken'
+  );
+  const write = defineCloudMutation<Record<string, never>, string>('cloudAccount', 'test:write');
+  const publicQuery = definePublicCloudQuery<Record<string, never>, string[]>(
+    'cloudAccount',
+    'test:public'
+  );
+  const authError = () => new ConvexError({ kind: 'lody.auth', code: 'unauthenticated' });
+  let root: Root;
+  let container: HTMLDivElement;
+  let auth: AuthenticatedConvexContextValue;
+  let client: ReturnType<typeof useCloudPlatformClient>;
+  let action: (args: Record<string, never>) => Promise<string>;
+  let mutation: typeof action;
+  let result: unknown;
+  let reply: unknown;
+  let sent: string[];
+  let updates: Set<() => void>;
+  const recovery = vi.fn();
+  let original: typeof fixture.cloudClient;
+
+  function Probe() {
+    client = useCloudPlatformClient();
+    action = cloudPlatformApi.useAction(grant);
+    mutation = cloudPlatformApi.useMutation(write);
+    return null;
+  }
+  const render = () =>
+    act(() =>
+      root.render(
+        <AuthenticatedConvexContext.Provider value={auth}>
+          <Probe />
+        </AuthenticatedConvexContext.Provider>
+      )
+    );
+  beforeEach(() => {
+    recovery.mockReset();
+    auth = {
+      authSessionId: 'session-a',
+      isAuthenticated: true,
+      isLoading: false,
+      isRecovering: false,
+      confirmedUnauthenticated: false,
+      claimAutomaticCommand: () => true,
+      requestAuthRecovery: recovery,
+    };
+    sent = [];
+    updates = new Set();
+    result = ['paired'];
+    reply = 'token';
+    original = { ...fixture.cloudClient };
+    const execute = async (reference: FunctionReference<'action' | 'mutation' | 'query'>) => {
+      sent.push(getFunctionName(reference));
+      if (reply instanceof Error) throw reply;
+      return reply;
+    };
+    fixture.cloudClient.action = execute;
+    fixture.cloudClient.mutation = execute;
+    fixture.cloudClient.query = execute;
+    fixture.cloudClient.watchQuery = (reference) => ({
+      localQueryResult: () => {
+        if (result instanceof Error) throw result;
+        return result;
+      },
+      onUpdate: (changed) => {
+        sent.push(getFunctionName(reference));
+        updates.add(changed);
+        return () => {
+          updates.delete(changed);
+        };
+      },
+    });
+    container = document.createElement('div');
+    root = createRoot(container);
+    render();
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+    Object.assign(fixture.cloudClient, original);
+    container.remove();
+  });
+
+  it('does not send protected startup requests before server-confirmed authentication', async () => {
+    auth = { ...auth, isAuthenticated: false, isLoading: true };
+    render();
+    const values: string[][] = [];
+    const close = client.subscribeValue(
+      pending,
+      {},
+      (value) => values.push(value),
+      () => {}
+    );
+    await expect(action({})).rejects.toMatchObject({ data: { code: 'unauthenticated' } });
+    await expect(client.query(pending, {})).rejects.toMatchObject({
+      data: { code: 'unauthenticated' },
+    });
+    expect(sent).toEqual([]);
+    auth = { ...auth, isAuthenticated: true, isLoading: false };
+    render();
+    expect(values).toEqual([['paired']]);
+    expect(updates.size).toBe(1);
+    close();
+  });
+
+  it('pauses failing inbox subscriptions and resumes the same owner after authentication recovers', async () => {
+    const identity = client;
+    const values: string[][] = [];
+    const failures: unknown[] = [];
+    const close = client.subscribeValue(
+      pending,
+      {},
+      (value) => values.push(value),
+      (error) => failures.push(error)
+    );
+    result = authError();
+    for (const update of [...updates]) update();
+    expect(updates.size).toBe(0);
+    expect(failures).toEqual([result]);
+    expect(recovery).toHaveBeenCalledTimes(1);
+    await expect(client.query(pending, {})).rejects.toMatchObject({
+      data: { code: 'unauthenticated' },
+    });
+    expect(sent).toEqual(['e2eeAutomaticPairing:pending']);
+    auth = { ...auth, isAuthenticated: false, isRecovering: true };
+    render();
+    auth = { ...auth, isAuthenticated: true, isRecovering: false };
+    render();
+    expect(client).toBe(identity);
+    expect(updates.size).toBe(1);
+    expect(recovery).toHaveBeenCalledTimes(1); // old cached rejection is not a fresh failure
+    result = ['recovered'];
+    for (const update of [...updates]) update();
+    expect(values).toEqual([['paired'], ['recovered']]);
+    close();
+    expect(updates.size).toBe(0);
+  });
+
+  it.each(['action', 'mutation'] as const)(
+    'reports rejected %s commands without replaying them during recovery',
+    async (kind) => {
+      const command = () => (kind === 'action' ? action({}) : mutation({}));
+      reply = authError();
+      await expect(command()).rejects.toBe(reply);
+      await expect(command()).rejects.toMatchObject({ data: { code: 'unauthenticated' } });
+      expect(sent).toHaveLength(1);
+      expect(recovery).toHaveBeenCalledTimes(1);
+      auth = { ...auth, isAuthenticated: false, isRecovering: true };
+      render();
+      auth = { ...auth, isAuthenticated: true, isRecovering: false };
+      render();
+      expect(sent).toHaveLength(1);
+      reply = 'fresh-token';
+      await expect(command()).resolves.toBe('fresh-token');
+    }
+  );
+
+  it('retires logout subscriptions while keeping intentionally public reads available', async () => {
+    const values: string[][] = [];
+    const close = client.subscribeValue(
+      pending,
+      {},
+      (value) => values.push(value),
+      () => {}
+    );
+    auth = { ...auth, isAuthenticated: false, confirmedUnauthenticated: true, authSessionId: null };
+    render();
+    expect(updates.size).toBe(0);
+    for (let i = 0; i < 10; i++)
+      await expect(client.query(pending, {})).rejects.toBeInstanceOf(ConvexError);
+    expect(sent).toEqual(['e2eeAutomaticPairing:pending']);
+    reply = ['public'];
+    await expect(client.query(publicQuery, {})).resolves.toEqual(['public']);
+    auth = {
+      ...auth,
+      isAuthenticated: true,
+      confirmedUnauthenticated: false,
+      authSessionId: 'session-b',
+    };
+    render();
+    expect(updates.size).toBe(0);
+    expect(values).toEqual([['paired']]);
+    close();
+  });
+
+  it('keeps subscriptions created during a userless refetch bound to their original session', () => {
+    auth = { ...auth, isAuthenticated: false, authSessionId: null };
+    render();
+    const values: string[][] = [];
+    const close = client.subscribeValue(
+      pending,
+      {},
+      (value) => values.push(value),
+      () => {}
+    );
+    auth = { ...auth, isAuthenticated: true, authSessionId: 'session-b' };
+    render();
+    expect(updates.size).toBe(0);
+    expect(values).toEqual([]);
+    expect(sent).toEqual([]);
+    close();
+  });
+
+  it.each(['account replacement', 'provider teardown'] as const)(
+    'does not let a late command failure restart auth after %s',
+    async (boundary) => {
+      let reject!: (error: Error) => void;
+      reply = new Promise<string>((_resolve, rejectRequest) => {
+        reject = rejectRequest;
+      });
+      const pendingCommand = action({});
+      if (boundary === 'account replacement') {
+        auth = { ...auth, authSessionId: 'session-b' };
+        render();
+      } else {
+        act(() => root.unmount());
+      }
+      const failure = authError();
+      reject(failure);
+      await expect(pendingCommand).rejects.toBe(failure);
+      expect(recovery).not.toHaveBeenCalled();
+    }
+  );
+
+  it('does not treat permission and server failures as authentication loss', async () => {
+    reply = new ConvexError({ code: 'forbidden' });
+    await expect(action({})).rejects.toBe(reply);
+    reply = 'allowed';
+    await expect(action({})).resolves.toBe('allowed');
+    expect(recovery).not.toHaveBeenCalled();
+  });
 });

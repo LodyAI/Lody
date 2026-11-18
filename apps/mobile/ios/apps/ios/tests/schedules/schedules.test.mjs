@@ -11,6 +11,7 @@ const {
   draftInput,
   ruleOf,
   triggerOf,
+  proposalRule,
 } = runtime;
 
 const WS = 'w1';
@@ -128,6 +129,47 @@ test('an unsupported stored rule can only be kept, never rewritten', () => {
       triggerOf({ kind: 'weekly', weekdays: [], hour: 9, minute: 0 }, 'UTC', 0),
     /schedule_trigger_invalid/,
   );
+});
+
+test('a custom step proposed by an Agent is read, created and reopened like on Web', () => {
+  const STEP_MAX = 2_147_483_647;
+  // Steps past a day used to drop the whole proposal card on mobile.
+  assert.deepEqual(proposalRule({ kind: 'minutes', every: 200_000 }), {
+    kind: 'minutes',
+    every: 200_000,
+  });
+  assert.deepEqual(proposalRule({ kind: 'hours', every: STEP_MAX }), {
+    kind: 'hours',
+    every: STEP_MAX,
+  });
+  // Android carries `every` as a 32-bit Int.
+  assert.equal(proposalRule({ kind: 'hours', every: STEP_MAX + 1 }), undefined);
+  assert.equal(proposalRule({ kind: 'minutes', every: 1.5 }), undefined);
+
+  const now = Date.parse('2026-11-17T08:07:00Z');
+  const trigger = triggerOf(
+    { kind: 'minutes', every: 200_000, timeZone: 'UTC' },
+    'UTC',
+    now,
+  );
+  assert.deepEqual(trigger, {
+    kind: 'interval',
+    everyMs: 200_000 * 60_000,
+    anchorAt: new Date(now).toISOString(),
+  });
+  assert.equal(ruleOf(trigger).kind, 'minutes');
+  assert.equal(ruleOf(trigger).every, 200_000);
+  assert.throws(
+    () => triggerOf({ kind: 'hours', every: STEP_MAX + 1 }, 'UTC', now),
+    /schedule_trigger_invalid/,
+  );
+  // A longer stored interval stays read-only instead of overflowing `every`.
+  const longer = {
+    kind: 'interval',
+    everyMs: (STEP_MAX + 1) * 3_600_000,
+    anchorAt: new Date(now).toISOString(),
+  };
+  assert.equal(ruleOf(longer).kind, 'unsupported');
 });
 
 test('an edit keeps what mobile cannot edit and changes what it can', async () => {

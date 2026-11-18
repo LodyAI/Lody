@@ -243,12 +243,12 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     chat.setDirectoryTabs("", symbol: "")
     chat.setNavigationMachine(state.catalog.machineNames[session.machineId] ?? "")
     chat.setNavigationMachineState(state.presence.status(of: session.machineId))
-    let others = tabs.filter { $0.id != sessionId }.map { session in
+    let viewedTabs = tabs.map { session in
       var viewed = session
       if let at = tabViews[session.id] { viewed.lastViewedMessageAt = max(viewed.lastViewedMessageAt ?? -.infinity, at) }
       return viewed
     }
-    tabsButton.setStatus(DirectoryTabs.symbol(others))
+    tabsButton.setUnread(DirectoryTabs.hasBackgroundUnread(viewedTabs, currentId: sessionId))
     tabsButton.accessibilityLabel = String(format: String(localized: "session.tabs.count", bundle: .lody), tabs.count)
     // The trailing directory button opens the panel below the header.
     directoryTabs = tabs
@@ -527,11 +527,19 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     pageHeader.translatesAutoresizingMaskIntoConstraints = false
     // The header replaces the navigation bar, so it must clear the window controls of a windowed
     // iPad app itself: the plain safe area does not include them, a navigation bar's layout does.
+    // The corner-adapted guide also insets for an iPhone's rounded display corners, so it is only a
+    // floor; the 16 pt margin stays measured from the plain safe area.
     let headerArea = view.layoutGuide(for: .safeArea(cornerAdaptation: .horizontal))
+    let preferredLeading = pageHeader.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16)
+    let preferredTrailing = pageHeader.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16)
+    preferredLeading.priority = .defaultHigh
+    preferredTrailing.priority = .defaultHigh
     NSLayoutConstraint.activate([
       pageHeader.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-      pageHeader.leadingAnchor.constraint(equalTo: headerArea.leadingAnchor, constant: 16),
-      pageHeader.trailingAnchor.constraint(equalTo: headerArea.trailingAnchor, constant: -16),
+      preferredLeading,
+      preferredTrailing,
+      pageHeader.leadingAnchor.constraint(greaterThanOrEqualTo: headerArea.leadingAnchor),
+      pageHeader.trailingAnchor.constraint(lessThanOrEqualTo: headerArea.trailingAnchor),
       pageHeader.heightAnchor.constraint(equalToConstant: chat.pageHeaderHeight),
       chat.topAnchor.constraint(equalTo: view.topAnchor),
       chat.leadingAnchor.constraint(equalTo: view.leadingAnchor),

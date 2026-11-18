@@ -38,6 +38,11 @@ per batch, then launches a fresh app for each case. Run English only (`en`,
 `en_US`). Individual cases default to light and dark; core suites default to light.
 `--embedded` is accepted only for old callers and has no effect.
 
+`LODY_UI_PENDING_ONLY=1 pnpm verify:ui --case send --require-video --app /absolute/path/to/Lody.app`
+checks only the pending message's Check and continue / Remove locally actions,
+retained identity and delivery-only state. The full `send` case also exercises
+these actions after its offline send, failure and reply scenarios.
+
 ## Case inventory
 
 `run.py` owns the executable inventory; `--help` lists available cases and suites.

@@ -5,9 +5,19 @@ import {
   LocalLoroTransportAdapter,
   type LocalLoroDataPlaneConnection,
 } from '@lody/shared/local-loro-transport';
-import { StreamsTransportAdapter } from 'loro-repo/transport/streams';
+import {
+  InMemoryRemoteCursorStore,
+  type JsonObject,
+  type StreamsCrdtOptions,
+} from '@loro-dev/streams-crdt';
+import { createLoroDocAdapter, StreamsCrdt } from '@loro-dev/streams-crdt/loro';
 import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
-import { readEagerSyncSnapshot, writeEagerSyncSnapshot } from './eager-sync-snapshot-cache';
+import {
+  readEagerSyncSnapshot,
+  writeEagerSyncSnapshot,
+  type EagerSyncSnapshot,
+} from './eager-sync-snapshot-cache';
+import { coveredEagerSyncCursor } from './eager-sync-checkpoint';
 import type { EagerSyncAuthContext, EagerSyncWorkerInput } from './eager-sync-worker-protocol';
 
 export async function runEagerSyncWorkerTask(
@@ -18,6 +28,7 @@ export async function runEagerSyncWorkerTask(
     readSnapshot?: typeof readEagerSyncSnapshot;
     writeSnapshot?: typeof writeEagerSyncSnapshot;
     now?: () => number;
+    fetch?: StreamsCrdtOptions<Record<string, number>>['fetch'];
   }
 ) {
   requirePlaintextWorkspaceStreamsContent(request.content);
@@ -28,9 +39,11 @@ export async function runEagerSyncWorkerTask(
   // No Session store or Mirror is constructed in this worker. All document
   // import/export and snapshot encoding stay off the renderer thread.
   const doc = new LoroDoc();
-  let transport: LocalLoroTransportAdapter | StreamsTransportAdapter | undefined;
+  let transport: LocalLoroTransportAdapter | StreamsCrdt<JsonObject> | undefined;
   let subscription: ReturnType<LocalLoroTransportAdapter['joinDocRoom']> | undefined;
   const disposers: Array<() => void> = [];
+  const cursors = new InMemoryRemoteCursorStore();
+  let cloudCheckpoint: EagerSyncSnapshot['cloudCheckpoint'];
   try {
     if (cached?.plane === request.transport.plane) {
       doc.import(new Uint8Array(await cached.snapshot.arrayBuffer()));
@@ -65,28 +78,60 @@ export async function runEagerSyncWorkerTask(
         );
       });
     }
-    transport =
-      request.transport.plane === 'local'
-        ? new LocalLoroTransportAdapter({
-            workspaceId: request.workspaceId,
-            peerId: request.peerId,
-            connection: deps.connection,
-          })
-        : new StreamsTransportAdapter({
-            ...request.transport.options,
-            docStreamId: () =>
-              request.transport.plane === 'cloud' ? request.transport.streamId : '',
-            auth: deps.auth,
-            snapshotCodec: streamsSnapshotCodec,
-            // No shared cursor: this disposable replica must bootstrap from its
-            // own snapshot. It never publishes compaction snapshots remotely.
-            snapshotUpload: { canUpload: async () => false },
-          });
-    subscription = transport.joinDocRoom(request.roomId, doc);
-    await subscription.firstSyncedWithRemote;
-    await localCatchUp;
-    subscription.unsubscribe();
-    subscription = undefined;
+    if (request.transport.plane === 'local') {
+      transport = new LocalLoroTransportAdapter({
+        workspaceId: request.workspaceId,
+        peerId: request.peerId,
+        connection: deps.connection,
+      });
+      subscription = transport.joinDocRoom(request.roomId, doc);
+      await subscription.firstSyncedWithRemote;
+      await localCatchUp;
+      subscription.unsubscribe();
+      subscription = undefined;
+    } else {
+      const { streamUrl, shardUrls } = request.transport;
+      const restoredCursor = coveredEagerSyncCursor(
+        cached,
+        request.scope,
+        request.roomId,
+        streamUrl,
+        doc
+      );
+      if (restoredCursor) await cursors.save(restoredCursor);
+      transport = new StreamsCrdt({
+        streamUrl,
+        shardUrls,
+        adapter: createLoroDocAdapter(doc),
+        auth: deps.auth,
+        fetch: deps.fetch,
+        snapshotCodec: streamsSnapshotCodec,
+        // This store is task-local. No durable cursor changes until the final
+        // snapshot and progress commit together; failed tasks retain the old row.
+        remoteCursorStore: cursors,
+        createStreamIfMissing: false,
+        snapshotUpload: { canUpload: async () => false },
+      });
+      const result = await transport.catchup();
+      if (!result.ok) {
+        // Exhausting the recovery budget still means missing dependencies. An
+        // existing checkpoint must not shorten this room's download backoff.
+        if (result.error.code === 'apply_incomplete') return 'apply_incomplete' as const;
+        throw result.error;
+      }
+      const cursor = await cursors.load(streamUrl);
+      if (cursor)
+        cloudCheckpoint = {
+          format: 1,
+          snapshotVersion: Object.fromEntries(doc.oplogVersion().toJSON()),
+          cursor,
+        };
+    }
+    // A snapshot excludes unresolved imports. Never certify missing data or
+    // advance activity progress, even if the transport reports catch-up complete.
+    if (doc.exportPendingUpdates() !== undefined) {
+      return 'apply_incomplete' as const;
+    }
     const snapshot = new Blob([doc.export({ mode: 'snapshot' }).slice().buffer]);
     const stored = await (deps.writeSnapshot ?? writeEagerSyncSnapshot)({
       scope: request.scope,
@@ -95,12 +140,16 @@ export async function runEagerSyncWorkerTask(
       lastMessageAt: request.lastMessageAt,
       savedAt: (deps.now ?? Date.now)(),
       snapshot,
+      ...(cloudCheckpoint ? { cloudCheckpoint } : {}),
     });
-    return stored ? ('synced' as const) : ('skipped' as const);
+    return stored ? ('synced' as const) : ('cache_rejected' as const);
   } finally {
     for (const dispose of disposers) dispose();
     subscription?.unsubscribe();
-    await transport?.close();
-    doc.free();
+    try {
+      await transport?.close();
+    } finally {
+      doc.free();
+    }
   }
 }

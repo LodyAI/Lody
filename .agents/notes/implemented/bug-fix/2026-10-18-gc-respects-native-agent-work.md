@@ -70,16 +70,22 @@ to GC:
 
 ## Completion signals
 
-Added 2026-11-16. The same level also decides when a Turn counts as finished for
+Added 2026-11-16, hardened 2026-11-17. The same level also decides when a Turn counts as finished for
 its reader. A Turn that ends while its agent still reports `running` or
 `background` no longer marks the Session unread or sends the success notification
 at release; `SessionExecutionService` waits on that agent instance's lifecycle
 events, without a clock, and publishes once the agent reports idle, with the
 later activity time. If the process ends first (idle GC after its 24-hour cap,
-memory pressure, a crash), the conversation gets a `nativeWorkInterrupted` notice,
+memory pressure, a crash, or ACP child exit without `Session.terminate`), the
+conversation gets a `nativeWorkInterrupted` notice before completion is flushed,
 the Session is still marked unread, and the user is alerted to an `unknown` result
-(`native_work_interrupted`) instead of a success. A newer Turn on the Session
-withdraws the wait, because that Turn publishes its own completion.
+(`native_work_interrupted`) instead of a success. When Antigravity's monitor hits
+its 24-hour cap with pending work or tears down on `closeSession`/disconnect, its
+unsettled work is preserved for the interruption check rather than flipped to
+normal idle while still releasing GC. If GC destroyed the Turn's `SessionDocument`
+at termination, completion re-acquires the live document unless the Session was
+archived or deleted. A newer Turn, Stop, archive, or delete withdraws the wait so
+intentional teardown publishes no stale interruption.
 
 The wait is not completion bookkeeping: it holds no write, so it does not count
 in `inspectClientLoss` or the shutdown drain, which a background dev server could
@@ -118,6 +124,15 @@ cancellation attention is unchanged and never waits.
   and a Core release that defines it. Older adapters and other providers report
   nothing and keep exactly the old GC behavior, including late output not
   counting as activity.
+- Added 2026-11-17 ([#2797](https://github.com/LodyAI/Lody/issues/2797)): the
+  DeepSeek Harness adapter also reports the level, from native `agent/status` and
+  the root session's live jobs. It used to force `quiet` job completion and reject
+  every root step outside a prompt, so a job that finished while idle reached the
+  model only with the next user message, and idle GC removed the process and its
+  in-memory job registry after 20 minutes. It now keeps the native `wakeup`
+  delivery and admits only the turn that claims the completion notice. A job still
+  dies with its ACP process (eviction, crash, daemon restart); Harness has no
+  cross-process job registry.
 - The adapter sends the level without awaiting it, so the SDK message loop never
   yields at these points. Ordering holds because each send reaches the
   connection before its first `await`.

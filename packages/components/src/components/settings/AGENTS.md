@@ -58,7 +58,8 @@ Lody Agent connections and Sorbet endpoints follow
   verification.
 - Keep three.js/R3F behind the lazy usage-calendar module so lightweight and SSR
   consumers never evaluate its renderer graph.
-- Charts follow [timeline rules](../../../../../specs/usage-timeline.md).
+- Hourly labels use device time. Calendar and day-detail keys use UTC
+  ([timeline rules](../../../../../specs/usage-timeline.md)).
   Cache bounded day snapshots per auth session/workspace/date for one hour;
   refresh expiry without blanking data. Keep auth/capability gates
   ([cache](../../../../../specs/usage-detail-cache.md)).

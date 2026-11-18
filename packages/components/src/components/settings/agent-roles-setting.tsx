@@ -315,8 +315,19 @@ export function AgentRoleRow({
   const [first] = targets;
   const summaries = targets.map((target) => ({
     text: buildAgentRoleRunConfigSummary(target.runConfig, target.selectorOptions).join(' · '),
-    identity: buildAgentRoleRunConfigSummary(target.runConfig).join(' · '),
-    agent: target.agentConfig?.name ?? '',
+    // Option key order is storage order, not meaning: sort before comparing.
+    identity: buildAgentRoleRunConfigSummary({
+      ...target.runConfig,
+      configOptionValues: Object.fromEntries(
+        Object.entries(target.runConfig.configOptionValues ?? {}).sort(([a], [b]) =>
+          a < b ? -1 : a > b ? 1 : 0
+        )
+      ),
+    }).join(' · '),
+    // Each machine names its own Provider; the kind of agent is what must match.
+    agent: target.agentConfig
+      ? `${target.agentConfig.cliType}:${target.agentConfig.agentType.toLowerCase()}`
+      : '',
   }));
   // Two machines running the Role the same way read as one line; when they
   // differ, the row says so instead of picking one to show.

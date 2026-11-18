@@ -28,6 +28,7 @@ import { getPlatform } from '@/lib/commands/platform';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import {
   $domPointToOffset,
+  $ensureMentionCaretTarget,
   $offsetToPoint,
   $readComposerValue,
   $readMentionOffsets,
@@ -176,6 +177,23 @@ function measureCaretRect(editor: LexicalEditor, element: HTMLElement, offset: n
     const previous = createDomRange(editor, offset - 1, offset)?.getClientRects();
     const last = previous && previous.length > 0 ? previous[previous.length - 1] : null;
     if (last && last.height > 0) rect = new DOMRect(last.right, last.top, 0, last.height);
+  }
+  // String offsets inside an atomic chip snap to its edge, so the previous
+  // character range can collapse too. Measure the actual preceding DOM node.
+  if (
+    !rect &&
+    range &&
+    range.startContainer.nodeType === Node.ELEMENT_NODE &&
+    range.startOffset > 0
+  ) {
+    const previous = range.startContainer.childNodes[range.startOffset - 1];
+    if (previous && typeof range.getClientRects === 'function') {
+      const preceding = range.cloneRange();
+      preceding.selectNode(previous);
+      const rects = preceding.getClientRects();
+      const last = rects[rects.length - 1];
+      if (last && last.height > 0) rect = new DOMRect(last.right, last.top, 0, last.height);
+    }
   }
   if (!rect) {
     const style = window.getComputedStyle(element);
@@ -403,6 +421,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
   const contextRef = React.useRef(context);
   contextRef.current = context;
   const documentRef = React.useRef<ComposerDocument>(EMPTY_DOCUMENT);
+  const pointerDownRef = React.useRef<{ x: number; y: number; anchor: number } | null>(null);
   const selectionRef = React.useRef<ComposerSelection | null>(null);
   const pendingSelectionRef = React.useRef<PendingSelection | null>(null);
   const virtualAnchorSnapshotRef = React.useRef<VirtualAnchorSnapshot | null>(null);
@@ -709,7 +728,16 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
     };
     syncEditable(editor.isEditable());
     const onNativeClick = (event: MouseEvent) => onClickPrimitiveRef.current(event);
-    const onPointerDown = () => {
+    const onPointerDown = (event: MouseEvent) => {
+      const native = element.ownerDocument.getSelection();
+      const anchor = native?.anchorNode
+        ? editor.read(() => $domPointToOffset(editor, native.anchorNode!, native.anchorOffset))
+        : null;
+      pointerDownRef.current = {
+        x: event.clientX,
+        y: event.clientY,
+        anchor: anchor ?? controller.getSelection().start,
+      };
       if (element.ownerDocument.activeElement !== element) pointerFocusRef.current = true;
     };
     element.addEventListener('click', onNativeClick);
@@ -721,6 +749,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       () => element.removeEventListener('mousedown', onPointerDown, true),
       editor.registerEditableListener(syncEditable),
       registerPlainText(editor),
+      editor.registerNodeTransform(MentionDecoratorNode, $ensureMentionCaretTarget),
       registerHistory(editor, history, 300),
       editor.registerCommand(
         KEY_DOWN_COMMAND,
@@ -954,6 +983,26 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       const { start: cursorPosition, end: selectionEnd } = readSelection();
       const hasSelection = cursorPosition !== selectionEnd;
       const horizontalMove = hasSelection ? null : getHorizontalCaretMove(event);
+      // WebKit treats Home beside an inline decorator as scrolling. At a
+      // line-leading atomic reference, its left edge is the only line start.
+      if (
+        event.key === 'Home' &&
+        !event.shiftKey &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !ctx.open &&
+        !hasSelection
+      ) {
+        const lineStart = value.lastIndexOf('\n', cursorPosition - 1) + 1;
+        const leading = ctx.mentions.find(
+          (mention) => mention.start === lineStart && cursorPosition <= mention.end
+        );
+        if (leading) {
+          event.preventDefault();
+          writeSelection(leading.start);
+          return;
+        }
+      }
 
       if (horizontalMove) {
         const { direction, isWordJump } = horizontalMove;
@@ -1212,9 +1261,43 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
     (event: MouseEvent) => {
       if (isComposingNow()) return;
       const ctx = contextRef.current;
+      const pointerDown = pointerDownRef.current;
+      pointerDownRef.current = null;
+      const dragged =
+        !!pointerDown &&
+        Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y) > 3;
       const target = event.target instanceof Element ? event.target : null;
       const chipElement = target?.closest<HTMLElement>('[data-mention-start]');
+      if (!chipElement && element && !dragged) {
+        // An empty text node has no hit-test width. Safari can map a click in
+        // the small leading margin to the start of the entire paragraph.
+        const leading = Array.from(
+          element.querySelectorAll<HTMLElement>('[data-mention-start]')
+        ).find((chip) => {
+          const start = Number(chip.dataset.mentionStart);
+          if (start !== 0 && documentRef.current.text[start - 1] !== '\n') return false;
+          const box = chip.getBoundingClientRect();
+          return (
+            event.clientX >= box.left - 6 &&
+            event.clientX < box.left &&
+            event.clientY >= box.top &&
+            event.clientY <= box.bottom
+          );
+        });
+        if (leading) {
+          const start = Number(leading.dataset.mentionStart);
+          writeSelection(
+            event.shiftKey ? (pointerDown?.anchor ?? readSelection().start) : start,
+            start
+          );
+          return;
+        }
+      }
       if (chipElement && element?.contains(chipElement)) {
+        // Pointer drags and Shift-click extend the editor's range. Do not turn
+        // their trailing click into a preview or collapse the selection.
+        const nativeSelection = element.ownerDocument.getSelection();
+        if (dragged && nativeSelection && !nativeSelection.isCollapsed) return;
         const start = Number(chipElement.dataset.mentionStart);
         const end = Number(chipElement.dataset.mentionEnd);
         // A click lands the caret on the chip's nearer edge, never inside it.
@@ -1226,6 +1309,10 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
           event.clientX < first.left + (first.right - first.left) / 2 &&
           (rects.length === 1 || event.clientY >= first.top);
         const edge = towardStart ? start : end;
+        if (event.shiftKey) {
+          writeSelection(pointerDown?.anchor ?? readSelection().start, edge);
+          return;
+        }
         writeSelection(edge, edge);
         onMentionUpdate(documentRef.current.text, edge);
         const mention = ctx.mentions.find(

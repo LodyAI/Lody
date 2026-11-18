@@ -89,6 +89,7 @@ import { field } from '@lody/ui/field/field.tokens.stylex';
 import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 import {
   type ComposerInputElement,
+  getComposerCaretRect,
   getComposerSelection,
   getComposerText,
   setComposerSelection,
@@ -1251,7 +1252,7 @@ export function ChatComposer({
   );
 
   // Auto-resize effect: adjust textarea height based on content
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!autoResize) return;
 
     // Get the textarea element from the ref
@@ -1261,37 +1262,53 @@ export function ChatComposer({
         : null;
     if (!textarea) return;
 
-    // Calculate line height and max height
-    const computedStyle = getComputedStyle(textarea);
-    const lineHeight = parseInt(computedStyle.lineHeight || '24', 10) || 24;
-    const paddingTop = parseInt(computedStyle.paddingTop || '0', 10);
-    const paddingBottom = parseInt(computedStyle.paddingBottom || '0', 10);
-    const minHeight = lineHeight * effectivePromptRows + paddingTop + paddingBottom;
-    const maxHeight = lineHeight * maxRows + paddingTop + paddingBottom;
+    const resize = () => {
+      // Calculate line height and max height
+      const computedStyle = getComputedStyle(textarea);
+      const lineHeight = parseInt(computedStyle.lineHeight || '24', 10) || 24;
+      const paddingTop = parseInt(computedStyle.paddingTop || '0', 10);
+      const paddingBottom = parseInt(computedStyle.paddingBottom || '0', 10);
+      const minHeight = lineHeight * effectivePromptRows + paddingTop + paddingBottom;
+      const maxHeight = lineHeight * maxRows + paddingTop + paddingBottom;
 
-    // When empty, the height is simply minHeight — and must be: Chromium includes
-    // the wrapped placeholder text in an empty textarea's scrollHeight, so a long
-    // placeholder would grow the box past minHeight and then visibly shrink on
-    // the first keystroke. Skipping measurement also avoids constructing a
-    // mirror and forcing layout while an empty composer mounts on session switch.
-    const hasValue = (promptValue ?? '').length > 0;
-    if (!hasValue) {
-      // A visible prompt suggestion overlays the empty box; grow to hold it so
-      // a wrapped hint never runs over the footer.
-      const suggestionHeight =
-        promptSuggestionHeight > 0 ? promptSuggestionHeight + paddingTop + paddingBottom : 0;
-      textarea.style.height = `${Math.min(maxHeight, Math.max(minHeight, suggestionHeight))}px`;
-      textarea.style.overflowY = 'hidden';
-      return;
-    }
+      // When empty, the height is simply minHeight — and must be: Chromium includes
+      // the wrapped placeholder text in an empty textarea's scrollHeight, so a long
+      // placeholder would grow the box past minHeight and then visibly shrink on
+      // the first keystroke. Skipping measurement also avoids constructing a
+      // mirror and forcing layout while an empty composer mounts on session switch.
+      const hasValue = (promptValue ?? '').length > 0;
+      if (!hasValue) {
+        // A visible prompt suggestion overlays the empty box; grow to hold it so
+        // a wrapped hint never runs over the footer.
+        const suggestionHeight =
+          promptSuggestionHeight > 0 ? promptSuggestionHeight + paddingTop + paddingBottom : 0;
+        textarea.style.height = `${Math.min(maxHeight, Math.max(minHeight, suggestionHeight))}px`;
+        textarea.style.overflowY = 'hidden';
+        return;
+      }
 
-    // Measure outside the flex layout. A temporary height:auto on the live
-    // textarea expands the conversation viewport and can clamp its scrollTop.
-    const scrollHeight = measureComposerContentHeight(textarea, computedStyle);
-    const newHeight = Math.max(minHeight, Math.min(scrollHeight, maxHeight));
+      // Measure outside the flex layout. A temporary height:auto on the live
+      // textarea expands the conversation viewport and can clamp its scrollTop.
+      const scrollHeight = measureComposerContentHeight(textarea, computedStyle);
+      const newHeight = Math.max(minHeight, Math.min(scrollHeight, maxHeight));
 
-    textarea.style.height = `${newHeight}px`;
-    textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
+      textarea.style.height = `${newHeight}px`;
+      textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
+    };
+    resize();
+    // Lexical commits externally inserted chips after the owner's layout effect.
+    // Measure that committed layout as well, before restoring caret visibility.
+    const frame = requestAnimationFrame(() => {
+      resize();
+      if (textarea.ownerDocument.activeElement !== textarea) return;
+      const caret = getComposerCaretRect(textarea, getComposerSelection(textarea).end);
+      const bounds = textarea.getBoundingClientRect();
+      const top = bounds.top + textarea.clientTop;
+      const bottom = top + textarea.clientHeight;
+      if (caret.bottom > bottom) textarea.scrollTop += caret.bottom - bottom;
+      else if (caret.top < top) textarea.scrollTop -= top - caret.top;
+    });
+    return () => cancelAnimationFrame(frame);
   }, [autoResize, promptValue, promptRef, effectivePromptRows, maxRows, promptSuggestionHeight]);
 
   const boxTextareaStyles = getChatComposerTextareaStyles({ tone, variant, isMobile });

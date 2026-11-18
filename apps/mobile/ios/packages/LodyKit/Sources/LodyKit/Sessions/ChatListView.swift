@@ -770,7 +770,8 @@ private struct ChatRowContent: View {
       }
       .padding(.horizontal, LodyLayout.listEdgeX)
       .padding(.vertical, LodySpacing.xs)
-      .frame(maxWidth: .infinity, minHeight: LodySize.listRow, alignment: .topLeading)
+      // The child-row height: a full list row left a wide gap below the count line.
+      .frame(maxWidth: .infinity, minHeight: LodySize.controlMd, alignment: .topLeading)
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)

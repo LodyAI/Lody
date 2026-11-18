@@ -380,7 +380,7 @@ export const ShortStreamHidesRail: Story = {
   render: () => (
     <div {...stylex.props(storyLayout.frame)}>
       <SessionChatStreamView
-        items={integrationItems.slice(0, 8)}
+        items={integrationItems.slice(0, 6)}
         sessionId={integrationSessionId}
         xstyle={sceneStyles.fill}
         renderMessageRow={renderMessageRow}

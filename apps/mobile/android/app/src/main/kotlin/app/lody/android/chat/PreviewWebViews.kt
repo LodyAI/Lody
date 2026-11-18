@@ -31,10 +31,10 @@ object PreviewUrls {
     }
 }
 
-private fun blocked() = WebResourceResponse("text/plain", "UTF-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(byteArrayOf()))
+internal fun blocked() = WebResourceResponse("text/plain", "UTF-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(byteArrayOf()))
 
 @SuppressLint("SetJavaScriptEnabled")
-private fun WebView.previewSettings(storage: Boolean) {
+internal fun WebView.previewSettings(storage: Boolean) {
     settings.apply {
         javaScriptEnabled = true
         allowFileAccess = false

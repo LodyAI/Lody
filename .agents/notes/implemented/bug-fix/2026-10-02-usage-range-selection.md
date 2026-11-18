@@ -47,8 +47,8 @@ transition and observer cleanup remain responsible for their original jobs.
 No cache invalidation is needed: the [day-cache decision](2026-09-21-usage-detail-cache.md)
 still applies. Removing animations or adding observer-specific cancellation
 would change more behavior while leaving selection authority mixed with layout.
-The [timeline Spec](../../../../specs/usage-timeline.md) owns the range behavior;
-the [UTC decision](2026-10-01-usage-timeline-time-basis.md) remains applicable.
+The [timeline Spec](../../../../specs/usage-timeline.md) owns range behavior.
+The [UTC day key](2026-10-01-usage-timeline-time-basis.md) identifies the selected day.
 
 ## Ablation and verification
 

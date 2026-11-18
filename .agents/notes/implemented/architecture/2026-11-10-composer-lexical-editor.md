@@ -73,8 +73,11 @@ there" pins this; it fails on the textarea and passes on the editor.
     a `placeholder` variant in `tailwind/index.css`. Without one, the UA placeholder
     colour is copied from a textarea styled like the editor. WebKit cannot report a
     `::placeholder` style, so there the copy is skipped and the CSS default applies.
-  - Spellcheck is off and selection uses system colours wherever chips render,
-    as under the mirror.
+  - Spellcheck is off wherever chips render. Plain text uses system selection
+    colours; atomic chips use the same system selection background and foreground,
+    without
+    a border, shadow or rounded corners, and suppress duplicate native selection
+    paint inside their view.
   - Programmatic and keyboard focus keep the caret, while a pointer places it.
   - The first content is written as the element attaches, so a parent's layout
     effect measures a filled editor, as it did a textarea.
@@ -90,6 +93,12 @@ there" pins this; it fails on the textarea and passes on the editor.
 
 ## Alternatives
 
+- **Text-only mention nodes.** Lexical's [mention example](https://github.com/facebook/lexical/blob/v0.53.0/packages/lexical-playground/src/nodes/MentionNode.ts)
+  extends `TextNode`; its token/segmented text modes still allow character-level
+  range navigation. Snapshot references need a custom view and atomic edges, so
+  they retain an inline decorator, also used by
+  [lexical-beautiful-mentions](https://github.com/sodenn/lexical-beautiful-mentions/blob/main/plugin/src/MentionNode.tsx).
+  This is source evidence for the representation, not a claim of Notion parity.
 - **Patch the mirror (scrollbar inset).** It fixed the reported case, but the
   owner rejected it: the class of bug remains.
 - **ProseMirror or Tiptap.** ProseMirror is equally capable. Lexical was chosen
@@ -110,12 +119,22 @@ there" pins this; it fails on the textarea and passes on the editor.
   - jsdom tests drive the real editor through `tests/composer-test-utils.ts`.
   - Browser specs read text through `tests/e2e/composer-text.ts`.
   - `tests/setup.ts` supplies zero-size Range geometry, which jsdom lacks.
-- **Chips:** they still keep their raw text's advance width (`mention-chips.tsx`),
-  so a draft wraps and looks as before.
+- **Chips:** icons and visible labels use normal layout. Canonical prefix/suffix
+  delimiters stay in Lexical text but never occupy invisible DOM boxes. Raw DOM
+  `textContent` is therefore presentation, not the composer string; callers use
+  `composer-input.ts`. Dragging or Shift-clicking extends selection without
+  activating the chip preview. An empty unmergeable TextNode provides the left
+  caret target when no editable text precedes a mention; a node transform retains
+  this boundary after edits. It adds no character or string offset. Native
+  selection remains enabled, since disabling it redirects typing away from this
+  edge in browsers.
 - **Rich text:** none on web yet; the editor makes it possible later without
   changing the owner model.
 
 ## Verification
+
+The later atomic-chip presentation refinement is browser-tested separately; the
+2026-11-11 device results below do not certify its revised selection styling.
 
 - **Boundary:** `tests/composer-document.test.ts` covers round trips, sanitizing
   and offset/DOM mapping.

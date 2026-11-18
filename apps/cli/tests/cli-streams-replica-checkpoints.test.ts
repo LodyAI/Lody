@@ -51,13 +51,18 @@ const metaSnapshotWithA = (): Uint8Array => {
 };
 
 /** Streams serving `snapshot` at offset 100; catch-up from 100 has nothing new. */
-function createStreamsServer(snapshot: Uint8Array) {
+function createStreamsServer(
+  snapshot: Uint8Array,
+  respond?: (url: URL, method: string) => Response | undefined
+) {
   const requests: URL[] = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(input instanceof Request ? input.url : input);
       requests.push(url);
+      const intercepted = respond?.(url, init?.method ?? 'GET');
+      if (intercepted) return intercepted;
       if (init?.method === 'POST') {
         const headers = new Headers(init.headers);
         return new Response(null, {
@@ -330,4 +335,61 @@ describe('CLI Streams checkpoints are bound to the replica that loaded them', ()
     expect((await syncMeta(restarted)).ok).toBe(true);
     expect(server.bootstraps()).toBe(1);
   });
+});
+
+// These cases intentionally exercise the published SDK through the real daemon composition.
+describe('CLI gateway namespace fences retain offline SQLite data', () => {
+  for (const kind of ['doc', 'flock', 'meta'] as const) {
+    for (const [status, code] of [
+      [404, 'space_not_found'],
+      [410, 'space_generation_fenced'],
+    ] as const) {
+      it(`${kind}: ${status} ${code} cannot auto-create or upload the namespace and preserves drafts across reopen`, async () => {
+        const methods: string[] = [];
+        createStreamsServer(new Uint8Array(), (_url, method) => {
+          methods.push(method);
+          return method === 'GET'
+            ? new Response(null, { status, headers: { 'Stream-Error-Code': code } })
+            : undefined;
+        });
+        const daemon = await openCliProcess();
+        const id = 'offline-draft';
+        const doc = kind === 'doc' ? (await daemon.repo.openPersistedDoc(id)).doc : undefined;
+        const flock =
+          kind === 'meta'
+            ? daemon.repo.getMeta()
+            : kind === 'flock'
+              ? (await daemon.repo.openFlockDoc(id)).flock
+              : undefined;
+        if (doc) {
+          doc.getMap('data').set('draft', 'unsent CLI text');
+          doc.commit();
+        } else flock!.put(['draft'], 'unsent CLI text');
+        await daemon.repo.flush();
+        const result = await withTransport(daemon, (adapter) =>
+          doc
+            ? adapter.syncDoc(id, doc)
+            : kind === 'meta'
+              ? adapter.syncMeta(flock!)
+              : adapter.syncFlockDoc(id, flock!)
+        );
+        expect(result.ok).toBe(false);
+        expect(methods.some((method) => method === 'PUT' || method === 'POST')).toBe(false);
+        await daemon.repo.flush();
+        await closeCliProcess(daemon);
+        const restarted = await openCliProcess();
+        if (kind === 'doc') {
+          expect((await restarted.repo.openPersistedDoc(id)).doc.getMap('data').get('draft')).toBe(
+            'unsent CLI text'
+          );
+        } else {
+          const restored =
+            kind === 'meta'
+              ? restarted.repo.getMeta()
+              : (await restarted.repo.openFlockDoc(id)).flock;
+          expect(restored.get(['draft'])).toBe('unsent CLI text');
+        }
+      });
+    }
+  }
 });

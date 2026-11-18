@@ -27,6 +27,9 @@ const styles = stylex.create({
     display: 'flex',
     maxHeight: '14rem',
   },
+  twoPane: {
+    height: '14rem',
+  },
   list: {
     display: 'flex',
     flexDirection: 'column',
@@ -170,7 +173,7 @@ export function ComposerAgentRolePanel({
   if (!previewItem) return null;
 
   return (
-    <div ref={rootRef} {...stylex.props(styles.root)}>
+    <div ref={rootRef} {...stylex.props(styles.root, !compact && styles.twoPane)}>
       <div {...stylex.props(styles.list, compact ? styles.listCompact : styles.listTwoPane)}>
         {/* The Role rows scroll independently; Create stays at the pane's bottom. */}
         <div {...withClassName(stylex.props(styles.listItems), 'scrollbar-pro')}>

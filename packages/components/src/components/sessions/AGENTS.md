@@ -19,6 +19,14 @@ Read parent rules and linked context.
 - `Change owner` writes the OWNER `SessionMeta.userId`, never sharing;
   candidates need machine/project access.
 
+## Opener provenance
+
+- Keep `openedBySessionId` (precise opener) distinct from `openedByRowSessionId`
+  (row). `buildSidebarOpenerRowResolver` in `session-list-rows.ts` walks
+  `parentSessionId` to root using sidebar `allActiveSessions`, never visible rows.
+  Preserve the precise opener and independent child workspace; `parentSessionId`
+  children stay out of `sessionListAtom` rows.
+
 ## [Shell, side panel, side chats](../../../../../.agents/docs/sessions-side-panel.md)
 
 - Desktop file/diff/browser/PR viewers are closeable right-panel tabs; never split
@@ -46,6 +54,8 @@ Read parent rules and linked context.
   `getExecutableHtmlPreviewSupport()` plus `scriptsOptedIn` via
   `useManagedPreviewFrame` only (see sessions-browser.md); else use
   navigation-stripped HTML with an empty sandbox.
+  The only other executable frame is the consented desktop direct preview in
+  `local-html-preview.tsx` (same doc).
   Never preview truncated text; static frames die with their tab.
 - Encrypted remote preview controls require the existing protected feature host
   and verified write role; never fall back to ordinary preview proofs. Explain

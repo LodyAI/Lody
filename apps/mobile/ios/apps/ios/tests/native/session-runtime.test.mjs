@@ -109,6 +109,125 @@ test('control stream catchup happens before choosing a legacy history backend', 
   }
 });
 
+test(
+  'Roost history can catch up while the control stream is retrying without confirming session sync',
+  { timeout: 8_000 },
+  async (t) => {
+    const controlRead = Promise.withResolvers();
+    const controlRetry = Promise.withResolvers();
+    const controlFailed = Promise.withResolvers();
+    const historyWatch = Promise.withResolvers();
+    const liveAfterRecovery = Promise.withResolvers();
+    const eventsWhileControlUnavailable = [];
+    let revision = 1;
+    let polls = 0;
+    let controlUnavailable = false;
+    const turn = () => ({
+      id: 'assistant-1',
+      role: 'assistant',
+      timestamp: '2026-01-01T00:00:00Z',
+      finished: revision === 2,
+      items: [{ type: 'text', text: 'Synthetic reply' }],
+    });
+    const fixture = await openTestSession({
+      target: { backend: 'roost', machineId: 'm1' },
+      readSession({ signal }) {
+        if (++polls === 1) return controlRead.promise;
+        if (polls === 2) return controlRetry.promise;
+        return new Promise((_, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), {
+            once: true,
+          });
+        });
+      },
+      onEvent(event) {
+        if (event.type !== 'session') return;
+        const snapshot = JSON.parse(event.session);
+        if (controlUnavailable) {
+          eventsWhileControlUnavailable.push(event.synced);
+          if (
+            snapshot.status === 'syncing' &&
+            snapshot.reason === 'network_error'
+          )
+            controlFailed.resolve();
+        } else if (event.synced && snapshot.entries[0]?.finished) {
+          liveAfterRecovery.resolve();
+        }
+      },
+      async onRpc(request, runtime, signal) {
+        const { query } = await runtime.openPayload(request.params);
+        let result, pageTurns;
+        if (query.kind === 'watchChanges') {
+          const response = Promise.withResolvers();
+          signal.addEventListener(
+            'abort',
+            () => response.reject(signal.reason),
+            { once: true },
+          );
+          if (query.checkpoint === 'c1') historyWatch.resolve(response.resolve);
+          result = await response.promise;
+        } else {
+          result = {
+            checkpoint: `c${revision}`,
+            startPosition: 0,
+            totalCount: 1,
+            rows: [{ position: 0, state: 'ready', turnId: 'assistant-1' }],
+            hasMoreOlder: false,
+            cursor: null,
+          };
+          pageTurns = [turn()];
+        }
+        return {
+          result: await runtime.sealPayload('s1', {
+            type: 'session/history-read_response',
+            sessionId: 's1',
+            success: true,
+            historyRevision: revision,
+            historyCount: 1,
+            result,
+            pageTurns,
+          }),
+        };
+      },
+    });
+    t.after(() => {
+      controlRetry.resolve({ ok: false, result: { code: 'cancelled' } });
+      fixture.close();
+    });
+    assert.equal(fixture.events.at(-1).entries[0].finished, false);
+    controlUnavailable = true;
+    controlRead.resolve({ ok: false, result: { code: 'network_error' } });
+    await controlFailed.promise;
+
+    revision = 2;
+    (await historyWatch.promise)({
+      state: 'ready',
+      checkpoint: 'c2',
+      ids: ['assistant-1'],
+      bodies: { changed: [turn()], suffix: [] },
+    });
+    // A retained session open flushes its current projection. Advance the test
+    // only after that projection contains the owner's new history.
+    do {
+      t.signal.throwIfAborted();
+      await new Promise((resolve) => setImmediate(resolve));
+      await fixture.reopen();
+    } while (!fixture.events.at(-1).entries[0]?.finished);
+    assert.equal(fixture.events.at(-1).status, 'syncing');
+    assert.ok(
+      eventsWhileControlUnavailable.every((synced) => synced === false),
+    );
+
+    controlUnavailable = false;
+    controlRetry.resolve({
+      ok: true,
+      result: { nextOffset: '2', upToDate: true, closed: false },
+    });
+    await liveAfterRecovery.promise;
+    assert.equal(fixture.events.at(-1).status, 'live');
+  },
+);
+
 test('Roost sessions read, observe and send through the owning machine', async () => {
   const turn = (text) => ({
     id: 'old',
@@ -450,6 +569,399 @@ test('Roost retries the failed receipt upload before handing the same input to i
     await handoff;
     assert.deepEqual(writes, [{ id: result.id, receipt: { userId: 'u1' } }]);
   } finally {
+    fixture.close();
+  }
+});
+
+test('a Loro send with a lost append response can be forgotten locally without Roost input state', async () => {
+  let current = true;
+  const resolveTarget = () => ({ backend: 'loro' });
+  resolveTarget.isCurrent = () => current;
+  const fixture = await openTestSession({
+    resolveTarget,
+    afterAppend(url) {
+      if (!url.includes(':rpc:')) throw new Error('lost_response_after_commit');
+    },
+  });
+  try {
+    const result = await fixture.runtime.sendTurn({
+      id: '00000000-0000-4000-8000-000000000001',
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'claude',
+      text: 'Synthetic unconfirmed input',
+    });
+    assert.equal(result.state, 'unknown');
+    const persisted = fixture.server.toJSON();
+    assert.deepEqual(
+      persisted.history.map((entry) => entry.id),
+      [result.id],
+    );
+    await fixture.runtime.actOnPendingInput('s1', result.id, 'forget');
+    assert.deepEqual(
+      fixture.server.toJSON(),
+      persisted,
+      'Local removal must not alter or resend remote history',
+    );
+    await assert.rejects(
+      fixture.runtime.actOnPendingInput('s1', result.id, 'retry'),
+      /session_not_ready/,
+    );
+    current = false;
+    await assert.rejects(
+      fixture.runtime.actOnPendingInput('s1', result.id, 'forget'),
+      /workspace_changed/,
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
+for (const failure of ['lost_append_response', 'metadata_handoff_failed']) {
+  test(`explicit Loro recovery repairs ${failure} with the original persisted input`, async () => {
+    const fixture = await openTestSession({
+      afterAppend(url) {
+        if (failure === 'lost_append_response' && !url.includes(':rpc:'))
+          throw new Error(failure);
+      },
+      markDispatch() {
+        throw new Error('metadata_handoff_failed');
+      },
+      onRpc: async (request) => {
+        assert.equal(request.method, 'session/dispatch-turn');
+        const original = fixture.server.toJSON().history[0];
+        assert.deepEqual(request.params, {
+          sessionId: 's1',
+          userTurnId: original.id,
+          userId: original.userId,
+          timestamp: original.timestamp,
+          inputConfig: original.inputConfig,
+        });
+        return { result: { accepted: true, disposition: 'accepted' } };
+      },
+    });
+    try {
+      const sent = await fixture.runtime.sendTurn({
+        id: '00000000-0000-4000-8000-000000000002',
+        sessionId: 's1',
+        machineId: 'm1',
+        userId: 'u1',
+        cliType: 'builtin',
+        agentType: 'claude',
+        text: 'Original synthetic input',
+        model: 'original-model',
+      });
+      assert.equal(
+        sent.state,
+        failure === 'lost_append_response' ? 'unknown' : 'uploaded',
+      );
+      const persisted = fixture.server.toJSON();
+      assert.deepEqual(
+        await fixture.runtime.actOnPendingInput('s1', sent.id, 'retry', () => ({
+          userId: 'u1',
+          machineId: 'm1',
+        })),
+        { state: 'accepted' },
+      );
+      assert.deepEqual(fixture.server.toJSON(), persisted);
+      assert.equal(
+        fixture.appends.filter((url) => !url.includes(':rpc:')).length,
+        1,
+      );
+      assert.equal(
+        fixture.appends.filter((url) => url.includes(':rpc:req:')).length,
+        1,
+      );
+    } finally {
+      fixture.close();
+    }
+  });
+}
+
+test('Loro recovery imports catch-up before deciding that an input needs dispatch', async () => {
+  let recovering = false;
+  const fixture = await openTestSession({
+    seedServer(doc) {
+      doc
+        .getList('history')
+        .pushContainer(new LoroMap())
+        .set('id', 'terminal-input');
+      const entry = doc.getList('history').get(0);
+      for (const [key, value] of Object.entries({
+        role: 'user',
+        userId: 'u1',
+        status: 'pending',
+        timestamp: '2026-01-01',
+        inputConfig: { prompt: 'Synthetic' },
+      }))
+        entry.set(key, value);
+    },
+    catchupServer(doc) {
+      if (recovering) doc.getList('history').get(0).set('status', 'handled');
+    },
+  });
+  try {
+    recovering = true;
+    assert.deepEqual(
+      await fixture.runtime.actOnPendingInput(
+        's1',
+        'terminal-input',
+        'retry',
+        () => ({ userId: 'u1', machineId: 'm1' }),
+      ),
+      { state: 'settled' },
+    );
+    assert.equal(fixture.appends.length, 0);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('a failed Loro recovery remains explicitly retryable without resending history', async () => {
+  let fail = true;
+  const fixture = await openTestSession({
+    markDispatch() {
+      throw new Error('metadata_handoff_failed');
+    },
+    onRpc: async () => {
+      if (fail) throw new Error('lost_dispatch_response');
+      return { result: { accepted: true, disposition: 'duplicate' } };
+    },
+  });
+  try {
+    const sent = await fixture.runtime.sendTurn({
+      id: '00000000-0000-4000-8000-000000000006',
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'claude',
+      text: 'Synthetic RPC uncertainty',
+    });
+    const retry = () =>
+      fixture.runtime.actOnPendingInput('s1', sent.id, 'retry', () => ({
+        userId: 'u1',
+        machineId: 'm1',
+      }));
+    await assert.rejects(retry(), /lost_dispatch_response/);
+    fail = false;
+    assert.deepEqual(await retry(), { state: 'accepted' });
+    assert.equal(fixture.server.toJSON().history.length, 1);
+    assert.equal(
+      fixture.appends.filter((url) => !url.includes(':rpc:')).length,
+      1,
+    );
+    assert.equal(
+      fixture.appends.filter((url) => url.includes(':rpc:req:')).length,
+      2,
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
+test('Loro recovery requires server evidence, not an uncommitted local turn', async () => {
+  const fixture = await openTestSession({ failAppend: () => true });
+  try {
+    const sent = await fixture.runtime.sendTurn({
+      id: '00000000-0000-4000-8000-000000000003',
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'claude',
+      text: 'Synthetic local only',
+    });
+    assert.equal(sent.state, 'unknown');
+    assert.equal(fixture.runtime.sessionDoc('s1').toJSON().history.length, 1);
+    await assert.rejects(
+      fixture.runtime.actOnPendingInput('s1', sent.id, 'retry', () => ({
+        userId: 'u1',
+        machineId: 'm1',
+      })),
+      /input_not_confirmed/,
+    );
+    assert.equal(fixture.server.toJSON().history?.length ?? 0, 0);
+    assert.equal(
+      fixture.appends.filter((url) => url.includes(':rpc:')).length,
+      0,
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
+test('Loro recovery coalesces the same input and local removal fences a late server read', async () => {
+  let release, entered;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  let recovering = false;
+  const fixture = await openTestSession({
+    beforeBootstrap: async () => {
+      if (recovering) {
+        entered();
+        await gate;
+      }
+    },
+    markDispatch() {
+      throw new Error('metadata_handoff_failed');
+    },
+  });
+  try {
+    const sent = await fixture.runtime.sendTurn({
+      id: '00000000-0000-4000-8000-000000000004',
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'claude',
+      text: 'Synthetic cancellation',
+    });
+    recovering = true;
+    const target = () => ({ userId: 'u1', machineId: 'm1' });
+    const first = fixture.runtime.actOnPendingInput(
+      's1',
+      sent.id,
+      'retry',
+      target,
+    );
+    const second = fixture.runtime.actOnPendingInput(
+      's1',
+      sent.id,
+      'retry',
+      target,
+    );
+    const stopped = Promise.all([
+      assert.rejects(first),
+      assert.rejects(second),
+    ]);
+    await started;
+    await assert.rejects(
+      fixture.runtime.actOnPendingInput('s1', 'other-id', 'retry', target),
+      /send_in_progress/,
+    );
+    await fixture.runtime.actOnPendingInput('s1', sent.id, 'forget');
+    const replacement = await fixture.runtime.sendTurn({
+      id: '00000000-0000-4000-8000-000000000007',
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'claude',
+      text: 'Synthetic replacement after removal',
+    });
+    assert.equal(
+      replacement.state,
+      'uploaded',
+      'Removal releases the session while an aborted read is still returning',
+    );
+    release();
+    await stopped;
+    assert.equal(
+      fixture.appends.filter((url) => url.includes(':rpc:')).length,
+      0,
+    );
+    recovering = false;
+    fixture.server.getList('history').get(0).set('status', 'canceled');
+    assert.deepEqual(
+      await fixture.runtime.actOnPendingInput('s1', sent.id, 'retry', target),
+      { state: 'settled' },
+    );
+    assert.equal(
+      fixture.appends.filter((url) => url.includes(':rpc:')).length,
+      0,
+    );
+  } finally {
+    release();
+    fixture.close();
+  }
+});
+
+test('the recovery handler uses current metadata and fences account or machine changes after readback', async () => {
+  let readStarted, releaseRead;
+  let recovering = false;
+  let read;
+  const fixture = await openTestSession({
+    beforeBootstrap: async () => {
+      if (recovering) {
+        readStarted();
+        await read;
+      }
+    },
+  });
+  try {
+    const inputId = '00000000-0000-4000-8000-000000000005';
+    fixture.runtime.appendUserTurn(
+      fixture.server,
+      inputId,
+      'Synthetic retained input',
+      'u1',
+      { prompt: 'Original input' },
+      '2026-01-01',
+    );
+    let flock = new Flock('recovery-test');
+    flock.set(['m', 'session-s1'], { machineId: 'm1', historyBackend: 'loro' });
+    const state = {
+      workspace: 'w1',
+      userId: 'u1',
+      metaReplica: { flock },
+      catalogs: new Map(),
+      machineReplicas: new Map(),
+      unhealthy: new Set(),
+    };
+    const handlers = new Map();
+    fixture.runtime.registerSessions({
+      state,
+      channel: { handle: (name, handler) => handlers.set(name, handler) },
+    });
+    const retry = () =>
+      handlers.get('retryPendingInput')({ sessionId: 's1', inputId });
+    for (const change of ['account', 'machine', 'missing-history', 'archive']) {
+      state.userId = 'u1';
+      flock = new Flock('recovery-test-' + change);
+      state.metaReplica.flock = flock;
+      flock.set(['m', 'session-s1'], {
+        machineId: 'm1',
+        historyBackend: 'loro',
+      });
+      const started = new Promise((resolve) => {
+        readStarted = resolve;
+      });
+      read = new Promise((resolve) => {
+        releaseRead = resolve;
+      });
+      recovering = true;
+      const result = retry();
+      const rejected = assert.rejects(
+        result,
+        /workspace_changed|input_already_terminal|session_not_ready/,
+      );
+      await started;
+      if (change === 'account') state.userId = 'u2';
+      if (change === 'machine')
+        flock.set(['m', 'session-s1', 'machineId'], 'm2');
+      if (change === 'missing-history')
+        flock.set(['m', 'session-s1', 'missingHistoryUserMsgIds'], {
+          [inputId]: true,
+        });
+      if (change === 'archive')
+        flock.set(['m', 'session-s1', 'isArchived'], true);
+      releaseRead();
+      await rejected;
+    }
+    assert.equal(
+      fixture.appends.length,
+      0,
+      'A stale scope must not issue a handoff or rewrite history',
+    );
+  } finally {
+    releaseRead?.();
     fixture.close();
   }
 });

@@ -1,36 +1,36 @@
 {
   "name": "codex",
-  "version": "0.166.0",
+  "version": "0.169.1",
   "artifacts": {
     "darwin-arm64": {
       "fileName": "codex-package-aarch64-apple-darwin.tar.zst",
-      "sha256": "9c6dd385c617d64da736f9409f116557b30d5d31509c617eb8a263107458578f",
-      "size": 119322364
+      "sha256": "94ecae8328d46d8a398ef1650336c20ace275a967670a0be27370080a719db96",
+      "size": 123928295
     },
     "darwin-x64": {
       "fileName": "codex-package-x86_64-apple-darwin.tar.zst",
-      "sha256": "9d39819d130facda3c53ad61934111b944b0788532c66acebb6e2a95c1a5cb8b",
-      "size": 130651178
+      "sha256": "75bbfd65eac9f2dd655190d0b3d50c86eaa80b521c37017ed345e56f0c9fdb8b",
+      "size": 135635623
     },
     "linux-arm64": {
       "fileName": "codex-package-aarch64-unknown-linux-musl.tar.zst",
-      "sha256": "41d7e5673d867939497c2f7c5f8fe7673795a6a81d3a3920394756af321eda01",
-      "size": 136246047
+      "sha256": "d766991aa266fe419ac8b4d7dbdcd49fb058af231f5b4e7e16b532c8a6bc10c8",
+      "size": 141434978
     },
     "linux-x64": {
       "fileName": "codex-package-x86_64-unknown-linux-musl.tar.zst",
-      "sha256": "8f7aedc4e2f853575ce1543496afc8af51666f7628fb535810ed9f6a013df1be",
-      "size": 143592321
+      "sha256": "654cc52d98f2b90522a51858b8a8f65bab4147c61a34c0238e6b67655ec21e1b",
+      "size": 141879607
     },
     "win32-arm64": {
       "fileName": "codex-package-aarch64-pc-windows-msvc.tar.zst",
-      "sha256": "17e0d7dafa0b25a7dc54ab641b7c0c83dc8a09820a1c1a484c4043e519b9b732",
-      "size": 139646713
+      "sha256": "0c5e34da967b75242624088afac9813dee3696af503ec12bb8203d85a6720ef3",
+      "size": 144012047
     },
     "win32-x64": {
       "fileName": "codex-package-x86_64-pc-windows-msvc.tar.zst",
-      "sha256": "8b981e07f05d5526f09c49da02673919324203e22f8d4f027cd844d2d1142bda",
-      "size": 150827371
+      "sha256": "75b7d9d158f53977fa1a4a51eb51dd310f1e9b8dd51f608d2368c76951d76d63",
+      "size": 155186752
     }
   }
 }

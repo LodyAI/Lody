@@ -24,6 +24,22 @@ class DirectoryTabsTest {
     @Test fun attentionWinsOverRunningAndUnread() {
         assertEquals(ChatAttention.Waiting, DirectoryTabs.attention(listOf(session("running", status="running"), session("wait", status="requestPermission"))))
     }
+    @Test fun headerDotOnlyReflectsUnreadOutputInOtherOpenTabs() {
+        val current = session("current").copy(lastMessageAt = 2, lastReadAt = 1)
+        for (status in listOf("running", "requestPermission", "error", "completed")) {
+            val other = session("other", "current", status)
+            assertFalse(DirectoryTabs.hasBackgroundUnread(listOf(current, other), "current"))
+            val unread = other.copy(lastMessageAt = 2, lastReadAt = 1)
+            assertTrue(DirectoryTabs.hasBackgroundUnread(listOf(current, unread), "current"))
+            assertFalse(DirectoryTabs.hasBackgroundUnread(listOf(unread), "other"))
+            assertFalse(DirectoryTabs.hasBackgroundUnread(listOf(current, unread.copy(isTabClosed = true)), "current"))
+            val viewed = unread.copy(lastReadAt = 2)
+            assertFalse(DirectoryTabs.hasBackgroundUnread(listOf(current, viewed), "current"))
+            assertTrue(DirectoryTabs.hasBackgroundUnread(listOf(current, viewed.copy(lastMessageAt = 3)), "current"))
+        }
+        assertEquals(ChatAttention.Running, DirectoryTabs.attention(listOf(session("running", status = "running"))))
+        assertEquals(ChatAttention.Failed, DirectoryTabs.attention(listOf(session("failed", status = "error"))))
+    }
     @Test fun missingOwnerDoesNotIncludeUnrelatedChats() {
         val child = session("child", "missing")
         assertEquals(listOf(child), DirectoryTabs.sessions(child, listOf(child, session("other"))))

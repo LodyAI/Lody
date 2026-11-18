@@ -16,6 +16,7 @@ export async function loadSchedules() {
         export * from './src/runtime/schedules.ts';
         export { draftInput, ruleOf, triggerOf } from './src/runtime/handlers/schedules.ts';
         export * from './src/protocol/schedules.ts';
+        export { proposalRule } from './src/protocol/proposals.ts';
       `,
       resolveDir: new URL(
         '../../../../packages/cloud-runtime/',

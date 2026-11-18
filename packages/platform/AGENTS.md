@@ -40,7 +40,10 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
   a route commit cannot override an outstanding lease.
 - Automatic exceptions in those scopes use a fixed diagnostic vocabulary. Shared
   main/daemon processes cannot infer one workspace mode and always use that
-  vocabulary. Preserve detailed local, user-submitted support reports.
+  vocabulary. Restricted diagnostics retain only allowlisted category/source/runtime
+  fields, consumer-specific operation/stage/status values and bounded numeric versions; grouping uses these fixed fields, never
+  hashes of original messages/stacks. Reprojection must preserve safe diagnostics.
+  Preserve detailed local, user-submitted support reports.
   [SDK buffering rationale](../../.agents/notes/implemented/bug-fix/2026-10-29-workspace-telemetry-privacy.md).
 
 ## Streams token capability

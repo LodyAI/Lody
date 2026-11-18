@@ -469,19 +469,26 @@ const sortedSet = (values: readonly number[]) =>
 const sameSet = (a: readonly number[], b: readonly number[]) =>
   sortedSet(a).join(',') === sortedSet(b).join(',');
 
+/** Web `SCHEDULE_CUSTOM_STEP_MAX`: Android carries `every` as a 32-bit `Int`. */
+const STEP_MAX = 2_147_483_647;
+
 export function triggerToRecurrence(
   trigger: TimedScheduleTrigger,
 ): ScheduleRecurrence {
   if (trigger.kind === 'once') return { kind: 'once', at: trigger.at };
   const unsupported: ScheduleRecurrence = { kind: 'unsupported', trigger };
   if (trigger.kind === 'interval') {
-    if (trigger.everyMs % 3_600_000 === 0)
+    // A longer stored step stays `unsupported` (kept verbatim), never truncated.
+    if (
+      trigger.everyMs % 3_600_000 === 0 &&
+      trigger.everyMs / 3_600_000 <= STEP_MAX
+    )
       return {
         kind: 'hours',
         every: trigger.everyMs / 3_600_000,
         timeZone: deviceTimeZone(),
       };
-    if (trigger.everyMs % 60_000 === 0)
+    if (trigger.everyMs % 60_000 === 0 && trigger.everyMs / 60_000 <= STEP_MAX)
       return {
         kind: 'minutes',
         every: trigger.everyMs / 60_000,
@@ -535,7 +542,7 @@ export function recurrenceToTrigger(
     case 'unsupported':
       return validateScheduleTrigger(recurrence.trigger);
     case 'minutes':
-      if (!wholeIn(recurrence.every, 1, 1440))
+      if (!wholeIn(recurrence.every, 1, STEP_MAX))
         throw new Error('schedule_trigger_invalid');
       return 60 % recurrence.every === 0
         ? validateScheduleTrigger({
@@ -549,7 +556,7 @@ export function recurrenceToTrigger(
             anchorAt: new Date(now).toISOString(),
           });
     case 'hours':
-      if (!wholeIn(recurrence.every, 1, 168))
+      if (!wholeIn(recurrence.every, 1, STEP_MAX))
         throw new Error('schedule_trigger_invalid');
       return 24 % recurrence.every === 0
         ? validateScheduleTrigger({

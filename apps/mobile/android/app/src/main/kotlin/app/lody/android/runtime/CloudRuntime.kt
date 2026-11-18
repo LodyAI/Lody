@@ -532,7 +532,8 @@ data class DirectoryEntry(val name: String, val directory: Boolean)
 sealed interface FileContent {
     val path: String
     data class Text(override val path: String, val text: String, val bytes: Long) : FileContent
-    data class Binary(override val path: String, val bytes: Long) : FileContent
+    /** [base64] carries the body so an HTML preview can serve images and fonts it names. */
+    data class Binary(override val path: String, val bytes: Long, val mimeType: String? = null, val base64: String = "") : FileContent
     /** The computer's refusal (`file_not_found`, `too_large`, `permission_denied`, …). */
     data class Failed(override val path: String, val code: String) : FileContent
 }

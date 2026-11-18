@@ -35,7 +35,7 @@ reduced-motion behavior remain supported.
 Changing the animation's duration alone would retain the misplaced coordinates.
 Clipping at the page would hide content without repairing its ownership. The
 fixed frame corrects the geometry at its owner without changing the
-[UTC timeline contract](../../../../specs/usage-timeline.md), the
+[timeline presentation contract](../../../../specs/usage-timeline.md), the
 [selection lifetime](2026-10-02-usage-range-selection.md), or
 [day-detail cache](2026-09-21-usage-detail-cache.md).
 

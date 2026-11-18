@@ -3508,7 +3508,8 @@ export class MessageHandler {
           },
           { noticeId: `session-stop-failure-${turnId}-${failure.phase}` }
         ),
-      recordNativeWorkInterrupted: async (sessionId, turnId) =>
+      recordNativeWorkInterrupted: async (sessionId, turnId) => {
+        if (this.deletedSessionIds.has(sessionId) || this.archiveInFlight.has(sessionId)) return;
         await this.recordAgentWarning(
           sessionId,
           {
@@ -3516,7 +3517,8 @@ export class MessageHandler {
             source: 'nativeWorkInterrupted',
           },
           { noticeId: `native-work-interrupted-${turnId}` }
-        ),
+        );
+      },
       maybeGenerateAndStoreSessionTitle: async (
         sessionId,
         cliType,
@@ -4852,6 +4854,7 @@ export class MessageHandler {
     options: { writeIdleStatus?: boolean } = {}
   ): Promise<void> {
     this.logger.debug(`[${sessionId}] Releasing archived session runtime`);
+    this.executionService.withdrawNativeWorkCompletion(sessionId);
 
     this.clearSessionActivePresence(sessionId);
     this.closeSessionTerminals?.(sessionId);
@@ -5184,6 +5187,7 @@ export class MessageHandler {
    * orphan to report, not a reason to leave the archive half done.
    */
   private async terminateSessionForRelease(sessionId: SessionId): Promise<void> {
+    this.executionService.withdrawNativeWorkCompletion(sessionId);
     try {
       await this.sessionManager.terminateSession(sessionId, true);
     } catch (error) {
@@ -12262,7 +12266,9 @@ export class MessageHandler {
    * model turn it started itself). GC must not stop such a session as idle.
    */
   getNativeWork(sessionId: SessionId): NativeAgentWork {
-    return this.sessionManager.getSession(sessionId)?.agentClient?.getNativeWork() ?? null;
+    const session = this.sessionManager.getSession(sessionId);
+    if (!session || session.hasLiveAgentProcess?.() === false) return null;
+    return session.agentClient?.getNativeWork() ?? null;
   }
 
   /**
@@ -12352,8 +12358,9 @@ export class MessageHandler {
         this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
       hasGoal: (sessionId) => this.hasActiveGoal(sessionId),
       nativeActivity: (sessionId) => {
-        const client = this.sessionManager.getSession(sessionId)?.agentClient;
-        return client ? client.getNativeActivityObservation() : 'idle';
+        const session = this.sessionManager.getSession(sessionId);
+        if (!session || session.hasLiveAgentProcess?.() === false) return 'idle';
+        return session.agentClient ? session.agentClient.getNativeActivityObservation() : 'idle';
       },
       author: (sessionId) =>
         this.executionService.getActiveInvocationContext(sessionId)?.requesterUserId,

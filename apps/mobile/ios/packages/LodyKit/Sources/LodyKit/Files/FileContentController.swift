@@ -161,7 +161,7 @@ class FileContentController: UIViewController {
         guard let self, let preview else { return }
         self.serve(id: id, path: path, to: preview, handle: handle)
       }
-      preview.setHandle(handle)
+      preview.setHandle(handle, documentPath: path)
       return preview
     }
     if markdown, !source {

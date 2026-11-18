@@ -195,8 +195,7 @@ const buildActivityGroupKey = (messageId: string, first: AssistantActivityRender
 
 const buildAssistantTurnRenderBlocksFromEntries = (
   messageId: string,
-  entries: readonly AssistantMessageRenderItem[],
-  separateThoughts = false
+  entries: readonly AssistantMessageRenderItem[]
 ): AssistantTurnRenderBlock[] => {
   const blocks: AssistantTurnRenderBlock[] = [];
   let pendingActivityEntries: AssistantActivityRenderItem[] = [];
@@ -218,14 +217,6 @@ const buildAssistantTurnRenderBlocksFromEntries = (
       continue;
     }
     if (isActivityGroupEntry(entry)) {
-      const previous = pendingActivityEntries[0];
-      if (
-        separateThoughts &&
-        previous &&
-        (previous.content.type === 'thought') !== (entry.content.type === 'thought')
-      ) {
-        flushActivityGroup();
-      }
       pendingActivityEntries.push(entry);
       continue;
     }
@@ -305,11 +296,10 @@ const collectSegmentEntries = (
 export const buildAssistantTurnRenderLayout = (
   messageId: string,
   items: readonly MessageContent[],
-  isTurnFinished: boolean,
-  separateThoughts = false
+  isTurnFinished: boolean
 ): AssistantTurnRenderLayout => {
   const entries = buildAssistantMessageRenderItems(items);
-  const blocks = buildAssistantTurnRenderBlocksFromEntries(messageId, entries, separateThoughts);
+  const blocks = buildAssistantTurnRenderBlocksFromEntries(messageId, entries);
   const ranges = buildSegmentBlockRanges(blocks);
 
   const segments: AssistantTurnRenderSegment[] = ranges.map((blockRange, segmentIndex) => {

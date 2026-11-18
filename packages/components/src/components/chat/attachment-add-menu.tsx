@@ -70,7 +70,7 @@ const styles = stylex.create({
   checkboxMobile: { paddingBlock: 'calc(var(--spacing) * 2.5)' },
   back: { fontWeight: 'var(--font-weight-medium)' },
   content: { width: 'max-content' },
-  mcpContent: { width: 'min(20rem, calc(100vw - 2rem))' },
+  mcpContent: { width: '20rem', maxWidth: 'calc(100vw - 2rem)' },
   rowMono: {
     fontFamily: 'var(--font-mono)',
     fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
@@ -110,6 +110,7 @@ const styles = stylex.create({
     flexShrink: 1,
     flexBasis: '0%',
     flexDirection: 'column',
+    whiteSpace: 'normal',
   },
   rowName: {
     overflow: 'hidden',
@@ -119,8 +120,11 @@ const styles = stylex.create({
   rowNameMobile: { fontSize: '15px' },
   rowDetail: {
     overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 2,
+    whiteSpace: 'normal',
+    overflowWrap: 'break-word',
     fontSize: themeFontSize.xs,
     lineHeight: '1.375',
     color: themeColors.mutedForeground,
@@ -129,7 +133,7 @@ const styles = stylex.create({
     userSelect: 'none',
     paddingInline: themeSpace[2.5],
     paddingBottom: themeSpace[1.5],
-    paddingTop: themeSpace[2],
+    paddingTop: themeSpace[1.5],
     fontSize: '11px',
     lineHeight: '1.375',
     color: themeColors.mutedForeground,
@@ -325,7 +329,7 @@ export function AttachmentAddMenu({
                     >
                       {mcpLabel}
                     </Menu.SubmenuTrigger>
-                    <Menu.Content xstyle={styles.mcpContent}>
+                    <Menu.Content align="end" sideOffset={8} xstyle={styles.mcpContent}>
                       <McpServerItems mcp={mcp} isMobile={isMobile} />
                     </Menu.Content>
                   </Menu.Submenu>
@@ -383,7 +387,10 @@ function McpServerItems({ mcp, isMobile }: { mcp: AttachmentAddMenuMcp; isMobile
         );
       })}
       {mcp.existingSession ? (
-        <p {...stylex.props(styles.hint)}>{t('session.mcp.nextStartHint')}</p>
+        <>
+          <Menu.Separator />
+          <p {...stylex.props(styles.hint)}>{t('session.mcp.nextStartHint')}</p>
+        </>
       ) : null}
     </>
   );

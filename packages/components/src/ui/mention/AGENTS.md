@@ -45,7 +45,11 @@ composer without mention sources.
   selections stay native so copy and whole-region edits can span mentions; only a
   collapsed caret decides triggers. The `{text, mentions}` boundary
   (`composer-document.ts`) is the only place offsets are computed. With a chip
-  resolver, spellcheck is off and selection uses system colours. The owner hears
+  resolver, disable spellcheck. Text uses system selection colours; chips suppress
+  native highlighting and paint one selected surface. Render icons and labels in
+  normal layout without invisible character boxes. Keep an empty editable TextNode
+  before mentions without preceding text. Never add placeholder characters or
+  disable native selection. The owner hears
   IME text only once committed; no owner write is applied mid-composition.
 - The pop-back itself is `context.onNavigateBack()`, owned by the root next to
   `onMentionAdd`: it has to interleave the controlled value commit with caret

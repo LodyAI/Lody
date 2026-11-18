@@ -8,6 +8,7 @@ import type { SettingsUsageTimelineData } from '../src/components/settings/setti
 import {
   createUsageTimelineFormatter,
   formatUsageTimelineBucketLabel,
+  groupUsageWeekBuckets,
 } from '../src/components/settings/usage-timeline-bucket-label';
 import { createTestI18n, withTestI18n } from './test-i18n';
 
@@ -68,42 +69,63 @@ function render(data: SettingsUsageTimelineData): HTMLDivElement {
 }
 
 describe('usage timeline presentation', () => {
-  it('renders the actual UTC window and bucket-aligned skyline axis', () => {
+  const localTime = createUsageTimelineFormatter('en');
+
+  it('renders the actual local window and bucket-aligned skyline axis', () => {
     const data = timeline('day');
     const container = render(data);
     const cells = [...container.querySelectorAll<HTMLButtonElement>('[role="gridcell"]')];
     expect(cells).toHaveLength(24);
-    expect(container.querySelector('[title="Sep 30, 16:00 – Oct 1, 16:00 UTC"]')).not.toBeNull();
+    const windowLabel = `${localTime.format(data.startMs)} – ${localTime.format(data.endMs)}`;
+    expect(container.querySelector(`[title="${windowLabel}"]`)).not.toBeNull();
     const axis = cells[0]!.closest('[role="row"]')!.nextElementSibling!.nextElementSibling!;
-    expect([...axis.children].map((cell) => cell.textContent).filter(Boolean)).toEqual([
-      '16',
-      '19',
-      '22',
-      '01',
-      '04',
-      '07',
-      '10',
-      '13',
-    ]);
+    const expectedTicks = data.buckets
+      .filter((_, index) => index % 3 === 0)
+      .map(({ bucketStartMs }) => {
+        const date = new Date(bucketStartMs);
+        const hour = String(date.getHours()).padStart(2, '0');
+        return date.getMinutes() ? `${hour}:${String(date.getMinutes()).padStart(2, '0')}` : hour;
+      });
+    expect([...axis.children].map((cell) => cell.textContent).filter(Boolean)).toEqual(expectedTicks);
     const peak = cells[23]!;
+    const peakStartMs = data.buckets[23]!.bucketStartMs;
     expect(peak.querySelector('span')!.style.height).toBe('100%');
-    expect(peak.title).toBe('Oct 1, 15:00 – Oct 1, 16:00 UTC · 500');
-    const splitLabel = formatUsageTimelineBucketLabel(
-      data,
-      data.buckets[23]!,
-      createUsageTimelineFormatter('en')
+    expect(peak.title).toBe(
+      `${localTime.format(peakStartMs)} – ${localTime.format(data.endMs)} · 500`
     );
-    expect(splitLabel).toBe('Oct 1, 15:00 UTC');
+    const splitLabel = formatUsageTimelineBucketLabel(data, data.buckets[23]!, localTime);
     expect(container.textContent).toContain(splitLabel);
   });
 
-  it('renders all eight UTC dates touched by a rolling seven-day window', () => {
+  it('renders each returned week bucket under its local date and hour', () => {
     const data = timeline('week');
     const container = render(data);
-    const peak = container.querySelector<HTMLButtonElement>('[title="Oct 7, 15:00 UTC · 500"]');
+    const peakDate = new Date(data.buckets.at(-1)!.bucketStartMs);
+    const peak = container.querySelector<HTMLButtonElement>(
+      `[title="${localTime.format(peakDate)} · 500"]`
+    );
     expect(peak).not.toBeNull();
-    expect(container.querySelectorAll('[role="row"]')).toHaveLength(8);
-    expect(container.textContent).toContain('Sep 30, 16:00 – Oct 7, 16:00 UTC');
+    expect(peak?.getAttribute('aria-colindex')).toBe(String(peakDate.getHours() + 1));
+    const dates = new Set(data.buckets.map(({ bucketStartMs }) => new Date(bucketStartMs).toDateString()));
+    expect(container.querySelectorAll('[role="row"]')).toHaveLength(dates.size);
+    expect(container.querySelectorAll('[role="gridcell"]')).toHaveLength(data.buckets.length);
+  });
+
+  it('keeps both buckets in a repeated local hour and both offsets in their labels', () => {
+    const timeZone = 'America/Los_Angeles';
+    const data = timeline('week');
+    const startMs = Date.UTC(2026, 10, 1, 7);
+    const buckets = data.buckets.slice(0, 4).map((bucket, index) => ({
+      ...bucket,
+      bucketStartMs: startMs + index * HOUR_MS,
+    }));
+    const { rows, labels } = groupUsageWeekBuckets(buckets, timeZone);
+    expect(rows.map(({ dateMs }) => dateMs)).toEqual([Date.UTC(2026, 10, 1)]);
+    expect(labels.slice(0, 4)).toEqual(['00', '01', '01', '02']);
+    expect(rows[0]!.bucketIndexes.slice(0, 4)).toEqual([0, 1, 2, 3]);
+    const formatter = createUsageTimelineFormatter('en', timeZone);
+    expect(formatter.format(buckets[1]!.bucketStartMs)).toBe('Nov 1, 01:00 GMT-7');
+    expect(formatter.format(buckets[2]!.bucketStartMs)).toBe('Nov 1, 01:00 GMT-8');
   });
 });
 
@@ -209,7 +231,7 @@ describe('usage day selection across ranges', () => {
     const cells = [...container.querySelectorAll<HTMLButtonElement>('[role="gridcell"]')];
     const cell = cells.filter(
       (item) =>
-        !range || (item.title.includes('UTC') && item.title.includes(' – ') === (range === 'day'))
+        !range || (item.title && item.title.includes(' – ') === (range === 'day'))
     )[index]!;
     await act(async () => cell.click());
     return cell;
@@ -276,7 +298,7 @@ describe('usage day selection across ranges', () => {
     expect(container.querySelector('output')!.textContent).toBe(String(Date.UTC(2026, 8, 30)));
     expect(
       container.querySelector('[aria-label="workspace.usage.skyline.dayDetail"] p')?.textContent
-    ).toBe('Wed, Sep 30, 2026');
+    ).toBe('Wed, Sep 30, 2026 · UTC');
   });
 
   it('retains a selected day across 30d ↔ All and rejects a callback for another day', async () => {
@@ -295,7 +317,7 @@ describe('usage day selection across ranges', () => {
     expect(container.querySelector('output')!.textContent).toBe(String(Date.UTC(2026, 9, 1)));
     expect(
       container.querySelector('[aria-label="workspace.usage.skyline.dayDetail"] p')!.textContent
-    ).toBe('Thu, Oct 1, 2026');
+    ).toBe('Thu, Oct 1, 2026 · UTC');
     await act(async () =>
       container.querySelector<HTMLButtonElement>('[aria-label="common.close"]')!.click()
     );

@@ -61,7 +61,7 @@ dismiss_keyboard()
 delivery = ui.element(turn + ':delivery')['frame']
 assert ui.element(turn + ':delivery')['AXLabel'] == catalog.text('native.chat.message.guide.confirming')
 bubble = ui.element(turn + ':user')['frame']
-assert delivery['y'] + delivery['height'] <= bubble['y'] + 1, 'Guidance belongs above its own bubble'
+assert delivery['y'] >= bubble['y'] + bubble['height'] - 1, 'Guidance confirmation belongs below its own bubble'
 ui.capture('guide-pending')
 ui.wait(lambda _: trace.reserved_space() is not None, 'Guide landing geometry missing')
 assert abs(trace.reserved_space()) < 1, 'Guidance must not reserve empty space below the transcript'

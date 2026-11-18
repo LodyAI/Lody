@@ -287,8 +287,8 @@ extension LodyChatView {
     }
     if processEntryID.isEmpty, let pendingSend {
       for row in pendingSend.rows(entries: transcript.entries) {
-        if row.kind == "delivery", let index = projected.firstIndex(where: { $0.entryID == row.entryID }) {
-          projected.insert(row, at: index)
+        if row.kind == "delivery", let index = projected.lastIndex(where: { $0.entryID == row.entryID }) {
+          projected.insert(row, at: index + 1)
         } else {
           projected.append(row)
         }
@@ -323,14 +323,14 @@ extension LodyChatView {
     }
     if hasPositionedContent && window != nil && !UIAccessibility.isReduceMotionEnabled {
       for row in rows.values where row.kind == "delivery" && !activeIDs.contains(row.id) {
-        guard let index = projected.firstIndex(where: { $0.entryID == row.entryID }) else { continue }
+        guard let index = projected.lastIndex(where: { $0.entryID == row.entryID }) else { continue }
         if deliveryExits[row.id] == nil {
           let width = ChatReadingColumn.itemWidth(in: collection.bounds.width)
           let height = rowHeight(row, width: width)
           deliveryExits[row.id] = height
           rowHeights[row.id] = (height, 0, width)
         }
-        if rowHeights[row.id] != nil { projected.insert(row, at: index) }
+        if rowHeights[row.id] != nil { projected.insert(row, at: index + 1) }
       }
     }
     deliveryExits = deliveryExits.filter { id, _ in projected.contains { $0.id == id } }

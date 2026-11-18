@@ -7,7 +7,7 @@ Translation: current
 
 ## 摘要
 
-core 已实现 vault-v1 恢复，但还没有产品使用它，所以丢失全部已配对设备的用户会失去加密工作区。
+桌面恢复宿主已接入 vault-v1，并支持文件／密码恢复。宿主测试不代替本文要求的安装产品、系统窗口和原生设备验收。
 2026-10-31，owner 经 E2EE 总调度对六个接入问题作出决定：
 
 - 每个账号一个保险库；
@@ -28,8 +28,7 @@ passkey 解锁，任何返回真实 PRF 结果的 passkey 都能用，并以通�
 
 ## 问题
 
-MVP 要求用户至少配对两台设备。保险库覆盖没有设备幸存的情况，但目前只有 `packages/e2ee-core`
-和 Lab 在使用它。[开放契约 note](../architecture/2026-10-15-e2ee-open-contracts.zh.md) 将保险库
+MVP 要求用户至少配对两台设备。保险库覆盖没有设备幸存的情况；桌面宿主现在已消费 core 工作流，本文仍保留更广的平台与验收要求。[开放契约 note](../architecture/2026-10-15-e2ee-open-contracts.zh.md) 将保险库
 列为仅在 core 中实现。[#2125](https://github.com/LodyAI/Lody/pull/2125) 加了一个默认关闭的桌面
 闭环：创建账号保险库及其恢复文件，再检查文件。它既不保留 V，也不接纳 R，所以决定 2、3 只约束后续工作。
 
@@ -149,13 +148,13 @@ owner 已随 Spec 修订一并批准 R 凭据参数。
 
 下表来源曾于 2026-11-10 查证，不代表产品验收。
 
-| 对象 | 已查证的机制与来源 | 对 Lody 的意义 |
-| --- | --- | --- |
-| 1Password 的密码＋Secret Key 路径 | [官方 SRP 说明](https://1password.com/blog/developers-how-we-use-srp-and-you-can-too)区分双秘密派生 2SKD 与不传密码的 SRP 认证；[Secret Key 说明](https://support.1password.com/secret-key-security/)解释随机秘密加强服务端密文的保护。 | 可以学用户现场开包的体验，不能只复制“密码”输入框便声称等同其安全模型；本提案不改 Lody 登录为 SRP。 |
-| Proton Pass | [安全模型](https://proton.me/blog/proton-pass-security-model)使用 SRP 认证、由密码经 bcrypt 保护用户钥，再打开 vault/item 密钥。 | 浏览器可做分层客户端解密；不证明密码包装可直接接到 Lody 已批准的恢复格式。 |
-| MetaMask 扩展的助记词路径 | [官方 passkey 说明](https://support.metamask.io/configure/wallet/passkeys/)描述本地密码保护 vault、passkey 包装本地加密钥；本地 vault 不随同步 passkey 自动出现在另一安装。此处 SRP 指 Secret Recovery Phrase，不是 Secure Remote Password。 | 扩展的本地保险库不等于普通网站从云端自助取回工作区；不推断其社交登录路径。 |
-| WhatsApp Web 的关联设备 | [官方多设备架构](https://engineering.fb.com/2021/07/14/security/whatsapp-multi-device/)描述各设备独立身份、通过手机扫码关联，关联后可独立连接。此来源是 2021 年的架构说明。 | 适合保留设备批准入口，不能满足“另一台设备不在手边也能首次解锁”。不据此声称其所有现行流程仍相同。 |
-| WebAuthn PRF | [W3C 标准](https://www.w3.org/TR/webauthn-3/#prf-extension)定义每凭据的 32 字节伪随机输出，可用于加密。 | 普通 passkey 签名不是解密钥；必须验证真实 PRF，兼容性不能只看浏览器名字。 |
+| 对象                              | 已查证的机制与来源                                                                                                                                                                                                                           | 对 Lody 的意义                                                                                     |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 1Password 的密码＋Secret Key 路径 | [官方 SRP 说明](https://1password.com/blog/developers-how-we-use-srp-and-you-can-too)区分双秘密派生 2SKD 与不传密码的 SRP 认证；[Secret Key 说明](https://support.1password.com/secret-key-security/)解释随机秘密加强服务端密文的保护。      | 可以学用户现场开包的体验，不能只复制“密码”输入框便声称等同其安全模型；本提案不改 Lody 登录为 SRP。 |
+| Proton Pass                       | [安全模型](https://proton.me/blog/proton-pass-security-model)使用 SRP 认证、由密码经 bcrypt 保护用户钥，再打开 vault/item 密钥。                                                                                                             | 浏览器可做分层客户端解密；不证明密码包装可直接接到 Lody 已批准的恢复格式。                         |
+| MetaMask 扩展的助记词路径         | [官方 passkey 说明](https://support.metamask.io/configure/wallet/passkeys/)描述本地密码保护 vault、passkey 包装本地加密钥；本地 vault 不随同步 passkey 自动出现在另一安装。此处 SRP 指 Secret Recovery Phrase，不是 Secure Remote Password。 | 扩展的本地保险库不等于普通网站从云端自助取回工作区；不推断其社交登录路径。                         |
+| WhatsApp Web 的关联设备           | [官方多设备架构](https://engineering.fb.com/2021/07/14/security/whatsapp-multi-device/)描述各设备独立身份、通过手机扫码关联，关联后可独立连接。此来源是 2021 年的架构说明。                                                                  | 适合保留设备批准入口，不能满足“另一台设备不在手边也能首次解锁”。不据此声称其所有现行流程仍相同。   |
+| WebAuthn PRF                      | [W3C 标准](https://www.w3.org/TR/webauthn-3/#prf-extension)定义每凭据的 32 字节伪随机输出，可用于加密。                                                                                                                                      | 普通 passkey 签名不是解密钥；必须验证真实 PRF，兼容性不能只看浏览器名字。                          |
 
 **归属与替代检查。** 本 proposed Note 仍拥有原生与恢复集成理由，仅网页计划被取代。历史批准记录保留；没有已实施 Note 被完整替代。
 
@@ -170,3 +169,17 @@ owner 已随 Spec 修订一并批准 R 凭据参数。
 host 排空，不新增后台负责人或替换路径。安装失败保留身份与原件供续做；独立工作区
 及已获准的内容仍可用。Chromium 用例覆盖坏包、错误账号、已撤销 R、安装失败、精确
 续做和持久重开；私有 Web 入口和部署仍须另行验收。
+
+## 恢复调度
+
+宿主在绑定账户的保险库 Scope 内调用 `restoreVaultWorkspaces`，最多并行恢复四个工作区。同一工作区的旧成员引用仍按原顺序执行，因为它们共享身份和恢复进度键；返回结果保留认证索引的顺序。一个工作区不可用时，另一个仍能开始验证恢复。父级必须等待子 fiber 和清理真正结束，才允许保险库释放主密钥副本；没有脱离所有者的后台任务，也不靠超时替换原准入。单项失败继续保存原重试日志，单项之外的失败保留原批次失败语义。回归使用真实加密、Deferred 屏障和虚拟时钟。
+
+密码解锁通过可选的 `readEntries` 一次读固定八个不可变密文槽（1–8 个不同 id，密文体总量最多 256 KiB）。缺失仍为 null，数量或 id 不符在派生前拒绝；不支持该能力的存储保留四并发原读取。Cloud 适配器只在旧服务明确没有端点时回退，权限拒绝或错误响应不能触发回退。最新两个候选、Argon2id、当前索引认证、回滚 pin 与清理保持不变。
+
+主进程一次解锁后，以四条独立工作区通道准备批量备份，同一工作区仍按顺序执行。准备和网络等待可以重叠，共享索引写入仍经过 core 互斥和 CAS。每项独立记录失败，父 Scope 等待所有实际工作结束。
+
+每次恢复操作创建原生 Effect RequestResolver，用 1 ms 窗口收集并发历史请求，不缓存账本。恢复在包网络读取前准备首个原始历史页，只在包固定的验证上下文中消费一次，准入后仍重新读取，使独立工作区能同时到达首批请求。现有 `historyBatch` 每次最多 64 个不同工作区；重复 id 拆到下一批，各自保留原凭证、cursor 和 checkpoint。校验回复数量和顺序，再逐项交付；明确缺少端点的旧服务才回退四并发原读取。账户与 30 秒请求期限继续归原 Cloud 所有者。当前版本的 RequestResolver 在请求 fiber 之外启动批次，因此已接纳的请求等待保持不可中断直到有期限的批次结束，取消不能提前释放保险库；Deferred 回归验证这条清理边界。单个慢历史项仍会拖慢同一网络批次，最多到原请求期限，批次之外的工作区安装和结果继续独立。
+
+恢复观察者只在验证、接纳身份和本次清理完成后接收结果，观察者失败不回滚已完成结果。主进程只给发起文档发送公开结果，核对随机操作 id、文档生命周期和原登录 generation；排队开始与最终返回也拒绝跨登录代次，包括同账户重新登录。UI 先订阅再调用，完成后退订，账户、端口变化或卸载后忽略迟到进度与最终结果；按工作区 id 显示独立行，已安装项可以先使用。缺少新 epoch key 的项继续单独标为部分恢复。离开 UI 不取消主进程生产者、不删除原操作，也不把等待结束当成清理完成。
+
+回归通过 Deferred 屏障、虚拟时钟和真实恢复加密验证；后端覆盖跨账户、未登录、删除中、非法数量和超大响应。原生对话框和已安装产品的验收仍单独进行。

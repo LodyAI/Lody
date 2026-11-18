@@ -16,9 +16,15 @@ import {
   type LexicalEditor,
   type LexicalNode,
   type PointType,
+  type TextNode,
 } from 'lexical';
 import { dropOverlappingRanges } from '@lody/shared';
-import { $createMentionNode, $isMentionNode, type MentionNodeRange } from './mention-node';
+import {
+  $createMentionNode,
+  $isMentionNode,
+  type MentionDecoratorNode,
+  type MentionNodeRange,
+} from './mention-node';
 
 /**
  * The one boundary between the composer's string model (text plus UTF-16,
@@ -68,6 +74,17 @@ function appendPlainText(paragraph: ElementNode, text: string) {
   });
 }
 
+/** A real editable caret target at the left edge, without adding a character. */
+export function $ensureMentionCaretTarget(mention: MentionDecoratorNode): TextNode {
+  const previous = mention.getPreviousSibling();
+  if ($isTextNode(previous) && !$isMentionNode(previous)) return previous;
+  // Normalization removes ordinary empty text nodes; keep this one available
+  // after a line break, at document start, or between adjacent references.
+  const text = $createTextNode('').toggleUnmergeable();
+  mention.insertBefore(text);
+  return text;
+}
+
 /** Replace the whole document with `text` and its mention ranges. */
 export function $writeComposerValue<M extends ComposerMentionRange>(
   text: string,
@@ -79,7 +96,9 @@ export function $writeComposerValue<M extends ComposerMentionRange>(
   let cursor = 0;
   for (const mention of sanitizeComposerMentions(text, mentions)) {
     appendPlainText(paragraph, text.slice(cursor, mention.start));
-    paragraph.append($createMentionNode(text.slice(mention.start, mention.end), mention));
+    const node = $createMentionNode(text.slice(mention.start, mention.end), mention);
+    paragraph.append(node);
+    $ensureMentionCaretTarget(node);
     cursor = mention.end;
   }
   appendPlainText(paragraph, text.slice(cursor));

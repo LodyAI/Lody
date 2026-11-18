@@ -190,10 +190,10 @@ this page is the full text of the rules summarised there.
   deliberately absent: a sentence about what one value allows belongs to the
   Role editor, not to a scan of what is pinned. Its machine is passed
   in rather than looked up, so the pane stays renderable without the workspace's
-  machine-visibility context. Its two
-  panes grow with their content up to 14rem, then scroll
-  independently. Create stays at the bottom of the Role list pane while its
-  rows scroll; it has no separator above it. The detail pane's header flows
+  machine-visibility context. The two-pane submenu has a fixed 14rem height so
+  previewing another Role does not resize it; its panes scroll independently.
+  The compact list grows with its content up to 14rem. Create stays at the bottom
+  of the Role list pane while its rows scroll; it has no separator above it. The detail pane's header flows
   into the pinned values without a divider. The parent, permission, and Role
   menus retain the shared `@lody/ui` popup inset; neither list compensates for
   it with custom horizontal margins. The Role editor is a Dialog and is

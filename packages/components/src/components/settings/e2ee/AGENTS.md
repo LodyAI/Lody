@@ -51,3 +51,8 @@ Parent settings/component rules apply. Edit `AGENTS.md`, not `CLAUDE.md`.
   never an empty tab, and offers no recovery shortcut. The section shows loading until
   its first plan answers; a host's `e2ee_recovery_disabled` refusal shows recovery as
   off with no actions. The switch never enables main's vault.
+
+- Restore progress is observational: show each adopted result while peers wait, keep
+  partial key recovery distinct, and key rows by workspace id because names repeat.
+  Scope observers and final results to the originating account, port and operation;
+  leaving the section detaches observation, never cancels the producer or its journal.
