@@ -16,7 +16,13 @@ import {
 import { machineRpc } from './machine-rpc';
 import { retrySessionRead } from './session-read';
 import { providerRows } from './provider-settings';
-import { decodeFrames, encodeFrame } from '../frames';
+import { encodeFrame } from '../frames';
+import {
+  catalogImportCheckpoint,
+  importCatalogUpdates,
+  readCatalogRefresh,
+  catalogBootstrapSlots,
+} from './catalog-sync';
 import { watchMachinePresence } from './machine-presence';
 import { unknownPresence } from '../models/machines.ts';
 import type {
@@ -231,9 +237,19 @@ setSessionUsageReader((sessionId, modelId) => {
     modelId,
   );
 });
+const acquireCatalogBootstrap = catalogBootstrapSlots(2);
 let revision = 0;
 let lastPublished = '';
+let publishTimer: ReturnType<typeof setTimeout> | undefined;
 function publish() {
+  if (publishTimer !== undefined) return;
+  // Read the current scope at flush time; never retain an old catalog payload.
+  publishTimer = setTimeout(() => {
+    publishTimer = undefined;
+    publishNow();
+  }, 16);
+}
+function publishNow() {
   const meta = catalogs.get('meta');
   if (!meta) return;
   const expected = new Set(['meta', ...meta.machineIds]);
@@ -249,10 +265,10 @@ function publish() {
     if (!watchers.has(machine)) watch(machine);
   refreshSessionUsage();
   channel.emit('creationOptionsChanged', {});
-  if (unhealthy.size || meta.machineIds.some((id) => !catalogs.has(id))) return;
+  if (unhealthy.has('meta')) return;
   const projects = new Map(meta.projects.map((p) => [p.id, p]));
   for (const id of meta.machineIds)
-    for (const p of catalogs.get(id)!.projects)
+    for (const p of catalogs.get(id)?.projects ?? [])
       projects.set(p.id, { ...projects.get(p.id), ...p });
   for (const [id, p] of projects) {
     const repo = gitRepos.get(id);
@@ -294,18 +310,30 @@ function publish() {
   }
   channel.emit('synced', { revision, streams: watchers.size });
 }
-function apply(flock: Flock, bytes: Uint8Array) {
-  for (const frame of decodeFrames(bytes))
-    flock.importJson(JSON.parse(new TextDecoder().decode(frame)));
-}
 function watch(mode: string) {
   const controller = new AbortController();
   watchers.set(mode, controller);
   const { signal } = controller;
+  const reportError = (
+    reason:
+      'catalog_limit' | 'stream_closed' | 'stalled_cursor' | 'network_or_auth',
+  ) => {
+    // Native hosts interpret syncError as workspace unavailability. A machine
+    // failure only removes that machine's readiness, not the meta directory.
+    if (mode === 'meta') channel.emit('syncError', { reason, stream: mode });
+    else
+      channel.emit('diagnostic', {
+        stage: `sync_error:${reason}`,
+        stream: mode,
+      });
+  };
   void (async () => {
     let failures = 0;
     let providerSignature = '';
+    let preparedBootstrap: Awaited<ReturnType<typeof readCatalogRefresh>>;
     while (!signal.aborted) {
+      let caughtUp = false;
+      let releaseBootstrap = () => {};
       try {
         const authorization = await getGrant();
         if (signal.aborted) return;
@@ -324,8 +352,14 @@ function watch(mode: string) {
             pollTimeoutMs: 35000,
           },
         });
+        if (mode !== 'meta')
+          releaseBootstrap = await acquireCatalogBootstrap(signal);
+        const checkpoint = catalogImportCheckpoint(signal);
         channel.emit('diagnostic', { stage: 'bootstrap', stream: mode });
-        const initial = await client.bootstrap({ signal });
+        const initial = preparedBootstrap
+          ? { ok: true as const, result: preparedBootstrap }
+          : await client.bootstrap({ signal });
+        preparedBootstrap = undefined;
         channel.emit('diagnostic', {
           stage: initial.ok ? 'bootstrap_ok' : initial.result.code,
           stream: mode,
@@ -335,6 +369,7 @@ function watch(mode: string) {
             unhealthy.delete(mode);
             catalogs.set(mode, { projects: [], sessions: [], machineIds: [] });
             publish();
+            releaseBootstrap();
             await delay(30000, signal);
             continue;
           }
@@ -342,11 +377,13 @@ function watch(mode: string) {
         }
         const flock = new Flock(`lody-ios-${crypto.randomUUID()}`);
         const data = initial.result;
+        const snapshotBytes = data.snapshot?.body.length ?? 0;
         let size = 0;
         if (data.snapshotOffset !== '-1' && data.snapshot) {
           const bytes = data.snapshot.body;
           size += bytes.length;
           if (size > 16 * 1024 * 1024) throw new Error('catalog_limit');
+          await checkpoint(true);
           flock.importFile(
             bytes[0] === 0x28 &&
               bytes[1] === 0xb5 &&
@@ -356,17 +393,20 @@ function watch(mode: string) {
               : bytes,
           );
         }
+        await checkpoint();
         for (const part of data.updates) {
           size += part.body.length;
           if (size > 16 * 1024 * 1024) throw new Error('catalog_limit');
-          apply(flock, part.body);
+          await importCatalogUpdates(flock, part.body, checkpoint);
         }
         let offset = data.nextOffset,
           cursor = data.cursor,
           upToDate = data.upToDate;
         let pages = 0;
+        let checkedWindow = false;
         while (!signal.aborted) {
           if (upToDate) {
+            caughtUp = true;
             if (mode === 'meta') {
               const first = !state.metaReplica;
               // Keep the replica's identity across polls: in-flight calls
@@ -376,19 +416,26 @@ function watch(mode: string) {
               if (first) resumeAcceptedInputs();
             } else machineReplicas.set(mode, flock);
             unhealthy.delete(mode);
-            catalogs.set(mode, projectRows(flock.scan(), mode));
-            publish();
+            await checkpoint();
+            const rows = flock.scan();
+            catalogs.set(mode, projectRows(rows, mode));
             if (mode !== 'meta') {
               const nextSignature = JSON.stringify(
-                providerRows(flock, mode, false),
+                providerRows(flock, mode, false, rows),
               );
               if (nextSignature !== providerSignature) {
                 providerSignature = nextSignature;
                 channel.emit('agentProvidersChanged', { machineId: mode });
               }
             }
+            releaseBootstrap();
+            publish();
+            checkedWindow = false;
             failures = 0;
             pages = 0;
+            // Bootstrap includes its snapshot. Each later live/catch-up window
+            // gets a fresh budget, retained across transient read retries.
+            size = 0;
           }
           // A failed read has not imported bytes or advanced the cursor. Keep
           // that verified replica through transport loss and host suspension.
@@ -429,10 +476,7 @@ function watch(mode: string) {
             (error) => {
               unhealthy.add(mode);
               channel.emit('creationOptionsChanged', {});
-              channel.emit('syncError', {
-                reason: 'network_or_auth',
-                stream: mode,
-              });
+              reportError('network_or_auth');
               if (!(
                 error instanceof Error && error.message === 'runtime_suspended'
               ))
@@ -442,10 +486,29 @@ function watch(mode: string) {
           if (!response.ok) throw new Error(response.result.code);
           const next = response.result;
           if (signal.aborted) return;
+          if (
+            caughtUp &&
+            !checkedWindow &&
+            (!next.upToDate || (next.payload?.body.length ?? 0) >= 256 * 1024)
+          ) {
+            checkedWindow = true;
+            const refreshed = await readCatalogRefresh(
+              client,
+              offset,
+              snapshotBytes,
+              16 * 1024 * 1024,
+              signal,
+            );
+            if (refreshed) {
+              preparedBootstrap = refreshed;
+              throw new Error('catalog_rebootstrap');
+            }
+          }
+          if (next.payload?.body.length || !next.upToDate) unhealthy.add(mode);
           if (next.payload) {
             size += next.payload.body.length;
             if (size > 16 * 1024 * 1024) throw new Error('catalog_limit');
-            apply(flock, next.payload.body);
+            await importCatalogUpdates(flock, next.payload.body, checkpoint);
           }
           if (next.nextOffset === offset && !next.upToDate)
             throw new Error('stalled_cursor');
@@ -458,19 +521,30 @@ function watch(mode: string) {
           if (!next.payload?.body.length && upToDate) await delay(1000, signal);
         }
       } catch (error) {
+        releaseBootstrap();
         if (signal.aborted) return;
         if (mode === 'meta') state.metaReplica = undefined;
         else machineReplicas.delete(mode);
         unhealthy.add(mode);
         channel.emit('creationOptionsChanged', {});
         const reason = error instanceof Error ? error.message : 'sync_failed';
-        channel.emit('syncError', {
-          reason:
-            (
-              ['catalog_limit', 'stream_closed', 'stalled_cursor'] as const
-            ).find((known) => known === reason) ?? 'network_or_auth',
-          stream: mode,
-        });
+        if (
+          reason === 'catalog_rebootstrap' ||
+          (reason === 'catalog_limit' && caughtUp)
+        ) {
+          // An old replica can have an arbitrarily long backlog. Discard it
+          // and try the server's compacted snapshot before declaring a limit.
+          channel.emit('diagnostic', {
+            stage: 'catalog_rebootstrap',
+            stream: mode,
+          });
+          continue;
+        }
+        reportError(
+          (['catalog_limit', 'stream_closed', 'stalled_cursor'] as const).find(
+            (known) => known === reason,
+          ) ?? 'network_or_auth',
+        );
         grant = undefined;
         if (reason === 'catalog_limit') return;
         try {
@@ -481,6 +555,8 @@ function watch(mode: string) {
         } catch {
           return;
         }
+      } finally {
+        releaseBootstrap();
       }
     }
   })();

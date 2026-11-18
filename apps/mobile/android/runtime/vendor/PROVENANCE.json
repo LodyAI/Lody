@@ -1,10 +1,10 @@
 {
-  "source": "Lody monorepo apps/mobile/ios/packages/cloud-runtime",
-  "commit": "f53d2644f671fd0546abe36be79dc8a1a19698a3",
+  "source": "LodyAI/lody-ios packages/cloud-runtime",
+  "commit": "ddce4386dc5894f270137e892cc0f7588b7d696d",
   "license": "AGPL-3.0-only",
-  "path": "apps/mobile/ios/packages/cloud-runtime",
-  "export": "git archive f53d2644f671fd0546abe36be79dc8a1a19698a3 apps/mobile/ios/packages/cloud-runtime",
-  "note": "Android mirrors the iOS runtime source, generated Roost browser module and licenses. The Roost authoring source and generator remain in iOS. The changes from the recorded main commit are listed in roostHistory.",
+  "path": "packages/cloud-runtime",
+  "export": "git -C apps/mobile/ios archive ddce4386dc5894f270137e892cc0f7588b7d696d packages/cloud-runtime",
+  "note": "Complete snapshot of the pinned iOS cloud-runtime package, excluding Roost authoring source and its generator. SHA256.json records every mirrored file. Earlier entries retain the source-update history.",
   "roostHistory": {
     "files": [
       "README.md",
@@ -144,7 +144,7 @@
     "files": [
       "src/runtime/mention-expansion.ts"
     ],
-    "note": "An @session:/@role: chip written straight after non-ASCII text (`\u8ba9@role:<id>`) expands to its reference at send, so the transcript shows the Role's name instead of the legacy `Role` fallback. Mirrored verbatim from the iOS runtime source in the same change."
+    "note": "An @session:/@role: chip written straight after non-ASCII text (`让@role:<id>`) expands to its reference at send, so the transcript shows the Role's name instead of the legacy `Role` fallback. Mirrored verbatim from the iOS runtime source in the same change."
   },
   "perModelConfigOptions": {
     "files": [
@@ -216,5 +216,18 @@
     "note": "Full package snapshot from the reviewed iOS dependency upgrade commit. SHA256.json records the exact files. Roost authoring source and its generator remain in iOS. This replaces the earlier selective runtime deltas, including the previously excluded transcript windowing and explicit pending-input reconciliation. iOS pnpm 11 installation, check, test and bundle passed; dependency licenses were regenerated.",
     "commit": "b7f87e88ea1d9f273301afadceefdd60ee1a16ac",
     "export": "git -C apps/mobile/ios archive b7f87e88ea1d9f273301afadceefdd60ee1a16ac packages/cloud-runtime"
+  },
+  "catalogRecovery": {
+    "repository": "https://github.com/LodyAI/lody-ios",
+    "commit": "ddce4386dc5894f270137e892cc0f7588b7d696d",
+    "pullRequest": "https://github.com/LodyAI/lody-ios/pull/99",
+    "files": [
+      "README.md",
+      "src/runtime/index.ts",
+      "src/runtime/catalog-sync.ts",
+      "src/runtime/settings.ts",
+      "src/runtime/provider-settings.ts"
+    ],
+    "note": "Full-package export after the merged SDK upgrade. Includes per-window budgets, metadata-first publication, safe cost-based snapshot selection, cooperative frame imports, shared machine scans, two initialization slots and 16 ms publication coalescing. The upgraded SDK pins, uploadTimeoutMs: 15000, licenses and remaining canonical source are preserved."
   }
 }

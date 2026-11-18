@@ -91,10 +91,11 @@ export function providerRows(
   flock: Flock,
   machineId: string,
   readOnly: boolean,
+  rows: ReturnType<Flock['scan']> = flock.scan(),
 ): { providers: Item[]; setups: Setup[] } {
   const providers: Item[] = [],
     setups: Setup[] = [];
-  for (const row of flock.scan()) {
+  for (const row of rows) {
     if (row.key.length !== 2) continue;
     const value = object(row.value),
       id = text(row.key[1]);

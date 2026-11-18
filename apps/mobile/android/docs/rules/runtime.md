@@ -19,3 +19,7 @@ Read before changing the WebView runtime, its owner and lifecycle, the `CloudRun
 - Run JS, JVM owner/protocol tests and Android WebView tests for runtime changes. Snapshot drift checks are part of asset generation; update hashes and provenance only after reviewing an intentional source update. See `docs/runtime-snapshot.md`.
 
 - Native iOS page ownership/reveal fixes do not replace Android's Compose lifecycle or transcript implementation; retain the existing Android session owner boundaries.
+
+- Catalog `catalog` / `synced` pairs require healthy synchronized metadata. Pending or failed machine streams keep their last projection and cannot block other machines; their errors are diagnostics. Operations still require their target machine to be ready. The 16 MiB budget applies per bootstrap/catch-up window; old-replica limits fall back to a fresh bootstrap before becoming terminal.
+
+- Catalog and cached-settings recovery use exact decimal byte offsets and snapshot cost estimates. Optional snapshot failures retain usable incremental state. Frame imports yield between 12 ms slices and honor cancellation. Two machine initializations may run at once; metadata and live reads bypass their queue. A 16 ms publication window reads the current scope and merges bursts; machine catalog/provider projection shares one scan.
