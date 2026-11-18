@@ -1,11 +1,13 @@
 import * as stylex from '@stylexjs/stylex';
-import { Button } from '@lody/ui/button';
-import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { getSessionRoomId, type SessionId } from '@lody/shared';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { useAtomValue } from 'jotai';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { formatTaskNumber, useAcceptCoordinatorTasks, useProjectBoardData } from './project-board';
+import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
+import { formatTaskNumber, useCoordinatorTasksData } from './project-board';
 import type {
   CoordinatorProjectKey,
   ProjectBoardBucket,
@@ -15,22 +17,15 @@ import type {
 /**
  * Project mode: the coordinator's conversation shows people what changed, not
  * the machinery. Receipts and creation cards collapse into one "changes" line
- * whose task states come from the tasks themselves, and every open item sits
- * in one to-do card at the end of the conversation.
+ * whose task states come from the tasks themselves (including accepted/archived
+ * tasks, so their titles, numbers and Accepted state stay intact).
  *
  * Presentation only: history, model input and receipts are untouched, so the
  * full rows are one click away and copy/export still see everything.
  */
 type CoordinatorConversationValue = {
   tasks: ReadonlyMap<string, ProjectBoardRow>;
-  todo: readonly ProjectBoardRow[];
   openTask: (sessionId: string) => void;
-  acceptTasks: (sessionIds: readonly string[]) => void;
-  /**
-   * Starts a reply about a task: puts the task's session mention in the
-   * coordinator's composer, so the message names its conversation exactly.
-   */
-  replyToTask: (sessionId: string) => void;
 };
 
 const CoordinatorConversationContext = createContext<CoordinatorConversationValue | null>(null);
@@ -43,31 +38,21 @@ export function CoordinatorConversationProvider({
   coordinatorSessionId,
   project,
   onOpenTask,
-  onReplyToTask,
   children,
 }: {
   coordinatorSessionId: string;
   project: CoordinatorProjectKey | null;
   onOpenTask: (sessionId: string) => void;
-  onReplyToTask: (sessionId: string) => void;
   children: ReactNode;
 }) {
-  const board = useProjectBoardData(coordinatorSessionId, project);
-  const acceptTasks = useAcceptCoordinatorTasks();
-  const value = useMemo<CoordinatorConversationValue>(() => {
-    const tasks = new Map<string, ProjectBoardRow>();
-    for (const rows of Object.values(board)) {
-      for (const row of rows) tasks.set(row.session.id, row);
-    }
-    return {
+  const tasks = useCoordinatorTasksData(coordinatorSessionId, project);
+  const value = useMemo<CoordinatorConversationValue>(
+    () => ({
       tasks,
-      // What needs the user first, then what waits for review.
-      todo: [...board.needsYou, ...board.review],
       openTask: onOpenTask,
-      acceptTasks,
-      replyToTask: onReplyToTask,
-    };
-  }, [acceptTasks, board, onOpenTask, onReplyToTask]);
+    }),
+    [onOpenTask, tasks]
+  );
   return (
     <CoordinatorConversationContext.Provider value={value}>
       {children}
@@ -157,70 +142,46 @@ const styles = stylex.create({
     lineHeight: text.footnoteLeading,
     cursor: 'pointer',
   },
-  todo: {
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-    marginBlock: space[3],
-    borderRadius: radius.large,
-    backgroundColor: colors.elevatedBackground,
-    boxShadow: shadow.card,
-  },
-  todoHead: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: space[2],
-    paddingBlock: space[2],
-    paddingInline: space[3],
-    fontSize: text.subheadlineSize,
-    lineHeight: text.subheadlineLeading,
-    fontWeight: 600,
-    color: colors.label,
-  },
-  todoCount: { marginInlineStart: space[1.5], fontWeight: 400, color: colors.secondaryLabel },
-  todoRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space[2],
-    minWidth: 0,
-    paddingBlock: space[2],
-    paddingInline: space[3],
-    boxShadow: `inset 0 0.5px 0 ${colors.separator}`,
-  },
-  todoMain: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space[2],
-    flexGrow: 1,
-    minWidth: 0,
-    padding: 0,
-    borderWidth: 0,
-    backgroundColor: 'transparent',
-    color: colors.label,
-    textAlign: 'start',
-    fontSize: text.bodySize,
-    lineHeight: text.bodyLeading,
-    cursor: 'pointer',
-  },
-  todoMore: {
-    paddingBlock: space[2],
-    paddingInline: space[3],
-    borderWidth: 0,
-    backgroundColor: 'transparent',
-    boxShadow: `inset 0 0.5px 0 ${colors.separator}`,
-    color: colors.secondaryLabel,
-    fontSize: text.footnoteSize,
-    lineHeight: text.footnoteLeading,
-    textAlign: 'start',
-    cursor: 'pointer',
-  },
 });
 
 function TaskState({ bucket }: { bucket: ProjectBoardBucket }) {
   const { t } = useTranslation();
   const [key, fallback] = STATE_LABELS[bucket];
   return <span {...stylex.props(styles.state, styles[`state${bucket}`])}>{t(key, fallback)}</span>;
+}
+
+function CoordinatorTaskChip({
+  sessionId,
+  task,
+  fallbackTitle,
+  onOpen,
+}: {
+  sessionId: string;
+  task: ProjectBoardRow | undefined;
+  fallbackTitle: string | undefined;
+  onOpen: (sessionId: string) => void;
+}) {
+  const { t } = useTranslation();
+  const meta = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId as SessionId)));
+  const title =
+    task?.session.title?.trim() ||
+    meta?.title?.trim() ||
+    fallbackTitle?.trim() ||
+    t('sessions.untitled', 'Untitled session');
+  const number = formatTaskNumber(task?.taskNumber ?? null);
+  const bucket = task?.bucket ?? (meta?.isArchived ? 'accepted' : undefined);
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={() => onOpen(sessionId)}
+      {...stylex.props(styles.chip)}
+    >
+      {number ? <span {...stylex.props(styles.chipNumber)}>{number}</span> : null}
+      <span {...stylex.props(styles.chipTitle)}>{title}</span>
+      {bucket ? <TaskState bucket={bucket} /> : null}
+    </button>
+  );
 }
 
 /**
@@ -248,27 +209,15 @@ export function CoordinatorTaskChangeStrip({
         <span {...stylex.props(styles.stripLabel)}>
           {t('projectMode.changes.label', 'Changes')}
         </span>
-        {sessionIds.map((id) => {
-          const task = coordinator.tasks.get(id);
-          const title =
-            task?.session.title?.trim() ||
-            fallbackTitles.get(id) ||
-            t('sessions.untitled', 'Untitled session');
-          const number = formatTaskNumber(task?.taskNumber ?? null);
-          return (
-            <button
-              key={id}
-              type="button"
-              title={title}
-              onClick={() => coordinator.openTask(id)}
-              {...stylex.props(styles.chip)}
-            >
-              {number ? <span {...stylex.props(styles.chipNumber)}>{number}</span> : null}
-              <span {...stylex.props(styles.chipTitle)}>{title}</span>
-              {task ? <TaskState bucket={task.bucket} /> : null}
-            </button>
-          );
-        })}
+        {sessionIds.map((id) => (
+          <CoordinatorTaskChip
+            key={id}
+            sessionId={id}
+            task={coordinator.tasks.get(id)}
+            fallbackTitle={fallbackTitles.get(id)}
+            onOpen={coordinator.openTask}
+          />
+        ))}
         <button
           type="button"
           aria-expanded={expanded}
@@ -281,89 +230,5 @@ export function CoordinatorTaskChangeStrip({
       </div>
       {expanded ? details : null}
     </div>
-  );
-}
-
-const TODO_VISIBLE_ROWS = 5;
-
-/**
- * Everything waiting on the user, at the end of the coordinator's conversation:
- * questions, permission requests and failed sends first, then finished tasks to
- * review. Hidden when nothing waits.
- */
-export function CoordinatorTodoCard() {
-  const { t } = useTranslation();
-  const coordinator = useCoordinatorConversation();
-  const [showAll, setShowAll] = useState(false);
-  const acceptOne = useCallback((id: string) => coordinator?.acceptTasks([id]), [coordinator]);
-  if (!coordinator || coordinator.todo.length === 0) return null;
-  const { todo } = coordinator;
-  const visible = showAll ? todo : todo.slice(0, TODO_VISIBLE_ROWS);
-  const reviewIds = todo.filter((row) => row.bucket === 'review').map((row) => row.session.id);
-  return (
-    <section {...stylex.props(styles.todo)} data-testid="coordinator-todo">
-      <div {...stylex.props(styles.todoHead)}>
-        <span>
-          {t('projectMode.todo.title', 'To do')}
-          <span {...stylex.props(styles.todoCount)}>{todo.length}</span>
-        </span>
-        {reviewIds.length > 1 ? (
-          <Button size="small" variant="ghost" onClick={() => coordinator.acceptTasks(reviewIds)}>
-            {t('projectMode.board.acceptAll', 'Accept all')}
-          </Button>
-        ) : null}
-      </div>
-      {visible.map((row) => {
-        const number = formatTaskNumber(row.taskNumber);
-        const title = row.session.title?.trim() || t('sessions.untitled', 'Untitled session');
-        return (
-          <div key={row.session.id} {...stylex.props(styles.todoRow)}>
-            <button
-              type="button"
-              title={title}
-              onClick={() => coordinator.openTask(row.session.id)}
-              {...stylex.props(styles.todoMain)}
-            >
-              {number ? <span {...stylex.props(styles.chipNumber)}>{number}</span> : null}
-              <span {...stylex.props(styles.chipTitle)}>{title}</span>
-              <TaskState bucket={row.bucket} />
-            </button>
-            <Button
-              size="small"
-              variant="ghost"
-              onClick={() => coordinator.replyToTask(row.session.id)}
-            >
-              {t('projectMode.todo.reply', 'Reply')}
-            </Button>
-            {row.bucket === 'review' ? (
-              <Button size="small" variant="secondary" onClick={() => acceptOne(row.session.id)}>
-                {t('projectMode.board.accept', 'Accept')}
-              </Button>
-            ) : (
-              <Button
-                size="small"
-                variant="secondary"
-                onClick={() => coordinator.openTask(row.session.id)}
-              >
-                {t('projectMode.todo.open', 'Open')}
-              </Button>
-            )}
-          </div>
-        );
-      })}
-      {todo.length > TODO_VISIBLE_ROWS ? (
-        <button
-          type="button"
-          onClick={() => setShowAll((value) => !value)}
-          {...stylex.props(styles.todoMore)}
-        >
-          {showAll
-            ? t('projectMode.todo.showLess', 'Show less')
-            : t('projectMode.todo.showMore', '{{count}} more', {
-                count: todo.length - TODO_VISIBLE_ROWS,
-              })}
-        </button>
-      ) : null}
-    </section>
   );
 }

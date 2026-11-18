@@ -167,14 +167,10 @@ export function useAcceptCoordinatorTasks(): (sessionIds: readonly string[]) => 
   );
 }
 
-/**
- * The project's tasks with live status, shared by the board, the coordinator's
- * conversation strips and its to-do card. Call it from a leaf: it follows the
- * presence clock.
- */
-export function useProjectBoardData(
+function useProjectBoardDataInternal(
   coordinatorSessionId: string | null,
-  project: CoordinatorProjectKey | null
+  project: CoordinatorProjectKey | null,
+  includeArchived: boolean
 ): ProjectBoardData {
   const { allActiveSessions } = useVisibleSessionMetas();
   const { currentUserId } = useMySessionScope();
@@ -207,14 +203,15 @@ export function useProjectBoardData(
     return next;
   }, [allActiveSessions, presenceNowMs, presenceStates]);
 
+  const sourceSessions = includeArchived ? allSessionsIncludingArchived : allActiveSessions;
   const childSessionsByParent = useMemo(
-    () => buildChildSessionsByParent(allActiveSessions),
-    [allActiveSessions]
+    () => buildChildSessionsByParent(sourceSessions),
+    [sourceSessions]
   );
   const board = useMemo(
     () =>
       buildProjectBoard({
-        sessions: allActiveSessions,
+        sessions: sourceSessions,
         childSessionsByParent,
         project,
         // The start page has no coordinator of its own; it shows the one the project is still bound to.
@@ -227,20 +224,51 @@ export function useProjectBoardData(
         liveSessionStatuses,
         sendStates,
         numberingSessions: allSessionsIncludingArchived,
+        includeArchived,
       }),
     [
       allActiveSessions,
       childSessionsByParent,
       coordinatorSessionId,
       currentUserId,
+      includeArchived,
       liveSessionStatuses,
       project,
       sendStates,
+      sourceSessions,
       allSessionsIncludingArchived,
     ]
   );
 
   return board;
+}
+
+/**
+ * Active (unarchived) tasks for the project's right-hand board.
+ */
+export function useProjectBoardData(
+  coordinatorSessionId: string | null,
+  project: CoordinatorProjectKey | null
+): ProjectBoardData {
+  return useProjectBoardDataInternal(coordinatorSessionId, project, false);
+}
+
+/**
+ * Every task of a coordinator, archived (accepted) ones included, so history
+ * change strips in the coordinator conversation keep titles, numbers and state.
+ */
+export function useCoordinatorTasksData(
+  coordinatorSessionId: string | null,
+  project: CoordinatorProjectKey | null
+): ReadonlyMap<string, ProjectBoardRow> {
+  const board = useProjectBoardDataInternal(coordinatorSessionId, project, true);
+  return useMemo(() => {
+    const tasks = new Map<string, ProjectBoardRow>();
+    for (const rows of Object.values(board)) {
+      for (const row of rows) tasks.set(row.session.id, row);
+    }
+    return tasks;
+  }, [board]);
 }
 
 /**

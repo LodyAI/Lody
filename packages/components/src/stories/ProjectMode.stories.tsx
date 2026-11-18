@@ -5,7 +5,7 @@
  * synthetic session metadata, so its grouping is the real one.
  */
 import type { Meta, StoryObj } from '@storybook/react';
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ArrowUp } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import type { MachineId, SessionId, SessionMeta, SessionStatus } from '@lody/shared';
@@ -28,11 +28,7 @@ import {
   type CoordinatorProjectKey,
 } from '@/components/project-mode/project-board-model';
 import { ProjectWorkspace } from '@/components/project-mode/project-workspace';
-import {
-  CoordinatorConversationPreviewProvider,
-  CoordinatorTodoCard,
-} from '@/components/project-mode/coordinator-conversation';
-import { ConversationColumn } from '@/components/shared/conversation-column';
+import { CoordinatorConversationPreviewProvider } from '@/components/project-mode/coordinator-conversation';
 import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
 import {
   SessionSidePanelTabBar,
@@ -290,13 +286,11 @@ function ConversationPage({
   title,
   items,
   placeholder,
-  trailingContent,
 }: {
   sessionId: SessionId;
   title: string;
   items: ChatStreamItem[];
   placeholder: string;
-  trailingContent?: ReactNode;
 }) {
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const [prompt, setPrompt] = useState('');
@@ -310,7 +304,6 @@ function ConversationPage({
             <SessionChatStreamView
               sessionId={sessionId}
               items={items}
-              trailingContent={trailingContent}
               className="h-full"
               renderMessageRow={({ message, sessionId: id }) => (
                 <MessageRowView message={message} sessionId={id} />
@@ -365,7 +358,18 @@ const childItems: ChatStreamItem[] = [
 }));
 
 const coordinatorTasks = new Map(
-  Object.values(board)
+  Object.values(
+    buildProjectBoard({
+      sessions,
+      childSessionsByParent: buildChildSessionsByParent(sessions),
+      project,
+      coordinatorSessionId: coordinatorId,
+      currentUserId: 'user-story',
+      liveSessionStatuses: liveStatuses,
+      sendStates: {},
+      includeArchived: true,
+    })
+  )
     .flat()
     .map((row) => [row.session.id, row] as const)
 );
@@ -402,13 +406,10 @@ function CoordinatorPage({ working = false }: { working?: boolean }) {
         <CoordinatorConversationPreviewProvider
           value={{
             tasks: coordinatorTasks,
-            todo: [...board.needsYou, ...board.review],
             openTask: () => {
               setOpenedChild(true);
               setActiveTab(CHILD_TAB);
             },
-            acceptTasks: () => {},
-            replyToTask: () => {},
           }}
         >
           <ConversationPage
@@ -416,11 +417,6 @@ function CoordinatorPage({ working = false }: { working?: boolean }) {
             title="项目协调者 · lody"
             items={working ? workingStreamItems : streamItems}
             placeholder="告诉协调者你想做什么"
-            trailingContent={
-              <ConversationColumn>
-                <CoordinatorTodoCard />
-              </ConversationColumn>
-            }
           />
         </CoordinatorConversationPreviewProvider>
       }

@@ -99,6 +99,33 @@ describe('project board', () => {
     expect(numberOf('second')).toBe(2);
     expect(numberOf('third')).toBe(3);
     expect(numberOf('manual')).toBeUndefined();
+
+    // Coordinator history strips include archived tasks so accepted tasks retain their title, T1 and Accepted state.
+    const allSessions = [
+      coordinator,
+      session('first-archived', {
+        title: 'Streams presence 桌面前台通知',
+        openedBySessionId: coordinator.id as never,
+        createdAt: created(1),
+        coordinatorTaskAcceptedAt: 20,
+        isArchived: true,
+      }),
+      session('second', { openedBySessionId: coordinator.id as never, createdAt: created(2) }),
+    ];
+    const withArchived = buildProjectBoard({
+      sessions: allSessions,
+      childSessionsByParent: buildChildSessionsByParent(allSessions),
+      project,
+      coordinatorSessionId: coordinator.id,
+      currentUserId: 'user-1',
+      liveSessionStatuses: new Map(),
+      sendStates: {},
+      includeArchived: true,
+    });
+    expect(withArchived.accepted).toHaveLength(1);
+    expect(withArchived.accepted[0]?.session.title).toBe('Streams presence 桌面前台通知');
+    expect(withArchived.accepted[0]?.taskNumber).toBe(1);
+    expect(withArchived.accepted[0]?.bucket).toBe('accepted');
   });
 
   it('lists only the coordinator’s own tasks, wherever they run', () => {

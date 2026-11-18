@@ -36,7 +36,7 @@ export function usePanelSessionMetas(sessionIds: readonly SessionId[]): SessionM
     return atom((get) => {
       const next = ids.flatMap((id) => {
         const meta = get(sessionMetaAtomFamily(getSessionRoomId(id)));
-        return meta && !meta.isArchived ? [meta] : [];
+        return meta ? [meta] : [];
       });
       if (next.length === previous.length && next.every((meta, i) => meta === previous[i])) {
         return previous;

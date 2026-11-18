@@ -146,6 +146,8 @@ export function buildProjectBoard(options: {
   sendStates: Readonly<Record<string, SessionSendState>>;
   /** Every session including archived ones, so accepted (archived) tasks keep their numbers. */
   numberingSessions?: readonly SessionMeta[];
+  /** Include archived tasks (used by coordinator conversation history strips so accepted tasks keep their title, number and state). */
+  includeArchived?: boolean;
 }): ProjectBoard {
   const board: ProjectBoard = { needsYou: [], working: [], review: [], accepted: [] };
   const { coordinatorSessionId } = options;
@@ -154,7 +156,7 @@ export function buildProjectBoard(options: {
     coordinatorSessionId
   );
   for (const session of options.sessions) {
-    if (session.isArchived || session.parentSessionId) continue;
+    if ((!options.includeArchived && session.isArchived) || session.parentSessionId) continue;
     if (session.id === coordinatorSessionId) continue;
     if (!isSessionInMyScope(session, options.currentUserId)) continue;
     // Another coordinator of the same project is a conversation of its own, not a task.
@@ -172,13 +174,15 @@ export function buildProjectBoard(options: {
       sendState === 'failed' ||
       activity.isWaitingPermission ||
       typeof session.awaitingUserSince === 'number';
-    const bucket: ProjectBoardBucket = needsYou
-      ? 'needsYou'
-      : activity.isWorking || sendState === 'sending'
-        ? 'working'
-        : isCoordinatorTaskAccepted(session, activity.latestMessageAt)
-          ? 'accepted'
-          : 'review';
+    const bucket: ProjectBoardBucket = session.isArchived
+      ? 'accepted'
+      : needsYou
+        ? 'needsYou'
+        : activity.isWorking || sendState === 'sending'
+          ? 'working'
+          : isCoordinatorTaskAccepted(session, activity.latestMessageAt)
+            ? 'accepted'
+            : 'review';
     board[bucket].push({
       session,
       bucket,

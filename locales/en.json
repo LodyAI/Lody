@@ -6829,10 +6829,5 @@
   "projectMode.board.acceptAll": "Accept all",
   "projectMode.board.acceptFailed": "Could not accept the task",
   "projectMode.changes.label": "Changes",
-  "projectMode.changes.details": "Details",
-  "projectMode.todo.title": "To do",
-  "projectMode.todo.open": "Open",
-  "projectMode.todo.showLess": "Show less",
-  "projectMode.todo.showMore": "{{count}} more",
-  "projectMode.todo.reply": "Reply"
+  "projectMode.changes.details": "Details"
 }

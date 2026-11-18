@@ -6816,10 +6816,5 @@
   "projectMode.board.acceptAll": "全部验收",
   "projectMode.board.acceptFailed": "验收没有成功",
   "projectMode.changes.label": "本次变更",
-  "projectMode.changes.details": "详情",
-  "projectMode.todo.title": "待办",
-  "projectMode.todo.open": "打开",
-  "projectMode.todo.showLess": "收起",
-  "projectMode.todo.showMore": "还有 {{count}} 项",
-  "projectMode.todo.reply": "回复"
+  "projectMode.changes.details": "详情"
 }
