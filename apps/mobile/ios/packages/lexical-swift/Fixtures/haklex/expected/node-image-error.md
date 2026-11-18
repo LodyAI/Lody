@@ -1,1 +1,0 @@
-![Broken image mockup](https://invalid.example.invalid/broken-image.jpg "Error badge stays centered without being squeezed by the img")
