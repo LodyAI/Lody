@@ -17,6 +17,13 @@ For an intentional update:
 3. Replace the snapshot only after reviewing the diff; update PROVENANCE and SHA256 together. Generate hashes with the exported `hashes()` function in `runtime/snapshot.mjs`, directed at the reviewed source directory. No build regenerates the manifest automatically.
 4. Run snapshot verification, `npm ci`, JS tests, asset build, JVM and Android bridge tests. Update `runtime/contract/fixtures.json` only for an intentional contract change. Capture actual WebView/WASM results and verify release assets contain no diagnostics.
 
+The current runtime pins Flock 0.5.0, Streams Client 0.13.1, Streams CRDT
+0.21.1 and Loro 1.17.0, matching the root workspace and iOS decoder.
+Control requests and durable uploads each retain a 15-second budget, with
+`uploadTimeoutMs` set explicitly because SDK 0.12+ defaults uploads to 60 seconds.
+The full iOS snapshot also carries Loro transcript windowing and explicit pending-input
+reconciliation; it does not replay history appends during recovery.
+
 Android bundles Loro through `runtime/src/loro-wasm.mjs`: both `loro-crdt` and
 `loro-crdt/base64` resolve to the official `loro-crdt/web` entry, with its WASM bytes
 inlined by esbuild and initialized asynchronously before dependent modules run.

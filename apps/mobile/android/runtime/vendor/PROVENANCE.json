@@ -144,7 +144,7 @@
     "files": [
       "src/runtime/mention-expansion.ts"
     ],
-    "note": "An @session:/@role: chip written straight after non-ASCII text (`让@role:<id>`) expands to its reference at send, so the transcript shows the Role's name instead of the legacy `Role` fallback. Mirrored verbatim from the iOS runtime source in the same change."
+    "note": "An @session:/@role: chip written straight after non-ASCII text (`\u8ba9@role:<id>`) expands to its reference at send, so the transcript shows the Role's name instead of the legacy `Role` fallback. Mirrored verbatim from the iOS runtime source in the same change."
   },
   "perModelConfigOptions": {
     "files": [
@@ -208,5 +208,13 @@
       "src/protocol/schedules.ts"
     ],
     "note": "Agent schedule proposals and the editor accept any whole minute or hour step up to 2147483647 (the 32-bit Int the Android rule model carries), as on Web, instead of dropping a proposal card whose step exceeds 59 minutes or 23 hours. A stored interval longer than that reads as unsupported rather than overflowing. Mirrored verbatim from the iOS source in the same change; dependencies and licenses are unchanged."
+  },
+  "runtimeSdkUpgrade": {
+    "repository": "https://github.com/LodyAI/lody-ios",
+    "baseCommit": "67494b6b1c46df54a4ac8240b03af9b85c5032b2",
+    "path": "packages/cloud-runtime",
+    "note": "Full package snapshot from the reviewed iOS dependency upgrade commit. SHA256.json records the exact files. Roost authoring source and its generator remain in iOS. This replaces the earlier selective runtime deltas, including the previously excluded transcript windowing and explicit pending-input reconciliation. iOS pnpm 11 installation, check, test and bundle passed; dependency licenses were regenerated.",
+    "commit": "b7f87e88ea1d9f273301afadceefdd60ee1a16ac",
+    "export": "git -C apps/mobile/ios archive b7f87e88ea1d9f273301afadceefdd60ee1a16ac packages/cloud-runtime"
   }
 }

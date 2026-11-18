@@ -209,7 +209,7 @@
     },
     "retryPendingInput": {
       "params": "ForgetPendingInputParams",
-      "result": "Empty",
+      "result": "RetryPendingInputResult",
       "timeoutMs": 30000
     },
     "scheduleCommand": {
@@ -3214,6 +3214,16 @@
         }
       },
       "required": ["ids", "current", "reserved"]
+    },
+    "RetryPendingInputResult": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": ["pending", "accepted", "settled"]
+        }
+      },
+      "required": ["state"]
     },
     "RuntimeError": {
       "type": "object",
