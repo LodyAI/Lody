@@ -6,6 +6,7 @@ import { Bytes, encodeCbor, hashRecordBytes, recordSigningBytes } from '@lody/e2
 import { encodeEpochStagedGroup } from '@lody/e2ee-core/host'
 import { Effect, Fiber, Result, Scope, Exit } from 'effect'
 import { TestClock } from 'effect/testing'
+import { recoveryVaultFailure } from './e2ee-recovery-vault.mts'
 import { makeE2eeCloudClient } from './e2ee-cloud-client.mts'
 
 const access = { workspaceId: 'workspace', credential: 'synthetic-device-credential' }
@@ -1653,5 +1654,33 @@ void test('E2EE cloud HTTP client recovers from transient 502/503/504 gateway bl
       )
     )
     assert.equal(attempts, 1)
+  }
+})
+
+void test('only an explicit recovery-disabled response reports disabled; transport and other business failures stay unavailable', async () => {
+  for (const code of ['e2ee_recovery_vault_disabled', 'e2ee_recovery_vault_retired', null]) {
+    const client = build(async () => {
+      if (code === null) throw new TypeError('Synthetic offline transport')
+      return Response.json({
+        status: 'error',
+        errorMessage: 'Synthetic refusal',
+        errorData: { code }
+      })
+    })
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const cloud = yield* client
+          const result = yield* Effect.result(cloud.recoveryVaultReplacement().state())
+          assert.equal(Result.isFailure(result), true)
+          assert.equal(
+            recoveryVaultFailure(result.failure).message,
+            code === 'e2ee_recovery_vault_disabled'
+              ? 'e2ee_recovery_disabled'
+              : 'e2ee_recovery_unavailable'
+          )
+        })
+      )
+    )
   }
 })

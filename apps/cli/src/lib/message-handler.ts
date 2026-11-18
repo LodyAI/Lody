@@ -895,7 +895,7 @@ export class MessageHandler {
   private static readonly CODE_COLLAB_EVIDENCE_MAX_AUTOMATIC_RETRIES = 5;
   private static readonly CODE_COLLAB_EVIDENCE_RETRY_BASE_DELAY_MS = 100;
   private static readonly CODE_COLLAB_EVIDENCE_RETRY_MAX_DELAY_MS = 1_600;
-  private static readonly CONTEXT_WINDOW_USAGE_THROTTLE_MS = 400;
+  private static readonly CONTEXT_WINDOW_USAGE_THROTTLE_MS = 10_000;
   // Track permission wait time: requestId -> timestamp when permission was requested
   private readonly permissionRequestStartTimes = new Map<string, number>();
   private readonly pendingPermissionRequests = new Map<SessionId, Set<string>>();
@@ -1756,9 +1756,15 @@ export class MessageHandler {
     usage: SessionContextWindowUsage
   ): Promise<void> {
     try {
+      // A final flush must land after an already-started intermediate write.
+      await Promise.all([...this.store.get(sessionId).pendingContextWindowHandlers]);
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       await sessionDoc.setContextWindowUsage(usage);
     } catch (error) {
+      const state = this.store.get(sessionId);
+      if (state.contextWindowUsageLastQueued === usage) {
+        state.contextWindowUsageLastQueued = null;
+      }
       this.logger.debug(
         `[${sessionId}] Failed to persist context window usage: ${formatErrorMessage(error)}`
       );
@@ -1769,21 +1775,61 @@ export class MessageHandler {
     sessionId: SessionId,
     usage: SessionContextWindowUsage
   ): void {
+    if (
+      !Number.isFinite(usage.size) ||
+      !Number.isFinite(usage.used) ||
+      usage.size < 0 ||
+      usage.used < 0
+    ) {
+      return;
+    }
     const state = this.store.get(sessionId);
     state.contextWindowUsageBuffer = usage;
     if (state.contextWindowUsageTimer) {
       return;
     }
-    state.contextWindowUsageTimer = setTimeout(() => {
+    const publish = () => {
       state.contextWindowUsageTimer = null;
       const latest = state.contextWindowUsageBuffer;
       if (!latest) {
         return;
       }
-      state.contextWindowUsageBuffer = null;
-      const promise = this.persistContextWindowUsage(sessionId, latest);
-      this.trackPendingContextWindowPersist(sessionId, promise);
-    }, MessageHandler.CONTEXT_WINDOW_USAGE_THROTTLE_MS);
+      const previous = state.contextWindowUsageLastQueued;
+      // Compare with the last published snapshot, so small deltas accumulate.
+      // Keep skipped values buffered for an exact boundary flush.
+      if (
+        previous &&
+        latest.size === previous.size &&
+        Math.abs(latest.used - previous.used) < Math.max(1024, latest.size * 0.01)
+      ) {
+        return;
+      }
+      this.queueContextWindowUsagePersist(sessionId, latest);
+    };
+    const delay = state.contextWindowUsageLastQueued
+      ? Math.max(
+          0,
+          MessageHandler.CONTEXT_WINDOW_USAGE_THROTTLE_MS -
+            (Date.now() - state.contextWindowUsageLastQueuedAt)
+        )
+      : 0;
+    if (delay === 0) {
+      publish();
+    } else {
+      state.contextWindowUsageTimer = setTimeout(publish, delay);
+    }
+  }
+
+  private queueContextWindowUsagePersist(
+    sessionId: SessionId,
+    usage: SessionContextWindowUsage
+  ): void {
+    const state = this.store.get(sessionId);
+    state.contextWindowUsageBuffer = null;
+    state.contextWindowUsageLastQueued = usage;
+    state.contextWindowUsageLastQueuedAt = Date.now();
+    const promise = this.persistContextWindowUsage(sessionId, usage);
+    this.trackPendingContextWindowPersist(sessionId, promise);
   }
 
   private async flushSessionContextWindowUsage(sessionId: SessionId): Promise<void> {
@@ -1795,9 +1841,7 @@ export class MessageHandler {
 
     const latest = state.contextWindowUsageBuffer;
     if (latest) {
-      state.contextWindowUsageBuffer = null;
-      const promise = this.persistContextWindowUsage(sessionId, latest);
-      this.trackPendingContextWindowPersist(sessionId, promise);
+      this.queueContextWindowUsagePersist(sessionId, latest);
     }
 
     for (;;) {
@@ -10648,6 +10692,7 @@ export class MessageHandler {
       // separate RPC and must not synthesize its tool row ahead of that queue:
       // doing so splits an already-started text block at a batch boundary.
       await this.awaitTurnHistoryGate(sessionId);
+      await this.flushSessionContextWindowUsage(sessionId);
       await this.flushACPUpdatesNow(sessionId);
       if (
         this.deletedSessionIds.has(sessionId) ||

@@ -1,42 +1,42 @@
 {
   "name": "devin",
-  "version": "3000.12.28",
+  "version": "3000.14.30821",
   "artifacts": {
     "darwin-arm64": {
-      "fileName": "devin-3000.12.28-darwin-arm64.tar.zst",
-      "sha256": "82f6e0d2880115494bb8f57f3d8733f6ca070a91788c863df3c38f558da25617",
-      "size": 54009024,
-      "sourceSha256": "8833a0537d9d05b7d754f4c195b20472b8680d97d6fab4cba7e349173a5f5b91"
+      "fileName": "devin-3000.14.30821-darwin-arm64.tar.zst",
+      "sha256": "3bc9949faa1abd77846d4f373fc1a15d59fcbc947d93e794dcbd81b78a580d39",
+      "size": 66281772,
+      "sourceSha256": "46ef1a75d8bd851665179e136b7e39ad597d3d7913b95d67fd2b88e9c8af0061"
     },
     "darwin-x64": {
-      "fileName": "devin-3000.12.28-darwin-x64.tar.zst",
-      "sha256": "0eff4206b7f8d18f95505ef652ba2f1313cd7e1bcec5f49435dc9a3ad7b4da76",
-      "size": 57715382,
-      "sourceSha256": "45813a4a48363495d1cdeb8b4df9f960441ce0e912dd878a51d7ee5c38025884"
+      "fileName": "devin-3000.14.30821-darwin-x64.tar.zst",
+      "sha256": "e170a3eb01362587a69045a81f1269d8f608b488e60aad3bc5eefee48c1f0ba3",
+      "size": 71893345,
+      "sourceSha256": "e0ffc5fb0bc367270f20f15686bba74a2851959e782a37c016c68b91229ec0db"
     },
     "linux-arm64": {
-      "fileName": "devin-3000.12.28-linux-arm64.tar.zst",
-      "sha256": "f11bff824d287ca569cacb91427e8d28f12174410db3a63531af11d25bb7e0ae",
-      "size": 56109450,
-      "sourceSha256": "b8e2f450744b994b1a4b8db137d4026c0e1e65b29526a04f780c6e1125888a61"
+      "fileName": "devin-3000.14.30821-linux-arm64.tar.zst",
+      "sha256": "2737be4888c91a3811a654bcf557beafdce4d9cfc52f97903e0f84cfa94d6f91",
+      "size": 68680041,
+      "sourceSha256": "3deb8af6b026060e975ed371936e139818020e5dc5abbcba07cde039f473a5a5"
     },
     "linux-x64": {
-      "fileName": "devin-3000.12.28-linux-x64.tar.zst",
-      "sha256": "ce67befe71369bab212aeed0426ce410d70b4f3336341232b51d4a217cfc1d9e",
-      "size": 58134024,
-      "sourceSha256": "8bc952667502ac1175997364500b0d24c15fe35c8ebfd915dc1712d4211166d6"
+      "fileName": "devin-3000.14.30821-linux-x64.tar.zst",
+      "sha256": "829e6c8b179739bb806019c2f4f9345b8a0a462a7dba429c6fbe88fe30bdf7c8",
+      "size": 71990244,
+      "sourceSha256": "4dc43e3e4388bace60fe2aa8010cbb399402e724892d7175845b1cdef00e7ddb"
     },
     "win32-arm64": {
-      "fileName": "devin-3000.12.28-win32-arm64.tar.zst",
-      "sha256": "f6fcc154e2cf064c725fe33ff0d463c37ac745be7c8b5fb6b6027353cb8c40b9",
-      "size": 53085048,
-      "sourceSha256": "eb45915f4cc4c2f21db88f6325b6c5c0fb2988e70ee29cb1d6c6692bc08bd60c"
+      "fileName": "devin-3000.14.30821-win32-arm64.tar.zst",
+      "sha256": "223218eaf08c790ed134bff4a8b9d11f71ba9cd8a64a64e72c6b78e2becf9480",
+      "size": 65048627,
+      "sourceSha256": "94a412821542021d5472c23ba167b9fd283e1e39852455647a8998312f0b9c72"
     },
     "win32-x64": {
-      "fileName": "devin-3000.12.28-win32-x64.tar.zst",
-      "sha256": "cf039ecc44de521a85dc8cf8174f02c01d6148bdf269c13184f361a955cfcddd",
-      "size": 57534861,
-      "sourceSha256": "ee06781b02125b6a81a14792b8f9e31184807b17987b9d4b861d33a9a7e39cf7"
+      "fileName": "devin-3000.14.30821-win32-x64.tar.zst",
+      "sha256": "6c539633be7a9847aa0f91a78fac637cecba1c9b19cfc2a6822151f4e03687a6",
+      "size": 71735566,
+      "sourceSha256": "23e723a68f4bebe4c5f57f42e0f9d8b069c91407d62584afefa05e246c51cf4d"
     }
   }
 }

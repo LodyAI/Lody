@@ -1,4 +1,5 @@
 {
+  "e2ee.recovery.restoreWorking": "{{name}}：正在恢复…",
   "e2ee.deviceIdentity.modelUnknown": "型号未识别",
   "e2ee.deviceIdentity.osVersionUnavailable": "系统版本暂缺",
   "e2ee.deviceIdentity.personal": "个人设备",

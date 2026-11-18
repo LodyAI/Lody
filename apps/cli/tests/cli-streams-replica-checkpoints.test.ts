@@ -51,13 +51,18 @@ const metaSnapshotWithA = (): Uint8Array => {
 };
 
 /** Streams serving `snapshot` at offset 100; catch-up from 100 has nothing new. */
-function createStreamsServer(snapshot: Uint8Array) {
+function createStreamsServer(
+  snapshot: Uint8Array,
+  respond?: (url: URL, method: string) => Response | undefined
+) {
   const requests: URL[] = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(input instanceof Request ? input.url : input);
       requests.push(url);
+      const intercepted = respond?.(url, init?.method ?? 'GET');
+      if (intercepted) return intercepted;
       if (init?.method === 'POST') {
         const headers = new Headers(init.headers);
         return new Response(null, {
@@ -329,5 +334,170 @@ describe('CLI Streams checkpoints are bound to the replica that loaded them', ()
     expect(restarted.repo.getMeta().get(keyA)).toBe('A');
     expect((await syncMeta(restarted)).ok).toBe(true);
     expect(server.bootstraps()).toBe(1);
+  });
+});
+
+// These cases intentionally exercise the published SDK through the real daemon composition.
+describe('CLI gateway namespace fences retain offline SQLite data', () => {
+  for (const kind of ['doc', 'flock', 'meta'] as const) {
+    for (const [status, code] of [
+      [404, 'space_not_found'],
+      [410, 'space_generation_fenced'],
+    ] as const) {
+      it(`${kind}: ${status} ${code} cannot auto-create or upload the namespace and preserves drafts across reopen`, async () => {
+        const methods: string[] = [];
+        createStreamsServer(new Uint8Array(), (_url, method) => {
+          methods.push(method);
+          return method === 'GET'
+            ? new Response(null, { status, headers: { 'Stream-Error-Code': code } })
+            : undefined;
+        });
+        const daemon = await openCliProcess();
+        const id = 'offline-draft';
+        const doc = kind === 'doc' ? (await daemon.repo.openPersistedDoc(id)).doc : undefined;
+        const flock =
+          kind === 'meta'
+            ? daemon.repo.getMeta()
+            : kind === 'flock'
+              ? (await daemon.repo.openFlockDoc(id)).flock
+              : undefined;
+        if (doc) {
+          doc.getMap('data').set('draft', 'unsent CLI text');
+          doc.commit();
+        } else flock!.put(['draft'], 'unsent CLI text');
+        await daemon.repo.flush();
+        const result = await withTransport(daemon, (adapter) =>
+          doc
+            ? adapter.syncDoc(id, doc)
+            : kind === 'meta'
+              ? adapter.syncMeta(flock!)
+              : adapter.syncFlockDoc(id, flock!)
+        );
+        expect(result.ok).toBe(false);
+        expect(methods.some((method) => method === 'PUT' || method === 'POST')).toBe(false);
+        await daemon.repo.flush();
+        await closeCliProcess(daemon);
+        const restarted = await openCliProcess();
+        if (kind === 'doc') {
+          expect((await restarted.repo.openPersistedDoc(id)).doc.getMap('data').get('draft')).toBe(
+            'unsent CLI text'
+          );
+        } else {
+          const restored =
+            kind === 'meta'
+              ? restarted.repo.getMeta()
+              : (await restarted.repo.openFlockDoc(id)).flock;
+          expect(restored.get(['draft'])).toBe('unsent CLI text');
+        }
+      });
+    }
+  }
+});
+
+describe('CLI Flock snapshot catch-up cost', () => {
+  it.each([
+    'small-snapshot',
+    'large-snapshot',
+    'local-draft',
+    'missing-size',
+    'probe-failed',
+    'exact-byte-offsets',
+  ] as const)('%s survives SQLite reopen with the matching cursor', async (scenario) => {
+    const source = new Flock('cost-source');
+    source.put(keyA, 'A');
+    createStreamsServer(source.exportFile());
+    const cli = await openCliProcess();
+    expect((await syncMeta(cli)).ok).toBe(true);
+    const from = source.version();
+    source.put(keyA, 'B');
+    const snapshot = source.exportFile();
+    const payload = new TextEncoder().encode(JSON.stringify(source.exportJson(from)));
+    const update = new Uint8Array(4 + payload.byteLength);
+    new DataView(update.buffer).setUint32(0, payload.byteLength, false);
+    update.set(payload, 4);
+    const tail =
+      scenario === 'exact-byte-offsets' ? '90071992547410968577' : '00000000000004000000';
+    if (scenario === 'exact-byte-offsets') {
+      const store = cli.repo.getReplicaCheckpointStore({ kind: 'meta', flock: cli.repo.getMeta() });
+      const url = `${gatewayBaseUrl}/ds/lody/${encodeURIComponent(getLoroMetaStreamId(workspaceId))}`;
+      const cursor = await store.load(url);
+      expect(cursor).not.toBeNull();
+      await store.save({ ...cursor!, nextOffset: '90071992547409920000' });
+    }
+    const requests: { method: string; url: URL }[] = [];
+    createStreamsServer(snapshot, (url, method) => {
+      requests.push({ url, method });
+      if (method === 'HEAD' && scenario === 'probe-failed')
+        return new Response(null, { status: 503 });
+      if (method === 'GET' && url.pathname.includes('/snapshot/') && scenario === 'missing-size')
+        return new Response(null);
+      if (method === 'HEAD')
+        return new Response(null, {
+          headers: {
+            'Stream-Next-Offset': tail,
+            'Stream-Snapshot-Offset': tail,
+          },
+        });
+      if (method === 'GET' && url.pathname.includes('/snapshot/'))
+        return new Response(null, {
+          headers: {
+            'Content-Length': String(
+              scenario === 'large-snapshot' ? 20 * 1024 * 1024 : snapshot.byteLength
+            ),
+          },
+        });
+      if (url.pathname.endsWith('/bootstrap'))
+        return new Response(
+          new Blob([
+            '--cp\r\nContent-Type: application/octet-stream\r\n\r\n',
+            toArrayBuffer(snapshot),
+            '\r\n--cp--\r\n',
+          ]),
+          {
+            headers: {
+              'Content-Type': 'multipart/mixed; boundary=cp',
+              'Stream-Snapshot-Offset': tail,
+              'Stream-Next-Offset': tail,
+              'Stream-Up-To-Date': 'true',
+            },
+          }
+        );
+      if (method === 'GET')
+        return new Response(toArrayBuffer(update), {
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'Stream-Next-Offset': tail,
+            'Stream-Up-To-Date': 'true',
+          },
+        });
+      return undefined;
+    });
+    if (scenario === 'local-draft') cli.repo.getMeta().put(['draft'], 'offline CLI edit');
+    expect((await syncMeta(cli)).ok).toBe(true);
+    expect(cli.repo.getMeta().get(keyA)).toBe('B');
+    expect(requests.some(({ url }) => url.pathname.endsWith('/bootstrap'))).toBe(
+      scenario === 'small-snapshot' || scenario === 'exact-byte-offsets'
+    );
+    if (scenario === 'local-draft') {
+      expect(cli.repo.getMeta().get(['draft'])).toBe('offline CLI edit');
+      expect(requests.some(({ method }) => method === 'POST')).toBe(true);
+    }
+    await closeCliProcess(cli);
+    const reopened = await openCliProcess();
+    expect(reopened.repo.getMeta().get(keyA)).toBe('B');
+    if (scenario === 'local-draft')
+      expect(reopened.repo.getMeta().get(['draft'])).toBe('offline CLI edit');
+    const request = requests.find(
+      ({ method, url }) =>
+        method === 'HEAD' ||
+        (method === 'GET' &&
+          !url.pathname.includes('/snapshot/') &&
+          !url.pathname.endsWith('/bootstrap'))
+    )!;
+    const streamUrl = `${request.url.origin}${request.url.pathname}`;
+    const checkpoint = await reopened.repo
+      .getReplicaCheckpointStore({ kind: 'meta', flock: reopened.repo.getMeta() })
+      .load(streamUrl);
+    expect(checkpoint?.nextOffset).toBe(tail);
   });
 });

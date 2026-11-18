@@ -465,6 +465,7 @@ void test('scripts docs and word-budget metadata are skip-tests while executable
 void test('apps/mobile code and tests run check:quick without workspace test shards or typecheck', () => {
   for (const files of [
     ['apps/mobile/ios/apps/ios/src/index.ts'],
+    ['apps/mobile/ios'],
     ['apps/mobile/android/runtime/test/runtime.test.mjs'],
   ]) {
     const scope = select(files);

@@ -43,17 +43,20 @@ desktop’s local-only composition.
 
 ## Credits and origins
 
-The iOS client is based on **[Innei’s lody-ios](https://github.com/Innei/lody-ios)**,
-and Android reuses its cloud protocol runtime. Thank you to
-[Innei](https://github.com/Innei) and the upstream contributors for the native app,
-chat experience, and shared runtime. Original licenses and copyright notices are
-preserved; [ChatKit](https://github.com/Innei/ChatKit) remains a pinned submodule.
+The iOS client is **[lody-ios](https://github.com/LodyAI/lody-ios)**, created by
+[Innei](https://github.com/Innei) and contributors, and Android reuses its cloud
+protocol runtime. Thank you to Innei and the upstream contributors for the native
+app, chat experience, and shared runtime. It was first imported here as a copy;
+that copy and its history have since moved back into lody-ios, which this
+repository now pins as the `ios/` submodule. Original licenses and copyright
+notices are preserved; [ChatKit](https://github.com/Innei/ChatKit) is a pinned
+submodule inside lody-ios.
 
 ## Repository layout
 
 | Directory                     | Purpose                                                                          |
 | ----------------------------- | -------------------------------------------------------------------------------- |
-| [ios/](ios/README.md)         | Swift/UIKit and SwiftUI client; XcodeGen, SwiftPM, and a separate pnpm workspace |
+| [ios/](ios/README.md)         | Submodule: Swift/UIKit and SwiftUI client; XcodeGen, SwiftPM, own pnpm workspace |
 | [android/](android/README.md) | Kotlin/Jetpack Compose client; Gradle and an npm-built protocol runtime          |
 | `shared/markdown-repair/`     | Markdown repair entry used by both clients                                       |
 
@@ -65,10 +68,22 @@ appearance sources and resources under `android/app/src/main`.
 
 ## Development
 
-Run these commands from the Lody repository root to initialize the native chat dependency:
+Run this from the Lody repository root to check out the iOS client and its native chat dependency:
 
 ```sh
-git submodule update --init --recursive apps/mobile/ios/packages/chat-kit
+git submodule update --init --recursive apps/mobile/ios
+```
+
+iOS changes are committed in [LodyAI/lody-ios](https://github.com/LodyAI/lody-ios)
+from `apps/mobile/ios`, then this repository updates the submodule pointer.
+
+A checkout from before the switch still holds ignored files (`node_modules`, the
+generated Xcode project, ChatKit's old checkout) in `apps/mobile/ios`, which blocks
+the submodule. After pulling, move that directory aside, then initialize:
+
+```sh
+mv apps/mobile/ios /tmp/lody-ios-before-submodule
+git submodule update --init --recursive apps/mobile/ios
 ```
 
 Mobile has independent dependency locks and toolchains. The root `pnpm install`,

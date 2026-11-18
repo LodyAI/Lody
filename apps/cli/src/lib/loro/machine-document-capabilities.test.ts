@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  ACP_CAPABILITY_FETCH_TIME_RENEW_AFTER_MS,
   machineFlockKeys,
+  type AcpConfigOptionSummary,
+  type SessionGoalAction,
   getMachineFlockAcpCapabilities,
   getMachineFlockAgentConfigs,
   getMachineFlockRateLimits,
@@ -13,6 +16,7 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
+import { Flock } from '@loro-dev/flock-wasm';
 import { MachineDocument } from './doc';
 import { normalizeAcpSessionCapabilities } from '@/agent/acp-capability-normalization';
 import {
@@ -48,6 +52,95 @@ afterEach(() => {
 });
 
 describe('MachineDocument ACP capabilities', () => {
+  it('publishes no native Flock delta for session selections, but persists real changes and renewal', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-18T00:00:00Z'));
+    const flock = new Flock();
+    const document = new MachineDocument(
+      { openFlockDoc: async () => ({ flock }), flush: async () => {} } as unknown as LoroRepo,
+      'workspace-1' as WorkspaceId,
+      'machine-1' as MachineId,
+      () => {}
+    );
+    const configId = 'provider' as AgentConfigId;
+    const selections = (model: string, mode: string, effort: string): AcpConfigOptionSummary[] =>
+      [
+        { id: 'model', category: 'model', values: ['a', 'b'], currentValue: model },
+        { id: 'mode', category: 'mode', values: ['normal', 'plan'], currentValue: mode },
+        { id: 'effort', category: 'thought_level', values: ['low', 'high'], currentValue: effort },
+      ].map(({ values, ...option }) => ({
+        ...option,
+        name: option.id,
+        type: 'select',
+        options: values.map((value) => ({ value, name: value })),
+      }));
+    const commands = [{ name: 'help', description: 'Synthetic command catalog '.repeat(1000) }];
+    const write = (
+      configOptions: AcpConfigOptionSummary[],
+      sourceVersion = 'runtime-1',
+      goalActions?: SessionGoalAction[]
+    ) =>
+      document.updateAcpCapabilities(
+        configId,
+        'registry',
+        'example',
+        [],
+        [],
+        configOptions,
+        commands,
+        false,
+        sourceVersion,
+        undefined,
+        false,
+        goalActions
+      );
+    const defaults = selections('a', 'normal', 'low');
+    await write(defaults);
+    // Record both model declarations first; new observations are legitimate writes.
+    await write(selections('b', 'plan', 'high'));
+    const checkpoint = flock.version();
+    const initial = await document.getAcpCapabilities(configId);
+    for (const options of [selections('a', 'plan', 'high'), selections('b', 'normal', 'low')]) {
+      expect(await write(options)).toEqual(initial);
+      expect(flock.version()).toEqual(checkpoint);
+    }
+    expect(initial?.configOptions).toEqual(defaults);
+    // Renewal must retain the defaults and complete legacy row for older readers.
+    vi.advanceTimersByTime(ACP_CAPABILITY_FETCH_TIME_RENEW_AFTER_MS);
+    const renewed = await write(selections('b', 'plan', 'high'));
+    expect(renewed.fetchedAt).toBeGreaterThan(initial?.fetchedAt ?? 0);
+    expect(renewed.configOptions).toEqual(defaults);
+    expect(flock.version()).not.toEqual(checkpoint);
+    expect(flock.get(machineFlockKeys.acpCapability(configId))).toEqual(
+      JSON.parse(JSON.stringify(renewed))
+    );
+    const goals = await write(defaults, 'runtime-1', ['pause']);
+    expect((await document.getAcpCapabilities(configId))?.goalActions).toEqual(['pause']);
+    expect(goals.goalActions).toEqual(['pause']);
+    await write(defaults);
+    expect((await document.getAcpCapabilities(configId))?.goalActions).toBeUndefined();
+    const nextDefaults = selections('b', 'plan', 'high');
+    await write(nextDefaults, 'runtime-2');
+    expect((await document.getAcpCapabilities(configId))?.configOptions).toEqual(nextDefaults);
+    const changed = nextDefaults.map((option) =>
+      option.id === 'effort'
+        ? { ...option, options: [...option.options, { value: 'max', name: 'Max' }] }
+        : option
+    );
+    await write(changed, 'runtime-2');
+    expect((await document.getAcpCapabilities(configId))?.configOptions).toEqual(changed);
+    await document.updateAcpAuthMethods(configId, []);
+    expect((await document.getAcpCapabilities(configId))?.authMethods).toEqual([]);
+    const authenticatedCheckpoint = flock.version();
+    await document.updateAcpAuthMethods(configId, []);
+    expect(flock.version()).toEqual(authenticatedCheckpoint);
+    await document.updateAcpAuthMethods(configId, [{ type: 'agent', id: 'login', name: 'Login' }]);
+    expect((await document.getAcpCapabilities(configId))?.authMethods).toEqual([
+      { type: 'agent', id: 'login', name: 'Login' },
+    ]);
+    expect((await document.getAcpCapabilities(configId))?.availableCommands).toEqual(commands);
+  });
+
   it.each([
     { cliType: 'builtin' as const, agentType: 'antigravity' },
     { cliType: 'registry' as const, agentType: 'antigravity-acp' },
@@ -77,7 +170,7 @@ describe('MachineDocument ACP capabilities', () => {
         scope: { providerId: 'antigravity' },
         windows,
       });
-      const write = async (rateLimits?: { version: 1; query?: boolean }) => {
+      const write = async (rateLimits?: { version: 1; query?: true }) => {
         await document.updateAcpCapabilities(
           configId,
           agent.cliType,
@@ -114,7 +207,16 @@ describe('MachineDocument ACP capabilities', () => {
       for (const modelId of ['model-a', 'model-b']) {
         const session = normalizeAcpSessionCapabilities(
           {
-            models: { currentModelId: modelId, availableModels: [{ modelId, name: modelId }] },
+            configOptions: [
+              {
+                id: 'model',
+                name: 'Model',
+                category: 'model',
+                type: 'select',
+                currentValue: modelId,
+                options: [{ value: modelId, name: modelId }],
+              },
+            ],
           },
           { agent }
         );
@@ -247,6 +349,34 @@ describe('MachineDocument per-model option lists', () => {
 });
 
 describe('MachineDocument quota publication', () => {
+  it('keeps the persisted quota checkpoint for reset jitter and publishes real quota changes', async () => {
+    const flock = new Flock();
+    const document = new MachineDocument(
+      { openFlockDoc: async () => ({ flock }), flush: async () => {} } as unknown as LoroRepo,
+      'workspace-1' as WorkspaceId,
+      'machine-1' as MachineId,
+      () => {}
+    );
+    const configId = 'quota-provider' as AgentConfigId;
+    const quota = (reset: number, usedPercent = 25) => ({
+      limitId: 'account',
+      scope: { providerId: 'example' },
+      windows: [{ usedPercent, windowDurationSeconds: 3600, resetsAtEpochSeconds: reset }],
+    });
+    await document.updateRateLimits(configId, 'example', quota(1000));
+    const checkpoint = flock.version();
+    for (const reset of [1001, 999, 1002]) {
+      await document.updateRateLimits(configId, 'example', quota(reset));
+      expect(flock.version()).toEqual(checkpoint);
+    }
+    await document.updateRateLimits(configId, 'example', quota(1003));
+    expect(flock.version()).not.toEqual(checkpoint);
+    await document.updateRateLimits(configId, 'example', quota(1004, 26));
+    expect(Object.values(getMachineFlockRateLimits(readMachineFlockRowsFromFlock(flock)))).toEqual([
+      quota(1004, 26),
+    ]);
+  });
+
   it('publishes custom quota only while its persisted config and push fence still match', async () => {
     const flock = new FakeMachineFlock();
     const configId = 'quota-provider' as AgentConfigId;
@@ -256,6 +386,7 @@ describe('MachineDocument quota publication', () => {
       cliType: 'custom',
       agentType: 'example/agent',
       name: 'Example',
+      description: '',
       env: {},
       customAcp: { command: 'example', args: [] },
     };

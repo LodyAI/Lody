@@ -60,6 +60,7 @@ import {
   LEGACY_SESSION_HISTORY_BACKEND,
   getMachineFlockAcpCapabilities,
   getAcpConfigOptionsModelId,
+  getAcpConfigOptionStructureKey,
   writeAcpModelConfigOptionsToFlock,
   getMachineFlockProviderSetupCancellations,
   getMachineFlockProviderSetups,
@@ -467,6 +468,9 @@ function describeDocOpener(stack: string | undefined): string {
 
 export class LoroDocumentManager {
   public readonly repo: LoroRepo;
+  // A cloud transport can be detached and replaced while this manager's replica
+  // remains alive. Keep its repair budget across those adapter generations.
+  private readonly incompleteRecoveryScope = {};
   sessions: Map<SessionId, SessionDocument> = new Map();
   /**
    * When each cached Session doc was last handed to a caller. Every opener, not
@@ -924,6 +928,7 @@ export class LoroDocumentManager {
     this.remoteStreamsTokens = streamsTokens;
     if (this.encryptedWorkspace) await streamsTokens.legacy.getToken();
     const streamsTransport = await createCliStreamsTransport({
+      incompleteRecoveryScope: this.incompleteRecoveryScope,
       content: this.encryptedWorkspace?.content ?? { mode: 'plaintext' },
       bucketId: this.encryptedWorkspace?.bucketId(),
       workspaceId: this.workspaceId,
@@ -4072,6 +4077,7 @@ const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry):
     authMethods: entry.authMethods,
     sessionFork: entry.sessionFork,
     acknowledgedSteer: entry.acknowledgedSteer,
+    goalActions: entry.goalActions,
     sessionTitle: entry.sessionTitle,
     rateLimits: entry.rateLimits,
     sessionForkWorktree: entry.sessionForkWorktree,
@@ -4255,6 +4261,17 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       sourceVersion,
       modelAnswers
     );
+    // Keep the probe/default selection when only a session's model, mode or
+    // effort changed. Capture the session's own per-model answer above first.
+    if (
+      existing?.sourceVersion === sourceVersion &&
+      existing.configOptions &&
+      entry.configOptions &&
+      getAcpConfigOptionStructureKey(existing.configOptions) ===
+        getAcpConfigOptionStructureKey(entry.configOptions)
+    ) {
+      entry.configOptions = existing.configOptions;
+    }
     const capabilityUnchanged =
       existing &&
       serializeAcpCapabilityWithoutFetchTime(existing) ===
@@ -4298,7 +4315,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     )[key];
     // No row yet means no probe has described this Provider: the panel discovers it.
     if (!existing) return;
-    if (JSON.stringify(existing.authMethods ?? []) === JSON.stringify(authMethods)) return;
+    if (JSON.stringify(existing.authMethods) === JSON.stringify(authMethods)) return;
     const changed = writeMachineFlockRowToFlock(handle.flock, {
       key: machineFlockKeys.acpCapability(configId),
       // Every other field stays the earlier probe's; this call only knows the methods.

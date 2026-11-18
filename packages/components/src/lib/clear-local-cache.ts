@@ -27,6 +27,7 @@ import { DIFF_BLOB_CACHE_DB } from './diff-blob-cache';
 import { LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX } from '@lody/shared';
 import { workspaceInfoCache } from './local-storage-cache';
 import { EAGER_SYNC_HIGH_WATER_DB_NAME } from './eager-sync-high-water-cache';
+import { EAGER_SYNC_ADMISSION_DB } from '../providers/eager-sync-admission';
 import { EAGER_SYNC_CACHE_DB } from '../providers/eager-sync-snapshot-cache';
 import { replaceAppWindowLocation } from './app-location';
 import { getRegisteredAuthClient } from './auth-client-singleton';
@@ -66,6 +67,7 @@ const KNOWN_INDEXEDDB_NAMES = [
   'lody-session-send-v1',
   EAGER_SYNC_HIGH_WATER_DB_NAME,
   EAGER_SYNC_CACHE_DB,
+  EAGER_SYNC_ADMISSION_DB,
   'lody:repo-file-paths',
   'lody:repo-issues-prs',
   'lody:github-pr-cache',

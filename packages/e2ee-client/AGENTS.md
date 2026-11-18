@@ -124,6 +124,6 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
   downloads, never verification.
 
 - Management exposes last-personal-device risk from the verified ledger and requires
-  explicit recovery-only confirmation before signing its revocation. Restores report
-  partial epoch-key recovery separately from admission and content readiness, and
-  retain its retryable journal until the current epoch key is installed.
+  explicit recovery-only confirmation before signing its revocation.
+
+[Recovery scheduling](src/AGENTS.md) owns workspace concurrency and joins.

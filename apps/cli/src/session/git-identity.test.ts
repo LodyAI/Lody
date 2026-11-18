@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -288,9 +288,11 @@ describe('readHostDefaultGitIdentity', () => {
 
     execFileSync('git', ['config', '--unset', 'user.email']);
     writeConfig(path.join(home, 'work-identity'), '[user]\nemail = work@example.com\n');
+    // Git can discover the repository through the real path (macOS /var is a symlink).
+    const gitdir = realpathSync(dir).split(path.sep).join('/').replaceAll('"', '\\"');
     writeConfig(
       path.join(home, '.gitconfig'),
-      `[includeIf "gitdir:${dir}/"]\npath = work-identity\n`
+      `[includeIf "gitdir:${gitdir}/"]\npath = work-identity\n`
     );
     expect(probeMachineGitIdentity(dir).effective.email).toBe('work@example.com');
   });
