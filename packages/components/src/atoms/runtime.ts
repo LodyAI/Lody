@@ -278,6 +278,12 @@ export type WorkspaceRuntime = {
    * entry for this app instance — the PR poller's activity signal.
    */
   publishSessionViewing: (args: { sessionId: SessionId; userId: string } | null) => void;
+  /**
+   * Publish (or clear, with null) this app instance's ephemeral
+   * `desktop-foreground` presence entry; Hosts skip mobile pushes for that user
+   * while it is fresh.
+   */
+  publishDesktopForeground: (userId: string | null) => void;
   ensureDocStream: (roomId: string) => Promise<void>;
   /**
    * Run `fn` while holding a ref on the session store, so cache eviction cannot

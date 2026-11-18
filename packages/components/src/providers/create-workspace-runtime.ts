@@ -6236,6 +6236,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     forceMachineMonitorSample: (machineId) => targetMachineMonitor.forceSample(machineId),
     publishSessionViewing: (args: { sessionId: SessionId; userId: string } | null) =>
       presenceTransport.publishSessionViewing(args),
+    publishDesktopForeground: (userId: string | null) =>
+      presenceTransport.publishDesktopForeground(userId),
     ensureDocStream,
     // Every store access must be ref-counted so eviction cannot dispose+unload
     // a doc mid-use. releaseRef only starts the warm-release timer, so this

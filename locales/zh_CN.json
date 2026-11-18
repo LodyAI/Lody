@@ -6794,5 +6794,7 @@
   "e2ee.recovery.passwordNudgeBody": "Passkey 使用抗暴力猜测的高熵密钥保护云端备份。如果你的常用设备都支持 passkey（或你已保存离线恢复文件），移除恢复密码可以让云端备份更安全。",
   "e2ee.recovery.wrongPassword": "恢复密码不正确，或这个账号尚未设置恢复密码。",
   "e2ee.lostAll.password.title": "用恢复密码",
-  "e2ee.lostAll.password.help": "输入你之前设置的恢复密码。"
+  "e2ee.lostAll.password.help": "输入你之前设置的恢复密码。",
+  "settings.general.suppressMobilePushWhenFocused.label": "使用这台电脑时暂停手机通知",
+  "settings.general.suppressMobilePushWhenFocused.helper": "Lody 在这台电脑上处于焦点时，任务完成不再推送到手机。授权请求和提问仍会通知。"
 }

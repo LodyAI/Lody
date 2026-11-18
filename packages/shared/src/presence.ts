@@ -58,10 +58,27 @@ export type LodySessionViewingPresenceState = {
   updatedAt: number;
 };
 
+/**
+ * "User U has a focused Lody desktop window" — published only by the Electron
+ * renderer while its window is visible and focused, and only when that desktop's
+ * own setting allows it. A Host that finishes a turn for U skips the mobile push
+ * while a fresh entry exists. Written on focus transitions (debounced) and the
+ * shared 30s heartbeat, actively deleted on blur/hide/teardown; the TTL is only
+ * the crash fallback. One entry per app instance.
+ */
+export type LodyDesktopForegroundPresenceState = {
+  kind: 'desktop-foreground';
+  /** Auth user id of the desktop's signed-in account. */
+  userId: string;
+  instanceId: LodyPresenceInstanceId;
+  updatedAt: number;
+};
+
 export type LodyPresenceState =
   | LodyMachinePresenceState
   | LodySessionPresenceState
-  | LodySessionViewingPresenceState;
+  | LodySessionViewingPresenceState
+  | LodyDesktopForegroundPresenceState;
 export type LodyPresenceStateMap = Record<string, LodyPresenceState>;
 
 // Loro values (docs and the ephemeral store) cannot represent `undefined`:
@@ -147,10 +164,18 @@ const PresenceSessionViewingStateSchema = z.object({
   updatedAt: z.number().finite(),
 });
 
+const PresenceDesktopForegroundStateSchema = z.object({
+  kind: z.literal('desktop-foreground'),
+  userId: z.string().min(1),
+  instanceId: PresenceInstanceIdSchema,
+  updatedAt: z.number().finite(),
+});
+
 export const LodyPresenceStateSchema = z.discriminatedUnion('kind', [
   PresenceMachineStateSchema,
   PresenceSessionStateSchema,
   PresenceSessionViewingStateSchema,
+  PresenceDesktopForegroundStateSchema,
 ]);
 
 // Minimal metadata must not accept arbitrary strings disguised as branded IDs.
@@ -229,6 +254,12 @@ export const MinimalLodyPresenceStateSchema = z.discriminatedUnion('kind', [
     since: z.number().finite(),
     updatedAt: z.number().finite(),
   }),
+  z.object({
+    kind: z.literal('desktop-foreground'),
+    userId: MinimalUserIdSchema,
+    instanceId: MinimalInstanceIdSchema,
+    updatedAt: z.number().finite(),
+  }),
 ]);
 
 export const getLodyMachinePresenceKey = (
@@ -245,6 +276,11 @@ export const getLodySessionViewingPresenceKey = (
   userId: string,
   instanceId: LodyPresenceInstanceId
 ): string => `viewing:${encodeURIComponent(userId)}:${encodeURIComponent(instanceId)}`;
+
+export const getLodyDesktopForegroundPresenceKey = (
+  userId: string,
+  instanceId: LodyPresenceInstanceId
+): string => `desktop:${encodeURIComponent(userId)}:${encodeURIComponent(instanceId)}`;
 
 export const toLodyPresenceStreamUrl = (durableStreamUrl: string): string => {
   const url = new URL(durableStreamUrl);
@@ -344,4 +380,24 @@ export const collectOnlineMachineIdsFromPresence = (
     online.add(state.machineId);
   }
   return online;
+};
+
+/**
+ * Whether any of the given snapshots holds a fresh focused-desktop entry for
+ * `userId`. Absence, staleness and unreadable snapshots all answer false, so a
+ * caller deciding whether to suppress a mobile push falls back to sending it.
+ */
+export const hasFreshDesktopForegroundPresence = (
+  snapshots: Iterable<LodyPresenceStateMap>,
+  userId: string,
+  nowMs: number,
+  ttlMs: number = LODY_PRESENCE_TTL_MS
+): boolean => {
+  for (const states of snapshots) {
+    for (const state of Object.values(states)) {
+      if (state.kind !== 'desktop-foreground' || state.userId !== userId) continue;
+      if (isFreshLodyPresenceState(state, nowMs, ttlMs)) return true;
+    }
+  }
+  return false;
 };

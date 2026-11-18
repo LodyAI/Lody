@@ -43,6 +43,11 @@
   input before accepting an Operation, or reject retryably without persisting it.
 - Permission push and silent Live Activity sync are independent. Provider
   acceptance cannot suppress an ordinary permission alert.
+- A fresh `desktop-foreground` presence entry for the recipient, found in any
+  workspace this daemon hosts, skips only the terminal-outcome mobile push. Live
+  Activity sync, the desktop projection and permission/question pushes are unchanged.
+  Suppress only on positive evidence: an unreadable, unjoined or stale presence
+  sends. [Decision](../../../../../.agents/notes/proposed/architecture/2026-10-13-agent-native-attention.md#focused-desktop-mobile-suppression-2026-11-17).
 - Best-effort delivery is intentional. No notification database, outbox, pending
   TTL, notification-send retry, reconnect replay, lock-to-mobile handoff or exactly-once
   protocol. Existing execution/Operation persistence and recovery are unchanged.
