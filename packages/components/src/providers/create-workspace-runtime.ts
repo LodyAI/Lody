@@ -3707,6 +3707,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     durableStreamsBaseUrl = streamsBaseUrl;
     return createWorkspaceStreamsTransport({
       incompleteRecoveryScope,
+      recoverFlockCheckpointsOnTimeout: true,
       content: deps.content,
       ...(protectedContent ? { bucketId: deps.e2ee?.bucketId() ?? undefined } : {}),
       repo,

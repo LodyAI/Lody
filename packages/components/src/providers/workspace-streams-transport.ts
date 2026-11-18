@@ -1,3 +1,4 @@
+import { createWorkspaceStreamsTransportAdapter } from '@lody/shared/workspace-streams-persistence';
 import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
 import type { RemoteCursorStore } from '@loro-dev/streams-crdt';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
@@ -30,6 +31,7 @@ const { getLoroSyncDiagnostic } = createLoroSyncErrorTools({ RepoSyncError, Repo
 
 export type WorkspaceStreamsTransportOptions = {
   repo: LoroRepo;
+  recoverFlockCheckpointsOnTimeout?: boolean;
   /** Runtime-owned budget identity; never contains or shares a replica cursor. */
   incompleteRecoveryScope?: object;
   workspaceId: WorkspaceId;
@@ -94,47 +96,55 @@ export const createWorkspaceStreamsTransport = (
     throw new WorkspaceStreamsConfigurationError('Incomplete workspace Streams content protection');
   }
 
-  return new StreamsTransportAdapter({
-    incompleteRecoveryScope: options.incompleteRecoveryScope,
-    diagnostics: (event) => {
-      const diagnostic = getLoroSyncDiagnostic(event);
-      if (diagnostic) {
-        console[diagnostic.level]('[loro-streams] transport failure', {
-          workspaceId: options.workspaceId,
-          ...diagnostic,
-        });
-      }
-    },
-    bucketId: options.bucketId ?? LORO_STREAMS_BUCKET_ID,
-    metaStreamId: getLoroMetaStreamId(options.workspaceId),
-    docStreamId: (docId) => getLoroStreamIdForDocId(options.workspaceId, docId),
-    flockDocStreamId: (flockDocId) => flockDocId,
-    auth: options.auth,
-    // Every cursor save first awaits that resource's own durability barrier.
-    persistence: createRepoStreamsPersistence(options.repo, {
-      documentRemoteCursorStore: options.documentRemoteCursorStore,
-    }),
-    snapshotCodec:
-      content?.mode === 'protected'
-        ? (content.snapshotCodec ?? streamsSnapshotCodec)
-        : streamsSnapshotCodec,
-    baseUrl: options.streamsBaseUrl,
-    shardUrls: getLoroStreamsShardUrls(options.streamsBaseUrl, options.shardHostSuffix),
-    snapshotUpload:
-      content?.mode === 'protected' ? content.snapshotUpload : { canUpload: async () => true },
-    ...(content?.mode === 'protected'
-      ? {
-          payloadProtectionNamespace: content.namespace,
-          payloadProtection: ((room) => {
-            const selection = content.resolve(room);
-            if (selection?.mode !== 'protected') {
-              throw new WorkspaceStreamsConfigurationError(
-                'Workspace Streams room requires content protection'
-              );
+  return createWorkspaceStreamsTransportAdapter(
+    (persistence) =>
+      new StreamsTransportAdapter({
+        incompleteRecoveryScope: options.incompleteRecoveryScope,
+        diagnostics: (event) => {
+          const diagnostic = getLoroSyncDiagnostic(event);
+          if (diagnostic) {
+            console[diagnostic.level]('[loro-streams] transport failure', {
+              workspaceId: options.workspaceId,
+              ...diagnostic,
+            });
+          }
+        },
+        bucketId: options.bucketId ?? LORO_STREAMS_BUCKET_ID,
+        metaStreamId: getLoroMetaStreamId(options.workspaceId),
+        docStreamId: (docId) => getLoroStreamIdForDocId(options.workspaceId, docId),
+        flockDocStreamId: (flockDocId) => flockDocId,
+        auth: options.auth,
+        snapshotCodec:
+          content?.mode === 'protected'
+            ? (content.snapshotCodec ?? streamsSnapshotCodec)
+            : streamsSnapshotCodec,
+        baseUrl: options.streamsBaseUrl,
+        shardUrls: getLoroStreamsShardUrls(options.streamsBaseUrl, options.shardHostSuffix),
+        snapshotUpload:
+          content?.mode === 'protected' ? content.snapshotUpload : { canUpload: async () => true },
+        ...(content?.mode === 'protected'
+          ? {
+              payloadProtectionNamespace: content.namespace,
+              payloadProtection: ((room) => {
+                const selection = content.resolve(room);
+                if (selection?.mode !== 'protected') {
+                  throw new WorkspaceStreamsConfigurationError(
+                    'Workspace Streams room requires content protection'
+                  );
+                }
+                return selection;
+              }) satisfies StreamsRoomPayloadProtectionResolver,
             }
-            return selection;
-          }) satisfies StreamsRoomPayloadProtectionResolver,
-        }
-      : { payloadProtection: undefined }),
-  });
+          : { payloadProtection: undefined }),
+        persistence,
+      }),
+    {
+      auth: options.auth,
+      owner: options.incompleteRecoveryScope ?? options.repo,
+      persistence: createRepoStreamsPersistence(options.repo, {
+        documentRemoteCursorStore: options.documentRemoteCursorStore,
+      }),
+      recoverFlockCheckpointsOnTimeout: options.recoverFlockCheckpointsOnTimeout,
+    }
+  );
 };
