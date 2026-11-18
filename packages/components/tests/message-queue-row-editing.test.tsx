@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import type { MessageQueueItem, SessionId, WorkspaceId } from '@lody/shared';
 
+import { queueTask } from '../src/components/sessions/message-queue/queue-task';
 import { MessageQueueDisplay } from '../src/components/sessions/message-queue';
 import { currentWorkspaceIdAtom } from '../src/atoms';
 import { authTokenAtom, runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
@@ -178,8 +179,12 @@ describe('queued message editing commits', () => {
 
   // The save promise stays pending until the test releases it, so the row is
   // observable in its mid-write state instead of racing a microtask.
-  const renderQueue = async (options?: { holdSave?: boolean; failSaveOnce?: boolean }) => {
-    const items = [makeItem()];
+  const renderQueue = async (options?: {
+    holdSave?: boolean;
+    failSaveOnce?: boolean;
+    item?: MessageQueueItem;
+  }) => {
+    const items = [options?.item ?? makeItem()];
     await act(async () => {
       root?.render(
         createElement(MessageQueueDisplay, {
@@ -233,6 +238,33 @@ describe('queued message editing commits', () => {
     });
     return event;
   };
+
+  it.each(['', 'Please read this'])(
+    'keeps a queued file separate from its editable caption (%s)',
+    async (caption) => {
+      const file = {
+        type: 'local_attachment',
+        machineId: 'machine',
+        kind: 'file',
+        path: '/tmp/synthetic.data',
+        fileName: 'pasted-text.txt',
+        mimeType: 'text/plain',
+        sizeBytes: 50_000,
+      } as const;
+      const blocks = caption ? [file, { type: 'text' as const, text: caption }] : [file];
+      const item = makeItem();
+      item.acpSessionConfig = { ...item.acpSessionConfig!, prompt: caption, inputBlocks: blocks };
+      item.task = queueTask(blocks);
+      const view = await renderQueue({ item });
+      expect(view.textContent).toContain(caption || 'pasted-text.txt');
+      const textarea = await startEditing(view);
+      expect(textarea.value).toBe(caption);
+      const nextCaption = caption ? '' : 'Read the file';
+      await act(async () => setTextareaValue(textarea, nextCaption));
+      await pressEnter(textarea);
+      expect(saved).toEqual([{ cid: item.$cid, task: nextCaption }]);
+    }
+  );
 
   it('folds and reopens without committing or losing an editing draft', async () => {
     const view = await renderQueue();

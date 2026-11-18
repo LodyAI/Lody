@@ -2860,6 +2860,7 @@
   "sessions.messageQueue.editMessage": "编辑排队消息",
   "sessions.messageQueue.guide": "用这条消息引导当前回复",
   "sessions.messageQueue.guideAction": "引导",
+  "sessions.messageQueue.attachmentOnly": "[附件]",
   "sessions.messageQueue.imageOnly": "[仅图片消息]",
   "sessions.messageQueue.queuedCount": "{{count}} 条待发送",
   "sessions.messageQueue.scheduledCount": "{{count}} 条定时消息",
