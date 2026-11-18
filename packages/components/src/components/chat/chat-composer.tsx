@@ -1852,7 +1852,7 @@ export function ChatComposer({
                 {/* Single row only: long model names must shrink/truncate inside
                     the run-config face rather than wrapping config chips onto a
                     second line (especially on mobile). */}
-                <div {...stylex.props(styles.footerFace)}>{footerSelector ?? selector}</div>
+                <div {...stylex.props(styles.footerFace)}>{footerSelector}</div>
 
                 <div {...stylex.props(styles.footerActions)}>
                   {secondaryAction ? (
@@ -1924,7 +1924,7 @@ export function ChatComposer({
             ) : null}
 
             <div {...stylex.props(styles.dialogRow)}>
-              <div {...stylex.props(styles.dialogSelectors)}>{selector}</div>
+              <div {...stylex.props(styles.dialogSelectors)}>{footerSelector}</div>
 
               <div {...stylex.props(styles.dialogActions)}>
                 {secondaryAction ? (

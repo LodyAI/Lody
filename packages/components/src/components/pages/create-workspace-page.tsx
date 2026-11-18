@@ -26,7 +26,7 @@ import { SubscribeConsentNotice } from '../shared/subscribe-consent-notice';
 import { formatUsd } from '../settings/billing-setting-pure';
 import { ReferralOfferNotice } from '../settings/referral-settings-pure';
 
-const styles = stylex.create({
+const layoutStyles = stylex.create({
   page: {
     boxSizing: 'border-box',
     height: { default: '100vh', '@supports (height: 100dvh)': '100dvh' },
@@ -105,8 +105,8 @@ export function CreateWorkspacePage({
   const { t } = useTranslation();
 
   return (
-    <div data-testid="create-workspace-page" {...stylex.props(styles.page)}>
-      <div {...stylex.props(styles.content)}>
+    <div data-testid="create-workspace-page" {...stylex.props(layoutStyles.page)}>
+      <div {...stylex.props(layoutStyles.content)}>
         {onBackToWorkspace ? (
           <Button
             type="button"

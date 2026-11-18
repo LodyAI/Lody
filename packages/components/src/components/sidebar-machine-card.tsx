@@ -6,7 +6,6 @@ import type { ReactNode } from 'react';
 import { Folder, Monitor, User } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { MachineId } from '@lody/shared';
-import * as stylex from '@stylexjs/stylex';
 import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
 import { UserAvatar } from '@/components/user-avatar';
 import { avatar as avatarTokens } from '@lody/ui/avatar/avatar.tokens.stylex';

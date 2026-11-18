@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
+import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import {
@@ -406,7 +407,9 @@ describe('mobile-conversation-row-pr', () => {
 
       expect(row.querySelector('[data-session-mergeable-pill]')).toBeNull();
       // The diff does not come back either — the slot stays quiet on the active row.
-      expect(row.querySelector('.text-github-addition')).toBeNull();
+      expect([...row.querySelectorAll('span')].some((span) => span.textContent === '+12')).toBe(
+        false
+      );
       expect(row.querySelector('[data-pr-ci-verdict]')).not.toBeNull();
     });
 
@@ -414,7 +417,9 @@ describe('mobile-conversation-row-pr', () => {
       for (const prStatus of ['merged', 'closed'] as const) {
         const row = renderRow({ ...readyPr, id: `${prStatus}-session`, prStatus });
         expect(row.querySelector('[data-session-mergeable-pill]')).toBeNull();
-        expect(row.querySelector('.text-github-addition')?.textContent).toBe('+12');
+        expect([...row.querySelectorAll('span')].some((span) => span.textContent === '+12')).toBe(
+          true
+        );
         flushSync(() => root?.unmount());
         root = undefined;
         container?.remove();

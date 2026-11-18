@@ -479,7 +479,6 @@ function DemoLandingContent({
           onSelect={(option) => setSelectedMachine(option.value)}
           placeholder="Machine"
           placeholderIcon={Monitor}
-          tone={tone}
           xstyle={selectorStyles.tag}
           valueXstyle={selectorStyles.tagText}
           labelXstyle={selectorStyles.tagText}
@@ -505,7 +504,6 @@ function DemoLandingContent({
           onSelect={(option) => setSelectedAgent(option.value)}
           placeholder="Select agent"
           placeholderIcon={Bot}
-          tone={tone}
           xstyle={selectorStyles.tag}
           valueXstyle={selectorStyles.tagText}
           labelXstyle={selectorStyles.tagText}

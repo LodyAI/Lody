@@ -477,7 +477,6 @@ function DemoComposer({
             onSelect={(option) => setSelectedRepo(option.value)}
             placeholder="Select repo"
             placeholderIcon={Github}
-            tone={tone}
             xstyle={composerScene.fullWidth}
             contentXstyle={composerScene.repoPopup}
           />
@@ -489,7 +488,6 @@ function DemoComposer({
             onSelect={(option) => setSelectedAgent(option.value)}
             placeholder="Select agent"
             placeholderIcon={Bot}
-            tone={tone}
             xstyle={composerScene.fullWidth}
             contentXstyle={composerScene.agentPopup}
           />
@@ -503,7 +501,6 @@ function DemoComposer({
           onSelect={(option) => setSelectedRepo(option.value)}
           placeholder="Select repo"
           placeholderIcon={Github}
-          tone={tone}
           xstyle={composerScene.fullWidth}
           contentXstyle={composerScene.repoPopup}
         />
@@ -513,7 +510,6 @@ function DemoComposer({
           onSelect={(option) => setSelectedAgent(option.value)}
           placeholder="Select agent"
           placeholderIcon={Bot}
-          tone={tone}
           xstyle={composerScene.fullWidth}
           contentXstyle={composerScene.agentPopup}
         />

@@ -26,6 +26,7 @@ import {
 } from '@/lib/session-sharing';
 import { Tooltip } from '@lody/ui/tooltip';
 import { Popover } from '@lody/ui/popover';
+import { popup } from '@lody/ui/popup/popup.tokens.stylex';
 import { Separator } from '@lody/ui/separator';
 import { Button } from '@lody/ui/button';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -45,6 +46,7 @@ import {
 } from '../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  accessPopoverPadding: { [popup.panelPadding]: space[2] },
   lockMark: {
     margin: 'calc(var(--spacing) * -1)',
     boxSizing: 'content-box',
@@ -237,11 +239,7 @@ export function SessionSharingIndicator({
             {state.access === 'read' ? (
               <Eye {...stylex.props(styles.glyph)} aria-hidden="true" />
             ) : (
-              <LockKeyhole
-                {...stylex.props(styles.glyph)}
-                strokeWidth={2}
-                aria-hidden="true"
-              />
+              <LockKeyhole {...stylex.props(styles.glyph)} strokeWidth={2} aria-hidden="true" />
             )}
           </span>
         }

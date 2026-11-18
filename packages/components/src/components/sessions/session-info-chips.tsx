@@ -22,7 +22,6 @@ import {
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import * as stylex from '@stylexjs/stylex';
 import { clsx } from 'clsx';
 import {
   getSessionPullRequestLegacyFields,

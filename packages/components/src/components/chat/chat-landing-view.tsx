@@ -576,7 +576,7 @@ export function ChatLandingView({
         </div>
       ) : null}
       <div {...stylex.props(styles.fallbackActions)}>
-        <div {...stylex.props(styles.fallbackSelectors)}>{selector ?? footerSelector}</div>
+        <div {...stylex.props(styles.fallbackSelectors)}>{footerSelector}</div>
         <div {...stylex.props(styles.fallbackActionsEnd)}>
           {primaryActionNode}
           <button type="button" {...stylex.props(styles.retryButton)} onClick={resetErrorBoundary}>

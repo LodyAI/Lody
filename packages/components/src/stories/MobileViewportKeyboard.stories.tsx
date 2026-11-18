@@ -326,7 +326,6 @@ function ChatLandingContent({ rootFamily = 'mobile' }: { rootFamily?: WorkspaceR
         onSelect={(option) => setSelectedMachine(option.value)}
         placeholder="Machine"
         placeholderIcon={Monitor}
-        tone="dark"
         xstyle={selectorStyles.tag}
         valueXstyle={selectorStyles.tagText}
         labelXstyle={selectorStyles.tagText}

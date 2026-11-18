@@ -8,6 +8,12 @@ Parent/child scopes apply. `CLAUDE.md` symlinks here; edit `AGENTS.md` only.
 
 ## Sidebar and session rows
 
+- Sidebar top-level groups (machines, GitHub Worktrees, Chats) all use
+  `SIDEBAR_GROUP_LABEL_CLASS`, with no leading icon or sticky positioning; labels scroll
+  with their rows. Project, repo and conversation rows
+  are 1em. A machine is identified by its Offline pill and hover card
+  (`sidebar-machine-card.tsx`); never show "offline" while its status is unknown.
+
 - Sidebar rows represent Sessions, never Tasks.
 - Desktop project grouping applies `selectVisibleLocalProjectSections`; its
   "Hide Empty Projects" switch is documented in the [README](README.md).
@@ -134,13 +140,5 @@ E2EE/terminals: read [rules](e2ee/AGENTS.md).
 
 ## Automation markers
 
-- Key workspace, machine, invitation, membership and composer controls expose
-  stable `data-testid` values independent of translated labels. Repeated rows keep
-  the existing full identity attribute (`data-settings-machine-id`,
-  `data-machine-id`, `data-membership-id`, `data-request-id`, `data-device-key`,
-  `data-agent-config-id`).
-  These are public identifiers, never invitation tokens, credentials or key bytes.
-- `workspace-ready` exists only while the sidebar's scoped workspace data is ready;
-  it is not execution permission. Tests must still bind the workspace and observe
-  the required content or control surface. Preserve existing semantic/identity
-  attributes so older harnesses continue to work.
+Before changing workspace readiness or control identity markers, read
+[sessions/automation/AGENTS.md](sessions/automation/AGENTS.md#control-and-readiness-markers).
