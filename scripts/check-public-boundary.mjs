@@ -45,8 +45,6 @@ const publicRuntimeArtifactHostAllowlist = new Set([
   // Native mobile clients use this host for public cloud APIs, not runtime downloads.
   'apps/mobile/android/AGENTS.md',
   'apps/mobile/backend-config.mjs',
-  'apps/mobile/ios/apps/ios/verification/kit/attachments/README.md',
-  'apps/mobile/ios/packages/cloud-runtime/src/runtime/sharing/runtime.ts',
   'apps/mobile/android/runtime/vendor/cloud-runtime/src/runtime/sharing/runtime.ts',
   'apps/cli/src/ios-simulator/baguette-manifest.json',
   'packages/platform/src/runtime-artifacts.ts',

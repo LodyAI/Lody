@@ -7,8 +7,11 @@ both platform indexes link them.
 
 - Keep iOS and Android builds independent of the root pnpm workspace. Run the
   platform commands in [README.md](README.md) from their documented directories.
+- `ios/` is the [LodyAI/lody-ios](https://github.com/LodyAI/lody-ios) submodule.
+  Commit iOS changes there first, then update this pointer; ChatKit is lody-ios's
+  own nested submodule. Android snapshots and scripts read paths inside it.
 - Preserve upstream licenses, copyright notices, and the attribution to Innei's
-  lody-ios. ChatKit remains a pinned public submodule.
+  lody-ios.
 - Platform appearance code and bundled resources live with each native client;
   there is no shared design generator or preview project.
 - Mobile may use its public cloud protocol clients. Never import private backend
