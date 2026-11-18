@@ -105,12 +105,6 @@ export const resolveVisibleSessionGoal = (
 export const isSessionGoalActive = (goal: SessionGoalMessage | null | undefined): boolean =>
   goal?.status === 'active';
 
-/**
- * @deprecated Use `isSessionGoalActive`. This reports persistent goal state,
- * not whether an ACP prompt is currently running.
- */
-export const isSessionGoalWorking = isSessionGoalActive;
-
 export const isSessionGoalPaused = (goal: SessionGoalMessage | null | undefined): boolean =>
   goal?.status === 'paused';
 

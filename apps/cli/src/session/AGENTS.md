@@ -78,6 +78,7 @@ encrypted starts that run only signed input; the default ceiling had no room for
 - Promote only proven non-delivery via `steerTurnStatuses`, never producer pointers.
   Unknown never replays; RPC ACKs never revive history. Encrypted recovery preserves terminal
   decisions and newer pointers, closes partial replies with one notice, and isolates unrelated failures.
+- MCP selection changes retire ACP between prompts; changed-selection steer returns to dispatch for a new turn.
 - Config uses its owner signal; fence mutations after interrupt.
 - Resume must REOPEN the in-progress assistant entry, clearing
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
@@ -112,8 +113,7 @@ encrypted starts that run only signed input; the default ceiling had no room for
 
 ## Sagas
 
-- ACP processes and worktrees start at dispatch, never while a draft is typed. Answer
-  `session/prepare`/`-cancel` at once as no-ops (prepare: accepted duplicate), with no access check
+- ACP processes and worktrees start at dispatch, never while a draft is typed
   ([decision](../../../../.agents/notes/implemented/simplification/2026-10-16-remove-draft-session-preparation.md)).
 - Credentials are runtime leases: a failed creation releases that generation; local has none.
 - Nested child Sessions are rejected: ownership resolves one parent hop only.

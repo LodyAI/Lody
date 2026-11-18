@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { encodeStreamsRoomAdditionalData } from 'loro-repo/transport/streams';
 import { bindTestPresenceApplication } from './presence-application-fixture';
 import { Lody } from '../src/lib/lody';
@@ -395,6 +396,10 @@ const runSilentPromptTurn = async (options: {
   liveConfig?: { project?: ProjectRef; parentSessionId?: SessionId };
   /** No live process: the turn restores one; started configurations are recorded. */
   restore?: SessionConfig[];
+  /** What the agent reports outside Lody's Turns (Core `sessionActivity`). */
+  nativeWork?: { current: 'running' | 'background' | null };
+  /** Ordered lifecycle steps observed by the test (e.g. interruption notice before flush). */
+  onLifecycleEvent?: (event: string) => void;
 }) => {
   let history: Array<Record<string, unknown>> = [
     ...(options.earlierInputAuthor
@@ -424,7 +429,9 @@ const runSilentPromptTurn = async (options: {
       return { stopReason: 'end_turn' };
     }),
     currentModel: undefined,
+    getNativeWork: () => options.nativeWork?.current ?? null,
   };
+  let liveAgentProcess = true;
   const activeSession = {
     sessionId: options.sessionId as SessionId,
     acpSessionId: 'acp-silent' as ACPSessionId,
@@ -436,27 +443,47 @@ const runSilentPromptTurn = async (options: {
     getExecutionScope: () => options.liveConfig ?? {},
     exec: vi.fn(async () => ''),
     terminate: vi.fn(async () => {}),
+    hasLiveAgentProcess: () => liveAgentProcess,
     updateGitIdentity: vi.fn(),
     createAgent: vi.fn(async () => 'acp-silent'),
     applyExecutionPlaneLimits: vi.fn(async () => {}),
   };
   let status = SessionStatusFactory.idle();
   let restored = false;
-  const sessionDoc = withHistoryPort({
-    // Read at call time, so a test can change synced metadata mid-turn.
-    getMetaState: vi.fn(async () => ({ isArchived: false, ...options.meta })),
-    setStatus: vi.fn(async (next: typeof status) => {
-      status = next;
-    }),
-    setLastMessageAt: vi.fn(async () => {}),
-    waitUntilSynced: async () => {},
-    flushLocalWrites: async () => {},
-    getHistory: vi.fn(() => history),
-    updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
-      history = updater(history);
-    }),
-  });
+  let docDestroyed = false;
+  const roomId = getSessionRoomId(options.sessionId as SessionId);
+  const makeDocPort = (isDestroyedFn: () => boolean) =>
+    withHistoryPort({
+      sessionId: options.sessionId as SessionId,
+      roomId,
+      get isDestroyed() {
+        return isDestroyedFn();
+      },
+      // Read at call time, so a test can change synced metadata mid-turn.
+      getMetaState: vi.fn(async () => ({ isArchived: false, ...options.meta })),
+      setStatus: vi.fn(async (next: typeof status) => {
+        status = next;
+      }),
+      setLastMessageAt: vi.fn(async () => {
+        if (isDestroyedFn()) throw new Error('SessionDocument not initialized');
+        options.onLifecycleEvent?.(isDestroyedFn() ? 'stale:unread' : 'unread');
+      }),
+      waitUntilSynced: async () => true,
+      flushLocalWrites: async () => {
+        options.onLifecycleEvent?.(isDestroyedFn() ? 'stale:flush' : 'flush');
+      },
+      getHistory: vi.fn(() => history),
+      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
+        history = updater(history);
+      }),
+    });
+  const sessionDoc = makeDocPort(() => docDestroyed);
+  const replacementSessionDoc = makeDocPort(() => false);
   const failureMessages: string[] = [];
+  const interruptedNotices: string[] = [];
+  // Lifecycle events of the live agent, as SessionManager publishes them.
+  const sessionEvents = new EventEmitter();
+  let sessionEnded = false;
   const notificationFacts: TurnOutcomeFact[] = [];
   const onTurnOutcome = vi.fn(async (fact: TurnOutcomeFact) => {
     await options.onTurnOutcome?.(fact);
@@ -479,8 +506,10 @@ const runSilentPromptTurn = async (options: {
         ? history.map((item) => (item.id === turnId ? entry : item))
         : [...history, entry];
     }),
-    sessionManager: {
-      getSession: vi.fn(() => (options.restore && !restored ? null : activeSession)),
+    sessionManager: Object.assign(sessionEvents, {
+      getSession: vi.fn(() =>
+        (options.restore && !restored) || sessionEnded ? null : activeSession
+      ),
       getPendingSession: vi.fn(() => null),
       createSession: vi.fn(async (config: SessionConfig) => {
         // Like SessionManager, preparation rereads the Project group from synced metadata.
@@ -493,13 +522,18 @@ const runSilentPromptTurn = async (options: {
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
       validateSessionCredentials: vi.fn(async () => {}),
-    } as unknown as SessionManager,
+    }) as unknown as SessionManager,
+    recordNativeWorkInterrupted: vi.fn(async (_sessionId: SessionId, turnId: string) => {
+      options.onLifecycleEvent?.('notice');
+      interruptedNotices.push(turnId);
+    }),
     workspaceDocument: {
       repo: {
         upsertDocMeta,
         getDocMeta: vi.fn(async () => undefined),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      isSessionDocCleaning: () => false,
+      getOrCreateSessionDoc: vi.fn(async () => (docDestroyed ? replacementSessionDoc : sessionDoc)),
       updateAcpCapabilities: vi.fn(async () => {}),
     } as unknown as LoroDocumentManager,
     turnFinalization: {
@@ -572,6 +606,7 @@ const runSilentPromptTurn = async (options: {
   return withHistoryPort({
     deps,
     sessionDoc,
+    replacementSessionDoc,
     notificationFacts,
     failureMessages,
     upsertDocMeta,
@@ -580,6 +615,24 @@ const runSilentPromptTurn = async (options: {
     getStatus: () => status,
     finalizationOwners,
     service,
+    interruptedNotices,
+    /** Publishes a `sessionActivity` change of the live agent. */
+    changeNativeWork: (work: 'running' | 'background' | null) => {
+      if (options.nativeWork) options.nativeWork.current = work;
+      sessionEvents.emit('onNativeWorkChanged', options.sessionId, work);
+    },
+    /** The ACP child crashes (`onExit` clears `agentProcess` and emits null without `'terminated'`). */
+    crashAgentProcess: () => {
+      liveAgentProcess = false;
+      sessionEvents.emit('onNativeWorkChanged', options.sessionId, null);
+    },
+    /** The agent process exits, as idle GC or memory pressure ends it. */
+    endAgentProcess: (opts?: { destroyDoc?: boolean }) => {
+      sessionEnded = true;
+      liveAgentProcess = false;
+      if (opts?.destroyDoc) docDestroyed = true;
+      sessionEvents.emit('terminated', { sessionId: options.sessionId });
+    },
   });
 };
 
@@ -1691,6 +1744,10 @@ function inboxExecutionFixture(
     doc,
     session,
     client,
+    /** Replaces or ends the live Agent, as idle GC or a crash would. */
+    dropLiveSession: () => {
+      liveSession = undefined;
+    },
     deps,
     message,
     add,

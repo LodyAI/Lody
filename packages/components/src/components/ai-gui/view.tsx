@@ -1150,32 +1150,21 @@ type AssistantTurnLayout = ReturnType<typeof buildAssistantTurnRenderLayout> & {
 const EMPTY_SUBAGENT_TASKS: ReturnType<typeof collectSubagentTasks> = [];
 
 // Assistant-turn layout (block grouping + subagent-task collection) is derived
-// from the message and provider display policy. `buildChatStreamItems`
+// from the message alone. `buildChatStreamItems`
 // hands back a stable parsed-message object for unchanged turns and a fresh one
 // whenever the turn changes. Keying the cache by that reference lets only the
 // streaming turn recompute; without it, each streamed token re-runs these
 // O(items) passes for every turn in the whole conversation.
-const assistantTurnLayoutCache = new WeakMap<
-  SessionHistoryParsed,
-  { showThoughts: boolean; layout: AssistantTurnLayout }
->();
+const assistantTurnLayoutCache = new WeakMap<SessionHistoryParsed, AssistantTurnLayout>();
 
-const getAssistantTurnLayout = (
-  message: SessionHistoryParsed,
-  showThoughts: boolean
-): AssistantTurnLayout => {
+const getAssistantTurnLayout = (message: SessionHistoryParsed): AssistantTurnLayout => {
   const cached = assistantTurnLayoutCache.get(message);
-  if (cached?.showThoughts === showThoughts) return cached.layout;
+  if (cached) return cached;
   const layout: AssistantTurnLayout = {
-    ...buildAssistantTurnRenderLayout(
-      message.id,
-      message.items,
-      message.finished === true,
-      showThoughts
-    ),
+    ...buildAssistantTurnRenderLayout(message.id, message.items, message.finished === true),
     subagentTasks: collectSubagentTasks(message.items),
   };
-  assistantTurnLayoutCache.set(message, { showThoughts, layout });
+  assistantTurnLayoutCache.set(message, layout);
   return layout;
 };
 
@@ -1196,7 +1185,6 @@ type AssistantTurnRowsCacheEntry = {
   activeSearchBlockId: string | null | undefined;
   expansionVersion: number;
   copyContextAvailable: boolean;
-  showThoughts: boolean;
   nextIsUser: boolean;
 };
 const assistantTurnRowsCache = new WeakMap<SessionMessageItem, AssistantTurnRowsCacheEntry>();
@@ -1212,7 +1200,6 @@ export const buildChatVirtualRows = ({
   expansionVersion,
   copyContextAvailable = false,
   groupCreatedSessions = true,
-  showThoughts = false,
   coordinatorBubbles = false,
   selectionLayouts,
 }: {
@@ -1226,8 +1213,7 @@ export const buildChatVirtualRows = ({
   expansionVersion: number;
   copyContextAvailable?: boolean;
   groupCreatedSessions?: boolean;
-  showThoughts?: boolean;
-  /** Project mode: one reply bubble per assistant turn, without work or duration. */
+  /** Coordinator conversation: one reply bubble per coordinator_message, without work or duration. */
   coordinatorBubbles?: boolean;
 }): ChatVirtualRow[] => {
   const rows: ChatVirtualRow[] = [];
@@ -1357,7 +1343,6 @@ export const buildChatVirtualRows = ({
       cachedRows.scopedAssistantActions === scopedAssistantActions &&
       cachedRows.activeSearchBlockId === activeSearchBlockId &&
       cachedRows.copyContextAvailable === copyContextAvailable &&
-      cachedRows.showThoughts === showThoughts &&
       cachedRows.nextIsUser === nextIsUser &&
       cachedRows.expansionVersion === expansionVersion
     ) {
@@ -1365,10 +1350,7 @@ export const buildChatVirtualRows = ({
       continue;
     }
 
-    const { blocks, segments, entries, subagentTasks } = getAssistantTurnLayout(
-      message,
-      showThoughts
-    );
+    const { blocks, segments, entries, subagentTasks } = getAssistantTurnLayout(message);
     const cachedState = selectionLayout?.expandState ?? getExpandState(message.id);
     const cachedExpansion = cachedState.expandedGroups;
     // Collapse into a "Worked for …" summary ONLY when the turn both finished and
@@ -1436,7 +1418,7 @@ export const buildChatVirtualRows = ({
       );
 
       const visibleEntries = block.entries.filter((entry) =>
-        entry.content.type === 'thought' ? showThoughts : entry.content.kind !== 'think'
+        entry.content.type === 'thought' || entry.content.kind !== 'think'
       );
       if (visibleEntries.length === 0) return;
 
@@ -1639,7 +1621,6 @@ export const buildChatVirtualRows = ({
       activeSearchBlockId,
       expansionVersion,
       copyContextAvailable,
-      showThoughts,
       nextIsUser,
     });
     rows.push(...assistantRows);
@@ -1895,15 +1876,6 @@ export const SessionChatStreamView = forwardRef<
     },
     ref
   ) => {
-    const thoughtVisibilityAtom = useMemo(
-      () =>
-        selectAtom(
-          sessionMetaAtomFamily(getSessionRoomId(sessionId)),
-          (meta) => meta?.cliType === 'builtin' && meta.agentType === 'deepseek'
-        ),
-      [sessionId]
-    );
-    const showThoughts = useAtomValue(thoughtVisibilityAtom);
     const coordinatorSessionAtom = useMemo(
       () =>
         selectAtom(sessionMetaAtomFamily(getSessionRoomId(sessionId)), (meta) =>
@@ -2016,7 +1988,6 @@ export const SessionChatStreamView = forwardRef<
         activeSearchBlockId,
         expansionVersion: assistantExpansionVersion,
         copyContextAvailable,
-        showThoughts,
         selectionLayouts,
         groupCreatedSessions: messageSelection === null,
         coordinatorBubbles,
@@ -2049,7 +2020,6 @@ export const SessionChatStreamView = forwardRef<
     }, [
       coordinatorBubbles,
       messageSelection,
-      showThoughts,
       selectionLayouts,
       activeSearchBlockId,
       assistantActions,
@@ -3907,7 +3877,12 @@ const AgentWarningNoticeBody = ({
               'sessions.systemNotices.agentWarning.stopTerminationFailed',
               'Could not stop the task'
             )
-          : t('sessions.systemNotices.agentWarning.title', 'Agent warning');
+          : source === 'nativeWorkInterrupted'
+            ? t(
+                'sessions.systemNotices.agentWarning.nativeWorkInterrupted',
+                'Background work was interrupted'
+              )
+            : t('sessions.systemNotices.agentWarning.title', 'Agent warning');
   const guidance =
     source === 'sessionCancelFailed'
       ? t(
@@ -3924,7 +3899,12 @@ const AgentWarningNoticeBody = ({
               'sessions.systemNotices.agentWarning.stopTerminationFailedGuidance',
               'The task may still be running. Try restarting Lody’s background service on this machine.'
             )
-          : undefined;
+          : source === 'nativeWorkInterrupted'
+            ? t(
+                'sessions.systemNotices.agentWarning.nativeWorkInterruptedGuidance',
+                'The agent stopped before its background tasks finished, so their results may be missing.'
+              )
+            : undefined;
   return (
     <div className={cn('py-1', !inTurn && '@[640px]:pl-3')} role="alert">
       <AgentNoticeBanner
@@ -5627,11 +5607,8 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
   fontSize: ConversationFontSize;
 }) {
   const { t } = useTranslation();
-  /* Only builtin DSH exposes these thought rows. Reuse answer sizing,
-     preserving thought search identity and the separate disclosure label.
-     The thought is prose on the rail, with no glyph: it is the agent's own
-     words, and an icon beside every paragraph of it read as a list of
-     objects. The group header already says "Thought". */
+  // Thoughts keep answer typography and their original search identity inside
+  // the shared activity group; its summary describes the adjacent tool calls.
   return (
     <ActivityProcessStep flush>
       <span className="sr-only">

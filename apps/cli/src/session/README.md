@@ -15,6 +15,15 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 | Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.                      |
 | Process lifetime | [Session](session.ts)                             | Owns ACP resources, confirmed termination, and bounded Codex refresh-start recovery. |
 
+## MCP selection between turns
+
+Session records the MCP ids mounted at startup. Execution compares them with the
+next turn's frozen selection as sets. Adding, removing or replacing a selection
+retires the idle Agent through the existing reconfiguration path, then restores
+the conversation with the new MCP configuration through normal resume/replay. Unchanged selections,
+including a different order, keep the current Agent. A steer with changed MCP ids
+returns to dispatch as pending input so it runs after the active turn ends.
+
 ## Machine identity recovery admission
 
 Fleet checks both active presence and registered execution owners before accepting
@@ -508,13 +517,9 @@ Every Session starts its ACP process and worktree when its first turn is dispatc
 Draft preparation, which started both while the user typed, was removed: its runtime was
 almost never adopted, and discarding it cost more than a cold start
 ([decision](../../../../.agents/notes/implemented/simplification/2026-10-16-remove-draft-session-preparation.md)).
-`session/prepare` and `session/prepare-cancel` still parse, because older desktops send
-them. The daemon answers both at once without work; prepare reports an accepted duplicate
-so an older desktop holds one lease per draft instead of re-asking after every pause.
-`worktree/legacy-speculative-worktrees.ts` handles worktrees an older daemon prepared:
-creation claims the Session's marker and reruns setup on its worktree. Only a worktree no
-Session adopted is rebuilt for a target mismatch: an adopted one keeps its branch, which
-resume restores by name. A sweep removes orphans whose Session never became durable.
+The `session/prepare` and `session/prepare-cancel` requests and the speculative-worktree
+markers older daemons left are no longer recognized
+([decision](../../../../.agents/notes/implemented/simplification/2026-11-16-drop-pre-october-compatibility.md)).
 
 Memory identity references travel with turn configuration. `Session.createAgent` maps
 them through `../lib/memory-providers.ts` at spawn; the execution service restarts a
@@ -562,14 +567,14 @@ Older owners retain the single-`readAll` compatibility path; v2 failures propaga
 without that fallback. Certified goals and recovery replay avoid preparing unrelated
 query fields; replay formats ordered members individually on the owner. Transcript
 queries reuse visibility flags for unchanged records. Sparse membership edits
-rebase existing fields only across a Native-certified local write interval. The [selected-history decision](../../../../.agents/notes/proposed/architecture/2026-10-31-roost-selective-history-reads.md)
+rebase existing fields only across a Native-certified local write interval. The [selected-history decision](../../../../.agents/notes/implemented/architecture/2026-10-31-roost-selective-history-reads.md)
 records the affected paths and memory measurements.
 
 Roost progress retains cursor, revision, count and change hints. Operation identities
 are verified by Native receipts; the control notification does not repeat an
 unused operation ID. Publication order, per-action persistence and the existing
 control schema/readers are retained. See the
-[control storage investigation](../../../../.agents/notes/proposed/architecture/2026-10-23-roost-control-storage.md).
+[control storage investigation](../../../../.agents/notes/rejected/architecture/2026-10-23-roost-control-storage.md).
 
 Dispatch reads pending identities, requested turns and completion evidence from
 body-free indexes, then hydrates only the selected input. The complete marker

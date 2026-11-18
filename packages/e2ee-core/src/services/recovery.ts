@@ -26,6 +26,13 @@ export class RecoveryVaultStore extends Context.Service<
     putImmutable(vaultId: string, entry: VaultCiphertext): Effect.Effect<void, unknown>;
     /** Read an owned encrypted entry or null; retrieval permission is not proof of its authenticity. */
     readEntry(vaultId: string, entryId: string): Effect.Effect<VaultCiphertext | null, unknown>;
+    /** Optional bounded read of 1..8 distinct ids, in request order (null for missing).
+     * Never caches ciphertext; callers still authenticate every returned entry.
+     * Cloud adapters enforce a 256 KiB combined body budget. */
+    readEntries?(
+      vaultId: string,
+      entryIds: readonly string[]
+    ): Effect.Effect<readonly (VaultCiphertext | null)[], unknown>;
     /** Read the encrypted current index or null; the client authenticates it and checks its durable pin. */
     readIndex(vaultId: string): Effect.Effect<VaultCiphertext | null, unknown>;
     /** Atomically compare index identity and replace it with next; Conflict keeps the stored index, while an error may have an uncertain outcome. */

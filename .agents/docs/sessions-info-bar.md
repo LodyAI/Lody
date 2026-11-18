@@ -206,10 +206,11 @@ labelClassName`) so the stage diffstat never clips. Wired from
     must preventDefault onPointerDownOutside when the target is the anchor,
     or dismiss + click-toggle cancel out. GoalChip's popover reuses
     `GoalActionButton`/`formatTokensCompact` from `session-goal-banner.tsx`.
-    Goal controls are transport-gated: the current `/goal …` prompt bridge is
-    Codex-only, so provider-neutral snapshots remain read-only until their advertised
-    `_session/goal` method is routed through the session control plane; Stop must never
-    synthesize `pause` for those providers. Paused and blocked Codex goals both expose
+    Goal controls are transport-gated by the agent's advertised Core goal capability
+    (`apps/cli/src/agent/goal-control.ts`: the `_lody/session/goal` request, a
+    `_meta.lody.goalControl` prompt, or the older `/goal …` bridge); goals from an agent
+    that advertises no control stay read-only, and Stop must never synthesize `pause`
+    for it. Paused and blocked Codex goals both expose
     Resume; a blocked goal is waiting for explicit user continuation, not terminal.
     An `active` goal is persistent session state,
     not proof that an ACP prompt is running: current busy/running UI, message queue routing,

@@ -27,7 +27,7 @@ Translation: current
   - CSS 给它 textarea 的 UA 盒模型：inline-block、pre-wrap、`overflow: auto`。
   - 高度为 `rows` 行加内边距，工具类仍可覆盖尺寸。
   - 调用方的 `placeholder:` 工具类通过 `tailwind/index.css` 里的 `placeholder` 变体，同样作用于编辑器的占位符。没有这类工具类时，从一个样式相同的 textarea 复制浏览器默认的占位符颜色。WebKit 读不到 `::placeholder` 的样式，所以在 WebKit 上不复制，使用 CSS 默认值。
-  - 渲染 chip 的地方关闭拼写检查，选区用系统颜色，和显示层时期一样。
+  - 渲染 chip 的地方关闭拼写检查。普通文字使用系统选区颜色；原子引用使用相同的系统选区背景色与文字色，不加边框、阴影或圆角，并抑制内部文字重复的浏览器选区着色。
   - 程序或键盘聚焦保留原光标，指针聚焦按点击位置放光标。
   - 首次内容在元素挂载时写入，所以父组件的 layout effect 量到的是已填好内容的编辑器，和 textarea 一样。
   - 去掉 Lexical 设置的行内 `word-break: break-word`，保持 textarea 的换行规则。
@@ -36,6 +36,7 @@ Translation: current
 
 ## 其他方案
 
+- **纯文本 mention 节点**：Lexical 的[官方示例](https://github.com/facebook/lexical/blob/v0.53.0/packages/lexical-playground/src/nodes/MentionNode.ts)继承 `TextNode`，其 token/segmented 模式仍允许按字符移动选区。快照引用需要自定义显示与原子边界，因此保留行内 decorator；[lexical-beautiful-mentions](https://github.com/sodenn/lexical-beautiful-mentions/blob/main/plugin/src/MentionNode.tsx) 也使用该表示。这是节点选择的源码依据，不代表交互已经等同于 Notion。
 - **给显示层打补丁（补上滚动条宽度）**：修好了报告的那一种情况，但 owner 否决了，因为同类 bug 还会再出。
 - **ProseMirror 或 Tiptap**：ProseMirror 能力相当，选 Lexical 是因为 iOS 已经在用 Lexical 模型，且 owner 同意。Tiptap 多了一层这个纯文本 composer 用不上的富文本抽象。
 - **做一个形似 `textarea` 的 ref 外壳**：这是隐藏的兜底，否决；调用方改用显式的元素接口。
@@ -48,10 +49,12 @@ Translation: current
   - jsdom 测试借助 `tests/composer-test-utils.ts` 驱动真实编辑器。
   - 浏览器测试用 `tests/e2e/composer-text.ts` 读取文字。
   - `tests/setup.ts` 为 jsdom 补上了它缺少的零尺寸 Range 几何信息。
-- **chip**：仍保持原文字的字符宽度（`mention-chips.tsx`），所以草稿换行和外观都和以前一样。
+- **chip**：图标和可见标签正常参与布局。分隔前后缀保留在 Lexical 原始文字中，不再通过不可见 DOM 字符占宽。DOM 的 `textContent` 因此只是显示内容；调用方通过 `composer-input.ts` 读取输入模型。拖选和 Shift-click 扩展选区，不激活预览。mention 前没有可编辑文本时，使用不参与合并的空 TextNode 作为左侧光标落点，并通过节点变换保留编辑后的这个边界；它不增加任何字符或字符串偏移。保留原生选择能力，避免浏览器把左侧输入重定向到上一行或节点另一侧。
 - **富文本**：网页端暂不提供；有了这个编辑器，以后可以在不改调用方模型的前提下加上。
 
 ## 验证
+
+后续原子引用显示调整单独通过浏览器测试验证；下文 2026-11-11 的设备结果不能证明这次选区样式调整已完成真机验收。
 
 - **转换层**：`tests/composer-document.test.ts` 覆盖往返转换、区间清理和偏移量/DOM 映射。
 - **行为**：`tests/e2e/composer-editor.spec.ts` 覆盖打字、换行、chip、方向键、Backspace/Delete、点击 chip、撤销重做（包括调用方清空之后，以及编辑器自带撤销下提交 chip 之后）、粘贴、CDP 模拟输入法（包括紧贴 chip 组字）、无障碍，以及内容溢出时光标落在字上。它在 textarea 版本上除光标落字那条外全部通过，在编辑器上全部通过。

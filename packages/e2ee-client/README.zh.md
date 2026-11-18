@@ -82,7 +82,7 @@ runtime open 仅取得控制 reader：只重开 ready 的既有身份，重验�
 真实 view。远端分页只能确认既有已验签 feed，不能另建信任缓存或直接推进游标。
 
 `PersonalHostPlatform.contentToken` 在已批准的 session 内接收完整绑定和设备 credential，
-产品只取得专用短期正文/附件 grant；拒绝 token、快照修复提示和 RPC-only 参数原样传递。
+产品只取得专用短期正文/附件 grant；拒绝 token 和 RPC-only 参数原样传递。
 RPC 方法只在真实原件 store 存在时出现。可选 machineSharing 在固定身份/scope、已验证
 账本源和 installed-key history 上构建 PersonalMachineSharing Layer；真实策略 owner 负责
 既有密码、持久原件、generation pin 和 freshness。缺失时不暴露两个共享方法，不用空

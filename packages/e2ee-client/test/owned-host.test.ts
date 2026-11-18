@@ -535,7 +535,7 @@ describe('makePersonalWorkspaceRuntime contentStreamsToken', () => {
       const claimed = await runtime.claimPersonalJoin!(workspaceId, offer.pairingSessionId);
       expect(claimed).toEqual({ ready: true, status: 'approved' });
       await runtime.open(workspaceId);
-      const refreshed = await runtime.refresh(workspaceId, { installKeys: true });
+      const refreshed = await runtime.refresh(workspaceId, { keyMode: 'full' });
       expect(refreshed.hasCurrentKey).toBe(true);
 
       const acceptedUrls = [

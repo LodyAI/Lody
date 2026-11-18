@@ -5,8 +5,8 @@ export type MachineVisibilityAccess = {
   ownerUserId: string;
   sharedWithTeam: boolean;
   /**
-   * `updatedAt` as returned by Convex `workspaceMachines`. For rows synthesized locally under
-   * BC-2026-04-16-MACHINE-VISIBILITY-OWNER-FALLBACK this is `0` (sentinel for "unknown"): the
+   * `updatedAt` as returned by Convex `workspaceMachines`. For rows synthesized locally by the
+   * owner fallback in `buildVisibleMachineIndex` this is `0` (sentinel for "unknown"): the
    * record has no real last-updated time because it never reached Convex.
    */
   updatedAt: number;
@@ -38,7 +38,7 @@ function selectAccessRow(
 /**
  * Build the visible-machine index exposed by `useVisibleMachineMetas`.
  *
- * BC-2026-04-16-MACHINE-VISIBILITY-OWNER-FALLBACK:
+ * Owner fallback:
  * Machines introduced in PR #1806 require a `workspaceMachines` row to be visible. Older CLI
  * versions never write that row, so their owners' own machines (and sessions) disappear from the
  * UI until the CLI is upgraded and restarted. This helper additionally synthesizes an implicit

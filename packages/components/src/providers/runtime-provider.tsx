@@ -715,7 +715,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           install: () =>
             status.hasCurrentKey
               ? native.status(leased)
-              : native.refresh(leased, { installKeys: true, keyMode: 'receive' }),
+              : native.refresh(leased, { keyMode: 'receive' }),
         });
         if (disposed || retired) return;
         if (encryptedAccess.phase() === 'ready') setKeyUpdateWorkspace(null);
@@ -739,7 +739,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       if (!native) return;
       const leased = nativeLease;
       const pending = native
-        .refresh(leased, { installKeys: !nativeHasUsableKey && workspaceRuntime === null })
+        .refresh(leased, {
+          keyMode: !nativeHasUsableKey && workspaceRuntime === null ? 'full' : 'none',
+        })
         .then(acceptStatus)
         .catch(async (error: unknown) => {
           if (disposed || retired) return;

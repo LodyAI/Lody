@@ -644,148 +644,6 @@ describe('AgentClient plan mode permission restoration', () => {
       expect(client.pendingPromptCompletion).toBeNull();
     });
 
-    it('handles rate limit extension notifications', async () => {
-      const { client, onRateLimitUpdate } = createTestClient();
-      const limits = {
-        schemaVersion: 2 as const,
-        planName: '"pro"',
-        limitName: null,
-        limitId: 'codex',
-        windows: [
-          {
-            usedPercent: 18,
-            windowDurationMins: 7 * 24 * 60,
-            resetsAt: 1777400602,
-          },
-        ],
-        fiveHour: 3,
-        sevenDay: 82,
-        fiveHourResetAt: 1777288209,
-        sevenDayResetAt: 1777400602,
-      };
-
-      await expect(client.extNotification?.('_acp_ext:session_rate_limits', limits)).resolves.toBe(
-        undefined
-      );
-
-      expect(onRateLimitUpdate).toHaveBeenCalledWith({
-        rateLimits: [
-          {
-            limitId: 'codex',
-            limitName: null,
-            planName: '"pro"',
-            scope: { providerId: 'codex' },
-            windows: [
-              {
-                usedPercent: 18,
-                windowDurationSeconds: 604800,
-                resetsAtEpochSeconds: 1777400602,
-              },
-            ],
-          },
-        ],
-      });
-    });
-
-    it('keeps handling rate limit extension method requests', async () => {
-      const { client, onRateLimitUpdate } = createTestClient();
-      const limits = {
-        planName: null,
-        fiveHour: 3,
-        sevenDay: 82,
-        fiveHourResetAt: 1777288209,
-        sevenDayResetAt: 1777400602,
-      };
-
-      await expect(client.extMethod('_acp_ext:session_rate_limits', limits)).resolves.toEqual({});
-
-      expect(onRateLimitUpdate).toHaveBeenCalledWith({
-        rateLimits: [
-          {
-            limitId: 'codex',
-            planName: null,
-            scope: { providerId: 'codex' },
-            windows: [
-              {
-                usedPercent: 3,
-                windowDurationSeconds: 18000,
-                resetsAtEpochSeconds: 1777288209,
-              },
-              {
-                usedPercent: 82,
-                windowDurationSeconds: 604800,
-                resetsAtEpochSeconds: 1777400602,
-              },
-            ],
-          },
-        ],
-      });
-    });
-
-    it('routes completed Codex proposed plan extension notifications through proposed plan updates', async () => {
-      const { client, onUpdateMessage } = createTestClient();
-
-      await client.extNotification?.('_acp_ext:codex_proposed_plan', {
-        schemaVersion: 1,
-        sessionId: 'acp-test',
-        turnId: 'codex-turn-1',
-        markdown: '- Inspect event routing',
-        status: 'completed',
-        isLatest: true,
-      });
-
-      expect(onUpdateMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          sessionId: 'acp-test',
-          update: expect.objectContaining({
-            sessionUpdate: 'plan_update',
-            plan: {
-              type: 'markdown',
-              planId: 'codex-turn-1',
-              content: '- Inspect event routing',
-            },
-          }),
-        })
-      );
-    });
-
-    it('ignores non-standard Codex proposed plan extension method names', async () => {
-      const { client, onUpdateMessage } = createTestClient();
-
-      await client.extNotification?.('codex_proposed_plan', {
-        schemaVersion: 1,
-        sessionId: 'acp-test',
-        turnId: 'codex-turn-1',
-        markdown: '- Inspect event routing',
-        status: 'completed',
-        isLatest: true,
-      });
-
-      expect(onUpdateMessage).not.toHaveBeenCalled();
-    });
-
-    it('routes in-progress Codex proposed plan deltas through proposed plan updates', async () => {
-      const { client, onUpdateMessage } = createTestClient();
-
-      await client.extNotification?.('_acp_ext:codex_proposed_plan', {
-        schemaVersion: 1,
-        sessionId: 'acp-test',
-        turnId: 'codex-turn-1',
-        markdown: '- Inspect event routing',
-        status: 'delta',
-        isLatest: true,
-      });
-
-      expect(onUpdateMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          update: expect.objectContaining({
-            sessionUpdate: 'plan_update',
-            plan: expect.objectContaining({ planId: 'codex-turn-1' }),
-          }),
-        })
-      );
-    });
-
     it('routes image generation tool calls to begin/end callbacks and suppresses them', async () => {
       const { client, onUpdateMessage, onImageGenerationBegin, onImageGenerationEnd } =
         createTestClient();
@@ -1677,7 +1535,7 @@ describe('AgentClient goal session info', () => {
     ]);
   });
 
-  it('normalizes provider-neutral goal metadata for non-canonical agents', async () => {
+  it('normalizes Core goal metadata at the durable boundary', async () => {
     const { client, onThreadGoalUpdated, onUpdateMessage } = createTestClient({
       agentType: 'claude',
     });
@@ -1687,17 +1545,16 @@ describe('AgentClient goal session info', () => {
       update: {
         sessionUpdate: 'session_info_update',
         _meta: {
-          goal: {
-            objective: 'ship the release',
-            status: 'limited',
-            tokenBudget: 42_000,
-            iterations: 7,
-            lastReason: 'waiting for review',
-            tokensUsed: 12_000,
-            timeUsedSeconds: 90,
-            createdAt: 100,
-            updatedAt: 200,
-            controlMethod: '_session/goal',
+          lody: {
+            goal: {
+              objective: 'ship the release',
+              status: 'limited',
+              tokenBudget: 42_000,
+              tokensUsed: 12_000,
+              timeUsedSeconds: 90,
+              createdAtEpochSeconds: 100,
+              updatedAtEpochSeconds: 200,
+            },
           },
         },
       },
@@ -1711,96 +1568,45 @@ describe('AgentClient goal session info', () => {
       tokenBudget: 42_000,
       tokensUsed: 12_000,
       timeUsedSeconds: 90,
-      createdAt: 100,
-      updatedAt: 200,
+      createdAt: 100_000,
+      updatedAt: 200_000,
     });
     expect(onUpdateMessage).toHaveBeenCalledTimes(1);
   });
 
-  it('prefers valid provider-neutral metadata over a legacy Codex duplicate', async () => {
-    const { client, onThreadGoalUpdated } = createTestClient();
+  it('ignores goal metadata outside the Core namespace', async () => {
+    const { client, onThreadGoalUpdated, onThreadGoalCleared } = createTestClient();
 
     await client.sessionUpdate({
       sessionId: 'acp-test',
       update: {
         sessionUpdate: 'session_info_update',
         _meta: {
-          goal: {
-            objective: 'neutral objective',
-            status: 'active',
-            controlMethod: '_session/goal',
-          },
-          codex: {
-            goal: {
-              objective: 'legacy objective',
-              status: 'paused',
-            },
-          },
+          goal: { objective: 'top-level objective', status: 'active' },
+          codex: { goal: { objective: 'codex objective', status: 'paused' } },
         },
       },
     } as unknown as SessionNotification);
 
-    expect(onThreadGoalUpdated).toHaveBeenCalledWith({
-      type: 'goal',
-      threadId: 'acp-test',
-      objective: 'neutral objective',
-      status: 'active',
-      tokenBudget: null,
-    });
+    expect(onThreadGoalUpdated).not.toHaveBeenCalled();
+    expect(onThreadGoalCleared).not.toHaveBeenCalled();
   });
 
-  it('keeps parsing legacy Codex goal metadata', async () => {
-    const { client, onThreadGoalUpdated, onUpdateMessage } = createTestClient();
-
-    await client.sessionUpdate({
-      sessionId: 'acp-test',
-      update: {
-        sessionUpdate: 'session_info_update',
-        _meta: {
-          codex: {
-            goal: {
-              objective: 'ship the release',
-              status: 'budgetLimited',
-              tokenBudget: 42_000,
-            },
-          },
-        },
-      },
-    });
-
-    expect(onThreadGoalUpdated).toHaveBeenCalledWith({
-      type: 'goal',
-      threadId: 'acp-test',
-      objective: 'ship the release',
-      status: 'budgetLimited',
-      tokenBudget: 42_000,
-    });
-    expect(onUpdateMessage).toHaveBeenCalledTimes(1);
-  });
-
-  it('handles a null provider-neutral goal as cleared', async () => {
+  it('handles a null Core goal as cleared', async () => {
     const { client, onThreadGoalCleared } = createTestClient({ agentType: 'claude' });
 
     await client.sessionUpdate({
       sessionId: 'acp-test',
       update: {
         sessionUpdate: 'session_info_update',
-        _meta: {
-          goal: null,
-          codex: {
-            goal: {
-              objective: 'legacy objective',
-              status: 'active',
-            },
-          },
-        },
+        _meta: { lody: { goal: null } },
       },
     } as unknown as SessionNotification);
 
     expect(onThreadGoalCleared).toHaveBeenCalledWith('acp-test');
   });
 
-  it('ignores invalid provider-neutral goal metadata without breaking the session stream', async () => {
+  it('ignores invalid Core goal metadata without breaking the session stream', async () => {
     const { client, onThreadGoalUpdated, onUpdateMessage } = createTestClient({
       agentType: 'claude',
     });
@@ -1809,19 +1615,7 @@ describe('AgentClient goal session info', () => {
       sessionId: 'acp-test',
       update: {
         sessionUpdate: 'session_info_update',
-        _meta: {
-          goal: {
-            objective: 'neutral objective',
-            status: 'active',
-            controlMethod: '_wrong/goal',
-          },
-          codex: {
-            goal: {
-              objective: 'legacy objective',
-              status: 'active',
-            },
-          },
-        },
+        _meta: { lody: { goal: { objective: 'neutral objective', status: 'unknown' } } },
       },
     } as unknown as SessionNotification);
 

@@ -46,6 +46,8 @@ export async function createCliStreamsTransport(args: {
   workspaceId: WorkspaceId;
   tokenProvider: LoroStreamsTokenProviderLegacy;
   repo: LoroRepo;
+  /** Owner bound to the manager's replica/account/content lifetime. */
+  incompleteRecoveryScope?: object;
   /**
    * LoroDoc room cursors only. Meta and named Flock cursors are replica-bound:
    * `SqliteRepoStore` restores each one in the same transaction as the data it
@@ -73,6 +75,7 @@ export async function createCliStreamsTransport(args: {
     gatewayBaseUrl,
     tokenProvider,
     adapter: new StreamsTransportAdapter({
+      incompleteRecoveryScope: args.incompleteRecoveryScope,
       diagnostics: (event) => {
         const diagnostic = getLoroSyncDiagnostic(event);
         if (diagnostic) {

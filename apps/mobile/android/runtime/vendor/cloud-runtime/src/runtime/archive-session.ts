@@ -79,20 +79,6 @@ function lifecycleSessionIds(flock: Flock, sessionId: string) {
   return result;
 }
 
-function patchNeedToArchive(
-  flock: Flock,
-  machineId: string,
-  sessionId: string,
-  archived: boolean,
-) {
-  if (!machineId) return;
-  const room = `machine-${machineId}`;
-  const need = object(docFields(flock, room).needToArchiveSessions);
-  if (archived) need[sessionId] = true;
-  else delete need[sessionId];
-  flock.set(['m', room, 'needToArchiveSessions'], need);
-}
-
 async function appendJson(client: StreamsClient, update: unknown) {
   const result = await client.append({
     part: {
@@ -254,7 +240,6 @@ export async function archiveSession(
     if (childTab(fields)) continue;
     const machineId = String(fields.machineId ?? '');
     roots.push({ id, machineId });
-    patchNeedToArchive(meta.flock, machineId, id, args.archived);
   }
   meta.flock.commit();
   await appendJson(meta.client, meta.flock.exportJson(version));

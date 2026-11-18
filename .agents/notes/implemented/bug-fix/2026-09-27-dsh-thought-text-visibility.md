@@ -46,7 +46,8 @@ Session metadata rather than model name, and updates the
 [rendering rule](../../../../packages/components/src/components/ai-gui/AGENTS.md) and
 [draft Spec](../../../../specs/deepseek-thought-visibility.md). The provider flag
 participates in row-cache identity. Thought-only groups receive a disclosure
-label; expanded groups preserve thought/tool ordering. Folding
+label; expanded groups preserve thought/tool ordering. Since 2026-11-16 every
+provider shows thoughts and the provider flag is removed. Folding
 and removing rows are different behaviors; expanding a group cannot restore rows
 that were never constructed. This filter is provider-independent.
 
@@ -79,4 +80,4 @@ isolated execution of the actual row builder and its actual grouping/folding
 helpers passes these scenarios, with unrelated footer/subagent services stubbed.
 This is narrower than a component test or visual desktop verification.
 
-Thought-only DSH groups now default closed, including under expanded finished work. Explicit expansion and search reveal still work. Regression coverage includes the default, toggling and separate groups.
+Thought-only groups default closed, including under expanded finished work. Adjacent thoughts and tools share a disclosure across every provider; explicit expansion and search reveal preserve their order. Prose still separates groups.

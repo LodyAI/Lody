@@ -11,7 +11,11 @@ import { daemonLossObserver, createDaemonLossTasks } from '@/lib/e2ee/client-los
 import type { EncryptedAgentExecution } from '@/lib/e2ee/agent-execution';
 import { MAX_DERIVED_TURNS_PER_ORIGIN } from '@/lib/e2ee/derivation-limits';
 import type { RealtimeStartPermit } from '@/lib/e2ee/realtime-journal';
-import { publishTurnCompletionLegacy } from './turn-completion-legacy';
+import {
+  awaitNativeWorkSettlementLegacy,
+  publishTurnCompletionLegacy,
+} from './turn-completion-legacy';
+import type { NativeWorkWatch } from './turn-completion';
 import { resolveProjectFileRoots } from './worktree/project-member-access';
 import { type AcpLauncher, resolveAcpLauncher } from '@/agent/acp-analytics';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
@@ -211,6 +215,12 @@ type FinalizeTurnContext = {
 };
 
 type InboxExecutionHandle = Awaited<ReturnType<OperationInboxLegacy['openExecution']>>;
+
+function mcpSelectionChanged(session: ISession, input: SessionTurnInputConfig): boolean {
+  const selected = new Set(input.mcpServerIds ?? []);
+  const mounted = new Set(session.getMcpServerIds?.() ?? []);
+  return selected.size !== mounted.size || [...selected].some((id) => !mounted.has(id));
+}
 
 /** One message per definite encrypted refusal; only a sender without rights reads as one. */
 function encryptedRefusalMessage(
@@ -735,6 +745,8 @@ export type SessionExecutionServiceDeps = {
     turnId: string,
     failure: { phase: SessionStopFailurePhase; message: string }
   ) => Promise<void>;
+  /** Persists the notice that agent work outliving this Turn ended unfinished. */
+  recordNativeWorkInterrupted?: (sessionId: SessionId, turnId: string) => Promise<void>;
   maybeGenerateAndStoreSessionTitle: (
     sessionId: SessionId,
     cliType: AgentConfigCliType,
@@ -1350,6 +1362,12 @@ export class SessionExecutionService {
   private readonly canceledTurnBySession = new Map<SessionId, string>();
   private readonly currentTurnBySession = new Map<SessionId, string>();
   private readonly turnRuntimeBySession = new Map<SessionId, TurnRuntimeState>();
+  /**
+   * The last cleanly released turn per Session. Work its own Agent continues by itself
+   * (woken by a background task, a scheduled wake-up or a cron) still acts for this
+   * turn's frozen invocation. See `readInvokingRuntime`.
+   */
+  private readonly releasedTurnBySession = new Map<SessionId, TurnRuntimeState>();
   /** Admission ownership outlives replaceable turn runtime registrations. */
   private readonly liveInboxExecutionIds = new Set<string>();
   /** Start times of recent start retries, shared by every Session this service runs. */
@@ -2404,6 +2422,9 @@ export class SessionExecutionService {
     if (!agentClient || !acpSessionId || !steerCapability) {
       return await rejectAndPromote('unsupported');
     }
+    if (mcpSelectionChanged(runtime.session, options.inputConfig)) {
+      return await rejectAndPromote('unsupported', 'MCP selection requires a new turn.');
+    }
     if (steerCapability.configPolicy === 'active') {
       const mismatch = agentClient.findSteerConfigMismatch(options.inputConfig);
       if (mismatch) {
@@ -3260,7 +3281,125 @@ export class SessionExecutionService {
   }
 
   private registerTurnRuntime(runtime: TurnRuntimeState): void {
+    this.releasedTurnBySession.delete(runtime.sessionId);
     this.turnRuntimeBySession.set(runtime.sessionId, runtime);
+    // A newer Turn owns the Session's completion signals from here on.
+    this.withdrawNativeWorkCompletion(runtime.sessionId);
+  }
+
+  /** Completion publications still waiting for agent work that outlived their Turn. */
+  private readonly nativeWorkSupersede = new Map<SessionId, Set<() => void>>();
+
+  /**
+   * Withdraws any pending post-turn background completion wait so Stop, archive, delete,
+   * or a newer Turn will not emit stale `nativeWorkInterrupted` notices or outcomes.
+   */
+  withdrawNativeWorkCompletion(sessionId: SessionId): void {
+    for (const supersede of [...(this.nativeWorkSupersede.get(sessionId) ?? [])]) supersede();
+  }
+
+  private registerNativeWorkWithdraw(sessionId: SessionId, withdraw: () => void): () => void {
+    const supersedeSet = this.nativeWorkSupersede.get(sessionId) ?? new Set();
+    supersedeSet.add(withdraw);
+    this.nativeWorkSupersede.set(sessionId, supersedeSet);
+    return () => {
+      supersedeSet.delete(withdraw);
+      if (!supersedeSet.size && this.nativeWorkSupersede.get(sessionId) === supersedeSet)
+        this.nativeWorkSupersede.delete(sessionId);
+    };
+  }
+
+  /**
+   * Watches the released Turn's own agent instance while it still reports work. Absent
+   * for agents that report no `sessionActivity`, which keep immediate completion.
+   */
+  private watchNativeWork(sessionId: SessionId): NativeWorkWatch | undefined {
+    const sessionManager = this.deps.sessionManager;
+    const session = sessionManager.getSession(sessionId);
+    const client = session?.agentClient;
+    if (!session || !client || session.hasLiveAgentProcess?.() === false) return undefined;
+    const readPending = (): 'running' | 'background' | null => {
+      try {
+        return client.getNativeWork() ?? (client.hasUnsettledNativeWork?.() ? 'background' : null);
+      } catch (cause) {
+        this.deps.logger.debug(
+          `[${sessionId}] Native agent work unreadable at release: ${formatErrorMessage(cause)}`
+        );
+        return null;
+      }
+    };
+    // An unreadable observation must not hold back completion; publish it as before.
+    if (readPending() === null) return undefined;
+    const isInstanceLive = () =>
+      sessionManager.getSession(sessionId) === session && session.hasLiveAgentProcess?.() !== false;
+    return {
+      current: readPending,
+      subscribe: (onEvent) => {
+        const unregister = this.registerNativeWorkWithdraw(sessionId, () => onEvent('superseded'));
+        // Detach publishes null before removing the instance; read it after that.
+        const onChanged = (changed: SessionId) => {
+          if (changed !== sessionId) return;
+          queueMicrotask(() => onEvent(isInstanceLive() ? 'changed' : 'ended'));
+        };
+        const onEnded = (event: { sessionId: SessionId }) => {
+          if (event.sessionId === sessionId) onEvent('ended');
+        };
+        sessionManager.on('onNativeWorkChanged', onChanged);
+        sessionManager.on('exit', onEnded);
+        sessionManager.on('terminated', onEnded);
+        if (!isInstanceLive()) queueMicrotask(() => onEvent('ended'));
+        return () => {
+          unregister();
+          sessionManager.off('onNativeWorkChanged', onChanged);
+          sessionManager.off('exit', onEnded);
+          sessionManager.off('terminated', onEnded);
+        };
+      },
+    };
+  }
+
+  /**
+   * The runtime whose invocation the Session's Agent currently acts for: the
+   * registered turn, else the last cleanly released turn while that same Agent
+   * process is still live. Only that Agent holds the Session's tool binding, so a
+   * call proves it is working; whether it reports its own activity does not
+   * matter (Codex reports none to Lody). A replaced or exited Agent acts for nobody.
+   */
+  private readInvokingRuntime(sessionId: SessionId): TurnRuntimeState | undefined {
+    const live = this.turnRuntimeBySession.get(sessionId);
+    if (live) return live;
+    const released = this.releasedTurnBySession.get(sessionId);
+    if (!released) return undefined;
+    const session = released.session;
+    if (
+      !session ||
+      this.deps.sessionManager.getSession(sessionId) !== session ||
+      session.hasLiveAgentProcess?.() === false
+    ) {
+      this.releasedTurnBySession.delete(sessionId);
+      return undefined;
+    }
+    return released;
+  }
+
+  /** The Agent process ended or was replaced; its self-started work ends with it. */
+  forgetReleasedTurn(sessionId: SessionId): void {
+    this.releasedTurnBySession.delete(sessionId);
+  }
+
+  private canContinueAfterRelease(runtime: TurnRuntimeState): boolean {
+    return (
+      runtime.promptStarted &&
+      Boolean(runtime.session) &&
+      !runtime.cancelRequested &&
+      !runtime.releaseFailure &&
+      !runtime.disconnectedTransport &&
+      !runtime.initializationStalled &&
+      !(
+        runtime.inboxOwner?.input &&
+        this.isInboxInputCanceled(runtime.sessionId, runtime.inboxOwner.input.inputId)
+      )
+    );
   }
 
   /**
@@ -3301,6 +3440,8 @@ export class SessionExecutionService {
         this.releaseParentAdmission(runtime);
       }
       this.turnRuntimeBySession.delete(sessionId);
+      if (this.canContinueAfterRelease(runtime)) this.releasedTurnBySession.set(sessionId, runtime);
+      else this.releasedTurnBySession.delete(sessionId);
       daemonLossObserver.changed();
     }
     // Safety net: drop per-turn analytics state if the turn ended without a
@@ -5833,30 +5974,90 @@ export class SessionExecutionService {
         const notify = async () => {
           if (fact) await this.publishTurnOutcomeFact(fact);
         };
+        const own = (work: Promise<unknown>) => {
+          const owned = Promise.allSettled([work]);
+          this.ownedWork.add(owned);
+          void owned.then(() => {
+            this.ownedWork.delete(owned);
+            daemonLossObserver.changed();
+          });
+        };
         // Failure attention is independent of successful delivery. Never delay it on sync.
         const completion = runtime.finalizeCompleted && !runtime.releaseFailure;
-        const delivery = completion
-          ? publishTurnCompletionLegacy({
-              signal: this.completionPublicationAbort.signal,
-              completedAt,
-              sessionDoc,
-              workspaceDocument: this.deps.workspaceDocument,
-              notify: fact?.outcome.kind === 'succeeded' ? notify : async () => {},
-            }).catch((error: unknown) => {
-              this.deps.logger.warn(
-                `[${sessionId}] Turn completion publication incomplete (turnId=${runtime.turnId}): ${formatErrorMessage(error)}`
+        const publishCompletion = (settlement: 'settled' | 'interrupted', at: number) =>
+          publishTurnCompletionLegacy({
+            signal: this.completionPublicationAbort.signal,
+            completedAt: at,
+            sessionDoc,
+            workspaceDocument: this.deps.workspaceDocument,
+            notify:
+              fact?.outcome.kind !== 'succeeded'
+                ? async () => {}
+                : settlement === 'interrupted'
+                  ? () =>
+                      this.publishTurnOutcomeFact({
+                        ...fact,
+                        outcome: { kind: 'unknown', code: 'native_work_interrupted' },
+                      })
+                  : notify,
+          }).catch((error: unknown) => {
+            this.deps.logger.warn(
+              `[${sessionId}] Turn completion publication incomplete (turnId=${runtime.turnId}): ${formatErrorMessage(error)}`
+            );
+          });
+        // Agent work that outlived the Turn keeps it unfinished for its reader. The wait
+        // holds no write, so only the publication after it is owned bookkeeping.
+        const nativeWork = completion ? this.watchNativeWork(sessionId) : undefined;
+        if (nativeWork) {
+          let withdrawn = false;
+          const unregisterWithdraw = this.registerNativeWorkWithdraw(sessionId, () => {
+            withdrawn = true;
+          });
+          void awaitNativeWorkSettlementLegacy(nativeWork, this.completionPublicationAbort.signal)
+            .then((settlement) => {
+              if (
+                settlement === 'superseded' ||
+                withdrawn ||
+                this.completionPublicationAbort.signal.aborted
+              ) {
+                unregisterWithdraw();
+                return;
+              }
+              own(
+                (async () => {
+                  try {
+                    if (settlement === 'interrupted')
+                      await this.recordNativeWorkInterrupted(sessionId, runtime.turnId);
+                    if (withdrawn || this.completionPublicationAbort.signal.aborted) return;
+                    unregisterWithdraw();
+                    await publishCompletion(settlement, Math.max(completedAt, getServerNow()));
+                  } finally {
+                    unregisterWithdraw();
+                  }
+                })()
               );
             })
-          : Promise.resolve();
-        const attention = fact?.outcome.kind !== 'succeeded' ? notify() : Promise.resolve();
-        const owned = Promise.allSettled([delivery, attention]);
-        this.ownedWork.add(owned);
-        void owned.then(() => {
-          this.ownedWork.delete(owned);
-          daemonLossObserver.changed();
-        });
+            .catch(() => {
+              // Shutdown withdrew the wait; nothing was published or written.
+              unregisterWithdraw();
+            });
+        } else if (completion) own(publishCompletion('settled', completedAt));
+        if (fact?.outcome.kind !== 'succeeded') own(notify());
       }
     }
+  }
+
+  /**
+   * The agent reported work after its Turn and its process ended first: the conversation
+   * records it, and the reader is alerted to an unknown result rather than a success.
+   */
+  private recordNativeWorkInterrupted(sessionId: SessionId, turnId: string): Promise<void> {
+    return (this.deps.recordNativeWorkInterrupted?.(sessionId, turnId) ?? Promise.resolve()).catch(
+      (cause: unknown) =>
+        this.deps.logger.warn(
+          `[${sessionId}] Failed to record interrupted background work: ${formatErrorMessage(cause)}`
+        )
+    );
   }
 
   /** Freeze provenance once the exact input is available; never changes authorization. */
@@ -6101,7 +6302,7 @@ export class SessionExecutionService {
     sourceTurnId: string,
     requestId: string
   ): { kind: 'owner' } | { kind: 'member' } | undefined {
-    const runtime = this.turnRuntimeBySession.get(sessionId);
+    const runtime = this.readInvokingRuntime(sessionId);
     if (!runtime || runtime.cancelRequested || runtime.invocation?.sourceTurnId !== sourceTurnId)
       return undefined;
     if (runtime.encryptedPrincipal === 'owner') return { kind: 'owner' };
@@ -6124,7 +6325,7 @@ export class SessionExecutionService {
     | { kind: 'owner' }
     | { kind: 'member'; requesterDevice: string; localProjectIds: readonly string[] }
     | undefined {
-    const runtime = this.turnRuntimeBySession.get(sessionId);
+    const runtime = this.readInvokingRuntime(sessionId);
     if (!runtime || runtime.cancelRequested) return undefined;
     if (runtime.encryptedPrincipal === 'owner') return { kind: 'owner' };
     if (
@@ -6145,7 +6346,7 @@ export class SessionExecutionService {
         sender?: { kind: 'user' } | { kind: 'agent'; sessionId: SessionId };
       }
     | undefined {
-    const runtime = this.turnRuntimeBySession.get(sessionId);
+    const runtime = this.readInvokingRuntime(sessionId);
     if (
       !runtime ||
       runtime.cancelRequested ||
@@ -7673,10 +7874,13 @@ export class SessionExecutionService {
           self.captureStatusChanged(sessionId, 'initializing', undefined, 'chat_dispatch');
 
           let readySession = session;
+          // MCP servers are mounted at ACP startup. Replace between prompts so the
+          // driving turn's selection takes effect without hot-loading a busy agent.
           if (
             readySession &&
-            JSON.stringify(readySession.getMemoryBinding?.() ?? null) !==
-              JSON.stringify(acpSessionConfig.memory ?? null)
+            (mcpSelectionChanged(readySession, acpSessionConfig) ||
+              JSON.stringify(readySession.getMemoryBinding?.() ?? null) !==
+                JSON.stringify(acpSessionConfig.memory ?? null))
           ) {
             yield* ctx.abortIfCancelled();
             const previousSession = readySession;
@@ -8392,6 +8596,10 @@ export class SessionExecutionService {
 
   /** Metadata stop barriers also cover descendants created after the UI snapshot. */
   async reconcileCollaborationStops(): Promise<void> {
+    for (const sessionId of [...this.releasedTurnBySession.keys()]) {
+      if (await isSessionCollaborationStopped(this.deps.workspaceDocument.repo, sessionId))
+        this.releasedTurnBySession.delete(sessionId);
+    }
     for (const [sessionId, runtime] of this.turnRuntimeBySession) {
       if (await isSessionCollaborationStopped(this.deps.workspaceDocument.repo, sessionId)) {
         await this.cancelSession(
@@ -8531,6 +8739,9 @@ export class SessionExecutionService {
         return { success: false, error: error instanceof Error ? error.message : String(error) };
       }
     }
+    // Stop also ends the authority of work the Agent continues by itself.
+    this.releasedTurnBySession.delete(sessionId);
+    this.withdrawNativeWorkCompletion(sessionId);
     this.deps.logger.info(`Session stop requested: ${sessionId}`);
     this.deps.logger.debug(`[${sessionId}] Received stop request for turn ${turnId}`);
     const activeTurnId = this.deps.getActiveTurnId(sessionId);

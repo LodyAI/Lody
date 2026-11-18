@@ -23,6 +23,7 @@ import {
   type SessionExecutionServiceDeps,
 } from '../src/session/session-execution-service';
 import type { SessionManager } from '../src/session/session-manager';
+import type { SessionConfig } from '../src/session/types';
 import { withHistoryPort } from './history-port-fixture';
 import { composeTestSessionDoc } from './session-doc-fixture';
 import {
@@ -459,133 +460,182 @@ describe('SessionExecutionService', () => {
       memory: { providerId: 'nowledge-mem', memoryId: 'reviewer' },
     },
     { scenario: 'unlinked memory identity', live: true, memory: undefined },
-  ])('restores ACP with frozen configuration after $scenario', async ({ live, memory }) => {
-    const codexAuth = {
-      mode: 'chatgpt' as const,
-      profileId: '60a84cb4-50fd-4590-9f69-6055ffef0c57',
-    };
-    const meta = {
-      agentConfigId: capabilityConfigId,
-      repoFullName: 'owner/repo',
-      acpSessionId: 'acp-1' as ACPSessionId,
-      branchName: 'feat/resume',
-      parentSessionId: 'parent-session-1' as SessionId,
-      isArchived: false,
-    };
-    let history: unknown[] = [];
-    const sessionDoc = withHistoryPort({
-      getMetaState: vi.fn(async () => meta),
-      setStatus: vi.fn(async () => {}),
-      setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(() => history),
-      updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
-        history = updater(history);
-      }),
-    });
+    { scenario: 'added MCP', live: true, previousMcp: [], mcp: ['server-a'] },
+    { scenario: 'removed MCP', live: true, previousMcp: ['server-a'], mcp: [] },
+    { scenario: 'replaced MCP', live: true, previousMcp: ['server-a'], mcp: ['server-b'] },
+    {
+      scenario: 'reordered MCP',
+      live: true,
+      previousMcp: ['server-a', 'server-b'],
+      mcp: ['server-b', 'server-a'],
+      reuse: true,
+    },
+    {
+      scenario: 'unchanged MCP',
+      live: true,
+      previousMcp: ['server-a'],
+      mcp: ['server-a'],
+      reuse: true,
+    },
+  ])(
+    'restores ACP with frozen configuration after $scenario',
+    async ({ live, memory, previousMcp, mcp, reuse }) => {
+      const mcpServerIds = mcp as SessionConfig['mcpServerIds'] | undefined;
+      const events: string[] = [];
+      const codexAuth = {
+        mode: 'chatgpt' as const,
+        profileId: '60a84cb4-50fd-4590-9f69-6055ffef0c57',
+      };
+      const meta = {
+        agentConfigId: capabilityConfigId,
+        repoFullName: 'owner/repo',
+        acpSessionId: 'acp-1' as ACPSessionId,
+        branchName: 'feat/resume',
+        parentSessionId: 'parent-session-1' as SessionId,
+        isArchived: false,
+      };
+      let history: unknown[] = [];
+      const sessionDoc = withHistoryPort({
+        getMetaState: vi.fn(async () => meta),
+        setStatus: vi.fn(async () => {}),
+        setBaseBranch: vi.fn(async () => {}),
+        getHistory: vi.fn(() => history),
+        updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
+          history = updater(history);
+        }),
+      });
 
-    const agentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => ({})),
-      currentModel: undefined,
-    };
-    const restoredSession = {
-      sessionId: 'session-1' as SessionId,
-      acpSessionId: 'acp-1' as ACPSessionId,
-      agentClient,
-      terminalManager: {} as unknown,
-      getWorkdir: () => '/tmp',
-      getHostWorkdir: () => '/tmp',
-      getParentSessionId: () => undefined,
-      exec: vi.fn(async () => ''),
-      terminate: vi.fn(async () => {}),
-      updateGitIdentity: vi.fn(),
-      createAgent: vi.fn(async () => 'acp-1'),
-      applyExecutionPlaneLimits: vi.fn(async () => {}),
-    };
+      const agentClient = {
+        isCreated: vi.fn(() => true),
+        cancel: vi.fn(async () => {}),
+        prompt: vi.fn(async () => {
+          events.push('prompt');
+          return {};
+        }),
+        currentModel: undefined,
+      };
+      const restoredSession = {
+        sessionId: 'session-1' as SessionId,
+        acpSessionId: 'acp-1' as ACPSessionId,
+        agentClient,
+        terminalManager: {} as unknown,
+        getWorkdir: () => '/tmp',
+        getHostWorkdir: () => '/tmp',
+        getParentSessionId: () => undefined,
+        exec: vi.fn(async () => ''),
+        terminate: vi.fn(async () => {}),
+        updateGitIdentity: vi.fn(),
+        createAgent: vi.fn(async () => 'acp-1'),
+        applyExecutionPlaneLimits: vi.fn(async () => {}),
+      };
 
-    let retired = !live;
-    const oldSession = {
-      ...restoredSession,
-      getMemoryBinding: () => ({ providerId: 'nowledge-mem', memoryId: 'previous' }),
-      agentClient: {
-        ...agentClient,
-        prompt: async () => {
-          throw new Error('Old memory process must not receive the new prompt');
+      let retired = !live;
+      const oldSession = {
+        ...restoredSession,
+        getMemoryBinding: () =>
+          previousMcp ? undefined : { providerId: 'nowledge-mem', memoryId: 'previous' },
+        getMcpServerIds: () => previousMcp as SessionConfig['mcpServerIds'],
+        agentClient: {
+          ...agentClient,
+          prompt: async () => {
+            if (!reuse) throw new Error('Old process must not receive the new prompt');
+            events.push('prompt');
+            return {};
+          },
         },
-      },
-    };
-    const sessionManager = {
-      getSession: vi.fn(() => (retired ? null : oldSession)),
-      retireSessionForReconfiguration: async (session: unknown) => {
-        expect(session).toBe(oldSession);
-        retired = true;
-      },
-      getPendingSession: vi.fn(() => null),
-      createSession: vi.fn(async (config, agentStart) => {
-        expect(retired).toBe(true);
-        expect(config.memory).toEqual(memory);
-        expect(config.sessionId).toBe('session-1');
-        expect(config.resume).toBe(true);
-        expect(config.githubRepo).toBe('owner/repo');
-        expect(config.restoreBranchName).toBe('feat/resume');
-        expect(config.parentSessionId).toBe('parent-session-1');
-        expect(config.agentConfigId).toBe(capabilityConfigId);
-        expect(config.codexAuth).toEqual(codexAuth);
-        expect(agentStart?.resumeSessionId).toBe('acp-1');
-        return restoredSession as unknown;
-      }),
-      setSessionError: vi.fn(),
-      terminateSession: vi.fn(),
-      validateSessionCredentials: vi.fn(async () => {}),
-    } as unknown as SessionManager;
-
-    const deps = createBaseDeps({
-      sessionManager,
-      workspaceDocument: {
-        getAgentConfigById: async () =>
-          createLaunchConfig({ cliType: 'builtin', agentType: 'codex', env: {}, codexAuth }),
-        repo: {
-          upsertDocMeta: vi.fn(async () => {}),
-          getDocMeta: vi.fn(async () => undefined),
+      };
+      const sessionManager = {
+        getSession: vi.fn(() => (retired ? null : oldSession)),
+        retireSessionForReconfiguration: async (session: unknown) => {
+          expect(session).toBe(oldSession);
+          retired = true;
+          events.push('retire');
         },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
-        updateAcpCapabilities: vi.fn(async () => {}),
-      } as unknown as LoroDocumentManager,
-      buildAcpPromptBlocks: vi.fn(async () => [{ type: 'text', text: 'hi' }] as any),
-    });
+        getPendingSession: vi.fn(() => null),
+        createSession: vi.fn(async (config, agentStart) => {
+          expect(retired).toBe(true);
+          events.push('restore');
+          expect(config.memory).toEqual(memory);
+          expect(config.mcpServerIds).toEqual(mcpServerIds ?? []);
+          expect(config.sessionId).toBe('session-1');
+          expect(config.resume).toBe(true);
+          expect(config.githubRepo).toBe('owner/repo');
+          expect(config.restoreBranchName).toBe('feat/resume');
+          expect(config.parentSessionId).toBe('parent-session-1');
+          expect(config.agentConfigId).toBe(capabilityConfigId);
+          expect(config.codexAuth).toEqual(codexAuth);
+          expect(agentStart?.resumeSessionId).toBe('acp-1');
+          return restoredSession as unknown;
+        }),
+        setSessionError: vi.fn(),
+        terminateSession: vi.fn(),
+        validateSessionCredentials: vi.fn(async () => {}),
+      } as unknown as SessionManager;
 
-    const service = new SessionExecutionService(deps);
-    await service.continueSession({
-      type: 'session/chat',
-      sessionId: 'session-1' as SessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
-      acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex', memory },
-      userTurnId: 'turn-user-1',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
+      const deps = createBaseDeps({
+        sessionManager,
+        workspaceDocument: {
+          getAgentConfigById: async () =>
+            createLaunchConfig({ cliType: 'builtin', agentType: 'codex', env: {}, codexAuth }),
+          repo: {
+            upsertDocMeta: vi.fn(async () => {}),
+            getDocMeta: vi.fn(async () => undefined),
+          },
+          getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+          updateAcpCapabilities: vi.fn(async () => {}),
+        } as unknown as LoroDocumentManager,
+        buildAcpPromptBlocks: vi.fn(async () => [{ type: 'text', text: 'hi' }] as any),
+      });
 
-    expect(sessionDoc.setStatus).toHaveBeenCalledWith(
-      SessionStatusFactory.initializing('resuming')
-    );
-    expect(sessionDoc.setStatus.mock.calls.map(([status]) => status)).toEqual([
-      SessionStatusFactory.initializing(),
-      SessionStatusFactory.initializing('resuming'),
-      SessionStatusFactory.running(),
-      SessionStatusFactory.idle(),
-    ]);
-    expect(sessionDoc.setBaseBranch).toHaveBeenCalledWith('main');
-    expect(agentClient.prompt).toHaveBeenCalledWith('acp-1', [{ type: 'text', text: 'hi' }], {
-      signal: expect.any(AbortSignal),
-    });
-    expect(deps.startSessionActivePresence).toHaveBeenCalledTimes(1);
-    expect(deps.startSessionActivePresence).toHaveBeenCalledWith('session-1', 'initializing');
-    expect(deps.clearSessionActivePresence).toHaveBeenCalledTimes(1);
-  });
+      const service = new SessionExecutionService(deps);
+      await service.continueSession({
+        type: 'session/chat',
+        sessionId: 'session-1' as SessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
+        acpSessionConfig: {
+          prompt: 'hi',
+          cliType: 'builtin',
+          agentType: 'codex',
+          memory,
+          mcpServerIds,
+        },
+        userTurnId: 'turn-user-1',
+        userId: 'user-1',
+        userName: 'User',
+        userEmail: 'user@example.com',
+      });
+
+      expect(events).toEqual(
+        reuse ? ['prompt'] : live ? ['retire', 'restore', 'prompt'] : ['restore', 'prompt']
+      );
+      if (reuse) {
+        expect(sessionDoc.setStatus.mock.calls.map(([status]) => status)).toEqual([
+          SessionStatusFactory.initializing(),
+          SessionStatusFactory.running(),
+          SessionStatusFactory.idle(),
+        ]);
+        return;
+      }
+      expect(sessionDoc.setStatus).toHaveBeenCalledWith(
+        SessionStatusFactory.initializing('resuming')
+      );
+      expect(sessionDoc.setStatus.mock.calls.map(([status]) => status)).toEqual([
+        SessionStatusFactory.initializing(),
+        SessionStatusFactory.initializing('resuming'),
+        SessionStatusFactory.running(),
+        SessionStatusFactory.idle(),
+      ]);
+      expect(sessionDoc.setBaseBranch).toHaveBeenCalledWith('main');
+      expect(agentClient.prompt).toHaveBeenCalledWith('acp-1', [{ type: 'text', text: 'hi' }], {
+        signal: expect.any(AbortSignal),
+      });
+      expect(deps.startSessionActivePresence).toHaveBeenCalledTimes(1);
+      expect(deps.startSessionActivePresence).toHaveBeenCalledWith('session-1', 'initializing');
+      expect(deps.clearSessionActivePresence).toHaveBeenCalledTimes(1);
+    }
+  );
 
   it.each(['create', 'continue'] as const)(
     'replays failed first-turn input through %s dispatch without a resumable ACP id',

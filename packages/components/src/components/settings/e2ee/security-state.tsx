@@ -76,7 +76,7 @@ export function useSecurityState() {
             // Offline refresh cannot erase verified local facts or pause the workspace.
             if (shouldRefresh) {
               try {
-                await native.refresh(workspaceId, { installKeys: false });
+                await native.refresh(workspaceId, { keyMode: 'none' });
               } catch {
                 /* Retry on the next probe. */
               }

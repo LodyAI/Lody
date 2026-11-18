@@ -19,7 +19,7 @@ const runtime = await import(`data:text/javascript;base64,${Buffer.from(bundle.o
 const ok = (result = {}) => ({ ok: true, result });
 const args = { id: '22222222-2222-4222-8222-222222222222', sessionId: 's', machineId: 'm', userId: 'u', text: 'hello', cliType: 'builtin', agentType: 'codex', modelId: 'model' };
 
-async function fixture({ failAt, target, owner } = {}) {
+async function fixture({ failAt, target, owner, readControl, observe } = {}) {
   const previousNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
   const locks = new Map();
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { locks: { request(name, { signal }, work) {
@@ -53,6 +53,10 @@ async function fixture({ failAt, target, owner } = {}) {
         const result = owner ? await owner(request, signal) : { result: { accepted: true } };
         return ok({ nextOffset: '1', payload: { body: new TextEncoder().encode(JSON.stringify({ id: request.id, ...result })) } });
       }
+      if (this.url.endsWith(':s:s')) {
+        const read = readControl?.();
+        if (read) return read;
+      }
       return new Promise((_resolve, reject) => signal?.addEventListener('abort', () => reject(new Error('cancelled')), { once: true }));
     }
   };
@@ -60,9 +64,13 @@ async function fixture({ failAt, target, owner } = {}) {
   const opened = new Promise((resolve) => { ready = resolve; });
   const resolver = target ? () => ({ incremental: true, watch: true, ...target }) : undefined;
   const getGrant = async () => ({ token: 'fixture', gatewayBaseUrl: 'https://x.invalid' });
-  const emit = (event) => { if (event.session && JSON.parse(event.session).status === 'live') ready(); };
+  const emit = (event) => {
+    if (event.session && JSON.parse(event.session).status === 'live') ready();
+    observe?.(event);
+  };
   const markDispatch = async () => calls.push('dispatch-pointer');
-  await runtime.openSession('s', 'w', getGrant, emit, markDispatch, true, resolver);
+  const reopen = () => runtime.openSession('s', 'w', getGrant, emit, markDispatch, true, resolver);
+  await reopen();
   await opened;
   if (target?.backend === 'roost') runtime.startAcceptedInputs({
     accountId: 'u', workspaceId: 'w', getGrant, emit, markDispatch, resolveTarget: () => resolver,
@@ -74,7 +82,7 @@ async function fixture({ failAt, target, owner } = {}) {
       } } };
     },
   });
-  return { doc, calls, close() { runtime.stopSessions(); void runtime.stopAcceptedInputs(); doc.free(); delete globalThis.__androidStream; if (previousNavigator) Object.defineProperty(globalThis, 'navigator', previousNavigator); else delete globalThis.navigator; } };
+  return { doc, calls, reopen, close() { runtime.stopSessions(); void runtime.stopAcceptedInputs(); doc.free(); delete globalThis.__androidStream; if (previousNavigator) Object.defineProperty(globalThis, 'navigator', previousNavigator); else delete globalThis.navigator; } };
 }
 
 for (const [failure, expected] of [[undefined, 'accepted'], ['history', 'unknown'], ['rpc', 'uploaded']]) {
@@ -89,6 +97,80 @@ for (const [failure, expected] of [[undefined, 'accepted'], ['history', 'unknown
     } finally { f.close(); }
   });
 }
+
+test('Android Roost waits for control-stream recovery even after owner history catches up', { timeout: 8_000 }, async (t) => {
+  const blocked = Promise.withResolvers();
+  const recovered = Promise.withResolvers();
+  const retrying = Promise.withResolvers();
+  const historyWatch = Promise.withResolvers();
+  const synced = Promise.withResolvers();
+  let polls = 0, revision = 1, controlUnavailable = false, latest;
+  const earlySync = [];
+  const turn = () => ({
+    id: 'assistant-1', role: 'assistant', timestamp: '2026-01-01T00:00:00Z',
+    items: [{ type: 'text', text: 'Synthetic reply' }], finished: revision === 2,
+  });
+  const f = await fixture({
+    target: { backend: 'roost', machineId: 'm' },
+    readControl: () => [blocked, recovered][polls++]?.promise,
+    observe(event) {
+      if (event.type !== 'session') return;
+      latest = JSON.parse(event.session);
+      if (controlUnavailable) {
+        if (event.synced) earlySync.push(latest.status);
+        if (latest.status === 'syncing' && latest.reason === 'network_error') retrying.resolve();
+      } else if (event.synced && latest.entries[0]?.finished) {
+        synced.resolve();
+      }
+    },
+    async owner(request, signal) {
+      const { query } = await runtime.openPayload(request.params);
+      let result, pageTurns;
+      if (query.kind === 'watchChanges') {
+        const reply = Promise.withResolvers();
+        signal.addEventListener('abort', () => reply.reject(signal.reason), { once: true });
+        if (query.checkpoint === 'c1') historyWatch.resolve(reply.resolve);
+        result = await reply.promise;
+      } else {
+        result = {
+          checkpoint: `c${revision}`, startPosition: 0, totalCount: 1,
+          rows: [{ position: 0, state: 'ready', turnId: 'assistant-1' }],
+          hasMoreOlder: false, cursor: null,
+        };
+        pageTurns = [turn()];
+      }
+      return { result: await runtime.sealPayload('s', {
+        type: 'session/history-read_response', sessionId: 's', success: true,
+        historyRevision: revision, historyCount: 1, result, pageTurns,
+      }) };
+    },
+  });
+  t.after(() => {
+    recovered.resolve({ ok: false, result: { code: 'cancelled' } });
+    f.close();
+  });
+  assert.equal(latest.entries[0].finished, false);
+  controlUnavailable = true;
+  blocked.resolve({ ok: false, result: { code: 'network_error' } });
+  await retrying.promise;
+  revision = 2;
+  (await historyWatch.promise)({
+    state: 'ready', checkpoint: 'c2', ids: ['assistant-1'],
+    bodies: { changed: [turn()], suffix: [] },
+  });
+  // Reopening the retained session exposes its snapshot while the retry is held.
+  do {
+    t.signal.throwIfAborted();
+    await new Promise((resolve) => setImmediate(resolve));
+    await f.reopen();
+  } while (!latest.entries[0]?.finished);
+  assert.equal(latest.status, 'syncing');
+  assert.deepEqual(earlySync, []);
+  controlUnavailable = false;
+  recovered.resolve(ok({ nextOffset: '2', upToDate: true, closed: false }));
+  await synced.promise;
+  assert.equal(latest.status, 'live');
+});
 
 test('Android snapshot opens a Roost session and writes input through the owner', async () => {
   const operations = [];

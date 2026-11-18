@@ -40,12 +40,13 @@ unchanged.
 
 ## Implementation and limits
 
-Only builtin DSH, selected from Session metadata, enables the separate-thought
-layout. A thought/tool boundary flushes the current activity group, preserving
+This layout first applied only to builtin DSH, selected from Session metadata.
+Since 2026-11-16 every provider uses it and the provider policy is removed; see the
+[thought-visibility Spec](../../../../specs/deepseek-thought-visibility.md). A thought/tool boundary flushes the current activity group, preserving
 keys when tools arrive. Thought and tool groups default closed; explicit toggles
 and search reveals retain their existing behavior. Completed work uses the shared
 outer fold and preserves the original order when expanded. Duration follows the
-shared header/footer policy. Both layout and row caches include the provider policy; other providers retain their previous behavior.
+shared header/footer policy.
 
 The separate disclosure retains access to thought prose without displaying it by
 default. No stored types or provider transport changed. Live ordinary text still waits for each committed message;

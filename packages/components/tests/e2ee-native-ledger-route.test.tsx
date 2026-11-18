@@ -1208,7 +1208,7 @@ it('waits for the current key after account pairing joins this device, and opens
     writeEpoch: keyInstalled ? 0 : null,
     hasDeviceCredential: true,
   });
-  const keyRefreshes: Array<{ installKeys?: boolean } | undefined> = [];
+  const keyRefreshes: Array<{ keyMode?: string } | undefined> = [];
   let installKey!: () => void;
   const keyInstall = new Promise<void>((resolve) => {
     installKey = resolve;
@@ -1219,9 +1219,9 @@ it('waits for the current key after account pairing joins this device, and opens
         throw new Error("Error invoking remote method 'e2ee.open': Error: e2ee_missing-binding");
       return status();
     },
-    refresh: async (_: string, options?: { installKeys?: boolean }) => {
+    refresh: async (_: string, options?: { keyMode?: string }) => {
       keyRefreshes.push(options);
-      if (options?.installKeys !== true)
+      if (options?.keyMode !== 'receive' && options?.keyMode !== 'full')
         throw new Error('native key installation was not requested');
       await keyInstall;
       keyInstalled = true;
@@ -1252,7 +1252,7 @@ it('waits for the current key after account pairing joins this device, and opens
   await act(async () => root.render(createElement(Component)));
   await act(async () => {});
   expect(fixture.navigation).toEqual([]);
-  expect(keyRefreshes).toEqual([{ installKeys: true, keyMode: 'receive' }]);
+  expect(keyRefreshes).toEqual([{ keyMode: 'receive' }]);
   await act(async () => installKey());
   await act(async () => {});
   expect(fixture.navigation).toEqual([
@@ -1292,8 +1292,9 @@ it.each(['held-native-round', 'late-key-notification'])(
         throw new PersonalHostError({ code: 'unsupported' });
       },
       close: async () => {},
-      refresh: async (_id: string, options?: { installKeys?: boolean }) => {
-        if (options?.installKeys !== true) throw new Error('keys were not requested');
+      refresh: async (_id: string, options?: { keyMode?: string }) => {
+        if (options?.keyMode !== 'receive' && options?.keyMode !== 'full')
+          throw new Error('keys were not requested');
         if (mode === 'held-native-round') {
           await key.promise;
           installed = true;
@@ -1342,7 +1343,7 @@ it.each(['held-native-round', 'late-key-notification'])(
   }
 );
 
-const keyRequestPort = (refresh: (options?: { installKeys?: boolean }) => Promise<void>) => {
+const keyRequestPort = (refresh: (options?: { keyMode?: string }) => Promise<void>) => {
   fixture.workspaces = {
     status: 'ready',
     activeWorkspaceId: workspaceId,
@@ -1363,7 +1364,7 @@ const keyRequestPort = (refresh: (options?: { installKeys?: boolean }) => Promis
         throw new Error("Error invoking remote method 'e2ee.open': Error: e2ee_missing-binding");
       return status();
     },
-    refresh: async (_: string, options?: { installKeys?: boolean }) => {
+    refresh: async (_: string, options?: { keyMode?: string }) => {
       await refresh(options);
       keyInstalled = true;
       return status();
@@ -1464,16 +1465,16 @@ it('asks for the key once across a remount of the same account and workspace, th
   const Component = Route.options.component as () => ReturnType<typeof createElement>;
   await act(async () => root.render(createElement(Component)));
   await act(async () => {});
-  expect(keyRefreshes).toEqual([{ installKeys: true, keyMode: 'receive' }]);
+  expect(keyRefreshes).toEqual([{ keyMode: 'receive' }]);
   await act(async () => root.unmount());
   root = createRoot(container);
   await act(async () => root.render(createElement(Component)));
   await act(async () => {});
-  expect(keyRefreshes).toEqual([{ installKeys: true, keyMode: 'receive' }]);
+  expect(keyRefreshes).toEqual([{ keyMode: 'receive' }]);
   expect(fixture.navigation).toEqual([]);
   await act(async () => keyInstall.resolve());
   await act(async () => {});
-  expect(keyRefreshes).toEqual([{ installKeys: true, keyMode: 'receive' }]);
+  expect(keyRefreshes).toEqual([{ keyMode: 'receive' }]);
   expect(fixture.navigation).toEqual([
     { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
   ]);
@@ -2319,8 +2320,9 @@ it('renders automatic pairing before public describe/history settle and retries 
                 workspaces: [{ workspaceId, name: 'Protected', state: 'joined' }],
               }
             : null,
-        refresh: async (_id: string, options?: { installKeys?: boolean }) => {
-          if (options?.installKeys !== true) throw new Error('expected installKeys');
+        refresh: async (_id: string, options?: { keyMode?: string }) => {
+          if (options?.keyMode !== 'receive' && options?.keyMode !== 'full')
+            throw new Error('expected a key round');
           refreshCount += 1;
           // First mailbox check arrives 100ms before desktop finishes uploading the key; second succeeds.
           if (refreshCount >= 2) keyInstalled = true;

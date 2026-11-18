@@ -100,3 +100,14 @@ export const MultiLine: Story = {
     sessionId,
   },
 };
+
+/** The agent process ended while it still reported background work after its Turn. */
+export const NativeWorkInterrupted: Story = {
+  args: {
+    message: warningMessage(
+      'The agent process ended while it still reported background work.',
+      'nativeWorkInterrupted'
+    ),
+    sessionId,
+  },
+};

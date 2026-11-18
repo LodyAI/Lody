@@ -75,8 +75,6 @@ server.
    their delivery IDs and rejected-digest entries, but do not consume the new
    revision quota. Exact retries do not change an envelope's revision. Refuse
    the 17th distinct frame in the current revision.
-   The SQLite reference host adds a revision column to existing databases;
-   legacy envelopes retain revision zero because their delivery round is unknown.
 
 **`read(id)`** — return the frame the principal stored under `id` for the
 current epoch, or nothing.

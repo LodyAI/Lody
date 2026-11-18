@@ -46,6 +46,8 @@ Read parent rules and linked context.
   `getExecutableHtmlPreviewSupport()` plus `scriptsOptedIn` via
   `useManagedPreviewFrame` only (see sessions-browser.md); else use
   navigation-stripped HTML with an empty sandbox.
+  The only other executable frame is the consented desktop direct preview in
+  `local-html-preview.tsx` (same doc).
   Never preview truncated text; static frames die with their tab.
 - Encrypted remote preview controls require the existing protected feature host
   and verified write role; never fall back to ordinary preview proofs. Explain

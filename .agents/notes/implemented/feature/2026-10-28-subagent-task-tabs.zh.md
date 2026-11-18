@@ -11,8 +11,8 @@ Translation: current
 
 ## 分类
 
-`taskKind` 不标记 agent 还是命令：Claude 生命周期适配器
-（`apps/cli/src/agent/claude-task-lifecycle.ts`）对任何进入后台的运行（包括后台
+`taskKind` 不标记 agent 还是命令：Claude adapter 的 `_meta.lody.task.kind`
+（`packages/acp-extension-claude/src/acp-agent.ts`，由 `parseLodyTaskMeta` 读取）对任何进入后台的运行（包括后台
 agent）都发布 `background`，其余一律发布 `subagent`（包括前台 shell 任务）。因此
 `subagent-task-state.tsx` 中的 `groupOf` 在以下情况把任务归入“任务”：`taskKind`
 为 `scheduled`，或 `taskType`（来自 Core 元数据时为 `actor`）是 `local_bash`、

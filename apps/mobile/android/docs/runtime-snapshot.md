@@ -46,6 +46,9 @@ have accepted it. The native transcript opens at the latest page and requests
 older pages when needed. The Android runtime test exercises the bundled production
 session module with a synthetic Streams peer.
 
+Roost reports a live session after both the control stream and owner history
+are ready. A failed read only clears its own reader's readiness until it recovers.
+
 Roost proposal decisions write the outcome through the owner's shared
 `replaceTurn` command, as on Web. The Loro path continues to append the notice
 update to its session document.

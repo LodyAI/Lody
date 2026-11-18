@@ -30,6 +30,8 @@ const { getLoroSyncDiagnostic } = createLoroSyncErrorTools({ RepoSyncError, Repo
 
 export type WorkspaceStreamsTransportOptions = {
   repo: LoroRepo;
+  /** Runtime-owned budget identity; never contains or shares a replica cursor. */
+  incompleteRecoveryScope?: object;
   workspaceId: WorkspaceId;
   /**
    * LoroDoc room cursors only. Meta and named Flock progress is replica-bound:
@@ -57,6 +59,19 @@ export const getWorkspaceMetaStreamUrl = (
     baseUrl: streamsBaseUrl,
   });
 
+/** The document URL built from the same bucket and room mapping as the transport. */
+export const getWorkspaceDocStreamUrl = (
+  workspaceId: WorkspaceId,
+  docId: string,
+  streamsBaseUrl: string,
+  bucketId: string = LORO_STREAMS_BUCKET_ID
+): string =>
+  createLoroStreamUrl({
+    bucketId,
+    streamId: getLoroStreamIdForDocId(workspaceId, docId),
+    baseUrl: streamsBaseUrl,
+  });
+
 /** The renderer's durable Streams transport for one workspace repo. */
 export const createWorkspaceStreamsTransport = (
   options: WorkspaceStreamsTransportOptions
@@ -80,6 +95,7 @@ export const createWorkspaceStreamsTransport = (
   }
 
   return new StreamsTransportAdapter({
+    incompleteRecoveryScope: options.incompleteRecoveryScope,
     diagnostics: (event) => {
       const diagnostic = getLoroSyncDiagnostic(event);
       if (diagnostic) {

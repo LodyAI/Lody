@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyScheduleRecurrence,
   changeScheduleRecurrenceKind,
+  nextScheduleSlot,
   previewSchedule,
   recurrenceToTrigger,
   triggerToRecurrence,
@@ -56,6 +57,20 @@ describe('recurrence ⇄ trigger mapping', () => {
       kind: 'interval',
       everyMs: 5 * 3_600_000,
     });
+  });
+
+  it('keeps a stored step longer than any client can carry, and never plans past the Date range', () => {
+    const anchorAt = new Date(NOW).toISOString();
+    const largest = { kind: 'interval', everyMs: 2_147_483_647 * 3_600_000, anchorAt } as const;
+    expect(triggerToRecurrence(largest)).toMatchObject({ kind: 'hours', every: 2_147_483_647 });
+    // A legacy JSON trigger may store more; it stays read-only rather than overflowing `every`.
+    const longer = { kind: 'interval', everyMs: 2_147_483_648 * 3_600_000, anchorAt } as const;
+    expect(triggerToRecurrence(longer)).toEqual({ kind: 'unsupported', trigger: longer });
+    expect(applyScheduleRecurrence(triggerToRecurrence(longer), NOW, longer)).toBe(longer);
+    expect(nextScheduleSlot(largest, NOW, NOW)).toBe(NOW + 2_147_483_647 * 3_600_000);
+    const beyond = { kind: 'interval', everyMs: 8_640_000_000_000_000, anchorAt } as const;
+    expect(nextScheduleSlot(beyond, NOW, NOW)).toBeUndefined();
+    expect(previewSchedule(beyond, NOW, NOW)).toEqual([]);
   });
 });
 

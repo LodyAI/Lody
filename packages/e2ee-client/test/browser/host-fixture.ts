@@ -2396,11 +2396,11 @@ export async function runtimeInvoke(action: string) {
         value = await runtime.refresh(offer.workspaceId);
         break;
       case 'receive':
-        value = await runtime.refresh(offer.workspaceId, { installKeys: true });
+        value = await runtime.refresh(offer.workspaceId, { keyMode: 'full' });
         break;
       case 'keyFailure':
         failMailbox = true;
-        value = await runtime.refresh(offer.workspaceId, { installKeys: true });
+        value = await runtime.refresh(offer.workspaceId, { keyMode: 'full' });
         break;
       case 'ledger':
         value = await runtime.ledgerView(offer.workspaceId);
@@ -2462,10 +2462,10 @@ export async function runtimeInvoke(action: string) {
         };
         break;
       case 'grant':
-        value = await runtime.contentStreamsToken(offer.workspaceId, 'rejected-exact', 'doc:1');
+        value = await runtime.contentStreamsToken(offer.workspaceId, 'rejected-exact');
         break;
       case 'rpcGrant':
-        value = await runtime.contentStreamsToken(offer.workspaceId, undefined, undefined, true);
+        value = await runtime.contentStreamsToken(offer.workspaceId, undefined, true);
         break;
       case 'badGrant':
         badToken = true;
@@ -2579,7 +2579,7 @@ export async function runtimeInvoke(action: string) {
         break;
       }
       case 'receiveOnly':
-        value = await runtime.refresh(offer.workspaceId, { installKeys: true, keyMode: 'receive' });
+        value = await runtime.refresh(offer.workspaceId, { keyMode: 'receive' });
         break;
       case 'openBody': {
         const saved = JSON.parse(localStorage.getItem('runtime-sealed')!);
@@ -2855,7 +2855,7 @@ export async function runtimeInvoke(action: string) {
         break;
 
       case 'startReceive':
-        runtimeWork = runtime.refresh(offer.workspaceId, { installKeys: true }).then(
+        runtimeWork = runtime.refresh(offer.workspaceId, { keyMode: 'full' }).then(
           (v) => ({ ok: true, value: v }),
           (error) => ({ ok: false, reason: error.code ?? error.reason })
         );

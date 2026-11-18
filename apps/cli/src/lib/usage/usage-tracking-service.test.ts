@@ -93,7 +93,6 @@ describe('usage delivery', () => {
       const event = parseLodyExtensionMessage({
         method: LODY_EXTENSION_METHODS.sessionUsageUpdate,
         sessionId: 'native',
-        provider: 'claude',
         params: {
           sessionId: 'native',
           usage,

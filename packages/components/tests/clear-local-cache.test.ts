@@ -149,6 +149,7 @@ describe('maybeClearLodyCacheOnBoot', () => {
     await maybeClearLodyCacheOnBoot();
 
     expect(deletedDatabases).toContain('lody:repo-file-paths');
+    expect(deletedDatabases).toContain('lody:eager-sync-admission-v1');
     expect(deletedDatabases).toContain('lody-loro-repo-db-ws1');
     expect(deletedDatabases).not.toContain('someone-elses-db');
     expect(deletedCaches).toEqual(['lody-avatars']);

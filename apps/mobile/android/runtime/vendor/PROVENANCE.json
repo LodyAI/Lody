@@ -188,5 +188,25 @@
       "src/runtime/handlers/schedules.ts"
     ],
     "note": "creationOptions accepts includeOffline for schedule targets: every readable machine's agents, online or not, as on Web; new chats keep online-only agents. The schedules list reads ownedMachineIds and clocks from workspace metadata as well as synced machine streams. Mirrored verbatim from the reviewed iOS source commit; transcript windowing in project.ts and session.ts stays out of the snapshot, and dependencies and licenses are unchanged."
+  },
+  "archiveWithoutMachineQueue": {
+    "files": [
+      "src/runtime/archive-session.ts"
+    ],
+    "note": "Archiving no longer writes the machine meta needToArchiveSessions queue, which daemons have discarded since #620 reconciled archived worktrees from session state. Mirrored verbatim from the iOS source in the same change; dependencies and licenses are unchanged."
+  },
+  "roostReadiness": {
+    "commit": "2d7411c58510a4caadf01a2d6e180c5569de761d",
+    "files": [
+      "src/runtime/session.ts"
+    ],
+    "note": "Mirrors the iOS Roost readiness change. A failed control-stream or owner-history read clears that reader's readiness until it recovers. Unrelated iOS session changes stay outside this snapshot."
+  },
+  "scheduleCustomSteps": {
+    "files": [
+      "src/protocol/proposals.ts",
+      "src/protocol/schedules.ts"
+    ],
+    "note": "Agent schedule proposals and the editor accept any whole minute or hour step up to 2147483647 (the 32-bit Int the Android rule model carries), as on Web, instead of dropping a proposal card whose step exceeds 59 minutes or 23 hours. A stored interval longer than that reads as unsupported rather than overflowing. Mirrored verbatim from the iOS source in the same change; dependencies and licenses are unchanged."
   }
 }

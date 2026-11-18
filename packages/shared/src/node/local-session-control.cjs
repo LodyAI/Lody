@@ -666,16 +666,6 @@ function isLocalSessionControlRequest(value) {
     );
   }
 
-  if (value.type === 'session/code-collab-host-start') {
-    return (
-      typeof value.machineId === 'string' &&
-      typeof value.workspaceId === 'string' &&
-      typeof value.sessionId === 'string' &&
-      typeof value.requestedByUserId === 'string' &&
-      value.requestedByUserId.trim().length > 0
-    );
-  }
-
   if (value.type === 'session/image-upload') {
     return (
       typeof value.machineId === 'string' &&
@@ -1123,21 +1113,6 @@ function isLocalSessionControlResponse(value) {
       isOptionalString(value.modelName) &&
       isOptionalPositiveInteger(value.modelIndex) &&
       isOptionalPositiveInteger(value.modelCount)
-    );
-  }
-
-  if (value.type === 'session/code-collab-host-start_response') {
-    return (
-      typeof value.sessionId === 'string' &&
-      typeof value.success === 'boolean' &&
-      (typeof value.status === 'undefined' ||
-        value.status === 'started' ||
-        value.status === 'already-running' ||
-        value.status === 'disabled' ||
-        value.status === 'failed' ||
-        value.status === 'stopped') &&
-      isOptionalString(value.error) &&
-      isOptionalString(value.message)
     );
   }
 

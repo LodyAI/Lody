@@ -21,7 +21,6 @@ const freeOverview: BillingOverviewData = {
   effectivePlanTier: 'free',
   entitlementSource: 'free',
   offerKey: null,
-  yearlyEarlyBirdEligible: false,
   promotionalEntitlementEndsAt: null,
   giftStartsAt: null,
   giftEndsAt: null,

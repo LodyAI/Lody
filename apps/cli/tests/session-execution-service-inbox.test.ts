@@ -44,6 +44,75 @@ vi.hoisted(() => {
   process.env.LODY_E2E = '1';
 });
 describe('Operation Inbox execution boundary', () => {
+  it('lets the Agent continuing after its turn act for that turn until Stop', async () => {
+    const f = inboxExecutionFixture(async () => ({ stopReason: 'end_turn' }));
+    const sessionId = f.message.sessionId;
+    try {
+      await f.accept();
+      await f.service.continueSession(f.message);
+      expect(f.service.getExecutionSnapshot(sessionId).hasActiveTurn).toBe(false);
+
+      // Woken by its own background task, the Agent's tool calls act for the finished
+      // turn without reporting any activity of its own (Codex reports none).
+      expect(f.service.getActiveInvocationContext(sessionId)).toMatchObject({
+        requesterUserId: 'user-1',
+        sourceTurnId: 'human-input',
+      });
+
+      await f.service.cancelSession({
+        type: 'session/cancel',
+        sessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        turnId: 'assistant:human-input',
+      });
+      expect(f.service.getActiveInvocationContext(sessionId)).toBeUndefined();
+    } finally {
+      await f.close();
+    }
+  });
+
+  it('gives no authority to a replaced Agent or to work after a cancelled turn', async () => {
+    const finished = inboxExecutionFixture(async () => ({ stopReason: 'end_turn' }));
+    try {
+      await finished.accept();
+      await finished.service.continueSession(finished.message);
+      finished.dropLiveSession();
+      expect(
+        finished.service.getActiveInvocationContext(finished.message.sessionId)
+      ).toBeUndefined();
+    } finally {
+      await finished.close();
+    }
+
+    const started = createDeferred<void>();
+    const answer = createDeferred<{ stopReason: string }>();
+    const cancelled = inboxExecutionFixture(async () => {
+      started.resolve();
+      return await answer.promise;
+    });
+    const sessionId = cancelled.message.sessionId;
+    try {
+      await cancelled.accept();
+      const run = cancelled.service.continueSession(cancelled.message);
+      await started.promise;
+      const turnId = cancelled.service.getExecutionSnapshot(sessionId).activeTurnId;
+      expect(turnId).toBeDefined();
+      const stop = cancelled.service.cancelSession({
+        type: 'session/cancel',
+        sessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        turnId: turnId ?? '',
+      });
+      answer.resolve({ stopReason: 'cancelled' });
+      await Promise.all([stop, run]);
+      expect(cancelled.service.getActiveInvocationContext(sessionId)).toBeUndefined();
+    } finally {
+      await cancelled.close();
+    }
+  });
+
   it('continues actual work when notification provenance cannot be read', async () => {
     const prompt = vi.fn(async () => ({ stopReason: 'end_turn' }));
     const f = inboxExecutionFixture(prompt);

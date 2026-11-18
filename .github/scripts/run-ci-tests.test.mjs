@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { main, planCiTests, REST_PACKAGE_DIRS, TEST_GROUPS } from './run-ci-tests.mjs';
+import { relatedTestFiles } from './related-test-files.mjs';
 
 const affected = (testPackages) => ({ mode: 'affected', runTests: true, testPackages });
 
@@ -103,6 +104,64 @@ void test('affected rest group filters to its own listed packages via single-boo
   assert.ok(!plan[1].includes('lody'));
 });
 
+void test('a pull request touching only importable modules runs only Vitest tests that import them', () => {
+  const changed = 'packages/shared/src/value.ts';
+  const scope = { ...affected(['@lody/shared', '@lody/components', '@lody/electron']) };
+  assert.deepEqual(planCiTests({ scope, group: 'components', shard: '1/2', related: [changed] }), [
+    [
+      '--filter',
+      '@lody/components',
+      'exec',
+      'vitest',
+      'related',
+      '--run',
+      '--passWithNoTests',
+      '--maxWorkers=4',
+      '--shard=1/2',
+      '../shared/src/value.ts',
+    ],
+  ]);
+  assert.deepEqual(planCiTests({ scope, group: 'rest', related: [changed] }), [
+    ['test:rest:related', '--passWithNoTests', '--maxWorkers=4', '--project=shared:*', changed],
+    // Electron's node:test suites have no import-graph selection and stay whole.
+    ['--filter', '@lody/electron', 'run', 'test'],
+  ]);
+  // A full run never narrows, even if a caller passes related files.
+  assert.deepEqual(planCiTests({ scope: null, group: 'cli', related: [changed] }), [
+    ['--filter', 'lody', 'run', 'test', '--maxWorkers=4'],
+  ]);
+});
+
+void test('changes Vitest cannot trace through imports keep whole package suites', () => {
+  const exists = () => true;
+  const scopeFor = (changedFiles, mode = 'affected') => ({ mode, changedFiles });
+  assert.deepEqual(
+    relatedTestFiles(scopeFor(['apps/cli/src/a.ts', 'apps/cli/tests/b.test.ts', 'README.md']), {
+      exists,
+    }),
+    ['apps/cli/src/a.ts', 'apps/cli/tests/b.test.ts']
+  );
+  for (const untraceable of [
+    'apps/cli/vitest.config.ts',
+    'apps/cli/tests/vitest-setup.ts',
+    'packages/components/tests/fixtures/data.ts',
+    'packages/components/src/__mocks__/x.ts',
+    'packages/components/src/styles.css',
+    'packages/shared/package.json',
+    'scripts/helper.mjs',
+  ]) {
+    assert.equal(
+      relatedTestFiles(scopeFor(['apps/cli/src/a.ts', untraceable]), { exists }),
+      null,
+      untraceable
+    );
+  }
+  // A deleted module's former importers are invisible to the graph.
+  assert.equal(relatedTestFiles(scopeFor(['apps/cli/src/a.ts']), { exists: () => false }), null);
+  // Only an affected pull-request scope may narrow.
+  assert.equal(relatedTestFiles(scopeFor(['apps/cli/src/a.ts'], 'full'), { exists }), null);
+});
+
 void test('skip-tests scope runs nothing; empty affected list fails open to full', () => {
   const skip = { mode: 'skip-tests', runTests: false, testPackages: [] };
   for (const group of TEST_GROUPS) assert.deepEqual(planCiTests({ scope: skip, group }), []);
@@ -144,10 +203,9 @@ void test('test group planning boots in a fresh checkout before dependency insta
   try {
     mkdirSync(join(root, '.github/scripts'), { recursive: true });
     mkdirSync(join(root, 'scripts'));
-    copyFileSync(
-      new URL('./run-ci-tests.mjs', import.meta.url),
-      join(root, '.github/scripts/run-ci-tests.mjs')
-    );
+    for (const file of ['run-ci-tests.mjs', 'related-test-files.mjs']) {
+      copyFileSync(new URL(`./${file}`, import.meta.url), join(root, '.github/scripts', file));
+    }
     copyFileSync(
       new URL('../../scripts/vitest-rest.config.mjs', import.meta.url),
       join(root, 'scripts/vitest-rest.config.mjs')

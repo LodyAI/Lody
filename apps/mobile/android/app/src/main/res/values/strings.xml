@@ -374,7 +374,7 @@
     <string name="files_error_folder">Could not read this folder. The computer may be offline.</string>
     <string name="files_empty_folder">This folder is empty.</string>
     <string name="files_truncated">Only the first 2,000 items are shown.</string>
-    <string name="files_markdown_only">Only Markdown files can be previewed for now.</string>
+    <string name="files_markdown_only">Only Markdown and HTML files can be previewed for now.</string>
     <string name="files_error_too_large">This file is too large to preview.</string>
     <string name="files_error_not_found">This file no longer exists.</string>
     <string name="files_error_permission">The computer does not allow reading this file.</string>

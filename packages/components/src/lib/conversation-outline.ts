@@ -57,7 +57,7 @@ export const SUMMARY_SOURCE_WINDOW = 960;
  * a scheduled run or a fork — is not a turn the user drove, so it does not
  * count toward the threshold; see {@link countUserDrivenRounds}.
  */
-export const OUTLINE_MIN_USER_ROUNDS = 10;
+export const OUTLINE_MIN_USER_ROUNDS = 4;
 
 /**
  * Buckets for the tick width. A round's visual weight tracks how much was said

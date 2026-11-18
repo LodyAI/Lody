@@ -15,7 +15,9 @@ export function composerText(composer: Locator): Promise<string> {
         if (node instanceof HTMLBRElement) {
           if (!node.hasAttribute('data-lexical-managed-linebreak')) text += '\n';
         } else {
-          text += node.textContent ?? '';
+          const mention =
+            node instanceof Element ? node.querySelector('[data-mention-text]') : null;
+          text += mention?.getAttribute('data-mention-text') ?? node.textContent ?? '';
         }
       });
     });

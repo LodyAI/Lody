@@ -131,6 +131,7 @@ import {
   sidebarLastWidthAtom,
   sidebarOrganizeModeAtom,
   sidebarProjectViewAtom,
+  sidebarHideEmptyProjectsAtom,
   sidebarShowBranchNamesAtom,
   sidebarUpdatedShowProjectNamesAtom,
   sidebarUpdatedBucketCollapseStateAtom,
@@ -177,7 +178,10 @@ import {
   type SessionListRow,
 } from '@/components/session-list';
 import { projectEditorRequestAtom } from '@/atoms/project-editor';
-import { placeProjectGroups } from '@/lib/project-group-placement';
+import {
+  placeProjectGroups,
+  selectVisibleLocalProjectSections,
+} from '@/lib/project-group-placement';
 import {
   buildChildSessionsByParent,
   buildSessionListRows,
@@ -1810,6 +1814,7 @@ export function LoroAppSidebar({
     sidebarUpdatedShowProjectNamesAtom
   );
   const [showBranchNames, setShowBranchNames] = useAtom(sidebarShowBranchNamesAtom);
+  const [hideEmptyProjects, setHideEmptyProjects] = useAtom(sidebarHideEmptyProjectsAtom);
   const setSidebarCollapsed = useSetAtom(sidebarCollapsedAtom);
   const [sidebarLastWidth, setSidebarLastWidth] = useAtom(sidebarLastWidthAtom);
   const handleChatScopeChanged = useCallback(
@@ -1844,6 +1849,16 @@ export function LoroAppSidebar({
       setShowBranchNames(next);
     },
     [postHog, setShowBranchNames]
+  );
+  const handleHideEmptyProjectsChange = useCallback(
+    (next: boolean) => {
+      capturePostHogEvent(postHog, 'settings/changed', {
+        key: 'sidebar_hide_empty_projects',
+        value: next,
+      });
+      setHideEmptyProjects(next);
+    },
+    [postHog, setHideEmptyProjects]
   );
   const sessionSidebarCodeChangesOnly = useAtomValue(sessionSidebarCodeChangesOnlyAtom);
   const { archiveSession, markSessionUnread, setSessionPinned, updateSessionTitle } =
@@ -2870,6 +2885,7 @@ export function LoroAppSidebar({
       detailsHeading: t('sidebar.filter.detailsHeading', 'Details'),
       updatedProjectNames: t('sidebar.filter.updatedProjectNames', 'Show Project'),
       showBranchNames: t('sidebar.filter.showBranchNames', 'Show Branch'),
+      hideEmptyProjects: t('sidebar.filter.hideEmptyProjects', 'Hide Empty Projects'),
       showMyTasks: t('sessions.sidebar.my', 'My Tasks'),
       showAllTasks: t('sessions.sidebar.team', 'All Tasks'),
       emptyMyTasks: t('sidebar.filter.emptyMyTasks', 'No tasks match this view'),
@@ -2903,6 +2919,8 @@ export function LoroAppSidebar({
       onShowUpdatedProjectNamesChange={handleShowUpdatedProjectNamesChange}
       showBranchNames={showBranchNames}
       onShowBranchNamesChange={handleShowBranchNamesChange}
+      hideEmptyProjects={hideEmptyProjects}
+      onHideEmptyProjectsChange={handleHideEmptyProjectsChange}
       labels={filterLabels}
       open={sidebarFilterOpen}
       onOpenChange={setSidebarFilterOpen}
@@ -2956,7 +2974,7 @@ export function LoroAppSidebar({
       projectGroupSessions.map((session) => session.projectGroup?.id)
     );
     const defined = workspaceProjects
-      .filter((project) => activeProjectIds.has(project.id))
+      .filter((project) => !hideEmptyProjects || activeProjectIds.has(project.id))
       .map((project, index) => ({ project, index }))
       .sort(
         (left, right) =>
@@ -2986,7 +3004,14 @@ export function LoroAppSidebar({
       ...defined,
       ...[...removed.values()].sort((left, right) => left.name.localeCompare(right.name)),
     ];
-  }, [projectGroupOrder, projectGroupSessions, repoCollapseState, userId, workspaceProjects]);
+  }, [
+    hideEmptyProjects,
+    projectGroupOrder,
+    projectGroupSessions,
+    repoCollapseState,
+    userId,
+    workspaceProjects,
+  ]);
   const projectGroupPlacement = useMemo(
     () =>
       placeProjectGroups({
@@ -3131,24 +3156,23 @@ export function LoroAppSidebar({
 
   // Filter after pinned trees and opened-by placement have assigned each row
   // its final group. Keep the catalog above for Updated/Pinned and saved order.
+  // With "Hide Empty Projects" off, every catalog project stays listed.
   const localProjectSections = useMemo(
     () =>
-      catalogLocalProjectSections
-        .map((section) => ({
-          ...section,
-          projects: section.projects.filter(
-            (project) =>
-              (workspaceLocalProjectSessionsByKey.get(`${section.machineId}:${project.id}`)
-                ?.length ?? 0) > 0
-          ),
-        }))
-        .filter(
-          (section) =>
-            section.projects.length > 0 ||
-            (section.machineId &&
-              (projectGroupPlacement.byMachine.get(section.machineId)?.sessions.length ?? 0) > 0)
-        ),
-    [catalogLocalProjectSections, projectGroupPlacement, workspaceLocalProjectSessionsByKey]
+      selectVisibleLocalProjectSections({
+        sections: catalogLocalProjectSections,
+        hideEmptyProjects,
+        sessionCountOf: (machineId, projectId) =>
+          workspaceLocalProjectSessionsByKey.get(`${machineId}:${projectId}`)?.length ?? 0,
+        projectGroupSessionCountOf: (machineId) =>
+          projectGroupPlacement.byMachine.get(machineId)?.sessions.length ?? 0,
+      }),
+    [
+      catalogLocalProjectSections,
+      hideEmptyProjects,
+      projectGroupPlacement,
+      workspaceLocalProjectSessionsByKey,
+    ]
   );
   const showGithubWorktrees =
     sessionsListLoading ||
@@ -4178,6 +4202,8 @@ export function LoroAppSidebar({
         onShowUpdatedProjectNamesChange={handleShowUpdatedProjectNamesChange}
         showBranchNames={showBranchNames}
         onShowBranchNamesChange={handleShowBranchNamesChange}
+        hideEmptyProjects={hideEmptyProjects}
+        onHideEmptyProjectsChange={handleHideEmptyProjectsChange}
         onChatScopeChange={handleChatScopeChanged}
         onSelectUpdatedItem={handleSelectUpdatedItem}
         onTogglePinnedSection={handleTogglePinnedSection}

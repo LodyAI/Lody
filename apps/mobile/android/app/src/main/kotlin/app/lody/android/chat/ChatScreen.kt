@@ -658,15 +658,24 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
         )
     }
     val pullRequestPanel = bar?.pullRequest?.let(panelFor)
-    // Transcript links to a PR of this project (a multi-repository project's members included)
-    // open the PR panel; other links go to the browser. iOS `openPullRequestLink`.
+    // Transcript links to a file on the session's computer open its preview (Markdown and HTML
+    // for now, iOS `openMessageLink`); links to a PR of this project (a multi-repository project's
+    // members included) open the PR panel; other links go to the browser. iOS `openPullRequestLink`.
     val browser = androidx.compose.ui.platform.LocalUriHandler.current
     val repositories = context.repositories
-    val transcriptLinks = remember(browser, repositories) {
+    var previewFile by remember(id) { mutableStateOf<String?>(null) }
+    val markdownOnly = stringResource(R.string.files_markdown_only)
+    val transcriptLinks = remember(browser, repositories, markdownOnly) {
         object : androidx.compose.ui.platform.UriHandler {
             override fun openUri(uri: String) {
-                val link = PullRequestLink.inProject(uri, repositories)
-                if (link != null) linkedPullRequest = link else browser.openUri(uri)
+                val file = ChatFileLink.parse(uri)
+                val link = if (file == null) PullRequestLink.inProject(uri, repositories) else null
+                when {
+                    file != null && file.isPreviewable -> previewFile = file.path
+                    file != null -> coroutines.launch { snackbar.currentSnackbarData?.dismiss(); snackbar.showSnackbar(markdownOnly) }
+                    link != null -> linkedPullRequest = link
+                    else -> runCatching { browser.openUri(uri) }
+                }
             }
         }
     }
@@ -677,6 +686,15 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
         openExternal = { uri -> runCatching { browser.openUri(uri) } },
         onDismiss = { browsingFiles = false },
     )
+    previewFile?.let { path ->
+        ProjectFilesSheet(
+            listDir = { relative -> repository.listDir(scope, id, relative) },
+            readFile = { file -> repository.readFile(scope, id, file) },
+            openExternal = { uri -> runCatching { browser.openUri(uri) } },
+            onDismiss = { previewFile = null },
+            startFile = path,
+        )
+    }
     linkedPullRequest?.let { link ->
         val own = bar?.pullRequest?.takeIf { it.number == link.number && it.repository.equals(link.repository, ignoreCase = true) }
         if (bar != null && own != null) {
@@ -1051,9 +1069,9 @@ internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, clos
                     .semantics { contentDescription = title }) {
                     Icon(LodyIcons.Sessions, contentDescription = androidx.compose.ui.res.pluralStringResource(R.plurals.chat_directory_tabs, tabs.size, tabs.size), tint = colors.iconPrimary, modifier = Modifier.size(LodyIconSize.md))
                 }
-                if (tabs.any { !it.parentSessionId.isNullOrBlank() }) DirectoryTabs.attention(tabs.filter { it.id != currentId })?.let { attention ->
+                if (tabs.any { !it.parentSessionId.isNullOrBlank() } && DirectoryTabs.hasBackgroundUnread(tabs, currentId)) {
                     Box(Modifier.align(Alignment.BottomEnd).padding(end = LodySpacing.xs, bottom = LodySpacing.xs).size(LodyIconSize.xs + LodySpacing.xxs)
-                        .background(colors.bgOverlay, CircleShape), contentAlignment = Alignment.Center) { app.lody.android.home.AttentionGlyph(attention) }
+                        .background(colors.bgOverlay, CircleShape), contentAlignment = Alignment.Center) { app.lody.android.home.AttentionGlyph(app.lody.android.home.ChatAttention.Unread) }
                 }
                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = 420.dp)) {
                     ChatTabsMenu(tabs, closedTabs, currentId, creating, busy,

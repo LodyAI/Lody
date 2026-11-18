@@ -35,6 +35,36 @@ describe('PostHog provider options', () => {
     vi.unstubAllGlobals();
   });
 
+  it('retires boundary analytics and projects boundary exceptions in ordinary scopes too', () => {
+    expect(
+      runBeforeSend({
+        event: 'app/error_boundary_triggered',
+        properties: {
+          reason_code: 'SYNTHETIC_TOKEN',
+          error_fingerprint: 'SYNTHETIC_HASH',
+        },
+      })
+    ).toBeNull();
+    const projected = runBeforeSend({
+      event: '$exception',
+      properties: {
+        errorBoundary: 'SYNTHETIC_BOUNDARY',
+        error_type: 'SYNTHETIC_NAME',
+        error_code: 'SYNTHETIC_CODE',
+        componentStack: 'SYNTHETIC_STACK',
+        $exception_list: [{ type: 'SYNTHETIC_NAME', value: 'SYNTHETIC_MESSAGE' }],
+        $groups: { workspace: 'SYNTHETIC_WORKSPACE' },
+      },
+    });
+    expect(projected?.properties).toMatchObject({
+      source: 'errorBoundary',
+      error_type: 'unknown',
+      error_code: 'redacted_exception',
+      $exception_list: [{ type: 'Error', value: 'redacted_exception' }],
+    });
+    expect(JSON.stringify(projected)).not.toContain('SYNTHETIC_');
+  });
+
   it('keeps an encrypted approval private above ordinary workspaces until all actual surfaces retire', () => {
     let current = 'ordinary-A';
     const removeScope = installWorkspaceTelemetryScope(() => current);
@@ -90,6 +120,12 @@ describe('PostHog provider options', () => {
         distinct_id: undefined,
         $exception_list: [{ type: 'Error', value: 'e2ee_feature_unavailable' }],
         error_code: 'e2ee_feature_unavailable',
+        error_type: 'unknown',
+        source: 'unknown',
+        platform: 'web',
+        $lib: 'unknown',
+        $exception_fingerprint:
+          'lody-redacted-v1:web:web:unknown:unknown:unknown:e2ee_feature_unavailable',
       },
     });
   });
@@ -264,4 +300,147 @@ it('scrubs a queued replay URL contaminated after capture before it reaches the 
   expect(bodies[0]).not.toContain('QUEUED_CAPABILITY_SECRET');
   expect(bodies[0]).toContain('theme=dark');
   expect(bodies[0]).toContain('synthetic-project-key');
+});
+
+it('keeps restricted categories, source and version through deferred capture and repeated transport redaction', () => {
+  const bodies: unknown[] = [];
+  let scope: string | null = null;
+  const privacy = createPostHogPrivacy(() => scope);
+  const client = {
+    __loaded: false,
+    _send_request: (options: { data: unknown }) => bodies.push(options.data),
+  };
+  privacy.attach(client as never);
+  const emit = (
+    error: unknown,
+    extra: Record<string, unknown> = {},
+    version = '0.112.0-nightly.3'
+  ) => {
+    const prepared = privacy.prepareException([
+      error,
+      {
+        errorBoundary: 'PRIVATE_BOUNDARY',
+        path: '/PRIVATE_PATH',
+        ...extra,
+      },
+    ]);
+    expect(JSON.stringify(prepared)).not.toContain('PRIVATE_');
+    const event = privacy.beforeSend({
+      event: '$exception',
+      properties: {
+        ...(prepared[1] as Record<string, unknown>),
+        $exception_list: [
+          { type: 'Error', value: String(prepared[0]), stacktrace: 'PRIVATE_STACK' },
+        ],
+        platform: 'electron',
+        electron_process: 'renderer',
+        $lib: 'desktop',
+        app_version: version,
+        $lib_version: version,
+        $exception_fingerprint: 'PRIVATE_FINGERPRINT',
+      },
+    });
+    client._send_request({ data: [event] });
+    scope = 'ordinary';
+    privacy.sync();
+    scope = null;
+    client._send_request({ data: [event] });
+    return (bodies.at(-1) as Array<{ properties: Record<string, unknown> }>)[0]!.properties;
+  };
+  const type = emit(new TypeError('PRIVATE_TOKEN'));
+  const again = emit(new TypeError('PRIVATE_OTHER_TEXT'));
+  const nextVersion = emit(new TypeError('PRIVATE_TOKEN'), {}, '0.113.0');
+  const manual = emit(new TypeError('PRIVATE_TOKEN'), { errorBoundary: undefined });
+  const range = emit(new RangeError('PRIVATE_TOKEN'));
+  const forbidden = emit(new TypeError('PRIVATE_TOKEN'), { error_code: 'forbidden' });
+  expect(type).toMatchObject({
+    error_type: 'TypeError',
+    source: 'errorBoundary',
+    platform: 'electron',
+    electron_process: 'renderer',
+    app_version: '0.112.0-nightly.3',
+    $lib: 'desktop',
+  });
+  expect(type.$exception_fingerprint).toBe(again.$exception_fingerprint);
+  expect(type.$exception_fingerprint).toBe(nextVersion.$exception_fingerprint);
+  expect(nextVersion.app_version).toBe('0.113.0');
+  expect(type.$exception_fingerprint).not.toBe(manual.$exception_fingerprint);
+  expect(type.$exception_fingerprint).not.toBe(range.$exception_fingerprint);
+  expect(type.$exception_fingerprint).not.toBe(forbidden.$exception_fingerprint);
+  expect(bodies[0]).toEqual(bodies[1]);
+  expect(JSON.stringify(bodies)).not.toContain('PRIVATE_');
+});
+
+it('rejects unrecognized diagnostic fields and versions rather than hashing secret error text', () => {
+  const privacy = createPostHogPrivacy(() => null);
+  const result = privacy.beforeSend({
+    event: '$exception',
+    properties: {
+      $exception_list: [
+        { type: 'PRIVATE_TYPE', value: 'PRIVATE_MESSAGE', mechanism: { type: 'PRIVATE_SOURCE' } },
+      ],
+      error_code: 'PRIVATE_CODE',
+      source: 'PRIVATE_SOURCE',
+      platform: 'PRIVATE_PLATFORM',
+      $lib: 'PRIVATE_LIB',
+      $lib_version: '1.2.3-PRIVATE_TOKEN',
+      app_version: 'PRIVATE_VERSION',
+      release: 'PRIVATE_RELEASE',
+      operation: 'PRIVATE_OPERATION',
+      stage: 'doc_meta_scan_failed',
+      failure_kind: 'rejected',
+      handling_state: 'observed',
+      retry_state: 'not_scheduled',
+      $exception_fingerprint: 'PRIVATE_FINGERPRINT',
+      extra: { cause: 'PRIVATE_CAUSE' },
+    },
+  });
+  expect(result?.properties).toMatchObject({
+    error_type: 'unknown',
+    source: 'unknown',
+    platform: 'unknown',
+  });
+  expect(result?.properties).not.toHaveProperty('app_version');
+  expect(result?.properties).not.toHaveProperty('stage');
+  expect(JSON.stringify(result)).not.toContain('PRIVATE_');
+});
+
+it('preserves fixed sync diagnostics through deferred capture and transport reprojection', () => {
+  const privacy = createPostHogPrivacy(() => null);
+  const sent: unknown[] = [];
+  const client = {
+    __loaded: false,
+    _send_request: (options: { data: unknown }) => sent.push(options.data),
+  };
+  privacy.attach(client as never);
+  const prepared = privacy.prepareException([
+    new Error('PRIVATE_MESSAGE'),
+    {
+      operation: 'workspace_sync',
+      stage: 'doc_meta_scan_failed',
+      failure_kind: 'rejected',
+      handling_state: 'observed',
+      retry_state: 'not_scheduled',
+      workspace_id: 'PRIVATE_WORKSPACE',
+    },
+  ]);
+  const event = privacy.beforeSend({
+    event: '$exception',
+    properties: prepared[1] as Record<string, unknown>,
+  });
+  client._send_request({ data: [event] });
+  client._send_request({ data: sent[0] });
+  expect(sent[1]).toEqual(sent[0]);
+  expect(sent[0]).toMatchObject([
+    {
+      properties: {
+        operation: 'workspace_sync',
+        stage: 'doc_meta_scan_failed',
+        failure_kind: 'rejected',
+        handling_state: 'observed',
+        retry_state: 'not_scheduled',
+      },
+    },
+  ]);
+  expect(JSON.stringify(sent)).not.toContain('PRIVATE_');
 });

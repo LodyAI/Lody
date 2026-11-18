@@ -264,7 +264,7 @@ export const ShortStreamHidesRail: Story = {
   render: () => (
     <div className="h-[640px] w-full bg-background">
       <SessionChatStreamView
-        items={integrationItems.slice(0, 8)}
+        items={integrationItems.slice(0, 6)}
         sessionId={integrationSessionId}
         className="h-full"
         renderMessageRow={renderMessageRow}

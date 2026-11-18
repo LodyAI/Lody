@@ -1902,6 +1902,7 @@ describe('SessionExecutionService', () => {
             userEmail: 'user@example.com',
             agentCliType: 'builtin',
             agentType: 'codex',
+            mcpServerIds: [],
           },
           createSilentLogger(),
           '/tmp'

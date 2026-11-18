@@ -58,6 +58,21 @@ this page is the full text of the rules summarised there.
   unload signal (with a parent-initiated load as fallback) removes the frame at once and is
   treated as a navigation request that leaves rendered mode. This narrows, but does not close,
   the window in which a replacement page can run; the outgoing request has already been sent.
+
+- Desktop direct HTML preview is the one exception to the `srcdoc` path. It applies when the
+  file is on this desktop's machine and `useSessionFileActions().resolveHostPath` yields its
+  absolute path. Each entry into rendered mode first shows a consent dialog. Its "Allow
+  JavaScript" checkbox starts unchecked. Electron main (`machineRpc.openHtmlPreview`) then serves
+  the file's folder from a fresh `lody-html-preview://<random token>/` origin. Relative CSS,
+  scripts and images load, and reload re-reads disk. Without consent the iframe sandbox is
+  empty and the response carries `script-src 'none'`. With consent the sandbox adds scripts,
+  same-origin and forms, never modals, popups or top navigation. The unique origin keeps that
+  cross-origin to the renderer. Main's `will-frame-navigate` guard keeps a preview frame on
+  `lody-html-preview:` URLs, and the default session refuses every permission a preview requests. The renderer CSP admits the scheme only in `frame-src`. Main
+  refuses dot-files and paths outside the folder, judged after resolving symlinks, and other machines; a
+  null answer falls back to the `srcdoc` preview. This mode has no annotation or script toggle,
+  shows the saved file rather than unsaved editor text, and with scripts allowed the page can
+  reach the network. Remote and Web sessions keep the `srcdoc` path.
   The standalone mobile project browser treats repository HTML as untrusted: it opens the
   read-only preview with the eye toggle and runs scripts only behind an explicit "Run
   scripts" opt-in (`StaticHtmlScriptPreview`, no annotation), on any engine that supports it.

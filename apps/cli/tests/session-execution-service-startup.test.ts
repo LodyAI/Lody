@@ -495,6 +495,114 @@ describe('SessionExecutionService', () => {
     }
   );
 
+  it('withholds success until agent work that outlived the turn settles', async () => {
+    const turn = await runSilentPromptTurn({
+      sessionId: 'background-settles',
+      hasPromptEventsForTurn: true,
+      nativeWork: { current: 'background' },
+    });
+    expect(turn.notificationFacts).toEqual([]);
+    expect(turn.sessionDoc.setLastMessageAt).not.toHaveBeenCalled();
+
+    turn.changeNativeWork('running');
+    await turn.service.drainInboxExecutions();
+    expect(turn.notificationFacts).toEqual([]);
+
+    turn.changeNativeWork(null);
+    await vi.waitFor(() => expect(turn.notificationFacts).toHaveLength(1));
+    await turn.service.drainInboxExecutions();
+    expect(turn.notificationFacts[0]?.outcome).toEqual({ kind: 'succeeded' });
+    expect(turn.sessionDoc.setLastMessageAt).toHaveBeenCalledOnce();
+    expect(turn.interruptedNotices).toEqual([]);
+  });
+
+  it('reports background work ended by the agent process as unknown, not success', async () => {
+    const turn = await runSilentPromptTurn({
+      sessionId: 'background-interrupted',
+      hasPromptEventsForTurn: true,
+      nativeWork: { current: 'background' },
+    });
+    turn.endAgentProcess();
+    await vi.waitFor(() => expect(turn.notificationFacts).toHaveLength(1));
+    await turn.service.drainInboxExecutions();
+    expect(turn.notificationFacts[0]?.outcome).toEqual({
+      kind: 'unknown',
+      code: 'native_work_interrupted',
+    });
+    expect(turn.interruptedNotices).toEqual(['assistant:turn-user-1']);
+    // The reader still sees the conversation as changed.
+    expect(turn.sessionDoc.setLastMessageAt).toHaveBeenCalledOnce();
+  });
+
+  it('treats an ACP child crash without Session.terminate as interrupted rather than hanging', async () => {
+    const turn = await runSilentPromptTurn({
+      sessionId: 'background-crashed',
+      hasPromptEventsForTurn: true,
+      nativeWork: { current: 'background' },
+    });
+    turn.crashAgentProcess();
+    await vi.waitFor(() => expect(turn.notificationFacts).toHaveLength(1));
+    await turn.service.drainInboxExecutions();
+    expect(turn.notificationFacts[0]?.outcome).toEqual({
+      kind: 'unknown',
+      code: 'native_work_interrupted',
+    });
+    expect(turn.interruptedNotices).toEqual(['assistant:turn-user-1']);
+    expect(turn.sessionDoc.setLastMessageAt).toHaveBeenCalledOnce();
+  });
+
+  it('writes nativeWorkInterrupted before flushing and re-acquires a live doc when GC destroys the old one', async () => {
+    const events: string[] = [];
+    const turn = await runSilentPromptTurn({
+      sessionId: 'background-gc-destroyed-doc',
+      hasPromptEventsForTurn: true,
+      nativeWork: { current: 'background' },
+      onLifecycleEvent: (event) => events.push(event),
+    });
+    turn.endAgentProcess({ destroyDoc: true });
+    await vi.waitFor(() => expect(turn.notificationFacts).toHaveLength(1));
+    await turn.service.drainInboxExecutions();
+    expect(turn.notificationFacts[0]?.outcome).toEqual({
+      kind: 'unknown',
+      code: 'native_work_interrupted',
+    });
+    expect(turn.interruptedNotices).toEqual(['assistant:turn-user-1']);
+    expect(turn.sessionDoc.setLastMessageAt).not.toHaveBeenCalled();
+    expect(turn.replacementSessionDoc.setLastMessageAt).toHaveBeenCalledOnce();
+    expect(events.slice(0, 3)).toEqual(['notice', 'flush', 'unread']);
+  });
+
+  it('withdraws background completion wait on Stop and release so teardown emits no stale interruption', async () => {
+    const stopped = await runSilentPromptTurn({
+      sessionId: 'background-stopped',
+      hasPromptEventsForTurn: true,
+      nativeWork: { current: 'background' },
+    });
+    await stopped.service.cancelSession({
+      sessionId: 'background-stopped' as SessionId,
+      turnId: 'turn-user-1',
+    });
+    stopped.endAgentProcess();
+    await Promise.resolve();
+    await stopped.service.drainInboxExecutions();
+    expect(stopped.interruptedNotices).toEqual([]);
+    expect(stopped.sessionDoc.setLastMessageAt).not.toHaveBeenCalled();
+    expect(stopped.notificationFacts).toEqual([]);
+
+    const archived = await runSilentPromptTurn({
+      sessionId: 'background-archived',
+      hasPromptEventsForTurn: true,
+      nativeWork: { current: 'background' },
+    });
+    archived.service.withdrawNativeWorkCompletion('background-archived' as SessionId);
+    archived.endAgentProcess();
+    await Promise.resolve();
+    await archived.service.drainInboxExecutions();
+    expect(archived.interruptedNotices).toEqual([]);
+    expect(archived.sessionDoc.setLastMessageAt).not.toHaveBeenCalled();
+    expect(archived.notificationFacts).toEqual([]);
+  });
+
   it('preserves delegated audience on the terminal fact without substituting the host owner', async () => {
     const audience = {
       kind: 'agent',

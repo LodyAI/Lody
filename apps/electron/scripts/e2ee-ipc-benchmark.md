@@ -124,5 +124,5 @@ small in the snapshot trial; they must not be read as snapshot critical-path spa
 Real gateway verification was blocked because the local Docker daemon socket was
 absent. Production trim grace (assumed 48 hours), authenticated gateway behavior,
 workspace-directory/React startup, installed apps and other platforms remain
-unverified. The [MVP note](../../../.agents/notes/proposed/architecture/2026-10-27-e2ee-native-content-snapshots.md)
+unverified. The [MVP note](../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-native-content-snapshots.md)
 records the explicit native-offset trust trade-off and recovery policy.

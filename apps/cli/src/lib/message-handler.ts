@@ -148,7 +148,6 @@ import {
   type ChatFailedCode,
   type ChatFailedReason,
   type ProjectRef,
-  type SessionPreparationCancelSpec,
   getProjectRefBranch,
   resolveBaseBranchPreference,
   MachineStatusRequestValidated,
@@ -161,8 +160,6 @@ import {
   MachineAcpCapabilitiesRefreshResponse,
   type MachineAcpAuthenticateRequestValidated,
   type MachineAcpAuthenticateResponse,
-  SessionCodeCollabHostStartRequestValidated,
-  SessionCodeCollabHostStartResponse,
   type MachineAcpBinaryStatusRequestValidated,
   type MachineAcpBinaryInstallRequestValidated,
   type LocalProjectControlErrorCode,
@@ -184,9 +181,6 @@ import {
   sessionForkFailure,
   type SessionEditAndResendResponse,
   sessionEditAndResendFailure,
-  type SessionPreparationSpec,
-  type SessionPrepareCancelResponse,
-  type SessionPrepareResponse,
   type MachineLifecycleCapability,
   PreviewCandidateReportRequestValidated,
   SessionPreviewCreateRequestValidated,
@@ -2964,35 +2958,6 @@ export class MessageHandler {
     });
   }
 
-  /**
-   * Draft session preparation is retired. Desktops that predate its removal
-   * still ask for it, so both requests answer at once without doing any work.
-   * Prepare reports an accepted duplicate: an older desktop then holds that one
-   * lease until the draft idles or is sent. A rejection would make it ask again,
-   * and cancel, after every pause in typing.
-   */
-  private declineSessionPreparation(spec: SessionPreparationSpec): SessionPrepareResponse {
-    return {
-      type: 'session/prepare_response',
-      preparationId: spec.preparationId,
-      sessionId: spec.sessionId,
-      accepted: true,
-      disposition: 'duplicate',
-    };
-  }
-
-  private declineSessionPreparationCancel(
-    args: SessionPreparationCancelSpec
-  ): SessionPrepareCancelResponse {
-    return {
-      type: 'session/prepare-cancel_response',
-      preparationId: args.preparationId,
-      sessionId: args.sessionId,
-      cancelled: false,
-      disposition: 'not-found',
-    };
-  }
-
   // Single access choke point for prompt-handoff steer: both RPC arrival paths
   // (Loro Streams deps callback and local Machine RPC switch) route through here
   // so neither can bypass machine/local-project verification.
@@ -3543,6 +3508,17 @@ export class MessageHandler {
           },
           { noticeId: `session-stop-failure-${turnId}-${failure.phase}` }
         ),
+      recordNativeWorkInterrupted: async (sessionId, turnId) => {
+        if (this.deletedSessionIds.has(sessionId) || this.archiveInFlight.has(sessionId)) return;
+        await this.recordAgentWarning(
+          sessionId,
+          {
+            message: 'The agent process ended while it still reported background work.',
+            source: 'nativeWorkInterrupted',
+          },
+          { noticeId: `native-work-interrupted-${turnId}` }
+        );
+      },
       maybeGenerateAndStoreSessionTitle: async (
         sessionId,
         cliType,
@@ -3994,8 +3970,6 @@ export class MessageHandler {
             disposition,
           };
         },
-        prepareSession: async (spec) => this.declineSessionPreparation(spec),
-        cancelSessionPreparation: async (args) => this.declineSessionPreparationCancel(args),
         resolveSessionHistoryOwnerSessionId: this.resolveSessionHistoryOwnerSessionId,
         authorizeSessionHistoryRead: async ({ sessionId, readProof }) => {
           if (!readProof || !this.cloudPort.access.verifySessionHistoryRead) return false;
@@ -4527,6 +4501,7 @@ export class MessageHandler {
 
     // Session exit: flush ACP updates before marking idle.
     this.sessionManager.on('exit', (exit) => {
+      this.executionService.forgetReleasedTurn(exit.sessionId);
       void (async () => {
         const sessionId = exit.sessionId;
         this.logger.debug(`[${sessionId}] Session exit event received (exitCode=${exit.exitCode})`);
@@ -4546,6 +4521,7 @@ export class MessageHandler {
     // Session termination can race with exit/error; always flush ACP updates first.
     // Skip if session was already cleaned by GC to avoid re-creating transient state.
     this.sessionManager.on('terminated', (event) => {
+      this.executionService.forgetReleasedTurn(event.sessionId);
       this.codeCollabV2Service.releaseWorkspaceWatchForOwner(event.sessionId);
       void (async () => {
         const sessionId = event.sessionId;
@@ -4878,6 +4854,7 @@ export class MessageHandler {
     options: { writeIdleStatus?: boolean } = {}
   ): Promise<void> {
     this.logger.debug(`[${sessionId}] Releasing archived session runtime`);
+    this.executionService.withdrawNativeWorkCompletion(sessionId);
 
     this.clearSessionActivePresence(sessionId);
     this.closeSessionTerminals?.(sessionId);
@@ -5210,6 +5187,7 @@ export class MessageHandler {
    * orphan to report, not a reason to leave the archive half done.
    */
   private async terminateSessionForRelease(sessionId: SessionId): Promise<void> {
+    this.executionService.withdrawNativeWorkCompletion(sessionId);
     try {
       await this.sessionManager.terminateSession(sessionId, true);
     } catch (error) {
@@ -8110,10 +8088,6 @@ export class MessageHandler {
           disposition,
         };
       }
-      case 'session/prepare':
-        return this.declineSessionPreparation(request.params);
-      case 'session/prepare-cancel':
-        return this.declineSessionPreparationCancel(request.params);
       case 'ios-simulator/agent-control': {
         const sessionId = request.params.sessionId as SessionId;
         const invocation = this.executionService.getActiveInvocationContext(sessionId);
@@ -8248,24 +8222,6 @@ export class MessageHandler {
     }
   }
 
-  private async respondToLegacyCodeCollabHostStart(
-    message: SessionCodeCollabHostStartRequestValidated
-  ): Promise<SessionCodeCollabHostStartResponse> {
-    const sessionId = message.sessionId;
-    this.touchSession(sessionId);
-    this.logger.debug(
-      `[${sessionId}] Ignoring legacy Code Collab host-start request; v1 session-specific host has been removed.`
-    );
-    return {
-      type: 'session/code-collab-host-start_response',
-      sessionId,
-      success: false,
-      status: 'disabled',
-      error: 'unsupported',
-      message: 'Code Collab v1 session-specific host is no longer supported.',
-    };
-  }
-
   /**
    * Handles a validated local control message.
    */
@@ -8317,9 +8273,6 @@ export class MessageHandler {
         break;
       case 'machine/acp-binary-install':
         await this.handleMachineAcpBinaryInstall(message, context);
-        break;
-      case 'session/code-collab-host-start':
-        await this.handleCodeCollabHostStart(message, context);
         break;
       case 'session/image-upload':
         await this.handleSessionImageUpload(message, context);
@@ -8987,14 +8940,6 @@ export class MessageHandler {
         message.payload as Record<string, unknown>
       )
     );
-  }
-
-  private async handleCodeCollabHostStart(
-    message: SessionCodeCollabHostStartRequestValidated,
-    dispatchContext: MessageDispatchContext
-  ): Promise<void> {
-    const response = await this.respondToLegacyCodeCollabHostStart(message);
-    dispatchContext.send(response);
   }
 
   private async handlePreviewCandidateReport(
@@ -12323,7 +12268,9 @@ export class MessageHandler {
    * model turn it started itself). GC must not stop such a session as idle.
    */
   getNativeWork(sessionId: SessionId): NativeAgentWork {
-    return this.sessionManager.getSession(sessionId)?.agentClient?.getNativeWork() ?? null;
+    const session = this.sessionManager.getSession(sessionId);
+    if (!session || session.hasLiveAgentProcess?.() === false) return null;
+    return session.agentClient?.getNativeWork() ?? null;
   }
 
   /**
@@ -12413,8 +12360,9 @@ export class MessageHandler {
         this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
       hasGoal: (sessionId) => this.hasActiveGoal(sessionId),
       nativeActivity: (sessionId) => {
-        const client = this.sessionManager.getSession(sessionId)?.agentClient;
-        return client ? client.getNativeActivityObservation() : 'idle';
+        const session = this.sessionManager.getSession(sessionId);
+        if (!session || session.hasLiveAgentProcess?.() === false) return 'idle';
+        return session.agentClient ? session.agentClient.getNativeActivityObservation() : 'idle';
       },
       author: (sessionId) =>
         this.executionService.getActiveInvocationContext(sessionId)?.requesterUserId,

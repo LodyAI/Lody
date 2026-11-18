@@ -56,7 +56,7 @@ describe('buildVisibleMachineIndex', () => {
   });
 
   it('synthesizes an own+private access entry for an unregistered own machine', () => {
-    // BC-2026-04-16-MACHINE-VISIBILITY-OWNER-FALLBACK: old CLI never wrote a
+    // Owner fallback: old CLI never wrote a
     // workspaceMachines row, but Loro still knows ownerUserId.
     const rawMachines = new Map<MachineId, MachineViewMeta>([
       [m1, machine(m1, { ownerUserId: 'user-1', lastSeen: 123 })],

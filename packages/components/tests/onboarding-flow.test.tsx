@@ -43,6 +43,7 @@ vi.mock('../src/hooks/use-authenticated-convex', async (importOriginal) => {
   return {
     ...actual,
     useAuthenticatedConvex: () => ({ isAuthenticated: true, isLoading: false }),
+    useOptionalAuthenticatedConvex: () => ({ isAuthenticated: true, isLoading: false }),
   };
 });
 

@@ -3,6 +3,8 @@ package app.lody.android.create
 import app.lody.android.runtime.CatalogProject
 import app.lody.android.runtime.CatalogSession
 import app.lody.android.runtime.CatalogSnapshot
+import app.lody.android.runtime.CreationCapability
+import app.lody.android.runtime.CreationConfigOption
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -21,6 +23,28 @@ class CreateSessionModelTest {
             assertEquals(listOf("github:lody/web", "m2:local:b", "group:any"),
                 CreateSessionModel.recent(catalog, target).map { it.id })
         }
+    }
+
+    @Test
+    fun newChatSendsPlanAndFastPickedOnThePage() {
+        val claude = CreationCapability(
+            "m1", "builtin", "claude", emptyList(), emptyList(), emptyMap(), defaultModelId = "sonnet",
+            switches = listOf(
+                CreationConfigOption("plan_mode", null, "boolean", false),
+                CreationConfigOption("fast", "model_config", "boolean", false),
+            ),
+            fastModes = mapOf("opus" to true, "sonnet" to false),
+        )
+        val role = mapOf<String, Any>("fast" to true, "verbosity" to "low")
+        // Untouched switches keep the Role's pins.
+        assertEquals(role, CreateSessionModel.optionValues(claude, role, "opus", null, null))
+        // Picks override the pins and reach the request.
+        assertEquals(mapOf("fast" to false, "verbosity" to "low", "plan_mode" to true),
+            CreateSessionModel.optionValues(claude, role, "opus", plan = true, fast = false))
+        assertEquals(false, claude.fastOn(mapOf("fast" to false), "opus"))
+        // A model without Fast neither offers the switch nor sends a pick for it.
+        assertEquals(null, claude.fastOn(emptyMap(), "sonnet"))
+        assertEquals(mapOf("plan_mode" to true), CreateSessionModel.optionValues(claude, emptyMap(), "sonnet", true, true))
     }
 
     private val snapshot = CatalogSnapshot(
