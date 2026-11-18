@@ -57,7 +57,7 @@ submodule inside lody-ios.
 | Directory                     | Purpose                                                                          |
 | ----------------------------- | -------------------------------------------------------------------------------- |
 | [ios/](ios/README.md)         | Submodule: Swift/UIKit and SwiftUI client; XcodeGen, SwiftPM, own pnpm workspace |
-| [android/](android/README.md) | Kotlin/Jetpack Compose client; Gradle and an npm-built protocol runtime          |
+| [android/](android/README.md) | Submodule: Kotlin/Jetpack Compose client, Gradle and npm-built protocol runtime  |
 | `shared/markdown-repair/`     | Markdown repair entry used by both clients                                       |
 
 Appearance code and icons are owned by each platform. iOS uses system fonts,
@@ -68,14 +68,18 @@ appearance sources and resources under `android/app/src/main`.
 
 ## Development
 
-Run this from the Lody repository root to check out the iOS client and its native chat dependency:
+Run this from the Lody repository root to check out both native clients and the iOS chat dependency:
 
 ```sh
-git submodule update --init --recursive apps/mobile/ios
+git submodule update --init --recursive apps/mobile/ios apps/mobile/android
 ```
 
-iOS changes are committed in [LodyAI/lody-ios](https://github.com/LodyAI/lody-ios)
-from `apps/mobile/ios`, then this repository updates the submodule pointer.
+Commit native changes in [lody-ios](https://github.com/LodyAI/lody-ios) or
+[lody-android](https://github.com/LodyAI/lody-android) first, then update the corresponding
+pointer here to a commit reachable from the native repository’s default branch.
+Build Android inside this checkout so Gradle and npm can read the shared mobile inputs.
+If ignored Gradle or npm files remain in `apps/mobile/android` after upgrading an
+existing checkout, move the directory aside before initializing the submodule.
 
 A checkout from before the switch still holds ignored files (`node_modules`, the
 generated Xcode project, ChatKit's old checkout) in `apps/mobile/ios`, which blocks

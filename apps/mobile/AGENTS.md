@@ -1,12 +1,13 @@
 # Lody Mobile
 
-Native mobile clients maintained in the Lody public repository. Read
+Lody pins each native mobile client as a submodule. Read
 [iOS rules](ios/AGENTS.md) or [Android rules](android/AGENTS.md) before editing.
 Rules both clients share live in [cross-platform rules](docs/rules/cross-platform.md);
 both platform indexes link them.
 
 - Keep iOS and Android builds independent of the root pnpm workspace. Run the
   platform commands in [README.md](README.md) from their documented directories.
+- `android/` is the [LodyAI/lody-android](https://github.com/LodyAI/lody-android) submodule. Commit Android changes there before updating its pointer here.
 - `ios/` is the [LodyAI/lody-ios](https://github.com/LodyAI/lody-ios) submodule.
   Commit iOS changes there first, then update this pointer; ChatKit is lody-ios's
   own nested submodule. Android snapshots and scripts read paths inside it.
