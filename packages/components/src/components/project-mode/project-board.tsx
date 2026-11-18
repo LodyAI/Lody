@@ -8,6 +8,7 @@ import {
   findFreshSessionPresenceState,
   getServerNow,
   type SessionId,
+  type SessionPullRequestView,
   type SessionStatus,
 } from '@lody/shared';
 import { useRouter } from '@tanstack/react-router';
@@ -18,11 +19,13 @@ import { useTranslation } from 'react-i18next';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
 import { sessionSendStatesAtom } from '@/atoms/session-send-status';
 import { allSessionsIncludingArchivedAtom } from '@/atoms/doc-meta';
-import { SessionRowStatusIndicator } from '@/components/sidebar-row-shared';
+import { PR_STATUS_META } from '@/components/sessions/pull-request-badge';
+import { SessionPrIcon, SessionRowStatusIndicator } from '@/components/sidebar-row-shared';
 import { buildChildSessionsByParent } from '@/components/sessions/session-list-rows';
 import { useMySessionScope, useVisibleSessionMetas } from '@/hooks/use-visible-session-metas';
 import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
+import { openExternalUrl } from '@/lib/native-browser';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import {
   buildProjectBoard,
@@ -134,6 +137,24 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   mark: { display: 'flex', width: '14px', flexShrink: 0, justifyContent: 'center' },
+  prButton: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1],
+    flexShrink: 0,
+    paddingBlock: space[1],
+    paddingInline: space[2],
+    borderWidth: 0,
+    borderRadius: radius.medium,
+    backgroundColor: { default: colors.wellBackground, ':hover': colors.hoverFill },
+    color: colors.label,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    fontVariantNumeric: 'tabular-nums',
+    cursor: 'pointer',
+  },
+  prStatus: { color: colors.secondaryLabel },
+  prMergeable: { color: colors.success },
   empty: {
     margin: 0,
     paddingInline: space[1],
@@ -297,12 +318,15 @@ export function ProjectBoard({
   coordinatorSessionId,
   project,
   onOpenSession,
+  onOpenPr,
   hideTitle = false,
 }: {
   coordinatorSessionId: string | null;
   project: CoordinatorProjectKey | null;
   /** Opens a row in place (the coordinator's right panel); defaults to the conversation's page. */
   onOpenSession?: (sessionId: string) => void;
+  /** Opens a row's associated PR as a right-panel tab; falls back to opening the PR URL. */
+  onOpenPr?: (sessionId: string, pr: SessionPullRequestView) => void;
   /** Inside the side panel the tab already names the board. */
   hideTitle?: boolean;
 }) {
@@ -335,6 +359,7 @@ export function ProjectBoard({
       board={board}
       getSessionHref={getSessionHref}
       onOpenSession={onOpenSession ?? openSession}
+      onOpenPr={onOpenPr}
       onAcceptTasks={acceptTasks}
       hideTitle={hideTitle}
     />
@@ -346,12 +371,14 @@ export function ProjectBoardView({
   board,
   getSessionHref,
   onOpenSession,
+  onOpenPr,
   onAcceptTasks,
   hideTitle = false,
 }: {
   board: ProjectBoardData;
   getSessionHref: (sessionId: string) => string;
   onOpenSession: (sessionId: string) => void;
+  onOpenPr?: (sessionId: string, pr: SessionPullRequestView) => void;
   /** Marks finished tasks as reviewed; omitted where accepting is not offered. */
   onAcceptTasks?: (sessionIds: readonly string[]) => void;
   hideTitle?: boolean;
@@ -415,6 +442,7 @@ export function ProjectBoardView({
                     row={row}
                     href={getSessionHref(row.session.id)}
                     onOpen={onOpenSession}
+                    onOpenPr={onOpenPr}
                     onAccept={onAcceptTasks}
                   />
                 ))}
@@ -429,15 +457,56 @@ export function ProjectBoardView({
   );
 }
 
+function ProjectBoardPrButton({
+  sessionId,
+  pr,
+  onOpenPr,
+}: {
+  sessionId: string;
+  pr: SessionPullRequestView;
+  onOpenPr?: (sessionId: string, pr: SessionPullRequestView) => void;
+}) {
+  const { t } = useTranslation();
+  const statusMeta = PR_STATUS_META[pr.status] ?? PR_STATUS_META.open;
+  const isMergeable = pr.readiness === 'y' && pr.status !== 'merged' && pr.status !== 'closed';
+  const statusText = isMergeable
+    ? t('sessions.pr.mergeable', 'Mergeable')
+    : t(statusMeta.labelKey, statusMeta.labelFallback);
+  const numberLabel = pr.number !== null ? `#${pr.number}` : 'PR';
+  return (
+    <button
+      type="button"
+      title={`${numberLabel} · ${statusText}`}
+      data-project-board-pr={pr.number ?? 'pr'}
+      onClick={() => {
+        if (onOpenPr) {
+          onOpenPr(sessionId, pr);
+        } else {
+          void openExternalUrl(pr.url);
+        }
+      }}
+      {...stylex.props(styles.prButton)}
+    >
+      <SessionPrIcon prStatus={pr.status} prCiState={pr.ci} />
+      <span>{numberLabel}</span>
+      <span {...stylex.props(styles.prStatus, isMergeable && styles.prMergeable)}>
+        {statusText}
+      </span>
+    </button>
+  );
+}
+
 const ProjectBoardRowLink = memo(function ProjectBoardRowLink({
   row,
   href,
   onOpen,
+  onOpenPr,
   onAccept,
 }: {
   row: ProjectBoardRow;
   href: string;
   onOpen: (sessionId: string) => void;
+  onOpenPr?: (sessionId: string, pr: SessionPullRequestView) => void;
   onAccept?: (sessionIds: readonly string[]) => void;
 }) {
   const { t, i18n } = useTranslation();
@@ -478,6 +547,13 @@ const ProjectBoardRowLink = memo(function ProjectBoardRowLink({
           <Badge tone="neutral">{t('projectMode.board.createdManually', 'Created manually')}</Badge>
         ) : null}
       </a>
+      {row.pullRequest ? (
+        <ProjectBoardPrButton
+          sessionId={row.session.id}
+          pr={row.pullRequest}
+          onOpenPr={onOpenPr}
+        />
+      ) : null}
       {row.bucket === 'review' && onAccept ? (
         <Button size="small" variant="secondary" onClick={() => onAccept([row.session.id])}>
           {t('projectMode.board.accept', 'Accept')}

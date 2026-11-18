@@ -85,13 +85,19 @@ const sessions: SessionMeta[] = [
     createdAt: new Date(minutesAgo(90)).toISOString(),
     lastMessageAt: minutesAgo(15),
     lastReadAt: minutesAgo(40),
+    pullRequests: [{ url: 'https://github.com/LodyAI/lody/pull/2631', status: 'open' }],
+    pullRequestState: {
+      'https://github.com/LodyAI/lody/pull/2631': { s: 's', m: 'c', t: NOW },
+    },
   }),
   session('done-1', '整理协调者提示词的中英文版本', {
-    // Accepted after its last reply, so it sits under Accepted.
+    // Accepted after its last reply, so it sits under Accepted (collapsed by default).
     coordinatorTaskAcceptedAt: minutesAgo(55),
+    isArchived: true,
     createdAt: new Date(minutesAgo(80)).toISOString(),
     lastMessageAt: minutesAgo(70),
     lastReadAt: minutesAgo(60),
+    pullRequests: [{ url: 'https://github.com/LodyAI/lody/pull/2628', status: 'merged' }],
   }),
   session('manual', '手动排查 daemon 内存占用', {
     openedBySessionId: undefined,

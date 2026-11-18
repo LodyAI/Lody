@@ -1,7 +1,9 @@
 import {
   isCoordinatorSession,
+  resolveSessionPrimaryPullRequest,
   type MachineId,
   type SessionMeta,
+  type SessionPullRequestView,
   type SessionStatus,
 } from '@lody/shared';
 import type { SessionSendState } from '@/lib/session-send-status';
@@ -97,6 +99,7 @@ export type ProjectBoardRow = {
   hasUnreadMessages: boolean;
   sendState: SessionSendState | null;
   latestMessageAt: number;
+  pullRequest: SessionPullRequestView | null;
 };
 
 export type ProjectBoard = Record<ProjectBoardBucket, ProjectBoardRow[]>;
@@ -197,6 +200,7 @@ export function buildProjectBoard(options: {
       hasUnreadMessages: activity.hasUnreadMessages,
       sendState,
       latestMessageAt: activity.latestMessageAt,
+      pullRequest: resolveSessionPrimaryPullRequest(session),
     });
   }
   for (const bucket of PROJECT_BOARD_BUCKETS) {

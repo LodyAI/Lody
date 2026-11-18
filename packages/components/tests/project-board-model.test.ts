@@ -115,6 +115,24 @@ describe('project board', () => {
     expect(acceptedArchived.accepted[0]?.session.title).toBe('Streams presence 桌面前台通知');
     expect(acceptedArchived.accepted[0]?.taskNumber).toBe(1);
 
+    const withPr = board([
+      coordinator,
+      session('pr-task', {
+        openedBySessionId: coordinator.id as never,
+        pullRequests: [{ url: 'https://github.com/LodyAI/lody/pull/2631', status: 'open' }],
+        pullRequestState: {
+          'https://github.com/LodyAI/lody/pull/2631': { s: 's', m: 'c', t: 1 },
+        },
+      }),
+    ]);
+    expect(withPr.review[0]?.pullRequest).toMatchObject({
+      repoFullName: 'LodyAI/lody',
+      number: 2631,
+      status: 'open',
+      ci: 's',
+      readiness: 'y',
+    });
+
     // Coordinator history strips include non-accepted archived tasks too so chips retain their title and T1.
     const allSessions = [
       coordinator,

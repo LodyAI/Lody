@@ -374,7 +374,11 @@ import {
 import { persistAgentSessionDefaults } from '@/lib/local-storage-cache';
 import { SessionChangesSidebar } from './session-changes-sidebar';
 import { developerModeEnabledAtom } from '@/atoms/settings';
-import { parseBrowserAddress } from '@lody/shared';
+import {
+  parseBrowserAddress,
+  resolveSessionPrimaryPullRequest,
+  type SessionPullRequestView,
+} from '@lody/shared';
 import { parseGitHubReferenceUrl } from '@/components/ai-gui/github-reference-link';
 import { getPublicBrowserBridge } from '@/lib/electron-ipc-client';
 import { ProjectBoard } from '@/components/project-mode/project-board';
@@ -5547,6 +5551,31 @@ const SessionDetail = ({
     });
   }, []);
 
+  const handleOpenOwnedPrTab = useCallback(
+    (
+      ownerSessionId: SessionId | null,
+      pr: Pick<SessionPullRequestView, 'repoFullName' | 'number' | 'url'>
+    ): boolean => {
+      const parsed = parseGitHubReferenceUrl(pr.url);
+      const repoFullName =
+        pr.repoFullName?.trim() || (parsed ? `${parsed.owner}/${parsed.repo}` : '');
+      const prNumber = pr.number ?? (parsed?.kind === 'pull' ? parsed.number : null);
+      if (!repoFullName || prNumber === null) return false;
+      const repoName = repoFullName.split('/')[1] ?? repoFullName;
+      const tabId = `pr:${repoFullName.toLowerCase()}#${prNumber}`;
+      upsertViewerTab({
+        id: tabId,
+        type: 'pr',
+        repoFullName,
+        prNumber,
+        ownerSessionId,
+        label: `${repoName} #${prNumber}`,
+      });
+      return true;
+    },
+    [upsertViewerTab]
+  );
+
   /**
    * Opens GitHub PR links, web session links for this workspace, and public
    * HTTP(S) URLs clicked inside the coordinator conversation as right-panel tabs.
@@ -5575,17 +5604,11 @@ const SessionDetail = ({
 
       const githubRef = parseGitHubReferenceUrl(trimmed);
       if (githubRef?.kind === 'pull') {
-        const repoFullName = `${githubRef.owner}/${githubRef.repo}`;
-        const tabId = `pr:${repoFullName.toLowerCase()}#${githubRef.number}`;
-        upsertViewerTab({
-          id: tabId,
-          type: 'pr',
-          repoFullName,
-          prNumber: githubRef.number,
-          ownerSessionId: null,
-          label: `${githubRef.repo} #${githubRef.number}`,
+        return handleOpenOwnedPrTab(null, {
+          repoFullName: `${githubRef.owner}/${githubRef.repo}`,
+          number: githubRef.number,
+          url: trimmed,
         });
-        return true;
       }
 
       try {
@@ -5606,7 +5629,7 @@ const SessionDetail = ({
         return false;
       }
     },
-    [handleOpenPanelSession, isMobile, sessionId, upsertViewerTab, workspaceSlug]
+    [handleOpenOwnedPrTab, handleOpenPanelSession, isMobile, sessionId, upsertViewerTab, workspaceSlug]
   );
 
   /** A file link in a panel-hosted conversation opens a tab on that conversation's workspace. */
@@ -7763,7 +7786,10 @@ const SessionDetail = ({
                   onOpenHtmlFile: (filePath: string) =>
                     handleOpenOwnedFile(sideSession.id, filePath, true),
                   onOpenBrowser: undefined,
-                  onOpenPrTab: undefined,
+                  onOpenPrTab: () => {
+                    const pr = resolveSessionPrimaryPullRequest(sideSession);
+                    if (pr) handleOpenOwnedPrTab(sideSession.id, pr);
+                  },
                   onOpenAllChanges: undefined,
                 }
               : {})}
@@ -7843,6 +7869,9 @@ const SessionDetail = ({
               coordinatorSessionId={activeSession.id}
               project={coordinatorProject}
               onOpenSession={handleOpenPanelSession}
+              onOpenPr={(ownerId, pr) => {
+                handleOpenOwnedPrTab(ownerId as SessionId, pr);
+              }}
               hideTitle
             />
           </div>
