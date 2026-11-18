@@ -1,3 +1,4 @@
+import { queryProviderRateLimits } from './provider-quota';
 import { isPidAliveSyncLegacy } from '@lody/shared/node/process';
 import { PassThrough } from 'node:stream';
 import { parseCopilotQuota, readCopilotQuota } from './copilot-quota';
@@ -5,7 +6,6 @@ import { AgentSideConnection, PROTOCOL_VERSION, type Stream } from '@agentclient
 import {
   initializeAndSetAcpSessionArchived,
   initializeAndReadAcpRateLimits,
-  queryLocalAcpRateLimits,
 } from './acp-runner';
 import { spawn } from 'node:child_process';
 import * as loginShell from './login-shell-env';
@@ -606,7 +606,7 @@ describe('Antigravity quota ACP compatibility', () => {
         if (r.method === 'session/prompt') console.error('waiting');
       });`;
       try {
-        const outcome = queryLocalAcpRateLimits({
+        const outcome = queryProviderRateLimits({
           cliType: 'registry',
           agentType: 'antigravity-acp',
           workdir: process.cwd(),
@@ -623,7 +623,7 @@ describe('Antigravity quota ACP compatibility', () => {
               if (String(data).includes('waiting')) ready();
             });
             return child;
-          }) as NonNullable<Parameters<typeof queryLocalAcpRateLimits>[0]['spawnImpl']>,
+          }) as NonNullable<Parameters<typeof queryProviderRateLimits>[0]['spawnImpl']>,
         });
         const rejected = expect(outcome).rejects.toThrow('cancelled');
         await waiting;
@@ -855,7 +855,7 @@ describe('builtin agy quota command', () => {
       env: { AGY_CLI_DISABLE_AUTO_UPDATE: 'true' },
     });
     try {
-      const snapshot = await queryLocalAcpRateLimits({
+      const snapshot = await queryProviderRateLimits({
         cliType: 'builtin',
         agentType: 'antigravity',
         workdir: os.tmpdir(),
@@ -878,7 +878,7 @@ describe('builtin agy quota command', () => {
               ...args,
             ],
             options
-          )) as NonNullable<Parameters<typeof queryLocalAcpRateLimits>[0]['spawnImpl']>,
+          )) as NonNullable<Parameters<typeof queryProviderRateLimits>[0]['spawnImpl']>,
       });
       expect(snapshot.rateLimits[0]).toEqual({
         limitId: 'antigravity',
@@ -953,7 +953,7 @@ describe('agy quota failure isolation', () => {
       });
       try {
         await expect(
-          queryLocalAcpRateLimits({
+          queryProviderRateLimits({
             ...options(),
             spawnImpl: ((_cmd, _args, opts) =>
               spawn(
@@ -981,7 +981,7 @@ describe('agy quota failure isolation', () => {
     });
     let child: ChildProcess | undefined;
     try {
-      const outcome = queryLocalAcpRateLimits({
+      const outcome = queryProviderRateLimits({
         ...options(),
         signal: controller.signal,
         spawnImpl: ((_cmd, _args, opts) => {
@@ -1127,7 +1127,7 @@ describe('Copilot subscription quota', () => {
           if (String(chunk).includes('quota-ready')) onReady?.();
         });
         return child;
-      }) as NonNullable<Parameters<typeof queryLocalAcpRateLimits>[0]['spawnImpl']>,
+      }) as NonNullable<Parameters<typeof queryProviderRateLimits>[0]['spawnImpl']>,
       exited: () => child !== undefined && (child.exitCode !== null || child.signalCode !== null),
     };
   }
@@ -1137,7 +1137,7 @@ describe('Copilot subscription quota', () => {
     'reads %s%% remaining and confirms process exit before returning',
     async (remaining) => {
       const runtime = setup(quota(remaining));
-      const result = await queryLocalAcpRateLimits({ ...options(), spawnImpl: runtime.spawnImpl });
+      const result = await queryProviderRateLimits({ ...options(), spawnImpl: runtime.spawnImpl });
       expect(result.rateLimits).toEqual([
         {
           limitId: 'github-copilot-cli',
@@ -1175,7 +1175,7 @@ describe('Copilot subscription quota', () => {
   ])('rejects unavailable or malformed readings and releases the child: %#', async (payload) => {
     const runtime = setup(payload);
     await expect(
-      queryLocalAcpRateLimits({ ...options(), spawnImpl: runtime.spawnImpl })
+      queryProviderRateLimits({ ...options(), spawnImpl: runtime.spawnImpl })
     ).rejects.toThrow('unavailable');
     expect(runtime.exited()).toBe(true);
   });
@@ -1203,7 +1203,7 @@ describe('Copilot subscription quota', () => {
     async (mode) => {
       const runtime = setup(quota(50), mode);
       await expect(
-        queryLocalAcpRateLimits({ ...options(), spawnImpl: runtime.spawnImpl })
+        queryProviderRateLimits({ ...options(), spawnImpl: runtime.spawnImpl })
       ).rejects.toThrow();
       expect(runtime.exited()).toBe(true);
     }
@@ -1324,7 +1324,7 @@ describe('Copilot subscription quota', () => {
     });
     const runtime = setup(quota(50), 'wait', ready);
     const controller = new AbortController();
-    const result = queryLocalAcpRateLimits({
+    const result = queryProviderRateLimits({
       ...options(),
       signal: controller.signal,
       spawnImpl: runtime.spawnImpl,
@@ -1337,7 +1337,7 @@ describe('Copilot subscription quota', () => {
     vi.restoreAllMocks();
     const next = setup(quota(50));
     expect(
-      (await queryLocalAcpRateLimits({ ...options(), spawnImpl: next.spawnImpl })).rateLimits[0]
+      (await queryProviderRateLimits({ ...options(), spawnImpl: next.spawnImpl })).rateLimits[0]
         ?.windows[0]?.usedPercent
     ).toBe(50);
     expect(next.exited()).toBe(true);

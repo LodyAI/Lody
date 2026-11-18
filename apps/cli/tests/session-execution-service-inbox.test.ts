@@ -1,5 +1,5 @@
 import { MessageHandler } from '../src/lib/message-handler';
-import * as quotaRunner from '../src/agent/acp-runner';
+import * as quotaRunner from '../src/agent/provider-quota';
 import { ProviderQuotaRefreshCache } from '../src/session/provider-quota-refresh-cache';
 import { createSessionBackend } from '@/session/session-backend';
 import type { MachineAccessVerification } from '@/session/session-access-retry';
@@ -1887,7 +1887,7 @@ describe('Provider quota refresh', () => {
   it('publishes a cold query for its exact Provider and coalesces concurrent consumers', async () => {
     const pending = createDeferred<typeof snapshot>();
     const ready = createDeferred();
-    const read = vi.spyOn(quotaRunner, 'queryLocalAcpRateLimits').mockImplementation(async () => {
+    const read = vi.spyOn(quotaRunner, 'queryProviderRateLimits').mockImplementation(async () => {
       ready.resolve();
       return pending.promise;
     });
@@ -1942,7 +1942,7 @@ describe('Provider quota refresh', () => {
     'refreshes %s with tool env but preserves cached quota for account overrides',
     async (agentType, accountKey) => {
       const read = vi
-        .spyOn(quotaRunner, 'queryLocalAcpRateLimits')
+        .spyOn(quotaRunner, 'queryProviderRateLimits')
         .mockImplementation(async (options) => {
           expect(options.agentConfigId).toBe(capabilityConfigId);
           expect(options.env?.OP_TOKEN).toBe('synthetic');
@@ -1991,7 +1991,7 @@ describe('Provider quota refresh', () => {
     async (mode) => {
       const pending = createDeferred<typeof snapshot>();
       const ready = createDeferred();
-      const read = vi.spyOn(quotaRunner, 'queryLocalAcpRateLimits').mockImplementation(async () => {
+      const read = vi.spyOn(quotaRunner, 'queryProviderRateLimits').mockImplementation(async () => {
         ready.resolve();
         return pending.promise;
       });
