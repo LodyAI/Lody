@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { usePlatformCapability } from '@lody/platform/react';
-import type { AgentConfigMeta, ManagedBuiltinAgentType, ProviderSetupTask } from '@lody/shared';
+import type {
+  AgentConfigListSummary,
+  ManagedBuiltinAgentType,
+  ProviderSetupTask,
+} from '@lody/shared';
 import {
   desktopOnboardingDraftAtom,
   desktopOnboardingPhaseAtom,
@@ -10,7 +14,7 @@ import {
 } from '@/atoms/onboarding';
 import {
   cmdRetryProviderSetupAtom,
-  getAllAgentConfigAtom,
+  getAllAgentConfigListAtom,
   getAllProviderSetupsAtom,
 } from '@/atoms/agents';
 import { localMachineIdAtom } from '@/atoms/local-probe';
@@ -43,7 +47,7 @@ export type DesktopOnboardingCompletion = {
 export function resolveDesktopOnboardingSummaryAgent(
   provider: DesktopOnboardingProviderSelection | null,
   providerSetups: readonly ProviderSetupTask[],
-  agentConfigs: readonly AgentConfigMeta[]
+  agentConfigs: readonly AgentConfigListSummary[]
 ): {
   state: 'ready' | 'preparing' | 'failed' | 'missing';
   name: string | undefined;
@@ -162,7 +166,7 @@ export function OnboardingOverlay({
   // A successful setup is REPLACED by a published AgentConfig under the same
   // id, so the config check must come first or success reads as "missing".
   const providerSetups = useAtomValue(getAllProviderSetupsAtom);
-  const agentConfigs = useAtomValue(getAllAgentConfigAtom);
+  const agentConfigs = useAtomValue(getAllAgentConfigListAtom);
   const retryProviderSetup = useSetAtom(cmdRetryProviderSetupAtom);
   const selectedSetupId =
     draft.provider?.kind === 'providerSetup' ? draft.provider.providerSetupId : null;

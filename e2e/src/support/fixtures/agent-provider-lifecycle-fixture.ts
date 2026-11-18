@@ -38,11 +38,18 @@ export class AgentProviderLifecycleFixture {
   readonly editedAgentCommandLine: string;
   readonly alternateAgentCommandLine: string;
 
-  constructor(readonly eventLogPath: string) {
+  constructor(
+    readonly eventLogPath: string,
+    private readonly previewTargetFile?: string
+  ) {
     writeFileSync(eventLogPath, '', 'utf8');
     this.initialAgentCommandLine = this.commandLineFor('initial');
     this.editedAgentCommandLine = this.commandLineFor('edited');
     this.alternateAgentCommandLine = this.commandLineFor('alternate');
+  }
+
+  async expectInitialExecution(prompt: string): Promise<void> {
+    await this.waitForPrompt('initial', prompt, this.initialCustomPrompt);
   }
 
   async expectIsolatedSessionPrompts(): Promise<void> {
@@ -107,7 +114,13 @@ export class AgentProviderLifecycleFixture {
   }
 
   private commandLineFor(variant: ProviderVariant): string {
-    return [process.execPath, SCRIPTED_ACP_ENTRY, this.eventLogPath, variant]
+    return [
+      process.execPath,
+      SCRIPTED_ACP_ENTRY,
+      this.eventLogPath,
+      variant,
+      ...(this.previewTargetFile ? [this.previewTargetFile] : []),
+    ]
       .map(quoteCommandArgument)
       .join(' ');
   }

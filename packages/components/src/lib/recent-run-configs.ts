@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { getAgentRoleEmoji, type AgentConfigMeta, type AgentRole } from '@lody/shared';
+import { getAgentRoleEmoji, type AgentConfigListSummary, type AgentConfigMeta, type AgentRole } from '@lody/shared';
 import type { RecentRunConfigItem } from '@/components/sessions/recent-run-config-menu-group';
 import {
   isConfigOptionValueValid,
@@ -245,7 +245,7 @@ export function buildRecentRunConfigItems({
   limit = MAX_VISIBLE_RECENT_RUN_CONFIGS,
 }: {
   records: ReadonlyArray<RecentRunConfigRecord>;
-  agentConfigs: ReadonlyArray<AgentConfigMeta>;
+  agentConfigs: ReadonlyArray<AgentConfigListSummary & Partial<Pick<AgentConfigMeta, 'env'>>>;
   /**
    * Roles the composer can run RIGHT NOW. A recorded Role entry is offered only
    * while its Role is in here: a Role never falls back, so an entry whose Role
@@ -278,7 +278,7 @@ export function buildRecentRunConfigItems({
         cliType: config.cliType,
         agentType: config.agentType,
         brandId: config.brandId,
-        env: config.env,
+        ...(config.env === undefined ? {} : { env: config.env }),
       },
       // A Role names itself; the row then reads as that Role rather than as the
       // agent it happens to be bound to.

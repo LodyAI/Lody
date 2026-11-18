@@ -471,3 +471,269 @@ describe('local data-plane UTF-8 chunk decoding', () => {
     }
   });
 });
+
+describe('native file-index domain observations', () => {
+  const observe = (peerId: string, ownerSessionId = 'owner') => ({
+    type: 'file-index-observe' as const,
+    protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+    workspaceId: WORKSPACE_ID,
+    peerId,
+    ownerSessionId,
+    requestId: `observe-${peerId}`,
+  });
+
+  it('delivers coalesced read-only snapshots per peer and releases one observer independently', async () => {
+    const callbacks = new Map<
+      string,
+      (state: import('../src/local-loro-data-plane').LocalNativeFileIndexState) => void
+    >();
+    let observerId = 0;
+    const server = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
+      workspaceId: WORKSPACE_ID,
+      resolveDoc: async () => {
+        throw new Error('Native observation must not open a document');
+      },
+      resolveFlockDoc: async () => {
+        throw new Error('Native observation must not open a legacy Flock');
+      },
+      nativeFileIndexSource: {
+        async subscribe(_owner, onSnapshot) {
+          const id = String(++observerId);
+          callbacks.set(id, onSnapshot);
+          onSnapshot({
+            status: 'ready',
+            fileIndex: { 'initial.ts': true },
+            generations: {},
+            updatedAtMs: 1,
+          });
+          return {
+            async release() {
+              callbacks.delete(id);
+            },
+          };
+        },
+      },
+    });
+    const { connection, received, setAccepting, drain } = makeBackpressureConnection();
+    await server.handleMessage(connection, observe('first'));
+    await server.handleMessage(connection, observe('second'));
+    await settle();
+    expect(
+      received
+        .filter((message) => message.type === 'file-index-observed')
+        .map((message) => message.peerId)
+    ).toEqual(['first', 'second']);
+    const snapshots = () => received.filter((message) => message.type === 'file-index-snapshot');
+    expect(
+      snapshots()
+        .filter((message) => message.peerId === 'first')
+        .at(-1)?.state
+    ).toMatchObject({ status: 'ready', fileIndex: { 'initial.ts': true } });
+    setAccepting(false);
+    for (const callback of callbacks.values()) callback({ status: 'loading' });
+    await settle();
+    for (const callback of callbacks.values())
+      callback({
+        status: 'ready',
+        fileIndex: { 'latest.ts': true },
+        generations: { 'latest.ts': 'generation' },
+        updatedAtMs: 2,
+      });
+    await settle();
+    setAccepting(true);
+    drain();
+    await settle();
+    expect(
+      snapshots()
+        .filter((message) => message.peerId === 'second')
+        .at(-1)?.state
+    ).toMatchObject({
+      status: 'ready',
+      fileIndex: { 'latest.ts': true },
+      generations: { 'latest.ts': 'generation' },
+    });
+    await server.handleMessage(connection, { ...observe('first'), type: 'file-index-unobserve' });
+    const firstCount = snapshots().filter((message) => message.peerId === 'first').length;
+    for (const callback of callbacks.values())
+      callback({ status: 'ready', fileIndex: {}, updatedAtMs: 3 });
+    await settle();
+    expect(callbacks.size).toBe(1);
+    expect(snapshots().filter((message) => message.peerId === 'first')).toHaveLength(firstCount);
+    expect(
+      snapshots()
+        .filter((message) => message.peerId === 'second')
+        .at(-1)?.state
+    ).toMatchObject({ status: 'ready', fileIndex: {} });
+    await server.disposeLegacy();
+    expect(callbacks.size).toBe(0);
+  });
+
+  it('keeps a replacement reset when an older observation is queued behind backpressure', async () => {
+    let generation = 0;
+    const server = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
+      workspaceId: WORKSPACE_ID,
+      resolveDoc: async () => {
+        throw new Error('unused');
+      },
+      resolveFlockDoc: async () => {
+        throw new Error('unused');
+      },
+      nativeFileIndexSource: {
+        async subscribe(_owner, onSnapshot) {
+          generation++;
+          onSnapshot({
+            status: 'ready',
+            fileIndex: { [`generation-${generation}`]: true },
+            updatedAtMs: generation,
+          });
+          return { async release() {} };
+        },
+      },
+    });
+    const { connection, received, setAccepting, drain } = makeBackpressureConnection();
+    setAccepting(false);
+    await server.handleMessage(connection, observe('replaced'));
+    await settle();
+    await server.handleMessage(connection, { ...observe('replaced'), requestId: 'new-request' });
+    setAccepting(true);
+    drain();
+    await settle();
+    expect(received.filter((message) => message.type === 'file-index-snapshot')).toEqual([
+      {
+        ...observe('replaced'),
+        type: 'file-index-snapshot',
+        requestId: 'new-request',
+        state: { status: 'ready', fileIndex: { 'generation-2': true }, updatedAtMs: 2 },
+      },
+    ]);
+    await server.disposeLegacy();
+  });
+
+  it('fences a late subscription after disconnect and joins its actual release', async () => {
+    let accept!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      accept = resolve;
+    });
+    let started!: () => void;
+    const subscribed = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let active = false;
+    const server = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
+      workspaceId: WORKSPACE_ID,
+      resolveDoc: async () => {
+        throw new Error('unused');
+      },
+      resolveFlockDoc: async () => {
+        throw new Error('unused');
+      },
+      nativeFileIndexSource: {
+        async subscribe(_owner, onSnapshot) {
+          started();
+          await pending;
+          active = true;
+          onSnapshot({ status: 'ready', fileIndex: { 'late.ts': true }, updatedAtMs: 1 });
+          return {
+            async release() {
+              active = false;
+            },
+          };
+        },
+      },
+    });
+    const { connection, received } = makeConnection();
+    const opening = server.handleMessage(connection, observe('late'));
+    await subscribed;
+    const closing = server.handleDisconnectLegacy(connection.id);
+    accept();
+    await opening;
+    await closing;
+    await settle();
+    expect(active).toBe(false);
+    expect(received.filter((message) => message.type.startsWith('file-index-'))).toEqual([]);
+    await server.disposeLegacy();
+  });
+
+  it('bounds a stalled unsubscribe without blocking a different peer and retains late settlement', async () => {
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    let releasing!: () => void;
+    const started = new Promise<void>((resolve) => {
+      releasing = resolve;
+    });
+    let settledRelease = false;
+    const server = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
+      workspaceId: WORKSPACE_ID,
+      nativeFileIndexReleaseTimeoutMs: 5,
+      resolveDoc: async () => {
+        throw new Error('unused');
+      },
+      resolveFlockDoc: async () => {
+        throw new Error('unused');
+      },
+      nativeFileIndexSource: {
+        async subscribe(owner, onSnapshot) {
+          onSnapshot({ status: 'ready', fileIndex: { [owner]: true }, updatedAtMs: 1 });
+          return {
+            async release() {
+              if (owner === 'stalled') {
+                releasing();
+                await pending;
+                settledRelease = true;
+              }
+            },
+          };
+        },
+      },
+    });
+    const { connection, received } = makeConnection();
+    await server.handleMessage(connection, observe('stalled', 'stalled'));
+    const closing = server.handleMessage(connection, {
+      ...observe('stalled', 'stalled'),
+      type: 'file-index-unobserve',
+    });
+    await started;
+    await vi.advanceTimersByTimeAsync(5);
+    await closing;
+    expect(settledRelease).toBe(false);
+    await server.handleMessage(connection, observe('independent', 'independent'));
+    await settle();
+    expect(
+      received
+        .filter(
+          (message) => message.type === 'file-index-snapshot' && message.peerId === 'independent'
+        )
+        .at(-1)
+    ).toMatchObject({ state: { status: 'ready', fileIndex: { independent: true } } });
+    finish();
+    await pending;
+    await server.disposeLegacy();
+    expect(settledRelease).toBe(true);
+  });
+
+  it('answers legacy capability explicitly without opening a Flock room', async () => {
+    const server = new LocalLoroDataPlaneServerLegacy({
+      writerLegacy,
+      workspaceId: WORKSPACE_ID,
+      resolveDoc: async () => {
+        throw new Error('unused');
+      },
+      resolveFlockDoc: async () => {
+        throw new Error('legacy fallback belongs to its caller');
+      },
+    });
+    const { connection, received } = makeConnection();
+    await server.handleMessage(connection, observe('legacy'));
+    await settle();
+    expect(received.filter((message) => message.type === 'file-index-observed')).toEqual([
+      { ...observe('legacy'), type: 'file-index-observed', backend: 'legacy' },
+    ]);
+    await server.disposeLegacy();
+  });
+});

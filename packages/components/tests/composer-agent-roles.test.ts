@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   AGENT_ROLE_VERSION,
+  findAgentRoleRunConfigIssue,
+  getAcpCapabilityCacheKey,
+  type MachineCatalogPublicCapability,
   type AgentConfigId,
   type AgentConfigMeta,
   type AgentRole,
@@ -10,6 +13,7 @@ import {
 } from '@lody/shared';
 import {
   buildComposerAgentRoleItems,
+  createAgentRoleCapabilityResolver,
   isComposerAgentRoleApplied,
   resolveTurnAgentRoleForRunConfig,
 } from '../src/lib/composer-agent-roles';
@@ -40,6 +44,49 @@ describe('composer-agent-roles', () => {
     }) as AgentConfigMeta;
 
   const available: AgentRoleAvailability = { kind: 'available' };
+
+  it('judges native Role pins from the admitted public capability and never revives a legacy cache while unavailable', () => {
+    const config = makeConfig('config-1', 'machine-1');
+    const { env: _env, ...summary } = config;
+    const role = makeRole({
+      id: 'native-role' as AgentRoleId,
+      name: 'Native',
+      runConfig: { modelId: 'native-model' },
+    });
+    const capability: MachineCatalogPublicCapability = {
+      cliType: 'builtin',
+      agentType: 'codex',
+      modes: [],
+      models: [{ modelId: 'native-model', name: 'Native model' }],
+      authority: 'authoritative',
+      canValidateRolePins: true,
+    };
+    let synced = true;
+    const machines = new Map([[config.machineId, { acpCapabilities: {
+      [getAcpCapabilityCacheKey(config.id)]: {
+        cliType: config.cliType, agentType: config.agentType, provenance: 'runtime' as const,
+        modes: [], models: [{ modelId: 'legacy-model', name: 'Legacy model' }], fetchedAt: 1,
+      },
+    } }]]);
+    const legacy = createAgentRoleCapabilityResolver([config], machines)(role);
+    expect(findAgentRoleRunConfigIssue(role, legacy!)).toBe('model_unavailable');
+    const resolve = createAgentRoleCapabilityResolver([summary], machines, () => ({
+      kind: 'native',
+      synced,
+      generation: 'admitted-owner',
+      capability: () => (synced ? capability : undefined),
+      roleCapability: () => (synced ? capability : undefined),
+      quota: () => undefined,
+    }));
+    const offered = resolve(role);
+    expect(offered).toBeDefined();
+    expect(findAgentRoleRunConfigIssue(role, offered!)).toBeUndefined();
+    expect(findAgentRoleRunConfigIssue({ runConfig: { modelId: 'removed-model' } }, offered!)).toBe(
+      'model_unavailable'
+    );
+    synced = false;
+    expect(resolve(role)).toBeUndefined();
+  });
 
   describe('buildComposerAgentRoleItems', () => {
     const reviewer = makeRole({ id: 'r-2' as AgentRoleId, name: 'Reviewer' });

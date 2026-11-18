@@ -4,6 +4,9 @@ const REPO_DB_PREFIX = 'lody-loro-repo-db-';
 
 type AuxiliaryCacheSnapshot = {
   windowId: string | null;
+  workspaceId: string | null;
+  activeLegacyRepoOpened: boolean;
+  legacyHighWaterNamespaceObserved: boolean;
   namespace: string | null;
   repoDbName: string | null;
   highWaterDbOpened: boolean;
@@ -25,9 +28,34 @@ export class DesktopWindowCachePage {
     this.auxiliaryPage = await auxiliaryPagePromise;
   }
 
-  async expectAuxiliaryRuntimeCacheIsolation(): Promise<void> {
+  async expectAuxiliaryRuntimeCacheIsolation(
+    storage:
+      | { owner: 'legacy' }
+      | {
+          owner: 'native';
+          readEvidence(): readonly {
+            stage: string;
+            rendererOwner: string | null;
+            head: number;
+            proofTx: number;
+          }[];
+        }
+  ): Promise<void> {
     const auxiliaryPage = this.requireAuxiliaryPage();
     await expect(auxiliaryPage.locator('#chat-prompt')).toBeEditable({ timeout: 60_000 });
+    if (storage.owner === 'native') {
+      await expect.poll(storage.readEvidence, { timeout: 60_000 }).toEqual([
+        expect.objectContaining({
+          stage: 'native',
+          rendererOwner: 'native',
+          head: expect.any(Number),
+          proofTx: expect.any(Number),
+        }),
+      ]);
+      const proof = storage.readEvidence()[0]!;
+      expect(proof.proofTx).toBeGreaterThan(0);
+      expect(proof.head).toBeGreaterThanOrEqual(proof.proofTx);
+    }
 
     await expect
       .poll(
@@ -35,14 +63,18 @@ export class DesktopWindowCachePage {
           const snapshot = await this.readAuxiliaryCacheSnapshot();
           return (
             snapshot.windowId !== null &&
-            snapshot.repoDbName !== null &&
+            (storage.owner === 'native'
+              ? !snapshot.activeLegacyRepoOpened
+              : snapshot.repoDbName !== null) &&
             snapshot.highWaterDbOpened &&
             snapshot.highWaterNamespaceObserved
           );
         },
         {
           message:
-            'auxiliary Repo and eager-sync high-water state should share one window-scoped namespace',
+            storage.owner === 'native'
+              ? 'auxiliary native reads should use window-scoped progress without a legacy Repo'
+              : 'auxiliary Repo and eager-sync high-water state should share one window-scoped namespace',
           timeout: 60_000,
         }
       )
@@ -51,7 +83,27 @@ export class DesktopWindowCachePage {
     const snapshot = await this.readAuxiliaryCacheSnapshot();
     expect(snapshot.windowId).not.toBeNull();
     expect(snapshot.namespace).toBeTruthy();
-    expect(snapshot.repoDbName).toBe(`${REPO_DB_PREFIX}${snapshot.namespace}`);
+    if (storage.owner === 'legacy') {
+      expect(snapshot.repoDbName).toBe(`${REPO_DB_PREFIX}${snapshot.namespace}`);
+    } else {
+      expect(snapshot.repoDbName).toBeNull();
+      expect(snapshot.activeLegacyRepoOpened).toBe(false);
+      expect(snapshot.legacyHighWaterNamespaceObserved).toBe(false);
+      const primary = await this.primaryPage.evaluate(async () => {
+        if (!window.ipc) throw new Error('Electron IPC is unavailable');
+        const state = (await window.ipc.invoke('localPlatform.getSnapshot')) as {
+          workspace?: { workspaceId?: string };
+        };
+        return {
+          workspaceId: state.workspace?.workspaceId,
+          windowId: sessionStorage.getItem('lody:windowId'),
+        };
+      });
+      expect(snapshot.workspaceId).toBe(primary.workspaceId);
+      expect(snapshot.windowId).not.toBe(primary.windowId);
+      expect(snapshot.namespace).toBe(`${primary.workspaceId}:${snapshot.windowId}`);
+      await expect(auxiliaryPage).toHaveURL(/#\/local\/chat(?:\?.*)?$/u);
+    }
     expect(snapshot.namespace).toMatch(new RegExp(`:${snapshot.windowId}$`, 'u'));
     expect(snapshot.highWaterNamespaceObserved).toBe(true);
   }
@@ -96,7 +148,7 @@ export class DesktopWindowCachePage {
   }
 
   private async readAuxiliaryCacheSnapshot(): Promise<AuxiliaryCacheSnapshot> {
-    return await this.requireAuxiliaryPage().evaluate(() => {
+    return await this.requireAuxiliaryPage().evaluate(async () => {
       type CacheObservation = {
         openedDatabaseNames: string[];
         highWaterNamespaces: string[];
@@ -106,15 +158,31 @@ export class DesktopWindowCachePage {
       };
       const observation = observedWindow.__LODY_E2E_CACHE_OBSERVATION__;
       const windowId = sessionStorage.getItem('lody:windowId');
+      if (!window.ipc) throw new Error('Electron IPC is unavailable');
+      const state = (await window.ipc.invoke('localPlatform.getSnapshot')) as {
+        workspace?: { workspaceId?: string };
+      };
+      const workspaceId = state.workspace?.workspaceId ?? null;
       const repoDbName =
         windowId === null
           ? null
           : (observation?.openedDatabaseNames.find(
               (name) => name.startsWith('lody-loro-repo-db-') && name.endsWith(`:${windowId}`)
             ) ?? null);
-      const namespace = repoDbName?.slice('lody-loro-repo-db-'.length) ?? null;
+      const namespace = workspaceId && windowId ? `${workspaceId}:${windowId}` : null;
       return {
         windowId,
+        workspaceId,
+        activeLegacyRepoOpened:
+          workspaceId !== null &&
+          (observation?.openedDatabaseNames.some(
+            (name) =>
+              name === `lody-loro-repo-db-${workspaceId}` ||
+              name.startsWith(`lody-loro-repo-db-${workspaceId}:`)
+          ) ??
+            false),
+        legacyHighWaterNamespaceObserved:
+          workspaceId !== null && (observation?.highWaterNamespaces.includes(workspaceId) ?? false),
         namespace,
         repoDbName,
         highWaterDbOpened:

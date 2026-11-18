@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { resolveCliTypesSelection } from './start-options';
+import { resolveCliTypesSelection, resolveStartupBuiltinAgentDiscovery } from './start-options';
 import { createStartShutdownController } from './start-shutdown';
 import type { Logger } from '@/utils/logger';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -44,6 +44,61 @@ afterEach(() => {
 });
 
 describe('start command cli type selection', () => {
+  it('disables optional builtin discovery before opening credentials without selecting defaults', () => {
+    const result = resolveStartupBuiltinAgentDiscovery({
+      setting: '0',
+      discover: () => {
+        throw new Error('Provider credential owner must stay unopened');
+      },
+    });
+    expect(Object.values(result.availability).every((value) => value === false)).toBe(true);
+    expect(result.selection).toEqual({
+      configuredCliTypes: [],
+      cliTypes: [],
+      missing: [],
+      invalid: [],
+      isDefaultSelection: true,
+    });
+  });
+  it('preserves explicit builtin selection without reading its credentials when discovery is disabled', () => {
+    const result = resolveStartupBuiltinAgentDiscovery({
+      setting: '0',
+      requestedCliTypes: ['codex'],
+      discover: () => {
+        throw new Error('Explicit selection must not open discovery credentials');
+      },
+    });
+    expect(result.selection).toEqual({
+      configuredCliTypes: ['codex'],
+      cliTypes: ['codex'],
+      missing: [],
+      invalid: [],
+      isDefaultSelection: false,
+    });
+  });
+  it('retains ordinary discovery and requested selection when no opt-out is configured', () => {
+    const result = resolveStartupBuiltinAgentDiscovery({
+      setting: undefined,
+      requestedCliTypes: ['codex'],
+      discover: () => ({
+        kimi: false,
+        grok: false,
+        claude: false,
+        codex: 'configured',
+        antigravity: 'managed-runtime',
+        pi: 'managed-runtime',
+        devin: 'managed-runtime',
+      }),
+    });
+    expect(result.selection).toEqual({
+      configuredCliTypes: ['codex'],
+      cliTypes: ['codex'],
+      missing: [],
+      invalid: [],
+      isDefaultSelection: false,
+    });
+  });
+
   it('defaults Kimi and Grok only when their credential files exist', () => {
     const home = mkdtempSync(join(tmpdir(), 'lody-agent-auth-'));
     try {

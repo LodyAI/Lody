@@ -3,13 +3,11 @@ import {
   getMachineRoomId,
   getMachineFlockDocId,
   getMachineFlockLocalProjects,
-  getScheduleRegistryFlockDocId,
   getScheduleRoomId,
   getServerNow,
   getSessionRoomId,
   isLoroRepoDocDeleted,
   machineSupportsSchedulesProtocol,
-  ScheduleRuntimeRowSchema,
   previewSchedule,
   readMachineFlockRowsFromFlock,
   ScheduleCommandSchema,
@@ -63,7 +61,12 @@ export async function executeScheduleCommand(
   assertScheduleCommandAllowed(command, context.requesterSessionId);
   const { manager, auth, localOnly, requesterSessionId } = context;
   const workspaceId = context.workspace.id as WorkspaceId;
+  const machineCatalog = manager.getMachineCatalogRuntimePort?.();
+  const sourceFor = (machineId: string) =>
+    machineCatalog?.binding.machineId === machineId ? machineCatalog : undefined;
   const repository = new ScheduleRepository(manager.repo, workspaceId, {
+    registry: manager.scheduleRegistry,
+    definitions: manager.scheduleDefinitions,
     protectedContent: context.workspace.contentMode === 'e2ee',
     signDeclaration: (document, manualRunKey) =>
       manager.signScheduleDeclaration(document, manualRunKey),
@@ -87,8 +90,8 @@ export async function executeScheduleCommand(
     const session = await manager.getOrCreateSessionDoc(requesterSessionId);
     await sync(session.roomId);
   }
-  const registry = await manager.repo.openFlockDoc(getScheduleRegistryFlockDocId(workspaceId));
-  if (!localOnly) await registry.syncOnce();
+  const registry = manager.scheduleRegistry;
+  if (!localOnly) await registry.sync();
   if (command.action === 'list') {
     const rows = (await repository.list()).filter(
       (row) => !command.query || row.title.toLowerCase().includes(command.query.toLowerCase())
@@ -117,7 +120,8 @@ export async function executeScheduleCommand(
           manager.repo,
           workspaceId,
           auth.machineId as MachineId,
-          sessionMeta.agentConfigId as AgentConfigId
+          sessionMeta.agentConfigId as AgentConfigId,
+          sourceFor(auth.machineId)
         ).catch(() => undefined)
       : undefined;
     const outcome = await publishScheduleProposal(
@@ -152,10 +156,7 @@ export async function executeScheduleCommand(
       throw new Error('Schedule not found');
     const document = await repository.read(id);
     if (!document) throw new Error('Schedule not found');
-    const runtimes = [...registry.flock.scan({ prefix: ['runtime', id] })].flatMap((row) => {
-      const parsed = ScheduleRuntimeRowSchema.safeParse(row.value);
-      return parsed.success ? [parsed.data] : [];
-    });
+    const runtimes = (await registry.read()).runtimes.filter((row) => row.scheduleId === id);
     return {
       runtimes,
       schedule: {
@@ -196,14 +197,26 @@ export async function executeScheduleCommand(
       await import('@/commands/session');
     const draft = command.draft;
     const configId = draft.agent.agentConfigId as AgentConfigId;
-    const agent = await readMergedAgentConfigById(manager.repo, workspaceId, machine.id, configId);
+    const agent = await readMergedAgentConfigById(
+      manager.repo,
+      workspaceId,
+      machine.id,
+      configId,
+      sourceFor(machine.id)
+    );
     if (!agent.config || agent.config.machineId !== machine.id)
       throw new Error('Selected Agent is unavailable on the target machine');
     if (draft.project?.kind === 'local') {
-      const flock = await manager.repo.openFlockDoc(getMachineFlockDocId(workspaceId, machine.id));
-      const projects = getMachineFlockLocalProjects(
-        readMachineFlockRowsFromFlock(flock.flock, { families: ['localProject'] })
-      );
+      const selected = sourceFor(machine.id);
+      const projects = selected
+        ? (await selected.readCatalog()).projects
+        : getMachineFlockLocalProjects(
+            readMachineFlockRowsFromFlock(
+              (await manager.repo.openFlockDoc(getMachineFlockDocId(workspaceId, machine.id)))
+                .flock,
+              { families: ['localProject'] }
+            )
+          );
       if (!projects[draft.project.localProjectId])
         throw new Error('Choose a Project on the target machine');
     }
@@ -277,7 +290,7 @@ export async function executeScheduleCommand(
   else await repository.delete(id, auth.userId, now);
   if (!localOnly) {
     await (await manager.repo.openPersistedDoc(getScheduleRoomId(id))).syncOnce();
-    await registry.syncOnce();
+    await registry.sync();
   }
   if (command.action === 'pause' && requesterSessionId) {
     const session = await manager.getOrCreateSessionDoc(requesterSessionId);

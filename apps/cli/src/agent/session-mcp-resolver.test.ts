@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createLegacyWorkspaceCatalogQuery } from '@lody/shared';
 
 import type {
   McpServerId,
@@ -12,6 +13,9 @@ import { WorkspaceSyncUnavailableError } from '@/lib/command-runtime';
 const workspaceId = 'workspace-1' as WorkspaceId;
 const sessionId = 'session-1' as SessionId;
 const selectedId = 'server-1' as McpServerId;
+const catalogBinding = { workspaceId, accountId: 'owner' };
+const catalogFrom = (open: () => Promise<{ flock: WorkspaceFlockReadableFlock }>) =>
+  createLegacyWorkspaceCatalogQuery({ binding: catalogBinding, open });
 
 const flockWithRows = (rows: Array<{ key: readonly unknown[]; value: unknown }>) =>
   ({
@@ -43,7 +47,8 @@ describe('loadSessionMcpCatalog', () => {
       throw new Error('Empty selections must not access the catalog');
     };
     const select = await loadSessionMcpCatalog({
-      repo: { openFlockDoc: unexpectedRead },
+      catalog: { read: unexpectedRead },
+      catalogBinding,
       waitForCatalogBaseline: unexpectedRead,
       workspaceId,
       sessionId,
@@ -57,12 +62,11 @@ describe('loadSessionMcpCatalog', () => {
     const baseline = Promise.withResolvers<void>();
     let ready = false;
     const loading = loadSessionMcpCatalog({
-      repo: {
-        openFlockDoc: async () => {
-          if (!ready) throw new Error('Read before the baseline');
-          return { flock: catalogFlock };
-        },
-      },
+      catalog: catalogFrom(async () => {
+        if (!ready) throw new Error('Read before the baseline');
+        return { flock: catalogFlock };
+      }),
+      catalogBinding,
       waitForCatalogBaseline: () => baseline.promise,
       workspaceId,
       sessionId,
@@ -80,7 +84,8 @@ describe('loadSessionMcpCatalog', () => {
     const cause = new Error('Synthetic initial-sync timeout');
     const error = new WorkspaceSyncUnavailableError({ message: 'Catalog is still syncing', cause });
     const loading = loadSessionMcpCatalog({
-      repo: { openFlockDoc: async () => ({ flock: flockWithRows([]) }) },
+      catalog: catalogFrom(async () => ({ flock: flockWithRows([]) })),
+      catalogBinding,
       waitForCatalogBaseline: async () => {
         throw error;
       },

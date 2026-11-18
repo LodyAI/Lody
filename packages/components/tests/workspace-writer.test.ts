@@ -8,6 +8,7 @@ import {
 } from '@lody/shared';
 
 import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
+import { ACP_CAPABILITY_CACHE_VERSION } from '@lody/shared';
 import { persistReconciledAgentRole } from '../src/lib/agent-role-schema-reconciliation';
 import {
   AGENT_ROLE_VERSION,
@@ -105,7 +106,16 @@ describe('createDirectWorkspaceWriter', () => {
     }
   });
 
-  it.each(['unchanged', 'edited', 'deleted', 'cancelled', 'other-owner', 'write-failure'] as const)(
+  it.each([
+    'unchanged',
+    'edited',
+    'deleted',
+    'cancelled',
+    'other-owner',
+    'write-failure',
+    'old-schema',
+    'future-schema',
+  ] as const)(
     'reconciles the durable role without overwriting intervening changes: %s',
     async (scenario) => {
       const flock = new Flock('role-reconciliation');
@@ -123,7 +133,19 @@ describe('createDirectWorkspaceWriter', () => {
         updatedAt: 1,
       };
       const key = workspaceFlockKeys.agentRole(role.id);
-      flock.set(key, role as never);
+      const raw = {
+        ...role,
+        future: { preserved: true },
+        runConfig: {
+          ...role.runConfig,
+          futureConfig: true,
+          configOptionValues: {
+            ...role.runConfig.configOptionValues,
+            unknownStructured: { preserved: true },
+          },
+        },
+      };
+      flock.set(key, raw as never);
       flock.commit();
       let release!: () => void;
       const gate = new Promise<void>((resolve) => {
@@ -137,24 +159,29 @@ describe('createDirectWorkspaceWriter', () => {
         },
       };
       const writer = createDirectWorkspaceWriter({ repo } as never);
-      const runtime = { repo, writer, workspaceId: 'workspace' } as never;
+      const runtime = { repo, writer, workspaceId: 'workspace', accountId: 'owner' } as never;
       const capability: AcpCapabilityCacheEntry = {
         cliType: 'builtin',
         agentType: 'codex',
         provenance: 'runtime',
+        cacheVersion:
+          ACP_CAPABILITY_CACHE_VERSION +
+          (scenario === 'old-schema' ? -1 : scenario === 'future-schema' ? 1 : 0),
         fetchedAt: 2,
         modes: [],
         models: [],
         configOptions: [],
       };
+      const controller = new AbortController();
       const pending = persistReconciledAgentRole(
         runtime,
         role,
         capability,
         scenario === 'other-owner' ? 'someone-else' : 'owner',
         3,
-        () => scenario !== 'cancelled'
+        controller.signal
       );
+      if (scenario === 'cancelled') controller.abort();
       if (scenario === 'edited')
         flock.set(key, { ...role, name: 'New name', revision: 2 } as never);
       if (scenario === 'deleted') flock.delete(key);
@@ -166,12 +193,15 @@ describe('createDirectWorkspaceWriter', () => {
       else await pending;
       if (scenario === 'unchanged') {
         expect(flock.get(key)).toEqual({
-          ...role,
-          runConfig: { configOptionValues: {} },
+          ...raw,
+          runConfig: {
+            futureConfig: true,
+            configOptionValues: { unknownStructured: { preserved: true } },
+          },
           revision: 2,
           updatedAt: 3,
         });
-        await persistReconciledAgentRole(runtime, role, capability, 'owner', 4, () => true);
+        await persistReconciledAgentRole(runtime, role, capability, 'owner', 4);
         expect(flock.get(key)).toMatchObject({ revision: 2, updatedAt: 3 });
       } else expect(flock.get(key)).toEqual(before);
     }
@@ -203,7 +233,7 @@ it('persists machine memory associations through the real Flock writer without t
     },
   };
   const writer = createDirectWorkspaceWriter({ repo } as never);
-  const runtime = { repo, writer, workspaceId: 'workspace' } as never;
+  const runtime = { repo, writer, workspaceId: 'workspace', accountId: 'owner' } as never;
   const entry = {
     machineId: 'machine-a',
     providerId: 'nowledge-mem',
@@ -237,4 +267,61 @@ it('persists machine memory associations through the real Flock writer without t
   expect(await read('machine-b')).toEqual([{ ...entry, machineId: 'machine-b' }]);
   await expect(editMemoryAssociation(runtime, entry)).rejects.toThrow('no longer exists');
   expect(await read('machine-a')).toEqual([]);
+});
+
+it('uses the actual native MF command receipt for memory links and edits without opening the retired writer or restoring stale association state', async () => {
+  const { openNativeMachineCatalogTestGroup, machineA, binding, deferred } =
+    await import('./native-machine-catalog.test-support');
+  const { linkMemoryAssociation, editMemoryAssociation, unlinkMemoryAssociation } =
+    await import('../src/lib/memory-association-write');
+  const { machineFlockKeys } = await import('@lody/shared');
+  const group = await openNativeMachineCatalogTestGroup([machineA]);
+  try {
+    await group.source.start();
+    const retired = () => {
+      throw new Error('Retired MF writer must never be opened');
+    };
+    const runtime = {
+      ...binding,
+      repo: { openFlockDoc: retired },
+      writer: { flockRowPutIfAbsent: retired, flockRowUpdate: retired, flockRowDelete: retired },
+      ownsNativeMachineCatalog: () => true,
+      nativeMachineCatalogSource: group.source,
+    } as never;
+    const entry = {
+      machineId: machineA,
+      providerId: 'nowledge-mem',
+      memoryId: 'reviewer',
+      name: 'Reviewer',
+    };
+    expect(await linkMemoryAssociation(runtime, entry)).toEqual(entry);
+    expect(await editMemoryAssociation(runtime, { ...entry, name: 'Edited' })).toEqual({
+      ...entry,
+      name: 'Edited',
+    });
+    expect(await linkMemoryAssociation(runtime, entry)).toEqual({ ...entry, name: 'Edited' });
+    const key = machineFlockKeys.memory(entry.providerId, entry.memoryId);
+    expect(
+      (await group.client.flockGet(group.namespace, group.rooms.get(machineA)!, key)).value
+    ).toMatchObject({ name: 'Edited' });
+    await unlinkMemoryAssociation(runtime, machineA, entry);
+    const deleted = await group.client.flockGet(group.namespace, group.rooms.get(machineA)!, key);
+    expect(deleted.found).toBe(false);
+    await expect(editMemoryAssociation(runtime, entry)).rejects.toMatchObject({
+      code: 'not_found',
+    });
+    const revoked = deferred<void>();
+    const off = group.source.subscribe(() => {
+      if (!group.source.readProjection(machineA)?.synced) revoked.resolve();
+    });
+    group.setSynced(machineA, false);
+    await revoked.promise;
+    off();
+    await expect(linkMemoryAssociation(runtime, entry)).rejects.toThrow('unavailable');
+    expect(
+      (await group.client.flockGet(group.namespace, group.rooms.get(machineA)!, key)).found
+    ).toBe(false);
+  } finally {
+    await group.close();
+  }
 });

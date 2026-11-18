@@ -8,7 +8,12 @@ import {
 } from '@lody/shared';
 
 import { getMachineMetaByIdAtomFamily } from '@/atoms';
-import { mergeMachineFlockMachineMeta } from '@/lib/machine-flock-machine-meta-overlay';
+import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { nativeMachineCatalogSettingsAtom } from '@/atoms/native-machine-catalog';
+import {
+  mergeMachineFlockMachineMeta,
+  replaceNativeMachineCatalogMeta,
+} from '@/lib/machine-flock-machine-meta-overlay';
 import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 
 const RESOLVED_MACHINE_FLOCK_REMOTE_SYNC_DELAY_MS = 1000;
@@ -21,6 +26,8 @@ export type ResolvedMachineMeta = {
 export function useResolvedMachineMeta(
   machineId: MachineId | null | undefined
 ): ResolvedMachineMeta {
+  const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const nativeSnapshot = useAtomValue(nativeMachineCatalogSettingsAtom);
   const rawMachine = useAtomValue(getMachineMetaByIdAtomFamily(machineId ?? undefined));
   const machineFlockRows = useMachineFlockRows(machineId, {
     families: [
@@ -35,12 +42,15 @@ export function useResolvedMachineMeta(
   const machine = useMemo(() => {
     if (!rawMachine || !machineId) return null;
     return (
-      mergeMachineFlockMachineMeta(
-        new Map([[machineId, rawMachine]]),
-        new Map([[machineId, machineFlockRows]])
+      replaceNativeMachineCatalogMeta(
+        mergeMachineFlockMachineMeta(
+          new Map([[machineId, rawMachine]]),
+          new Map([[machineId, machineFlockRows]])
+        ),
+        runtime
       ).get(machineId) ?? rawMachine
     );
-  }, [machineFlockRows, machineId, rawMachine]);
+  }, [machineFlockRows, machineId, rawMachine, runtime, nativeSnapshot]);
 
   return { machine, machineFlockRows };
 }

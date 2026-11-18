@@ -1,4 +1,18 @@
 import {
+  LOCAL_DOCUMENT_DOMAIN_FREEZE_PATH,
+  nativeDocumentDomainFreezeRequestSchema,
+  nativeDocumentDomainFreezeResponseSchema,
+  type NativeDocumentDomainFreezeRequest,
+  type NativeDocumentDomainFreezeResponse,
+} from '@lody/shared/native-document-domain-control';
+import {
+  LOCAL_SESSION_BODY_FREEZE_PATH,
+  nativeSessionBodyFreezeRequestSchema,
+  nativeSessionBodyFreezeResponseSchema,
+  type NativeSessionBodyFreezeRequest,
+  type NativeSessionBodyFreezeResponse,
+} from '@lody/shared/native-session-body-control';
+import {
   LOCAL_E2EE_PAIRING_PATH,
   LOCAL_E2EE_RESET_PATH,
   LocalE2eeResetRequestSchema,
@@ -56,6 +70,12 @@ const PROJECT_CONTROL_TYPES: ReadonlyArray<LocalProjectControlRequestValidated['
   LocalProjectControlRequestSchema.options.map((option) => option.shape.type.value);
 
 export interface LocalSessionControlConfig {
+  dispatchDocumentDomainFreeze?: (
+    request: NativeDocumentDomainFreezeRequest
+  ) => Promise<NativeDocumentDomainFreezeResponse>;
+  dispatchSessionBodyFreeze?: (
+    request: NativeSessionBodyFreezeRequest
+  ) => Promise<NativeSessionBodyFreezeResponse>;
   dispatchAutomation?: (message: AutomationControlRequest) => Promise<AutomationControlResponse>;
   dispatchE2eeReset?: (message: LocalE2eeResetRequest) => Promise<LocalE2eeResetResponse>;
   dispatchE2eePairing?: (
@@ -435,6 +455,50 @@ export class LocalControlHandler {
           return handlerResponse(200, await this.config.dispatchSchedule(parsed.data));
         } catch {
           return handlerResponse(500, { ok: false, error: 'schedule_control_failed' });
+        }
+      })();
+    }
+    if (request.path === LOCAL_DOCUMENT_DOMAIN_FREEZE_PATH) {
+      return (async () => {
+        let raw: unknown;
+        try {
+          raw = JSON.parse(request.rawBody);
+        } catch {
+          return handlerResponse(400, { ok: false, error: 'invalid_request' });
+        }
+        const parsed = nativeDocumentDomainFreezeRequestSchema.safeParse(raw);
+        if (!parsed.success) return handlerResponse(400, { ok: false, error: 'invalid_request' });
+        if (!this.config.dispatchDocumentDomainFreeze)
+          return handlerResponse(503, { ok: false, error: 'scope_unavailable' });
+        try {
+          const response = nativeDocumentDomainFreezeResponseSchema.parse(
+            await this.config.dispatchDocumentDomainFreeze(parsed.data)
+          );
+          return handlerResponse(200, response);
+        } catch {
+          return handlerResponse(503, { ok: false, error: 'freeze_unconfirmed' });
+        }
+      })();
+    }
+    if (request.path === LOCAL_SESSION_BODY_FREEZE_PATH) {
+      return (async () => {
+        let raw: unknown;
+        try {
+          raw = JSON.parse(request.rawBody);
+        } catch {
+          return handlerResponse(400, { ok: false, error: 'invalid_request' });
+        }
+        const parsed = nativeSessionBodyFreezeRequestSchema.safeParse(raw);
+        if (!parsed.success) return handlerResponse(400, { ok: false, error: 'invalid_request' });
+        if (!this.config.dispatchSessionBodyFreeze)
+          return handlerResponse(503, { ok: false, error: 'scope_unavailable' });
+        try {
+          const response = nativeSessionBodyFreezeResponseSchema.parse(
+            await this.config.dispatchSessionBodyFreeze(parsed.data)
+          );
+          return handlerResponse(200, response);
+        } catch {
+          return handlerResponse(503, { ok: false, error: 'freeze_unconfirmed' });
         }
       })();
     }

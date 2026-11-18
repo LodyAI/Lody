@@ -14,6 +14,10 @@ import {
   machineFlockKeys,
   serializeMachineFlockKey,
   serializeCustomAcpLaunchSpec,
+  prepareAgentConfigEdit,
+  MachineCatalogError,
+  type AgentConfigEditorPort,
+  type MachineCatalogEditor,
   type AgentConfigId,
   type AgentConfigMeta,
   type MachineId,
@@ -41,6 +45,16 @@ import { initI18n } from '../src/i18n';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import { localProbeResultAtom } from '../src/atoms/local-probe';
 import { Tooltip } from '@lody/ui/tooltip';
+import {
+  NativeMachineCatalogSettingsProvider,
+  useMachineCatalogSettings,
+} from '../src/providers/machine-catalog-settings';
+import {
+  openNativeMachineCatalogTestGroup,
+  machineA as catalogMachineA,
+  machineB as catalogMachineB,
+  deferred as catalogDeferred,
+} from './native-machine-catalog.test-support';
 
 const machineId = 'machine-test' as MachineId;
 const claudeConfigId = 'claude-config' as AgentConfigId;
@@ -243,18 +257,21 @@ describe('AgentConfigDialog', () => {
     }),
     onManagedRuntimeSelected?: ComponentProps<typeof AgentConfigDialog>['onManagedRuntimeSelected'],
     onScanPiExtensions?: ComponentProps<typeof AgentConfigDialog>['onScanPiExtensions'],
-    onOpenChange = vi.fn()
+    onOpenChange = vi.fn(),
+    catalogEditor?: AgentConfigEditorPort,
+    open = true
   ) => {
     await act(async () => {
       root?.render(
         <Provider store={store}>
           <Tooltip.Provider>
             <AgentConfigDialog
-              open
+              open={open}
               onOpenChange={onOpenChange}
               mode={mode}
               machine={machine}
               onSubmit={onSubmit}
+              catalogEditor={catalogEditor}
               onRefreshCapabilities={onRefreshCapabilities}
               onCheckBinaryStatus={onCheckBinaryStatus}
               onManagedRuntimeSelected={onManagedRuntimeSelected}
@@ -265,6 +282,415 @@ describe('AgentConfigDialog', () => {
       );
     });
   };
+
+  const catalogFixture = (initial: Partial<AgentConfigMeta> = {}) => {
+    let revision = 1;
+    let stored = {
+      id: claudeConfigId,
+      machineId,
+      name: 'Private provider',
+      description: undefined,
+      cliType: 'builtin' as const,
+      agentType: 'claude',
+      env: { API_KEY: 'SYNTHETIC_OLD_SECRET', REMOVE: 'old' },
+      ...initial,
+    } as AgentConfigMeta;
+    const summary = () => ({
+      id: stored.id,
+      machineId,
+      name: stored.name,
+      description: stored.description,
+      cliType: stored.cliType,
+      agentType: stored.agentType,
+    });
+    const port: AgentConfigEditorPort = {
+      async load() {
+        return {
+          ...summary(),
+          editToken: `revision-${revision}`,
+          expiresAt: 999999,
+          credentials: {
+            envPresent: Object.keys(stored.env).length > 0,
+            customLaunchPresent: stored.customAcp !== undefined,
+            runtimeOverridesPresent: stored.runtimeOverrides !== undefined,
+            profilePresent: false,
+          },
+          hasPrompt: stored.prompt !== undefined,
+          credentialVerification: 'unknown',
+        } satisfies MachineCatalogEditor;
+      },
+      async save(input) {
+        if (input.editToken !== `revision-${revision}`)
+          throw new MachineCatalogError('edit_conflict');
+        stored = prepareAgentConfigEdit(stored, input.changes).config;
+        revision++;
+        return { changed: true };
+      },
+    };
+    return {
+      port,
+      summary,
+      stored: () => stored,
+      peerRename() {
+        stored = { ...stored, name: 'Peer name' };
+        revision++;
+      },
+    };
+  };
+  const clickText = async (text: string) => {
+    const target = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.trim() === text
+    );
+    if (!target) throw new Error(`Missing button ${text}`);
+    await act(async () => target.click());
+  };
+  const renderCatalog = async (
+    fixture: ReturnType<typeof catalogFixture>,
+    onOpenChange = vi.fn(),
+    open = true
+  ) => {
+    await renderDialog(
+      { kind: 'edit-catalog', summary: fixture.summary() },
+      createMachine('Synthetic machine'),
+      async () => {
+        throw new Error('Native editor must never invoke a legacy row upsert');
+      },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      onOpenChange,
+      fixture.port,
+      open
+    );
+  };
+  const privateFieldAction = async (label: string, action: string) => {
+    const group = document.body.querySelector(`[role="group"][aria-label="${label}"]`)!;
+    const button = [...group.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.trim() === action
+    )!;
+    await act(async () => button.click());
+  };
+
+  it('edits the existing dialog through a write-only domain port without reading or prefilling saved environment', async () => {
+    const fixture = catalogFixture();
+    store.set(runtimeAtom, {
+      contentMode: 'plaintext',
+      repo: {
+        openFlockDoc() {
+          throw new Error('Native editor opened raw MF');
+        },
+      },
+    } as never);
+    await renderCatalog(fixture);
+    expect(document.body.textContent).toContain('Saved variables are present');
+    expect(document.body.textContent).not.toContain('SYNTHETIC_OLD_SECRET');
+    expect(document.body.querySelector('textarea')).toBeNull();
+    await act(async () =>
+      setNativeInputValue(
+        document.getElementById('catalog-agent-name') as HTMLInputElement,
+        'Renamed privately'
+      )
+    );
+    await clickText('Save');
+    expect(fixture.stored()).toMatchObject({
+      name: 'Renamed privately',
+      env: { API_KEY: 'SYNTHETIC_OLD_SECRET', REMOVE: 'old' },
+    });
+    expect(JSON.stringify(fixture.summary())).not.toContain('SECRET');
+  });
+
+  it('replaces or clears only the explicitly selected environment keys and clears new input after save', async () => {
+    const fixture = catalogFixture();
+    await renderCatalog(fixture);
+    await clickText('Change individual keys');
+    const textarea = document.body.querySelector('textarea')!;
+    await act(async () =>
+      setNativeTextAreaValue(textarea, 'API_KEY=SYNTHETIC_NEW_SECRET\n-REMOVE\n?UNKNOWN')
+    );
+    expect(document.body.textContent).toContain('New credential values need verification');
+    await clickText('Save');
+    expect(fixture.stored().env).toEqual({ API_KEY: 'SYNTHETIC_NEW_SECRET' });
+    expect(document.body.querySelector('textarea')).toBeNull();
+    expect(JSON.stringify(fixture.summary())).not.toContain('SYNTHETIC_NEW_SECRET');
+    await act(async () => root?.render(null));
+    await renderCatalog(fixture);
+    await clickText('Clear all');
+    await clickText('Save');
+    expect(fixture.stored().env).toEqual({});
+  });
+
+  it('keeps user input on a stale version refusal and requires an explicit editor refresh before retry', async () => {
+    const fixture = catalogFixture();
+    await renderCatalog(fixture);
+    await clickText('Replace all');
+    await act(async () =>
+      setNativeTextAreaValue(
+        document.body.querySelector('textarea')!,
+        'API_KEY=SYNTHETIC_REPLACEMENT'
+      )
+    );
+    fixture.peerRename();
+    await clickText('Save');
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toContain(
+      'configuration changed'
+    );
+    expect(fixture.stored().env.API_KEY).toBe('SYNTHETIC_OLD_SECRET');
+    expect((document.body.querySelector('textarea') as HTMLTextAreaElement).value).toContain(
+      'SYNTHETIC_REPLACEMENT'
+    );
+    await clickText('Refresh');
+    expect((document.getElementById('catalog-agent-name') as HTMLInputElement).value).toBe(
+      'Peer name'
+    );
+    await clickText('Save');
+    expect(fixture.stored().env.API_KEY).toBe('SYNTHETIC_REPLACEMENT');
+    expect(fixture.stored().name).toBe('Peer name');
+  });
+
+  it('keeps saved credentials on failed verification and verifies each replacement draft again', async () => {
+    const fixture = catalogFixture();
+    const save = fixture.port.save;
+    let verified = false;
+    fixture.port.save = async (input, options) => {
+      if (!verified) throw new MachineCatalogError('verification_failed');
+      return save(input, options);
+    };
+    await renderCatalog(fixture);
+    await clickText('Replace all');
+    await act(async () =>
+      setNativeTextAreaValue(document.body.querySelector('textarea')!, 'API_KEY=SYNTHETIC_REJECTED')
+    );
+    await clickText('Save');
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toContain(
+      'saved values were kept'
+    );
+    expect(fixture.stored().env.API_KEY).toBe('SYNTHETIC_OLD_SECRET');
+    await act(async () =>
+      setNativeTextAreaValue(document.body.querySelector('textarea')!, 'API_KEY=SYNTHETIC_VERIFIED')
+    );
+    verified = true;
+    await clickText('Save');
+    expect(fixture.stored().env.API_KEY).toBe('SYNTHETIC_VERIFIED');
+    expect(JSON.stringify(fixture.summary())).not.toContain('SYNTHETIC_VERIFIED');
+    expect(document.body.querySelector('textarea')).toBeNull();
+  });
+
+  it('keeps, replaces and clears private runtime and prompt fields without prefilling their old values', async () => {
+    const fixture = catalogFixture({
+      prompt: 'SYNTHETIC_PRIVATE_PROMPT',
+      runtimeOverrides: { claudeCodeExecutable: '/synthetic/private-cli' },
+    });
+    await renderCatalog(fixture);
+    expect(document.body.textContent).not.toContain('SYNTHETIC_PRIVATE_PROMPT');
+    expect(document.body.textContent).not.toContain('/synthetic/private-cli');
+    await clickText('Save');
+    expect(fixture.stored()).toMatchObject({
+      prompt: 'SYNTHETIC_PRIVATE_PROMPT',
+      runtimeOverrides: { claudeCodeExecutable: '/synthetic/private-cli' },
+    });
+    await act(async () => root?.render(null));
+    await renderCatalog(fixture);
+    await privateFieldAction('Runtime overrides', 'Replace');
+    await privateFieldAction('System prompt', 'Replace');
+    await act(async () => {
+      setNativeInputValue(
+        document.body.querySelector('[aria-label="Executable path"]') as HTMLInputElement,
+        '/synthetic/new-cli'
+      );
+      setNativeTextAreaValue(
+        document.body.querySelector('textarea[aria-label="System prompt"]')!,
+        'SYNTHETIC_NEW_PROMPT'
+      );
+    });
+    await clickText('Save');
+    expect(fixture.stored()).toMatchObject({
+      prompt: 'SYNTHETIC_NEW_PROMPT',
+      runtimeOverrides: { claudeCodeExecutable: '/synthetic/new-cli' },
+    });
+    expect(JSON.stringify(fixture.summary())).not.toContain('SYNTHETIC_NEW_PROMPT');
+    await act(async () => root?.render(null));
+    await renderCatalog(fixture);
+    await privateFieldAction('Runtime overrides', 'Clear');
+    await privateFieldAction('System prompt', 'Clear');
+    await clickText('Save');
+    expect(fixture.stored().runtimeOverrides).toBeUndefined();
+    expect(fixture.stored().prompt).toBeUndefined();
+  });
+
+  it('replaces a custom launch command without exposing its old argv and refuses to clear the required command', async () => {
+    const fixture = catalogFixture({
+      cliType: 'custom',
+      agentType: 'custom',
+      customAcp: { command: '/synthetic/private-command', args: ['SYNTHETIC_PRIVATE_ARG'] },
+    });
+    await renderCatalog(fixture);
+    expect(document.body.textContent).not.toContain('SYNTHETIC_PRIVATE_ARG');
+    await privateFieldAction('Custom command', 'Clear');
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toContain(
+      'requires a valid launch command'
+    );
+    expect(
+      [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(
+        (button) => button.textContent === 'Save'
+      )?.disabled
+    ).toBe(true);
+    await privateFieldAction('Custom command', 'Replace');
+    await act(async () =>
+      setNativeInputValue(
+        document.body.querySelector('input[aria-label="Custom command"]')!,
+        'new-synthetic-agent --acp'
+      )
+    );
+    await clickText('Save');
+    expect(fixture.stored().customAcp).toEqual({ command: 'new-synthetic-agent', args: ['--acp'] });
+    expect(fixture.stored().env).toEqual({ API_KEY: 'SYNTHETIC_OLD_SECRET', REMOVE: 'old' });
+    expect(JSON.stringify(fixture.summary())).not.toContain('new-synthetic-agent');
+  });
+
+  it('retains a real second machine credential draft when the first hosted machine retires, and saves only to that second owner', async () => {
+    const group = await openNativeMachineCatalogTestGroup();
+    try {
+      await group.source.start();
+      const loaded = catalogDeferred<void>();
+      const begin = group.transport.beginMachineAgentConfigEdit;
+      group.transport.beginMachineAgentConfigEdit = async (request) => {
+        try {
+          const result = await begin(request);
+          loaded.resolve();
+          return result;
+        } catch (error) {
+          loaded.reject(error);
+          throw error;
+        }
+      };
+      const saved = catalogDeferred<void>();
+      const summary = group.source
+        .getSnapshot()
+        .agents.find((agent) => agent.machineId === catalogMachineB)!;
+      const machine = { ...createMachine('Second synthetic machine'), id: catalogMachineB };
+      function BoundDialog() {
+        const catalog = useMachineCatalogSettings()!;
+        return (
+          <AgentConfigDialog
+            open
+            onOpenChange={(open) => {
+              if (!open) saved.resolve();
+            }}
+            mode={{ kind: 'edit-catalog', summary }}
+            machine={machine}
+            catalogSource={catalog}
+            onSubmit={async () => {
+              throw new Error('Native draft must not use the old row writer');
+            }}
+            onRefreshCapabilities={async () => {
+              throw new Error('Write-only editing must not probe saved credentials');
+            }}
+            onCheckBinaryStatus={async () => ({ status: 'installed' as const })}
+          />
+        );
+      }
+      await act(async () =>
+        root!.render(
+          <Provider store={store}>
+            <Tooltip.Provider>
+              <NativeMachineCatalogSettingsProvider source={group.source}>
+                <BoundDialog />
+              </NativeMachineCatalogSettingsProvider>
+            </Tooltip.Provider>
+          </Provider>
+        )
+      );
+      await act(async () => loaded.promise);
+      await clickText('Replace all');
+      await act(async () =>
+        setNativeTextAreaValue(
+          document.body.querySelector('textarea')!,
+          'API_KEY=SYNTHETIC_SECOND_MACHINE_DRAFT'
+        )
+      );
+      const groupRealm = group.source.getSnapshot().generation;
+      const secondRealm = group.source.getSnapshot().machineGeneration!(catalogMachineB);
+      await act(async () => group.setSynced(catalogMachineB, false));
+      expect(group.source.getStatus(catalogMachineB)).toBe('ready');
+      expect(group.source.getSnapshot().machineGeneration!(catalogMachineB)).toBe(secondRealm);
+      expect(document.body.querySelector('textarea')?.value).toBe(
+        'API_KEY=SYNTHETIC_SECOND_MACHINE_DRAFT'
+      );
+      expect(group.source.getStatus(catalogMachineA)).toBe('ready');
+      await act(async () => group.revoke(catalogMachineA));
+      expect(group.source.getStatus(catalogMachineA)).toBe('error');
+      expect(group.source.getSnapshot().generation).toBe(groupRealm);
+      expect(group.source.getSnapshot().machineGeneration!(catalogMachineB)).toBe(secondRealm);
+      expect(document.body.querySelector('textarea')?.value).toBe(
+        'API_KEY=SYNTHETIC_SECOND_MACHINE_DRAFT'
+      );
+      expect((await group.rawConfig(catalogMachineB)).env.API_KEY).toBe('SYNTHETIC_SAVED_SECRET');
+      expect((await group.rawConfig(catalogMachineA)).env.API_KEY).toBe('SYNTHETIC_SAVED_SECRET');
+      const save = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(
+        (button) => button.textContent?.trim() === 'Save'
+      )!;
+      await act(async () => {
+        save.click();
+        await saved.promise;
+      });
+      expect((await group.rawConfig(catalogMachineB)).env).toEqual({
+        API_KEY: 'SYNTHETIC_SECOND_MACHINE_DRAFT',
+      });
+      expect((await group.rawConfig(catalogMachineA)).env.API_KEY).toBe('SYNTHETIC_SAVED_SECRET');
+      expect(JSON.stringify(group.source.getSnapshot())).not.toContain(
+        'SYNTHETIC_SECOND_MACHINE_DRAFT'
+      );
+    } finally {
+      await act(async () => {
+        root?.unmount();
+        root = undefined;
+      });
+      await group.close();
+    }
+  });
+
+  it('clears unsaved private input when the bound editor owner changes, even for the same config id', async () => {
+    const first = catalogFixture(),
+      next = catalogFixture();
+    await renderCatalog(first);
+    await clickText('Replace all');
+    await act(async () =>
+      setNativeTextAreaValue(
+        document.body.querySelector('textarea')!,
+        'API_KEY=SYNTHETIC_OLD_OWNER_DRAFT'
+      )
+    );
+    await renderCatalog(next);
+    expect(document.body.querySelector('textarea')).toBeNull();
+    expect(document.body.textContent).not.toContain('SYNTHETIC_OLD_OWNER_DRAFT');
+    await clickText('Save');
+    expect(next.stored().env.API_KEY).toBe('SYNTHETIC_OLD_SECRET');
+    expect(first.stored().env.API_KEY).toBe('SYNTHETIC_OLD_SECRET');
+  });
+
+  it('resets invalid unsaved environment state across a retained close and reopen', async () => {
+    const fixture = catalogFixture(),
+      onOpenChange = vi.fn();
+    await renderCatalog(fixture, onOpenChange);
+    await clickText('Replace all');
+    await act(async () =>
+      setNativeTextAreaValue(document.body.querySelector('textarea')!, 'INVALID ENTRY')
+    );
+    expect(
+      [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(
+        (button) => button.textContent === 'Save'
+      )?.disabled
+    ).toBe(true);
+    await renderCatalog(fixture, onOpenChange, false);
+    await renderCatalog(fixture, onOpenChange, true);
+    const save = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === 'Save'
+    )!;
+    expect(save.disabled).toBe(false);
+    await clickText('Save');
+    expect(fixture.stored().env).toEqual({ API_KEY: 'SYNTHETIC_OLD_SECRET', REMOVE: 'old' });
+  });
 
   it.each([false, true])(
     'explains unsupported encrypted remote provider forms before any write or probe (signed RPC: %s)',

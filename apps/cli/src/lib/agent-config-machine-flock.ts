@@ -20,9 +20,25 @@ import {
   writeAgentConfigToFlock,
 } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
+import type { MachineDocumentRuntimePort } from './machine-document-runtime-port';
 
 export type MachineFlockSyncScheduler = {
   markMachineFlockDocDirty: (machineId: MachineId, options?: { reason?: string }) => void;
+};
+
+/** Trusted Node read capability selected by whole-machine ownership. Never expose through renderer IPC. */
+export type MachineAgentConfigReadPort = {
+  readonly binding: { readonly workspaceId: WorkspaceId; readonly machineId: MachineId };
+  readAgentConfigs(): Promise<Record<AgentConfigId, AgentConfigMeta>>;
+  readAgentConfig(id: AgentConfigId): Promise<AgentConfigMeta | undefined>;
+};
+const assertMachineSourceBinding = (
+  source: MachineAgentConfigReadPort,
+  workspaceId: WorkspaceId,
+  machineId: MachineId
+) => {
+  if (source.binding.workspaceId !== workspaceId || source.binding.machineId !== machineId)
+    throw new Error('Machine Agent config source binding mismatch');
 };
 
 /** Managed builtin provider types the user removed on this machine, so they must not be auto-registered at startup. */
@@ -40,8 +56,13 @@ export async function readMachineBuiltinAgentOptOuts(
 export async function readMachineAgentConfigs(
   repo: LoroRepo,
   workspaceId: WorkspaceId,
-  machineId: MachineId
+  machineId: MachineId,
+  source?: MachineAgentConfigReadPort
 ): Promise<Record<AgentConfigId, AgentConfigMeta>> {
+  if (source) {
+    assertMachineSourceBinding(source, workspaceId, machineId);
+    return source.readAgentConfigs();
+  }
   const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
   return getMachineFlockAgentConfigs(
     readMachineFlockRowsFromFlock(handle.flock, { families: ['agentConfig'] })
@@ -62,8 +83,15 @@ export async function readMergedAgentConfigById(
   repo: LoroRepo,
   workspaceId: WorkspaceId,
   machineId: MachineId,
-  agentConfigId: AgentConfigId
+  agentConfigId: AgentConfigId,
+  source?: MachineAgentConfigReadPort
 ): Promise<AgentConfigPointLookup> {
+  if (source) {
+    assertMachineSourceBinding(source, workspaceId, machineId);
+    const config = await source.readAgentConfig(agentConfigId);
+    // A selected native owner is complete. Missing does not revive retired Meta rows.
+    return { config: config ?? null, source: config ? 'machine-flock' : 'none' };
+  }
   const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
   const machineConfig = getMachineFlockAgentConfigs(
     readMachineFlockRowsFromFlock(handle.flock, {
@@ -101,8 +129,26 @@ export function mergeAgentConfigs(
 export async function listMergedAgentConfigs(
   repo: LoroRepo,
   workspaceId: WorkspaceId,
-  machineIds?: readonly MachineId[]
+  machineIds?: readonly MachineId[],
+  source?: MachineAgentConfigReadPort
 ): Promise<AgentConfigMeta[]> {
+  if (source) {
+    assertMachineSourceBinding(source, workspaceId, source.binding.machineId);
+    const requested = machineIds ?? [source.binding.machineId];
+    const native = requested.includes(source.binding.machineId)
+      ? Object.values(await source.readAgentConfigs())
+      : [];
+    const legacyMachines = requested.filter((machineId) => machineId !== source.binding.machineId);
+    if (!legacyMachines.length) return native;
+    const [legacyMeta, legacyFlocks] = await Promise.all([
+      listLoroRepoMetaAgentConfigs(repo),
+      listMachineAgentConfigs(repo, workspaceId, legacyMachines),
+    ]);
+    // The source's machine is authoritative even when it has zero configs.
+    // Other machines retain their independently selected whole-room owner.
+    const remoteMeta = legacyMeta.filter((config) => legacyMachines.includes(config.machineId));
+    return [...native, ...mergeAgentConfigs(remoteMeta, legacyFlocks)];
+  }
   const resolvedMachineIds = machineIds ?? (await listMachineIds(repo));
   const [loroRepoMetaConfigs, machineFlockConfigs] = await Promise.all([
     listLoroRepoMetaAgentConfigs(repo),
@@ -130,8 +176,18 @@ export async function upsertMachineAgentConfig(
   repo: LoroRepo,
   workspaceId: WorkspaceId,
   config: AgentConfigMeta,
-  options: { sync?: MachineFlockSyncScheduler; reason?: string } = {}
+  options: {
+    sync?: MachineFlockSyncScheduler;
+    reason?: string;
+    native?: MachineDocumentRuntimePort;
+    expected?: AgentConfigMeta;
+  } = {}
 ): Promise<void> {
+  if (options.native) {
+    assertMachineSourceBinding(options.native, workspaceId, config.machineId);
+    await options.native.saveAgentConfig(config, options.expected);
+    return;
+  }
   const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, config.machineId));
   // Writing the row also retracts the same-type opt-out, both in one commit (see writeAgentConfigToFlock).
   const changed = writeAgentConfigToFlock(handle.flock, config);
@@ -154,8 +210,17 @@ export async function deleteMachineAgentConfig(
   repo: LoroRepo,
   workspaceId: WorkspaceId,
   config: AgentConfigMeta,
-  options: { sync?: MachineFlockSyncScheduler; reason?: string } = {}
+  options: {
+    sync?: MachineFlockSyncScheduler;
+    reason?: string;
+    native?: MachineDocumentRuntimePort;
+  } = {}
 ): Promise<void> {
+  if (options.native) {
+    assertMachineSourceBinding(options.native, workspaceId, config.machineId);
+    await options.native.removeAgentConfig(config);
+    return;
+  }
   const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, config.machineId));
   // Deleting the row also records an opt-out when needed, both in one commit (see deleteAgentConfigFromFlock).
   const changed = deleteAgentConfigFromFlock(handle.flock, config, getServerNow());
@@ -227,29 +292,15 @@ async function listAliveDocIds(
   repo: LoroRepo,
   predicate: (docId: string) => boolean
 ): Promise<string[]> {
-  const scanner = repo.getMeta();
-  if (!scanner) return [];
-  const rows = await scanner.scan({ prefix: ['m'] });
-  const ids = new Set<string>();
-  for (const row of rows) {
-    const key = row.key;
-    if (!Array.isArray(key) || key.length < 2) continue;
-    if (key[0] !== 'm') continue;
-    const docId = key[1];
-    if (typeof docId !== 'string') continue;
-    if (!predicate(docId)) continue;
-    ids.add(docId);
-  }
-  const results = await Promise.all(
-    Array.from(ids).map(async (docId) => {
-      const record = await repo.getDocMeta(docId);
-      return record?.meta && !isLoroRepoDocDeleted(record) ? docId : null;
-    })
-  );
-  return results.filter((docId): docId is string => docId !== null);
+  return (await repo.listDoc())
+    .filter(
+      (row) =>
+        predicate(row.docId) && !isLoroRepoDocDeleted(row) && Object.keys(row.meta).length > 0
+    )
+    .map((row) => row.docId);
 }
 
-function normalizeAgentConfigMeta(raw: unknown): AgentConfigMeta | null {
+export function normalizeAgentConfigMeta(raw: unknown): AgentConfigMeta | null {
   if (!isRecord(raw)) return null;
   const id = isNonEmptyString(raw.id) ? (raw.id as AgentConfigId) : null;
   const machineId = isNonEmptyString(raw.machineId) ? (raw.machineId as MachineId) : null;

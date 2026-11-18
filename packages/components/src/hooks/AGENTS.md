@@ -104,7 +104,9 @@ visibility; skipping a catalog grants no machine or execution authority.
 - File-index hooks borrow owner-session resources from the workspace Effect
   `ScopedCache`, never open/scan/subscribe/join per mount. Subscribe before cold scan,
   advance by batches and compare Flock versions before remote catch-up rescans.
-- Each entry owns a loro-repo Flock lease. LRU eviction closes room and Flock
+- Legacy entries own a loro-repo Flock lease. Native local file-index entries own
+  only a bounded, read-only JSON observation through authenticated daemon IPC;
+  they never acquire a legacy Flock or IndexedDB replica. LRU eviction closes room and Flock
   subscriptions, releases the lease, then unloads the replica. Late room joins after
   eviction must unsubscribe and best-effort unload again. Never cache failed opens;
   invalidate failed resources after their last borrower releases.

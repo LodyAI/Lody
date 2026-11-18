@@ -44,6 +44,27 @@ vi.hoisted(() => {
   process.env.LODY_E2E = '1';
 });
 describe('Operation Inbox execution boundary', () => {
+  it.each([false,true])('adds private native MF instructions once at the actual provider boundary (precomposed=%s)',async precomposed=>{
+    const submitted:ContentBlock[][]=[];
+    const f=inboxExecutionFixture(async blocks=>{submitted.push(blocks);return {stopReason:'end_turn'};});
+    try {
+      const privatePrompt='Synthetic private machine instructions';
+      const runtime={binding:{accountId:'user-1',workspaceId:'workspace-1',machineId:'machine-1'},getAgentConfigForMachineLaunch:async()=>({id:capabilityConfigId,machineId:'machine-1',name:'Synthetic private config',cliType:'builtin',agentType:'codex',prompt:privatePrompt})};
+      f.deps.workspaceDocument.getMachineCatalogRuntimePort=()=>runtime as never;
+      f.deps.workspaceDocument.repo.openFlockDoc=async()=>{throw new Error('Native prompt must never reopen legacy MF');};
+      if(precomposed) f.message.acpSessionConfig.prompt=`${privatePrompt}\n\nCURRENT_REQUEST`;
+      const before=await (await createSessionBackend(f.doc,await f.doc.getMetaState())).readHistory();
+      await f.accept();
+      await f.service.continueSession(f.message);
+      const text=submitted.flat().filter(block=>block.type==='text').map(block=>block.text).join('\n');
+      expect(text).toContain(`${privatePrompt}\n\nCURRENT_REQUEST`);
+      expect(text.split(privatePrompt)).toHaveLength(2);
+      const after=await (await createSessionBackend(f.doc,await f.doc.getMetaState())).readHistory();
+      const original=before.find(turn=>turn.role==='user');
+      expect(after.find(turn=>turn.id===original?.id)).toEqual({...original,status:'handled'});
+    } finally {await f.close();}
+  });
+
   it('lets the Agent continuing after its turn act for that turn until Stop', async () => {
     const f = inboxExecutionFixture(async () => ({ stopReason: 'end_turn' }));
     const sessionId = f.message.sessionId;

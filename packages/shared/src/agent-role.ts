@@ -600,7 +600,7 @@ export type AgentRoleAvailabilityContext = {
    * What the Role's bound agent provably offers. Undefined means the pins cannot
    * be judged, which leaves the Role available: `selectAgentRoleCapability`.
    */
-  runConfigCapability?: (role: AgentRole) => AcpCapabilityCacheEntry | undefined;
+  runConfigCapability?: (role: AgentRole) => AgentRoleRunConfigCapability | undefined;
 };
 
 /**
@@ -628,10 +628,22 @@ export const selectAgentRoleCapability = (
   return models.length > 0 || modes.length > 0 ? readable : undefined;
 };
 
+export type AgentRoleRunConfigCapability = Pick<
+  AcpCapabilityCacheEntry,
+  | 'cliType'
+  | 'agentType'
+  | 'modes'
+  | 'models'
+  | 'configOptions'
+  | 'modelReasoningEfforts'
+  | 'declaredModelControls'
+  | 'observedModelConfigOptions'
+>;
+
 /** Which saved pin the agent no longer offers; dispatch would reject the same one. */
 export const findAgentRoleRunConfigIssue = (
   role: Pick<AgentRole, 'runConfig'>,
-  capability: AcpCapabilityCacheEntry
+  capability: AgentRoleRunConfigCapability
 ): Extract<AgentRoleUnavailableReason, 'model_unavailable' | 'mode_unavailable'> | undefined => {
   const { modelId, modeId, configOptionValues } = role.runConfig;
   const { models } = summarizeAgentRunConfigCapabilities(capability);

@@ -86,7 +86,12 @@ function harness(workspaceId = 'workspace-a', initialRows = [row]) {
               transportIds: () => ['local', 'cloud'],
               subscription: (id: string) => {
                 if (id !== 'local') throw new Error('wrong readiness transport');
-                return { firstSyncedWithRemote: sync.promise };
+                return {
+                  status: 'joined',
+                  onStatusChange: () => () => {},
+                  firstSyncedWithRemote: sync.promise,
+                  waitUntilSynced: () => sync.promise,
+                };
               },
               get firstSyncedWithRemote(): never {
                 throw new Error('ambiguous readiness');
@@ -274,7 +279,73 @@ describe('Schedule Registry recovery', () => {
     expect(snapshot().error).toBeUndefined();
     await act(async () => vi.advanceTimersByTimeAsync(1000));
     expect(h.rooms.size).toBe(1);
-    expect(h.opens).toBe(1);
+  });
+
+  it('uses an injected whole-SR snapshot port and rejects a foreign binding without opening a legacy replica', async () => {
+    const h = harness();
+    let deliver!: (snapshot: import('@lody/shared').ScheduleRegistrySnapshot) => void;
+    const port: import('@lody/shared').ScheduleRegistryPort = {
+      workspaceId: h.runtime.workspaceId,
+      read: async () => ({
+        schedules: [],
+        runtimes: [],
+        manuals: [],
+        tombstones: [],
+        discoveryIds: [],
+        synced: true,
+      }),
+      exportRows: async () => [],
+      execute: async () => ({ changed: false }),
+      flush: async () => {},
+      sync: async () => {},
+      async observe(update) {
+        deliver = update;
+        return { close() {} };
+      },
+    };
+    h.runtime = {
+      ...h.runtime,
+      scheduleRegistry: port,
+      repo: {
+        openFlockDoc: async () => {
+          throw new Error('Forbidden legacy SR');
+        },
+      },
+    } as unknown as WorkspaceRuntime;
+    await mount(h);
+    await act(async () =>
+      deliver({
+        schedules: [row as import('@lody/shared').ScheduleRegistryRow],
+        runtimes: [],
+        manuals: [],
+        tombstones: [],
+        discoveryIds: [row.scheduleId],
+        synced: true,
+      })
+    );
+    expect(snapshot()).toMatchObject({
+      workspaceId: h.runtime.workspaceId,
+      rows: [row],
+      ready: true,
+    });
+    const next = harness();
+    next.runtime = {
+      ...next.runtime,
+      scheduleRegistry: { ...port, workspaceId: 'foreign' as never },
+    };
+    await mount(next);
+    expect(snapshot()).toMatchObject({ rows: [], error: 'REGISTRY_UNAVAILABLE' });
+    await act(async () =>
+      deliver({
+        schedules: [row as import('@lody/shared').ScheduleRegistryRow],
+        runtimes: [],
+        manuals: [],
+        tombstones: [],
+        discoveryIds: [row.scheduleId],
+        synced: true,
+      })
+    );
+    expect(snapshot().rows).toEqual([]);
   });
 
   it.each(['open', 'join', 'sync'] as const)(

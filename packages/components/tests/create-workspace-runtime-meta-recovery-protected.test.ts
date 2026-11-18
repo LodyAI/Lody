@@ -173,6 +173,11 @@ vi.mock('loro-repo', async (importOriginal) => {
             refreshTransportRoutes: mocks.refreshTransportRoutes,
             transportRooms: mocks.transportRooms,
             joinMetaRoom: mocks.joinMetaRoom,
+            // Metadata-only substitute: it owns no body documents. Body
+            // durability cases below inject the real persisted Repo instead.
+            persistDocNow: async () => {
+              throw new Error('Metadata-only fixture cannot persist a document body');
+            },
             flush: mocks.flush,
             destroy: mocks.destroy,
             reconnect: mocks.reconnect,

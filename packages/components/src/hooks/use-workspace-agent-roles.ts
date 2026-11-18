@@ -14,7 +14,8 @@ import {
   type MachineId,
 } from '@lody/shared';
 import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
-import { getAllAgentConfigAtom } from '@/atoms/agents';
+import { getAllAgentConfigListAtom } from '@/atoms/agents';
+import { useNativeMachineCatalogPublicReader } from './use-native-machine-catalog-public';
 import { machineFlockRowsByWorkspaceAtom } from '@/atoms/machine-flock';
 import { presumedOnlineMachineIdsAtom } from '@/atoms/presence';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
@@ -89,7 +90,8 @@ export function useAgentRoleAvailability(
 
   const { machines } = useVisibleMachineMetas();
   const onlineMachineIds = useAtomValue(presumedOnlineMachineIdsAtom);
-  const agentConfigs = useAtomValue(getAllAgentConfigAtom);
+  const agentConfigs = useAtomValue(getAllAgentConfigListAtom);
+  const readNative = useNativeMachineCatalogPublicReader();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
 
   // Presence of a machine key means its Flock rows were read, which is what
@@ -127,10 +129,16 @@ export function useAgentRoleAvailability(
       authorizedMachineIds: new Set(machines.keys()),
       onlineMachineIds,
       agentConfigMachineIds,
-      loadedAgentConfigMachineIds: new Set(loadedMachineIds),
-      runConfigCapability: createAgentRoleCapabilityResolver(agentConfigs, machines),
+      loadedAgentConfigMachineIds: new Set([
+        ...loadedMachineIds.filter((id) => readNative(id).kind === 'legacy'),
+        ...[...machines.keys()].filter((id) => {
+          const view = readNative(id);
+          return view.kind === 'native' && view.synced;
+        }),
+      ]),
+      runConfigCapability: createAgentRoleCapabilityResolver(agentConfigs, machines, readNative),
     };
-  }, [agentConfigs, loadedMachineIds, machines, onlineMachineIds]);
+  }, [agentConfigs, loadedMachineIds, machines, onlineMachineIds, readNative]);
 
   const resolve = useCallback(
     (role: AgentRole) => resolveAgentRoleAvailability(role, context),

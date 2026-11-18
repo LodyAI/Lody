@@ -1237,6 +1237,15 @@ async function syncMachineFlockDocsForRead(
   const results = await Promise.all(
     Array.from(new Set(machineIds)).map(async (machineId): Promise<MachineFlockFreshness> => {
       try {
+        const native = manager.getMachineCatalogRuntimePort?.(machineId);
+        if (
+          native &&
+          native.binding.workspaceId === workspaceId &&
+          native.binding.machineId === machineId
+        ) {
+          await native.readCatalog();
+          return { confirmed: true };
+        }
         await manager.syncFlockDocOrThrow(getMachineFlockDocId(workspaceId, machineId), {
           reason: `${reason}:${machineId}`,
           requireRemoteConfirmation: true,
@@ -1275,7 +1284,12 @@ export async function resolveLocalProjectRefOrThrow(
     'session.local-projects'
   );
   const localProjects = Object.values(
-    await readMachineLocalProjects(manager.repo, workspaceId, machineId)
+    await readMachineLocalProjects(
+      manager.repo,
+      workspaceId,
+      machineId,
+      manager.getMachineCatalogRuntimePort?.(machineId)
+    )
   );
   if (localProjects.length === 0) {
     assertMachineFlockCacheSufficient(freshness, 'Local project catalog is unavailable.', {
@@ -2276,14 +2290,22 @@ async function readAgentAcpCapabilitySnapshot(args: AgentAcpCapabilityReadArgs):
         [args.machineId],
         'session.acp-capabilities'
       );
-  const handle = await args.manager.repo.openFlockDoc(
-    getMachineFlockDocId(args.workspaceId, args.machineId)
-  );
-  const capabilities = getMachineFlockAcpCapabilities(
-    readMachineFlockRowsFromFlock(handle.flock, {
-      families: ACP_CAPABILITY_ROW_FAMILIES,
-    })
-  );
+  const native = args.manager.getMachineCatalogRuntimePort?.(args.machineId);
+  if (
+    native &&
+    (native.binding.workspaceId !== args.workspaceId || native.binding.machineId !== args.machineId)
+  )
+    throw new Error('Machine capability scope mismatch');
+  const handle = native
+    ? undefined
+    : await args.manager.repo.openFlockDoc(getMachineFlockDocId(args.workspaceId, args.machineId));
+  const capabilities = native
+    ? (await native.readCatalog()).capabilities
+    : getMachineFlockAcpCapabilities(
+        readMachineFlockRowsFromFlock(handle!.flock, {
+          families: ACP_CAPABILITY_ROW_FAMILIES,
+        })
+      );
   const cached = capabilities[getAcpCapabilityCacheKey(args.agentConfigId)];
   const capability =
     'runtimeOverrides' in args
@@ -3050,7 +3072,12 @@ async function listAgentConfigsForMachine(
     [machineId],
     'session.agent-configs'
   );
-  const configs = await listMergedAgentConfigs(manager.repo, workspaceId, [machineId]);
+  const configs = await listMergedAgentConfigs(
+    manager.repo,
+    workspaceId,
+    [machineId],
+    manager.getMachineCatalogRuntimePort?.(machineId)
+  );
   configs.sort((left, right) => {
     const nameCompare = left.name.localeCompare(right.name);
     if (nameCompare !== 0) {
@@ -3305,7 +3332,12 @@ async function resolveLocalProjectRefOnMachineOrThrow(
     'session.local-projects'
   );
   const localProjects = Object.values(
-    await readMachineLocalProjects(manager.repo, workspaceId, machineId)
+    await readMachineLocalProjects(
+      manager.repo,
+      workspaceId,
+      machineId,
+      manager.getMachineCatalogRuntimePort?.(machineId)
+    )
   );
   if (localProjects.length === 0) {
     assertMachineFlockCacheSufficient(freshness, 'Local project catalog is unavailable.', {
@@ -3641,7 +3673,7 @@ export async function resolveEffectiveSessionCreateDispatchConfig(args: {
             }
           }
           return readProjectDefaultMcpIds(
-            args.manager.repo,
+            args.manager,
             args.workspaceId,
             args.project,
             args.agentConfig.machineId
@@ -4118,7 +4150,7 @@ export async function createSessionResult(
       } satisfies Partial<SessionMeta>);
     }
     if (!options.delegatedRequester)
-      sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
+      await sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await commitPreparedSessionDispatch(manager, prepared);
     dispatched = true;
     await confirmDispatchSyncedBestEffort({
@@ -4443,7 +4475,7 @@ export async function sendSessionChatResult(
     userTurn.existingStatus === undefined &&
     userTurn.inputConfig
   ) {
-    if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
+    if (!delegatedRequester) await sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await updateSessionActivityTimestampsBestEffort(manager, sessionId);
     // Bound setup separately: cold connections must not consume the offer's
     // five-second response budget. Late setup must never send after fallback.
@@ -4517,7 +4549,7 @@ export async function sendSessionChatResult(
     environment &&
     userTurn.inputConfig
   ) {
-    if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
+    if (!delegatedRequester) await sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await updateSessionActivityTimestampsBestEffort(manager, sessionId);
     const response = await environment.host.steerSession({
       sessionId,
@@ -4555,7 +4587,7 @@ export async function sendSessionChatResult(
   let dispatched = false;
   try {
     await updateSessionActivityTimestampsBestEffort(manager, sessionId);
-    if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
+    if (!delegatedRequester) await sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await writeDispatchPointer({ manager, sessionId, userTurnId });
     dispatched = true;
     await confirmDispatchSyncedBestEffort({

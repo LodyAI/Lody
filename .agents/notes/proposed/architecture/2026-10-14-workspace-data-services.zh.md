@@ -452,3 +452,31 @@ UploadReceipt 区分 barrier-completed（local-primary/remote）、not-attempted
 | host/daemon 重启、取消、权限换代、上传恢复与 RPC handoff                     | 性能收益同时满足原数据安全和可用性边界                     |
 
 本方案是待实施的业务与架构契约。固定源码审计、框架类型参照和早期有限模型用于澄清设计；真实 Effect/Repo/SQLite/IndexedDB/IPC 集成、prepared handoff、Clock/清理行为和产品性能仍须在对应实现中验证。文档与翻译检查不代表运行时实现通过，也不批准现行协议变更。
+
+## 10. 固定 npm 0.1.0 的渐进接入
+
+[迁移计划与当前实施边界](../../../docs/electron-loro-repo-rs-migration.zh.md) 固定发布源码
+`1d80000d7f6b7301442a6e2c7c558cd69e6ab88a`。共用目录端口借用已有 Repo。
+可选 local FI/FIS 使用 daemon scoped child，或由 main/daemon 通过私有租约共用独立
+数据 host；只有 host 打开 engine 目录。renderer 使用领域 IPC，不创建额外旧 IDB
+副本；关闭执行保留 main 的独立数据租约。
+
+Local WF 另有持久全窗口 registration/revision、daemon pause、只读 IDB 导出和持有
+旧 SQLite 排他 writer lease 的 helper。归档完整 CRDT 来源并证明时钟/tombstone 覆盖
+后才发布 native。main 核对 journal 和实际 native 存储后通知 UI；过期 ticket 和真实
+文档导航只撤销自己的 registration。helper ACK 丢失保留原来源及冻结路由用于恢复，
+已发布 owner 不随 flag 移除而改变。二进制回滚明确持久化旧 Repo 后才改变 owner。
+没有同 room 双写，也不从 UI ready 推断云端 authority。开启 FI/FIS 与 WF 的完整 OSS
+本地桌面测试已通过；这不代表 Cloud、多设备、六平台、签名或断电验收。
+
+MF/SR 领域端口和消费者接缝尚未完成产品物理选择。Meta 保留旧 owner：正式 scan 隐藏
+删除标记，没有完整 binary 来源就无法安全投影 inline 与 leaf 混存的旧 metadata。
+公开 WASM importer 无法回放 native FLKD compact delta；必须拒绝该形态，不能复活
+删除字段或使用不完整 SQLite snapshot。
+
+P4 复用 HistoryWriter planners，经 native CAS 与私有只读 Loro 投影读写。单个旧 inline
+turn 可用 `defaultObject: value` 原子替换，后续所有受控 patch 显式 canonical schema，
+保留 Text CID 和未知旧内容。同一次操作既修改 inline turn 又插入新 Map/Text 仍不能由
+正式 SDK 表达；adapter 在写入前拒绝，未发布的显式 value opcode 原型不算已安装能力。
+完整 SessionBackend host ports 和其它文档产品组合仍待完成。Roost、E2EE 和凭据边界
+保持原契约。

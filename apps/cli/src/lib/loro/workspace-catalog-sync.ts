@@ -125,7 +125,9 @@ export const makeWorkspaceCatalogSync = Effect.fnUntraced(function* (
   repo: LoroRepo,
   workspaceId: WorkspaceId,
   logger: Logger,
-  requireRemoteBaseline = true
+  requireRemoteBaseline = true,
+  omitWorkspaceRoom = false,
+  omitMetadataRoom = false
 ) {
   const scope = yield* Effect.scope;
   type Entry = {
@@ -246,6 +248,9 @@ export const makeWorkspaceCatalogSync = Effect.fnUntraced(function* (
   });
   const hold = (id: string) => ensure(id).pipe(Effect.asVoid);
   const ready = Effect.fnUntraced(function* (id: string | undefined, timeoutMs: number) {
+    // External Meta has a separate real authority; this legacy catalog cannot
+    // manufacture readiness by joining an unavailable legacy room.
+    if (id === undefined && omitMetadataRoom) return false;
     const entry = yield* ensure(id);
     if (entry.baseline) return true;
     if (timeoutMs <= 0) return false;
@@ -253,7 +258,7 @@ export const makeWorkspaceCatalogSync = Effect.fnUntraced(function* (
       Effect.timeoutOrElse({ duration: timeoutMs, orElse: () => Effect.succeed(false) })
     );
   });
-  yield* ensure(undefined);
-  yield* hold(getWorkspaceFlockDocId(workspaceId));
+  if (!omitMetadataRoom) yield* ensure(undefined);
+  if (!omitWorkspaceRoom) yield* hold(getWorkspaceFlockDocId(workspaceId));
   return { hold, ready } satisfies WorkspaceCatalogSync;
 });

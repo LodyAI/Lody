@@ -5,7 +5,8 @@ import { useAtomValue } from 'jotai';
 import { ListChecks, Plus, ShieldAlert, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { getAllAgentConfigAtom } from '@/atoms';
+import { getAllAgentConfigListAtom } from '@/atoms';
+import type { AgentConfigDisplay } from '@/lib/agent-config-display';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { getModeIcon as getPermissionModeIcon } from '@/components/chat/chat-landing-selectors';
 import { composerSurface } from '@/components/shared/composer-surface';
@@ -250,7 +251,7 @@ function MobileRunConfigSheetRows({
   agentRoles,
 }: MobileRunConfigSheetRowsProps) {
   const { t } = useTranslation();
-  const executorConfigs = useAtomValue(getAllAgentConfigAtom);
+  const executorConfigs: readonly AgentConfigDisplay[] = useAtomValue(getAllAgentConfigListAtom);
 
   const {
     modelSelectors,

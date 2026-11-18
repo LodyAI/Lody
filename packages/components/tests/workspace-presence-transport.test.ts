@@ -932,3 +932,183 @@ describe('session-detail-presence', () => {
     });
   });
 });
+
+it('receives local machine presence with zero legacy rooms, updates Role availability and releases the original listener', async () => {
+  const [
+    { Effect, Layer },
+    { LocalLoroWriterTurn },
+    { makeLocalLoroWriterLegacy },
+    { LocalLoroDataPlaneServerLegacy },
+    { LocalLoroTransportAdapter },
+    { createLocalLoroDataPlaneConnection },
+    { base64ToBytes },
+    { collectOnlineMachineIdsFromPresence, resolveAgentRoleAvailability, getServerNow },
+  ] = await Promise.all([
+    import('effect'),
+    import('@lody/shared/local-loro-writer'),
+    import('@lody/shared/local-loro-writer/legacy'),
+    import('@lody/shared/local-loro-data-plane-server'),
+    import('@lody/shared/local-loro-transport'),
+    import('../src/providers/local-loro-data-plane-connection'),
+    import('@lody/shared/local-loro-data-plane'),
+    import('@lody/shared'),
+  ]);
+  vi.useRealTimers();
+  const writer = makeLocalLoroWriterLegacy(
+    Layer.succeed(LocalLoroWriterTurn, { next: Effect.void })
+  );
+  const workspaceId = 'native-zero-room' as WorkspaceId;
+  const machineId = 'local-machine' as MachineId;
+  const instanceId = 'local-instance' as LodyPresenceInstanceId;
+  const key = getLodyMachinePresenceKey(machineId, instanceId);
+  const now = getServerNow();
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(now);
+  const origin = new EphemeralStore(LODY_PRESENCE_TTL_MS);
+  origin.set(key, { kind: 'machine', machineId, instanceId, updatedAt: now });
+  const sourceListeners = new Set<() => void>();
+  const ipcListeners = new Map<string, Set<(value: unknown) => void>>();
+  const sent: import('@lody/shared').LocalLoroDataPlaneClientMessage[] = [];
+  const tasks: Promise<void>[] = [];
+  const initial = Promise.withResolvers<void>(),
+    updated = Promise.withResolvers<void>(),
+    cleared = Promise.withResolvers<void>();
+  let receiver = new EphemeralStore(LODY_PRESENCE_TTL_MS);
+  let snapshot: LodyPresenceStateMap = {};
+  let initialized = false;
+  const receive = (value: unknown) => {
+    for (const listener of ipcListeners.get('loro.event') ?? []) listener(value);
+  };
+  const connection = { id: 'actual-local-socket', send: receive };
+  const server = new LocalLoroDataPlaneServerLegacy({
+    writerLegacy: writer,
+    workspaceId,
+    resolveDoc: async () => {
+      throw new Error('Native presence must not open a legacy body');
+    },
+    resolveFlockDoc: async () => {
+      throw new Error('Native presence must not open Meta/MF/WF/SR');
+    },
+    presenceSource: {
+      encodeLocalOrigin: () => origin.encodeAll(),
+      subscribeLocalOrigin(listener) {
+        sourceListeners.add(listener);
+        return () => sourceListeners.delete(listener);
+      },
+    },
+  });
+  vi.stubGlobal('window', {
+    ipc: {
+      invoke: async (channel: string) => channel === 'loro.isConnected',
+      on(channel: string, listener: (value: unknown) => void) {
+        const listeners = ipcListeners.get(channel) ?? new Set();
+        listeners.add(listener);
+        ipcListeners.set(channel, listeners);
+        return () => listeners.delete(listener);
+      },
+      send(channel: string, message: import('@lody/shared').LocalLoroDataPlaneClientMessage) {
+        if (channel !== 'loro.send') return;
+        sent.push(message);
+        if (message.type === 'ping') {
+          if (!message.workspaceId || !message.peerId) return;
+          tasks.push(
+            server.handleMessage(connection, {
+              ...message,
+              workspaceId: message.workspaceId,
+              peerId: message.peerId,
+            })
+          );
+        } else tasks.push(server.handleMessage(connection, message));
+      },
+    },
+  });
+  const local = createLocalLoroDataPlaneConnection({
+    presence: {
+      workspaceId,
+      peerId: 'zero-room-view',
+      onMessage(message) {
+        receiver.apply(base64ToBytes(message.dataBase64));
+        snapshot = parseLodyPresenceStates(receiver.getAllStates() as Record<string, unknown>);
+        const machine = Object.values(snapshot).find((state) => state.kind === 'machine');
+        if (!initialized && machine) {
+          initialized = true;
+          initial.resolve();
+        }
+        if (machine?.updatedAt === now + 1) updated.resolve();
+        if (initialized && !machine) cleared.resolve();
+      },
+      onDisconnect() {
+        receiver = new EphemeralStore(LODY_PRESENCE_TTL_MS);
+        snapshot = {};
+      },
+    },
+  });
+  if (!local) throw new Error('Missing Electron local data-plane connection');
+  const transport = new LocalLoroTransportAdapter({
+    workspaceId,
+    peerId: 'zero-room-view',
+    connection: local.connection,
+  });
+  const role = {
+    v: 1 as const,
+    id: 'role' as import('@lody/shared').AgentRoleId,
+    ownerUserId: 'owner',
+    visibility: 'private' as const,
+    name: 'Native role',
+    machineId,
+    agentConfigId: 'agent' as import('@lody/shared').AgentConfigId,
+    runConfig: {},
+    revision: 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const availability = () =>
+    resolveAgentRoleAvailability(role, {
+      authorizedMachineIds: new Set([machineId]),
+      loadedAgentConfigMachineIds: new Set([machineId]),
+      agentConfigMachineIds: new Map([[role.agentConfigId, machineId]]),
+      onlineMachineIds: collectOnlineMachineIdsFromPresence(snapshot, now + 1),
+    });
+  try {
+    await transport.connect();
+    await initial.promise;
+    expect(Object.values(snapshot)).toMatchObject([{ kind: 'machine', machineId, updatedAt: now }]);
+    expect(availability()).toEqual({ kind: 'available' });
+    expect(sent.every((message) => message.type === 'ping')).toBe(true);
+    vi.setSystemTime(now + 1);
+    origin.set(key, { kind: 'machine', machineId, instanceId, updatedAt: now + 1 });
+    for (const listener of sourceListeners) listener();
+    await updated.promise;
+    expect(Object.values(snapshot)).toMatchObject([{ updatedAt: now + 1 }]);
+    const current = snapshot;
+    receive({
+      type: 'presence',
+      protocolVersion: 7,
+      workspaceId: 'different-workspace',
+      dataBase64: '',
+    });
+    expect(snapshot).toBe(current);
+    vi.setSystemTime(now + 2);
+    origin.delete(key);
+    for (const listener of sourceListeners) listener();
+    await cleared.promise;
+    expect(snapshot).toEqual({});
+    expect(availability()).toEqual({ kind: 'unavailable', reason: 'machine_offline' });
+    local.dispose();
+    origin.set(key, { kind: 'machine', machineId, instanceId, updatedAt: now + 2 });
+    for (const listener of sourceListeners) listener();
+    await Promise.all(tasks);
+    expect(snapshot).toEqual({});
+    await transport.close();
+    expect([...ipcListeners.values()].every((listeners) => listeners.size === 0)).toBe(true);
+  } finally {
+    local.dispose();
+    await transport.close();
+    await server.handleDisconnectLegacy(connection.id);
+    await server.disposeLegacy();
+    await writer.closeLegacy();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
+  expect(sourceListeners.size).toBe(0);
+});

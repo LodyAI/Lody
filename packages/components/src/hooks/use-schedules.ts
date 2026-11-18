@@ -1,10 +1,9 @@
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
   getScheduleRegistryFlockDocId,
-  readScheduleRegistryRows,
-  ScheduleRuntimeRowSchema,
+  createLegacyScheduleRegistry,
   type ScheduleDocument,
 } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
@@ -32,8 +31,6 @@ export function useScheduleRegistrySync(): void {
   }, [runtime, setSnapshot]);
   useEffect(() => {
     let disposed = false;
-    let off: (() => void) | undefined;
-    let leave: (() => void) | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let running = false;
     let failed = false;
@@ -48,89 +45,67 @@ export function useScheduleRegistrySync(): void {
     )
       return undefined;
     const roomId = getScheduleRegistryFlockDocId(runtime.workspaceId);
-    let local:
-      | {
-          handle: Awaited<ReturnType<typeof runtime.repo.openFlockDoc>>;
-          update: () => void;
-        }
-      | undefined;
-    let synced = false;
-    const releaseRoom = () => {
-      leave?.();
-      leave = undefined;
+    const registry =
+      runtime.scheduleRegistry ??
+      createLegacyScheduleRegistry({
+        workspaceId: runtime.workspaceId,
+        repo: runtime.repo,
+        releaseRoomOnSyncError: true,
+        selectBinding: readinessBinding,
+      });
+    if (registry.workspaceId !== runtime.workspaceId) {
+      setSnapshot((current) => ({
+        ...current,
+        ready: true,
+        retrying: false,
+        error: 'REGISTRY_UNAVAILABLE',
+      }));
+      return undefined;
+    }
+    let observation: Awaited<ReturnType<typeof registry.observe>> | undefined;
+    const release = async () => {
+      const owner = observation;
+      if (!owner) return;
+      await owner.close();
+      if (observation === owner) observation = undefined;
     };
-    const releaseLocal = () => {
-      off?.();
-      off = undefined;
-      local = undefined;
+    const onFailure = (error: unknown) => {
+      if (disposed) return;
+      failed = true;
+      recordClientError('schedules.registry_load_failed', error, { roomId, stage: 'observe' });
+      setSnapshot((current) => ({
+        ...current,
+        ready: true,
+        retrying: false,
+        error: 'REGISTRY_UNAVAILABLE',
+      }));
+      const delay = retryDelays[retries++];
+      if (delay !== undefined) timer = setTimeout(() => void run(), delay);
     };
     const run = async () => {
       if (disposed || running) return;
       running = true;
       failed = false;
       if (timer !== undefined) clearTimeout(timer);
-      releaseRoom();
       setSnapshot((current) => ({ ...current, retrying: true }));
-      let stage = 'open';
       try {
-        if (!local) {
-          const handle = await runtime.repo.openFlockDoc(roomId);
+        // A failed release retains its exact owner; do not acquire a duplicate.
+        await release();
+        const next = await registry.observe((snapshot) => {
           if (disposed) return;
-          const update = () => {
-            if (disposed) return;
-            const scan = [...handle.flock.scan()];
-            const rows = readScheduleRegistryRows(scan);
-            setSnapshot((current) => ({
-              workspaceId: runtime.workspaceId,
-              rows,
-              runtimes: scan.flatMap((entry) => {
-                if (entry.key[0] !== 'runtime') return [];
-                const parsed = ScheduleRuntimeRowSchema.safeParse(entry.value);
-                return parsed.success &&
-                  entry.key[1] === parsed.data.scheduleId &&
-                  entry.key[2] === parsed.data.machineId
-                  ? [parsed.data]
-                  : [];
-              }),
-              // An empty local scan is not authoritative until first sync.
-              ready: rows.length > 0 || synced || !!current.error,
-              retrying: synced ? false : current.retrying,
-              error: synced ? undefined : current.error,
-            }));
-          };
-          stage = 'scan';
-          off = handle.flock.subscribe(update);
-          update();
-          local = { handle, update };
-        }
-        stage = 'join';
-        const room = await local.handle.joinRoom();
-        if (disposed) {
-          room.unsubscribe();
-          return;
-        }
-        leave = () => room.unsubscribe();
-        stage = 'first-sync';
-        await readinessBinding(room).firstSyncedWithRemote;
-        if (disposed) return;
-        synced = true;
-        stage = 'scan';
-        local.update();
+          setSnapshot((current) => ({
+            workspaceId: runtime.workspaceId,
+            rows: snapshot.schedules,
+            runtimes: snapshot.runtimes,
+            ready: snapshot.schedules.length > 0 || snapshot.synced || !!current.error,
+            retrying: snapshot.synced ? false : current.retrying,
+            error: snapshot.synced ? undefined : current.error,
+          }));
+        }, onFailure);
+        observation = next;
+        if (disposed) await release();
       } catch (error) {
-        if (disposed) return;
-        // Remote failure does not invalidate the readable local document.
-        releaseRoom();
-        if (stage === 'open' || stage === 'scan') releaseLocal();
-        failed = true;
-        recordClientError('schedules.registry_load_failed', error, { roomId, stage });
-        setSnapshot((current) => ({
-          ...current,
-          ready: true,
-          retrying: false,
-          error: 'REGISTRY_UNAVAILABLE',
-        }));
-        const delay = retryDelays[retries++];
-        if (delay !== undefined) timer = setTimeout(() => void run(), delay);
+        onFailure(error);
       } finally {
         running = false;
       }
@@ -144,8 +119,9 @@ export function useScheduleRegistrySync(): void {
       disposed = true;
       if (timer !== undefined) clearTimeout(timer);
       window.removeEventListener('online', onOnline);
-      releaseRoom();
-      releaseLocal();
+      void release().catch((error) =>
+        recordClientError('schedules.registry_release_failed', error, { roomId })
+      );
     };
   }, [runtime, setSnapshot, retryGeneration]);
 }
@@ -178,6 +154,11 @@ export function useScheduleDocument(id: string | undefined) {
   const scope = useResolvedWorkspaceScope();
   const runtime =
     scope.enabled && scope.workspaceId === activeRuntime?.workspaceId ? activeRuntime : null;
+  const ownerEpoch = useSyncExternalStore(
+    useCallback((listener) => runtime && id && id !== 'new' ? runtime.subscribeDocumentDomainEpoch?.({ domain: 'schedule_definition', id }, listener) ?? (() => {}) : () => {}, [runtime, id]),
+    useCallback(() => runtime && id && id !== 'new' ? runtime.getDocumentDomainEpoch?.({ domain: 'schedule_definition', id }) ?? 0 : 0, [runtime, id]),
+    () => 0
+  );
   const [value, setValue] = useState<{
     runtime: unknown;
     id: string;
@@ -192,18 +173,18 @@ export function useScheduleDocument(id: string | undefined) {
       .acquireScheduleStore(id)
       .then(async (store) => {
         if (disposed) {
-          runtime.releaseScheduleStoreRef(id);
+          runtime.releaseScheduleStoreRef(id, store);
           return;
         }
         let synced = false;
         const update = () => {
           const document = store.getState();
-          if (!disposed) setValue({ runtime, id, document, ready: !!document || synced });
+          if (!disposed) setValue({ runtime, id, document, ready: store.getSyncState ? store.getSyncState() === 'synced' : !!document || synced });
         };
         const off = store.subscribe(update);
         release = () => {
           off();
-          runtime.releaseScheduleStoreRef(id);
+          runtime.releaseScheduleStoreRef(id, store);
         };
         update();
         await store.firstSynced;
@@ -211,12 +192,12 @@ export function useScheduleDocument(id: string | undefined) {
         update();
       })
       .catch(() => {
-        if (!disposed) setValue({ runtime, id, document: null, ready: true });
+        if (!disposed) setValue({ runtime, id, document: null, ready: !runtime.scheduleDefinitions });
       });
     return () => {
       disposed = true;
       release?.();
     };
-  }, [runtime, id]);
+  }, [runtime, id, ownerEpoch]);
   return value.runtime === runtime && value.id === id ? value : { document: null, ready: false };
 }

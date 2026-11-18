@@ -10,7 +10,7 @@ import {
   LocalLoroDataPlaneClientMessageSchema,
   LOCAL_LORO_DATA_PLANE_MAX_FRAME_BYTES,
   LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-  type LocalLoroDataPlaneClientMessage,
+  type LocalLoroWorkspaceClientMessage,
 } from '@lody/shared';
 import type {
   LocalLoroDataPlaneServerLegacy,
@@ -214,7 +214,7 @@ async function startInner(config: LocalLoroDataPlaneSocketServerConfig): Promise
 function parseLine(
   connection: LocalLoroDataPlaneServerConnection,
   line: string
-): Exclude<LocalLoroDataPlaneClientMessage, { type: 'ping' }> | null {
+): LocalLoroWorkspaceClientMessage | null {
   let raw: unknown;
   try {
     raw = JSON.parse(line);
@@ -240,11 +240,20 @@ function parseLine(
     return null;
   }
   const message = parsed.data;
-  // Pings are connection-scoped liveness probes from the relay; they never touch
-  // a workspace engine.
-  if (message.type === 'ping') {
-    connection.send({ type: 'pong', protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION });
+  // Bare relay pings never touch a workspace engine. Scoped presence pings
+  // must pass the same workspace lookup as room messages.
+  if (message.type === 'ping' && message.workspaceId === undefined) {
+    connection.send({
+      type: 'pong',
+      protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+      nativeFileIndexSnapshots: true,
+    });
     return null;
+  }
+  if (message.type === 'ping') {
+    // Schema enforces the pair; reconstruct it so workspace routing stays typed.
+    if (message.workspaceId === undefined || message.peerId === undefined) return null;
+    return { ...message, workspaceId: message.workspaceId, peerId: message.peerId };
   }
   return message;
 }
@@ -253,7 +262,7 @@ async function handleMessage(
   config: LocalLoroDataPlaneSocketServerConfig,
   connection: LocalLoroDataPlaneServerConnection,
   touchedEngines: Set<LocalLoroDataPlaneServerLegacy>,
-  message: Exclude<LocalLoroDataPlaneClientMessage, { type: 'ping' }>
+  message: LocalLoroWorkspaceClientMessage
 ): Promise<void> {
   const engine = config.getWorkspaceServer(message.workspaceId);
   if (!engine) {

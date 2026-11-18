@@ -666,6 +666,14 @@ export type SessionExecutionServiceDeps = {
   logger: Logger;
   sessionManager: SessionManager;
   workspaceDocument: LoroDocumentManager;
+  /** Whole-machine native owner selection; absent preserves the legacy owner. */
+  machineCatalog?: Pick<
+    LoroDocumentManager,
+    | 'getAgentConfigForMachineLaunch'
+    | 'getAcpCapabilities'
+    | 'updateAcpCapabilities'
+    | 'updateAcpAuthMethods'
+  >;
   machineId: MachineId;
   userId: string;
   workspaceId: WorkspaceId;
@@ -1424,16 +1432,14 @@ export class SessionExecutionService {
       configId,
       success: false,
     };
-    const config = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
-      configId,
-      this.deps.machineId
-    );
+    const config = await (
+      this.deps.machineCatalog ?? this.deps.workspaceDocument
+    ).getAgentConfigForMachineLaunch(configId, this.deps.machineId);
     if (!config) return response;
     if (!isSubscriptionQuotaEligible(config)) return response;
-    const capability = await this.deps.workspaceDocument.getAcpCapabilities(
-      this.deps.machineId,
-      configId
-    );
+    const capability = await (
+      this.deps.machineCatalog ?? this.deps.workspaceDocument
+    ).getAcpCapabilities(this.deps.machineId, configId);
     if (capability?.rateLimits?.query !== true) return response;
     const fingerprint = JSON.stringify(config);
     response.success = await this.providerQuotaRefresh.run(configId, fingerprint, async () => {
@@ -1489,10 +1495,9 @@ export class SessionExecutionService {
       signal.throwIfAborted();
       // v1 adapters conflate failed reads with empty snapshots. Never clear or mark fresh.
       if (snapshot.rateLimits.length === 0) return false;
-      const latest = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
-        configId,
-        this.deps.machineId
-      );
+      const latest = await (
+        this.deps.machineCatalog ?? this.deps.workspaceDocument
+      ).getAgentConfigForMachineLaunch(configId, this.deps.machineId);
       if (!latest || JSON.stringify(latest) !== fingerprint) return false;
       const unchanged = () =>
         (this.providerQuotaUpdates.get(configId) ?? 0) === revision && !signal.aborted;
@@ -2446,7 +2451,7 @@ export class SessionExecutionService {
       if (queuedRejection) return queuedRejection;
       const inputBlocks = resolveSessionExecutionInputBlocks(options.inputConfig);
       const promptBlocks = await wait(
-        this.deps.buildAcpPromptBlocks({
+        this.buildConfiguredAcpPromptBlocks({
           requesterUserId: options.userId,
           workspaceId: this.deps.workspaceId,
           sessionId: options.sessionId,
@@ -4453,6 +4458,7 @@ export class SessionExecutionService {
       this.deps.machineId,
       localProjectId,
       {
+        native: this.deps.workspaceDocument.getMachineCatalogRuntimePort?.(),
         verifyProjectIdentity: this.deps.workspaceDocument.isEncryptedWorkspace?.() === true,
         requestSync: () =>
           this.deps.workspaceDocument.syncMachineFlockDoc(this.deps.machineId, {
@@ -6872,7 +6878,8 @@ export class SessionExecutionService {
       const local = await readMachineLocalProjects(
         this.deps.workspaceDocument.repo,
         this.deps.workspaceId,
-        this.deps.machineId as MachineId
+        this.deps.machineId as MachineId,
+        this.deps.workspaceDocument.getMachineCatalogRuntimePort?.()
       );
       for (const row of Object.values(local))
         if (row.githubRepoFullName && preferLocal.has(row.githubRepoFullName.toLowerCase()))
@@ -7019,6 +7026,45 @@ export class SessionExecutionService {
           )
       : turn.body;
     await this.runVisibleSessionTurn(turn.options, body);
+  }
+
+  /** Native MF keeps configured instructions private. Compose them only for
+   * this provider submission; user history and replayed prior turns stay intact. */
+  private async buildConfiguredAcpPromptBlocks(
+    args: Parameters<SessionExecutionServiceDeps['buildAcpPromptBlocks']>[0]
+  ): Promise<ContentBlock[]> {
+    const runtime = this.deps.workspaceDocument.getMachineCatalogRuntimePort?.();
+    if (!runtime) return this.deps.buildAcpPromptBlocks(args);
+    if (
+      runtime.binding.machineId !== this.deps.machineId ||
+      runtime.binding.workspaceId !== args.workspaceId
+    )
+      throw new Error('Native agent prompt binding mismatch');
+    const doc = await this.deps.workspaceDocument.getOrCreateSessionDoc(args.sessionId);
+    const meta = await doc.getMetaState();
+    if (!meta?.agentConfigId) return this.deps.buildAcpPromptBlocks(args);
+    const config = await runtime.getAgentConfigForMachineLaunch(
+      meta.agentConfigId,
+      this.deps.machineId
+    );
+    if (runtime !== this.deps.workspaceDocument.getMachineCatalogRuntimePort?.())
+      throw new Error('Native agent prompt authority changed');
+    if (!config) throw new Error('Native agent configuration is unavailable');
+    const prefix = config.prompt?.trim();
+    if (!prefix) return this.deps.buildAcpPromptBlocks(args);
+    let target = -1;
+    for (let index = 0; index < args.inputBlocks.length; index++)
+      if (args.inputBlocks[index]?.type === 'text') target = index;
+    const block = args.inputBlocks[target];
+    // Inputs authored before migration (and trusted CLI producers) can already
+    // carry exactly this configured prefix. Do not add it a second time.
+    if (block?.type === 'text' && (block.text === prefix || block.text.startsWith(`${prefix}\n\n`)))
+      return this.deps.buildAcpPromptBlocks(args);
+    const inputBlocks = [...args.inputBlocks];
+    if (block?.type === 'text')
+      inputBlocks[target] = { ...block, text: `${prefix}\n\n${block.text}` };
+    else inputBlocks.push({ type: 'text', text: prefix });
+    return this.deps.buildAcpPromptBlocks({ ...args, inputBlocks });
   }
 
   private async prepareContinueSessionTurn(
@@ -7485,7 +7531,7 @@ export class SessionExecutionService {
           'execution.build_acp_prompt_blocks',
           { sessionId, turnId, inputBlocks: sessionInputBlocks.length },
           async () =>
-            await self.deps.buildAcpPromptBlocks({
+            await self.buildConfiguredAcpPromptBlocks({
               requesterUserId: message.userId,
               workspaceId: message.workspaceId,
               sessionId,
@@ -8346,7 +8392,7 @@ export class SessionExecutionService {
               'execution.build_acp_prompt_blocks',
               { sessionId, turnId, inputBlocks: sessionInputBlocks.length },
               async () =>
-                await self.deps.buildAcpPromptBlocks({
+                await self.buildConfiguredAcpPromptBlocks({
                   requesterUserId: message.userId,
                   workspaceId,
                   sessionId,
@@ -9009,7 +9055,7 @@ export class SessionExecutionService {
           magpieGatewayUrl: config.magpieGatewayUrl,
           env: config.env,
         });
-      await this.deps.workspaceDocument.updateAcpCapabilities(
+      await (this.deps.machineCatalog ?? this.deps.workspaceDocument).updateAcpCapabilities(
         this.deps.machineId,
         agentConfigId,
         config.agentCliType,
@@ -9169,10 +9215,9 @@ export class SessionExecutionService {
                 );
                 const assertCurrent = async () => {
                   signal.throwIfAborted();
-                  const current = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
-                    config.id,
-                    this.deps.machineId
-                  );
+                  const current = await (
+                    this.deps.machineCatalog ?? this.deps.workspaceDocument
+                  ).getAgentConfigForMachineLaunch(config.id, this.deps.machineId);
                   if (!current || JSON.stringify(current.codexAuth) !== frozenBinding)
                     throw new Error('Provider changed during authentication; try again');
                   assertManagedCodexProfileConfig(current);
@@ -9306,10 +9351,9 @@ export class SessionExecutionService {
       };
     }
 
-    const config = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
-      message.configId,
-      this.deps.machineId
-    );
+    const config = await (
+      this.deps.machineCatalog ?? this.deps.workspaceDocument
+    ).getAgentConfigForMachineLaunch(message.configId, this.deps.machineId);
     if (!config) {
       return {
         type: 'machine/acp-capabilities-refresh_response',
@@ -9341,10 +9385,9 @@ export class SessionExecutionService {
     try {
       let env: Record<string, string> | undefined;
       if (configId !== undefined) {
-        const config = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
-          configId,
-          this.deps.machineId
-        );
+        const config = await (
+          this.deps.machineCatalog ?? this.deps.workspaceDocument
+        ).getAgentConfigForMachineLaunch(configId, this.deps.machineId);
         if (!config || config.cliType !== 'builtin' || config.agentType !== 'pi') {
           return {
             success: false,
@@ -9489,10 +9532,9 @@ export class SessionExecutionService {
       env: message.env,
     });
     const recordedFingerprint = this.acpCapabilityLaunchInputFingerprints.get(message.configId);
-    const entry = await this.deps.workspaceDocument.getAcpCapabilities(
-      this.deps.machineId,
-      message.configId
-    );
+    const entry = await (
+      this.deps.machineCatalog ?? this.deps.workspaceDocument
+    ).getAcpCapabilities(this.deps.machineId, message.configId);
     // Session-confirmed models do not prove the project-independent command preview.
     if (entry?.availableCommands === undefined) return undefined;
     const decision = decideAcpCapabilityRefreshCache({
@@ -9526,10 +9568,9 @@ export class SessionExecutionService {
       options.signal?.throwIfAborted();
       let codexProfile: ResolvedCodexProfile | undefined;
       if (message.codexAuth) {
-        const config = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
-          message.configId,
-          this.deps.machineId
-        );
+        const config = await (
+          this.deps.machineCatalog ?? this.deps.workspaceDocument
+        ).getAgentConfigForMachineLaunch(message.configId, this.deps.machineId);
         if (!config || JSON.stringify(config.codexAuth) !== JSON.stringify(message.codexAuth))
           throw new Error('Provider changed during verification');
         codexProfile = await getCodexProfileStore().resolve(this.deps.workspaceId, config, true);
@@ -9606,7 +9647,9 @@ export class SessionExecutionService {
         authMethods && usesAcpProtocolAuthentication(message.cliType, message.agentType)
           ? authMethods.map(summarizeAcpAuthMethod)
           : undefined;
-      const capability = await this.deps.workspaceDocument.updateAcpCapabilities(
+      const capability = await (
+        this.deps.machineCatalog ?? this.deps.workspaceDocument
+      ).updateAcpCapabilities(
         this.deps.machineId,
         message.configId,
         message.cliType,
@@ -9690,7 +9733,7 @@ export class SessionExecutionService {
       // sign-in method without a second probe.
       await Promise.resolve()
         .then(() =>
-          this.deps.workspaceDocument.updateAcpAuthMethods?.(
+          (this.deps.machineCatalog ?? this.deps.workspaceDocument).updateAcpAuthMethods?.(
             this.deps.machineId,
             message.configId,
             requiredAuthMethods

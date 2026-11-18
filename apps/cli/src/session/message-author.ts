@@ -1,10 +1,7 @@
 import {
   buildAgentMessageAuthor,
   resolveAgentBrandId,
-  getWorkspaceFlockDocId,
-  listWorkspaceAgentRoles,
   snapshotAgentRole,
-  readWorkspaceFlockRowsFromFlock,
   type AgentMessageAuthor,
   type ModelInfo,
   type SessionMeta,
@@ -32,14 +29,14 @@ export async function resolveSessionMessageAuthor(
       ? inputConfig?.agentRoleSnapshot
       : undefined;
   if (!role && roleId && workspaceId) {
-    const handle = await manager.repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
-    const matchedRole = listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(handle.flock)).find(
-      (candidate) =>
-        candidate.id === roleId &&
-        candidate.revision === inputConfig?.agentRoleRevision &&
-        candidate.machineId === session.machineId &&
-        candidate.agentConfigId === session.agentConfigId
-    );
+    const candidate = await manager.readWorkspaceRole(workspaceId, roleId);
+    const matchedRole =
+      candidate &&
+      candidate.revision === inputConfig?.agentRoleRevision &&
+      candidate.machineId === session.machineId &&
+      candidate.agentConfigId === session.agentConfigId
+        ? candidate
+        : undefined;
     role = matchedRole ? snapshotAgentRole(matchedRole) : undefined;
   }
   return buildAgentMessageAuthor({

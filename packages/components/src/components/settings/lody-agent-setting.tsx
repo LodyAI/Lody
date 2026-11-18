@@ -19,7 +19,7 @@ import {
   cmdCreateProviderSetupAtom,
   cmdRetryProviderSetupAtom,
   deleteProviderSetupAtom,
-  getAgentConfigsByMachineAtomFamily,
+  getLegacyAgentConfigsByMachineAtomFamily as getAgentConfigsByMachineAtomFamily,
   getProviderSetupsByMachineAtomFamily,
 } from '@/atoms/agents';
 import { localMachineIdAtom } from '@/atoms/local-probe';

@@ -122,12 +122,38 @@ const mocks = vi.hoisted(() => ({
   streamsGatewayBaseUrl: 'https://streams.example.test',
 }));
 
+/** These catalog/startup fixtures never open a body. Supply the SDK's actual
+ * storage surface so manager admission can bind it; any accidental body I/O
+ * fails instead of manufacturing persistence or release acknowledgements. */
+function withSdkStoragePorts<T extends object>(repo: T): T {
+  for (const name of [
+    'openPersistedDoc',
+    'persistDocNow',
+    'acquireDoc',
+    'joinDocRoom',
+    'unloadDoc',
+    'openFlockDoc',
+    'acquireFlockDoc',
+    'joinFlockDocRoom',
+  ] as const) {
+    if (typeof Reflect.get(repo, name) !== 'function')
+      Object.defineProperty(repo, name, {
+        configurable: true,
+        writable: true,
+        value: async () => {
+          throw new Error(`Unexpected ${name} in catalog/startup fixture`);
+        },
+      });
+  }
+  return repo;
+}
+
 vi.mock('loro-repo', async (importOriginal) => {
   const actual = await importOriginal<typeof import('loro-repo')>();
   return {
     ...actual,
     LoroRepo: {
-      create: mocks.repoCreate,
+      create: async (...args: unknown[]) => withSdkStoragePorts(await mocks.repoCreate(...args)),
     },
     RepoDocHandle: class RepoDocHandle {},
     RepoWatchHandle: class RepoWatchHandle {},
@@ -963,7 +989,7 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
       },
     } as unknown as LoroDocumentManager['repo'];
     const manager = new LoroDocumentManager({
-      repo,
+      repo: withSdkStoragePorts(repo),
       workspaceId: 'cleanup-failure' as WorkspaceId,
       userId: 'user-1',
       metaSub: createMetaSubscription(),
@@ -1014,7 +1040,9 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
 
   it('reports the presence release timeout retained inside the Effect cause', async () => {
     const manager = new LoroDocumentManager({
-      repo: { destroy: async () => {} } as unknown as LoroDocumentManager['repo'],
+      repo: withSdkStoragePorts({
+        destroy: async () => {},
+      }) as unknown as LoroDocumentManager['repo'],
       workspaceId: 'cleanup-presence' as WorkspaceId,
       userId: 'user-1',
       metaSub: createMetaSubscription(),
@@ -1073,7 +1101,7 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
       reconnect: vi.fn(async () => {}),
     } as unknown as LoroDocumentManager['repo'];
     const manager = new LoroDocumentManager({
-      repo,
+      repo: withSdkStoragePorts(repo),
       workspaceId: 'workspace-8' as WorkspaceId,
       userId: 'user-1',
       metaSub,
@@ -1110,7 +1138,7 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
       sync,
     } as unknown as LoroDocumentManager['repo'];
     const manager = new LoroDocumentManager({
-      repo,
+      repo: withSdkStoragePorts(repo),
       workspaceId: 'workspace-remote-doc-sync' as WorkspaceId,
       userId: 'user-1',
       metaSub,
@@ -1151,7 +1179,7 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
       }),
     } as unknown as LoroDocumentManager['repo'];
     const manager = new LoroDocumentManager({
-      repo,
+      repo: withSdkStoragePorts(repo),
       workspaceId: 'workspace-remote-doc-sync-race' as WorkspaceId,
       userId: 'user-1',
       metaSub,
@@ -1196,7 +1224,7 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
       sync,
     } as unknown as LoroDocumentManager['repo'];
     const manager = new LoroDocumentManager({
-      repo,
+      repo: withSdkStoragePorts(repo),
       workspaceId: 'workspace-flock-sync-coalesce' as WorkspaceId,
       userId: 'user-1',
       metaSub,
@@ -1230,7 +1258,7 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
       const { LoroRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
       const repo = await LoroRepo.create({});
       const manager = new LoroDocumentManager({
-        repo,
+        repo: withSdkStoragePorts(repo),
         workspaceId: 'workspace-flock-no-route' as WorkspaceId,
         userId: 'user-1',
         metaSub: null,
@@ -1299,7 +1327,7 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
       await repo.addTransport(transportId, adapter);
     }
     const manager = new LoroDocumentManager({
-      repo,
+      repo: withSdkStoragePorts(repo),
       workspaceId: 'workspace-flock-partial' as WorkspaceId,
       userId: 'user-1',
       metaSub: null,
@@ -1352,7 +1380,7 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
       }),
     } as unknown as LoroDocumentManager['repo'];
     const manager = new LoroDocumentManager({
-      repo,
+      repo: withSdkStoragePorts(repo),
       workspaceId: 'workspace-flock-replaced' as WorkspaceId,
       presenceRuntime: await createCliPresenceRuntimeLegacy(
         'workspace-flock-replaced' as WorkspaceId
@@ -1415,7 +1443,7 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
         sync,
       } as unknown as LoroDocumentManager['repo'];
       const manager = new LoroDocumentManager({
-        repo,
+        repo: withSdkStoragePorts(repo),
         workspaceId: 'workspace-flock-mixed' as WorkspaceId,
         userId: 'user-1',
         metaSub: null,
@@ -1514,7 +1542,7 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
       resolveFlockDoc: async () => localFlock,
     });
     const manager = new LoroDocumentManager({
-      repo,
+      repo: withSdkStoragePorts(repo),
       workspaceId,
       userId: 'user-1',
       metaSub,

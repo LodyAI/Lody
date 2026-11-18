@@ -227,6 +227,7 @@ export async function terminateAcpProcessTree(
     exitTimeoutMs: number;
     /** Skip SIGTERM: for probes whose output no longer matters. */
     force?: boolean;
+    processGroup?: boolean;
     nodeProcess?: NodeProcessApi;
   }
 ): Promise<void> {
@@ -235,7 +236,7 @@ export async function terminateAcpProcessTree(
     {
       graceMs: options.force ? 0 : options.exitTimeoutMs,
       killWaitMs: options.exitTimeoutMs,
-      processGroup: true,
+      processGroup: options.processGroup ?? true,
     },
     toShared({
       logger: options.logger,
@@ -256,6 +257,7 @@ export type SpawnAcpProcessOptions = {
   args?: string[];
   command?: string;
   spawnImpl?: NodeProcessApi['spawn'];
+  processGroup?: boolean;
 };
 
 export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess => {
@@ -290,7 +292,7 @@ export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess =
       command: executable.command,
       args: executable.args,
       options: { cwd: options.workdir, env: options.env, stdio: ['pipe', 'pipe', 'pipe'] },
-      processGroup: true,
+      processGroup: options.processGroup ?? true,
     },
     toShared(withSpawn(options.spawnImpl))
   ).child;
@@ -325,6 +327,8 @@ export type StartLocalAcpAgentOptions = {
     request: RequestPermissionRequest
   ): Promise<RequestPermissionResponse>;
   onManagedRuntimeProgress?: ManagedRuntimeProgressCallback;
+  /** Private helper whose enclosing managed process Scope owns the complete group. */
+  parentOwnsProcessGroup?: true;
   signal?: AbortSignal;
   extraArgs?: string[];
   spawnImpl?: NodeProcessApi['spawn'];
@@ -844,6 +848,7 @@ async function startLocalAcpProtocol<T>(
       closeBroker = prepared.close;
       if (releaseProfile) prepared.env.LODY_CODEX_PROCESS_TOKEN = releaseProfile.token;
       agentProcess = spawnAcpProcess({
+        ...(options.parentOwnsProcessGroup ? { processGroup: false } : {}),
         cliType: options.cliType,
         agentType: options.agentType,
         workdir: options.workdir,
@@ -994,6 +999,7 @@ async function startLocalAcpProtocol<T>(
       // Report a survivor, but keep the startup error: it is why the call failed.
       await terminateAcpProcessTree(agentProcess, {
         logger: options.logger,
+        processGroup: options.parentOwnsProcessGroup ? false : undefined,
         sessionLabel: 'acp-startup',
         exitTimeoutMs: 3000,
       }).catch((terminationError: unknown) => {
@@ -1055,6 +1061,8 @@ export type ShutdownLocalAcpAgentOptions = {
   sessionLabel: string;
   closeSessionTimeoutMs?: number;
   exitTimeoutMs?: number;
+  processGroup?: boolean;
+  requireConfirmedExit?: true;
   /** Test seam for the OS process table. */
   nodeProcess?: NodeProcessApi;
 };
@@ -1080,9 +1088,11 @@ export async function shutdownLocalAcpAgent(options: ShutdownLocalAcpAgentOption
       logger: options.logger,
       sessionLabel: options.sessionLabel,
       exitTimeoutMs,
+      processGroup: options.processGroup,
       nodeProcess: options.nodeProcess,
     });
   } catch (error) {
+    if (options.requireConfirmedExit) throw error;
     // These probe, title, and login agents are never reused, so a survivor
     // cannot receive new work; it is a leak to surface, not a caller failure.
     options.logger.warn(

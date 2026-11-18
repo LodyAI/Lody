@@ -229,3 +229,60 @@ describe('local project registration and standalone display', () => {
     expect(runtime.read()).toMatchObject({ id: 'project-1', standaloneVisible: false });
   });
 });
+
+it('registers and promotes directories through actual native MF receipts while the retired legacy writer stays unavailable', async () => {
+  const { openNativeMachineCatalogTestGroup, machineA, binding } =
+    await import('./native-machine-catalog.test-support');
+  const group = await openNativeMachineCatalogTestGroup([machineA]);
+  try {
+    await group.source.start();
+    const retired = () => {
+      throw new Error('Retired MF writer must not open');
+    };
+    const runtime = {
+      ...binding,
+      writer: { flockRowPutIfAbsent: retired, flockRowUpdate: retired },
+      ownsNativeMachineCatalog: () => true,
+      nativeMachineCatalogSource: group.source,
+      requestLocalProjectControl: async () => prepared(),
+    };
+    const input = { ...args, machineId: machineA, runtime, inspect: true };
+    expect((await prepareAndWriteLocalProject({ ...input, standaloneVisible: false })).status).toBe(
+      'added'
+    );
+    const key = machineFlockKeys.localProject('project-1');
+    const stored = (await group.client.flockGet(group.namespace, group.rooms.get(machineA)!, key))
+      .value;
+    expect(stored).toMatchObject({
+      rootPath: '/repo/lody',
+      standaloneVisible: false,
+      githubRepoFullName: 'acme/lody',
+    });
+    expect((await prepareAndWriteLocalProject({ ...input, standaloneVisible: false })).status).toBe(
+      'existing'
+    );
+    await group.client.flockBatch(group.namespace, group.rooms.get(machineA)!, [
+      {
+        op: 'put',
+        key,
+        value: {
+          ...(stored as object),
+          name: 'Peer name',
+          future: { opaque: 'SYNTHETIC_PRIVATE_PROJECT', bytes: Uint8Array.of(1, 2) },
+        },
+      },
+    ]);
+    const promoted = await prepareAndWriteLocalProject(input);
+    expect(promoted).toMatchObject({ status: 'added', name: 'Peer name', rootPath: '/repo/lody' });
+    const final = (await group.client.flockGet(group.namespace, group.rooms.get(machineA)!, key))
+      .value;
+    expect(final).toMatchObject({
+      name: 'Peer name',
+      standaloneVisible: true,
+      future: { opaque: 'SYNTHETIC_PRIVATE_PROJECT', bytes: Uint8Array.of(1, 2) },
+    });
+    expect(JSON.stringify(promoted)).not.toContain('SYNTHETIC_PRIVATE_PROJECT');
+  } finally {
+    await group.close();
+  }
+});

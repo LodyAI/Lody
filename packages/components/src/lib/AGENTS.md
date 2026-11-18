@@ -60,9 +60,17 @@ Organization queries require matching authenticated sessions.
 
 ## File Preview and Code Collab
 
-- Remote file surfaces read the owning session's file-index Flock. Local Electron
+- Remote file surfaces read the owning session's file-index Flock, or the ordinary
+  Cloud host's explicitly selected whole FI/FIS read-only projection. Cloud cache
+  resources require matching workspace authority; only a positive legacy response
+  permits renderer Flock/IDB acquisition. Missing factories, frozen ownership and
+  transport failures never authorize fallback. Observation borrows release only
+  themselves; account/workspace revocation clears snapshots and retires authority.
+  Local Electron
   initial trees and All Changes first use local `code-collab/get-file-index`
-  Machine RPC without awaiting Flock, then subscribe to local Flock events.
+  Machine RPC without awaiting Flock, then subscribe to local Flock events or
+  the native pilot's read-only snapshots. Negotiate native observation through
+  v7 ping/pong; only an explicit old pong selects legacy, never a timeout.
   Delayed/failed subscriptions never block IPC or fall back to cloud. Stale join
   events converge with CLI asynchronous snapshot reconciliation. Machine RPC
   also provides exact content, save, LSP and diffs.

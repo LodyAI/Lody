@@ -29,7 +29,7 @@ import {
 import { LodyFleet, syncCliServerTime } from '@/lib/lody-fleet';
 import { CliType, MachineId } from '@lody/shared';
 import { checkClaude, checkCodex } from '@/utils';
-import { CliAvailability, resolveCliTypesSelection } from './start-options';
+import { CliAvailability, resolveStartupBuiltinAgentDiscovery } from './start-options';
 import { CliRuntimeStateReporter } from '@/lib/cli-runtime-state';
 import { formatErrorMessage } from '@/utils/format-error';
 import { createStartShutdownController } from './start-shutdown';
@@ -273,15 +273,20 @@ export const startCommand = new Command('start')
     const providedAuth = options.auth?.trim();
 
     const cliDetectionStartedAt = Date.now();
-    const cliAvailability = {
-      kimi: hasBuiltinAgentCredentials('kimi') && 'configured',
-      antigravity: 'managed-runtime',
-      pi: 'managed-runtime',
-      grok: hasBuiltinAgentCredentials('grok') && 'configured',
-      devin: 'managed-runtime',
-      claude: checkClaude(),
-      codex: checkCodex(),
-    };
+    const discovery = resolveStartupBuiltinAgentDiscovery({
+      setting: process.env.LODY_BUILTIN_AGENT_DISCOVERY,
+      requestedCliTypes: options.cliTypes,
+      discover: () => ({
+        kimi: hasBuiltinAgentCredentials('kimi') && 'configured',
+        antigravity: 'managed-runtime',
+        pi: 'managed-runtime',
+        grok: hasBuiltinAgentCredentials('grok') && 'configured',
+        devin: 'managed-runtime',
+        claude: checkClaude(),
+        codex: checkCodex(),
+      }),
+    });
+    const cliAvailability = discovery.availability;
     logger.debug(
       `[startup] CLI credential detection durationMs=${Date.now() - cliDetectionStartedAt}`
     );
@@ -308,10 +313,7 @@ export const startCommand = new Command('start')
         : null;
     const resolvedElectronSessionUserId = electronSessionUserId || electronSessionUser?.id || null;
 
-    const cliSelection = resolveCliTypesSelection({
-      requestedCliTypes: options.cliTypes,
-      availability: cliAvailability,
-    });
+    const cliSelection = discovery.selection;
 
     if (cliSelection.invalid.length > 0) {
       logger.error(

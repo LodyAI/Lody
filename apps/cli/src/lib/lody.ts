@@ -1,3 +1,13 @@
+import { getInstalledCodeCollabFileIndexBackendFactoryLegacy } from './code-collab/code-collab-file-index-installation';
+import type {
+  NativeDocumentDomainFreezeRequest,
+  NativeDocumentDomainFreezeResponse,
+} from '@lody/shared/native-document-domain-control';
+import type {
+  NativeSessionBodyFreezeRequest,
+  NativeSessionBodyFreezeResponse,
+} from '@lody/shared/native-session-body-control';
+import type { CodeCollabFileIndexBackendFactory } from './code-collab/code-collab-file-index-backend';
 import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
 import { daemonLossObserver } from './e2ee/client-loss-observer';
 import type { AuthorizeEncryptedExecution, EncryptedAgentExecution } from './e2ee/agent-execution';
@@ -44,6 +54,8 @@ const BUILTIN_AGENT_CONFIG_INITIAL_RETRY_DELAY_MS = 10_000;
 const BUILTIN_AGENT_CONFIG_MAX_RETRY_DELAY_MS = 5 * 60_000;
 
 interface LodyOptions {
+  /** Trusted private Node composition; local/protected manager modes never invoke it. */
+  nativeFileIndexBackendFactory?: CodeCollabFileIndexBackendFactory;
   /** A successful authenticated ledger read of this encrypted workspace; see Fleet. */
   onEncryptedAuthorityConfirmed?: (startedAt: AuthorityStamp) => void;
   /** True while execution relies on an outage window, with that window's ends. */
@@ -313,6 +325,10 @@ export class Lody {
           // The daemon is the only process that resumes LoroDoc rooms from the
           // shared SQLite cursors; one-shot commands keep theirs in memory.
           documentCursorScope: 'shared-durable',
+          nativeMachineId: options.machineId,
+          nativeFileIndexBackendFactory:
+            options.nativeFileIndexBackendFactory ??
+            getInstalledCodeCollabFileIndexBackendFactoryLegacy(),
           keepWorkspaceCatalogJoined: true,
           streamsTokens: e2ee?.tokens ?? options.cloudPort.streamsTokens,
           encryptedWorkspace: e2ee,
@@ -374,6 +390,7 @@ export class Lody {
       workspaceDocument: documentManager,
       memoryPressure: options.memoryPressure,
       handlerConfig: {
+        machineCatalogRuntime: documentManager.getNativeMachineRuntimePorts(this.machineId),
         sorbetCredentials: createSorbetCredentialsHandler(
           documentManager,
           this.machineId,
@@ -686,6 +703,22 @@ export class Lody {
 
   hasAutomationSessionWork(sessionId: SessionId): boolean {
     return this.runtime.getMessageHandler()?.hasAutomationSessionWork(sessionId) ?? true;
+  }
+
+  async handleNativeDocumentDomainMigrationControl(
+    request: NativeDocumentDomainFreezeRequest
+  ): Promise<NativeDocumentDomainFreezeResponse> {
+    const handler = this.runtime.getMessageHandler();
+    if (!handler) return { ok: false, error: 'scope_unavailable' };
+    return handler.handleNativeDocumentDomainMigrationControl(request);
+  }
+
+  async handleNativeSessionBodyMigrationControl(
+    request: NativeSessionBodyFreezeRequest
+  ): Promise<NativeSessionBodyFreezeResponse> {
+    const handler = this.runtime.getMessageHandler();
+    if (!handler) return { ok: false, error: 'scope_unavailable' };
+    return handler.handleNativeSessionBodyMigrationControl(request);
   }
 
   getAutomationSessionAuthority() {

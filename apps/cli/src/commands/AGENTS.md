@@ -47,6 +47,9 @@ Parent rules apply; see [Session rules](../session/AGENTS.md).
 
 `runSessionCommand`: JSON/JSONL diagnostics go to stderr through setup, cleanup and exit.
 
+`LODY_BUILTIN_AGENT_DISCOVERY=0` skips discovery and selection.
+Explicit `--cli-types`, custom ACP and Cloud authorization remain unchanged.
+
 ## Read commands and workspace sync
 
 - Session read commands (`session list/show/history/status`, `export`) sync Loro metadata/docs

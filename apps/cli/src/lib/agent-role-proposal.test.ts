@@ -5,7 +5,9 @@ import {
   applyAgentRoleProposal,
   getWorkspaceFlockDocId,
   writeWorkspaceAgentRoleToFlock,
+  createLegacyWorkspaceCatalogQuery,
   type WorkspaceId,
+  type AgentRoleId,
   type AgentRoleProposalCommand,
   type SessionId,
 } from '@lody/shared';
@@ -83,6 +85,21 @@ describe('Role proposal history', () => {
     const manager = {
       repo,
       getOrCreateSessionDoc: async () => doc,
+      readWorkspaceCatalog: async () => {
+        const binding = { workspaceId, accountId: 'user' };
+        return createLegacyWorkspaceCatalogQuery({
+          binding,
+          open: () => repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId)),
+        }).read(binding);
+      },
+      readWorkspaceRole: async (_workspaceId: WorkspaceId, id: AgentRoleId) => {
+        const binding = { workspaceId, accountId: 'user' };
+        return createLegacyWorkspaceCatalogQuery({
+          binding,
+          open: () => repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId)),
+          authorizeRoleLookup: () => true,
+        }).readRole(binding, id);
+      },
     } as unknown as LoroDocumentManager;
     try {
       const handle = await repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));

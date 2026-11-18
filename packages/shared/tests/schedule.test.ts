@@ -517,6 +517,46 @@ describe('Chat-mode schedules carry no project', () => {
     expect(rows.has(JSON.stringify(['tombstone', 'test']))).toBe(true);
     expect(rows.has(JSON.stringify(['schedule', 'test']))).toBe(false);
     expect(rows.has(JSON.stringify(['runtime', 'test', 'machine']))).toBe(false);
+    // An unrelated retained native cleanup may remain uncertain. Its error is
+    // still reported, while another eligible legacy message makes progress.
+    await repo.save({
+      scheduleId: 'independent',
+      draft,
+      actorId: 'owner',
+      now: 1,
+      activationId: 'independent-activation',
+      activityId: 'created',
+      create: true,
+    });
+    const independent = (await repo.list())[0]!;
+    rows.set(JSON.stringify(['runtime', 'independent', 'machine']), {
+      scheduleId: 'independent',
+      machineId: 'machine',
+      activationId: 'independent-activation',
+      observedDefinitionFingerprint: independent.definitionFingerprint,
+      messageState: 'sent',
+      updatedAt: 1000,
+    });
+    const recovering = new ScheduleRepository(port, 'workspace' as never, {
+      definitions: {
+        async resolve() {
+          return undefined;
+        },
+        async recoverRetention() {
+          throw new Error('Other native deletion remains unknown');
+        },
+      },
+    });
+    await expect(
+      recovering.pruneExpiredMessages({
+        now: 1000 + SCHEDULED_MESSAGE_RETENTION_MS,
+        ownerId: 'owner',
+        machineId: 'machine',
+      })
+    ).rejects.toThrow('remains unknown');
+    expect(purged).toEqual(['schedule-test', 'schedule-independent']);
+    expect(await repo.list()).toEqual([]);
+    expect(rows.has(JSON.stringify(['tombstone', 'independent']))).toBe(true);
   });
 
   it('persists complete messages across replicas, fingerprints their payload and replays one creation', async () => {

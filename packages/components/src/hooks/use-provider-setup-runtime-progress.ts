@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import type { ProviderSetupTask, WorkspaceId } from '@lody/shared';
+import type { AgentType, WorkspaceId } from '@lody/shared';
 import type { WorkspaceRuntime } from '@/atoms/runtime';
 import { useMachineAcpBinaryActions } from './use-machine-acp-binary-actions';
 
@@ -12,11 +12,16 @@ import { useMachineAcpBinaryActions } from './use-machine-acp-binary-actions';
 export function useProviderSetupRuntimeProgress(
   runtime: WorkspaceRuntime | null,
   workspaceId: WorkspaceId | null,
-  setups: readonly ProviderSetupTask[]
+  setups: readonly {
+    readonly machineId: import('@lody/shared').MachineId;
+    readonly createdAt: number;
+    readonly status: string;
+    readonly config: { readonly agentType: AgentType };
+  }[]
 ): void {
   const { installBinary } = useMachineAcpBinaryActions(runtime, workspaceId);
   const activeSetups = useMemo(() => {
-    const byMachine = new Map<string, ProviderSetupTask>();
+    const byMachine = new Map<string, (typeof setups)[number]>();
     for (const setup of [...setups].sort((left, right) => left.createdAt - right.createdAt)) {
       if (setup.status !== 'preparing-runtime' || byMachine.has(setup.machineId)) continue;
       byMachine.set(setup.machineId, setup);

@@ -1,8 +1,5 @@
 import { notificationLabel } from '@lody/shared/notifications';
-import type { RepoRoomSubscription } from 'loro-repo';
 import {
-  canonicalScheduleJson,
-  getScheduleRegistryFlockDocId,
   getScheduleRoomId,
   getServerNow,
   getSessionRoomId,
@@ -10,8 +7,6 @@ import {
   ScheduleRepository,
   ScheduledMessageSchema,
   scheduleDefinitionFingerprint,
-  scheduleRegistryKeys,
-  ScheduleRuntimeRowSchema,
   type ScheduleAuthorizationRequest,
   type SessionId,
   type SessionMeta,
@@ -29,7 +24,6 @@ import type { WorkspaceSummary } from '../workspace';
 import type { LoroDocumentManager } from '../loro/doc';
 import type { Logger } from '@/utils/logger';
 import { createSessionBackend } from '@/session/session-backend';
-import { streamsRoomBinding } from '../loro/streams-room-binding';
 import {
   buildScheduleRunTarget,
   withScheduledMessageInput,
@@ -46,7 +40,6 @@ import {
   materializePreparedSessionInput,
   type PreparedSessionInput,
 } from '../prepared-session-input';
-import { createScheduleSyncGate } from './schedule-sync-gate';
 import { ScheduleStore } from './schedule-store';
 import { ScheduleEngine, ScheduleConfigurationError } from './schedule-engine';
 import { isQuotaReservationCandidate } from './quota-reservation';
@@ -82,14 +75,18 @@ export async function createScheduleWorkspace(args: {
 }): Promise<ScheduleWorkspaceHandle> {
   const { manager, workspace, auth } = args;
   const workspaceId = workspace.id as WorkspaceId;
-  const repository = new ScheduleRepository(manager.repo, workspaceId);
+  const catalog = manager.getMachineCatalogRuntimePort?.();
+  const machineCatalog = catalog?.binding.machineId === auth.machineId ? catalog : undefined;
+  const repository = new ScheduleRepository(manager.repo, workspaceId, {
+    registry: manager.scheduleRegistry,
+    definitions: manager.scheduleDefinitions,
+  });
   const store = new ScheduleStore<PreparedSessionInput>();
-  const registry = await manager.repo.openFlockDoc(getScheduleRegistryFlockDocId(workspaceId));
-  const subscriptions: RepoRoomSubscription[] = [];
+  const registry = manager.scheduleRegistry;
   const cleanups: (() => void)[] = [];
   let disposed = false;
-  let cloudGate: ReturnType<typeof createScheduleSyncGate> | undefined;
-  const isReady = () => args.localOnly || cloudGate?.isReady() === true;
+  let registrySynced = false;
+  const isReady = () => args.localOnly || registrySynced;
   const disabled = process.env.LODY_SCHEDULES_DISABLED === '1';
   const resolveTarget = async (
     run: import('./schedule-store').ScheduleRun<PreparedSessionInput>
@@ -101,7 +98,8 @@ export async function createScheduleWorkspace(args: {
       manager.repo,
       workspaceId,
       auth.machineId,
-      agent.agentConfigId as AgentConfigId
+      agent.agentConfigId as AgentConfigId,
+      machineCatalog
     );
     if (
       !machine ||
@@ -116,12 +114,15 @@ export async function createScheduleWorkspace(args: {
     const project = run.definition.project;
     const requiredLocalProjectId = scheduleRequiredLocalProjectId(project);
     if (requiredLocalProjectId !== undefined) {
-      const flock = await manager.repo.openFlockDoc(
-        getMachineFlockDocId(workspaceId, auth.machineId)
-      );
-      const projects = getMachineFlockLocalProjects(
-        readMachineFlockRowsFromFlock(flock.flock, { families: ['localProject'] })
-      );
+      const projects = machineCatalog
+        ? (await machineCatalog.readCatalog()).projects
+        : getMachineFlockLocalProjects(
+            readMachineFlockRowsFromFlock(
+              (await manager.repo.openFlockDoc(getMachineFlockDocId(workspaceId, auth.machineId)))
+                .flock,
+              { families: ['localProject'] }
+            )
+          );
       if (!projects[requiredLocalProjectId])
         throw new ScheduleConfigurationError('PROJECT_UNAVAILABLE');
     }
@@ -301,25 +302,11 @@ export async function createScheduleWorkspace(args: {
       );
     },
     publish: async (runtime) => {
-      const key = scheduleRegistryKeys.runtime(runtime.scheduleId, auth.machineId);
-      const prior = ScheduleRuntimeRowSchema.safeParse(registry.flock.get(key));
-      // Keep the last accepted Session while updating queue/next-fire fields.
-      const next = {
-        ...runtime,
-        lastDispatch:
-          runtime.lastDispatch ??
-          (prior.success && prior.data.activationId === runtime.activationId
-            ? prior.data.lastDispatch
-            : undefined),
-      };
-      if (
-        prior.success &&
-        canonicalScheduleJson({ ...prior.data, updatedAt: 0 }) ===
-          canonicalScheduleJson({ ...next, updatedAt: 0 })
-      )
-        return;
-      registry.flock.set(key, JSON.parse(JSON.stringify(next)));
-      await manager.repo.flush();
+      const result = await registry.execute({
+        kind: 'put-runtime',
+        runtime: { ...runtime, machineId: auth.machineId },
+      });
+      if (result.changed) await registry.flush();
     },
     // Do not log prompts, config values, credentials or provider exception text.
     onEvent: ({ runKey, ...event }) => {
@@ -355,19 +342,9 @@ export async function createScheduleWorkspace(args: {
         args.logger.warn('[schedules] retention sweep failed; will retry');
       }
       const rows = await repository.list();
-      for (const entry of registry.flock.scan({ prefix: ['manual'] })) {
-        const request = entry.value as unknown as {
-          scheduleId: string;
-          actorId: string;
-          manualRunId: string;
-          activationId: string;
-          requestedAt: number;
-        };
+      for (const request of (await registry.read()).manuals) {
         if (
           !request ||
-          entry.key.length !== 3 ||
-          entry.key[1] !== request.scheduleId ||
-          entry.key[2] !== request.manualRunId ||
           request.actorId !== auth.userId ||
           !/^[a-zA-Z0-9_-]{1,50}$/.test(request.manualRunId) ||
           !Number.isFinite(request.requestedAt) ||
@@ -412,21 +389,65 @@ export async function createScheduleWorkspace(args: {
   const wake = (): void => {
     void evaluate().catch(() => args.logger.warn('[schedules] wake failed'));
   };
-  cleanups.push(registry.flock.subscribe(wake));
+  let observation: Awaited<ReturnType<typeof registry.observe>> | undefined;
+  let observerPending: Promise<void> | undefined;
+  let observerRetries = 0;
+  const observationError = (error: unknown) => {
+    if (disposed) return;
+    registrySynced = false;
+    args.logger.warn('[schedules] Registry synchronization pending');
+    if ((error as { code?: string })?.code === 'restart_required' && observerRetries++ < 3)
+      queueMicrotask(() => {
+        if (!disposed) void observeRegistry().catch(observationError);
+      });
+  };
+  const observeRegistry = (): Promise<void> => {
+    const previous = observerPending;
+    const pending = (async () => {
+      if (previous) await previous;
+      if (observation) {
+        await observation.close();
+        observation = undefined;
+      }
+      if (disposed) return;
+      const acquired = await registry.observe((snapshot) => {
+        if (!disposed) {
+          registrySynced = snapshot.synced;
+          wake();
+        }
+      }, observationError);
+      observation = acquired;
+      if (disposed) {
+        await acquired.close();
+        if (observation === acquired) observation = undefined;
+      }
+    })();
+    observerPending = pending;
+    return pending;
+  };
+  try {
+    await observeRegistry();
+  } catch (error) {
+    disposed = true;
+    const failures: unknown[] = [error];
+    try {
+      await observation?.close();
+    } catch (cleanup) {
+      failures.push(cleanup);
+    }
+    try {
+      await engine.stop();
+      store.close();
+    } catch (cleanup) {
+      failures.push(cleanup);
+    }
+    throw new AggregateError(failures, 'Schedule workspace startup failed');
+  }
 
   // One short timer is also the wake-from-sleep clock check. No per-Schedule
   // timer survives a definition edit, and evaluation coalesces in the engine.
   const timer = setInterval(wake, 15_000);
   timer.unref();
-  const registrySubscription = await registry.joinRoom();
-  subscriptions.push(registrySubscription);
-  if (!args.localOnly) {
-    const binding = streamsRoomBinding(registrySubscription);
-    cloudGate = createScheduleSyncGate(binding, wake, () =>
-      args.logger.warn('[schedules] Registry synchronization pending')
-    );
-    cleanups.push(cloudGate.dispose);
-  }
   wake();
   return {
     evaluate,
@@ -434,10 +455,22 @@ export async function createScheduleWorkspace(args: {
       disposed = true;
       clearInterval(timer);
       for (const cleanup of cleanups) cleanup();
-      for (const sub of subscriptions) sub.unsubscribe();
-      await evaluating;
-      await engine.stop();
-      store.close();
+      const failures: unknown[] = [];
+      try {
+        await observerPending;
+        await observation?.close();
+      } catch (error) {
+        failures.push(error);
+      }
+      try {
+        await evaluating;
+        await engine.stop();
+        store.close();
+      } catch (error) {
+        failures.push(error);
+      }
+      if (failures.length)
+        throw new AggregateError(failures, 'Schedule workspace cleanup unconfirmed');
     },
   };
 }

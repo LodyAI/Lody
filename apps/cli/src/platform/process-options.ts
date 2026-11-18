@@ -1,4 +1,7 @@
-import { observeManagedProcessTree } from '@/lib/managed-process-observation';
+import {
+  observeManagedProcessTree,
+  handoffManagedProcessTree,
+} from '@/lib/managed-process-observation';
 import type { Layer } from 'effect';
 import type { ChildProcessSpawner } from 'effect/process';
 import {
@@ -27,6 +30,7 @@ export const toShared = (options: PlatformFacadeOptions = {}): ProcessFacadeOpti
   nodeProcess: options.nodeProcess ?? {
     ...nodeProcessLive,
     observeTree: observeManagedProcessTree,
+    handoffTree: handoffManagedProcessTree,
   },
   signal: options.signal,
   loggerLayer: lodyLoggerLayer(options.logger ?? getLogger(), options.logPrefix),

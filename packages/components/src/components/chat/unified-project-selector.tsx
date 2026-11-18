@@ -192,6 +192,7 @@ interface UnifiedProjectSelectorProps {
   latestMessageAtByRepo?: ReadonlyMap<string, number>;
   latestMessageAtByLocalProject?: ReadonlyMap<string, number>;
   onAddLocalProject: () => void;
+  addLocalProjectDisabled?: boolean;
   onConnectGitRepo: () => void;
   projectSharing?: {
     currentUserId: string | null;
@@ -379,6 +380,7 @@ export function UnifiedProjectSelector({
   latestMessageAtByRepo,
   latestMessageAtByLocalProject,
   onAddLocalProject,
+  addLocalProjectDisabled,
   onConnectGitRepo,
   projectSharing,
 }: UnifiedProjectSelectorProps) {
@@ -404,6 +406,7 @@ export function UnifiedProjectSelector({
       className={className}
       latestMessageAtByRepo={latestMessageAtByRepo}
       onAddLocalProject={onAddLocalProject}
+      addLocalProjectDisabled={addLocalProjectDisabled}
       onConnectGitRepo={onConnectGitRepo}
       onShareLocalProjectWithTeam={projectSharing?.onShareWithTeam}
       getShareErrorMessage={getShareErrorMessage}
@@ -420,6 +423,7 @@ export function UnifiedProjectSelectorView({
   className,
   latestMessageAtByRepo,
   onAddLocalProject,
+  addLocalProjectDisabled,
   onConnectGitRepo,
   onShareLocalProjectWithTeam,
   getShareErrorMessage,
@@ -563,6 +567,7 @@ export function UnifiedProjectSelectorView({
           render={
             <button
               type="button"
+              aria-busy={addLocalProjectDisabled || undefined}
               {...withClassName(
                 stylex.props(
                   !isPropertyRow && contextPill.surface,
@@ -770,7 +775,11 @@ export function UnifiedProjectSelectorView({
               {t('chat.projectPicker.createProject', 'Create project')}
             </Menu.Item>
           ) : null}
-          <Menu.Item icon={FolderPlus} onClick={onAddLocalProject}>
+          <Menu.Item
+            icon={FolderPlus}
+            onClick={onAddLocalProject}
+            disabled={addLocalProjectDisabled}
+          >
             {t('chat.contextSwitch.addProject', 'Add a folder')}
           </Menu.Item>
           <Menu.Item icon={ArrowUpRight} onClick={onConnectGitRepo}>

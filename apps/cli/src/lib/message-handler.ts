@@ -1,3 +1,7 @@
+import type {
+  NativeDocumentDomainFreezeRequest,
+  NativeDocumentDomainFreezeResponse,
+} from '@lody/shared/native-document-domain-control';
 import type { MachineStatusResponse } from '@lody/shared';
 import { readManagedOperation } from './managed-daemon-release';
 import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
@@ -34,11 +38,7 @@ import {
 import type { EncryptedAgentExecution } from './e2ee/agent-execution';
 import { decideEncryptedDerivation } from './e2ee/derivation-limits';
 import { isScheduledMessageFile } from './schedules/scheduled-message-files';
-import {
-  getWorkspaceFlockDocId,
-  listWorkspaceProjects,
-  readWorkspaceFlockRowsFromFlock,
-} from '@lody/shared';
+import { getWorkspaceFlockDocId } from '@lody/shared';
 import { encodeSessionFilePath, resolveSessionPullRequests } from '@lody/shared';
 import { SessionAutomationAuthority } from '@/session/session-automation-authority';
 import type { SessionFileRoot } from '@lody/shared';
@@ -304,6 +304,12 @@ import { deriveRepoIdFromGitHubRepo } from '@/utils/github';
 import { localProjectsLegacy } from '@lody/shared/node/local-project';
 import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import { readLocalNativeSessionRoute } from '@lody/shared/node/native-session-routing';
+import type {
+  NativeSessionBodyFreezeRequest,
+  NativeSessionBodyFreezeResponse,
+} from '@lody/shared/native-session-body-control';
+import { SessionNativeBodyMigrationControlLegacy } from '../session/session-native-body-migration';
 import {
   type LiveActivitySummarySyncResult,
   type PermissionRequestNotificationInput,
@@ -415,6 +421,7 @@ import {
 } from '@/lib/code-collab/code-collab-v2-diff-evidence';
 import {
   readMachineLocalProjects,
+  canonicalLocalProjectRootPath,
   removeMachineLocalProject,
   isLocalProjectReferenced,
   resolveWorkspaceLocalProject,
@@ -645,6 +652,15 @@ function formatLiveActivityUpdatedAt(value: number, nowMs: number): string {
 }
 
 export interface MessageHandlerConfig {
+  /** Explicit whole-machine owner ports; composition supplies both together. */
+  machineCatalogRuntime?: {
+    execution: import('./machine-document-runtime-port').MachineDocumentRuntimePort;
+    providerSetup: import('./provider-setup-manager').ProviderSetupStoragePort;
+    catalog: ReturnType<
+      typeof import('./loro/native-machine-catalog').createNativeMachineRuntimeCatalog
+    >;
+    binding: import('@lody/shared').MachineCatalogBinding;
+  };
   sorbetCredentials?: {
     list: (
       configId: AgentConfigId,
@@ -790,6 +806,56 @@ export class MessageHandler {
     ReturnType<typeof import('./e2ee/acp-interaction-owner').createAcpInteractionOwner>
   >;
   private acpInteractionStopping = false;
+  /** Private profile-authenticated local endpoint; no Machine/cloud RPC mapping. */
+  handleNativeDocumentDomainMigrationControl(
+    request: NativeDocumentDomainFreezeRequest
+  ): Promise<NativeDocumentDomainFreezeResponse> {
+    if (
+      this.cleanedUp ||
+      this.acpInteractionStopping ||
+      this.cloudPort.kind !== 'local' ||
+      this.encryptedAttachments
+    )
+      return Promise.resolve({ ok: false, error: 'scope_unavailable' });
+    return this.workspaceDocument.handleNativeDocumentDomainMigrationControl(request);
+  }
+
+  private nativeSessionBodyMigration?: SessionNativeBodyMigrationControlLegacy;
+
+  /** Authenticated local endpoint only. No Machine RPC or renderer raw SDK access. */
+  handleNativeSessionBodyMigrationControl(
+    request: NativeSessionBodyFreezeRequest
+  ): Promise<NativeSessionBodyFreezeResponse> {
+    this.nativeSessionBodyMigration ??= new SessionNativeBodyMigrationControlLegacy({
+      accountId: this.userId,
+      workspaceId: this.workspaceId,
+      generation: () => this.workspaceDocument.getSessionBodyMigrationGeneration(),
+      unavailable: () =>
+        this.cleanedUp ||
+        this.acpInteractionStopping ||
+        this.cloudPort.kind !== 'local' ||
+        this.encryptedAttachments,
+      tryBarrier: (id) => this.executionService.tryAcquireSessionRewriteBarrier(id),
+      snapshot: (id) => this.executionService.getExecutionSnapshot(id),
+      pending: (id) => this.sessionManager.getPendingSession(id),
+      cached: (id) => this.sessionManager.getSession(id),
+      retire: (original) => this.sessionManager.retireSessionForReconfiguration(original),
+      flush: async (id) => {
+        await this.flushACPUpdatesNow(id);
+        const state = this.store.get(id);
+        if (state.acpFlushInFlight || state.acpUpdateBuffer.length)
+          throw new Error('Session ACP persistence remains unconfirmed');
+      },
+      freeze: (id, nonce, phase) =>
+        this.workspaceDocument.freezeLegacySessionForNative(id, nonce, phase),
+      route: (id) =>
+        readLocalNativeSessionRoute(
+          { accountId: this.userId, workspaceId: this.workspaceId, dataRoot: getLodyDataDir() },
+          getSessionRoomId(id)
+        ),
+    });
+    return this.nativeSessionBodyMigration.handle(request);
+  }
 
   private machineId: MachineId;
   private token: string;
@@ -846,7 +912,14 @@ export class MessageHandler {
   private worktreeGcTimer: NodeJS.Timeout | null = null;
   private detachWorktreeGcSyncListener: (() => void) | null = null;
   private readonly deleteLocalProjectInFlight = new Set<LocalProjectId>();
-  private machineFlockCommandWatcher: MachineFlockCommandWatcher;
+  private machineFlockCommandWatcher?: MachineFlockCommandWatcher;
+  private nativeMachineCommandObservation?: { close(): void };
+  private nativeMachineCommandsStopped = false;
+  private nativeMachineCommandPending?: {
+    work: readonly import('./loro/native-machine-catalog').NativeMachineCommandWork[];
+    signal: AbortSignal;
+  };
+  private nativeMachineCommandDrain?: Promise<void>;
   // Desktop local-transport backfill: in-flight task keys (`${sessionId}:${fileId}`)
   // so a file is never backfilled by two concurrent workers (re-enqueue dedupe).
   private readonly sessionFileBackfillInFlight = new Set<string>();
@@ -908,6 +981,7 @@ export class MessageHandler {
   private readonly encryptedExecution?: EncryptedAgentExecution;
   private readonly sorbetCredentials?: MessageHandlerConfig['sorbetCredentials'];
   private providerSetupManager: ProviderSetupManager;
+  private readonly machineCatalogRuntime?: MessageHandlerConfig['machineCatalogRuntime'];
   private previewService: PreviewService;
   private iosSimulatorService: IosSimulatorService;
   private androidEmulatorService: AndroidEmulatorService;
@@ -2807,7 +2881,7 @@ export class MessageHandler {
 
   private async probeProjectLocalMember(localProjectId: LocalProjectId) {
     try {
-      const rootPath = await resolveWorkspaceLocalProjectRootPath(
+      const rootPath = await this.resolveWorkspaceLocalProjectRootPath(
         this.workspaceDocument.repo,
         this.workspaceId,
         this.machineId,
@@ -2853,7 +2927,7 @@ export class MessageHandler {
       return failure('access_denied', access.reason);
     }
 
-    const rootPath = await resolveWorkspaceLocalProjectRootPathWithRetry(
+    const rootPath = await this.resolveWorkspaceLocalProjectRootPathWithRetry(
       this.workspaceDocument.repo,
       this.workspaceId,
       this.machineId,
@@ -3224,6 +3298,12 @@ export class MessageHandler {
     config: MessageHandlerConfig
   ) {
     this.sessionManager = sessionManager;
+    this.machineCatalogRuntime = config.machineCatalogRuntime;
+    if (config.machineCatalogRuntime)
+      this.workspaceDocument.selectMachineCatalogRuntime(
+        config.machineCatalogRuntime.execution,
+        config.machineId as MachineId
+      );
     this.sorbetCredentials = config.sorbetCredentials;
     this.encryptedAttachments = config.encryptedWorkspace === true;
     // Create a child logger with workspace context for file logging
@@ -3291,7 +3371,7 @@ export class MessageHandler {
         const publishStartedAtMs = Date.now();
         const pathCount = Object.keys(state.fileIndex).length;
         const result = await publishCodeCollabFileIndexFlock({
-          repo: this.workspaceDocument.repo,
+          store: await this.workspaceDocument.getCodeCollabPublicationStore(state.ownerSessionId),
           signal: state.signal,
           flockDocId: getCodeCollabFileIndexFlockDocId(this.workspaceId, state.ownerSessionId),
           fileIndex: state.fileIndex,
@@ -3301,6 +3381,7 @@ export class MessageHandler {
           bumpDiffPaths: state.bumpDiffPaths,
         });
         state.signal?.throwIfAborted();
+        await this.workspaceDocument.markCodeCollabIndexPublished(state.ownerSessionId, state);
         if (state.persistAllChangesDiffStats) {
           try {
             await workspaceGitService.publishDiffStats(state);
@@ -3324,7 +3405,7 @@ export class MessageHandler {
       publishFileIndexSignal: async (state) => {
         const publishStartedAtMs = Date.now();
         const result = await publishCodeCollabFileIndexSignalFlock({
-          repo: this.workspaceDocument.repo,
+          store: await this.workspaceDocument.getCodeCollabPublicationStore(state.ownerSessionId),
           signal: state.signal,
           flockDocId: getCodeCollabFileIndexSignalFlockDocId(
             this.workspaceId,
@@ -3387,6 +3468,7 @@ export class MessageHandler {
     });
     this.encryptedExecution = config.encryptedWorkspace ? config.encryptedExecution : undefined;
     this.executionService = new SessionExecutionService({
+      machineCatalog: config.machineCatalogRuntime?.execution,
       encryptedExecution: this.encryptedExecution,
       encryptedWorkspace: config.encryptedWorkspace,
       logger: this.logger,
@@ -3558,6 +3640,7 @@ export class MessageHandler {
         await this.evictForMemoryPressureFn(excludeSessionId),
     });
     this.providerSetupManager = new ProviderSetupManager({
+      storage: config.machineCatalogRuntime?.providerSetup,
       repo: this.workspaceDocument.repo,
       workspaceId: this.workspaceId,
       machineId: this.machineId,
@@ -3565,16 +3648,17 @@ export class MessageHandler {
       sync: this.workspaceDocument,
       logger: this.logger,
     });
-    this.machineFlockCommandWatcher = new MachineFlockCommandWatcher({
-      repo: this.workspaceDocument.repo,
-      docId: this.getMachineFlockDocIdForMachine(),
-      logContext: this.getMachineFlockLogContext(),
-      waitForRemoteAuthority: this.cloudPort.kind !== 'local',
-      logger: this.logger,
-      onEvents: (events, { authoritative }) =>
-        this.rescanMachineCommands(getMachineCommandEventImpact(events), authoritative),
-      onReady: () => this.rescanMachineCommands(),
-    });
+    if (!config.machineCatalogRuntime)
+      this.machineFlockCommandWatcher = new MachineFlockCommandWatcher({
+        repo: this.workspaceDocument.repo,
+        docId: this.getMachineFlockDocIdForMachine(),
+        logContext: this.getMachineFlockLogContext(),
+        waitForRemoteAuthority: this.cloudPort.kind !== 'local',
+        logger: this.logger,
+        onEvents: (events, { authoritative }) =>
+          this.rescanMachineCommands(getMachineCommandEventImpact(events), authoritative),
+        onReady: () => this.rescanMachineCommands(),
+      });
     this.worktreeGc = new WorktreeGarbageCollector({
       reposDir: path.join(getLodyDataDir(), 'repos'),
       chatsDir: path.join(getLodyDataDir(), 'chats'),
@@ -4282,7 +4366,25 @@ export class MessageHandler {
     // This prevents dispatch from racing ahead of local session startup prerequisites.
     this.setupSessionLifecycleWatchers();
     this.startWorktreeGc();
-    void this.machineFlockCommandWatcher.start();
+    if (this.machineCatalogRuntime) {
+      const native = this.machineCatalogRuntime;
+      void native.catalog
+        .observeCommands(
+          native.binding,
+          (work, context) => {
+            this.scheduleNativeMachineCommands(work, context.signal);
+          },
+          () => this.logger.debug('[machine-catalog] Native command observation failed')
+        )
+        .then(
+          (observation) => {
+            if (this.nativeMachineCommandsStopped) observation.close();
+            else this.nativeMachineCommandObservation = observation;
+          },
+          () => this.logger.debug('[machine-catalog] Native command observation failed')
+        );
+    } else void this.machineFlockCommandWatcher?.start();
+    this.providerSetupManager.start();
     void this.discardLegacySessionCommands();
   }
 
@@ -4573,6 +4675,8 @@ export class MessageHandler {
   }
 
   private async readMachineFlockCommandRows(): Promise<MachineFlockRowMap> {
+    if (this.machineCatalogRuntime)
+      throw new Error('Legacy machine command read is disabled by the native owner');
     const handle = await this.workspaceDocument.repo.openFlockDoc(
       this.getMachineFlockDocIdForMachine()
     );
@@ -4582,6 +4686,8 @@ export class MessageHandler {
   }
 
   private async tryReadMachineFlockCommandRows(): Promise<MachineFlockRowMap> {
+    if (this.machineCatalogRuntime)
+      throw new Error('Legacy machine command fallback is disabled by the native owner');
     try {
       return await this.readMachineFlockCommandRows();
     } catch (error) {
@@ -4596,6 +4702,8 @@ export class MessageHandler {
   }
 
   private async readMachineCommandSnapshot(): Promise<MachineCommandSnapshot> {
+    if (this.machineCatalogRuntime)
+      throw new Error('Legacy machine command snapshot is disabled by the native owner');
     const machineRoomId = getMachineRoomId(this.machineId);
     const [machineMetaDoc, machineFlockRows] = await Promise.all([
       this.workspaceDocument.repo.getDocMeta(machineRoomId),
@@ -4611,6 +4719,14 @@ export class MessageHandler {
     key: MachineFlockKey,
     nowMs = getServerNow()
   ): Promise<boolean> {
+    if (this.machineCatalogRuntime) {
+      if (key[0] === 'sessionLaunchConfig')
+        return this.machineCatalogRuntime.catalog.execute(this.machineCatalogRuntime.binding, {
+          kind: 'remove-legacy-launch',
+          sessionId: key[1],
+        });
+      throw new Error('Native command completion requires its observed receipt');
+    }
     const handle = await this.workspaceDocument.repo.openFlockDoc(
       this.getMachineFlockDocIdForMachine()
     );
@@ -4629,6 +4745,14 @@ export class MessageHandler {
     row: MachineFlockRow,
     nowMs = getServerNow()
   ): Promise<boolean> {
+    if (this.machineCatalogRuntime) {
+      if (row.key[0] === 'dotlodyPath')
+        return this.machineCatalogRuntime.catalog.execute(this.machineCatalogRuntime.binding, {
+          kind: 'publish-dotlody-path',
+          path: row.value as string,
+        });
+      throw new Error('Native machine publication requires its domain command');
+    }
     const handle = await this.workspaceDocument.repo.openFlockDoc(
       this.getMachineFlockDocIdForMachine()
     );
@@ -4941,6 +5065,7 @@ export class MessageHandler {
   }
 
   private async discardLegacySessionCommands(): Promise<void> {
+    if (this.machineCatalogRuntime) return;
     try {
       const handle = await this.workspaceDocument.repo.openFlockDoc(
         this.getMachineFlockDocIdForMachine()
@@ -5004,6 +5129,7 @@ export class MessageHandler {
   }
 
   private async processDeleteLocalProjectRequests(): Promise<void> {
+    if (this.machineCatalogRuntime) return;
     const snapshot = await this.readMachineCommandSnapshot();
     const localProjectEntries = snapshot.deleteLocalProjectEntries;
     if (localProjectEntries.length === 0) {
@@ -5041,6 +5167,83 @@ export class MessageHandler {
     }
   }
 
+  /** Native durable work keeps its observed receipt through filesystem work;
+   * a replaced request or revoked generation can never acknowledge a new one. */
+  private async processNativeMachineCommands(
+    work: readonly import('./loro/native-machine-catalog').NativeMachineCommandWork[],
+    signal: AbortSignal
+  ): Promise<void> {
+    const native = this.machineCatalogRuntime;
+    if (!native || this.nativeMachineCommandsStopped || signal.aborted) return;
+    for (const item of work) {
+      if (signal.aborted || this.nativeMachineCommandsStopped) return;
+      const commandSignal = AbortSignal.any([signal, item.signal]);
+      if (commandSignal.aborted) continue;
+      const key = item.command.key;
+      if (key[0] !== 'cmd') continue;
+      if (key[1] === 'archiveSession' || key[1] === 'deleteSession') {
+        await native.catalog
+          .execute(native.binding, { kind: 'complete-command', receipt: item.receipt })
+          .catch(() => undefined);
+        continue;
+      }
+      if (key[1] !== 'deleteLocalProject') continue;
+      const projectId = key[2] as LocalProjectId;
+      if (this.deleteLocalProjectInFlight.has(projectId)) continue;
+      this.deleteLocalProjectInFlight.add(projectId);
+      try {
+        const command = item.command.value as MachineDeleteLocalProjectCommand;
+        const result = await this.deleteLocalProjectResources(projectId, command, commandSignal);
+        if (commandSignal.aborted || this.nativeMachineCommandsStopped) continue;
+        if (command.cleanupWorktrees) {
+          if (result)
+            await native.catalog.execute(native.binding, {
+              kind: 'complete-local-project-deletion',
+              receipt: item.receipt,
+              result,
+            });
+          else
+            await native.catalog.execute(native.binding, {
+              kind: 'complete-command',
+              receipt: item.receipt,
+            });
+        } else
+          await native.catalog.execute(native.binding, {
+            kind: 'complete-command',
+            receipt: item.receipt,
+          });
+      } catch {
+        if (!commandSignal.aborted)
+          this.logger.debug('[machine-catalog] Native project command remains pending');
+      } finally {
+        this.deleteLocalProjectInFlight.delete(projectId);
+      }
+    }
+  }
+
+  private scheduleNativeMachineCommands(
+    work: readonly import('./loro/native-machine-catalog').NativeMachineCommandWork[],
+    signal: AbortSignal
+  ): void {
+    if (this.nativeMachineCommandsStopped) return;
+    this.nativeMachineCommandPending = { work, signal };
+    if (this.nativeMachineCommandDrain) return;
+    this.nativeMachineCommandDrain = (async () => {
+      while (this.nativeMachineCommandPending && !this.nativeMachineCommandsStopped) {
+        const next = this.nativeMachineCommandPending;
+        this.nativeMachineCommandPending = undefined;
+        await this.processNativeMachineCommands(next.work, next.signal);
+      }
+    })()
+      .catch(() => this.logger.debug('[machine-catalog] Native command remains pending'))
+      .finally(() => {
+        this.nativeMachineCommandDrain = undefined;
+        const pending = this.nativeMachineCommandPending;
+        if (pending && !this.nativeMachineCommandsStopped)
+          this.scheduleNativeMachineCommands(pending.work, pending.signal);
+      });
+  }
+
   private async cleanupLocalProjectWorktreeSetup(localProjectId: LocalProjectId): Promise<void> {
     if (!this.cleanupLocalProjectWorktreeSetupIfUnreferenced) {
       return;
@@ -5056,7 +5259,10 @@ export class MessageHandler {
     }
   }
 
-  private async archiveLocalProjectSessions(localProjectId: LocalProjectId): Promise<void> {
+  private async archiveLocalProjectSessions(
+    localProjectId: LocalProjectId,
+    signal?: AbortSignal
+  ): Promise<void> {
     const sessions = (await listAliveSessionMetas(this.workspaceDocument)).filter(({ meta }) =>
       isSessionInLocalProjectRemovalScope(meta, {
         machineId: this.machineId,
@@ -5070,7 +5276,9 @@ export class MessageHandler {
     );
     const archivedRootSessionIds = new Set(rootSessions.map(({ meta }) => meta.id));
     for (const { roomId, meta } of rootSessions) {
+      signal?.throwIfAborted();
       await this.releaseArchivedSessionRuntime(meta.id);
+      signal?.throwIfAborted();
       await this.workspaceDocument.repo.upsertDocMeta(roomId, {
         isArchived: true,
         status: SessionStatusFactory.idle(),
@@ -5078,11 +5286,13 @@ export class MessageHandler {
     }
 
     for (const { roomId, meta } of sessions) {
+      signal?.throwIfAborted();
       if (archivedRootSessionIds.has(meta.id)) continue;
       if (this.sessionManager.hasSession(meta.id)) {
         await this.releaseArchivedSessionRuntime(meta.id);
       }
       if (meta.isArchived === true) continue;
+      signal?.throwIfAborted();
       await this.workspaceDocument.repo.upsertDocMeta(roomId, {
         isArchived: true,
         status: SessionStatusFactory.idle(),
@@ -5096,14 +5306,20 @@ export class MessageHandler {
 
   private async deleteLocalProjectResources(
     localProjectId: LocalProjectId,
-    command: MachineDeleteLocalProjectCommand
+    command: MachineDeleteLocalProjectCommand,
+    signal?: AbortSignal
   ): Promise<MachineDeleteLocalProjectCommand['cleanupResult'] | undefined> {
-    const existingProject = await resolveWorkspaceLocalProject(
-      this.workspaceDocument.repo,
-      this.workspaceId,
-      this.machineId,
-      localProjectId
-    );
+    signal?.throwIfAborted();
+    const native = this.machineCatalogRuntime;
+    const existingProject = native
+      ? (await native.catalog.readCatalog(native.binding)).projects[localProjectId]
+      : await this.resolveWorkspaceLocalProject(
+          this.workspaceDocument.repo,
+          this.workspaceId,
+          this.machineId,
+          localProjectId
+        );
+    signal?.throwIfAborted();
     if (!existingProject && !command.cleanupWorktrees) {
       this.logger.debug(`[local-project] ${localProjectId} already removed`);
       await this.cleanupLocalProjectWorktreeSetup(localProjectId);
@@ -5129,33 +5345,46 @@ export class MessageHandler {
       ) {
         throw new Error('Project catalog is not ready');
       }
-      const catalog = await this.workspaceDocument.repo.openFlockDoc(catalogId);
-      const projects = listWorkspaceProjects(readWorkspaceFlockRowsFromFlock(catalog.flock));
+      const { projects } = await this.workspaceDocument.readWorkspaceCatalog(this.workspaceId);
       const sessions = (await listAliveSessionMetas(this.workspaceDocument)).map(
         ({ meta }) => meta
       );
       if (isLocalProjectReferenced(existingProject, this.machineId, projects, sessions)) {
-        await upsertMachineLocalProject(
-          this.workspaceDocument.repo,
-          this.workspaceId,
-          this.machineId,
-          existingProject,
-          undefined,
-          { sync: this.workspaceDocument, reason: 'local-project-unlink', standaloneVisible: false }
-        );
+        signal?.throwIfAborted();
+        if (native)
+          await native.catalog.execute(native.binding, {
+            kind: 'unlink-local-project',
+            project: existingProject,
+          });
+        else
+          await upsertMachineLocalProject(
+            this.workspaceDocument.repo,
+            this.workspaceId,
+            this.machineId,
+            existingProject,
+            undefined,
+            {
+              sync: this.workspaceDocument,
+              reason: 'local-project-unlink',
+              standaloneVisible: false,
+            }
+          );
         return undefined;
       }
     }
 
-    await this.archiveLocalProjectSessions(localProjectId);
+    signal?.throwIfAborted();
+    await this.archiveLocalProjectSessions(localProjectId, signal);
 
     let cleanupResult: MachineDeleteLocalProjectCommand['cleanupResult'];
     const originalRootPath = existingProject?.rootPath ?? command.originalRootPath;
     if (command.cleanupWorktrees && originalRootPath) {
+      signal?.throwIfAborted();
       const sessions = (await listAliveSessionMetas(this.workspaceDocument)).map(
         ({ meta }) => meta
       );
       cleanupResult = await cleanupLocalProjectWorktrees({
+        signal,
         machineId: this.machineId,
         localProjectId,
         originalRootPath,
@@ -5165,14 +5394,23 @@ export class MessageHandler {
     }
 
     if (existingProject) {
-      await removeMachineLocalProject(
-        this.workspaceDocument.repo,
-        this.workspaceId,
-        this.machineId,
-        localProjectId,
-        undefined,
-        { sync: this.workspaceDocument, reason: 'local-project-delete-command' }
-      );
+      signal?.throwIfAborted();
+      if (native)
+        await native.catalog.execute(native.binding, {
+          kind: 'remove-local-project-metadata',
+          projectId: localProjectId,
+          expectedRootPath: existingProject.rootPath,
+          expectedProject: existingProject,
+        });
+      else
+        await removeMachineLocalProject(
+          this.workspaceDocument.repo,
+          this.workspaceId,
+          this.machineId,
+          localProjectId,
+          undefined,
+          { sync: this.workspaceDocument, reason: 'local-project-delete-command' }
+        );
       this.logger.debug(
         `[local-project] Removed ${existingProject.name} (${existingProject.rootPath})`
       );
@@ -6969,7 +7207,7 @@ export class MessageHandler {
       return { ok: true, workspaceRoot, ownerSessionId, source: 'project-group' };
     }
     if (project?.kind === 'local') {
-      const originalRootPath = await resolveWorkspaceLocalProjectRootPath(
+      const originalRootPath = await this.resolveWorkspaceLocalProjectRootPath(
         this.workspaceDocument.repo,
         this.workspaceId,
         this.machineId,
@@ -7230,10 +7468,15 @@ export class MessageHandler {
           ownerSessionId
         );
       } else if (project?.kind === 'local') {
-        const root = this.workspaceDocument.peekLocalProjectRootPath(
-          this.machineId,
-          project.localProjectId
-        );
+        const root = this.machineCatalogRuntime
+          ? (
+              await this.nativeLocalProject(
+                this.workspaceId,
+                this.machineId,
+                project.localProjectId
+              )
+            )?.rootPath
+          : this.workspaceDocument.peekLocalProjectRootPath(this.machineId, project.localProjectId);
         if (root)
           workspaceRoot =
             owner.isWorktree || project.useWorktree
@@ -7300,9 +7543,15 @@ export class MessageHandler {
           ownerMeta?.projectRun,
           this.machineId,
           (id) =>
-            readOnly
-              ? Promise.resolve(this.workspaceDocument.peekLocalProjectRootPath(this.machineId, id))
-              : this.sessionManager.resolveLocalProjectRootPath(id),
+            readOnly && this.machineCatalogRuntime
+              ? this.nativeLocalProject(this.workspaceId, this.machineId, id).then(
+                  (project) => project?.rootPath ?? null
+                )
+              : readOnly
+                ? Promise.resolve(
+                    this.workspaceDocument.peekLocalProjectRootPath(this.machineId, id)
+                  )
+                : this.sessionManager.resolveLocalProjectRootPath(id),
           (id) => this.logger.debug(`Project group file root unavailable: ${id}`),
           !readOnly
         );
@@ -7877,10 +8126,9 @@ export class MessageHandler {
         )
           throw new Error('Sorbet credentials scope mismatch');
         const configId = request.params.configId as AgentConfigId;
-        const config = await this.workspaceDocument.getAgentConfigForMachineLaunch(
-          configId,
-          this.machineId
-        );
+        const config = await (
+          this.machineCatalogRuntime?.execution ?? this.workspaceDocument
+        ).getAgentConfigForMachineLaunch(configId, this.machineId);
         if (
           !config ||
           config.machineId !== this.machineId ||
@@ -9852,7 +10100,14 @@ export class MessageHandler {
       // so a staged-but-never-sent file cannot hold quota forever.
       const ageMs = await getSessionFileBlobAgeMs(blobArgs);
       if (ageMs !== null && ageMs > getDraftSessionFileBlobMaxAgeMs()) {
-        if (await isScheduledMessageFile({ repo: this.workspaceDocument.repo, ...blobArgs }))
+        if (
+          await isScheduledMessageFile({
+            repo: this.workspaceDocument.repo,
+            registry: this.workspaceDocument.scheduleRegistry,
+            definitions: this.workspaceDocument.scheduleDefinitions,
+            ...blobArgs,
+          })
+        )
           return;
         await removeSessionFileBlob(blobArgs);
         this.logger.warn(
@@ -11059,7 +11314,12 @@ export class MessageHandler {
       return undefined;
     }
     try {
-      const agentConfigMeta = await this.workspaceDocument.getAgentConfigById(agentConfigId);
+      const agentConfigMeta = this.machineCatalogRuntime
+        ? await this.machineCatalogRuntime.execution.getAgentConfigForMachineLaunch(
+            agentConfigId,
+            this.machineId
+          )
+        : await this.workspaceDocument.getAgentConfigById(agentConfigId);
       return agentConfigMeta?.titleGeneration;
     } catch (error) {
       this.logger.debug(
@@ -11195,7 +11455,12 @@ export class MessageHandler {
       const resolvedTitleConfig =
         titleConfig ?? (await this.resolveTitleConfig(sessionId, meta?.agentConfigId));
       const provider = meta?.agentConfigId
-        ? await this.workspaceDocument.getAgentConfigById(meta.agentConfigId, this.machineId)
+        ? this.machineCatalogRuntime
+          ? await this.machineCatalogRuntime.execution.getAgentConfigForMachineLaunch(
+              meta.agentConfigId,
+              this.machineId
+            )
+          : await this.workspaceDocument.getAgentConfigById(meta.agentConfigId, this.machineId)
         : null;
       if (meta?.agentConfigId && !provider) return null;
       const profileStore = getCodexProfileStore();
@@ -11418,7 +11683,7 @@ export class MessageHandler {
           );
         }
         const preparedProject = this.localProjectControlService.prepareProject(request.rootPath);
-        const existingProject = await resolveWorkspaceLocalProjectWithSyncOnMiss(
+        const existingProject = await this.resolveWorkspaceLocalProjectWithSyncOnMiss(
           this.workspaceDocument.repo,
           this.workspaceId,
           this.machineId,
@@ -11479,11 +11744,14 @@ export class MessageHandler {
   private async listRegisteredLocalProjectRootPathsForCurrentWorkspace(): Promise<
     Record<LocalProjectId, string>
   > {
-    const projects = await readMachineLocalProjects(
-      this.workspaceDocument.repo,
-      this.workspaceId,
-      this.machineId
-    );
+    const projects = this.machineCatalogRuntime
+      ? (await this.machineCatalogRuntime.catalog.readCatalog(this.machineCatalogRuntime.binding))
+          .projects
+      : await readMachineLocalProjects(
+          this.workspaceDocument.repo,
+          this.workspaceId,
+          this.machineId
+        );
     const rootPaths: Record<string, string> = {};
     for (const [localProjectId, project] of Object.entries(projects)) {
       // Legacy machine meta is not validated on read, so a row can omit rootPath.
@@ -11496,18 +11764,93 @@ export class MessageHandler {
     return rootPaths as Record<LocalProjectId, string>;
   }
 
+  private async nativeLocalProject(
+    workspaceId: WorkspaceId,
+    machineId: MachineId,
+    id: LocalProjectId
+  ) {
+    const native = this.machineCatalogRuntime!;
+    if (native.binding.workspaceId !== workspaceId || native.binding.machineId !== machineId)
+      throw new Error('Native machine catalog scope mismatch');
+    return (await native.catalog.readCatalog(native.binding)).projects[id] ?? null;
+  }
+
+  private async resolveWorkspaceLocalProject(
+    ...args: Parameters<typeof resolveWorkspaceLocalProject>
+  ): ReturnType<typeof resolveWorkspaceLocalProject> {
+    return this.machineCatalogRuntime
+      ? this.nativeLocalProject(args[1], args[2], args[3])
+      : resolveWorkspaceLocalProject(...args);
+  }
+
+  private async resolveWorkspaceLocalProjectWithSyncOnMiss(
+    ...args: Parameters<typeof resolveWorkspaceLocalProjectWithSyncOnMiss>
+  ): ReturnType<typeof resolveWorkspaceLocalProjectWithSyncOnMiss> {
+    return this.machineCatalogRuntime
+      ? this.nativeLocalProject(args[1], args[2], args[3])
+      : resolveWorkspaceLocalProjectWithSyncOnMiss(...args);
+  }
+
+  private async resolveWorkspaceLocalProjectRootPath(
+    ...args: Parameters<typeof resolveWorkspaceLocalProjectRootPath>
+  ): ReturnType<typeof resolveWorkspaceLocalProjectRootPath> {
+    if (!this.machineCatalogRuntime) return resolveWorkspaceLocalProjectRootPath(...args);
+    return (await this.nativeLocalProject(args[1], args[2], args[3]))?.rootPath.trim() || null;
+  }
+
+  private async resolveWorkspaceLocalProjectRootPathWithRetry(
+    ...args: Parameters<typeof resolveWorkspaceLocalProjectRootPathWithRetry>
+  ): ReturnType<typeof resolveWorkspaceLocalProjectRootPathWithRetry> {
+    if (!this.machineCatalogRuntime) return resolveWorkspaceLocalProjectRootPathWithRetry(...args);
+    const rootPath =
+      (await this.nativeLocalProject(args[1], args[2], args[3]))?.rootPath.trim() || null;
+    if (rootPath && args[4]?.verifyProjectIdentity) {
+      try {
+        return localProjectsLegacy.createLocalProjectId(rootPath) === args[3] ? rootPath : null;
+      } catch {
+        return null;
+      }
+    }
+    return rootPath;
+  }
+
   private async upsertLocalProjectMetaInCurrentWorkspace(entry: {
     localProjectId: LocalProjectId;
     name: string;
     rootPath: string;
   }): Promise<void> {
-    const existing = await readMachineLocalProjects(
-      this.workspaceDocument.repo,
-      this.workspaceId,
-      this.machineId
-    );
+    const existing = this.machineCatalogRuntime
+      ? (await this.machineCatalogRuntime.catalog.readCatalog(this.machineCatalogRuntime.binding))
+          .projects
+      : await readMachineLocalProjects(
+          this.workspaceDocument.repo,
+          this.workspaceId,
+          this.machineId
+        );
     const previous = existing[entry.localProjectId];
     const nowMs = getServerNow();
+
+    if (this.machineCatalogRuntime) {
+      const rootPath = canonicalLocalProjectRootPath(entry.rootPath);
+      const observed = fs.existsSync(rootPath)
+        ? await localProjectsLegacy.getLocalProjectGitHubRepoAtRootPath(rootPath)
+        : null;
+      await this.machineCatalogRuntime.catalog.execute(this.machineCatalogRuntime.binding, {
+        kind: 'upsert-local-project',
+        expected: previous,
+        observedGitHubRepo: observed,
+        standaloneVisible: true,
+        project: {
+          ...(previous ?? {}),
+          id: entry.localProjectId,
+          name: entry.name,
+          rootPath,
+          createdAtMs: previous?.createdAtMs ?? nowMs,
+          lastOpenedAtMs: nowMs,
+        },
+      });
+      return;
+    }
 
     await upsertMachineLocalProject(
       this.workspaceDocument.repo,
@@ -11561,7 +11904,7 @@ export class MessageHandler {
       };
     }
 
-    const rootPath = await resolveWorkspaceLocalProjectRootPath(
+    const rootPath = await this.resolveWorkspaceLocalProjectRootPath(
       this.workspaceDocument.repo,
       this.workspaceId,
       this.machineId,
@@ -11906,6 +12249,13 @@ export class MessageHandler {
 
   async cleanup(): Promise<void> {
     this.acpInteractionStopping = true;
+    this.nativeSessionBodyMigration?.stopAdmission();
+    // Detached idle ACPs no longer belong to SessionManager. Begin their actual
+    // cleanup before unrelated shutdown awaits; failure retains this owner.
+    const migrationCleanup = this.nativeSessionBodyMigration?.close();
+    void migrationCleanup?.catch((cause) =>
+      this.logger.error('Session migration cleanup retains resources', cause)
+    );
     await (await this.acpInteractionOwner)?.close();
     this.executionService.stopCompletionPublication();
     const inboxShutdown = this.operationCoordinator.recoverStop();
@@ -11945,13 +12295,21 @@ export class MessageHandler {
     }
     this.detachWorktreeGcSyncListener?.();
     this.detachWorktreeGcSyncListener = null;
-    this.machineFlockCommandWatcher.stop();
+    this.nativeMachineCommandsStopped = true;
+    this.nativeMachineCommandPending = undefined;
+    this.nativeMachineCommandObservation?.close();
+    this.nativeMachineCommandObservation = undefined;
+    this.machineFlockCommandWatcher?.stop();
     this.providerSetupManager.stop();
     // Terminating sessions is the producer barrier: agent callbacks may still
     // enqueue their final ACP notifications while termination is in progress,
     // but none can arrive after this await. Keep the document manager open so
     // those callbacks can be flushed below.
     await this.sessionManager.cleanUp({ keepWorkspaceDocumentOpen: true });
+    // Native command observers have stopped admission and aborted each retained
+    // receipt. Join already-started filesystem work while its document owner is
+    // still open; late command continuations cannot author into a closed Repo.
+    await this.nativeMachineCommandDrain;
     // Turn finalizers can still write history/evidence after producers stop.
     // Keep every store open until their leases and monitoring actually release.
     await this.sessionActivePresence.close();
@@ -11966,6 +12324,7 @@ export class MessageHandler {
     await this.drainCodeCollabTurnPersistenceForCleanup();
     const cleanupErrors: unknown[] = [];
     for (const close of [
+      async () => await migrationCleanup,
       async () => await this.diffBlobStoreReader?.close(),
       async () => await this.codeCollabV2DiffStore.close(),
       async () =>
@@ -12004,14 +12363,22 @@ export class MessageHandler {
       let projectName: string | undefined;
       if (meta.project?.kind === 'local') {
         try {
-          projectName = (
-            await resolveWorkspaceLocalProject(
-              this.workspaceDocument.repo,
-              this.workspaceId,
-              meta.machineId,
-              meta.project.localProjectId
-            )
-          )?.name;
+          projectName = this.machineCatalogRuntime
+            ? meta.machineId === this.machineId
+              ? (
+                  await this.machineCatalogRuntime.catalog.readCatalog(
+                    this.machineCatalogRuntime.binding
+                  )
+                ).projects[meta.project.localProjectId]?.name
+              : undefined
+            : (
+                await this.resolveWorkspaceLocalProject(
+                  this.workspaceDocument.repo,
+                  this.workspaceId,
+                  meta.machineId,
+                  meta.project.localProjectId
+                )
+              )?.name;
         } catch {
           /* The repository name remains a useful fallback. */
         }

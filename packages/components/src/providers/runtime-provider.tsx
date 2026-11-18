@@ -1,3 +1,5 @@
+import { NativeMachineCatalogSettingsProvider } from './machine-catalog-settings';
+import { nativeMachineCatalogSettingsAtom } from '../atoms/native-machine-catalog';
 import { subscribeAttachmentWorkspaceMode } from '@/lib/attachment-workspace-access';
 import { subscribeE2eeLedgerChanges } from './e2ee-runtime-notifications';
 import { onIpcEvent } from '@/lib/electron-ipc-client';
@@ -28,7 +30,15 @@ import {
   type KeyReceptionWait,
 } from '../components/workspace-key-reception-notice';
 import { WorkspaceHostIdentityNotice } from '../components/workspace-host-identity-notice';
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { LODY_PRESENCE_HEARTBEAT_MS, type MachineId, type WorkspaceId } from '@lody/shared';
 import {
@@ -175,6 +185,26 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const currentUser = useAtomValue(userAtom);
   const retirements = useRef(createWorkspaceRuntimeRetirements());
   const runtime = useAtomValue(runtimeAtom);
+  const nativeMachineCatalogSource = useSyncExternalStore(
+    useCallback(
+      (listener: () => void) =>
+        runtime?.subscribeNativeMachineCatalogSource?.(listener) ?? (() => {}),
+      [runtime]
+    ),
+    useCallback(() => runtime?.nativeMachineCatalogSource, [runtime]),
+    () => undefined
+  );
+  const setNativeMachineCatalog = useSetAtom(nativeMachineCatalogSettingsAtom);
+  useEffect(() => {
+    const source = nativeMachineCatalogSource;
+    const update = () => setNativeMachineCatalog(source?.getSnapshot());
+    update();
+    const detach = source?.subscribe(update);
+    return () => {
+      detach?.();
+      setNativeMachineCatalog(undefined);
+    };
+  }, [nativeMachineCatalogSource, setNativeMachineCatalog]);
   const setRuntime = useSetAtom(runtimeAtom);
   const setRuntimeInitFailure = useSetAtom(workspaceRuntimeInitFailureAtom);
   const runtimeInitFailure = useAtomValue(workspaceRuntimeInitFailureAtom);
@@ -1417,7 +1447,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           onRetry={hostIdentityWait.retry}
         />
       )}
-      {children}
+      {nativeMachineCatalogSource ? (
+        <NativeMachineCatalogSettingsProvider source={nativeMachineCatalogSource}>
+          {children}
+        </NativeMachineCatalogSettingsProvider>
+      ) : (
+        children
+      )}
       <SessionPendingSendsHost runtime={runtime} />
     </>
   );

@@ -1,6 +1,10 @@
+import { useNativeMachineCatalogPublicReader } from './use-native-machine-catalog-public';
 import { useCallback } from 'react';
 import { useAtomValue } from 'jotai';
-import { getAgentConfigsByMachineAtomFamily } from '@/atoms/agents';
+import {
+  getAgentConfigsByMachineAtomFamily,
+  getLegacyAgentConfigsByMachineAtomFamily,
+} from '@/atoms/agents';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
 import {
   getAcpCapabilityCacheKey,
@@ -17,6 +21,10 @@ export function useSessionForkCapabilities(
 ) {
   useMachineFlockAgentConfigsForMachineIds([machineId]);
   const configs = useAtomValue(getAgentConfigsByMachineAtomFamily(machineId ?? undefined));
+  const legacyConfigs = useAtomValue(
+    getLegacyAgentConfigsByMachineAtomFamily(machineId ?? undefined)
+  );
+  const readNative = useNativeMachineCatalogPublicReader();
   const canForkSession = useCallback(
     (target: SessionMeta): boolean => {
       if (target.isArchived || !target.agentConfigId || !resolveSessionAcpTargetId(target))
@@ -29,13 +37,19 @@ export function useSessionForkCapabilities(
           candidate.agentType === target.agentType
       );
       if (!config) return false;
+      const native = readNative(target.machineId);
+      if (native.kind === 'native') {
+        const capability = native.capability(config);
+        return capability?.authority === 'authoritative' && capability.sessionFork === true;
+      }
+      const legacyConfig = legacyConfigs.find((value) => value.id === config.id);
       const capability = capabilities?.[getAcpCapabilityCacheKey(target.agentConfigId)];
       return (
-        getAcpCapabilityCacheEntryAuthority(capability, config.runtimeOverrides) ===
+        getAcpCapabilityCacheEntryAuthority(capability, legacyConfig?.runtimeOverrides) ===
           'authoritative' && capability?.sessionFork === true
       );
     },
-    [capabilities, configs]
+    [capabilities, configs, legacyConfigs, readNative]
   );
   const canForkSessionToWorktree = useCallback(
     (target: SessionMeta): boolean => {
@@ -55,13 +69,19 @@ export function useSessionForkCapabilities(
           candidate.agentType === target.agentType
       );
       if (!config) return false;
+      const native = readNative(target.machineId);
+      if (native.kind === 'native') {
+        const capability = native.capability(config);
+        return capability?.authority === 'authoritative' && capability.sessionForkWorktree === true;
+      }
+      const legacyConfig = legacyConfigs.find((value) => value.id === config.id);
       const capability = capabilities?.[getAcpCapabilityCacheKey(target.agentConfigId)];
       return (
-        getAcpCapabilityCacheEntryAuthority(capability, config.runtimeOverrides) ===
+        getAcpCapabilityCacheEntryAuthority(capability, legacyConfig?.runtimeOverrides) ===
           'authoritative' && capability?.sessionForkWorktree === true
       );
     },
-    [capabilities, configs]
+    [capabilities, configs, legacyConfigs, readNative]
   );
   return { canForkSession, canForkSessionToWorktree };
 }

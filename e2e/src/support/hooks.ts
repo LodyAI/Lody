@@ -46,6 +46,46 @@ After(async function (this: LodyWorld, scenario: ITestCaseHookParameter) {
   if (artifactDirectoryReady && harness.app && harness.page) {
     try {
       await harness.captureSnapshot();
+      if (process.env.LODY_NATIVE_FILE_INDEX === '1') {
+        const nativeHosts = harness.captureNativeFileIndexEvidence();
+        writeFileSync(
+          join(artifacts.scenarioDir, 'native-file-index.json'),
+          `${JSON.stringify(nativeHosts, null, 2)}\n`,
+          'utf8'
+        );
+        if (
+          !failed &&
+          artifacts.stableId === 'LODY-REVIEW-001' &&
+          !nativeHosts.some(
+            (host) =>
+              host.nativeRooms >= 2 &&
+              host.frozenRooms === 0 &&
+              host.pid !== null &&
+              host.pid !== harness.app!.process().pid
+          )
+        ) {
+          throw new Error('Review passed without proving a separate native FI/FIS owner');
+        }
+      }
+      if (process.env.LODY_NATIVE_WORKSPACE_CATALOG === '1') {
+        const catalogs = harness.captureNativeWorkspaceCatalogEvidence();
+        writeFileSync(
+          join(artifacts.scenarioDir, 'native-workspace-catalog.json'),
+          `${JSON.stringify(catalogs, null, 2)}\n`,
+          'utf8'
+        );
+        if (
+          !failed &&
+          ['LODY-MCP-001', 'LODY-MCP-002'].includes(artifacts.stableId) &&
+          !catalogs.some(
+            (catalog) =>
+              catalog.stage === 'native' &&
+              catalog.rendererOwner === 'native' &&
+              catalog.head > catalog.proofTx
+          )
+        )
+          throw new Error('MCP passed without proving native catalog publication and new writes');
+      }
       const cliBacklog = await harness.captureCliBacklog();
       writeFileSync(
         join(artifacts.scenarioDir, 'cli-backlog.json'),

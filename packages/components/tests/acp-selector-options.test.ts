@@ -1022,3 +1022,39 @@ describe('observed per-model option lists', () => {
     });
   });
 });
+
+it('uses an admitted native public capability without private provenance, and selected-unavailable never falls back to an old machine cache', () => {
+  const machine = machineWithCapabilities({
+    [agentConfigId]: {
+      cliType: 'builtin',
+      agentType: 'claude',
+      modes: [],
+      models: [{ modelId: 'stale-legacy-model', name: 'Old model' }],
+      provenance: 'runtime',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      fetchedAt: 1,
+    },
+  });
+  const target = {
+    configId: agentConfigId,
+    cliType: 'builtin' as const,
+    agentType: 'claude',
+    machine,
+    nativeSelected: true,
+    nativeCapability: {
+      cliType: 'builtin' as const,
+      agentType: 'claude',
+      modes: [],
+      models: [{ modelId: 'native-model', name: 'Native model' }],
+      authority: 'authoritative' as const,
+      canValidateRolePins: true,
+    },
+  };
+  const actual = buildAcpSelectorOptions(target);
+  expect(actual.capabilityAuthority).toBe('authoritative');
+  expect(actual.modelOptions.map((option) => option.value)).toEqual(['native-model']);
+  const unavailable = buildAcpSelectorOptions({ ...target, nativeCapability: undefined });
+  expect(unavailable.capabilityAuthority).toBe('unavailable');
+  expect(unavailable.modelOptions).toEqual([]);
+  expect(unavailable.configOptionSelectors).toEqual([]);
+});

@@ -1,13 +1,11 @@
 import {
-  getWorkspaceFlockDocId,
-  getWorkspaceMcpCatalog,
-  readWorkspaceFlockRowsFromFlock,
   resolveSessionMcpServers,
   type McpServerId,
   type ResolveSessionMcpServersResult,
   type ResolveSessionMcpServersInput,
   type SessionId,
-  type WorkspaceFlockReadableFlock,
+  type WorkspaceCatalogQuery,
+  type WorkspaceCatalogBinding,
   type WorkspaceId,
   type WorkspaceMcpServerMeta,
   type ResolvedMcpServer,
@@ -25,9 +23,8 @@ export type SessionMcpCatalogSelector = (
 ) => ResolveSessionMcpServersResult & { warnings?: string[] };
 
 export type LoadSessionMcpCatalogInput = {
-  repo: {
-    openFlockDoc(docId: string): Promise<{ flock: WorkspaceFlockReadableFlock }>;
-  };
+  catalog: WorkspaceCatalogQuery;
+  catalogBinding: WorkspaceCatalogBinding;
   waitForCatalogBaseline?: () => Promise<void>;
   workspaceId: WorkspaceId;
   sessionId: SessionId;
@@ -61,7 +58,6 @@ export const loadSessionMcpCatalog = async (
     return EMPTY_SELECTION;
   }
 
-  const docId = getWorkspaceFlockDocId(input.workspaceId);
   let baselineError: WorkspaceSyncUnavailableError | undefined;
   try {
     await input.waitForCatalogBaseline?.();
@@ -70,8 +66,11 @@ export const loadSessionMcpCatalog = async (
     baselineError = error;
   }
   try {
-    const handle = await input.repo.openFlockDoc(docId);
-    const catalog = getWorkspaceMcpCatalog(readWorkspaceFlockRowsFromFlock(handle.flock));
+    const projection = await input.catalog.read({
+      ...input.catalogBinding,
+      workspaceId: input.workspaceId,
+    });
+    const catalog = Object.fromEntries(projection.servers.map((entry) => [entry.id, entry]));
     const ids = normalizeMcpServerIdSelection(selectedIds) ?? [];
     // Check every selected row before authentication preparation: a cold retry
     // must neither silently omit tools nor prepare credentials twice.

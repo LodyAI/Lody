@@ -13,6 +13,7 @@ import {
 } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
@@ -21,7 +22,8 @@ import {
   fetchNativeBinaryPackage,
   roostPrebuildFileName,
   stageRoostBinding,
-  stageLoroRuntimePackage
+  stageLoroRuntimePackage,
+  stageRepoEnginePackage
 } from './cli-native-deps.mjs'
 import { probeRoostRuntime } from './roost-runtime-probe.mjs'
 
@@ -29,6 +31,109 @@ const publishedSource = path.resolve(
   import.meta.dirname,
   '../../cli/node_modules/@loro-dev/roost-node'
 )
+
+test('P0 stages only the target Repo addon and loads the published version from that tree', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'lody-repo-stage-'))
+  const require = createRequire(import.meta.url)
+  const source = path.dirname(require.resolve('@loro-dev/loro-repo-engine/package.json'))
+  const target = path.join(directory, 'node_modules/@loro-dev/loro-repo-engine')
+  try {
+    await mkdir(target, { recursive: true })
+    await writeFile(path.join(target, 'loro-repo-engine.foreign.node'), 'stale target')
+    const staged = stageRepoEnginePackage(source, path.join(directory, 'node_modules'), {
+      platform: process.platform,
+      arch: process.arch
+    })
+    assert.deepEqual(
+      (await readdir(target)).filter((name) => name.endsWith('.node')),
+      [staged.binaryName]
+    )
+    const loaded = createRequire(path.join(directory, 'probe.cjs'))('@loro-dev/loro-repo-engine')
+    assert.deepEqual(loaded.engineVersion(), { package: '0.1.0', protocol: 2 })
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('P0 rejects a mismatched Repo version without changing an existing staged runtime', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'lody-repo-stage-refusal-'))
+  const source = path.join(directory, 'source')
+  const target = path.join(directory, 'modules/@loro-dev/loro-repo-engine')
+  try {
+    await mkdir(source, { recursive: true })
+    await mkdir(target, { recursive: true })
+    await writeFile(
+      path.join(source, 'package.json'),
+      JSON.stringify({
+        name: '@loro-dev/loro-repo-engine',
+        version: '0.2.0',
+        optionalDependencies: {}
+      })
+    )
+    await writeFile(path.join(target, 'index.js'), 'retained working runtime')
+    assert.throws(
+      () =>
+        stageRepoEnginePackage(source, path.join(directory, 'modules'), {
+          platform: process.platform,
+          arch: process.arch
+        }),
+      /exact published 0.1.0/
+    )
+    assert.equal(await readFile(path.join(target, 'index.js'), 'utf8'), 'retained working runtime')
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('local SDK staging requires exact artifact, target and addon bytes before replacing a runtime', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'lody-local-sdk-staging-'))
+  const source = path.join(directory, 'source')
+  const target = path.join(directory, 'modules/@loro-dev/loro-repo-engine')
+  const saved = process.env.LODY_LOCAL_REPO_SDK_ARTIFACT
+  const artifactId = 'a'.repeat(64)
+  const binaryName = 'loro-repo-engine.darwin-arm64.node'
+  const bytes = Buffer.from('synthetic addon bytes; actual NAPI loading is covered separately')
+  const metadata = {
+    name: '@loro-dev/loro-repo-engine',
+    version: `0.1.0-lody-local.${artifactId.slice(0, 16)}`,
+    lodyLocalSdk: {
+      schemaVersion: 1,
+      developmentOnly: true,
+      artifactId,
+      platform: 'darwin',
+      arch: 'arm64',
+      binaryName,
+      binarySha256: '0'.repeat(64)
+    }
+  }
+  try {
+    await mkdir(source, { recursive: true })
+    await mkdir(target, { recursive: true })
+    await writeFile(path.join(source, 'package.json'), JSON.stringify(metadata))
+    await writeFile(path.join(source, 'index.js'), 'selected local loader')
+    await writeFile(path.join(source, binaryName), bytes)
+    await writeFile(path.join(target, 'index.js'), 'previous working runtime')
+    delete process.env.LODY_LOCAL_REPO_SDK_ARTIFACT
+    const stage = (arch = 'arm64') =>
+      stageRepoEnginePackage(source, path.join(directory, 'modules'), { platform: 'darwin', arch })
+    assert.throws(stage, /identity or target mismatch/)
+    process.env.LODY_LOCAL_REPO_SDK_ARTIFACT = artifactId
+    assert.throws(() => stage('x64'), /identity or target mismatch/)
+    assert.throws(stage, /checksum mismatch/)
+    assert.equal(await readFile(path.join(target, 'index.js'), 'utf8'), 'previous working runtime')
+    metadata.lodyLocalSdk.binarySha256 = createHash('sha256').update(bytes).digest('hex')
+    await writeFile(path.join(source, 'package.json'), JSON.stringify(metadata))
+    await writeFile(path.join(target, 'loro-repo-engine.foreign.node'), 'stale')
+    assert.equal(stage().artifactId, artifactId)
+    assert.deepEqual(await readFile(path.join(target, binaryName)), bytes)
+    assert.equal(await readFile(path.join(target, 'index.js'), 'utf8'), 'selected local loader')
+    assert.equal((await readdir(target)).includes('loro-repo-engine.foreign.node'), false)
+  } finally {
+    if (saved === undefined) delete process.env.LODY_LOCAL_REPO_SDK_ARTIFACT
+    else process.env.LODY_LOCAL_REPO_SDK_ARTIFACT = saved
+    await rm(directory, { recursive: true, force: true })
+  }
+})
 
 async function postinstallFixture(directory, { installerExit = 0, sparkleExit = 0 } = {}) {
   const scripts = path.join(directory, 'scripts')

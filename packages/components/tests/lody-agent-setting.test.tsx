@@ -42,7 +42,7 @@ vi.mock('../src/atoms/agents', async () => {
   const configs = atomFamily((value: AgentConfigMeta[]) => atom(value));
   const setups = atomFamily((value: ProviderSetupTask[]) => atom(value));
   return {
-    getAgentConfigsByMachineAtomFamily: () => configs(mounted.configs),
+    getLegacyAgentConfigsByMachineAtomFamily: () => configs(mounted.configs),
     getProviderSetupsByMachineAtomFamily: () => setups(mounted.setups),
     cmdCreateProviderSetupAtom: atom(null),
     cmdRetryProviderSetupAtom: atom(null),

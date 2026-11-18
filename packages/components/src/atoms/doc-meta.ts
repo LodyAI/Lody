@@ -6,6 +6,14 @@ import { atomFamily } from 'jotai/utils';
 import { atomEffect } from 'jotai-effect';
 import type { LoroRepo } from 'loro-repo';
 import {
+  createLegacyWorkspaceDirectory,
+  type WorkspaceDirectory,
+  type WorkspaceDirectoryReader,
+  type WorkspaceDirectoryEntry,
+  type WorkspaceDirectoryObservation,
+  type WorkspaceDirectoryChange,
+} from '@lody/shared/workspace-directory';
+import {
   isLoroRepoDocDeleted,
   resolveSessionPullRequests,
   getSessionRoomId,
@@ -25,7 +33,7 @@ import {
   sessionRunConfigDraftsAtom,
 } from './session-run-config-drafts';
 import { mergeBootstrapMetaCache } from '@/lib/doc-meta-bootstrap';
-import { listDocMetaEntries, type DocMetaCacheSnapshot } from '@/lib/doc-meta-batch';
+import { type DocMetaCacheSnapshot } from '@/lib/doc-meta-batch';
 import { jsonValueEqual } from '@/lib/json-value-equal';
 import { getDocMetaRoomKind, withDerivedDocMetaId } from '@/lib/doc-meta-room';
 import { describeErrorType } from '@/lib/workspace-data-scope';
@@ -567,12 +575,14 @@ export const clearDocMetaCacheAtom = atom(null, (_get, set) => {
 });
 
 // 初始扫描
-async function buildDocMetaCache(repo: LoroRepo) {
+async function buildDocMetaCache(directory: WorkspaceDirectoryReader) {
+  return projectDocMetaCache(await directory.listEntries());
+}
+function projectDocMetaCache(entries: WorkspaceDirectoryEntry[]) {
   const sessions: Record<string, SessionMeta> = {};
   const machines: Record<string, MachineMeta> = {};
   const agents: Record<string, AgentConfigMeta> = {};
 
-  const entries = await listDocMetaEntries(repo);
   if (typeof window !== 'undefined') {
     const sessionEntries = entries.filter((e) => isSessionDocRoomId(e.docId));
     console.debug(
@@ -606,10 +616,10 @@ async function buildDocMetaCache(repo: LoroRepo) {
 
 // Helper to fetch metadata for a single doc through loro-repo's public API.
 async function fetchDocMeta(
-  repo: LoroRepo,
+  directory: WorkspaceDirectory,
   docId: string
 ): Promise<Record<string, unknown> | null> {
-  const entry = await repo.getDocMeta(docId);
+  const entry = await directory.getEntry(docId);
   if (!entry || isLoroRepoDocDeleted(entry)) return null;
   return Object.keys(entry.meta).length > 0 ? entry.meta : null;
 }
@@ -624,6 +634,11 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
   }
 
   let cancelled = false;
+  const directory = runtime.workspaceDirectory ?? createLegacyWorkspaceDirectory(runtime.repo);
+  let scanGeneration = 0;
+  let observation: WorkspaceDirectoryObservation | undefined;
+  let pendingObservation: Promise<void> | undefined;
+  let retries = 0;
   const draftOwner = get.peek(sessionRunConfigDraftAccountAtom);
   const clearDeletedSessionDraft = (
     sessionId: string,
@@ -768,7 +783,7 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
 
     pendingReadEpochByDocId.set(docId, fetchEpoch);
     setProjectionPending(docId, true);
-    void fetchDocMeta(runtime.repo, docId)
+    void fetchDocMeta(directory, docId)
       .then((meta) => {
         if (cancelled) return;
         if (fullMetaFetchEpochByDocId.get(docId) !== fetchEpoch) return;
@@ -965,54 +980,140 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
     }
   }
 
-  const handle = runtime.repo.watch(
-    (event) => {
+  const onDirectoryChange = (event: WorkspaceDirectoryChange) => {
+    if (event.kind === 'snapshot-reset') {
       if (cancelled) return;
-      if (event.kind === 'doc-metadata') {
-        const patch = event.patch as Record<string, unknown>;
-        // Local writes have already been accepted by Meta Flock. Apply them to
-        // an existing UI projection immediately instead of placing a user
-        // action behind a potentially large reconnect/catch-up batch.
-        if (event.by === 'local' && hasCachedDocMeta(event.docId)) {
-          const pendingPatch = pendingPatches.get(event.docId);
-          pendingPatches.delete(event.docId);
-          applyPatchBatchToCache([
-            [event.docId, pendingPatch ? { ...pendingPatch, ...patch } : patch],
-          ]);
-          updateProjectionPending(event.docId);
-          return;
-        }
-
-        // Merge remote/live patches for the same docId within the same batch.
-        const existing = pendingPatches.get(event.docId);
-        if (existing) {
-          Object.assign(existing, patch);
-        } else {
-          pendingPatches.set(event.docId, { ...patch });
-        }
-        setProjectionPending(event.docId, true);
-        scheduleFlush();
-      } else if ((event as { kind: string }).kind === 'doc-existence-changed') {
-        const e = event as unknown as { kind: string; docId: string; from: string; to: string };
-        if (e.to !== 'deleted' && e.to !== 'active' && e.to !== 'missing') return;
-        if (e.to === 'deleted' && isSessionDocRoomId(e.docId)) {
-          // Invalidate edit leases immediately, not after the metadata batch.
-          clearDeletedSessionDraft(e.docId.slice(SESSION_DOC_PREFIX.length));
-        }
-        pendingExistenceCounts.set(e.docId, (pendingExistenceCounts.get(e.docId) ?? 0) + 1);
-        setProjectionPending(e.docId, true);
-        if (e.to === 'deleted') {
-          pendingExistenceUpdates.push({ docId: e.docId, state: 'deleted' });
-        } else if (e.to === 'active') {
-          pendingExistenceUpdates.push({ docId: e.docId, state: 'active' });
-        } else if (e.to === 'missing') {
-          pendingExistenceUpdates.push({ docId: e.docId, state: 'missing' });
-        }
-        scheduleFlush();
+      scanGeneration++;
+      pendingPatches.clear();
+      pendingExistenceUpdates.length = 0;
+      pendingExistenceCounts.clear();
+      pendingFullMetas.clear();
+      pendingMetaDocIds.clear();
+      for (const id of fullMetaFetchEpochByDocId.keys())
+        fullMetaFetchEpochByDocId.set(id, (fullMetaFetchEpochByDocId.get(id) ?? 0) + 1);
+      for (const id of pendingReadEpochByDocId.keys())
+        pendingReadEpochByDocId.set(id, (pendingReadEpochByDocId.get(id) ?? 0) + 1);
+      for (const id of existenceEpochByDocId.keys())
+        existenceEpochByDocId.set(id, (existenceEpochByDocId.get(id) ?? 0) + 1);
+      for (const id of [...markedPendingDocIds]) setProjectionPending(id, false);
+      existenceStateByDocId.clear();
+      for (const entry of event.entries) {
+        if (entry.exists !== undefined)
+          existenceStateByDocId.set(entry.docId, entry.exists ? 'active' : 'deleted');
+        if (entry.exists === false && isSessionDocRoomId(entry.docId))
+          clearDeletedSessionDraft(entry.docId.slice(SESSION_DOC_PREFIX.length));
       }
-    },
-    { kinds: ['doc-metadata', 'doc-existence-changed'] as string[] as never }
-  );
+      const cache = projectDocMetaCache(event.entries.filter((entry) => entry.exists === true));
+      set(sessionMetaCacheAtom, cache.sessions);
+      set(machineMetaCacheAtom, cache.machines);
+      set(agentConfigMetaCacheAtom, cache.agents);
+      set(docMetaCacheReadyAtom, true);
+      set(docMetaCacheScopeAtom, {
+        runtime,
+        workspaceId: runtime.workspaceId,
+        workspaceSlug: runtime.workspaceSlug,
+        ready: true,
+      });
+      return;
+    }
+    if (cancelled) return;
+    if (event.kind === 'doc-metadata') {
+      const patch = event.patch as Record<string, unknown>;
+      // Local writes have already been accepted by Meta Flock. Apply them to
+      // an existing UI projection immediately instead of placing a user
+      // action behind a potentially large reconnect/catch-up batch.
+      if (event.by === 'local' && hasCachedDocMeta(event.docId)) {
+        const pendingPatch = pendingPatches.get(event.docId);
+        pendingPatches.delete(event.docId);
+        applyPatchBatchToCache([
+          [event.docId, pendingPatch ? { ...pendingPatch, ...patch } : patch],
+        ]);
+        updateProjectionPending(event.docId);
+        return;
+      }
+
+      // Merge remote/live patches for the same docId within the same batch.
+      const existing = pendingPatches.get(event.docId);
+      if (existing) {
+        Object.assign(existing, patch);
+      } else {
+        pendingPatches.set(event.docId, { ...patch });
+      }
+      setProjectionPending(event.docId, true);
+      scheduleFlush();
+    } else if (event.kind === 'doc-existence-changed') {
+      const e = event;
+      if (e.to !== 'deleted' && e.to !== 'active' && e.to !== 'missing') return;
+      if (e.to === 'deleted' && isSessionDocRoomId(e.docId)) {
+        // Invalidate edit leases immediately, not after the metadata batch.
+        clearDeletedSessionDraft(e.docId.slice(SESSION_DOC_PREFIX.length));
+      }
+      pendingExistenceCounts.set(e.docId, (pendingExistenceCounts.get(e.docId) ?? 0) + 1);
+      setProjectionPending(e.docId, true);
+      if (e.to === 'deleted') {
+        pendingExistenceUpdates.push({ docId: e.docId, state: 'deleted' });
+      } else if (e.to === 'active') {
+        pendingExistenceUpdates.push({ docId: e.docId, state: 'active' });
+      } else if (e.to === 'missing') {
+        pendingExistenceUpdates.push({ docId: e.docId, state: 'missing' });
+      }
+      scheduleFlush();
+    }
+  };
+  const onDirectoryError = (error: unknown) => {
+    if (cancelled) return;
+    scanGeneration++;
+    set(docMetaCacheReadyAtom, false);
+    set(docMetaCacheScopeAtom, {
+      runtime,
+      workspaceId: runtime.workspaceId,
+      workspaceSlug: runtime.workspaceSlug,
+      ready: false,
+      scanFailure: { errorType: describeErrorType(error) },
+    });
+    if ((error as { code?: string })?.code === 'restart_required' && retries++ < 3)
+      queueMicrotask(() => {
+        if (!cancelled) void startObservation().catch(onDirectoryError);
+      });
+  };
+  const startObservation = (): Promise<void> => {
+    const previous = pendingObservation;
+    if (!previous && !observation && !cancelled) {
+      try {
+        const first = directory.observe(onDirectoryChange, onDirectoryError);
+        if (!(first instanceof Promise)) {
+          observation = first;
+          return (pendingObservation = Promise.resolve());
+        }
+        return (pendingObservation = first.then(async (acquired) => {
+          observation = acquired;
+          if (cancelled) {
+            await acquired.unsubscribe();
+            if (observation === acquired) observation = undefined;
+          }
+        }));
+      } catch (error) {
+        return (pendingObservation = Promise.reject(error));
+      }
+    }
+    const operation = (async () => {
+      if (previous) await previous;
+      if (observation) {
+        await observation.unsubscribe();
+        observation = undefined;
+      }
+      if (cancelled) return;
+      const acquired = await directory.observe(onDirectoryChange, onDirectoryError);
+      observation = acquired;
+      if (cancelled) {
+        await acquired.unsubscribe();
+        if (observation === acquired) observation = undefined;
+      }
+    })();
+    pendingObservation = operation;
+    return operation;
+  };
+  const initialObservation = startObservation();
 
   // A session may have been deleted while this workspace was not open. Probe
   // only actual drafts, and require a deletion marker: missing metadata during
@@ -1024,7 +1125,7 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
   const draftSessionIds = new Set(workspaceDrafts.map(({ scope }) => scope.sessionId));
   for (const sessionId of draftSessionIds) {
     const docId = getSessionRoomId(sessionId as SessionId);
-    void runtime.repo.getDocMeta(docId).then(
+    void directory.getEntry(docId).then(
       (entry) => {
         if (cancelled) return;
         if (isLoroRepoDocDeleted(entry)) {
@@ -1042,9 +1143,16 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
   // later partial live patch must not clobber complete metadata already present in
   // the flock snapshot, and a resolving snapshot must not undo an archive/restore
   // already observed live.
-  void buildDocMetaCache(runtime.repo).then(
+  let initialScanGeneration = scanGeneration;
+  const initialScan = observation
+    ? buildDocMetaCache(directory)
+    : initialObservation.then(() => {
+        initialScanGeneration = scanGeneration;
+        return buildDocMetaCache(directory);
+      });
+  void initialScan.then(
     (cache) => {
-      if (cancelled) return;
+      if (cancelled || scanGeneration !== initialScanGeneration) return;
       set(sessionMetaCacheAtom, (prev) =>
         mergeBootstrapMetaCache(cache.sessions, prev, existenceStateByDocId)
       );
@@ -1063,7 +1171,7 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
       });
     },
     (error: unknown) => {
-      if (cancelled) return;
+      if (cancelled || scanGeneration !== initialScanGeneration) return;
       // The scope stays not ready (the workspace keeps reading as syncing), so
       // record why: the stuck-sync report names this failure instead of a hang.
       console.warn('[doc-meta] initial metadata scan failed', {
@@ -1087,6 +1195,11 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
       clearTimeout(flushTimer);
       flushTimer = null;
     }
-    handle.unsubscribe();
+    void (async () => {
+      await pendingObservation?.catch(() => {});
+      await observation?.unsubscribe();
+    })().catch((error) =>
+      console.warn('[doc-meta] directory release failed', { errorType: describeErrorType(error) })
+    );
   };
 });

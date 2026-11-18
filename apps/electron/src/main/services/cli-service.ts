@@ -1,3 +1,16 @@
+import { isDeepStrictEqual } from 'node:util'
+import {
+  nativeDocumentDomainFreezeRequestSchema,
+  nativeDocumentDomainFreezeResponseSchema,
+  type NativeDocumentDomainFreezeRequest,
+  type NativeDocumentDomainFreezeResponse
+} from '@lody/shared/native-document-domain-control'
+import {
+  nativeSessionBodyFreezeRequestSchema,
+  type NativeSessionBodyFreezeRequest,
+  type NativeSessionBodyFreezeResponse
+} from '@lody/shared/native-session-body-control'
+import { readFrozenLegacySessionSqlite } from '@lody/shared/node/native-session-legacy-source'
 import {
   LocalE2eeRecoveryFailureSchema,
   type LocalE2eeResetRequest
@@ -6,7 +19,7 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import { totalmem } from 'node:os'
-import { basename, join, resolve as resolvePath } from 'node:path'
+import { basename, dirname, join, resolve as resolvePath } from 'node:path'
 import { app, powerSaveBlocker, type WebContents } from 'electron'
 import { Effect, Layer, Logger, LogLevel, References } from 'effect'
 import type { AutomationControlRequest } from '@lody/shared/automations'
@@ -346,6 +359,26 @@ function resolveBundledCliRuntime(): string {
   return process.execPath
 }
 
+/** Resolve the data-only executable without probing or starting an execution daemon. */
+export function resolveBundledIndependentRepoLaunch(): { executable: string; entry: string } {
+  const cli = resolveBundledCliEntry()
+  if (!cli) throw new Error('Bundled data host is unavailable')
+  const entry = join(dirname(cli), 'native-repo-independent-host.js')
+  if (!fs.existsSync(entry)) throw new Error('Bundled independent data host is unavailable')
+  return { executable: resolveBundledCliRuntime(), entry }
+}
+
+export function resolveBundledWorkspaceCatalogMigrationLaunch(): {
+  executable: string
+  entry: string
+} {
+  const cli = resolveBundledCliEntry()
+  if (!cli) throw new Error('Bundled catalog migration is unavailable')
+  const entry = join(dirname(cli), 'native-workspace-catalog-migrate.js')
+  if (!fs.existsSync(entry)) throw new Error('Bundled catalog migration is unavailable')
+  return { executable: resolveBundledCliRuntime(), entry }
+}
+
 function resolveRepoRoot(): string | null {
   let candidate = app.getAppPath()
   for (let depth = 0; depth < 8; depth += 1) {
@@ -521,6 +554,7 @@ export class CliService {
   // purely as a control UI for agents on other machines. Persisted so the choice
   // survives restarts. Defaults to true to preserve the "runs the CLI" behavior.
   private cliAutoStartEnabled = true
+  private readonly dataMigrationPauses = new Set<symbol>()
   private powerSaveBlockerId: number | null = null
   private supervisor: CliSupervisor | null = null
   private readonly supervisorInstanceId: string
@@ -554,6 +588,7 @@ export class CliService {
   }
 
   private ensureSupervisor(): CliSupervisor {
+    if (this.dataMigrationPauses.size) throw new Error('Local data migration is in progress')
     if (this.supervisor) return this.supervisor
 
     this.supervisor = new CliSupervisor({
@@ -749,6 +784,8 @@ export class CliService {
   }
 
   async restartAutoStart(): Promise<RestartCliResult> {
+    if (this.dataMigrationPauses.size)
+      return { ok: false, error: 'Local data migration is in progress' }
     if (!this.cliAutoStartEnabled) {
       return { ok: false }
     }
@@ -779,7 +816,7 @@ export class CliService {
       // Manual termination keeps observing an external CLI only while local
       // agents remain enabled. Disabling the setting is an explicit
       // control-only mode and must not retain a background probe loop.
-      if (this.cliAutoStartEnabled) {
+      if (this.cliAutoStartEnabled && this.dataMigrationPauses.size === 0) {
         supervisor.startProbing()
       }
       this.updatePowerSaveBlocker()
@@ -821,6 +858,20 @@ export class CliService {
         this.cachedMachineId = fallbackMachineId
       }
       return fallbackMachineId
+    }
+  }
+
+  /** Data-only domains retain the installation identity while execution is off.
+   * This never probes or starts a daemon and grants no execution capability. */
+  readLocalDataMachineId(): string | null {
+    const known = this.cachedMachineId ?? readMachineIdFromCliCredentials()
+    if (known) return known
+    // Local-only CLI has no cloud credentials. Its installation identity is
+    // the same machine-id file used by the CLI; this read never provisions it.
+    try {
+      return fs.readFileSync(join(LODY_DATA_DIR, 'machine-id'), 'utf8').trim() || null
+    } catch {
+      return null
     }
   }
 
@@ -872,6 +923,70 @@ export class CliService {
           )
         )
     )
+  }
+
+  /** Private local migration control, never forwarded through machine/cloud RPC.
+   * The reply proves the original daemon's per-Session drain; main independently
+   * checks its persisted bytes using only this profile's trusted storage path. */
+  async controlNativeDocumentDomainMigration(
+    message: NativeDocumentDomainFreezeRequest
+  ): Promise<NativeDocumentDomainFreezeResponse> {
+    const input = nativeDocumentDomainFreezeRequestSchema.parse(message)
+    const request = this.localControlClient.documentDomainFreeze
+    if (!request) throw new Error('document_domain_scope_unavailable')
+    const response = nativeDocumentDomainFreezeResponseSchema.parse(
+      await Effect.runPromise(request(input, { timeoutMs: 30000 }))
+    )
+    if (
+      !response.ok ||
+      response.accountId !== input.accountId ||
+      response.workspaceId !== input.workspaceId ||
+      response.nonce !== input.nonce ||
+      response.purpose !== input.purpose ||
+      response.phase !== input.phase ||
+      !isDeepStrictEqual(response.scope, input.scope)
+    )
+      throw new Error('document_domain_freeze_unconfirmed')
+    return response
+  }
+
+  async controlNativeSessionBodyMigration(
+    message: NativeSessionBodyFreezeRequest
+  ): Promise<NativeSessionBodyFreezeResponse & { snapshot?: Uint8Array }> {
+    const input = nativeSessionBodyFreezeRequestSchema.parse(message)
+    const request = this.localControlClient.sessionBodyFreeze
+    if (!request) throw new Error('session_body_scope_unavailable')
+    const response = await Effect.runPromise(request(input, { timeoutMs: 30000 }))
+    if (!response.ok) throw new Error(`session_body_${response.error}`)
+    if (
+      response.accountId !== input.accountId ||
+      response.workspaceId !== input.workspaceId ||
+      response.sessionId !== input.sessionId ||
+      response.nonce !== input.nonce ||
+      response.phase !== input.phase
+    )
+      throw new Error('session_body_freeze_unconfirmed')
+    if (response.phase === 'freeze' || response.phase === 'assert') {
+      const source = readFrozenLegacySessionSqlite({
+        path: join(
+          getLodyDataDir(mainPlatformKind),
+          'loro-repo',
+          input.workspaceId,
+          'repo.sqlite3'
+        ),
+        workspaceId: input.workspaceId,
+        sessionId: input.sessionId
+      })
+      if (
+        source.sourceId !== response.source.sourceId ||
+        source.present !== response.source.present ||
+        source.sha256 !== response.source.sha256 ||
+        source.byteLength !== response.source.byteLength
+      )
+        throw new Error('session_body_freeze_unconfirmed')
+      return { ...response, snapshot: source.snapshot }
+    }
+    return response
   }
 
   async sendLocalSessionControl(
@@ -1083,14 +1198,61 @@ export class CliService {
   }
 
   private startSupervisorIfNeeded(): void {
+    if (this.dataMigrationPauses.size) return
     const supervisor = this.ensureSupervisor()
     void supervisor.start()
   }
 
   async run(args: string[], options?: CliRunOptions): Promise<CliRunResult> {
+    if (this.dataMigrationPauses.size) throw new Error('Local data migration is in progress')
     const prepared = await this.prepareBundledCli(args, options)
     throwIfAborted(options?.signal)
     return await prepared.spawn().result
+  }
+
+  /** Main-owned maintenance lease; it never changes the user's execution preference. */
+  acquireDataMigrationPause(): {
+    stop(): Promise<void>
+    release(options?: { resume?: boolean }): void
+  } {
+    const key = Symbol('data-migration')
+    this.dataMigrationPauses.add(key)
+    let released = false
+    return {
+      stop: async () => {
+        if (this.cliAutoStartEnabled && (this.supervisor || this.trackedCliChildren.size > 0)) {
+          let live: CliRuntimeState
+          try {
+            live = await Effect.runPromise(
+              this.localProbeClient.state({ timeoutMs: LOCAL_PROBE_TIMEOUT_MS })
+            )
+          } catch (error) {
+            // An owned child can fail before publishing its endpoint (including
+            // a stale writer fence). Confirm its normal shutdown, then let the
+            // helper perform strong-identity recovery. Never stop an unknown owner.
+            if (this.trackedCliChildren.size === 0) throw error
+            await this.shutdownForQuit()
+            return
+          }
+          if (live.supervisor?.instanceId !== this.supervisorInstanceId)
+            throw new Error('Data migration cannot stop an external runtime')
+          if (live.activeSessionCount !== 0)
+            throw new Error('Data migration requires an idle local runtime')
+        }
+        await this.shutdownForQuit()
+      },
+      release: (options) => {
+        if (released) return
+        released = true
+        this.dataMigrationPauses.delete(key)
+        if (
+          options?.resume !== false &&
+          this.dataMigrationPauses.size === 0 &&
+          this.cliAutoStartEnabled
+        )
+          this.startSupervisorIfNeeded()
+      }
+    }
   }
 
   /** Retained only for `getOutputBacklog`; no renderer subscribes to CLI output. */
@@ -1112,6 +1274,9 @@ export class CliService {
     options?: CliRunOptions
   ): LaunchHandle {
     throwIfAborted(options?.signal)
+    // Preparation awaits shell/proxy I/O. A maintenance lease may have been
+    // acquired after run/start admitted it; check again at the physical spawn.
+    if (this.dataMigrationPauses.size) throw new Error('Local data migration is in progress')
     const runId = randomUUID()
     this.recordCliOutput({
       runId,

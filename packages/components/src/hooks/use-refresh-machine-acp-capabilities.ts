@@ -37,7 +37,8 @@ export const toAcpModelOptionsRefreshProgress = (
  * that only says authentication is required is returned, not thrown: for a
  * Provider without credentials that is the expected next step.
  */
-export function useRefreshMachineAcpCapabilities() {
+export function useRefreshMachineAcpCapabilities(options: { resyncLegacy?: boolean } = {}) {
+  const resyncLegacy = options.resyncLegacy ?? true;
   const { t } = useTranslation();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
@@ -84,16 +85,16 @@ export function useRefreshMachineAcpCapabilities() {
             : t('agents.acpCapabilities.refreshError', 'Refresh failed');
         throw new Error(errorMessage);
       }
-      // The CLI wrote the fresh capabilities to the machine flock doc, which the
-      // web only syncs once per session; force a re-sync so chat landing and the
-      // settings dialog reflect the new modes/models without a reload.
-      await resyncMachineFlockRows(runtime, args.machineId, {
-        refreshedCapability: response.capability
-          ? { configId: response.configId, value: response.capability }
-          : undefined,
-      });
+      // Publish the machine-confirmed capability to mounted readers immediately.
+      // Optional remote catch-up proceeds independently of this successful probe.
+      if (resyncLegacy)
+        await resyncMachineFlockRows(runtime, args.machineId, {
+          refreshedCapability: response.capability
+            ? { configId: response.configId, value: response.capability }
+            : undefined,
+        });
       return response;
     },
-    [runtime, t, workspaceId]
+    [runtime, t, workspaceId, resyncLegacy]
   );
 }

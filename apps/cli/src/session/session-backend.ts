@@ -1,3 +1,18 @@
+import type {
+  SessionBackend,
+  SessionBackendForkSnapshot,
+  QueuePromotionInput,
+  QueuePromotionResult,
+  SessionAgentBatchInput,
+} from '@lody/shared/node/native-session-contract';
+export type {
+  SessionBackend,
+  SessionBackendForkSnapshot,
+  QueuePromotionInput,
+  QueuePromotionResult,
+  SessionAgentBatchInput,
+} from '@lody/shared/node/native-session-contract';
+import { promoteSessionQueuedTurn } from './native-session-queue-promotion';
 import {
   resolveSessionHistoryBackendKind,
   type MessageQueueItem,
@@ -37,156 +52,7 @@ import {
   type SessionDispatchSelector,
 } from './session-dispatch-history';
 
-/**
- * Logical history and delivery operations consumed by session orchestration.
- *
- * This is intentionally narrower than `SessionDocument`: callers get the
- * domain history port and queue operations, but not Loro containers, mirrors,
- * or repo handles. A Roost adapter can implement the same contract while
- * projecting physical segments into the same logical history.
- */
-export interface SessionBackend {
-  readonly inputAcceptance?: import('@lody/shared/session-data').SessionInputAcceptance;
-  readonly kind: SessionHistoryBackendKind;
-  readonly history: SessionHistoryReader;
-
-  initialize(options: { skipAutoRead: boolean }): Promise<void>;
-  readHistory(): Promise<SessionHistoryInput[]>;
-  readonly readHistoryInspection?: (
-    query: import('@lody/shared').SessionHistoryInspectionQuery
-  ) => Promise<import('@lody/shared').SessionHistoryReadResponse>;
-  readonly readHistoryReplay?: (
-    excludeTurnId?: string
-  ) => Promise<import('@lody/shared').ReplayPromptResult>;
-  readonly readHistoryTranscript?: (options: { limit?: number; reverse?: boolean }) => Promise<{
-    total: number;
-    positions: number[];
-    entries: SessionHistoryInput[];
-  }>;
-  readonly readHistoryEntry?: (turnId: string) => Promise<SessionHistoryInput | undefined>;
-  foldHistory<T>(
-    create: () => T,
-    visit: (state: T, entry: SessionHistoryInput) => void
-  ): Promise<T>;
-  readHistoryQuery(options?: {
-    from?: number;
-    to?: number;
-    transcriptVisibility?: boolean;
-  }): Promise<readonly HistoryQueryRow[]>;
-  readHistorySelection(
-    select: (rows: readonly HistoryQueryRow[]) => readonly number[],
-    options?: { transcriptVisibility?: boolean }
-  ): Promise<SessionHistoryInput[]>;
-  /** Read the latest goal from local history. */
-  readonly readLatestGoal: () => Promise<SessionGoalMessage | null>;
-  readonly readLatestUserId?: () => Promise<string | undefined>;
-  readDispatchHistory(includeTurnIds: readonly string[]): Promise<SessionDispatchEntry[]>;
-  readDispatchSelection(
-    includeTurnIds: readonly string[],
-    select: SessionDispatchSelector
-  ): Promise<SessionDispatchSelection>;
-  captureForkSnapshot(): Promise<SessionBackendForkSnapshot>;
-  importForkHistory(
-    snapshot: SessionBackendForkSnapshot,
-    selection: readonly SessionHistoryInput[]
-  ): Promise<void>;
-  readHistoryCount(): Promise<number>;
-  readHistoryDirectory(from: number, to: number): Promise<readonly SessionDirectoryRow[]>;
-  readLatestTurn(role: SessionTurn['role']): Promise<SessionTurn | undefined>;
-  readTurn(turnId: string): Promise<SessionTurnRead>;
-  readTurnOutput(userTurnId: string): Promise<SessionHistoryInput[]>;
-  /** Stable logical ordering metadata used to persist turn-scoped diff evidence. */
-  getTurnStorageMetadata(
-    turnId: string
-  ): Promise<{ readonly capturedAtMs: number; readonly orderKey: string } | undefined>;
-  subscribeHistory(listener: () => void): () => void;
-  applyHistoryAction(action: HistoryAction): Promise<SessionActionResult>;
-  applyHistoryImport(input: HistoryImportInput): Promise<SessionImportResult>;
-  applyAcpRuntimeConfigPatch(
-    basedOnUserTurnId: string,
-    patch: SessionAcpRuntimeConfigPatch
-  ): Promise<boolean>;
-  replaceEditableTail(input: ReplaceEditableTailInput): Promise<SessionEditableTailResult>;
-  openAssistantTurn(input: OpenAssistantTurnInput): Promise<void>;
-  respondPermission(
-    requestId: string,
-    outcome: import('@lody/shared').PermissionOutcome,
-    options?: { readonly turnId?: string }
-  ): Promise<boolean>;
-  applyAgentBatch(input: SessionAgentBatchInput): Promise<void>;
-  setPlan(entries: readonly SessionPlanEntry[]): Promise<void>;
-  appendHistoryTurn(entry: SessionHistoryInput): Promise<void>;
-  appendUserTurn(entry: SessionHistoryInput): Promise<void>;
-  publishUserTurnActivation(userTurnId: string): Promise<void>;
-  promoteQueuedTurn(input: QueuePromotionInput): Promise<QueuePromotionResult>;
-  getMessageQueue(): Promise<readonly MessageQueueItem[]>;
-  peekReadyMessageQueue(): Promise<MessageQueueItem | null>;
-  removeMessageQueueItem(cid: string): Promise<void>;
-  getMetaState(): Promise<SessionMeta | undefined>;
-  getQueuePromotionRecord(operationId: string): Promise<SessionQueuePromotionRecord | undefined>;
-  setQueuePromotionRecord(
-    operationId: string,
-    record: SessionQueuePromotionRecord | undefined
-  ): Promise<void>;
-  getSteerTurnStatuses(): Promise<SessionMeta['steerTurnStatuses']>;
-  replaceSteerTurnStatuses(statuses: SessionMeta['steerTurnStatuses']): Promise<void>;
-  getSteerOperationRecord(operationId: string): Promise<SessionSteerOperationRecord | undefined>;
-  getSteerOperationLedger(): Promise<SessionMeta['steerOperationLedger']>;
-  setSteerOperationRecord(
-    operationId: string,
-    record: SessionSteerOperationRecord | undefined
-  ): Promise<void>;
-  flushLocalWrites(): Promise<void>;
-  waitUntilSynced(options?: { timeoutMs?: number }): Promise<boolean>;
-  dispose?(): void | Promise<void>;
-
-  /** Stable identity used to correlate queue retries with one logical turn. */
-  getQueueOperationId(item: MessageQueueItem): string;
-}
-
-/** Opaque source snapshot plus the logical rows needed to select a fork range. */
-export type SessionBackendForkSnapshot = {
-  readonly backendKind: SessionHistoryBackendKind;
-  readonly history: readonly SessionHistoryInput[];
-  /** Passed through to the destination backend; callers must not inspect it. */
-  readonly storageSnapshot: unknown;
-};
-
 export const getSteerOperationId = (userTurnId: string): string => `steer:${userTurnId.trim()}`;
-
-export type QueuePromotionInput = {
-  item: MessageQueueItem;
-  entry: SessionHistoryInput;
-  operationId: string;
-  /**
-   * History evidence gathered by the caller's dispatch snapshot. Supplying it
-   * keeps queue promotion from materializing the full conversation a second
-   * time on the long-dialogue hot path.
-   */
-  existingEntry?: SessionHistoryInput;
-};
-
-export type SessionAgentBatchInput = {
-  readonly notifications?: readonly AcpSessionNotification[];
-  readonly contents?: readonly MessageContent[];
-  /**
-   * Stable per-item identities aligned with `notifications` or `contents`.
-   * Backends must make a retry with the same identity idempotent, including
-   * when an earlier item in the batch committed before a later item failed.
-   */
-  readonly operationIds?: readonly string[];
-  readonly targetAssistantEntryId?: string;
-  readonly entryBound?: boolean;
-  readonly model?: ModelInfo;
-  readonly createId?: () => string;
-  readonly now?: () => string;
-};
-
-export type QueuePromotionResult = {
-  status: 'applied' | 'already-applied';
-  operationId: string;
-  entry: SessionHistoryInput;
-};
 
 /** Read the first stored occurrence, retaining duplicate-ID semantics on Loro. */
 export async function readHistoryEntry(
@@ -426,91 +292,20 @@ class LoroSessionBackend implements SessionBackend {
   }
 
   async promoteQueuedTurn(input: QueuePromotionInput): Promise<QueuePromotionResult> {
-    const { item, entry, operationId } = input;
-    if (operationId !== this.getQueueOperationId(item)) {
-      throw new Error(`Queue promotion operation does not match queue row ${item.$cid}`);
-    }
-    if (entry.role !== 'user' || entry.id.trim().length === 0 || entry.id !== entry.id.trim()) {
-      throw new Error(`Queue promotion requires a user entry with a stable id`);
-    }
-
-    const prior = await this.getQueuePromotionRecord(operationId);
-    let existing =
-      input.existingEntry?.role === 'user' && input.existingEntry.id === entry.id
-        ? input.existingEntry
-        : undefined;
-    if (!existing) {
-      const read = await this.readTurn(entry.id);
-      existing =
-        read.state === 'ready' && read.turn.role === 'user'
-          ? (read.turn as SessionHistoryInput)
-          : undefined;
-    }
-    const alreadyAccepted =
-      existing !== undefined ||
-      prior?.state === 'history_accepted' ||
-      prior?.state === 'activation_published' ||
-      prior?.state === 'queue_consumed';
-
-    if (!alreadyAccepted) {
-      let preparedReceiptError: unknown;
-      try {
-        await this.setQueuePromotionRecord(operationId, {
-          queueCid: item.$cid,
-          userTurnId: entry.id,
-          state: 'prepared',
-          updatedAt: Date.now(),
-        });
-      } catch (error) {
-        // History is itself an exact idempotency witness. If the control-plane
-        // receipt is temporarily unavailable, still accept the turn once so a
-        // retry can discover that precise row instead of losing the queue item.
-        preparedReceiptError = error;
-      }
-      // Production uses the receipt-aware split writes. Legacy data-only
-      // fixtures expose appendUserTurn, which preserves their old atomic
-      // history-plus-activation behavior for tests and migration callers.
-      if (
-        typeof this.queuePort.getQueuePromotionRecord === 'function' &&
-        typeof this.queuePort.setQueuePromotionRecord === 'function'
-      ) {
+    return promoteSessionQueuedTurn(
+      this,
+      async (entry) => {
+        // Data-only legacy fixtures retain their old append+activation behavior.
+        if (
+          typeof this.queuePort.getQueuePromotionRecord !== 'function' ||
+          typeof this.queuePort.setQueuePromotionRecord !== 'function'
+        ) {
+          if (this.queuePort.appendUserTurn) return this.queuePort.appendUserTurn(entry);
+        }
         await this.sessionDoc.sessionData.commands.appendTurn(entry as unknown as SessionTurn);
-      } else if (this.queuePort.appendUserTurn) {
-        await this.queuePort.appendUserTurn(entry);
-      } else {
-        await this.sessionDoc.sessionData.commands.appendTurn(entry as unknown as SessionTurn);
-      }
-      if (preparedReceiptError) throw preparedReceiptError;
-      await this.setQueuePromotionRecord(operationId, {
-        queueCid: item.$cid,
-        userTurnId: entry.id,
-        state: 'history_accepted',
-        updatedAt: Date.now(),
-      });
-    }
-
-    // Activation is deliberately replayable. If the process died after the
-    // history commit, this write repairs the pointer before consuming the row.
-    await this.publishUserTurnActivation(entry.id);
-    await this.setQueuePromotionRecord(operationId, {
-      queueCid: item.$cid,
-      userTurnId: entry.id,
-      state: 'activation_published',
-      updatedAt: Date.now(),
-    });
-    await this.removeMessageQueueItem(item.$cid);
-    await this.setQueuePromotionRecord(operationId, {
-      queueCid: item.$cid,
-      userTurnId: entry.id,
-      state: 'queue_consumed',
-      updatedAt: Date.now(),
-    });
-
-    return {
-      status: alreadyAccepted ? 'already-applied' : 'applied',
-      operationId,
-      entry: existing ?? entry,
-    };
+      },
+      input
+    );
   }
 
   getMessageQueue(): Promise<readonly MessageQueueItem[]> {
@@ -687,12 +482,20 @@ export async function createSessionBackend(
   const sessionMeta =
     meta === undefined ? await (sessionDoc.getMetaState?.() ?? Promise.resolve(undefined)) : meta;
   const kind = resolveSessionBackendKind(sessionMeta);
-  const factory =
-    kind === 'roost'
+  const native = sessionDoc.getNativeSessionBackend?.();
+  if (native && kind !== 'loro')
+    throw new Error('Native Session owner cannot replace Roost history');
+  const factory = native
+    ? () => native
+    : kind === 'roost'
       ? (sessionDoc.historyBackendFactory ?? sessionBackendFactories.get(kind))
       : sessionBackendFactories.get(kind);
   if (!factory) throw new SessionBackendUnavailableError(kind, sessionDoc.sessionId);
-  const backend = Promise.resolve().then(() => factory(sessionDoc, sessionMeta));
+  const backend = Promise.resolve()
+    .then(() => factory(sessionDoc, sessionMeta))
+    .then((value) =>
+      native || kind !== 'loro' ? value : (sessionDoc.guardLegacySessionBackend?.(value) ?? value)
+    );
   const binding = { kind, backend };
   sessionBackendBindings.set(sessionDoc, binding);
   try {

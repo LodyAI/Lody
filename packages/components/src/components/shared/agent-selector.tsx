@@ -4,11 +4,11 @@ import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import {
   type AgentConfigId,
-  type AgentConfigMeta,
+  type AgentConfigListSummary,
   type MachineId,
   type MachineViewMeta,
 } from '@lody/shared';
-import { getAllAgentConfigAtom } from '@/atoms';
+import { getAllAgentConfigListAtom } from '@/atoms';
 import { cn } from '@/lib/utils';
 import { useOnlineMachines } from '@/hooks/use-online-machines';
 import { Bot } from 'lucide-react';
@@ -47,7 +47,7 @@ export type AgentSelection = {
 type AgentOption = OptionSelectorOption<string> & {
   agentId: AgentConfigId;
   machineId: MachineId;
-  config: AgentConfigMeta;
+  config: AgentConfigListSummary;
   machine: MachineViewMeta;
 };
 
@@ -70,11 +70,11 @@ interface AgentSelectorProps {
    * Additional validation function for each agent config item
    * Returns true if the item should be disabled
    */
-  validateItem?: (config: AgentConfigMeta, machine?: MachineViewMeta) => boolean;
+  validateItem?: (config: AgentConfigListSummary, machine?: MachineViewMeta) => boolean;
   /**
    * Optional icon renderer for each agent config item.
    */
-  getOptionIcon?: (config: AgentConfigMeta, machine?: MachineViewMeta) => ReactNode;
+  getOptionIcon?: (config: AgentConfigListSummary, machine?: MachineViewMeta) => ReactNode;
 }
 
 export function AgentSelector({
@@ -94,7 +94,7 @@ export function AgentSelector({
   getOptionIcon,
 }: AgentSelectorProps) {
   const { t } = useTranslation();
-  const executorConfigs = useAtomValue(getAllAgentConfigAtom);
+  const executorConfigs = useAtomValue(getAllAgentConfigListAtom);
   const machineList = useOnlineMachines(allowedMachineIds);
 
   const selectedValue = value ? `${value.agentId}:${value.machineId}` : undefined;

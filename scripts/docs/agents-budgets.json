@@ -11,6 +11,10 @@
     "apps/cli/src/mcp/AGENTS.md": 1240,
     "packages/components/src/hooks/AGENTS.md": 1280,
     "packages/e2ee-client/AGENTS.md": 1400,
-    "apps/electron/src/main/services/AGENTS.md": 1290
+    "apps/electron/src/main/services/AGENTS.md": 1290,
+    "apps/cli/src/lib/loro/AGENTS.md": 1420,
+    "packages/components/src/lib/AGENTS.md": 1280,
+    "packages/shared/src/node/AGENTS.md": 1400,
+    "apps/cli/src/lib/code-collab/AGENTS.md": 1280
   }
 }

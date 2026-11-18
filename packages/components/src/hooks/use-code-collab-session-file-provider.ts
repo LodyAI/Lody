@@ -289,7 +289,7 @@ function useCodeCollabFileIndexLoadState(args: {
         throw new Error('Code Collab shared file state is unavailable.');
       }
 
-      const lease = await cache.acquire(flockDocId);
+      const lease = await cache.acquire(flockDocId, targetPlane);
       release = lease.release;
       if (cancelled) {
         await releaseSafely(lease.release);
@@ -344,7 +344,11 @@ function useCodeCollabFileIndexLoadState(args: {
     if (acquireError?.requestKey === requestKey) return acquireError.state;
     if (!activeResource) return fallback;
     const resourceState = activeResource.resource.getSnapshot();
-    if (activeResource.targetPlane === 'local' && resourceState.status !== 'ready') {
+    if (
+      activeResource.targetPlane === 'local' &&
+      activeResource.resource.backend !== 'native' &&
+      resourceState.status !== 'ready'
+    ) {
       return fallback;
     }
     return resourceState;

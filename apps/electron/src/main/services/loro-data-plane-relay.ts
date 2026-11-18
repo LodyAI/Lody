@@ -30,6 +30,7 @@ const PENDING_DAEMON_WRITES_MAX_BYTES = 64 * 1024 * 1024
 
 type PendingDaemonWrite = {
   line: string
+  isCurrent?: () => boolean
 }
 
 /**
@@ -122,8 +123,17 @@ export class LoroDataPlaneRelay {
     this.attachSender(sender)
     if (!this.enabled) return
     this.trackPeer(message, sender)
+    const peers = sender ? this.sendersPeers.get(sender) : undefined
+    const isCurrent =
+      sender && message.type === 'ping' && message.peerId !== undefined
+        ? () =>
+            this.sendersPeers.get(sender) === peers &&
+            peers?.get(message.peerId ?? '') === message.workspaceId
+        : undefined
     void this.ensureConnected()
-      .then(() => this.write(message))
+      .then(() => {
+        if (!isCurrent || isCurrent()) this.write(message, isCurrent)
+      })
       .catch(() => {
         // Drop while disconnected; protocol v3 recovers by design — the status
         // channel flips on reconnect, adapters rejoin, and join reconciliation
@@ -145,7 +155,12 @@ export class LoroDataPlaneRelay {
   }
 
   private trackPeer(message: LocalLoroDataPlaneClientMessage, sender?: WebContents): void {
-    if (!sender || message.type === 'ping') return
+    if (!sender) return
+    if (
+      message.type === 'ping' &&
+      (message.workspaceId === undefined || message.peerId === undefined)
+    )
+      return
     let peers = this.sendersPeers.get(sender)
     if (!peers) {
       peers = new Map()
@@ -155,7 +170,8 @@ export class LoroDataPlaneRelay {
       peers.delete(message.peerId)
       return
     }
-    peers.set(message.peerId, message.workspaceId)
+    if (message.peerId !== undefined && message.workspaceId !== undefined)
+      peers.set(message.peerId, message.workspaceId)
   }
 
   private releaseSenderPeers(sender: WebContents): void {
@@ -342,7 +358,7 @@ export class LoroDataPlaneRelay {
   // pauses direct writes) instead of destroying the socket — a busy daemon just
   // reads slower. Only the PENDING_DAEMON_WRITES_MAX_BYTES safety net (daemon
   // stopped reading entirely) still reconnects.
-  private write(message: LocalLoroDataPlaneClientMessage): void {
+  private write(message: LocalLoroDataPlaneClientMessage, isCurrent?: () => boolean): void {
     const socket = this.socket
     if (!this.enabled || !this.connected || !socket || socket.destroyed) {
       throw new Error('loro_data_plane_socket_unavailable')
@@ -354,7 +370,7 @@ export class LoroDataPlaneRelay {
         socket.destroy()
         throw new Error('loro_data_plane_socket_backpressure')
       }
-      this.pendingDaemonWrites.push({ line })
+      this.pendingDaemonWrites.push({ line, isCurrent })
       this.pendingDaemonBytes += line.length
       return
     }
@@ -374,6 +390,7 @@ export class LoroDataPlaneRelay {
       }
       this.pendingDaemonWrites.shift()
       this.pendingDaemonBytes -= pending.line.length
+      if (pending.isCurrent && !pending.isCurrent()) continue
       if (!socket.write(pending.line)) {
         this.daemonWriteBlocked = true
         return
@@ -398,10 +415,8 @@ export class LoroDataPlaneRelay {
     }
     const parsed = LocalLoroDataPlaneServerMessageSchema.safeParse(raw)
     if (!parsed.success) return
-    if (parsed.data.type === 'pong') {
-      // Liveness only; `lastInboundAt` was already refreshed on the data event.
-      return
-    }
+    // Authenticated connection-scoped pong also advertises optional read-only
+    // features. Old daemons omit them; renderers must not infer support by timeout.
     this.publish(parsed.data)
   }
 

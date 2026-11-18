@@ -85,7 +85,13 @@ export default defineConfig(({ mode }) => {
     main: {
       envDir: false,
       envPrefix: '__LodyPublicBuildOnlyPrefix__',
-      define: { ...viteEnvDefine, __LODY_E2E_CLOCK_BUILD__: 'false' },
+      define: {
+        ...viteEnvDefine,
+        __LODY_E2E_CLOCK_BUILD__: 'false',
+        __LODY_LOCAL_REPO_SDK_ARTIFACT__: JSON.stringify(
+          process.env.LODY_LOCAL_REPO_SDK_ARTIFACT ?? ''
+        )
+      },
       build: {
         lib: {
           entry: {
@@ -95,7 +101,7 @@ export default defineConfig(({ mode }) => {
         },
         externalizeDeps: {
           // E2EE's Node SQLite adapter cannot inline its dynamic addon loader.
-          include: ['better-sqlite3'],
+          include: ['better-sqlite3', 'loro-crdt'],
           exclude: [
             '@devframes/agentic',
             '@devframes/hub',

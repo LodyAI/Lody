@@ -3,44 +3,20 @@ import {
   readCodeCollabFileGenerations,
   CODE_COLLAB_FILE_GENERATION_MAX_BYTES,
   readCodeCollabFileIndexFromFlock,
-  codeCollabFileIndexValuesEqual,
-  type CodeCollabFileGenerations,
-} from '@lody/shared';
-const diffGenerationEpoch = randomUUID();
-let diffGenerationCounter = 0;
-import { waitForCodeCollabTask } from './code-collab-task';
-import {
   readCodeCollabFileIndexSignalFromFlock,
-  writeCodeCollabFileIndexSignalToFlock,
-  applyCodeCollabFileIndexFlockWriteBatch,
+  codeCollabFileIndexValuesEqual,
   planCodeCollabFileIndexFlockWrite,
-  type CodeCollabFileIndexWritableFlock,
+  type CodeCollabFileGenerations,
   type CodeCollabV2FileIndexState,
 } from '@lody/shared';
+import {
+  CodeCollabPublicationConflict,
+  type CodeCollabPublicationStore,
+} from './code-collab-publication-store';
 
-// Publication confirmation relies on `syncOnce()` THROWING on failure: the CLI
-// repo routes exactly one 'streams' transport, and loro-repo rethrows a
-// single-transport failure unchanged. With ZERO transports (offline, nothing
-// attached) `syncOnce()` resolves vacuously and publication is treated as
-// succeeded — deliberate parity with the pre-multi-transport placeholder.
-// Treating that as failure would put every offline publish into the bounded
-// repair loop, which force-republishes and bumps the signal revision every
-// ~30s for as long as the daemon stays deliberately offline; cloud catch-up
-// after re-attach is owned by loro-repo's room rebind/resync instead.
-type CodeCollabFlockHandle = {
-  readonly flock: CodeCollabFileIndexWritableFlock;
-  readonly syncOnce: () => Promise<unknown>;
-};
-
-export type CodeCollabFlockRepo = {
-  readonly openFlockDoc: (flockDocId: string) => Promise<CodeCollabFlockHandle>;
-  readonly flush: () => Promise<void>;
-  readonly sync?: (options: {
-    readonly scope: 'doc';
-    readonly flockDocIds: string[];
-    readonly signal: AbortSignal;
-  }) => Promise<unknown>;
-};
+const diffGenerationEpoch = randomUUID();
+let diffGenerationCounter = 0;
+const MAX_PUBLICATION_CONFLICTS = 8;
 
 export class CodeCollabFileIndexChangedPublishError extends Error {
   constructor(cause: unknown) {
@@ -53,7 +29,7 @@ export class CodeCollabFileIndexChangedPublishError extends Error {
 
 export async function publishCodeCollabFileIndexFlock(args: {
   readonly signal?: AbortSignal;
-  readonly repo: CodeCollabFlockRepo;
+  readonly store: CodeCollabPublicationStore;
   readonly flockDocId: string;
   readonly fileIndex: CodeCollabV2FileIndexState;
   readonly updatedAtMs: number;
@@ -62,13 +38,12 @@ export async function publishCodeCollabFileIndexFlock(args: {
   readonly bumpDiffPaths?: readonly string[];
 }): Promise<{ readonly changed: boolean; readonly generations: CodeCollabFileGenerations }> {
   args.signal?.throwIfAborted();
-  const handle = await waitForCodeCollabTask(args.repo.openFlockDoc(args.flockDocId), args.signal);
-  if (args.reconcileRemote) {
-    await syncFlock(args.repo, handle, args.flockDocId, args.signal);
-  }
+  const room = await args.store.open(args.flockDocId, args.signal);
+  if (args.reconcileRemote) await room.reconcile(args.signal);
   args.signal?.throwIfAborted();
-  const previous = readCodeCollabFileIndexFromFlock(handle.flock);
-  const previousGenerations = readCodeCollabFileGenerations(handle.flock);
+  let snapshot = await room.read(args.signal);
+  const previous = readCodeCollabFileIndexFromFlock(snapshot.view);
+  const previousGenerations = readCodeCollabFileGenerations(snapshot.view);
   const generations: Record<string, string> = {};
   const bumped = new Set(args.bumpDiffPaths);
   for (const [path, value] of Object.entries(args.fileIndex)) {
@@ -84,62 +59,64 @@ export async function publishCodeCollabFileIndexFlock(args: {
         ? previousGenerations[path]
         : `${diffGenerationEpoch}.${++diffGenerationCounter}`;
   }
-  // File rows and generation siblings share the same bounded commit plan.
-  // Flush + sync keeps legacy cleanup and generation-only updates within the
-  // Streams append budget. Repair re-plans from the replica after a failed batch.
-  const batches = planCodeCollabFileIndexFlockWrite(handle.flock, args.fileIndex, { generations });
-  if (batches.length === 0) {
-    return { changed: false, generations };
-  }
-  try {
-    for (const batch of batches) {
-      args.signal?.throwIfAborted();
-      applyCodeCollabFileIndexFlockWriteBatch(handle.flock, batch, args.updatedAtMs);
-      await waitForCodeCollabTask(args.repo.flush(), args.signal);
-      args.signal?.throwIfAborted();
-      await syncFlock(args.repo, handle, args.flockDocId, args.signal);
+  let changed = false;
+  let conflicts = 0;
+  // Re-read after each persisted batch. Native CAS may reject a known stale
+  // snapshot; only that rejection can retry. Disconnects have unknown outcomes
+  // and are returned to the existing owner-scoped repair workflow.
+  for (;;) {
+    args.signal?.throwIfAborted();
+    const batch = planCodeCollabFileIndexFlockWrite(snapshot.view, args.fileIndex, {
+      generations,
+    })[0];
+    if (!batch) return { changed, generations };
+    try {
+      await room.commit(snapshot, { kind: 'index', batch }, args.updatedAtMs, args.signal);
+      changed = true;
+    } catch (error) {
+      if (
+        error instanceof CodeCollabPublicationConflict &&
+        conflicts++ < MAX_PUBLICATION_CONFLICTS
+      ) {
+        snapshot = await room.read(args.signal);
+        continue;
+      }
+      throw new CodeCollabFileIndexChangedPublishError(error);
     }
-  } catch (error) {
-    throw new CodeCollabFileIndexChangedPublishError(error);
+    try {
+      snapshot = await room.read(args.signal);
+    } catch (error) {
+      throw new CodeCollabFileIndexChangedPublishError(error);
+    }
   }
-  return { changed: true, generations };
 }
 
 export async function publishCodeCollabFileIndexSignalFlock(args: {
   readonly signal?: AbortSignal;
-  readonly repo: CodeCollabFlockRepo;
+  readonly store: CodeCollabPublicationStore;
   readonly flockDocId: string;
   readonly updatedAtMs: number;
 }): Promise<{ readonly changed: boolean; readonly revision: number }> {
   args.signal?.throwIfAborted();
-  const handle = await waitForCodeCollabTask(args.repo.openFlockDoc(args.flockDocId), args.signal);
-  await syncFlock(args.repo, handle, args.flockDocId, args.signal);
-  args.signal?.throwIfAborted();
-  const previous = readCodeCollabFileIndexSignalFromFlock(handle.flock);
-  const revision = (previous?.r ?? 0) + 1;
-  const changed = writeCodeCollabFileIndexSignalToFlock(handle.flock, revision, args.updatedAtMs);
-  if (changed) {
-    await waitForCodeCollabTask(args.repo.flush(), args.signal);
+  const room = await args.store.open(args.flockDocId, args.signal);
+  await room.reconcile(args.signal);
+  for (let conflicts = 0; ; conflicts++) {
     args.signal?.throwIfAborted();
-    await syncFlock(args.repo, handle, args.flockDocId, args.signal);
+    const snapshot = await room.read(args.signal);
+    const previous = readCodeCollabFileIndexSignalFromFlock(snapshot.view);
+    const revision = (previous?.r ?? 0) + 1;
+    try {
+      const changed = await room.commit(
+        snapshot,
+        { kind: 'signal', revision },
+        args.updatedAtMs,
+        args.signal
+      );
+      return { changed, revision };
+    } catch (error) {
+      if (error instanceof CodeCollabPublicationConflict && conflicts < MAX_PUBLICATION_CONFLICTS)
+        continue;
+      throw error;
+    }
   }
-  return { changed, revision };
-}
-
-async function syncFlock(
-  repo: CodeCollabFlockRepo,
-  handle: CodeCollabFlockHandle,
-  flockDocId: string,
-  signal?: AbortSignal
-): Promise<void> {
-  signal?.throwIfAborted();
-  // The shared Repo/Streams owner serializes its raw I/O even after a caller aborts.
-  // Never destroy/reopen that owner merely to cancel one optional refresh.
-  await waitForCodeCollabTask(
-    signal && repo.sync
-      ? repo.sync({ scope: 'doc', flockDocIds: [flockDocId], signal })
-      : handle.syncOnce(),
-    signal
-  );
-  signal?.throwIfAborted();
 }

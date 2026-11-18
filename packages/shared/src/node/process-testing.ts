@@ -52,6 +52,13 @@ export class FakeChildProcess extends EventEmitter {
     }
   }
 
+  ref(): this {
+    return this;
+  }
+  unref(): this {
+    return this;
+  }
+
   asChildProcess(): ChildProcess {
     return this as unknown as ChildProcess;
   }

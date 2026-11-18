@@ -9,6 +9,8 @@ import { Provider, createStore } from 'jotai';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
 import {
+  type LocalLoroDataPlaneClientMessage,
+  type LocalLoroDataPlaneServerMessage,
   getSessionRoomId,
   getMachineRoomId,
   type MachineMeta,
@@ -28,6 +30,20 @@ import {
   createCodeCollabFileIndexCache,
   type CodeCollabFileIndexCache,
 } from '../src/lib/code-collab-file-index-cache';
+import { openNativeCodeCollabFileIndexResource } from '../src/lib/code-collab-native-file-index-resource';
+import type { LocalLoroDataPlaneConnection } from '@lody/shared/local-loro-transport';
+import { openCloudCodeCollabFileIndexResource } from '../src/lib/code-collab-cloud-file-index-resource';
+import {
+  CloudFileIndexMainLegacy,
+  type CloudFileIndexMainGrant,
+} from '../../../apps/electron/src/main/services/cloud-file-index';
+import {
+  type CloudFileIndexEvent,
+  cloudFileIndexRequestSchema,
+  cloudFileIndexReleaseSchema,
+  parseCloudFileIndexInput,
+} from '@lody/shared/cloud-file-index-ipc';
+import { readCodeCollabFileIndexSnapshotFromFlock } from '@lody/shared';
 import { SessionAgentFileLinkMenuProvider } from '../src/components/sessions/session-agent-file-link-menu';
 import { useAgentFileLinkMatch } from '../src/components/ai-gui/agent-file-link-context';
 
@@ -803,3 +819,851 @@ async function flushMicrotasks(rounds = 4): Promise<void> {
     });
   }
 }
+
+describe('native local file-index cache resource', () => {
+  it('shares a read-only projection, fences disconnects and stale resets, and never acquires legacy Flock', async () => {
+    const messages = new Set<(message: LocalLoroDataPlaneServerMessage) => void>();
+    const statuses = new Set<(connected: boolean) => void>();
+    const sent: LocalLoroDataPlaneClientMessage[] = [];
+    let connected = true;
+    let started!: () => void;
+    const observing = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const connection: LocalLoroDataPlaneConnection = {
+      send(message) {
+        sent.push(message);
+        if (message.type === 'ping') {
+          for (const listener of messages)
+            listener({
+              type: 'pong',
+              protocolVersion: message.protocolVersion,
+              nativeFileIndexSnapshots: true,
+            });
+        }
+        if (message.type === 'file-index-observe') started();
+      },
+      onMessage(listener) {
+        messages.add(listener);
+        return () => messages.delete(listener);
+      },
+      onStatusChange(listener) {
+        statuses.add(listener);
+        return () => statuses.delete(listener);
+      },
+      isConnected: () => connected,
+    };
+    const deliver = (message: LocalLoroDataPlaneServerMessage) => {
+      for (const listener of messages) listener(message);
+    };
+    const cache = createCodeCollabFileIndexCache(
+      {
+        acquireFlockDoc: async () => {
+          throw new Error('Native index must not acquire old Flock/IDB');
+        },
+        joinFlockDocRoom: async () => {
+          throw new Error('Native index must not join old room');
+        },
+        unloadFlockDoc: async () => {
+          throw new Error('Native index must not own old replica');
+        },
+      },
+      {
+        openLocalResource: async (_room, onFailure) =>
+          openNativeCodeCollabFileIndexResource({
+            connection,
+            workspaceId: 'workspace',
+            ownerSessionId: 'owner',
+            onFailure,
+          }),
+      }
+    );
+    fileIndexCaches.push(cache);
+    const firstPending = cache.acquire('workspace:fi:owner', 'local');
+    await observing;
+    const firstRequest = sent.find((message) => message.type === 'file-index-observe');
+    if (!firstRequest || firstRequest.type !== 'file-index-observe')
+      throw new Error('Observation missing');
+    deliver({ ...firstRequest, type: 'file-index-observed', backend: 'native' });
+    deliver({
+      ...firstRequest,
+      type: 'file-index-snapshot',
+      state: {
+        status: 'ready',
+        fileIndex: { 'old.ts': true },
+        generations: { 'old.ts': 'old' },
+        updatedAtMs: 1,
+      },
+    });
+    const first = await firstPending;
+    const second = await cache.acquire('workspace:fi:owner', 'local');
+    expect(second.resource).toBe(first.resource);
+    expect(second.resource.getSnapshot()).toMatchObject({
+      status: 'ready',
+      snapshot: { fileIndex: { 'old.ts': true } },
+    });
+    const originalSnapshot = second.resource.getSnapshot();
+    deliver({
+      ...firstRequest,
+      type: 'file-index-snapshot',
+      state: {
+        status: 'ready',
+        fileIndex: { 'old.ts': true },
+        generations: { 'old.ts': 'old' },
+        updatedAtMs: 2,
+      },
+    });
+    expect(second.resource.getSnapshot()).toBe(originalSnapshot);
+    deliver({
+      ...firstRequest,
+      type: 'file-index-snapshot',
+      state: {
+        status: 'ready',
+        fileIndex: { 'old.ts': true },
+        generations: { 'old.ts': 'new-generation' },
+        updatedAtMs: 2,
+      },
+    });
+    expect(second.resource.getSnapshot()).toMatchObject({
+      status: 'ready',
+      snapshot: {
+        generations: { 'old.ts': 'new-generation' },
+      },
+    });
+    await first.release();
+    connected = false;
+    for (const listener of statuses) listener(false);
+    expect(second.resource.getSnapshot()).toEqual({ status: 'loading' });
+    deliver({
+      ...firstRequest,
+      type: 'file-index-snapshot',
+      state: { status: 'ready', fileIndex: { 'late.ts': true }, updatedAtMs: 2 },
+    });
+    expect(second.resource.getSnapshot()).toEqual({ status: 'loading' });
+    connected = true;
+    for (const listener of statuses) listener(true);
+    const nextRequest = sent.filter((message) => message.type === 'file-index-observe').at(-1);
+    if (!nextRequest || nextRequest.type !== 'file-index-observe')
+      throw new Error('Reconnect missing');
+    expect(nextRequest.requestId).not.toBe(firstRequest.requestId);
+    deliver({
+      ...firstRequest,
+      type: 'file-index-snapshot',
+      state: { status: 'ready', fileIndex: { 'stale.ts': true }, updatedAtMs: 2 },
+    });
+    expect(second.resource.getSnapshot()).toEqual({ status: 'loading' });
+    deliver({ ...nextRequest, type: 'file-index-observed', backend: 'native' });
+    deliver({
+      ...nextRequest,
+      type: 'file-index-snapshot',
+      state: {
+        status: 'ready',
+        fileIndex: { 'new.ts': true },
+        generations: { 'new.ts': 'new' },
+        updatedAtMs: 3,
+      },
+    });
+    expect(second.resource.getSnapshot()).toMatchObject({
+      status: 'ready',
+      snapshot: {
+        fileIndex: { 'new.ts': true },
+        generations: { 'new.ts': 'new' },
+      },
+    });
+    await second.release();
+    await cache.dispose();
+    expect(messages.size).toBe(0);
+    expect(statuses.size).toBe(0);
+    expect(sent.at(-1)).toMatchObject({ type: 'detach', peerId: firstRequest.peerId });
+  });
+
+  it.each(['access_denied', 'retired', 'restart_required', 'unrecognized'])(
+    'keeps a trusted filesystem seed through loading and explicit transient errors, but clears it for %s',
+    async (code) => {
+      const messages = new Set<(message: LocalLoroDataPlaneServerMessage) => void>();
+      let request:
+        | Extract<LocalLoroDataPlaneClientMessage, { type: 'file-index-observe' }>
+        | undefined;
+      const deliver = (message: LocalLoroDataPlaneServerMessage) => {
+        for (const listener of messages) listener(message);
+      };
+      const connection: LocalLoroDataPlaneConnection = {
+        send(message) {
+          if (message.type === 'ping')
+            deliver({
+              type: 'pong',
+              protocolVersion: message.protocolVersion,
+              nativeFileIndexSnapshots: true,
+            });
+          if (message.type === 'file-index-observe') {
+            request = message;
+            deliver({ ...message, type: 'file-index-observed', backend: 'native' });
+          }
+        },
+        onMessage(listener) {
+          messages.add(listener);
+          return () => messages.delete(listener);
+        },
+        onStatusChange: () => () => {},
+        isConnected: () => true,
+      };
+      let failures = 0;
+      const resource = await openNativeCodeCollabFileIndexResource({
+        connection,
+        workspaceId: 'workspace',
+        ownerSessionId: 'owner',
+        onFailure: () => {
+          failures++;
+        },
+      });
+      if (!resource || !request) throw new Error('Missing native file-index observation');
+      const snapshot = (
+        state: Extract<LocalLoroDataPlaneServerMessage, { type: 'file-index-snapshot' }>['state']
+      ) => deliver({ ...request!, type: 'file-index-snapshot', state });
+      try {
+        snapshot({ status: 'ready', fileIndex: { 'cached.ts': true }, updatedAtMs: 1 });
+        resource.seed({ 'actual-filesystem.ts': true }, 2);
+        const trusted = resource.getSnapshot();
+        expect(trusted).toMatchObject({
+          status: 'ready',
+          snapshot: { fileIndex: { 'actual-filesystem.ts': true } },
+        });
+        snapshot({ status: 'loading' });
+        expect(resource.getSnapshot()).toBe(trusted);
+        snapshot({ status: 'error', code: 'native_file_index_unavailable' });
+        expect(resource.getSnapshot()).toBe(trusted);
+        expect(failures).toBe(1);
+        snapshot({
+          status: 'ready',
+          fileIndex: { 'actual-filesystem.ts': true },
+          generations: { 'actual-filesystem.ts': 'current-publication' },
+          updatedAtMs: 2,
+        });
+        resource.seed({ 'actual-filesystem.ts': true }, 2);
+        snapshot({ status: 'loading' });
+        expect(resource.getSnapshot()).toMatchObject({
+          status: 'ready',
+          snapshot: {
+            generations: { 'actual-filesystem.ts': 'current-publication' },
+          },
+        });
+        snapshot({ status: 'error', code });
+        expect(resource.getSnapshot()).toMatchObject({ status: 'error' });
+        resource.seed({ 'late-filesystem.ts': true }, 3);
+        expect(resource.getSnapshot()).toMatchObject({ status: 'error' });
+        snapshot({ status: 'loading' });
+        snapshot({ status: 'ready', fileIndex: { 'late-native.ts': true }, updatedAtMs: 3 });
+        if (code === 'access_denied' || code === 'retired') {
+          expect(resource.getSnapshot()).toMatchObject({ status: 'error' });
+        } else {
+          // The same trusted Node observer can recover after validating its
+          // current grant. The outstanding old filesystem response still cannot.
+          expect(resource.getSnapshot()).toMatchObject({
+            status: 'ready',
+            snapshot: {
+              fileIndex: { 'late-native.ts': true },
+            },
+          });
+          resource.seed({ 'late-filesystem.ts': true }, 4);
+          expect(resource.getSnapshot()).toMatchObject({
+            status: 'ready',
+            snapshot: {
+              fileIndex: { 'late-native.ts': true },
+            },
+          });
+        }
+      } finally {
+        await resource.dispose();
+      }
+      expect(messages.size).toBe(0);
+    }
+  );
+
+  it('continues live legacy Flock reads when an old daemon pong has no native capability', async () => {
+    const flock = new Flock('old-daemon-compatibility');
+    flock.set(['old.ts'], true);
+    flock.commit();
+    const messages = new Set<(message: LocalLoroDataPlaneServerMessage) => void>();
+    const cache = createCodeCollabFileIndexCache(
+      {
+        acquireFlockDoc: async () => ({ flock, release: async () => undefined }),
+        joinFlockDocRoom: async () => makeSyncedFlockRoom(),
+        unloadFlockDoc: async () => undefined,
+      },
+      {
+        openLocalResource: async (_room, onFailure) =>
+          openNativeCodeCollabFileIndexResource({
+            workspaceId: 'workspace',
+            ownerSessionId: 'owner',
+            onFailure,
+            connection: {
+              send(message) {
+                if (message.type !== 'ping')
+                  throw new Error('Old daemon only supports ping negotiation');
+                for (const listener of messages)
+                  listener({ type: 'pong', protocolVersion: message.protocolVersion });
+              },
+              onMessage(listener) {
+                messages.add(listener);
+                return () => messages.delete(listener);
+              },
+              onStatusChange(listener) {
+                listener(true);
+                return () => undefined;
+              },
+              isConnected: () => true,
+            },
+          }),
+      }
+    );
+    fileIndexCaches.push(cache);
+    const lease = await cache.acquire('workspace:fi:owner', 'local');
+    await flushMicrotasks(8);
+    expect(lease.resource.backend).not.toBe('native');
+    expect(lease.resource.getSnapshot()).toMatchObject({
+      status: 'ready',
+      snapshot: { fileIndex: { 'old.ts': true } },
+    });
+    flock.set(['new.ts'], true);
+    flock.commit();
+    await flushMicrotasks(8);
+    expect(lease.resource.getSnapshot()).toMatchObject({
+      status: 'ready',
+      snapshot: {
+        fileIndex: { 'old.ts': true, 'new.ts': true },
+      },
+    });
+    await lease.release();
+  });
+
+  it('keeps old-daemon legacy subscription available without sending an unsupported observation', async () => {
+    const sent: LocalLoroDataPlaneClientMessage[] = [];
+    const messages = new Set<(message: LocalLoroDataPlaneServerMessage) => void>();
+    const statuses = new Set<(connected: boolean) => void>();
+    const resource = await openNativeCodeCollabFileIndexResource({
+      workspaceId: 'workspace',
+      ownerSessionId: 'owner',
+      onFailure: () => {
+        throw new Error('Not a failure');
+      },
+      connection: {
+        send(message) {
+          sent.push(message);
+          if (message.type === 'ping') {
+            for (const listener of messages)
+              listener({ type: 'pong', protocolVersion: message.protocolVersion });
+          }
+        },
+        onMessage(listener) {
+          messages.add(listener);
+          return () => messages.delete(listener);
+        },
+        onStatusChange(listener) {
+          statuses.add(listener);
+          listener(true);
+          return () => statuses.delete(listener);
+        },
+        isConnected: () => true,
+      },
+    });
+    expect(resource).toBe(null);
+    expect(sent.map((message) => message.type)).toEqual(['ping']);
+    expect(messages.size).toBe(0);
+    expect(statuses.size).toBe(0);
+  });
+});
+
+describe('ordinary Cloud file-index cache selection', () => {
+  it('uses explicit Cloud selection, keeps local routing separate, and never falls back after selected failure', async () => {
+    const legacy = new Flock('cloud-positive-legacy');
+    legacy.set(['legacy.ts'], true);
+    legacy.commit();
+    const denied = new Error('Selected Cloud index unavailable');
+    const cache = createCodeCollabFileIndexCache(
+      {
+        acquireFlockDoc: async (room) => {
+          if (room !== 'workspace:fi:legacy')
+            throw new Error('Selected Cloud room reopened old IDB');
+          return { flock: legacy, release: async () => undefined };
+        },
+        joinFlockDocRoom: async () => makeSyncedFlockRoom(),
+        unloadFlockDoc: async () => undefined,
+      },
+      {
+        openCloudResource: async (room) => {
+          if (room === 'workspace:fi:legacy') return null;
+          throw denied;
+        },
+        openLocalResource: async () => ({
+          backend: 'native',
+          getSnapshot: () => ({ status: 'loading' }),
+          subscribe: () => () => undefined,
+          seed: () => undefined,
+          dispose: async () => undefined,
+        }),
+      }
+    );
+    fileIndexCaches.push(cache);
+    const old = await cache.acquire('workspace:fi:legacy', 'cloud');
+    const local = await cache.acquire('workspace:fi:selected', 'local');
+    try {
+      expect(old.resource.getSnapshot()).toMatchObject({
+        status: 'ready',
+        snapshot: { fileIndex: { 'legacy.ts': true } },
+      });
+      legacy.set(['next.ts'], true);
+      legacy.commit();
+      expect(old.resource.getSnapshot()).toMatchObject({
+        status: 'ready',
+        snapshot: { fileIndex: { 'next.ts': true } },
+      });
+      expect(local.resource.backend).toBe('native');
+      await expect(cache.acquire('workspace:fi:selected', 'cloud')).rejects.toThrow(denied.message);
+      expect(local.resource.getSnapshot()).toEqual({ status: 'loading' });
+      expect(old.resource.getSnapshot()).toMatchObject({ status: 'ready' });
+    } finally {
+      await old.release();
+      await local.release();
+    }
+  });
+
+  it('recovers only the failed Cloud actor after its borrowers leave, preserving another live original source', async () => {
+    const actors = new Map<
+      string,
+      {
+        flock: Flock;
+        fail?: () => void;
+        rejectSync?: (reason: unknown) => void;
+      }
+    >();
+    for (const actor of ['a', 'b']) {
+      const flock = new Flock(`cloud-actor-${actor}`);
+      flock.set([`${actor}.ts`], true);
+      flock.commit();
+      actors.set(`workspace:fi:${actor}`, { flock });
+    }
+    const cache = createCodeCollabFileIndexCache(
+      {
+        acquireFlockDoc: async (room) => ({
+          flock: actors.get(room)!.flock,
+          release: async () => undefined,
+        }),
+        joinFlockDocRoom: async (room) => {
+          const actor = actors.get(room)!;
+          const synced = new Promise<void>((_resolve, reject) => {
+            actor.rejectSync = reject;
+          });
+          return makeSyncedFlockRoom(synced);
+        },
+        unloadFlockDoc: async () => undefined,
+      },
+      { openCloudResource: async () => null }
+    );
+    fileIndexCaches.push(cache);
+    const a = await cache.acquire('workspace:fi:a', 'cloud');
+    const b = await cache.acquire('workspace:fi:b', 'cloud');
+    await flushMicrotasks();
+    actors.get('workspace:fi:a')!.rejectSync!(new Error('Actor A sync failed'));
+    await flushMicrotasks();
+    expect(a.resource.getSnapshot().status).toBe('error');
+    const sameB = await cache.acquire('workspace:fi:b', 'cloud');
+    expect(sameB.resource).toBe(b.resource);
+    actors.get('workspace:fi:b')!.flock.set(['b-next.ts'], true);
+    actors.get('workspace:fi:b')!.flock.commit();
+    expect(b.resource.getSnapshot()).toMatchObject({
+      status: 'ready',
+      snapshot: { fileIndex: { 'b-next.ts': true } },
+    });
+    await a.release();
+    const recoveredA = await cache.acquire('workspace:fi:a', 'cloud');
+    expect(recoveredA.resource).not.toBe(a.resource);
+    expect(recoveredA.resource.getSnapshot()).toMatchObject({
+      status: 'ready',
+      snapshot: { fileIndex: { 'a.ts': true } },
+    });
+    expect(b.resource).toBe(sameB.resource);
+    await Promise.all([recoveredA.release(), b.release(), sameB.release()]);
+  });
+});
+
+describe('ordinary Cloud FI/FIS main-to-renderer projection', () => {
+  it('streams real Flock projections without renderer persistence, isolates failed cleanup and clears revoked snapshots', async () => {
+    const events = new Set<(event: CloudFileIndexEvent) => void>();
+    const borrows = new Set<object>();
+    const sources = new Map(
+      ['a', 'b'].map((actor) => {
+        const flock = new Flock(`cloud-native-${actor}`);
+        flock.set([`${actor}.ts`], true);
+        flock.set([`${actor}.ts`, 'v'], { g: 'generation.1' });
+        flock.commit();
+        return [actor, flock] as const;
+      })
+    );
+    let authorized = true;
+    let failReleaseA = false;
+    const bridge = new CloudFileIndexMainLegacy({
+      acquire: async (_windowId, workspaceId) => {
+        const borrow = {};
+        borrows.add(borrow);
+        return {
+          workspaceId,
+          generation: 'authenticated-generation-1',
+          assertCurrent() {
+            if (!authorized) throw new Error('Synthetic revoked authority');
+          },
+          release: async () => {
+            borrows.delete(borrow);
+          },
+          source: {
+            async subscribe(owner, listener) {
+              const flock = sources.get(owner);
+              if (!flock) return null;
+              const publish = () =>
+                listener({
+                  status: 'ready',
+                  ...readCodeCollabFileIndexSnapshotFromFlock(flock),
+                  updatedAtMs: 1,
+                });
+              const stop = flock.subscribe(publish);
+              publish(); // Before IPC observe resolves: the client must retain the initial push.
+              return {
+                release: async () => {
+                  if (owner === 'a' && failReleaseA)
+                    throw new Error('Synthetic unknown unsubscribe acknowledgement');
+                  stop();
+                },
+              };
+            },
+          },
+        };
+      },
+      send: (_window, event) => {
+        for (const listener of events) listener(event);
+      },
+    });
+    const transport = {
+      observe: (value: unknown) =>
+        bridge.observe(7, parseCloudFileIndexInput(cloudFileIndexRequestSchema, value)),
+      cancel: (value: unknown) =>
+        bridge.cancel(7, parseCloudFileIndexInput(cloudFileIndexRequestSchema, value)),
+      unobserve: (value: unknown) =>
+        bridge.unobserve(7, parseCloudFileIndexInput(cloudFileIndexReleaseSchema, value)),
+      onSnapshot: (listener: (event: CloudFileIndexEvent) => void) => {
+        events.add(listener);
+        return () => events.delete(listener);
+      },
+    };
+    expect(() =>
+      transport.observe({
+        workspaceId: 'workspace',
+        ownerSessionId: 'a',
+        requestId: crypto.randomUUID(),
+        namespace: 'foreign',
+      })
+    ).toThrow('cloud_file_index_invalid_request');
+    const cache = createCodeCollabFileIndexCache(
+      {
+        acquireFlockDoc: async () => {
+          throw new Error('Cloud selected pair reopened renderer IDB');
+        },
+        joinFlockDocRoom: async () => {
+          throw new Error('Cloud selected pair joined old transport');
+        },
+        unloadFlockDoc: async () => {
+          throw new Error('Cloud selected pair created old replica');
+        },
+      },
+      {
+        openCloudResource: (room, onFailure) =>
+          openCloudCodeCollabFileIndexResource({
+            workspaceId: 'workspace',
+            ownerSessionId: room.slice('workspace:fi:'.length),
+            onFailure,
+            transport,
+          }),
+      }
+    );
+    fileIndexCaches.push(cache);
+    const a = await cache.acquire('workspace:fi:a', 'cloud');
+    const b = await cache.acquire('workspace:fi:b', 'cloud');
+    try {
+      expect(a.resource.getSnapshot()).toMatchObject({
+        status: 'ready',
+        snapshot: {
+          fileIndex: { 'a.ts': true },
+          generations: { 'a.ts': 'generation.1' },
+        },
+      });
+      expect(borrows.size).toBe(2);
+      failReleaseA = true;
+      // Unknown release must remain owned by the main bridge, without retiring B's source.
+      await a.release();
+      sources.get('b')!.set(['b.ts', 'v'], { g: 'generation.2' });
+      sources.get('b')!.commit();
+      expect(b.resource.getSnapshot()).toMatchObject({
+        status: 'ready',
+        snapshot: {
+          generations: { 'b.ts': 'generation.2' },
+        },
+      });
+      await expect(bridge.retire(7)).rejects.toMatchObject({ code: 'cleanup_unconfirmed' });
+      expect(borrows.size).toBe(1); // Failed A is still retained; B was actually released.
+      expect(b.resource.getSnapshot()).toMatchObject({
+        status: 'error',
+        error: { code: 'access_denied' },
+      });
+      failReleaseA = false;
+      await bridge.retire(7);
+      expect(borrows.size).toBe(0);
+      authorized = false;
+    } finally {
+      failReleaseA = false;
+      await bridge.close();
+      await b.release();
+    }
+  });
+
+  it('reopens the same window only after the old frame releases, and fences late old requests and callbacks', async () => {
+    let releaseOld!: () => void;
+    const oldReleased = new Promise<void>((resolve) => {
+      releaseOld = resolve;
+    });
+    let releasing!: () => void;
+    const releaseStarted = new Promise<void>((resolve) => {
+      releasing = resolve;
+    });
+    let frame = 1;
+    const borrows = new Set<object>();
+    const events = new Set<(event: CloudFileIndexEvent) => void>();
+    const delivered: CloudFileIndexEvent[] = [];
+    const callbacks: Array<() => void> = [];
+    const flock = new Flock('cloud-reload-frame');
+    flock.set(['current.ts'], true);
+    flock.commit();
+    const bridge = new CloudFileIndexMainLegacy({
+      acquire: async (_window, workspaceId) => {
+        const acquiredFrame = frame;
+        const borrow = {};
+        borrows.add(borrow);
+        return {
+          workspaceId,
+          generation: `frame-${acquiredFrame}`,
+          assertCurrent: () => undefined,
+          release: async () => {
+            borrows.delete(borrow);
+          },
+          source: {
+            subscribe: async (_owner, listener) => {
+              const publish = () =>
+                listener({
+                  status: 'ready',
+                  ...readCodeCollabFileIndexSnapshotFromFlock(flock),
+                  updatedAtMs: acquiredFrame,
+                });
+              const stop = flock.subscribe(publish);
+              callbacks.push(publish);
+              publish();
+              return {
+                release: async () => {
+                  if (acquiredFrame === 1) {
+                    releasing();
+                    await oldReleased;
+                  }
+                  stop();
+                },
+              };
+            },
+          },
+        };
+      },
+      send: (_window, event) => {
+        delivered.push(event);
+        for (const listener of events) listener(event);
+      },
+    });
+    const transport = {
+      observe: (value: unknown) =>
+        bridge.observe(7, parseCloudFileIndexInput(cloudFileIndexRequestSchema, value)),
+      cancel: (value: unknown) =>
+        bridge.cancel(7, parseCloudFileIndexInput(cloudFileIndexRequestSchema, value)),
+      unobserve: (value: unknown) =>
+        bridge.unobserve(7, parseCloudFileIndexInput(cloudFileIndexReleaseSchema, value)),
+      onSnapshot: (listener: (event: CloudFileIndexEvent) => void) => {
+        events.add(listener);
+        return () => events.delete(listener);
+      },
+    };
+    const open = () =>
+      openCloudCodeCollabFileIndexResource({
+        workspaceId: 'workspace',
+        ownerSessionId: 'owner',
+        onFailure: () => undefined,
+        transport,
+      });
+    const first = await open();
+    if (!first) throw new Error('First frame missing native source');
+    const oldRequest = parseCloudFileIndexInput(cloudFileIndexRequestSchema, {
+      workspaceId: delivered[0]!.workspaceId,
+      ownerSessionId: delivered[0]!.ownerSessionId,
+      requestId: delivered[0]!.requestId,
+    });
+    const retire = bridge.retire(7);
+    expect(bridge.retire(7)).toBe(retire);
+    await releaseStarted;
+    frame = 2;
+    await expect(open()).rejects.toMatchObject({ code: 'restart_required' });
+    expect(borrows.size).toBe(1);
+    releaseOld();
+    await retire;
+    expect(borrows.size).toBe(0);
+    const second = await open();
+    if (!second) throw new Error('Reload lost its native source');
+    try {
+      expect(second.getSnapshot()).toMatchObject({
+        status: 'ready',
+        snapshot: { fileIndex: { 'current.ts': true } },
+      });
+      await expect(bridge.observe(7, oldRequest)).rejects.toMatchObject({
+        code: 'restart_required',
+      });
+      callbacks[0]!(); // A queued old SDK frame cannot replace the new frame's projection.
+      flock.set(['next.ts'], true);
+      flock.commit();
+      expect(second.getSnapshot()).toMatchObject({
+        status: 'ready',
+        snapshot: { fileIndex: { 'next.ts': true } },
+      });
+      expect(first.getSnapshot()).toMatchObject({
+        status: 'error',
+        error: { code: 'access_denied' },
+      });
+      expect(borrows.size).toBe(1);
+    } finally {
+      await second.dispose();
+      await first.dispose();
+      await bridge.close();
+    }
+    expect(borrows.size).toBe(0);
+  });
+
+  it('retains an exact cleanup retry when the unobserve acknowledgement is missing', async () => {
+    let confirmRelease = false;
+    let subscriptionActive = true;
+    const resource = await openCloudCodeCollabFileIndexResource({
+      workspaceId: 'workspace',
+      ownerSessionId: 'owner',
+      onFailure: () => undefined,
+      transport: {
+        observe: async (value) => ({
+          ...parseCloudFileIndexInput(cloudFileIndexRequestSchema, value),
+          backend: 'native',
+          leaseId: crypto.randomUUID(),
+          generation: 'generation',
+        }),
+        cancel: async () => ({ canceled: true }),
+        unobserve: async () => {
+          if (!confirmRelease) return undefined as unknown as { released: true };
+          subscriptionActive = false;
+          return { released: true };
+        },
+        onSnapshot: () => () => undefined,
+      },
+    });
+    if (!resource) throw new Error('Native observation was not selected');
+    let retry: (() => Promise<void>) | undefined;
+    try {
+      await resource.dispose();
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'cleanup_unconfirmed' });
+      retry = (error as { retryCleanup(): Promise<void> }).retryCleanup;
+    }
+    expect(subscriptionActive).toBe(true);
+    if (!retry) throw new Error('Missing acknowledgement lost its cleanup owner');
+    confirmRelease = true;
+    await retry();
+    expect(subscriptionActive).toBe(false);
+  });
+
+  it('returns positive legacy without a source, while selected acquisition failure stays unavailable', async () => {
+    const bridge = new CloudFileIndexMainLegacy({
+      acquire: async (_window, workspaceId) => {
+        if (workspaceId === 'legacy') return null;
+        throw new Error('Selected native authority unavailable');
+      },
+      send: () => {
+        throw new Error('Legacy request must not publish a snapshot');
+      },
+    });
+    try {
+      expect(
+        await bridge.observe(7, {
+          workspaceId: 'legacy',
+          ownerSessionId: 'owner',
+          requestId: crypto.randomUUID(),
+        })
+      ).toEqual({ backend: 'legacy' });
+      await expect(
+        bridge.observe(7, {
+          workspaceId: 'selected',
+          ownerSessionId: 'owner',
+          requestId: crypto.randomUUID(),
+        })
+      ).rejects.toMatchObject({ code: 'unavailable' });
+    } finally {
+      await bridge.close();
+    }
+  });
+
+  it('fences cancellation before and during acquisition, releasing a late source without publishing its index', async () => {
+    let resolveGrant!: (value: CloudFileIndexMainGrant) => void;
+    let started!: () => void;
+    const startedPromise = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const lateGrant = new Promise<CloudFileIndexMainGrant>((resolve) => {
+      resolveGrant = resolve;
+    });
+    const events: CloudFileIndexEvent[] = [];
+    const borrows = new Set<object>();
+    const bridge = new CloudFileIndexMainLegacy({
+      acquire: async () => {
+        started();
+        return lateGrant;
+      },
+      send: (_window, event) => events.push(event),
+    });
+    const request = {
+      workspaceId: 'workspace',
+      ownerSessionId: 'a',
+      requestId: crypto.randomUUID(),
+    };
+    const pending = bridge.observe(7, request);
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'restart_required' });
+    await startedPromise;
+    const cancel = bridge.cancel(7, request);
+    const borrow = {};
+    borrows.add(borrow);
+    resolveGrant({
+      workspaceId: 'workspace',
+      generation: 'generation',
+      assertCurrent: () => undefined,
+      release: async () => {
+        borrows.delete(borrow);
+      },
+      source: {
+        subscribe: async () => {
+          throw new Error('Canceled source reached subscription');
+        },
+      },
+    });
+    await rejected;
+    await cancel;
+    expect(borrows.size).toBe(0);
+    expect(events).toEqual([]);
+    await expect(bridge.observe(7, request)).rejects.toMatchObject({ code: 'restart_required' });
+    const before = { ...request, requestId: crypto.randomUUID() };
+    await bridge.cancel(7, before);
+    await expect(bridge.observe(7, before)).rejects.toMatchObject({ code: 'restart_required' });
+    await bridge.close();
+  });
+});

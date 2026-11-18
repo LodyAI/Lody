@@ -14,7 +14,7 @@ import {
   type TextRewrite,
 } from '@lody/shared';
 import type { AgentRoleDetailSubject } from '@/components/sessions/agent-role-detail-pane';
-import { getAllAgentConfigAtom } from '@/atoms/agents';
+import { getAllAgentConfigListAtom } from '@/atoms/agents';
 import {
   hydrateSlugMentionsFromText,
   type HydratedMentions,
@@ -156,7 +156,7 @@ export function useAgentRoleMentionItems(
   /** The composer's machine, whose targets lead; ordering only. */
   preferredMachineId?: MachineId | null
 ): AgentRoleMentionItem[] {
-  const agentConfigs = useAtomValue(getAllAgentConfigAtom);
+  const agentConfigs = useAtomValue(getAllAgentConfigListAtom);
   const { machines } = useVisibleMachineMetas();
   const { roles } = useWorkspaceAgentRoles();
   const { resolve } = useAgentRoleAvailability(roles);

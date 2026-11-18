@@ -90,6 +90,8 @@ export function useScheduledMessageContents(
     const controller = new AbortController();
     let disposed = false;
     const repository = new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+      registry: runtime.scheduleRegistry,
+        definitions: runtime.scheduleDefinitions,
       protectedContent: runtime.contentMode === 'e2ee',
       signDeclaration: runtime.signScheduleDeclaration,
     });
@@ -135,7 +137,16 @@ export function useScheduledMessageContents(
       if (disposed) return;
       setContents(new Map(current));
 
-      const toSync = missing.filter((target) => !syncAttempts.current.has(targetKey(target)));
+      const toSync: Target[] = [];
+      for (const target of missing) {
+        if (syncAttempts.current.has(targetKey(target))) continue;
+        try {
+          // Only a positive legacy route may use the old one-shot body sync.
+          // Native/frozen/read failures never fall back into IndexedDB.
+          if (await runtime.scheduleDefinitions?.resolve(target.scheduleId)) continue;
+          toSync.push(target);
+        } catch { /* Keep the title until the selected owner is readable. */ }
+      }
       for (let offset = 0; offset < toSync.length; offset += SYNC_BATCH_SIZE) {
         const batch = toSync.slice(offset, offset + SYNC_BATCH_SIZE);
         try {

@@ -1,3 +1,5 @@
+import { CloudFileIndexIpc } from './services/cloud-file-index-ipc'
+import { DocumentDomainsIpc } from './services/document-domains-ipc'
 import { type IpcMainEvent } from 'electron'
 import { createServices, type MergeIpcService } from 'electron-ipc-decorator'
 import { IPC_PUSH_CHANNELS, IPC_SEND_CHANNELS } from '@lody/shared/electron-ipc'
@@ -12,6 +14,12 @@ import { LocalPlatformIpc } from './services/local-platform-ipc'
 import { LocalProjectsIpc } from './services/local-projects-ipc'
 import { LoroIpc } from './services/loro-ipc'
 import { MachineRpcIpc } from './services/machine-rpc-ipc'
+import { MachineCatalogIpc } from './services/machine-catalog-ipc'
+import { ScheduleRegistryIpc } from './services/schedule-registry-ipc'
+import { DocumentDomainMigrationIpc } from './services/document-domain-migration-ipc'
+import { SessionBodyMigrationIpc } from './services/session-body-migration-ipc'
+import { WorkspaceMetaIpc } from './services/workspace-meta-ipc'
+import { NativeSessionIpc } from './services/native-session-ipc'
 import { NotificationsIpc } from './services/notifications-ipc'
 import { PublicBrowserIpc } from './services/public-browser-ipc'
 import { SessionControlIpc } from './services/session-control-ipc'
@@ -34,6 +42,14 @@ export const IPC_SERVICE_CONSTRUCTORS = [
   LocalProjectsIpc,
   LoroIpc,
   MachineRpcIpc,
+  MachineCatalogIpc,
+  ScheduleRegistryIpc,
+  NativeSessionIpc,
+  WorkspaceMetaIpc,
+  SessionBodyMigrationIpc,
+  DocumentDomainMigrationIpc,
+  DocumentDomainsIpc,
+  CloudFileIndexIpc,
   NotificationsIpc,
   PublicBrowserIpc,
   SessionControlIpc,

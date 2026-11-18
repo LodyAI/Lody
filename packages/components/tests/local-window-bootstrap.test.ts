@@ -47,6 +47,47 @@ function channelFactory() {
 afterEach(() => vi.useRealTimers());
 
 describe('local window bootstrap', () => {
+  it('keeps external metadata out of peer bootstrap while legacy body snapshots remain available', async () => {
+    const { createChannel, createRegistry } = channelFactory();
+    const source = await LoroRepo.create({});
+    const target = await LoroRepo.create({});
+    await source.upsertDocMeta('session-peer', { title: 'peer metadata' });
+    await target.upsertDocMeta('session-own', { title: 'own metadata' });
+    const before = target.getMeta().exportJson();
+    const body = new LoroDoc();
+    body.getText('history').insert(0, 'cached body');
+    body.commit();
+    const sourceOwner = createLocalWindowBootstrap(
+      source,
+      'workspace',
+      new Map([['session-peer', body]]),
+      createChannel,
+      createRegistry
+    );
+    const targetOwner = createLocalWindowBootstrap(
+      target,
+      'workspace',
+      new Map(),
+      createChannel,
+      createRegistry,
+      { externalMetadata: true }
+    );
+    try {
+      const snapshot = await targetOwner.readDocument('session-peer');
+      expect(LoroDoc.fromSnapshot(snapshot!).toJSON()).toEqual(body.toJSON());
+      expect(target.getMeta().exportJson()).toEqual(before);
+      expect(await target.getDocMeta('session-peer')).toBeUndefined();
+      expect((await target.getDocMeta('session-own'))?.meta).toMatchObject({
+        title: 'own metadata',
+      });
+    } finally {
+      sourceOwner.close();
+      targetOwner.close();
+      await source.destroy();
+      await target.destroy();
+    }
+  });
+
   it('reuses metadata and loaded history while merging independent edits', async () => {
     vi.useFakeTimers();
     const { createChannel, createRegistry } = channelFactory();

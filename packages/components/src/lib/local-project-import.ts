@@ -1,8 +1,12 @@
+import { nativeMachineCatalogSettingsForWrite } from './native-machine-catalog-public';
 import {
   getMachineFlockDocId,
   getServerNow,
   machineFlockKeys,
-  parseMachineFlockRow,
+  planLocalProjectEnsure,
+  planLocalProjectEdit,
+  MachineCatalogError,
+  type MachineCatalogProjectEdit,
   type LocalProjectId,
   type LocalProjectMeta,
   type MachineId,
@@ -27,9 +31,24 @@ type NativeLocalProjectDirectorySelection =
 type LocalProjectImportRuntime = Pick<
   WorkspaceRuntime,
   'workspaceId' | 'requestLocalProjectControl'
-> & {
-  writer: Pick<WorkspaceRuntime['writer'], 'flockRowPutIfAbsent' | 'flockRowUpdate'>;
-};
+> &
+  Partial<Pick<WorkspaceRuntime, 'ownsNativeMachineCatalog' | 'nativeMachineCatalogSource'>> & {
+    writer: Pick<WorkspaceRuntime['writer'], 'flockRowPutIfAbsent' | 'flockRowUpdate'>;
+  };
+
+function legacyProjectEdit(
+  current: unknown,
+  id: LocalProjectId,
+  changes: MachineCatalogProjectEdit
+) {
+  try {
+    return planLocalProjectEdit(current, id, changes).value;
+  } catch (error) {
+    if (error instanceof MachineCatalogError && error.code === 'not_found')
+      throw new Error('Local project is unavailable');
+    throw error;
+  }
+}
 
 /** Validate a selection without registering it. */
 export async function prepareLocalProject(args: {
@@ -58,22 +77,29 @@ export async function prepareLocalProject(args: {
 }
 
 export async function setLocalProjectStandaloneVisibility(args: {
-  runtime: Pick<LocalProjectImportRuntime, 'workspaceId' | 'writer'>;
+  runtime: Pick<
+    LocalProjectImportRuntime,
+    'workspaceId' | 'writer' | 'ownsNativeMachineCatalog' | 'nativeMachineCatalogSource'
+  >;
   machineId: MachineId;
   localProjectId: LocalProjectId;
   visible: boolean;
 }): Promise<boolean> {
+  const catalog = nativeMachineCatalogSettingsForWrite(args.runtime, args.machineId);
+  if (catalog)
+    return (
+      await catalog.execute(args.machineId, {
+        kind: 'edit-local-project',
+        id: args.localProjectId,
+        changes: { standaloneVisible: args.visible },
+      })
+    ).changed;
   const key = machineFlockKeys.localProject(args.localProjectId);
   return args.runtime.writer.flockRowUpdate(
     getMachineFlockDocId(args.runtime.workspaceId, args.machineId),
     key,
-    (current) => {
-      const row = parseMachineFlockRow(key, current);
-      if (!row || row.key[0] !== 'localProject') throw new Error('Local project is unavailable');
-      if (((row.value as LocalProjectMeta).standaloneVisible !== false) === args.visible)
-        return undefined;
-      return { ...(current as LocalProjectMeta), standaloneVisible: args.visible };
-    }
+    (current) =>
+      legacyProjectEdit(current, args.localProjectId, { standaloneVisible: args.visible })
   );
 }
 
@@ -103,20 +129,24 @@ export async function prepareAndWriteLocalProject(args: {
   const publishInspection = async () => {
     if (!prepared.inspection) return;
     const inspection = prepared.inspection;
-    const key = machineFlockKeys.localProject(prepared.localProjectId);
+    const changes = {
+      githubRepoFullName: inspection.repoFullName
+        ? { kind: 'set' as const, value: inspection.repoFullName }
+        : { kind: 'clear' as const },
+    };
+    const catalog = nativeMachineCatalogSettingsForWrite(args.runtime, args.machineId);
+    if (catalog) {
+      await catalog.execute(args.machineId, {
+        kind: 'edit-local-project',
+        id: prepared.localProjectId,
+        changes,
+      });
+      return;
+    }
     await args.runtime.writer.flockRowUpdate(
       getMachineFlockDocId(args.runtime.workspaceId, args.machineId),
-      key,
-      (current) => {
-        const row = parseMachineFlockRow(key, current);
-        if (!row || row.key[0] !== 'localProject') throw new Error('Local project is unavailable');
-        if ((row.value as LocalProjectMeta).githubRepoFullName === inspection.repoFullName)
-          return undefined;
-        const next = { ...(current as LocalProjectMeta) };
-        if (inspection.repoFullName) next.githubRepoFullName = inspection.repoFullName;
-        else delete next.githubRepoFullName;
-        return next;
-      }
+      machineFlockKeys.localProject(prepared.localProjectId),
+      (current) => legacyProjectEdit(current, prepared.localProjectId, changes)
     );
   };
   if (prepared.alreadyRegistered) {
@@ -152,17 +182,17 @@ export async function prepareAndWriteLocalProject(args: {
     ...(args.standaloneVisible === false ? { standaloneVisible: false } : {}),
   };
   const projectKey = machineFlockKeys.localProject(project.id);
-  const writeResult = await args.runtime.writer.flockRowPutIfAbsent(
-    flockDocId,
-    projectKey,
-    project
-  );
-  const storedRow = parseMachineFlockRow(projectKey, writeResult.value);
-  const storedProject =
-    storedRow?.key[0] === 'localProject' ? (storedRow.value as LocalProjectMeta) : undefined;
-  if (!storedProject || storedProject.id !== project.id) {
-    throw new Error(`Existing local project row is invalid: ${project.id}`);
-  }
+  const catalog = nativeMachineCatalogSettingsForWrite(args.runtime, args.machineId);
+  const writeResult = catalog
+    ? await catalog
+        .execute(args.machineId, { kind: 'ensure-local-project', project })
+        .then((receipt) => {
+          if (!receipt.project || receipt.project.id !== project.id)
+            throw new Error('Local project acknowledgement is unavailable');
+          return { inserted: receipt.changed, value: receipt.project };
+        })
+    : await args.runtime.writer.flockRowPutIfAbsent(flockDocId, projectKey, project);
+  const storedProject = planLocalProjectEnsure(writeResult.value, project).project;
   await publishInspection();
   const promoted =
     args.standaloneVisible !== false

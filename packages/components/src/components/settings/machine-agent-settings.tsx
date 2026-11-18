@@ -1,6 +1,10 @@
+import type { AgentConfigDisplay, ProviderSetupDisplay } from '@/lib/agent-config-display';
 import type { ManagedDaemonUpdateStatus } from '@lody/shared';
 import { collectClientBuildInfo } from '@/lib/client-build-info';
 import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
+import { useMachineCatalogSettings } from '../../providers/machine-catalog-settings';
+import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
+import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
 import {
   useLegacyWorkspaceMutation,
   useLegacyWorkspaceQuery,
@@ -10,13 +14,16 @@ import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { atom, useAtomValue, useSetAtom } from 'jotai';
 import { useNavigate } from '@tanstack/react-router';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
   MACHINE_PROTOCOL_CAPABILITIES,
   machineSupportsProtocolCapability,
   type AcpSessionMonitorSnapshot,
+  getServerNow,
+  type MachineCatalogSettingsPort,
+  type AgentConfigEditorPort,
   type AgentConfigId,
   type AgentConfigMeta,
   type MachineId,
@@ -348,10 +355,15 @@ const styles = stylex.create({
   manage: { flexShrink: 0, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
 });
 
+const EMPTY_AGENT_CONFIGS = atom<AgentConfigMeta[]>([]);
+const EMPTY_PROVIDER_SETUPS = atom<ProviderSetupTask[]>([]);
+
 export type MachineAgentSettingsProps = {
   selectedMachineId: MachineId | null;
   onSelectedMachineChange: (next: MachineId | null) => void;
   mode?: 'agents' | 'machines';
+  /** Safe Node-owned catalog snapshot/commands; absent retains the legacy backend. */
+  catalog?: MachineCatalogSettingsPort;
 };
 
 const createMachineRequestId = (): string =>
@@ -426,7 +438,47 @@ export function MachineAgentSettings({
   selectedMachineId,
   onSelectedMachineChange,
   mode = 'agents',
+  catalog: catalogProp,
 }: MachineAgentSettingsProps) {
+  const injectedCatalog = useMachineCatalogSettings();
+  const selectedCatalog = catalogProp ?? injectedCatalog;
+  const catalogScope = useResolvedWorkspaceScope();
+  const catalogAccount = useWorkspaceLocalAccountId();
+  const catalogReady = Boolean(
+    selectedCatalog &&
+    catalogScope.enabled &&
+    catalogScope.workspaceId === selectedCatalog.binding.workspaceId &&
+    catalogAccount === selectedCatalog.binding.accountId
+  );
+  const catalog = useMemo(() => {
+    if (!selectedCatalog) return undefined;
+    if (
+      catalogScope.enabled &&
+      catalogScope.workspaceId === selectedCatalog.binding.workspaceId &&
+      catalogAccount === selectedCatalog.binding.accountId
+    )
+      return selectedCatalog;
+    // Retain the selected owner while admission is closed. Falling back here
+    // would reopen the old MF merely because a route or account is changing.
+    return {
+      binding: selectedCatalog.binding,
+      generation: selectedCatalog.generation,
+      machineGeneration: selectedCatalog.machineGeneration,
+      agents: [],
+      setups: [],
+      editor: () => ({
+        load: async () => {
+          throw new Error('Machine catalog scope unavailable');
+        },
+        save: async () => {
+          throw new Error('Machine catalog scope unavailable');
+        },
+      }),
+      execute: async () => {
+        throw new Error('Machine catalog scope unavailable');
+      },
+    } satisfies MachineCatalogSettingsPort;
+  }, [selectedCatalog, catalogScope.enabled, catalogScope.workspaceId, catalogAccount]);
   const { t } = useTranslation();
   const inSettingsPane = useInSettingsPane();
   const { openSettings } = useOpenSettings();
@@ -451,23 +503,27 @@ export function MachineAgentSettings({
   const members = useMemo(() => activeOrganization?.members ?? [], [activeOrganization?.members]);
   const currentUserId = session?.user?.id ?? null;
 
-  const { machines, accessByMachineId, isLoading } = useVisibleMachineMetas();
+  const { machines, accessByMachineId, isLoading } = useVisibleMachineMetas({
+    includeMachineFlock: !catalog,
+  });
   const {
     projects: visibleLocalProjects,
     accessByProjectKey,
     isLoading: visibleLocalProjectsLoading,
   } = useVisibleLocalProjectsFromMachineIndex(
     { machines, accessByMachineId, isLoading },
-    { enabled: mode === 'machines' }
+    { enabled: mode === 'machines' && !catalog }
   );
   const visibleMachineIdsForAgentConfigs = useMemo(() => [...machines.keys()], [machines]);
-  useMachineFlockAgentConfigsForMachineIds(visibleMachineIdsForAgentConfigs);
+  useMachineFlockAgentConfigsForMachineIds(catalog ? [] : visibleMachineIdsForAgentConfigs);
   const localMachineId = useAtomValue(localMachineIdAtom);
   const onlineMachineIds = useOnlineMachineIds();
   const presumedOnlineMachineIds = useAtomValue(presumedOnlineMachineIdsAtom);
 
-  const allConfigs = useAtomValue(getAllAgentConfigAtom);
-  const allSetups = useAtomValue(getAllProviderSetupsAtom);
+  const legacyConfigs = useAtomValue(catalog ? EMPTY_AGENT_CONFIGS : getAllAgentConfigAtom);
+  const legacySetups = useAtomValue(catalog ? EMPTY_PROVIDER_SETUPS : getAllProviderSetupsAtom);
+  const allConfigs: readonly AgentConfigDisplay[] = catalog?.agents ?? legacyConfigs;
+  const allSetups: readonly ProviderSetupDisplay[] = catalog?.setups ?? legacySetups;
   useProviderSetupRuntimeProgress(runtime, workspaceId, allSetups);
   const createConfig = useSetAtom(cmdCreateAgentConfigAtom);
   const createSetup = useSetAtom(cmdCreateProviderSetupAtom);
@@ -540,7 +596,7 @@ export function MachineAgentSettings({
     [onSelectedMachineChange]
   );
 
-  const migration = useAgentConfigMigration();
+  const migration = useAgentConfigMigration({ enabled: !catalog });
 
   const canManageOthers = useMemo(
     () => canManageAllMachines(currentUserId, members),
@@ -811,13 +867,13 @@ export function MachineAgentSettings({
   );
 
   const configsForMachine = useMemo(() => {
-    if (!resolvedSelectedMachine) return [] as AgentConfigMeta[];
+    if (!resolvedSelectedMachine) return [] as AgentConfigDisplay[];
     return allConfigs
       .filter((c) => c.machineId === resolvedSelectedMachine.id)
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [allConfigs, resolvedSelectedMachine]);
   const setupsForMachine = useMemo(() => {
-    if (!resolvedSelectedMachine) return [] as ProviderSetupTask[];
+    if (!resolvedSelectedMachine) return [] as ProviderSetupDisplay[];
     return allSetups
       .filter((setup) => setup.machineId === resolvedSelectedMachine.id)
       .sort((left, right) => left.createdAt - right.createdAt);
@@ -864,6 +920,22 @@ export function MachineAgentSettings({
   // transition ever plays — a dialog mounted already-open renders in its final
   // state on the first frame, and one unmounted on close vanishes mid-fade.
   const [dialogOpen, setDialogOpen] = useState(false);
+  const editorOwnerKey =
+    catalog && dialogMachine
+      ? `${catalog.binding.accountId}:${catalog.binding.workspaceId}:${catalog.machineGeneration?.(dialogMachine.id) ?? catalog.generation}:${dialogMachine.id}:${catalogReady}`
+      : '';
+  const dialogEditor = useRef<{ key: string; port: AgentConfigEditorPort | undefined }>({
+    key: '',
+    port: undefined,
+  });
+  if (dialogEditor.current.key !== editorOwnerKey) {
+    // Projection refreshes do not silently replace an open editor's version
+    // token. A new owner generation or explicit Refresh acquires another one.
+    dialogEditor.current = {
+      key: editorOwnerKey,
+      port: catalog && dialogMachine ? catalog.editor(dialogMachine.id) : undefined,
+    };
+  }
   const dialogMachineAvailable = !!dialogMachine;
   // Opening happens one commit after the root mounts, for the same reason.
   useLayoutEffect(() => {
@@ -1032,7 +1104,7 @@ export function MachineAgentSettings({
     };
   }, [remoteMachinesAvailable]);
 
-  const refreshCapabilities = useRefreshMachineAcpCapabilities();
+  const refreshCapabilities = useRefreshMachineAcpCapabilities({ resyncLegacy: !catalog });
 
   const pingMachine = useCallback(
     (machineId: MachineId): Promise<number> => {
@@ -1299,10 +1371,32 @@ export function MachineAgentSettings({
     []
   );
 
-  const openEditDialog = useCallback((machine: MachineViewMeta, config: AgentConfigMeta) => {
-    setDialogMachineId(machine.id);
-    setDialogMode({ kind: 'edit', config });
-  }, []);
+  const openEditDialog = useCallback(
+    (machine: MachineViewMeta, config: AgentConfigDisplay) => {
+      setDialogMachineId(machine.id);
+      setDialogMode(
+        catalog
+          ? {
+              kind: 'edit-catalog',
+              summary: {
+                id: config.id,
+                machineId: config.machineId,
+                name: config.name,
+                description: config.description,
+                cliType: config.cliType,
+                agentType: config.agentType,
+                brandId: config.brandId,
+              },
+            }
+          : (() => {
+              const full = legacyConfigs.find((value) => value.id === config.id);
+              if (!full) throw new Error('Legacy provider edit is unavailable');
+              return { kind: 'edit' as const, config: full };
+            })()
+      );
+    },
+    [catalog, legacyConfigs]
+  );
 
   const handleDialogSubmit = useCallback(
     async (payload: AgentConfigSubmitPayload) => {
@@ -1325,12 +1419,29 @@ export function MachineAgentSettings({
             brandId: payload.brandId,
             machineId: dialogMachineId,
           };
-          if (payload.backgroundSetup) {
+          if (catalog) {
+            if (payload.backgroundSetup) {
+              const now = getServerNow();
+              await catalog.execute(dialogMachineId, {
+                kind: 'queue-provider-setup',
+                task: {
+                  v: 1,
+                  id: config.id,
+                  machineId: config.machineId,
+                  config,
+                  status: 'queued',
+                  attempt: 1,
+                  createdAt: now,
+                  updatedAt: now,
+                },
+              });
+            } else await catalog.execute(dialogMachineId, { kind: 'create-agent', config });
+          } else if (payload.backgroundSetup) {
             await createSetup(config);
           } else {
             await createConfig(config);
           }
-        } else {
+        } else if (dialogMode.kind === 'edit') {
           await updateConfig({
             id: dialogMode.config.id as AgentConfigId,
             codexAuth: payload.codexAuth,
@@ -1358,44 +1469,69 @@ export function MachineAgentSettings({
         throw error;
       }
     },
-    [dialogMachineId, dialogMode, createConfig, createSetup, updateConfig, t]
+    [dialogMachineId, dialogMode, createConfig, createSetup, updateConfig, t, catalog]
   );
 
   const handleRetrySetup = useCallback(
-    async (setup: ProviderSetupTask) => {
+    async (setup: ProviderSetupDisplay) => {
       try {
-        await retrySetup(setup.id);
+        if (catalog)
+          await catalog.execute(setup.machineId, {
+            kind: 'retry-provider-setup',
+            id: setup.id,
+            expected: { attempt: setup.attempt, status: setup.status, updatedAt: setup.updatedAt },
+            now: getServerNow(),
+          });
+        else await retrySetup(setup.id);
       } catch (error) {
         toast.error(t('settings.agent.setup.retryFailed', 'Could not retry provider setup'));
         throw error;
       }
     },
-    [retrySetup, t]
+    [retrySetup, t, catalog]
   );
 
   const handleDeleteSetup = useCallback(
-    async (setup: ProviderSetupTask) => {
+    async (setup: ProviderSetupDisplay) => {
       try {
-        await deleteSetup(setup.id);
+        if (catalog)
+          await catalog.execute(setup.machineId, {
+            kind: 'cancel-provider-setup',
+            cancellation: {
+              v: 1,
+              id: setup.id,
+              machineId: setup.machineId,
+              cancelledAt: getServerNow(),
+            },
+          });
+        else await deleteSetup(setup.id);
       } catch (error) {
         toast.error(t('settings.agent.setup.deleteFailed', 'Could not cancel provider setup'));
         throw error;
       }
     },
-    [deleteSetup, t]
+    [deleteSetup, t, catalog]
   );
 
   const handleDeleteConfig = useCallback(
-    async (config: AgentConfigMeta) => {
+    async (config: AgentConfigDisplay) => {
       try {
-        await deleteConfig(config.id);
+        if (catalog) {
+          const editor = await catalog.editor(config.machineId).load(config.id);
+          await catalog.execute(config.machineId, {
+            kind: 'remove-agent',
+            id: config.id,
+            editToken: editor.editToken,
+            now: getServerNow(),
+          });
+        } else await deleteConfig(config.id);
       } catch (error) {
         console.error('Failed to delete agent config:', error);
         toast.error(t('agents.deleteConfigError', 'Failed to delete configuration'));
         throw error;
       }
     },
-    [deleteConfig, t]
+    [deleteConfig, t, catalog]
   );
 
   const showBanner = mode === 'agents' && migration.status === 'running';
@@ -1409,8 +1545,13 @@ export function MachineAgentSettings({
   ) : null;
 
   const dialog =
-    dialogMode && dialogMachine ? (
+    dialogMode && dialogMachine && (!selectedCatalog || catalogReady) ? (
       <AgentConfigDialog
+        key={
+          selectedCatalog
+            ? `${selectedCatalog.binding.accountId}:${selectedCatalog.binding.workspaceId}:${selectedCatalog.machineGeneration?.(dialogMachine.id) ?? selectedCatalog.generation}`
+            : 'legacy'
+        }
         open={dialogOpen}
         onOpenChange={(open) => {
           if (!open) setDialogOpen(false);
@@ -1424,6 +1565,8 @@ export function MachineAgentSettings({
           }
         }}
         mode={dialogMode}
+        catalogEditor={dialogEditor.current.port}
+        catalogSource={catalog}
         machine={dialogMachine}
         onSubmit={handleDialogSubmit}
         onRefreshCapabilities={refreshCapabilities}

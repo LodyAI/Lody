@@ -702,6 +702,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       this.handleJoined(state, message.serverVersion, message.payload);
       return;
     }
+    if (message.type !== 'update') return;
     // type === 'update'
     const state = this.rooms.get(roomKey(message.room));
     if (!state || state.closed || !sameRoom(state.room, message.room)) {

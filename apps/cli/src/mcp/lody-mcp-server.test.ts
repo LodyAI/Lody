@@ -22,6 +22,7 @@ import {
   getStaticBuiltinAcpCapabilities,
   getSessionRoomId,
   workspaceFlockKeys,
+  createLegacyWorkspaceCatalogQuery,
   type AgentConfigId,
   type AcpCapabilityCacheEntry,
   type AgentRole,
@@ -836,7 +837,7 @@ describe('session MCP input schemas', () => {
     const openFlockDoc = vi.fn(async () => ({
       flock: {
         scan: ({ prefix }: { prefix?: readonly unknown[] } = {}) =>
-          prefix?.[0] === 'agentRole'
+          !prefix?.length || prefix[0] === 'agentRole'
             ? [{ key: workspaceFlockKeys.agentRole(role.id), value: role }]
             : [],
       },
@@ -844,6 +845,11 @@ describe('session MCP input schemas', () => {
     const manager = {
       syncFlockDocOrThrow,
       repo: { openFlockDoc },
+      readWorkspaceCatalog: () =>
+        createLegacyWorkspaceCatalogQuery({
+          binding: { workspaceId: 'workspace-id' as WorkspaceId, accountId: null },
+          open: openFlockDoc,
+        }).read({ workspaceId: 'workspace-id' as WorkspaceId, accountId: null }),
     } as unknown as LoroDocumentManager;
 
     const catalog = await loadWorkspaceAgentRoleCatalog(manager, 'workspace-id' as WorkspaceId);
@@ -1059,6 +1065,11 @@ describe('session MCP input schemas', () => {
   it('preserves omitted create defaults but lets raw selectors replace inherited scalar selectors', async () => {
     const capability = createCapability('codex');
     const manager = {
+      workspaceCatalogBinding: { workspaceId: 'workspace-1' as WorkspaceId, accountId: null },
+      workspaceCatalog: createLegacyWorkspaceCatalogQuery({
+        binding: { workspaceId: 'workspace-1' as WorkspaceId, accountId: null },
+        open: async () => ({ flock: { scan: () => [] } }),
+      }),
       repo: {
         openFlockDoc: async () => ({
           flock: { scan: () => [{ key: ['acpCapability', 'agent-1'], value: capability }] },

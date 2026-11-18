@@ -135,12 +135,16 @@ export async function listRemoteLocalProjects(args: {
     authorizedMachines,
     normalizeCliValue(args.machineSelector) ?? args.auth.machineId
   );
-  await args.manager.syncFlockDocOrThrow(getMachineFlockDocId(workspaceId, machine.id), {
-    reason: `project.list:${machine.id}`,
-  });
+  const native = args.manager.getMachineCatalogRuntimePort?.(machine.id);
+  const nativeCatalog = native ? await native.readCatalog() : undefined;
+  if (!native)
+    await args.manager.syncFlockDocOrThrow(getMachineFlockDocId(workspaceId, machine.id), {
+      reason: `project.list:${machine.id}`,
+    });
 
   const localProjects = Object.values(
-    await dependencies.readProjects(args.manager.repo, workspaceId, machine.id)
+    nativeCatalog?.projects ??
+      (await dependencies.readProjects(args.manager.repo, workspaceId, machine.id))
   );
   const projectAccess = await Promise.all(
     localProjects.map(async (project) => ({

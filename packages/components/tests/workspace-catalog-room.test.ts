@@ -1,6 +1,9 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import {
   AGENT_ROLE_VERSION,
+  WorkspaceCatalogError,
+  type WorkspaceCatalogUpdate,
+  type WorkspaceCatalogReader,
   getProjectMcpKey,
   workspaceFlockKeys,
   type AgentConfigId,
@@ -15,6 +18,7 @@ import {
 import { type WorkspaceRuntime, runtimeAtom } from '../src/atoms/runtime';
 import {
   acquireWorkspaceCatalog,
+  retryWorkspaceCatalog,
   type WorkspaceCatalogSnapshot,
 } from '../src/lib/workspace-catalog-room';
 import {
@@ -226,5 +230,126 @@ describe('tour-repo', () => {
         handle.flock.set(workspaceFlockKeys.mcpServer('mcp-1' as McpServerId), { id: 'mcp-1' })
       ).toThrow(/does not persist/);
     });
+  });
+});
+
+describe('catalog terminal owner recovery', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+  const projection = (name: string) => ({
+    servers: [],
+    roles: [],
+    projects: [],
+    projectMcpDefaults: { [name]: { ids: [] } },
+  });
+  it('withdraws readiness, fences the old observer, and reacquires only after its release', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const observers: Array<{
+      update: (value: WorkspaceCatalogUpdate) => void;
+      fail: (error: unknown) => void;
+    }> = [];
+    const release = Promise.withResolvers<void>();
+    const reader: WorkspaceCatalogReader = {
+      read: async () => projection('unused'),
+      observe: async (_binding, update, fail) => {
+        observers.push({ update, fail });
+        update({
+          projection: projection(observers.length === 1 ? 'old' : 'replacement'),
+          synced: true,
+        });
+        return { close: () => (observers.length === 1 ? release.promise : Promise.resolve()) };
+      },
+    };
+    const runtime = {
+      workspaceId: 'w',
+      accountId: 'owner',
+      workspaceCatalogReader: reader,
+    } as never;
+    const states: WorkspaceCatalogSnapshot[] = [];
+    const lease = acquireWorkspaceCatalog(runtime, (value) => states.push(value));
+    await Promise.resolve();
+    await Promise.resolve();
+    observers[0]!.fail(new WorkspaceCatalogError('restart_required', 'closed'));
+    expect(states.at(-1)).toMatchObject({ synced: false, failed: true });
+    observers[0]!.update({ projection: projection('stale'), synced: true });
+    expect(states.at(-1)).toMatchObject({ synced: false, failed: true });
+    release.resolve();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(states.at(-1)).toMatchObject({
+      synced: true,
+      failed: false,
+      projectMcpDefaults: { replacement: { ids: [] } },
+    });
+    expect(states.at(-1)?.projectMcpDefaults).not.toHaveProperty('old');
+    lease.release();
+    await Promise.resolve();
+  });
+
+  it('clears failed after reacquiring unchanged local data even without remote authority', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const same = projection('local');
+    let fail!: (error: unknown) => void;
+    const reader: WorkspaceCatalogReader = {
+      read: async () => same,
+      observe: async (_binding, update, onError) => {
+        fail = onError;
+        update({ projection: same, synced: false });
+        return { close: () => {} };
+      },
+    };
+    const runtime = {
+      workspaceId: 'w',
+      accountId: 'owner',
+      workspaceCatalogReader: reader,
+    } as never;
+    const states: WorkspaceCatalogSnapshot[] = [];
+    const lease = acquireWorkspaceCatalog(runtime, (value) => states.push(value));
+    await vi.advanceTimersByTimeAsync(0);
+    fail(new WorkspaceCatalogError('restart_required', 'closed'));
+    expect(states.at(-1)).toMatchObject({ loaded: true, synced: false, failed: true });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(states.at(-1)).toMatchObject({ loaded: true, synced: false, failed: false });
+    lease.release();
+    await Promise.resolve();
+  });
+
+  it('bounds failed reacquisition attempts and lets an explicit retry recover the mounted consumer', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    let available = false;
+    let attempts = 0;
+    const reader: WorkspaceCatalogReader = {
+      read: async () => projection('unused'),
+      observe: async (_binding, update) => {
+        attempts += 1;
+        if (!available) throw new WorkspaceCatalogError('restart_required', 'closed');
+        update({ projection: projection('recovered'), synced: true });
+        return { close: () => {} };
+      },
+    };
+    const runtime = {
+      workspaceId: 'w',
+      accountId: 'owner',
+      workspaceCatalogReader: reader,
+    } as never;
+    const states: WorkspaceCatalogSnapshot[] = [];
+    const lease = acquireWorkspaceCatalog(runtime, (value) => states.push(value));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(attempts).toBe(4);
+    expect(states.at(-1)).toMatchObject({ synced: false, failed: true });
+    available = true;
+    retryWorkspaceCatalog(runtime);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states.at(-1)).toMatchObject({
+      synced: true,
+      failed: false,
+      projectMcpDefaults: { recovered: { ids: [] } },
+    });
+    lease.release();
+    await Promise.resolve();
   });
 });

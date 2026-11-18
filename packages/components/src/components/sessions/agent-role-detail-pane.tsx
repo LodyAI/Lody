@@ -36,8 +36,8 @@ export type AgentRoleDetailSubject = {
   role: AgentRole;
   agentConfig?: Pick<
     AgentConfigMeta,
-    'name' | 'cliType' | 'agentType' | 'brandId' | 'env' | 'runtimeOverrides'
-  >;
+    'name' | 'cliType' | 'agentType' | 'brandId'
+  > & Partial<Pick<AgentConfigMeta, 'env' | 'runtimeOverrides'>>;
   /** Only what reading a Role needs: the capabilities its labels resolve against. */
   machine?: Pick<MachineViewMeta, 'acpCapabilities'> | null;
   /**

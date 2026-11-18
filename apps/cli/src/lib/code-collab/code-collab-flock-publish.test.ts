@@ -1,5 +1,16 @@
 import { Flock } from '@loro-dev/flock-wasm';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { startEngine } from '@loro-dev/loro-repo-engine';
+import {
+  connectEngine,
+  connectSocketTransport,
+  readEngineEndpoint,
+} from '@loro-dev/loro-repo-client/node';
+import { RepoClient } from '@loro-dev/loro-repo-client';
+import { createNativeLocalCodeCollabPublicationStore } from './code-collab-native-publication-store';
 
 import {
   CODE_COLLAB_FILE_INDEX_LIMITS,
@@ -9,7 +20,21 @@ import {
   type CodeCollabFileIndexWritableFlock,
   type CodeCollabV2FileTreeState,
 } from '@lody/shared';
-import { publishCodeCollabFileIndexFlock } from './code-collab-flock-publish';
+import {
+  publishCodeCollabFileIndexFlock as publishWithStore,
+  publishCodeCollabFileIndexSignalFlock,
+} from './code-collab-flock-publish';
+import {
+  createLegacyCodeCollabPublicationStore,
+  type CodeCollabFlockRepo,
+} from './code-collab-publication-store';
+
+function publishCodeCollabFileIndexFlock(
+  args: Omit<Parameters<typeof publishWithStore>[0], 'store'> & { repo: CodeCollabFlockRepo }
+) {
+  const { repo, ...publication } = args;
+  return publishWithStore({ ...publication, store: createLegacyCodeCollabPublicationStore(repo) });
+}
 
 function makeFlock(
   initial: Record<string, unknown>,
@@ -233,3 +258,262 @@ function countTombstoneBytes(flock: Flock): number {
   }
   return bytes;
 }
+
+describe('native local Code Collab publication', () => {
+  const namespace = 'publication-test';
+  const workspaceId = 'workspace';
+  const indexId = `${workspaceId}:fi:owner`;
+  const signalId = `${workspaceId}:fis:owner`;
+  const room = { kind: 'flock' as const, id: indexId };
+
+  async function withEngine(run: (client: RepoClient, dataDir: string) => Promise<void>) {
+    const dataDir = await mkdtemp(join(tmpdir(), 'lody-native-publication-'));
+    let engine: ReturnType<typeof startEngine> | undefined;
+    let client: RepoClient | undefined;
+    try {
+      engine = startEngine({ dataDir });
+      client = await connectEngine(dataDir);
+      await run(client, dataDir);
+    } finally {
+      try {
+        await client?.close();
+      } finally {
+        engine?.stop();
+        await rm(dataDir, { recursive: true, force: true });
+      }
+    }
+  }
+
+  it('persists bounded file rows and generations, dedupes unchanged state, and advances only its signal room', async () => {
+    await withEngine(async (client) => {
+      const store = createNativeLocalCodeCollabPublicationStore({ client, namespace, workspaceId });
+      const fileIndex = {
+        'a.ts': { kind: 'text' as const, change: { diff: [2, 1] as [number, number] } },
+        src: { kind: 'lazy' as const },
+      };
+      const first = await publishWithStore({
+        store,
+        flockDocId: indexId,
+        fileIndex,
+        updatedAtMs: 1,
+        reconcileRemote: false,
+      });
+      const state = await client.flockScan(namespace, room);
+      expect(readCodeCollabFileIndexFromFlock({ scan: () => state.entries })).toEqual(fileIndex);
+      expect(readCodeCollabFileGenerations({ scan: () => state.entries })).toEqual(
+        first.generations
+      );
+      expect(first.changed).toBe(true);
+      expect(
+        await publishWithStore({
+          store,
+          flockDocId: indexId,
+          fileIndex,
+          updatedAtMs: 2,
+          reconcileRemote: true,
+        })
+      ).toEqual({ changed: false, generations: first.generations });
+      expect((await client.flockScan(namespace, room)).roomTxId).toBe(state.roomTxId);
+      expect(
+        await publishCodeCollabFileIndexSignalFlock({ store, flockDocId: signalId, updatedAtMs: 2 })
+      ).toEqual({ changed: true, revision: 1 });
+      expect(
+        (await client.flockGet(namespace, { kind: 'flock', id: signalId }, ['s'])).value
+      ).toEqual({ v: 1, r: 1 });
+      await expect(store.open('another-workspace:fi:owner')).rejects.toThrow(
+        'outside this workspace'
+      );
+      await expect(store.open(`${workspaceId}:wf:catalog`)).rejects.toThrow(
+        'outside this workspace'
+      );
+      await expect(client.flockScan(namespace, { kind: 'meta', id: 'meta' })).rejects.toThrow();
+    });
+  });
+
+  it('replans an actual rejected CAS without replacing an unrelated room', async () => {
+    await withEngine(async (client) => {
+      const native = createNativeLocalCodeCollabPublicationStore({
+        client,
+        namespace,
+        workspaceId,
+      });
+      const signalRoom = { kind: 'flock' as const, id: signalId };
+      await client.createRoom(namespace, signalRoom);
+      await client.flockBatch(namespace, signalRoom, [
+        { op: 'put', key: ['s'], value: { v: 1, r: 7 } },
+      ]);
+      let injectConflict = true;
+      const store = {
+        async open(id: string, signal?: AbortSignal) {
+          const acquired = await native.open(id, signal);
+          return {
+            ...acquired,
+            async commit(...args: Parameters<typeof acquired.commit>) {
+              if (injectConflict) {
+                injectConflict = false;
+                await client.flockBatch(namespace, room, [
+                  { op: 'put', key: ['obsolete.ts'], value: true },
+                ]);
+              }
+              return acquired.commit(...args);
+            },
+          };
+        },
+      };
+      await publishWithStore({
+        store,
+        flockDocId: indexId,
+        fileIndex: { 'current.ts': true },
+        updatedAtMs: 1,
+        reconcileRemote: false,
+      });
+      const state = await client.flockScan(namespace, room);
+      expect(readCodeCollabFileIndexFromFlock({ scan: () => state.entries })).toEqual({
+        'current.ts': true,
+      });
+      expect((await client.flockGet(namespace, signalRoom, ['s'])).value).toEqual({ v: 1, r: 7 });
+    });
+  });
+
+  it('does not replay an unknown write when the committed response is lost', async () => {
+    await withEngine(async (inspector, dataDir) => {
+      await inspector.createRoom(namespace, room);
+      const before = await inspector.flockScan(namespace, room);
+      const transport = await connectSocketTransport((await readEngineEndpoint(dataDir)).socket);
+      let responses = 0;
+      const client = new RepoClient({
+        send: (message) => transport.send(message),
+        onMessage: (listener) =>
+          transport.onMessage((message) => {
+            responses++;
+            if (responses === 3) void transport.close();
+            else listener(message);
+          }),
+        onClose: (listener) => transport.onClose(listener),
+        close: () => transport.close(),
+      });
+      try {
+        const store = createNativeLocalCodeCollabPublicationStore({
+          client,
+          namespace,
+          workspaceId,
+        });
+        await expect(
+          publishWithStore({
+            store,
+            flockDocId: indexId,
+            fileIndex: { 'committed.ts': true },
+            updatedAtMs: 1,
+            reconcileRemote: false,
+          })
+        ).rejects.toThrow('publication failed');
+        const after = await inspector.flockScan(namespace, room);
+        expect(readCodeCollabFileIndexFromFlock({ scan: () => after.entries })).toEqual({
+          'committed.ts': true,
+        });
+        expect(after.roomTxId).toBe(before.roomTxId + 1);
+        expect(responses).toBe(3);
+      } finally {
+        await client.close();
+      }
+    });
+  });
+});
+
+it('retains persisted Cloud FI fences without a factory while unrelated legacy publication and Session metadata remain usable', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { createHash } = await import('node:crypto');
+  const { mkdir, readFile } = await import('node:fs/promises');
+  const { dirname } = await import('node:path');
+  const { LoroRepo } = await import('loro-repo');
+  const {
+    cloudFileIndexAuthorityId,
+    cloudFileIndexSelectionPath,
+    listCloudFileIndexSelections,
+    unavailableCloudFileIndexBackend,
+  } = await import('./code-collab-cloud-file-index-selection');
+  const root = await mkdtemp(join(tmpdir(), 'lody-cloud-fi-admission-'));
+  const workspace = 'cloud-fi-workspace' as import('@lody/shared').WorkspaceId;
+  const account = 'cloud-fi-account';
+  const authority = cloudFileIndexAuthorityId('https://deployment.example', 'https://auth.example');
+  const filename = cloudFileIndexSelectionPath(root, account, workspace, authority);
+  await mkdir(dirname(filename), { recursive: true });
+  const database = new DatabaseSync(filename);
+  database.exec(
+    'PRAGMA synchronous=FULL;CREATE TABLE file_index_binding(version INTEGER,account TEXT,workspace TEXT,authority TEXT,machine TEXT,cohort TEXT,selected TEXT);CREATE TABLE file_index_owners(owner TEXT PRIMARY KEY,stage TEXT)'
+  );
+  database.prepare('INSERT INTO file_index_binding VALUES(1,?,?,?,?,?,?)').run(
+    account,
+    workspace,
+    authority,
+    'machine',
+    createHash('sha256')
+      .update(JSON.stringify(['frozen', 'native']))
+      .digest('hex'),
+    JSON.stringify(['frozen', 'native'])
+  );
+  database.prepare('INSERT INTO file_index_owners VALUES(?,?)').run('native', 'native');
+  database.prepare('INSERT INTO file_index_owners VALUES(?,?)').run('frozen', 'frozen');
+  database.close();
+  const before = await readFile(filename);
+  const repo = await LoroRepo.create({});
+  try {
+    const selection = listCloudFileIndexSelections(root, account, workspace, authority);
+    expect(selection.flatMap((value) => value.owners.map((owner) => owner.owner)).sort()).toEqual([
+      'frozen',
+      'native',
+    ]);
+    expect(
+      listCloudFileIndexSelections(
+        root,
+        account,
+        workspace,
+        cloudFileIndexAuthorityId('https://other.example', 'https://auth.example')
+      )
+    ).toEqual([]);
+    const backend = unavailableCloudFileIndexBackend(
+      repo,
+      workspace,
+      selection.flatMap((value) => value.owners.map((owner) => owner.owner))
+    );
+    for (const owner of ['native', 'frozen']) {
+      expect(await backend.ownsRoom(`${workspace}:fi:${owner}`)).toBe(true);
+      expect(await backend.ownsRoom(`${workspace}:fis:${owner}`)).toBe(true);
+      await expect(backend.store(owner)).rejects.toThrow('recovery required');
+      expect(() => repo.openFlockDoc(`${workspace}:fi:${owner}`)).toThrow('recovery required');
+      const snapshots: unknown[] = [];
+      const observer = await backend.source.subscribe(owner, (state) => snapshots.push(state));
+      expect(snapshots).toEqual([
+        { status: 'error', code: 'native_cloud_index_recovery_required' },
+      ]);
+      await observer?.release();
+    }
+    expect(
+      await backend.source.subscribe('unselected', () => {
+        throw new Error('Unselected owner must remain legacy');
+      })
+    ).toBeNull();
+    const roomId = `${workspace}:fi:unselected`;
+    await publishWithStore({
+      store: await backend.store('unselected'),
+      flockDocId: roomId,
+      fileIndex: { 'healthy.txt': true },
+      updatedAtMs: 1,
+      reconcileRemote: false,
+    });
+    expect(readCodeCollabFileIndexFromFlock((await repo.openFlockDoc(roomId)).flock)).toEqual({
+      'healthy.txt': true,
+    });
+    await repo.upsertDocMeta('session-unrelated', { type: 'session', title: 'still writable' });
+    await repo.flush();
+    expect(await repo.getDocMeta('session-unrelated')).toMatchObject({
+      meta: { title: 'still writable' },
+      deleted: false,
+    });
+    await backend.close();
+    expect(await readFile(filename)).toEqual(before);
+  } finally {
+    await repo.destroy();
+    await rm(root, { recursive: true, force: true });
+  }
+});

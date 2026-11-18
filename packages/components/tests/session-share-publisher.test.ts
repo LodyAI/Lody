@@ -115,24 +115,38 @@ it.each(['plaintext', 'e2ee'] as const)(
 );
 
 it('reports image download failures and still releases the source', async () => {
-  const release = vi.fn();
-  const releaseSync = vi.fn();
+  let held = false;
+  let syncHeld = false;
+  let acquiredSource: unknown;
   const runtime = {
     workspaceId: 'workspace',
     prepareSessionTarget: async () => {},
-    acquireSessionStore: async () => ({
-      sessionId: 'root',
-      firstSynced: Promise.resolve(),
-      acquireSync: () => releaseSync,
-      sessionData: {
-        history: {
-          readAll: async () => [
-            { id: 'turn', role: 'user', items: [{ type: 'image', imageId: 'image' }] },
-          ],
+    acquireSessionStore: async () => {
+      held = true;
+      const source = {
+        sessionId: 'root',
+        firstSynced: Promise.resolve(),
+        acquireSync: () => {
+          syncHeld = true;
+          return () => {
+            syncHeld = false;
+          };
         },
-      },
-    }),
-    releaseSessionStoreRef: release,
+        sessionData: {
+          history: {
+            readAll: async () => [
+              { id: 'turn', role: 'user', items: [{ type: 'image', imageId: 'image' }] },
+            ],
+          },
+        },
+      };
+      acquiredSource = source;
+      return source;
+    },
+    releaseSessionStoreRef: (id: string, source: unknown) => {
+      if (id !== 'root' || source !== acquiredSource) throw new Error('Wrong source lease');
+      held = false;
+    },
   };
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Missing', { status: 404 })));
   try {
@@ -145,8 +159,8 @@ it('reports image download failures and still releases the source', async () => 
         signal: new AbortController().signal,
       } as unknown as Parameters<typeof captureSessionShare>[0])
     ).rejects.toThrow('Share attachment unavailable');
-    expect(release).toHaveBeenCalledWith('root');
-    expect(releaseSync).toHaveBeenCalledOnce();
+    expect(held).toBe(false);
+    expect(syncHeld).toBe(false);
   } finally {
     vi.unstubAllGlobals();
   }

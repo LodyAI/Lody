@@ -41,7 +41,8 @@ export function createLocalWindowBootstrap(
   workspaceId: string,
   documents: ReadonlyMap<string, LoroDoc>,
   createChannel: (name: string) => Channel = (name) => new BroadcastChannel(name),
-  createRegistry: (scope: string, id: string) => PeerRegistry = createBrowserPeerRegistry
+  createRegistry: (scope: string, id: string) => PeerRegistry = createBrowserPeerRegistry,
+  options: { externalMetadata?: boolean } = {}
 ) {
   const scope = `lody:local-window-bootstrap:v1:${workspaceId}`;
   const peerId = crypto.randomUUID();
@@ -54,6 +55,7 @@ export function createLocalWindowBootstrap(
   let closed = false;
   channel.onmessage = ({ data }) => {
     if (closed || !data || typeof data.id !== 'string' || typeof data.room !== 'string') return;
+    if (options.externalMetadata && data.room === 'meta') return;
     if (data.type === 'request') {
       if (data.room !== 'meta' && (!Array.isArray(data.peers) || !data.peers.includes(peerId)))
         return;
@@ -119,7 +121,7 @@ export function createLocalWindowBootstrap(
       }
     });
   };
-  void request('meta');
+  if (!options.externalMetadata) void request('meta');
   return {
     async readDocument(room: string): Promise<Uint8Array | undefined> {
       const peers = await registry.peers().catch(() => []);

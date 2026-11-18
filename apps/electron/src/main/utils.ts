@@ -15,6 +15,25 @@ export function formatUnknownError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+/** Bounds only the caller's wait. The original owner retains pending cleanup. */
+export async function waitForCleanup<A>(
+  work: Promise<A>,
+  timeoutMs: number,
+  timeoutError: () => Error
+): Promise<A> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(timeoutError()), timeoutMs)
+      })
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export function normalizeExternalHttpUrl(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null

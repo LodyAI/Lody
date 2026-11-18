@@ -38,6 +38,8 @@ export class WorkSessionFixture {
   ) {
     this.projectRoot = join(tempRoot, this.projectName);
     this.acpEventLogPath = eventLogPath ?? join(tempRoot, 'scripted-acp-events.jsonl');
+    // One fixture owns one round; earlier runs must not count as this Agent's work.
+    writeFileSync(this.acpEventLogPath, '', 'utf8');
     this.scriptedAgentCommandLine = [process.execPath, this.scriptedAcpEntry, this.acpEventLogPath]
       .map(quoteCommandArgument)
       .join(' ');

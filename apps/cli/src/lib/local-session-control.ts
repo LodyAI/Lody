@@ -1,3 +1,5 @@
+import { LOCAL_DOCUMENT_DOMAIN_FREEZE_PATH } from '@lody/shared/native-document-domain-control';
+import { LOCAL_SESSION_BODY_FREEZE_PATH } from '@lody/shared/native-session-body-control';
 import { LOCAL_E2EE_PAIRING_PATH, LOCAL_E2EE_RESET_PATH } from '@lody/shared/e2ee-local-pairing';
 import type * as http from 'http';
 import { AUTOMATION_CONTROL_PATH } from '@lody/shared/automations';
@@ -101,6 +103,8 @@ export function createLocalSessionControlRequestHandler(
       requestPath !== LOCAL_SCHEDULE_CONTROL_PATH &&
       requestPath !== AUTOMATION_CONTROL_PATH &&
       requestPath !== LOCAL_SESSION_CONTROL_PATH &&
+      requestPath !== LOCAL_SESSION_BODY_FREEZE_PATH &&
+      requestPath !== LOCAL_DOCUMENT_DOMAIN_FREEZE_PATH &&
       requestPath !== LOCAL_MACHINE_RPC_PATH &&
       requestPath !== LOCAL_E2EE_PAIRING_PATH &&
       requestPath !== LOCAL_E2EE_RESET_PATH &&

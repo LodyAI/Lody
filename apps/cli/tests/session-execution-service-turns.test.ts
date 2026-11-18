@@ -56,104 +56,133 @@ vi.hoisted(() => {
   process.env.LODY_E2E = '1';
 });
 describe('SessionExecutionService', () => {
-  it('uses the current dirty branch when initializing an existing direct local session', async () => {
-    const rootPath = createGitLocalProject();
-    fs.writeFileSync(path.join(rootPath, 'dirty.txt'), 'dirty\n', 'utf8');
-    const localProjectId = 'local-project-existing-dirty' as LocalProjectId;
-    const project = {
-      kind: 'local' as const,
-      localProjectId,
-      branch: 'feature/remote-local',
-    };
-    const sessionDoc = withHistoryPort({
-      getMetaState: vi.fn(async () => ({
-        project,
+  it.each([false, true])(
+    'uses the current dirty branch when initializing an existing direct local session (native catalog=%s)',
+    async (nativeCatalog) => {
+      const rootPath = createGitLocalProject();
+      fs.writeFileSync(path.join(rootPath, 'dirty.txt'), 'dirty\n', 'utf8');
+      const localProjectId = 'local-project-existing-dirty' as LocalProjectId;
+      const project = {
+        kind: 'local' as const,
+        localProjectId,
+        branch: 'feature/remote-local',
+      };
+      const sessionDoc = withHistoryPort({
+        getMetaState: vi.fn(async () => ({
+          project,
+          acpSessionId: 'acp-local-project-existing-dirty' as ACPSessionId,
+        })),
+        getHistory: vi.fn(() => []),
+        setStatus: vi.fn(async () => {}),
+        setProject: vi.fn(async () => {}),
+        setBaseBranch: vi.fn(async () => {}),
+        updateHistory: vi.fn(async () => {}),
+        roomId: 'session-local-project-existing-dirty',
+      });
+      const agentClient = {
+        isCreated: vi.fn(() => true),
+        cancel: vi.fn(async () => {}),
+        prompt: vi.fn(async () => ({})),
+        currentModel: undefined,
+      };
+      const createdSession = {
+        sessionId: 'session-local-project-existing-dirty' as SessionId,
         acpSessionId: 'acp-local-project-existing-dirty' as ACPSessionId,
-      })),
-      getHistory: vi.fn(() => []),
-      setStatus: vi.fn(async () => {}),
-      setProject: vi.fn(async () => {}),
-      setBaseBranch: vi.fn(async () => {}),
-      updateHistory: vi.fn(async () => {}),
-      roomId: 'session-local-project-existing-dirty',
-    });
-    const agentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => ({})),
-      currentModel: undefined,
-    };
-    const createdSession = {
-      sessionId: 'session-local-project-existing-dirty' as SessionId,
-      acpSessionId: 'acp-local-project-existing-dirty' as ACPSessionId,
-      agentClient,
-      terminalManager: {} as unknown,
-      getWorkdir: () => rootPath,
-      getHostWorkdir: () => rootPath,
-      getParentSessionId: () => undefined,
-      exec: vi.fn(async () => ''),
-      terminate: vi.fn(async () => {}),
-      updateGitIdentity: vi.fn(),
-      createAgent: vi.fn(async () => 'acp-local-project-existing-dirty'),
-      applyExecutionPlaneLimits: vi.fn(async () => {}),
-    };
-    const createSession = vi.fn(async (config) => {
-      expect(config.project).toEqual({ kind: 'local', localProjectId });
-      expect(config.branch).toBeUndefined();
-      expect(runGit(rootPath, ['symbolic-ref', '--short', 'HEAD'])).toBe('main');
-      expect(fs.readFileSync(path.join(rootPath, 'dirty.txt'), 'utf8')).toBe('dirty\n');
-      return createdSession as unknown;
-    });
-    const deps = createBaseDeps({
-      sessionManager: {
-        getSession: vi.fn(() => null),
-        getPendingSession: vi.fn(() => null),
-        createSession,
-        setSessionError: vi.fn(),
-        terminateSession: vi.fn(),
-        validateSessionCredentials: vi.fn(async () => {}),
-      } as unknown as SessionManager,
-      workspaceDocument: {
-        repo: {
-          upsertDocMeta: vi.fn(async () => {}),
-          getDocMeta: vi.fn(async () => ({
-            meta: {
-              localProjects: {
-                [localProjectId]: {
-                  id: localProjectId,
-                  name: 'Existing Dirty Local Project',
-                  rootPath,
-                  createdAtMs: 1,
+        agentClient,
+        terminalManager: {} as unknown,
+        getWorkdir: () => rootPath,
+        getHostWorkdir: () => rootPath,
+        getParentSessionId: () => undefined,
+        exec: vi.fn(async () => ''),
+        terminate: vi.fn(async () => {}),
+        updateGitIdentity: vi.fn(),
+        createAgent: vi.fn(async () => 'acp-local-project-existing-dirty'),
+        applyExecutionPlaneLimits: vi.fn(async () => {}),
+      };
+      const createSession = vi.fn(async (config) => {
+        expect(config.project).toEqual({ kind: 'local', localProjectId });
+        expect(config.branch).toBeUndefined();
+        expect(runGit(rootPath, ['symbolic-ref', '--short', 'HEAD'])).toBe('main');
+        expect(fs.readFileSync(path.join(rootPath, 'dirty.txt'), 'utf8')).toBe('dirty\n');
+        return createdSession as unknown;
+      });
+      const deps = createBaseDeps({
+        sessionManager: {
+          getSession: vi.fn(() => null),
+          getPendingSession: vi.fn(() => null),
+          createSession,
+          setSessionError: vi.fn(),
+          terminateSession: vi.fn(),
+          validateSessionCredentials: vi.fn(async () => {}),
+        } as unknown as SessionManager,
+        workspaceDocument: {
+          getMachineCatalogRuntimePort: () =>
+            nativeCatalog
+              ? {
+                  binding: {
+                    accountId: 'user-1',
+                    workspaceId: 'workspace-1',
+                    machineId: 'machine-1',
+                  },
+                  readCatalog: async () => ({
+                    projects: {
+                      [localProjectId]: {
+                        id: localProjectId,
+                        name: 'Native dirty project',
+                        rootPath,
+                        createdAtMs: 1,
+                      },
+                    },
+                    capabilities: {},
+                    rateLimits: {},
+                  }),
+                }
+              : undefined,
+          repo: {
+            openFlockDoc: async () => {
+              if (nativeCatalog) throw new Error('Selected native project must not open legacy MF');
+              return { flock: { scan: () => [] } };
+            },
+            upsertDocMeta: vi.fn(async () => {}),
+            getDocMeta: vi.fn(async () => ({
+              meta: {
+                localProjects: {
+                  [localProjectId]: {
+                    id: localProjectId,
+                    name: 'Existing Dirty Local Project',
+                    rootPath,
+                    createdAtMs: 1,
+                  },
                 },
               },
-            },
-          })),
-        },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
-        getOrOpenSessionCode: vi.fn(async () => null),
-        updateAcpCapabilities: vi.fn(async () => {}),
-      } as unknown as LoroDocumentManager,
-    });
+            })),
+          },
+          getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+          getOrOpenSessionCode: vi.fn(async () => null),
+          updateAcpCapabilities: vi.fn(async () => {}),
+        } as unknown as LoroDocumentManager,
+      });
 
-    const service = new SessionExecutionService(deps);
-    await service.startSession({
-      type: 'session/create',
-      sessionId: 'session-local-project-existing-dirty' as SessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project,
-      acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
-      userTurnId: 'turn-local-existing-dirty',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
+      const service = new SessionExecutionService(deps);
+      await service.startSession({
+        type: 'session/create',
+        sessionId: 'session-local-project-existing-dirty' as SessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        project,
+        acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
+        userTurnId: 'turn-local-existing-dirty',
+        userId: 'user-1',
+        userName: 'User',
+        userEmail: 'user@example.com',
+      });
 
-    expect(createSession).toHaveBeenCalledOnce();
-    expect(deps.recordChatFailure).not.toHaveBeenCalled();
-    expect(runGit(rootPath, ['symbolic-ref', '--short', 'HEAD'])).toBe('main');
-    expect(fs.readFileSync(path.join(rootPath, 'dirty.txt'), 'utf8')).toBe('dirty\n');
-  });
+      expect(createSession).toHaveBeenCalledOnce();
+      expect(deps.recordChatFailure).not.toHaveBeenCalled();
+      expect(runGit(rootPath, ['symbolic-ref', '--short', 'HEAD'])).toBe('main');
+      expect(fs.readFileSync(path.join(rootPath, 'dirty.txt'), 'utf8')).toBe('dirty\n');
+    }
+  );
 
   it('records an actionable diagnostic when Git is unavailable for a GitHub worktree', async () => {
     const sessionDoc = withHistoryPort({

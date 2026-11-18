@@ -213,6 +213,31 @@ describe('shutdownLocalAcpAgent', () => {
     expect(table.isAlive(leader)).toBe(false);
   });
 
+  it('does not confirm a trusted helper probe whose contained child survives termination', async () => {
+    vi.useFakeTimers();
+    const table = new FakeProcessTable('linux');
+    table.queueSpawn({ ignores: ['SIGTERM', 'SIGKILL'] });
+    const child = table.api.spawn('candidate-probe', [], { detached: false });
+    const pid = child.pid ?? -1;
+    const shutdown = shutdownLocalAcpAgent({
+      agentProcess: child,
+      logger: createSilentLogger(),
+      sessionLabel: 'trusted-candidate',
+      exitTimeoutMs: 10,
+      processGroup: false,
+      requireConfirmedExit: true,
+      nodeProcess: table.api,
+    });
+    void shutdown.catch(() => {});
+    await vi.advanceTimersByTimeAsync(30);
+    await expect(shutdown).rejects.toBeDefined();
+    expect(table.isAlive(pid)).toBe(true);
+    expect(table.delivered).toEqual([
+      { target: pid, signal: 'SIGTERM' },
+      { target: pid, signal: 'SIGKILL' },
+    ]);
+  });
+
   // Probe, title, and login agents are never reused, so a survivor is logged
   // as a leak instead of failing a caller whose real work already finished.
   it('reports an agent that survives termination without rejecting', async () => {

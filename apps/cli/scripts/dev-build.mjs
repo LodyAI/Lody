@@ -48,6 +48,35 @@ export const devBuildDirectory = path.join(packageDirectory, DEV_BUILD_DIR_NAME)
  */
 const entryPoints = {
   index: path.join(sourceDirectory, 'index.ts'),
+  'native-schedule-registry-migrate': path.join(
+    sourceDirectory,
+    'lib/loro/native-schedule-registry-migrate-entry.ts'
+  ),
+  'native-machine-catalog-verify': path.join(
+    sourceDirectory,
+    'lib/loro/native-machine-catalog-verify-entry.ts'
+  ),
+  'native-workspace-meta-migrate': path.join(
+    sourceDirectory,
+    'lib/loro/native-workspace-meta-migrate-entry.ts'
+  ),
+  'native-machine-catalog-migrate': path.join(
+    sourceDirectory,
+    'lib/loro/native-machine-catalog-migrate-entry.ts'
+  ),
+  'native-workspace-catalog-migrate': path.join(
+    sourceDirectory,
+    'lib/loro/native-workspace-catalog-migrate-entry.ts'
+  ),
+  'native-repo-host': path.join(sourceDirectory, 'lib/loro/native-repo-host-entry.ts'),
+  'native-repo-independent-host': path.join(
+    sourceDirectory,
+    'lib/loro/native-repo-independent-host-entry.ts'
+  ),
+  'native-repo-independent-engine': path.join(
+    sourceDirectory,
+    'lib/loro/native-repo-independent-engine-entry.ts'
+  ),
   'cloudflared-worker': path.join(sourceDirectory, 'preview/cloudflared-worker.ts'),
   'baguette-worker': path.join(sourceDirectory, 'ios-simulator/baguette-worker.ts'),
   'codex-acp': path.join(sourceDirectory, 'codex-acp-entry.ts'),
@@ -186,6 +215,9 @@ export function createDevBuildOptions(deferredSpecifiers = new Set()) {
     // Keep the two `ws` opt-outs the production build inlines so dev and prod
     // agree on which optional native ws addons are skipped.
     define: {
+      __LODY_LOCAL_REPO_SDK_ARTIFACT__: JSON.stringify(
+        process.env.LODY_LOCAL_REPO_SDK_ARTIFACT ?? ''
+      ),
       'process.env.WS_NO_BUFFER_UTIL': JSON.stringify('true'),
       'process.env.WS_NO_UTF_8_VALIDATE': JSON.stringify('true'),
     },

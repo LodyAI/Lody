@@ -24,6 +24,7 @@ const dependencyBlocks = [
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
 const workspacePackageNames = new Set();
 const requiredPublishedRuntimeDependencies = [
+  '@loro-dev/loro-repo-engine',
   '@loro-dev/roost-node',
   '@napi-rs/keyring',
   'better-sqlite3',
@@ -41,6 +42,7 @@ const requiredPublishedRuntimeDependencies = [
 // through tty.WriteStream, where EAGAIN is masked and can block (microsoft/node-pty#833).
 const requiredExactPublishedRuntimeDependencies = ['loro-crdt'];
 const requiredPinnedPublishedRuntimeDependencies = new Map([
+  ['@loro-dev/loro-repo-engine', '0.1.0'],
   ['@lydell/node-pty', '1.2.0-beta.14'],
   ['@loro-dev/roost-node', '0.3.1'],
 ]);
@@ -381,6 +383,8 @@ await import(${JSON.stringify(bundleUrl)});
 await new Promise((resolve) => setTimeout(resolve, 100));
 const { createRequire } = await import('node:module');
 const requireFromBundle = createRequire(new URL(${JSON.stringify(bundleUrl)}));
+const nativeRepoVersion = requireFromBundle('@loro-dev/loro-repo-engine').engineVersion();
+if (nativeRepoVersion.package !== '0.1.0' || nativeRepoVersion.protocol !== 2) throw new Error('Native Repo runtime mismatch');
 // better-sqlite3 dlopens its binding lazily inside the Database constructor, so a
 // bare require would pass even with the binding missing — which is exactly how an
 // install-script-less environment breaks. Open a real database instead.

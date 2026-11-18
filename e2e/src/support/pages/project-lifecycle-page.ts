@@ -30,15 +30,22 @@ export class ProjectLifecyclePage {
   ) {}
 
   async addProjectThroughProductUi(): Promise<void> {
-    await this.page.getByRole('button', { name: /^(Select a project|选择项目)$/u }).click();
-    await this.page.getByRole('menuitem', { name: /^(Add a folder|添加文件夹)$/u }).click();
+    const selector = this.page.getByRole('button', { name: /^(Select a project|选择项目)$/u });
+    await expect(selector).toBeVisible();
+    await expect(selector).not.toHaveAttribute('aria-busy', 'true');
+    await selector.click();
+    const addFolder = this.page.getByRole('menuitem', { name: /^(Add a folder|添加文件夹)$/u });
+    await expect(addFolder).toBeEnabled();
+    await addFolder.click();
 
     const dialog = this.page.getByRole('dialog', { name: /^(Add a folder|添加文件夹)$/u });
     await expect(dialog).toBeVisible();
     const editPath = dialog.getByTitle(/^(Edit path|编辑路径)$/u);
-    if (!(await editPath.isVisible())) {
-      await dialog.getByText(/^(Your machine|你的机器)$/u).click();
-    }
+    const machine = dialog.getByText(/^(Your machine|你的机器)$/u);
+    // Native local mode can select its sole machine before showing this dialog.
+    // Wait for either real page rather than guessing from a still-loading frame.
+    await expect(editPath.or(machine).first()).toBeVisible();
+    if (!(await editPath.isVisible())) await machine.click();
     await expect(editPath).toBeVisible();
     await editPath.click();
     const pathInput = dialog.getByPlaceholder(/^(Type an absolute path|输入绝对路径)$/u);

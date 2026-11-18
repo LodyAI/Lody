@@ -182,7 +182,7 @@ function assertUniqueName(
 }
 
 type McpCatalogContext = {
-  repo: LoroDocumentManager['repo'];
+  manager: LoroDocumentManager;
   workspaceId: WorkspaceId;
   userId: string;
   /** The catalog as it stood after the pre-read sync. */
@@ -215,10 +215,10 @@ async function withMcpCatalog(
         }
       }
       await run({
-        repo: manager.repo,
+        manager,
         workspaceId,
         userId: auth.userId,
-        servers: await listWorkspaceMcpCatalog(manager.repo, workspaceId),
+        servers: await listWorkspaceMcpCatalog(manager, workspaceId),
         writeOptions: { sync: !options.offline },
       });
     });
@@ -277,39 +277,47 @@ const addCommand = addConnectionOptions(
   .option('--default', 'Select this server by default for new sessions')
   .option('--no-default', 'Do not select this server by default for new sessions')
   .action(async (name: string, options: McpAddOptions) => {
-    await withMcpCatalog(options, async ({ repo, workspaceId, userId, servers, writeOptions }) => {
-      const normalizedName = normalizeName(name);
-      assertUniqueName(servers, normalizedName);
-      const connection = buildMcpConnectionFromOptions(options);
-      const now = getServerNow();
-      const entry: WorkspaceMcpServerMeta = {
-        id: uuidV4() as McpServerId,
-        name: normalizedName,
-        transport: connection?.transport ?? 'stdio',
-        ...(normalizeCliValue(options.description)
-          ? { description: normalizeCliValue(options.description) }
-          : {}),
-        ...(connection ? { connection } : {}),
-        ...(options.default ? { enabledByDefault: true } : {}),
-        createdAt: now,
-        updatedAt: now,
-        createdBy: userId,
-      };
-      const result = await upsertWorkspaceMcpCatalogEntry(repo, workspaceId, entry, writeOptions);
-      captureCli('workspace/mcp_created', {
-        workspace_id: workspaceId,
-        source: 'cli',
-        transport: entry.transport,
-        enabled_by_default: entry.enabledByDefault === true,
-        has_description: Boolean(entry.description),
-      });
-      reportWrite(
-        options,
-        { workspaceId, server: entry },
-        `Added MCP server ${entry.name} (${entry.id}).`,
-        result
-      );
-    });
+    await withMcpCatalog(
+      options,
+      async ({ manager, workspaceId, userId, servers, writeOptions }) => {
+        const normalizedName = normalizeName(name);
+        assertUniqueName(servers, normalizedName);
+        const connection = buildMcpConnectionFromOptions(options);
+        const now = getServerNow();
+        const entry: WorkspaceMcpServerMeta = {
+          id: uuidV4() as McpServerId,
+          name: normalizedName,
+          transport: connection?.transport ?? 'stdio',
+          ...(normalizeCliValue(options.description)
+            ? { description: normalizeCliValue(options.description) }
+            : {}),
+          ...(connection ? { connection } : {}),
+          ...(options.default ? { enabledByDefault: true } : {}),
+          createdAt: now,
+          updatedAt: now,
+          createdBy: userId,
+        };
+        const result = await upsertWorkspaceMcpCatalogEntry(
+          manager,
+          workspaceId,
+          entry,
+          writeOptions
+        );
+        captureCli('workspace/mcp_created', {
+          workspace_id: workspaceId,
+          source: 'cli',
+          transport: entry.transport,
+          enabled_by_default: entry.enabledByDefault === true,
+          has_description: Boolean(entry.description),
+        });
+        reportWrite(
+          options,
+          { workspaceId, server: entry },
+          `Added MCP server ${entry.name} (${entry.id}).`,
+          result
+        );
+      }
+    );
   });
 
 const setCommand = addConnectionOptions(
@@ -321,7 +329,7 @@ const setCommand = addConnectionOptions(
   .option('--default', 'Select this server by default for new sessions')
   .option('--no-default', 'Do not select this server by default for new sessions')
   .action(async (selector: string, options: McpSetOptions) => {
-    await withMcpCatalog(options, async ({ repo, workspaceId, servers, writeOptions }) => {
+    await withMcpCatalog(options, async ({ manager, workspaceId, servers, writeOptions }) => {
       const current = findByIdOrName(servers, selector);
       const name = options.name === undefined ? current.name : normalizeName(options.name);
       assertUniqueName(servers, name, current.id);
@@ -343,7 +351,7 @@ const setCommand = addConnectionOptions(
       if (!isDeepStrictEqual(next, current)) {
         next.updatedAt = getServerNow();
       }
-      const result = await upsertWorkspaceMcpCatalogEntry(repo, workspaceId, next, writeOptions);
+      const result = await upsertWorkspaceMcpCatalogEntry(manager, workspaceId, next, writeOptions);
       reportWrite(
         options,
         { workspaceId, server: next },
@@ -358,10 +366,10 @@ const removeCommand = addCommonOptions(
 )
   .argument('<server>', 'Server id or name')
   .action(async (selector: string, options: McpCommandOptions) => {
-    await withMcpCatalog(options, async ({ repo, workspaceId, servers, writeOptions }) => {
+    await withMcpCatalog(options, async ({ manager, workspaceId, servers, writeOptions }) => {
       const current = findByIdOrName(servers, selector);
       const result = await deleteWorkspaceMcpCatalogEntry(
-        repo,
+        manager,
         workspaceId,
         current.id,
         writeOptions

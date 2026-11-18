@@ -1,3 +1,5 @@
+import { LOCAL_DOCUMENT_DOMAIN_FREEZE_PATH, nativeDocumentDomainFreezeResponseSchema, type NativeDocumentDomainFreezeRequest, type NativeDocumentDomainFreezeResponse } from '../native-document-domain-control';
+import { LOCAL_SESSION_BODY_FREEZE_PATH, nativeSessionBodyFreezeResponseSchema, type NativeSessionBodyFreezeRequest, type NativeSessionBodyFreezeResponse } from '../native-session-body-control';
 import {
   LOCAL_E2EE_PAIRING_PATH,
   LOCAL_E2EE_RESET_PATH,
@@ -201,6 +203,8 @@ export type LocalProbeClientService = {
 };
 
 export type LocalControlClientService = {
+  documentDomainFreeze?: (message: NativeDocumentDomainFreezeRequest, options?: LocalIpcRequestOptions) => Effect.Effect<NativeDocumentDomainFreezeResponse, IpcError>;
+  sessionBodyFreeze?: (message:NativeSessionBodyFreezeRequest,options?:LocalIpcRequestOptions)=>Effect.Effect<NativeSessionBodyFreezeResponse,IpcError>;
   automationControl: (
     message: AutomationControlRequest,
     options?: LocalIpcRequestOptions
@@ -1044,6 +1048,8 @@ function makeControlClient(
   postSessionControl?: PostSessionControlFn
 ): LocalControlClientService {
   return {
+    documentDomainFreeze:(message,options)=>Effect.flatMap(post(LOCAL_DOCUMENT_DOMAIN_FREEZE_PATH,message,options?.timeoutMs??DEFAULT_LOCAL_CONTROL_TIMEOUT_MS),({response,payload})=>parseJsonBody<NativeDocumentDomainFreezeResponse>(nativeDocumentDomainFreezeResponseSchema,()=> 'document_domain_freeze_unavailable')(response,payload)),
+    sessionBodyFreeze:(message,options)=>Effect.flatMap(post(LOCAL_SESSION_BODY_FREEZE_PATH,message,options?.timeoutMs??DEFAULT_LOCAL_CONTROL_TIMEOUT_MS),({response,payload})=>parseJsonBody<NativeSessionBodyFreezeResponse>(nativeSessionBodyFreezeResponseSchema,()=> 'session_body_freeze_unavailable')(response,payload)),
     e2eeReset: (message, options) =>
       Effect.flatMap(
         post(

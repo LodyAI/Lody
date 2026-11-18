@@ -15,6 +15,8 @@ import {
   type AgentConfigId,
   type AgentConfigCliType,
   type MachineViewMeta,
+  type MachineId,
+  type MachineCatalogPublicCapability,
   type AcpConfigOptionSummary,
   type AcpConfigOptionValue as SharedAcpConfigOptionValue,
   type BuiltinRuntimeOverrides,
@@ -192,7 +194,12 @@ export type AcpSelectorTarget = {
   selectedModelId?: string | null;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
   runtimeOverrides?: BuiltinRuntimeOverrides;
-  machine?: Pick<MachineViewMeta, 'acpCapabilities'> | null;
+  machine?:
+    | (Pick<MachineViewMeta, 'acpCapabilities'> & Partial<Pick<MachineViewMeta, 'id'>>)
+    | null;
+  machineId?: MachineId | null;
+  nativeSelected?: boolean;
+  nativeCapability?: MachineCatalogPublicCapability;
 };
 
 /**
@@ -245,16 +252,21 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
 
   if (target.configId) {
     const key = getAcpCapabilityCacheKey(target.configId);
-    const capability = getReadableAcpCapabilityCacheEntryForRuntimeOverrides(
-      target.machine?.acpCapabilities?.[key],
-      target.runtimeOverrides
-    );
+    const legacyCapability = target.nativeSelected
+      ? undefined
+      : getReadableAcpCapabilityCacheEntryForRuntimeOverrides(
+          target.machine?.acpCapabilities?.[key],
+          target.runtimeOverrides
+        );
+    const capability = target.nativeSelected ? target.nativeCapability : legacyCapability;
     if (
       capability &&
       capability.cliType === target.cliType &&
       capability.agentType === target.agentType
     ) {
-      const authority = getAcpCapabilityCacheEntryAuthority(capability, target.runtimeOverrides);
+      const authority = target.nativeSelected
+        ? (target.nativeCapability?.authority ?? 'unavailable')
+        : getAcpCapabilityCacheEntryAuthority(legacyCapability, target.runtimeOverrides);
       const modelReasoningEfforts = capability.modelReasoningEfforts;
       const declaredModelControls = capability.declaredModelControls;
       const observedModelConfigOptions = capability.observedModelConfigOptions;
@@ -305,6 +317,7 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
     }
   }
 
+  if (target.nativeSelected) return { authority: 'unavailable', modelReasoningEfforts: undefined };
   const staticCapabilities = getStaticBuiltinAcpCapabilities(
     target.cliType,
     target.agentType,

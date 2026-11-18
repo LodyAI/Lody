@@ -17,7 +17,12 @@ import {
   canRunAuthedWorkspaceQuery,
   isAuthedWorkspaceQueryLoading,
 } from '@/lib/authed-convex-query';
-import { mergeMachineFlockMachineMeta } from '@/lib/machine-flock-machine-meta-overlay';
+import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { nativeMachineCatalogSettingsAtom } from '@/atoms/native-machine-catalog';
+import {
+  mergeMachineFlockMachineMeta,
+  replaceNativeMachineCatalogMeta,
+} from '@/lib/machine-flock-machine-meta-overlay';
 import {
   buildVisibleMachineIndex,
   type MachineVisibilityAccess,
@@ -141,12 +146,23 @@ export function useVisibleMachineMetas(
       remoteMachineIds: enabled ? onlineVisibleMachineIds : [],
     }
   );
+  const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const nativeSnapshot = useAtomValue(nativeMachineCatalogSettingsAtom);
   const visibleMachinesWithFlockMeta = useMemo(
     () =>
-      includeMachineFlock
-        ? mergeMachineFlockMachineMeta(baseVisibleIndex.machines, machineFlockRowsByMachineId)
-        : baseVisibleIndex.machines,
-    [baseVisibleIndex.machines, includeMachineFlock, machineFlockRowsByMachineId]
+      replaceNativeMachineCatalogMeta(
+        includeMachineFlock
+          ? mergeMachineFlockMachineMeta(baseVisibleIndex.machines, machineFlockRowsByMachineId)
+          : baseVisibleIndex.machines,
+        runtime
+      ),
+    [
+      baseVisibleIndex.machines,
+      includeMachineFlock,
+      machineFlockRowsByMachineId,
+      runtime,
+      nativeSnapshot,
+    ]
   );
 
   return useMemo(

@@ -1,3 +1,4 @@
+import { useNativeMachineCatalogPublicReader } from './use-native-machine-catalog-public';
 import { useMemo } from 'react';
 import {
   getAcpCapabilityCacheKey,
@@ -13,7 +14,9 @@ export function useAvailableCommands(
   target?: AcpSelectorTarget,
   sessionCommands?: AcpCommandSummary[]
 ): AcpCommandSummary[] {
+  const readNative = useNativeMachineCatalogPublicReader();
   const configId = target?.configId;
+  const machineId = target?.machineId ?? target?.machine?.id;
   const cliType = target?.cliType;
   const agentType = target?.agentType;
   const runtimeOverrides = target?.runtimeOverrides;
@@ -22,6 +25,15 @@ export function useAvailableCommands(
   return useMemo(() => {
     if (sessionCommands !== undefined) return sessionCommands;
     if (!configId || !cliType || !agentType) return [];
+    const native = machineId ? readNative(machineId) : undefined;
+    if (target?.nativeSelected || native?.kind === 'native') {
+      const capability =
+        target?.nativeCapability ??
+        (native?.kind === 'native'
+          ? native.capability({ id: configId, machineId: machineId!, cliType, agentType })
+          : undefined);
+      return capability?.availableCommands ?? [];
+    }
     const key = getAcpCapabilityCacheKey(configId);
     const capability = getReadableAcpCapabilityCacheEntryForRuntimeOverrides(
       machine?.acpCapabilities?.[key],
@@ -30,5 +42,16 @@ export function useAvailableCommands(
     return capability?.cliType === cliType && capability.agentType === agentType
       ? (capability.availableCommands ?? [])
       : [];
-  }, [configId, cliType, agentType, runtimeOverrides, machine, sessionCommands]);
+  }, [
+    configId,
+    cliType,
+    agentType,
+    runtimeOverrides,
+    machine,
+    sessionCommands,
+    machineId,
+    readNative,
+    target?.nativeSelected,
+    target?.nativeCapability,
+  ]);
 }

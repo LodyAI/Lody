@@ -28,6 +28,10 @@ When('未登录用户保留另一加密身份的清理标记后冷启动桌面',
 });
 
 Then('普通工作区可用且另一身份的清理标记和数据保持原样', async function (this: LodyWorld) {
-  await this.onboarding!.expectLocalColdStartPreservesOtherIdentity();
+  await this.onboarding!.expectLocalColdStartPreservesOtherIdentity(
+    process.env.LODY_NATIVE_WORKSPACE_META === '1'
+      ? { owner: 'native', readEvidence: () => this.harness!.captureNativeWorkspaceMetaEvidence() }
+      : { owner: 'legacy' }
+  );
   await this.harness!.captureSnapshot();
 });

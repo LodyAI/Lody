@@ -1,6 +1,7 @@
 import { recordClientLog } from '../lib/client-log';
 
 export type WorkspaceCloseStage =
+  | 'workspace-flock-migration'
   | 'dispatch'
   | 'readers'
   | 'pending-input'

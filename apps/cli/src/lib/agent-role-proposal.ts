@@ -7,9 +7,8 @@ import {
   applyAgentRoleProposal,
   getServerNow,
   getWorkspaceFlockDocId,
-  listWorkspaceAgentRoles,
-  readWorkspaceFlockRowsFromFlock,
   type AgentRoleProposalCommand,
+  type AgentRoleId,
   type AgentRoleProposalMeta,
   type SessionId,
   type WorkspaceId,
@@ -91,10 +90,14 @@ export async function proposeAgentRole(args: {
         });
       }
     }
-    const handle = await manager.repo.openFlockDoc(docId);
-    const roles = listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(handle.flock));
+    const catalog = await manager.readWorkspaceCatalog(workspaceId);
     const existing =
-      command.action === 'update' ? roles.find((role) => role.id === command.roleId) : undefined;
+      command.action === 'update'
+        ? await manager.readWorkspaceRole(workspaceId, command.roleId as AgentRoleId)
+        : undefined;
+    const roles = existing
+      ? [...catalog.roles.filter((role) => role.id !== existing.id), existing]
+      : catalog.roles;
     if (command.action === 'create')
       await args.validateTarget(command.machineId, command.agentConfigId);
     const meta: AgentRoleProposalMeta = {

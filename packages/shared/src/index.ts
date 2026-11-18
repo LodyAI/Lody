@@ -7,7 +7,11 @@ import {
 export * from './preview-control';
 import { CliType } from './ai';
 export * from './history-writer';
-export type { AgentHistoryTargets } from './history-agent-window';
+export {
+  createAgentHistoryWindow,
+  type AgentHistoryTargets,
+  type AgentHistoryPatch,
+} from './history-agent-window';
 export * from './history-write-schema';
 export * from './session-mirror';
 export * from './session-control-plane';
@@ -137,6 +141,8 @@ export * from './mcp-authentication';
 export * from './agent-role';
 export * from './agent-role-proposal';
 export * from './workspace-flock';
+export * from './workspace-catalog';
+export * from './agent-role-schema-reconciliation';
 export * from './local-machine-rpc';
 export * from './local-loro-data-plane';
 export * from './json-guards';
@@ -535,3 +541,13 @@ export {
   sessionHistoryWriteIntentDigest,
   type SessionAccessRecord,
 } from './session-access';
+
+export * from './machine-catalog';
+export * from './machine-catalog-association';
+export * from './machine-catalog-project';
+export * from './machine-catalog-magpie';
+export * from './machine-catalog-ipc';
+
+export * from './schedule-registry-port';
+
+export * from './workspace-directory';

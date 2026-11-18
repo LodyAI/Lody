@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
+import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
@@ -35,6 +36,10 @@ const require = createRequire(import.meta.url)
 // strict layout exposes transitive deps only next to the package that
 // declares them (.pnpm/<pkg>/node_modules/<dep>), not under apps/cli.
 const CLI_RUNTIME_PACKAGE_CHAIN = [
+  { name: '@loro-dev/loro-repo-engine', from: 'cli' },
+  { name: '@loro-dev/loro-repo-client', from: 'cli', entry: '@loro-dev/loro-repo-client/node' },
+  { name: '@loro-dev/json-patch', from: '@loro-dev/loro-repo-client' },
+  { name: '@msgpack/msgpack', from: '@loro-dev/json-patch' },
   { name: '@loro-dev/roost-node', from: 'cli', entry: '@loro-dev/roost-node/native' },
   { name: '@napi-rs/keyring', from: 'cli' },
   { name: 'better-sqlite3', from: 'cli' },
@@ -74,6 +79,90 @@ export function roostPrebuildFileName({ platform, arch }) {
   }
   const suffix = platform === 'linux' ? '-gnu' : platform === 'win32' ? '-msvc' : ''
   return `roost.${platform}-${arch}${suffix}.node`
+}
+
+/** Stage the exact native engine for the packaging target, including cross-builds. */
+export function stageRepoEnginePackage(sourceDir, nodeModulesDir, { platform, arch }) {
+  if (!['darwin', 'linux', 'win32'].includes(platform) || !['arm64', 'x64'].includes(arch)) {
+    throw new Error(`No Repo engine prebuild for ${platform}-${arch}`)
+  }
+  const suffix = `${platform}-${arch}${platform === 'linux' ? '-gnu' : platform === 'win32' ? '-msvc' : ''}`
+  const packageName = `@loro-dev/loro-repo-engine-${suffix}`
+  const metadata = JSON.parse(fs.readFileSync(path.join(sourceDir, 'package.json'), 'utf8'))
+  const local = metadata.lodyLocalSdk
+  if (local !== undefined) {
+    const binaryName = `loro-repo-engine.${suffix}.node`
+    if (
+      metadata.name !== '@loro-dev/loro-repo-engine' ||
+      local.schemaVersion !== 1 ||
+      local.developmentOnly !== true ||
+      !/^[a-f0-9]{64}$/.test(local.artifactId) ||
+      local.artifactId !== process.env.LODY_LOCAL_REPO_SDK_ARTIFACT ||
+      metadata.version !== `0.1.0-lody-local.${local.artifactId.slice(0, 16)}` ||
+      local.platform !== platform ||
+      local.arch !== arch ||
+      local.binaryName !== binaryName ||
+      !/^[a-f0-9]{64}$/.test(local.binarySha256)
+    )
+      throw new Error('Local Repo SDK artifact identity or target mismatch')
+    const binary = fs.readFileSync(path.join(sourceDir, binaryName))
+    if (createHash('sha256').update(binary).digest('hex') !== local.binarySha256)
+      throw new Error('Local Repo SDK addon checksum mismatch')
+    const loader = fs.readFileSync(path.join(sourceDir, 'index.js'))
+    const target = path.join(nodeModulesDir, '@loro-dev/loro-repo-engine')
+    fs.mkdirSync(target, { recursive: true })
+    fs.writeFileSync(path.join(target, binaryName), binary)
+    fs.writeFileSync(path.join(target, 'index.js'), loader)
+    fs.writeFileSync(path.join(target, 'package.json'), JSON.stringify(metadata))
+    for (const entry of fs.readdirSync(target)) {
+      if (entry.endsWith('.node') && entry !== binaryName) fs.rmSync(path.join(target, entry))
+    }
+    return { target, binaryName, version: metadata.version, artifactId: local.artifactId }
+  }
+  const version = metadata.optionalDependencies?.[packageName]
+  if (
+    metadata.name !== '@loro-dev/loro-repo-engine' ||
+    version !== '0.1.0' ||
+    metadata.version !== version
+  ) {
+    throw new Error('Repo engine P0 requires exact published 0.1.0 wrapper and platform versions')
+  }
+  let downloaded
+  try {
+    let platformDir
+    try {
+      const fromEngine = createRequire(path.join(sourceDir, 'package.json'))
+      platformDir = path.dirname(fromEngine.resolve(`${packageName}/package.json`))
+    } catch (error) {
+      if (error.code !== 'MODULE_NOT_FOUND') throw error
+      downloaded = fetchNativeBinaryPackage(packageName, version)
+      platformDir = downloaded.packageDir
+    }
+    const native = JSON.parse(fs.readFileSync(path.join(platformDir, 'package.json'), 'utf8'))
+    if (
+      native.name !== packageName ||
+      native.version !== version ||
+      !native.os?.includes(platform) ||
+      !native.cpu?.includes(arch)
+    ) {
+      throw new Error('Repo engine platform package does not match the packaging target')
+    }
+    const binaryName = `loro-repo-engine.${suffix}.node`
+    // Validate/read all replacement bytes before touching an existing staged runtime.
+    const binary = fs.readFileSync(path.join(platformDir, binaryName))
+    const loader = fs.readFileSync(path.join(sourceDir, 'index.js'))
+    const target = path.join(nodeModulesDir, '@loro-dev/loro-repo-engine')
+    fs.mkdirSync(target, { recursive: true })
+    fs.writeFileSync(path.join(target, binaryName), binary)
+    fs.writeFileSync(path.join(target, 'index.js'), loader)
+    fs.writeFileSync(path.join(target, 'package.json'), JSON.stringify(metadata))
+    for (const entry of fs.readdirSync(target)) {
+      if (entry.endsWith('.node') && entry !== binaryName) fs.rmSync(path.join(target, entry))
+    }
+    return { target, binaryName, version }
+  } finally {
+    downloaded?.cleanup()
+  }
 }
 
 export function stagedRoostBindingPath(target) {
@@ -285,12 +374,25 @@ export function stageCliRuntimePackages() {
     const fromDir = resolvePackageDir(name, resolvedDirs[from], entry)
     resolvedDirs[name] = fromDir
     const toDir = path.join(stagedNodeModulesDir, name)
-    if (name === 'loro-crdt') {
+    if (name === '@loro-dev/loro-repo-engine') {
+      stageRepoEnginePackage(fromDir, stagedNodeModulesDir, {
+        platform: process.platform,
+        arch: process.arch
+      })
+    } else if (name === 'loro-crdt') {
       stageLoroRuntimePackage(fromDir, toDir)
     } else {
       copyPackageDir(fromDir, toDir, { isTopLevel: true })
     }
   }
+}
+
+export function installEmbeddedRepoEngineBinding(target) {
+  return stageRepoEnginePackage(
+    resolvePackageDir('@loro-dev/loro-repo-engine', cliAppRoot),
+    stagedNodeModulesDir,
+    target
+  )
 }
 
 /**

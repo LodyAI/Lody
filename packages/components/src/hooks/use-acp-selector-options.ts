@@ -1,3 +1,4 @@
+import { useNativeMachineCatalogPublicReader } from './use-native-machine-catalog-public';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -16,6 +17,20 @@ import { localizeBuiltinGrokSelectorOptions } from '@/lib/grok-acp-selector-i18n
  */
 export function useAcpSelectorOptions(target?: AcpSelectorTarget): AcpSelectorOptions {
   const { t } = useTranslation();
+  const nativeReader = useNativeMachineCatalogPublicReader();
+  const machineId = target?.machineId ?? target?.machine?.id;
+  const native = machineId ? nativeReader(machineId) : undefined;
+  const nativeSelected = target?.nativeSelected ?? native?.kind === 'native';
+  const nativeCapability =
+    target?.nativeCapability ??
+    (native?.kind === 'native' && target?.configId && target.cliType && target.agentType
+      ? native.capability({
+          id: target.configId,
+          machineId: machineId!,
+          cliType: target.cliType,
+          agentType: target.agentType,
+        })
+      : undefined);
   const targetConfigId = target?.configId;
   const targetCliType = target?.cliType;
   const targetAgentType = target?.agentType;
@@ -37,6 +52,8 @@ export function useAcpSelectorOptions(target?: AcpSelectorTarget): AcpSelectorOp
             configOptionValues: targetConfigOptionValues,
             runtimeOverrides: targetRuntimeOverrides,
             machine: targetMachine,
+            nativeSelected,
+            nativeCapability,
           }
         : undefined
     );
@@ -46,6 +63,8 @@ export function useAcpSelectorOptions(target?: AcpSelectorTarget): AcpSelectorOp
   }, [
     targetConfigId,
     targetMachine,
+    nativeSelected,
+    nativeCapability,
     targetAgentType,
     targetCliType,
     targetConfigOptionValues,

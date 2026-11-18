@@ -1,8 +1,9 @@
+import { useSessionStoreEpoch } from '@/hooks/use-session-store-epoch';
 import { deriveSessionTurnFacts, type SessionTurnFacts } from './session-turn-facts';
 import { normalizeFileDiff, type FileDiff, type SessionId } from '@lody/shared';
 import { useAtomValue } from 'jotai';
 import { useEffect, useRef, useState } from 'react';
-import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { activeWorkspaceRuntimeAtom, type SessionDocStore } from '@/atoms/runtime';
 import { acquireConversationDerivation, type ConversationView } from '@/lib/conversation-view';
 import type {
   SessionFileChangedFilesResult,
@@ -239,6 +240,7 @@ export function useSessionDiffSummary(
   } = {}
 ): SessionDiffSummaryState {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const storeEpoch = useSessionStoreEpoch(runtime, sessionId);
   const enabled = options.enabled ?? true;
   const fileProvider = options.fileProvider ?? null;
   const fileProviderPending = options.fileProviderPending ?? false;
@@ -459,6 +461,7 @@ export function useSessionDiffSummary(
   useEffect(() => {
     let cancelled = false;
     let acquiredStore = false;
+    let acquiredView: SessionDocStore | undefined;
     let releaseSync: (() => void) | null = null;
     let unsubscribe: (() => void) | null = null;
     let lease: ReturnType<typeof acquireConversationDerivation<SessionTurnFacts>> | null = null;
@@ -478,8 +481,9 @@ export function useSessionDiffSummary(
       try {
         const store = await runtime.acquireSessionStore(sessionId);
         acquiredStore = true;
+        acquiredView = store;
         if (cancelled) {
-          runtime.releaseSessionStoreRef(sessionId);
+          runtime.releaseSessionStoreRef(sessionId, acquiredView);
           acquiredStore = false;
           return;
         }
@@ -566,10 +570,10 @@ export function useSessionDiffSummary(
         releaseSync();
       }
       if (acquiredStore) {
-        runtime.releaseSessionStoreRef(sessionId);
+        runtime.releaseSessionStoreRef(sessionId, acquiredView);
       }
     };
-  }, [enabled, runtime, sessionId]);
+  }, [enabled, runtime, sessionId, storeEpoch]);
 
   if (fileProvider !== null && state.source !== 'provider') {
     return {

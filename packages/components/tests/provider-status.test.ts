@@ -25,6 +25,10 @@ import {
   cmdRetryProviderSetupAtom,
   deleteProviderSetupAtom,
   getAllAgentConfigAtom,
+  getAllAgentConfigListAtom,
+  getAgentMetaByIdAtomFamily,
+  getAgentListMetaByIdAtomFamily,
+  nativeMachineCatalogSettingsAtom,
   getAllProviderSetupsAtom,
 } from '../src/atoms/agents';
 import {
@@ -300,4 +304,62 @@ describe('provider-setup-writer', () => {
       expect(syncOnce).not.toHaveBeenCalled();
     });
   });
+});
+
+it('replaces cached legacy provider fallbacks when the same mounted runtime selects native, and never revives a removed native provider', () => {
+  const store = createStore();
+  const workspaceId = 'lw_native_provider_list' as WorkspaceId;
+  const machineId = 'native-provider-machine' as MachineId;
+  const id = 'native-provider' as AgentConfigId;
+  let native = false;
+  store.set(currentWorkspaceIdAtom, workspaceId);
+  store.set(currentWorkspaceSlugAtom, workspaceId);
+  store.set(runtimeAtom, {
+    workspaceId,
+    workspaceSlug: workspaceId,
+    ownsNativeMachineCatalog: (target: MachineId) => native && target === machineId,
+  } as WorkspaceRuntime);
+  const key = machineFlockKeys.agentConfig(id);
+  store.set(setMachineFlockRowsForMachineAtom, {
+    workspaceId,
+    machineId,
+    mode: 'replace',
+    rows: {
+      [serializeMachineFlockKey(key)]: {
+        key,
+        value: {
+          id,
+          machineId,
+          name: 'Old cached name',
+          cliType: 'custom',
+          agentType: 'custom',
+          env: { TOKEN: 'SYNTHETIC_PRIVATE' },
+        },
+      },
+    },
+  });
+  expect(store.get(getAllAgentConfigAtom)[0]?.env).toEqual({ TOKEN: 'SYNTHETIC_PRIVATE' });
+  expect(store.get(getAgentMetaByIdAtomFamily(id))?.name).toBe('Old cached name');
+  native = true;
+  const catalog: import('@lody/shared').MachineCatalogSettingsPort = {
+    binding: { accountId: 'local:fixture', workspaceId },
+    generation: 'selected-native',
+    agents: [{ id, machineId, name: 'Native name', cliType: 'custom', agentType: 'custom' }],
+    setups: [],
+    editor: () => {
+      throw new Error('Not an editor test');
+    },
+    execute: async () => {
+      throw new Error('Not a writer test');
+    },
+  };
+  store.set(nativeMachineCatalogSettingsAtom, catalog);
+  expect(store.get(getAllAgentConfigAtom)).toEqual([]);
+  expect(store.get(getAgentMetaByIdAtomFamily(id))).toBeNull();
+  expect(store.get(getAllAgentConfigListAtom)).toEqual(catalog.agents);
+  expect(store.get(getAgentListMetaByIdAtomFamily(id))).toEqual(catalog.agents[0]);
+  expect(store.get(getAgentListMetaByIdAtomFamily(id))).not.toHaveProperty('env');
+  store.set(nativeMachineCatalogSettingsAtom, { ...catalog, agents: [] });
+  expect(store.get(getAllAgentConfigListAtom)).toEqual([]);
+  expect(store.get(getAgentListMetaByIdAtomFamily(id))).toBeNull();
 });

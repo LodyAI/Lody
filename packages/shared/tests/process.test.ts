@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@effect/vitest';
-import { Cause, Effect, Exit, Option } from 'effect';
+import { Cause, Effect, Exit, Option, Scope } from 'effect';
+import { ChildProcess as Command, ChildProcessSpawner } from 'effect/process';
 
 import type { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +25,88 @@ const agentSpec: SpawnSpec = {
 
 const failureOf = <A, E>(exit: Exit.Exit<A, E>): E | undefined =>
   Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined;
+
+describe('confirmed independent owner handoff', () => {
+  it.effect(
+    'retires a handed-off live tree from execution ownership and leaves it alive after Scope close',
+    () => {
+      const table = new FakeProcessTable();
+      const observed = new Set<unknown>();
+      return Effect.gen(function* () {
+        const scope = yield* Scope.make();
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const handle = yield* Scope.provide(
+          spawner.spawn(
+            Command.make('data-host', [], {
+              detached: true,
+              stdin: 'ignore',
+              stdout: 'ignore',
+              stderr: 'ignore',
+            })
+          ),
+          scope
+        );
+        expect(observed.size).toBe(1);
+        yield* handle.unref;
+        expect(observed.size).toBe(0);
+        yield* Scope.close(scope, Exit.succeed(undefined));
+        expect(table.isAlive(Number(handle.pid))).toBe(true);
+        yield* handle.kill({ killSignal: 'SIGKILL', forceKillAfter: 0 });
+        expect(table.isAlive(Number(handle.pid))).toBe(false);
+      }).pipe(
+        Effect.provide(
+          processLayer({
+            nodeProcess: {
+              ...table.api,
+              observeTree: (tree) => {
+                observed.add(tree);
+              },
+              handoffTree: (tree) => {
+                observed.delete(tree);
+              },
+            },
+          })
+        )
+      );
+    }
+  );
+
+  it.effect(
+    'a failed handoff keeps the original Scope responsible for terminating its child',
+    () => {
+      const table = new FakeProcessTable();
+      return Effect.gen(function* () {
+        const scope = yield* Scope.make();
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const handle = yield* Scope.provide(
+          spawner.spawn(
+            Command.make('data-host', [], {
+              detached: true,
+              stdin: 'ignore',
+              stdout: 'ignore',
+              stderr: 'ignore',
+            })
+          ),
+          scope
+        );
+        expect((yield* Effect.exit(handle.unref))._tag).toBe('Failure');
+        yield* Scope.close(scope, Exit.succeed(undefined));
+        expect(table.isAlive(Number(handle.pid))).toBe(false);
+      }).pipe(
+        Effect.provide(
+          processLayer({
+            nodeProcess: {
+              ...table.api,
+              handoffTree: () => {
+                throw new Error('handoff receipt rejected');
+              },
+            },
+          })
+        )
+      );
+    }
+  );
+});
 
 describe('process tree termination (Windows)', () => {
   // Windows reuses pids quickly; an exit handler must not taskkill whatever
@@ -56,6 +139,30 @@ const readPidLine = (stream: Readable | null) =>
       stream.off('data', onData);
     });
   });
+
+describe('finite verification helper command release', () => {
+  for (const strict of [false, true])
+    it.effect(
+      `requires complete helper-group release only when explicitly selected (${strict})`,
+      () => {
+        const table = new FakeProcessTable();
+        let descendant = -1;
+        return Effect.gen(function* () {
+          const output = yield* runCommand({
+            command: 'verification-helper',
+            args: [],
+            ...(strict ? { requireExitedTree: true as const } : {}),
+            onSpawned: (child) => {
+              descendant = table.addDescendant(child.pid!);
+              table.exitOnItsOwn(child.pid!, 0);
+            },
+          });
+          expect(output.code).toBe(0);
+          expect(table.isAlive(descendant)).toBe(!strict);
+        }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
+      }
+    );
+});
 
 describe('process tree termination (real processes)', () => {
   it.live.skipIf(process.platform === 'win32')(

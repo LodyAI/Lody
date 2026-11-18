@@ -4,10 +4,10 @@ import { createAsyncConcurrencyGate } from '@/lib/async-concurrency-gate';
 export type StartupAcpCapabilitiesRefreshPorts = {
   listMachineIds: () => Promise<MachineId[]>;
   isMachineOnline: (machineId: MachineId) => boolean;
-  listAgentConfigs: (machineId: MachineId) => Promise<AgentConfigMeta[]>;
+  listAgentConfigs: (machineId: MachineId) => Promise<readonly Pick<AgentConfigMeta, 'id' | 'machineId'>[]>;
   refreshAgentConfig: (
     machineId: MachineId,
-    config: AgentConfigMeta,
+    config: Pick<AgentConfigMeta, 'id' | 'machineId'>,
     signal?: AbortSignal
   ) => Promise<void>;
   onError?: (error: unknown, context: { machineId: MachineId; configId?: string }) => void;
@@ -48,7 +48,7 @@ export async function runStartupAcpCapabilitiesRefresh(
       runMachine(async () => {
         if (signal?.aborted || !ports.isMachineOnline(machineId)) return;
 
-        let configs: AgentConfigMeta[];
+        let configs: readonly Pick<AgentConfigMeta, 'id' | 'machineId'>[];
         try {
           configs = await ports.listAgentConfigs(machineId);
         } catch (error) {

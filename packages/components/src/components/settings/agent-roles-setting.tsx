@@ -10,13 +10,14 @@ import {
   getAgentRoleEmoji,
   getAgentRoleTarget,
   getAgentRoleTargets,
-  type AgentConfigMeta,
   type AgentRole,
   type AgentRoleAvailability,
   type MachineId,
 } from '@lody/shared';
 import { userAtom, settingsSelectedMachineIdAtom } from '@/atoms';
-import { getAllAgentConfigAtom } from '@/atoms/agents';
+import { getAllAgentConfigAtom, getAllAgentConfigListAtom } from '@/atoms/agents';
+import { useNativeMachineCatalogPublicReader } from '@/hooks/use-native-machine-catalog-public';
+import type { AgentConfigDisplay } from '@/lib/agent-config-display';
 import { onlineMachineIdsAtom } from '@/atoms/presence';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import {
@@ -59,7 +60,9 @@ export function AgentRolesSetting() {
   const { t } = useTranslation();
   const currentUserId = useAtomValue(userAtom)?.id ?? null;
   const onlineMachineIds = useAtomValue(onlineMachineIdsAtom);
-  const agentConfigs = useAtomValue(getAllAgentConfigAtom);
+  const agentConfigs = useAtomValue(getAllAgentConfigListAtom);
+  const legacyAgentConfigs = useAtomValue(getAllAgentConfigAtom);
+  const readNative = useNativeMachineCatalogPublicReader();
   const { machines } = useVisibleMachineMetas();
   const { roles, synced } = useWorkspaceAgentRoles();
   const selectedMachineId = useAtomValue(settingsSelectedMachineIdAtom);
@@ -84,13 +87,19 @@ export function AgentRolesSetting() {
       const targets = getAgentRoleTargets(role).map((target): AgentRoleRowTarget => {
         const bound = bindAgentRoleTarget(role, target.machineId) ?? role;
         const agentConfig = agentConfigs.find((entry) => entry.id === target.agentConfigId);
+        const native = readNative(target.machineId);
+        const legacy = legacyAgentConfigs.find((entry) => entry.id === target.agentConfigId);
         const options = buildAcpSelectorOptions(
           agentConfig
             ? {
                 configId: target.agentConfigId,
                 cliType: agentConfig.cliType,
                 agentType: agentConfig.agentType,
-                runtimeOverrides: agentConfig.runtimeOverrides,
+                machineId: target.machineId,
+                runtimeOverrides: legacy?.runtimeOverrides,
+                nativeSelected: native.kind === 'native',
+                nativeCapability:
+                  native.kind === 'native' ? native.capability(agentConfig) : undefined,
                 machine: machines.get(target.machineId) ?? null,
                 selectedModelId: target.runConfig.modelId,
               }
@@ -102,7 +111,9 @@ export function AgentRolesSetting() {
           online: onlineMachineIds.has(target.machineId),
           availability: resolve(bound),
           runConfig: target.runConfig,
-          agentConfig,
+          agentConfig: agentConfig
+            ? { ...agentConfig, ...(legacy ? { env: legacy.env } : {}) }
+            : undefined,
           selectorOptions:
             agentConfig?.cliType === 'builtin' && agentConfig.agentType.toLowerCase() === 'grok'
               ? localizeBuiltinGrokSelectorOptions(options, t)
@@ -117,7 +128,7 @@ export function AgentRolesSetting() {
         );
       return { role, targets, allMachines };
     });
-  }, [agentConfigs, machines, onlineMachineIds, resolve, roles, t]);
+  }, [agentConfigs, legacyAgentConfigs, readNative, machines, onlineMachineIds, resolve, roles, t]);
 
   // Arriving from a memory's "Link to a role" names a machine: bring the first
   // Role that runs there into view, and open Roles on that machine's tab.
@@ -280,7 +291,7 @@ export type AgentRoleRowTarget = {
     'modelOptions' | 'modeOptions' | 'configOptionSelectors'
   >;
   /** The bound config, when it still exists; its icon stands for the agent. */
-  agentConfig?: Pick<AgentConfigMeta, 'cliType' | 'agentType' | 'brandId' | 'env' | 'name'>;
+  agentConfig?: Pick<AgentConfigDisplay, 'cliType' | 'agentType' | 'brandId' | 'env' | 'name'>;
 };
 
 /**

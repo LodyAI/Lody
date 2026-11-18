@@ -1,3 +1,6 @@
+import { useNativeMachineCatalogPublicReader } from '@/hooks/use-native-machine-catalog-public';
+import type { AgentConfigDisplay, ProviderSetupDisplay } from '@/lib/agent-config-display';
+import { useMachineCatalogSettings } from '../../../providers/machine-catalog-settings';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -10,6 +13,7 @@ import {
   getBuiltinAgentByAgentType,
   hasEmptyModelSelectOption,
   isManagedBuiltinAgentType,
+  getServerNow,
   type AgentBrandId,
   type BuiltinAgentType,
   type ManagedBuiltinAgentType,
@@ -18,7 +22,6 @@ import {
   type MachineId,
   type MachineAcpBinaryProgressMessage,
   type MachineViewMeta,
-  type ProviderSetupTask,
 } from '@lody/shared';
 import { toast } from '@/lib/toast';
 import { Button } from '@lody/ui/button';
@@ -298,9 +301,9 @@ const MORE_SHOWCASE_AGENTS: ShowcaseAgent[] = [
 
 export interface ProvidersScreenViewProps {
   /** Local-machine providers to render in the list. */
-  configs: AgentConfigMeta[];
+  configs: AgentConfigDisplay[];
   /** Durable providers still being prepared on the target machine. */
-  setups?: ProviderSetupTask[];
+  setups?: ProviderSetupDisplay[];
   /** Per-config test status, keyed by config id. */
   testStatuses: Record<string, ProviderTestStatus>;
   /** Ephemeral request-scoped work; deliberately separate from the last result. */
@@ -319,15 +322,15 @@ export interface ProvidersScreenViewProps {
   localMachineId?: MachineId | null;
   localMachine?: MachineViewMeta;
   /** Open the edit dialog for an existing provider. */
-  onEdit: (config: AgentConfigMeta) => void;
-  onSelect?: (config: AgentConfigMeta) => void;
+  onEdit: (config: AgentConfigDisplay) => void;
+  onSelect?: (config: AgentConfigDisplay) => void;
   /** Run the connectivity test (or re-test) for a row. */
-  onTest: (config: AgentConfigMeta) => void;
-  onAuthenticated?: (config: AgentConfigMeta) => void | Promise<void>;
+  onTest: (config: AgentConfigDisplay) => void;
+  onAuthenticated?: (config: AgentConfigDisplay) => void | Promise<void>;
   /** Delete a row (the confirm step is also handled here). */
-  onDelete: (config: AgentConfigMeta) => void;
-  onRetrySetup?: (setup: ProviderSetupTask) => Promise<void>;
-  onDeleteSetup?: (setup: ProviderSetupTask) => Promise<void>;
+  onDelete: (config: AgentConfigDisplay) => void;
+  onRetrySetup?: (setup: ProviderSetupDisplay) => Promise<void>;
+  onDeleteSetup?: (setup: ProviderSetupDisplay) => Promise<void>;
   /**
    * Open the create dialog. Pass a showcase `pick` to pre-select that provider;
    * omit it for a blank create flow.
@@ -766,8 +769,12 @@ export function ProvidersScreen({
     [localMachineId]
   );
   useMachineFlockAgentConfigsForMachineIds(localMachineIdsForAgentConfigs);
-  const allConfigs = useAtomValue(getAllAgentConfigAtom);
-  const allSetups = useAtomValue(getAllProviderSetupsAtom);
+  const catalog = useMachineCatalogSettings();
+  const readNative = useNativeMachineCatalogPublicReader();
+  const legacyConfigs = useAtomValue(getAllAgentConfigAtom);
+  const allConfigs = catalog?.agents ?? legacyConfigs;
+  const legacySetups = useAtomValue(getAllProviderSetupsAtom);
+  const allSetups = catalog?.setups ?? legacySetups;
   const createConfig = useSetAtom(cmdCreateAgentConfigAtom);
   const createSetup = useSetAtom(cmdCreateProviderSetupAtom);
   const retrySetup = useSetAtom(cmdRetryProviderSetupAtom);
@@ -805,7 +812,7 @@ export function ProvidersScreen({
   const [failureReasons, setFailureReasons] = useState<Record<string, string>>({});
   const testRunsRef = useRef(createProviderTestRunRegistry());
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<AgentConfigMeta | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<AgentConfigDisplay | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
@@ -870,14 +877,19 @@ export function ProvidersScreen({
       for (const config of localConfigs) {
         const existing = prev[config.id];
         if (existing === 'failed' || existing === 'passed') continue;
-        if (resolveInitialOnboardingProviderStatus(config, acpCapabilities) === 'passed') {
+        const native = readNative(config.machineId);
+        const verified =
+          native.kind === 'native'
+            ? native.capability(config)?.authority === 'authoritative'
+            : resolveInitialOnboardingProviderStatus(config, acpCapabilities) === 'passed';
+        if (verified) {
           if (next === prev) next = { ...prev };
           next[config.id] = 'passed';
         }
       }
       return next;
     });
-  }, [localConfigs, acpCapabilities]);
+  }, [localConfigs, acpCapabilities, readNative]);
 
   // If the local machine never arrives, silently restart the CLI once and
   // give it another window to reconnect. If it still doesn't show up, surface
@@ -1012,14 +1024,15 @@ export function ProvidersScreen({
       }
       // The machine flock doc only syncs once per session; force a re-sync so
       // the freshly probed capabilities surface without a reload.
-      await resyncMachineFlockRows(runtime, args.machineId, {
-        refreshedCapability: response.capability
-          ? { configId: response.configId, value: response.capability }
-          : undefined,
-      });
+      if (!catalog)
+        await resyncMachineFlockRows(runtime, args.machineId, {
+          refreshedCapability: response.capability
+            ? { configId: response.configId, value: response.capability }
+            : undefined,
+        });
       return response;
     },
-    [localMachineId, runtime, t, workspaceId]
+    [localMachineId, runtime, t, workspaceId, catalog]
   );
 
   const { checkBinaryStatus, installBinary } = useMachineAcpBinaryActions(runtime, workspaceId);
@@ -1027,7 +1040,7 @@ export function ProvidersScreen({
   // New built-in configs are live-probed by AgentConfigDialog when Create is
   // pressed. This explicit Test action remains for already-created provider rows.
   const handleTest = useCallback(
-    (config: AgentConfigMeta) => {
+    (config: AgentConfigDisplay) => {
       const run = testRunsRef.current.start(config.id);
       const startedAtMs = analytics.now();
       analytics.capture('onboarding/operation_started', {
@@ -1116,6 +1129,8 @@ export function ProvidersScreen({
   const handleDialogSubmit = useCallback(
     async (payload: AgentConfigSubmitPayload) => {
       if (!localMachineId || !dialogMode) return;
+      if (dialogMode.kind === 'edit-catalog')
+        throw new Error('Native provider edits require their bound editor');
       const operation =
         dialogMode.kind === 'edit'
           ? 'agent_config_update'
@@ -1140,7 +1155,24 @@ export function ProvidersScreen({
             brandId: payload.brandId,
             machineId: localMachineId,
           };
-          if (payload.backgroundSetup) {
+          if (catalog) {
+            if (payload.backgroundSetup) {
+              const now = getServerNow();
+              await catalog.execute(localMachineId, {
+                kind: 'queue-provider-setup',
+                task: {
+                  v: 1,
+                  id: config.id,
+                  machineId: config.machineId,
+                  config,
+                  status: 'queued',
+                  attempt: 1,
+                  createdAt: now,
+                  updatedAt: now,
+                },
+              });
+            } else await catalog.execute(localMachineId, { kind: 'create-agent', config });
+          } else if (payload.backgroundSetup) {
             await createSetup(config);
           } else {
             await createConfig(config);
@@ -1199,11 +1231,12 @@ export function ProvidersScreen({
       localMachineId,
       t,
       updateConfig,
+      catalog,
     ]
   );
 
   const handleRetrySetup = useCallback(
-    async (setup: ProviderSetupTask) => {
+    async (setup: ProviderSetupDisplay) => {
       const startedAtMs = analytics.now();
       analytics.capture('onboarding/operation_started', {
         step: 'providers',
@@ -1211,7 +1244,14 @@ export function ProvidersScreen({
         attempt: setup.attempt + 1,
       });
       try {
-        await retrySetup(setup.id);
+        if (catalog)
+          await catalog.execute(setup.machineId, {
+            kind: 'retry-provider-setup',
+            id: setup.id,
+            expected: { attempt: setup.attempt, status: setup.status, updatedAt: setup.updatedAt },
+            now: getServerNow(),
+          });
+        else await retrySetup(setup.id);
         analytics.capture('onboarding/operation_succeeded', {
           step: 'providers',
           operation: 'agent_setup_retry_request',
@@ -1234,18 +1274,28 @@ export function ProvidersScreen({
         throw error;
       }
     },
-    [analytics, retrySetup, t]
+    [analytics, retrySetup, t, catalog]
   );
 
   const handleDeleteSetup = useCallback(
-    async (setup: ProviderSetupTask) => {
+    async (setup: ProviderSetupDisplay) => {
       const startedAtMs = analytics.now();
       analytics.capture('onboarding/operation_started', {
         step: 'providers',
         operation: 'agent_setup_cancel',
       });
       try {
-        await deleteSetup(setup.id);
+        if (catalog)
+          await catalog.execute(setup.machineId, {
+            kind: 'cancel-provider-setup',
+            cancellation: {
+              v: 1,
+              id: setup.id,
+              machineId: setup.machineId,
+              cancelledAt: getServerNow(),
+            },
+          });
+        else await deleteSetup(setup.id);
         analytics.capture('onboarding/operation_succeeded', {
           step: 'providers',
           operation: 'agent_setup_cancel',
@@ -1266,7 +1316,7 @@ export function ProvidersScreen({
         throw error;
       }
     },
-    [analytics, deleteSetup, t]
+    [analytics, deleteSetup, t, catalog]
   );
 
   const handleConfirmDelete = async () => {
@@ -1279,7 +1329,15 @@ export function ProvidersScreen({
     try {
       setDeleting(true);
       invalidateTestRun(pendingDelete.id);
-      await deleteConfig(pendingDelete.id);
+      if (catalog) {
+        const editor = await catalog.editor(pendingDelete.machineId).load(pendingDelete.id);
+        await catalog.execute(pendingDelete.machineId, {
+          kind: 'remove-agent',
+          id: pendingDelete.id,
+          editToken: editor.editToken,
+          now: getServerNow(),
+        });
+      } else await deleteConfig(pendingDelete.id);
       clearFailureReason(pendingDelete.id);
       setTestStatuses((prev) => {
         const { [pendingDelete.id]: _, ...rest } = prev;
@@ -1321,7 +1379,13 @@ export function ProvidersScreen({
         noLocalMachine={!localMachine}
         localMachineId={localMachineId}
         localMachine={localMachine}
-        onEdit={(config) => setDialogMode({ kind: 'edit', config })}
+        onEdit={(config) => {
+          if (catalog) setDialogMode({ kind: 'edit-catalog', summary: config });
+          else {
+            const full = legacyConfigs.find((value) => value.id === config.id);
+            if (full) setDialogMode({ kind: 'edit', config: full });
+          }
+        }}
         onSelect={(config) => setSelectedProviderId(config.id)}
         onTest={handleTest}
         onAuthenticated={(config) => {
@@ -1377,6 +1441,7 @@ export function ProvidersScreen({
             if (!open) setDialogMode(null);
           }}
           mode={dialogMode}
+          catalogSource={catalog}
           machine={localMachine}
           onSubmit={handleDialogSubmit}
           onRefreshCapabilities={refreshCapabilities}
@@ -1481,7 +1546,7 @@ function ProviderActivityAction({
   config,
 }: {
   activity: ProviderTestActivity;
-  config: AgentConfigMeta;
+  config: AgentConfigDisplay;
 }) {
   const { t } = useTranslation();
   const percent = getProviderTestActivityPercent(activity);

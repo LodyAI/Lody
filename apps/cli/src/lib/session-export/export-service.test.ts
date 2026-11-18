@@ -1,5 +1,11 @@
 import { LoroRepo } from 'loro-repo';
-import { ScheduleRepository, type SessionMeta, type WorkspaceId } from '@lody/shared';
+import { Flock } from '@loro-dev/flock-wasm';
+import {
+  ScheduleRepository,
+  createLegacyScheduleRegistry,
+  type SessionMeta,
+  type WorkspaceId,
+} from '@lody/shared';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -13,6 +19,51 @@ import { prepareExportOutputDir } from './output-dir';
 vi.mock('./workspace-usage', () => ({
   fetchWorkspaceUsageBundle: async () => ({ summary: {}, timelines: [] }),
 }));
+
+it('exports native Meta as complete binary without reading a legacy Meta or rounding i64 values', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'lody-native-meta-export-'));
+  const repo = await LoroRepo.create({});
+  const fixture = new Flock('synthetic-native-export');
+  fixture.put(['opaque'], 314159265);
+  const exact = new Flock('synthetic-native-export-source');
+  exact.importJson(
+    JSON.parse(JSON.stringify(fixture.exportJson()), (_key, value: unknown) =>
+      value === 314159265 ? 9223372036854775806n : value
+    )
+  );
+  const binary = exact.exportFile();
+  const manager = {
+    repo,
+    exportNativeMetaSnapshot: async () => binary,
+    workspaceDirectory: { listActiveIds: async () => [], listEntries: async () => [] },
+    scheduleRegistry: createLegacyScheduleRegistry({
+      repo,
+      workspaceId: 'local-export' as WorkspaceId,
+    }),
+  } as unknown as LoroDocumentManager;
+  const oldGetMeta = repo.getMeta.bind(repo);
+  repo.getMeta = () => {
+    throw new Error('Legacy Meta must not be read by native export');
+  };
+  try {
+    await exportWorkspaceData({
+      manager,
+      workspace: { id: 'local-export', slug: null, name: 'Synthetic local export' },
+      cliToken: '',
+      outputDir: path.join(root, 'export'),
+      downloadImages: false,
+    });
+    expect(await readFile(path.join(root, 'export/meta.flock'))).toEqual(Buffer.from(binary));
+    expect(JSON.parse(await readFile(path.join(root, 'export/meta.json'), 'utf8'))).toEqual({
+      format: 'flock',
+      snapshot: 'meta.flock',
+    });
+  } finally {
+    repo.getMeta = oldGetMeta;
+    await repo.destroy();
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 it('writes decrypted sessions and encrypted Schedule definitions to the local export', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'lody-encrypted-export-'));
@@ -53,6 +104,11 @@ it('writes decrypted sessions and encrypted Schedule definitions to the local ex
   });
   const manager = {
     repo,
+    exportNativeMetaSnapshot: async () => undefined,
+    scheduleRegistry: createLegacyScheduleRegistry({
+      repo,
+      workspaceId: 'protected' as WorkspaceId,
+    }),
     getSessionHistorySnapshot: async () => history,
   } as unknown as LoroDocumentManager;
   try {

@@ -134,7 +134,7 @@ export async function captureSessionShare(options: {
   } finally {
     for (const { store, releaseSync } of stores) {
       releaseSync();
-      options.runtime.releaseSessionStoreRef(store.sessionId);
+      options.runtime.releaseSessionStoreRef(store.sessionId, store);
     }
   }
 }

@@ -4,6 +4,8 @@ import { createDaemonLossRegistry } from '../src/lib/e2ee/client-loss-observer';
 import { authorizeEncryptedSchedule } from '../src/lib/e2ee/schedule-execution-authorization';
 import {
   decodeE2eeIntentRecord,
+  createLegacyWorkspaceCatalogQuery,
+  getWorkspaceFlockDocId,
   encodeE2eeIntentRecord,
   manualScheduleRunKey,
   readScheduleAuthorization,
@@ -702,6 +704,11 @@ describe('machine execution authorization freshness', () => {
           );
           const manager = {
             repo,
+            workspaceCatalogBinding: { workspaceId: 'workspace' as WorkspaceId, accountId: null },
+            workspaceCatalog: createLegacyWorkspaceCatalogQuery({
+              binding: { workspaceId: 'workspace' as WorkspaceId, accountId: null },
+              open: () => repo.openFlockDoc(getWorkspaceFlockDocId('workspace' as WorkspaceId)),
+            }),
             syncMetaOrThrow: async () => {},
             getOrCreateSessionDoc: async () => session,
             isEncryptedWorkspace: () => true,

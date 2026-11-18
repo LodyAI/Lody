@@ -45,7 +45,10 @@ function createFakeRepo() {
   const repo = {
     openFlockDoc: vi.fn(async () => ({ flock, syncOnce: vi.fn(async () => {}) })),
     getDocMeta: vi.fn(async () => null),
-    getMeta: vi.fn(() => undefined),
+    listDoc: async () => [],
+    getMeta: () => {
+      throw new Error('Raw Meta is outside the catalog fixture');
+    },
     deleteDoc: vi.fn(async () => {}),
     flush: vi.fn(async () => {}),
   } as unknown as LoroRepo;

@@ -5,8 +5,8 @@ import { CircleHelp } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { space } from '@lody/ui/tokens/scales.stylex';
-import type { AgentConfigMeta, MachineId } from '@lody/shared';
-import { getAllAgentConfigAtom } from '@/atoms/agents';
+import type { AgentConfigListSummary, MachineId } from '@lody/shared';
+import { getAllAgentConfigListAtom } from '@/atoms/agents';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { userAtom } from '@/atoms';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
@@ -33,7 +33,7 @@ export type AccountMachineOverviewItem = {
   os?: string;
   isOnline: boolean;
   sharedWithTeam: boolean;
-  agents: AgentConfigMeta[];
+  agents: AgentConfigListSummary[];
   directories: AccountMachineDirectory[];
 };
 
@@ -57,10 +57,10 @@ export function AccountMachinesOverview() {
   );
   const ownMachineIds = useMemo(() => ownMachines.map((machine) => machine.id), [ownMachines]);
   useMachineFlockAgentConfigsForMachineIds(ownMachineIds);
-  const allAgentConfigs = useAtomValue(getAllAgentConfigAtom);
+  const allAgentConfigs = useAtomValue(getAllAgentConfigListAtom);
 
   const items = useMemo<AccountMachineOverviewItem[]>(() => {
-    const agentsByMachine = new Map<MachineId, AgentConfigMeta[]>();
+    const agentsByMachine = new Map<MachineId, AgentConfigListSummary[]>();
     for (const config of allAgentConfigs) {
       if (!agentsByMachine.has(config.machineId)) agentsByMachine.set(config.machineId, []);
       agentsByMachine.get(config.machineId)?.push(config);

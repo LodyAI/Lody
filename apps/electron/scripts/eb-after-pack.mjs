@@ -111,6 +111,7 @@ export default async function afterPack(context) {
   // staged-relative locations rather than guessing the per-platform file names here.
   const nativeTarget = { platform: platform === 'mas' ? 'darwin' : platform, arch: archName }
   const packedNodeModulesDir = path.join(packedCliDir, 'node_modules')
+  const packedRepoEngineDir = path.join(packedNodeModulesDir, '@loro-dev/loro-repo-engine')
   const packedFromStaged = (stagedPath) =>
     path.join(packedNodeModulesDir, path.relative(stagedNodeModulesDir, stagedPath))
   const packedBindingPath = packedFromStaged(stagedSqliteBindingPath(nativeTarget))
@@ -119,6 +120,24 @@ export default async function afterPack(context) {
     recursive: true,
     force: true
   })
+  const repoSuffix = `${nativeTarget.platform}-${archName}${nativeTarget.platform === 'linux' ? '-gnu' : nativeTarget.platform === 'win32' ? '-msvc' : ''}`
+  for (const file of ['package.json', 'index.js', `loro-repo-engine.${repoSuffix}.node`]) {
+    if (!fs.existsSync(path.join(packedRepoEngineDir, file)))
+      throw new Error(`[native-repo] packaged runtime is missing ${file}`)
+  }
+  for (const entry of [
+    'native-machine-catalog-migrate.js',
+    'native-schedule-registry-migrate.js',
+    'native-workspace-meta-migrate.js',
+    'native-machine-catalog-verify.js',
+    'native-workspace-catalog-migrate.js',
+    'native-repo-host.js',
+    'native-repo-independent-host.js',
+    'native-repo-independent-engine.js'
+  ]) {
+    if (!fs.existsSync(path.join(packedCliDir, entry)))
+      throw new Error(`[native-repo] packaged entry is missing ${entry}`)
+  }
   if (!fs.existsSync(packedBindingPath)) {
     throw new Error(`[embedded-cli] sqlite binding missing after copy: ${packedBindingPath}`)
   }
@@ -229,6 +248,23 @@ export default async function afterPack(context) {
         `the packaged app would crash-loop on CLI autostart.\n${detail}`
     )
   }
+
+  const repoProbe = spawnSync(
+    cliRuntimePath,
+    [
+      '-e',
+      "const v = require(process.argv[1]).engineVersion(); if (v.package !== '0.1.0' || v.protocol !== 2) process.exit(1)",
+      packedRepoEngineDir
+    ],
+    {
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      encoding: 'utf8',
+      timeout: SMOKE_TIMEOUT_MS,
+      windowsHide: true
+    }
+  )
+  if (repoProbe.error || repoProbe.status !== 0)
+    throw new Error('[native-repo] packaged engine failed to load')
 
   const roostProbe = spawnSync(
     cliRuntimePath,

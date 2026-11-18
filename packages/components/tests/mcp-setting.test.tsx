@@ -15,6 +15,8 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 const catalog = vi.hoisted(() => ({
   servers: Array<WorkspaceMcpServerMeta>(),
+  actualCatalog: false,
+  runtime: undefined as WorkspaceRuntime | undefined,
   upsert: vi.fn<(entry: WorkspaceMcpServerMeta) => Promise<void>>(),
   requestLocalMcpTools: vi.fn<WorkspaceRuntime['requestLocalMcpTools']>(),
   requestLocalMcpAuthentication: vi.fn<WorkspaceRuntime['requestLocalMcpAuthentication']>(
@@ -28,16 +30,32 @@ vi.mock('../src/atoms/runtime', async (importOriginal) => {
   const { atom } = await import('jotai');
   return {
     ...actual,
-    activeWorkspaceRuntimeAtom: atom({
-      requestLocalMcpTools: catalog.requestLocalMcpTools,
-      requestLocalMcpAuthentication: catalog.requestLocalMcpAuthentication,
-    } satisfies Pick<WorkspaceRuntime, 'requestLocalMcpTools' | 'requestLocalMcpAuthentication'>),
+    activeWorkspaceRuntimeAtom: atom(
+      () =>
+        catalog.runtime ??
+        ({
+          requestLocalMcpTools: catalog.requestLocalMcpTools,
+          requestLocalMcpAuthentication: catalog.requestLocalMcpAuthentication,
+        } satisfies Pick<
+          WorkspaceRuntime,
+          'requestLocalMcpTools' | 'requestLocalMcpAuthentication'
+        >)
+    ),
   };
 });
-vi.mock('../src/hooks/use-workspace-mcp-catalog', () => ({
-  useWorkspaceMcpCatalog: () => ({ servers: catalog.servers, synced: true }),
-  useWorkspaceMcpCatalogActions: () => ({ upsert: catalog.upsert, remove: vi.fn() }),
-}));
+vi.mock('../src/hooks/use-workspace-mcp-catalog', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/hooks/use-workspace-mcp-catalog')>();
+  return {
+    useWorkspaceMcpCatalog: () =>
+      catalog.actualCatalog
+        ? actual.useWorkspaceMcpCatalog()
+        : { servers: catalog.servers, synced: true, loaded: true },
+    useWorkspaceMcpCatalogActions: () =>
+      catalog.actualCatalog
+        ? actual.useWorkspaceMcpCatalogActions()
+        : { upsert: catalog.upsert, remove: vi.fn() },
+  };
+});
 vi.mock('../src/hooks/use-mobile', () => ({ useIsMobile: () => false }));
 
 it.each(['tools', 'empty', 'error'])(
@@ -333,3 +351,279 @@ it.each(['cancel', 'close-before-ready', 'manual'] as const)(
     }
   }
 );
+
+it('creates a default-enabled MCP through the native reader/IPC command path and updates the real settings catalog', async () => {
+  const [
+    { default: fs },
+    { default: os },
+    { default: path },
+    { openNativeRepoTestHost },
+    { createNativeWorkspaceCatalog },
+    { createNativeWorkspaceCatalogIpc },
+    { parseWorkspaceCatalogIpcCommand },
+  ] = await Promise.all([
+    import('node:fs/promises'),
+    import('node:os'),
+    import('node:path'),
+    import('./native-repo-host.test-support'),
+    import('@lody/shared/node/native-workspace-catalog'),
+    import('../src/providers/native-workspace-catalog-ipc'),
+    import('@lody/shared/workspace-catalog-ipc'),
+  ]);
+  await initI18n('en');
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-native-mcp-setting-'));
+  const host = await openNativeRepoTestHost(dataDir);
+  try {
+    const workspaceId = 'mcp-settings-native' as import('@lody/shared').WorkspaceId;
+    const binding = { workspaceId, accountId: 'owner' };
+    const room = { kind: 'flock' as const, id: `${workspaceId}:wf:workspace` };
+    await host.client.createRoom(workspaceId, room);
+    const backend = createNativeWorkspaceCatalog({
+      client: host.client,
+      namespace: workspaceId,
+      binding,
+      authorize: () => true,
+      authority: { current: () => false, subscribe: () => () => {} },
+      confirmUpload: async () => {},
+    });
+    const events = new Set<
+      (event: import('@lody/shared/workspace-catalog-ipc').WorkspaceCatalogIpcEvent) => void
+    >();
+    const observations = new Map<string, { leaseId: string; close(): Promise<void> }>();
+    const initial = Promise.withResolvers<void>();
+    const releaseInitial = Promise.withResolvers<void>();
+    const initialVisible = Promise.withResolvers<void>();
+    let first = true;
+    const committed = Promise.withResolvers<void>(),
+      visible = Promise.withResolvers<void>();
+    const registrationId = crypto.randomUUID();
+    const source = createNativeWorkspaceCatalogIpc(
+      binding,
+      registrationId,
+      {
+        readWorkspaceCatalog: () => backend.read(binding),
+        executeWorkspaceCatalog: async (_registrationId, command) => {
+          const result = await backend.execute(binding, parseWorkspaceCatalogIpcCommand(command));
+          committed.resolve();
+          return result;
+        },
+        uploadWorkspaceCatalog: () => backend.upload(binding),
+        observeWorkspaceCatalog: async (scope) => {
+          const leaseId = crypto.randomUUID();
+          const observation = await backend.observe(
+            binding,
+            (update) => {
+              const event = { ...scope, leaseId, type: 'snapshot' as const, update };
+              const publish = () => {
+                for (const listener of events) listener(event);
+                initialVisible.resolve();
+                if (update.projection.servers.length) visible.resolve();
+              };
+              if (first) {
+                first = false;
+                initial.resolve();
+                void releaseInitial.promise.then(publish);
+              } else publish();
+            },
+            (error) => visible.reject(error)
+          );
+          observations.set(scope.requestId, { leaseId, close: observation.close });
+          return { leaseId };
+        },
+        unobserveWorkspaceCatalog: async (scope) => {
+          await observations.get(scope.requestId)?.close();
+          observations.delete(scope.requestId);
+        },
+      },
+      (listener) => {
+        events.add(listener);
+        return () => events.delete(listener);
+      }
+    );
+    catalog.runtime = {
+      workspaceId,
+      accountId: 'owner',
+      workspaceCatalogReader: source.reader,
+      workspaceCatalogCommands: source.commands,
+      repo: {
+        openFlockDoc: async () => {
+          throw new Error('Native MCP reopened legacy Flock/IDB');
+        },
+      },
+      writer: {
+        flockRowPut: async () => {
+          throw new Error('Native MCP used old writer');
+        },
+      },
+      requestLocalMcpTools: catalog.requestLocalMcpTools,
+      requestLocalMcpAuthentication: catalog.requestLocalMcpAuthentication,
+    } as unknown as WorkspaceRuntime;
+    catalog.actualCatalog = true;
+    catalog.requestLocalMcpTools.mockResolvedValue({ type: 'mcp/tools', tools: [] });
+    const store = createStore();
+    store.set(userAtom, { id: 'owner', email: 'owner@example.test', name: 'Owner' });
+    store.set(localProbeResultAtom, { ok: true, machineId: 'local' });
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const click = async (text: string) =>
+      act(async () => {
+        const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+          (node) => node.textContent?.trim() === text
+        );
+        if (!button) throw new Error(`Missing ${text}`);
+        button.click();
+      });
+    const fill = async (suffix: string, value: string) =>
+      act(async () => {
+        const input = document.querySelector<HTMLInputElement>(`input[id$="${suffix}"]`);
+        if (!input) throw new Error(`Missing input ${suffix}`);
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+          input,
+          value
+        );
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    try {
+      await act(async () =>
+        root.render(
+          <Provider store={store}>
+            <Tooltip.Provider>
+              <McpSetting />
+            </Tooltip.Provider>
+          </Provider>
+        )
+      );
+      const add = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+        (node) => node.textContent?.trim() === 'Add server'
+      );
+      await initial.promise;
+      expect(add?.disabled).toBe(true);
+      await act(async () => {
+        releaseInitial.resolve();
+        await initialVisible.promise;
+      });
+      expect(add?.disabled).toBe(false);
+      await click('Add server');
+      await fill('-name', 'Native editable MCP');
+      await fill('-command', 'synthetic-node');
+      await act(async () => document.querySelector<HTMLButtonElement>('[role="switch"]')!.click());
+      await click('Save configuration');
+      await committed.promise;
+      const saved = await backend.read(binding);
+      expect(saved.servers).toMatchObject([
+        {
+          name: 'Native editable MCP',
+          enabledByDefault: true,
+          connection: { transport: 'stdio', command: 'synthetic-node' },
+        },
+      ]);
+      await act(async () => {
+        await visible.promise;
+      });
+      expect(container.textContent).toContain('Native editable MCP');
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      releaseInitial.resolve();
+      await source.close();
+      catalog.actualCatalog = false;
+      catalog.runtime = undefined;
+    }
+  } finally {
+    catalog.actualCatalog = false;
+    catalog.runtime = undefined;
+    await host.close();
+    await fs.rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+it('keeps a workspace MCP draft when local execution identity arrives after the editor opens', async () => {
+  await initI18n('en');
+  catalog.actualCatalog = false;
+  catalog.servers = [];
+  catalog.upsert.mockReset();
+  catalog.upsert.mockImplementation(async (entry) => {
+    catalog.servers = [entry];
+  });
+  const tools =
+    Promise.withResolvers<Awaited<ReturnType<WorkspaceRuntime['requestLocalMcpTools']>>>();
+  catalog.requestLocalMcpTools.mockImplementation(() => tools.promise);
+  const store = createStore();
+  store.set(userAtom, { id: 'owner', email: 'owner@example.test', name: 'Owner' });
+  store.set(localProbeResultAtom, null);
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <Provider store={store}>
+          <Tooltip.Provider>
+            <McpSetting />
+          </Tooltip.Provider>
+        </Provider>
+      )
+    );
+    const click = async (text: string) =>
+      act(async () => {
+        const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+          (node) => node.textContent?.trim() === text
+        );
+        if (!button) throw new Error('Missing ' + text);
+        button.click();
+      });
+    await click('Add server');
+    const name = document.querySelector<HTMLInputElement>('input[id$="-name"]');
+    if (!name) throw new Error('Missing Server name');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+        name,
+        'Retained workspace draft'
+      );
+      name.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    // The catalog is already ready. Execution availability arrives independently.
+    await act(async () => store.set(localProbeResultAtom, { ok: true, machineId: 'late-local' }));
+    expect(document.querySelector<HTMLInputElement>('input[id$="-name"]')?.value).toBe(
+      'Retained workspace draft'
+    );
+    const command = document.querySelector<HTMLInputElement>('input[id$="-command"]');
+    if (!command) throw new Error('Missing Command');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+        command,
+        'synthetic-node'
+      );
+      command.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click('Save configuration');
+    expect(catalog.servers).toMatchObject([
+      {
+        name: 'Retained workspace draft',
+        connection: { transport: 'stdio', command: 'synthetic-node' },
+      },
+    ]);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    // A result from the former execution machine cannot populate this new binding.
+    await act(async () =>
+      store.set(localProbeResultAtom, { ok: true, machineId: 'replacement-local' })
+    );
+    await act(async () =>
+      tools.resolve({ type: 'mcp/tools', tools: [{ name: 'stale_private_tool' }] })
+    );
+    expect(container.textContent).not.toContain('stale_private_tool');
+    await click('Add server');
+    expect(document.querySelector('input[id$="-name"]')).not.toBeNull();
+    await act(async () =>
+      store.set(userAtom, { id: 'different-owner', email: 'other@example.test', name: 'Other' })
+    );
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  } finally {
+    tools.resolve({ type: 'mcp/tools', tools: [] });
+    await act(async () => root.unmount());
+    container.remove();
+    catalog.servers = [];
+  }
+});

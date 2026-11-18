@@ -72,7 +72,8 @@ export async function persistHumanInputReceipt(
   if (!userId) throw new Error('Human input requires an explicit user identity');
   await runtime.sendResources.withSessionStore(
     sessionId,
-    (store) => {
+    async (store) => {
+      if (store.nativeBody) return store.nativeBody.recordHumanInputReceipt(entry.id, userId);
       if (store.getState().humanInputReceipts?.[entry.id]?.userId === userId) return;
       store.setState((draft: SessionDocDraft) => {
         draft.humanInputReceipts ??= {};
@@ -139,6 +140,20 @@ export async function writeUserTurn(
   await prepareUserTurnWrite(runtime, send, signal);
   await persistHumanInputReceipt(runtime, send.sessionId, send.entry, signal);
   throwIfSendAborted(signal);
+  if (!send.queue && send.delivery.kind === 'dispatch') {
+    const dispatched = await runtime.sendResources.withSessionStore(
+      send.sessionId,
+      async (store) => {
+        if (!store.nativeBody) return false;
+        // One admitted Node command owns history and the authoritative activation
+        // handoff. A lost reply stays unknown; it is never replayed here.
+        await store.nativeBody.dispatchUserTurn(send.entry);
+        return true;
+      },
+      signal
+    );
+    if (dispatched) return;
+  }
   if (send.queue) {
     try {
       await runtime.writer.enqueueSessionMessage(

@@ -1,8 +1,23 @@
+import type { CloudFileIndexEvent } from './cloud-file-index-ipc';
+import type { NativeDocumentDomainEvent } from './native-document-domain-ipc';
+import type { RendererDocumentDomainRequest } from './renderer-document-domain-migration';
+import type { RendererSessionBodyRequest } from './renderer-session-body-migration';
+import type { WorkspaceMetaEvent } from './native-workspace-meta-ipc';
 import type {
   LocalLoroDataPlaneClientMessage,
   LocalLoroDataPlaneServerMessage,
 } from './local-loro-data-plane';
 import type { TerminalDataEvent, TerminalExitEvent, TerminalTitleEvent } from './terminal-protocol';
+import type { RendererWfRequest } from './renderer-room-migration';
+import type { RendererWfPublishedOwner } from './renderer-room-migration';
+import type { WorkspaceCatalogIpcEvent } from './workspace-catalog-ipc';
+import type { MachineCatalogIpcEvent } from './machine-catalog-ipc';
+import type { ScheduleRegistryIpcEvent } from './schedule-registry-ipc';
+import type { NativeSessionEvent } from './native-session-domain';
+import type {
+  RendererFlockGroupRequest,
+  RendererFlockGroupRegistration,
+} from './renderer-flock-room-group';
 import type {
   ElectronCliState,
   ElectronLoginState,
@@ -18,6 +33,22 @@ import type {
 } from './electron-ipc';
 
 export type IpcPushMap = {
+  'cloudFileIndex.snapshot': CloudFileIndexEvent;
+  'documentDomains.event': NativeDocumentDomainEvent;
+  'documentDomainMigration.request': RendererDocumentDomainRequest;
+  'scheduleRegistry.event': ScheduleRegistryIpcEvent;
+  'sessionBodyMigration.request': RendererSessionBodyRequest;
+  'workspaceMeta.event': WorkspaceMetaEvent;
+  'nativeSession.event': NativeSessionEvent;
+  'localPlatform.workspaceMetaMigration': RendererFlockGroupRequest;
+  'localPlatform.workspaceMetaOwner': RendererFlockGroupRegistration;
+  'localPlatform.scheduleRegistryMigration': RendererFlockGroupRequest;
+  'localPlatform.scheduleRegistryOwner': RendererFlockGroupRegistration;
+  'localPlatform.machineFlockMigration': RendererFlockGroupRequest;
+  'localPlatform.machineFlockOwner': RendererFlockGroupRegistration;
+  'machineCatalog.event': MachineCatalogIpcEvent;
+  'localPlatform.workspaceCatalog': WorkspaceCatalogIpcEvent;
+  'localPlatform.workspaceFlockOwner': RendererWfPublishedOwner;
   'terminal.event':
     | TerminalDataEvent
     | TerminalExitEvent
@@ -25,6 +56,7 @@ export type IpcPushMap = {
     | { type: 'error'; code: string; message: string };
   'loro.event': LocalLoroDataPlaneServerMessage;
   'loro.status': boolean;
+  'localPlatform.workspaceFlockMigration': RendererWfRequest;
   'cli.state': ElectronCliState;
   'updater.state': ElectronUpdaterState;
   'storageGuard.state': ElectronStorageGuardState;
@@ -60,9 +92,26 @@ export type IpcSendMap = {
 };
 
 export const IPC_PUSH_CHANNELS = {
+  cloudFileIndexSnapshot: 'cloudFileIndex.snapshot',
+  documentDomainsEvent: 'documentDomains.event',
+  documentDomainMigrationRequest: 'documentDomainMigration.request',
+  scheduleRegistryEvent: 'scheduleRegistry.event',
+  sessionBodyMigrationRequest: 'sessionBodyMigration.request',
+  workspaceMetaEvent: 'workspaceMeta.event',
+  nativeSessionEvent: 'nativeSession.event',
+  workspaceMetaMigration: 'localPlatform.workspaceMetaMigration',
+  workspaceMetaOwner: 'localPlatform.workspaceMetaOwner',
+  scheduleRegistryMigration: 'localPlatform.scheduleRegistryMigration',
+  scheduleRegistryOwner: 'localPlatform.scheduleRegistryOwner',
+  machineFlockMigration: 'localPlatform.machineFlockMigration',
+  machineFlockOwner: 'localPlatform.machineFlockOwner',
+  machineCatalogEvent: 'machineCatalog.event',
   terminalEvent: 'terminal.event',
   loroEvent: 'loro.event',
   loroStatus: 'loro.status',
+  workspaceFlockMigration: 'localPlatform.workspaceFlockMigration',
+  workspaceCatalog: 'localPlatform.workspaceCatalog',
+  workspaceFlockOwner: 'localPlatform.workspaceFlockOwner',
   cliState: 'cli.state',
   updaterState: 'updater.state',
   storageGuardState: 'storageGuard.state',

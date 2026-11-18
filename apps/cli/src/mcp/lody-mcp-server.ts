@@ -2577,6 +2577,18 @@ const readDaemonCatalogFreshness = async (
   manager: LoroDocumentManager,
   docId: string | undefined
 ): Promise<MachineFlockFreshness> => {
+  const native = manager.getMachineCatalogRuntimePort?.();
+  if (
+    native &&
+    docId === getMachineFlockDocId(native.binding.workspaceId, native.binding.machineId)
+  ) {
+    try {
+      await native.readCatalog();
+      return { confirmed: true };
+    } catch (error) {
+      return { confirmed: false, error };
+    }
+  }
   if (await manager.catalogBaselineReady(docId, 0)) return { confirmed: true };
   return {
     confirmed: false,
@@ -2902,6 +2914,12 @@ const readMachineAcpCapabilities = async (
   workspaceId: WorkspaceId,
   machineId: MachineId
 ): Promise<Record<string, AcpCapabilityCacheEntry>> => {
+  const native = manager.getMachineCatalogRuntimePort?.(machineId);
+  if (native) {
+    if (native.binding.workspaceId !== workspaceId || native.binding.machineId !== machineId)
+      throw new Error('Machine capability scope mismatch');
+    return (await native.readCatalog()).capabilities;
+  }
   const handle = await manager.repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
   return getMachineFlockAcpCapabilities(
     readMachineFlockRowsFromFlock(handle.flock, {
@@ -2915,6 +2933,12 @@ const readMachineRateLimits = async (
   workspaceId: WorkspaceId,
   machineId: MachineId
 ): Promise<Record<string, import('acp-extension-core').RateLimit>> => {
+  const native = manager.getMachineCatalogRuntimePort?.(machineId);
+  if (native) {
+    if (native.binding.workspaceId !== workspaceId || native.binding.machineId !== machineId)
+      throw new Error('Machine quota scope mismatch');
+    return (await native.readCatalog()).rateLimits;
+  }
   const handle = await manager.repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
   return getMachineFlockRateLimits(
     readMachineFlockRowsFromFlock(handle.flock, { families: ['rateLimit'] })
@@ -2950,7 +2974,8 @@ const buildSessionWorkContext = async (
     const localProjects = await readMachineLocalProjects(
       manager.repo,
       workspaceId,
-      session.machineId
+      session.machineId,
+      manager.getMachineCatalogRuntimePort?.(session.machineId)
     );
     const localProject = localProjects[project.localProjectId];
     if (!localProject) {
@@ -3104,9 +3129,12 @@ const buildSessionCreateOptions = async (
       manager,
       getMachineFlockDocId(workspaceId, selectedMachine.id)
     );
-    const allAgentConfigs = await listMergedAgentConfigs(manager.repo, workspaceId, [
-      selectedMachine.id,
-    ]);
+    const allAgentConfigs = await listMergedAgentConfigs(
+      manager.repo,
+      workspaceId,
+      [selectedMachine.id],
+      manager.getMachineCatalogRuntimePort?.()
+    );
     const agentConfigQuery = normalizeCliValue(input.agentConfigQuery)?.toLowerCase();
     if (allAgentConfigs.length === 0) {
       assertMachineFlockCacheSufficient(flockFreshness, 'Agent config catalog is unavailable.', {
@@ -3148,7 +3176,12 @@ const buildSessionCreateOptions = async (
         ? currentSession.project.localProjectId
         : undefined;
     const allLocalProjects = Object.values(
-      await readMachineLocalProjects(manager.repo, workspaceId, selectedMachine.id)
+      await readMachineLocalProjects(
+        manager.repo,
+        workspaceId,
+        selectedMachine.id,
+        manager.getMachineCatalogRuntimePort?.(selectedMachine.id)
+      )
     );
     const localProjectCandidates = allLocalProjects.filter((project) => {
       if (localProjectQuery) {
@@ -3284,7 +3317,9 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
     }
     const invoking = await resolveInvokingTurnContext(currentSession, manager);
     const roleCatalog = args.agentRoleId
-      ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
+      ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId, [
+          args.agentRoleId,
+        ])
       : undefined;
     const catalogRole = args.agentRoleId ? roleCatalog?.get(args.agentRoleId) : undefined;
     const resolved = resolveMcpSessionCreate(
@@ -4092,7 +4127,11 @@ const startSessionCreateManyOperation = async (
     const expanded = args.items.map((item) => ({ ...(args.defaults ?? {}), ...item }));
     const invoking = await resolveInvokingTurnContext(requester, manager);
     const roleCatalog = expanded.some((item) => Boolean(item.agentRoleId))
-      ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
+      ? await loadWorkspaceAgentRoleCatalog(
+          manager,
+          workspace.id as WorkspaceId,
+          expanded.flatMap((item) => (item.agentRoleId ? [item.agentRoleId] : []))
+        )
       : undefined;
     const cloneableRepo = await resolveRoleCloneableRepo(
       auth,
@@ -5195,7 +5234,9 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
           }
           const invoking = await resolveInvokingTurnContext(currentSession, manager);
           const roleCatalog = args.agentRoleId
-            ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
+            ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId, [
+                args.agentRoleId,
+              ])
             : undefined;
           const catalogRole = args.agentRoleId ? roleCatalog?.get(args.agentRoleId) : undefined;
           const resolved = resolveMcpSessionCreate(

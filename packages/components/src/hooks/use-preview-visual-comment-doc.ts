@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useAtomValue } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -84,6 +84,13 @@ export function usePreviewVisualCommentDoc(
   const currentUser = options?.currentUser ?? null;
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const browserOnline = useAtomValue(browserOnlineAtom);
+  const ownerTarget = useMemo(() => ({ domain: 'preview_comments' as const, id: sessionId }), [sessionId]);
+  const ownerEpoch = useSyncExternalStore(
+    useCallback((listener) => runtime?.subscribeDocumentDomainEpoch?.(ownerTarget, listener) ?? (() => {}), [runtime, ownerTarget]),
+    useCallback(() => runtime?.getDocumentDomainEpoch?.(ownerTarget) ?? 0, [runtime, ownerTarget]),
+    () => 0
+  );
+  const [nativeSource, setNativeSource] = useState(false);
   const fallbackDoc = useMemo<PreviewVisualCommentDocInput>(
     () => ({ meta: { sessionId }, turns: {} }),
     [sessionId]
@@ -97,6 +104,7 @@ export function usePreviewVisualCommentDoc(
   useEffect(() => {
     let cancelled = false;
     let acquired = false;
+    let acquiredStore: PreviewVisualCommentDocStore | undefined;
     let unsubscribe: (() => void) | null = null;
     let unsubscribeSyncState: (() => void) | null = null;
     setReady(false);
@@ -113,16 +121,19 @@ export function usePreviewVisualCommentDoc(
       try {
         const store = await runtime.acquirePreviewVisualCommentStore(sessionId);
         acquired = true;
+        acquiredStore = store;
         if (cancelled) {
-          runtime.releasePreviewVisualCommentStoreRef(sessionId);
+          runtime.releasePreviewVisualCommentStoreRef(sessionId, acquiredStore);
           return;
         }
+        setNativeSource(Boolean(store.nativePreview));
         setState(store.getState());
         setSyncState(store.getSyncState());
         setReady(true);
         unsubscribeSyncState = store.subscribeSyncState((nextState) => {
           if (!cancelled) {
             setSyncState(nextState);
+            if (store.nativePreview) setReady(nextState === 'synced');
           }
         });
         unsubscribe = store.subscribe((nextState) => {
@@ -146,10 +157,10 @@ export function usePreviewVisualCommentDoc(
         unsubscribeSyncState();
       }
       if (acquired) {
-        runtime.releasePreviewVisualCommentStoreRef(sessionId);
+        runtime.releasePreviewVisualCommentStoreRef(sessionId, acquiredStore);
       }
     };
-  }, [enabled, fallbackDoc, runtime, sessionId]);
+  }, [enabled, fallbackDoc, runtime, sessionId, ownerEpoch]);
 
   const withStore = useCallback(
     async <T>(fn: (store: PreviewVisualCommentDocStore) => Promise<T> | T): Promise<T> => {
@@ -245,6 +256,6 @@ export function usePreviewVisualCommentDoc(
     markSubmitted,
     waitUntilSynced,
     ready,
-    synced: browserOnline && syncState === 'synced',
+    synced: (nativeSource || browserOnline) && syncState === 'synced',
   };
 }

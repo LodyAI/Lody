@@ -30,7 +30,20 @@ import {
 import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
 import { MessageHandler } from '../src/lib/message-handler';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
-import { SessionManager } from '../src/session/session-manager';
+import { SessionManager, type ISession } from '../src/session/session-manager';
+import type { SessionExecutionService } from '../src/session/session-execution-service';
+import type {
+  NativeSessionBodyFreezeRequest,
+  NativeSessionBodyFreezeResponse,
+  NativeSessionBodyFreezeReceipt,
+} from '@lody/shared/native-session-body-control';
+import { SessionNativeBodyMigrationControlLegacy } from '../src/session/session-native-body-migration';
+import { randomUUID } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
+import {
+  readLocalNativeSessionRoute,
+  resolveLocalNativeSessionPaths,
+} from '@lody/shared/node/native-session-routing';
 import { Session } from '../src/session/session';
 import type { WorktreeOwnerState } from '../src/session/worktree/worktree-gc';
 import { getWorktreeManager } from '../src/session/worktree/worktree-manager';
@@ -51,6 +64,13 @@ const createSilentLogger = (): Logger => ({
 });
 
 type MessageHandlerInternals = {
+  handleNativeSessionBodyMigrationControl(
+    request: NativeSessionBodyFreezeRequest
+  ): Promise<NativeSessionBodyFreezeResponse>;
+  executionService: SessionExecutionService;
+  nativeSessionBodyMigration?: SessionNativeBodyMigrationControlLegacy;
+
+  nativeMachineCommandDrain?: Promise<void>;
   buildNotificationPresentation: (
     sessionId: SessionId,
     origins: readonly string[],
@@ -85,6 +105,16 @@ type MessageHandlerInternals = {
 };
 
 function createHarness(options?: {
+  migration?: {
+    generation: string;
+    cached: Map<SessionId, ISession>;
+    pending: Map<SessionId, Promise<ISession>>;
+    freeze(
+      id: SessionId,
+      nonce: string,
+      phase: 'freeze' | 'assert'
+    ): Promise<NativeSessionBodyFreezeReceipt>;
+  };
   workspaceProjects?: WorkspaceProject[];
   catalogReady?: () => Promise<boolean>;
   history?: SessionEntry[];
@@ -202,7 +232,13 @@ function createHarness(options?: {
   };
   const presenceEntries = new Map<SessionId, unknown>();
   const workspaceDocument = {
+    getSessionBodyMigrationGeneration: () => options?.migration?.generation ?? 'fixture-generation',
+    freezeLegacySessionForNative: (id: SessionId, nonce: string, phase: 'freeze' | 'assert') => {
+      if (!options?.migration) throw new Error('Migration fixture absent');
+      return options.migration.freeze(id, nonce, phase);
+    },
     catalogBaselineReady: options?.catalogReady ?? (async () => true),
+    readWorkspaceCatalog: async () => ({ projects: options?.workspaceProjects ?? [] }),
     publishSessionPresence: (id: SessionId, _machine: unknown, status: unknown) => {
       presenceEntries.set(id, status);
     },
@@ -216,6 +252,19 @@ function createHarness(options?: {
     markMachineFlockDocDirty: vi.fn(),
   };
   const sessionManager = {
+    getSession: (id: SessionId) => options?.migration?.cached.get(id) ?? null,
+    getPendingSession: (id: SessionId) => options?.migration?.pending.get(id) ?? null,
+    retireSessionForReconfiguration: (original: ISession) =>
+      SessionManager.prototype.retireSessionForReconfiguration.call(
+        {
+          sessions: options?.migration?.cached,
+          detachSession: (session: ISession) => {
+            if (options?.migration?.cached.get(session.sessionId) === session)
+              options.migration.cached.delete(session.sessionId);
+          },
+        } as unknown as SessionManager,
+        original
+      ),
     on: vi.fn(),
     setRequestPermissionHandler: vi.fn(),
     getActiveChildSessionIds: vi.fn<SessionManager['getActiveChildSessionIds']>(
@@ -237,8 +286,8 @@ function createHarness(options?: {
     createSilentLogger(),
     {
       token: 'token',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      userId: 'user-1',
+      workspaceId: (options?.migration ? 'lw_migration' : 'workspace-1') as WorkspaceId,
+      userId: options?.migration ? 'local:migration' : 'user-1',
       machineId,
       machineName: 'machine',
       cliVersion: '0.0.0',
@@ -424,6 +473,43 @@ describe('MessageHandler terminal cleanup', () => {
       await Effect.runPromise(Scope.close(lease, Exit.void));
       await cleaning;
       vi.useRealTimers();
+    }
+  });
+
+  it('keeps the document owner open until an already admitted native machine command finishes', async () => {
+    const { handler, sessionManager } = createHarness();
+    let finish!: () => void, waiting!: () => void;
+    const command = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const joined = new Promise<void>((resolve) => {
+      waiting = resolve;
+    });
+    let documentsClosed = false;
+    const lease: PromiseLike<void> = {
+      then(resolve, reject) {
+        waiting();
+        return command.then(resolve, reject);
+      },
+    };
+    handler.nativeMachineCommandDrain = lease as Promise<void>;
+    sessionManager.cleanUp.mockImplementation(
+      async (options?: { keepWorkspaceDocumentOpen?: boolean }) => {
+        if (!options?.keepWorkspaceDocumentOpen) documentsClosed = true;
+      }
+    );
+    const cleanup = handler.cleanup();
+    try {
+      expect(await Promise.race([joined.then(() => 'waiting'), cleanup.then(() => 'closed')])).toBe(
+        'waiting'
+      );
+      expect(documentsClosed).toBe(false);
+      finish();
+      await cleanup;
+      expect(documentsClosed).toBe(true);
+    } finally {
+      finish();
+      await cleanup;
     }
   });
 
@@ -1164,5 +1250,359 @@ describe('MessageHandler terminal cleanup', () => {
     await handler.deleteLocalProjectResources(localProjectId, deleteCommand);
 
     expect(machineFlockRows).not.toContainEqual(expect.objectContaining({ key: localProjectKey }));
+  });
+});
+
+describe('MessageHandler local Session body migration admission', () => {
+  let dataRoot: string;
+  beforeEach(() => {
+    dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-session-migration-handler-'));
+    vi.stubEnv('LODY_DATA_DIR', dataRoot);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    fs.rmSync(dataRoot, { recursive: true, force: true });
+  });
+
+  function deferred<T>() {
+    let resolve: (value: T | PromiseLike<T>) => void = () => {
+      throw new Error('Not initialized');
+    };
+    const promise = new Promise<T>((done) => {
+      resolve = done;
+    });
+    return { promise, resolve };
+  }
+  function migrationHarness() {
+    const cached = new Map<SessionId, ISession>(),
+      pending = new Map<SessionId, Promise<ISession>>();
+    const sessionId = 'migration-target' as SessionId;
+    const migration = {
+      generation: 'migration-generation',
+      cached,
+      pending,
+      freeze: async (
+        id: SessionId,
+        nonce: string,
+        phase: 'freeze' | 'assert'
+      ): Promise<NativeSessionBodyFreezeReceipt> => ({
+        accountId: 'local:migration',
+        workspaceId: 'lw_migration',
+        sessionId: id,
+        nonce,
+        phase,
+        ok: true,
+        ownerGeneration: 'migration-generation',
+        source: {
+          sourceId: 'legacy-sqlite',
+          present: false,
+          sha256: '0'.repeat(64),
+          byteLength: 0,
+        },
+      }),
+    };
+    const { handler } = createHarness({ migration, sessionId });
+    const request = {
+      accountId: 'local:migration',
+      workspaceId: 'lw_migration',
+      sessionId,
+      nonce: randomUUID(),
+      phase: 'prepare' as const,
+    };
+    return { handler, migration, request, sessionId };
+  }
+  it('claims the real execution barrier before retiring idle ACP; a sibling remains admitted', async () => {
+    const { handler, migration, request, sessionId } = migrationHarness();
+    const started = deferred<void>(),
+      stopped = deferred<void>();
+    let running = true;
+    migration.cached.set(sessionId, {
+      sessionId,
+      terminate: async () => {
+        started.resolve();
+        await stopped.promise;
+        running = false;
+      },
+    } as ISession);
+    try {
+      const preparing = handler.handleNativeSessionBodyMigrationControl(request);
+      // The barrier is synchronous, before even the ACP termination await.
+      expect(handler.executionService.tryAcquireSessionRewriteConflictLease(sessionId)).toBeNull();
+      const sibling = handler.executionService.tryAcquireSessionRewriteConflictLease(
+        'sibling' as SessionId
+      );
+      expect(sibling).not.toBeNull();
+      sibling?.();
+      await started.promise;
+      expect(migration.cached.has(sessionId)).toBe(false);
+      expect(running).toBe(true);
+      // A competing nonce cannot replace the original retained ACP cleanup.
+      expect(
+        await handler.handleNativeSessionBodyMigrationControl({ ...request, nonce: randomUUID() })
+      ).toEqual({ ok: false, error: 'scope_unavailable' });
+      stopped.resolve();
+      expect(await preparing).toMatchObject({
+        ok: true,
+        prepared: true,
+        ownerGeneration: migration.generation,
+      });
+      expect(running).toBe(false);
+      expect(
+        await handler.handleNativeSessionBodyMigrationControl({ ...request, phase: 'publish' })
+      ).toEqual({ ok: false, error: 'freeze_unconfirmed' });
+      expect(handler.executionService.tryAcquireSessionRewriteConflictLease(sessionId)).toBeNull();
+      expect(
+        await handler.handleNativeSessionBodyMigrationControl({ ...request, phase: 'abort' })
+      ).toMatchObject({ ok: true, released: true });
+      const released = handler.executionService.tryAcquireSessionRewriteConflictLease(sessionId);
+      expect(released).not.toBeNull();
+      released?.();
+    } finally {
+      stopped.resolve();
+      await handler.cleanup();
+    }
+  });
+  it('retains raw ACP termination after a request deadline and a retry joins that owner', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { handler, migration, request, sessionId } = migrationHarness();
+    const started = deferred<void>(),
+      stopped = deferred<void>();
+    let live = true;
+    migration.cached.set(sessionId, {
+      sessionId,
+      terminate: async () => {
+        started.resolve();
+        await stopped.promise;
+        live = false;
+      },
+    } as ISession);
+    try {
+      const preparing = handler.handleNativeSessionBodyMigrationControl(request);
+      await started.promise;
+      await vi.advanceTimersByTimeAsync(5001);
+      expect(await preparing).toEqual({ ok: false, error: 'freeze_unconfirmed' });
+      expect(live).toBe(true);
+      expect(migration.cached.has(sessionId)).toBe(false);
+      expect(handler.executionService.tryAcquireSessionRewriteConflictLease(sessionId)).toBeNull();
+      const retried = handler.handleNativeSessionBodyMigrationControl(request);
+      stopped.resolve();
+      expect(await retried).toMatchObject({ ok: true, prepared: true });
+      expect(live).toBe(false);
+      expect(
+        await handler.handleNativeSessionBodyMigrationControl({ ...request, phase: 'abort' })
+      ).toMatchObject({ ok: true, released: true });
+    } finally {
+      stopped.resolve();
+      await handler.cleanup();
+      vi.useRealTimers();
+    }
+  });
+  it('rejects active and child admissions before freezing without blocking the sibling', async () => {
+    const { handler, request, sessionId } = migrationHarness();
+    const execution = handler.executionService as unknown as {
+      currentTurnBySession: Map<SessionId, string>;
+      childAdmissions: Map<SessionId, number>;
+    };
+    try {
+      execution.currentTurnBySession.set(sessionId, 'active-turn');
+      expect(await handler.handleNativeSessionBodyMigrationControl(request)).toEqual({
+        ok: false,
+        error: 'scope_unavailable',
+      });
+      expect(handler.executionService.getExecutionSnapshot(sessionId).hasRewriteBarrier).toBe(
+        false
+      );
+      execution.currentTurnBySession.delete(sessionId);
+      execution.childAdmissions.set(sessionId, 1);
+      expect(await handler.handleNativeSessionBodyMigrationControl(request)).toEqual({
+        ok: false,
+        error: 'scope_unavailable',
+      });
+      expect(handler.executionService.getExecutionSnapshot(sessionId).hasRewriteBarrier).toBe(
+        false
+      );
+      execution.childAdmissions.delete(sessionId);
+      const conflict = handler.executionService.tryAcquireSessionRewriteConflictLease(sessionId);
+      expect(await handler.handleNativeSessionBodyMigrationControl(request)).toEqual({
+        ok: false,
+        error: 'scope_unavailable',
+      });
+      conflict?.();
+    } finally {
+      execution.currentTurnBySession.delete(sessionId);
+      execution.childAdmissions.delete(sessionId);
+      await handler.cleanup();
+    }
+  });
+  it('joins late ACP termination during shutdown and never starts a body freeze afterwards', async () => {
+    const { handler, migration, request, sessionId } = migrationHarness();
+    const started = deferred<void>(),
+      stopped = deferred<void>();
+    let live = true;
+    migration.cached.set(sessionId, {
+      sessionId,
+      terminate: async () => {
+        started.resolve();
+        await stopped.promise;
+        live = false;
+      },
+    } as ISession);
+    migration.freeze = async () => {
+      throw new Error('Shutdown must not start body migration');
+    };
+    const preparing = handler.handleNativeSessionBodyMigrationControl(request);
+    await started.promise;
+    const owner = handler.nativeSessionBodyMigration;
+    if (!owner) throw new Error('Missing migration owner');
+    const closing = owner.close();
+    expect(live).toBe(true);
+    expect(
+      await handler.handleNativeSessionBodyMigrationControl({ ...request, phase: 'freeze' })
+    ).toEqual({ ok: false, error: 'scope_unavailable' });
+    stopped.resolve();
+    expect(await preparing).toEqual({ ok: false, error: 'freeze_unconfirmed' });
+    await closing;
+    expect(live).toBe(false);
+    expect(handler.executionService.getExecutionSnapshot(sessionId).hasRewriteBarrier).toBe(false);
+    await handler.cleanup();
+  });
+  it('rejects pending creation without retaining an execution barrier or touching a body', async () => {
+    const { handler, migration, request, sessionId } = migrationHarness();
+    const pending = deferred<ISession>();
+    migration.pending.set(sessionId, pending.promise);
+    migration.freeze = async () => {
+      throw new Error('Busy Session must never be drained');
+    };
+    try {
+      expect(await handler.handleNativeSessionBodyMigrationControl(request)).toEqual({
+        ok: false,
+        error: 'scope_unavailable',
+      });
+      expect(handler.executionService.getExecutionSnapshot(sessionId).hasRewriteBarrier).toBe(
+        false
+      );
+      const conflict = handler.executionService.tryAcquireSessionRewriteConflictLease(sessionId);
+      expect(conflict).not.toBeNull();
+      conflict?.();
+    } finally {
+      migration.pending.clear();
+      await handler.cleanup();
+    }
+  });
+  it('retains a detached ACP when termination fails and retries that original owner during cleanup', async () => {
+    const { handler, migration, request, sessionId } = migrationHarness();
+    const failure = new Error('Synthetic ACP release failed');
+    let mayClose = false,
+      open = true;
+    migration.cached.set(sessionId, {
+      sessionId,
+      terminate: async () => {
+        if (!mayClose) throw failure;
+        open = false;
+      },
+    } as ISession);
+    expect(await handler.handleNativeSessionBodyMigrationControl(request)).toEqual({
+      ok: false,
+      error: 'freeze_unconfirmed',
+    });
+    expect(migration.cached.has(sessionId)).toBe(false);
+    expect(open).toBe(true);
+    expect(handler.executionService.tryAcquireSessionRewriteConflictLease(sessionId)).toBeNull();
+    const owner = handler.nativeSessionBodyMigration;
+    if (!owner) throw new Error('Missing migration owner');
+    await expect(owner.close()).rejects.toBeInstanceOf(AggregateError);
+    expect(open).toBe(true);
+    expect(await owner.handle(request)).toEqual({ ok: false, error: 'scope_unavailable' });
+    mayClose = true;
+    await owner.close();
+    expect(open).toBe(false);
+    await handler.cleanup();
+  });
+  it('revalidates each assert and releases a published body only after actual route selection', async () => {
+    const { handler, migration, request, sessionId } = migrationHarness();
+    const binding = {
+      accountId: request.accountId,
+      workspaceId: request.workspaceId as WorkspaceId,
+      dataRoot,
+    };
+    const selected = resolveLocalNativeSessionPaths(binding);
+    fs.mkdirSync(path.dirname(selected.journalPath), { recursive: true });
+    const journal = new DatabaseSync(selected.journalPath);
+    journal.exec(
+      'CREATE TABLE native_loro_document_migrations(binding TEXT,room_id TEXT,manifest TEXT,stage TEXT)'
+    );
+    journal.prepare('INSERT INTO native_loro_document_migrations VALUES(?,?,?,?)').run(
+      selected.migrationBinding,
+      getSessionRoomId(sessionId),
+      JSON.stringify({
+        family: 'session',
+        binding: selected.migrationBinding,
+        namespace: binding.workspaceId,
+        roomId: getSessionRoomId(sessionId),
+        migrationId: request.nonce,
+        targetGeneration: 'synthetic-artifact-schema',
+        sourceIds: ['legacy-sqlite'],
+      }),
+      'legacy'
+    );
+    const select = (stage: 'legacy' | 'frozen' | 'native') =>
+      journal.prepare('UPDATE native_loro_document_migrations SET stage=?').run(stage);
+    let sourcePresent = false;
+    const control = new SessionNativeBodyMigrationControlLegacy({
+      accountId: request.accountId,
+      workspaceId: request.workspaceId,
+      generation: () => migration.generation,
+      unavailable: () => false,
+      tryBarrier: (id) => handler.executionService.tryAcquireSessionRewriteBarrier(id),
+      snapshot: (id) => handler.executionService.getExecutionSnapshot(id),
+      pending: () => null,
+      cached: () => null,
+      retire: async () => {},
+      flush: async () => {},
+      route: () => readLocalNativeSessionRoute(binding, getSessionRoomId(sessionId)),
+      freeze: async (id, nonce, phase) => ({
+        ...(await migration.freeze(id, nonce, phase)),
+        source: {
+          sourceId: 'legacy-sqlite',
+          present: sourcePresent,
+          sha256: '0'.repeat(64),
+          byteLength: sourcePresent ? 1 : 0,
+        },
+      }),
+    });
+    try {
+      expect(await control.handle(request)).toMatchObject({ ok: true, prepared: true });
+      select('frozen');
+      expect(await control.handle({ ...request, phase: 'freeze' })).toMatchObject({
+        ok: true,
+        source: { present: false },
+      });
+      expect(await control.handle({ ...request, phase: 'assert' })).toMatchObject({
+        ok: true,
+        source: { present: false },
+      });
+      sourcePresent = true;
+      expect(await control.handle({ ...request, phase: 'assert' })).toMatchObject({
+        ok: true,
+        source: { present: true },
+      });
+      expect(await control.handle({ ...request, phase: 'abort' })).toEqual({
+        ok: false,
+        error: 'freeze_unconfirmed',
+      });
+      expect(handler.executionService.getExecutionSnapshot(sessionId).hasRewriteBarrier).toBe(true);
+      select('native');
+      expect(await control.handle({ ...request, phase: 'publish' })).toMatchObject({
+        ok: true,
+        released: true,
+      });
+      expect(handler.executionService.getExecutionSnapshot(sessionId).hasRewriteBarrier).toBe(
+        false
+      );
+    } finally {
+      await control.close();
+      await handler.cleanup();
+      journal.close();
+    }
   });
 });

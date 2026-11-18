@@ -12,7 +12,7 @@ import { encodeExportPathSegment, joinExportPath } from './path-utils';
 import { fetchWorkspaceUsageBundle } from './workspace-usage';
 import type { ExportManifest, ExportSessionSummary } from './types';
 import { formatErrorMessage } from '@/utils/format-error';
-import { getScheduleRegistryFlockDocId, ScheduleRepository } from '@lody/shared';
+import { ScheduleRepository } from '@lody/shared';
 import { listWorkspaceScheduleIds } from '../schedules/schedule-documents';
 
 type WorkspaceDescriptor = {
@@ -65,29 +65,29 @@ async function writeText(filePath: string, value: string): Promise<void> {
 }
 
 async function writeRepoMetaJson(manager: LoroDocumentManager, outputDir: string): Promise<void> {
+  const binary = await manager.exportNativeMetaSnapshot();
+  if (binary) {
+    await fs.mkdir(outputDir, { recursive: true });
+    await fs.writeFile(path.join(outputDir, 'meta.flock'), binary);
+    await writeJson(path.join(outputDir, 'meta.json'), { format: 'flock', snapshot: 'meta.flock' });
+    return;
+  }
   const meta = (manager.repo as unknown as RepoWithMetaFlock).metaFlock;
   const exported = await Promise.resolve(meta.exportJson(undefined, Date.now()));
   await writeJson(path.join(outputDir, 'meta.json'), exported);
 }
 
 async function loadSessionMetas(manager: LoroDocumentManager): Promise<SessionMeta[]> {
-  const scanner = manager.repo.getMeta();
-  if (!scanner) {
-    return [];
-  }
-
-  const roomIds = new Set<string>();
-  const rows = await scanner.scan({ prefix: ['m'] });
-  for (const row of rows) {
-    const key = row.key;
-    if (!Array.isArray(key) || key.length < 2) {
-      continue;
-    }
-    const roomId = key[1];
-    if (typeof roomId === 'string' && roomId.startsWith('session-')) {
-      roomIds.add(roomId);
-    }
-  }
+  const roomIds = new Set(
+    (await manager.repo.listDoc())
+      .filter(
+        (row) =>
+          row.docId.startsWith('session-') &&
+          !isLoroRepoDocDeleted(row) &&
+          Object.keys(row.meta).length > 0
+      )
+      .map((row) => row.docId)
+  );
 
   const metas = await Promise.all(
     [...roomIds].map(async (roomId) => {
@@ -201,7 +201,11 @@ export async function exportWorkspaceData(
   ) {
     const scheduleRepository = new ScheduleRepository(
       options.manager.repo,
-      options.workspace.id as WorkspaceId
+      options.workspace.id as WorkspaceId,
+      {
+        registry: options.manager.scheduleRegistry,
+        definitions: options.manager.scheduleDefinitions,
+      }
     );
     const scheduleIds = await listWorkspaceScheduleIds(
       options.manager,
@@ -226,12 +230,10 @@ export async function exportWorkspaceData(
       scheduleIndex.push({ scheduleId: id, title: document.definition.title });
     }
     await writeJson(path.join(options.outputDir, 'schedules', 'index.json'), scheduleIndex);
-    const scheduleRegistry = await options.manager.repo.openFlockDoc(
-      getScheduleRegistryFlockDocId(options.workspace.id as WorkspaceId)
+    await writeJson(
+      path.join(options.outputDir, 'schedules', 'registry.json'),
+      await options.manager.scheduleRegistry.exportRows()
     );
-    await writeJson(path.join(options.outputDir, 'schedules', 'registry.json'), [
-      ...scheduleRegistry.flock.scan(),
-    ]);
   } else {
     await writeJson(path.join(options.outputDir, 'schedules', 'index.json'), scheduleIndex);
   }

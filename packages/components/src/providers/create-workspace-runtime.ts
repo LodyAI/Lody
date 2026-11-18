@@ -1,5 +1,45 @@
+import {
+  drainLegacyDocumentDomainStore,
+  notifyDocumentDomainEpoch,
+} from './document-domain-store-lifecycle';
+import { openSessionBodyStore, drainLegacySessionBodyStore } from './session-body-store-lifecycle';
+import { RendererDocumentDomainFreeze } from './renderer-document-domain-migration';
+import { startElectronRendererDocumentDomainMigration } from './electron-renderer-document-domain-migration';
+import { createRendererNativeDocumentStores } from './renderer-native-document-stores';
+import { createElectronNativeScheduleDefinitionResolver } from './electron-native-document-domains';
+import {
+  documentDomainMigrationScope,
+  type RendererDocumentDomainScope,
+} from '@lody/shared/renderer-document-domain-migration';
+import type { NativeDocumentDomainTarget } from '@lody/shared/native-document-domain-ipc';
+import { RendererSessionBodyFreeze } from './renderer-session-body-migration';
+import { startElectronRendererSessionBodyMigration } from './electron-renderer-session-body-migration';
+import * as LoroRepoSdk from 'loro-repo';
+import { createElectronNativeSessionStoreOwner } from './electron-native-session';
+import { createElectronNativeWorkspaceMeta } from './electron-native-workspace-meta';
+import { startElectronRendererWorkspaceMeta } from './renderer-workspace-meta-ipc';
+import { createElectronNativeScheduleRegistry } from './electron-native-schedule-registry';
+import { createRendererScheduleRegistryOwner } from './renderer-schedule-registry-owner';
+import {
+  startElectronRendererMachineFlock,
+  startElectronRendererScheduleRegistry,
+} from './renderer-machine-flock-ipc';
+import {
+  RendererFlockRoomGroupFreeze,
+  createRendererFlockGroupRepoFreezePorts,
+} from './renderer-flock-room-group-freeze';
+import { createElectronNativeMachineCatalog } from './electron-native-machine-catalog';
+import {
+  createLegacyWorkspaceDirectory,
+  createObservedWorkspaceDirectory,
+  type WorkspaceDirectoryReader,
+} from '@lody/shared/workspace-directory';
 import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
 import {
+  getWorkspaceFlockDocId,
+  createLegacyWorkspaceCatalogReader,
+  createLegacyScheduleRegistry,
+  createLegacyWorkspaceCatalogCommands,
   MachineAcpAuthenticateResponseSchema,
   MachineAcpAuthenticationProgressMessageSchema,
   MachineAcpBinaryProgressMessageSchema,
@@ -129,6 +169,14 @@ import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
 import { clientLossEffects } from '@/lib/e2ee-client-loss-effects';
 import type { WorkspaceId } from '@lody/shared';
 import { createDirectWorkspaceWriter } from './workspace-writer-impl';
+import { createElectronRendererWorkspaceFlockMigrationPort } from './renderer-workspace-flock-ipc';
+import { createElectronNativeWorkspaceCatalog } from './native-workspace-catalog-ipc';
+import { createWorkspaceCatalogOwnerDispatcher } from './workspace-catalog-owner-dispatcher';
+import {
+  RendererWorkspaceFlockFreeze,
+  createRendererWfRepoFreezePorts,
+  type RendererWorkspaceFlockMigrationPort,
+} from './renderer-workspace-flock-freeze';
 import { logTokenProviderEvent } from './loro-streams-token-diagnostics';
 import {
   createConversationSession,
@@ -194,7 +242,9 @@ import { createLocalLoroDataPlaneConnection } from './local-loro-data-plane-conn
 import { createWorkspaceMachineRpcFacade } from './workspace-machine-rpc-facade';
 import { resyncMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import { createCodeCollabFileIndexCache } from '@/lib/code-collab-file-index-cache';
-import { getIpcServices, onIpcEvent, sendLocalSessionControl } from '@/lib/electron-ipc-client';
+import { openCloudCodeCollabFileIndexResource } from '@/lib/code-collab-cloud-file-index-resource';
+import { openNativeCodeCollabFileIndexResource } from '@/lib/code-collab-native-file-index-resource';
+import { getIpcServices, sendLocalSessionControl } from '@/lib/electron-ipc-client';
 import { createRoostSessionDataFactoryForMachine } from '@/lib/roost-session-bridge';
 
 declare global {
@@ -287,6 +337,12 @@ export type WorkspaceE2eeTransport = {
   ) => Promise<string[]>;
 };
 type RuntimeDeps = {
+  workspaceDirectory?: import('@lody/shared/workspace-directory').WorkspaceDirectory;
+  /** Trusted whole-SR domain injection. This is independent of the WF freeze protocol. */
+  scheduleRegistry?: import('@lody/shared').ScheduleRegistryPort;
+  scheduleDefinitions?: import('@lody/shared').ScheduleDefinitionResolver;
+  /** Optional trusted Electron maintenance protocol; never inferred from environment flags. */
+  workspaceFlockMigration?: RendererWorkspaceFlockMigrationPort;
   content: WorkspaceStreamsContent;
   /** Provisional cloud runtimes may read/write locally, but cannot attach a
    * transport or send a body until their immutable mode is authenticated. */
@@ -540,6 +596,8 @@ function createPendingResponseRegistry<T>(defaultTimeoutMs: number) {
 }
 
 export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<WorkspaceRuntime> {
+  if (deps.scheduleRegistry && deps.scheduleRegistry.workspaceId !== deps.workspaceId)
+    throw new Error('Schedule registry workspace mismatch');
   deps.signal?.throwIfAborted();
   const egressAbort = new AbortController();
   const waitForContentAdmission = async (signal?: AbortSignal) => {
@@ -549,6 +607,24 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     owned.throwIfAborted();
   };
   const protectedContent = deps.content.mode === 'protected';
+  if (
+    !protectedContent &&
+    deps.syncMode !== 'local' &&
+    typeof window !== 'undefined' &&
+    window.__LODY_ELECTRON__ === true
+  ) {
+    const services = getIpcServices();
+    if (services) {
+      try {
+        void services.cloudFileIndex
+          .prepareWorkspace({ workspaceId: deps.workspaceId })
+          .catch(() => console.warn('[Cloud file index] Workspace preparation unavailable'));
+      } catch {
+        console.warn('[Cloud file index] Workspace preparation unavailable');
+      }
+    }
+  }
+
   const protectedDispatchAvailable =
     protectedContent &&
     Boolean(
@@ -601,13 +677,570 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     | ((room: WorkspaceTransportRoom) => WorkspaceTransportRoute)
     | null = null;
   const repoStorage = createWorkspaceRepoStorage(cacheIdentity.repoDbName);
+  let scheduleRegistryFreeze: RendererFlockRoomGroupFreeze | undefined;
+  let scheduleRegistryRegistration: Awaited<
+    ReturnType<typeof startElectronRendererScheduleRegistry>
+  > = null;
+  let nativeScheduleRegistrySource:
+    | ReturnType<typeof createElectronNativeScheduleRegistry>
+    | undefined;
+  let scheduleRegistryOwner: ReturnType<typeof createRendererScheduleRegistryOwner> | undefined;
+  let machineFlockFreeze: RendererFlockRoomGroupFreeze | undefined;
+  let machineFlockRegistration: Awaited<ReturnType<typeof startElectronRendererMachineFlock>> =
+    null;
+  let nativeMachineCatalogSource: ReturnType<typeof createElectronNativeMachineCatalog> | undefined;
+  let nativeMachineCatalogStarting: Promise<void> | undefined;
+  let machineFlockRegistrationId: string | undefined;
+  const machineCatalogSourceListeners = new Set<() => void>();
+  const syncNativeMachineCatalogOwner = () => {
+    if (
+      !machineFlockFreeze ||
+      machineFlockFreeze.ownerKind() === 'legacy' ||
+      !machineFlockRegistrationId ||
+      !deps.accountId
+    )
+      return;
+    if (!nativeMachineCatalogSource) {
+      nativeMachineCatalogSource = createElectronNativeMachineCatalog({
+        binding: { accountId: deps.accountId, workspaceId: deps.workspaceId },
+        registrationId: machineFlockRegistrationId,
+        machineIds: machineFlockFreeze.group.roomIds.map(
+          (room) => room.slice(`${deps.workspaceId}:mf:`.length) as MachineId
+        ),
+      });
+      for (const listener of machineCatalogSourceListeners) listener();
+    }
+    if (machineFlockFreeze.ownerKind() === 'native' && !nativeMachineCatalogStarting) {
+      nativeMachineCatalogStarting = nativeMachineCatalogSource.start();
+      void nativeMachineCatalogStarting.catch(() => {});
+    }
+  };
+  let detachMachineFlockOwner: (() => void) | undefined;
+  let workspaceFlockFreeze: RendererWorkspaceFlockFreeze | null = null;
+  let workspaceFlockMigrationRegistration: Awaited<
+    ReturnType<RendererWorkspaceFlockMigrationPort['start']>
+  > | null = null;
+  const closeWorkspaceFlockRegistration = () => workspaceFlockMigrationRegistration?.close();
   const openSessionWithSnapshot = createSessionSnapshotLoader(repoStorage);
-  const repo = await LoroRepo.create({
+  let workspaceMetaRegistration: Awaited<ReturnType<typeof startElectronRendererWorkspaceMeta>> =
+    null;
+  let nativeWorkspaceMetaSource: ReturnType<typeof createElectronNativeWorkspaceMeta> | undefined;
+  let nativeSessionStores: ReturnType<typeof createElectronNativeSessionStoreOwner> | undefined;
+  let sessionBodyGate: RendererSessionBodyFreeze | undefined;
+  let sessionBodyRegistration:
+    | Awaited<ReturnType<typeof startElectronRendererSessionBodyMigration>>
+    | undefined;
+  let documentDomainGate: RendererDocumentDomainFreeze | undefined;
+  let documentDomainRegistration:
+    | Awaited<ReturnType<typeof startElectronRendererDocumentDomainMigration>>
+    | undefined;
+  let nativeDocumentStores: ReturnType<typeof createRendererNativeDocumentStores> | undefined;
+  let nativeScheduleDefinitions: import('@lody/shared').ScheduleDefinitionResolver | undefined;
+  const legacyLeafDocuments = new Map<string, LoroDoc>();
+  const legacyPreviewStores = new Map<SessionId, PreviewVisualCommentDocStore>();
+  const legacyScheduleStores = new Map<string, ScheduleDocStore>();
+  const nativePreviewIds = new Set<SessionId>();
+  const nativeScheduleIds = new Set<string>();
+  const leafDetachWork = new Map<string, Promise<unknown>>();
+  const documentDomainEpochs = new Map<string, number>();
+  const documentDomainEpochListeners = new Map<string, Set<() => void>>();
+  const notifyDocumentDomain = (target: NativeDocumentDomainTarget) =>
+    notifyDocumentDomainEpoch(target, documentDomainEpochs, documentDomainEpochListeners, () =>
+      console.warn('[Native documents] Subscriber failed')
+    );
+  let drainLegacyDocumentDomain: (
+    scope: RendererDocumentDomainScope
+  ) => Promise<void> = async () => {
+    throw new Error('Document domain drain not ready');
+  };
+  const legacySessionStores = new Map<SessionId, SessionDocStore>();
+  const sessionStoreEpochs = new Map<SessionId, number>();
+  const sessionStoreListeners = new Map<SessionId, Set<() => void>>();
+  let drainLegacySessionBody: (sessionId: string) => Promise<void> = async () => {
+    throw new Error('Session body drain is not ready');
+  };
+  const externalFactory = Reflect.get(LoroRepo, 'createWithExternalMetadata');
+  const externalCapability = Reflect.get(LoroRepo, 'externalMetadataCapability');
+  // These exact registrations must exist before Meta can migrate. No Repo or
+  // legacy Meta writer exists yet; freeze still captures every persisted IDB
+  // source through the existing all-window protocol. Once created, this same
+  // runtime attaches its real Repo detach/persist barriers to the same gates.
+  let workspaceFlockRepoPorts: ReturnType<typeof createRendererWfRepoFreezePorts> | undefined;
+  let machineFlockRepoPorts: ReturnType<typeof createRendererFlockGroupRepoFreezePorts> | undefined;
+  let scheduleRegistryRepoPorts:
+    | ReturnType<typeof createRendererFlockGroupRepoFreezePorts>
+    | undefined;
+  const workspaceFlockMigrationPort =
+    deps.workspaceFlockMigration ??
+    (!protectedContent && deps.syncMode === 'local'
+      ? createElectronRendererWorkspaceFlockMigrationPort()
+      : null);
+  const closeStartupCatalogRegistrations = async () => {
+    const results = await Promise.allSettled([
+      Promise.resolve().then(() => scheduleRegistryRegistration?.close()),
+      Promise.resolve().then(() => machineFlockRegistration?.close()),
+      Promise.resolve().then(() => closeWorkspaceFlockRegistration()),
+    ]);
+    const errors = results.flatMap((value) => (value.status === 'rejected' ? [value.reason] : []));
+    if (errors.length)
+      throw new AggregateError(errors, 'Catalog startup registration cleanup failed');
+  };
+  try {
+    if (workspaceFlockMigrationPort) {
+      if (protectedContent || !deps.accountId)
+        throw new Error('Renderer WF migration requires a trusted plaintext account');
+      const binding = {
+        accountId: deps.accountId,
+        workspaceId: deps.workspaceId,
+        roomId: getWorkspaceFlockDocId(deps.workspaceId),
+        contentMode: 'plaintext' as const,
+      };
+      workspaceFlockFreeze = new RendererWorkspaceFlockFreeze(binding, {
+        detachRoom: async () => {
+          await workspaceFlockRepoPorts?.detachRoom();
+        },
+        persistRoom: async () => {
+          await workspaceFlockRepoPorts?.persistRoom();
+        },
+        readStartupOwner: async () => {
+          workspaceFlockMigrationRegistration = await workspaceFlockMigrationPort.start(
+            binding,
+            (request) => workspaceFlockFreeze!.handle(request),
+            deps.signal,
+            (owner) => workspaceFlockFreeze!.published(owner)
+          );
+          return workspaceFlockMigrationRegistration.owner;
+        },
+      });
+      await workspaceFlockFreeze.startup();
+    }
+    if (!protectedContent && deps.syncMode === 'local' && deps.accountId) {
+      machineFlockRegistration = await startElectronRendererMachineFlock({
+        accountId: deps.accountId,
+        workspaceId: deps.workspaceId,
+        signal: deps.signal,
+        create: (owner) => {
+          machineFlockRegistrationId = owner.registrationId;
+          machineFlockFreeze = new RendererFlockRoomGroupFreeze(owner.group, {
+            requireSingleMachine: true,
+            detachRooms: async () => {
+              await machineFlockRepoPorts?.detachRooms();
+            },
+            persistRooms: async () => {
+              await machineFlockRepoPorts?.persistRooms();
+            },
+            readStartupOwner: async () => ({
+              group: owner.group,
+              owner: owner.owner,
+              revision: owner.revision,
+            }),
+          });
+          return machineFlockFreeze;
+        },
+      });
+      if (!deps.scheduleRegistry)
+        scheduleRegistryRegistration = await startElectronRendererScheduleRegistry({
+          accountId: deps.accountId,
+          workspaceId: deps.workspaceId,
+          signal: deps.signal,
+          create: (owner) => {
+            scheduleRegistryFreeze = new RendererFlockRoomGroupFreeze(owner.group, {
+              detachRooms: async () => {
+                await scheduleRegistryRepoPorts?.detachRooms();
+              },
+              persistRooms: async () => {
+                await scheduleRegistryRepoPorts?.persistRooms();
+              },
+              readStartupOwner: async () => ({
+                group: owner.group,
+                owner: owner.owner,
+                revision: owner.revision,
+              }),
+            });
+            return scheduleRegistryFreeze;
+          },
+        });
+    }
+    if (!protectedContent && deps.syncMode === 'local' && deps.accountId) {
+      workspaceMetaRegistration = await startElectronRendererWorkspaceMeta({
+        accountId: deps.accountId,
+        workspaceId: deps.workspaceId,
+        signal: deps.signal,
+        create: (owner) => {
+          // No Repo exists yet: this runtime owns no legacy Meta author or observer.
+          // Check the actual installed SDK before allowing the all-window freeze.
+          if (
+            externalCapability !== 'loro-external-metadata-v1' ||
+            typeof externalFactory !== 'function'
+          )
+            throw new Error('External metadata SDK capability unavailable');
+          return new RendererFlockRoomGroupFreeze(owner.group, {
+            readStartupOwner: async () => ({
+              group: owner.group,
+              owner: owner.owner,
+              revision: owner.revision,
+            }),
+            detachRooms: async () => {},
+            persistRooms: async () => {},
+          });
+        },
+      });
+      if (workspaceMetaRegistration) {
+        const KnownNotCommitted = Reflect.get(LoroRepoSdk, 'ExternalMetadataNotCommittedError');
+        nativeWorkspaceMetaSource = createElectronNativeWorkspaceMeta({
+          registrationId: workspaceMetaRegistration.registrationId,
+          requestId: () => crypto.randomUUID(),
+          ...(typeof KnownNotCommitted === 'function'
+            ? {
+                knownNotCommitted: () => Reflect.construct(KnownNotCommitted, []) as Error,
+              }
+            : {}),
+          onFailure: () => deps.onControlConnectionStateChange?.('error'),
+        });
+        nativeSessionStores = createElectronNativeSessionStoreOwner({
+          registrationId: workspaceMetaRegistration.registrationId,
+          principalId: deps.accountId,
+          requestId: () => crypto.randomUUID(),
+          onFailure: () =>
+            console.warn(
+              'createWorkspaceRuntime: Native Session room operation or cleanup remains unconfirmed'
+            ),
+        });
+        sessionBodyGate = new RendererSessionBodyFreeze({
+          beginFreeze: (sessionId) => {
+            sharedWindowDocuments.delete(getSessionRoomId(sessionId as SessionId));
+            eagerSyncWorkerClient?.cancel(getSessionRoomId(sessionId as SessionId));
+          },
+          drainLegacySession: (sessionId) => drainLegacySessionBody(sessionId),
+          published: (sessionId) => {
+            const id = sessionId as SessionId;
+            sessionStoreEpochs.set(id, (sessionStoreEpochs.get(id) ?? 0) + 1);
+            for (const listener of sessionStoreListeners.get(id) ?? []) listener();
+          },
+        });
+        sessionBodyRegistration = await startElectronRendererSessionBodyMigration({
+          registrationId: workspaceMetaRegistration.registrationId,
+          gate: sessionBodyGate,
+          deferReady: true,
+          onFailure: () =>
+            console.warn(
+              'createWorkspaceRuntime: Session body migration operation or cleanup remains unconfirmed'
+            ),
+        });
+      }
+    }
+  } catch (cause) {
+    const results = await Promise.allSettled([
+      closeStartupCatalogRegistrations(),
+      nativeSessionStores?.close(),
+      sessionBodyRegistration?.close(),
+      nativeWorkspaceMetaSource?.close(),
+      workspaceMetaRegistration?.close(),
+    ]);
+    throw new AggregateError(
+      [cause, ...results.flatMap((value) => (value.status === 'rejected' ? [value.reason] : []))],
+      'Workspace native prerequisites failed'
+    );
+  }
+  if (workspaceMetaRegistration) {
+    nativeDocumentStores = createRendererNativeDocumentStores({
+      registrationId: workspaceMetaRegistration.registrationId,
+      onFailure: () =>
+        console.warn(
+          'createWorkspaceRuntime: Native document room operation or cleanup remains unconfirmed'
+        ),
+    });
+    nativeScheduleDefinitions = createElectronNativeScheduleDefinitionResolver({
+      registrationId: workspaceMetaRegistration.registrationId,
+    });
+    documentDomainGate = new RendererDocumentDomainFreeze({
+      beginFreeze: (scope) => {
+        notifyDocumentDomain(scope);
+        // Resolve only this room to no transports. Retain the actual detach
+        // Promise so the later source witness cannot outrun its completion.
+        if (!leafDetachWork.has(scope.roomId)) {
+          const pending = Promise.resolve().then(() => repo.refreshTransportRoutes());
+          leafDetachWork.set(scope.roomId, pending);
+          void pending.catch(() => {});
+        }
+      },
+      drainLegacy: (scope) => drainLegacyDocumentDomain(scope),
+      published: (scope) => notifyDocumentDomain(scope),
+    });
+    documentDomainRegistration = await startElectronRendererDocumentDomainMigration({
+      registrationId: workspaceMetaRegistration.registrationId,
+      gate: documentDomainGate,
+      deferReady: true,
+      onFailure: () =>
+        console.warn(
+          'createWorkspaceRuntime: Document migration operation or cleanup remains unconfirmed'
+        ),
+    });
+  }
+  const repoOptions: Parameters<typeof LoroRepo.create>[0] = {
     storageAdapter: repoStorage,
     metaDebounceCommitMs: 0,
     resolveRoomTransports: (room) =>
-      resolveRoomTransportsImpl?.(room) ?? { transportIds: ['cloud'] },
-  });
+      room.kind === 'doc' &&
+      ((sessionBodyGate && !sessionBodyGate.shouldRoute(room.id)) ||
+        (documentDomainGate && !documentDomainGate.shouldRoute(room.id)))
+        ? { transportIds: [] }
+        : room.kind === 'flock-doc' &&
+            ((machineFlockFreeze && !machineFlockFreeze.shouldRoute(room.id)) ||
+              (scheduleRegistryFreeze && !scheduleRegistryFreeze.shouldRoute(room.id)))
+          ? { transportIds: [] }
+          : workspaceFlockFreeze &&
+              room.kind === 'flock-doc' &&
+              room.id === getWorkspaceFlockDocId(deps.workspaceId) &&
+              !workspaceFlockFreeze.isLegacy()
+            ? { transportIds: [] }
+            : (resolveRoomTransportsImpl?.(room) ?? { transportIds: ['cloud'] }),
+  };
+  let repo: LoroRepo;
+  try {
+    repo = nativeWorkspaceMetaSource
+      ? await Reflect.apply(externalFactory, LoroRepo, [
+          repoOptions,
+          nativeWorkspaceMetaSource.adapter,
+        ])
+      : await LoroRepo.create(repoOptions);
+    if (nativeWorkspaceMetaSource && Reflect.get(repo, 'metadataMode') !== 'external')
+      throw new Error('External metadata SDK factory did not select external ownership');
+  } catch (cause) {
+    const cleanup = await Promise.allSettled([
+      closeStartupCatalogRegistrations(),
+      nativeSessionStores?.close(),
+      nativeDocumentStores?.close(),
+      documentDomainRegistration?.close(),
+      sessionBodyRegistration?.close(),
+      nativeWorkspaceMetaSource?.close(),
+      workspaceMetaRegistration?.close(),
+    ]);
+    throw new AggregateError(
+      [
+        cause,
+        ...cleanup.flatMap((result) => (result.status === 'rejected' ? [result.reason] : [])),
+      ],
+      'Workspace metadata startup failed'
+    );
+  }
+  if (sessionBodyGate) {
+    const gate = sessionBodyGate;
+    const originalOpen = repo.openPersistedDoc.bind(repo);
+    const originalAcquire = repo.acquireDoc.bind(repo);
+    const originalJoin = repo.joinDocRoom.bind(repo);
+    const run = <A>(roomId: string, work: () => Promise<A>) =>
+      roomId.startsWith('session-') ? gate.run(roomId.slice(8), work) : work();
+    repo.acquireDoc = (roomId) => run(roomId, () => originalAcquire(roomId));
+    repo.joinDocRoom = (roomId, ...args) =>
+      run(roomId, async () => {
+        const joined = await originalJoin(roomId, ...args);
+        if (roomId.startsWith('session-') && !gate.shouldRoute(roomId)) {
+          joined.unsubscribe();
+          throw new Error('Legacy document join retired');
+        }
+        return joined;
+      });
+    repo.openPersistedDoc = (roomId) =>
+      run(roomId, async () => {
+        const handle = await originalOpen(roomId);
+        return {
+          ...handle,
+          joinRoom: (...args) => run(roomId, () => handle.joinRoom(...args)),
+          syncOnce: () => run(roomId, () => handle.syncOnce()),
+        };
+      });
+  }
+  const persistLegacyLeafDocument = repo.persistDocNow.bind(repo);
+  if (documentDomainGate) {
+    const gate = documentDomainGate;
+    const originalOpen = repo.openPersistedDoc.bind(repo),
+      originalAcquire = repo.acquireDoc.bind(repo),
+      originalJoin = repo.joinDocRoom.bind(repo),
+      originalSync = repo.sync.bind(repo);
+    const target = (roomId: string): NativeDocumentDomainTarget | undefined =>
+      roomId.startsWith('preview-comment-')
+        ? { domain: 'preview_comments', id: roomId.slice(16) }
+        : roomId.startsWith('schedule-')
+          ? { domain: 'schedule_definition', id: roomId.slice(9) }
+          : undefined;
+    const run = <A>(roomId: string, work: () => Promise<A>) => {
+      const selected = target(roomId);
+      return selected ? gate.run(documentDomainMigrationScope(selected), work) : work();
+    };
+    repo.acquireDoc = (roomId) =>
+      run(roomId, async () => {
+        const handle = await originalAcquire(roomId);
+        if (target(roomId)) {
+          legacyLeafDocuments.set(roomId, handle.doc as LoroDoc);
+          try {
+            gate.assertLegacy(roomId);
+          } catch (error) {
+            await handle.release();
+            throw error;
+          }
+        }
+        return handle;
+      });
+    repo.joinDocRoom = (roomId, ...args) =>
+      run(roomId, async () => {
+        const joined = await originalJoin(roomId, ...args);
+        if (target(roomId) && !gate.shouldRoute(roomId)) {
+          joined.unsubscribe();
+          throw new Error('Legacy document join retired');
+        }
+        return joined;
+      });
+    repo.persistDocNow = (roomId, doc) => run(roomId, () => persistLegacyLeafDocument(roomId, doc));
+    repo.sync = async (options) => {
+      if (options?.scope === 'doc' && options.docIds)
+        for (const roomId of options.docIds) if (target(roomId)) gate.assertLegacy(roomId);
+      return originalSync(options);
+    };
+    repo.openPersistedDoc = (roomId) =>
+      run(roomId, async () => {
+        const handle = await originalOpen(roomId);
+        if (target(roomId)) {
+          legacyLeafDocuments.set(roomId, handle.doc as LoroDoc);
+          gate.assertLegacy(roomId);
+        }
+        return {
+          ...handle,
+          joinRoom: (...args) => run(roomId, () => handle.joinRoom(...args)),
+          syncOnce: () => run(roomId, () => handle.syncOnce()),
+        };
+      });
+  }
+  const closeRepoWithMeta = async () => {
+    await repo.destroy();
+    await nativeSessionStores?.close();
+    await nativeDocumentStores?.close();
+    await documentDomainRegistration?.close();
+    await sessionBodyRegistration?.close();
+    await nativeWorkspaceMetaSource?.close();
+    await workspaceMetaRegistration?.close();
+  };
+  const directoryMetadataSource = nativeWorkspaceMetaSource;
+  const nativeDirectoryReader: WorkspaceDirectoryReader | undefined = directoryMetadataSource
+    ? {
+        listActiveIds: async () =>
+          (await directoryMetadataSource.adapter.read()).docs
+            .filter((row) => !row.deleted)
+            .map((row) => row.docId),
+        listEntries: async () =>
+          (await directoryMetadataSource.adapter.read()).docs.map((row) => ({
+            ...row,
+            exists: !row.deleted,
+          })),
+      }
+    : undefined;
+  const directoryReadProbe =
+    typeof window !== 'undefined' && '__LODY_E2E_BOOT__' in window
+      ? (
+          window as typeof window & {
+            __LODY_E2E_DIRECTORY_READERS__?: {
+              wrap(reader: WorkspaceDirectoryReader): WorkspaceDirectoryReader;
+            };
+          }
+        ).__LODY_E2E_DIRECTORY_READERS__
+      : undefined;
+  const workspaceDirectory =
+    deps.workspaceDirectory ??
+    (nativeDirectoryReader
+      ? createObservedWorkspaceDirectory(
+          repo,
+          directoryReadProbe?.wrap(nativeDirectoryReader) ?? nativeDirectoryReader
+        )
+      : createLegacyWorkspaceDirectory(repo));
+  if (workspaceFlockFreeze) {
+    workspaceFlockRepoPorts = createRendererWfRepoFreezePorts(
+      repo,
+      getWorkspaceFlockDocId(deps.workspaceId)
+    );
+  }
+  const attachGroupRepo = (gate: RendererFlockRoomGroupFreeze) => {
+    const original = {
+      acquire: repo.acquireFlockDoc.bind(repo),
+      open: repo.openFlockDoc.bind(repo),
+      join: repo.joinFlockDocRoom.bind(repo),
+    };
+    const ports = createRendererFlockGroupRepoFreezePorts(repo, gate.group);
+    const attached = {
+      detachRooms: ports.detachRooms,
+      persistRooms: async () => {
+        for (const roomId of gate.group.roomIds) {
+          const lease = await original.acquire(roomId);
+          try {
+            lease.flock.commit();
+            await repo.persistFlockDocNow(roomId, lease.flock);
+          } finally {
+            await lease.release();
+          }
+        }
+        await repo.flush();
+      },
+    };
+    repo.openFlockDoc = ((id, ...args) =>
+      gate.run(id, () => original.open(id, ...args))) as typeof repo.openFlockDoc;
+    repo.acquireFlockDoc = ((id, ...args) =>
+      gate.run(id, () => original.acquire(id, ...args))) as typeof repo.acquireFlockDoc;
+    repo.joinFlockDocRoom = ((id, ...args) =>
+      gate.run(id, () => original.join(id, ...args))) as typeof repo.joinFlockDocRoom;
+    return attached;
+  };
+  try {
+    if (machineFlockFreeze) {
+      machineFlockRepoPorts = attachGroupRepo(machineFlockFreeze);
+      detachMachineFlockOwner = machineFlockFreeze.subscribeOwner(syncNativeMachineCatalogOwner);
+      syncNativeMachineCatalogOwner();
+      await nativeMachineCatalogStarting;
+    }
+    if (scheduleRegistryFreeze && scheduleRegistryRegistration) {
+      const gate = scheduleRegistryFreeze;
+      const registrationId = scheduleRegistryRegistration.registrationId;
+      scheduleRegistryRepoPorts = attachGroupRepo(gate);
+      scheduleRegistryOwner = createRendererScheduleRegistryOwner({
+        workspaceId: deps.workspaceId,
+        gate,
+        legacy: () =>
+          createLegacyScheduleRegistry({
+            workspaceId: deps.workspaceId,
+            repo,
+            releaseRoomOnSyncError: true,
+            selectBinding: (sub) =>
+              sub.subscription(
+                targetRouter.getReadinessTransportForRoom({
+                  kind: 'flock-doc',
+                  id: `${deps.workspaceId}:sr`,
+                })
+              ),
+          }),
+        native: async () => {
+          if (!nativeScheduleRegistrySource)
+            nativeScheduleRegistrySource = createElectronNativeScheduleRegistry({
+              workspaceId: deps.workspaceId,
+              actorId: deps.accountId!,
+              registrationId,
+            });
+          await nativeScheduleRegistrySource.start();
+          return nativeScheduleRegistrySource.registry;
+        },
+      });
+      if (gate.ownerKind() === 'native') await scheduleRegistryOwner.registry.read();
+    }
+  } catch (cause) {
+    const results = await Promise.allSettled([
+      scheduleRegistryOwner?.close(),
+      nativeScheduleRegistrySource?.close(),
+      nativeMachineCatalogSource?.close(),
+      closeStartupCatalogRegistrations(),
+      closeRepoWithMeta(),
+    ]);
+    throw new AggregateError(
+      [cause, ...results.flatMap((value) => (value.status === 'rejected' ? [value.reason] : []))],
+      'Catalog runtime attachment failed'
+    );
+  }
   // E2E-only protected transport evidence; absent outside a probe-enabled window.
   const transportEffects = protectedContent ? clientLossEffects(deps.workspaceId) : null;
   transportEffects?.ownerOpened();
@@ -665,7 +1298,14 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const sharedWindowDocuments = new Map<string, LoroDoc>();
   const windowBootstrap =
     syncMode === 'local' && typeof BroadcastChannel !== 'undefined'
-      ? createLocalWindowBootstrap(repo, deps.workspaceId, sharedWindowDocuments)
+      ? createLocalWindowBootstrap(
+          repo,
+          deps.workspaceId,
+          sharedWindowDocuments,
+          undefined,
+          undefined,
+          { externalMetadata: Boolean(nativeWorkspaceMetaSource) }
+        )
       : null;
   let notifyTargetRouteChange = (): void => {};
   const targetRouter = new WorkspaceTargetRouter({
@@ -679,8 +1319,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let initialTokenAttachPromise: Promise<void> | null = null;
   let localLoroTransport: LocalLoroTransportAdapter | null = null;
   let localMachineMonitorTransport: WorkspaceLocalMachineMonitorTransport | null = null;
+  let nativeFileIndexConnection: ReturnType<typeof createLocalLoroDataPlaneConnection> = null;
   let localDataPlaneConnectionDispose: (() => void) | null = null;
-  let localPresenceUnsubscribe: (() => void) | null = null;
   let transportAttached = false;
   let authToken: string | null = null;
   let resumePendingInputs: (() => void) | null = null;
@@ -722,7 +1362,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // synced before the cloud plane existed, so only the cloud binding's first
   // sync after such a delete may clear the marker.
   let cloudAttachDroppedSuspectCheckpoint = false;
-  const metaSyncState = (): RoomSyncState => metaTracker?.getSyncState() ?? 'idle';
+  const metaSyncState = (): RoomSyncState =>
+    nativeWorkspaceMetaSource
+      ? nativeWorkspaceMetaSource.getHealth().status === 'ready'
+        ? 'synced'
+        : 'error'
+      : (metaTracker?.getSyncState() ?? 'idle');
 
   // workspaceId is required and provided at initialization
   const workspaceId: WorkspaceId = deps.workspaceId;
@@ -3323,7 +3968,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         listMachineIds: async () => {
           const authorizedMachineIds = deps.getAuthorizedMachineIds?.() ?? null;
           if (!authorizedMachineIds) return [];
-          const { machines } = await readSessionAndMachineMetas(repo, deps.readDocMetaCache);
+          const { machines } = await readSessionAndMachineMetas(
+            repo,
+            deps.readDocMetaCache,
+            workspaceDirectory
+          );
           return Object.keys(machines)
             .map((roomId) => roomId.slice(MACHINE_DOC_PREFIX.length).trim() as MachineId)
             .filter((machineId) => machineId.length > 0 && authorizedMachineIds.has(machineId));
@@ -3333,6 +3982,19 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           presenceTransport.getSyncState() === 'synced' &&
           collectOnlineMachineIdsFromPresence(latestPresenceStates, getServerNow()).has(machineId),
         listAgentConfigs: async (machineId) => {
+          if (
+            machineFlockFreeze &&
+            machineFlockFreeze.ownerKind() !== 'legacy' &&
+            machineFlockFreeze.group.roomIds.includes(getMachineFlockDocId(workspaceId, machineId))
+          ) {
+            const selected = nativeMachineCatalogSource?.readProjection(machineId);
+            if (!selected?.synced)
+              throw new Error('Native machine catalog unavailable for capability refresh');
+            return selected.projection.agents.map((agent) => ({
+              id: agent.id as AgentConfigId,
+              machineId: agent.machineId as MachineId,
+            }));
+          }
           const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
           await handle.syncOnce().catch((error: unknown) => {
             console.warn(
@@ -3368,6 +4030,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
             throw new Error(response?.error ?? 'ACP capability refresh did not return a response');
           }
           if (signal.aborted) return;
+          if (
+            machineFlockFreeze &&
+            machineFlockFreeze.ownerKind() !== 'legacy' &&
+            machineFlockFreeze.group.roomIds.includes(getMachineFlockDocId(workspaceId, machineId))
+          )
+            return;
           await resyncMachineFlockRows({ repo, workspaceId }, machineId, {
             requireRemoteSync: true,
             refreshedCapability: response.capability
@@ -3543,10 +4211,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       localDataPlaneConnectionDispose();
       localDataPlaneConnectionDispose = null;
     }
-    if (localPresenceUnsubscribe) {
-      localPresenceUnsubscribe();
-      localPresenceUnsubscribe = null;
-    }
 
     emitControlConnectionState();
   };
@@ -3622,7 +4286,35 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       globalThis.crypto?.randomUUID?.() ?? `renderer:${Date.now()}:${Math.random().toString(36)}`;
     const peerId = `renderer:${rawPeerId}`;
 
-    const localConnection = createLocalLoroDataPlaneConnection();
+    // Presence has no Meta/Doc/Flock dependency. Install its real binary
+    // consumer before connecting, then ping so an all-native (zero-room) view
+    // still receives the CLI's own presence origin.
+    let localPresenceStore = deps.onPresenceSnapshot
+      ? new EphemeralStore(LODY_PRESENCE_TTL_MS)
+      : undefined;
+    const localConnection = createLocalLoroDataPlaneConnection(
+      localPresenceStore
+        ? {
+            presence: {
+              workspaceId,
+              peerId,
+              onMessage: (message) => {
+                localPresenceStore!.apply(base64ToBytes(message.dataBase64));
+                latestLocalOriginPresenceStates = parseLodyPresenceStates(
+                  localPresenceStore!.getAllStates() as Record<string, unknown>,
+                  { minimal: protectedContent }
+                );
+                publishMergedPresence();
+              },
+              onDisconnect: () => {
+                localPresenceStore = new EphemeralStore(LODY_PRESENCE_TTL_MS);
+                latestLocalOriginPresenceStates = {};
+                publishMergedPresence();
+              },
+            },
+          }
+        : undefined
+    );
     if (!localConnection) {
       // Fail fast: local-first mode without the data-plane bridge would be a
       // runtime with NO transport at all (the Streams path is not a fallback
@@ -3653,24 +4345,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     // the mux-era member-status side channel is gone by design.
     await repo.addTransport('local', localLoroTransport);
     if (disposePromise) throw new Error('Runtime disposed');
-
-    // Keep local and cloud snapshots independently: the local plane carries
-    // only what the local CLI itself authors and is authoritative for that
-    // instance, while every remote origin reaches us through the cloud replica
-    // alone — see `mergePresenceSnapshots`.
-    if (getIpcServices() && deps.onPresenceSnapshot) {
-      const presenceStore = new EphemeralStore(LODY_PRESENCE_TTL_MS);
-      localPresenceUnsubscribe = onIpcEvent('loro.event', (message) => {
-        if (message.type !== 'presence') return;
-        if (message.workspaceId !== workspaceId) return;
-        presenceStore.apply(base64ToBytes(message.dataBase64));
-        latestLocalOriginPresenceStates = parseLodyPresenceStates(
-          presenceStore.getAllStates() as Record<string, unknown>,
-          { minimal: protectedContent }
-        );
-        publishMergedPresence();
-      });
-    }
 
     transportAttached = true;
     transportReady.resolve();
@@ -4221,6 +4895,18 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const ensureMetaRoomSynced = async (
     syncPhase: 'initial' | 'recovery' = 'initial'
   ): Promise<void> => {
+    if (nativeWorkspaceMetaSource) {
+      await nativeWorkspaceMetaSource.adapter.read();
+      if (disposePromise) return;
+      initialMetaSyncCompleted = true;
+      initialMetaSyncFailed = false;
+      workspaceMetaFirstSynced = true;
+      for (const wake of sessionReaderWakeListeners) wake();
+      notifyConnectionStateInputsChanged();
+      scheduleStartupAcpCapabilitiesRefresh();
+      startBackgroundSyncCoordinator();
+      return;
+    }
     if (metaSub) {
       return;
     }
@@ -4955,7 +5641,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     });
   };
 
-  const createSessionStore = async (sessionId: SessionId): Promise<SessionDocStore> => {
+  const createLegacySessionStore = async (sessionId: SessionId): Promise<SessionDocStore> => {
     const roomId = getSessionRoomId(sessionId);
     // Backend selection is part of the persisted session identity, so resolve it
     // before composing the reader even when this runtime has no injected factory.
@@ -5275,6 +5961,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       history,
       sessionData,
       dispose: () => {
+        if (disposed) return;
         disposed = true;
         sharedWindowDocuments.delete(roomId);
         materializedSessionIds.delete(sessionId);
@@ -5342,6 +6029,16 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     };
   };
 
+  const createSessionStore = (sessionId: SessionId): Promise<SessionDocStore> =>
+    openSessionBodyStore({
+      openNative: () => nativeSessionStores?.open(sessionId) ?? Promise.resolve(undefined),
+      createLegacy: () => createLegacySessionStore(sessionId),
+      runLegacy: sessionBodyGate ? (work) => sessionBodyGate.run(sessionId, work) : undefined,
+      publishLegacy: (store) => {
+        legacySessionStores.set(sessionId, store);
+      },
+      guardLegacy: (store) => sessionBodyGate?.guardStore(store) ?? store,
+    });
   const sessionStoreCache = createManagedStoreCache<SessionId, SessionDocStore>({
     create: async (sessionId) => {
       materializedSessionIds.add(sessionId);
@@ -5357,10 +6054,29 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     // The cache is the doc's sole application-layer owner: hard release = stop
     // sync + Mirror.dispose (store.dispose) + repo.unloadDoc, serialized per key
     // by the cache so a concurrent acquire waits for the unload, then recreates.
-    unload: (sessionId) => repo.unloadDoc(getSessionRoomId(sessionId)),
+    unload: async (sessionId) => {
+      if (nativeSessionStores?.owns(sessionId)) await nativeSessionStores.closeRoom(sessionId);
+      else await repo.unloadDoc(getSessionRoomId(sessionId));
+      legacySessionStores.delete(sessionId);
+    },
   });
 
-  const createPreviewVisualCommentStore = async (
+  drainLegacySessionBody = (sessionId) => {
+    const id = sessionId as SessionId;
+    return drainLegacySessionBodyStore(legacySessionStores.get(id), {
+      refreshRoutes: () => repo.refreshTransportRoutes(),
+      unload: () => repo.unloadDoc(getSessionRoomId(id)),
+      releaseMaterializedLegacy: () => sessionStoreCache.release(id),
+      forgetLegacy: () => {
+        legacySessionStores.delete(id);
+      },
+    });
+  };
+  const releaseSessionStoreRef = (sessionId: SessionId, store?: SessionDocStore) => {
+    if (store && sessionStoreCache.peek(sessionId) !== store) return;
+    sessionStoreCache.releaseRef(sessionId);
+  };
+  const createLegacyPreviewVisualCommentStore = async (
     sessionId: SessionId
   ): Promise<PreviewVisualCommentDocStore> => {
     const roomId = getPreviewCommentRoomId(sessionId);
@@ -5411,7 +6127,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     });
     void firstSynced.catch(() => {});
 
-    return {
+    const store: PreviewVisualCommentDocStore = {
       sessionId,
       roomId,
       doc: persistedDoc.doc as LoroDoc,
@@ -5420,7 +6136,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       subscribeSyncState: syncTracker.subscribeSyncState,
       getState: () => mirror.getState(),
       setState: (updater) => {
-        mirror.setState(updater as never);
+        const apply = () => mirror.setState(updater as never);
+        return documentDomainGate
+          ? documentDomainGate.runSync(
+              documentDomainMigrationScope({ domain: 'preview_comments', id: sessionId }),
+              apply
+            )
+          : apply();
       },
       subscribe: (listener) => mirror.subscribe(listener),
       dispose: () => {
@@ -5439,6 +6161,28 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         }
       },
     };
+    legacyPreviewStores.set(sessionId, store);
+    return store;
+  };
+  const createPreviewVisualCommentStore = async (
+    sessionId: SessionId
+  ): Promise<PreviewVisualCommentDocStore> => {
+    if (documentDomainRegistration?.registration.creationEnabled && nativeDocumentStores) {
+      const owner = await nativeDocumentStores.route({ domain: 'preview_comments', id: sessionId });
+      if (owner === 'legacy') await documentDomainRegistration.ensurePreview(sessionId);
+    }
+    const native = await nativeDocumentStores?.preview(sessionId);
+    if (native) {
+      nativePreviewIds.add(sessionId);
+      return native;
+    }
+    const create = () => createLegacyPreviewVisualCommentStore(sessionId);
+    return documentDomainGate
+      ? documentDomainGate.run(
+          documentDomainMigrationScope({ domain: 'preview_comments', id: sessionId }),
+          create
+        )
+      : create();
   };
 
   const previewVisualCommentStoreCache = createManagedStoreCache<
@@ -5449,70 +6193,246 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     releaseDelayMs: STORE_RELEASE_DELAY_MS,
     // Same ownership contract as sessionStoreCache: the cache alone unloads the
     // doc from the repo on hard release, serialized per key.
-    unload: (sessionId) => repo.unloadDoc(getPreviewCommentRoomId(sessionId)),
+    unload: async (sessionId) => {
+      if (nativePreviewIds.has(sessionId)) {
+        await nativeDocumentStores?.closeRoom({ domain: 'preview_comments', id: sessionId });
+        nativePreviewIds.delete(sessionId);
+      } else await repo.unloadDoc(getPreviewCommentRoomId(sessionId));
+      legacyPreviewStores.delete(sessionId);
+    },
   });
 
   const scheduleStoreCache = createManagedStoreCache<string, ScheduleDocStore>({
     releaseDelayMs: STORE_RELEASE_DELAY_MS,
-    unload: (id) => repo.unloadDoc(getScheduleRoomId(id)),
+    unload: async (id) => {
+      if (nativeScheduleIds.has(id)) {
+        await nativeDocumentStores?.closeRoom({ domain: 'schedule_definition', id });
+        nativeScheduleIds.delete(id);
+      } else await repo.unloadDoc(getScheduleRoomId(id));
+      legacyScheduleStores.delete(id);
+    },
     create: async (id) => {
-      const roomId = getScheduleRoomId(id);
-      const handle = await repo.openPersistedDoc(roomId);
-      const mirror = new Mirror({
-        doc: handle.doc as LoroDoc,
-        schema: scheduleDocSchema,
-        ignoreUnknownProperties: true,
-      });
-      let room: RepoRoomSubscription | null = null;
-      let disposed = false;
-      const syncAbort = new AbortController();
-      const firstSynced = transportReady.promise.then(async () => {
-        const joined = await waitForRoomToSync(() => handle.joinRoom(), {
-          roomId,
-          initialDelayMs: 0,
-          isCancelled: () => disposed,
-          firstSynced: (sub) => readinessBindingForDocRoom(sub, roomId).firstSyncedWithRemote,
-          onSubscription: (sub) => {
-            room = sub;
-          },
+      const native = await nativeDocumentStores?.schedule(id);
+      if (native) {
+        nativeScheduleIds.add(id);
+        return native;
+      }
+      const createLegacy = async (): Promise<ScheduleDocStore> => {
+        const roomId = getScheduleRoomId(id);
+        const handle = await repo.openPersistedDoc(roomId);
+        const mirror = new Mirror({
+          doc: handle.doc as LoroDoc,
+          schema: scheduleDocSchema,
+          ignoreUnknownProperties: true,
         });
-        if (disposed) joined?.unsubscribe();
-        else room = joined ?? null;
-      });
-      void firstSynced.catch(() => {});
-      return {
-        roomId,
-        firstSynced,
-        getState: () => scheduleDocumentFromMirrorState(mirror.getState(), id),
-        subscribe: (listener) => mirror.subscribe(listener),
-        waitUntilSynced: async () => {
-          await firstSynced.catch(() => {});
-          if (room && !disposed)
-            await waitForScheduleWriteSync(
-              readinessBindingForDocRoom(room, roomId),
-              syncAbort.signal
-            );
-        },
-        dispose: () => {
-          disposed = true;
-          syncAbort.abort();
-          mirror.dispose();
-          room?.unsubscribe();
-        },
+        let room: RepoRoomSubscription | null = null;
+        let disposed = false;
+        const syncAbort = new AbortController();
+        const firstSynced = transportReady.promise.then(async () => {
+          const joined = await waitForRoomToSync(() => handle.joinRoom(), {
+            roomId,
+            initialDelayMs: 0,
+            isCancelled: () => disposed,
+            firstSynced: (sub) => readinessBindingForDocRoom(sub, roomId).firstSyncedWithRemote,
+            onSubscription: (sub) => {
+              room = sub;
+            },
+          });
+          if (disposed) joined?.unsubscribe();
+          else room = joined ?? null;
+        });
+        void firstSynced.catch(() => {});
+        const store: ScheduleDocStore = {
+          roomId,
+          firstSynced,
+          getState: () => scheduleDocumentFromMirrorState(mirror.getState(), id),
+          subscribe: (listener) => mirror.subscribe(listener),
+          waitUntilSynced: async () => {
+            await firstSynced.catch(() => {});
+            if (room && !disposed)
+              await waitForScheduleWriteSync(
+                readinessBindingForDocRoom(room, roomId),
+                syncAbort.signal
+              );
+          },
+          dispose: () => {
+            disposed = true;
+            syncAbort.abort();
+            mirror.dispose();
+            room?.unsubscribe();
+          },
+        };
+        legacyScheduleStores.set(id, store);
+        return store;
       };
+      return documentDomainGate
+        ? documentDomainGate.run(
+            documentDomainMigrationScope({ domain: 'schedule_definition', id }),
+            createLegacy
+          )
+        : createLegacy();
     },
   });
+  const releasePreviewVisualCommentStoreRef = (
+    id: SessionId,
+    store?: PreviewVisualCommentDocStore
+  ) => {
+    if (store && previewVisualCommentStoreCache.peek(id) !== store) return;
+    previewVisualCommentStoreCache.releaseRef(id);
+  };
+  const releaseScheduleStoreRef = (id: string, store?: ScheduleDocStore) => {
+    if (store && scheduleStoreCache.peek(id) !== store) return;
+    scheduleStoreCache.releaseRef(id);
+  };
+  drainLegacyDocumentDomain = async (scope) => {
+    const legacy =
+      scope.domain === 'preview_comments'
+        ? legacyPreviewStores.get(scope.id as SessionId)
+        : legacyScheduleStores.get(scope.id);
+    await drainLegacyDocumentDomainStore(legacy, legacyLeafDocuments.get(scope.roomId), {
+      detach: () => leafDetachWork.get(scope.roomId) ?? Promise.resolve(),
+      persist: (doc) => persistLegacyLeafDocument(scope.roomId, doc),
+      unload: () => repo.unloadDoc(scope.roomId),
+      releaseMaterializedLegacy: () => {
+        if (scope.domain === 'preview_comments')
+          return previewVisualCommentStoreCache.peek(scope.id as SessionId) === legacy
+            ? previewVisualCommentStoreCache.release(scope.id as SessionId)
+            : Promise.resolve();
+        return scheduleStoreCache.peek(scope.id) === legacy
+          ? scheduleStoreCache.release(scope.id)
+          : Promise.resolve();
+      },
+      forgetLegacy: () => {
+        if (scope.domain === 'preview_comments') legacyPreviewStores.delete(scope.id as SessionId);
+        else legacyScheduleStores.delete(scope.id);
+        legacyLeafDocuments.delete(scope.roomId);
+      },
+      onFailure: (phase, code) => {
+        if (typeof window !== 'undefined' && '__LODY_E2E_BOOT__' in window)
+          console.warn(`[native-document-domain-drain] phase=${phase} code=${code}`);
+      },
+    });
+  };
+  const selectedScheduleDefinitions = deps.scheduleDefinitions ?? nativeScheduleDefinitions;
+  const scheduleDefinitions: import('@lody/shared').ScheduleDefinitionResolver | undefined =
+    selectedScheduleDefinitions || documentDomainGate
+      ? {
+          create: async (input) => {
+            if (selectedScheduleDefinitions?.create)
+              return selectedScheduleDefinitions.create(input);
+            if (!documentDomainRegistration?.registration.creationEnabled || !nativeDocumentStores)
+              return undefined;
+            const owner = await nativeDocumentStores.route({
+              domain: 'schedule_definition',
+              id: input.scheduleId,
+            });
+            if (owner === 'native') return undefined;
+            if (owner !== 'legacy') throw new Error('Document migration in progress');
+            await documentDomainRegistration.createSchedule(input);
+            const port = await selectedScheduleDefinitions?.resolve(input.scheduleId);
+            const document = await port?.read();
+            if (!document) throw new Error('Native Schedule creation receipt unavailable');
+            return document;
+          },
+          resolve: (id) => selectedScheduleDefinitions?.resolve(id) ?? Promise.resolve(undefined),
+          runOperation: (id, work) => {
+            const run = () =>
+              selectedScheduleDefinitions?.runOperation
+                ? selectedScheduleDefinitions.runOperation(id, work)
+                : work();
+            const scope = documentDomainMigrationScope({ domain: 'schedule_definition', id });
+            if (!documentDomainGate) return run();
+            const owner = documentDomainGate.owner(scope.roomId);
+            if (owner === 'frozen')
+              return Promise.reject(new Error('Document migration in progress'));
+            return owner === 'legacy' ? documentDomainGate.run(scope, run) : run();
+          },
+        }
+      : undefined;
 
   // Dual-author: every client direct-authors its own durable writes and uploads
   // them over its own cloud connection; local targets additionally converge with
   // the CLI over the local plane (specs/local-first-two-plane.md 作者规则).
-  const workspaceWriter = createDirectWorkspaceWriter({
+  const directWorkspaceWriter = createDirectWorkspaceWriter({
     repo,
     acquireSessionStore: sessionStoreCache.acquire,
-    releaseSessionStoreRef: sessionStoreCache.releaseRef,
+    releaseSessionStoreRef,
     acquirePreviewVisualCommentStore: previewVisualCommentStoreCache.acquire,
-    releasePreviewVisualCommentStoreRef: previewVisualCommentStoreCache.releaseRef,
+    releasePreviewVisualCommentStoreRef,
   });
+  const beforeScheduleWriter =
+    machineFlockFreeze?.writer(
+      workspaceFlockFreeze?.writer(directWorkspaceWriter) ?? directWorkspaceWriter
+    ) ??
+    workspaceFlockFreeze?.writer(directWorkspaceWriter) ??
+    directWorkspaceWriter;
+  const workspaceWriter =
+    scheduleRegistryFreeze?.writer(beforeScheduleWriter) ?? beforeScheduleWriter;
+  if (documentDomainGate) {
+    const mutate = workspaceWriter.mutatePreviewVisualComments.bind(workspaceWriter);
+    workspaceWriter.mutatePreviewVisualComments = (sessionId, mutation) => {
+      const scope = documentDomainMigrationScope({ domain: 'preview_comments', id: sessionId });
+      const owner = documentDomainGate!.owner(scope.roomId);
+      if (owner === 'frozen') return Promise.reject(new Error('Document migration in progress'));
+      return owner === 'legacy'
+        ? documentDomainGate!.run(scope, () => mutate(sessionId, mutation))
+        : mutate(sessionId, mutation);
+    };
+  }
+  const wrapWorkspaceCatalogReader = (
+    reader: ReturnType<typeof createLegacyWorkspaceCatalogReader>
+  ) => workspaceFlockFreeze?.reader(reader) ?? reader;
+  const wrapWorkspaceCatalogCommands = (
+    commands: ReturnType<typeof createLegacyWorkspaceCatalogCommands>
+  ) => workspaceFlockFreeze?.commands(commands) ?? commands;
+
+  const legacyCatalogReader = wrapWorkspaceCatalogReader(
+    createLegacyWorkspaceCatalogReader({
+      binding: { workspaceId, accountId: deps.accountId ?? null },
+      open: async () => {
+        const handle = await repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
+        return {
+          ...handle,
+          joinRoom: () =>
+            workspaceFlockFreeze
+              ? workspaceFlockFreeze.run(() => handle.joinRoom())
+              : handle.joinRoom(),
+        };
+      },
+      isCurrent: () => !disposePromise,
+    })
+  );
+  const legacyCatalogCommands = wrapWorkspaceCatalogCommands(
+    createLegacyWorkspaceCatalogCommands({
+      binding: { workspaceId, accountId: deps.accountId ?? null },
+      isCurrent: () => !disposePromise,
+      put: (key, value) =>
+        workspaceWriter.flockRowPut(getWorkspaceFlockDocId(workspaceId), key, value),
+      remove: (key) => workspaceWriter.flockRowDelete(getWorkspaceFlockDocId(workspaceId), key),
+      update: (key, plan) =>
+        workspaceWriter.flockRowUpdate(getWorkspaceFlockDocId(workspaceId), key, plan),
+      upload: async () => {
+        await (await repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId))).syncOnce();
+      },
+    })
+  );
+  let nativeCatalogBackend: ReturnType<typeof createElectronNativeWorkspaceCatalog> | undefined;
+  const workspaceCatalogBackend = workspaceFlockFreeze
+    ? createWorkspaceCatalogOwnerDispatcher({
+        owner: () => workspaceFlockFreeze!.ownerKind(),
+        subscribeOwner: (listener) => workspaceFlockFreeze!.subscribeOwner(listener),
+        legacy: { reader: legacyCatalogReader, commands: legacyCatalogCommands },
+        native: () => {
+          const registrationId = workspaceFlockMigrationRegistration?.registrationId;
+          if (!registrationId) throw new Error('Native workspace catalog registration unavailable');
+          nativeCatalogBackend ??= createElectronNativeWorkspaceCatalog(
+            { accountId: deps.accountId ?? null, workspaceId },
+            registrationId
+          );
+          return nativeCatalogBackend;
+        },
+      })
+    : { reader: legacyCatalogReader, commands: legacyCatalogCommands, close: async () => {} };
 
   releaseIdleDocumentStoresBeforeReconnect = async () => {
     // Keep the warm-cache delay during normal navigation, but trim idle joined
@@ -5625,7 +6545,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     eagerSyncVisibleSessionIds?.has(sessionId) ?? false;
 
   const seedBackgroundSyncSnapshots = async (): Promise<void> => {
-    const { sessions } = await readSessionAndMachineMetas(repo, deps.readDocMetaCache);
+    const { sessions } = await readSessionAndMachineMetas(
+      repo,
+      deps.readDocMetaCache,
+      workspaceDirectory
+    );
     for (const [roomId, meta] of Object.entries(sessions)) {
       const sessionId = sessionIdFromRoomId(roomId);
       backgroundSyncSnapshots.set(sessionId, toSessionActivitySnapshot(sessionId, meta));
@@ -5686,6 +6610,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
             if (signal.aborted || materializedSessionIds.has(sessionId)) {
               return 'skipped';
             }
+            if (sessionBodyGate && !sessionBodyGate.shouldRoute(getSessionRoomId(sessionId)))
+              return 'skipped';
+            if (nativeSessionStores && (await nativeSessionStores.route(sessionId)) !== 'legacy')
+              return 'skipped';
             return (
               eagerSyncWorkerClient?.prefetch(getSessionRoomId(sessionId), lastMessageAt, signal) ??
               'skipped'
@@ -5784,6 +6712,33 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
     // Publish retirement before any cancellation callback or asynchronous close runs.
     const attempt = Promise.resolve().then(async () => {
+      await closeStep('workspace-flock-migration', async () => {
+        const results = await Promise.allSettled([
+          workspaceCatalogBackend.close(),
+          nativeMachineCatalogSource?.close(),
+          scheduleRegistryOwner?.close(),
+          nativeScheduleRegistrySource?.close(),
+          scheduleRegistryRegistration?.close(),
+          Promise.resolve().then(() => detachMachineFlockOwner?.()),
+          machineFlockRegistration?.close(),
+          nativeCatalogBackend?.close(),
+          workspaceFlockFreeze?.close(),
+        ]);
+        const errors = results.flatMap((result) =>
+          result.status === 'rejected' ? [result.reason] : []
+        );
+        // Retirement can release a failed native subscription owner, but cannot
+        // claim that an undrained legacy producer has stopped.
+        if (results[5]!.status === 'fulfilled')
+          try {
+            await workspaceFlockMigrationRegistration?.close();
+          } catch (cause) {
+            errors.push(cause);
+          }
+        if (errors.length)
+          throw new AggregateError(errors, 'Workspace catalog cleanup remains unconfirmed');
+        workspaceFlockMigrationRegistration = null;
+      });
       await closeStep('dispatch', async () => {
         encryptedAcpCloseCancellation = true;
         const cancellationController = new AbortController();
@@ -5923,14 +6878,19 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
       await closeStep('doc-stores', async () => {
         await sessionStoreCache.disposeAll();
+        await nativeSessionStores?.close();
         await previewVisualCommentStoreCache.disposeAll();
         await scheduleStoreCache.disposeAll();
+        await nativeDocumentStores?.close();
       });
       let codeCollabFileIndexCacheDisposeError: unknown = null;
       try {
         await closeStep('file-index', () => codeCollabFileIndexCache.dispose());
       } catch (error) {
         codeCollabFileIndexCacheDisposeError = error;
+      } finally {
+        nativeFileIndexConnection?.dispose();
+        nativeFileIndexConnection = null;
       }
 
       let teardownTransportError: unknown = null;
@@ -5970,6 +6930,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       await closeStep('repo', async () => {
         try {
           await repo.destroy();
+          await documentDomainRegistration?.close();
+          await sessionBodyRegistration?.close();
+          await nativeWorkspaceMetaSource?.close();
+          await workspaceMetaRegistration?.close();
         } catch (error) {
           uncertainRepoClose = repo.destroyed;
           throw error;
@@ -6066,7 +7030,34 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   }, RECONNECT_BACKSTOP_INTERVAL_MS);
 
   window.repo = repo;
-  const codeCollabFileIndexCache = createCodeCollabFileIndexCache(repo);
+  const codeCollabFileIndexCache = createCodeCollabFileIndexCache(repo, {
+    ...(!protectedContent && cloudPlaneEnabled && window.__LODY_ELECTRON__
+      ? {
+          openCloudResource: async (flockDocId: string, onFailure: () => void) => {
+            const prefix = `${workspaceId}:fi:`;
+            if (!flockDocId.startsWith(prefix) || flockDocId.length <= prefix.length) return null;
+            return openCloudCodeCollabFileIndexResource({
+              workspaceId,
+              ownerSessionId: flockDocId.slice(prefix.length),
+              onFailure,
+            });
+          },
+        }
+      : {}),
+    openLocalResource: async (flockDocId, onFailure) => {
+      const prefix = `${workspaceId}:fi:`;
+      if (!flockDocId.startsWith(prefix) || flockDocId.length <= prefix.length) return null;
+      nativeFileIndexConnection ??= createLocalLoroDataPlaneConnection();
+      if (!nativeFileIndexConnection)
+        throw new Error('Local file-index observation bridge is unavailable.');
+      return openNativeCodeCollabFileIndexResource({
+        connection: nativeFileIndexConnection.connection,
+        workspaceId,
+        ownerSessionId: flockDocId.slice(prefix.length),
+        onFailure,
+      });
+    },
+  });
   const sendResources = createSessionSendResources({
     acquire: sessionStoreCache.acquire,
     releaseRef: sessionStoreCache.releaseRef,
@@ -6110,6 +7101,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   deps.signal?.addEventListener('abort', abortInitialization, { once: true });
   try {
     deps.signal?.throwIfAborted();
+    await documentDomainRegistration?.ready();
+    await sessionBodyRegistration?.ready();
     if (electronLocalDataPlane) {
       localStartupPromise = ensureLocalTransport();
       if (deps.waitForContentAdmission) {
@@ -6171,6 +7164,50 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     codeCollabFileIndexCache,
     sendResources,
     writer: workspaceWriter,
+    scheduleDefinitions,
+    getDocumentDomainEpoch: (target) =>
+      documentDomainEpochs.get(documentDomainMigrationScope(target).roomId) ?? 0,
+    subscribeDocumentDomainEpoch: (target, listener) => {
+      const roomId = documentDomainMigrationScope(target).roomId,
+        listeners = documentDomainEpochListeners.get(roomId) ?? new Set<() => void>();
+      documentDomainEpochListeners.set(roomId, listeners);
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+        if (!listeners.size) documentDomainEpochListeners.delete(roomId);
+      };
+    },
+    scheduleRegistry:
+      deps.scheduleRegistry ??
+      scheduleRegistryOwner?.registry ??
+      createLegacyScheduleRegistry({
+        workspaceId: deps.workspaceId,
+        repo,
+        releaseRoomOnSyncError: true,
+        selectBinding: (sub) =>
+          sub.subscription(
+            targetRouter.getReadinessTransportForRoom({
+              kind: 'flock-doc',
+              id: `${deps.workspaceId}:sr`,
+            })
+          ),
+      }),
+    workspaceDirectory,
+    get nativeMachineCatalogSource() {
+      return nativeMachineCatalogSource;
+    },
+    subscribeNativeMachineCatalogSource: (listener: () => void) => {
+      machineCatalogSourceListeners.add(listener);
+      return () => {
+        machineCatalogSourceListeners.delete(listener);
+      };
+    },
+    ownsNativeMachineCatalog: (machineId: MachineId) =>
+      !!machineFlockFreeze &&
+      machineFlockFreeze.group.roomIds.includes(`${deps.workspaceId}:mf:${machineId}`) &&
+      machineFlockFreeze.ownerKind() !== 'legacy',
+    workspaceCatalogReader: workspaceCatalogBackend.reader,
+    workspaceCatalogCommands: workspaceCatalogBackend.commands,
     readSessionOperationTargets: async (sessionId, operation) => {
       if (disposePromise) throw new Error('Runtime disposed');
       // This flag follows the selected meta transport: local on Desktop,
@@ -6209,13 +7246,23 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       try {
         return await fn(store);
       } finally {
-        sessionStoreCache.releaseRef(sessionId);
+        releaseSessionStoreRef(sessionId, store);
       }
     },
     releaseSessionStore: sessionStoreCache.release,
     acquireSessionStore: sessionStoreCache.acquire,
     peekSessionStore: sessionStoreCache.peek,
-    releaseSessionStoreRef: sessionStoreCache.releaseRef,
+    getSessionStoreEpoch: (sessionId: SessionId) => sessionStoreEpochs.get(sessionId) ?? 0,
+    subscribeSessionStoreEpoch: (sessionId: SessionId, listener: () => void) => {
+      const listeners = sessionStoreListeners.get(sessionId) ?? new Set<() => void>();
+      sessionStoreListeners.set(sessionId, listeners);
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+        if (!listeners.size) sessionStoreListeners.delete(sessionId);
+      };
+    },
+    releaseSessionStoreRef,
     withPreviewVisualCommentStore: async <T>(
       sessionId: SessionId,
       fn: (store: PreviewVisualCommentDocStore) => Promise<T> | T
@@ -6224,12 +7271,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       try {
         return await fn(store);
       } finally {
-        previewVisualCommentStoreCache.releaseRef(sessionId);
+        releasePreviewVisualCommentStoreRef(sessionId, store);
       }
     },
     releasePreviewVisualCommentStore: previewVisualCommentStoreCache.release,
     acquirePreviewVisualCommentStore: previewVisualCommentStoreCache.acquire,
-    releasePreviewVisualCommentStoreRef: previewVisualCommentStoreCache.releaseRef,
+    releasePreviewVisualCommentStoreRef,
     withScheduleStore: async <T>(
       id: string,
       fn: (store: ScheduleDocStore) => Promise<T> | T,
@@ -6250,7 +7297,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       );
     },
     acquireScheduleStore: scheduleStoreCache.acquire,
-    releaseScheduleStoreRef: scheduleStoreCache.releaseRef,
+    releaseScheduleStoreRef,
     sendControl,
     waitForSessionCreateResponse,
     waitForSessionCancelResponse,

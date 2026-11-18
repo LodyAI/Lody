@@ -39,8 +39,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function openStore(): Promise<SessionDocStore> {
-  const view = await openReaderView(reimport(buildSessionDoc(buildFixtureHistory(3))), {
+async function openStore(turns = 3): Promise<SessionDocStore> {
+  const view = await openReaderView(reimport(buildSessionDoc(buildFixtureHistory(turns))), {
     sessionId: FIXTURE_SESSION_ID,
   });
   views.push(view);
@@ -81,6 +81,43 @@ function renderSessionDoc(runtime: Partial<WorkspaceRuntime>) {
 }
 
 describe('useSessionDoc opening', () => {
+  it('reacquires the published body owner and does not replace it with a late legacy acquisition', async () => {
+    const legacy = await openStore(3);
+    const native = await openStore(1);
+    let current = legacy;
+    let epoch = 0;
+    let releaseLegacy!: (store: SessionDocStore) => void;
+    const pendingLegacy = new Promise<SessionDocStore>((resolve) => {
+      releaseLegacy = resolve;
+    });
+    const listeners = new Set<() => void>();
+    const released: SessionDocStore[] = [];
+    const commits = renderSessionDoc({
+      peekSessionStore: () => current,
+      acquireSessionStore: () => (current === legacy ? pendingLegacy : Promise.resolve(current)),
+      releaseSessionStoreRef: (_id, store) => {
+        if (store) released.push(store);
+      },
+      getSessionStoreEpoch: () => epoch,
+      subscribeSessionStoreEpoch: (_id, listener) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    });
+    expect(commits.at(-1)).toEqual({ ready: true, turns: legacy.history.turnCount });
+    await act(async () => {
+      current = native;
+      epoch++;
+      for (const listener of listeners) listener();
+    });
+    expect(commits.at(-1)).toEqual({ ready: true, turns: native.history.turnCount });
+    await act(async () => releaseLegacy(legacy));
+    expect(commits.at(-1)).toEqual({ ready: true, turns: native.history.turnCount });
+    expect(released).toEqual([legacy]);
+  });
+
   it('renders an already-open store in its first commit', async () => {
     const open = await openStore();
     let acquired = 0;

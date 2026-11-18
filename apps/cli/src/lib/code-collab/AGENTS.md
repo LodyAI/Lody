@@ -5,6 +5,9 @@
 Current behavior and protocol references: [file surfaces](../../../../../.agents/docs/sessions-file-surfaces.md).
 File-by-file responsibilities: [README.md](README.md).
 
+The 1,280-word ceiling preserves the ordinary Cloud native index ownership and
+failure-containment rules alongside the existing filesystem and publication contracts.
+
 ## Invariants
 
 - Turn-end filesystem refresh runs before Turn release within the execution owner's statistics budget.
@@ -31,8 +34,10 @@ File-by-file responsibilities: [README.md](README.md).
 - Shared file tree/All Changes uses owner-session Flock stream
   `<workspace-id>:fi:<master-session-id>` (one file row plus an optional opaque generation row per changed path); successful changes or
   targeted repairs advance signal stream `<workspace-id>:fis:<master-session-id>`,
-  and the named Flock bridge in `apps/cli/src/lib/loro/doc.ts` lets Electron
-  invalidate and refresh its Machine RPC snapshot. Both streams have 180-day TTL and
+  and the legacy named Flock bridge in `apps/cli/src/lib/loro/doc.ts` lets Electron
+  invalidate and refresh its Machine RPC snapshot. The local native pilot instead
+  serves read-only index/generation snapshots through the same authenticated IPC;
+  its FI/FIS pair has one native owner and no legacy writer. Both streams have 180-day TTL and
   must not enter repo meta. Root activation and terminal turn refresh may mirror only
   compact aggregate file counts and text add/del `diffStats` from the complete All Changes set before index
   trimming, including uncommitted work even with an associated PR. Statistics reconciliation
@@ -40,6 +45,12 @@ File-by-file responsibilities: [README.md](README.md).
   File/diff watcher refreshes stay Flock-only. The injected `observeWorkspaceGit` observer
   runs only on activation/explicit root refresh, never file watcher or terminal diff refresh;
   it must not gate file snapshots.
+- Ordinary Cloud FI/FIS backends enter only through the optional trusted Node
+  factory before daemon consumers start. Local and protected modes never call it.
+  Persisted selected owners cannot reopen legacy Flock writers when the factory
+  is unavailable. Fence only those derived indexes, preserving Session work and
+  the filesystem-first RPC snapshot. Deployment authorities keep separate markers;
+  renderer resources carry read-only snapshots and never cloud credentials.
 - The whole published file index stays within `CODE_COLLAB_FILE_INDEX_LIMITS`
   (1,000 rows, 100 KiB of estimated Flock JSON), applied after the tree and All
   Changes are merged, never per input. Over-budget paths stay unloaded behind lazy

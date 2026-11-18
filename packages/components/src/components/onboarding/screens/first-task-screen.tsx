@@ -8,13 +8,14 @@ import {
   buildInitialHistoryEntry,
   getServerNow,
   type AgentConfigId,
-  type AgentConfigMeta,
+  type AgentConfigListSummary,
   type LocalProjectId,
   type ProjectRef,
   type SessionId,
 } from '@lody/shared';
 import { userAtom } from '@/atoms';
-import { getAllAgentConfigAtom } from '@/atoms/agents';
+import { getAllAgentConfigListAtom } from '@/atoms/agents';
+import type { AgentConfigDisplay } from '@/lib/agent-config-display';
 import type { DesktopOnboardingProjectSelection } from '@/atoms/onboarding';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useSessionActions } from '@/hooks/use-session-actions';
@@ -42,20 +43,20 @@ const styles = stylex.create({
   seeds: { display: 'flex', flexWrap: 'wrap', gap: space[2] },
 });
 
-export function getFirstTaskAgentConfigs(
-  configs: readonly AgentConfigMeta[],
+export function getFirstTaskAgentConfigs<T extends AgentConfigListSummary>(
+  configs: readonly T[],
   project: DesktopOnboardingProjectSelection
-): AgentConfigMeta[] {
+): T[] {
   if (project.kind !== 'local') return [];
   return configs
     .filter((candidate) => candidate.machineId === project.machineId)
     .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
 }
 
-export function getSelectedFirstTaskAgentConfig(
-  availableConfigs: readonly AgentConfigMeta[],
+export function getSelectedFirstTaskAgentConfig<T extends AgentConfigListSummary>(
+  availableConfigs: readonly T[],
   agentConfigId: AgentConfigId
-): AgentConfigMeta | null {
+): T | null {
   return availableConfigs.find((candidate) => candidate.id === agentConfigId) ?? null;
 }
 
@@ -70,7 +71,7 @@ export function FirstTaskScreen({
   agentConfigId: AgentConfigId;
   project: DesktopOnboardingProjectSelection;
   onBack: () => void;
-  onAgentConfigChange: (config: AgentConfigMeta) => void;
+  onAgentConfigChange: (config: AgentConfigListSummary) => void;
   onSkip: () => void;
   onContinue: () => Promise<boolean>;
 }) {
@@ -78,13 +79,13 @@ export function FirstTaskScreen({
   const analytics = useOnboardingAnalytics();
   const user = useAtomValue(userAtom);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
-  const configs = useAtomValue(getAllAgentConfigAtom);
+  const configs: readonly AgentConfigDisplay[] = useAtomValue(getAllAgentConfigListAtom);
   const { startSession, requestSessionDispatch } = useSessionActions();
   const availableConfigs = useMemo(
     () => getFirstTaskAgentConfigs(configs, project),
     [configs, project]
   );
-  const config: AgentConfigMeta | null = useMemo(
+  const config: AgentConfigDisplay | null = useMemo(
     () => getSelectedFirstTaskAgentConfig(availableConfigs, agentConfigId),
     [agentConfigId, availableConfigs]
   );

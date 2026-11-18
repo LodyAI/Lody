@@ -13,6 +13,7 @@ import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 
 type LocalProjectWorktreeRemovalTarget = {
+  signal?: AbortSignal;
   machineId: MachineId;
   localProjectId: LocalProjectId;
   originalRootPath: string;
@@ -89,7 +90,9 @@ export async function cleanupLocalProjectWorktrees(
   const manager = getManager(target);
 
   for (const session of getTargetSessions(target)) {
+    target.signal?.throwIfAborted();
     const inspection = await manager.inspectWorktree(session.id);
+    target.signal?.throwIfAborted();
     if (inspection.state === 'missing') continue;
     const item = toCleanupItem(session, inspection.path);
     if (inspection.state === 'dirty') {

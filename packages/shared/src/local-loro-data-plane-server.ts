@@ -25,10 +25,12 @@ import {
   roomKey,
   type FlockVersionVector,
   type LocalLoroDataPlaneClientMessage,
+  type LocalLoroWorkspaceClientMessage,
   type LocalLoroDataPlaneRoom,
   type LocalLoroDataPlaneServerMessage,
   type LocalLoroJoinMessage,
   type LocalLoroUpdateMessage,
+  type LocalNativeFileIndexState,
 } from './local-loro-data-plane';
 
 /**
@@ -102,8 +104,29 @@ export type LocalLoroMachineMonitorSource = {
 export type LocalLoroDocRoomJoinHandler = (docId: string) => void | Promise<void>;
 export type LocalLoroFlockRoomHandler = (flockDocId: string) => void | Promise<void>;
 
+export type LocalNativeFileIndexSource = {
+  subscribe(
+    ownerSessionId: string,
+    onSnapshot: (state: LocalNativeFileIndexState) => void
+  ): Promise<null | { release(): Promise<void> }>;
+};
+
+type NativeFileIndexObserver = {
+  connection: LocalLoroDataPlaneServerConnection;
+  peerId: string;
+  ownerSessionId: string;
+  requestId: string;
+  ready: boolean;
+  closed: boolean;
+  state: LocalNativeFileIndexState | null;
+  opened: Promise<null | { release(): Promise<void> }>;
+};
+
 export type LocalLoroDataPlaneServerOptions = {
   workspaceId: string;
+  nativeFileIndexSource?: LocalNativeFileIndexSource;
+  /** Bound only observation release waiters; actual SDK settlement stays owned. */
+  nativeFileIndexReleaseTimeoutMs?: number;
   resolveDoc: (docId: string) => Promise<LoroDoc>;
   resolveFlockDoc: (flockDocId: string) => Promise<LocalLoroFlockLike>;
   // The `meta` room is loro-repo's internal metaFlock (doc registry + per-doc
@@ -190,6 +213,7 @@ type RoomEntry = DocRoomEntry | FlockRoomEntry;
 // per connection, and bursts coalesce for free.
 type WriterTask =
   | { kind: 'message'; message: LocalLoroDataPlaneServerMessage }
+  | { kind: 'native-file-index'; observer: NativeFileIndexObserver }
   | { kind: 'join-reply'; roomKey: string; peerId: string; requestId: string }
   | { kind: 'sync'; roomKey: string; peerId: string }
   | { kind: 'presence' }
@@ -215,6 +239,14 @@ type WriterTask =
 /** @deprecated Room resolution/join/leave/import remains Promise orchestration.
  * All outbound work consumes the one native LocalLoroWriter via its Legacy facade. */
 export class LocalLoroDataPlaneServerLegacy {
+  private readonly nativeFileIndexObservers = new Map<string, NativeFileIndexObserver>();
+  private readonly nativeFileIndexReleases = new Map<
+    NativeFileIndexObserver,
+    {
+      release: () => Promise<void>;
+      pending: Promise<void> | null;
+    }
+  >();
   private readonly rooms = new Map<string, RoomEntry>();
   // `null` resolves mean the build was superseded by an invalidation; retry.
   private readonly resolveInFlight = new Map<string, Promise<RoomEntry | null>>();
@@ -222,6 +254,7 @@ export class LocalLoroDataPlaneServerLegacy {
   // flight can discover that the doc it resolved has since been evicted.
   private readonly roomGenerations = new Map<string, number>();
   // Every connected client receives workspace presence pushes.
+  private readonly presencePeers = new Map<string, Set<string>>();
   private readonly presenceReceivers = new Map<string, LocalLoroDataPlaneServerConnection>();
   private readonly machineMonitorReceivers = new Map<string, LocalLoroDataPlaneServerConnection>();
   private readonly writerOwner = makeLocalLoroWriterOwner();
@@ -366,7 +399,7 @@ export class LocalLoroDataPlaneServerLegacy {
 
   async handleMessage(
     connection: LocalLoroDataPlaneServerConnection,
-    message: Exclude<LocalLoroDataPlaneClientMessage, { type: 'ping' }>
+    message: LocalLoroWorkspaceClientMessage
   ): Promise<void> {
     if (this.disposed || this.disconnectedIds.has(connection.id)) {
       return;
@@ -375,7 +408,7 @@ export class LocalLoroDataPlaneServerLegacy {
       this.sendError(connection, {
         code: 'workspace_runtime_unavailable',
         peerId: message.peerId,
-        requestId: message.type === 'join' ? message.requestId : undefined,
+        requestId: 'requestId' in message ? message.requestId : undefined,
       });
       return;
     }
@@ -383,7 +416,7 @@ export class LocalLoroDataPlaneServerLegacy {
       this.sendError(connection, {
         code: 'workspace_mismatch',
         peerId: message.peerId,
-        requestId: message.type === 'join' ? message.requestId : undefined,
+        requestId: 'requestId' in message ? message.requestId : undefined,
       });
       return;
     }
@@ -391,7 +424,7 @@ export class LocalLoroDataPlaneServerLegacy {
       // Any message from a connection registers it as a presence receiver and
       // gets the current presence snapshot (presence is workspace-level, not
       // per-room).
-      this.registerPresenceReceiver(connection);
+      if (message.type !== 'detach') this.registerPresenceReceiver(connection, message.peerId);
       if (
         this.options.promptSuggestionSource &&
         !this.promptSuggestionReceivers.has(connection.id)
@@ -400,6 +433,16 @@ export class LocalLoroDataPlaneServerLegacy {
         this.offer(connection, { kind: 'prompt-suggestions' });
       }
       switch (message.type) {
+        case 'ping':
+          this.offer(connection, {
+            kind: 'message',
+            message: {
+              type: 'pong',
+              protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+              nativeFileIndexSnapshots: true,
+            },
+          });
+          return;
         case 'join':
           await this.handleJoin(connection, message);
           return;
@@ -409,8 +452,19 @@ export class LocalLoroDataPlaneServerLegacy {
         case 'leave':
           this.unsubscribePeer(message.peerId, roomKey(message.room));
           return;
+        case 'file-index-observe':
+          await this.observeNativeFileIndex(connection, message);
+          return;
+        case 'file-index-unobserve':
+          await this.releaseNativeFileIndexes(
+            (observer) =>
+              observer.connection.id === connection.id &&
+              observer.peerId === message.peerId &&
+              observer.requestId === message.requestId
+          );
+          return;
         case 'detach':
-          this.detachPeer(message.peerId);
+          await this.detachPeer(message.peerId);
           return;
         case 'machine-monitor':
           this.registerMachineMonitorReceiver(connection);
@@ -423,13 +477,19 @@ export class LocalLoroDataPlaneServerLegacy {
         code: 'data_plane_error',
         message: errorMessage(error),
         peerId: message.peerId,
-        requestId: message.type === 'join' ? message.requestId : undefined,
+        requestId: 'requestId' in message ? message.requestId : undefined,
         room: 'room' in message ? message.room : undefined,
       });
     }
   }
 
-  private registerPresenceReceiver(connection: LocalLoroDataPlaneServerConnection): void {
+  private registerPresenceReceiver(
+    connection: LocalLoroDataPlaneServerConnection,
+    peerId: string
+  ): void {
+    const peers = this.presencePeers.get(connection.id) ?? new Set<string>();
+    peers.add(peerId);
+    this.presencePeers.set(connection.id, peers);
     if (!this.options.presenceSource || this.presenceReceivers.has(connection.id)) {
       return;
     }
@@ -492,6 +552,7 @@ export class LocalLoroDataPlaneServerLegacy {
           this.promptSuggestionUnsubscribe = null;
         });
         this.promptSuggestionReceivers.clear();
+        this.presencePeers.clear();
         this.presenceReceivers.clear();
         this.machineMonitorReceivers.clear();
         for (const [key, entry] of this.rooms)
@@ -503,6 +564,11 @@ export class LocalLoroDataPlaneServerLegacy {
             this.notifyFlockRoomLeave(entry.room);
           });
         this.roomGenerations.clear();
+        try {
+          await this.releaseNativeFileIndexes(() => true);
+        } catch (error) {
+          failure = Cause.combine(failure, Cause.die(error));
+        }
         const writer = await this.writerLegacy.executeEffect(
           this.writerLegacy.writer.closeOwner(this.writerOwner).pipe(Effect.exit)
         );
@@ -519,9 +585,10 @@ export class LocalLoroDataPlaneServerLegacy {
   }
 
   /** Synchronous revocation precedes the awaited physical-writer release. */
-  handleDisconnectLegacy(connectionId: string): Promise<void> {
+  async handleDisconnectLegacy(connectionId: string): Promise<void> {
     this.disconnectedIds.add(connectionId);
     this.promptSuggestionReceivers.delete(connectionId);
+    this.presencePeers.delete(connectionId);
     this.presenceReceivers.delete(connectionId);
     this.machineMonitorReceivers.delete(connectionId);
     let failure: Cause.Cause<unknown> = Cause.empty;
@@ -540,6 +607,11 @@ export class LocalLoroDataPlaneServerLegacy {
         failure = Cause.combine(failure, Cause.die(error));
       }
     }
+    try {
+      await this.releaseNativeFileIndexes((observer) => observer.connection.id === connectionId);
+    } catch (error) {
+      failure = Cause.combine(failure, Cause.die(error));
+    }
     return this.writerLegacy.executeEffect(
       this.writerLegacy.writer.disconnect(connectionId).pipe(
         Effect.exit,
@@ -552,10 +624,126 @@ export class LocalLoroDataPlaneServerLegacy {
   }
 
   /** Drop every subscription held by one peer (adapter close / dead window). */
-  private detachPeer(peerId: string): void {
+  private async detachPeer(peerId: string): Promise<void> {
+    for (const [connectionId, peers] of this.presencePeers) {
+      peers.delete(peerId);
+      if (peers.size === 0) {
+        this.presencePeers.delete(connectionId);
+        this.presenceReceivers.delete(connectionId);
+      }
+    }
     for (const key of [...this.rooms.keys()]) {
       this.unsubscribePeer(peerId, key);
     }
+    await this.releaseNativeFileIndexes((observer) => observer.peerId === peerId);
+  }
+
+  private async releaseNativeFileIndexes(
+    matches: (observer: NativeFileIndexObserver) => boolean
+  ): Promise<void> {
+    for (const [key, observer] of this.nativeFileIndexObservers) {
+      if (!matches(observer)) continue;
+      observer.closed = true;
+      this.nativeFileIndexObservers.delete(key);
+      this.nativeFileIndexReleases.set(observer, {
+        release: () =>
+          observer.opened.then(
+            (lease) => lease?.release(),
+            () => undefined
+          ),
+        pending: null,
+      });
+    }
+    // Only this peer's releases can affect this request. Application teardown
+    // also retries retained failures, without fencing other windows/owners.
+    const results = await Promise.allSettled(
+      [...this.nativeFileIndexReleases]
+        .filter(([observer]) => matches(observer))
+        .map(async ([observer, owner]) => {
+          owner.pending ??= owner.release().then(
+            () => {
+              this.nativeFileIndexReleases.delete(observer);
+            },
+            (error) => {
+              owner.pending = null;
+              throw error;
+            }
+          );
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            await Promise.race([
+              owner.pending,
+              new Promise<never>((_resolve, reject) => {
+                timer = setTimeout(
+                  () => reject(new Error('Native file-index release timed out; owner retained.')),
+                  this.options.nativeFileIndexReleaseTimeoutMs ?? 5_000
+                );
+              }),
+            ]);
+          } finally {
+            clearTimeout(timer);
+          }
+        })
+    );
+    const errors = results.flatMap((result) =>
+      result.status === 'rejected' ? [result.reason] : []
+    );
+    if (errors.length > 0)
+      throw new AggregateError(errors, 'Native file-index observation release failed.');
+  }
+
+  private async observeNativeFileIndex(
+    connection: LocalLoroDataPlaneServerConnection,
+    message: Extract<LocalLoroDataPlaneClientMessage, { type: 'file-index-observe' }>
+  ): Promise<void> {
+    await this.releaseNativeFileIndexes(
+      (observer) =>
+        observer.connection.id === connection.id &&
+        observer.peerId === message.peerId &&
+        observer.ownerSessionId === message.ownerSessionId
+    );
+    const key = JSON.stringify([connection.id, message.peerId, message.ownerSessionId]);
+    const observer: NativeFileIndexObserver = {
+      connection,
+      peerId: message.peerId,
+      ownerSessionId: message.ownerSessionId,
+      requestId: message.requestId,
+      ready: false,
+      closed: false,
+      state: null,
+      opened: Promise.resolve(null),
+    };
+    this.nativeFileIndexObservers.set(key, observer);
+    observer.opened = Promise.resolve().then(
+      () =>
+        this.options.nativeFileIndexSource?.subscribe(message.ownerSessionId, (state) => {
+          if (observer.closed || this.nativeFileIndexObservers.get(key) !== observer) return;
+          observer.state = state;
+          if (observer.ready) this.offer(connection, { kind: 'native-file-index', observer });
+        }) ?? null
+    );
+    let lease: Awaited<typeof observer.opened>;
+    try {
+      lease = await observer.opened;
+    } catch (error) {
+      observer.closed = true;
+      if (this.nativeFileIndexObservers.get(key) === observer)
+        this.nativeFileIndexObservers.delete(key);
+      throw error;
+    }
+    if (observer.closed || this.disposed || this.disconnectedIds.has(connection.id)) return;
+    this.enqueueMessage(connection, {
+      ...message,
+      type: 'file-index-observed',
+      backend: lease ? 'native' : 'legacy',
+    });
+    if (!lease) {
+      observer.closed = true;
+      this.nativeFileIndexObservers.delete(key);
+      return;
+    }
+    observer.ready = true;
+    if (observer.state) this.offer(connection, { kind: 'native-file-index', observer });
   }
 
   private async handleJoin(
@@ -844,17 +1032,21 @@ export class LocalLoroDataPlaneServerLegacy {
     this.writerLegacy.writer.offer(connection, {
       owner: this.writerOwner,
       key:
-        task.kind === 'sync'
-          ? `sync:${task.roomKey}\n${task.peerId}`
-          : task.kind === 'presence' ||
-              task.kind === 'machine-monitor' ||
-              task.kind === 'prompt-suggestions'
-            ? task.kind
-            : undefined,
+        task.kind === 'native-file-index'
+          ? `native-index:${task.observer.peerId}:${task.observer.ownerSessionId}:${task.observer.requestId}`
+          : task.kind === 'sync'
+            ? `sync:${task.roomKey}\n${task.peerId}`
+            : task.kind === 'presence' ||
+                task.kind === 'machine-monitor' ||
+                task.kind === 'prompt-suggestions'
+              ? task.kind
+              : undefined,
       roomKey: task.kind === 'sync' || task.kind === 'join-reply' ? task.roomKey : undefined,
       valid: () =>
         !this.disposed &&
         !this.disconnectedIds.has(connection.id) &&
+        (task.kind !== 'native-file-index' || !task.observer.closed) &&
+        (task.kind !== 'presence' || this.presenceReceivers.get(connection.id) === connection) &&
         (!room ||
           ((task.kind === 'sync' || task.kind === 'join-reply') &&
             this.rooms.get(task.roomKey) === room &&
@@ -906,6 +1098,21 @@ export class LocalLoroDataPlaneServerLegacy {
     const self = this;
     return Effect.gen(function* () {
       switch (task.kind) {
+        case 'native-file-index': {
+          const observer = task.observer;
+          if (observer.closed || !observer.state) return [];
+          return [
+            {
+              type: 'file-index-snapshot',
+              protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+              workspaceId: self.options.workspaceId,
+              peerId: observer.peerId,
+              requestId: observer.requestId,
+              ownerSessionId: observer.ownerSessionId,
+              state: observer.state,
+            },
+          ];
+        }
         case 'message':
           return [task.message];
         case 'presence': {

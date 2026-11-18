@@ -9,11 +9,16 @@ import {
 /** A published reservation owns its local bytes even before it has a history entry. */
 export async function isScheduledMessageFile(args: {
   repo: ScheduleRepositoryPort;
+  registry?: import('@lody/shared').ScheduleRegistryPort;
+  definitions?: import('@lody/shared').ScheduleDefinitionResolver;
   workspaceId: WorkspaceId;
   sessionId: SessionId;
   fileId: string;
 }): Promise<boolean> {
-  const repository = new ScheduleRepository(args.repo, args.workspaceId);
+  const repository = new ScheduleRepository(args.repo, args.workspaceId, {
+    registry: args.registry,
+    definitions: args.definitions,
+  });
   for (const row of await repository.list()) {
     if (
       !row.scheduledMessage ||

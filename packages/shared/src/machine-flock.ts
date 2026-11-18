@@ -1,3 +1,4 @@
+import { getRateLimitEntryKey } from './rate-limit-key';
 import { isMagpieGatewayUrl, normalizeMagpieGateway } from './magpie-import';
 import { MemoryAssociationSchema, type MemoryAssociation } from './memory-provider';
 import type { RateLimit } from 'acp-extension-core';
@@ -35,12 +36,7 @@ import type {
   WorktreeCleanupScriptConfig,
   WorktreeSetupScriptConfig,
 } from './project';
-import {
-  getRateLimitEntryKey,
-  type AgentConfigMeta,
-  type SessionLaunchConfig,
-  type SessionMeta,
-} from './schema';
+import { type AgentConfigMeta, type SessionLaunchConfig, type SessionMeta } from './schema';
 
 export const MACHINE_FLOCK_DOC_STREAM_SEGMENT = 'mf';
 
@@ -1122,6 +1118,26 @@ export function findBuiltinAgentOptOutToRetract(
   return serializeMachineFlockKey(key) in rows ? key : null;
 }
 
+/** Retain stored extensions, while allowing known optional fields to be cleared. */
+export function preserveStoredAgentConfigFields(
+  previous: unknown,
+  normalized: AgentConfigMeta
+): AgentConfigMeta {
+  const value = { ...(isRecord(previous) ? previous : {}), ...normalized };
+  for (const key of [
+    'description',
+    'customAcp',
+    'runtimeOverrides',
+    'magpieGatewayUrl',
+    'prompt',
+    'titleGeneration',
+    'brandId',
+    'codexAuth',
+  ])
+    if (!Object.hasOwn(normalized, key)) delete (value as Record<string, unknown>)[key];
+  return value as AgentConfigMeta;
+}
+
 /** Write the agentConfig row and retract the same-type opt-out in one commit. Returns whether anything changed. */
 export function writeAgentConfigToFlock(
   flock: MachineFlockWritableFlock,
@@ -1147,7 +1163,17 @@ export function writeAgentConfigToFlock(
     return false;
   }
   if (rowChanged) {
-    flock.set(normalized.key, normalized.value, nowMs);
+    const previous = [...flock.scan({ prefix: key })].find(
+      (row) =>
+        serializeMachineFlockKey(row.key as MachineFlockKey) === serializeMachineFlockKey(key)
+    )?.value;
+    flock.set(
+      normalized.key,
+      encodeCodexProfileConfig(
+        preserveStoredAgentConfigFields(previous, normalized.value as AgentConfigMeta)
+      ),
+      nowMs
+    );
   }
   if (retractKey) {
     flock.delete(retractKey, nowMs);

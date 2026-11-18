@@ -41,3 +41,36 @@ function getDefaultCliTypes(availability: CliAvailability): CliType[] {
 function isSupportedCliType(value: string): value is CliType {
   return SUPPORTED_CLI_TYPES.includes(value as CliType);
 }
+
+/** Resolve optional builtins before opening any provider credential source.
+ * This never changes command authentication or explicit custom providers. */
+export function resolveStartupBuiltinAgentDiscovery(input: {
+  setting: string | undefined;
+  requestedCliTypes?: CliType[];
+  discover: () => CliAvailability;
+}) {
+  const enabled = input.setting !== '0';
+  const availability: CliAvailability = enabled
+    ? input.discover()
+    : {
+        kimi: false,
+        grok: false,
+        claude: false,
+        codex: false,
+        antigravity: false,
+        pi: false,
+        devin: false,
+      };
+  if (!enabled) {
+    for (const requested of input.requestedCliTypes ?? []) {
+      if (isSupportedCliType(requested)) availability[requested] = 'explicitly-selected';
+    }
+  }
+  return {
+    availability,
+    selection: resolveCliTypesSelection({
+      requestedCliTypes: input.requestedCliTypes,
+      availability,
+    }),
+  };
+}

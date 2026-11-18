@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { expect, type Page } from '@playwright/test';
 import { SessionForkFixture } from '../fixtures/session-fork-fixture.js';
 import { isFixtureProcessAlive } from '../fixtures/process-liveness.js';
@@ -58,8 +58,13 @@ export class SessionForkPage {
   }
 
   async addProjectAndSelectAgent(): Promise<void> {
-    await this.page.getByRole('button', { name: /^(Select a project|选择项目)$/u }).click();
-    await this.page.getByRole('menuitem', { name: /^(Add a folder|添加文件夹)$/u }).click();
+    const selector = this.page.getByRole('button', { name: /^(Select a project|选择项目)$/u });
+    await expect(selector).toBeVisible();
+    await expect(selector).not.toHaveAttribute('aria-busy', 'true');
+    await selector.click();
+    const addFolder = this.page.getByRole('menuitem', { name: /^(Add a folder|添加文件夹)$/u });
+    await expect(addFolder).toBeEnabled();
+    await addFolder.click();
     const dialog = this.page.getByRole('dialog', { name: /^(Add a folder|添加文件夹)$/u });
     await expect(dialog).toBeVisible();
     const editPath = dialog.getByTitle(/^(Edit path|编辑路径)$/u);
@@ -113,8 +118,9 @@ export class SessionForkPage {
       (terminal) => terminal.cwd
     )?.cwd;
     expect(targetWorktreePath).toEqual(expect.any(String));
-    expect(targetWorktreePath).toBe(target.targetWorktreePath);
     await expect.poll(() => existsSync(targetWorktreePath!)).toBe(true);
+    await expect.poll(() => existsSync(target.targetWorktreePath)).toBe(true);
+    expect(realpathSync(targetWorktreePath!)).toBe(realpathSync(target.targetWorktreePath));
 
     return {
       sourceSessionId,
@@ -151,10 +157,9 @@ export class SessionForkPage {
 
     await this.navigateToSession(resources.targetSessionId);
     await expect
-      .poll(
-        () => isFixtureProcessAlive(resources.sourceAgentPid, this.fixture.eventLogPath),
-        { intervals: [1_000, 2_000] }
-      )
+      .poll(() => isFixtureProcessAlive(resources.sourceAgentPid, this.fixture.eventLogPath), {
+        intervals: [1_000, 2_000],
+      })
       .toBe(true);
     await this.archiveAndDeleteCurrentSession(resources.targetSessionId);
     await expect
@@ -177,10 +182,10 @@ export class SessionForkPage {
     await expect(this.assistantResponse()).toBeVisible();
     await this.archiveAndDeleteCurrentSession(resources.sourceSessionId);
     await expect
-      .poll(
-        () => isFixtureProcessAlive(resources.sourceAgentPid, this.fixture.eventLogPath),
-        { timeout: 30_000, intervals: [1_000, 2_000] }
-      )
+      .poll(() => isFixtureProcessAlive(resources.sourceAgentPid, this.fixture.eventLogPath), {
+        timeout: 30_000,
+        intervals: [1_000, 2_000],
+      })
       .toBe(false);
   }
 

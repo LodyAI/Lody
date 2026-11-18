@@ -1,3 +1,4 @@
+import type { AgentConfigDisplay } from '@/lib/agent-config-display';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
@@ -6,7 +7,7 @@ import { E2eeMachineSharingSettings } from './e2ee/machine-sharing-settings';
 import { useTranslation } from 'react-i18next';
 import { Bot, Folder } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
-import type { AgentConfigMeta, MachineId } from '@lody/shared';
+import type { MachineId } from '@lody/shared';
 import { useLocalProjectsAdmin } from '@/hooks/use-local-projects-admin';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
@@ -31,7 +32,7 @@ type PresentedProject = MachineConnectedProject & {
 
 type MachineConnectedResourcesProps = {
   machineId: MachineId;
-  configs: AgentConfigMeta[];
+  configs: AgentConfigDisplay[];
   preloadedProjects: MachineConnectedProject[];
   projectsLoading: boolean;
   readOnly?: boolean;
@@ -135,7 +136,7 @@ function MachineConnectedResourcesContent({
   hideFolders,
 }: {
   machineId: MachineId;
-  configs: AgentConfigMeta[];
+  configs: AgentConfigDisplay[];
   projects: PresentedProject[];
   projectsLoading: boolean;
   readOnly: boolean;
@@ -229,8 +230,13 @@ function MachineConnectedResourcesContent({
             </h3>
           </div>
           {!readOnly ? (
-            <Button data-testid="settings-machine-manage-agents"
-              data-machine-id={machineId} variant="secondary" size="small" onClick={onManageAgents}>
+            <Button
+              data-testid="settings-machine-manage-agents"
+              data-machine-id={machineId}
+              variant="secondary"
+              size="small"
+              onClick={onManageAgents}
+            >
               {t('settings.machines.manageAgents', 'Manage in Agents')}
             </Button>
           ) : null}

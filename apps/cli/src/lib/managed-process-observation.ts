@@ -26,6 +26,10 @@ export function observeManagedProcessTree(tree: ProcessTree): void {
   }
   trees.add(tree);
 }
+/** Only an explicit process-service handoff can retire a still-live execution tree. */
+export function handoffManagedProcessTree(tree: ProcessTree): void {
+  trees.delete(tree);
+}
 export const pruneManagedProcessTrees = Effect.fn('pruneManagedProcessTrees')(function* () {
   for (const tree of [...trees]) {
     if (!(yield* tree.isAlive)) trees.delete(tree);

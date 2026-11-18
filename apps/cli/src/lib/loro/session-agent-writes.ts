@@ -2,16 +2,11 @@ import type { z } from 'zod';
 import type { HistoryWriter, SessionHistory, SessionHistoryInput } from '@lody/shared';
 import { HistoryEntryWriteSchema, HistoryWriteError, parseHistoryWrite } from '@lody/shared';
 import {
-  applyMessageContentsBatch,
-  applyNotificationOnHistory,
-  targetLocalHistoryTargets,
-} from '@lody/shared';
-import {
   applyMarkTurnSeen,
   markTurnSeenBlocked,
   applyOpenAssistantTurn,
   createAssistantTurn,
-  selectAgentHistoryRows,
+  applySessionAgentBatch,
 } from '@lody/shared/session-data';
 import type {
   SessionFieldChange,
@@ -19,7 +14,6 @@ import type {
   SessionTurnWritableValues,
   OpenAssistantTurnInput,
 } from '@lody/shared/session-data';
-import type { MessageContent, ModelInfo, AcpSessionNotification } from '@lody/shared';
 
 /**
  * Agent output for the assistant bound to the accepted input.
@@ -27,18 +21,7 @@ import type { MessageContent, ModelInfo, AcpSessionNotification } from '@lody/sh
  * Tool, plan and subagent batches use stored ownership with `updateTail`;
  * other updates select owners before running the reducer.
  */
-export type ApplyAgentBatchInput = {
-  readonly notifications?: readonly AcpSessionNotification[];
-  readonly contents?: readonly MessageContent[];
-  /** Stable per-item retry identities; the Loro writer applies a batch atomically. */
-  readonly operationIds?: readonly string[];
-  readonly targetAssistantEntryId?: string;
-  readonly entryBound?: boolean;
-  readonly model?: ModelInfo;
-  /** Deterministic identity for tests; production derives the target id. */
-  readonly createId?: () => string;
-  readonly now?: () => string;
-};
+export type ApplyAgentBatchInput = import('@lody/shared/session-data').AgentHistoryBatchInput;
 
 /** CLI execution policy over the one writer; not part of the UI reader port. */
 export interface SessionAgentWrites {
@@ -94,76 +77,7 @@ export function createSessionAgentWrites(writer: HistoryWriter): SessionAgentWri
       writer.append(createAssistantTurn(input) as unknown as SessionHistory);
     },
     async applyAgentBatch(input) {
-      const notifications = input.notifications ?? [];
-      const contents = input.contents ?? [];
-      const targetId = input.targetAssistantEntryId;
-      if (notifications.length === 0 && contents.length === 0) {
-        return;
-      }
-      const applyTo = (turns: SessionHistoryInput[]): SessionHistoryInput[] => {
-        let next = turns;
-        if (notifications.length > 0) {
-          next = applyNotificationOnHistory(next, notifications as never, input.model, {
-            ...(input.createId ? { createId: input.createId } : {}),
-            ...(input.now ? { now: input.now } : {}),
-            ...(targetId ? { targetAssistantEntryId: targetId } : {}),
-          });
-        }
-        if (contents.length > 0) {
-          next = applyMessageContentsBatch(next, contents as never, {
-            ...(input.createId ? { createId: input.createId } : {}),
-            ...(input.now ? { now: input.now } : {}),
-            ...(targetId ? { targetAssistantEntryId: targetId } : {}),
-            ...(input.model ? { model: input.model } : {}),
-          });
-        }
-        return next;
-      };
-      if (input.entryBound && targetId === undefined)
-        throw new HistoryWriteError([{ path: ['targetAssistantEntryId'], code: 'invalid_input' }]);
-      // Resolve tools and subagents in their original turns, including nested child
-      // output. Mixed batches use the same sparse write and preserve event order.
-      const targets =
-        targetId !== undefined && contents.length === 0
-          ? targetLocalHistoryTargets(notifications)
-          : undefined;
-      if (targets && writer.updateTail(targetId!, targets, applyTo)) return;
-      // A bound batch whose target does not exist yet still creates it with the
-      // caller's id, matching the historical targeted-then-create fallthrough.
-      if (
-        input.entryBound &&
-        writer.updateEntry(targetId!, (entry) => {
-          const next = applyTo([entry as unknown as SessionHistoryInput]);
-          return (next[0] ?? entry) as unknown as SessionHistoryInput;
-        })
-      )
-        return;
-      writer.updateSelected(
-        (rows) => {
-          const dependencies = notifications.flatMap(
-            (notification) => targetLocalHistoryTargets([notification]) ?? []
-          );
-          const tools = new Set(dependencies.flatMap((target) => target.toolCallIds));
-          const tasks = new Set(dependencies.flatMap((target) => target.taskIds));
-          for (const notification of notifications) {
-            const update = notification.update;
-            if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update')
-              tools.add(update.toolCallId);
-          }
-          for (const content of contents) {
-            if (content.type === 'tool_call') tools.add(content.toolCallId);
-            if (content.type === 'subagent_task') tasks.add(content.taskId);
-          }
-          return selectAgentHistoryRows(rows, {
-            targetId,
-            toolCallIds: tools,
-            taskIds: tasks,
-            runs: dependencies.flatMap((target) => target.runs),
-          });
-        },
-        (turns) => applyTo(turns)
-      );
-      return;
+      applySessionAgentBatch(writer, input);
     },
   };
 }

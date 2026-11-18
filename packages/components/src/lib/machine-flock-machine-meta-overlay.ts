@@ -3,6 +3,8 @@ import {
   getMachineFlockDeleteLocalProjectIds,
   getMachineFlockLocalProjects,
   getMachineFlockRateLimits,
+  getRateLimitEntryKey,
+  type AgentConfigId,
   type LocalProjectId,
   parseRateLimitEntryKey,
   type MachineFlockRowMap,
@@ -120,4 +122,52 @@ export function mergeMachineFlockMachineMeta(
   }
 
   return nextMachines ?? rawMachines;
+}
+
+/** Native owns the whole MF room: an empty projection deletes old fallback
+ * fields rather than reviving archived Meta. Private launch cache identities
+ * remain in Node; public capability views consume the safe domain projection. */
+export function replaceNativeMachineCatalogMeta(
+  machines: Map<MachineId, MachineViewMeta>,
+  owner:
+    | {
+        ownsNativeMachineCatalog?: (machineId: MachineId) => boolean;
+        nativeMachineCatalogSource?: import('../providers/native-machine-catalog-ipc').NativeMachineCatalogSource;
+      }
+    | null
+    | undefined
+): Map<MachineId, MachineViewMeta> {
+  if (!owner?.ownsNativeMachineCatalog) return machines;
+  let next: Map<MachineId, MachineViewMeta> | undefined;
+  for (const [machineId, machine] of machines) {
+    if (!owner.ownsNativeMachineCatalog(machineId)) continue;
+    const projection = owner.nativeMachineCatalogSource?.readProjection(machineId)?.projection;
+    const localProjects: NonNullable<MachineViewMeta['localProjects']> = {};
+    for (const project of projection?.projects ?? [])
+      localProjects[project.id as LocalProjectId] = {
+        ...project,
+        id: project.id as LocalProjectId,
+      };
+    const raceLimits: MachineViewMeta['raceLimits'] = {};
+    for (const quota of projection?.quotas ?? [])
+      if (quota.snapshot)
+        raceLimits[
+          getRateLimitEntryKey(
+            quota.cliType,
+            quota.limitId,
+            quota.configId as AgentConfigId | undefined
+          )
+        ] = quota.snapshot;
+    next ??= new Map(machines);
+    next.set(machineId, {
+      ...machine,
+      localProjects,
+      acpCapabilities: {},
+      raceLimits,
+      workspacePaths: undefined,
+      needToArchiveSessions: undefined,
+      needToDeleteSessions: undefined,
+    });
+  }
+  return next ?? machines;
 }

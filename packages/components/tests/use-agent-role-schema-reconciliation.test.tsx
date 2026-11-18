@@ -85,6 +85,7 @@ describe('role maintenance at workspace startup', () => {
       });
       const runtime = {
         workspaceId: 'workspace',
+        accountId: 'owner',
         repo,
         writer: createDirectWorkspaceWriter({ repo } as never),
         requestMachineAcpCapabilitiesRefresh: () => probe,
@@ -179,6 +180,7 @@ describe('role maintenance at workspace startup', () => {
     const probed: string[] = [];
     const runtime = {
       workspaceId: 'workspace',
+      accountId: 'owner',
       repo,
       writer: createDirectWorkspaceWriter({ repo } as never),
       requestMachineAcpCapabilitiesRefresh: async (request: { machineId: string }) => {

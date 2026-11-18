@@ -104,4 +104,30 @@ describe('local project worktree removal', () => {
       },
     ]);
   });
+
+  it('leaves worktrees intact when the native command is revoked during inspection', async () => {
+    const remaining = new Set([cleanSessionId, dirtySessionId]);
+    let entered!: () => void, release!: () => void;
+    const inspecting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const finish = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    inspectWorktree.mockImplementation(async () => {
+      entered();
+      await finish;
+      return { state: 'clean', path: '/worktrees/clean' };
+    });
+    removeWorktree.mockImplementation(async (id: SessionId) => {
+      remaining.delete(id);
+    });
+    const controller = new AbortController();
+    const work = cleanupLocalProjectWorktrees({ ...target, signal: controller.signal });
+    await inspecting;
+    controller.abort(new Error('Native command replaced'));
+    release();
+    await expect(work).rejects.toThrow('Native command replaced');
+    expect([...remaining]).toEqual([cleanSessionId, dirtySessionId]);
+  });
 });

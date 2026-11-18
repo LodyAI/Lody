@@ -5,8 +5,10 @@ also applies.
 
 ## Runtime boundary
 
-- Application E2E always launches the built OSS desktop through Playwright
-  Electron. A browser-only renderer test belongs in `packages/components`.
+- Regression E2E launches the built OSS desktop through Playwright Electron.
+  The opt-in multi-device acceptance lane may consume a private isolated Cloud
+  fixture; its service provisioning and authenticated composition stay private.
+  A browser-only renderer test belongs in `packages/components`.
 - Build once before a run. Scenarios consume `apps/electron/out/main/index.js`
   and the synced CLI under `apps/electron/resources/cli`; they never rebuild.
 - Use a real Electron main process, preload, renderer, IPC graph, and bundled

@@ -1,4 +1,5 @@
 import { atom } from 'jotai';
+import { nativeMachineCatalogSettingsForWrite } from '../lib/native-machine-catalog-public';
 import {
   isMagpieImportLink,
   parseMagpieImportLink,
@@ -80,6 +81,19 @@ export const importMagpieProvidersAtom = atom(
       throw new Error('This machine does not support Pi');
     set(magpieImportRunningAtom, true);
     try {
+      const native = nativeMachineCatalogSettingsForWrite(runtime, machineId);
+      if (native) {
+        // The trusted Node owner performs private gateway/runtime deduplication.
+        // A public list cannot prove those private launch identities.
+        await native.execute(machineId, {
+          kind: 'import-magpie',
+          request: { gatewayUrl: request.gatewayUrl, targets },
+        });
+        if (get(localMachineIdAtom) !== machineId || get(activeWorkspaceRuntimeAtom) !== runtime)
+          throw new Error('Import context changed');
+        if (get(pendingMagpieImportAtom)?.id === request.id) set(pendingMagpieImportAtom, null);
+        return;
+      }
       const handle = await runtime.repo.openFlockDoc(
         getMachineFlockDocId(runtime.workspaceId, machineId)
       );

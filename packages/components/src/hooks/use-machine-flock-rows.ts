@@ -1,5 +1,6 @@
+import { nativeMachineCatalogSettingsAtom } from '@/atoms/native-machine-catalog';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useAtomValue, useSetAtom, useStore } from 'jotai';
+import { atom, useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
   getMachineFlockDocId,
   machineFlockKeys,
@@ -61,6 +62,10 @@ function readMachineFlockVersion(flock: MachineFlock): MachineFlockVersion | nul
   return MACHINE_FLOCK_CHANGE_STAMPS.get(flock)?.stamp ?? null;
 }
 type MachineFlockRoomSubscription = Awaited<ReturnType<MachineFlockDocHandle['joinRoom']>>;
+
+const EMPTY_MACHINE_FLOCK_WORKSPACES_ATOM = atom<
+  Record<string, Record<string, MachineFlockRowMap>>
+>({});
 
 const EMPTY_MACHINE_FLOCK_ROWS = Object.freeze({}) as MachineFlockRowMap;
 
@@ -529,6 +534,7 @@ function acquireMachineFlockEvents(
       unsubscribe: handle.flock.subscribe((batch) => {
         const events = (batch as { events?: MachineFlockEvent[] }).events ?? [];
         if (events.length === 0) return;
+        if (runtime.ownsNativeMachineCatalog?.(machineId)) return;
         const cacheKey = getMachineFlockRowsCacheKey(runtime.workspaceId, machineId);
         const version = readMachineFlockVersion(handle.flock);
         for (const activeStore of refCountsByStore.keys()) {
@@ -642,6 +648,10 @@ function readMachineFlockRowsSnapshot(
   );
 }
 
+// Only the newest acknowledged probe may publish its eventual catch-up result.
+// Entries live for in-flight work and are scoped to the actual runtime object.
+const ACKNOWLEDGED_CAPABILITY_CATCHUPS = new WeakMap<object, Map<AgentConfigId, object>>();
+
 /**
  * Force a fresh remote sync of a single machine's flock doc and push the result
  * into any mounted `useMachineFlockRowsByMachineIds` consumers.
@@ -653,7 +663,9 @@ function readMachineFlockRowsSnapshot(
  * A failed remote sync is not an error by default: the local rows were still
  * refreshed, and callers that resync after an already-acknowledged mutation
  * (settings, onboarding) must not report their own success as a failure. Pass
- * `requireRemoteSync` when the caller retries on a stale read.
+ * `requireRemoteSync` when the caller retries on a stale read. A capability
+ * returned by a successful machine probe is published immediately; its optional
+ * remote catch-up runs independently unless remote confirmation was requested.
  */
 export async function resyncMachineFlockRows(
   runtime: Pick<WorkspaceRuntime, 'repo' | 'workspaceId'> | null | undefined,
@@ -669,31 +681,64 @@ export async function resyncMachineFlockRows(
   const normalizedMachineId = normalizeMachineId(machineId);
   if (!runtime || !normalizedMachineId) return;
   const cacheKey = getMachineFlockRowsCacheKey(runtime.workspaceId, normalizedMachineId);
-  const handle = await openMachineFlockDoc(runtime, normalizedMachineId);
-  const syncResult = await syncMachineFlockRowsOnce(cacheKey, handle, { force: true });
-  const version = readMachineFlockVersion(handle.flock);
-  notifyMachineFlockRowsCache(cacheKey, {
-    rows: (readOptions) => readMachineFlockRowsSnapshot(handle, readOptions, 'resync'),
-    mode: 'merge',
-    preserveExistingOnEmpty: true,
-    syncedRemote: syncResult.syncedRemote,
-    version,
-  });
-  if (options.refreshedCapability) {
-    const key = machineFlockKeys.acpCapability(options.refreshedCapability.configId);
-    notifyMachineFlockRowsCache(cacheKey, {
-      rows: {
-        [serializeMachineFlockKey(key)]: {
-          key,
-          value: options.refreshedCapability.value,
+  const publishAcknowledgedCapability = () => {
+    if (options.refreshedCapability) {
+      const key = machineFlockKeys.acpCapability(options.refreshedCapability.configId);
+      notifyMachineFlockRowsCache(cacheKey, {
+        rows: {
+          [serializeMachineFlockKey(key)]: {
+            key,
+            value: options.refreshedCapability.value,
+          },
         },
-      },
-      mode: 'merge',
-    });
+        mode: 'merge',
+      });
+    }
+  };
+  const refreshRows = async (isCurrent: () => boolean = () => true, publishRows = true) => {
+    const handle = await openMachineFlockDoc(runtime, normalizedMachineId);
+    const syncResult = await syncMachineFlockRowsOnce(cacheKey, handle, { force: true });
+    if (!isCurrent()) return;
+    if (publishRows) {
+      const version = readMachineFlockVersion(handle.flock);
+      notifyMachineFlockRowsCache(cacheKey, {
+        rows: (readOptions) => readMachineFlockRowsSnapshot(handle, readOptions, 'resync'),
+        mode: 'merge',
+        preserveExistingOnEmpty: true,
+        syncedRemote: syncResult.syncedRemote,
+        version,
+      });
+    }
+    publishAcknowledgedCapability();
+    if (options.requireRemoteSync && !syncResult.syncedRemote) {
+      throw new Error(`Failed to sync Machine Flock rows for ${normalizedMachineId}`);
+    }
+  };
+  if (options.refreshedCapability && !options.requireRemoteSync) {
+    // The machine has already confirmed this probe. Its exact capability is
+    // usable now; remote catch-up must not keep the Test action pending.
+    const configId = options.refreshedCapability.configId;
+    const pending =
+      ACKNOWLEDGED_CAPABILITY_CATCHUPS.get(runtime) ?? new Map<AgentConfigId, object>();
+    ACKNOWLEDGED_CAPABILITY_CATCHUPS.set(runtime, pending);
+    const ticket = {};
+    pending.set(configId, ticket);
+    publishAcknowledgedCapability();
+    // Imported Flock changes already reach mounted listeners through their live
+    // subscription. Do not replace unrelated acknowledged overlays with a stale
+    // full-row scan while other probes are catching up.
+    void refreshRows(() => pending.get(configId) === ticket, false)
+      .catch(() => {
+        console.warn('[machine-flock] acknowledged capability catch-up unavailable');
+      })
+      .finally(() => {
+        if (pending.get(configId) === ticket) pending.delete(configId);
+        if (pending.size === 0 && ACKNOWLEDGED_CAPABILITY_CATCHUPS.get(runtime) === pending)
+          ACKNOWLEDGED_CAPABILITY_CATCHUPS.delete(runtime);
+      });
+    return;
   }
-  if (options.requireRemoteSync && !syncResult.syncedRemote) {
-    throw new Error(`Failed to sync Machine Flock rows for ${normalizedMachineId}`);
-  }
+  await refreshRows();
 }
 
 export function useMachineFlockRows(
@@ -723,8 +768,11 @@ export function useMachineFlockRowsByMachineIdsState(
   options: UseMachineFlockRowsOptions = {}
 ): MachineFlockRowsByMachineIdsState {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const nativeCatalogSnapshot = useAtomValue(nativeMachineCatalogSettingsAtom);
   const machineFlockRowsStore = useStore();
-  const machineFlockRowsByWorkspace = useAtomValue(machineFlockRowsByWorkspaceAtom);
+  const machineFlockRowsByWorkspace = useAtomValue(
+    machineIds.length === 0 ? EMPTY_MACHINE_FLOCK_WORKSPACES_ATOM : machineFlockRowsByWorkspaceAtom
+  );
   const setMachineFlockRowsForMachine = useSetAtom(setMachineFlockRowsForMachineAtom);
   const syncRemote = options.syncRemote ?? true;
   const readLocal = options.readLocal ?? true;
@@ -799,6 +847,14 @@ export function useMachineFlockRowsByMachineIdsState(
     if (!runtime) return;
 
     for (const machineId of normalizedMachineIds) {
+      if (runtime.ownsNativeMachineCatalog?.(machineId)) {
+        const previous = activeTasks.get(machineId);
+        if (previous) {
+          stopTask(previous);
+          activeTasks.delete(machineId);
+        }
+        continue;
+      }
       const cacheKey = getMachineFlockRowsCacheKey(runtime.workspaceId, machineId);
       const remoteEnabled = syncRemote && (normalizedRemoteMachineIds?.has(machineId) ?? true);
       const presenceAware = normalizedRemoteMachineIds !== null;
@@ -1045,6 +1101,7 @@ export function useMachineFlockRowsByMachineIdsState(
     machineFlockRowsStore,
     normalizedMachineIds,
     normalizedRemoteMachineIds,
+    nativeCatalogSnapshot,
     readLocal,
     readOptions,
     remoteSyncDelayMs,
@@ -1071,10 +1128,15 @@ export function useMachineFlockRowsByMachineIdsState(
     if (!runtime) return rowsByMachine;
     const workspaceRows = machineFlockRowsByWorkspace[String(runtime.workspaceId)] ?? {};
     for (const machineId of normalizedMachineIds) {
-      rowsByMachine.set(machineId, workspaceRows[String(machineId)] ?? EMPTY_MACHINE_FLOCK_ROWS);
+      rowsByMachine.set(
+        machineId,
+        runtime.ownsNativeMachineCatalog?.(machineId)
+          ? EMPTY_MACHINE_FLOCK_ROWS
+          : (workspaceRows[String(machineId)] ?? EMPTY_MACHINE_FLOCK_ROWS)
+      );
     }
     return rowsByMachine;
-  }, [machineFlockRowsByWorkspace, normalizedMachineIds, runtime]);
+  }, [machineFlockRowsByWorkspace, normalizedMachineIds, runtime, nativeCatalogSnapshot]);
   const remoteSyncedMachineIds = useMemo(() => {
     if (!runtime) return EMPTY_MACHINE_IDS;
     const synced = new Set<MachineId>();
@@ -1100,6 +1162,7 @@ export function useMachineFlockRowsByMachineIdsState(
     machineFlockRowsStore,
     normalizedMachineIds,
     normalizedRemoteMachineIds,
+    nativeCatalogSnapshot,
     readLocal,
     remoteSyncDelayMs,
     remoteSyncState,

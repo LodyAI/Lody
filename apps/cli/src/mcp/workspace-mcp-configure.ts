@@ -16,6 +16,7 @@ import {
   syncMcpCatalog,
   upsertWorkspaceMcpCatalogEntry,
   type McpCatalogWriteResult,
+  type WorkspaceMcpCatalogOwner,
 } from '@/lib/workspace-mcp-store';
 
 const MAX_MCP_CATALOG_ENTRIES = 100;
@@ -178,10 +179,7 @@ export const WorkspaceMcpConfigureToolInputSchema = z
 
 export type WorkspaceMcpConfigureToolInput = z.infer<typeof WorkspaceMcpConfigureToolInputSchema>;
 
-type WorkspaceMcpConfigureManager = Parameters<typeof syncMcpCatalog>[0] & {
-  repo: Parameters<typeof listWorkspaceMcpCatalog>[0] &
-    Parameters<typeof upsertWorkspaceMcpCatalogEntry>[0];
-};
+type WorkspaceMcpConfigureManager = Parameters<typeof syncMcpCatalog>[0] & WorkspaceMcpCatalogOwner;
 
 type ConfigureWorkspaceMcpServerDeps = {
   syncCatalog: typeof syncMcpCatalog;
@@ -254,7 +252,7 @@ export async function configureWorkspaceMcpServer(
       });
     }
 
-    const servers = await deps.listCatalog(manager.repo, workspaceId);
+    const servers = await deps.listCatalog(manager, workspaceId);
     const matches = servers.filter((server) => namesEqual(server.name, input.name));
     if (matches.length > 0) {
       throw new Error(
@@ -287,7 +285,7 @@ export async function configureWorkspaceMcpServer(
       ...(input.description ? { description: input.description } : {}),
     };
 
-    const write = await deps.upsertEntry(manager.repo, workspaceId, next);
+    const write = await deps.upsertEntry(manager, workspaceId, next);
     return {
       ...write,
       action: 'created',

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useAtomValue } from 'jotai';
+import { atom, useAtomValue } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { type AgentConfigId, type MachineId, getAgentConfigRoomId } from '@lody/shared';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
@@ -7,6 +7,8 @@ import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { getLegacyAgentConfigsAtom, writeAgentConfigToMachineFlock } from '@/atoms/agents';
 import { useVisibleMachineMetas } from './use-visible-machine-metas';
 import { withoutEncryptedSharedMachines } from '@/lib/visible-machine-index';
+
+const EMPTY_LEGACY_CONFIGS = atom<never[]>([]);
 
 const MUTEX_KEY_PREFIX = 'lody-agent-config-migration:';
 const MUTEX_TTL_MS = 60_000;
@@ -23,13 +25,16 @@ type MigrationStatus = 'idle' | 'running' | 'done' | 'error';
  *
  * The mutex guards against two tabs racing through the same migration.
  */
-export function useAgentConfigMigration(): {
+export function useAgentConfigMigration(options: { enabled?: boolean } = {}): {
   status: MigrationStatus;
   legacyCount: number;
 } {
+  const enabled = options.enabled ?? true;
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-  const legacyConfigs = useAtomValue(getLegacyAgentConfigsAtom);
+  const legacyConfigs = useAtomValue(enabled ? getLegacyAgentConfigsAtom : EMPTY_LEGACY_CONFIGS);
   const visibleMachineIndex = useVisibleMachineMetas({ includeMachineFlock: false });
   const { isLoading } = visibleMachineIndex;
   // Never write automatically into another member's encrypted shared machine.
@@ -41,7 +46,7 @@ export function useAgentConfigMigration(): {
   const inFlightRef = useRef(false);
 
   useEffect(() => {
-    if (!runtime || !workspaceId) return;
+    if (!enabled || !runtime || !workspaceId) return;
     if (isLoading) return;
     if (inFlightRef.current) return;
     if (legacyConfigs.length === 0) {
@@ -63,6 +68,7 @@ export function useAgentConfigMigration(): {
       try {
         for (const legacy of legacySnapshot) {
           for (const machineId of machineIds) {
+            if (!enabledRef.current) return;
             const newId = uuidv4() as AgentConfigId;
             const nextMeta = {
               id: newId,
@@ -80,6 +86,7 @@ export function useAgentConfigMigration(): {
             };
             await writeAgentConfigToMachineFlock(runtime, nextMeta);
           }
+          if (!enabledRef.current) return;
           await runtime.writer.deleteDoc(getAgentConfigRoomId(legacy.id));
         }
         setStatus('done');
@@ -91,9 +98,9 @@ export function useAgentConfigMigration(): {
         inFlightRef.current = false;
       }
     })();
-  }, [runtime, workspaceId, legacyConfigs, machines, isLoading]);
+  }, [runtime, workspaceId, legacyConfigs, machines, isLoading, enabled]);
 
-  return { status, legacyCount: legacyConfigs.length };
+  return { status: enabled ? status : 'idle', legacyCount: enabled ? legacyConfigs.length : 0 };
 }
 
 function acquireMutex(key: string): boolean {

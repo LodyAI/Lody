@@ -2,7 +2,7 @@
 
 Lody desktop application built with Electron, React, and TypeScript.
 
-The desktop pins Electron 44.7.0 and requires macOS 13 or newer on Mac.
+The desktop pins Electron 44.9.3 and requires macOS 13 or newer on Mac.
 This runtime is compatible with the pinned DeepSeek Harness native loader;
 see the [runtime compatibility decision](../../.agents/notes/implemented/bug-fix/2026-10-10-dsh-electron-runtime.md).
 
@@ -31,6 +31,39 @@ own installer. SQLite and the embedded CLI native packages use their shipped
 Node-API prebuilds; installation does not rebuild them for an Electron ABI.
 Packaging stages the target platform/architecture binaries and probes them before
 signing.
+
+### Native repository migration acceptance
+
+`pnpm --dir apps/electron verify:repo-engine` runs the opt-in
+[loro-repo-engine P0 lab](scripts/repo-engine-lab/README.md) with disposable data,
+two real Electron renderers, an independent Node client and a shared native host.
+It validates ASAR/native loading and local recovery; it does not switch the product
+backend or establish cloud, multi-device, signing or Roost acceptance.
+
+The local file-index pilot uses `LODY_NATIVE_FILE_INDEX=1` when starting the
+desktop. Its daemon owns one separate native host; windows observe JSON snapshots
+over authenticated IPC. Only local FI/FIS rooms migrate. Existing native owners
+remain selected across restarts; use `LODY_NATIVE_FILE_INDEX=rollback` on a fresh
+daemon start for verified binary rollback, rather than removing the flag. Cloud,
+encrypted workspaces, Session history and Roost keep their existing paths.
+
+For a fresh local profile, also set `LODY_NATIVE_REPO_MODE=independent` to share
+the data host between main and the daemon through private leases. Main retains
+its data lease when execution stops; renderer access remains through domain IPC.
+This mode has a separate marked directory and refuses existing classic native
+room journals. Removing the flag does not change its persisted ownership.
+The independent handoff currently supports the tested macOS path; Windows is
+explicitly refused until its process-tree handoff is implemented and accepted.
+
+`LODY_NATIVE_WORKSPACE_CATALOG=1` additionally opts the local WF catalog into
+verified migration and selects the independent host. Main pauses the daemon and
+freezes every registered renderer before the helper merges old IDB and SQLite
+sources. UI commands use domain IPC; the daemon borrows the same native engine.
+The persisted owner remains binding after the flag is removed. A failed migration
+retains its frozen journal and original archives for retry; never delete the
+native directory or force an old writer to resume. MF, SR and Meta retain their
+existing physical owners. This flag has passed the full OSS local desktop suite;
+it does not establish Cloud or multi-device synchronization acceptance.
 
 ### Open-source desktop development
 

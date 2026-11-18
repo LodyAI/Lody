@@ -7,14 +7,15 @@ import { usePostHog } from '@posthog/react';
 import { useTranslation } from 'react-i18next';
 import {
   getServerNow,
-  type AgentConfigMeta,
+  type AgentConfigListSummary,
   type AgentRole,
   type AgentRoleId,
   type MachineId,
 } from '@lody/shared';
 
 import { userAtom } from '@/atoms';
-import { getAllAgentConfigAtom } from '@/atoms/agents';
+import { getAllAgentConfigAtom, getAllAgentConfigListAtom } from '@/atoms/agents';
+import { useNativeMachineCatalogPublicReader } from '@/hooks/use-native-machine-catalog-public';
 import { onlineMachineIdsAtom } from '@/atoms/presence';
 import { buildAcpSelectorOptions } from '@/components/shared/acp-selector-options';
 import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
@@ -111,7 +112,9 @@ export function AgentRoleEditorDialog({
   const postHog = usePostHog();
   const currentUserId = useAtomValue(userAtom)?.id ?? null;
   const onlineMachineIds = useAtomValue(onlineMachineIdsAtom);
-  const agentConfigs = useAtomValue(getAllAgentConfigAtom);
+  const agentConfigs = useAtomValue(getAllAgentConfigListAtom);
+  const legacyAgentConfigs = useAtomValue(getAllAgentConfigAtom);
+  const readNative = useNativeMachineCatalogPublicReader();
   const { machines } = useVisibleMachineMetas();
   const { upsert } = useWorkspaceAgentRoleActions();
   const settingsPane = useSettingsPane();
@@ -162,12 +165,18 @@ export function AgentRoleEditorDialog({
     () => machineAgentConfigs.find((config) => config.id === activeTarget?.agentConfigId),
     [activeTarget?.agentConfigId, machineAgentConfigs]
   );
+  const native = activeMachineId ? readNative(activeMachineId) : undefined;
   const selectorTarget = selectedAgentConfig
     ? {
         configId: selectedAgentConfig.id,
         cliType: selectedAgentConfig.cliType,
         agentType: selectedAgentConfig.agentType,
-        runtimeOverrides: selectedAgentConfig.runtimeOverrides,
+        machineId: selectedAgentConfig.machineId,
+        runtimeOverrides: legacyAgentConfigs.find((config) => config.id === selectedAgentConfig.id)
+          ?.runtimeOverrides,
+        nativeSelected: native?.kind === 'native',
+        nativeCapability:
+          native?.kind === 'native' ? native.capability(selectedAgentConfig) : undefined,
         machine: activeMachineId ? (machines.get(activeMachineId) ?? null) : null,
       }
     : undefined;
@@ -405,8 +414,8 @@ function AddAgentRoleTargetPanel({
   machineId: MachineId;
   machineLabel: string;
   source: AgentRoleTargetFormValue | undefined;
-  sourceConfig: AgentConfigMeta | undefined;
-  machineConfigs: readonly AgentConfigMeta[];
+  sourceConfig: AgentConfigListSummary | undefined;
+  machineConfigs: readonly AgentConfigListSummary[];
   onAdd: (target: AgentRoleTargetFormValue) => void;
 }) {
   const { t } = useTranslation();

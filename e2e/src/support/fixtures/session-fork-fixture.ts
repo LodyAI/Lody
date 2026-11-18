@@ -35,6 +35,7 @@ export class SessionForkFixture {
   ) {
     this.projectRoot = join(tempRoot, this.projectName);
     this.eventLogPath = eventLogPath;
+    writeFileSync(eventLogPath, '', 'utf8');
     this.agentCommandLine = [process.execPath, ACP_ENTRY, this.eventLogPath]
       .map(quoteCommandArgument)
       .join(' ');

@@ -6,6 +6,7 @@ import {
   ACP_COLLABORATION_MODE_PLAN_VALUE,
   ACP_COLLABORATION_MODE_DEFAULT_VALUE,
   type AgentConfigMeta,
+  type AgentConfigListSummary,
   type AgentRole,
   type AgentRoleAvailability,
   type AgentRoleId,
@@ -17,6 +18,7 @@ import {
 } from '@lody/shared';
 import type { AcpConfigOptionValue } from '@/components/shared/acp-selector-options';
 import type { AgentSelection } from '@/components/shared/agent-selector';
+import type { NativeMachineCatalogPublicView } from './native-machine-catalog-public';
 
 /**
  * Agent Roles as the composer's run-config menu uses them.
@@ -39,10 +41,8 @@ export type ComposerAgentRoleItem = {
    * Carries what the detail pane needs to resolve that agent's capabilities, so
    * a stored id can be shown as the label the agent publishes for it.
    */
-  agentConfig?: Pick<
-    AgentConfigMeta,
-    'name' | 'cliType' | 'agentType' | 'brandId' | 'env' | 'runtimeOverrides'
-  >;
+  agentConfig?: Pick<AgentConfigMeta, 'name' | 'cliType' | 'agentType' | 'brandId'> &
+    Partial<Pick<AgentConfigMeta, 'env' | 'runtimeOverrides'>>;
 };
 
 export type SessionTurnAgentRoleSelection =
@@ -146,7 +146,7 @@ export function buildComposerAgentRoleItems({
 }: {
   roles: readonly AgentRole[];
   machineId: MachineId | null | undefined;
-  agentConfigs: readonly AgentConfigMeta[];
+  agentConfigs: readonly AgentConfigListSummary[];
   resolveAvailability: (role: AgentRole) => AgentRoleAvailability;
 }): ComposerAgentRoleItem[] {
   if (!machineId) return [];
@@ -237,12 +237,15 @@ export const AGENT_ROLE_UNAVAILABLE_REASON_KEYS = {
 
 /** Each Role judged against the capabilities of its own machine and agent. */
 export const createAgentRoleCapabilityResolver = (
-  agentConfigs: readonly AgentConfigMeta[],
-  machines: ReadonlyMap<MachineId, Pick<MachineViewMeta, 'acpCapabilities'>>
+  agentConfigs: readonly AgentConfigListSummary[],
+  machines: ReadonlyMap<MachineId, Pick<MachineViewMeta, 'acpCapabilities'>>,
+  readNative?: (machineId: MachineId) => NativeMachineCatalogPublicView
 ): NonNullable<AgentRoleAvailabilityContext['runConfigCapability']> => {
   const configById = new Map(agentConfigs.map((config) => [config.id, config]));
   return (role) => {
     const config = configById.get(role.agentConfigId);
+    const native = readNative?.(role.machineId);
+    if (native?.kind === 'native') return config ? native.roleCapability(config) : undefined;
     const capabilities = machines.get(role.machineId)?.acpCapabilities;
     return config
       ? selectAgentRoleCapability(capabilities?.[getAcpCapabilityCacheKey(config.id)], config)
@@ -350,7 +353,7 @@ export function selectSessionAgentRoles({
   /** Existing Sessions stay on this exact machine and provider binding. */
   machineId: MachineId | null | undefined;
   agentConfigId: AgentConfigMeta['id'] | null | undefined;
-  agentConfigs: readonly AgentConfigMeta[];
+  agentConfigs: readonly AgentConfigListSummary[];
   resolveAvailability: (role: AgentRole) => AgentRoleAvailability;
 }): ComposerAgentRoleItem[] {
   if (!machineId || !agentConfigId) return [];

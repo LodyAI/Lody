@@ -373,6 +373,30 @@ export class LodyFleet {
     const localControlConfig: LocalSessionControlConfig = {
       machineId: this.machineId,
       logger: this.logger,
+      dispatchDocumentDomainFreeze: async (request) => {
+        const runtime = this.runtimes.get(request.workspaceId);
+        if (
+          request.accountId !== this.userId ||
+          !runtime ||
+          runtime.cleanupReceipt ||
+          runtime.workspace.contentMode === 'e2ee' ||
+          !runtime.lody.documentManager.nativeMetaDocument(request.scope.metadataDocId)
+        )
+          return { ok: false as const, error: 'scope_unavailable' as const };
+        return runtime.lody.handleNativeDocumentDomainMigrationControl(request);
+      },
+      dispatchSessionBodyFreeze: async (request) => {
+        const runtime = this.runtimes.get(request.workspaceId);
+        if (
+          request.accountId !== this.userId ||
+          !runtime ||
+          runtime.cleanupReceipt ||
+          runtime.workspace.contentMode === 'e2ee' ||
+          !runtime.lody.documentManager.nativeMetaDocument(`session-${request.sessionId}`)
+        )
+          return { ok: false as const, error: 'scope_unavailable' as const };
+        return runtime.lody.handleNativeSessionBodyMigrationControl(request);
+      },
       dispatchSession: async (message, options) =>
         await this.dispatchLocalSessionControl(message, options),
       dispatchProject: async (message) => await this.dispatchLocalProjectControl(message),
@@ -1428,7 +1452,8 @@ export class LodyFleet {
           workspace.id as WorkspaceId,
           this.machineId,
           startedLody.documentManager,
-          stop.signal
+          stop.signal,
+          startedLody.documentManager.getMachineCatalogRuntimePort?.()
         ).catch((error: unknown) => {
           workspaceLogger.warn(`Failed to reconcile local projects: ${formatErrorMessage(error)}`);
         });
@@ -1909,7 +1934,8 @@ export class LodyFleet {
         const configs = await listMergedAgentConfigs(
           runtime.lody.documentManager.repo,
           runtime.workspace.id as WorkspaceId,
-          [this.machineId]
+          [this.machineId],
+          runtime.lody.documentManager.getMachineCatalogRuntimePort?.()
         );
         for (const config of configs) {
           if (
@@ -2101,7 +2127,8 @@ export class LodyFleet {
               runtime.lody.documentManager.repo,
               runtime.workspace.id as WorkspaceId,
               this.machineId,
-              localProjectId
+              localProjectId,
+              runtime.lody.documentManager.getMachineCatalogRuntimePort?.()
             ),
         });
         matches.push(workdir);
@@ -2289,7 +2316,12 @@ export class LodyFleet {
   ): Promise<void> {
     const repo = runtime.lody.documentManager.repo;
     const workspaceId = runtime.workspace.id as WorkspaceId;
-    const existing = await readMachineLocalProjects(repo, workspaceId, this.machineId);
+    const existing = await readMachineLocalProjects(
+      repo,
+      workspaceId,
+      this.machineId,
+      runtime.lody.documentManager.getMachineCatalogRuntimePort?.()
+    );
     const previous = existing[entry.localProjectId];
     const nowMs = getServerNow();
 
@@ -2309,6 +2341,8 @@ export class LodyFleet {
       {
         sync: runtime.lody.documentManager,
         reason: 'local-project-add',
+        native: runtime.lody.documentManager.getMachineCatalogRuntimePort?.(),
+        expected: previous,
         refreshGitHubRemote: true,
         standaloneVisible: true,
       }
@@ -2325,7 +2359,11 @@ export class LodyFleet {
       this.machineId,
       localProjectId,
       undefined,
-      { sync: runtime.lody.documentManager, reason: 'local-project-delete' }
+      {
+        sync: runtime.lody.documentManager,
+        reason: 'local-project-delete',
+        native: runtime.lody.documentManager.getMachineCatalogRuntimePort?.(),
+      }
     );
   }
 
@@ -2346,7 +2384,8 @@ export class LodyFleet {
       const existing = await readMachineLocalProjects(
         runtime.lody.documentManager.repo,
         runtime.workspace.id as WorkspaceId,
-        this.machineId
+        this.machineId,
+        runtime.lody.documentManager.getMachineCatalogRuntimePort?.()
       );
 
       const projects: Array<{ localProjectId: LocalProjectId; name: string; rootPath: string }> =
@@ -2619,6 +2658,7 @@ export class LodyFleet {
       this.machineId,
       localProjectId,
       {
+        native: runtime.lody.documentManager.getMachineCatalogRuntimePort?.(),
         requestSync: () =>
           runtime.lody.documentManager.syncMachineFlockDoc(this.machineId, {
             reason: 'local-project-control-resolve',
@@ -2703,6 +2743,7 @@ export class LodyFleet {
           this.machineId,
           preparedProject.localProjectId,
           {
+            native: runtime.lody.documentManager.getMachineCatalogRuntimePort?.(),
             requestSync: () =>
               runtime.lody.documentManager.syncMachineFlockDoc(this.machineId, {
                 reason: 'local-project-prepare-add-resolve',
@@ -2767,7 +2808,8 @@ export class LodyFleet {
           runtime.lody.documentManager.repo,
           runtime.workspace.id as WorkspaceId,
           this.machineId,
-          message.localProjectId
+          message.localProjectId,
+          runtime.lody.documentManager.getMachineCatalogRuntimePort?.()
         );
         if (!existingProject) {
           throw new Error(`Local project not found in workspace: ${message.localProjectId}`);

@@ -191,3 +191,59 @@ describe('confirmed local Magpie import', () => {
     expect(f.rows.size).toBe(0);
   });
 });
+
+it('imports native Magpie providers through the real trusted owner without opening the retired private gateway catalog', async () => {
+  const { openNativeMachineCatalogTestGroup, machineA, binding } =
+    await import('./native-machine-catalog.test-support');
+  const group = await openNativeMachineCatalogTestGroup([machineA]);
+  try {
+    await group.source.start();
+    const { store } = fixture();
+    const retired = () => {
+      throw new Error('Retired private MF must not open');
+    };
+    const runtime = {
+      ...binding,
+      workspaceSlug: 'magpie-workspace',
+      repo: { openFlockDoc: retired },
+      writer: { flockRowPut: retired },
+      ownsNativeMachineCatalog: () => true,
+      nativeMachineCatalogSource: group.source,
+    } as unknown as WorkspaceRuntime;
+    store.set(runtimeAtom, runtime);
+    store.set(currentWorkspaceIdAtom, binding.workspaceId);
+    store.set(localProbeResultAtom, { ok: true, machineId: machineA });
+    store.set(machineMetaCacheAtom, {
+      [getMachineRoomId(machineA)]: {
+        id: machineA,
+        name: 'Local',
+        protocolCapabilities: { magpieImport: 1, providerSetup: 1, builtinPi: 1 },
+      } as MachineMeta,
+    });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      store.set(receiveMagpieImportAtom, link);
+      await store.set(importMagpieProvidersAtom, {
+        requestId: store.get(pendingMagpieImportAtom)!.id,
+        targets: ['claude', 'dsh'],
+      });
+      expect(store.get(pendingMagpieImportAtom)).toBeNull();
+    }
+    const raw = await group.client.flockScan(group.namespace, group.rooms.get(machineA)!);
+    const imported = raw.entries.flatMap((entry) => {
+      const row = (
+        entry.key[0] === 'providerSetup'
+          ? (entry.value as { config?: unknown })?.config
+          : entry.key[0] === 'agentConfig'
+            ? entry.value
+            : undefined
+      ) as { magpieGatewayUrl?: unknown; agentType?: string } | undefined;
+      return row?.magpieGatewayUrl === gateway ? [row] : [];
+    });
+    expect(imported).toHaveLength(2);
+    expect(imported.map((row) => row.agentType).sort()).toEqual(['claude', 'deepseek']);
+    expect(store.get(getAllAgentConfigAtom)).toEqual([]);
+    expect(JSON.stringify(group.source.getSnapshot())).not.toContain(gateway);
+  } finally {
+    await group.close();
+  }
+});

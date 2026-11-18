@@ -33,6 +33,7 @@ const bundledNodeBuiltins = new Set([
 ]);
 
 const explicitlyExternal = new Set([
+  '@loro-dev/loro-repo-engine',
   '@loro-dev/roost-node',
   '@napi-rs/keyring',
   'better-sqlite3',
@@ -53,6 +54,35 @@ const explicitlyExternal = new Set([
 // Other modes (including build:watch) preserve the existing combined graph.
 const runtimeEntries = {
   index: path.resolve(__dirname, 'src/index.ts'),
+  'native-schedule-registry-migrate': path.resolve(
+    __dirname,
+    'src/lib/loro/native-schedule-registry-migrate-entry.ts'
+  ),
+  'native-machine-catalog-verify': path.resolve(
+    __dirname,
+    'src/lib/loro/native-machine-catalog-verify-entry.ts'
+  ),
+  'native-workspace-meta-migrate': path.resolve(
+    __dirname,
+    'src/lib/loro/native-workspace-meta-migrate-entry.ts'
+  ),
+  'native-machine-catalog-migrate': path.resolve(
+    __dirname,
+    'src/lib/loro/native-machine-catalog-migrate-entry.ts'
+  ),
+  'native-workspace-catalog-migrate': path.resolve(
+    __dirname,
+    'src/lib/loro/native-workspace-catalog-migrate-entry.ts'
+  ),
+  'native-repo-host': path.resolve(__dirname, 'src/lib/loro/native-repo-host-entry.ts'),
+  'native-repo-independent-host': path.resolve(
+    __dirname,
+    'src/lib/loro/native-repo-independent-host-entry.ts'
+  ),
+  'native-repo-independent-engine': path.resolve(
+    __dirname,
+    'src/lib/loro/native-repo-independent-engine-entry.ts'
+  ),
   'cloudflared-worker': path.resolve(__dirname, 'src/preview/cloudflared-worker.ts'),
   'baguette-worker': path.resolve(__dirname, 'src/ios-simulator/baguette-worker.ts'),
   'diff-worker': path.resolve(__dirname, 'src/lib/code-collab/diff-worker.ts'),
@@ -82,7 +112,12 @@ export default defineConfig(({ mode }) => ({
   // The browser compatibility transform reparses every emitted chunk into an
   // additional SWC AST and exhausts the 2 GB packaging heap on this bundle.
   plugins: [wasm(), devinRuntimeContractPlugin()],
-  define: inlineEnv,
+  define: {
+    ...inlineEnv,
+    __LODY_LOCAL_REPO_SDK_ARTIFACT__: JSON.stringify(
+      process.env.LODY_LOCAL_REPO_SDK_ARTIFACT ?? ''
+    ),
+  },
   resolve: {
     alias: [
       // loro-crdt >=1.13 routes the `node` condition to its CJS nodejs entry,

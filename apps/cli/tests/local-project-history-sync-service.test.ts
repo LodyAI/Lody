@@ -894,10 +894,12 @@ describe('history import persistence', () => {
       repo: {
         upsertDocMeta,
         deleteDoc,
-        getMeta: () => ({
-          scan: async () =>
-            existing.map(({ sessionId }) => ({ key: ['m', getSessionRoomId(sessionId)] })),
-        }),
+        listDoc: async () =>
+          existing.map(({ sessionId, meta }) => ({
+            docId: getSessionRoomId(sessionId),
+            meta,
+            deleted: false,
+          })),
         getDocMeta: async (roomId: string) => ({
           meta: existing.find(({ sessionId }) => getSessionRoomId(sessionId) === roomId)?.meta,
         }),

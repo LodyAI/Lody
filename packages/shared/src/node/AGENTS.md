@@ -4,6 +4,25 @@
 
 CLI, desktop main and supervisor helpers. Rules: [shared](../../AGENTS.md).
 
+The 1,400-word ceiling retains complete process rules alongside independent
+data-host ownership and authenticated workspace-wide retirement; the default ceiling has no room for both.
+
+## Independent native data host
+
+`native-repo-independent-host` owns a private observer lease and SDK connection,
+not the shared process after acknowledged handoff. Main and daemon use the same
+Layer; remaining Promise composition uses the named Legacy facade. Transfer an
+execution tree only after bootstrap lease acknowledgement, before admitting other
+leases. Failed release retains its original cleanup owner. Mutations are never
+replayed after lost acknowledgements. Independent mode requires a bound, private,
+marked directory; never adopt an existing classic engine implicitly. Unsupported
+platform handoff must fail before admission, without falling back to old writers.
+Whole-workspace retirement is a separate authenticated trusted Node operation;
+it stops every lease of the captured control/engine generation and confirms actual
+OS exit. It never discovers or signals a successor. Ordinary observer close keeps
+its last-lease behavior.
+Host environment forwards explicit `NO_PROXY`/`no_proxy` exclusions, never proxy credentials or unrelated application secrets.
+
 ## Local-project Git (`local-project.ts`)
 
 - Native workflows require `LocalProjects`, provided by `LocalProjectsLive` with
@@ -66,8 +85,9 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
   never resolve a Windows command from the working directory.
 - Liveness covers the whole tree (process group, cgroup), not just the root.
   A group left with only zombies is gone; only an exact member scan proves it.
-- A command that exits on its own keeps what it deliberately left running; only
-  a caller that stops waiting (timeout, interruption, output limit) ends the tree.
+- Commands preserve background children on normal exit by default. Finite verification
+  helpers use `requireExitedTree` to confirm release before publication; interrupted
+  callers always end their tree.
 - Scope owns process acquisition before configuration or other interruptible
   post-spawn work. Failed owner hooks also release the acquired process.
 - Subscribe to a child's events in the same synchronous step as the spawn
@@ -140,3 +160,9 @@ Application-owned process observers inventory acquired trees without granting si
 ## Local IPC authentication
 
 Control, probe and Loro data-plane requests require the private daemon token before dispatch. Publish credentials and random Windows endpoints atomically in the `0600` run file; never log or expose secrets to renderers. See [compatibility and filesystem limits](../../../../.agents/notes/implemented/bug-fix/2026-11-12-local-ipc-and-native-preview-security.md).
+
+## Native Machine catalog
+
+Keep `native-machine-catalog.ts` shared across Node hosts. Public summaries omit
+credentials and executable provenance. Retirement fences immediately; async close
+retains actual unsubscribe work until acknowledgement or transport-loss proof.

@@ -382,6 +382,47 @@ export class SessionRelationLifecyclePage {
   }
 
   private async installMetadataScanBarrier(): Promise<void> {
+    if (process.env.LODY_NATIVE_WORKSPACE_META === '1') {
+      await this.page.addInitScript(`
+        (() => {
+          let releaseGate = () => {};
+          const gate = new Promise((resolve) => { releaseGate = resolve; });
+          let readers;
+          const control = {
+            blockedScans: 0, completedScans: 0, released: false, repoAssigned: false,
+            startMetadataScans: () => {
+              if (!readers) throw new Error('Native directory readers are unavailable');
+              void readers.listActiveIds();
+              void readers.listEntries();
+            },
+            release: () => { control.released = true; releaseGate(); },
+          };
+          const block = (read) => async () => {
+            if (control.released) return read();
+            control.blockedScans += 1;
+            try { const result = await read(); await gate; return result; }
+            finally { control.completedScans += 1; }
+          };
+          window.__LODY_E2E_DIRECTORY_READERS__ = {
+            wrap: (original) => {
+              readers = {
+                listActiveIds: block(original.listActiveIds),
+                listEntries: block(original.listEntries),
+              };
+              return readers;
+            },
+          };
+          let repoValue;
+          Object.defineProperty(window, 'repo', {
+            configurable: true,
+            get: () => repoValue,
+            set: (repo) => { repoValue = repo; control.repoAssigned = true; },
+          });
+          window.__LODY_E2E_META_SCAN_GATE__ = control;
+        })();
+      `);
+      return;
+    }
     await this.page.addInitScript(`
       (() => {
         let releaseGate = () => {};

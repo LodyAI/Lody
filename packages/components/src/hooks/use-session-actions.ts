@@ -1,3 +1,4 @@
+import { nativeMachineCatalogSettingsForWrite } from '@/lib/native-machine-catalog-public';
 import { useSessionOwnerAccess } from './use-session-owner-access';
 import { useSessionManagementGuard } from './use-session-management-guard';
 import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
@@ -29,7 +30,7 @@ import {
   getSessionCancelRequestMarker,
   machineFlockKeys,
   SessionStatusFactory,
-  getLocalProjectHistoryProviderKey,
+  planLocalProjectHistoryInvalidation,
   getServerNow,
   LEGACY_SESSION_HISTORY_BACKEND,
   ROOST_SESSION_HISTORY_BACKEND,
@@ -184,6 +185,18 @@ async function assertArchivedLocalProjectCanRestore(
   const project = sessionMeta.project;
   if (project?.kind !== 'local') return;
 
+  if (runtime.ownsNativeMachineCatalog?.(sessionMeta.machineId)) {
+    const state = runtime.nativeMachineCatalogSource?.readProjection(sessionMeta.machineId);
+    if (!state?.synced) throw new Error('Native project catalog is unavailable');
+    if (
+      !state.projection.projects.some((value) => value.id === project.localProjectId) ||
+      state.projection.localProjectDeletions?.some(
+        (value) => value.projectId === project.localProjectId
+      )
+    )
+      throw new ArchivedLocalProjectRestoreUnavailableError();
+    return;
+  }
   const machineMeta = (await runtime.repo.getDocMeta(getMachineRoomId(sessionMeta.machineId)))
     ?.meta as MachineLegacyMetaFields | undefined;
   const machineFlockHandle = await runtime.repo.openFlockDoc(
@@ -213,6 +226,17 @@ async function deleteMachineFlockRowsBestEffort(
   reason: string
 ): Promise<void> {
   try {
+    const catalog = nativeMachineCatalogSettingsForWrite(runtime, machineId as MachineId);
+    if (catalog) {
+      for (const key of keys) {
+        if (key[0] !== 'sessionLaunchConfig') throw new Error('Unsupported native command cleanup');
+        await catalog.execute(machineId as MachineId, {
+          kind: 'remove-session-launch-reference',
+          sessionId: key[1],
+        });
+      }
+      return;
+    }
     const flockDocId = getMachineFlockDocId(runtime.workspaceId, machineId as MachineId);
     for (const key of keys) {
       await runtime.writer.flockRowDelete(flockDocId, key);
@@ -585,7 +609,8 @@ export function useSessionActions(): SessionActions {
           });
       }
       if (cancelId) {
-        await runtime.sendResources.withSessionStore(sessionId, (sessionStore) => {
+        await runtime.sendResources.withSessionStore(sessionId, async (sessionStore) => {
+          if (sessionStore.nativeBody) return sessionStore.nativeBody.cancel(cancelId, turnId);
           sessionStore.setState((draft: SessionDocDraft) => {
             draft.cancelRequest = { id: cancelId, turnId };
           });
@@ -749,6 +774,17 @@ export function useSessionActions(): SessionActions {
         return;
       }
 
+      const catalogPort = nativeMachineCatalogSettingsForWrite(runtime, sessionMeta.machineId);
+      if (catalogPort) {
+        await catalogPort.execute(sessionMeta.machineId, {
+          kind: 'invalidate-project-history-import',
+          projectId: sessionMeta.project.localProjectId,
+          provider: externalHistory.provider,
+          sourceAcpSessionId: externalHistory.sourceAcpSessionId,
+          importedSessionId: sessionMeta.id,
+        });
+        return;
+      }
       const machineRoomId = getMachineRoomId(sessionMeta.machineId);
       const machineMeta = (await runtime.repo.getDocMeta(machineRoomId))?.meta as
         | MachineLegacyMetaFields
@@ -762,37 +798,18 @@ export function useSessionActions(): SessionActions {
         ),
       };
       const project = localProjects?.[sessionMeta.project.localProjectId];
-      const providerKey = getLocalProjectHistoryProviderKey(externalHistory.provider);
-      const catalog = project?.history?.[providerKey];
-      const item = catalog?.sessions[externalHistory.sourceAcpSessionId];
-      if (!project || !catalog || !item) {
-        return;
-      }
-      if (item.importedSessionId && item.importedSessionId !== sessionMeta.id) {
-        return;
-      }
-
-      const nextItem = {
-        acpSessionId: item.acpSessionId,
-        title: item.title,
-        ...(item.updatedAt !== undefined ? { updatedAt: item.updatedAt } : {}),
-        status: 'available' as const,
-      };
-
-      const key = machineFlockKeys.localProject(sessionMeta.project.localProjectId);
-      await runtime.writer.flockRowPut(flockDocId, key, {
-        ...project,
-        history: {
-          ...(project.history ?? {}),
-          [providerKey]: {
-            ...catalog,
-            sessions: {
-              ...catalog.sessions,
-              [externalHistory.sourceAcpSessionId]: nextItem,
-            },
-          },
-        },
+      const plan = planLocalProjectHistoryInvalidation(project, {
+        projectId: sessionMeta.project.localProjectId,
+        provider: externalHistory.provider,
+        sourceAcpSessionId: externalHistory.sourceAcpSessionId,
+        importedSessionId: sessionMeta.id,
       });
+      if (plan.value)
+        await runtime.writer.flockRowPut(
+          flockDocId,
+          machineFlockKeys.localProject(sessionMeta.project.localProjectId),
+          plan.value
+        );
     },
     [runtime]
   );

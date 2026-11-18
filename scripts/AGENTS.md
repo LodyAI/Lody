@@ -22,7 +22,9 @@ maintenance commands here.
   documentation, internal absolute paths in any publishable text, and captured
   transcript fixtures.
 - `check-local-loro-writer-boundary.mjs` protects native writer execution/platform
-  boundaries and the single CLI repo unloader; behavior suites prove its effects.
+  boundaries and the single shipped CLI repo unloader; behavior suites prove its effects.
+  Owning tests may call the real SDK unload boundary to verify persistence and
+  refusal; this exception does not apply to shipped CLI files.
 - Root `specs/` and the `.agents/` tree may contain public client and protocol
   documentation and may be linked from other documents. Root `docs/` stays a
   closed path. Their contents still undergo the same private-path, internal-path,

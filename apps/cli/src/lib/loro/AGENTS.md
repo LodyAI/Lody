@@ -2,6 +2,29 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
+The 1,420-word ceiling retains native Meta readiness together with persistent
+ownership, freeze and existing sync and lifecycle boundaries.
+
+## Native local file-index pilot
+
+The opt-in local file-index pilot has one daemon publisher. Its default host is a
+scoped Node child; explicit fresh-profile independent mode shares the data host with
+main through private leases. Closing execution releases its lease without stopping
+main's data lease. Existing classic native rooms require explicit migration before
+independent admission. Renderer windows receive read-only domain snapshots. FI/FIS move
+together through the migration journal. Freeze legacy admission before import;
+rollback requires durable binary merge and verified coverage, never a flag flip.
+`LODY_NATIVE_WORKSPACE_CATALOG=1` admits local WF through main's persistent
+whole-window freeze and verified helper migration. A persisted native or frozen WF
+route remains binding without the flag; absent native storage never creates an empty
+replacement or reopens a legacy writer. Main and daemon borrow the independent host
+through separate leases. MF/SR/Meta require their own whole-room freeze and owner
+selection; WF receipts grant none of them. Plaintext Session journals bind
+processes regardless of flags. Require per-Session execution admission and complete
+CLI/IDB capture after draining writers/transports and retiring captured WASM
+containers. Missing storage never restores old writers. Roost, cloud and protected
+owners remain.
+
 ## Mirrors over synced docs tolerate unknown root keys
 
 Synced Mirrors use `ignoreUnknownProperties: true`; unknown roots must not block writes.
@@ -20,9 +43,9 @@ full initial sync.
 
 Rules:
 
-- Renderer metadata is imported into the meta Flock with no transport; the
-  metadata live monitor must start at repo init (`ready()`), or
-  `getDocMeta` stays stale and dispatch misses `latestUserMsgId`.
+- Legacy Meta imports have no transport. Start their live monitor at Repo ready
+  so metadata and dispatch observe `latestUserMsgId`. Native Meta attaches its
+  external facet before creating Repo.
 - Never open docs in a loop over `listAliveRoomIds` or any other workspace-wide
   enumeration. A long-lived workspace holds thousands of historical session
   rooms; opening them all stalls startup and floods the Streams backend.
@@ -107,10 +130,11 @@ observer-lease driven; never start OS probes permanently or persist snapshots.
 
 ## Catalog readers
 
-Share Promise Repo; close readers first. Timeouts end waiters.
-Retry baseline errors in-place. Only metadata and the workspace Flock stay joined;
-any other catalog is released after `TRANSIENT_CATALOG_IDLE_MS` without a read
-and stops retrying then. Role writes confirm remote sync.
+Native Meta binds a complete directory projection and client generation before
+readiness; never join legacy Meta or infer remote confirmation. Changed generations
+retire readiness. Legacy readers share Repo and close first. Retry baseline errors;
+retain only legacy Meta/workspace Flock, releasing other catalogs after
+`TRANSIENT_CATALOG_IDLE_MS` without reads or retries. Role writes confirm remote sync.
 Default MCP fallback requires an actual persisted remote cursor for that workspace
 Flock, not local rows or an empty checkpoint generation. Keep the pinned SQLite
 checkpoint reader read-only; cover receipt, restart and purge through real Streams

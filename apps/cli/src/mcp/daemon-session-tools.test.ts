@@ -305,7 +305,8 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     const configs = await Promise.all(Array.from({ length: 4 }, () => resolve()));
     expect(configs.map((config) => config.mcpServerIds)).toEqual([[id], [id], [id], [id]]);
     const select = await loadSessionMcpCatalog({
-      repo: manager.repo,
+      catalog: manager.workspaceCatalog,
+      catalogBinding: manager.workspaceCatalogBinding,
       waitForCatalogBaseline: () => waitForMcpCatalogBaseline(manager, workspaceId),
       workspaceId,
       sessionId,

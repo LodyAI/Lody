@@ -1129,7 +1129,11 @@ describe('local DSH Provider discovery', () => {
       },
     ];
     const repo = {
-      getMeta: () => ({ scan: async () => [] }),
+      listDoc: async () => [],
+      getDocMeta: async () => undefined,
+      getMeta: () => {
+        throw new Error('Raw Meta is outside Provider discovery');
+      },
       openFlockDoc: async () => ({
         flock: {
           scan: () =>

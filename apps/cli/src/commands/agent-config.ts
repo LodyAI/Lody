@@ -378,7 +378,8 @@ async function listAgentConfigsForWorkspace(
   const configs = await listMergedAgentConfigs(
     manager.repo,
     workspaceId,
-    machines.map((machine) => machine.id)
+    machines.map((machine) => machine.id),
+    manager.getMachineCatalogRuntimePort?.()
   );
   return sortAgentConfigs(configs);
 }
@@ -635,7 +636,9 @@ const agentConfigCreateCommand = new Command('create')
           ...(titleGeneration ? { titleGeneration } : {}),
         };
 
-        await upsertMachineAgentConfig(manager.repo, workspace.id as WorkspaceId, config);
+        await upsertMachineAgentConfig(manager.repo, workspace.id as WorkspaceId, config, {
+          native: manager.getMachineCatalogRuntimePort?.(config.machineId),
+        });
         await ensureWorkspaceMetaSynced(manager, `agent-config.create:${config.id}`);
 
         if (options.json) {
@@ -756,7 +759,10 @@ const agentConfigUpdateCommand = new Command('update')
           titleGeneration: requestedTitleUpdate ? titleGeneration : current.titleGeneration,
         };
 
-        await upsertMachineAgentConfig(manager.repo, workspace.id as WorkspaceId, nextConfig);
+        await upsertMachineAgentConfig(manager.repo, workspace.id as WorkspaceId, nextConfig, {
+          native: manager.getMachineCatalogRuntimePort?.(current.machineId),
+          expected: current,
+        });
         await ensureWorkspaceMetaSynced(manager, `agent-config.update:${current.id}`);
 
         if (options.json) {
@@ -800,7 +806,9 @@ const agentConfigDeleteCommand = new Command('delete')
           }
         );
 
-        await deleteMachineAgentConfig(manager.repo, workspace.id as WorkspaceId, config);
+        await deleteMachineAgentConfig(manager.repo, workspace.id as WorkspaceId, config, {
+          native: manager.getMachineCatalogRuntimePort?.(config.machineId),
+        });
         await ensureWorkspaceMetaSynced(manager, `agent-config.delete:${config.id}`);
 
         if (options.json) {
@@ -853,35 +861,50 @@ const agentConfigImportMagpieCommand = new Command('import-magpie')
             assertMagpieImportMachine(machine, request);
             if ((await readMachinePresence(manager, machine.id)) === 'offline')
               throw new Error('Current machine is offline. Run lody start first.');
-            if (
-              !(await manager.syncMachineFlockDoc(machine.id, { reason: 'magpie-import:prewrite' }))
-            )
-              throw new Error(
-                'Cannot synchronize existing providers; no changes were written. Retry after checking connectivity.'
+            const native = manager.getMachineCatalogRuntimePort?.(machine.id);
+            let providers: ReturnType<typeof importMagpieProviders>;
+            let synced: boolean;
+            if (native) {
+              await native.readCatalog();
+              providers = await native.importMagpie(machine, request);
+              synced = await manager.syncMachineFlockDoc(machine.id, {
+                reason: 'magpie-import:publish',
+              });
+            } else {
+              if (
+                !(await manager.syncMachineFlockDoc(machine.id, {
+                  reason: 'magpie-import:prewrite',
+                }))
+              )
+                throw new Error(
+                  'Cannot synchronize existing providers; no changes were written. Retry after checking connectivity.'
+                );
+              const handle = await manager.repo.openFlockDoc(
+                getMachineFlockDocId(workspaceId, machine.id)
               );
-            const handle = await manager.repo.openFlockDoc(
-              getMachineFlockDocId(workspaceId, machine.id)
-            );
-            const existing = await listMergedAgentConfigs(manager.repo, workspaceId, [machine.id]);
-            const providers = importMagpieProviders({
-              flock: handle.flock,
-              machine,
-              request,
-              existing,
-              newId: () => uuidV4() as AgentConfigId,
-              now: getServerNow(),
-            });
-            await manager.repo.flush();
-            manager.markMachineFlockDocDirty(machine.id, { reason: 'magpie-import' });
-            const priorSynced = await manager.syncMachineFlockDoc(machine.id, {
-              reason: 'magpie-import:publish',
-            });
-            // The first waiter may have joined a sync started before our flush.
-            const synced =
-              priorSynced &&
-              (await manager.syncMachineFlockDoc(machine.id, {
-                reason: 'magpie-import:confirm',
-              }));
+              const existing = await listMergedAgentConfigs(manager.repo, workspaceId, [
+                machine.id,
+              ]);
+              providers = importMagpieProviders({
+                flock: handle.flock,
+                machine,
+                request,
+                existing,
+                newId: () => uuidV4() as AgentConfigId,
+                now: getServerNow(),
+              });
+              await manager.repo.flush();
+              manager.markMachineFlockDocDirty(machine.id, { reason: 'magpie-import' });
+              const priorSynced = await manager.syncMachineFlockDoc(machine.id, {
+                reason: 'magpie-import:publish',
+              });
+              // The first waiter may have joined a sync started before our flush.
+              synced =
+                priorSynced &&
+                (await manager.syncMachineFlockDoc(machine.id, {
+                  reason: 'magpie-import:confirm',
+                }));
+            }
             if (options.json)
               printJson({
                 ok: true,

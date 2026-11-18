@@ -17,6 +17,7 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { formatErrorMessage } from '@/utils/format-error';
+import type { MachineDocumentRuntimePort } from '../lib/machine-document-runtime-port';
 
 type LoggerLike = {
   debug(message: string): void;
@@ -33,6 +34,7 @@ export type AgentConfigLaunchFields = Pick<
 
 type WorkspaceDocumentLike = {
   repo: RepoLike;
+  getMachineCatalogRuntimePort?(): MachineDocumentRuntimePort | undefined;
   getAgentConfigById(
     agentConfigId: AgentConfigId,
     machineId?: MachineId
@@ -125,8 +127,19 @@ export async function readLegacySessionLaunchConfig(input: {
   sessionId: SessionId;
   sessionMeta: SessionMeta | undefined;
   logger: LoggerLike;
+  machineCatalog?: MachineDocumentRuntimePort;
 }): Promise<SessionLaunchConfig | undefined> {
   const machineId = input.sessionMeta?.machineId ?? input.machineId;
+  if (input.machineCatalog) {
+    if (
+      input.machineCatalog.binding.workspaceId !== input.workspaceId ||
+      input.machineCatalog.binding.machineId !== machineId
+    )
+      throw new Error('Machine launch catalog scope mismatch');
+    return (
+      await input.machineCatalog.readSessionLaunchSnapshot(input.sessionId, input.sessionMeta)
+    ).legacy;
+  }
   try {
     return (
       await readMachineSessionLaunchSnapshot({
@@ -156,6 +169,12 @@ export async function resolveSessionLaunchConfig(input: {
   logger: LoggerLike;
 }): Promise<SessionLaunchConfigResolution> {
   const machineId = input.sessionMeta?.machineId ?? input.machineId;
+  const native = input.workspaceDocument.getMachineCatalogRuntimePort?.();
+  if (native) {
+    if (native.binding.workspaceId !== input.workspaceId || native.binding.machineId !== machineId)
+      throw new Error('Machine launch catalog scope mismatch');
+    return (await native.readSessionLaunchSnapshot(input.sessionId, input.sessionMeta)).resolution;
+  }
   let snapshot: MachineSessionLaunchSnapshot;
   try {
     snapshot = await readMachineSessionLaunchSnapshot({

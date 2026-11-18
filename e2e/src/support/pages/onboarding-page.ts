@@ -106,14 +106,49 @@ export class OnboardingPage {
     }, fixture);
   }
 
-  async expectLocalColdStartPreservesOtherIdentity(): Promise<void> {
+  async expectLocalColdStartPreservesOtherIdentity(
+    storage:
+      | { owner: 'legacy' }
+      | {
+          owner: 'native';
+          readEvidence(): readonly {
+            stage: string;
+            rendererOwner: string | null;
+            head: number;
+            proofTx: number;
+          }[];
+        }
+  ): Promise<void> {
     const workspaceId = await this.localWorkspaceId();
     const fixture = retiredIdentityFixture(workspaceId);
     await expect(this.page.locator('#chat-prompt')).toBeEditable({ timeout: 60_000 });
+    const activeDatabase = `lody-loro-repo-db-${workspaceId}`;
+    if (storage.owner === 'native') {
+      await expect.poll(storage.readEvidence, { timeout: 60_000 }).toEqual([
+        expect.objectContaining({
+          stage: 'native',
+          rendererOwner: 'native',
+          head: expect.any(Number),
+          proofTx: expect.any(Number),
+        }),
+      ]);
+      const proof = storage.readEvidence()[0]!;
+      expect(proof.proofTx).toBeGreaterThan(0);
+      expect(proof.head).toBeGreaterThanOrEqual(proof.proofTx);
+    }
     const databases = await this.page.evaluate(async () =>
       (await indexedDB.databases()).map((database) => database.name)
     );
-    expect(databases).toContain(`lody-loro-repo-db-${workspaceId}`);
+    if (storage.owner === 'native') {
+      expect(
+        databases.filter(
+          (database) => database === activeDatabase || database?.startsWith(`${activeDatabase}:`)
+        )
+      ).toEqual([]);
+    } else {
+      expect(databases).toContain(activeDatabase);
+    }
+    await expect(this.page).toHaveURL(/#\/local\/chat(?:\?.*)?$/u);
     expect(databases).toContain(fixture.database);
     const retained = await this.page.evaluate(async (previous) => {
       const content = await new Promise<unknown>((resolve, reject) => {

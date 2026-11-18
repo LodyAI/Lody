@@ -25,6 +25,8 @@ import { turnNotificationAudience } from '../notifications/turn-notification-aud
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildScheduleRegistryRow,
+  createLegacyWorkspaceCatalogQuery,
+  getWorkspaceFlockDocId,
   getSessionRoomId,
   ScheduleAgentSchema,
   ScheduleDefinitionSchema,
@@ -76,6 +78,11 @@ const agentConfig = {
 
 /** No billing entitlement, so the quota check returns before any scan. */
 const manager = {
+  workspaceCatalogBinding: { workspaceId: 'workspace' as WorkspaceId, accountId: null },
+  workspaceCatalog: createLegacyWorkspaceCatalogQuery({
+    binding: { workspaceId: 'workspace' as WorkspaceId, accountId: null },
+    open: () => manager.repo.openFlockDoc(getWorkspaceFlockDocId('workspace' as WorkspaceId)),
+  }),
   repo: {
     getDocMeta: async () => undefined,
     getWorkspaceMeta: async () => undefined,
@@ -185,6 +192,12 @@ describe('Schedule ACP values reach ordinary Session preparation', () => {
   };
   const config = { ...agentConfig, cliType: 'custom' as const, agentType: 'acp' };
   const localManager = {
+    workspaceCatalogBinding: { workspaceId: 'workspace' as WorkspaceId, accountId: null },
+    workspaceCatalog: createLegacyWorkspaceCatalogQuery({
+      binding: { workspaceId: 'workspace' as WorkspaceId, accountId: null },
+      open: () =>
+        localManager.repo.openFlockDoc(getWorkspaceFlockDocId('workspace' as WorkspaceId)),
+    }),
     syncMetaOrThrow: async () => {},
     repo: {
       getDocMeta: async () => undefined,

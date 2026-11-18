@@ -1,10 +1,11 @@
 import {
+  createLegacyWorkspaceCatalogCommands,
+  type WorkspaceCatalogCommand,
+  type WorkspaceCatalogCommands,
   getProjectMcpKey,
   getWorkspaceFlockDocId,
   normalizeProjectMcpDefault,
-  serializeAgentRoleRow,
   assertPublicMcpServer,
-  workspaceFlockKeys,
   type AgentRole,
   type AgentRoleId,
   type McpServerId,
@@ -36,7 +37,10 @@ import type { WorkspaceRuntime } from '@/atoms/runtime';
 
 export type WorkspaceCatalogWriteDeps = {
   workspaceId: WorkspaceId;
-  writer: Pick<WorkspaceRuntime['writer'], 'flockRowPut' | 'flockRowDelete'>;
+  accountId?: string | null;
+  workspaceCatalogCommands?: WorkspaceCatalogCommands;
+  writer: Pick<WorkspaceRuntime['writer'], 'flockRowPut' | 'flockRowDelete'> &
+    Partial<Pick<WorkspaceRuntime['writer'], 'flockRowUpdate'>>;
   repo: Pick<WorkspaceRuntime['repo'], 'openFlockDoc'>;
 };
 
@@ -47,31 +51,44 @@ export type WorkspaceCatalogWriteDeps = {
  * nothing for it — or the user — to do about a failed upload but let the room
  * carry it later.
  */
+const catalogCommands = (deps: WorkspaceCatalogWriteDeps): WorkspaceCatalogCommands =>
+  deps.workspaceCatalogCommands ??
+  createLegacyWorkspaceCatalogCommands({
+    binding: { workspaceId: deps.workspaceId, accountId: deps.accountId ?? null },
+    put: (key, value) =>
+      deps.writer.flockRowPut(getWorkspaceFlockDocId(deps.workspaceId), key, value),
+    remove: (key) => deps.writer.flockRowDelete(getWorkspaceFlockDocId(deps.workspaceId), key),
+    update: deps.writer.flockRowUpdate
+      ? (key, plan) =>
+          deps.writer.flockRowUpdate!(getWorkspaceFlockDocId(deps.workspaceId), key, plan)
+      : undefined,
+    upload: async () => {
+      await (await deps.repo.openFlockDoc(getWorkspaceFlockDocId(deps.workspaceId))).syncOnce();
+    },
+  });
+
 export const uploadWorkspaceCatalog = async (deps: WorkspaceCatalogWriteDeps): Promise<void> => {
   try {
-    const handle = await deps.repo.openFlockDoc(getWorkspaceFlockDocId(deps.workspaceId));
-    await handle.syncOnce();
+    await catalogCommands(deps).upload({
+      workspaceId: deps.workspaceId,
+      accountId: deps.accountId ?? null,
+    });
   } catch (error) {
     console.warn('Workspace catalog upload deferred to room sync', error);
   }
 };
 
-/** Durable write, then an upload nobody waits on. */
-const putRow = async (
+export const executeCatalogCommand = async (
   deps: WorkspaceCatalogWriteDeps,
-  key: Parameters<WorkspaceRuntime['writer']['flockRowPut']>[1],
-  value: unknown
+  command: WorkspaceCatalogCommand,
+  options?: { signal?: AbortSignal }
 ): Promise<void> => {
-  await deps.writer.flockRowPut(getWorkspaceFlockDocId(deps.workspaceId), key, value);
-  void uploadWorkspaceCatalog(deps);
-};
-
-const deleteRow = async (
-  deps: WorkspaceCatalogWriteDeps,
-  key: Parameters<WorkspaceRuntime['writer']['flockRowDelete']>[1]
-): Promise<void> => {
-  await deps.writer.flockRowDelete(getWorkspaceFlockDocId(deps.workspaceId), key);
-  void uploadWorkspaceCatalog(deps);
+  const result = await catalogCommands(deps).execute(
+    { workspaceId: deps.workspaceId, accountId: deps.accountId ?? null },
+    command,
+    options
+  );
+  if (result.changed) void uploadWorkspaceCatalog(deps);
 };
 
 export const putWorkspaceMcpServer = (
@@ -79,13 +96,13 @@ export const putWorkspaceMcpServer = (
   entry: WorkspaceMcpServerMeta
 ): Promise<void> => {
   assertPublicMcpServer(entry);
-  return putRow(deps, workspaceFlockKeys.mcpServer(entry.id), entry);
+  return executeCatalogCommand(deps, { kind: 'put-mcp', entry });
 };
 
 export const deleteWorkspaceMcpServer = (
   deps: WorkspaceCatalogWriteDeps,
   id: McpServerId
-): Promise<void> => deleteRow(deps, workspaceFlockKeys.mcpServer(id));
+): Promise<void> => executeCatalogCommand(deps, { kind: 'delete-mcp', id });
 
 /**
  * Write a Role — created, edited, shared, or unshared.
@@ -98,24 +115,23 @@ export const deleteWorkspaceMcpServer = (
 export const writeWorkspaceAgentRole = (
   deps: WorkspaceCatalogWriteDeps,
   role: AgentRole
-): Promise<void> =>
-  putRow(deps, workspaceFlockKeys.agentRole(role.id), serializeAgentRoleRow(role));
+): Promise<void> => executeCatalogCommand(deps, { kind: 'put-role', role });
 
 export const deleteWorkspaceAgentRole = (
   deps: WorkspaceCatalogWriteDeps,
   id: AgentRoleId
-): Promise<void> => deleteRow(deps, workspaceFlockKeys.agentRole(id));
+): Promise<void> => executeCatalogCommand(deps, { kind: 'delete-role', id });
 
 /** Write a Project group — created or edited. Each content change bumps `revision`. */
 export const writeWorkspaceProject = (
   deps: WorkspaceCatalogWriteDeps,
   project: WorkspaceProject
-): Promise<void> => putRow(deps, workspaceFlockKeys.project(project.id), project);
+): Promise<void> => executeCatalogCommand(deps, { kind: 'put-project', project });
 
 export const deleteWorkspaceProject = (
   deps: WorkspaceCatalogWriteDeps,
   id: ProjectId
-): Promise<void> => deleteRow(deps, workspaceFlockKeys.project(id));
+): Promise<void> => executeCatalogCommand(deps, { kind: 'delete-project', id });
 /**
  * Who may manage a project's defaults, resolved from live state by the caller
  * at the moment of the write — never from whether a switch was enabled.
@@ -186,5 +202,9 @@ export const putProjectMcpDefault = async (
   if (management.kind !== 'manage') throw new ProjectMcpDefaultWriteError('forbidden');
   const value = normalizeProjectMcpDefault({ ids });
   if (!value) throw new ProjectMcpDefaultWriteError('invalid_selection');
-  await putRow(deps, workspaceFlockKeys.projectMcpDefault(management.projectKey), value);
+  await executeCatalogCommand(deps, {
+    kind: 'set-project-defaults',
+    projectKey: management.projectKey,
+    ids: value.ids,
+  });
 };

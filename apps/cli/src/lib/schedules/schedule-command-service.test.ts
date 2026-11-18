@@ -80,6 +80,7 @@ async function fixture() {
   let syncMeta = async () => true;
   const context = {
     manager: {
+      scheduleRegistry: repository.registry,
       repo: {
         ...port,
         getDocMeta: async (id: string) =>

@@ -104,6 +104,76 @@ process/resource snapshots. It writes
 Playwright `reopen/trace.zip`. The default 24-session run is a bounded baseline;
 larger counts are opt-in and do not establish a performance threshold.
 
+## Local workspace catalog migration rehearsal
+
+After `pnpm e2e:build`, run this optional acceptance separately from the regression suite:
+
+```bash
+pnpm --dir e2e exec tsx src/migration/workspace-catalog.ts
+```
+
+It uses one disposable profile across four real Electron launches: create a nonempty
+MCP catalog through the legacy UI, enable native WF migration and edit the retained
+entry, restart and delete it, then restart again to verify deletion. It checks the
+main/native ownership journals, native transaction advances and actual process exits.
+Caller native flags are overridden so the first launch always authors legacy data.
+Each immutable round retains screenshots, traces, logs and `result.json` under
+`e2e/artifacts/workspace-catalog-migration/`; failure also retains its isolated profile.
+This is local WF migration evidence, not cloud sync, Session/Meta or cross-platform
+acceptance. It never rebuilds artifacts or writes directly to a Repo.
+
+## Local machine catalog migration rehearsal
+
+Build with the verified local SDK artifact, then run:
+
+```bash
+pnpm --dir e2e exec tsx src/migration/machine-catalog.ts
+```
+
+Four launches of one disposable profile create a legacy custom Provider, migrate and
+rename it, execute an actual ACP conversation, delete it after restarting, then
+restart with the migration flag off. The conversation checks preservation of the
+private command and prompt; the final launch checks durable native ownership and
+non-resurrection. All recorded main, daemon and native engine PIDs must exit.
+Results and failed profiles follow the same retention policy under
+`e2e/artifacts/machine-catalog-migration/`. This covers the local MF slice; Session
+bodies remain legacy, and Cloud or other platforms require their own acceptance.
+
+## Local Meta and Session body migration acceptance
+
+Build the desktop with the exact local SDK artifact before running either command:
+
+```bash
+pnpm --dir e2e migration:meta
+pnpm --dir e2e migration:session
+pnpm --dir e2e migration:schedule
+pnpm --dir e2e migration:preview
+```
+
+These opt-in rounds use four real Electron launches, a disposable profile and a
+synthetic ACP provider. Both create legacy data, migrate WF/MF/SR and Meta, read the
+old conversation, create another conversation, then restart with migration flags
+off. The Session variant also selects native Session bodies and checks durable
+publication receipts for both conversations. Roost bodies stay on their original
+path. Each round checks process exits and preserves failure evidence under
+`e2e/artifacts/workspace-meta-migration/` or `session-body-migration/`.
+
+The Schedule variant also creates and edits a future message through the UI,
+restarts with the flag off, and checks its native publication plus the absence of
+a duplicate body in legacy SQLite/IndexedDB. Its artifacts use
+`e2e/artifacts/schedule-definition-migration/`.
+
+The Preview variant reports a disposable loopback website through the synthetic
+agent's real Lody MCP tool, opens Browser through the UI, creates two comments,
+resolves one, and reads the unresolved comment after flag-off restart. It checks
+the durable native route and absence of a duplicate legacy SQLite/IndexedDB body.
+The status mutation is Resolve: the product has no comment-body editing control.
+Its artifacts use `e2e/artifacts/preview-comments-migration/`.
+
+These commands do not rebuild, join the regression suite, or establish Cloud,
+packaged application or cross-platform acceptance. A started or partially passed
+round is not a completed acceptance; use its final `result.json`.
+
 ## Codex account acceptance
 
 The opt-in [Codex recorder](scripts/acceptance-codex-profiles.mts) exercises the built
@@ -204,3 +274,11 @@ as an independently retryable inline video comment on the matching open PR.
 The current active coverage is tracked in [the coverage matrix](./COVERAGE.md).
 The suite checker parses Gherkin and enforces IDs, priorities, runtime ownership,
 documentation indexes, and P0 matrix entries before any application build.
+
+## Multi-device acceptance
+
+The opt-in [multi-device lane](src/multidevice/README.md) exercises two independent
+Cloud desktop replicas through real UI and a deterministic external ACP provider.
+It requires an isolated fixture implemented in the private outer repository; the
+public OSS full suite does not supply cloud synchronization. Missing infrastructure
+is reported as blocked with a nonzero exit, never as passing coverage.

@@ -173,6 +173,11 @@ vi.mock('loro-repo', async (importOriginal) => {
             refreshTransportRoutes: mocks.refreshTransportRoutes,
             transportRooms: mocks.transportRooms,
             joinMetaRoom: mocks.joinMetaRoom,
+            // Metadata-only substitute: it owns no body documents. Body
+            // durability cases below inject the real persisted Repo instead.
+            persistDocNow: async () => {
+              throw new Error('Metadata-only fixture cannot persist a document body');
+            },
             flush: mocks.flush,
             destroy: mocks.destroy,
             reconnect: mocks.reconnect,
@@ -180,6 +185,8 @@ vi.mock('loro-repo', async (importOriginal) => {
             getDocMeta: mocks.getDocMeta,
             watch: mocks.watch,
             getMeta: () => mocks.metaFlock,
+            // This metadata-only fixture has no materialized named Flock rooms.
+            getFlockDoc: async () => undefined,
             getReplicaCheckpointStore: mocks.getReplicaCheckpointStore,
           }
       ),
@@ -502,6 +509,324 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
+
+  it('freezes and captures WF/MF/SR before native Meta readiness can open any Repo', async () => {
+    vi.useRealTimers();
+    const [
+      { default: fs },
+      { default: os },
+      { default: path },
+      { IDBFactory },
+      { Flock },
+      { RendererWorkspaceFlockMigrationMainLegacy },
+      { RendererFlockRoomGroupMigrationMainLegacy },
+      { LoroRepo: RepoFactory },
+      { IndexedDBStorageAdaptor: RealIdbStorage },
+    ] = await Promise.all([
+      import('node:fs/promises'),
+      import('node:os'),
+      import('node:path'),
+      import('fake-indexeddb'),
+      import('@loro-dev/flock-wasm'),
+      import('../../../apps/electron/src/main/services/renderer-workspace-flock-migration'),
+      import('../../../apps/electron/src/main/services/renderer-flock-room-group-migration'),
+      import('loro-repo'),
+      vi.importActual<typeof import('loro-repo/storage/indexeddb')>('loro-repo/storage/indexeddb'),
+    ]);
+    const directory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'lody-runtime-catalog-prerequisite-')
+    );
+    const workspaceId = 'lw_startup_order' as WorkspaceId,
+      accountId = 'local:startup';
+    const binding = {
+      accountId,
+      workspaceId,
+      roomId: `${workspaceId}:wf:workspace`,
+      contentMode: 'plaintext' as const,
+    };
+    const idb = new IDBFactory();
+    vi.stubGlobal('indexedDB', idb);
+    const storage = new RealIdbStorage({ dbName: `lody-loro-repo-db-${workspaceId}` });
+    const expected = new Map<string, Uint8Array>();
+    for (const room of [binding.roomId, `${workspaceId}:mf:machine-a`, `${workspaceId}:sr`]) {
+      const flock = new Flock('pre-native-catalog');
+      flock.set(['unknown-row'], { room, retained: true });
+      flock.commit();
+      const snapshot = flock.exportFile();
+      expected.set(room, snapshot);
+      await storage.save({ type: 'flock-doc-snapshot', flockDocId: room, snapshot });
+    }
+    await storage.close();
+    const listeners = new Map<string, Set<(value: unknown) => void>>();
+    const push = (channel: string, value: unknown) => {
+      for (const listener of listeners.get(channel) ?? []) listener(value);
+    };
+    const committed = new Set<string>();
+    const captured = new Map<string, Uint8Array>();
+    const wf = new RendererWorkspaceFlockMigrationMainLegacy({
+      databasePath: path.join(directory, 'wf.sqlite3'),
+      registeredWindowIds: () => [1],
+      readCommittedOwner: async () => (committed.has('wf') ? 'native' : 'legacy'),
+      send: (_window, request) => push('localPlatform.workspaceFlockMigration', request),
+      publishOwner: (_window, owner) => push('localPlatform.workspaceFlockOwner', owner),
+    });
+    const groups = new Map(
+      ['machine', 'schedule', 'meta'].map((domain) => {
+        const group = {
+          accountId,
+          workspaceId,
+          domain: domain as 'machine' | 'schedule' | 'meta',
+          contentMode: 'plaintext' as const,
+          roomIds:
+            domain === 'machine'
+              ? [`${workspaceId}:mf:machine-a`]
+              : domain === 'schedule'
+                ? [`${workspaceId}:sr`]
+                : ['meta'],
+        };
+        const channel =
+          domain === 'machine'
+            ? 'machineFlock'
+            : domain === 'schedule'
+              ? 'scheduleRegistry'
+              : 'workspaceMeta';
+        return [
+          domain,
+          new RendererFlockRoomGroupMigrationMainLegacy({
+            group,
+            databasePath: path.join(directory, `${domain}.sqlite3`),
+            registeredWindowIds: () => [1],
+            preflight: domain === 'machine',
+            readCommittedOwner: async () => (committed.has(domain) ? 'native' : 'legacy'),
+            send: (_window, request) => push(`localPlatform.${channel}Migration`, request),
+            publishOwner: (_window, owner) => push(`localPlatform.${channel}Owner`, owner),
+          }),
+        ] as const;
+      })
+    );
+    const oldCapability = Reflect.get(RepoFactory, 'externalMetadataCapability');
+    const oldFactory = Reflect.get(RepoFactory, 'createWithExternalMetadata');
+    Reflect.set(RepoFactory, 'externalMetadataCapability', 'loro-external-metadata-v1');
+    Reflect.set(RepoFactory, 'createWithExternalMetadata', async () => {
+      throw new Error('Meta startup must complete before Repo creation');
+    });
+    vi.mocked(RepoFactory.create).mockClear();
+    Object.assign(window, {
+      __LODY_ELECTRON__: true,
+      ipc: {
+        on(channel: string, listener: (value: unknown) => void) {
+          const set = listeners.get(channel) ?? new Set();
+          set.add(listener);
+          listeners.set(channel, set);
+          return () => set.delete(listener);
+        },
+        send() {},
+        async invoke(channel: string, value?: unknown) {
+          if (channel === 'localPlatform.registerWorkspaceFlock')
+            return wf.register(1, binding, wf.beginRegistration(1));
+          if (channel === 'localPlatform.acknowledgeWorkspaceFlock') {
+            wf.acceptAck(1, value);
+            return;
+          }
+          if (channel === 'localPlatform.retireWorkspaceFlock') {
+            wf.retire(1, value as string);
+            return;
+          }
+          if (channel === 'localPlatform.readyWorkspaceFlock') {
+            wf.ready(1, value as string);
+            const receipt = await wf.freeze(binding);
+            const source = receipt.sources.find((source) => source.snapshot.byteLength > 0);
+            if (source) captured.set(binding.roomId, source.snapshot);
+            committed.add('wf');
+            await wf.complete(binding, receipt.revision);
+            return wf.status(binding);
+          }
+          for (const [domain, main] of groups) {
+            const name =
+              domain === 'machine'
+                ? 'MachineFlock'
+                : domain === 'schedule'
+                  ? 'ScheduleRegistry'
+                  : 'WorkspaceMeta';
+            if (channel === `localPlatform.register${name}`)
+              return main.register(1, main.beginRegistration(1));
+            if (channel === `localPlatform.acknowledge${name}`) {
+              main.acceptAck(1, value);
+              return;
+            }
+            if (channel === `localPlatform.retire${name}`) {
+              main.retire(1, value as string);
+              return;
+            }
+            if (channel === `localPlatform.ready${name}`) {
+              main.ready(1, value as string);
+              if (domain === 'meta') {
+                if (
+                  wf.status(binding).owner !== 'native' ||
+                  groups.get('machine')!.status().owner !== 'native' ||
+                  groups.get('schedule')!.status().owner !== 'native'
+                )
+                  throw new Error('Native Meta prerequisites incomplete');
+                throw new Error('Intentional stop at completed catalog prerequisites');
+              }
+              const receipt = await main.freeze();
+              for (const window of receipt.windows)
+                for (const room of window.inventory) {
+                  const source = room.sources.find((source) => source.present);
+                  if (source) captured.set(room.roomId, source.snapshot);
+                }
+              committed.add(domain);
+              await main.complete(receipt.revision);
+              return { ...main.status(), registrationId: value };
+            }
+          }
+          throw new Error('Unexpected startup protocol');
+        },
+      },
+    });
+    try {
+      await expect(
+        createWorkspaceRuntime({
+          content: { mode: 'plaintext' },
+          syncMode: 'local',
+          accountId,
+          workspaceSlug: 'startup',
+          workspaceId,
+          apiBaseUrl: '',
+          token: '',
+        })
+      ).rejects.toThrow('Workspace native prerequisites failed');
+      expect(wf.status(binding).owner).toBe('native');
+      expect(groups.get('machine')!.status().owner).toBe('native');
+      expect(groups.get('schedule')!.status().owner).toBe('native');
+      expect(captured.size).toBe(expected.size);
+      for (const [room, bytes] of captured) {
+        const flock = new Flock('captured-catalog');
+        flock.strictImportFile(bytes);
+        expect(flock.get(['unknown-row'])).toEqual({ room, retained: true });
+      }
+      expect(RepoFactory.create).not.toHaveBeenCalled();
+      expect([...listeners.values()].every((set) => set.size === 0)).toBe(true);
+    } finally {
+      if (oldCapability === undefined)
+        Reflect.deleteProperty(RepoFactory, 'externalMetadataCapability');
+      else Reflect.set(RepoFactory, 'externalMetadataCapability', oldCapability);
+      if (oldFactory === undefined)
+        Reflect.deleteProperty(RepoFactory, 'createWithExternalMetadata');
+      else Reflect.set(RepoFactory, 'createWithExternalMetadata', oldFactory);
+      wf.close();
+      for (const main of groups.values()) main.close();
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the first Cloud metadata snapshot usable while file-index workspace preparation is pending or fails', async () => {
+    const preparation = Promise.withResolvers<{ prepared: true }>();
+    const requests: unknown[] = [];
+    Object.assign(window, {
+      __LODY_ELECTRON__: true,
+      ipc: {
+        invoke(channel: string, input: unknown) {
+          if (channel === 'cloudFileIndex.prepareWorkspace') {
+            requests.push(input);
+            return preparation.promise;
+          }
+          return Promise.resolve(channel === 'loro.isConnected');
+        },
+        on: () => () => {},
+        send() {},
+      },
+    });
+    window.localStorage.setItem('lody:electronLocalDataPlane', '0');
+    const sessionId = 'cloud-first-snapshot' as SessionId;
+    mocks.listDoc.mockResolvedValue([
+      { docId: getSessionRoomId(sessionId), meta: { id: sessionId }, exists: true },
+    ]);
+    mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const runtime = await createWorkspaceRuntime({
+      content: { mode: 'plaintext' },
+      syncMode: 'cloud',
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'auth-token',
+    });
+    try {
+      await flushPromises();
+      expect(requests).toEqual([{ workspaceId: 'workspace-1' }]);
+      await expect(runtime.readSessionOperationTargets(sessionId, 'archive')).resolves.toEqual([
+        { id: sessionId },
+      ]);
+      preparation.reject(new Error('Synthetic private provider failure must not be logged'));
+      await flushPromises();
+      await expect(runtime.readSessionOperationTargets(sessionId, 'archive')).resolves.toEqual([
+        { id: sessionId },
+      ]);
+      expect(warning.mock.calls).toContainEqual([
+        '[Cloud file index] Workspace preparation unavailable',
+      ]);
+      expect(
+        warning.mock.calls.flat().some((value) => String(value).includes('Synthetic private'))
+      ).toBe(false);
+    } finally {
+      await runtime.dispose();
+      warning.mockRestore();
+    }
+  });
+
+  it.each(['local', 'protected'] as const)(
+    'does not prepare ordinary Cloud authority for %s startup',
+    async (mode) => {
+      mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
+      const authorities: unknown[] = [];
+      Object.assign(window, {
+        __LODY_ELECTRON__: true,
+        ipc: {
+          invoke(channel: string, input: unknown) {
+            if (channel === 'cloudFileIndex.prepareWorkspace') authorities.push(input);
+            return Promise.resolve(null);
+          },
+          on: () => () => {},
+          send() {},
+        },
+      });
+      const accountId = 'local:guard';
+      if (mode === 'protected') {
+        await expect(
+          createWorkspaceRuntime({
+            content: { mode: 'protected', keyId: 'synthetic' } as Parameters<
+              typeof createWorkspaceRuntime
+            >[0]['content'],
+            accountId,
+            workspaceSlug: 'workspace',
+            workspaceId: 'workspace-1' as WorkspaceId,
+            apiBaseUrl: '',
+            syncMode: 'cloud',
+          })
+        ).rejects.toThrow('e2ee_transport_unavailable');
+      } else {
+        const runtime = await createWorkspaceRuntime({
+          content: { mode: 'plaintext' },
+          syncMode: 'local',
+          accountId,
+          workspaceSlug: 'workspace',
+          workspaceId: 'workspace-1' as WorkspaceId,
+          apiBaseUrl: '',
+          workspaceFlockMigration: {
+            start: async (binding) => ({
+              binding,
+              owner: { binding, owner: 'legacy', revision: 'legacy' },
+              registrationId: crypto.randomUUID(),
+              close: async () => {},
+            }),
+          },
+        });
+        await runtime.dispose();
+      }
+      expect(authorities).toEqual([]);
+    }
+  );
 
   it('aborts the real token provider fetch when startup is cancelled', async () => {
     mocks.realTokenProvider = true;

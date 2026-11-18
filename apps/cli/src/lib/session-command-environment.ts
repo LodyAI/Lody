@@ -209,7 +209,12 @@ export function createLocalSessionCommandEnvironment(args: {
       )
         return { allowed: false, reason: 'not_visible' };
       if (target.localProjectId) {
-        const projects = await readMachineLocalProjects(manager.repo, workspaceId, machineId);
+        const projects = await readMachineLocalProjects(
+          manager.repo,
+          workspaceId,
+          machineId,
+          manager.getMachineCatalogRuntimePort?.()
+        );
         const project = Object.values(projects).find((entry) => entry.id === target.localProjectId);
         if (!project) return { allowed: false, reason: 'project_not_shared' };
       }

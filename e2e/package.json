@@ -14,7 +14,11 @@
     "journey:coverage": "node scripts/generate-coverage.mjs --write",
     "journey:validate": "node scripts/validate-journey-candidate.mjs",
     "scout:ablation": "tsx src/scout/scout-runner.ts --ablation --journey session",
-    "smoke": "cucumber-js --config cucumber.mjs --tags \"@P0\""
+    "smoke": "cucumber-js --config cucumber.mjs --tags \"@P0\"",
+    "migration:meta": "tsx src/migration/workspace-meta.ts",
+    "migration:session": "tsx src/migration/workspace-meta.ts --session-body",
+    "migration:schedule": "tsx src/migration/workspace-meta.ts --schedule-definition",
+    "migration:preview": "tsx src/migration/workspace-meta.ts --preview-comments"
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "catalog:",

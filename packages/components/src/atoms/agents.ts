@@ -1,3 +1,6 @@
+import { nativeMachineCatalogSettingsForWrite } from '../lib/native-machine-catalog-public';
+import { nativeMachineCatalogSettingsAtom } from './native-machine-catalog';
+export { nativeMachineCatalogSettingsAtom } from './native-machine-catalog';
 import { isMagpieGatewayUrl } from '@lody/shared';
 import { atom } from 'jotai';
 import {
@@ -302,18 +305,19 @@ function getMergedAgentConfigMap(
 export const getAgentMetaByIdAtomFamily = atomFamily((agentId?: AgentConfigId) =>
   atom((get) => {
     if (!agentId) return null;
+    get(nativeMachineCatalogSettingsAtom); // Owner changes invalidate any legacy fallback.
     const runtime = get(activeWorkspaceRuntimeAtom);
     const machineFlockRowsByWorkspace = get(machineFlockRowsByWorkspaceAtom);
-    return (
-      getMergedAgentConfigMap(
-        get(agentConfigMetaCacheAtom),
-        runtime ? machineFlockRowsByWorkspace[String(runtime.workspaceId)] : undefined
-      ).get(agentId) ?? null
-    );
+    const legacy = getMergedAgentConfigMap(
+      get(agentConfigMetaCacheAtom),
+      runtime ? machineFlockRowsByWorkspace[String(runtime.workspaceId)] : undefined
+    ).get(agentId);
+    return legacy && !runtime?.ownsNativeMachineCatalog?.(legacy.machineId) ? legacy : null;
   })
 );
 
 export const getAllAgentConfigAtom = atom((get) => {
+  get(nativeMachineCatalogSettingsAtom);
   const runtime = get(activeWorkspaceRuntimeAtom);
   const machineFlockRowsByWorkspace = get(machineFlockRowsByWorkspaceAtom);
   return [
@@ -321,26 +325,47 @@ export const getAllAgentConfigAtom = atom((get) => {
       get(agentConfigMetaCacheAtom),
       runtime ? machineFlockRowsByWorkspace[String(runtime.workspaceId)] : undefined
     ).values(),
-  ];
+  ].filter((value) => !runtime?.ownsNativeMachineCatalog?.(value.machineId));
 });
 
-export const getAllAgentConfigIdsAtom = atom((get) => get(getAllAgentConfigAtom).map((c) => c.id));
+export const getAllAgentConfigListAtom = atom((get) => [
+  ...get(getAllAgentConfigAtom),
+  ...(get(nativeMachineCatalogSettingsAtom)?.agents ?? []),
+]);
+export const getAgentListMetaByIdAtomFamily = atomFamily((agentId?: AgentConfigId) =>
+  atom((get) =>
+    agentId ? (get(getAllAgentConfigListAtom).find((value) => value.id === agentId) ?? null) : null
+  )
+);
 
-export const getAgentConfigsByMachineAtomFamily = atomFamily((machineId?: MachineId) =>
+export const getAllAgentConfigIdsAtom = atom((get) =>
+  get(getAllAgentConfigListAtom).map((c) => c.id)
+);
+
+export const getAgentConfigListByMachineAtomFamily = atomFamily((machineId?: MachineId) =>
+  atom((get) =>
+    machineId ? get(getAllAgentConfigListAtom).filter((value) => value.machineId === machineId) : []
+  )
+);
+
+export const getLegacyAgentConfigsByMachineAtomFamily = atomFamily((machineId?: MachineId) =>
   atom((get) => {
     if (!machineId) return [] as AgentConfigMeta[];
     return get(getAllAgentConfigAtom).filter((c) => c.machineId === machineId);
   })
 );
 
+export const getAgentConfigsByMachineAtomFamily = getAgentConfigListByMachineAtomFamily;
+
 export const getAllProviderSetupsAtom = atom((get) => {
+  get(nativeMachineCatalogSettingsAtom);
   const runtime = get(activeWorkspaceRuntimeAtom);
   if (!runtime) return [] as ProviderSetupTask[];
   const rowsByMachine = get(machineFlockRowsByWorkspaceAtom)[String(runtime.workspaceId)];
   const byId = new Map<AgentConfigId, ProviderSetupTask>();
   for (const rows of Object.values(rowsByMachine ?? {})) {
     for (const setup of Object.values(getMachineFlockProviderSetups(rows))) {
-      byId.set(setup.id, setup);
+      if (!runtime.ownsNativeMachineCatalog?.(setup.machineId)) byId.set(setup.id, setup);
     }
   }
   return [...byId.values()];
@@ -372,6 +397,12 @@ export const cmdCreateAgentConfigAtom = atom(
     const runtime = get(activeWorkspaceRuntimeAtom);
     if (!runtime) throw new Error('Runtime not ready');
     if (!config.machineId) throw new Error('machineId is required to create an agent config');
+    const catalog = nativeMachineCatalogSettingsForWrite(runtime, config.machineId);
+    if (catalog) {
+      assertManagedCodexProfileConfig(config);
+      await catalog.execute(config.machineId, { kind: 'create-agent', config });
+      return config.id;
+    }
     const rows = await writeAgentConfigToMachineFlock(runtime, config);
     // Replace rather than merge: merge cannot drop a key, so a retracted opt-out would
     // linger in the cache until the next sync.
@@ -405,6 +436,11 @@ export const cmdCreateProviderSetupAtom = atom(null, async (get, set, config: Ag
     createdAt: now,
     updatedAt: now,
   };
+  const catalog = nativeMachineCatalogSettingsForWrite(runtime, setup.machineId);
+  if (catalog) {
+    await catalog.execute(setup.machineId, { kind: 'queue-provider-setup', task: setup });
+    return setup.id;
+  }
   const rows = await writeProviderSetupToMachineFlock(runtime, setup);
   set(setMachineFlockRowsForMachineAtom, {
     workspaceId: runtime.workspaceId,
@@ -418,6 +454,24 @@ export const cmdCreateProviderSetupAtom = atom(null, async (get, set, config: Ag
 export const cmdRetryProviderSetupAtom = atom(null, async (get, set, setupId: AgentConfigId) => {
   const runtime = get(activeWorkspaceRuntimeAtom);
   if (!runtime) throw new Error('Runtime not ready');
+  const nativeSetup = runtime.nativeMachineCatalogSource
+    ?.getSnapshot()
+    .setups.find((entry) => entry.id === setupId);
+  if (nativeSetup) {
+    const catalog = nativeMachineCatalogSettingsForWrite(runtime, nativeSetup.machineId);
+    if (!catalog) throw new Error('Provider setup owner changed');
+    await catalog.execute(nativeSetup.machineId, {
+      kind: 'retry-provider-setup',
+      id: setupId,
+      expected: {
+        attempt: nativeSetup.attempt,
+        status: nativeSetup.status,
+        updatedAt: nativeSetup.updatedAt,
+      },
+      now: getServerNow(),
+    });
+    return;
+  }
   const setup = get(getAllProviderSetupsAtom).find((entry) => entry.id === setupId);
   if (!setup) return;
   const { failureCode: _failureCode, ...retryableSetup } = setup;
@@ -439,6 +493,23 @@ export const cmdRetryProviderSetupAtom = atom(null, async (get, set, setupId: Ag
 export const deleteProviderSetupAtom = atom(null, async (get, set, setupId: AgentConfigId) => {
   const runtime = get(activeWorkspaceRuntimeAtom);
   if (!runtime) throw new Error('Runtime not ready');
+  const nativeSetup = runtime.nativeMachineCatalogSource
+    ?.getSnapshot()
+    .setups.find((entry) => entry.id === setupId);
+  if (nativeSetup) {
+    const catalog = nativeMachineCatalogSettingsForWrite(runtime, nativeSetup.machineId);
+    if (!catalog) throw new Error('Provider setup owner changed');
+    await catalog.execute(nativeSetup.machineId, {
+      kind: 'cancel-provider-setup',
+      cancellation: {
+        v: 1,
+        id: setupId,
+        machineId: nativeSetup.machineId,
+        cancelledAt: getServerNow(),
+      },
+    });
+    return;
+  }
   const setup = get(getAllProviderSetupsAtom).find((entry) => entry.id === setupId);
   if (!setup) return;
   const optimisticRows =
@@ -455,6 +526,20 @@ export const deleteProviderSetupAtom = atom(null, async (get, set, setupId: Agen
 export const deleteAgentConfigAtom = atom(null, async (get, _set, configId: AgentConfigId) => {
   const runtime = get(activeWorkspaceRuntimeAtom);
   if (!runtime) throw new Error('Runtime not ready');
+  const summary = get(getAllAgentConfigListAtom).find((entry) => entry.id === configId);
+  const catalog = summary
+    ? nativeMachineCatalogSettingsForWrite(runtime, summary.machineId)
+    : undefined;
+  if (catalog && summary) {
+    const editor = await catalog.editor(summary.machineId).load(configId);
+    await catalog.execute(summary.machineId, {
+      kind: 'remove-agent',
+      id: configId,
+      editToken: editor.editToken,
+      now: getServerNow(),
+    });
+    return;
+  }
   const config = get(getAllAgentConfigAtom).find((entry) => entry.id === configId);
   if (config) {
     const rows = await deleteAgentConfigFromMachineFlock(runtime, config);
@@ -470,6 +555,52 @@ export const deleteAgentConfigAtom = atom(null, async (get, _set, configId: Agen
 export const cmdUpdateAgentConfigAtom = atom(null, async (get, _set, config: AgentConfigMeta) => {
   const runtime = get(activeWorkspaceRuntimeAtom);
   if (!runtime) throw new Error('Runtime not ready');
+  const catalog = nativeMachineCatalogSettingsForWrite(runtime, config.machineId);
+  if (catalog) {
+    const summary = catalog.agents.find(
+      (value) => value.id === config.id && value.machineId === config.machineId
+    );
+    if (
+      !summary ||
+      summary.cliType !== config.cliType ||
+      summary.agentType !== config.agentType ||
+      summary.brandId !== config.brandId ||
+      config.codexAuth !== undefined ||
+      config.titleGeneration !== undefined ||
+      config.magpieGatewayUrl !== undefined ||
+      !config.env ||
+      typeof config.env !== 'object' ||
+      Array.isArray(config.env)
+    )
+      throw new Error('This provider change requires its dedicated native editor');
+    const port = catalog.editor(config.machineId);
+    const editor = await port.load(config.id);
+    await port.save({
+      id: config.id,
+      editToken: editor.editToken,
+      changes: {
+        name: config.name,
+        env: { kind: 'replace', value: config.env },
+        description:
+          config.description === undefined
+            ? { kind: 'clear' }
+            : { kind: 'replace', value: config.description },
+        prompt:
+          config.prompt === undefined
+            ? { kind: 'clear' }
+            : { kind: 'replace', value: config.prompt },
+        customAcp:
+          config.customAcp === undefined
+            ? { kind: 'clear' }
+            : { kind: 'replace', value: config.customAcp },
+        runtimeOverrides:
+          config.runtimeOverrides === undefined
+            ? { kind: 'clear' }
+            : { kind: 'replace', value: config.runtimeOverrides },
+      },
+    });
+    return;
+  }
   const roomId = getAgentConfigRoomId(config.id);
   const existing = await runtime.repo.getDocMeta(roomId);
   const rows = await writeAgentConfigToMachineFlock(runtime, config);

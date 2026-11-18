@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { atom, useAtomValue, useSetAtom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from '@/lib/toast';
 import { usePostHog } from '@posthog/react';
@@ -47,6 +47,12 @@ import {
   usesAcpProtocolAuthentication,
   acpOwnsSessionTitleGeneration,
   REGISTRY_ACP_AGENTS,
+  getServerNow,
+  type MachineCatalogSettingsPort,
+  type AgentConfigEditorPort,
+  type MachineCatalogEditor,
+  type AgentConfigEdit,
+  type AgentConfigListSummary,
   type AgentBrandId,
   type AgentConfigCliType,
   type AgentConfigId,
@@ -108,7 +114,7 @@ import { Select } from '@lody/ui/select';
 import { Tabs } from '@lody/ui/tabs';
 import { OptionSelector } from '@/components/shared/option-selector';
 import { shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
-import { EnvVarsTextarea, envVarsToText } from './env-vars-textarea';
+import { EnvVarsTextarea, envVarsToText, type EnvCredentialEditMode } from './env-vars-textarea';
 import { Tooltip } from '@lody/ui/tooltip';
 import { Badge } from '@lody/ui/badge';
 import { Radio, RadioGroup } from '@lody/ui/radio';
@@ -1168,9 +1174,13 @@ export type AgentConfigSubmitPayload = {
   backgroundSetup?: true;
 };
 
-export type AgentConfigDialogMode =
+export type LegacyAgentConfigDialogMode =
   | { kind: 'create'; initialForm?: Partial<AgentConfigFormData> }
   | { kind: 'edit'; config: AgentConfigMeta };
+
+export type AgentConfigDialogMode =
+  | LegacyAgentConfigDialogMode
+  | { kind: 'edit-catalog'; summary: AgentConfigListSummary };
 
 type RefreshArgs = {
   machineId: MachineId;
@@ -1201,6 +1211,9 @@ export type AgentConfigDialogProps = {
   /** Fires when the open/close transition finishes — the caller's cleanup hook. */
   onOpenChangeComplete?: (open: boolean) => void;
   mode: AgentConfigDialogMode;
+  /** Stable, bound domain port. Catalog editing never invokes legacy hooks or onSubmit. */
+  catalogEditor?: AgentConfigEditorPort;
+  catalogSource?: MachineCatalogSettingsPort;
   machine: MachineViewMeta;
   onSubmit: (payload: AgentConfigSubmitPayload) => Promise<void>;
   onRefreshCapabilities: (args: RefreshArgs) => Promise<MachineAcpCapabilitiesRefreshResponse>;
@@ -1504,6 +1517,13 @@ function resolveInitialTestedCustomKey(
 export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const reason = useMachineRpcFeatureReason(props.machine.id);
   const { t } = useTranslation();
+  const editorBinding = useRef<{
+    realm: string | AgentConfigEditorPort | undefined;
+    machineId: MachineId;
+    configId: AgentConfigId | undefined;
+    version: number;
+    editor: AgentConfigEditorPort | undefined;
+  } | null>(null);
   // The header action and retained dialogs must respect the same boundary as
   // the provider list. Signed file RPC support does not admit provider probes.
   if (reason) {
@@ -1520,10 +1540,510 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
       </Dialog.Root>
     );
   }
-  return <SupportedAgentConfigDialog {...props} />;
+  const realm = props.catalogSource
+    ? `${props.catalogSource.binding.accountId}:${props.catalogSource.binding.workspaceId}:${props.catalogSource.machineGeneration?.(props.machine.id) ?? props.catalogSource.generation}`
+    : props.catalogEditor;
+  const configId =
+    props.mode.kind === 'edit-catalog'
+      ? props.mode.summary.id
+      : props.mode.kind === 'edit'
+        ? props.mode.config.id
+        : undefined;
+  if (
+    !editorBinding.current ||
+    editorBinding.current.realm !== realm ||
+    editorBinding.current.machineId !== props.machine.id ||
+    editorBinding.current.configId !== configId
+  ) {
+    editorBinding.current = {
+      realm,
+      machineId: props.machine.id,
+      configId,
+      version: (editorBinding.current?.version ?? 0) + 1,
+      editor: props.catalogEditor ?? props.catalogSource?.editor(props.machine.id),
+    };
+  }
+  if (props.mode.kind === 'edit-catalog')
+    return (
+      <CatalogAgentConfigDialog
+        key={editorBinding.current.version}
+        {...props}
+        catalogEditor={editorBinding.current.editor}
+        summary={props.mode.summary}
+      />
+    );
+  if (props.catalogSource && props.mode.kind === 'edit') {
+    const { id, machineId, name, description, cliType, agentType, brandId } = props.mode.config;
+    return (
+      <CatalogAgentConfigDialog
+        key={editorBinding.current.version}
+        {...props}
+        catalogEditor={editorBinding.current.editor}
+        summary={{ id, machineId, name, description, cliType, agentType, brandId }}
+      />
+    );
+  }
+  return (
+    <SupportedAgentConfigDialog
+      key={props.catalogSource ? editorBinding.current.version : undefined}
+      {...props}
+      mode={props.mode}
+    />
+  );
 }
 
-function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
+const EMPTY_PUBLISHED_AGENT = atom<AgentConfigMeta | undefined>(undefined);
+const EMPTY_SETUP_ROWS = atom<import('@lody/shared').ProviderSetupTask[]>([]);
+
+const catalogEditorStyles = stylex.create({
+  fields: { display: 'flex', flexDirection: 'column', gap: space[4] },
+  note: { margin: 0, color: colors.secondaryLabel, fontSize: '12px' },
+});
+
+type RuntimePathKey = Exclude<
+  keyof BuiltinRuntimeOverrides,
+  'piExtensions' | 'antigravitySkipPermissions'
+>;
+const getRuntimePathKey = (cliType: string, agentType: string): RuntimePathKey | null => {
+  if (cliType !== 'builtin') return null;
+  const paths: Record<string, RuntimePathKey> = {
+    antigravity: 'antigravityPath',
+    codex: 'codexPath',
+    claude: 'claudeCodeExecutable',
+    kimi: 'kimiPath',
+    devin: 'devinPath',
+    grok: 'grokPath',
+    pi: 'piPath',
+  };
+  return paths[agentType] ?? null;
+};
+type PrivateFieldMode = 'keep' | 'replace' | 'clear';
+export function CatalogPrivateField({
+  label,
+  present,
+  mode,
+  onModeChange,
+  disabled,
+  children,
+}: {
+  label: string;
+  present: boolean | undefined;
+  mode: PrivateFieldMode;
+  onModeChange: (mode: PrivateFieldMode) => void;
+  disabled: boolean;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div {...stylex.props(styles.stackTight)}>
+      <span>{label}</span>
+      <p {...stylex.props(catalogEditorStyles.note)}>
+        {present === undefined
+          ? t('settings.agent.credentials.stateUnknown', 'Saved value state is unavailable.')
+          : present
+            ? t(
+                'settings.agent.credentials.privatePresent',
+                'A saved value is present. Its contents stay on the machine.'
+              )
+            : t('settings.agent.credentials.privateAbsent', 'No saved value.')}
+      </p>
+      <div role="group" aria-label={label}>
+        {(['keep', 'replace', 'clear'] as const).map((action) => (
+          <Button
+            key={action}
+            type="button"
+            size="small"
+            disabled={disabled}
+            aria-pressed={mode === action}
+            variant={mode === action ? 'secondary' : 'ghost'}
+            onClick={() => onModeChange(action)}
+          >
+            {t(`settings.agent.credentials.field.${action}`, {
+              defaultValue: { keep: 'Keep', replace: 'Replace', clear: 'Clear' }[action],
+            })}
+          </Button>
+        ))}
+      </div>
+      {mode === 'replace' && children}
+    </div>
+  );
+}
+
+/** Same settings dialog, using a write-only editor instead of a replica-backed form. */
+function CatalogAgentConfigDialog(
+  props: AgentConfigDialogProps & { summary: AgentConfigListSummary }
+) {
+  const { t } = useTranslation();
+  const [editor, setEditor] = useState<MachineCatalogEditor | null>(null);
+  const [name, setName] = useState(props.summary.name);
+  const [description, setDescription] = useState(props.summary.description ?? '');
+  const [env, setEnv] = useState<Record<string, string>>({});
+  const [envMode, setEnvMode] = useState<EnvCredentialEditMode>('keep');
+  const [entries, setEntries] = useState<NonNullable<AgentConfigEdit['envEntries']>>([]);
+  const [invalidEnv, setInvalidEnv] = useState(false);
+  const [promptMode, setPromptMode] = useState<PrivateFieldMode>('keep');
+  const [prompt, setPrompt] = useState('');
+  const [launchMode, setLaunchMode] = useState<PrivateFieldMode>('keep');
+  const [launch, setLaunch] = useState('');
+  const [runtimeMode, setRuntimeMode] = useState<PrivateFieldMode>('keep');
+  const [runtimePath, setRuntimePath] = useState('');
+  const [extensions, setExtensions] = useState('');
+  const [skipPermissions, setSkipPermissions] = useState(false);
+  const runtimeKey = getRuntimePathKey(props.summary.cliType, props.summary.agentType);
+  const parsedLaunch = useMemo(() => {
+    try {
+      return launchMode === 'replace' ? parseCustomAcpCommandLine(launch) : null;
+    } catch {
+      return null;
+    }
+  }, [launchMode, launch]);
+  const invalidLaunch =
+    props.summary.cliType === 'custom' &&
+    (launchMode === 'clear' || (launchMode === 'replace' && !parsedLaunch));
+  const clearPrivateDraft = () => {
+    setInvalidEnv(false);
+    setPromptMode('keep');
+    setPrompt('');
+    setLaunchMode('keep');
+    setLaunch('');
+    setRuntimeMode('keep');
+    setRuntimePath('');
+    setExtensions('');
+    setSkipPermissions(false);
+  };
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const generation = useRef(0),
+    dirtyName = useRef(false),
+    dirtyDescription = useRef(false);
+  const pending = useRef<AbortController | null>(null);
+  const load = useCallback(async () => {
+    const mine = ++generation.current;
+    pending.current?.abort();
+    pending.current = null;
+    setSaving(false);
+    setEditor(null);
+    setError(null);
+    if (!props.catalogEditor) {
+      setError('unavailable');
+      return;
+    }
+    try {
+      const next = await props.catalogEditor.load(props.summary.id);
+      if (mine !== generation.current) return;
+      if (next.id !== props.summary.id || next.machineId !== props.machine.id)
+        throw new Error('Editor binding mismatch');
+      setEditor(next);
+      if (!dirtyName.current) setName(next.name);
+      if (!dirtyDescription.current) setDescription(next.description ?? '');
+    } catch {
+      if (mine === generation.current) setError('load_failed');
+    }
+  }, [props.catalogEditor, props.summary.id, props.machine.id]);
+  useEffect(() => {
+    if (props.open) void load();
+    else {
+      clearPrivateDraft();
+      setEnv({});
+      setEntries([]);
+      setEnvMode('keep');
+      setSaving(false);
+      setEditor(null);
+      setError(null);
+      dirtyName.current = false;
+      dirtyDescription.current = false;
+      setDescription(props.summary.description ?? '');
+      setName(props.summary.name);
+    }
+    return () => {
+      generation.current++;
+      pending.current?.abort();
+      pending.current = null;
+    };
+  }, [props.open, load]);
+  useEffect(() => {
+    clearPrivateDraft();
+    setEnv({});
+    setEntries([]);
+    setEnvMode('keep');
+    dirtyName.current = false;
+    dirtyDescription.current = false;
+    setDescription(props.summary.description ?? '');
+    setName(props.summary.name);
+  }, [props.summary.id, props.machine.id]);
+  const submit = async () => {
+    if (!editor || !props.catalogEditor || invalidEnv || invalidLaunch || !name.trim()) return;
+    const mine = generation.current,
+      cancellation = new AbortController();
+    pending.current?.abort();
+    pending.current = cancellation;
+    setSaving(true);
+    setError(null);
+    const changes: AgentConfigEdit = {
+      name: name.trim(),
+      description: !dirtyDescription.current
+        ? { kind: 'keep' }
+        : description
+          ? { kind: 'replace', value: description }
+          : { kind: 'clear' },
+      env:
+        envMode === 'replace'
+          ? { kind: 'replace', value: env }
+          : { kind: envMode === 'clear' ? 'clear' : 'keep' },
+      ...(envMode === 'entries' ? { envEntries: entries } : {}),
+      prompt: promptMode === 'replace' ? { kind: 'replace', value: prompt } : { kind: promptMode },
+      ...(props.summary.cliType === 'custom'
+        ? {
+            customAcp:
+              launchMode === 'replace'
+                ? { kind: 'replace' as const, value: parsedLaunch! }
+                : { kind: launchMode },
+          }
+        : {}),
+      ...(props.summary.cliType === 'builtin'
+        ? {
+            runtimeOverrides:
+              runtimeMode === 'replace'
+                ? {
+                    kind: 'replace' as const,
+                    value: {
+                      ...(runtimeKey && runtimePath.trim()
+                        ? { [runtimeKey]: runtimePath.trim() }
+                        : {}),
+                      ...(props.summary.agentType === 'pi'
+                        ? {
+                            piExtensions: extensions
+                              .split('\n')
+                              .map((value) => value.trim())
+                              .filter(Boolean),
+                          }
+                        : {}),
+                      ...(props.summary.agentType === 'antigravity'
+                        ? { antigravitySkipPermissions: skipPermissions }
+                        : {}),
+                    },
+                  }
+                : { kind: runtimeMode },
+          }
+        : {}),
+    };
+    try {
+      await props.catalogEditor.save(
+        { id: editor.id, editToken: editor.editToken, changes },
+        { signal: cancellation.signal }
+      );
+      if (mine !== generation.current || cancellation.signal.aborted) return;
+      setEnv({});
+      clearPrivateDraft();
+      setEntries([]);
+      setEnvMode('keep');
+      setEditor(null);
+      props.onOpenChange(false);
+    } catch (cause) {
+      if (mine !== generation.current || cancellation.signal.aborted) return;
+      const code =
+        cause && typeof cause === 'object' && 'code' in cause
+          ? String(cause.code)
+          : 'operation_failed';
+      setError(code);
+      if (code === 'edit_conflict' || code === 'edit_expired') setEditor(null);
+    } finally {
+      if (mine === generation.current) setSaving(false);
+    }
+  };
+  const conflict = error === 'edit_conflict' || error === 'edit_expired';
+  return (
+    <Dialog.Root
+      open={props.open}
+      onOpenChange={props.onOpenChange}
+      onOpenChangeComplete={props.onOpenChangeComplete}
+    >
+      <Dialog.Content
+        data-testid="agent-config-dialog"
+        data-machine-id={props.machine.id}
+        data-agent-config-id={props.summary.id}
+      >
+        <Dialog.Title>{t('agents.editConfig', 'Edit configuration')}</Dialog.Title>
+        <Dialog.Description>
+          {t(
+            'settings.agent.credentials.machineOwned',
+            'Saved credential values stay on the machine. Changes are checked there before saving.'
+          )}
+        </Dialog.Description>
+        <div {...stylex.props(catalogEditorStyles.fields)}>
+          <Field htmlFor="catalog-agent-name" label={t('agents.configName', 'Name')}>
+            <Input
+              id="catalog-agent-name"
+              value={name}
+              disabled={saving}
+              onChange={(event) => {
+                dirtyName.current = true;
+                setName(event.target.value);
+              }}
+            />
+          </Field>
+          <Field htmlFor="catalog-agent-description" label={t('agents.description', 'Description')}>
+            <Input
+              id="catalog-agent-description"
+              value={description}
+              disabled={saving}
+              onChange={(event) => {
+                dirtyDescription.current = true;
+                setDescription(event.target.value);
+              }}
+            />
+          </Field>
+          <EnvVarsTextarea
+            value={env}
+            onChange={setEnv}
+            onError={(errors) => setInvalidEnv(errors.length > 0)}
+            disabled={!editor || saving}
+            credentialEdit={{
+              present: editor?.credentials.envPresent,
+              mode: envMode,
+              onModeChange: (mode) => {
+                setEnvMode(mode);
+                setError(null);
+              },
+              onEntriesChange: setEntries,
+            }}
+          />
+          <CatalogPrivateField
+            label={t('agents.systemPrompt', 'System prompt')}
+            present={editor?.hasPrompt}
+            mode={promptMode}
+            disabled={!editor || saving}
+            onModeChange={(mode) => {
+              setPromptMode(mode);
+              setPrompt('');
+            }}
+          >
+            <Textarea
+              aria-label={t('agents.systemPrompt', 'System prompt')}
+              value={prompt}
+              disabled={saving}
+              onChange={(event) => setPrompt(event.target.value)}
+            />
+          </CatalogPrivateField>
+          {props.summary.cliType === 'custom' && (
+            <CatalogPrivateField
+              label={t('agents.customCommand', 'Custom command')}
+              present={editor?.credentials.customLaunchPresent}
+              mode={launchMode}
+              disabled={!editor || saving}
+              onModeChange={(mode) => {
+                setLaunchMode(mode);
+                setLaunch('');
+              }}
+            >
+              <Input
+                aria-label={t('agents.customCommand', 'Custom command')}
+                value={launch}
+                disabled={saving}
+                onChange={(event) => setLaunch(event.target.value)}
+              />
+            </CatalogPrivateField>
+          )}
+          {invalidLaunch && (
+            <p role="alert" {...stylex.props(styles.warning)}>
+              {t(
+                'agents.customCommandRequired',
+                'A custom provider requires a valid launch command.'
+              )}
+            </p>
+          )}
+          {props.summary.cliType === 'builtin' && (
+            <CatalogPrivateField
+              label={t('agents.runtimeOverrides', 'Runtime overrides')}
+              present={editor?.credentials.runtimeOverridesPresent}
+              mode={runtimeMode}
+              disabled={!editor || saving}
+              onModeChange={(mode) => {
+                setRuntimeMode(mode);
+                setRuntimePath('');
+                setExtensions('');
+                setSkipPermissions(false);
+              }}
+            >
+              {runtimeKey && (
+                <Input
+                  aria-label={t('agents.runtimeExecutablePath', 'Executable path')}
+                  value={runtimePath}
+                  disabled={saving}
+                  onChange={(event) => setRuntimePath(event.target.value)}
+                />
+              )}
+              {props.summary.agentType === 'pi' && (
+                <Textarea
+                  aria-label={t('agents.piExtensionPaths', 'Extension paths, one per line')}
+                  value={extensions}
+                  disabled={saving}
+                  onChange={(event) => setExtensions(event.target.value)}
+                />
+              )}
+              {props.summary.agentType === 'antigravity' && (
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={skipPermissions}
+                    disabled={saving}
+                    onChange={(event) => setSkipPermissions(event.target.checked)}
+                  />
+                  {t('agents.antigravitySkipPermissions', 'Skip permission prompts')}
+                </label>
+              )}
+            </CatalogPrivateField>
+          )}
+          {(envMode !== 'keep' || launchMode !== 'keep' || runtimeMode !== 'keep') && (
+            <p {...stylex.props(catalogEditorStyles.note)}>
+              {t(
+                'settings.agent.credentials.verificationRequired',
+                'New credential values need verification. Changing them invalidates the previous verification.'
+              )}
+            </p>
+          )}
+          {error && (
+            <div role="alert" {...stylex.props(styles.warning)}>
+              {conflict
+                ? t(
+                    'settings.agent.credentials.conflict',
+                    'This configuration changed. Refresh the editor before saving; your new input is kept.'
+                  )
+                : error === 'verification_failed' || error === 'verification_required'
+                  ? t(
+                      'settings.agent.credentials.verifyFailed',
+                      'Credential verification did not complete. The saved values were kept.'
+                    )
+                  : t('agents.updateConfigError', 'Failed to update configuration')}
+            </div>
+          )}
+          {(conflict || error === 'load_failed') && (
+            <Button type="button" variant="secondary" disabled={saving} onClick={() => void load()}>
+              {t('common.refresh', 'Refresh')}
+            </Button>
+          )}
+        </div>
+        <Dialog.Footer>
+          <Button type="button" variant="ghost" onClick={() => props.onOpenChange(false)}>
+            {t('common.cancel', 'Cancel')}
+          </Button>
+          <Button
+            type="button"
+            disabled={!editor || saving || invalidEnv || invalidLaunch || !name.trim()}
+            onClick={() => void submit()}
+          >
+            {saving && <Spinner size="small" />}
+            {t('common.save', 'Save')}
+          </Button>
+        </Dialog.Footer>
+      </Dialog.Content>
+    </Dialog.Root>
+  );
+}
+
+function SupportedAgentConfigDialog(
+  props: Omit<AgentConfigDialogProps, 'mode'> & { mode: LegacyAgentConfigDialogMode }
+) {
   const {
     open,
     onOpenChange,
@@ -1544,8 +2064,19 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
     mode.kind === 'edit'
       ? mode.config.id
       : (draftConfigIdRef.current ??= uuidv4() as AgentConfigId);
-  const publishedConfig = useAtomValue(getAgentMetaByIdAtomFamily(agentConfigId));
-  const setups = useAtomValue(getProviderSetupsByMachineAtomFamily(machine.id));
+  const legacyPublishedConfig = useAtomValue(
+    props.catalogSource ? EMPTY_PUBLISHED_AGENT : getAgentMetaByIdAtomFamily(agentConfigId)
+  );
+  const legacySetups = useAtomValue(
+    props.catalogSource ? EMPTY_SETUP_ROWS : getProviderSetupsByMachineAtomFamily(machine.id)
+  );
+  const publicConfig = props.catalogSource?.agents.find(
+    (config) => config.id === agentConfigId && config.machineId === machine.id
+  );
+  const publishedConfig = publicConfig ?? legacyPublishedConfig;
+  const setups = props.catalogSource
+    ? props.catalogSource.setups.filter((setup) => setup.machineId === machine.id)
+    : legacySetups;
   const retrySetup = useSetAtom(cmdRetryProviderSetupAtom);
   const deleteSetup = useSetAtom(deleteProviderSetupAtom);
   // Creation observes the daemon-owned setup instead of launching a competing
@@ -1769,24 +2300,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
       : authRequired &&
         ((isManagedBuiltin && formData.agentType !== 'pi' && formData.agentType !== 'devin') ||
           usesProtocolAuthentication);
-  const builtinRuntimeOverrideKey =
-    formData.cliType !== 'builtin'
-      ? null
-      : formData.agentType === 'antigravity'
-        ? 'antigravityPath'
-        : formData.agentType === 'codex'
-          ? 'codexPath'
-          : formData.agentType === 'claude'
-            ? 'claudeCodeExecutable'
-            : formData.agentType === 'kimi'
-              ? 'kimiPath'
-              : formData.agentType === 'devin'
-                ? 'devinPath'
-                : formData.agentType === 'grok'
-                  ? 'grokPath'
-                  : formData.agentType === 'pi'
-                    ? 'piPath'
-                    : null;
+  const builtinRuntimeOverrideKey = getRuntimePathKey(formData.cliType, formData.agentType);
   const builtinRuntimeOverrideValue = builtinRuntimeOverrideKey
     ? (formData.runtimeOverrides?.[builtinRuntimeOverrideKey] ?? '')
     : '';
@@ -1799,8 +2313,12 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
   // that don't change the parsed argv (extra whitespace) don't re-probe.
   const customAcpKey = parsedCustomAcp ? formatCustomAcpCommandLine(parsedCustomAcp) : '';
 
-  const pathRows = useMachineFlockRows(machine.id, { families: ['dotlodyPath'] });
-  const machineDataRoot = getMachineFlockDotlodyPath(pathRows);
+  const pathRows = useMachineFlockRows(props.catalogSource ? null : machine.id, {
+    families: ['dotlodyPath'],
+  });
+  const machineDataRoot = props.catalogSource
+    ? props.catalogSource.dotlodyPaths?.[machine.id]
+    : getMachineFlockDotlodyPath(pathRows);
   const dshConfigPath =
     isDeepSeekBuiltin &&
     machineDataRoot &&
@@ -2875,7 +3393,18 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
               machine={machine}
               onRetry={async (setup) => {
                 try {
-                  await retrySetup(setup.id);
+                  if (props.catalogSource)
+                    await props.catalogSource.execute(machine.id, {
+                      kind: 'retry-provider-setup',
+                      id: setup.id,
+                      expected: {
+                        attempt: setup.attempt,
+                        status: setup.status,
+                        updatedAt: setup.updatedAt,
+                      },
+                      now: getServerNow(),
+                    });
+                  else await retrySetup(setup.id);
                 } catch (error) {
                   toast.error(
                     t('settings.agent.setup.retryFailed', 'Could not retry provider setup')
@@ -2885,7 +3414,17 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
               }}
               onDelete={async (setup) => {
                 try {
-                  await deleteSetup(setup.id);
+                  if (props.catalogSource)
+                    await props.catalogSource.execute(machine.id, {
+                      kind: 'cancel-provider-setup',
+                      cancellation: {
+                        v: 1,
+                        id: setup.id,
+                        machineId: machine.id,
+                        cancelledAt: getServerNow(),
+                      },
+                    });
+                  else await deleteSetup(setup.id);
                   // Cancellation is durable for this id. A new test must be a
                   // new setup, or the daemon would cancel it again.
                   draftConfigIdRef.current = uuidv4() as AgentConfigId;

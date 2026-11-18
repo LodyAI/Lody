@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { HistoryEntryWriteSchema, parseHistoryWrite } from '../history-write-schema';
 import { sha256Hex } from '../incremental-sha256';
 import type { SessionTurn } from './domain';
 
@@ -588,4 +589,29 @@ export function planHistoryImport(
   if (decision.status === 'conflicted') throw new HistoryImportRefused(decision.reason);
   const suffix = input.replay.history.slice(decision.appendFromIndex);
   return { turns: [...history, ...suffix], appended: suffix.length };
+}
+
+/** Shared cursor/hash preflight; validate only the newly replayed suffix. */
+export function prepareHistoryImportCursor(input: HistoryImportInput, rawCursor: unknown) {
+  const cursor = HistoryImportCursorSchema.optional().parse(rawCursor);
+  const importedHashes =
+    input.mode === 'refresh'
+      ? resolveImportedTurnHashes(input.externalHistory, cursor?.importedTurnHashes)
+      : [];
+  const storedHashVersion =
+    input.mode === 'refresh'
+      ? resolveImportHashVersion(input.externalHistory, cursor)
+      : input.replay.hashVersion;
+  const projectedHashes = [
+    ...importedHashes,
+    ...input.replay.history
+      .slice(importedHashes.length)
+      .map((entry) =>
+        hashHistoryEntryForVersion(
+          parseHistoryWrite(HistoryEntryWriteSchema, entry),
+          storedHashVersion
+        )
+      ),
+  ];
+  return { cursor, projectedHashes };
 }

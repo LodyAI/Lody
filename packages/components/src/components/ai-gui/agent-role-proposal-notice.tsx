@@ -11,9 +11,6 @@ import {
   AgentRoleProposalMetaSchema,
   applyAgentRoleProposal,
   getServerNow,
-  getWorkspaceFlockDocId,
-  listWorkspaceAgentRoles,
-  readWorkspaceFlockRowsFromFlock,
   type AgentRoleProposalMeta,
   type SessionId,
 } from '@lody/shared';
@@ -21,6 +18,7 @@ import { userAtom } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { writeWorkspaceAgentRole } from '@/lib/workspace-catalog-write';
+import { readWorkspaceCatalog } from '@/lib/workspace-catalog-room';
 
 const styles = stylex.create({
   card: {
@@ -202,10 +200,7 @@ export function AgentRoleProposalNotice({
                 'The selected Agent configuration is unavailable'
               )
             );
-          const handle = await runtime.repo.openFlockDoc(
-            getWorkspaceFlockDocId(runtime.workspaceId)
-          );
-          const roles = listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(handle.flock));
+          const { roles } = await readWorkspaceCatalog(runtime);
           const role = applyAgentRoleProposal(current, roles, user.id, getServerNow());
           await writeWorkspaceAgentRole(runtime, role);
         }

@@ -1,9 +1,9 @@
+import type { AgentConfigDisplay } from '@/lib/agent-config-display';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   AcpSessionMonitorSnapshot,
-  AgentConfigMeta,
   MachineMonitorResourceUsage,
   MachineMonitorSnapshot,
   SessionMeta,
@@ -293,7 +293,7 @@ export function DeviceResourceMonitor({
   /** Desktop pills content is flush with the title — no extra horizontal inset. */
   flush?: boolean;
   sessionMetas?: readonly SessionPresentationMeta[];
-  agentConfigs?: readonly AgentConfigMeta[];
+  agentConfigs?: readonly AgentConfigDisplay[];
   onOpenSession?: (session: AcpSessionMonitorSnapshot, meta?: SessionPresentationMeta) => void;
   onTerminateSession?: (session: AcpSessionMonitorSnapshot) => Promise<void>;
 }) {
@@ -455,7 +455,7 @@ function SessionTable({
 }: {
   sessions: AcpSessionMonitorSnapshot[];
   sessionMetas: readonly SessionPresentationMeta[];
-  agentConfigs: readonly AgentConfigMeta[];
+  agentConfigs: readonly AgentConfigDisplay[];
   onOpenSession?: (session: AcpSessionMonitorSnapshot, meta?: SessionPresentationMeta) => void;
   onTerminateSession?: (session: AcpSessionMonitorSnapshot) => Promise<void>;
 }) {

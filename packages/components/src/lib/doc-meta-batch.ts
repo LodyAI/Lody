@@ -1,70 +1,17 @@
 import type { LoroRepo } from 'loro-repo';
 import { isLoroRepoDocDeleted, isMachineDocRoomId, isSessionDocRoomId } from '@lody/shared';
-import { collectDocExistenceValues, collectDocMetadataPatchesFromEntries } from './flock-existence';
+import {
+  createLegacyWorkspaceDirectoryReader,
+  type WorkspaceDirectoryReader,
+} from '@lody/shared/workspace-directory';
+export type { WorkspaceDirectoryEntry as DocMetaEntry } from '@lody/shared/workspace-directory';
+import type { WorkspaceDirectoryEntry as DocMetaEntry } from '@lody/shared/workspace-directory';
 
-type FlockScanRow = {
-  readonly key: readonly unknown[];
-  readonly value?: unknown;
-};
-
-type FlockScanner = {
-  scan(options?: {
-    prefix?: readonly unknown[];
-  }): Iterable<FlockScanRow> | Promise<Iterable<FlockScanRow>>;
-};
-
-type RepoWithMetaScanner = LoroRepo & {
-  getMeta?: () => FlockScanner | null | undefined;
-};
-
-export type DocMetaEntry = {
-  docId: string;
-  meta: Record<string, unknown>;
-  exists?: boolean;
-};
-
-async function scanRows(
-  scanner: FlockScanner,
-  prefix: readonly unknown[]
-): Promise<FlockScanRow[]> {
-  return Array.from(await scanner.scan({ prefix }));
-}
-
-async function tryListDocMetaEntriesFromFlock(repo: LoroRepo): Promise<DocMetaEntry[] | null> {
-  const scanner = (repo as RepoWithMetaScanner).getMeta?.();
-  if (!scanner) return null;
-
-  try {
-    const [metadataRows, existenceRows] = await Promise.all([
-      scanRows(scanner, ['m']),
-      scanRows(scanner, ['e']),
-    ]);
-    const metadataByDocId = collectDocMetadataPatchesFromEntries(metadataRows);
-    const existenceByDocId = collectDocExistenceValues({ events: existenceRows });
-    const entries: DocMetaEntry[] = [];
-    for (const [docId, meta] of metadataByDocId) {
-      const existence = existenceByDocId.get(docId);
-      if (existence !== 'active') continue;
-      entries.push({
-        docId,
-        meta,
-        exists: true,
-      });
-    }
-    return entries;
-  } catch {
-    return null;
-  }
-}
-
-export async function listDocMetaEntries(repo: LoroRepo): Promise<DocMetaEntry[]> {
-  const batchedEntries = await tryListDocMetaEntriesFromFlock(repo);
-  if (batchedEntries) return batchedEntries;
-  const entries = await repo.listDoc();
-  return entries.map((entry) => ({
-    ...entry,
-    meta: entry.meta as Record<string, unknown>,
-  }));
+export async function listDocMetaEntries(
+  repo: LoroRepo,
+  directory?: WorkspaceDirectoryReader
+): Promise<DocMetaEntry[]> {
+  return (directory ?? createLegacyWorkspaceDirectoryReader(repo)).listEntries();
 }
 
 /**
@@ -87,13 +34,14 @@ export type ReadDocMetaCache = (repo: LoroRepo) => DocMetaCacheSnapshot | null;
  */
 export async function readSessionAndMachineMetas(
   repo: LoroRepo,
-  readCache: ReadDocMetaCache | undefined
+  readCache: ReadDocMetaCache | undefined,
+  directory?: WorkspaceDirectoryReader
 ): Promise<DocMetaCacheSnapshot> {
   const cached = readCache?.(repo);
   if (cached) return cached;
   const sessions: Record<string, Record<string, unknown>> = {};
   const machines: Record<string, Record<string, unknown>> = {};
-  for (const entry of await listDocMetaEntries(repo)) {
+  for (const entry of await listDocMetaEntries(repo, directory)) {
     if (isLoroRepoDocDeleted(entry)) continue;
     if (isSessionDocRoomId(entry.docId)) sessions[entry.docId] = entry.meta;
     else if (isMachineDocRoomId(entry.docId)) machines[entry.docId] = entry.meta;

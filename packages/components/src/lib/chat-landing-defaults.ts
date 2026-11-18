@@ -1,4 +1,4 @@
-import type { AgentConfigId, AgentConfigMeta, MachineId, MachineViewMeta } from '@lody/shared';
+import type { AgentConfigId, AgentConfigListSummary, MachineId, MachineViewMeta } from '@lody/shared';
 import { z } from 'zod';
 import type { AgentSelection } from '@/components/shared';
 
@@ -73,7 +73,7 @@ export function recordChatLandingProjectUse(
 }
 
 export function getChatLandingAgentSelectionsForMachine(
-  executorConfigs: AgentConfigMeta[],
+  executorConfigs: AgentConfigListSummary[],
   machineId: MachineId | null | undefined
 ): AgentSelection[] {
   if (!machineId) return [];
@@ -88,7 +88,7 @@ type ResolvePreferredChatLandingAgentSelectionArgs = {
   preferredAgentId?: AgentConfigId | string | null;
   preferredMachineId?: MachineId | string | null;
   requiredMachineId?: MachineId | string | null;
-  executorConfigs: AgentConfigMeta[];
+  executorConfigs: AgentConfigListSummary[];
   machines: Map<string, MachineViewMeta>;
 };
 

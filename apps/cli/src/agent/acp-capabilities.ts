@@ -36,6 +36,8 @@ export type FetchAcpCapabilitiesOptions = {
   verifyCodexCredential?: boolean;
   onManagedRuntimeProgress?: ManagedRuntimeProgressCallback;
   signal?: AbortSignal;
+  /** A trusted flat helper's enclosing process Scope owns this entire probe group. */
+  parentOwnsProcessGroup?: true;
   /**
    * Switch the probe session to every advertised model and record the option
    * list the agent reports for each. Only a refresh a person asked for sets
@@ -204,6 +206,7 @@ export async function fetchAcpCapabilities(
     options.signal?.throwIfAborted();
     const { agentProcess, client, acpSessionId, sessionResponse, capabilitySourceVersion } =
       await startLocalAcpAgent({
+        parentOwnsProcessGroup: options.parentOwnsProcessGroup,
         codexProfile: options.codexProfile,
         cliType,
         agentType,
@@ -329,6 +332,9 @@ export async function fetchAcpCapabilities(
         acpSessionId,
         logger,
         sessionLabel: `acp-capabilities:${cliType}/${agentType}`,
+        ...(options.parentOwnsProcessGroup
+          ? { processGroup: false, requireConfirmedExit: true as const }
+          : {}),
       });
     }
   } finally {

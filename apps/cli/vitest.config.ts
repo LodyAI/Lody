@@ -13,6 +13,9 @@ const isolatedFiles = new Set([
   'src/session/session-backend.test.ts',
   'tests/streams-relay-authorship.repro.test.ts',
   'src/lib/loro/presence.test.ts',
+  // The real host boundary asserts no engine addon was loaded in its worker.
+  // Older SDK kernel suites load that addon directly and cannot share this OS lifetime.
+  'src/lib/loro/native-document-domains.test.ts',
   // These suites replace process.env itself; Vitest retains the original object
   // for vi.stubEnv, so subsequent files must start with fresh worker state.
   'src/lib/auth.test.ts',

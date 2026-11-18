@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LocalProjectId, MachineId } from '@lody/shared';
@@ -9,6 +9,18 @@ import {
   type UnifiedLocalProjectOption,
 } from '../src/components/chat/unified-project-selector';
 import { Tooltip } from '@lody/ui/tooltip';
+import { useRemovedNativeProjectSelection } from '../src/hooks/use-chat-landing-defaults';
+import {
+  nativeMachineCatalogHarness,
+  machineA,
+  machineB,
+  binding,
+  view,
+} from './native-machine-catalog.test-support';
+import {
+  AddLocalProjectDialog,
+  type RemoteDirectoryOps,
+} from '../src/components/local-projects/add-local-project-dialog';
 import { createTestI18n, withTestI18n } from './test-i18n';
 
 const testI18n = createTestI18n({ interpolate: false });
@@ -273,5 +285,243 @@ describe('UnifiedProjectSelectorView options', () => {
 
     expect(onEditProjectGroup).toHaveBeenCalledWith('shop');
     expect(onChange).not.toHaveBeenCalled();
+  });
+  it('keeps Add a folder disabled until its runtime exists, preserves ordinary selection, and retains an opened directory draft', async () => {
+    const machine = {
+      id: machineId,
+      name: 'Your machine',
+      online: true,
+      ownerName: null,
+      canAddProjects: true,
+    };
+    const machines = [machine];
+    const ops: RemoteDirectoryOps = {
+      listRoots: async () => ({
+        ok: true,
+        value: { platform: 'linux', pathSeparator: '/', homeDir: '/work' },
+      }),
+      browseDir: async (_id, args) => ({
+        ok: true,
+        value: {
+          path: args.absolutePath ?? '/work',
+          parentPath: '/',
+          entries: [],
+          truncated: false,
+        },
+      }),
+      createDirectory: async () => ({ ok: false, message: 'Not part of this interaction' }),
+      addProject: async () => ({ ok: false, message: 'Draft must remain unsubmitted' }),
+    };
+    function Harness({ ready, revision }: { ready: boolean; revision: number }) {
+      const [open, setOpen] = useState(false);
+      const [selected, setSelected] = useState<
+        import('../src/components/chat/unified-project-selector').UnifiedProjectSelection
+      >({ kind: 'none' });
+      return (
+        <>
+          <UnifiedProjectSelectorView
+            value={selected}
+            onChange={setSelected}
+            localProjects={localProjects}
+            onAddLocalProject={() => setOpen(true)}
+            addLocalProjectDisabled={!ready}
+            onConnectGitRepo={() => {}}
+          />
+          <output data-selection>
+            {selected.kind === 'local' ? selected.localProjectId : selected.kind}
+          </output>
+          <output data-revision>{revision}</output>
+          <AddLocalProjectDialog
+            open={open}
+            onOpenChange={setOpen}
+            isMobile={false}
+            machines={machines}
+            initialMachineId={machineId}
+            ops={ops}
+            onAdded={() => {}}
+          />
+        </>
+      );
+    }
+    const render = async (ready: boolean, revision: number) =>
+      act(async () =>
+        root.render(
+          withTestI18n(
+            <Tooltip.Provider>
+              <Harness ready={ready} revision={revision} />
+            </Tooltip.Provider>,
+            testI18n
+          )
+        )
+      );
+    const openMenu = async () =>
+      act(async () =>
+        container
+          .querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!
+          .dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowDown' }))
+      );
+    const addFolder = () =>
+      [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+        (node) => node.textContent === 'Add a folder'
+      )!;
+    await render(false, 0);
+    expect(container.querySelector('button[aria-haspopup="menu"]')?.getAttribute('aria-busy')).toBe(
+      'true'
+    );
+    await openMenu();
+    expect(addFolder().getAttribute('aria-disabled')).toBe('true');
+    await act(async () => addFolder().click());
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    const project = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(
+      (node) => node.textContent === 'Project 1'
+    )!;
+    await act(async () => project.click());
+    expect(container.querySelector('[data-selection]')?.textContent).toBe('project-1');
+    await openMenu();
+    expect(addFolder().getAttribute('aria-disabled')).toBe('true');
+    await render(true, 1);
+    expect(
+      container.querySelector('button[aria-haspopup="menu"]')?.getAttribute('aria-busy')
+    ).toBeNull();
+    expect(addFolder().getAttribute('aria-disabled')).not.toBe('true');
+    await act(async () => addFolder().click());
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    const editPath = document.querySelector<HTMLButtonElement>('button[title="Edit path"]');
+    expect(editPath?.disabled).toBe(false);
+    await act(async () => editPath!.click());
+    const input = document.querySelector<HTMLInputElement>(
+      'input[placeholder="Type an absolute path"]'
+    );
+    expect(input).not.toBeNull();
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+        input,
+        '/work/unsubmitted-draft'
+      );
+      input!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await render(true, 2);
+    expect(container.querySelector('[data-revision]')?.textContent).toBe('2');
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(
+      document.querySelector<HTMLInputElement>('input[placeholder="Type an absolute path"]')?.value
+    ).toBe('/work/unsubmitted-draft');
+  });
+  it('clears only a removed draft project confirmed by its ready native catalog, retaining unknown and foreign scopes', async () => {
+    const host = nativeMachineCatalogHarness([machineA, machineB]);
+    const project = {
+      id: 'native-project',
+      name: 'Native Project',
+      rootPath: '/work/native',
+      createdAtMs: 1,
+    };
+    const initial = view(machineA);
+    host.snapshots.set(machineA, {
+      ...initial,
+      synced: false,
+      projection: { ...initial.projection, projects: [project] },
+    });
+    const source = host.source();
+    function Harness({
+      workspace = binding.workspaceId,
+      account = binding.accountId,
+      owned = machineA,
+    }: {
+      workspace?: string;
+      account?: string;
+      owned?: MachineId;
+    }) {
+      const [selection, setSelection] = useState<
+        import('../src/components/chat/unified-project-selector').UnifiedProjectSelection
+      >({ kind: 'local', machineId: machineA, localProjectId: project.id as LocalProjectId });
+      const [context, setContext] = useState<'local' | 'chat' | 'github'>('local');
+      useRemovedNativeProjectSelection({
+        runtime: {
+          workspaceId: workspace as never,
+          nativeMachineCatalogSource: source,
+          ownsNativeMachineCatalog: (id) => id === owned,
+        },
+        workspaceId: workspace,
+        accountId: account,
+        contextType: context,
+        selection: selection.kind === 'local' ? selection : null,
+        onRemoved: () => {
+          setSelection({ kind: 'none' });
+          setContext('chat');
+        },
+      });
+      const current = source.readProjection(machineA);
+      return (
+        <>
+          <output data-context>{context}</output>
+          <output data-selected-project>
+            {selection.kind === 'local' ? selection.localProjectId : 'none'}
+          </output>
+          <UnifiedProjectSelectorView
+            value={selection}
+            onChange={setSelection}
+            localProjects={(current?.projection.projects ?? []).map((value) => ({
+              key: `${machineA}:${value.id}`,
+              machineId: machineA,
+              localProjectId: value.id as LocalProjectId,
+              name: value.name,
+              rootPath: value.rootPath,
+            }))}
+            onAddLocalProject={() => {}}
+            onConnectGitRepo={() => {}}
+          />
+        </>
+      );
+    }
+    const render = async (props: Parameters<typeof Harness>[0] = {}) =>
+      act(async () =>
+        root.render(
+          withTestI18n(
+            <Tooltip.Provider>
+              <Harness {...props} />
+            </Tooltip.Provider>,
+            testI18n
+          )
+        )
+      );
+    const selected = () => container.querySelector('[data-selected-project]')?.textContent;
+    try {
+      await render();
+      expect(selected()).toBe(project.id);
+      await act(async () => source.start());
+      expect(container.querySelector('button[aria-haspopup="menu"]')?.textContent).toContain(
+        'Native Project'
+      );
+      const lease = [...host.leases.values()].find(
+        (value) => value.request.machineId === machineA
+      )!;
+      await act(async () =>
+        host.send({
+          ...lease.request,
+          leaseId: lease.leaseId,
+          type: 'error',
+          code: 'restart_required',
+        })
+      );
+      expect(source.readProjection(machineA)).toBeUndefined();
+      expect(selected()).toBe(project.id);
+      host.snapshots.set(machineA, { ...initial, synced: false });
+      await render({ workspace: 'foreign-workspace' });
+      await act(async () => source.reacquire(machineA));
+      expect(source.getStatus(machineA)).toBe('ready');
+      expect(selected()).toBe(project.id);
+      await render({ account: 'foreign-account' });
+      expect(selected()).toBe(project.id);
+      await render({ owned: machineB });
+      expect(selected()).toBe(project.id);
+      await render();
+      expect(selected()).toBe('none');
+      expect(container.querySelector('[data-context]')?.textContent).toBe('chat');
+      expect(container.querySelector('button[aria-haspopup="menu"]')?.textContent).toContain(
+        'Select a project'
+      );
+    } finally {
+      await act(async () => source.close());
+    }
   });
 });

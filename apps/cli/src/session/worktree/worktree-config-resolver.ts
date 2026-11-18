@@ -75,6 +75,7 @@ export async function resolveSessionWorktreeCleanupConfig(input: {
     (
       await readLegacySessionLaunchConfig({
         repo: input.workspaceDocument.repo,
+        machineCatalog: input.workspaceDocument.getMachineCatalogRuntimePort?.(),
         workspaceId: input.workspaceId,
         machineId: input.machineId,
         sessionId: input.sessionId,

@@ -76,7 +76,7 @@ export function McpSetting() {
   const user = useAtomValue(userAtom);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const localMachineId = useAtomValue(localMachineIdAtom);
-  const { servers, synced } = useWorkspaceMcpCatalog();
+  const { servers, synced, loaded } = useWorkspaceMcpCatalog();
   const { upsert, remove } = useWorkspaceMcpCatalogActions();
   const [editor, setEditor] = useState<EditorState | null>(null);
   const { shown: shownEditor, onOpenChangeComplete } = useDialogExitSnapshot(editor);
@@ -92,43 +92,52 @@ export function McpSetting() {
     Record<string, { connection: WorkspaceMcpServerMeta['connection']; state: McpToolListState }>
   >({});
   const scope = useRef(0);
+  const connectionScope = useRef(0);
+  // Catalog drafts belong to the workspace/account, independently of whether
+  // the local execution process has finished publishing its machine identity.
   useEffect(() => {
-    setToolLists({});
-    setAuthentication({});
     setEditor(null);
     setSubmitting(false);
     setError(undefined);
     return () => {
       scope.current += 1;
     };
+  }, [runtime, user?.id]);
+  useEffect(() => {
+    setToolLists({});
+    setAuthentication({});
+    return () => {
+      connectionScope.current += 1;
+    };
   }, [runtime, localMachineId, user?.id]);
 
   const discoverTools = async (entry: WorkspaceMcpServerMeta) => {
     if (!runtime || !localMachineId || !entry.connection) return;
-    const requestScope = scope.current;
+    const requestScope = connectionScope.current;
     const pending = { connection: entry.connection, state: { status: 'loading' } as const };
     setToolLists((current) => ({ ...current, [entry.id]: pending }));
     try {
       const { tools } = await runtime.requestLocalMcpTools(localMachineId, entry, user?.id);
-      if (requestScope === scope.current)
+      if (requestScope === connectionScope.current)
         setToolLists((current) =>
           current[entry.id] === pending
             ? { ...current, [entry.id]: { ...pending, state: { status: 'success', tools } } }
             : current
         );
     } catch {
+      if (requestScope !== connectionScope.current) return;
       try {
         const status = await runtime.requestLocalMcpAuthentication(localMachineId, {
           requesterUserId: user?.id ?? '',
           action: 'status',
           server: entry,
         });
-        if (requestScope === scope.current)
+        if (requestScope === connectionScope.current)
           setAuthentication((current) => ({ ...current, [entry.id]: status }));
       } catch {
         /* Old daemons still report the connection failure. */
       }
-      if (requestScope === scope.current)
+      if (requestScope === connectionScope.current)
         setToolLists((current) =>
           current[entry.id] === pending
             ? { ...current, [entry.id]: { ...pending, state: { status: 'error' } } }
@@ -145,6 +154,7 @@ export function McpSetting() {
 
   const save = async (value: McpConnectionFormValue) => {
     const requestScope = scope.current;
+    const requestConnectionScope = connectionScope.current;
     const duplicate = servers.find(
       (server) =>
         server.name.localeCompare(value.name, undefined, { sensitivity: 'accent' }) === 0 &&
@@ -177,7 +187,7 @@ export function McpSetting() {
       if (requestScope !== scope.current) return;
       if (value.localAuthentication) {
         setEditor({ mode: 'edit', entry });
-        if (!runtime || !localMachineId)
+        if (requestConnectionScope !== connectionScope.current || !runtime || !localMachineId)
           throw new Error(t('settings.mcp.authentication.localRequired'));
         const result = await runtime.requestLocalMcpAuthentication(localMachineId, {
           requesterUserId: user?.id ?? '',
@@ -185,7 +195,8 @@ export function McpSetting() {
           server: entry,
           authentication: value.localAuthentication,
         });
-        if (requestScope !== scope.current) return;
+        if (requestScope !== scope.current || requestConnectionScope !== connectionScope.current)
+          return;
         if (result.status === 'error') throw new Error(t('settings.mcp.authentication.error'));
         setAuthentication((current) => ({ ...current, [entry.id]: result }));
       }
@@ -230,7 +241,12 @@ export function McpSetting() {
 
   const addLabel = t('settings.mcp.add');
   const addButton = (
-    <Button size="small" variant="secondary" onClick={() => openEditor({ mode: 'add' })}>
+    <Button
+      size="small"
+      variant="secondary"
+      disabled={!runtime || !loaded}
+      onClick={() => openEditor({ mode: 'add' })}
+    >
       <Plus {...stylex.props(catalog.icon)} />
       {addLabel}
     </Button>

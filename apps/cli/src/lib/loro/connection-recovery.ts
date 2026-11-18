@@ -104,6 +104,14 @@ type LoroConnectionRecoveryControllerOptions = {
   initialMetaSyncPromise: Promise<boolean>;
   initialMetaSyncCompleted: boolean;
   onMetaRoomReady: () => void;
+  /** Local native Meta has no legacy Streams room or cloud baseline. */
+  externalLocalMeta?: boolean;
+  /** Actual private Node directory authority; its generation cannot be blessed
+   * by a legacy room status or a local transport placeholder. */
+  localMetaAuthority?: {
+    get(): { synced: boolean; generation: string };
+    subscribe(listener: () => void): () => void;
+  };
 };
 
 const isRecoverableMetaRoomStatus = isRecoverableStreamsRoomStatus;
@@ -144,6 +152,11 @@ export class LoroConnectionRecoveryController {
   private readonly workspaceId: WorkspaceId;
   private readonly logger: Logger;
   private readonly onMetaRoomReady: () => void;
+  private readonly externalLocalMeta: boolean;
+  private readonly localMetaAuthority: LoroConnectionRecoveryControllerOptions['localMetaAuthority'];
+  private readonly localMetaGeneration: string | undefined;
+  private localMetaGenerationRetired = false;
+  private detachLocalMetaAuthority: (() => void) | undefined;
 
   private transportStatus: TransportConnectionStatus;
   private metaRoomStatus: RepoTransportRoomStatus | null = null;
@@ -190,6 +203,14 @@ export class LoroConnectionRecoveryController {
     this.workspaceId = options.workspaceId;
     this.logger = options.logger;
     this.onMetaRoomReady = options.onMetaRoomReady;
+    this.externalLocalMeta = options.externalLocalMeta === true;
+    this.localMetaAuthority = options.localMetaAuthority;
+    this.localMetaGeneration = options.localMetaAuthority?.get().generation;
+    if (
+      this.externalLocalMeta &&
+      (!this.localMetaAuthority || !this.localMetaGeneration || options.initialMetaSub)
+    )
+      throw new Error('Native Meta requires its bound directory authority without a legacy room');
     this.transportStatus = options.initialTransportStatus;
     this.initialMetaSyncCompleted = options.initialMetaSyncCompleted;
     this.eventFiber = Effect.runFork(this.createEventLoop());
@@ -202,11 +223,22 @@ export class LoroConnectionRecoveryController {
       })
       .catch(() => {});
 
-    this.attachMetaRoomStatusLogger(options.initialMetaSub, {
-      emitReadyIfJoined: !this.initialMetaSyncCompleted,
-    });
-    this.startAutoReconnectWatchdog();
-    if (!options.initialMetaSub || this.transportStatus === 'disconnected') {
+    if (this.externalLocalMeta) {
+      let healthy = this.isStreamsHealthy();
+      this.detachLocalMetaAuthority = this.localMetaAuthority!.subscribe(() => {
+        const next = this.isStreamsHealthy();
+        if (!healthy && next) this.emitStreamsOnline('native-local-meta-ready');
+        healthy = next;
+      });
+    } else
+      this.attachMetaRoomStatusLogger(options.initialMetaSub, {
+        emitReadyIfJoined: !this.initialMetaSyncCompleted,
+      });
+    if (!this.externalLocalMeta) this.startAutoReconnectWatchdog();
+    if (
+      !this.externalLocalMeta &&
+      (!options.initialMetaSub || this.transportStatus === 'disconnected')
+    ) {
       this.scheduleReconnect('startup-unhealthy');
     }
   }
@@ -218,6 +250,7 @@ export class LoroConnectionRecoveryController {
    * machine offline. Without a meta room this falls back to the aggregate.
    */
   isTransportConnected(): boolean {
+    if (this.externalLocalMeta) return false; // Local availability grants no cloud reachability.
     return this.metaRoomStatus === 'joined' || this.transportStatus === 'connected';
   }
 
@@ -227,6 +260,7 @@ export class LoroConnectionRecoveryController {
 
   /** First-class Streams state; see {@link LoroStreamsHealth}. */
   getStreamsHealth(): LoroStreamsHealth {
+    if (this.externalLocalMeta) return this.isStreamsHealthy() ? 'connected' : 'recovering';
     if (!this.isStreamsHealthy()) {
       return 'recovering';
     }
@@ -357,7 +391,7 @@ export class LoroConnectionRecoveryController {
   async waitUntilMetaSynced(
     options: { timeoutMs?: number; reason?: string } = {}
   ): Promise<boolean> {
-    if (this.isCleanedUp) {
+    if (this.isCleanedUp || this.externalLocalMeta) {
       return false;
     }
 
@@ -447,6 +481,8 @@ export class LoroConnectionRecoveryController {
 
   async cleanUp(): Promise<void> {
     this.isCleanedUp = true;
+    this.detachLocalMetaAuthority?.();
+    this.detachLocalMetaAuthority = undefined;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -729,7 +765,12 @@ export class LoroConnectionRecoveryController {
   }
 
   private scheduleReconnect(reason: string): void {
-    if (this.isCleanedUp || this.isStreamsHealthy() || this.reconnectTimer) {
+    if (
+      this.externalLocalMeta ||
+      this.isCleanedUp ||
+      this.isStreamsHealthy() ||
+      this.reconnectTimer
+    ) {
       return;
     }
     // From here on, any health we regain was reached BY a recovery, so losing
@@ -779,6 +820,20 @@ export class LoroConnectionRecoveryController {
    * the pre-refactor "local-only = healthy" placeholder semantics.
    */
   private isStreamsHealthy(): boolean {
+    if (this.externalLocalMeta) {
+      if (this.isCleanedUp) return false;
+      try {
+        if (this.localMetaGenerationRetired) return false;
+        const current = this.localMetaAuthority?.get();
+        if (current?.generation !== this.localMetaGeneration) {
+          this.localMetaGenerationRetired = true;
+          return false;
+        }
+        return current?.synced === true;
+      } catch {
+        return false;
+      }
+    }
     if (this.metaRoomStatus === 'joined') return true;
     return this.metaRoomStatus === 'detached' && this.transportStatus !== 'disconnected';
   }
@@ -1029,7 +1084,7 @@ export class LoroConnectionRecoveryController {
   }
 
   private async ensureMetaRoomJoined(reason: string): Promise<void> {
-    if (this.metaSub) {
+    if (this.externalLocalMeta || this.metaSub) {
       return;
     }
 

@@ -14,6 +14,12 @@ Install the CLI package:
 npm install -g lody@next
 ```
 
+Set `LODY_BUILTIN_AGENT_DISCOVERY=0` to start without reading optional builtin
+provider credentials or automatically selecting/registering builtin providers.
+Explicit `--cli-types` selections and existing configs remain available, and custom
+ACP providers work normally. Explicit selections do not trigger credential discovery.
+This setting does not change Cloud authentication or workspace authorization.
+
 ## Agent session identity
 
 Agent processes and their ACP terminals receive `LODY_SESSION_ID` and

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Effect } from 'effect';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ACP_CAPABILITY_CACHE_VERSION } from '@lody/shared';
+import { ACP_CAPABILITY_CACHE_VERSION, type WorkspaceId, type MachineId } from '@lody/shared';
 import { getAcpCapabilitySourceVersion } from '../src/agent/setting';
 import { LoroDocumentManager } from '../src/lib/loro/doc';
 import * as encryptedWorkspace from '../src/lib/e2ee/workspace-legacy';
@@ -60,6 +60,7 @@ const createSilentLogger = (): Logger => ({
   debug: () => {},
   trace: () => {},
   setLevel: () => {},
+  setDebug: () => {},
   child: () => createSilentLogger(),
   close: async () => {},
 });
@@ -70,6 +71,29 @@ const flushMicrotasks = async () => {
   await Promise.resolve();
   await Promise.resolve();
 };
+
+// These cases exercise the legacy registration path, with no native MF owner selected.
+const legacyOwnerSelection: Pick<LoroDocumentManager, 'getNativeMachineRuntimePorts'> = {
+  getNativeMachineRuntimePorts: () => undefined,
+};
+
+const registrationRuntimeOptions = () => ({
+  memoryPressure: {
+    getLatest: async () => {
+      throw new Error('Registration fixture must not probe memory');
+    },
+    refresh: async () => {
+      throw new Error('Registration fixture must not probe memory');
+    },
+  },
+  machineLifecycleCapability: {
+    launchMode: 'foreground' as const,
+    canRemoteRestart: false,
+    canRemoteUpgrade: false,
+    reason: 'not_daemon' as const,
+  },
+  cloudPort: createTestCloudPort(),
+});
 
 const builtinCodexSourceVersion = getAcpCapabilitySourceVersion({
   cliType: 'builtin',
@@ -96,15 +120,16 @@ describe('Lody.registerAgent', () => {
     const { Lody } = await import('../src/lib/lody');
     const lody = new Lody(
       {
+        ...registrationRuntimeOptions(),
         logger: createSilentLogger(),
         builtinAgentConfigCliTypes: ['codex'],
-        workspaceId: 'workspace-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
         token: 'token',
         userId: 'user-1',
-        machineId: 'machine-1',
+        machineId: 'machine-1' as MachineId,
         machineName: 'machine-name',
       },
-      {} as LoroDocumentManager
+      { ...legacyOwnerSelection } as LoroDocumentManager
     );
     const registerAgent = vi.spyOn(lody, 'registerAgent').mockResolvedValue();
 
@@ -126,16 +151,18 @@ describe('Lody.registerAgent', () => {
   it('propagates machine runtime initialization failures', async () => {
     mocks.initializeRuntime.mockRejectedValueOnce(new Error('registration unavailable'));
     const documentManager = {
+      ...legacyOwnerSelection,
       ensureMachineFlockDocJoined: vi.fn(),
     } as unknown as LoroDocumentManager;
     const { Lody } = await import('../src/lib/lody');
     const lody = new Lody(
       {
+        ...registrationRuntimeOptions(),
         logger: createSilentLogger(),
-        workspaceId: 'workspace-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
         token: 'token',
         userId: 'user-1',
-        machineId: 'machine-1',
+        machineId: 'machine-1' as MachineId,
         machineName: 'machine-name',
       },
       documentManager
@@ -154,6 +181,7 @@ describe('Lody.registerAgent', () => {
     const hasAgentConfig = vi.fn(async () => false);
     const createAgentConfig = vi.fn(async () => 'agent-config-id');
     const documentManager = {
+      ...legacyOwnerSelection,
       hasCompletedInitialMetaSync: vi.fn(() => false),
       onMetaRoomSynced: vi.fn(() => () => {}),
       onStreamsOnline: vi.fn(() => () => {}),
@@ -179,11 +207,12 @@ describe('Lody.registerAgent', () => {
     const { Lody } = await import('../src/lib/lody');
     const lody = new Lody(
       {
+        ...registrationRuntimeOptions(),
         logger: createSilentLogger(),
-        workspaceId: 'workspace-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
         token: 'token',
         userId: 'user-1',
-        machineId: 'machine-1',
+        machineId: 'machine-1' as MachineId,
         machineName: 'machine-name',
       },
       documentManager
@@ -207,6 +236,7 @@ describe('Lody.registerAgent', () => {
   it('skips deferred builtin registration when initial meta sync never completes', async () => {
     const createAgentConfig = vi.fn(async () => 'agent-config-id');
     const documentManager = {
+      ...legacyOwnerSelection,
       hasCompletedInitialMetaSync: vi.fn(() => false),
       onMetaRoomSynced: vi.fn(() => () => {}),
       onStreamsOnline: vi.fn(() => () => {}),
@@ -232,11 +262,12 @@ describe('Lody.registerAgent', () => {
     const { Lody } = await import('../src/lib/lody');
     const lody = new Lody(
       {
+        ...registrationRuntimeOptions(),
         logger: createSilentLogger(),
-        workspaceId: 'workspace-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
         token: 'token',
         userId: 'user-1',
-        machineId: 'machine-1',
+        machineId: 'machine-1' as MachineId,
         machineName: 'machine-name',
       },
       documentManager
@@ -256,6 +287,7 @@ describe('Lody.registerAgent', () => {
     const hasAgentConfig = vi.fn(async () => false);
     const createAgentConfig = vi.fn(async () => 'agent-config-id');
     const documentManager = {
+      ...legacyOwnerSelection,
       hasCompletedInitialMetaSync: vi.fn(() => true),
       waitForInitialMetaSync: vi.fn(async () => true),
       syncMachineFlockDoc,
@@ -279,11 +311,12 @@ describe('Lody.registerAgent', () => {
     const { Lody } = await import('../src/lib/lody');
     const lody = new Lody(
       {
+        ...registrationRuntimeOptions(),
         logger: createSilentLogger(),
-        workspaceId: 'workspace-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
         token: 'token',
         userId: 'user-1',
-        machineId: 'machine-1',
+        machineId: 'machine-1' as MachineId,
         machineName: 'machine-name',
       },
       documentManager
@@ -324,6 +357,7 @@ describe('Lody.registerAgent', () => {
     const rows = new Set<string>();
     let fail = true;
     const documentManager = {
+      ...legacyOwnerSelection,
       hasCompletedInitialMetaSync: () => true,
       syncMachineFlockDoc: async () => true,
       getBuiltinAgentOptOuts: async () => new Set(),
@@ -337,11 +371,12 @@ describe('Lody.registerAgent', () => {
     const { Lody } = await import('../src/lib/lody');
     const lody = new Lody(
       {
+        ...registrationRuntimeOptions(),
         logger: createSilentLogger(),
-        workspaceId: 'workspace-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
         token: 'token',
         userId: 'user-1',
-        machineId: 'machine-1',
+        machineId: 'machine-1' as MachineId,
         machineName: 'machine',
         builtinAgentConfigCliTypes: ['codex', 'claude'],
       },
@@ -374,6 +409,7 @@ describe('Lody.registerAgent', () => {
       fetchedAt: 0,
     }));
     const documentManager = {
+      ...legacyOwnerSelection,
       hasCompletedInitialMetaSync: vi.fn(() => true),
       waitForInitialMetaSync: vi.fn(async () => true),
       syncMachineFlockDoc: vi.fn(async () => true),
@@ -387,11 +423,12 @@ describe('Lody.registerAgent', () => {
     const { Lody } = await import('../src/lib/lody');
     const lody = new Lody(
       {
+        ...registrationRuntimeOptions(),
         logger: createSilentLogger(),
-        workspaceId: 'workspace-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
         token: 'token',
         userId: 'user-1',
-        machineId: 'machine-1',
+        machineId: 'machine-1' as MachineId,
         machineName: 'machine-name',
       },
       documentManager
@@ -410,28 +447,28 @@ describe('Lody.registerAgent', () => {
       label: 'legacy Pi on this machine',
       cliType: 'registry',
       agentType: 'pi-acp',
-      machineId: 'machine-1',
+      machineId: 'machine-1' as MachineId,
       createsPi: false,
     },
     {
       label: 'already migrated Pi',
       cliType: 'builtin',
       agentType: 'pi',
-      machineId: 'machine-1',
+      machineId: 'machine-1' as MachineId,
       createsPi: false,
     },
     {
       label: 'legacy Pi on another machine',
       cliType: 'registry',
       agentType: 'pi-acp',
-      machineId: 'machine-2',
+      machineId: 'machine-2' as MachineId,
       createsPi: true,
     },
     {
       label: 'another registry provider',
       cliType: 'registry',
       agentType: 'other',
-      machineId: 'machine-1',
+      machineId: 'machine-1' as MachineId,
       createsPi: true,
     },
   ])(
@@ -440,6 +477,7 @@ describe('Lody.registerAgent', () => {
       const existing = { id: 'existing', cliType, agentType, machineId, name: 'My provider' };
       const rows = [{ ...existing }];
       const documentManager = {
+        ...legacyOwnerSelection,
         hasCompletedInitialMetaSync: () => true,
         syncMachineFlockDoc: async () => true,
         getBuiltinAgentOptOuts: async () => new Set(),
@@ -447,7 +485,12 @@ describe('Lody.registerAgent', () => {
           rows.some(
             (row) => row.cliType === type && row.agentType === agent && row.machineId === machine
           ),
-        createAgentConfig: async (type: string, agent: string, machine: string, name: string) => {
+        createAgentConfig: async (
+          type: string,
+          agent: string,
+          machine: MachineId,
+          name: string
+        ) => {
           const id = `created-${agent}`;
           rows.push({ id, cliType: type, agentType: agent, machineId: machine, name });
           return id;
@@ -456,11 +499,12 @@ describe('Lody.registerAgent', () => {
       const { Lody } = await import('../src/lib/lody');
       const lody = new Lody(
         {
+          ...registrationRuntimeOptions(),
           logger: createSilentLogger(),
-          workspaceId: 'workspace-1',
+          workspaceId: 'workspace-1' as WorkspaceId,
           token: 'token',
           userId: 'user-1',
-          machineId: 'machine-1',
+          machineId: 'machine-1' as MachineId,
           machineName: 'machine-name',
         },
         documentManager
@@ -477,7 +521,7 @@ describe('Lody.registerAgent', () => {
                 id: 'created-pi',
                 cliType: 'builtin',
                 agentType: 'pi',
-                machineId: 'machine-1',
+                machineId: 'machine-1' as MachineId,
                 name: 'Pi',
               },
             ]
@@ -486,7 +530,7 @@ describe('Lody.registerAgent', () => {
           id: 'created-codex',
           cliType: 'builtin',
           agentType: 'codex',
-          machineId: 'machine-1',
+          machineId: 'machine-1' as MachineId,
           name: 'Codex',
         },
       ]);
@@ -500,6 +544,7 @@ describe('Lody.registerAgent', () => {
     const hasAgentConfig = vi.fn(async () => false);
     const createAgentConfig = vi.fn(async () => 'agent-config-id');
     const documentManager = {
+      ...legacyOwnerSelection,
       hasCompletedInitialMetaSync: vi.fn(() => true),
       waitForInitialMetaSync: vi.fn(async () => true),
       syncMachineFlockDoc: vi.fn(async () => true),
@@ -513,11 +558,12 @@ describe('Lody.registerAgent', () => {
     const { Lody } = await import('../src/lib/lody');
     const lody = new Lody(
       {
+        ...registrationRuntimeOptions(),
         logger: createSilentLogger(),
-        workspaceId: 'workspace-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
         token: 'token',
         userId: 'user-1',
-        machineId: 'machine-1',
+        machineId: 'machine-1' as MachineId,
         machineName: 'machine-name',
       },
       documentManager
@@ -562,17 +608,18 @@ describe('Lody workspace cloud-port composition', () => {
         });
       const documents = vi
         .spyOn(LoroDocumentManager, 'create')
-        .mockResolvedValue({ sessions: new Map() } as LoroDocumentManager);
+        .mockResolvedValue({ ...legacyOwnerSelection, sessions: new Map() } as LoroDocumentManager);
       try {
         const { Lody } = await import('../src/lib/lody');
         const lody = await Lody.create({
+          ...registrationRuntimeOptions(),
           logger: createSilentLogger(),
-          workspaceId: 'synthetic-workspace',
+          workspaceId: 'synthetic-workspace' as WorkspaceId,
           contentMode,
           genesisHash: 'ab'.repeat(32),
           token: 'synthetic-token',
           userId: 'user-1',
-          machineId: 'synthetic-machine',
+          machineId: 'synthetic-machine' as MachineId,
           machineName: 'Synthetic',
           cloudPort,
           memoryPressure: {} as never,
@@ -591,7 +638,7 @@ describe('Lody workspace cloud-port composition', () => {
           expect(
             await Effect.runPromise(
               gate.claim({
-                workspaceId: 'synthetic-workspace',
+                workspaceId: 'synthetic-workspace' as WorkspaceId,
                 sessionId: 'session',
                 userTurnId: 'turn',
                 requesterUserId: 'user-1',

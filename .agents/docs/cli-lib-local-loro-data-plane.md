@@ -34,7 +34,7 @@ receipt. Windows uses a random per-process pipe suffix separate from the secret.
 See the [security decision](../notes/implemented/bug-fix/2026-11-12-local-ipc-and-native-preview-security.md)
 for compatibility and filesystem limits.
 
-Every message carries `workspaceId` + `peerId` (a per-adapter uuid), and the server
+Workspace messages carry `workspaceId` + `peerId` (a per-adapter uuid), and the server
 keys sync state per PEER (`lastSentVV`, flock bundle hash), so multiple windows
 multiplexed over the one relay socket sync independently and a sender's own ops are
 never echoed back to it.
@@ -49,6 +49,13 @@ remaining catch-up chunks on the same socket. One physical connection owns one d
 subscription and one backpressure latch across every workspace: `write(false)` pauses
 both export and send until drain. Parked lanes keep their order. The Node turn and
 socket adapters live in `packages/shared/src/node/local-loro-writer.ts`.
+
+A renderer installs its presence listener before opening the connection. A scoped
+v7 `ping` carries both workspace and peer identifiers and registers presence after
+workspace admission, without joining a Doc or Flock room. Bare watchdog pings keep
+their connection-only behavior. The main relay records scoped peers for navigation
+cleanup; detaching the last peer releases its presence receiver. Native domains
+therefore do not depend on a legacy Meta join to learn the real machine status.
 
 Presence uses the same writer and snapshots local-origin state at execution. Repeated
 changes retain one running plus one queued task, so the final clear/delete still gets
@@ -101,8 +108,9 @@ per doc id so an in-flight renderer-only release cannot evict a handle dispatch 
 
 For both room kinds the CLI's cloud room status is never pushed to renderers as local
 room health: offline cloud failures must not poison the renderer's local reconnect loop
-(`specs/local-first-two-plane.md`). There is no polling and no request/response HTTP
-path.
+(the current `WorkspaceTargetRouter` and local/cloud readiness contracts). The historical
+`specs/local-first-two-plane.md` is absent from this checkout; it is not current authority.
+There is no polling and no request/response HTTP path.
 
 ## The two ends
 
@@ -115,3 +123,30 @@ path.
   up-syncing its delta from the returned `serverVersion` regardless of the in-memory
   dirty flag, so offline writes survive app restarts and dropped frames. Regression
   suite: `packages/shared/tests/local-loro-transport-bug-repro.test.ts`.
+
+## Optional native backend migration
+
+Legacy domains still use separate renderer and CLI persisted replicas over the v7
+plane. Selected local domains now use a shared Node owner and finite renderer IPC;
+persistent ownership markers keep them on that path when selection flags are off.
+The [Electron migration plan](electron-loro-repo-rs-migration.zh.md) records the fixed
+SDK capabilities, local desktop acceptance and remaining ordinary Cloud and platform
+checks. This does not replace the v7 compatibility path for unselected domains.
+Domain ownership remains with the linked WorkspaceData proposal.
+
+
+## Native local file-index observation
+
+The opt-in FI/FIS pilot uses the same authenticated socket and bounded writer, with
+read-only `file-index-observe/unobserve` requests and index/generation snapshots.
+The v7 ping/pong capability `nativeFileIndexSnapshots` is explicit: an old pong
+selects the original legacy Flock subscription; timeout does not infer a backend.
+The daemon rejects legacy FI/FIS room admission after whole-pair native cutover.
+Native windows keep JSON projections without acquiring those old Flock/IDB replicas.
+Disconnect withdraws readiness and a new request generation replaces state on reset.
+
+Observer release revokes callbacks and queued frames immediately. Waiting is bounded;
+late SDK unsubscribe remains with the server owner. Closing the isolated native host
+settles pending RPCs; failure of that observation cannot skip unrelated legacy cleanup.
+The [migration plan](electron-loro-repo-rs-migration.zh.md#9-当前实施边界) owns pilot
+selection, binary rollback and remaining SDK/platform acceptance limits.

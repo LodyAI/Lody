@@ -88,7 +88,7 @@ const minimalVisualAnnotationAnchorPayloadSchema = z
   })
   .strict();
 
-const previewVisualCommentPayloadSchema = z
+export const previewVisualCommentPayloadSchema = z
   .object({
     id: nonEmptyString,
     turnId: nonEmptyString,

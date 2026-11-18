@@ -219,6 +219,8 @@ function SupportedSchedulesWorkspace({
     () =>
       runtime
         ? new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+            registry: runtime.scheduleRegistry,
+        definitions: runtime.scheduleDefinitions,
             protectedContent: runtime.contentMode === 'e2ee',
             signDeclaration: runtime.signScheduleDeclaration,
           })
@@ -875,6 +877,8 @@ function ScheduleEditor({
         identity.scheduleId,
         () =>
           new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+            registry: runtime.scheduleRegistry,
+        definitions: runtime.scheduleDefinitions,
             protectedContent: runtime.contentMode === 'e2ee',
             signDeclaration: runtime.signScheduleDeclaration,
           }).save({

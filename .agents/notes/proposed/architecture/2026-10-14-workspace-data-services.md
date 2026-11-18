@@ -452,3 +452,40 @@ Capture baseline before implementation; compare phase two using the same data/wi
 | Host/daemon restart, cancellation, authorization generations, upload recovery and RPC handoff           | Performance gains retain existing data-safety/availability boundaries                                         |
 
 This is a business/architecture contract awaiting implementation. Fixed-source inspection, framework type references and earlier finite models clarify the design. Real Effect/Repo/SQLite/IndexedDB/IPC integration, prepared handoff, Clock/cleanup behavior and product performance require validation with implementation. Documentation/translation checks establish neither runtime acceptance nor approval of existing protocol changes.
+
+## 10. Incremental adoption of the published npm 0.1.0 SDK
+
+The [migration plan and current implementation boundary (Chinese)](../../../docs/electron-loro-repo-rs-migration.zh.md)
+pins release source `1d80000d7f6b7301442a6e2c7c558cd69e6ab88a`. Shared directory
+ports borrow existing Repos. Optional local FI/FIS use a scoped daemon child, or
+an independent data host shared by main and daemon through private leases. Only
+the host opens the engine directory. Renderer domain IPC creates no extra legacy
+IndexedDB replica; closing execution retains main's independent data lease.
+
+Local WF additionally has persistent all-window registration/revision, daemon
+pause, readonly IDB capture and an exclusive old-SQLite helper. Complete archived
+CRDT sources and clock/tombstone coverage precede native publication. The main
+owner verifies both the journal and physical native storage before notifying UI;
+stale tickets and real document navigation retire only their own registration.
+Lost helper ACK retains original sources and a frozen route for recovery. Published
+ownership survives flag removal. Binary rollback explicitly persists the old Repo
+before changing owner. There is no same-room dual write or inference of cloud
+authority from UI readiness. The full OSS local desktop suite passes with FI/FIS
+and WF enabled; this does not establish Cloud, multi-device, six-platform, signing
+or power-loss acceptance.
+
+MF/SR domain ports and their consumer seams do not complete physical product
+selection. Meta remains legacy: published scan hides tombstones, so inline-plus-leaf
+metadata cannot be safely projected without a complete binary source. The public
+WASM importer cannot replay native FLKD compact deltas. Refuse that shape rather
+than revive deleted fields or use an incomplete SQLite snapshot.
+
+P4 reuses HistoryWriter planners with native CAS and a private readonly Loro
+projection. A single old inline turn can be replaced atomically using
+`defaultObject: value`, followed by canonical schema on every controlled patch;
+Text CIDs and unknown stored content survive. One operation that changes an inline
+turn and inserts a new Map/Text still cannot be expressed by the published SDK.
+The adapter refuses it before writing; the unpublished explicit-value opcode
+prototype is not an installed capability. Complete SessionBackend host ports and
+other document compositions remain pending. Roost, E2EE and secret boundaries
+retain their existing contracts.

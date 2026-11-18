@@ -11,5 +11,9 @@ When('用户为同一个 workspace 打开辅助窗口', async function (this: Lo
 });
 
 Then('辅助窗口完成连接并使用与其 Repo 一致的同步进度命名空间', async function (this: LodyWorld) {
-  await this.desktopWindowCachePage!.expectAuxiliaryRuntimeCacheIsolation();
+  await this.desktopWindowCachePage!.expectAuxiliaryRuntimeCacheIsolation(
+    process.env.LODY_NATIVE_WORKSPACE_META === '1'
+      ? { owner: 'native', readEvidence: () => this.harness!.captureNativeWorkspaceMetaEvidence() }
+      : { owner: 'legacy' }
+  );
 });

@@ -1,15 +1,11 @@
 import {
-  applyWorkspaceFlockRowEvents,
-  getProjectMcpDefaults,
+  createLegacyWorkspaceCatalogReader,
+  isWorkspaceCatalogRestartRequired,
   getWorkspaceFlockDocId,
-  listWorkspaceAgentRoles,
-  listWorkspaceMcpServers,
-  listWorkspaceProjects,
-  readWorkspaceFlockRowsFromFlock,
+  type WorkspaceCatalogProjection,
+  type WorkspaceCatalogReader,
   type AgentRole,
   type ProjectMcpDefault,
-  type WorkspaceFlockEvent,
-  type WorkspaceFlockRowMap,
   type WorkspaceMcpServerMeta,
   type WorkspaceProject,
 } from '@lody/shared';
@@ -43,8 +39,6 @@ export type WorkspaceCatalogSnapshot = {
 
 type WorkspaceCatalogListener = (snapshot: WorkspaceCatalogSnapshot) => void;
 
-const EMPTY_ROWS = Object.freeze({}) as WorkspaceFlockRowMap;
-
 export const EMPTY_WORKSPACE_CATALOG: WorkspaceCatalogSnapshot = Object.freeze({
   servers: Object.freeze([]) as unknown as WorkspaceMcpServerMeta[],
   roles: Object.freeze([]) as unknown as AgentRole[],
@@ -61,10 +55,11 @@ type SharedCatalogRoom = {
   retryDelay: number;
   retryTimer?: ReturnType<typeof setTimeout>;
   cancelled: boolean;
-  rows: WorkspaceFlockRowMap;
   snapshot: WorkspaceCatalogSnapshot;
   listeners: Set<WorkspaceCatalogListener>;
-  teardown: Set<() => void>;
+  teardown: Set<() => Promise<void>>;
+  restartAttempts: number;
+  retryRestart?: () => void;
 };
 
 // The catalog is ONE document per workspace, but the composer mounts a consumer
@@ -108,16 +103,18 @@ function emit(room: SharedCatalogRoom, snapshot: WorkspaceCatalogSnapshot): void
   }
 }
 
-function publish(room: SharedCatalogRoom, rows: WorkspaceFlockRowMap, synced: boolean): void {
+function publish(
+  room: SharedCatalogRoom,
+  projection: WorkspaceCatalogProjection,
+  synced: boolean
+): void {
   const previous = room.snapshot;
-  if (room.rows === rows && previous.loaded && previous.synced === synced) return;
-  room.rows = rows;
-  const servers = reuseUnchanged(previous.servers, listWorkspaceMcpServers(rows));
-  const roles = reuseUnchanged(previous.roles, listWorkspaceAgentRoles(rows));
-  const projects = reuseUnchanged(previous.projects, listWorkspaceProjects(rows));
+  const servers = reuseUnchanged(previous.servers, projection.servers);
+  const roles = reuseUnchanged(previous.roles, projection.roles);
+  const projects = reuseUnchanged(previous.projects, projection.projects);
   const projectMcpDefaults = reuseUnchangedRecord(
     previous.projectMcpDefaults,
-    getProjectMcpDefaults(rows)
+    projection.projectMcpDefaults
   );
   if (
     servers === previous.servers &&
@@ -125,6 +122,7 @@ function publish(room: SharedCatalogRoom, rows: WorkspaceFlockRowMap, synced: bo
     projects === previous.projects &&
     projectMcpDefaults === previous.projectMcpDefaults &&
     previous.loaded &&
+    !previous.failed &&
     previous.synced === synced
   ) {
     return;
@@ -140,57 +138,148 @@ function publish(room: SharedCatalogRoom, rows: WorkspaceFlockRowMap, synced: bo
   });
 }
 
+const catalogBinding = (runtime: WorkspaceRuntime) => ({
+  workspaceId: runtime.workspaceId,
+  accountId: runtime.accountId ?? null,
+});
+function catalogReader(runtime: WorkspaceRuntime): WorkspaceCatalogReader {
+  const binding = catalogBinding(runtime);
+  return (
+    runtime.workspaceCatalogReader ??
+    createLegacyWorkspaceCatalogReader({
+      binding,
+      open: () => runtime.repo.openFlockDoc(getWorkspaceFlockDocId(runtime.workspaceId)),
+    })
+  );
+}
+
+/** Cold domain projection for proposal validation; does not acquire another room owner. */
+export function readWorkspaceCatalog(runtime: WorkspaceRuntime) {
+  return catalogReader(runtime).read(catalogBinding(runtime));
+}
+
+const MAX_CATALOG_RESTARTS = 3;
+const CATALOG_RELEASE_TIMEOUT_MS = 5_000;
+async function boundedCatalogRelease(work: Promise<void>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      work,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('Workspace catalog observation release is unconfirmed')),
+          CATALOG_RELEASE_TIMEOUT_MS
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function startRoom(runtime: WorkspaceRuntime, room: SharedCatalogRoom): void {
   if (room.cancelled || room.inFlight) return;
   clearTimeout(room.retryTimer);
   room.inFlight = true;
-  void (async () => {
+  const binding = catalogBinding(runtime);
+  const reader = catalogReader(runtime);
+  let retired = false;
+  let boundedRestarts = false;
+  let retiring = false;
+  let close: (() => Promise<void>) | undefined;
+  const schedule = (resume: () => void) => {
+    if (room.cancelled) return;
+    room.retryRestart = resume;
+    if (boundedRestarts && room.restartAttempts >= MAX_CATALOG_RESTARTS) return;
+    const delay = boundedRestarts
+      ? Math.min(1_000 * 2 ** room.restartAttempts, 30_000)
+      : room.retryDelay;
+    if (boundedRestarts) room.restartAttempts += 1;
+    else room.retryDelay = Math.min(room.retryDelay * 2, 30_000);
+    clearTimeout(room.retryTimer);
+    room.retryTimer = setTimeout(resume, delay);
+  };
+  const retire = async () => {
+    if (!close || retiring) return;
+    retiring = true;
+    room.inFlight = true;
     try {
-      const handle = await runtime.repo.openFlockDoc(getWorkspaceFlockDocId(runtime.workspaceId));
-      if (room.cancelled) return;
-
-      publish(room, readWorkspaceFlockRowsFromFlock(handle.flock), room.snapshot.synced);
-      const unsubscribeFlock = handle.flock.subscribe((batch) => {
-        if (room.cancelled) return;
-        const events = (batch as { events?: WorkspaceFlockEvent[] }).events ?? [];
-        if (events.length > 0) {
-          publish(room, applyWorkspaceFlockRowEvents(room.rows, events), room.snapshot.synced);
-        }
-      });
-      room.teardown.add(unsubscribeFlock);
-
-      const subscription = await handle.joinRoom();
-      if (room.cancelled) {
-        subscription.unsubscribe();
-        return;
-      }
-      room.teardown.add(() => subscription.unsubscribe());
-      await subscription.firstSyncedWithRemote;
-      if (room.cancelled) return;
-
-      // The first remote sync may arrive as a snapshot. Replace the local view
-      // wholesale so remotely deleted rows cannot survive in the UI cache.
-      publish(room, readWorkspaceFlockRowsFromFlock(handle.flock), true);
+      await boundedCatalogRelease(close());
+      schedule(() => startRoom(runtime, room));
     } catch (error) {
-      if (room.cancelled) return;
-      console.error('Failed to sync workspace catalog', error);
-      // Only a document that was never read is a failure to resolve defaults: a
-      // read snapshot stays usable while the remote room is unavailable.
-      if (!room.snapshot.loaded) {
-        emit(room, { ...room.snapshot, failed: true });
-        room.retryTimer = setTimeout(() => startRoom(runtime, room), room.retryDelay);
-        room.retryDelay = Math.min(room.retryDelay * 2, 30_000);
-      }
+      if (!room.cancelled) console.warn('Workspace catalog observation release failed', error);
+      // Retain and retry this one release; never acquire another observer while
+      // its cleanup is unconfirmed, and never stop the host or sibling readers.
+      schedule(() => {
+        void retire();
+      });
     } finally {
+      retiring = false;
       room.inFlight = false;
     }
-  })();
+  };
+  const failed = (error: unknown) => {
+    if (room.cancelled || retired) return;
+    retired = true;
+    boundedRestarts = isWorkspaceCatalogRestartRequired(error) || room.snapshot.loaded;
+    console.error('Failed to sync workspace catalog', error);
+    emit(room, { ...room.snapshot, failed: true, synced: false });
+    room.retryRestart = () => {
+      if (close) void retire();
+    };
+    if (close) void retire();
+  };
+  void reader
+    .observe(
+      binding,
+      (update) => {
+        if (room.cancelled || retired) return;
+        room.restartAttempts = 0;
+        room.retryRestart = undefined;
+        publish(room, update.projection, update.synced);
+      },
+      failed
+    )
+    .then((observation) => {
+      let released = false;
+      let releasing: Promise<void> | undefined;
+      close = () => {
+        retired = true;
+        if (released) return Promise.resolve();
+        if (releasing) return releasing;
+        const pending = Promise.resolve()
+          .then(() => observation.close())
+          .then(() => {
+            released = true;
+            room.teardown.delete(close!);
+          });
+        releasing = pending;
+        void pending.catch(() => {
+          if (releasing === pending) releasing = undefined;
+        });
+        return pending;
+      };
+      room.teardown.add(close);
+      if (room.cancelled || retired) return retire();
+    })
+    .catch((error) => {
+      failed(error);
+      if (!close) schedule(() => startRoom(runtime, room));
+    })
+    .finally(() => {
+      room.inFlight = false;
+    });
 }
 
 /** Retry an unread catalog without opening a second room for its consumers. */
 export function retryWorkspaceCatalog(runtime: WorkspaceRuntime): void {
   const room = ROOMS.get(runtime);
-  if (room?.snapshot.failed) startRoom(runtime, room);
+  if (room?.snapshot.failed) {
+    room.restartAttempts = 0;
+    clearTimeout(room.retryTimer);
+    if (room.retryRestart) room.retryRestart();
+    else startRoom(runtime, room);
+  }
 }
 
 /**
@@ -208,10 +297,10 @@ export function acquireWorkspaceCatalog(
       inFlight: false,
       retryDelay: 1_000,
       cancelled: false,
-      rows: EMPTY_ROWS,
       snapshot: EMPTY_WORKSPACE_CATALOG,
       listeners: new Set(),
       teardown: new Set(),
+      restartAttempts: 0,
     };
     ROOMS.set(runtime, room);
     startRoom(runtime, room);
@@ -236,9 +325,10 @@ export function acquireWorkspaceCatalog(
         ROOMS.delete(runtime);
       }
       for (const stop of joined.teardown) {
-        stop();
+        void stop().catch((error) =>
+          console.warn('Workspace catalog observation close failed', error)
+        );
       }
-      joined.teardown.clear();
     },
   };
 }

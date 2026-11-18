@@ -1,6 +1,13 @@
 import { inheritHistoryStreamText } from './history-stream-text';
 import { historyValuesEqual } from './history-values-equal';
 export { historyValuesEqual } from './history-values-equal';
+export {
+  getMapFieldSchema,
+  isMapSchema,
+  isListSchema,
+  containerTypeOfSchema,
+  schemaHasTransform,
+} from './history-materializer';
 import { Immer } from 'immer';
 import { isContainer, LoroMap, type LoroDoc, type LoroList } from 'loro-crdt';
 import { z } from 'zod';
@@ -424,8 +431,187 @@ export interface HistoryWriter {
   ): boolean;
 }
 
+/** Shared preflight for a field command; never parses untouched sibling payloads. */
+export function prepareHistoryFieldWrite(
+  key: string,
+  previous: unknown,
+  value: unknown
+): { readonly changed: false } | { readonly changed: true; readonly value: unknown } {
+  if (!Object.hasOwn(HistoryEntryWriteSchema.shape, key) || key === 'id' || key === 'items')
+    throw new HistoryWriteError([{ path: [key], code: 'invalid_field' }]);
+  if (historyValuesEqual(previous, value)) return { changed: false };
+  const field = HistoryEntryWriteSchema.shape[key as keyof typeof HistoryEntryWriteSchema.shape];
+  return { changed: true, value: cleanNew(field, value, previous) };
+}
+
+export const readLoroHistoryQuery = (
+  list: LoroList,
+  options?: { transcriptVisibility?: boolean }
+): HistoryQueryRow[] =>
+  Array.from({ length: list.length }, (_, index) =>
+    historyQueryRow(
+      list.get(index),
+      {
+        field: storedField,
+        scalar: (value) => {
+          const scalar = storedScalar(value);
+          if (isContainer(scalar)) return scalar.kind() === 'List' ? [] : {};
+          return scalar && typeof scalar === 'object' ? (Array.isArray(scalar) ? [] : {}) : scalar;
+        },
+        keys: (value) =>
+          isContainer(value) && value.kind() === 'Map'
+            ? [...(value as LoroMap).keys()]
+            : record(value)
+              ? Object.keys(value)
+              : [],
+        length: (value) =>
+          Array.isArray(value)
+            ? value.length
+            : isContainer(value) && value.kind() === 'List'
+              ? (value as LoroList).length
+              : 0,
+        at: (value, itemIndex) =>
+          Array.isArray(value) ? value[itemIndex] : (value as LoroList).get(itemIndex),
+      },
+      options?.transcriptVisibility
+    )
+  );
+
+export const prepareNewHistoryEntry = (entry: unknown): SessionHistoryInput =>
+  cleanNew(HistoryEntryWriteSchema, entry) as SessionHistoryInput;
+
+export function planHistorySequenceUpdate(
+  previous: readonly SessionHistoryInput[],
+  next: readonly SessionHistoryInput[],
+  prepareValue: (old: SessionHistoryInput | undefined, value: SessionHistoryInput) => unknown = (
+    old,
+    value
+  ) => (old === undefined ? prepareNewHistoryEntry(value) : prepareReplacement(old, value))
+) {
+  const used = new Set<number>();
+  const byId = new Map<unknown, number[]>();
+  const byRef = new Map<unknown, number>();
+  previous.forEach((entry, index) => {
+    byRef.set(entry, index);
+    const matches = byId.get(record(entry) ? entry.id : undefined) ?? [];
+    matches.push(index);
+    byId.set(record(entry) ? entry.id : undefined, matches);
+  });
+  let last = -1;
+  const items = next.map((entry) => {
+    const ref = byRef.get(entry);
+    const candidates = byId.get(record(entry) ? entry.id : undefined) ?? [];
+    const index =
+      ref !== undefined && !used.has(ref) ? ref : candidates.find((index) => !used.has(index));
+    if (index === undefined)
+      return { index: -1, changed: true, value: prepareValue(undefined, entry) };
+    if (index < last)
+      throw new HistoryWriteError([{ path: ['history'], code: 'unsupported_reorder' }]);
+    last = index;
+    used.add(index);
+    if (historyValuesEqual(previous[index], entry)) return { index, changed: false };
+    return { index, changed: true, value: prepareValue(previous[index], entry) };
+  });
+  return { used, items };
+}
+
+export function planSelectedHistoryUpdate(
+  query: readonly HistoryQueryRow[],
+  readStoredAt: (position: number) => SessionHistoryInput,
+  select: (rows: readonly HistoryQueryRow[]) => readonly number[],
+  updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]
+) {
+  const positions = new Set(select(query));
+  for (const index of positions)
+    if (!Number.isSafeInteger(index) || index < 0 || index >= query.length)
+      throw new HistoryWriteError([{ path: ['history'], code: 'invalid_selection' }]);
+  const untouched = new Set<unknown>();
+  const before = query.map((row, index) => {
+    if (positions.has(index)) return readStoredAt(index);
+    untouched.add(row);
+    return row as unknown as SessionHistoryInput;
+  });
+  const next = immer.produce(before, (draft) => {
+    const result = updater(draft);
+    if (result && result !== draft) draft.splice(0, draft.length, ...result);
+  });
+  const prepareValue = (old: SessionHistoryInput | undefined, value: SessionHistoryInput) => {
+    if (untouched.has(old))
+      throw new HistoryWriteError([{ path: ['history'], code: 'unselected_change' }]);
+    return old === undefined ? prepareNewHistoryEntry(value) : prepareReplacement(old, value);
+  };
+  return { before, next, prepareValue };
+}
+
+/** Canonical progress-card repair, shared by both storage owners. */
+export function prepareOperationProgressWrite(
+  previous: SessionHistoryInput[],
+  action: Extract<HistoryAction, { kind: 'operation-progress' }>
+) {
+  const next = planOperationProgress(previous, action.operation, action.timestamp, action.statuses);
+  if (next === previous) return undefined;
+  const id = getOperationProgressTurnId(
+    action.operation.requesterSessionId,
+    action.operation.operationId
+  );
+  const canonicalIndex = previous.findIndex((entry) => entry.id === id);
+  const retainedIndex = canonicalIndex >= 0 ? canonicalIndex : previous.length ? 0 : -1;
+  const old = previous[retainedIndex];
+  return {
+    retainedIndex,
+    value: old ? prepareReplacement(old, next[0]) : prepareNewHistoryEntry(next[0]),
+  };
+}
+
+export type HistoryRollbackMember = { readonly id: unknown; readonly record: boolean };
+export function historyRollbackRange(before: readonly unknown[], next: readonly unknown[]) {
+  let start = 0,
+    suffix = 0;
+  while (
+    start < before.length &&
+    start < next.length &&
+    historyValuesEqual(before[start], next[start])
+  )
+    start++;
+  while (
+    suffix < before.length - start &&
+    suffix < next.length - start &&
+    historyValuesEqual(before[before.length - 1 - suffix], next[next.length - 1 - suffix])
+  )
+    suffix++;
+  return { start, beforeEnd: before.length - suffix, afterEnd: next.length - suffix };
+}
+export function assertHistoryRollbackReceipt(args: {
+  readonly beforeMembers: readonly HistoryRollbackMember[];
+  readonly afterMembers: readonly HistoryRollbackMember[];
+  readonly currentMembers: readonly HistoryRollbackMember[];
+  readonly afterRange: readonly unknown[];
+  readonly currentRange: readonly unknown[];
+  readonly consumed: boolean;
+}) {
+  const { beforeMembers, afterMembers, currentMembers, afterRange, currentRange, consumed } = args;
+  if (
+    consumed ||
+    currentMembers.length < afterMembers.length ||
+    !afterMembers.every(
+      (row, index) =>
+        row.record && currentMembers[index]?.record && row.id === currentMembers[index]?.id
+    ) ||
+    !matchesRollbackReceipt(
+      beforeMembers.filter((row) => row.record),
+      afterRange,
+      currentRange
+    )
+  )
+    throw new HistoryWriteError([{ path: ['history'], code: 'stale_rollback' }]);
+}
+
 /** Shared extraction of #376's writer. No ConversationView or feature-flag dependency. */
-export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly SessionHistory[]) {
+export function createHistoryWriter(
+  doc: LoroDoc,
+  readHistory?: () => readonly SessionHistory[],
+  beforeWrite?: () => void
+) {
   const list = doc.getList('history');
   const readAll = () => readHistory?.() ?? (list.toJSON() as SessionHistory[]);
   // No subscription lifetime to manage. Unknown writes/imports/checkout invalidate
@@ -484,34 +670,14 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       old === undefined ? cleanNew(HistoryEntryWriteSchema, value) : prepareReplacement(old, value),
     offset = 0
   ) => {
-    const used = new Set<number>();
-    const byId = new Map<unknown, number[]>();
-    const byRef = new Map<unknown, number>();
-    previous.forEach((entry, i) => {
-      byRef.set(entry, i);
-      const id = record(entry) ? entry.id : undefined;
-      const matches = byId.get(id) ?? [];
-      matches.push(i);
-      byId.set(id, matches);
-    });
-    let last = -1;
-    const plan = next.map((entry) => {
-      const ref = byRef.get(entry);
-      const candidates = byId.get(record(entry) ? entry.id : undefined) ?? [];
-      const index =
-        ref !== undefined && !used.has(ref) ? ref : candidates.find((i) => !used.has(i));
-      if (index === undefined) return { value: prepareValue(undefined, entry), index: -1 };
-      if (index < last)
-        throw new HistoryWriteError([{ path: ['history'], code: 'unsupported_reorder' }]);
-      last = index;
-      used.add(index);
-      if (historyValuesEqual(previous[index], entry)) return { index };
-      const map = list.get(offset + index);
-      if (!isContainer(map) && record(map))
-        return { index, inline: true, value: prepareValue(previous[index], entry) };
+    const { used, items } = planHistorySequenceUpdate(previous, next, prepareValue);
+    const plan = items.map((op) => {
+      if (op.index < 0 || !op.changed) return op;
+      const map = list.get(offset + op.index);
+      if (!isContainer(map) && record(map)) return { ...op, inline: true };
       if (!isContainer(map) || map.kind() !== 'Map')
-        throw new HistoryWriteError([{ path: ['history', index], code: 'invalid_stored_turn' }]);
-      return { index, map, value: prepareValue(previous[index], entry) };
+        throw new HistoryWriteError([{ path: ['history', op.index], code: 'invalid_stored_turn' }]);
+      return { ...op, map };
     });
     return () => {
       for (let i = previous.length - 1; i >= 0; i--) if (!used.has(i)) list.delete(offset + i, 1);
@@ -526,7 +692,7 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
         else if ('inline' in op && op.inline) {
           list.delete(offset + i, 1);
           list.insert(offset + i, op.value as Parameters<LoroList['insert']>[1]);
-        } else if (op.value !== undefined && isContainer(op.map))
+        } else if ('map' in op && op.value !== undefined && isContainer(op.map))
           diffHistoryContainer(
             op.map,
             sessionHistorySchema,
@@ -541,39 +707,8 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
   const prepare = (previous: readonly SessionHistory[], next: readonly SessionHistory[]) =>
     planWrite(previous, next);
 
-  const readQuery = (options?: { transcriptVisibility?: boolean }): HistoryQueryRow[] =>
-    Array.from({ length: list.length }, (_, index) =>
-      historyQueryRow(
-        list.get(index),
-        {
-          field: storedField,
-          scalar: (value) => {
-            const scalar = storedScalar(value);
-            if (isContainer(scalar)) return scalar.kind() === 'List' ? [] : {};
-            return scalar && typeof scalar === 'object'
-              ? Array.isArray(scalar)
-                ? []
-                : {}
-              : scalar;
-          },
-          keys: (value) =>
-            isContainer(value) && value.kind() === 'Map'
-              ? [...(value as LoroMap).keys()]
-              : record(value)
-                ? Object.keys(value)
-                : [],
-          length: (value) =>
-            Array.isArray(value)
-              ? value.length
-              : isContainer(value) && value.kind() === 'List'
-                ? (value as LoroList).length
-                : 0,
-          at: (value, itemIndex) =>
-            Array.isArray(value) ? value[itemIndex] : (value as LoroList).get(itemIndex),
-        },
-        options?.transcriptVisibility
-      )
-    );
+  const readQuery = (options?: { transcriptVisibility?: boolean }) =>
+    readLoroHistoryQuery(list, options);
   const storedAt = (index: number): SessionHistoryInput => {
     const value = list.get(index);
     return structuredClone(isContainer(value) ? value.toJSON() : value) as SessionHistoryInput;
@@ -592,28 +727,13 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
     select: (rows: readonly HistoryQueryRow[]) => readonly number[],
     updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]
   ) => {
-    const query = readQuery();
-    const positions = new Set(select(query));
-    for (const index of positions)
-      if (!Number.isSafeInteger(index) || index < 0 || index >= query.length)
-        throw new HistoryWriteError([{ path: ['history'], code: 'invalid_selection' }]);
-    const untouched = new Set<unknown>();
-    const before = query.map((row, index) => {
-      if (positions.has(index)) return storedAt(index);
-      untouched.add(row);
-      return row as unknown as SessionHistoryInput;
-    });
-    const next = immer.produce(before, (draft) => {
-      const result = updater(draft);
-      if (result && result !== draft) draft.splice(0, draft.length, ...result);
-    });
-    const commit = planWrite(before, next, (old, value) => {
-      if (untouched.has(old))
-        throw new HistoryWriteError([{ path: ['history'], code: 'unselected_change' }]);
-      return old === undefined
-        ? cleanNew(HistoryEntryWriteSchema, value)
-        : prepareReplacement(old, value);
-    });
+    const { before, next, prepareValue } = planSelectedHistoryUpdate(
+      readQuery(),
+      storedAt,
+      select,
+      updater
+    );
+    const commit = planWrite(before, next, prepareValue);
     return { before, next, commit };
   };
 
@@ -639,45 +759,24 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
     updateSelectedWithRollback(select, updater) {
       const beforeMembers = membership();
       const { before, next, commit } = selectedPlan(select, updater);
-      let start = 0,
-        suffix = 0;
-      while (
-        start < before.length &&
-        start < next.length &&
-        historyValuesEqual(before[start], next[start])
-      )
-        start++;
-      while (
-        suffix < before.length - start &&
-        suffix < next.length - start &&
-        historyValuesEqual(before[before.length - 1 - suffix], next[next.length - 1 - suffix])
-      )
-        suffix++;
-      const removed = storedRange(start, before.length - suffix);
+      const { start, beforeEnd, afterEnd } = historyRollbackRange(before, next);
+      const removed = storedRange(start, beforeEnd);
       commit();
       const afterMembers = membership();
-      const end = afterMembers.length - suffix;
+      const end = afterEnd;
       const after = storedRange(start, end);
       let consumed = false;
       return () => {
         const currentMembers = membership();
-        const sameRows =
-          currentMembers.length >= afterMembers.length &&
-          afterMembers.every(
-            (row, index) =>
-              row.record && currentMembers[index]?.record && row.id === currentMembers[index]!.id
-          );
-        if (consumed || !sameRows)
-          throw new HistoryWriteError([{ path: ['history'], code: 'stale_rollback' }]);
         const currentRange = storedRange(start, end);
-        if (
-          !matchesRollbackReceipt(
-            beforeMembers.filter((row) => row.record),
-            after,
-            currentRange
-          )
-        )
-          throw new HistoryWriteError([{ path: ['history'], code: 'stale_rollback' }]);
+        assertHistoryRollbackReceipt({
+          beforeMembers,
+          afterMembers,
+          currentMembers,
+          afterRange: after,
+          currentRange,
+          consumed,
+        });
         // Align only complete values in the owned range. Later appends cannot
         // consume restored IDs; unchanged containers inside the range survive.
         planWrite(currentRange, removed, (_old, value) => value, start)();
@@ -756,7 +855,7 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       };
     },
     append(entry) {
-      const value = cleanNew(HistoryEntryWriteSchema, entry);
+      const value = prepareNewHistoryEntry(entry);
       populateContainer(
         list.insertContainer(list.length, new LoroMap()),
         sessionHistorySchema,
@@ -824,16 +923,10 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
         // Export each matching card once; unrelated turns are never materialized.
         return (isContainer(value) ? value.toJSON() : value) as SessionHistoryInput;
       });
-      const next = planOperationProgress(previous, operation, action.timestamp, action.statuses);
-      if (next === previous) return false;
-      // A changed operation projection contains exactly one canonical card.
-      // Keep that card's container/position, or rename the first legacy alias.
-      const canonicalIndex = previous.findIndex((entry) => entry.id === id);
-      const retainedIndex = canonicalIndex >= 0 ? canonicalIndex : previous.length ? 0 : -1;
+      const planned = prepareOperationProgressWrite(previous, action);
+      if (!planned) return false;
+      const { retainedIndex, value: prepared } = planned;
       const old = previous[retainedIndex];
-      const prepared = old
-        ? prepareReplacement(old, next[0])
-        : cleanNew(HistoryEntryWriteSchema, next[0]);
       // Preflight above must finish before replacing or deleting any stored row.
       if (retainedIndex < 0) {
         populateContainer(
@@ -935,7 +1028,6 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       const target = locate(id);
       if (!target) return false;
       const { map } = target;
-      const field = HistoryEntryWriteSchema.shape[key];
       if (
         !Object.hasOwn(HistoryEntryWriteSchema.shape, key) ||
         key === ('id' as string) ||
@@ -951,8 +1043,9 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
         });
       const stored = map.get(key);
       const previous = isContainer(stored) ? stored.toJSON() : stored;
-      if (historyValuesEqual(previous, value)) return true;
-      const parsed = cleanNew(field, value, previous);
+      const prepared = prepareHistoryFieldWrite(key, previous, value);
+      if (!prepared.changed) return true;
+      const parsed = prepared.value;
       // A partial field diff cannot add or move an indexed item.
       agentWindow.preserveIndex(() => {
         diffHistoryContainer(
@@ -1005,5 +1098,32 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       return false;
     },
   };
-  return { ...writer, prepare };
+  const result = { ...writer, prepare };
+  if (!beforeWrite) return result;
+  const reads = new Set([
+    'forEachStored',
+    'readQuery',
+    'readSelected',
+    'readStored',
+    'capture',
+    'read',
+  ]);
+  return Object.fromEntries(
+    Object.entries(result).map(([key, value]) => [
+      key,
+      typeof value !== 'function' || reads.has(key)
+        ? value
+        : (...args: unknown[]) => {
+            beforeWrite();
+            const returned = Reflect.apply(value, result, args);
+            // Prepared commits and compensation can outlive the original call.
+            return typeof returned === 'function'
+              ? (...later: unknown[]) => {
+                  beforeWrite();
+                  return Reflect.apply(returned, result, later);
+                }
+              : returned;
+          },
+    ])
+  ) as typeof result;
 }

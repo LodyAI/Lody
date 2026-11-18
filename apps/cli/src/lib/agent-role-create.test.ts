@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   AGENT_ROLE_VERSION,
+  createLegacyWorkspaceCatalogQuery,
   snapshotAgentRole,
   workspaceFlockKeys,
   type AgentConfigId,
@@ -51,6 +52,18 @@ const createRoleCatalogManager = (roles: AgentRole[]) => {
   const manager = {
     syncFlockDocOrThrow,
     repo: { openFlockDoc },
+    readWorkspaceCatalog: async (workspaceId: WorkspaceId) => {
+      const binding = { workspaceId, accountId: 'user-1' };
+      return createLegacyWorkspaceCatalogQuery({ binding, open: openFlockDoc }).read(binding);
+    },
+    readWorkspaceRole: async (workspaceId: WorkspaceId, id: AgentRoleId) => {
+      const binding = { workspaceId, accountId: 'user-1' };
+      return createLegacyWorkspaceCatalogQuery({
+        binding,
+        open: openFlockDoc,
+        authorizeRoleLookup: () => true,
+      }).readRole(binding, id);
+    },
   } as unknown as LoroDocumentManager;
   return { manager, syncFlockDocOrThrow };
 };

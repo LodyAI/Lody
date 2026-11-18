@@ -23,6 +23,7 @@ import {
 } from '@lody/shared';
 import type { SessionTurn } from '@lody/shared/session-data';
 import { type LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
+import { createLegacyCliWorkspaceCatalog } from '@/lib/loro/workspace-catalog-legacy';
 import { composeTestSessionDoc } from '../../tests/session-doc-fixture';
 import { FlockSyncTimeoutError } from '@/lib/loro/timeout-utils';
 import { applyAgentRoleCreateTarget, resolveAgentRoleCreate } from '@/lib/agent-role-create';
@@ -138,6 +139,7 @@ function createFixture(
     isEncryptedWorkspace: () => false,
     repo: {
       watch: () => ({ unsubscribe: () => undefined }),
+      listDoc: async () => [...metadata].map(([docId, meta]) => ({ docId, meta, deleted: false })),
       getMeta: () => ({
         scan: async ({ prefix }: { prefix: readonly string[] }) =>
           [...metadata.keys()].map((roomId) => ({
@@ -197,6 +199,20 @@ function createFixture(
       return sessionDoc;
     },
   } as unknown as LoroDocumentManager;
+  const catalogBinding = { workspaceId, accountId: userId };
+  const workspaceCatalog = createLegacyCliWorkspaceCatalog({
+    repo: manager.repo,
+    binding: catalogBinding,
+    isCurrent: () => true,
+  });
+  Object.assign(manager, {
+    workspaceCatalogBinding: catalogBinding,
+    workspaceCatalog,
+    readWorkspaceCatalog: (id: WorkspaceId = workspaceId) =>
+      workspaceCatalog.read({ ...catalogBinding, workspaceId: id }),
+    readWorkspaceRole: (id: WorkspaceId, roleId: import('@lody/shared').AgentRoleId) =>
+      workspaceCatalog.readRole({ ...catalogBinding, workspaceId: id }, roleId),
+  });
   const environment = createLocalSessionCommandEnvironment({
     manager,
     workspaceId,

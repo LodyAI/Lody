@@ -60,6 +60,7 @@
     "@lody/shared": "workspace:*",
     "@lody/turn-diff-store": "workspace:*",
     "@loro-dev/flock-wasm": "catalog:",
+    "@loro-dev/loro-repo-client": "0.1.0",
     "@loro-dev/roost": "catalog:",
     "@loro-dev/streams-client": "catalog:",
     "@loro-dev/streams-crdt": "catalog:",
@@ -139,6 +140,7 @@
     "LICENSE"
   ],
   "dependencies": {
+    "@loro-dev/loro-repo-engine": "0.1.0",
     "@effect/platform-node-shared": "catalog:",
     "@loro-dev/roost-node": "0.3.1",
     "@lydell/node-pty": "1.2.0-beta.14",

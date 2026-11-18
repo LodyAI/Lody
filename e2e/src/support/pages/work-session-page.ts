@@ -23,8 +23,13 @@ export class WorkSessionPage {
     projectName: string,
     machineName?: string
   ): Promise<void> {
-    await this.page.getByRole('button', { name: /^(Select a project|选择项目)$/u }).click();
-    await this.page.getByRole('menuitem', { name: /^(Add a folder|添加文件夹)$/u }).click();
+    const selector = this.page.getByRole('button', { name: /^(Select a project|选择项目)$/u });
+    await expect(selector).toBeVisible();
+    await expect(selector).not.toHaveAttribute('aria-busy', 'true');
+    await selector.click();
+    const addFolder = this.page.getByRole('menuitem', { name: /^(Add a folder|添加文件夹)$/u });
+    await expect(addFolder).toBeEnabled();
+    await addFolder.click();
 
     const dialog = this.page.getByRole('dialog', { name: /^(Add a folder|添加文件夹)$/u });
     await expect(dialog).toBeVisible();

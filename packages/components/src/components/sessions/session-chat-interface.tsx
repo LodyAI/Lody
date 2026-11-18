@@ -2814,6 +2814,7 @@ export const SessionChatInterface = memo(
     const {
       availableCommands,
       capabilityAuthority,
+      goalCapability,
       configOptionSelectors,
       defaultModeId,
       machineFlockRows,
@@ -3528,9 +3529,6 @@ export const SessionChatInterface = memo(
     // Goal control is an ACP extension, so the runtime's advertised actions
     // decide which buttons exist. A runtime with no goal extension stays
     // read-only rather than being guessed at from the agent's name.
-    const goalCapability = session.agentConfigId
-      ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
-      : undefined;
     const goalCommands = useMemo(
       () => (rpcReason ? [] : getSessionGoalCommands(goalCapability)),
       [rpcReason, goalCapability]
@@ -5764,6 +5762,8 @@ export const SessionChatInterface = memo(
       async (scheduleId: string) => {
         if (!runtime) return null;
         return new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+          registry: runtime.scheduleRegistry,
+          definitions: runtime.scheduleDefinitions,
           protectedContent: runtime.contentMode === 'e2ee',
           signDeclaration: runtime.signScheduleDeclaration,
         }).read(scheduleId);
@@ -5841,6 +5841,8 @@ export const SessionChatInterface = memo(
         try {
           await runtime.withScheduleStore(item.scheduleId, () =>
             new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+              registry: runtime.scheduleRegistry,
+              definitions: runtime.scheduleDefinitions,
               protectedContent: runtime.contentMode === 'e2ee',
               signDeclaration: runtime.signScheduleDeclaration,
             }).setEnabled({

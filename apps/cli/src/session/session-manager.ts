@@ -750,7 +750,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       onAgentWarning: (warning) => this.emit('onAgentWarning', sessionId, warning),
       loadExternalMcpServers: () =>
         loadSessionMcpCatalog({
-          repo: this.workspaceDocument.repo,
+          catalog: this.workspaceDocument.workspaceCatalog,
+          catalogBinding: this.workspaceDocument.workspaceCatalogBinding,
           waitForCatalogBaseline: () =>
             waitForMcpCatalogBaseline(this.workspaceDocument, this.workspaceId),
           workspaceId: this.workspaceId,
@@ -1147,7 +1148,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
               await readMachineLocalProjects(
                 this.workspaceDocument.repo,
                 this.workspaceId,
-                this.machineId
+                this.machineId,
+                this.workspaceDocument.getMachineCatalogRuntimePort?.()
               )
             ),
           allowManagedClone: this.cloudPort.githubTokens !== null,
@@ -1680,7 +1682,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             await readMachineLocalProjects(
               this.workspaceDocument.repo,
               this.workspaceId,
-              this.machineId
+              this.machineId,
+              this.workspaceDocument.getMachineCatalogRuntimePort?.()
             )
           ),
         allowManagedClone: this.cloudPort.githubTokens !== null,
@@ -1922,6 +1925,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           this.machineId,
           localProjectId,
           {
+            native: this.workspaceDocument.getMachineCatalogRuntimePort?.(),
             verifyProjectIdentity: this.workspaceDocument.isEncryptedWorkspace?.() === true,
             requestSync: () =>
               this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
@@ -1940,6 +1944,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.machineId,
       localProjectId,
       {
+        native: this.workspaceDocument.getMachineCatalogRuntimePort?.(),
         verifyProjectIdentity: this.workspaceDocument.isEncryptedWorkspace?.() === true,
         requestSync: () =>
           this.workspaceDocument.syncMachineFlockDoc(this.machineId, {

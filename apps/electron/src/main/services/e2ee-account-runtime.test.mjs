@@ -496,6 +496,104 @@ void test('quit retains a supervisor whose stop failed so recovery retries the s
   assert.equal(service.getCliState().phase, 'stopped')
 })
 
+void test('data maintenance rejects an already preparing CLI at physical spawn and permits a fresh request after release', async () => {
+  const { CliService } = await load('./cli-service.ts', {
+    electron: { app: {}, powerSaveBlocker: {} },
+    '../platform': { mainPlatformKind: 'local' },
+    '@lody/shared/node/installation-profile': { getLodyDataDir: () => '/synthetic-data' },
+    '@lody/shared/node/local-cli-host-lease': { getLocalCliHostEndpoint: () => '/synthetic-host' },
+    '@lody/shared/node/local-ipc': { getLocalDaemonRunFilePath: () => '/synthetic-run' },
+    '@lody/shared/node/process': {
+      startProcessLegacy: () => {
+        const child = new EventEmitter()
+        queueMicrotask(() => child.emit('close', 0, null))
+        return { child }
+      }
+    },
+    '@lody/shared/node/local-session-control': {},
+    '@lody/shared/node/local-project-control': {},
+    '@lody/shared/node/local-cli-supervisor': {},
+    '@lody/shared/local-machine-rpc': {},
+    '@lody/cli-supervisor': {
+      formatCommandForDisplay: () => 'synthetic-cli',
+      isV8OutOfMemoryExit: () => false
+    },
+    './shell-env': { shouldUseWindowsShell: () => false },
+    './system-proxy-env': {},
+    '../desktop-log': {},
+    '../desktop-log-core': {},
+    './desktop-execution-host': {},
+    './local-session-control-budget': {}
+  })
+  const service = Object.create(CliService.prototype)
+  Object.assign(service, {
+    cliAutoStartEnabled: false,
+    dataMigrationPauses: new Set(),
+    cliOutputBuffer: [],
+    trackedCliChildren: new Map()
+  })
+  const preparing = Promise.withResolvers()
+  const prepared = Promise.withResolvers()
+  service.prepareBundledCli = async () => {
+    preparing.resolve()
+    await prepared.promise
+    return { spawn: () => service.spawnCli('synthetic-cli', [], {}) }
+  }
+  const pending = service.run(['start'])
+  await preparing.promise
+  const pause = service.acquireDataMigrationPause()
+  prepared.resolve()
+  await assert.rejects(pending, /Local data migration is in progress/)
+  assert.equal(service.trackedCliChildren.size, 0)
+  assert.deepEqual(service.getOutputBacklog(), [])
+  pause.release()
+  const result = await service.run(['start'])
+  assert.equal(result.code, 0)
+  assert.equal(result.terminationKind, 'exit')
+  assert.equal(service.trackedCliChildren.size, 0)
+})
+
+void test('runtime retirement releases the independent catalog owner when the renderer maintenance marker fails', async () => {
+  const catalogDatabase = new DatabaseSync(':memory:')
+  catalogDatabase.exec('CREATE TABLE owned_catalog(value TEXT)')
+  const markerFailure = new Error('synthetic SQLITE_BUSY maintenance marker')
+  const { LocalPlatformIpc } = await load('../ipc/services/local-platform-ipc.ts', {
+    '../product-window-ipc-service': { ProductWindowIpcService: class {} },
+    '@lody/shared/renderer-room-migration': {},
+    '@lody/shared/workspace-catalog-ipc': {},
+    'electron-ipc-decorator': {
+      IpcMethod: () => () => {},
+      getIpcContext: () => ({ event: { sender: { id: 7 } } })
+    },
+    '../../platform': { isLocalPlatform: () => true },
+    '../ipc-service-deps': {
+      getIpcServiceDeps: () => ({
+        rendererWorkspaceFlockMigration: () => ({
+          retire: () => {
+            throw markerFailure
+          }
+        }),
+        nativeWorkspaceCatalog: () => ({
+          retire: async (windowId, registrationId) => {
+            assert.equal(windowId, 7)
+            assert.equal(registrationId, 'exact-retired-registration')
+            catalogDatabase.close()
+          }
+        })
+      })
+    }
+  })
+  try {
+    await assert.rejects(
+      new LocalPlatformIpc().retireWorkspaceFlock('exact-retired-registration'),
+      (error) => error.errors.length === 1 && error.errors[0] === markerFailure
+    )
+    assert.throws(() => catalogDatabase.prepare('SELECT * FROM owned_catalog'), /not open/)
+  } finally {
+    if (catalogDatabase.isOpen) catalogDatabase.close()
+  }
+})
+
 void test('local pairing timeout remains an unknown outcome and does not poison a later CLI request', async () => {
   const { IpcTimeoutError, IpcConnectError } = await import('@lody/shared/node/local-ipc')
   const { CliService } = await load('./cli-service.ts', {

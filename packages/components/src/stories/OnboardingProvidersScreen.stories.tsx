@@ -1,3 +1,4 @@
+import type { AgentConfigDisplay } from '@/lib/agent-config-display';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useCallback, useState } from 'react';
 import { fn } from 'storybook/test';
@@ -84,7 +85,7 @@ function InteractiveProvidersScreen({
   const [failureReasons, setFailureReasons] = useState<Record<string, string>>({});
 
   const handleTest = useCallback(
-    (config: AgentConfigMeta) => {
+    (config: AgentConfigDisplay) => {
       setActivities((prev) => ({
         ...prev,
         [config.id]: { phase: 'downloading-runtime', percent: 38 },
@@ -116,7 +117,7 @@ function InteractiveProvidersScreen({
     [forceFailure]
   );
 
-  const handleDelete = useCallback((config: AgentConfigMeta) => {
+  const handleDelete = useCallback((config: AgentConfigDisplay) => {
     setConfigs((prev) => prev.filter((c) => c.id !== config.id));
     setStatuses((prev) => {
       const { [config.id]: _, ...rest } = prev;

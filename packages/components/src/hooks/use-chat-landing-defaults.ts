@@ -1,7 +1,7 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type {
   AgentConfigId,
-  AgentConfigMeta,
+  AgentConfigListSummary,
   AgentRoleId,
   LocalProjectId,
   MachineId,
@@ -13,6 +13,8 @@ import {
   resolvePreferredChatLandingAgentSelection,
   writeChatLandingDefaults,
 } from '@/lib/chat-landing-defaults';
+import type { WorkspaceRuntime } from '@/atoms/runtime';
+
 type LocalProjectSelection = { machineId: MachineId; localProjectId: LocalProjectId };
 
 type UseChatLandingDefaultsArgs = {
@@ -20,7 +22,7 @@ type UseChatLandingDefaultsArgs = {
   shouldRestoreContextType: boolean;
   contextType: 'local' | 'github' | 'chat';
   setContextType: (contextType: 'local' | 'github' | 'chat') => void;
-  executorConfigs: AgentConfigMeta[];
+  executorConfigs: AgentConfigListSummary[];
   machines: Map<string, MachineViewMeta>;
   /** Pre-filtered map of machines that are reachable AND own at least one agent config. */
   selectableMachines: Map<MachineId, MachineViewMeta>;
@@ -407,4 +409,59 @@ export function useChatLandingDefaults({
   ]);
 
   return { defaultsReady: canPersist, repoDefaultsReady };
+}
+
+const noNativeProjectSubscription = () => () => {};
+const noNativeProjectSnapshot = () => undefined;
+
+/** Only a ready, complete canonical native catalog can invalidate this draft.
+ * A remote-sync flag and an unavailable native source are not deletion proof. */
+export function useRemovedNativeProjectSelection({
+  runtime,
+  workspaceId,
+  accountId,
+  contextType,
+  selection,
+  onRemoved,
+}: {
+  runtime:
+    | Pick<
+        WorkspaceRuntime,
+        'workspaceId' | 'ownsNativeMachineCatalog' | 'nativeMachineCatalogSource'
+      >
+    | null
+    | undefined;
+  workspaceId: string | null;
+  accountId: string | null;
+  contextType: 'local' | 'github' | 'chat';
+  selection: LocalProjectSelection | null;
+  onRemoved(expected: LocalProjectSelection): void;
+}) {
+  const source = runtime?.nativeMachineCatalogSource;
+  const snapshot = useSyncExternalStore(
+    source?.subscribe ?? noNativeProjectSubscription,
+    source?.getSnapshot ?? noNativeProjectSnapshot,
+    noNativeProjectSnapshot
+  );
+  useEffect(() => {
+    if (
+      contextType !== 'local' ||
+      !selection ||
+      !runtime ||
+      !source ||
+      !workspaceId ||
+      !accountId ||
+      runtime.workspaceId !== workspaceId ||
+      snapshot?.binding.workspaceId !== workspaceId ||
+      snapshot.binding.accountId !== accountId ||
+      !runtime.ownsNativeMachineCatalog?.(selection.machineId) ||
+      !source.ownsMachine(selection.machineId)
+    )
+      return;
+    const current = source.readProjection(selection.machineId);
+    if (!current || current.machineId !== selection.machineId) return;
+    if (current.projection.projects.some((project) => project.id === selection.localProjectId))
+      return;
+    onRemoved(selection);
+  }, [runtime, source, snapshot, workspaceId, accountId, contextType, selection, onRemoved]);
 }

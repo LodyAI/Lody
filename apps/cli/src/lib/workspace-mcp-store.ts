@@ -1,12 +1,15 @@
 import {
+  createLegacyWorkspaceCatalogQuery,
+  createLegacyWorkspaceCatalogCommands,
+  type WorkspaceCatalogCommand,
+  type WorkspaceCatalogQuery,
+  type WorkspaceCatalogCommands,
+  type WorkspaceCatalogBinding,
   deleteWorkspaceMcpServerFromFlock,
   getEffectiveDefaultMcpIds,
-  getProjectMcpDefaults,
   getProjectMcpKey,
   type ProjectRef,
   getWorkspaceFlockDocId,
-  listWorkspaceMcpServers,
-  readWorkspaceFlockRowsFromFlock,
   writeWorkspaceMcpServerToFlock,
   type McpServerId,
   type WorkspaceFlockReadableFlock,
@@ -58,6 +61,11 @@ export type McpCatalogWriteResult = {
   syncError?: string;
 };
 
+/** Trusted composition owner; business callers use its selected whole-room port. */
+export type WorkspaceMcpCatalogOwner = {
+  workspaceCatalog: WorkspaceCatalogQuery & WorkspaceCatalogCommands;
+  workspaceCatalogBinding: WorkspaceCatalogBinding;
+};
 type WorkspaceMcpRepo = {
   openFlockDoc(docId: string): Promise<{
     flock: WorkspaceFlockWritableFlock;
@@ -86,11 +94,19 @@ export async function syncMcpCatalog(
 }
 
 export async function listWorkspaceMcpCatalog(
-  repo: WorkspaceMcpReadableRepo,
+  repo: WorkspaceMcpReadableRepo | WorkspaceMcpCatalogOwner,
   workspaceId: WorkspaceId
 ): Promise<WorkspaceMcpServerMeta[]> {
-  const handle = await repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
-  return listWorkspaceMcpServers(readWorkspaceFlockRowsFromFlock(handle.flock));
+  if ('workspaceCatalog' in repo)
+    return (await repo.workspaceCatalog.read({ ...repo.workspaceCatalogBinding, workspaceId }))
+      .servers;
+  const binding = { workspaceId, accountId: null };
+  return (
+    await createLegacyWorkspaceCatalogQuery({
+      binding,
+      open: () => repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId)),
+    }).read(binding)
+  ).servers;
 }
 
 /**
@@ -98,21 +114,49 @@ export async function listWorkspaceMcpCatalog(
  * that follows is best effort and its failure is reported, never rolled back.
  */
 async function commitCatalogChange(
-  repo: WorkspaceMcpRepo,
+  repo: WorkspaceMcpRepo | WorkspaceMcpCatalogOwner,
   workspaceId: WorkspaceId,
   options: { sync?: boolean },
-  mutate: (flock: WorkspaceFlockWritableFlock) => boolean
+  command: Extract<WorkspaceCatalogCommand, { kind: 'put-mcp' | 'delete-mcp' }>
 ): Promise<McpCatalogWriteResult> {
+  if ('workspaceCatalog' in repo) {
+    const binding = { ...repo.workspaceCatalogBinding, workspaceId };
+    const { changed } = await repo.workspaceCatalog.execute(binding, command);
+    if (!changed) return { changed: false, synced: true };
+    if (options.sync === false) return { changed: true, synced: false, syncError: 'offline mode' };
+    try {
+      await repo.workspaceCatalog.upload(binding);
+      return { changed: true, synced: true };
+    } catch (error) {
+      return { changed: true, synced: false, syncError: formatErrorMessage(error) };
+    }
+  }
   const handle = await repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
-  if (!mutate(handle.flock)) {
+  let changed = false;
+  const binding = { workspaceId, accountId: null };
+  const commands = createLegacyWorkspaceCatalogCommands({
+    binding,
+    put: async (_key, value) => {
+      changed = writeWorkspaceMcpServerToFlock(handle.flock, value as WorkspaceMcpServerMeta);
+      if (changed) await repo.flush();
+    },
+    remove: async (key) => {
+      changed = deleteWorkspaceMcpServerFromFlock(handle.flock, key[1] as McpServerId);
+      if (changed) await repo.flush();
+    },
+    upload: async () => {
+      await handle.syncOnce();
+    },
+  });
+  await commands.execute(binding, command);
+  if (!changed) {
     return { changed: false, synced: true };
   }
-  await repo.flush();
   if (options.sync === false) {
     return { changed: true, synced: false, syncError: 'offline mode' };
   }
   try {
-    await handle.syncOnce();
+    await commands.upload(binding);
     return { changed: true, synced: true };
   } catch (error) {
     return { changed: true, synced: false, syncError: formatErrorMessage(error) };
@@ -120,39 +164,41 @@ async function commitCatalogChange(
 }
 
 export async function upsertWorkspaceMcpCatalogEntry(
-  repo: WorkspaceMcpRepo,
+  repo: WorkspaceMcpRepo | WorkspaceMcpCatalogOwner,
   workspaceId: WorkspaceId,
   entry: WorkspaceMcpServerMeta,
   options: { sync?: boolean } = {}
 ): Promise<McpCatalogWriteResult> {
-  return commitCatalogChange(repo, workspaceId, options, (flock) =>
-    writeWorkspaceMcpServerToFlock(flock, entry)
-  );
+  return commitCatalogChange(repo, workspaceId, options, { kind: 'put-mcp', entry });
 }
 
 export async function deleteWorkspaceMcpCatalogEntry(
-  repo: WorkspaceMcpRepo,
+  repo: WorkspaceMcpRepo | WorkspaceMcpCatalogOwner,
   workspaceId: WorkspaceId,
   mcpServerId: McpServerId,
   options: { sync?: boolean } = {}
 ): Promise<McpCatalogWriteResult> {
-  return commitCatalogChange(repo, workspaceId, options, (flock) =>
-    deleteWorkspaceMcpServerFromFlock(flock, mcpServerId)
-  );
+  return commitCatalogChange(repo, workspaceId, options, { kind: 'delete-mcp', id: mcpServerId });
 }
 
 /** Read a single local workspace snapshot; explicit selections bypass defaults. */
 export async function readProjectDefaultMcpIds(
-  repo: WorkspaceMcpReadableRepo,
+  repo: WorkspaceMcpReadableRepo | WorkspaceMcpCatalogOwner,
   workspaceId: WorkspaceId,
   project: ProjectRef | undefined,
   machineId: string
 ): Promise<McpServerId[]> {
-  const handle = await repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
-  const rows = readWorkspaceFlockRowsFromFlock(handle.flock);
+  const binding = { workspaceId, accountId: null };
+  const catalog =
+    'workspaceCatalog' in repo
+      ? await repo.workspaceCatalog.read({ ...repo.workspaceCatalogBinding, workspaceId })
+      : await createLegacyWorkspaceCatalogQuery({
+          binding,
+          open: () => repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId)),
+        }).read(binding);
   const key = getProjectMcpKey(project, machineId);
   return getEffectiveDefaultMcpIds(
-    listWorkspaceMcpServers(rows),
-    key ? getProjectMcpDefaults(rows)[key] : undefined
+    catalog.servers,
+    key ? catalog.projectMcpDefaults[key] : undefined
   );
 }

@@ -258,7 +258,7 @@ describe('configureWorkspaceMcpServer', () => {
     );
 
     expect(deps.upsertEntry).toHaveBeenCalledWith(
-      manager.repo,
+      manager,
       workspaceId,
       expect.objectContaining({
         id: 'new-server',

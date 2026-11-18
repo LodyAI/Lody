@@ -21,6 +21,15 @@ import { existsSync, realpathSync, statSync } from 'node:fs';
 import { localProjectsLegacy } from '@lody/shared/node/local-project';
 
 import { readTimeoutEnv, withTimeout } from './loro/timeout-utils';
+import type { MachineDocumentRuntimePort } from './machine-document-runtime-port';
+const assertNativeProjectScope = (
+  source: MachineDocumentRuntimePort,
+  workspaceId: WorkspaceId,
+  machineId: MachineId
+) => {
+  if (source.binding.workspaceId !== workspaceId || source.binding.machineId !== machineId)
+    throw new Error('Native project catalog scope mismatch');
+};
 
 export type MachineFlockSyncScheduler = {
   markMachineFlockDocDirty: (machineId: MachineId, options?: { reason?: string }) => void;
@@ -49,7 +58,7 @@ export async function withMachineCatalogWriteLock<T>(
   }
 }
 
-function canonicalLocalProjectRootPath(rootPath: string): string {
+export function canonicalLocalProjectRootPath(rootPath: string): string {
   try {
     const resolved = realpathSync.native(rootPath);
     return statSync(resolved).isDirectory()
@@ -58,6 +67,25 @@ function canonicalLocalProjectRootPath(rootPath: string): string {
   } catch {
     return rootPath;
   }
+}
+
+export function prepareMachineLocalProjectUpsert(
+  project: LocalProjectMeta,
+  current: LocalProjectMeta | undefined,
+  observedGitHubRepo: string | null | undefined,
+  standaloneVisible?: boolean
+): LocalProjectMeta {
+  return {
+    ...project,
+    rootPath: canonicalLocalProjectRootPath(project.rootPath),
+    standaloneVisible: standaloneVisible ?? current?.standaloneVisible ?? project.standaloneVisible,
+    githubRepoFullName:
+      observedGitHubRepo !== undefined
+        ? (observedGitHubRepo ?? undefined)
+        : current
+          ? current.githubRepoFullName
+          : project.githubRepoFullName,
+  };
 }
 
 export function shouldApplyMachineDeleteLocalProjectCommand(
@@ -91,8 +119,13 @@ function readLegacyMachineLocalProjects(
 export async function readMachineLocalProjects(
   repo: LoroRepo,
   workspaceId: WorkspaceId,
-  machineId: MachineId
+  machineId: MachineId,
+  native?: MachineDocumentRuntimePort
 ): Promise<Record<LocalProjectId, LocalProjectMeta>> {
+  if (native) {
+    assertNativeProjectScope(native, workspaceId, machineId);
+    return (await native.readCatalog()).projects;
+  }
   const machineRoomId = getMachineRoomId(machineId);
   const [machineMetaDoc, flockHandle] = await Promise.all([
     repo.getDocMeta(machineRoomId),
@@ -121,8 +154,25 @@ export async function upsertMachineLocalProject(
     reason?: string;
     refreshGitHubRemote?: boolean;
     standaloneVisible?: boolean;
+    native?: MachineDocumentRuntimePort;
+    expected?: LocalProjectMeta;
   } = {}
 ): Promise<void> {
+  if (options.native) {
+    assertNativeProjectScope(options.native, workspaceId, machineId);
+    const rootPath = canonicalLocalProjectRootPath(project.rootPath);
+    const observed = options.refreshGitHubRemote
+      ? existsSync(rootPath)
+        ? await localProjectsLegacy.getLocalProjectGitHubRepoAtRootPath(rootPath)
+        : null
+      : undefined;
+    const current = (await options.native.readCatalog()).projects[project.id];
+    await options.native.saveLocalProject(
+      prepareMachineLocalProjectUpsert(project, current, observed, options.standaloneVisible),
+      options.expected
+    );
+    return;
+  }
   const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
   const rootPath = canonicalLocalProjectRootPath(project.rootPath);
   const observed = options.refreshGitHubRemote
@@ -133,18 +183,12 @@ export async function upsertMachineLocalProject(
   const current = getMachineFlockLocalProjects(
     readMachineFlockRowsFromFlock(handle.flock, { families: ['localProject'] })
   )[project.id];
-  const canonicalProject = {
-    ...project,
-    rootPath,
-    standaloneVisible:
-      options.standaloneVisible ?? current?.standaloneVisible ?? project.standaloneVisible,
-    githubRepoFullName:
-      observed !== undefined
-        ? (observed ?? undefined)
-        : current
-          ? current.githubRepoFullName
-          : project.githubRepoFullName,
-  };
+  const canonicalProject = prepareMachineLocalProjectUpsert(
+    project,
+    current,
+    observed,
+    options.standaloneVisible
+  );
   const changed = writeMachineFlockRowToFlock(
     handle.flock,
     {
@@ -172,10 +216,11 @@ export async function reconcileMachineLocalProjectRootPaths(
   workspaceId: WorkspaceId,
   machineId: MachineId,
   sync: MachineFlockSyncScheduler,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  native?: MachineDocumentRuntimePort
 ): Promise<void> {
   await withMachineCatalogWriteLock(getMachineRoomId(machineId), async () => {
-    const projects = await readMachineLocalProjects(repo, workspaceId, machineId);
+    const projects = await readMachineLocalProjects(repo, workspaceId, machineId, native);
     for (const project of Object.values(projects)) {
       if (signal?.aborted) return;
       const canonicalRootPath = canonicalLocalProjectRootPath(project.rootPath);
@@ -188,7 +233,13 @@ export async function reconcileMachineLocalProjectRootPaths(
           rootPath: canonicalRootPath,
         },
         undefined,
-        { sync, reason: 'local-project-path-reconcile', refreshGitHubRemote: true }
+        {
+          sync,
+          reason: 'local-project-path-reconcile',
+          refreshGitHubRemote: true,
+          native,
+          expected: project,
+        }
       );
     }
   });
@@ -200,8 +251,18 @@ export async function removeMachineLocalProject(
   machineId: MachineId,
   localProjectId: LocalProjectId,
   nowMs = getServerNow(),
-  options: { sync?: MachineFlockSyncScheduler; reason?: string } = {}
+  options: {
+    sync?: MachineFlockSyncScheduler;
+    reason?: string;
+    native?: MachineDocumentRuntimePort;
+  } = {}
 ): Promise<void> {
+  if (options.native) {
+    assertNativeProjectScope(options.native, workspaceId, machineId);
+    const current = (await options.native.readCatalog()).projects[localProjectId];
+    if (current) await options.native.removeLocalProject(current);
+    return;
+  }
   const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
   const changed = deleteMachineFlockRowFromFlock(
     handle.flock,
@@ -236,13 +297,15 @@ export async function resolveWorkspaceLocalProjectRootPath(
   repo: LoroRepo,
   workspaceId: WorkspaceId,
   machineId: MachineId,
-  localProjectId: LocalProjectId
+  localProjectId: LocalProjectId,
+  native?: MachineDocumentRuntimePort
 ): Promise<string | null> {
   const localProject = await resolveWorkspaceLocalProject(
     repo,
     workspaceId,
     machineId,
-    localProjectId
+    localProjectId,
+    native
   );
   const rootPath = localProject?.rootPath;
   if (typeof rootPath !== 'string') {
@@ -256,13 +319,15 @@ export async function resolveWorkspaceLocalProject(
   repo: LoroRepo,
   workspaceId: WorkspaceId,
   machineId: MachineId,
-  localProjectId: LocalProjectId
+  localProjectId: LocalProjectId,
+  native?: MachineDocumentRuntimePort
 ): Promise<LocalProjectMeta | null> {
-  const localProjects = await readMachineLocalProjects(repo, workspaceId, machineId);
+  const localProjects = await readMachineLocalProjects(repo, workspaceId, machineId, native);
   return localProjects[localProjectId] ?? null;
 }
 
 export type ResolveLocalProjectRootPathRetryOptions = {
+  native?: MachineDocumentRuntimePort;
   /**
    * Machine Flock pull, awaited (bounded by `syncTimeoutMs`) after each miss so
    * a row that only exists remotely (e.g. a session dispatch that lands before
@@ -306,9 +371,20 @@ export async function resolveWorkspaceLocalProjectWithSyncOnMiss(
   workspaceId: WorkspaceId,
   machineId: MachineId,
   localProjectId: LocalProjectId,
-  options: { requestSync?: () => Promise<boolean>; syncTimeoutMs?: number } = {}
+  options: {
+    requestSync?: () => Promise<boolean>;
+    syncTimeoutMs?: number;
+    native?: MachineDocumentRuntimePort;
+  } = {}
 ): Promise<LocalProjectMeta | null> {
-  const existing = await resolveWorkspaceLocalProject(repo, workspaceId, machineId, localProjectId);
+  const existing = await resolveWorkspaceLocalProject(
+    repo,
+    workspaceId,
+    machineId,
+    localProjectId,
+    options.native
+  );
+  if (options.native) return existing;
   if (existing || !options.requestSync) return existing;
   const syncTimeoutMs =
     options.syncTimeoutMs ?? readTimeoutEnv('LODY_LOCAL_PROJECT_RESOLVE_SYNC_TIMEOUT_MS', 1_500);
@@ -365,7 +441,8 @@ export async function resolveWorkspaceLocalProjectRootPathWithRetry(
       repo,
       workspaceId,
       machineId,
-      localProjectId
+      localProjectId,
+      options.native
     );
     if (rootPath !== null) {
       if (!options.verifyProjectIdentity) return rootPath;
@@ -383,7 +460,7 @@ export async function resolveWorkspaceLocalProjectRootPathWithRetry(
       return null;
     }
     options.onRetry?.(attempt, maxAttempts);
-    if (options.requestSync) {
+    if (options.requestSync && !options.native) {
       // try/catch (not .catch) so a synchronously-throwing stub is also tolerated.
       try {
         await withTimeout(

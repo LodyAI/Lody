@@ -67,13 +67,38 @@ type Index = {
   children: Map<string, ChildIndex>;
 };
 
+/** Detached, already validated sparse write intent; a native owner applies it under CAS. */
+export interface AgentHistoryPatch {
+  readonly path: readonly (string | number)[];
+  readonly before: unknown;
+  readonly next: unknown;
+  readonly rangeStart?: number;
+}
+
 /** The one writer's version-checked directory. Index metadata, never historical payloads. */
 export function createAgentHistoryWindow(
   doc: LoroDoc,
   prepare: (previous: SessionHistoryInput, next: SessionHistoryInput) => Json,
-  equal: (a: unknown, b: unknown) => boolean
+  equal: (a: unknown, b: unknown) => boolean,
+  sink?: (patch: AgentHistoryPatch) => void
 ) {
   const history = doc.getList('history');
+  const commit = () => {
+    if (!sink) doc.commit();
+  };
+  const pathOf = (value: LoroMap | LoroList) => {
+    const path = doc.getPathToContainer(value.id);
+    if (!path) invalid();
+    return path!;
+  };
+  const writeContainer = (...args: Parameters<typeof diffHistoryContainer>) => {
+    if (sink) sink({ path: pathOf(args[0] as LoroMap), before: args[2], next: args[3] });
+    else diffHistoryContainer(...args);
+  };
+  const writeRange = (...args: Parameters<typeof diffHistoryListRange>) => {
+    if (sink) sink({ path: pathOf(args[0]), rangeStart: args[2], before: args[3], next: args[4] });
+    else diffHistoryListRange(...args);
+  };
   let index: Index | undefined;
   const indexItem = (directory: Index, value: unknown, slot: Slot) => {
     const type = scalar(field(value, 'type'));
@@ -104,7 +129,7 @@ export function createAgentHistoryWindow(
     }
   };
   const current = () => {
-    doc.commit();
+    commit();
     if (index?.version.compare(doc.version()) === 0) return index;
     const next: Index = {
       version: doc.version(),
@@ -144,7 +169,7 @@ export function createAgentHistoryWindow(
   return {
     /** Field writes cannot change row/item identities; retain a complete directory. */
     preserveIndex(write: () => void) {
-      doc.commit();
+      commit();
       const complete = index?.version.compare(doc.version()) === 0;
       write();
       if (complete && index) index.version = doc.version();
@@ -231,7 +256,7 @@ export function createAgentHistoryWindow(
             const skip = prefix.length + (customTail ? 1 : 0);
             return () => {
               writes.forEach((write) => write());
-              diffHistoryListRange(
+              writeRange(
                 items,
                 schema,
                 tailStart + (customTail ? 1 : 0),
@@ -257,8 +282,7 @@ export function createAgentHistoryWindow(
         const before = json(value);
         return {
           value: before,
-          plan: (after) => () =>
-            diffHistoryListRange(items, schema, position, [before], [after], undefined),
+          plan: (after) => () => writeRange(items, schema, position, [before], [after], undefined),
         };
       };
       const itemsSchema = getMapFieldSchema(sessionHistorySchema, 'items');
@@ -323,7 +347,7 @@ export function createAgentHistoryWindow(
               });
             });
             return () => {
-              diffHistoryContainer(
+              writeContainer(
                 task,
                 itemSchema,
                 { ...before, run: oldRun },
@@ -382,12 +406,13 @@ export function createAgentHistoryWindow(
         const { items: _oldItems, ...oldFields } = previous;
         const { items: _newItems, ...nextFields } = next;
         return () => {
-          diffHistoryContainer(stored, sessionHistorySchema, oldFields, nextFields, undefined);
+          writeContainer(stored, sessionHistorySchema, oldFields, nextFields, undefined);
           writeItems();
         };
       });
       writes.forEach((write) => write());
-      doc.commit();
+      commit();
+      if (sink) return true;
       rows.forEach(({ row, view }, i) =>
         view.refresh((prepared[i]?.items ?? before[i]!.items) as unknown[], (value, item) =>
           indexItem(directory, value, { row, item })

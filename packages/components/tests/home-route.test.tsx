@@ -3,6 +3,7 @@
 import { act, useEffect, useRef } from 'react';
 import { Provider, createStore } from 'jotai';
 import { settingsActiveTabAtom, settingsDialogOpenAtom } from '../src/atoms/settings';
+import { Route as LegacySessionsRoute } from '../src/routes/$workspaceName/_auth/sessions';
 import { Route as WorkspaceSettingsRoute } from '../src/routes/$workspaceName/_auth/settings';
 import { navigateToResolvedPath } from '../src/lib/deep-link-path';
 import { resolveDesktopGitHubInstallDeepLinkPath } from '../src/lib/desktop-github-install-deep-link';
@@ -568,4 +569,64 @@ it('recovers the same local provider after validation errors with capped retries
   expect(getLocalPlatformProvider()).toBe(provider);
   expect(vi.getTimerCount()).toBe(0);
   error.mockRestore();
+});
+
+it('reaches chat from the legacy sessions URL after readiness and preserves child routes', async () => {
+  const ready = Promise.withResolvers<void>();
+  const entered = Promise.withResolvers<void>();
+  const base = createRootRoute({ component: Outlet });
+  const workspace = createRoute({
+    getParentRoute: () => base,
+    path: '$workspaceName',
+    component: Outlet,
+  });
+  const auth = createRoute({ getParentRoute: () => workspace, id: '_auth', component: Outlet });
+  const sessions = LegacySessionsRoute.update({ getParentRoute: () => auth, path: 'sessions' });
+  const chat = createRoute({
+    getParentRoute: () => auth,
+    path: 'chat',
+    beforeLoad: () => {
+      entered.resolve();
+      return ready.promise;
+    },
+    component: () => <div>Cloud chat ready</div>,
+  });
+  const child = createRoute({
+    getParentRoute: () => sessions,
+    path: '$sessionId',
+    component: () => <div>Existing session</div>,
+  });
+  const router = createRouter({
+    routeTree: base.addChildren([
+      workspace.addChildren([auth.addChildren([sessions.addChildren([child]), chat])]),
+    ]),
+    history: createMemoryHistory({ initialEntries: ['/acme/sessions'] }),
+    defaultPendingMs: Infinity,
+    defaultPendingMinMs: 0,
+  });
+  await router.load();
+  const container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+  try {
+    await act(async () => {
+      root!.render(<RouterProvider router={router} />);
+    });
+    await entered.promise;
+    await act(async () => {
+      ready.resolve();
+      await router.load();
+    });
+    expect(router.state.location.pathname).toBe('/acme/chat');
+    expect(container.textContent).toBe('Cloud chat ready');
+    await act(async () => {
+      await router.navigate({
+        to: '/$workspaceName/sessions/$sessionId',
+        params: { workspaceName: 'acme', sessionId: 'existing' },
+      });
+    });
+    expect(container.textContent).toBe('Existing session');
+  } finally {
+    ready.resolve();
+  }
 });

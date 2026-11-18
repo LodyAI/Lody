@@ -160,6 +160,7 @@ type AccessRetryHandle = {
 };
 /** Comparable document version; undefined when the handle exposes none. */
 const sessionDocVersion = (sessionDoc: SessionDocumentHandle): string | undefined => {
+  if (typeof sessionDoc.getCausalVersion === 'function') return sessionDoc.getCausalVersion();
   const doc = (
     sessionDoc as { handle?: { doc?: { version(): { toJSON(): Map<unknown, unknown> } } } }
   ).handle?.doc;
@@ -2061,9 +2062,15 @@ export class SessionDispatchWatcher {
     // have no causal receipt: retain their activation until a versioned update,
     // archive or watcher shutdown, rather than silently stranding a late row.
     const receipt = meta.messageQueueUpdateVersion;
-    if (!receipt || receipt.updatedAt !== updatedAt || !sessionDoc.handle?.doc) return;
-    const version = sessionDoc.handle.doc.version();
-    if (!receipt.frontiers.every(({ peer, counter }) => (version.get(peer) ?? 0) > counter)) {
+    if (!receipt || receipt.updatedAt !== updatedAt) return;
+    const confirmed =
+      typeof sessionDoc.hasCausalFrontiers === 'function'
+        ? sessionDoc.hasCausalFrontiers(receipt.frontiers)
+        : !!sessionDoc.handle?.doc &&
+          receipt.frontiers.every(
+            ({ peer, counter }) => (sessionDoc.handle!.doc.version().get(peer) ?? 0) > counter
+          );
+    if (!confirmed) {
       return;
     }
     // A row that could not be promoted yet keeps the signal open, so the session

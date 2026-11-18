@@ -9,6 +9,9 @@ void describe('Electron harness environment', () => {
       {
         DISPLAY: ':99',
         LODY_E2E_SHOW_WINDOW: '1',
+        LODY_NATIVE_MACHINE_CATALOG: '1',
+        LODY_NATIVE_SCHEDULE_REGISTRY: '1',
+        LODY_NATIVE_WORKSPACE_META: '1',
         LODY_PRIVATE_VALUE: 'excluded',
         XAUTHORITY: '/tmp/xvfb-auth',
       }
@@ -17,6 +20,9 @@ void describe('Electron harness environment', () => {
     assert.deepEqual(env, {
       DISPLAY: ':99',
       LODY_E2E_SHOW_WINDOW: '1',
+      LODY_NATIVE_MACHINE_CATALOG: '1',
+      LODY_NATIVE_SCHEDULE_REGISTRY: '1',
+      LODY_NATIVE_WORKSPACE_META: '1',
       XAUTHORITY: '/tmp/xvfb-auth',
       NODE_ENV: 'test',
     });

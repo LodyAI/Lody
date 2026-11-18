@@ -1,4 +1,88 @@
+import { NativeDocumentDomainDrainLegacy } from './native-document-domain-drain';
+import type {
+  NativeDocumentDomainFreezeRequest,
+  NativeDocumentDomainFreezeResponse,
+} from '@lody/shared/native-document-domain-control';
+import { readNativeDocumentDomainRoute } from '@lody/shared/node/native-document-domains';
+import { resolveLocalIndependentRepo } from '@lody/shared/node/native-repo-independent-paths';
+import { readFrozenLegacyLoroDocumentSqlite } from '@lody/shared/node/legacy-loro-document-source';
+import { join } from 'node:path';
+import { isLocalUserId, isLocalWorkspaceId } from '@lody/shared/platform-kind';
+import { openNativeLocalDocumentDomainsLegacy } from './native-local-document-domains';
+import type { ScheduleDefinitionResolver } from '@lody/shared';
+import { freezeLegacySessionLoroDocument } from '@lody/shared/session-data/legacy-freeze';
+import { createNativeLocalSessionFactoryLegacy } from './native-local-session-owner';
+import { randomUUID } from 'node:crypto';
+import { readLocalNativeSessionRoute } from '@lody/shared/node/native-session-routing';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import { readFrozenLegacySessionSqlite } from '@lody/shared/node/native-session-legacy-source';
+import type { NativeSessionBodyFreezeReceipt } from '@lody/shared/native-session-body-control';
+import {
+  openNativeLocalScheduleRegistryLegacy,
+  isLegacyLocalScheduleRegistryCurrent,
+  type NativeLocalScheduleRegistryLegacy,
+} from './native-schedule-registry-owner';
+import {
+  openNativeLocalWorkspaceMetaLegacy,
+  createRepoWithNativeWorkspaceMetaLegacy,
+  type NativeLocalWorkspaceMetaLegacy,
+} from './native-workspace-meta-owner';
+import {
+  prepareSessionQueuePromotionLedger,
+  prepareSessionSteerOperationLedger,
+} from '@/session/native-session-meta-plan';
+import type {
+  NativeSessionDocumentFactory,
+  NativeSessionDocumentOwner,
+} from '@/session/native-session-document';
+import type { NativeSessionMetadataOwner } from '@lody/shared/node/native-session-domain-grant';
+import {
+  prepareSessionQueueAppend,
+  promoteSessionQueueImageReferences,
+} from '@/session/native-session-queue-plan';
+import { prepareSessionAcpRuntimeConfig } from '@/session/native-session-runtime-config-plan';
+import {
+  openNativeLocalMachineCatalogLegacy,
+  isLegacyLocalMachineCatalogCurrent,
+  readSelectedLocalMachineCatalogId,
+  type NativeLocalMachineCatalogLegacy,
+} from './native-machine-catalog-owner';
+import {
+  publishMachineAcpCapabilities,
+  publishMachineRateLimits,
+  isValidDaemonLaunchConfig,
+} from '../machine-acp-capability-plan';
+import type { MachineDocumentRuntimePort } from '../machine-document-runtime-port';
+import {
+  createLegacyScheduleRegistry,
+  getScheduleRegistryFlockDocId,
+  type ScheduleRegistryPort,
+} from '@lody/shared';
+import { createLegacyWorkspaceDirectory, type WorkspaceDirectory } from '@lody/shared';
+import { createLegacyCliWorkspaceCatalog } from './workspace-catalog-legacy';
+import {
+  openNativeLocalWorkspaceCatalogLegacy,
+  isLegacyLocalWorkspaceCatalogCurrent,
+  type NativeLocalWorkspaceCatalogLegacy,
+} from './native-workspace-catalog-owner';
+import type {
+  WorkspaceCatalogBinding,
+  WorkspaceCatalogQuery,
+  WorkspaceCatalogCommands,
+  WorkspaceCatalogRoleLookup,
+} from '@lody/shared';
 import { Cause, Effect } from 'effect';
+import { openNativeFileIndexPilotLegacy } from './native-file-index-pilot';
+import type {
+  CodeCollabFileIndexBackend,
+  CodeCollabFileIndexBackendFactory,
+} from '../code-collab/code-collab-file-index-backend';
+import type { CodeCollabV2FileIndexPublication } from '../code-collab/code-collab-v2-service';
+import {
+  listCloudFileIndexSelections,
+  unavailableCloudFileIndexBackend,
+} from '../code-collab/code-collab-cloud-file-index-selection';
+import { createLegacyCodeCollabPublicationStore } from '../code-collab/code-collab-publication-store';
 import { isDeepStrictEqual } from 'node:util';
 import type { CliE2eeWorkspaceLegacy } from '../e2ee/workspace-legacy';
 import { projectRunMetaPatch } from '@/session/project-run-state';
@@ -47,20 +131,15 @@ import {
   getWorkspaceFlockDocId,
   SessionPlanEntry,
   type SessionExternalHistoryCursorDocState,
-  ACP_CAPABILITY_CACHE_VERSION,
   MessageQueueItem,
   type MessageQueueItemInput,
   SessionTitleSource,
   getAcpCapabilityCacheKey,
-  getReadableAcpCapabilityCacheEntry,
   getServerNow,
-  shouldRenewAcpCapabilityFetchTime,
   isLoroRepoDocDeleted,
   NEW_SESSION_HISTORY_BACKEND,
   LEGACY_SESSION_HISTORY_BACKEND,
   getMachineFlockAcpCapabilities,
-  getAcpConfigOptionsModelId,
-  writeAcpModelConfigOptionsToFlock,
   getMachineFlockProviderSetupCancellations,
   getMachineFlockProviderSetups,
   getMachineFlockDocId,
@@ -81,9 +160,6 @@ import {
   type LodyPresenceStateMap,
   type SessionAcpRuntimeConfigPatch,
   type SessionAcpRuntimeConfigSnapshot,
-  isSensitiveAcpConfigOptionId,
-  BuiltinRuntimeOverridesSchema,
-  CustomAcpLaunchSpecSchema,
 } from '@lody/shared';
 import { LocalLoroDataPlaneServerLegacy } from '@lody/shared/local-loro-data-plane-server';
 import { getProcessLocalLoroWriterLegacy } from '@lody/shared/local-loro-writer/legacy';
@@ -198,43 +274,6 @@ const cleanupFailureReasons = (error: unknown): string[] => {
   return [...reasons];
 };
 
-const isValidDaemonLaunchConfig = (
-  config: AgentConfigMeta,
-  expectedConfigId: AgentConfigId,
-  expectedMachineId: MachineId
-): boolean => {
-  if (
-    config.id !== expectedConfigId ||
-    config.machineId !== expectedMachineId ||
-    typeof config.agentType !== 'string' ||
-    config.agentType.trim().length === 0 ||
-    typeof config.env !== 'object' ||
-    config.env === null ||
-    Array.isArray(config.env) ||
-    Object.values(config.env).some((value) => typeof value !== 'string')
-  ) {
-    return false;
-  }
-
-  if (config.cliType === 'custom') {
-    return (
-      CustomAcpLaunchSpecSchema.safeParse(config.customAcp).success &&
-      config.runtimeOverrides === undefined
-    );
-  }
-  if (config.cliType === 'registry') {
-    return config.customAcp === undefined && config.runtimeOverrides === undefined;
-  }
-  if (config.cliType === 'builtin') {
-    return (
-      config.customAcp === undefined &&
-      (config.runtimeOverrides === undefined ||
-        BuiltinRuntimeOverridesSchema.safeParse(config.runtimeOverrides).success)
-    );
-  }
-  return false;
-};
-
 type GlobalWithOptionalBun = typeof globalThis & { Bun?: unknown };
 type GlobalWithWebSocket = { WebSocket: typeof ProxiedWebSocket };
 
@@ -243,17 +282,36 @@ const createLocalLoroDataPlaneServer = (
   workspaceId: WorkspaceId,
   presenceRuntime: CliPresenceRuntimeLegacy,
   machineMonitorRuntime: CliMachineMonitorRuntime,
-  promptSuggestions: CliPromptSuggestions
+  promptSuggestions: CliPromptSuggestions,
+  nativeFileIndexPilot: CodeCollabFileIndexBackend | null,
+  nativeWorkspaceCatalog: NativeLocalWorkspaceCatalogLegacy | null,
+  deniesLegacyFlock: (roomId: string) => boolean,
+  deniesLegacyDoc: (roomId: string) => boolean | Promise<boolean> = () => false
 ): LocalLoroDataPlaneServerLegacy =>
   new LocalLoroDataPlaneServerLegacy({
     workspaceId,
-    resolveDoc: async (docId) => (await repo.openPersistedDoc(docId)).doc,
-    resolveFlockDoc: async (flockDocId) => (await repo.openFlockDoc(flockDocId)).flock,
+    nativeFileIndexSource: nativeFileIndexPilot?.source,
+    resolveDoc: async (docId) => {
+      if (await deniesLegacyDoc(docId)) throw new Error('native_session_owner_required');
+      return (await repo.openPersistedDoc(docId)).doc;
+    },
+    resolveFlockDoc: async (flockDocId) => {
+      if (deniesLegacyFlock(flockDocId)) throw new Error('native_flock_owner_required');
+      if (nativeWorkspaceCatalog?.ownsRoom(flockDocId))
+        throw new Error('native_workspace_catalog_owner_required');
+      if (await nativeFileIndexPilot?.ownsRoom(flockDocId))
+        throw new Error('native_file_index_owner_required');
+      return (await repo.openFlockDoc(flockDocId)).flock;
+    },
     // The meta room is the repo's internal metaFlock (`repo.getMeta()`).
     // Renderer `upsertDocMeta` writes must land here so the CLI's doc-metadata
     // live monitor + dispatch watcher fire (a detached `openFlockDoc('meta')`
     // would silently swallow every dispatch).
-    resolveMetaFlock: async () => repo.getMeta(),
+    resolveMetaFlock: async () => {
+      if (Reflect.get(repo, 'metadataMode') === 'external')
+        throw new Error('native_meta_owner_required');
+      return repo.getMeta();
+    },
     // Relay only the presence this CLI itself authors, so local-first renderers
     // retain an offline source; online renderers merge it with their independent
     // cloud snapshot, which is what carries every remote origin.
@@ -401,6 +459,12 @@ export type MachinePresenceView = {
 };
 
 export interface LoroDocumentManagerOptions {
+  /** Selected before any MF consumer or data-plane admission is constructed. */
+  machineCatalogRuntime?: MachineDocumentRuntimePort;
+  workspaceDirectory?: WorkspaceDirectory;
+  scheduleRegistry?: ScheduleRegistryPort;
+  scheduleRegistryOwnership?: 'legacy' | 'native';
+  workspaceCatalog?: WorkspaceCatalogQuery & WorkspaceCatalogCommands & WorkspaceCatalogRoleLookup;
   repo: LoroRepo;
   workspaceId: WorkspaceId;
   userId: string;
@@ -413,6 +477,12 @@ export interface LoroDocumentManagerOptions {
   machineMonitorRuntime?: CliMachineMonitorRuntime | null;
   promptSuggestions?: CliPromptSuggestions | null;
   localLoroDataPlaneServer?: LocalLoroDataPlaneServerLegacy | null;
+  nativeFileIndexPilot?: CodeCollabFileIndexBackend | null;
+  nativeWorkspaceCatalog?: NativeLocalWorkspaceCatalogLegacy | null;
+  nativeMachineCatalog?: NativeLocalMachineCatalogLegacy | null;
+  nativeScheduleRegistryOwner?: NativeLocalScheduleRegistryLegacy | null;
+  nativeWorkspaceMetaOwner?: NativeLocalWorkspaceMetaLegacy | null;
+  nativeDocumentDomains?: Awaited<ReturnType<typeof openNativeLocalDocumentDomainsLegacy>>;
   sqliteRepoStore?: CliSqliteRepoStore | null;
   /** LoroDoc Streams cursors for this process; see `DocumentCursorScope`. */
   documentRemoteCursorStore?: RemoteCursorStore | null;
@@ -434,6 +504,8 @@ export interface LoroDocumentManagerOptions {
   cloudBilling?: CloudBillingPort | null;
   /** One-shot clients route history to the owner; daemons use installed local factories. */
   sessionHistoryFactory?: SessionBackendFactory;
+  nativeSessionFactory?: NativeSessionDocumentFactory;
+  scheduleDefinitions?: ScheduleDefinitionResolver;
   /** Daemon-only Roost routing that leaves this machine's execution policies unchanged. */
   ownerHistoryRouter?: SessionBackendFactory;
 }
@@ -466,7 +538,352 @@ function describeDocOpener(stack: string | undefined): string {
 }
 
 export class LoroDocumentManager {
+  private machineCatalogRuntime?: MachineDocumentRuntimePort;
+
+  /** Composition selects the whole machine catalog before admitting consumers.
+   * There is deliberately no fallback setter to reopen the legacy owner. */
+  selectMachineCatalogRuntime(port: MachineDocumentRuntimePort, machineId: MachineId): () => void {
+    if (
+      port.binding.workspaceId !== this.workspaceId ||
+      port.binding.accountId !== this.userId ||
+      port.binding.machineId !== machineId
+    )
+      throw new Error('Machine catalog identity mismatch');
+    if (this.machineCatalogRuntime && this.machineCatalogRuntime !== port)
+      throw new Error('Machine catalog owner already selected');
+    this.machineCatalogRuntime = port;
+    return () => port.close();
+  }
+  getMachineCatalogRuntimePort(machineId?: MachineId): MachineDocumentRuntimePort | undefined {
+    return machineId === undefined || this.machineCatalogRuntime?.binding.machineId === machineId
+      ? this.machineCatalogRuntime
+      : undefined;
+  }
+  getNativeMachineRuntimePorts(machineId: MachineId) {
+    return this.nativeMachineCatalog?.binding.machineId === machineId
+      ? this.nativeMachineCatalog
+      : undefined;
+  }
   public readonly repo: LoroRepo;
+  public readonly workspaceDirectory: WorkspaceDirectory;
+  public readonly scheduleRegistry: ScheduleRegistryPort;
+  private readonly nativeScheduleRegistry: boolean;
+  private readonly nativeScheduleRegistryOwner: NativeLocalScheduleRegistryLegacy | null;
+  private readonly nativeWorkspaceMetaOwner: NativeLocalWorkspaceMetaLegacy | null;
+  private readonly nativeMetaGeneration: string | undefined;
+  private documentDomainDrain: NativeDocumentDomainDrainLegacy | undefined;
+  private getDocumentDomainDrain(): NativeDocumentDomainDrainLegacy {
+    return (this.documentDomainDrain ??= new NativeDocumentDomainDrainLegacy({
+      accountId: this.userId,
+      workspaceId: this.workspaceId,
+      ownerGeneration: this.sessionFreezeGeneration,
+      metadataGeneration: () => {
+        if (!this.nativeWorkspaceMetaOwner || this.cleaningUp)
+          throw new Error('Native Meta scope unavailable');
+        this.nativeWorkspaceMetaOwner.metadata.assertCurrent();
+        return this.nativeWorkspaceMetaOwner.metadata.generation;
+      },
+      authorize: async (scope, purpose, nonce) => {
+        const owner = this.nativeWorkspaceMetaOwner?.metadata;
+        if (
+          !owner ||
+          this.cleaningUp ||
+          !isLocalUserId(this.userId) ||
+          !isLocalWorkspaceId(this.workspaceId)
+        )
+          throw new Error('Native document scope unavailable');
+        owner.assertCurrent();
+        const machinePrefix = getMachineRoomId('' as MachineId);
+        const machineId =
+          this.machineCatalogRuntime?.binding.machineId ??
+          (this.machine?.roomId.startsWith(machinePrefix)
+            ? this.machine.roomId.slice(machinePrefix.length)
+            : undefined);
+        if (purpose === 'create') {
+          if (!machineId || !nonce) throw new Error('Native document creator unavailable');
+          const state = await owner.readDocumentCreationState(scope.metadataDocId);
+          if (!state.pristine) {
+            const row = state.snapshot.docs.find((row) => row.docId === scope.metadataDocId);
+            const receipt = row?.meta.nativeDocumentCreation;
+            if (
+              !row ||
+              row.deleted ||
+              row.meta.id !== scope.id ||
+              row.meta.userId !== this.userId ||
+              row.meta.machineId !== machineId ||
+              !receipt ||
+              typeof receipt !== 'object' ||
+              Array.isArray(receipt) ||
+              Reflect.get(receipt, 'version') !== 1 ||
+              Reflect.get(receipt, 'family') !== scope.domain ||
+              Reflect.get(receipt, 'reservationId') !== nonce ||
+              typeof Reflect.get(receipt, 'creationIntentSha256') !== 'string' ||
+              !/^[a-f0-9]{64}$/.test(Reflect.get(receipt, 'creationIntentSha256')) ||
+              Object.keys(receipt).some(
+                (key) =>
+                  !['version', 'family', 'reservationId', 'creationIntentSha256'].includes(key)
+              )
+            )
+              throw new Error('Original native document reservation required');
+          }
+        } else if (!(await owner.document(scope.metadataDocId).read()))
+          throw new Error('Document metadata unavailable');
+        if (scope.domain === 'preview_comments') {
+          const parent = await owner.document(scope.parentMetadataDocId!).read();
+          if (
+            !parent ||
+            parent.id !== scope.id ||
+            (purpose === 'create' &&
+              (parent.userId !== this.userId || parent.machineId !== machineId))
+          )
+            throw new Error('Preview Session unavailable');
+        }
+        owner.assertCurrent();
+      },
+      route: (scope) => {
+        const selected = resolveLocalIndependentRepo({
+          platform: 'local',
+          dataRoot: getLodyDataDir('local'),
+          accountId: this.userId,
+          workspaceId: this.workspaceId,
+        });
+        return readNativeDocumentDomainRoute(
+          {
+            ...selected,
+            journalPath: join(selected.directory, 'document-routes.sqlite3'),
+            accountId: this.userId,
+            workspaceId: this.workspaceId,
+          },
+          scope.domain,
+          scope.id
+        );
+      },
+      drain: async (scope) => {
+        if (!this.sqliteRepoStore) throw new Error('Legacy document storage unavailable');
+        this.cancelLocalDocRoomBridge(scope.roomId);
+        await Promise.allSettled([...(this.legacySessionOpenWork.get(scope.roomId) ?? [])]);
+        const doc = this.legacySessionDocuments.get(scope.roomId);
+        if (doc) {
+          freezeLegacySessionLoroDocument(doc);
+          if (doc.opCount() > 0 || doc.getPendingTxnLength() > 0)
+            await this.originalSessionPersist(scope.roomId, doc);
+        }
+        await this.unloadDocRoom(scope.roomId);
+      },
+      source: (scope) => {
+        if (!this.sqliteRepoStore) throw new Error('Legacy document storage unavailable');
+        const { snapshot: _snapshot, ...source } = readFrozenLegacyLoroDocumentSqlite({
+          path: this.sqliteRepoStore.dbPath,
+          roomId: scope.roomId,
+          sourceId: `cli-sqlite:loro-doc-layout1:${this.workspaceId}:${scope.roomId}`,
+          maxBytes: 128 * 1024 * 1024,
+        });
+        return source;
+      },
+    }));
+  }
+  handleNativeDocumentDomainMigrationControl(
+    request: NativeDocumentDomainFreezeRequest
+  ): Promise<NativeDocumentDomainFreezeResponse> {
+    return this.getDocumentDomainDrain().handle(request);
+  }
+  private isManagedLegacyDocument(roomId: string): boolean {
+    return (
+      roomId.startsWith('session-') ||
+      roomId.startsWith('schedule-') ||
+      roomId.startsWith('preview-comment-')
+    );
+  }
+  private assertLegacySessionRoom(roomId: string): void {
+    if (roomId.startsWith('schedule-') || roomId.startsWith('preview-comment-'))
+      this.documentDomainDrain?.assertLegacy(roomId);
+    if (
+      (roomId.startsWith('schedule-') &&
+        this.nativeDocumentDomains?.owns('schedule_definition', roomId.slice(9))) ||
+      (roomId.startsWith('preview-comment-') &&
+        this.nativeDocumentDomains?.owns('preview_comments', roomId.slice(16)))
+    )
+      throw new Error('Legacy document domain is frozen');
+    if (!roomId.startsWith('session-')) return;
+    if (this.sessionFreezes.has(roomId.slice(8) as SessionId))
+      throw new Error('Legacy Session body is frozen');
+    this.nativeSessionFactory?.assertLegacyRoom?.(roomId);
+    if (
+      isLocalUserId(this.userId) &&
+      isLocalWorkspaceId(this.workspaceId) &&
+      readLocalNativeSessionRoute(
+        { accountId: this.userId, workspaceId: this.workspaceId, dataRoot: getLodyDataDir() },
+        roomId
+      ) !== 'legacy'
+    )
+      throw new Error('Legacy Session body is frozen');
+  }
+  private async ownLegacySessionOpen<A>(roomId: string, work: () => Promise<A>): Promise<A> {
+    this.assertLegacySessionRoom(roomId);
+    const raw = work();
+    const jobs = this.legacySessionOpenWork.get(roomId) ?? new Set<Promise<unknown>>();
+    jobs.add(raw);
+    this.legacySessionOpenWork.set(roomId, jobs);
+    void raw
+      .finally(() => {
+        jobs.delete(raw);
+        if (!jobs.size) this.legacySessionOpenWork.delete(roomId);
+      })
+      .catch(() => undefined);
+    return raw;
+  }
+  getSessionBodyMigrationGeneration(): string {
+    return this.sessionFreezeGeneration;
+  }
+  /** Authenticated local-control only; no supplied path, remote RPC or global daemon pause. */
+  freezeLegacySessionForNative(
+    sessionId: SessionId,
+    nonce: string,
+    phase: 'freeze' | 'assert' = 'freeze'
+  ): Promise<NativeSessionBodyFreezeReceipt> {
+    if (this.cleaningUp || !this.sqliteRepoStore)
+      throw new Error('Session freeze scope unavailable');
+    const roomId = getSessionRoomId(sessionId),
+      prior = this.sessionFreezes.get(sessionId);
+    if (prior) {
+      if (prior.nonce !== nonce) throw new Error('Session freeze nonce changed');
+      if (phase === 'freeze' && prior.failed) return prior.retry();
+      return prior.work.then(() => this.readFrozenSessionReceipt(sessionId, nonce, phase));
+    }
+    if (phase === 'assert') throw new Error('Session freeze proof unavailable');
+    if (
+      readLocalNativeSessionRoute(
+        { accountId: this.userId, workspaceId: this.workspaceId, dataRoot: getLodyDataDir() },
+        roomId
+      ) !== 'frozen'
+    )
+      throw new Error('Session route must be durably frozen before CLI drain');
+    // Publish the local fence synchronously, before any pending open can continue.
+    const entry = {
+      nonce,
+      work: undefined as unknown as Promise<NativeSessionBodyFreezeReceipt>,
+      failed: false,
+      retry: undefined as unknown as () => Promise<NativeSessionBodyFreezeReceipt>,
+    };
+    this.sessionFreezes.set(sessionId, entry);
+    entry.retry = () => {
+      entry.failed = false;
+      entry.work = Promise.resolve().then(async () => {
+        this.cancelLocalDocRoomBridge(roomId);
+        await Promise.allSettled([...(this.legacySessionOpenWork.get(roomId) ?? [])]);
+        const pending = this.pendingSessionDocs.get(sessionId);
+        if (pending) await pending.catch(() => undefined);
+        const existing = this.sessions.get(sessionId);
+        if (existing)
+          await existing.freezeLegacyBody({
+            persist: (doc) => this.originalSessionPersist(roomId, doc),
+          });
+        else {
+          // Include public raw handles not yet present in SQLite/Meta. Never open
+          // a cold document just to prove absence: SDK opens can ensure metadata.
+          const doc = this.legacySessionDocuments.get(roomId);
+          if (doc) {
+            freezeLegacySessionLoroDocument(doc);
+            if (doc.opCount() > 0 || doc.getPendingTxnLength() > 0)
+              await this.originalSessionPersist(roomId, doc);
+          }
+          // The original SDK unload also drains any internal cached replica and
+          // rejects while a real room/lease still holds it. No force eviction.
+          await this.unloadDocRoom(roomId);
+        }
+        if (existing && this.sessions.get(sessionId) === existing) this.sessions.delete(sessionId);
+        return this.readFrozenSessionReceipt(sessionId, nonce, 'freeze');
+      });
+      void entry.work.catch(() => {
+        entry.failed = true;
+      });
+      return entry.work;
+    };
+    return entry.retry();
+  }
+  private readFrozenSessionReceipt(
+    sessionId: SessionId,
+    nonce: string,
+    phase: 'freeze' | 'assert'
+  ): NativeSessionBodyFreezeReceipt {
+    if (
+      this.cleaningUp ||
+      this.sessionFreezes.get(sessionId)?.nonce !== nonce ||
+      !this.sqliteRepoStore
+    )
+      throw new Error('Session freeze proof retired');
+    if (
+      readLocalNativeSessionRoute(
+        { accountId: this.userId, workspaceId: this.workspaceId, dataRoot: getLodyDataDir() },
+        getSessionRoomId(sessionId)
+      ) === 'legacy'
+    )
+      throw new Error('Session legacy route reopened');
+    const { snapshot: _snapshot, ...source } = readFrozenLegacySessionSqlite({
+      path: this.sqliteRepoStore.dbPath,
+      workspaceId: this.workspaceId,
+      sessionId,
+    });
+    return {
+      ok: true,
+      accountId: this.userId,
+      workspaceId: this.workspaceId,
+      sessionId,
+      nonce,
+      phase,
+      ownerGeneration: this.sessionFreezeGeneration,
+      source,
+    };
+  }
+
+  nativeMetaDocument(id: string) {
+    return this.nativeWorkspaceMetaOwner?.metadata.document(id);
+  }
+  async exportNativeMetaSnapshot(): Promise<Uint8Array | undefined> {
+    return this.nativeWorkspaceMetaOwner?.metadata.exportRaw();
+  }
+  ownsNativeFlockRoom(id: string): boolean {
+    return (
+      this.nativeWorkspaceCatalog?.ownsRoom(id) === true ||
+      (id.startsWith(`${this.workspaceId}:mf:`) &&
+        id.split(':').length === 3 &&
+        !isLegacyLocalMachineCatalogCurrent(
+          this.userId,
+          this.workspaceId,
+          id.slice(`${this.workspaceId}:mf:`.length) as MachineId
+        )) ||
+      (id === getScheduleRegistryFlockDocId(this.workspaceId) &&
+        (this.nativeScheduleRegistry ||
+          !isLegacyLocalScheduleRegistryCurrent(this.userId, this.workspaceId))) ||
+      (!!this.machineCatalogRuntime &&
+        id === getMachineFlockDocId(this.workspaceId, this.machineCatalogRuntime.binding.machineId))
+    );
+  }
+  public readonly workspaceCatalogBinding: WorkspaceCatalogBinding;
+  public readonly workspaceCatalog: WorkspaceCatalogQuery &
+    WorkspaceCatalogCommands &
+    WorkspaceCatalogRoleLookup;
+  private readonly nativeWorkspaceCatalog: NativeLocalWorkspaceCatalogLegacy | null;
+  private readonly nativeMachineCatalog: NativeLocalMachineCatalogLegacy | null;
+
+  async readWorkspaceCatalog(workspaceId: WorkspaceId = this.workspaceId) {
+    if (this.cleaningUp) throw new Error('document_manager_closing');
+    const catalog = await this.workspaceCatalog.read({
+      ...this.workspaceCatalogBinding,
+      workspaceId,
+    });
+    if (this.cleaningUp) throw new Error('document_manager_closing');
+    return catalog;
+  }
+  async readWorkspaceRole(workspaceId: WorkspaceId, id: import('@lody/shared').AgentRoleId) {
+    if (this.cleaningUp) throw new Error('document_manager_closing');
+    const role = await this.workspaceCatalog.readRole(
+      { ...this.workspaceCatalogBinding, workspaceId },
+      id
+    );
+    if (this.cleaningUp) throw new Error('document_manager_closing');
+    return role;
+  }
   sessions: Map<SessionId, SessionDocument> = new Map();
   /**
    * When each cached Session doc was last handed to a caller. Every opener, not
@@ -480,6 +897,7 @@ export class LoroDocumentManager {
   private readonly userId: string;
   private readonly logger: Logger;
   private readonly localLoroDataPlaneServer: LocalLoroDataPlaneServerLegacy | null;
+  private readonly nativeFileIndexPilot: CodeCollabFileIndexBackend | null;
   private readonly sqliteRepoStore: CliSqliteRepoStore | null;
   private readonly documentRemoteCursorStore: RemoteCursorStore | null;
   private remoteStreamsAttached: boolean;
@@ -519,6 +937,25 @@ export class LoroDocumentManager {
   private readonly streamsTokens: CloudStreamsTokenPort | null;
   public readonly cloudBilling: CloudBillingPort | null;
   private readonly sessionHistoryFactory?: SessionBackendFactory;
+  readonly scheduleDefinitions?: ScheduleDefinitionResolver;
+  private readonly nativeDocumentDomains: Awaited<
+    ReturnType<typeof openNativeLocalDocumentDomainsLegacy>
+  >;
+  private readonly nativeSessionFactory?: NativeSessionDocumentFactory;
+  private readonly originalSessionOpen: LoroRepo['openPersistedDoc'];
+  private readonly originalSessionPersist: LoroRepo['persistDocNow'];
+  private readonly legacySessionDocuments = new Map<string, LoroDoc>();
+  private readonly legacySessionOpenWork = new Map<string, Set<Promise<unknown>>>();
+  private readonly sessionFreezeGeneration = randomUUID();
+  private readonly sessionFreezes = new Map<
+    SessionId,
+    {
+      nonce: string;
+      work: Promise<NativeSessionBodyFreezeReceipt>;
+      failed: boolean;
+      retry(): Promise<NativeSessionBodyFreezeReceipt>;
+    }
+  >();
   private readonly ownerHistoryRouter?: SessionBackendFactory;
   private catalogSync?: WorkspaceCatalogSyncLegacy;
 
@@ -567,20 +1004,55 @@ export class LoroDocumentManager {
   }
 
   async holdCatalogFlockDoc(flockDocId: string): Promise<void> {
+    if (
+      this.nativeScheduleRegistry &&
+      flockDocId === getScheduleRegistryFlockDocId(this.workspaceId)
+    )
+      return;
+    if (this.ownsNativeFlockRoom(flockDocId)) return;
     await this.catalogSync?.hold(flockDocId);
   }
 
   async catalogBaselineReady(flockDocId: string | undefined, timeoutMs: number): Promise<boolean> {
+    if (flockDocId === undefined && this.nativeWorkspaceMetaOwner) {
+      const owner = this.nativeWorkspaceMetaOwner;
+      owner.metadata.assertCurrent();
+      await owner.externalMetadata.read();
+      const authority = owner.directory.authority?.get();
+      return (
+        !this.connectionRecovery.isRecovering() &&
+        authority?.synced === true &&
+        authority.generation === this.nativeMetaGeneration
+      );
+    }
+    if (
+      this.nativeScheduleRegistry &&
+      flockDocId === getScheduleRegistryFlockDocId(this.workspaceId)
+    )
+      return (await this.scheduleRegistry.read()).synced;
+    if (flockDocId && this.nativeWorkspaceCatalog?.ownsRoom(flockDocId))
+      return this.nativeWorkspaceCatalog.ready();
+    if (flockDocId?.startsWith(`${this.workspaceId}:mf:`) && this.ownsNativeFlockRoom(flockDocId)) {
+      if (
+        !this.machineCatalogRuntime ||
+        flockDocId !==
+          getMachineFlockDocId(this.workspaceId, this.machineCatalogRuntime.binding.machineId)
+      )
+        return false;
+      await this.machineCatalogRuntime.readCatalog();
+      return true;
+    }
     return this.catalogSync ? this.catalogSync.ready(flockDocId, timeoutMs) : true;
   }
 
   /** Projects the existing reader owner, including daemon calls outside Session ALS. */
   hasWorkspaceCatalogReader(): boolean {
-    return this.catalogSync !== undefined;
+    return this.nativeWorkspaceCatalog !== null || this.catalogSync !== undefined;
   }
 
   /** Past remote receipt, not current connectivity or a fresh authorization verdict. */
   hasPersistedWorkspaceCatalog(): boolean {
+    if (this.nativeWorkspaceCatalog) return this.nativeWorkspaceCatalog.hasPersisted();
     return (
       this.sqliteRepoStore !== null &&
       hasPersistedFlockRemoteState(
@@ -598,6 +1070,16 @@ export class LoroDocumentManager {
       attachRemoteOnCreate?: boolean;
       /** Daemon-only reader lease; one-shot commands retain explicit sync ownership. */
       keepWorkspaceCatalogJoined?: boolean;
+      machineCatalogRuntime?: MachineDocumentRuntimePort;
+      nativeMachineId?: MachineId;
+      nativeFileIndexBackendFactory?: CodeCollabFileIndexBackendFactory;
+      nativeWorkspaceMetaLaunch?: { executable: string; entry: string };
+      workspaceDirectory?: WorkspaceDirectory;
+      scheduleRegistry?: ScheduleRegistryPort;
+      scheduleRegistryOwnership?: 'legacy' | 'native';
+      workspaceCatalog?: WorkspaceCatalogQuery &
+        WorkspaceCatalogCommands &
+        WorkspaceCatalogRoleLookup;
       /**
        * Only the daemon passes `shared-durable`; see `DocumentCursorScope`.
        * The default keeps LoroDoc progress in this process's memory.
@@ -619,10 +1101,29 @@ export class LoroDocumentManager {
       streamsTokens?: CloudStreamsTokenPort | null;
       cloudBilling?: CloudBillingPort | null;
       sessionHistoryFactory?: SessionBackendFactory;
+      nativeSessionFactory?: NativeSessionDocumentFactory;
+      scheduleDefinitions?: ScheduleDefinitionResolver;
       ownerHistoryRouter?: SessionBackendFactory;
       onStorageWriteFailure?: (error: Error) => void;
     } = {}
   ): Promise<LoroDocumentManager> {
+    if (
+      options.nativeSessionFactory &&
+      (options.nativeSessionFactory.binding.accountId !== userId ||
+        options.nativeSessionFactory.binding.workspaceId !== workspaceId)
+    )
+      throw new Error('Native session factory identity mismatch');
+    if (
+      options.machineCatalogRuntime &&
+      (options.machineCatalogRuntime.binding.workspaceId !== workspaceId ||
+        options.machineCatalogRuntime.binding.accountId !== userId)
+    )
+      throw new Error('Machine catalog identity mismatch');
+    if (
+      (options.scheduleRegistry && options.scheduleRegistry.workspaceId !== workspaceId) ||
+      (options.scheduleRegistryOwnership === 'native' && !options.scheduleRegistry)
+    )
+      throw new Error('Bound native schedule registry port is required');
     // Configure the CLI's global HTTP dispatcher once (proxy/H2/diagnostics). This
     // must run regardless of whether Streams attaches, since all CLI HTTP —
     // message-handler fetches, R2 uploads, and the deferred Streams token/attach
@@ -656,8 +1157,35 @@ export class LoroDocumentManager {
 
     let repo: LoroRepo | null = null;
     let presenceRuntime: CliPresenceRuntimeLegacy | null = null;
+    let nativeFileIndexPilot: CodeCollabFileIndexBackend | null = null;
+    let nativeWorkspaceCatalog: NativeLocalWorkspaceCatalogLegacy | null = null;
+    let nativeMachineCatalog: NativeLocalMachineCatalogLegacy | null = null;
+    let nativeScheduleRegistryOwner: NativeLocalScheduleRegistryLegacy | null = null;
+    let nativeWorkspaceMetaOwner: NativeLocalWorkspaceMetaLegacy | null = null;
+    let nativeSessionFactory = options.nativeSessionFactory;
+    let nativeDocumentDomains: Awaited<ReturnType<typeof openNativeLocalDocumentDomainsLegacy>> =
+      null;
     let manager: LoroDocumentManager | null = null;
     try {
+      nativeWorkspaceMetaOwner = await openNativeLocalWorkspaceMetaLegacy({
+        accountId: userId,
+        workspaceId,
+        encrypted: !!options.encryptedWorkspace,
+        cloud: options.streamsTokens != null,
+        launch: options.nativeWorkspaceMetaLaunch,
+      });
+      if (nativeWorkspaceMetaOwner && !nativeSessionFactory)
+        nativeSessionFactory = await createNativeLocalSessionFactoryLegacy({
+          accountId: userId,
+          workspaceId,
+          metadata: nativeWorkspaceMetaOwner.metadata,
+          onBackgroundFailure: () => logger.warn('Native Session background operation failed'),
+        });
+      const repoOptions = {
+        storageAdapter: cliSqliteRepoStore.storageAdapter,
+        metaDebounceCommitMs: 0,
+        flockDocRetentionMs: getFlockDocRetentionMs,
+      };
       const createRepoStartMs = Date.now();
       repo = await traceAsync(
         logger,
@@ -665,16 +1193,50 @@ export class LoroDocumentManager {
         { workspaceId },
         async () =>
           await withTimeout(
-            LoroRepo.create({
-              storageAdapter: cliSqliteRepoStore.storageAdapter,
-              metaDebounceCommitMs: 0,
-              flockDocRetentionMs: getFlockDocRetentionMs,
-            }),
+            nativeWorkspaceMetaOwner
+              ? createRepoWithNativeWorkspaceMetaLegacy(repoOptions, nativeWorkspaceMetaOwner)
+              : LoroRepo.create(repoOptions),
             createRepoTimeoutMs,
             `Timeout waiting for LoroRepo.create (workspace=${workspaceId})`
           )
       );
       const createdRepo = repo;
+      // Persistent whole-MF admission also binds one-shot/legacy helpers which
+      // still receive this owned Repo. Never create an old writable MF replica
+      // after main's durable freeze or a native publication.
+      const assertLegacyMf = (id: string) => {
+        if (
+          id === getScheduleRegistryFlockDocId(workspaceId) &&
+          !isLegacyLocalScheduleRegistryCurrent(userId, workspaceId)
+        )
+          throw new Error('native_schedule_registry_owner_required');
+        const prefix = `${workspaceId}:mf:`;
+        if (
+          id.startsWith(prefix) &&
+          id.split(':').length === 3 &&
+          !isLegacyLocalMachineCatalogCurrent(
+            userId,
+            workspaceId,
+            id.slice(prefix.length) as MachineId
+          )
+        )
+          throw new Error('native_machine_catalog_owner_required');
+      };
+      const openLegacyMf = createdRepo.openFlockDoc.bind(createdRepo);
+      createdRepo.openFlockDoc = (id, ...args) => {
+        assertLegacyMf(id);
+        return openLegacyMf(id, ...args);
+      };
+      const acquireLegacyMf = createdRepo.acquireFlockDoc.bind(createdRepo);
+      createdRepo.acquireFlockDoc = (id, ...args) => {
+        assertLegacyMf(id);
+        return acquireLegacyMf(id, ...args);
+      };
+      const joinLegacyMf = createdRepo.joinFlockDocRoom.bind(createdRepo);
+      createdRepo.joinFlockDocRoom = (id, ...args) => {
+        assertLegacyMf(id);
+        return joinLegacyMf(id, ...args);
+      };
       logger.debug(`[${workspaceId}] LoroRepo created in ${Date.now() - createRepoStartMs}ms`);
       // Presence is produced locally regardless of remote sync so local-first
       // renderers get machine/session liveness over the data plane; the cloud
@@ -684,6 +1246,105 @@ export class LoroDocumentManager {
       });
       const machineMonitorRuntime = new CliMachineMonitorRuntime({ workspaceId, logger });
       const promptSuggestions = new CliPromptSuggestions(workspaceId, logger);
+      const ordinaryCloudDaemon =
+        options.streamsTokens != null &&
+        !options.encryptedWorkspace &&
+        options.documentCursorScope === 'shared-durable';
+      if (ordinaryCloudDaemon) {
+        let selected: string[] | null = [];
+        try {
+          selected = listCloudFileIndexSelections(
+            getLodyDataDir(),
+            userId,
+            workspaceId,
+            options.nativeFileIndexBackendFactory?.authorityId
+          ).flatMap((selection) => selection.owners.map((owner) => owner.owner));
+        } catch {
+          selected = null;
+          logger.debug(
+            'Native Cloud FI selection requires recovery; Session runtime remains available'
+          );
+        }
+        try {
+          nativeFileIndexPilot =
+            selected === null
+              ? unavailableCloudFileIndexBackend(createdRepo, workspaceId, null)
+              : options.nativeFileIndexBackendFactory
+                ? await options.nativeFileIndexBackendFactory({
+                    repo: createdRepo,
+                    workspaceId,
+                    accountId: userId,
+                    machineId: options.nativeMachineId,
+                  })
+                : selected.length
+                  ? unavailableCloudFileIndexBackend(createdRepo, workspaceId, selected)
+                  : null;
+          if (!nativeFileIndexPilot && selected?.length)
+            nativeFileIndexPilot = unavailableCloudFileIndexBackend(
+              createdRepo,
+              workspaceId,
+              selected
+            );
+        } catch {
+          nativeFileIndexPilot = unavailableCloudFileIndexBackend(
+            createdRepo,
+            workspaceId,
+            selected?.length ? selected : null
+          );
+          logger.debug('Native Cloud FI backend unavailable; selected publication remains fenced');
+        }
+      } else {
+        nativeFileIndexPilot = await openNativeFileIndexPilotLegacy({
+          workspaceId,
+          userId,
+          repo: createdRepo,
+          daemon: options.documentCursorScope === 'shared-durable',
+          encrypted: !!options.encryptedWorkspace || options.streamsTokens != null,
+        });
+      }
+      nativeWorkspaceCatalog = await openNativeLocalWorkspaceCatalogLegacy({
+        workspaceId,
+        accountId: userId,
+        encrypted: !!options.encryptedWorkspace,
+        cloud: options.streamsTokens != null,
+      });
+      const persistedNativeMachineId = readSelectedLocalMachineCatalogId({
+        accountId: userId,
+        workspaceId,
+      });
+      if (
+        persistedNativeMachineId &&
+        options.nativeMachineId &&
+        persistedNativeMachineId !== options.nativeMachineId
+      )
+        throw new Error('Native MF machine identity changed; explicit recovery is required');
+      const selectedNativeMachineId = persistedNativeMachineId ?? options.nativeMachineId;
+      if (selectedNativeMachineId && !options.machineCatalogRuntime)
+        nativeMachineCatalog = await openNativeLocalMachineCatalogLegacy({
+          workspaceId,
+          accountId: userId,
+          machineId: selectedNativeMachineId,
+          encrypted: !!options.encryptedWorkspace,
+          cloud: options.streamsTokens != null,
+        });
+      if (!options.scheduleRegistry)
+        nativeScheduleRegistryOwner = await openNativeLocalScheduleRegistryLegacy({
+          accountId: userId,
+          workspaceId,
+          encrypted: !!options.encryptedWorkspace,
+          cloud: options.streamsTokens != null,
+        });
+      nativeDocumentDomains = await openNativeLocalDocumentDomainsLegacy({
+        accountId: userId,
+        workspaceId,
+        encrypted: !!options.encryptedWorkspace,
+        cloud: options.streamsTokens != null,
+        metadata: nativeWorkspaceMetaOwner?.metadata,
+        registry:
+          nativeScheduleRegistryOwner?.registry ??
+          options.scheduleRegistry ??
+          createLegacyScheduleRegistry({ repo: createdRepo, workspaceId }),
+      });
       // No transport is registered at startup: rooms stay pending/detached
       // while offline, and renderer↔CLI document sync is served out-of-band by
       // the data-plane server engine. The cloud Streams transport is added
@@ -693,19 +1354,41 @@ export class LoroDocumentManager {
         workspaceId,
         presenceRuntime,
         machineMonitorRuntime,
-        promptSuggestions
+        promptSuggestions,
+        nativeFileIndexPilot,
+        nativeWorkspaceCatalog,
+        (id) =>
+          manager?.ownsNativeFlockRoom(id) === true ||
+          (options.machineCatalogRuntime !== undefined &&
+            id ===
+              getMachineFlockDocId(workspaceId, options.machineCatalogRuntime.binding.machineId)) ||
+          ((nativeScheduleRegistryOwner !== null ||
+            options.scheduleRegistryOwnership === 'native') &&
+            id === getScheduleRegistryFlockDocId(workspaceId)),
+        async (id) =>
+          (await (nativeSessionFactory?.ownsRoom(id) ?? false)) ||
+          (id.startsWith('schedule-')
+            ? nativeDocumentDomains?.owns('schedule_definition', id.slice(9)) === true
+            : id.startsWith('preview-comment-')
+              ? nativeDocumentDomains?.owns('preview_comments', id.slice(16)) === true
+              : false)
       );
-      const metaSub = await traceAsync(
-        logger,
-        'startup.loro_meta_join',
-        { workspaceId },
-        async () =>
-          await withTimeout(
-            createdRepo.joinMetaRoom(),
-            joinMetaTimeoutMs,
-            `Timeout waiting for repo.joinMetaRoom (workspace=${workspaceId})`
-          )
-      );
+      const metaSub = nativeWorkspaceMetaOwner
+        ? null
+        : await traceAsync(
+            logger,
+            'startup.loro_meta_join',
+            { workspaceId },
+            async () =>
+              await withTimeout(
+                createdRepo.joinMetaRoom(),
+                joinMetaTimeoutMs,
+                `Timeout waiting for repo.joinMetaRoom (workspace=${workspaceId})`
+              )
+          );
+      // Native Meta has no legacy Streams room. Bind the actual projection and
+      // client generation before public readiness starts observing its authority.
+      if (nativeWorkspaceMetaOwner) await nativeWorkspaceMetaOwner.directory.listEntries();
       manager = new LoroDocumentManager({
         repo: createdRepo,
         workspaceId,
@@ -717,11 +1400,13 @@ export class LoroDocumentManager {
         // the remote transport attaches.
         initialTransportStatus: 'connected',
         initialMetaSyncPromise: Promise.resolve(false),
-        initialMetaSyncCompleted: false,
+        initialMetaSyncCompleted: nativeWorkspaceMetaOwner !== null,
         presenceRuntime,
         machineMonitorRuntime,
         promptSuggestions,
         localLoroDataPlaneServer,
+        nativeFileIndexPilot,
+        nativeWorkspaceCatalog,
         sqliteRepoStore: cliSqliteRepoStore,
         documentRemoteCursorStore: createDocumentRemoteCursorStore(
           cliSqliteRepoStore,
@@ -732,18 +1417,63 @@ export class LoroDocumentManager {
         encryptedWorkspace: options.encryptedWorkspace,
         cloudBilling: options.cloudBilling ?? null,
         sessionHistoryFactory: options.sessionHistoryFactory,
+        nativeSessionFactory,
+        scheduleDefinitions: options.scheduleDefinitions ?? nativeDocumentDomains?.definitions,
+        nativeDocumentDomains,
         ownerHistoryRouter: options.ownerHistoryRouter,
+        workspaceCatalog: options.workspaceCatalog,
+        machineCatalogRuntime: nativeMachineCatalog?.execution ?? options.machineCatalogRuntime,
+        nativeMachineCatalog,
+        nativeScheduleRegistryOwner,
+        nativeWorkspaceMetaOwner,
+        workspaceDirectory: nativeWorkspaceMetaOwner?.directory ?? options.workspaceDirectory,
+        scheduleRegistry: nativeScheduleRegistryOwner?.registry ?? options.scheduleRegistry,
+        scheduleRegistryOwnership: nativeScheduleRegistryOwner
+          ? 'native'
+          : options.scheduleRegistryOwnership,
       });
       if (options.keepWorkspaceCatalogJoined) {
         manager.catalogSync = new WorkspaceCatalogSyncLegacy(
           createdRepo,
           workspaceId,
           logger,
-          options.streamsTokens != null
+          options.streamsTokens != null,
+          nativeWorkspaceCatalog !== null,
+          nativeWorkspaceMetaOwner !== null
         );
       }
     } catch (error) {
       const failures: unknown[] = [error];
+      try {
+        await nativeDocumentDomains?.close();
+      } catch (cleanup) {
+        failures.push(cleanup);
+      }
+      try {
+        await nativeScheduleRegistryOwner?.close();
+      } catch (cleanup) {
+        failures.push(cleanup);
+      }
+      try {
+        await nativeSessionFactory?.close();
+      } catch (cleanup) {
+        failures.push(cleanup);
+      }
+      try {
+        await nativeMachineCatalog?.close();
+      } catch (cleanup) {
+        failures.push(cleanup);
+      }
+      try {
+        await nativeWorkspaceCatalog?.close();
+      } catch (cleanup) {
+        failures.push(cleanup);
+      }
+      try {
+        await nativeFileIndexPilot?.close();
+      } catch (cleanup) {
+        failures.push(cleanup);
+      }
       try {
         await presenceRuntime?.stop();
       } catch (cleanup) {
@@ -756,11 +1486,17 @@ export class LoroDocumentManager {
           cliSqliteRepoStore.sqliteStore.close();
         }
       } catch (closeError) {
+        failures.push(closeError);
         logger.debug(
           `[${workspaceId}] Failed to close SQLite repo store after init failure: ${formatErrorMessage(
             closeError
           )}`
         );
+      }
+      try {
+        await nativeWorkspaceMetaOwner?.close();
+      } catch (cleanup) {
+        failures.push(cleanup);
       }
       if (failures.length > 1) {
         const failure = new AggregateError(
@@ -812,8 +1548,100 @@ export class LoroDocumentManager {
     this.repo = options.repo;
     this.workspaceId = options.workspaceId;
     this.userId = options.userId;
+    this.originalSessionOpen = this.repo.openPersistedDoc.bind(this.repo);
+    this.originalSessionPersist = this.repo.persistDocNow.bind(this.repo);
+    const acquireSession = this.repo.acquireDoc.bind(this.repo);
+    const joinSession = this.repo.joinDocRoom.bind(this.repo);
+    const unloadSession = this.repo.unloadDoc.bind(this.repo);
+    this.repo.unloadDoc = async (...args: Parameters<LoroRepo['unloadDoc']>) => {
+      await unloadSession(...args);
+      this.legacySessionDocuments.delete(args[0]);
+    };
+    this.repo.openPersistedDoc = (id) => {
+      this.assertLegacySessionRoom(id);
+      return this.isManagedLegacyDocument(id)
+        ? this.ownLegacySessionOpen(id, async () => {
+            const handle = await this.originalSessionOpen(id);
+            this.legacySessionDocuments.set(id, handle.doc);
+            this.assertLegacySessionRoom(id);
+            return handle;
+          })
+        : this.originalSessionOpen(id);
+    };
+    this.repo.acquireDoc = (id) => {
+      this.assertLegacySessionRoom(id);
+      return this.isManagedLegacyDocument(id)
+        ? this.ownLegacySessionOpen(id, async () => {
+            const lease = await acquireSession(id);
+            this.legacySessionDocuments.set(id, lease.doc);
+            try {
+              this.assertLegacySessionRoom(id);
+              return lease;
+            } catch (error) {
+              await lease.release();
+              throw error;
+            }
+          })
+        : acquireSession(id);
+    };
+    this.repo.joinDocRoom = (...args: Parameters<LoroRepo['joinDocRoom']>) => {
+      this.assertLegacySessionRoom(args[0]);
+      return this.isManagedLegacyDocument(args[0])
+        ? this.ownLegacySessionOpen(args[0], async () => {
+            const joined = await joinSession(...args);
+            try {
+              this.assertLegacySessionRoom(args[0]);
+              return joined;
+            } catch (error) {
+              joined.unsubscribe();
+              throw error;
+            }
+          })
+        : joinSession(...args);
+    };
+    this.repo.persistDocNow = (...args: Parameters<LoroRepo['persistDocNow']>) => {
+      this.assertLegacySessionRoom(args[0]);
+      return this.isManagedLegacyDocument(args[0])
+        ? this.ownLegacySessionOpen(args[0], () => this.originalSessionPersist(...args))
+        : this.originalSessionPersist(...args);
+    };
+
+    if (options.machineCatalogRuntime)
+      this.selectMachineCatalogRuntime(
+        options.machineCatalogRuntime,
+        options.machineCatalogRuntime.binding.machineId
+      );
+    this.workspaceDirectory =
+      options.workspaceDirectory ?? createLegacyWorkspaceDirectory(options.repo);
+    if (options.scheduleRegistry && options.scheduleRegistry.workspaceId !== options.workspaceId)
+      throw new Error('Schedule registry workspace mismatch');
+    if (options.scheduleRegistryOwnership === 'native' && !options.scheduleRegistry)
+      throw new Error('Native schedule registry port is required');
+    this.scheduleRegistry =
+      options.scheduleRegistry ??
+      createLegacyScheduleRegistry({ repo: options.repo, workspaceId: options.workspaceId });
+    this.nativeScheduleRegistryOwner = options.nativeScheduleRegistryOwner ?? null;
+    this.nativeWorkspaceMetaOwner = options.nativeWorkspaceMetaOwner ?? null;
+    this.nativeMetaGeneration = this.nativeWorkspaceMetaOwner?.metadata.generation;
+    this.nativeScheduleRegistry = options.scheduleRegistryOwnership === 'native';
+    this.nativeWorkspaceCatalog = options.nativeWorkspaceCatalog ?? null;
+    this.nativeMachineCatalog = options.nativeMachineCatalog ?? null;
+    this.workspaceCatalogBinding = Object.freeze({
+      workspaceId: this.workspaceId,
+      accountId: this.userId,
+    });
+    this.workspaceCatalog =
+      options.workspaceCatalog ??
+      this.nativeWorkspaceCatalog?.catalog ??
+      createLegacyCliWorkspaceCatalog({
+        repo: this.repo,
+        binding: this.workspaceCatalogBinding,
+        isCurrent: () =>
+          !this.cleaningUp && isLegacyLocalWorkspaceCatalogCurrent(this.userId, this.workspaceId),
+      });
     this.logger = options.logger;
     this.localLoroDataPlaneServer = options.localLoroDataPlaneServer ?? null;
+    this.nativeFileIndexPilot = options.nativeFileIndexPilot ?? null;
     this.sqliteRepoStore = options.sqliteRepoStore ?? null;
     this.documentRemoteCursorStore = options.documentRemoteCursorStore ?? null;
     this.remoteStreamsAttached = options.remoteStreamsAttached ?? false;
@@ -821,6 +1649,16 @@ export class LoroDocumentManager {
     this.encryptedWorkspace = options.encryptedWorkspace;
     this.cloudBilling = options.cloudBilling ?? null;
     this.sessionHistoryFactory = options.sessionHistoryFactory;
+    this.nativeSessionFactory = options.nativeSessionFactory;
+    this.nativeDocumentDomains = options.nativeDocumentDomains ?? null;
+    const definitions = options.scheduleDefinitions ?? this.nativeDocumentDomains?.definitions;
+    this.scheduleDefinitions = {
+      resolve: (id) => definitions?.resolve(id) ?? Promise.resolve(undefined),
+      runOperation: (id, work) =>
+        this.getDocumentDomainDrain().run(`schedule-${id}`, () =>
+          definitions?.runOperation ? definitions.runOperation(id, work) : work()
+        ),
+    };
     this.ownerHistoryRouter = options.ownerHistoryRouter;
     this.remoteStreamsGeneration = this.remoteStreamsAttached ? 1 : 0;
     this.presenceRuntime = options.presenceRuntime ?? null;
@@ -829,15 +1667,28 @@ export class LoroDocumentManager {
     const initialTransportStatus = options.initialTransportStatus ?? 'disconnected';
     const initialMetaSyncPromise = options.initialMetaSyncPromise ?? Promise.resolve(false);
     const initialMetaSyncCompleted = options.initialMetaSyncCompleted ?? false;
-    this.localLoroDataPlaneServer?.setDocRoomJoinHandler((docId) =>
-      this.handleLocalDocRoomJoin(docId)
-    );
+    this.localLoroDataPlaneServer?.setDocRoomJoinHandler(async (docId) => {
+      if (
+        (await this.nativeSessionFactory?.ownsRoom(docId)) ||
+        (docId.startsWith('schedule-') &&
+          this.nativeDocumentDomains?.owns('schedule_definition', docId.slice(9))) ||
+        (docId.startsWith('preview-comment-') &&
+          this.nativeDocumentDomains?.owns('preview_comments', docId.slice(16)))
+      )
+        throw new Error('native_session_owner_required');
+      return this.handleLocalDocRoomJoin(docId);
+    });
     this.localLoroDataPlaneServer?.setDocRoomLeaveHandler((docId) =>
       this.handleLocalDocRoomLeave(docId)
     );
-    this.localLoroDataPlaneServer?.setFlockRoomJoinHandler((flockDocId) =>
-      this.handleLocalFlockRoomJoin(flockDocId)
-    );
+    this.localLoroDataPlaneServer?.setFlockRoomJoinHandler(async (flockDocId) => {
+      if (this.ownsNativeFlockRoom(flockDocId)) throw new Error('native_flock_owner_required');
+      if (this.nativeWorkspaceCatalog?.ownsRoom(flockDocId))
+        throw new Error('native_workspace_catalog_owner_required');
+      if (await this.nativeFileIndexPilot?.ownsRoom(flockDocId))
+        throw new Error('native_file_index_owner_required');
+      await this.handleLocalFlockRoomJoin(flockDocId);
+    });
     this.localLoroDataPlaneServer?.setFlockRoomLeaveHandler((flockDocId) =>
       this.handleLocalFlockRoomLeave(flockDocId)
     );
@@ -859,6 +1710,8 @@ export class LoroDocumentManager {
       onMetaRoomReady: () => {
         this.initialMetaSyncCompleted = true;
       },
+      externalLocalMeta: this.nativeWorkspaceMetaOwner !== null,
+      localMetaAuthority: this.nativeWorkspaceMetaOwner?.directory.authority,
     });
     this.machineFlockSync = new MachineFlockSyncCoordinator({
       repo: this.repo,
@@ -901,6 +1754,8 @@ export class LoroDocumentManager {
 
   private async attachRemoteStreamsTransportInner(): Promise<void> {
     if (this.cleaningUp) throw new Error('document_manager_closing');
+    if (this.nativeWorkspaceMetaOwner)
+      throw new Error('Native local Meta has no cloud composition');
     if (this.remoteStreamsAttached) {
       return;
     }
@@ -1121,6 +1976,19 @@ export class LoroDocumentManager {
     return this.localLoroDataPlaneServer;
   }
 
+  async getCodeCollabPublicationStore(ownerSessionId: string) {
+    return this.nativeFileIndexPilot
+      ? this.nativeFileIndexPilot.store(ownerSessionId)
+      : createLegacyCodeCollabPublicationStore(this.repo);
+  }
+
+  async markCodeCollabIndexPublished(
+    ownerSessionId: string,
+    publication: CodeCollabV2FileIndexPublication
+  ): Promise<void> {
+    await this.nativeFileIndexPilot?.markPublished(ownerSessionId, publication);
+  }
+
   /**
    * THE ONLY PLACE THE CLI MAY CALL `repo.unloadDoc`.
    *
@@ -1215,6 +2083,10 @@ export class LoroDocumentManager {
   async waitUntilMetaSynced(
     options: { timeoutMs?: number; reason?: string } = {}
   ): Promise<boolean> {
+    if (this.nativeWorkspaceMetaOwner) {
+      await this.nativeWorkspaceMetaOwner.externalMetadata.flush();
+      return true;
+    }
     return await this.connectionRecovery.waitUntilMetaSynced(options);
   }
 
@@ -1226,6 +2098,13 @@ export class LoroDocumentManager {
   async syncMetaOrThrow(
     options: { timeoutMs?: number; reason?: string; requireRemoteConfirmation?: boolean } = {}
   ): Promise<void> {
+    if (this.nativeWorkspaceMetaOwner) {
+      if (this.streamsTokens !== null || this.remoteStreamsAttached)
+        throw new Error('Native local Meta has no cloud convergence receipt');
+      await this.nativeWorkspaceMetaOwner.externalMetadata.flush();
+      this.initialMetaSyncCompleted = true;
+      return;
+    }
     const reason = options.reason ?? 'explicit-sync';
     const timeoutMs =
       options.timeoutMs ??
@@ -1319,6 +2198,32 @@ export class LoroDocumentManager {
       requireRemoteConfirmation?: boolean;
     } = {}
   ): Promise<void> {
+    if (
+      this.machineCatalogRuntime &&
+      flockDocId ===
+        getMachineFlockDocId(this.workspaceId, this.machineCatalogRuntime.binding.machineId)
+    ) {
+      const timeoutMs =
+        options.timeoutMs ??
+        readTimeoutEnv('LODY_LORO_SYNC_MACHINE_FLOCK_TIMEOUT_MS', SYNC_CONFIRMATION_TIMEOUT_MS);
+      await withTimeout(
+        this.machineCatalogRuntime.upload(),
+        timeoutMs,
+        new FlockSyncTimeoutError('Native machine catalog synchronization timed out')
+      );
+      return;
+    }
+    if (
+      this.nativeScheduleRegistry &&
+      flockDocId === getScheduleRegistryFlockDocId(this.workspaceId)
+    ) {
+      await this.scheduleRegistry.sync();
+      return;
+    }
+    if (this.nativeWorkspaceCatalog?.ownsRoom(flockDocId)) {
+      await this.workspaceCatalog.upload(this.workspaceCatalogBinding);
+      return;
+    }
     const reason = options.reason ?? 'explicit-sync';
     const timeoutMs =
       options.timeoutMs ??
@@ -1387,6 +2292,7 @@ export class LoroDocumentManager {
     machineId: MachineId,
     localProjectId: import('@lody/shared').LocalProjectId
   ): string | null {
+    if (this.machineCatalogRuntime?.binding.machineId === machineId) return null;
     return this.machineFlockSync.peekLocalProjectRootPath(machineId, localProjectId);
   }
 
@@ -1394,6 +2300,21 @@ export class LoroDocumentManager {
     machineId: MachineId,
     options: { timeoutMs?: number; reason?: string; scheduleRetry?: boolean } = {}
   ): Promise<boolean> {
+    if (this.machineCatalogRuntime?.binding.machineId === machineId) {
+      try {
+        const timeoutMs =
+          options.timeoutMs ??
+          readTimeoutEnv('LODY_LORO_SYNC_MACHINE_FLOCK_TIMEOUT_MS', SYNC_CONFIRMATION_TIMEOUT_MS);
+        await withTimeout(
+          this.machineCatalogRuntime.upload(),
+          timeoutMs,
+          new FlockSyncTimeoutError('Native machine catalog synchronization timed out')
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    }
     return await this.machineFlockSync.syncNow(machineId, {
       ...options,
       reason: options.reason ?? 'explicit-sync',
@@ -1405,10 +2326,12 @@ export class LoroDocumentManager {
     machineId: MachineId,
     options: { reason?: string; timeoutMs?: number; resetBackoff?: boolean } = {}
   ): void {
+    if (this.machineCatalogRuntime?.binding.machineId === machineId) return;
     this.machineFlockSync.markDirty(machineId, options);
   }
 
   ensureMachineFlockDocJoined(machineId: MachineId, options: { reason?: string } = {}): void {
+    if (this.machineCatalogRuntime?.binding.machineId === machineId) return;
     void this.machineFlockSync.ensureJoined(machineId, options).catch((error: unknown) => {
       this.logger.debug(
         `[${this.workspaceId}] Failed to join Machine Flock room (machine=${machineId} reason=${
@@ -1434,6 +2357,11 @@ export class LoroDocumentManager {
       if (!(error instanceof Error) || error.message !== timeoutMessage) {
         throw error;
       }
+      if (this.nativeWorkspaceMetaOwner)
+        throw new Error(
+          'Native Meta body/metadata persistence is unconfirmed during fast shutdown',
+          { cause: error }
+        );
 
       this.logger.debug(
         `[${this.workspaceId}] Repo destroy timed out after ${destroyTimeoutMs}ms during fast cleanup`
@@ -1712,7 +2640,9 @@ export class LoroDocumentManager {
         sessionId,
         (sessionDocId) => this.unloadDocRoom(sessionDocId),
         this.logger,
-        this.sessionHistoryFactory ?? this.ownerHistoryRouter
+        this.sessionHistoryFactory ?? this.ownerHistoryRouter,
+        this.nativeSessionFactory,
+        (roomId) => this.nativeMetaDocument(roomId)
       );
       const meta = options.historyBackend ? undefined : await this.repo.getDocMeta(docId);
       const historyBackend =
@@ -1773,7 +2703,9 @@ export class LoroDocumentManager {
         sessionId,
         (snapshotDocId) => this.unloadDocRoom(snapshotDocId),
         this.logger,
-        this.sessionHistoryFactory ?? this.ownerHistoryRouter
+        this.sessionHistoryFactory ?? this.ownerHistoryRouter,
+        this.nativeSessionFactory,
+        (roomId) => this.nativeMetaDocument(roomId)
       );
       const meta = await this.repo.getDocMeta(docId);
       const historyBackend = !isLoroRepoDocDeleted(meta)
@@ -1826,7 +2758,9 @@ export class LoroDocumentManager {
           await this.unloadDocRoom(readDocId);
         },
         this.logger,
-        this.sessionHistoryFactory ?? this.ownerHistoryRouter
+        this.sessionHistoryFactory ?? this.ownerHistoryRouter,
+        this.nativeSessionFactory,
+        (roomId) => this.nativeMetaDocument(roomId)
       );
       const meta = await this.repo.getDocMeta(docId);
       const historyBackend = !isLoroRepoDocDeleted(meta)
@@ -2004,6 +2938,8 @@ export class LoroDocumentManager {
     agentType: string,
     machineId: MachineId
   ): Promise<boolean> {
+    if (this.machineCatalogRuntime)
+      return this.machineCatalogRuntime.hasAgentConfig(cliType, agentType, machineId);
     const configs = await listMergedAgentConfigs(this.repo, this.workspaceId, [machineId]);
     for (const meta of configs) {
       if (
@@ -2022,6 +2958,8 @@ export class LoroDocumentManager {
     agentType: string,
     machineId: MachineId
   ): Promise<AgentConfigMeta | undefined> {
+    if (this.machineCatalogRuntime)
+      return this.machineCatalogRuntime.findSoleAgentConfig(cliType, agentType, machineId);
     return await findSoleMachineAgentConfig(
       this.repo,
       this.workspaceId,
@@ -2033,6 +2971,8 @@ export class LoroDocumentManager {
 
   /** Managed builtin provider types the user removed on this machine, so they must not be auto-registered at startup. */
   async getBuiltinAgentOptOuts(machineId: MachineId): Promise<Set<ManagedBuiltinAgentType>> {
+    if (this.machineCatalogRuntime)
+      return this.machineCatalogRuntime.getBuiltinAgentOptOuts(machineId);
     return await readMachineBuiltinAgentOptOuts(this.repo, this.workspaceId, machineId);
   }
 
@@ -2040,6 +2980,8 @@ export class LoroDocumentManager {
     agentConfigId: AgentConfigId,
     machineId?: MachineId
   ): Promise<AgentConfigMeta | null> {
+    if (this.machineCatalogRuntime)
+      return this.machineCatalogRuntime.getAgentConfigById(agentConfigId, machineId);
     if (machineId) {
       return (
         await readMergedAgentConfigById(this.repo, this.workspaceId, machineId, agentConfigId)
@@ -2058,6 +3000,8 @@ export class LoroDocumentManager {
     agentConfigId: AgentConfigId,
     machineId: MachineId
   ): Promise<AgentConfigMeta | null> {
+    if (this.machineCatalogRuntime)
+      return this.machineCatalogRuntime.getAgentConfigForMachineLaunch(agentConfigId, machineId);
     const config = await this.getAgentConfigById(agentConfigId, machineId);
     if (config) {
       return isValidDaemonLaunchConfig(config, agentConfigId, machineId) ? config : null;
@@ -2086,6 +3030,8 @@ export class LoroDocumentManager {
     machineId: MachineId,
     name?: string
   ): Promise<AgentConfigId> {
+    if (this.machineCatalogRuntime)
+      return this.machineCatalogRuntime.createAgentConfig(cliType, agentType, machineId, name);
     const agentConfigId = uuidv4() as AgentConfigId;
     await upsertMachineAgentConfig(
       this.repo,
@@ -2160,6 +3106,15 @@ export class LoroDocumentManager {
     shouldWrite: () => boolean = () => true,
     expectedConfig?: AgentConfigMeta
   ): Promise<void> {
+    if (this.machineCatalogRuntime)
+      return this.machineCatalogRuntime.updateRateLimits(
+        machineId,
+        agentConfigId,
+        cliType,
+        limits,
+        shouldWrite,
+        expectedConfig
+      );
     if (!this.machine) {
       this.machine = this.createMachineDocument(machineId);
       await this.machine.init();
@@ -2189,6 +3144,23 @@ export class LoroDocumentManager {
     goalActions?: SessionGoalAction[],
     options: AcpCapabilityWriteOptions = {}
   ): Promise<AcpCapabilityCacheEntry> {
+    if (this.machineCatalogRuntime)
+      return this.machineCatalogRuntime.updateAcpCapabilities(
+        machineId,
+        configId,
+        cliType,
+        agentType,
+        modes,
+        models,
+        configOptions,
+        availableCommands,
+        sessionFork,
+        sourceVersion,
+        modelReasoningEfforts,
+        acknowledgedSteer,
+        goalActions,
+        options
+      );
     options.signal?.throwIfAborted();
     if (!this.machine) {
       this.machine = this.createMachineDocument(machineId);
@@ -2217,6 +3189,8 @@ export class LoroDocumentManager {
     configId: AgentConfigId,
     authMethods: NonNullable<AcpCapabilityCacheEntry['authMethods']>
   ): Promise<void> {
+    if (this.machineCatalogRuntime)
+      return this.machineCatalogRuntime.updateAcpAuthMethods(machineId, configId, authMethods);
     if (!this.machine) {
       this.machine = this.createMachineDocument(machineId);
       await this.machine.init();
@@ -2228,6 +3202,8 @@ export class LoroDocumentManager {
     machineId: MachineId,
     configId: AgentConfigId
   ): Promise<AcpCapabilityCacheEntry | undefined> {
+    if (this.machineCatalogRuntime)
+      return this.machineCatalogRuntime.getAcpCapabilities(machineId, configId);
     if (!this.machine) {
       this.machine = this.createMachineDocument(machineId);
       await this.machine.init();
@@ -2301,10 +3277,30 @@ export class LoroDocumentManager {
     try {
       await this.localLoroDataPlaneServer?.disposeLegacy();
     } catch (error) {
-      // Still stop presence: a live owner left behind would refuse every later
-      // owner of this workspace, while a stopped one can be retired.
-      await this.presenceRuntime?.stop().catch(() => undefined);
-      throw error;
+      if (this.nativeFileIndexPilot) {
+        // Closing the isolated native client settles outstanding unsubscribe
+        // RPCs. A native observer must not strand unrelated legacy sessions.
+        try {
+          await this.nativeFileIndexPilot.close();
+        } catch (nativeError) {
+          recordFailure('Native file-index host', nativeError, true);
+        }
+        try {
+          await this.localLoroDataPlaneServer?.disposeLegacy();
+        } catch (retryError) {
+          await this.presenceRuntime?.stop().catch(() => undefined);
+          throw new AggregateError(
+            [error, retryError],
+            'Local data-plane release is still unconfirmed'
+          );
+        }
+        recordFailure('Native file-index observation', error, true);
+      } else {
+        // Still stop presence: a live owner left behind would refuse every later
+        // owner of this workspace, while a stopped one can be retired.
+        await this.presenceRuntime?.stop().catch(() => undefined);
+        throw error;
+      }
     }
     try {
       await Promise.all([this.machineMonitorRuntime?.stop(), this.promptSuggestions?.stop()]);
@@ -2339,6 +3335,8 @@ export class LoroDocumentManager {
         recordFailure(scope, cause, true);
       }
     };
+    await attempt('Native file-index host', async () => this.nativeFileIndexPilot?.close());
+    await attempt('Native workspace catalog', async () => this.nativeWorkspaceCatalog?.close());
     // An init rejection has no registered doc. A destroy rejection must be reported.
     await Promise.allSettled(this.pendingSessionDocs.values());
     this.pendingSessionDocs.clear();
@@ -2353,14 +3351,31 @@ export class LoroDocumentManager {
         this.cleanSessionDoc(sessionId, { preserveStatus: options.preserveSessionStatus })
       );
     }
+    if (!this.sessions.size)
+      await attempt('Native session factory', async () => this.nativeSessionFactory?.close());
     await attempt('Machine document', async () => this.machine?.destroy());
+    // The selected whole-room capability stays installed after release. Keeping
+    // it prevents a late consumer from reopening the retired legacy MF owner.
+    await attempt('Native machine catalog', async () => this.machineCatalogRuntime?.close());
+    await attempt('Native MF independent owner', async () => this.nativeMachineCatalog?.close());
+    await attempt('Legacy document domain drain', async () => this.documentDomainDrain?.close());
+    await attempt('Native document domain owner', async () => this.nativeDocumentDomains?.close());
+    await attempt('Native SR independent owner', async () =>
+      this.nativeScheduleRegistryOwner?.close()
+    );
     this.machine = null;
-    this.sessions.clear();
-    this.sessionDocLastAccessMs.clear();
+    if (!this.nativeSessionFactory) this.sessions.clear();
+    if (!this.sessions.size) this.sessionDocLastAccessMs.clear();
     this.machineExistenceWatcher?.unsubscribe();
     this.machineExistenceWatcher = null;
     this.remoteStreamsStatusUnsubscribe?.();
     this.remoteStreamsStatusUnsubscribe = null;
+    await attempt('Repository', () => this.destroyRepo({ fast: options.fast }));
+    // SDK destroy flushes its borrowed external adapter before this lease retires.
+    await attempt('Native Meta independent owner', async () =>
+      this.nativeWorkspaceMetaOwner?.close()
+    );
+    await attempt('Encrypted workspace', async () => this.encryptedWorkspace?.close());
     let cleanupFailure: AggregateError | undefined;
     if (failures.length) {
       const details = failures.slice(0, 16).map((error) => error.message);
@@ -2374,8 +3389,6 @@ export class LoroDocumentManager {
         `[${this.workspaceId}] ${failures.map((error) => formatErrorMessage(error)).join('; ')}`
       );
     }
-    await this.destroyRepo({ fast: options.fast });
-    await this.encryptedWorkspace?.close();
     if (cleanupFailure) throw cleanupFailure;
   }
 
@@ -2462,35 +3475,6 @@ type SessionDocInitialState = {
   forkOperation?: SessionForkOperation;
 };
 
-const configOptionValuesEqual = (
-  left: SessionAcpRuntimeConfigSnapshot['configOptionValues'],
-  right: SessionAcpRuntimeConfigSnapshot['configOptionValues']
-): boolean => {
-  if (left === right) return true;
-  if (!left || !right) return false;
-  const leftKeys = Object.keys(left);
-  return (
-    leftKeys.length === Object.keys(right).length &&
-    leftKeys.every((key) => left[key] === right[key])
-  );
-};
-
-const acpRuntimeConfigEqual = (
-  left: SessionAcpRuntimeConfigSnapshot,
-  right: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'>
-): boolean =>
-  left.acpSessionId === right.acpSessionId &&
-  left.basedOnUserTurnId === right.basedOnUserTurnId &&
-  left.modeId === right.modeId &&
-  left.modelId === right.modelId &&
-  JSON.stringify(
-    left.availableCommands?.map(({ name, description }) => ({ name, description }))
-  ) ===
-    JSON.stringify(
-      right.availableCommands?.map(({ name, description }) => ({ name, description }))
-    ) &&
-  configOptionValuesEqual(left.configOptionValues, right.configOptionValues);
-
 /**
  * Hard cap on how long a queued message can hold the head-of-queue dispatch lock
  * via `isEditing`. If the editing client never releases (hard close, crash, killed
@@ -2553,6 +3537,10 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   private destroyed = false;
   /** Backend bound during initialization; subscriptions must use this instance. */
   private sessionBackendInstance: SessionBackend | null = null;
+  private nativeSessionOwner: NativeSessionDocumentOwner | null = null;
+  private legacyBodyFrozen = false;
+  private readonly legacySyncAbort = new AbortController();
+  private readonly legacyBodyWork = new Set<Promise<unknown>>();
   /**
    * CRDT-neutral read/write seam over the same doc and the Mirror's one shared
    * writer. Business callers use this instead of raw history callbacks; Loro,
@@ -2576,9 +3564,150 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
      */
     private unloadDocRoom: (docId: string) => Promise<void>,
     private logger: Logger = getLogger('loro'),
-    readonly historyBackendFactory?: SessionBackendFactory
+    readonly historyBackendFactory?: SessionBackendFactory,
+    readonly nativeSessionFactory?: NativeSessionDocumentFactory,
+    private readonly nativeMetadata?: (
+      roomId: string
+    ) => ReturnType<NativeSessionMetadataOwner['document']> | undefined
   ) {
     this.roomId = getSessionRoomId(this.sessionId);
+  }
+
+  /** Selected before opening a legacy body. A native selection never builds a
+   * Mirror or a second history author on the private read projection. */
+  private async initializeNativeSession(
+    historyBackend: SessionHistoryBackendKind,
+    initial: SessionDocInitialState | undefined,
+    options: { skipAutoRead: boolean; remoteSync: boolean }
+  ): Promise<boolean> {
+    if (!this.nativeSessionFactory || historyBackend !== 'loro') return false;
+    const facet = this.nativeMetadata?.(this.roomId);
+    const owner = await this.nativeSessionFactory(
+      this.sessionId,
+      facet
+        ? {
+            read: async () => (await facet.read()) as SessionMeta | undefined,
+            patch: async (fields) => {
+              await facet.patch(fields);
+            },
+            update: async (transform) => {
+              await facet.update((current) => transform(current as SessionMeta));
+            },
+            flush: () => facet.flush(),
+          }
+        : {
+            read: () => getAliveDocMeta<SessionMeta>(this.repo, this.roomId),
+            patch: async (fields) => {
+              await this.repo.upsertDocMeta(this.roomId, fields);
+            },
+            flush: () => this.repo.flush(),
+          },
+      { historyBackend }
+    );
+    if (!owner) return false;
+    this.nativeSessionOwner = owner;
+    if (historyBackend !== 'loro') throw new Error('Native Session body cannot own Roost history');
+    if (this.destroyed) throw new Error('Session closed during native owner acquisition');
+    this.sessionBackendInstance = await createSessionBackend(this, { historyBackend });
+    await owner.initialize(initial, options);
+    return true;
+  }
+
+  /** Actual old authoring boundary, including captured HistoryWriter commits. */
+  private assertLegacyBodyAuthor(): void {
+    if (this.destroyed || this.legacyBodyFrozen) throw new Error('Legacy Session body is frozen');
+    this.nativeSessionFactory?.assertLegacyRoom?.(this.roomId);
+  }
+  guardLegacySessionBackend(backend: SessionBackend): SessionBackend {
+    if (this.nativeSessionOwner || backend.kind !== 'loro') return backend;
+    const wrapped = Object.create(backend) as SessionBackend;
+    const names = new Set<string>();
+    for (
+      let object: object | null = backend;
+      object && object !== Object.prototype;
+      object = Object.getPrototypeOf(object)
+    )
+      for (const [name, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(object)))
+        if (name !== 'constructor' && typeof descriptor.value === 'function') names.add(name);
+    for (const name of names) {
+      if (name === 'dispose' || name === 'getQueueOperationId') continue;
+      const operation = (backend as unknown as Record<string, (...args: unknown[]) => unknown>)[
+        name
+      ]!;
+      Object.defineProperty(wrapped, name, {
+        configurable: true,
+        writable: true,
+        value: (...args: unknown[]) => {
+          this.assertLegacyBodyAuthor();
+          const result = Reflect.apply(operation, backend, args);
+          if (result && typeof (result as Promise<unknown>).then === 'function') {
+            const raw = Promise.resolve(result);
+            this.legacyBodyWork.add(raw);
+            void raw.finally(() => this.legacyBodyWork.delete(raw)).catch(() => undefined);
+            return raw;
+          }
+          return result;
+        },
+      });
+    }
+    return wrapped;
+  }
+  /** Trusted local-control drain only. Persist must be the manager's original
+   * SDK target-room barrier; failed persist/unload keeps this original Doc for retry. */
+  async freezeLegacyBody(ports: { persist(doc: LoroDoc): Promise<void> }): Promise<void> {
+    if (this.nativeSessionOwner) throw new Error('Native Session has no legacy author to drain');
+    this.legacyBodyFrozen = true;
+    this.legacySyncAbort.abort();
+    this.modelSummary?.dispose();
+    this.historyAutoReadHandle?.dispose();
+    await Promise.allSettled([...this.legacyBodyWork]);
+    await this.acpRuntimeConfigPatchSerial.catch(() => undefined);
+    if (this.docSub) {
+      this.docSub.unsubscribe();
+      this.docSub = null;
+      this.docBinding = null;
+    }
+    this.detachDocRoomStatusListener?.();
+    this.detachDocRoomStatusListener = null;
+    await this.remoteSyncReady.catch(() => undefined);
+    this.sessionDataInstance?.dispose();
+    this.mirror?.dispose();
+    if (this.handle) {
+      freezeLegacySessionLoroDocument(this.handle.doc);
+      await ports.persist(this.handle.doc);
+    }
+    await this.unloadDocRoom(this.roomId);
+    this.sessionDataInstance = null;
+    this.mirror = null;
+    this.handle = null;
+    this.sessionBackendInstance = null;
+    this.destroyed = true;
+  }
+
+  /** Comparable local body version without exposing the native read projection. */
+  getCausalVersion(): string | undefined {
+    if (this.nativeSessionOwner) return this.nativeSessionOwner.control.causalVersion();
+    const version = this.handle?.doc.version();
+    if (!version) return undefined;
+    try {
+      return JSON.stringify([...version.toJSON()].sort());
+    } finally {
+      version.free();
+    }
+  }
+  hasCausalFrontiers(frontiers: readonly { peer: string; counter: number }[]): boolean {
+    if (this.nativeSessionOwner)
+      return this.nativeSessionOwner.control.hasCausalFrontiers(frontiers);
+    const version = this.handle?.doc.version();
+    if (!version) return false;
+    try {
+      return frontiers.every(({ peer, counter }) => (version.get(BigInt(peer)) ?? 0) > counter);
+    } finally {
+      version.free();
+    }
+  }
+  getNativeSessionBackend(): SessionBackend | undefined {
+    return this.nativeSessionOwner?.backend;
   }
 
   /**
@@ -2592,6 +3721,8 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     initialState?: SessionDocInitialState,
     options: { historyBackend?: SessionHistoryBackendKind } = {}
   ): void {
+    if (this.nativeSessionOwner) throw new Error('Native Session cannot compose a legacy author');
+    this.assertLegacyBodyAuthor();
     this.modelSummary?.dispose();
     this.modelSummary = null;
     this.historyAutoReadHandle?.dispose();
@@ -2612,6 +3743,11 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
         session: mergedSession,
       } as SessionControlPlaneState,
     });
+    const writeControl = this.mirror.setState.bind(this.mirror);
+    this.mirror.setState = (...args: Parameters<typeof writeControl>) => {
+      this.assertLegacyBodyAuthor();
+      return writeControl(...args);
+    };
     try {
       // The control plane is shared by every backend, but history storage is not.
       // A Roost session must not construct a Loro reader/writer while opening a
@@ -2627,7 +3763,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       }
       // Seed a brand-new document's history through the shared writer. A persisted
       // document already holds its history; the control Mirror never reads it.
-      const writer = createHistoryWriter(doc);
+      const writer = createHistoryWriter(doc, undefined, () => this.assertLegacyBodyAuthor());
       if (initialHistory.length > 0 && doc.getList('history').length === 0) {
         writer.update(() => initialHistory);
       }
@@ -2722,12 +3858,13 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
 
   /** Re-run the projection once a catalog row the publisher previously skipped exists. */
   async syncModelSummary(): Promise<void> {
+    if (this.nativeSessionOwner) return this.nativeSessionOwner.flush();
     await this.modelSummary?.flush();
   }
 
   /** Publish the latest assistant model for a backend-owned history store. */
   async setLastModel(lastModel: SessionMeta['lastModel']): Promise<void> {
-    if (!this.mirror) {
+    if (this.destroyed || (!this.mirror && !this.nativeSessionOwner)) {
       throw new Error('SessionDocument not initialized');
     }
     const current = await this.repo.getDocMeta(this.roomId);
@@ -2754,7 +3891,8 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
    * only care about control state can use `mirror.subscribe` directly.
    */
   subscribeAll(listener: () => void): () => void {
-    if (!this.mirror) throw new Error('SessionDocument not initialized');
+    if (this.destroyed || (!this.mirror && !this.nativeSessionOwner))
+      throw new Error('SessionDocument not initialized');
     const history = this.sessionBackendInstance?.history ?? this.sessionData.history;
     let disposed = false;
     const unsubscribeMirror = this.subscribeControl(() => {
@@ -2772,6 +3910,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   subscribeControl(listener: () => void): () => void {
+    if (this.nativeSessionOwner) return this.nativeSessionOwner.control.observe(listener);
     if (!this.mirror) throw new Error('SessionDocument not initialized');
     return this.mirror.subscribe(listener);
   }
@@ -2786,8 +3925,17 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   ) {
     this.destroyed = false;
     try {
-      this.handle = await this.repo.openPersistedDoc(this.roomId);
       const historyBackend = await this.resolveHistoryBackend(options.historyBackend);
+      if (
+        await this.initializeNativeSession(historyBackend, undefined, {
+          skipAutoRead: options.skipAutoRead === true,
+          remoteSync: options.remoteSync !== false,
+        })
+      )
+        return;
+      this.assertLegacyBodyAuthor();
+      this.handle = await this.repo.openPersistedDoc(this.roomId);
+      this.assertLegacyBodyAuthor();
       // Create the mirror before remote sync completes so dispatch watchers can subscribe
       // immediately; the room join continues in the background and remote changes merge later.
       this.composeSessionData(this.handle.doc, undefined, {
@@ -2807,10 +3955,18 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
    * (or when the sync timeout expires). Resolves immediately if sync already finished.
    */
   async waitForRemoteSync(): Promise<void> {
+    if (this.nativeSessionOwner) {
+      await this.nativeSessionOwner.backend.waitUntilSynced();
+      return;
+    }
     await this.remoteSyncReady;
   }
 
   async ensureDocRoomJoined(): Promise<void> {
+    if (this.nativeSessionOwner) {
+      await this.nativeSessionOwner.backend.waitUntilSynced();
+      return;
+    }
     if (this.destroyed) {
       return;
     }
@@ -2854,6 +4010,10 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async rejoinDocRoom(): Promise<void> {
+    if (this.nativeSessionOwner) {
+      await this.nativeSessionOwner.backend.waitUntilSynced();
+      return;
+    }
     if (this.destroyed) {
       return;
     }
@@ -2878,8 +4038,17 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   ) {
     this.destroyed = false;
     try {
-      this.handle = await this.repo.openPersistedDoc(this.roomId);
       const historyBackend = await this.resolveHistoryBackend(options.historyBackend);
+      if (
+        await this.initializeNativeSession(historyBackend, initialState, {
+          skipAutoRead: false,
+          remoteSync: false,
+        })
+      )
+        return;
+      this.assertLegacyBodyAuthor();
+      this.handle = await this.repo.openPersistedDoc(this.roomId);
+      this.assertLegacyBodyAuthor();
       this.docSub?.unsubscribe();
       this.docSub = null;
       this.docBinding = null;
@@ -2910,6 +4079,11 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
 
   /** Release every partially-created resource when backend selection/open fails. */
   private async abortInitialization(): Promise<void> {
+    if (this.nativeSessionOwner) {
+      this.destroyed = true;
+      await this.nativeSessionOwner.close();
+      return;
+    }
     this.destroyed = true;
     await disposeSessionBackend(this).catch(() => {});
     this.sessionBackendInstance = null;
@@ -2944,14 +4118,14 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     const RETRY_MAX_DELAY_MS = 30_000;
 
     for (let attempt = 0; attempt < MAX_JOIN_RETRIES; attempt++) {
-      if (this.destroyed) {
+      if (this.destroyed || this.legacyBodyFrozen) {
         return;
       }
 
       let joinedSub: RepoRoomSubscription | null = null;
       try {
         joinedSub = await this.repo.joinDocRoom(this.roomId);
-        if (this.destroyed) {
+        if (this.destroyed || this.legacyBodyFrozen) {
           joinedSub.unsubscribe();
           return;
         }
@@ -2998,12 +4172,17 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
           );
           // Use unref() so the timer doesn't keep the process alive during fast cleanup
           await new Promise<void>((resolve) => {
-            const timer = setTimeout(resolve, delayMs);
-            if (typeof timer === 'object' && 'unref' in timer) {
-              timer.unref();
-            }
+            const finish = () => {
+              clearTimeout(timer);
+              this.legacySyncAbort.signal.removeEventListener('abort', finish);
+              resolve();
+            };
+            const timer = setTimeout(finish, delayMs);
+            this.legacySyncAbort.signal.addEventListener('abort', finish, { once: true });
+            if (this.legacySyncAbort.signal.aborted) finish();
+            if (typeof timer === 'object' && 'unref' in timer) timer.unref();
           });
-          if (this.destroyed) {
+          if (this.destroyed || this.legacyBodyFrozen) {
             return;
           }
           continue;
@@ -3066,6 +4245,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
 
   /** Control state only. Full history is an explicit sessionData.history.readAll(). */
   async getDocState(): Promise<Omit<SessionDocMeta, 'history'> | undefined> {
+    if (this.nativeSessionOwner) return this.nativeSessionOwner.control.read();
     if (!this.mirror) {
       throw new Error('SessionDocument not initialized');
     }
@@ -3085,7 +4265,9 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   /** Trusted human send only; generic history writes/imports never author this outbox. */
-  recordHumanInputReceipt(inputId: string, userId: string): void {
+  recordHumanInputReceipt(inputId: string, userId: string): void | Promise<void> {
+    if (this.nativeSessionOwner)
+      return this.nativeSessionOwner.control.recordHumanInputReceipt(inputId, userId);
     if (!this.mirror) throw new Error('SessionDocument not initialized');
     if (this.mirror.getState().humanInputReceipts?.[inputId]?.userId === userId) return;
     this.mirror.setState((draft) => {
@@ -3095,6 +4277,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async waitUntilSynced(options: { timeoutMs?: number } = {}): Promise<boolean> {
+    if (this.nativeSessionOwner) return this.nativeSessionOwner.backend.waitUntilSynced(options);
     const binding = this.docBinding;
     if (!binding) {
       return false;
@@ -3158,11 +4341,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     record: SessionQueuePromotionRecord | undefined
   ): Promise<void> {
     const current = await this.getMetaState();
-    const ledger = { ...(current?.queuePromotionLedger ?? {}) };
-    if (record) ledger[operationId] = record;
-    else delete ledger[operationId];
-    const entries = Object.entries(ledger);
-    const bounded = Object.fromEntries(entries.slice(Math.max(0, entries.length - 64)));
+    const bounded = prepareSessionQueuePromotionLedger(current, operationId, record);
     await this.repo.upsertDocMeta(this.roomId, {
       queuePromotionLedger: bounded,
     } satisfies Partial<SessionMeta>);
@@ -3192,27 +4371,15 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     operationId: string,
     record: SessionSteerOperationRecord | undefined
   ): Promise<void> {
-    if (record && record.operationId !== operationId) {
-      throw new Error(`Steer operation id does not match ledger key ${operationId}`);
-    }
     const current = await this.getMetaState();
-    const ledger = { ...(current?.steerOperationLedger ?? {}) };
-    if (record) ledger[operationId] = record;
-    else delete ledger[operationId];
-
-    const records = Object.entries(ledger);
-    if (records.length > 128) {
-      const settled = records
-        .filter(([, entry]) => entry.phase === 'settled')
-        .sort((a, b) => a[1].updatedAt - b[1].updatedAt);
-      for (const [id] of settled.slice(0, Math.max(0, records.length - 128))) delete ledger[id];
-    }
+    const ledger = prepareSessionSteerOperationLedger(current, operationId, record);
     await this.repo.upsertDocMeta(this.roomId, {
       steerOperationLedger: ledger,
     } satisfies Partial<SessionMeta>);
   }
 
   getForkOperation(): SessionForkOperation | undefined {
+    if (this.nativeSessionOwner) return this.nativeSessionOwner.control.getForkOperation();
     if (!this.mirror) {
       throw new Error('SessionDocument not initialized');
     }
@@ -3220,7 +4387,8 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     return parsed.success ? parsed.data : undefined;
   }
 
-  setForkOperation(operation: SessionForkOperation | undefined): void {
+  setForkOperation(operation: SessionForkOperation | undefined): void | Promise<void> {
+    if (this.nativeSessionOwner) return this.nativeSessionOwner.control.setForkOperation(operation);
     if (!this.mirror) {
       throw new Error('SessionDocument not initialized');
     }
@@ -3244,22 +4412,12 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     basedOnUserTurnId: string,
     patch: SessionAcpRuntimeConfigPatch
   ): Promise<boolean> {
+    if (this.nativeSessionOwner)
+      return this.nativeSessionOwner.control.applyAcpRuntimeConfigPatch(basedOnUserTurnId, patch);
     const next = this.acpRuntimeConfigPatchSerial.then(async () => {
       if (!this.mirror) {
         throw new Error('SessionDocument not initialized');
       }
-
-      const durablePatch: SessionAcpRuntimeConfigPatch =
-        patch.configOptionValues === undefined
-          ? patch
-          : {
-              ...patch,
-              configOptionValues: Object.fromEntries(
-                Object.entries(patch.configOptionValues).filter(
-                  ([configId]) => !isSensitiveAcpConfigOptionId(configId)
-                )
-              ),
-            };
 
       const history = this.sessionBackendInstance?.history ?? this.sessionDataInstance?.history;
       if (!history) {
@@ -3277,45 +4435,14 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
 
       const state = this.mirror?.getState();
       if (!state) throw new Error('SessionDocument not initialized');
-      const incomingTurnIndex = userTurnIndex.get(basedOnUserTurnId) ?? -1;
-      if (incomingTurnIndex < 0 || incomingTurnIndex !== latestUserTurnIndex) {
-        return false;
-      }
-
-      const current = state.acpRuntimeConfig as SessionAcpRuntimeConfigSnapshot | undefined;
-      const currentTurnIndex = current ? (userTurnIndex.get(current.basedOnUserTurnId) ?? -1) : -1;
-      if (currentTurnIndex > incomingTurnIndex) {
-        return false;
-      }
-
-      const continuesCurrentSnapshot =
-        current?.acpSessionId === durablePatch.acpSessionId &&
-        current.basedOnUserTurnId === basedOnUserTurnId;
-      const nextWithoutRevision: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'> = {
-        ...(current?.acpSessionId === durablePatch.acpSessionId &&
-        current.availableCommands !== undefined
-          ? { availableCommands: current.availableCommands }
-          : {}),
-        ...(continuesCurrentSnapshot
-          ? {
-              ...(current.modeId !== undefined ? { modeId: current.modeId } : {}),
-              ...(current.modelId !== undefined ? { modelId: current.modelId } : {}),
-              ...(current.configOptionValues !== undefined
-                ? { configOptionValues: current.configOptionValues }
-                : {}),
-            }
-          : {}),
-        ...durablePatch,
+      const nextSnapshot = prepareSessionAcpRuntimeConfig({
         basedOnUserTurnId,
-      };
-      if (current && acpRuntimeConfigEqual(current, nextWithoutRevision)) {
-        return false;
-      }
-
-      const nextSnapshot: SessionAcpRuntimeConfigSnapshot = {
-        ...nextWithoutRevision,
-        revision: (current?.revision ?? 0) + 1,
-      };
+        patch,
+        userTurnIndices: userTurnIndex,
+        latestUserTurnIndex,
+        current: state.acpRuntimeConfig as SessionAcpRuntimeConfigSnapshot | undefined,
+      });
+      if (!nextSnapshot) return false;
       this.mirror.setState((prev) => {
         prev.acpRuntimeConfig = nextSnapshot;
         return prev;
@@ -3330,6 +4457,14 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async markHistoryAsSeen(turnId: string): Promise<void> {
+    if (this.nativeSessionOwner) {
+      await this.nativeSessionOwner.backend.applyHistoryAction({
+        kind: 'user-status',
+        turnId,
+        status: 'seen',
+      });
+      return;
+    }
     this.logger.debug(`Marking session ${this.sessionId} history as seen`);
     if (this.sessionBackendInstance?.kind === 'roost') {
       await this.sessionBackendInstance.applyHistoryAction({
@@ -3360,7 +4495,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async setACPSessionId(acpSessionId: ACPSessionId) {
-    if (!this.mirror) {
+    if (this.destroyed || (!this.mirror && !this.nativeSessionOwner)) {
       throw new Error('SessionDocument not initialized');
     }
     this.logger.debug(`[${this.sessionId}] setACPSessionId: getting current doc meta`);
@@ -3389,7 +4524,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async setTitle(title: string, source?: SessionTitleSource) {
-    if (!this.mirror) {
+    if (this.destroyed || (!this.mirror && !this.nativeSessionOwner)) {
       throw new Error('SessionDocument not initialized');
     }
     const sanitized = title?.trim();
@@ -3419,7 +4554,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     source: SessionTitleSource,
     allowedSources: readonly SessionTitleSource[]
   ): Promise<boolean> {
-    if (!this.mirror) {
+    if (this.destroyed || (!this.mirror && !this.nativeSessionOwner)) {
       throw new Error('SessionDocument not initialized');
     }
     const sanitized = title?.trim();
@@ -3439,7 +4574,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async setRepoFullName(repoFullName: string) {
-    if (!this.mirror) {
+    if (this.destroyed || (!this.mirror && !this.nativeSessionOwner)) {
       throw new Error('SessionDocument not initialized');
     }
     const sanitized = repoFullName?.trim();
@@ -3454,7 +4589,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async setProject(project: ProjectRef) {
-    if (!this.mirror) {
+    if (this.destroyed || (!this.mirror && !this.nativeSessionOwner)) {
       throw new Error('SessionDocument not initialized');
     }
     const current = await this.repo.getDocMeta(this.roomId);
@@ -3464,14 +4599,15 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
 
   /** Caller must hold the conversation's WorkspaceGitService mutation queue. */
   async setProjectRun(run: NonNullable<SessionMeta['projectRun']>) {
-    if (!this.mirror) throw new Error('SessionDocument not initialized');
+    if (this.destroyed || (!this.mirror && !this.nativeSessionOwner))
+      throw new Error('SessionDocument not initialized');
     const current = await this.repo.getDocMeta(this.roomId);
     if (isLoroRepoDocDeleted(current)) return;
     await this.repo.upsertDocMeta(this.roomId, projectRunMetaPatch(run));
   }
 
   async setBranchName(branchName: string) {
-    if (!this.mirror) {
+    if (this.destroyed || (!this.mirror && !this.nativeSessionOwner)) {
       throw new Error('SessionDocument not initialized');
     }
     const sanitized = branchName?.trim();
@@ -3486,7 +4622,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async setIsWorktree(isWorktree: boolean) {
-    if (!this.mirror) {
+    if (this.destroyed || (!this.mirror && !this.nativeSessionOwner)) {
       throw new Error('SessionDocument not initialized');
     }
     const current = await this.repo.getDocMeta(this.roomId);
@@ -3497,7 +4633,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async setBaseBranch(baseBranch: string) {
-    if (!this.mirror) {
+    if (this.destroyed || (!this.mirror && !this.nativeSessionOwner)) {
       throw new Error('SessionDocument not initialized');
     }
     const sanitized = baseBranch?.trim();
@@ -3512,7 +4648,8 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async setLastMessageAt(timestamp?: number) {
-    if (!this.mirror) throw new Error('SessionDocument not initialized');
+    if (this.destroyed || (!this.mirror && !this.nativeSessionOwner))
+      throw new Error('SessionDocument not initialized');
     const next =
       typeof timestamp === 'number' && Number.isFinite(timestamp) ? timestamp : getServerNow();
     const parentSessionId = await this.activityWrites.enqueue(this.roomId, async () => {
@@ -3537,7 +4674,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
    * locally), while the marker must be cleared on every resolution path.
    */
   async clearAwaitingUser() {
-    if (!this.mirror) {
+    if (this.destroyed || (!this.mirror && !this.nativeSessionOwner)) {
       throw new Error('SessionDocument not initialized');
     }
     const current = await this.repo.getDocMeta(this.roomId);
@@ -3569,7 +4706,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async setContextWindowUsage(usage: SessionContextWindowUsage): Promise<void> {
-    if (!this.mirror) {
+    if (this.destroyed || (!this.mirror && !this.nativeSessionOwner)) {
       throw new Error('SessionDocument not initialized');
     }
     const size = usage.size;
@@ -3592,7 +4729,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async getStatus(): Promise<SessionStatus | undefined> {
-    if (!this.mirror) {
+    if (this.destroyed || (!this.mirror && !this.nativeSessionOwner)) {
       throw new Error('SessionDocument not initialized');
     }
     const meta = await getAliveDocMeta<SessionMeta>(this.repo, this.roomId);
@@ -3600,7 +4737,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async isChat(): Promise<boolean> {
-    if (!this.mirror) {
+    if (this.destroyed || (!this.mirror && !this.nativeSessionOwner)) {
       return false;
     }
     const meta = await getAliveDocMeta<SessionMeta>(this.repo, this.roomId);
@@ -3613,9 +4750,14 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
    * avoiding a chain of sequential doc-meta writes on the latency-critical path.
    */
   async setStatus(status: SessionStatus, extraPatch?: Partial<SessionMeta>) {
-    if (!this.mirror) {
+    if (this.destroyed || (!this.mirror && !this.nativeSessionOwner)) {
       throw new Error('Mirror not initialized');
     }
+    return this.writeStatus(status, extraPatch);
+  }
+
+  /** Teardown uses the original owner after public admissions are retired. */
+  private async writeStatus(status: SessionStatus, extraPatch?: Partial<SessionMeta>) {
     this.logger.debug(
       `[${this.sessionId}] setStatus: getting current doc meta (status.type=${status.type})`
     );
@@ -3649,6 +4791,25 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
    * index makes only this changed document discoverable without history scans.
    */
   async publishTerminalNotification(notification: TerminalNotification): Promise<void> {
+    if (this.nativeSessionOwner) {
+      terminalNotificationSchema.parse(notification);
+      const current = await this.repo.getDocMeta(this.roomId);
+      if (!current || isLoroRepoDocDeleted(current)) return;
+      await this.nativeSessionOwner.control.setNotification({
+        ...notification,
+        presentation: notification.presentation
+          ? {
+              kind: notification.presentation.kind,
+              conversationTitle: notification.presentation.conversationTitle,
+              scheduleName: notification.presentation.scheduleName,
+              projectName: notification.presentation.projectName,
+              pullRequestNumber: notification.presentation.pullRequestNumber,
+            }
+          : undefined,
+      });
+      await this.repo.upsertDocMeta(this.roomId, { notificationId: notification.id });
+      return;
+    }
     if (!this.mirror) throw new Error('Mirror not initialized');
     terminalNotificationSchema.parse(notification);
     const current = await this.repo.getDocMeta(this.roomId);
@@ -3675,6 +4836,10 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async getPreviewState(): Promise<SessionPreviewDocState | undefined> {
+    if (this.nativeSessionOwner)
+      return (await this.nativeSessionOwner.control.read()).preview as
+        | SessionPreviewDocState
+        | undefined;
     if (!this.mirror) {
       return undefined;
     }
@@ -3682,6 +4847,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async setPreviewState(preview: SessionPreviewDocState): Promise<void> {
+    if (this.nativeSessionOwner) return this.nativeSessionOwner.control.setPreview(preview);
     if (!this.mirror) {
       throw new Error('Mirror not initialized');
     }
@@ -3692,6 +4858,10 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async getExternalHistoryCursor(): Promise<SessionExternalHistoryCursorDocState | undefined> {
+    if (this.nativeSessionOwner)
+      return (await this.nativeSessionOwner.control.read()).externalHistoryCursor as
+        | SessionExternalHistoryCursorDocState
+        | undefined;
     if (!this.mirror) {
       return undefined;
     }
@@ -3701,6 +4871,8 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async setExternalHistoryCursor(cursor: SessionExternalHistoryCursorDocState): Promise<void> {
+    if (this.nativeSessionOwner)
+      return this.nativeSessionOwner.control.setExternalHistoryCursor(cursor);
     if (!this.mirror) {
       throw new Error('Mirror not initialized');
     }
@@ -3736,6 +4908,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
    * it belongs to producers that first supersede the acknowledged entry.
    */
   async appendUserTurn(entry: SessionHistoryInput): Promise<void> {
+    if (this.nativeSessionOwner) return this.nativeSessionOwner.backend.appendUserTurn(entry);
     if (entry.role !== 'user') {
       throw new Error(
         `appendUserTurn requires a user entry, received role "${entry.role}" for ${entry.id}`
@@ -3752,6 +4925,8 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async publishUserTurnActivation(userTurnId: string): Promise<void> {
+    if (this.nativeSessionOwner)
+      return this.nativeSessionOwner.backend.publishUserTurnActivation(userTurnId);
     await this.repo.upsertDocMeta(this.roomId, {
       latestUserMsgId: userTurnId,
     } satisfies Partial<SessionMeta>);
@@ -3797,6 +4972,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
    * Plan is now stored per-turn on each history entry, not at the root level.
    */
   async setPlan(entries: SessionPlanEntry[]) {
+    if (this.nativeSessionOwner) return this.nativeSessionOwner.backend.setPlan(entries);
     if (!this.mirror) {
       throw new Error('Mirror not initialized');
     }
@@ -3810,6 +4986,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async getMessageQueue(): Promise<MessageQueueItem[]> {
+    if (this.nativeSessionOwner) return this.nativeSessionOwner.control.getMessageQueue();
     if (!this.mirror) {
       return [];
     }
@@ -3817,6 +4994,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async peekReadyMessageQueue(): Promise<MessageQueueItem | null> {
+    if (this.nativeSessionOwner) return this.nativeSessionOwner.control.peekReadyMessageQueue();
     if (!this.mirror) {
       return null;
     }
@@ -3850,33 +5028,17 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async pushMessageQueue(item: MessageQueueItemInput): Promise<void> {
+    if (this.nativeSessionOwner) return this.nativeSessionOwner.control.pushMessageQueue(item);
     if (!this.mirror) {
       throw new Error('SessionDocument not initialized');
     }
 
     this.mirror.setState((prev) => {
       const mq = (prev.mq ?? []) as MessageQueueItem[];
-      const operationId =
-        item.operationId ??
-        (typeof item.userTurnId === 'string' && item.userTurnId.trim().length > 0
-          ? `queue:${item.userTurnId.trim()}`
-          : undefined);
-      const prior = operationId
-        ? mq.find((queued) => queued.operationId === operationId)
-        : undefined;
-      if (prior) {
-        if (
-          prior.userTurnId !== item.userTurnId ||
-          prior.userId !== item.userId ||
-          prior.task !== item.task ||
-          !isDeepStrictEqual(prior.acpSessionConfig, item.acpSessionConfig) ||
-          !isDeepStrictEqual(prior.project, item.project)
-        )
-          throw new Error('Queue operation identity conflict');
-        return prev;
-      }
+      const next = prepareSessionQueueAppend(mq, item);
+      if (!next) return prev;
       // @ts-ignore - mq is read-only in type but writable at runtime
-      prev.mq = [...mq, { ...item, ...(operationId ? { operationId } : {}) }];
+      prev.mq = [...mq, next];
       return prev;
     });
   }
@@ -3885,28 +5047,17 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   async promoteLocalImageReferences(
     image: import('@lody/shared').SessionImagePayload
   ): Promise<void> {
+    if (this.nativeSessionOwner)
+      return this.nativeSessionOwner.control.promoteLocalImageReferences(image);
     if (!this.mirror) throw new Error('SessionDocument not initialized');
     this.mirror.setState((prev) => {
-      for (const item of (prev.mq ?? []) as MessageQueueItem[]) {
-        const blocks = item.acpSessionConfig?.inputBlocks;
-        if (!Array.isArray(blocks)) continue;
-        for (const block of blocks) {
-          if (!block || typeof block !== 'object') continue;
-          if (
-            block.type === 'image' &&
-            block.transport === 'local' &&
-            block.localImageId === image.localImageId &&
-            block.machineId === image.machineId &&
-            block.storageSessionId === image.storageSessionId
-          )
-            Object.assign(block, image);
-        }
-      }
+      promoteSessionQueueImageReferences((prev.mq ?? []) as MessageQueueItem[], image);
       return prev;
     });
   }
 
   async removeMessageQueueItem(cid: string): Promise<void> {
+    if (this.nativeSessionOwner) return this.nativeSessionOwner.control.removeMessageQueueItem(cid);
     if (!this.mirror) {
       throw new Error('SessionDocument not initialized');
     }
@@ -3927,6 +5078,8 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
    * write-intent contract (`session-mq-update`).
    */
   async updateMessageQueueItem(cid: string, patch: Partial<MessageQueueItem>): Promise<void> {
+    if (this.nativeSessionOwner)
+      return this.nativeSessionOwner.control.updateMessageQueueItem(cid, patch);
     if (!this.mirror) {
       throw new Error('SessionDocument not initialized');
     }
@@ -3947,6 +5100,8 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
    * order (defensive — the renderer always sends the complete set).
    */
   async reorderMessageQueue(orderedCids: readonly string[]): Promise<void> {
+    if (this.nativeSessionOwner)
+      return this.nativeSessionOwner.control.reorderMessageQueue(orderedCids);
     if (!this.mirror) {
       throw new Error('SessionDocument not initialized');
     }
@@ -3973,6 +5128,20 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async destroy(options: { preserveStatus?: boolean } = {}) {
+    if (this.nativeSessionOwner) {
+      if (!this.destroyed && !options.preserveStatus) {
+        const status = await this.getStatus();
+        if (
+          status?.type === 'running' ||
+          status?.type === 'requestPermission' ||
+          status?.type === 'initializing'
+        )
+          await this.setStatus(SessionStatusFactory.idle());
+      }
+      this.destroyed = true;
+      await this.nativeSessionOwner.close();
+      return;
+    }
     if (!this.mirror) {
       return;
     }
@@ -3988,14 +5157,14 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     this.historyAutoReadHandle?.dispose();
     this.historyAutoReadHandle = null;
 
-    const status = await this.getStatus();
+    const status = (await getAliveDocMeta<SessionMeta>(this.repo, this.roomId))?.status;
     if (
       !options.preserveStatus &&
       (status?.type === 'running' ||
         status?.type === 'requestPermission' ||
         status?.type === 'initializing')
     ) {
-      await this.setStatus(SessionStatusFactory.idle());
+      await this.writeStatus(SessionStatusFactory.idle());
     }
     // Release the repo room BEFORE evicting the doc. loro-repo binds the
     // `LoroDoc` instance into a room's transport attachment once, at attach
@@ -4021,6 +5190,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async flushLocalWrites(): Promise<void> {
+    if (this.nativeSessionOwner) return this.nativeSessionOwner.flush();
     await this.repo.flush();
   }
 }
@@ -4056,26 +5226,6 @@ export type AcpCapabilityWriteOptions = {
    */
   authMethods?: AcpAuthMethodSummary[];
 };
-
-const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry): string =>
-  JSON.stringify({
-    cliType: entry.cliType,
-    agentType: entry.agentType,
-    cacheVersion: entry.cacheVersion,
-    provenance: entry.provenance,
-    sourceVersion: entry.sourceVersion,
-    modes: entry.modes,
-    models: entry.models,
-    configOptions: entry.configOptions,
-    modelReasoningEfforts: entry.modelReasoningEfforts,
-    availableCommands: entry.availableCommands,
-    authMethods: entry.authMethods,
-    sessionFork: entry.sessionFork,
-    acknowledgedSteer: entry.acknowledgedSteer,
-    sessionTitle: entry.sessionTitle,
-    rateLimits: entry.rateLimits,
-    sessionForkWorktree: entry.sessionForkWorktree,
-  });
 
 export class MachineDocument implements LoroDocument<{}, MachineMeta> {
   roomId: string;
@@ -4137,21 +5287,15 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
   ): Promise<void> {
     if (!agentConfigId && !isBuiltinAgentType(cliType)) return;
     return this.enqueueRateLimitsUpdate(async () => {
-      const limitId = ((limits as { limitId?: string }).limitId ?? cliType).trim() || cliType;
       const handle = await this.openMachineFlockDoc();
-      if (!shouldWrite()) return;
-      if (expectedConfig) {
-        const current = getMachineFlockAgentConfigs(
-          readMachineFlockRowsFromFlock(handle.flock, { families: ['agentConfig'] })
-        )[expectedConfig.id];
-        if (!current || JSON.stringify(current) !== JSON.stringify(expectedConfig)) return;
-      }
-      const changed = writeMachineFlockRowToFlock(handle.flock, {
-        key: agentConfigId
-          ? machineFlockKeys.rateLimit(agentConfigId, cliType, limitId)
-          : machineFlockKeys.legacyRateLimit(cliType as CliType, limitId),
-        value: limits,
-      });
+      const changed = publishMachineRateLimits(
+        handle.flock,
+        agentConfigId,
+        cliType,
+        limits,
+        shouldWrite,
+        expectedConfig
+      );
       if (changed) {
         await this.repo.flush();
         if (this.markMachineFlockDirty) {
@@ -4179,106 +5323,29 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     options: AcpCapabilityWriteOptions = {}
   ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
-    const normalizedModes = modes.map((mode) => ({
-      id: mode.id,
-      name: mode.name,
-      description: mode.description ?? undefined,
-    }));
-    const normalizedModels = models.map((model) => ({
-      modelId: model.modelId,
-      name: model.name ?? model.modelId,
-      description: model.description ?? undefined,
-    }));
-    const entry: AcpCapabilityCacheEntry = {
-      cliType,
-      agentType,
-      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
-      provenance: 'runtime',
-      sourceVersion,
-      modes: normalizedModes,
-      models: normalizedModels,
-      configOptions: configOptions?.length ? configOptions : undefined,
-      availableCommands,
-      authMethods: options.authMethods,
-      sessionFork,
-      acknowledgedSteer,
-      goalActions: goalActions?.length ? goalActions : undefined,
-      sessionTitle: options.sessionTitle,
-      rateLimits: options.rateLimits,
-      sessionForkWorktree: sessionFork,
-      modelReasoningEfforts:
-        modelReasoningEfforts && Object.keys(modelReasoningEfforts).length > 0
-          ? modelReasoningEfforts
-          : undefined,
-      fetchedAt: getServerNow(),
-    };
     const handle = await this.openMachineFlockDoc();
-    options.signal?.throwIfAborted();
-    const capabilityKey = getAcpCapabilityCacheKey(configId);
-    // Reads the stored row alone, without per-model controls, so the
-    // comparison below sees exactly what was written.
-    const existing = getMachineFlockAcpCapabilities(
-      readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
-    )[capabilityKey];
-    // A caller that did not ask the agent — session-created capability updates —
-    // must not erase methods an earlier probe recorded for the same launch.
-    if (
-      options.authMethods === undefined &&
-      existing?.authMethods !== undefined &&
-      existing.sourceVersion === entry.sourceVersion
-    ) {
-      entry.authMethods = existing.authMethods;
-    }
-    // Only probes replace the preview. Omission preserves the latest same-runtime
-    // probe, read beside the write so concurrent session starts cannot roll it back.
-    if (availableCommands === undefined && existing?.sourceVersion === sourceVersion) {
-      entry.availableCommands = getReadableAcpCapabilityCacheEntry(existing)?.availableCommands;
-    }
-    // The per-model row holds no timestamp, so an unchanged declaration is
-    // skipped by the row comparison and costs no write or sync.
-    const modelCapabilitiesChanged =
-      options.modelCapabilities !== undefined &&
-      writeMachineFlockRowToFlock(handle.flock, {
-        key: machineFlockKeys.acpModelCapability(configId),
-        value: { version: 1, sourceVersion, models: options.modelCapabilities },
-      });
-    // The snapshot is also its own model's answer; keep it beside the other
-    // models' answers so a later snapshot of another model does not lose it.
-    const modelAnswers: Record<string, AcpConfigOptionSummary[]> = {
-      ...options.modelConfigOptions,
-    };
-    const snapshotModelId = getAcpConfigOptionsModelId(entry.configOptions);
-    if (snapshotModelId && entry.configOptions) modelAnswers[snapshotModelId] = entry.configOptions;
-    const modelAnswersChanged = writeAcpModelConfigOptionsToFlock(
+    const result = publishMachineAcpCapabilities(
       handle.flock,
       configId,
+      cliType,
+      agentType,
+      modes,
+      models,
+      configOptions,
+      availableCommands,
+      sessionFork,
       sourceVersion,
-      modelAnswers
+      modelReasoningEfforts,
+      acknowledgedSteer,
+      goalActions,
+      options
     );
-    const capabilityUnchanged =
-      existing &&
-      serializeAcpCapabilityWithoutFetchTime(existing) ===
-        serializeAcpCapabilityWithoutFetchTime(entry) &&
-      // Unchanged content is still rewritten once it is old enough: the refresh
-      // cache trusts `fetchedAt`, and an entry never renewed would expire once
-      // and then miss on every later request, re-probing forever.
-      !shouldRenewAcpCapabilityFetchTime(existing, entry.fetchedAt);
-    options.signal?.throwIfAborted();
-    const changed =
-      !capabilityUnchanged &&
-      writeMachineFlockRowToFlock(handle.flock, {
-        key: machineFlockKeys.acpCapability(configId),
-        value: entry,
-      });
-    if (changed || modelCapabilitiesChanged || modelAnswersChanged) {
+    if (result.changed) {
       await this.repo.flush();
-      if (this.markMachineFlockDirty) {
-        this.markMachineFlockDirty('acp-capability-update');
-      } else {
-        await handle.syncOnce().catch(() => undefined);
-      }
+      if (this.markMachineFlockDirty) this.markMachineFlockDirty('acp-capability-update');
+      else await handle.syncOnce().catch(() => undefined);
     }
-    return (capabilityUnchanged ? existing : undefined) ?? entry;
+    return result.entry;
   }
 
   /**

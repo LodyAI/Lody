@@ -1,3 +1,4 @@
+import type { ProviderSetupDisplay } from '@/lib/agent-config-display';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
@@ -7,7 +8,6 @@ import {
   machineSupportsProviderSetupProtocol,
   type MachineAcpBinaryProgressMessage,
   type MachineViewMeta,
-  type ProviderSetupTask,
 } from '@lody/shared';
 import { Check, Copy, RotateCcw, Trash2 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
@@ -103,25 +103,25 @@ const styles = stylex.create({
   statusFailed: { color: colors.destructive },
 });
 
-export type ProviderSetupRowProps = {
-  setup: ProviderSetupTask;
+export type ProviderSetupRowProps<T extends ProviderSetupDisplay = ProviderSetupDisplay> = {
+  setup: T;
   /** Undefined only while the target machine's meta has not loaded yet. */
   machine: MachineViewMeta | undefined;
-  onRetry: (setup: ProviderSetupTask) => Promise<void>;
-  onDelete: (setup: ProviderSetupTask) => Promise<void>;
+  onRetry: (setup: T) => Promise<void>;
+  onDelete: (setup: T) => Promise<void>;
   /** Layout only. The row draws no surface: a list's card draws it. */
   className?: string;
   showAuthentication?: boolean;
 };
 
-export function ProviderSetupRow({
+export function ProviderSetupRow<T extends ProviderSetupDisplay>({
   setup,
   machine,
   onRetry,
   onDelete,
   className,
   showAuthentication = true,
-}: ProviderSetupRowProps) {
+}: ProviderSetupRowProps<T>) {
   const { t } = useTranslation();
   const [actionPending, setActionPending] = useState<'retry' | 'delete' | null>(null);
   const config = setup.config;
@@ -200,10 +200,7 @@ export function ProviderSetupRow({
     }
   })();
 
-  const runAction = async (
-    action: 'retry' | 'delete',
-    callback: (setup: ProviderSetupTask) => Promise<void>
-  ) => {
+  const runAction = async (action: 'retry' | 'delete', callback: (setup: T) => Promise<void>) => {
     if (actionPending) return;
     setActionPending(action);
     try {

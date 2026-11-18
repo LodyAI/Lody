@@ -27,6 +27,7 @@ import { FlockSyncTimeoutError } from '@/lib/loro/timeout-utils';
 
 import {
   getMachineFlockDocId,
+  createLegacyWorkspaceCatalogQuery,
   getWorkspaceFlockDocId,
   getProjectMcpKey,
   writeWorkspaceMcpServerToFlock,
@@ -1878,6 +1879,11 @@ describe('MCP selection at turn authoring', () => {
       handle.flock.commit();
       const manager = {
         repo,
+        workspaceCatalogBinding: { workspaceId, accountId: null },
+        workspaceCatalog: createLegacyWorkspaceCatalogQuery({
+          binding: { workspaceId, accountId: null },
+          open: () => repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId)),
+        }),
         syncFlockDocOrThrow: async () => {
           await repo.flush();
         },

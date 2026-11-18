@@ -414,6 +414,84 @@ describe('docMetaSubscriptionAtom', () => {
     }
   });
 
+  it('waits for an injected asynchronous directory watch and replaces its full reset without reading the old Meta', async () => {
+    const oldId = getSessionRoomId('old-directory-session' as SessionId);
+    const nextId = getSessionRoomId('next-directory-session' as SessionId);
+    let entries: import('@lody/shared/workspace-directory').WorkspaceDirectoryEntry[] = [
+      {
+        docId: oldId,
+        exists: true,
+        meta: { id: 'old-directory-session', title: 'Old', createdAt: '2026-01-01T00:00:00.000Z' },
+      },
+    ];
+    let listener!: (
+      event: import('@lody/shared/workspace-directory').WorkspaceDirectoryChange
+    ) => void;
+    let release!: (
+      value: import('@lody/shared/workspace-directory').WorkspaceDirectoryObservation
+    ) => void;
+    const acquired = new Promise<
+      import('@lody/shared/workspace-directory').WorkspaceDirectoryObservation
+    >((resolve) => {
+      release = resolve;
+    });
+    let active = true;
+    const directory: import('@lody/shared/workspace-directory').WorkspaceDirectory = {
+      listActiveIds: async () => entries.map((entry) => entry.docId),
+      listEntries: async () => entries,
+      getEntry: async (id) => entries.find((entry) => entry.docId === id),
+      observe: (update) => {
+        listener = update;
+        return acquired;
+      },
+    };
+    const forbidden = () => {
+      throw new Error('Forbidden old Meta');
+    };
+    const repo = {
+      getMeta: forbidden,
+      listDoc: forbidden,
+      getDocMeta: forbidden,
+      watch: forbidden,
+    } as unknown as LoroRepo;
+    const runtime = { ...createRuntime(repo), workspaceDirectory: directory };
+    const store = createStore();
+    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
+    try {
+      store.set(runtimeAtom, runtime);
+      await Promise.resolve();
+      expect(store.get(docMetaCacheReadyAtom)).toBe(false);
+      release({
+        async unsubscribe() {
+          active = false;
+        },
+      });
+      await flush();
+      expect(store.get(sessionMetaCacheAtom)[oldId]?.title).toBe('Old');
+      entries = [
+        {
+          docId: nextId,
+          exists: true,
+          meta: {
+            id: 'next-directory-session',
+            title: 'Reset',
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+        },
+      ];
+      listener({ kind: 'snapshot-reset', entries });
+      expect(store.get(sessionMetaCacheAtom)[oldId]).toBeUndefined();
+      expect(store.get(sessionMetaCacheAtom)[nextId]?.title).toBe('Reset');
+      store.set(runtimeAtom, null);
+      await flush();
+      expect(active).toBe(false);
+      listener({ kind: 'snapshot-reset', entries });
+      expect(store.get(sessionMetaCacheAtom)).toEqual({});
+    } finally {
+      unmount();
+    }
+  });
+
   it('observes archive updates that land while the bootstrap snapshot is being read', async () => {
     const sessionId = 'archived-during-bootstrap' as SessionId;
     const docId = getSessionRoomId(sessionId);

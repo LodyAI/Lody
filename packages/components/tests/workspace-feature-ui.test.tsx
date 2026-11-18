@@ -87,6 +87,14 @@ it('prepares and saves an encrypted scheduled message through the ordinary repos
     repo,
     withScheduleStore: async (_id: string, write: () => Promise<unknown>) => write(),
     signScheduleDeclaration: declarations.signScheduleDeclaration,
+    scheduleDefinitions: {
+      async create() {
+        throw new Error('Protected schedule cannot use a native creator');
+      },
+      async resolve() {
+        return undefined;
+      },
+    },
   } as WorkspaceRuntime;
   try {
     const message = await prepareScheduledMessage({
@@ -129,6 +137,280 @@ it('prepares and saves an encrypted scheduled message through the ordinary repos
     expect((await repository.list()).map((row) => row.scheduleId)).toEqual(['reserved']);
   } finally {
     await repo.destroy();
+  }
+});
+
+it('creates a native scheduled message before acquiring an old schedule store and preserves failures without fallback', async () => {
+  const backing = await LoroRepo.create({}),
+    workspaceId = 'native-create-workspace' as WorkspaceId;
+  const writer = new ScheduleRepository(backing, workspaceId);
+  let denied = false;
+  const runtime = {
+    contentMode: 'plaintext',
+    workspaceId,
+    repo: {
+      async openPersistedDoc() {
+        throw new Error('Native selection cannot open old Repo');
+      },
+    },
+    async withScheduleStore() {
+      throw new Error('Native creation cannot acquire old schedule store');
+    },
+    scheduleDefinitions: {
+      async resolve() {
+        throw new Error('Creation should return its committed document');
+      },
+      async create(input: import('@lody/shared').ScheduleSaveInput) {
+        if (denied) throw new Error('Native creator unavailable');
+        return writer.save(input);
+      },
+    },
+  } as unknown as WorkspaceRuntime;
+  const input = {
+    runtime,
+    actorId: 'owner',
+    scheduleId: 'reserved',
+    activationId: 'activation',
+    activityId: 'activity',
+    create: true,
+    now: 100,
+    draft: {
+      title: 'Hello',
+      prompt: 'hello',
+      message: { inputBlocks: [{ type: 'text' as const, text: 'hello' }] },
+      trigger: { kind: 'once' as const, at: new Date(1000).toISOString() },
+      destination: { kind: 'existing_session' as const, sessionId: 'session' },
+      machineId: 'machine',
+      agent: { agentConfigId: 'agent' },
+      misfirePolicy: { kind: 'run_once' as const },
+      overlapPolicy: 'queue_one' as const,
+      retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86400000 },
+    },
+  };
+  try {
+    expect((await saveScheduledMessage(input)).message).toEqual(input.draft.message);
+    expect((await writer.read(input.scheduleId))?.message).toEqual(input.draft.message);
+    expect((await writer.list()).map((row) => row.scheduleId)).toEqual(['reserved']);
+    denied = true;
+    await expect(saveScheduledMessage({ ...input, scheduleId: 'unaccepted' })).rejects.toThrow(
+      'Native creator unavailable'
+    );
+    expect(await writer.read('unaccepted')).toBeNull();
+    expect((await writer.list()).map((row) => row.scheduleId)).toEqual(['reserved']);
+  } finally {
+    await backing.destroy();
+  }
+});
+
+it('edits complete scheduled messages through the actual native client and Node domain without serializing rich caller context', async () => {
+  const fs = await import('node:fs/promises'),
+    os = await import('node:os'),
+    path = await import('node:path');
+  const { createRequire } = await import('node:module');
+  const { openNativeRepoTestHost } = await import('./native-repo-host.test-support');
+  const { createNativeScheduleDefinition, createScheduleDefinitionRegistryAdapter } =
+    await import('@lody/shared/node/native-schedule-definition');
+  const { createNativeScheduleRegistry } =
+    await import('@lody/shared/node/native-schedule-registry');
+  const { loadNativeRepoSdkCompatibility } =
+    await import('@lody/shared/node/native-repo-sdk-compatibility');
+  const compatibility = await loadNativeRepoSdkCompatibility(
+    path.resolve(import.meta.dirname, '../../../apps/electron/package.json')
+  );
+  const { NativeDocumentDomainsMainLegacy } =
+    await import('../../../apps/electron/src/main/services/native-document-domains');
+  const { createNativeDocumentDomainClient } =
+    await import('../src/providers/native-document-domain-ipc');
+  const { LODY_SCHEDULE_DOC_SCHEMA } = createRequire(
+    path.resolve(import.meta.dirname, '../../../apps/electron/package.json')
+  )('@loro-dev/loro-repo-client') as { LODY_SCHEDULE_DOC_SCHEMA: Record<string, unknown> };
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'native-scheduled-edit-consumer-'));
+  const host = await openNativeRepoTestHost(dataDir);
+  const workspaceId = 'native-edit-consumer' as WorkspaceId,
+    scheduleId = 'scheduled-message',
+    generation = 'actual-native-edit';
+  const registry = createNativeScheduleRegistry({
+    workspaceId,
+    namespace: workspaceId,
+    writer: 'native-edit-registry',
+    getClient: async () => host.client,
+    assertAccess() {},
+    flush: async () => {},
+  });
+  let main: InstanceType<typeof NativeDocumentDomainsMainLegacy> | undefined;
+  let source: ReturnType<typeof createNativeDocumentDomainClient> | undefined;
+  try {
+    const room = { kind: 'loro_doc' as const, id: `schedule-${scheduleId}` };
+    await host.client.createRoom(workspaceId, room, 'plaintext', {
+      docSchema: LODY_SCHEDULE_DOC_SCHEMA,
+    });
+    await host.client.createRoom(
+      workspaceId,
+      { kind: 'flock', id: `${workspaceId}:sr` },
+      'plaintext'
+    );
+    const domain = createNativeScheduleDefinition({
+      client: host.client,
+      namespace: workspaceId,
+      writer: 'native-edit-body',
+      compatibility,
+      scheduleId,
+      assertAccess() {},
+      registry: createScheduleDefinitionRegistryAdapter(registry, () => {}),
+      flushDefinition: async () => {},
+    });
+    expect(await domain.read()).toBeNull();
+    main = new NativeDocumentDomainsMainLegacy({
+      async acquire() {
+        return {
+          domain: 'schedule_definition',
+          port: domain,
+          actorId: 'owner',
+          machineId: 'machine',
+          generation,
+          assertCurrent() {},
+        };
+      },
+      send() {},
+    });
+    const bridge = main;
+    source = createNativeDocumentDomainClient({
+      registrationId: crypto.randomUUID(),
+      target: { domain: 'schedule_definition', id: scheduleId },
+      transport: {
+        readNativeDocumentDomain: (request) => bridge.read(1, request),
+        executeNativeDocumentDomain: (request) => bridge.execute(1, request),
+        observeNativeDocumentDomain: (request) => bridge.observe(1, request),
+        unobserveNativeDocumentDomain: (request) => bridge.unsubscribe(1, request),
+        cancelNativeDocumentDomain: (request) => bridge.cancel(1, request),
+      },
+      listen: () => () => {},
+    });
+    const draft = {
+      title: 'Initial',
+      prompt: 'initial',
+      message: { inputBlocks: [{ type: 'text' as const, text: 'initial' }] },
+      trigger: { kind: 'once' as const, at: new Date(10000).toISOString() },
+      destination: { kind: 'existing_session' as const, sessionId: 'session' },
+      machineId: 'machine',
+      agent: { agentConfigId: 'agent' },
+      misfirePolicy: { kind: 'run_once' as const },
+      overlapPolicy: 'queue_one' as const,
+      retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86400000 },
+    };
+    await domain.save({
+      scheduleId,
+      actorId: 'owner',
+      activationId: 'activation',
+      activityId: 'created',
+      create: true,
+      now: 100,
+      draft,
+    });
+    const runtime = {
+      contentMode: 'plaintext',
+      workspaceId,
+      repo: {
+        async openPersistedDoc() {
+          throw new Error('Selected native cannot read the old body');
+        },
+      },
+      scheduleRegistry: registry,
+      scheduleDefinitions: {
+        async resolve() {
+          return source!.definition;
+        },
+      },
+      async withScheduleStore(_id: string, write: () => Promise<unknown>) {
+        return write();
+      },
+    } as unknown as WorkspaceRuntime;
+    Reflect.set(runtime, 'self', runtime); // A leaked rich caller would fail JSON serialization.
+    const updated = {
+      ...draft,
+      title: 'Edited',
+      prompt: 'edited body',
+      message: { inputBlocks: [{ type: 'text' as const, text: 'edited body' }] },
+    };
+    if (!compatibility?.setValue) {
+      const before = (await host.client.readDoc(workspaceId, room, [])).roomTxId;
+      await expect(
+        saveScheduledMessage({
+          runtime,
+          scheduleId,
+          actorId: 'renderer',
+          activationId: 'edited',
+          activityId: 'edited',
+          create: false,
+          now: 200,
+          draft: updated,
+        })
+      ).rejects.toMatchObject({ code: 'unavailable' });
+      expect((await host.client.readDoc(workspaceId, room, [])).roomTxId).toBe(before);
+      return;
+    }
+    const saved = await saveScheduledMessage({
+      runtime,
+      scheduleId,
+      actorId: 'renderer-actor-ignored',
+      activationId: 'edited',
+      activityId: 'edited',
+      create: false,
+      now: 200,
+      draft: updated,
+    });
+    expect(saved.message?.inputBlocks).toEqual(updated.message.inputBlocks);
+    expect((await domain.read())?.definition).toMatchObject({
+      title: 'Edited',
+      ownerId: 'owner',
+      machineId: 'machine',
+    });
+    // The wire port independently picks fields even for other rich callers.
+    await source.definition.save({
+      ...{ runtime, unknownCallerField: 'synthetic' },
+      scheduleId,
+      actorId: 'forged',
+      activationId: 'second',
+      activityId: 'second',
+      create: false,
+      now: 300,
+      draft: { ...updated, title: 'Second' },
+    });
+    await source.definition.setEnabled({
+      ...{ runtime, unknownCallerField: 'synthetic' },
+      scheduleId,
+      actorId: 'forged',
+      enabled: false,
+      now: 400,
+      activationId: 'paused',
+      requestId: 'pause',
+    });
+    expect((await domain.read())?.definition).toMatchObject({
+      title: 'Second',
+      ownerId: 'owner',
+      machineId: 'machine',
+      enabled: false,
+    });
+    const head = (await host.client.readDoc(workspaceId, room, [])).roomTxId;
+    await expect(
+      source.execute({
+        ...{ unknownCallerField: 'synthetic' },
+        kind: 'schedule-enabled',
+        enabled: true,
+        now: 500,
+        activationId: 'bad',
+        requestId: 'bad',
+      })
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+    expect((await host.client.readDoc(workspaceId, room, [])).roomTxId).toBe(head);
+  } finally {
+    const released = await Promise.allSettled([source?.close(), main?.close(), registry.close()]);
+    await host.close();
+    const failures = released.flatMap((result) =>
+      result.status === 'rejected' ? [result.reason] : []
+    );
+    if (failures.length) throw new AggregateError(failures, 'Native edit fixture release failed');
+    await fs.rm(dataDir, { recursive: true, force: true });
   }
 });
 

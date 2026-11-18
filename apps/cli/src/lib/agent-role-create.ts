@@ -3,10 +3,9 @@ import {
   getAgentRoleTargets,
   getWorkspaceFlockDocId,
   isMultiTargetAgentRole,
-  listWorkspaceAgentRoles,
-  readWorkspaceFlockRowsFromFlock,
   snapshotAgentRole,
   type AgentRole,
+  type AgentRoleId,
   type MachineId,
   type WorkspaceId,
 } from '@lody/shared';
@@ -31,20 +30,25 @@ export const composeAgentRolePrompt = (
 
 export const loadWorkspaceAgentRoleCatalog = async (
   manager: LoroDocumentManager,
-  workspaceId: WorkspaceId
+  workspaceId: WorkspaceId,
+  explicitIds?: readonly string[]
 ): Promise<ReadonlyMap<string, AgentRole>> => {
   const docId = getWorkspaceFlockDocId(workspaceId);
   await manager.syncFlockDocOrThrow(docId, {
     timeoutMs: 10_000,
     reason: 'agent-role-catalog-read',
   });
-  const handle = await manager.repo.openFlockDoc(docId);
-  return new Map(
-    listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(handle.flock)).map((role) => [
-      role.id,
-      role,
-    ])
-  );
+  const roles =
+    explicitIds === undefined
+      ? (await manager.readWorkspaceCatalog(workspaceId)).roles
+      : (
+          await Promise.all(
+            [...new Set(explicitIds)].map((id) =>
+              manager.readWorkspaceRole(workspaceId, id as AgentRoleId)
+            )
+          )
+        ).filter((role): role is AgentRole => role !== undefined);
+  return new Map(roles.map((role) => [role.id, role]));
 };
 
 const formatAgentRoleCandidates = (roles: readonly AgentRole[]): string =>
@@ -204,7 +208,12 @@ export const resolveAgentRoleCreateFromCatalog = async (args: {
   prompt: string;
   overrides?: AgentRoleCreateOverrides;
 }): Promise<ResolvedAgentRoleCreate> => {
-  const catalog = await loadWorkspaceAgentRoleCatalog(args.manager, args.workspaceId);
+  const catalog = new Map(await loadWorkspaceAgentRoleCatalog(args.manager, args.workspaceId));
+  const exactId = normalizeCliValue(args.selector);
+  const exact = exactId
+    ? await args.manager.readWorkspaceRole(args.workspaceId, exactId as AgentRoleId)
+    : undefined;
+  if (exact) catalog.set(exact.id, exact);
   // `--machine` picks the target of a Role on several machines; for a
   // single-target Role it stays an ignored override, as before.
   const role = selectAgentRoleTarget([...catalog.values()], args.selector, {

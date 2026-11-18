@@ -206,22 +206,16 @@ function formatHistoryConflictResolutionBlocker(
 async function listWorkspaceSessionMetas(
   manager: LoroDocumentManager
 ): Promise<Array<{ sessionId: SessionId; meta: SessionMeta }>> {
-  const scanner = manager.repo.getMeta();
-  if (!scanner) {
-    return [];
-  }
-
-  const roomIds = new Set<string>();
-  for (const row of await scanner.scan({ prefix: ['m'] })) {
-    const key = row.key;
-    if (!Array.isArray(key) || key.length < 2) {
-      continue;
-    }
-    const roomId = key[1];
-    if (typeof roomId === 'string' && isSessionDocRoomId(roomId)) {
-      roomIds.add(roomId);
-    }
-  }
+  const roomIds = new Set(
+    (await manager.repo.listDoc())
+      .filter(
+        (row) =>
+          isSessionDocRoomId(row.docId) &&
+          !isLoroRepoDocDeleted(row) &&
+          Object.keys(row.meta).length > 0
+      )
+      .map((row) => row.docId)
+  );
 
   const metas = await Promise.all(
     [...roomIds].map(async (roomId) => {
@@ -928,7 +922,8 @@ export class LocalProjectHistorySyncService {
       const existing = await readMachineLocalProjects(
         this.manager.repo,
         this.context.workspaceId,
-        this.context.machineId
+        this.context.machineId,
+        this.manager.getMachineCatalogRuntimePort?.()
       );
       const previous = existing[args.localProjectId];
       if (!previous) {
@@ -949,7 +944,12 @@ export class LocalProjectHistorySyncService {
           },
         },
         lastListedAt,
-        { sync: this.manager, reason: 'local-project-history-sync' }
+        {
+          sync: this.manager,
+          reason: 'local-project-history-sync',
+          native: this.manager.getMachineCatalogRuntimePort?.(),
+          expected: previous,
+        }
       );
     });
 

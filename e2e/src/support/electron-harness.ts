@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeSync,
   writeFileSync,
@@ -94,6 +95,14 @@ const INHERITED_ENV_ALLOWLIST = [
   'HOME',
   'LOCALAPPDATA',
   'LODY_E2E_SHOW_WINDOW',
+  'LODY_NATIVE_FILE_INDEX',
+  'LODY_NATIVE_REPO_MODE',
+  'LODY_NATIVE_WORKSPACE_CATALOG',
+  'LODY_NATIVE_MACHINE_CATALOG',
+  'LODY_NATIVE_SCHEDULE_REGISTRY',
+  'LODY_NATIVE_WORKSPACE_META',
+  'LODY_NATIVE_SESSION_BODY',
+  'LODY_NATIVE_DOCUMENT_DOMAINS',
   'PATH',
   'PATHEXT',
   'SHELL',
@@ -199,6 +208,9 @@ export class ElectronHarness {
       timeout: 60_000,
     });
     const childProcess = this.app.process();
+    childProcess.once('exit', (code, signal) =>
+      this.record('electron-main', 'exit', JSON.stringify({ pid: childProcess.pid, code, signal }))
+    );
     childProcess.stdout?.on('data', (chunk) =>
       this.record('electron-main', 'stdout', String(chunk))
     );
@@ -310,6 +322,434 @@ export class ElectronHarness {
     );
     this.snapshots.push(snapshot);
     return snapshot;
+  }
+
+  /** Passive inspection of this synthetic profile, never a backend initializer. */
+  captureNativeFileIndexEvidence() {
+    if (!this.lodyDataDir) throw new Error('Electron harness is not running');
+    const independent =
+      process.env.LODY_NATIVE_REPO_MODE === 'independent' ||
+      process.env.LODY_NATIVE_WORKSPACE_CATALOG === '1' ||
+      process.env.LODY_NATIVE_MACHINE_CATALOG === '1' ||
+      process.env.LODY_NATIVE_SCHEDULE_REGISTRY === '1' ||
+      process.env.LODY_NATIVE_WORKSPACE_META === '1' ||
+      existsSync(join(this.lodyDataDir, 'native-repo', 'independent', 'v1'));
+    const base = join(
+      this.lodyDataDir,
+      'native-repo',
+      ...(independent ? ['independent', 'v1'] : ['v1'])
+    );
+    const hosts: Array<{
+      pid: number | null;
+      runId: string | null;
+      nativeRooms: number;
+      frozenRooms: number;
+    }> = [];
+    if (!existsSync(base)) return hosts;
+    const Database = requireFromElectron('better-sqlite3') as new (
+      path: string,
+      options: { readonly: boolean; fileMustExist: boolean }
+    ) => {
+      prepare(sql: string): { all(): Array<{ stage: string; count: number }> };
+      close(): void;
+    };
+    for (const binding of readdirSync(base).filter((name) => /^[a-f0-9]{64}$/.test(name))) {
+      const root = join(base, binding);
+      const path = join(root, 'routes.sqlite3');
+      if (!existsSync(path)) continue;
+      const db = new Database(path, { readonly: true, fileMustExist: true });
+      let rows;
+      try {
+        rows = db
+          .prepare('SELECT stage, COUNT(*) AS count FROM native_room_migrations GROUP BY stage')
+          .all();
+      } finally {
+        db.close();
+      }
+      const endpointPath = join(root, independent ? 'engine' : 'engine-0.1.0-v1', 'engine.json');
+      const endpoint = existsSync(endpointPath)
+        ? (JSON.parse(readFileSync(endpointPath, 'utf8')) as { pid?: unknown; run_id?: unknown })
+        : {};
+      hosts.push({
+        pid: typeof endpoint.pid === 'number' ? endpoint.pid : null,
+        runId: typeof endpoint.run_id === 'string' ? endpoint.run_id : null,
+        nativeRooms: rows
+          .filter((row) => row.stage === 'native')
+          .reduce((sum, row) => sum + row.count, 0),
+        frozenRooms: rows
+          .filter((row) => row.stage === 'frozen' || row.stage === 'verified')
+          .reduce((sum, row) => sum + row.count, 0),
+      });
+    }
+    return hosts;
+  }
+
+  /** Passive room/owner receipts only; never returns catalog values or credentials. */
+  captureNativeWorkspaceCatalogEvidence() {
+    return this.captureNativeFlockCatalogEvidence('workspace');
+  }
+
+  captureNativeMachineCatalogEvidence() {
+    return this.captureNativeFlockCatalogEvidence('machine');
+  }
+
+  captureNativeScheduleRegistryEvidence() {
+    return this.captureNativeFlockCatalogEvidence('schedule');
+  }
+
+  captureNativeSessionBodyEvidence(accountId: string, workspaceId: string, sessionId: string) {
+    if (!this.lodyDataDir) throw new Error('Electron harness is not running');
+    const base = join(this.lodyDataDir, 'native-repo', 'independent', 'v1');
+    if (!existsSync(base)) return 'legacy';
+    const Database = requireFromElectron('better-sqlite3') as new (
+      file: string,
+      options: { readonly: boolean; fileMustExist: boolean }
+    ) => {
+      prepare(sql: string): { all(...parameters: string[]): unknown[] };
+      close(): void;
+    };
+    let selected: string | undefined;
+    for (const name of readdirSync(base).filter((value) => /^[a-f0-9]{64}$/.test(value))) {
+      const file = join(base, name, 'session-routes.sqlite3');
+      if (!existsSync(file)) continue;
+      const db = new Database(file, { readonly: true, fileMustExist: true });
+      try {
+        const rows = db
+          .prepare(
+            'SELECT manifest,stage,receipt FROM native_loro_document_migrations WHERE binding=? AND room_id=?'
+          )
+          .all(JSON.stringify([accountId, workspaceId]), `session-${sessionId}`) as {
+          manifest: string;
+          stage: string;
+          receipt: string | null;
+        }[];
+        for (const row of rows) {
+          if (selected) throw new Error('Duplicate Session body publication');
+          const manifest = JSON.parse(row.manifest);
+          if (
+            manifest.binding !== JSON.stringify([accountId, workspaceId]) ||
+            manifest.namespace !== workspaceId ||
+            manifest.roomId !== `session-${sessionId}` ||
+            manifest.family !== 'session'
+          )
+            throw new Error('Session publication identity mismatch');
+          if (row.stage === 'native') {
+            const receipt = JSON.parse(row.receipt ?? 'null');
+            if (!receipt || !Number.isSafeInteger(receipt.roomTxId) || receipt.roomTxId <= 0)
+              throw new Error('Incomplete Session publication receipt');
+            if (manifest.origin === 'created') {
+              if (
+                receipt.kind !== 'created' ||
+                receipt.reservationId !== manifest.migrationId ||
+                receipt.creationIntentSha256 !== manifest.creationIntentSha256 ||
+                !/^[a-f0-9]{64}$/.test(receipt.creationIntentSha256) ||
+                !Array.isArray(receipt.absence) ||
+                !receipt.absence.length ||
+                receipt.absence.some(
+                  (source: { sourceId?: unknown; absent?: unknown }) =>
+                    typeof source.sourceId !== 'string' || source.absent !== true
+                ) ||
+                new Set(receipt.absence.map((source: { sourceId: string }) => source.sourceId))
+                  .size !== receipt.absence.length
+              )
+                throw new Error('Incomplete new Session reservation receipt');
+            } else if (
+              !/^[a-f0-9]{64}$/.test(receipt.sha256) ||
+              !Array.isArray(receipt.sources) ||
+              receipt.sources.length !== manifest.sourceIds.length ||
+              new Set(receipt.sources.map((source: { sourceId: string }) => source.sourceId))
+                .size !== manifest.sourceIds.length ||
+              receipt.sources.some(
+                (source: { sourceId: string; sha256: string }) =>
+                  !manifest.sourceIds.includes(source.sourceId) ||
+                  !/^[a-f0-9]{64}$/.test(source.sha256)
+              )
+            )
+              throw new Error('Incomplete migrated Session source receipt');
+          }
+          if (!['legacy', 'frozen', 'native', 'rollback'].includes(row.stage))
+            throw new Error('Unknown Session route');
+          selected = row.stage;
+        }
+      } finally {
+        db.close();
+      }
+    }
+    return selected ?? 'legacy';
+  }
+
+  captureNativeScheduleDefinitionEvidence(accountId: string, workspaceId: string) {
+    return this.captureNativeDocumentBodyEvidence(
+      accountId,
+      workspaceId,
+      'schedule_definition'
+    ).map(({ id, ...rest }) => ({ scheduleId: id, ...rest }));
+  }
+
+  captureNativePreviewCommentEvidence(accountId: string, workspaceId: string) {
+    return this.captureNativeDocumentBodyEvidence(accountId, workspaceId, 'preview_comments').map(
+      ({ id, ...rest }) => ({ sessionId: id, ...rest })
+    );
+  }
+
+  private captureNativeDocumentBodyEvidence(
+    accountId: string,
+    workspaceId: string,
+    family: 'schedule_definition' | 'preview_comments'
+  ) {
+    if (!this.lodyDataDir) throw new Error('Electron harness is not running');
+    const base = join(this.lodyDataDir, 'native-repo', 'independent', 'v1');
+    const result: { id: string; stage: string; legacySqlitePresent: boolean }[] = [];
+    if (!existsSync(base)) return result;
+    const Database = requireFromElectron('better-sqlite3') as new (
+      file: string,
+      options: { readonly: boolean; fileMustExist: boolean }
+    ) => { prepare(sql: string): { all(...parameters: string[]): unknown[] }; close(): void };
+    const classicFile = join(this.lodyDataDir, 'loro-repo', workspaceId, 'repo.sqlite3');
+    const classic = existsSync(classicFile)
+      ? new Database(classicFile, { readonly: true, fileMustExist: true })
+      : undefined;
+    try {
+      for (const name of readdirSync(base).filter((value) => /^[a-f0-9]{64}$/.test(value))) {
+        const file = join(base, name, 'document-routes.sqlite3');
+        if (!existsSync(file)) continue;
+        const db = new Database(file, { readonly: true, fileMustExist: true });
+        try {
+          const rows = db
+            .prepare(
+              'SELECT manifest,stage,receipt FROM native_loro_document_migrations WHERE binding=?'
+            )
+            .all(JSON.stringify([accountId, workspaceId])) as {
+            manifest: string;
+            stage: string;
+            receipt: string | null;
+          }[];
+          for (const row of rows) {
+            const manifest = JSON.parse(row.manifest);
+            if (manifest.family !== family) continue;
+            if (
+              manifest.binding !== JSON.stringify([accountId, workspaceId]) ||
+              manifest.namespace !== workspaceId ||
+              !manifest.roomId.startsWith(
+                family === 'schedule_definition' ? 'schedule-' : 'preview-comment-'
+              )
+            )
+              throw new Error('document publication identity mismatch');
+            if (row.stage === 'native') {
+              const receipt = JSON.parse(row.receipt ?? 'null');
+              if (
+                manifest.origin !== 'created' ||
+                receipt?.kind !== 'created' ||
+                receipt.family !== family ||
+                receipt.reservationId !== manifest.migrationId ||
+                receipt.creationIntentSha256 !== manifest.creationIntentSha256 ||
+                !Number.isSafeInteger(receipt.roomTxId) ||
+                receipt.roomTxId <= 0 ||
+                !Array.isArray(receipt.absence) ||
+                !receipt.absence.length ||
+                receipt.absence.some((source: { absent?: unknown }) => source.absent !== true)
+              )
+                throw new Error('Incomplete native document creation receipt');
+              const native = new Database(
+                join(
+                  base,
+                  name,
+                  'engine',
+                  'namespaces',
+                  `ns_${Buffer.from(workspaceId).toString('hex')}.sqlite3`
+                ),
+                { readonly: true, fileMustExist: true }
+              );
+              try {
+                const physical = native
+                  .prepare('SELECT encryption FROM v2_rooms WHERE room_kind=1 AND room_id=?')
+                  .all(manifest.roomId) as { encryption: number }[];
+                if (physical.length !== 1 || physical[0]!.encryption !== 0)
+                  throw new Error('Native plaintext document body missing');
+              } finally {
+                native.close();
+              }
+            }
+            const legacySqlitePresent = !!classic
+              ?.prepare(
+                'SELECT doc_id FROM docs WHERE doc_id=? UNION SELECT doc_id FROM doc_updates WHERE doc_id=? LIMIT 1'
+              )
+              .all(manifest.roomId, manifest.roomId).length;
+            result.push({
+              id: manifest.roomId.slice(family === 'schedule_definition' ? 9 : 16),
+              stage: row.stage,
+              legacySqlitePresent,
+            });
+          }
+        } finally {
+          db.close();
+        }
+      }
+    } finally {
+      classic?.close();
+    }
+    if (new Set(result.map((row) => row.id)).size !== result.length)
+      throw new Error('Duplicate document publication');
+    return result;
+  }
+
+  async expectLegacyRendererBodyAbsent(workspaceId: string, roomId: string) {
+    if (!this.page) throw new Error('Electron harness is not running');
+    const present = await this.page.evaluate(
+      async ({ workspaceId, roomId }) => {
+        const prefix = `lody-loro-repo-db-${workspaceId}`;
+        const databases = (await indexedDB.databases()).filter(
+          (db) => db.name === prefix || db.name?.startsWith(`${prefix}:`)
+        );
+        for (const descriptor of databases) {
+          const opening = indexedDB.open(descriptor.name!);
+          opening.onupgradeneeded = () => opening.transaction?.abort();
+          const db = await new Promise<IDBDatabase>((resolve, reject) => {
+            opening.onsuccess = () => resolve(opening.result);
+            opening.onerror = () => reject(opening.error);
+          });
+          try {
+            if (
+              db.version !== 4 ||
+              !db.objectStoreNames.contains('docs') ||
+              !db.objectStoreNames.contains('doc-updates')
+            )
+              throw new Error('Unsupported legacy renderer body layout');
+            const tx = db.transaction(['docs', 'doc-updates'], 'readonly');
+            const [base, updates] = await Promise.all(
+              ['docs', 'doc-updates'].map(
+                (store) =>
+                  new Promise<unknown>((resolve, reject) => {
+                    const read = tx.objectStore(store).get(roomId);
+                    read.onsuccess = () => resolve(read.result);
+                    read.onerror = () => reject(read.error);
+                  })
+              )
+            );
+            if (base !== undefined || updates !== undefined) return true;
+          } finally {
+            db.close();
+          }
+        }
+        return false;
+      },
+      { workspaceId, roomId }
+    );
+    if (present)
+      throw new Error('New native body was also authored in legacy renderer persistence');
+  }
+
+  captureNativeWorkspaceMetaEvidence() {
+    return this.captureNativeFlockCatalogEvidence('meta');
+  }
+
+  private captureNativeFlockCatalogEvidence(domain: 'workspace' | 'machine' | 'schedule' | 'meta') {
+    if (!this.lodyDataDir) throw new Error('Electron harness is not running');
+    const base = join(this.lodyDataDir, 'native-repo', 'independent', 'v1');
+    const result: Array<{
+      stage: string;
+      rendererOwner: string | null;
+      head: number;
+      proofTx: number;
+    }> = [];
+    if (!existsSync(base)) return result;
+    const Database = requireFromElectron('better-sqlite3') as new (
+      file: string,
+      options: { readonly: boolean; fileMustExist: boolean }
+    ) => {
+      prepare(sql: string): { all(...parameters: string[]): unknown[] };
+      close(): void;
+    };
+    const ownersFile = join(
+      this.lodyDataDir,
+      'native-repo',
+      domain === 'workspace' ? 'renderer-wf-owners.sqlite3' : 'renderer-flock-group-owners.sqlite3'
+    );
+    const owners = existsSync(ownersFile)
+      ? new Database(ownersFile, { readonly: true, fileMustExist: true })
+      : null;
+    try {
+      for (const name of readdirSync(base).filter((value) => /^[a-f0-9]{64}$/.test(value))) {
+        const directory = join(base, name);
+        const file = join(directory, 'routes.sqlite3');
+        if (!existsSync(file)) continue;
+        const journal = new Database(file, { readonly: true, fileMustExist: true });
+        let rows;
+        try {
+          rows = journal
+            .prepare('SELECT stage, intent, proof FROM native_room_migrations')
+            .all() as Array<{ stage: string; intent: string; proof: string | null }>;
+        } finally {
+          journal.close();
+        }
+        for (const row of rows) {
+          const intent = JSON.parse(row.intent) as {
+            namespace: string;
+            room: { id: string; kind: string };
+            binding: string;
+          };
+          if (
+            intent.room.kind !== (domain === 'meta' ? 'meta' : 'flock') ||
+            (domain === 'workspace'
+              ? !intent.room.id.endsWith(':wf:workspace')
+              : domain === 'machine'
+                ? intent.room.id.split(':')[1] !== 'mf'
+                : domain === 'schedule'
+                  ? intent.room.id !== `${intent.namespace}:sr`
+                  : intent.room.id !== 'meta')
+          )
+            continue;
+          const file = join(
+            directory,
+            'engine',
+            'namespaces',
+            `ns_${Buffer.from(intent.namespace).toString('hex')}.sqlite3`
+          );
+          const native = new Database(file, { readonly: true, fileMustExist: true });
+          let head;
+          try {
+            head = (
+              native
+                .prepare(
+                  `SELECT head_tx_id AS head FROM v2_rooms WHERE room_kind=${domain === 'meta' ? 3 : 2} AND encryption=0 AND room_id=?`
+                )
+                .all(intent.room.id) as Array<{ head: number }>
+            )[0]?.head;
+          } finally {
+            native.close();
+          }
+          if (head === undefined) throw new Error('Published catalog has no plaintext native room');
+          const [accountId, workspaceId] = JSON.parse(intent.binding) as [string, string];
+          const ownerKey = JSON.stringify({
+            accountId,
+            workspaceId,
+            roomId: intent.room.id,
+            contentMode: 'plaintext',
+          });
+          const rendererOwner = (
+            domain === 'workspace'
+              ? owners
+                  ?.prepare('SELECT owner FROM renderer_wf_owners WHERE binding=?')
+                  .all(ownerKey)
+              : owners
+                  ?.prepare(
+                    'SELECT o.owner FROM renderer_flock_group_rooms r JOIN renderer_flock_group_owners o ON o.scope=r.group_scope WHERE r.binding=? AND r.room_id=?'
+                  )
+                  .all(JSON.stringify([accountId, workspaceId, 'plaintext']), intent.room.id)
+          ) as Array<{ owner: string }> | undefined;
+          const proofTx = row.proof ? (JSON.parse(row.proof) as { roomTxId: number }).roomTxId : -1;
+          result.push({
+            stage: row.stage,
+            rendererOwner: rendererOwner?.[0]?.owner ?? null,
+            head,
+            proofTx,
+          });
+        }
+      }
+    } finally {
+      owners?.close();
+    }
+    return result;
   }
 
   async markBootPoint(name: string): Promise<BootProfileSnapshot | null> {

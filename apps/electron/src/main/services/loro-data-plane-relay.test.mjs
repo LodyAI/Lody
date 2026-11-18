@@ -57,10 +57,12 @@ function createControlledSocket() {
 function createRelayHarness() {
   const sockets = []
   const statuses = []
+  const events = []
   const sender = {
     isDestroyed: () => false,
     send: (channel, value) => {
       if (channel === 'loro.status') statuses.push(value)
+      if (channel === 'loro.event') events.push(value)
     },
     once() {},
     on() {}
@@ -73,7 +75,7 @@ function createRelayHarness() {
       return socket
     }
   )
-  return { relay, sockets, statuses, sender }
+  return { relay, sockets, statuses, events, sender }
 }
 
 const settle = () => new Promise((resolve) => setImmediate(resolve))
@@ -234,4 +236,93 @@ void test('a socket dropped for a protocol error does not fail requests on its s
 
   assert.deepEqual(await second, [])
   relay.destroy()
+})
+
+void test('forwards authenticated old and new pong capability replies to renderer readers', async () => {
+  const { relay, sockets, events, sender } = createRelayHarness()
+  relay.attachSender(sender)
+  sockets[0].emit('connect')
+  sockets[0].emit('data', Buffer.from('{"type":"authenticated"}\n'))
+  const oldPong = { type: 'pong', protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION }
+  const newPong = { ...oldPong, nativeFileIndexSnapshots: true }
+  sockets[0].emit('data', Buffer.from(`${JSON.stringify(oldPong)}\n${JSON.stringify(newPong)}\n`))
+  await settle()
+  assert.deepEqual(events, [oldPong, newPong])
+  assert.equal(relay.isConnected(), true)
+  relay.destroy()
+})
+
+void test('presence-only renderer reload detaches its scoped peer and fences delayed sends', async () => {
+  const { relay, sockets } = createRelayHarness()
+  const sender = new EventEmitter()
+  sender.isDestroyed = () => false
+  sender.send = () => {}
+  const ping = {
+    type: 'ping',
+    protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+    workspaceId: 'local-ws',
+    peerId: 'first-frame'
+  }
+  try {
+    relay.send(ping, sender)
+    // The old frame navigates away while its connection authentication is pending.
+    sender.emit('did-navigate')
+    sockets[0].emit('connect')
+    sockets[0].emit('data', Buffer.from('{"type":"authenticated"}\n'))
+    await settle()
+    assert.deepEqual(
+      sockets[0].writes.filter((message) => message.peerId === 'first-frame'),
+      []
+    )
+    relay.send({ ...ping, peerId: 'second-frame' }, sender)
+    await settle()
+    assert.deepEqual(sockets[0].writes.at(-1), { ...ping, peerId: 'second-frame' })
+    sender.emit('did-navigate')
+    assert.deepEqual(sockets[0].writes.at(-1), {
+      type: 'detach',
+      protocolVersion: 7,
+      workspaceId: 'local-ws',
+      peerId: 'second-frame'
+    })
+    // A bare watchdog ping is never a renderer peer and needs no detach.
+    relay.send({ type: 'ping', protocolVersion: 7 }, sender)
+    await settle()
+    const before = sockets[0].writes.length
+    sender.emit('destroyed')
+    assert.equal(sockets[0].writes.length, before)
+  } finally {
+    relay.destroy()
+  }
+})
+
+void test('retiring a presence-only renderer drops its backpressured ping before socket drain', async () => {
+  const { relay, sockets } = createRelayHarness()
+  const sender = new EventEmitter()
+  sender.isDestroyed = () => false
+  sender.send = () => {}
+  relay.attachSender(sender)
+  sockets[0].emit('connect')
+  sockets[0].emit('data', Buffer.from('{"type":"authenticated"}\n'))
+  await settle()
+  const write = sockets[0].write
+  let blocked = true
+  sockets[0].write = (line) => {
+    write(line)
+    return !blocked
+  }
+  try {
+    relay.send({ type: 'ping', protocolVersion: 7 })
+    await settle()
+    relay.send({ type: 'ping', protocolVersion: 7, workspaceId: 'ws', peerId: 'retired' }, sender)
+    await settle()
+    sender.emit('did-navigate')
+    blocked = false
+    sockets[0].emit('drain')
+    assert.deepEqual(
+      sockets[0].writes.filter((message) => message.peerId === 'retired'),
+      [{ type: 'detach', protocolVersion: 7, workspaceId: 'ws', peerId: 'retired' }]
+    )
+  } finally {
+    relay.destroy()
+  }
 })

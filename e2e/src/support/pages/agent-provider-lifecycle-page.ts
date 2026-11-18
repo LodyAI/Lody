@@ -13,6 +13,39 @@ export class AgentProviderLifecyclePage {
     private readonly fixture: AgentProviderLifecycleFixture
   ) {}
 
+  async expectProviderListed(name: string, present = true): Promise<void> {
+    const settings = await this.openAgentSettings();
+    const row = settings.getByText(name, { exact: true });
+    if (present) await expect(row).toBeVisible();
+    else await expect(row).toHaveCount(0);
+    await this.closeSettings(settings);
+  }
+
+  async renameProvider(previous: string, next: string): Promise<void> {
+    const settings = await this.openAgentSettings();
+    await this.openProviderEditor(settings, previous);
+    // Preserve write-only launch/env/prompt fields; execution proves preservation.
+    const nameInput = this.page.locator('#agent-config-name, #catalog-agent-name');
+    await nameInput.fill(next);
+    if (await this.isNativeEditor()) await this.keepNativePrivateFields();
+    await this.page.getByRole('button', { name: /^(Save|保存)$/u }).click();
+    await expect(nameInput).toBeHidden();
+    await expect(settings.getByText(next, { exact: true })).toBeVisible();
+    await this.closeSettings(settings);
+  }
+
+  async sendWithProvider(name: string, prompt: string, response: string): Promise<void> {
+    await this.openHome();
+    await this.selectProvider(name);
+    await this.createSession(prompt, response, 'first');
+  }
+
+  async deleteProviderByName(name: string): Promise<void> {
+    const settings = await this.openAgentSettings();
+    await this.deleteProvider(settings, name);
+    await this.closeSettings(settings);
+  }
+
   async rejectInvalidProviderAndCancel(): Promise<void> {
     const settings = await this.openAgentSettings();
     await this.openNewCustomProvider(settings);
@@ -63,6 +96,7 @@ export class AgentProviderLifecyclePage {
   async cancelDraftEdits(): Promise<void> {
     const settings = await this.openAgentSettings();
     await this.openProviderEditor(settings, this.fixture.initialProviderName);
+    if (await this.isNativeEditor()) await this.selectNativePrivateMode('prompt', 'clear');
     await this.fillCustomProvider({
       name: this.fixture.cancelledProviderName,
       command: this.fixture.alternateAgentCommandLine,
@@ -83,6 +117,16 @@ export class AgentProviderLifecyclePage {
       prompt: this.fixture.initialCustomPrompt,
     });
     await this.closeSettings(settings);
+    const verificationPrompt = 'Verify the saved Provider survived the cancelled private draft.';
+    await this.sendWithProvider(
+      this.fixture.initialProviderName,
+      verificationPrompt,
+      this.fixture.initialResponseText
+    );
+    await this.fixture.expectInitialExecution(verificationPrompt);
+    await this.archiveAndPermanentlyDelete(this.requireFirstSessionId());
+    this.firstSessionId = null;
+    await this.openHome();
   }
 
   async saveEditedProviderAndCreateAlternate(): Promise<void> {
@@ -95,7 +139,7 @@ export class AgentProviderLifecyclePage {
     });
     await this.testCurrentCommand(true);
     await this.page.getByRole('button', { name: /^(Save|保存)$/u }).click();
-    await expect(this.page.locator('#agent-config-name')).toBeHidden({ timeout: 30_000 });
+    await expect(this.editorName()).toBeHidden({ timeout: 30_000 });
     await expect(settings.getByText(this.fixture.initialProviderName, { exact: true })).toHaveCount(
       0
     );
@@ -242,17 +286,87 @@ export class AgentProviderLifecyclePage {
     await this.page.getByRole('option', { name: /^(Custom command|自定义命令)$/u }).click();
   }
 
+  private editorName(): Locator {
+    return this.page.locator('#agent-config-name, #catalog-agent-name');
+  }
+
+  private isNativeEditor(): Promise<boolean> {
+    return this.page.locator('#catalog-agent-name').isVisible();
+  }
+
+  private nativePrivateGroup(field: 'command' | 'prompt'): Locator {
+    return this.page.getByRole('group', {
+      name:
+        field === 'command' ? /^(Custom command|自定义命令)$/u : /^(System prompt|系统提示词)$/u,
+      exact: true,
+    });
+  }
+
+  private nativePrivateInput(field: 'command' | 'prompt'): Locator {
+    return this.page.getByRole('textbox', {
+      name:
+        field === 'command' ? /^(Custom command|自定义命令)$/u : /^(System prompt|系统提示词)$/u,
+      exact: true,
+    });
+  }
+
+  private async selectNativePrivateMode(
+    field: 'command' | 'prompt',
+    mode: 'keep' | 'replace' | 'clear'
+  ): Promise<void> {
+    const group = this.nativePrivateGroup(field);
+    const names = {
+      keep: /^(Keep|保留)$/u,
+      replace: /^(Replace|替换)$/u,
+      clear: /^(Clear|清除)$/u,
+    };
+    const button = group.getByRole('button', { name: names[mode], exact: true });
+    await expect(button).toBeEnabled();
+    await button.click();
+    await expect(button).toHaveAttribute('aria-pressed', 'true');
+    if (mode !== 'replace') await expect(this.nativePrivateInput(field)).toHaveCount(0);
+  }
+
+  private async keepNativePrivateFields(): Promise<void> {
+    for (const field of ['command', 'prompt'] as const) {
+      await expect(this.nativePrivateGroup(field).locator('..')).toContainText(
+        /A saved value is present\. Its contents stay on the machine\.|已有保存的值，内容保留在执行机器上。/u
+      );
+      await this.selectNativePrivateMode(field, 'keep');
+    }
+  }
+
   private async fillCustomProvider(input: ProviderInput): Promise<void> {
-    await this.page.locator('#agent-config-name').fill(input.name);
-    await this.page.locator('#custom-acp-command').fill(input.command);
-    await (await this.openCustomPrompt()).fill(input.prompt);
+    await this.editorName().fill(input.name);
+    if (await this.isNativeEditor()) {
+      await this.selectNativePrivateMode('command', 'replace');
+      const command = this.nativePrivateInput('command');
+      await expect(command).toHaveValue('');
+      await command.fill(input.command);
+      await this.selectNativePrivateMode('prompt', input.prompt ? 'replace' : 'clear');
+      if (input.prompt) {
+        const prompt = this.nativePrivateInput('prompt');
+        await expect(prompt).toHaveValue('');
+        await prompt.fill(input.prompt);
+      }
+    } else {
+      await this.page.locator('#custom-acp-command').fill(input.command);
+      await (await this.openCustomPrompt()).fill(input.prompt);
+    }
   }
 
   private async expectProviderValues(settings: Locator, input: ProviderInput): Promise<void> {
     await this.openProviderEditor(settings, input.name);
-    await expect(this.page.locator('#agent-config-name')).toHaveValue(input.name);
-    await expect(this.page.locator('#custom-acp-command')).toHaveValue(input.command);
-    await expect(await this.openCustomPrompt()).toHaveValue(input.prompt);
+    await expect(this.editorName()).toHaveValue(input.name);
+    if (await this.isNativeEditor()) {
+      // Public presence is the UI contract. The scripted ACP later verifies the
+      // saved launch variant and full prompt; no private read port is used here.
+      await this.keepNativePrivateFields();
+      await expect(this.page.locator('#custom-acp-command')).toHaveCount(0);
+    } else {
+      await expect(this.page.locator('#custom-acp-command')).toHaveValue(input.command);
+      await expect(await this.openCustomPrompt()).toHaveValue(input.prompt);
+    }
     await this.closeProviderEditor();
   }
 
@@ -280,12 +394,12 @@ export class AgentProviderLifecyclePage {
 
   private async openProviderEditor(settings: Locator, name: string): Promise<void> {
     await settings.getByText(name, { exact: true }).click();
-    await expect(this.page.locator('#agent-config-name')).toBeVisible();
+    await expect(this.page.locator('#agent-config-name, #catalog-agent-name')).toBeVisible();
   }
 
   private async closeProviderEditor(): Promise<void> {
     await this.page.getByRole('button', { name: /^(Cancel|取消)$/u }).click();
-    await expect(this.page.locator('#agent-config-name')).toBeHidden();
+    await expect(this.editorName()).toBeHidden();
   }
 
   private async deleteProvider(settings: Locator, name: string): Promise<void> {
@@ -322,6 +436,16 @@ export class AgentProviderLifecyclePage {
   }
 
   private async testCurrentCommand(expectReady: boolean): Promise<void> {
+    if (await this.isNativeEditor()) {
+      // Native edit verifies the candidate in trusted Node during Save. The
+      // standalone Test command belongs only to the legacy/create dialog.
+      if (!expectReady) throw new Error('Invalid-command rejection must use the create dialog');
+      await expect(
+        this.nativePrivateGroup('command').getByRole('button', { name: /^(Replace|替换)$/u })
+      ).toHaveAttribute('aria-pressed', 'true');
+      await expect(this.page.getByRole('button', { name: /^(Save|保存)$/u })).toBeEnabled();
+      return;
+    }
     const test = this.page.getByRole('button', { name: /^(Test command|测试命令)$/u });
     if (!expectReady) {
       await expect(test).toBeDisabled();

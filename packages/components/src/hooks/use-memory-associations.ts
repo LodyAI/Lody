@@ -1,3 +1,4 @@
+import { nativeMachineCatalogSettingsAtom } from '@/atoms/native-machine-catalog';
 import { useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
@@ -19,6 +20,11 @@ import {
 
 export function useMemoryAssociations(machineId: MachineId) {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  useAtomValue(nativeMachineCatalogSettingsAtom);
+  const native = runtime?.ownsNativeMachineCatalog?.(machineId) === true;
+  const nativeState = native
+    ? runtime?.nativeMachineCatalogSource?.readProjection(machineId)
+    : undefined;
   const publish = useSetAtom(applyMachineFlockRowEventsForMachineAtom);
   const online = useMachineOnlineStatus(machineId) === 'online';
   const rowsByMachineId = useMachineFlockRowsByMachineIds([machineId], {
@@ -29,20 +35,24 @@ export function useMemoryAssociations(machineId: MachineId) {
   });
   const entries = useMemo(
     () =>
-      getMachineFlockMemories(rowsByMachineId.get(machineId) ?? {}, machineId).sort((a, b) =>
-        a.name.localeCompare(b.name)
-      ),
-    [rowsByMachineId, machineId]
+      (native
+        ? nativeState?.synced
+          ? [...nativeState.projection.memories]
+          : []
+        : getMachineFlockMemories(rowsByMachineId.get(machineId) ?? {}, machineId)
+      ).sort((a, b) => a.name.localeCompare(b.name)),
+    [rowsByMachineId, machineId, native, nativeState]
   );
   const save = async (entry: MemoryAssociation, edit: boolean) => {
     if (!runtime || entry.machineId !== machineId)
       throw new Error('Memory workspace is unavailable');
     const saved = await (edit ? editMemoryAssociation : linkMemoryAssociation)(runtime, entry);
-    publish({
-      workspaceId: runtime.workspaceId,
-      machineId,
-      events: [{ key: machineFlockKeys.memory(saved.providerId, saved.memoryId), value: saved }],
-    });
+    if (!native)
+      publish({
+        workspaceId: runtime.workspaceId,
+        machineId,
+        events: [{ key: machineFlockKeys.memory(saved.providerId, saved.memoryId), value: saved }],
+      });
   };
   return {
     entries,
@@ -51,11 +61,12 @@ export function useMemoryAssociations(machineId: MachineId) {
     remove: async (binding: MemoryBinding) => {
       if (!runtime) throw new Error('Memory workspace is unavailable');
       await unlinkMemoryAssociation(runtime, machineId, binding);
-      publish({
-        workspaceId: runtime.workspaceId,
-        machineId,
-        events: [{ key: machineFlockKeys.memory(binding.providerId, binding.memoryId) }],
-      });
+      if (!native)
+        publish({
+          workspaceId: runtime.workspaceId,
+          machineId,
+          events: [{ key: machineFlockKeys.memory(binding.providerId, binding.memoryId) }],
+        });
     },
   };
 }

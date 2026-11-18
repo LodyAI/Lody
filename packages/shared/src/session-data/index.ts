@@ -22,6 +22,7 @@ export {
 } from './visible-transcript';
 
 export { createLoroSessionData, type LoroSessionData, type LoroSessionDataOptions } from './loro';
+export { createLoroSessionHistoryReader } from './loro-reader';
 export {
   createRoostHistoryReader,
   createRoostSessionData,
@@ -78,3 +79,5 @@ export {
   selectAgentHistoryRows,
   type HistoryQueryRow,
 } from './history-selection';
+
+export { applySessionAgentBatch, type AgentHistoryBatchInput } from './agent-batch';

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CodeCollabV2FileIndexStateSchema } from './code-collab';
 import type { TransportRoomStatus } from 'loro-repo';
 
 // Protocol 7: peer-scoped push channel with version-vector deltas and local
@@ -185,11 +186,30 @@ const LocalLoroMachineMonitorMessageSchema = z.object({
   dataBase64: z.string().min(1),
 });
 
-// Connection-scoped liveness probe (relay → daemon). Deliberately carries no
-// workspaceId/peerId: it belongs to the socket, not to any peer.
-const LocalLoroPingMessageSchema = z.object({
-  type: z.literal('ping'),
+// Bare relay watchdog pings remain connection-only. A scoped ping registers a
+// presence-only peer through the ordinary workspace route, without opening rooms.
+const LocalLoroPingMessageSchema = z
+  .object({
+    type: z.literal('ping'),
+    protocolVersion: z.literal(LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION),
+    workspaceId: z.string().min(1).max(1024).optional(),
+    peerId: z.string().min(1).max(1024).optional(),
+  })
+  .refine((message) => (message.workspaceId === undefined) === (message.peerId === undefined), {
+    message: 'workspaceId and peerId must be supplied together',
+  });
+
+// Read-only native file-index projection. No room ID, raw SDK operation, or write DTO.
+const LocalNativeFileIndexObserveSchema = z.object({
+  type: z.literal('file-index-observe'),
   protocolVersion: z.literal(LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION),
+  workspaceId: z.string().min(1),
+  peerId: z.string().min(1),
+  requestId: z.string().min(1),
+  ownerSessionId: z.string().min(1),
+});
+const LocalNativeFileIndexUnobserveSchema = LocalNativeFileIndexObserveSchema.extend({
+  type: z.literal('file-index-unobserve'),
 });
 
 export const LocalLoroDataPlaneClientMessageSchema = z.discriminatedUnion('type', [
@@ -199,6 +219,8 @@ export const LocalLoroDataPlaneClientMessageSchema = z.discriminatedUnion('type'
   LocalLoroDetachMessageSchema,
   LocalLoroMachineMonitorMessageSchema,
   LocalLoroPingMessageSchema,
+  LocalNativeFileIndexObserveSchema,
+  LocalNativeFileIndexUnobserveSchema,
 ]);
 
 // ---- Server → client messages ----
@@ -286,6 +308,27 @@ const LocalLoroServerPromptSuggestionsMessageSchema =
 const LocalLoroPongMessageSchema = z.object({
   type: z.literal('pong'),
   protocolVersion: z.literal(LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION),
+  nativeFileIndexSnapshots: z.boolean().optional(),
+});
+
+export const LocalNativeFileIndexStateSchema = z.discriminatedUnion('status', [
+  z.object({
+    status: z.literal('ready'),
+    fileIndex: CodeCollabV2FileIndexStateSchema,
+    generations: z.record(z.string(), z.string()).optional(),
+    updatedAtMs: z.number().finite().nonnegative(),
+  }),
+  z.object({ status: z.literal('loading') }),
+  z.object({ status: z.literal('error'), code: z.string().min(1) }),
+]);
+export type LocalNativeFileIndexState = z.infer<typeof LocalNativeFileIndexStateSchema>;
+const LocalNativeFileIndexObservedSchema = LocalNativeFileIndexObserveSchema.extend({
+  type: z.literal('file-index-observed'),
+  backend: z.enum(['native', 'legacy']),
+});
+const LocalNativeFileIndexSnapshotSchema = LocalNativeFileIndexObserveSchema.extend({
+  type: z.literal('file-index-snapshot'),
+  state: LocalNativeFileIndexStateSchema,
 });
 
 export const LocalLoroDataPlaneServerMessageSchema = z.discriminatedUnion('type', [
@@ -297,6 +340,8 @@ export const LocalLoroDataPlaneServerMessageSchema = z.discriminatedUnion('type'
   LocalLoroServerMachineMonitorMessageSchema,
   LocalLoroServerPromptSuggestionsMessageSchema,
   LocalLoroPongMessageSchema,
+  LocalNativeFileIndexObservedSchema,
+  LocalNativeFileIndexSnapshotSchema,
 ]);
 
 export type LocalLoroDataPlaneRoom = z.infer<typeof LocalLoroDataPlaneRoomSchema>;
@@ -676,3 +721,11 @@ export function base64ToBytes(encoded: string): Uint8Array {
   }
   return bytes;
 }
+
+/** Messages admitted through an actual workspace route, including presence-only peers. */
+export type LocalLoroWorkspaceClientMessage =
+  | Exclude<LocalLoroDataPlaneClientMessage, { type: 'ping' }>
+  | (Extract<LocalLoroDataPlaneClientMessage, { type: 'ping' }> & {
+      workspaceId: string;
+      peerId: string;
+    });

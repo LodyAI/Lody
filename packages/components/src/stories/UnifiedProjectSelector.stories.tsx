@@ -243,3 +243,11 @@ export const ProjectGroupSelectedDark: Story = {
     await userEvent.click(within(canvasElement).getByRole('button', { name: 'lody-group' }));
   },
 };
+
+/** Existing projects remain available while the local Add-folder runtime starts. */
+export const RuntimeStarting: Story = {
+  args: { addLocalProjectDisabled: true },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'lody' }));
+  },
+};

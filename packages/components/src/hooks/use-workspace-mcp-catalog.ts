@@ -8,6 +8,8 @@ import { deleteWorkspaceMcpServer, putWorkspaceMcpServer } from '@/lib/workspace
 export type WorkspaceMcpCatalogSnapshot = {
   servers: WorkspaceMcpServerMeta[];
   synced: boolean;
+  /** Local projection is materialized; editing never waits for remote upload. */
+  loaded: boolean;
 };
 
 /**

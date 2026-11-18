@@ -61,6 +61,9 @@ async function cliFiles(dir) {
 }
 const unloadSites = [];
 for (const file of await cliFiles('apps/cli/src')) {
+  // Owning tests deliberately exercise the real SDK persistence boundary.
+  // The single-unloader rule governs shipped CLI code.
+  if (/\.(?:test|test-support)\.ts$/u.test(file)) continue;
   walk(await source(file), (node) => {
     if (
       ts.isCallExpression(node) &&

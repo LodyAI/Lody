@@ -19,6 +19,7 @@ void test('invoke policy allows methods only within renderer-facing service grou
   ])
     assert.equal(isIpcInvokeChannel(`e2ee.${method}`), false)
   assert.equal(isIpcInvokeChannel('cli.methodAddedWithoutASecondAllowlist'), true)
+  assert.equal(isIpcInvokeChannel('machineCatalog.read'), true)
   assert.equal(isIpcInvokeChannel('lodyAuth:getSession'), false)
   assert.equal(isIpcInvokeChannel('unknown.getState'), false)
   assert.equal(isIpcInvokeChannel('cli.restart.extra'), false)
@@ -149,6 +150,185 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
     sends.get('terminal.input')(event, { data: 'synthetic' })
     assert.equal(running, false)
   }
+  const catalogContract = await import('@lody/shared/machine-catalog-ipc')
+  let selectedCatalog = null
+  const machineCatalog = await load('./services/machine-catalog-ipc.ts', {
+    'electron-ipc-decorator': decoratorExports,
+    '../product-window-ipc-service': service,
+    '@lody/shared/machine-catalog-ipc': catalogContract,
+    '../ipc-service-deps': {
+      getIpcServiceDeps: () => ({ nativeMachineCatalog: () => selectedCatalog })
+    }
+  })
+  new machineCatalog.MachineCatalogIpc()
+  const catalogRequest = {
+    registrationId: 'd4b80c1a-f1f3-418a-bc26-c9e3c6349bed',
+    requestId: '396c4510-6c56-45d6-929e-1e4a030beb9f',
+    machineId: 'synthetic-machine'
+  }
+  await assert.rejects(handlers.get('machineCatalog.read')(primary, catalogRequest), {
+    message: 'machine_catalog_unavailable'
+  })
+  selectedCatalog = {
+    async read(senderId, registrationId, machineId) {
+      return { senderId, registrationId, machineId }
+    },
+    async execute() {
+      throw new Error('synthetic-write-only-secret must never reach renderer')
+    }
+  }
+  primary.sender.id = 101
+  auxiliary.sender.id = 102
+  for (const event of [primary, auxiliary]) {
+    assert.deepEqual(await handlers.get('machineCatalog.read')(event, catalogRequest), {
+      senderId: event.sender.id,
+      registrationId: catalogRequest.registrationId,
+      machineId: catalogRequest.machineId
+    })
+  }
+  await assert.rejects(
+    handlers.get('machineCatalog.read')(unknown, catalogRequest),
+    /untrusted renderer/
+  )
+  await assert.rejects(
+    handlers.get('machineCatalog.read')(primary, { ...catalogRequest, workspaceId: 'forged' }),
+    { message: 'machine_catalog_invalid_request' }
+  )
+  await assert.rejects(
+    handlers.get('machineCatalog.execute')(primary, {
+      ...catalogRequest,
+      expectedGeneration: 'generation-1',
+      command: { kind: 'clear-dot-lody-path' }
+    }),
+    { message: 'machine_catalog_operation_failed' }
+  )
+  await assert.rejects(
+    handlers.get('machineCatalog.execute')(primary, {
+      ...catalogRequest,
+      command: { kind: 'clear-dot-lody-path' }
+    }),
+    { message: 'machine_catalog_invalid_request' }
+  )
+  const sessionContract = await import('@lody/shared/native-session-ipc')
+  const sessionBodies = new Map()
+  const sessionIpc = await load('./services/native-session-ipc.ts', {
+    'electron-ipc-decorator': decoratorExports,
+    '../product-window-ipc-service': service,
+    '@lody/shared/native-session-ipc': sessionContract,
+    '../ipc-service-deps': {
+      getIpcServiceDeps: () => ({
+        nativeSessionDomain: () => ({
+          async execute(windowId, scope, command, generation) {
+            if (windowId !== primary.sender.id)
+              throw new sessionContract.NativeSessionIpcError('access_denied')
+            if (generation !== 'current')
+              throw new sessionContract.NativeSessionIpcError('restart_required')
+            if (command.kind === 'cancel') sessionBodies.set(scope.sessionId, command.turnId)
+            return { generation, result: null }
+          },
+          async read() {
+            throw new Error('synthetic private storage path must stay in main')
+          }
+        })
+      })
+    }
+  })
+  new sessionIpc.NativeSessionIpc()
+  const sessionRequest = {
+    registrationId: 'frame',
+    sessionId: 'synthetic-session',
+    requestId: 'request',
+    expectedGeneration: 'current',
+    command: { kind: 'cancel', id: 'cancel-request', turnId: 'turn' }
+  }
+  for (const event of [unknown, { ...primary, senderFrame: { url: primary.senderFrame.url } }])
+    await assert.rejects(
+      handlers.get('nativeSession.execute')(event, sessionRequest),
+      /untrusted renderer/
+    )
+  await assert.rejects(handlers.get('nativeSession.execute')(auxiliary, sessionRequest), {
+    message: 'native_session_access_denied'
+  })
+  await assert.rejects(
+    handlers.get('nativeSession.execute')(primary, {
+      ...sessionRequest,
+      expectedGeneration: 'old'
+    }),
+    { message: 'native_session_restart_required' }
+  )
+  await assert.rejects(
+    handlers.get('nativeSession.execute')(primary, { ...sessionRequest, dataDir: '/forged' }),
+    { message: 'native_session_invalid_request' }
+  )
+  assert.equal(sessionBodies.size, 0)
+  await handlers.get('nativeSession.execute')(primary, sessionRequest)
+  assert.equal(sessionBodies.get('synthetic-session'), 'turn')
+  await assert.rejects(
+    handlers.get('nativeSession.read')(primary, {
+      registrationId: 'frame',
+      sessionId: 'synthetic-session',
+      requestId: 'read',
+      query: { kind: 'control' }
+    }),
+    { message: 'native_session_operation_failed' }
+  )
+  const metaContract = await import('@lody/shared/native-workspace-meta-ipc')
+  const visibleMeta = new Map()
+  const metaIpc = await load('./services/workspace-meta-ipc.ts', {
+    'electron-ipc-decorator': decoratorExports,
+    '../product-window-ipc-service': service,
+    '@lody/shared/native-workspace-meta-ipc': metaContract,
+    '../ipc-service-deps': {
+      getIpcServiceDeps: () => ({
+        nativeWorkspaceMeta: () => ({
+          async commit(windowId, scope, command, generation) {
+            if (windowId !== primary.sender.id || scope.registrationId !== 'meta-frame')
+              throw new metaContract.WorkspaceMetaIpcError('access_denied')
+            if (generation !== 'meta-current')
+              throw new metaContract.WorkspaceMetaIpcError('restart_required')
+            visibleMeta.set(command.docId, command.kind)
+            return { generation, outcome: 'committed' }
+          },
+          async read() {
+            throw new Error('synthetic private Meta value and data path')
+          }
+        })
+      })
+    }
+  })
+  new metaIpc.WorkspaceMetaIpc()
+  const metaRequest = {
+    registrationId: 'meta-frame',
+    requestId: 'meta-request',
+    expectedGeneration: 'meta-current',
+    command: { kind: 'ensure-doc', docId: 'session-synthetic' }
+  }
+  for (const event of [unknown, { ...primary, senderFrame: { url: primary.senderFrame.url } }])
+    await assert.rejects(
+      handlers.get('workspaceMeta.commit')(event, metaRequest),
+      /untrusted renderer/
+    )
+  await assert.rejects(handlers.get('workspaceMeta.commit')(auxiliary, metaRequest), {
+    message: 'workspace_meta_access_denied'
+  })
+  await assert.rejects(
+    handlers.get('workspaceMeta.commit')(primary, { ...metaRequest, dataDir: '/forged' }),
+    { message: 'workspace_meta_not_committed' }
+  )
+  await assert.rejects(
+    handlers.get('workspaceMeta.commit')(primary, { ...metaRequest, expectedGeneration: 'old' }),
+    { message: 'workspace_meta_restart_required' }
+  )
+  assert.equal(visibleMeta.size, 0)
+  await handlers.get('workspaceMeta.commit')(primary, metaRequest)
+  assert.equal(visibleMeta.get('session-synthetic'), 'ensure-doc')
+  await assert.rejects(
+    handlers.get('workspaceMeta.read')(primary, {
+      registrationId: 'meta-frame',
+      requestId: 'read'
+    }),
+    { message: 'workspace_meta_operation_failed' }
+  )
   let recovered = false
   let reported = false
   class RecoveryIpc extends service.ProductWindowIpcService {
@@ -367,4 +547,113 @@ void test('packaged Windows renderer admission ignores path casing without admit
     assert.equal(isTrustedProductRendererUrl('file:///x/out/renderer/INDEX.HTML', posix), false)
     assert.equal(isTrustedProductRendererUrl('file:///other/out/renderer/index.html', posix), false)
   }
+})
+
+void test('Session frame cleanup retains failed acquisitions and isolates another frame until the original lease is released', async () => {
+  const { NativeSessionMainLegacy } = await import('../services/native-session-domain.ts')
+  let originalLeaseRetained = true
+  let allowCleanup = false
+  let recovered = false
+  const main = new NativeSessionMainLegacy({
+    acquire: async (windowId) => {
+      if (windowId === 1 && !recovered) {
+        const failure = new Error('synthetic partial body acquisition')
+        failure.retryCleanup = async () => {
+          if (!allowCleanup) throw new Error('original lease still draining')
+          originalLeaseRetained = false
+          recovered = true
+        }
+        throw failure
+      }
+      return {
+        generation: 'current',
+        assertCurrent() {},
+        domain: {
+          generation: 'current',
+          assertCurrent() {},
+          read: async () => ({ available: true }),
+          execute: async () => {},
+          observe() {
+            throw new Error('unused')
+          },
+          close() {}
+        },
+        release: async () => {}
+      }
+    },
+    send() {}
+  })
+  const scope = { registrationId: 'frame', sessionId: 'session', requestId: 'request' }
+  await assert.rejects(main.read(1, scope, { kind: 'control' }), {
+    message: 'native_session_operation_failed'
+  })
+  await assert.rejects(main.retire(1, 'frame'), { message: 'native_session_cleanup_unconfirmed' })
+  assert.equal(originalLeaseRetained, true)
+  assert.deepEqual(await main.read(2, scope, { kind: 'control' }), {
+    generation: 'current',
+    result: { available: true }
+  })
+  await assert.rejects(main.read(1, scope, { kind: 'control' }), {
+    message: 'native_session_operation_failed'
+  })
+  allowCleanup = true
+  await main.retire(1, 'frame')
+  assert.equal(originalLeaseRetained, false)
+  assert.deepEqual(await main.read(1, scope, { kind: 'control' }), {
+    generation: 'current',
+    result: { available: true }
+  })
+  await main.close()
+})
+
+void test('normal Session navigation releases each body grant without exhausting cancellation or owner capacity', async () => {
+  const { NativeSessionMainLegacy } = await import('../services/native-session-domain.ts')
+  const activeBodyLeases = new Set()
+  const main = new NativeSessionMainLegacy({
+    acquire: async (_windowId, _registrationId, sessionId) => {
+      const lease = Symbol(sessionId)
+      activeBodyLeases.add(lease)
+      let closed = false
+      const assertCurrent = () => {
+        if (closed) throw new Error('retired domain')
+      }
+      return {
+        generation: 'current',
+        assertCurrent,
+        domain: {
+          generation: 'current',
+          assertCurrent,
+          read: async () => ({ history: [] }),
+          execute: async () => {},
+          observe() {
+            assertCurrent()
+            return { initial: Promise.resolve([]), control: Promise.resolve({}), close() {} }
+          },
+          close() {
+            closed = true
+          }
+        },
+        release: async () => {
+          activeBodyLeases.delete(lease)
+        }
+      }
+    },
+    send() {}
+  })
+  for (let index = 0; index < 520; index++) {
+    const scope = {
+      registrationId: 'same-frame',
+      sessionId: `session-${index}`,
+      requestId: `observe-${index}`
+    }
+    const observed = await main.observe(1, scope)
+    assert.deepEqual(observed.initial, [])
+    assert.equal(activeBodyLeases.size, 1)
+    await assert.rejects(main.unobserve(1, scope, 'wrong-lease'), {
+      message: 'native_session_access_denied'
+    })
+    await main.unobserve(1, scope, observed.leaseId)
+    assert.equal(activeBodyLeases.size, 0)
+  }
+  await main.close()
 })

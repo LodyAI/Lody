@@ -39,6 +39,7 @@ export type CodeCollabFileIndexLoadState =
   | { readonly status: 'error'; readonly error: unknown };
 
 export type CodeCollabFileIndexResource = {
+  readonly backend?: 'native';
   getSnapshot(): CodeCollabFileIndexLoadState;
   subscribe(listener: () => void): () => void;
   seed(fileIndex: CodeCollabV2FileIndexState, updatedAtMs: number): void;
@@ -50,7 +51,7 @@ export type CodeCollabFileIndexCacheLease = {
 };
 
 export type CodeCollabFileIndexCache = {
-  acquire(flockDocId: string): Promise<CodeCollabFileIndexCacheLease>;
+  acquire(flockDocId: string, plane?: 'local' | 'cloud'): Promise<CodeCollabFileIndexCacheLease>;
   dispose(): Promise<void>;
 };
 
@@ -63,7 +64,7 @@ export type CodeCollabFileIndexRuntimeRepo = {
   unloadFlockDoc: (flockDocId: string) => Promise<void>;
 };
 
-type MutableFileIndexResource = CodeCollabFileIndexResource & {
+export type CodeCollabFileIndexOwnedResource = CodeCollabFileIndexResource & {
   dispose(): Promise<void>;
 };
 
@@ -71,7 +72,7 @@ async function openCodeCollabFileIndexResource(
   runtimeRepo: CodeCollabFileIndexRuntimeRepo,
   flockDocId: string,
   onSyncFailure: () => void
-): Promise<MutableFileIndexResource> {
+): Promise<CodeCollabFileIndexOwnedResource> {
   logCodeCollabInfo('file-index flock open', { flockDocId });
   const repoLease = await runtimeRepo.acquireFlockDoc(flockDocId);
   const listeners = new Set<() => void>();
@@ -264,7 +265,18 @@ async function openCodeCollabFileIndexResource(
 }
 
 export function createCodeCollabFileIndexCache(
-  runtimeRepo: CodeCollabFileIndexRuntimeRepo
+  runtimeRepo: CodeCollabFileIndexRuntimeRepo,
+  options?: {
+    /** null is positive legacy evidence; a selected owner failure must reject. */
+    openCloudResource?: (
+      flockDocId: string,
+      onFailure: () => void
+    ) => Promise<CodeCollabFileIndexOwnedResource | null>;
+    openLocalResource?: (
+      flockDocId: string,
+      onFailure: () => void
+    ) => Promise<CodeCollabFileIndexOwnedResource | null>;
+  }
 ): CodeCollabFileIndexCache {
   const ownerScope = Effect.runSync(Scope.make());
   const borrowerScopes = new Set<Scope.Closeable>();
@@ -284,13 +296,23 @@ export function createCodeCollabFileIndexCache(
       // actively borrowed key remains addressable instead of being reopened.
       capacity: Number.POSITIVE_INFINITY,
       timeToLive: Duration.infinity,
-      lookup: (flockDocId: string) =>
+      lookup: (cacheKey: string) =>
         Effect.acquireRelease(
           Effect.tryPromise({
-            try: () =>
-              openCodeCollabFileIndexResource(runtimeRepo, flockDocId, () => {
-                failedKeys.add(flockDocId);
-              }),
+            try: async () => {
+              const flockDocId = cacheKey.slice(6);
+              const onFailure = () => {
+                failedKeys.add(cacheKey);
+              };
+              const openResource = cacheKey.startsWith('local\n')
+                ? options?.openLocalResource
+                : options?.openCloudResource;
+              if (openResource) {
+                const native = await openResource(flockDocId, onFailure);
+                if (native) return native;
+              }
+              return openCodeCollabFileIndexResource(runtimeRepo, flockDocId, onFailure);
+            },
             catch: (error) => error,
           }),
           (resource) =>
@@ -359,7 +381,8 @@ export function createCodeCollabFileIndexCache(
   };
 
   return {
-    acquire: async (flockDocId) => {
+    acquire: async (roomId, plane = 'cloud') => {
+      const flockDocId = `${plane}\n${roomId}`;
       if (disposed) throw new Error('Code Collab file-index cache is disposed.');
       await scheduleMaintenance(flockDocId);
       if (disposed) throw new Error('Code Collab file-index cache is disposed.');
@@ -369,7 +392,7 @@ export function createCodeCollabFileIndexCache(
       const keyBorrowers = borrowersByKey.get(flockDocId) ?? new Set<Scope.Closeable>();
       keyBorrowers.add(borrowerScope);
       borrowersByKey.set(flockDocId, keyBorrowers);
-      let resource: MutableFileIndexResource;
+      let resource: CodeCollabFileIndexOwnedResource;
       try {
         resource = await Effect.runPromise(
           ScopedCache.get(cache, flockDocId).pipe(Effect.provideService(Scope.Scope, borrowerScope))

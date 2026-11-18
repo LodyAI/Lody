@@ -4,6 +4,7 @@ import type { ProcessTree } from '@lody/shared/node/process';
 import {
   configureManagedProcessObservation,
   observeManagedProcessTree,
+  handoffManagedProcessTree,
   confirmManagedProcessTreesGone,
   pruneManagedProcessTrees,
 } from './managed-process-observation';
@@ -54,6 +55,23 @@ it('a managed drain joins observed groups instead of trusting the root process e
   observeManagedProcessTree(tree);
   await Effect.runPromise(confirmManagedProcessTreesGone);
   expect(alive).toBe(false);
+});
+it('a confirmed independent data-host handoff is no longer owned by the execution drain', async () => {
+  configureManagedProcessObservation(true);
+  let alive = true;
+  const tree: ProcessTree = {
+    description: 'independent workspace data host',
+    isAlive: Effect.sync(() => alive),
+    signal: () =>
+      Effect.sync(() => {
+        alive = false;
+        return 'delivered' as const;
+      }),
+  };
+  observeManagedProcessTree(tree);
+  handoffManagedProcessTree(tree);
+  await Effect.runPromise(confirmManagedProcessTreesGone);
+  expect(alive).toBe(true);
 });
 it('an unknown descendant liveness result cannot become a successful update drain', async () => {
   configureManagedProcessObservation(true);

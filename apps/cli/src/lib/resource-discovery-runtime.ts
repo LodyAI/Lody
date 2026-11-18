@@ -6,9 +6,7 @@ import {
   getMachineFlockDocId,
   getWorkspaceFlockDocId,
   isMachineDocRoomId,
-  listWorkspaceAgentRoles,
   readMachineFlockRowsFromFlock,
-  readWorkspaceFlockRowsFromFlock,
   type MachineId,
   type MachineMeta,
   type WorkspaceId,
@@ -25,7 +23,6 @@ import { readSessionMachineAccess, type DelegatedSessionRequester } from '@/comm
 import { listMergedAgentConfigs } from './agent-config-machine-flock';
 import { readMachineLocalProjects } from './local-project-meta';
 import { listWorkspaceGitHubRepositoriesForCliToken } from './workspace';
-import { listWorkspaceMcpCatalog } from './workspace-mcp-store';
 import { ResourceDiscovery } from './resource-discovery';
 import { getCliPlatformKind } from './cli-platform';
 import { getDaemonWorkspace, getSessionCommandEnvironment } from './session-command-environment';
@@ -43,6 +40,12 @@ export async function createResourceDiscovery(args: {
   initialCatalogWaitMs?: number;
 }): Promise<ResourceDiscovery> {
   const { manager, auth, workspaceId } = args;
+  const machineSource = manager.getMachineCatalogRuntimePort?.();
+  const nativeMachine = (machineId: MachineId) =>
+    machineSource?.binding.workspaceId === workspaceId &&
+    machineSource.binding.machineId === machineId
+      ? machineSource
+      : undefined;
   // The daemon owns ongoing synchronization. Discovery reads its current replica
   // without making catalog availability depend on another remote catch-up.
   const isDaemon = getDaemonWorkspace()?.manager === manager;
@@ -74,6 +77,15 @@ export async function createResourceDiscovery(args: {
     );
   }
   async function sync(id: string) {
+    if (
+      machineSource &&
+      id === getMachineFlockDocId(workspaceId, machineSource.binding.machineId)
+    ) {
+      await machineSource.readCatalog();
+      baselines.set(id, true);
+      synced.add(id);
+      return;
+    }
     // First-baseline waits share one request budget. Timeout keeps the daemon
     // reader alive and this request unconfirmed, even if later reads catch up.
     if (isDaemon && !shouldSync) {
@@ -139,9 +151,20 @@ export async function createResourceDiscovery(args: {
         machineId,
         baselines.get(getMachineFlockDocId(workspaceId, machineId)) !== false
       );
-      return listMergedAgentConfigs(manager.repo, workspaceId, [machineId]);
+      return listMergedAgentConfigs(
+        manager.repo,
+        workspaceId,
+        [machineId],
+        nativeMachine(machineId)
+      );
     },
     capabilities: async (machineId: MachineId) => {
+      const native = nativeMachine(machineId);
+      if (native) {
+        const snapshot = await native.readCatalog();
+        machineBaselines.set(machineId, true);
+        return snapshot.capabilities;
+      }
       const rows = await readMachineFlockRows(machineId);
       machineBaselines.set(
         machineId,
@@ -149,8 +172,12 @@ export async function createResourceDiscovery(args: {
       );
       return getMachineFlockAcpCapabilities(rows);
     },
-    rateLimits: async (machineId: MachineId) =>
-      getMachineFlockRateLimits(await readMachineFlockRows(machineId)),
+    rateLimits: async (machineId: MachineId) => {
+      const native = nativeMachine(machineId);
+      return native
+        ? (await native.readCatalog()).rateLimits
+        : getMachineFlockRateLimits(await readMachineFlockRows(machineId));
+    },
     machineResources: async (machine: MachineMeta) => {
       const response = await withMachineRpcClient(
         { auth, workspaceId, machineId: machine.id },
@@ -186,17 +213,23 @@ export async function createResourceDiscovery(args: {
         machineId,
         baselines.get(getMachineFlockDocId(workspaceId, machineId)) !== false
       );
-      return Object.values(await readMachineLocalProjects(manager.repo, workspaceId, machineId));
+      return Object.values(
+        await readMachineLocalProjects(
+          manager.repo,
+          workspaceId,
+          machineId,
+          nativeMachine(machineId)
+        )
+      );
     },
     roles: async () => {
       const id = getWorkspaceFlockDocId(workspaceId);
       await sync(id);
-      const handle = await manager.repo.openFlockDoc(id);
-      return listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(handle.flock));
+      return (await manager.readWorkspaceCatalog(workspaceId)).roles;
     },
     mcpServers: async () => {
       await sync(getWorkspaceFlockDocId(workspaceId));
-      return listWorkspaceMcpCatalog(manager.repo, workspaceId);
+      return (await manager.readWorkspaceCatalog(workspaceId)).servers;
     },
     repositories: async () => {
       if (getCliPlatformKind() === 'local') return [];

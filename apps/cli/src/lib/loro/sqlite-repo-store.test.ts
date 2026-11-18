@@ -9,6 +9,8 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { SqliteRepoStore } from 'loro-repo/storage/sqlite';
+import { Flock } from '@loro-dev/flock-wasm';
+import { readLegacySqliteFlockSource } from './legacy-sqlite-flock-source';
 import type Database from 'better-sqlite3';
 import BetterSqlite3 from 'better-sqlite3';
 import { createRequire } from 'node:module';
@@ -72,6 +74,128 @@ afterEach(async () => {
 });
 
 describe('SQLite Loro repo store', () => {
+  it('preserves queued JSON i64 tokens in frozen Meta without modifying the source database', async () => {
+    const { tempDir, sqliteStore } = await createTempSqliteCursorStore();
+    const peer = new Flock('synthetic-queued-i64');
+    peer.put(['m', 'session-synthetic', 'future'], 314159265);
+    const json = JSON.stringify(peer.exportJson()).replace('314159265', '9223372036854775806');
+    const exact = new Flock('expected-source');
+    exact.importJson(
+      JSON.parse(json, (_key, value: unknown) =>
+        value === 9223372036854776000 ? 9223372036854775806n : value
+      )
+    );
+    const queued = new TextEncoder().encode(json);
+    await sqliteStore.storage.save({ type: 'meta-update', update: queued });
+    const file = path.join(tempDir, 'repo.sqlite3');
+    const db = new BetterSqlite3(file, { readonly: true, fileMustExist: true });
+    try {
+      const before = db.prepare('SELECT * FROM meta_updates').all();
+      const result = readLegacySqliteFlockSource({
+        databasePath: file,
+        room: { kind: 'meta', id: 'meta' },
+      });
+      const normalized = (bytes: Uint8Array) => {
+        const flock = new Flock('readonly-proof');
+        flock.strictImportFile(bytes);
+        return flock.exportFile();
+      };
+      expect(normalized(result.snapshot)).toEqual(normalized(exact.exportFile()));
+      const rounded = new Flock('rounded-control');
+      // Plain JSON parsing either fails in WASM or changes the complete binary;
+      // it can never be accepted as this source's exact migration evidence.
+      let rejected = false;
+      try {
+        rounded.importJson(JSON.parse(json));
+      } catch {
+        rejected = true;
+      }
+      if (!rejected)
+        expect(normalized(rounded.exportFile())).not.toEqual(normalized(result.snapshot));
+      expect(db.prepare('SELECT * FROM meta_updates').all()).toEqual(before);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('exports complete frozen Flock and Meta sources without compacting old SQLite or advancing its checkpoint', async () => {
+    const { tempDir, sqliteStore } = await createTempSqliteCursorStore();
+    const roomId = 'lw_source:wf:workspace';
+    const base = new Flock();
+    base.put(['old'], { retained: 'unknown' }, 100);
+    const offline = Flock.strictFromFile(base.exportFile());
+    offline.delete(['old'], 200);
+    offline.put(['future', 'key'], { opaque: ['unchanged'] }, 201);
+    const update = new TextEncoder().encode(JSON.stringify(offline.exportJson()));
+    await sqliteStore.storage.save({
+      type: 'flock-doc-snapshot',
+      flockDocId: roomId,
+      snapshot: base.exportFile(),
+    });
+    await sqliteStore.storage.save({ type: 'flock-doc-update', flockDocId: roomId, update });
+    await sqliteStore.storage.save({ type: 'meta-snapshot', snapshot: base.exportFile() });
+    await sqliteStore.storage.save({ type: 'meta-update', update });
+    const file = path.join(tempDir, 'repo.sqlite3');
+    const database = new BetterSqlite3(file, { readonly: true, fileMustExist: true });
+    try {
+      const rows = () =>
+        [
+          'flock_docs',
+          'flock_doc_updates',
+          'meta_snapshot',
+          'meta_updates',
+          'replica_checkpoints',
+          'remote_cursors',
+        ].map((table) => database.prepare(`SELECT * FROM ${table}`).all());
+      const before = rows();
+      for (const room of [
+        { kind: 'flock' as const, id: roomId },
+        { kind: 'meta' as const, id: 'meta' },
+      ]) {
+        const source = readLegacySqliteFlockSource({ databasePath: file, room });
+        expect(source.present).toBe(true);
+        expect(Flock.strictFromFile(source.snapshot).exportJson()).toEqual(offline.exportJson());
+        const merged = Flock.strictFromFile(source.snapshot);
+        merged.strictImportFile(base.exportFile());
+        expect(merged.get(['old'])).toBeUndefined();
+        expect(merged.get(['future', 'key'])).toEqual({ opaque: ['unchanged'] });
+      }
+      expect(rows()).toEqual(before);
+      expect(() =>
+        readLegacySqliteFlockSource({
+          databasePath: file,
+          room: { kind: 'flock', id: roomId },
+          maxBytes: 1,
+        })
+      ).toThrow(/budget/);
+      expect(
+        readLegacySqliteFlockSource({ databasePath: file, room: { kind: 'flock', id: 'absent' } })
+          .present
+      ).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('blocks corrupt or unfamiliar legacy source layouts before importing a partial room', async () => {
+    const { tempDir, sqliteStore } = await createTempSqliteCursorStore();
+    const file = path.join(tempDir, 'repo.sqlite3');
+    const room = { kind: 'flock' as const, id: 'lw_source:wf:workspace' };
+    await sqliteStore.storage.save({
+      type: 'flock-doc-snapshot',
+      flockDocId: room.id,
+      snapshot: new Uint8Array([1, 2, 3]),
+    });
+    expect(() => readLegacySqliteFlockSource({ databasePath: file, room })).toThrow();
+    const database = new BetterSqlite3(file);
+    try {
+      database.exec('ALTER TABLE flock_docs ADD COLUMN future_contract TEXT');
+    } finally {
+      database.close();
+    }
+    expect(() => readLegacySqliteFlockSource({ databasePath: file, room })).toThrow(/Unsupported/);
+  });
+
   it.each(['esm', 'cjs'] as const)(
     'keeps %s write failures unchanged across nested storage capabilities',
     async (entry) => {

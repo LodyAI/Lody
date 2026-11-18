@@ -3,7 +3,8 @@ import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 
-import { getAllAgentConfigAtom } from '@/atoms';
+import { getAllAgentConfigListAtom } from '@/atoms';
+import type { AgentConfigDisplay } from '@/lib/agent-config-display';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { composerSurface } from '@/components/shared/composer-surface';
 import type {
@@ -80,7 +81,7 @@ export function MobileSessionRunConfig(props: MobileSessionRunConfigProps) {
     selectedModeId,
     fallbackAgent,
   } = props;
-  const executorConfigs = useAtomValue(getAllAgentConfigAtom);
+  const executorConfigs: readonly AgentConfigDisplay[] = useAtomValue(getAllAgentConfigListAtom);
 
   const agentIcon = useMemo((): ReactNode => {
     if (agentSelection) {

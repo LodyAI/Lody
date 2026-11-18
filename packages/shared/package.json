@@ -8,6 +8,8 @@
     "./src/visual-annotation-inspector-global.ts"
   ],
   "exports": {
+    "./machine-catalog-ipc": "./src/machine-catalog-ipc.ts",
+    "./workspace-directory": "./src/workspace-directory.ts",
     "./automations": {
       "types": "./src/automations/index.ts",
       "import": "./src/automations/index.ts"
@@ -178,6 +180,19 @@
       "types": "./src/layout.ts",
       "import": "./src/layout.ts"
     },
+    "./renderer-room-migration": {
+      "types": "./src/renderer-room-migration.ts",
+      "import": "./src/renderer-room-migration.ts"
+    },
+    "./renderer-flock-room-group": "./src/renderer-flock-room-group.ts",
+    "./native-workspace-catalog-migration": {
+      "types": "./src/native-workspace-catalog-migration.ts",
+      "import": "./src/native-workspace-catalog-migration.ts"
+    },
+    "./workspace-catalog-ipc": {
+      "types": "./src/workspace-catalog-ipc.ts",
+      "import": "./src/workspace-catalog-ipc.ts"
+    },
     "./node/*": {
       "types": "./src/node/*.ts",
       "import": "./src/node/*.ts",
@@ -193,7 +208,36 @@
     },
     "./e2ee-remote-pairing": "./src/e2ee-remote-pairing.ts",
     "./e2ee-rpc": "./src/e2ee-rpc.ts",
-    "./e2ee-execution-intent": "./src/e2ee-execution-intent.ts"
+    "./e2ee-execution-intent": "./src/e2ee-execution-intent.ts",
+    "./node/native-repo-sdk-compatibility": "./src/node/native-repo-sdk-compatibility.ts",
+    "./node/native-repo-flock-entries": "./src/node/native-repo-flock-entries.ts",
+    "./session-data/legacy-freeze": "./src/session-data/legacy-freeze.ts",
+    "./node/native-session-legacy-source": "./src/node/native-session-legacy-source.ts",
+    "./native-document-domain-control": "./src/native-document-domain-control.ts",
+    "./renderer-document-domain-migration": "./src/renderer-document-domain-migration.ts",
+    "./native-document-domain-ipc": "./src/native-document-domain-ipc.ts",
+    "./native-session-body-control": "./src/native-session-body-control.ts",
+    "./node/legacy-loro-document-source": "./src/node/legacy-loro-document-source.ts",
+    "./node/native-document-verification": "./src/node/native-document-verification.ts",
+    "./node/native-document-domains": "./src/node/native-document-domains.ts",
+    "./node/native-loro-document": "./src/node/native-loro-document.ts",
+    "./node/native-preview-comments": "./src/node/native-preview-comments.ts",
+    "./node/native-schedule-definition": "./src/node/native-schedule-definition.ts",
+    "./node/native-session-meta-reservation": "./src/node/native-session-meta-reservation.ts",
+    "./node/native-workspace-meta": "./src/node/native-workspace-meta.ts",
+    "./native-machine-catalog-migration": "./src/native-machine-catalog-migration.ts",
+    "./native-schedule-registry-migration": "./src/native-schedule-registry-migration.ts",
+    "./schedule-registry-ipc": "./src/schedule-registry-ipc.ts",
+    "./renderer-session-body-migration": "./src/renderer-session-body-migration.ts",
+    "./native-machine-catalog-verification": "./src/native-machine-catalog-verification.ts",
+    "./native-workspace-meta-ipc": "./src/native-workspace-meta-ipc.ts",
+    "./native-session-ipc": "./src/native-session-ipc.ts",
+    "./native-session-domain": "./src/native-session-domain.ts",
+    "./native-workspace-meta-migration": "./src/native-workspace-meta-migration.ts",
+    "./node/native-document-domain-meta-reservation": "./src/node/native-document-domain-meta-reservation.ts",
+    "./node/native-loro-document-manifest": "./src/node/native-loro-document-manifest.ts",
+    "./cloud-file-index-ipc": "./src/cloud-file-index-ipc.ts",
+    "./node/native-cloud-file-index-selection": "./src/node/native-cloud-file-index-selection.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
@@ -205,6 +249,7 @@
     "immer": "^10.2.0",
     "fzstd": "0.1.1",
     "@bokuweb/zstd-wasm": "^0.0.27",
+    "@loro-dev/loro-repo-client": "0.1.0",
     "@loro-dev/streams-crdt": "catalog:",
     "acp-extension-dsh": "workspace:*",
     "better-auth": "catalog:",

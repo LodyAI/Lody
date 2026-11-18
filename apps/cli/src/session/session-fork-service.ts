@@ -391,7 +391,7 @@ export class SessionForkService {
           userEmail: 'noreply@lody.ai',
         })
         .catch(() => {});
-      targetDoc.setForkOperation({
+      await targetDoc.setForkOperation({
         ...operation,
         state: 'failed',
         error: {
@@ -426,7 +426,7 @@ export class SessionForkService {
     if (operation) {
       // The flag clear itself did not persist — clear it now or the client's
       // observer reaches neither terminal branch and waits forever.
-      targetDoc.setForkOperation(undefined);
+      await targetDoc.setForkOperation(undefined);
     }
     if (!meta?.acpSessionId) {
       // The ACP session id is unrecoverable; leaving it absent means the next
@@ -787,10 +787,10 @@ export class SessionForkService {
           doc = await this.deps.workspaceDocument.getOrCreateSessionDoc(targetSessionId, {
             historyBackend: targetMeta.historyBackend,
           });
-          doc.setForkOperation(operation);
+          await doc.setForkOperation(operation);
           await this.deps.workspaceDocument.persistPendingChanges('session-fork-prepare');
         } catch (error) {
-          doc?.setForkOperation(undefined);
+          await doc?.setForkOperation(undefined);
           this.activeOperations.delete(operation.id);
           await this.deps.forkOperationStore.clear(targetSessionId).catch(() => {});
           return sessionForkFailure(
@@ -1080,7 +1080,7 @@ export class SessionForkService {
         await this.deps.forkOperationStore.record({ ...marker, branchName }).catch(() => {});
       });
       await withForkOperationLock(targetSessionId, async () => {
-        targetDoc.setForkOperation({
+        await targetDoc.setForkOperation({
           ...operation,
           phase: 'committing',
           updatedAt: new Date(getServerNow()).toISOString(),
@@ -1097,7 +1097,7 @@ export class SessionForkService {
             acpSessionId: targetAcpSessionId,
           });
         }
-        targetDoc.setForkOperation(undefined);
+        await targetDoc.setForkOperation(undefined);
         await this.deps.workspaceDocument.repo.upsertDocMeta(targetRoomId, {
           ...targetMeta,
           acpSessionId: targetAcpSessionId,
@@ -1123,7 +1123,7 @@ export class SessionForkService {
               error
             );
       await withForkOperationLock(targetSessionId, async () => {
-        targetDoc.setForkOperation({
+        await targetDoc.setForkOperation({
           ...operation,
           state: 'failed',
           error: { code: publicError.code, message: publicError.message },

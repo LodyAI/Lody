@@ -56,6 +56,7 @@ export function useAgentRoleSchemaReconciliation(): void {
   useEffect(() => {
     if (!runtime || !userId || !synced) return undefined;
     let cancelled = false;
+    const controller = new AbortController();
     for (const role of owned) {
       const config = configs.find(
         (item) => item.id === role.agentConfigId && item.machineId === role.machineId
@@ -106,7 +107,14 @@ export function useAgentRoleSchemaReconciliation(): void {
             response.capability,
             userId,
             getServerNow(),
-            () => !cancelled
+            controller.signal,
+            {
+              machineId: role.machineId,
+              agentConfigId: config.id,
+              cliType: config.cliType,
+              agentType: config.agentType,
+              runtimeOverrides: config.runtimeOverrides,
+            }
           );
         })
         .catch(() => {
@@ -115,6 +123,7 @@ export function useAgentRoleSchemaReconciliation(): void {
     }
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [runtime, userId, synced, owned, configs, machines, online, probes]);
 }

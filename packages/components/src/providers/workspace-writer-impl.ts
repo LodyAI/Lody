@@ -3,6 +3,7 @@ import {
   getServerNow,
   getSessionRoomId,
   type MessageQueueItem,
+  type MessageQueueItemInput,
   type PreviewVisualCommentDocInput,
 } from '@lody/shared';
 import type { SessionId } from '@lody/shared/ids';
@@ -29,9 +30,9 @@ const QUEUE_SIGNAL_FAILURE = 'Queued input was written but its signal failed';
 export type DirectWorkspaceWriterDeps = {
   repo: LoroRepo;
   acquireSessionStore: (sessionId: SessionId) => Promise<SessionDocStore>;
-  releaseSessionStoreRef: (sessionId: SessionId) => void;
+  releaseSessionStoreRef: (sessionId: SessionId, store?: SessionDocStore) => void;
   acquirePreviewVisualCommentStore: (sessionId: SessionId) => Promise<PreviewVisualCommentDocStore>;
-  releasePreviewVisualCommentStoreRef: (sessionId: SessionId) => void;
+  releasePreviewVisualCommentStoreRef: (sessionId: SessionId, store?: PreviewVisualCommentDocStore) => void;
 };
 
 /**
@@ -49,7 +50,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
     try {
       return await fn(store);
     } finally {
-      deps.releaseSessionStoreRef(id);
+      deps.releaseSessionStoreRef(id, store);
     }
   };
 
@@ -95,7 +96,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
     try {
       return await fn(store);
     } finally {
-      deps.releasePreviewVisualCommentStoreRef(sessionId);
+      deps.releasePreviewVisualCommentStoreRef(sessionId, store);
     }
   };
 
@@ -191,7 +192,12 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
     async enqueueSessionMessage(sessionId, item) {
       let written = false;
-      const row = withSessionStore(sessionId, (store) => {
+      const row = withSessionStore(sessionId, async (store) => {
+        if (store.nativeBody) {
+          const frontiers = await store.nativeBody.enqueue(item as MessageQueueItemInput);
+          written = true;
+          return [...frontiers];
+        }
         store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           const userTurnId = item.userTurnId;
@@ -210,6 +216,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
         });
         written = true;
         // Capture before releasing the store or yielding to another queue edit.
+        if (!store.doc) throw new Error('Session document owner is unavailable');
         return store.doc.frontiers();
       });
       let frontiers: ReturnType<LoroDoc['frontiers']>;
@@ -223,19 +230,22 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
     },
 
     async removeSessionMessage(sessionId, itemId) {
-      const frontiers = await withSessionStore(sessionId, (store) => {
+      const frontiers = await withSessionStore(sessionId, async (store) => {
+        if (store.nativeBody) return [...(await store.nativeBody.remove(itemId))];
         store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           draft.mq = mq.filter((item) => item.$cid !== itemId);
         });
         // Capture before releasing the store or yielding to another queue edit.
+        if (!store.doc) throw new Error('Session document owner is unavailable');
         return store.doc.frontiers();
       });
       await bumpMessageQueueWatermark(sessionId, frontiers);
     },
 
     async updateSessionMessage(sessionId, itemId, patch) {
-      const frontiers = await withSessionStore(sessionId, (store) => {
+      const frontiers = await withSessionStore(sessionId, async (store) => {
+        if (store.nativeBody) return [...(await store.nativeBody.update(itemId, patch))];
         store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           draft.mq = mq.map((item) =>
@@ -245,13 +255,15 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
           );
         });
         // Capture before releasing the store or yielding to another queue edit.
+        if (!store.doc) throw new Error('Session document owner is unavailable');
         return store.doc.frontiers();
       });
       await bumpMessageQueueWatermark(sessionId, frontiers);
     },
 
     async reorderSessionMessages(sessionId, orderedItemIds) {
-      const frontiers = await withSessionStore(sessionId, (store) => {
+      const frontiers = await withSessionStore(sessionId, async (store) => {
+        if (store.nativeBody) return [...(await store.nativeBody.reorder(orderedItemIds))];
         store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           const byCid = new Map(mq.map((item) => [item.$cid, item] as const));
@@ -271,13 +283,15 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
           draft.mq = ordered;
         });
         // Capture before releasing the store or yielding to another queue edit.
+        if (!store.doc) throw new Error('Session document owner is unavailable');
         return store.doc.frontiers();
       });
       await bumpMessageQueueWatermark(sessionId, frontiers);
     },
 
     async mutatePreviewVisualComments(sessionId, mutation) {
-      await withPreviewVisualCommentStore(sessionId, (store) => {
+      await withPreviewVisualCommentStore(sessionId, async (store) => {
+        if (store.nativePreview) { await store.nativePreview.mutate(mutation); return; }
         store.setState((draft: PreviewVisualCommentDocInput) => {
           applyPreviewVisualCommentMutation(draft, mutation);
         });

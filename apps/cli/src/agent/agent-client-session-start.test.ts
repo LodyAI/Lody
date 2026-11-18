@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RequestError } from '@agentclientprotocol/sdk';
 import {
   getWorkspaceFlockDocId,
+  createLegacyWorkspaceCatalogQuery,
   writeWorkspaceMcpServerToFlock,
   type McpServerId,
   type MachineId,
@@ -142,7 +143,11 @@ describe('AgentClient session startup', () => {
         onRequestPermission: vi.fn(),
         loadExternalMcpServers: () =>
           loadSessionMcpCatalog({
-            repo,
+            catalog: createLegacyWorkspaceCatalogQuery({
+              binding: { workspaceId, accountId: 'synthetic-owner' },
+              open: () => repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId)),
+            }),
+            catalogBinding: { workspaceId, accountId: 'synthetic-owner' },
             workspaceId,
             sessionId: 'cold-session' as SessionId,
             selectedIds: [selectedId],
@@ -245,7 +250,8 @@ describe('AgentClient session startup', () => {
         });
         const load = () =>
           loadSessionMcpCatalog({
-            repo: activeManager.repo,
+            catalog: activeManager.workspaceCatalog,
+            catalogBinding: activeManager.workspaceCatalogBinding,
             workspaceId,
             sessionId: 'persisted-session' as SessionId,
             selectedIds: missing ? [selectedId, missingId] : [selectedId],

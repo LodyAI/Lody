@@ -19,12 +19,14 @@ import { getLocalIpcServerCredentials } from '@lody/shared/node/local-ipc-auth';
  * same socket must still receive 'joined'.
  */
 import fs from 'node:fs';
+import { EventEmitter } from 'node:events';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { LoroDoc } from 'loro-crdt';
+import { EphemeralStore, LoroDoc } from 'loro-crdt';
 import {
+  base64ToBytes,
   createJsonLineSplitter,
   LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
   type LocalLoroDataPlaneServerMessage,
@@ -52,6 +54,10 @@ const logger: Logger = {
 
 const WORKSPACE_ID = 'ws-f6';
 const TEST_MAX_FRAME_BYTES = 64 * 1024;
+const presence = new EphemeralStore(60_000);
+const presenceListeners = new Set<() => void>();
+let resolvedRooms = 0;
+let engine: LocalLoroDataPlaneServerLegacy;
 
 // The socket path is derived from os.homedir(); redirect
 // HOME to a temp dir so the test can never collide with a real running daemon.
@@ -185,16 +191,25 @@ describe('local Loro data-plane socket server — F6 regression', () => {
     );
 
     const docs = new Map<string, LoroDoc>();
-    const engine = new LocalLoroDataPlaneServerLegacy({
+    engine = new LocalLoroDataPlaneServerLegacy({
       workspaceId: WORKSPACE_ID,
       resolveDoc: async (docId) => {
+        resolvedRooms++;
         const existing = docs.get(docId);
         if (existing) return existing;
         const doc = new LoroDoc();
         docs.set(docId, doc);
         return doc;
       },
+      presenceSource: {
+        encodeLocalOrigin: () => presence.encodeAll(),
+        subscribeLocalOrigin(listener) {
+          presenceListeners.add(listener);
+          return () => presenceListeners.delete(listener);
+        },
+      },
       resolveFlockDoc: async () => {
+        resolvedRooms++;
         throw new Error('not used');
       },
     });
@@ -207,6 +222,7 @@ describe('local Loro data-plane socket server — F6 regression', () => {
 
   afterAll(async () => {
     await stopLocalLoroDataPlaneServer();
+    await engine.disposeLegacy();
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
     if (originalPlatform === undefined) delete process.env.LODY_PLATFORM;
@@ -214,6 +230,116 @@ describe('local Loro data-plane socket server — F6 regression', () => {
     if (originalDataDir === undefined) delete process.env.LODY_DATA_DIR;
     else process.env.LODY_DATA_DIR = originalDataDir;
     if (tempHome) fs.rmSync(tempHome, { recursive: true, force: true });
+  });
+
+  it('routes a presence-only peer through the authenticated socket without opening rooms', async () => {
+    const socket = net.createConnection(
+      getLocalLoroDataPlaneSocketPath(undefined, getLocalIpcServerCredentials().pipeSuffix)
+    );
+    const client = new SocketClient(socket);
+    const baselineRooms = resolvedRooms;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.once('connect', resolve);
+        socket.once('error', reject);
+      });
+      await client.writeLine(
+        JSON.stringify({ type: 'authenticate', token: getLocalIpcServerCredentials().token })
+      );
+      const ping = { type: 'ping', protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION };
+      await client.writeLine(JSON.stringify(ping));
+      await client.waitForMessage((message) => message.type === 'pong');
+      expect(client.messages.filter((message) => message.type === 'presence')).toEqual([]);
+      await client.writeLine(JSON.stringify({ ...ping, workspaceId: WORKSPACE_ID }));
+      await client.waitForMessage(
+        (message) => message.type === 'error' && message.code === 'invalid_request'
+      );
+      await client.writeLine(
+        JSON.stringify({ ...ping, workspaceId: 'foreign', peerId: 'foreign-peer' })
+      );
+      await client.waitForMessage(
+        (message) => message.type === 'error' && message.code === 'workspace_runtime_unavailable'
+      );
+      expect(client.messages.filter((message) => message.type === 'presence')).toEqual([]);
+      presence.set('machine', { machineId: 'local', updatedAt: 1 });
+      await client.writeLine(
+        JSON.stringify({ ...ping, workspaceId: WORKSPACE_ID, peerId: 'presence-only' })
+      );
+      const first = await client.waitForMessage((message) => message.type === 'presence');
+      if (first.type !== 'presence') throw new Error('Expected presence');
+      const receiver = new EphemeralStore(60_000);
+      receiver.apply(base64ToBytes(first.dataBase64));
+      expect(receiver.getAllStates()).toEqual({ machine: { machineId: 'local', updatedAt: 1 } });
+      presence.set('machine', { machineId: 'local', updatedAt: 2 });
+      for (const listener of presenceListeners) listener();
+      const update = await client.waitForMessage(
+        (message) => message.type === 'presence' && message.dataBase64 !== first.dataBase64
+      );
+      if (update.type !== 'presence') throw new Error('Expected presence update');
+      receiver.apply(base64ToBytes(update.dataBase64));
+      expect(receiver.getAllStates()).toEqual({ machine: { machineId: 'local', updatedAt: 2 } });
+      expect(resolvedRooms).toBe(baselineRooms);
+      await client.writeLine(
+        JSON.stringify({
+          type: 'detach',
+          protocolVersion: 7,
+          workspaceId: WORKSPACE_ID,
+          peerId: 'presence-only',
+        })
+      );
+    } finally {
+      socket.destroy();
+      await client.closed;
+    }
+  });
+
+  it('carries zero-room presence through the real main relay and retires the old renderer peer on reload', async () => {
+    const { LoroDataPlaneRelay } =
+      await import('../../electron/src/main/services/loro-data-plane-relay');
+    const relay = new LoroDataPlaneRelay(() => ({
+      socketPath: getLocalLoroDataPlaneSocketPath(
+        undefined,
+        getLocalIpcServerCredentials().pipeSuffix
+      ),
+      token: getLocalIpcServerCredentials().token,
+    }));
+    const sender = Object.assign(new EventEmitter(), {
+      isDestroyed: () => false,
+      send: (channel: string, message: unknown) => {
+        if (channel !== 'loro.event') return;
+        const frame = message as LocalLoroDataPlaneServerMessage;
+        if (frame.type !== 'presence') return;
+        receiver.apply(base64ToBytes(frame.dataBase64));
+        if (receiver.getAllStates().relay !== undefined) ready.resolve();
+      },
+    });
+    const receiver = new EphemeralStore(60_000);
+    let ready = Promise.withResolvers<void>();
+    const rooms = resolvedRooms;
+    presence.set('relay', { machineId: 'actual-local', updatedAt: 3 });
+    const ping = {
+      type: 'ping' as const,
+      protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+      workspaceId: WORKSPACE_ID,
+      peerId: 'first-renderer',
+    };
+    try {
+      relay.send(ping, sender as unknown as Parameters<typeof relay.attachSender>[0]);
+      await ready.promise;
+      expect(receiver.getAllStates().relay).toEqual({ machineId: 'actual-local', updatedAt: 3 });
+      sender.emit('did-navigate');
+      ready = Promise.withResolvers<void>();
+      // A new renderer uses a new peer. The shared socket/engine remains alive.
+      relay.send(
+        { ...ping, peerId: 'second-renderer' },
+        sender as unknown as Parameters<typeof relay.attachSender>[0]
+      );
+      await ready.promise;
+      expect(resolvedRooms).toBe(rooms);
+      sender.emit('destroyed');
+    } finally {
+      relay.destroy();
+    }
   });
 
   it(

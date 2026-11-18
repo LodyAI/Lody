@@ -1,3 +1,4 @@
+import { useSessionStoreEpoch } from './use-session-store-epoch';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { acceptSessionUserTurn } from '../lib/session-send-admission';
@@ -126,6 +127,7 @@ export function useSessionDoc(
   const enabled = options.enabled ?? true;
   const syncEnabled = options.syncEnabled ?? enabled;
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const storeEpoch = useSessionStoreEpoch(runtime, sessionId);
   const browserOnline = useAtomValue(browserOnlineAtom);
   const fallbackDoc = useMemo<SessionDocInput>(
     () => ({
@@ -160,11 +162,12 @@ export function useSessionDoc(
     let cancelled = false;
     setLoadError(false);
     let acquiredStore = false;
+    let acquiredView: SessionDocStore | undefined;
     let unsubscribe: (() => void) | null = null;
     let unsubscribeSyncState: (() => void) | null = null;
     // Dev-only debug globals would pin the doc in production; track what this
     // effect instance published so cleanup only clears its own values.
-    let debugStore: SessionDocStore | null = null;
+    let debugDoc: unknown;
     let debugSessionState: SessionDocState | null = null;
     const openStore = enabled && runtime ? runtime.peekSessionStore?.(sessionId) : undefined;
     if (openStore) {
@@ -197,14 +200,15 @@ export function useSessionDoc(
       try {
         const store = await runtime.acquireSessionStore(sessionId);
         acquiredStore = true;
+        acquiredView = store;
         if (cancelled) {
-          runtime.releaseSessionStoreRef(sessionId);
+          runtime.releaseSessionStoreRef(sessionId, acquiredView);
           acquiredStore = false;
           return;
         }
         if (import.meta.env.DEV) {
-          debugStore = store;
-          window.currentSessionDoc = store.doc;
+          debugDoc = store.doc;
+          window.currentSessionDoc = debugDoc;
           window.currentMirror = () => store.getState();
         }
         setLoadedStore(store);
@@ -250,7 +254,7 @@ export function useSessionDoc(
         // Identity-checked clears: a newer session's effect may already have
         // repointed these globals; never clobber that, but never leave a stale
         // doc pinned either.
-        if (debugStore && window.currentSessionDoc === debugStore.doc) {
+        if (debugDoc && window.currentSessionDoc === debugDoc) {
           window.currentSessionDoc = undefined;
           window.currentMirror = undefined;
         }
@@ -260,10 +264,10 @@ export function useSessionDoc(
       }
       setLoadedStore(null);
       if (acquiredStore) {
-        runtime.releaseSessionStoreRef(sessionId);
+        runtime.releaseSessionStoreRef(sessionId, acquiredView);
       }
     };
-  }, [enabled, fallbackDoc, runtime, sessionId]);
+  }, [enabled, fallbackDoc, runtime, sessionId, storeEpoch]);
 
   useEffect(() => {
     if (!enabled || !syncEnabled || !loadedStore) {
@@ -491,6 +495,7 @@ export function useSessionDocSyncState(
 ): UseSessionDocSyncStateResult {
   const enabled = options.enabled ?? true;
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const storeEpoch = useSessionStoreEpoch(runtime, sessionId);
   const browserOnline = useAtomValue(browserOnlineAtom);
   const [ready, setReady] = useState(false);
   const [syncState, setSyncState] = useState<RoomSyncState>('idle');
@@ -499,6 +504,7 @@ export function useSessionDocSyncState(
   useEffect(() => {
     let cancelled = false;
     let acquiredStore = false;
+    let acquiredView: SessionDocStore | undefined;
     let releaseSync: (() => void) | null = null;
     let unsubscribeStore: (() => void) | null = null;
     let unsubscribeSyncState: (() => void) | null = null;
@@ -516,8 +522,9 @@ export function useSessionDocSyncState(
       try {
         const store = await runtime.acquireSessionStore(sessionId);
         acquiredStore = true;
+        acquiredView = store;
         if (cancelled) {
-          runtime.releaseSessionStoreRef(sessionId);
+          runtime.releaseSessionStoreRef(sessionId, acquiredView);
           acquiredStore = false;
           return;
         }
@@ -560,10 +567,10 @@ export function useSessionDocSyncState(
         releaseSync();
       }
       if (acquiredStore) {
-        runtime.releaseSessionStoreRef(sessionId);
+        runtime.releaseSessionStoreRef(sessionId, acquiredView);
       }
     };
-  }, [enabled, runtime, sessionId]);
+  }, [enabled, runtime, sessionId, storeEpoch]);
 
   return {
     ready,

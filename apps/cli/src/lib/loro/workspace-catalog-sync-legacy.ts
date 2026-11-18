@@ -12,9 +12,26 @@ export class WorkspaceCatalogSyncLegacy {
   private readonly catalog: WorkspaceCatalogSync;
   private closing?: Promise<void>;
 
-  constructor(repo: LoroRepo, workspaceId: WorkspaceId, logger: Logger, remote: boolean) {
+  constructor(
+    repo: LoroRepo,
+    workspaceId: WorkspaceId,
+    logger: Logger,
+    remote: boolean,
+    omitWorkspaceRoom = false,
+    omitMetadataRoom = false
+  ) {
     this.catalog = Effect.runSync(
-      Scope.provide(makeWorkspaceCatalogSync(repo, workspaceId, logger, remote), this.scope)
+      Scope.provide(
+        makeWorkspaceCatalogSync(
+          repo,
+          workspaceId,
+          logger,
+          remote,
+          omitWorkspaceRoom,
+          omitMetadataRoom
+        ),
+        this.scope
+      )
     );
   }
 

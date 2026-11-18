@@ -1,4 +1,5 @@
 import { machinePairCommand } from './machine-pair';
+import type { MachineDocumentRuntimePort } from '../lib/machine-document-runtime-port';
 import { Command } from 'commander';
 import { addDiscoveryOptions, runDiscoveryList, type DiscoveryCommandOptions } from './discovery';
 import {
@@ -146,8 +147,19 @@ async function mergeMachineFlockJsonState(
   repo: { openFlockDoc(flockDocId: string): Promise<{ flock: MachineFlockReadableFlock }> },
   workspaceId: WorkspaceId,
   machine: MachineListEntry,
-  includeAcpCapabilities: boolean
+  includeAcpCapabilities: boolean,
+  native?: MachineDocumentRuntimePort
 ): Promise<MachineListEntry> {
+  if (native) {
+    if (native.binding.workspaceId !== workspaceId || native.binding.machineId !== machine.id)
+      throw new Error('Machine catalog scope mismatch');
+    const snapshot = await native.readCatalog();
+    return {
+      ...machine,
+      acpCapabilities: includeAcpCapabilities ? snapshot.capabilities : undefined,
+      raceLimits: snapshot.rateLimits,
+    };
+  }
   const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machine.id));
   const rows = readMachineFlockRowsFromFlock(handle.flock, {
     families: includeAcpCapabilities
@@ -202,12 +214,14 @@ function formatMachineAgents(machine: Pick<MachineListEntry, 'agentConfigs'>): s
 async function attachAgentConfigsToMachines(
   repo: Parameters<typeof listMergedAgentConfigs>[0],
   workspaceId: WorkspaceId,
-  machines: MachineListEntry[]
+  machines: MachineListEntry[],
+  native?: MachineDocumentRuntimePort
 ): Promise<MachineListEntry[]> {
   const configs = await listMergedAgentConfigs(
     repo,
     workspaceId,
-    machines.map((machine) => machine.id)
+    machines.map((machine) => machine.id),
+    native
   );
   const configsByMachine = new Map<MachineId, AgentConfigMeta[]>();
   for (const config of configs) {
@@ -324,7 +338,8 @@ export const machineCommand = new Command('machine')
               machines = await attachAgentConfigsToMachines(
                 manager.repo,
                 workspace.id as WorkspaceId,
-                machines
+                machines,
+                manager.getMachineCatalogRuntimePort?.()
               );
             }
 
@@ -337,7 +352,8 @@ export const machineCommand = new Command('machine')
                     manager.repo,
                     workspace.id as WorkspaceId,
                     machine,
-                    includeAcpCapabilities
+                    includeAcpCapabilities,
+                    manager.getMachineCatalogRuntimePort?.(machine.id)
                   )
                 )
               );

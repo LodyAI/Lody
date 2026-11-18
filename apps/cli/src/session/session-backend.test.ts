@@ -4,6 +4,7 @@ import type {
   SessionHistoryInput,
   SessionId,
   SessionQueuePromotionRecord,
+  WorkspaceId,
 } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
 import { LoroRepo } from 'loro-repo';
@@ -343,7 +344,18 @@ describe('session backend selection', () => {
       } as never,
       sessionId,
       vi.fn(async () => undefined),
-      { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never
+      { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never,
+      undefined,
+      Object.assign(
+        async () => {
+          throw new Error('Native body owner must not be consulted for Roost');
+        },
+        {
+          binding: { accountId: 'local:synthetic', workspaceId: 'lw_synthetic' as WorkspaceId },
+          ownsRoom: () => false,
+          close: async () => {},
+        }
+      )
     );
     const backend = {
       kind: 'roost',

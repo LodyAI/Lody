@@ -24,3 +24,10 @@ build/release guarantees; mixed suites keep only their qualifying cases.
 - Label-only translation fixtures use `test-i18n.tsx`: own an independent instance
   and wrap each renderer root in its provider. Do not replace the global i18next
   instance or mock the `react-i18next` module just to supply labels.
+
+- Tests using `@loro-dev/loro-repo-engine` load its native addon only in an owned
+  standalone Node host. The reusable Vitest worker uses the JavaScript protocol
+  client and must not load that engine addon. Use the official process layer and
+  actual ready and exit signals. Confirm host exit before deleting synthetic data.
+  A fatal native signal fails the test and retains its data; isolation must never
+  turn a native crash into passing coverage.

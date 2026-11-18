@@ -1,3 +1,5 @@
+import { useNativeMachineCatalogPublicReader } from '@/hooks/use-native-machine-catalog-public';
+import type { AgentConfigDisplay } from '@/lib/agent-config-display';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useMemo, useState } from 'react';
@@ -9,7 +11,6 @@ import { Spinner } from '@lody/ui/spinner';
 import {
   REGISTRY_ACP_AGENTS,
   type AgentConfigCliType,
-  type AgentConfigMeta,
   type MachineAcpBinaryProgressMessage,
   type MachineViewMeta,
   parseRateLimitEntryKey,
@@ -39,7 +40,7 @@ import {
 
 /** Refreshes one Provider; `onModelOptionsProgress` names each model whose options are read. */
 export type ProviderRefreshHandler = (
-  config: AgentConfigMeta,
+  config: AgentConfigDisplay,
   options?: { onModelOptionsProgress?: (progress: AcpModelOptionsRefreshProgress) => void }
 ) => Promise<void>;
 
@@ -104,10 +105,10 @@ const styles = stylex.create({
 });
 
 export type ProviderRowProps = {
-  config: AgentConfigMeta;
+  config: AgentConfigDisplay;
   machine: MachineViewMeta | undefined;
-  onEdit: (config: AgentConfigMeta) => void;
-  onDelete?: (config: AgentConfigMeta) => Promise<void>;
+  onEdit: (config: AgentConfigDisplay) => void;
+  onDelete?: (config: AgentConfigDisplay) => Promise<void>;
   onRefresh?: ProviderRefreshHandler;
   /**
    * Density: `card` is the compact line of the desktop provider card, `list`
@@ -141,6 +142,11 @@ export function ProviderRow({
   const { t } = useTranslation();
   const { cliType, agentType } = config;
   const envCount = Object.keys(config.env || {}).length;
+  const privateQuotaConfig = config.env === undefined ? undefined : { ...config, env: config.env };
+  const nativeReader = useNativeMachineCatalogPublicReader();
+  const nativeView = nativeReader(config.machineId);
+  const nativeQuota = nativeView.kind === 'native' ? nativeView.quota(config) : undefined;
+
   // The cached model capabilities shared with the composer. Quota refresh is separate.
   const selector = useAcpSelectorOptions({
     configId: config.id,
@@ -158,21 +164,29 @@ export function ProviderRow({
   useProviderQuotaRefresh(
     machine?.id,
     config.id,
-    machine?.acpCapabilities?.[config.id]?.rateLimits?.query === true &&
-      canShowSubscriptionRateLimits({
-        cliType,
-        agentType,
-        config,
-        capability: machine?.acpCapabilities?.[config.id]?.rateLimits,
-      })
+    nativeView.kind === 'native'
+      ? nativeQuota?.subscription === true && nativeQuota.query
+      : machine?.acpCapabilities?.[config.id]?.rateLimits?.query === true &&
+          privateQuotaConfig !== undefined &&
+          canShowSubscriptionRateLimits({
+            cliType,
+            agentType,
+            config: privateQuotaConfig,
+            capability: machine?.acpCapabilities?.[config.id]?.rateLimits,
+          })
   );
+  const subscriptionVisible =
+    nativeView.kind === 'native'
+      ? nativeQuota?.subscription === true
+      : privateQuotaConfig !== undefined &&
+        canShowSubscriptionRateLimits({
+          cliType,
+          agentType,
+          config: privateQuotaConfig,
+          capability: machine?.acpCapabilities?.[config.id]?.rateLimits,
+        });
   const showRateLimits =
-    canShowSubscriptionRateLimits({
-      cliType,
-      agentType,
-      config,
-      capability: machine?.acpCapabilities?.[config.id]?.rateLimits,
-    }) &&
+    subscriptionVisible &&
     !!machine?.raceLimits &&
     Object.keys(machine.raceLimits).some((key) => {
       const parsed = parseRateLimitEntryKey(key);
@@ -190,7 +204,11 @@ export function ProviderRow({
   }, [showRateLimits, machine?.raceLimits, agentType, config.id]);
 
   // Codex-only: the third-party reset forecast for OpenAI's own usage limits.
-  const showResetForecast = canShowCodexResetForecast({ cliType, agentType, config });
+  const showResetForecast =
+    nativeView.kind === 'native'
+      ? nativeQuota?.resetForecast === true
+      : privateQuotaConfig !== undefined &&
+        canShowCodexResetForecast({ cliType, agentType, config: privateQuotaConfig });
 
   // What kind of provider this is, when it is not one Lody ships: a fact of the
   // meta line, in words, not a pill on every row.

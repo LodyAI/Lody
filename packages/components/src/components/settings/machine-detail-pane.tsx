@@ -1,3 +1,4 @@
+import type { AgentConfigDisplay, ProviderSetupDisplay } from '@/lib/agent-config-display';
 import type { ManagedDaemonUpdateStatus } from '@lody/shared';
 import { MachineIdentityRestore } from './machine-identity-restore';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
@@ -11,11 +12,9 @@ import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import {
   type AcpSessionMonitorSnapshot,
-  type AgentConfigMeta,
   type MachineId,
   type MachineMonitorSnapshot,
   type MachineViewMeta,
-  type ProviderSetupTask,
   type SessionMeta,
   resolveAgentBrandId,
 } from '@lody/shared';
@@ -233,14 +232,14 @@ const styles = stylex.create({
 
 export type MachineProvidersSectionProps = {
   machine: MachineViewMeta;
-  configs: AgentConfigMeta[];
-  setups?: ProviderSetupTask[];
+  configs: AgentConfigDisplay[];
+  setups?: ProviderSetupDisplay[];
   onAddConfig: () => void;
-  onEditConfig: (config: AgentConfigMeta) => void;
-  onDeleteConfig?: (config: AgentConfigMeta) => Promise<void>;
+  onEditConfig: (config: AgentConfigDisplay) => void;
+  onDeleteConfig?: (config: AgentConfigDisplay) => Promise<void>;
   onRefreshConfig?: ProviderRefreshHandler;
-  onRetrySetup?: (setup: ProviderSetupTask) => Promise<void>;
-  onDeleteSetup?: (setup: ProviderSetupTask) => Promise<void>;
+  onRetrySetup?: (setup: ProviderSetupDisplay) => Promise<void>;
+  onDeleteSetup?: (setup: ProviderSetupDisplay) => Promise<void>;
   /** Desktop pills content is flush with the title — no extra horizontal inset. */
   flush?: boolean;
   variant?: 'default' | 'mobile-list';
@@ -384,8 +383,8 @@ export type MachineDetailPaneProps = {
   mode?: 'agents' | 'devices';
   readOnly?: boolean;
   machine: MachineViewMeta;
-  configs: AgentConfigMeta[];
-  setups?: ProviderSetupTask[];
+  configs: AgentConfigDisplay[];
+  setups?: ProviderSetupDisplay[];
   isOwn: boolean;
   isLocal: boolean;
   ownerName: string | null;
@@ -395,11 +394,11 @@ export type MachineDetailPaneProps = {
   onDelete: (machine: MachineViewMeta) => Promise<void>;
   onSharedWithTeamChange?: (machineId: MachineId, sharedWithTeam: boolean) => Promise<void>;
   onAddConfig: () => void;
-  onEditConfig: (config: AgentConfigMeta) => void;
-  onDeleteConfig?: (config: AgentConfigMeta) => Promise<void>;
+  onEditConfig: (config: AgentConfigDisplay) => void;
+  onDeleteConfig?: (config: AgentConfigDisplay) => Promise<void>;
   onRefreshConfig?: ProviderRefreshHandler;
-  onRetrySetup?: (setup: ProviderSetupTask) => Promise<void>;
-  onDeleteSetup?: (setup: ProviderSetupTask) => Promise<void>;
+  onRetrySetup?: (setup: ProviderSetupDisplay) => Promise<void>;
+  onDeleteSetup?: (setup: ProviderSetupDisplay) => Promise<void>;
   onPing?: (machineId: MachineId) => Promise<number>;
   daemonUpdate?: { currentVersion: string; latestVersion: string };
   onRestartDaemon?: (machineId: MachineId) => Promise<void>;
@@ -1178,7 +1177,7 @@ function AvailableProviders({
   onAdd,
 }: {
   machineName: string;
-  configs: AgentConfigMeta[];
+  configs: AgentConfigDisplay[];
   onAdd: (initialForm: Partial<AgentConfigFormData>) => void;
 }) {
   const { t } = useTranslation();

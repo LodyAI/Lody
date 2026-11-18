@@ -1,5 +1,10 @@
 import { type CloudPort } from '@lody/platform';
-import { type MachineId } from '@lody/shared';
+import {
+  type MachineId,
+  type LocalProjectControlRequest,
+  type LocalProjectControlResponse,
+  type WorkspaceId,
+} from '@lody/shared';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { Effect } from 'effect';
 import { createHash } from 'node:crypto';
@@ -15,6 +20,8 @@ import {
 } from '../src/lib/local-workspace-catalog';
 import { Lody } from '../src/lib/lody';
 import { LodyFleet } from '../src/lib/lody-fleet';
+import { LocalProjectControlService } from '../src/lib/local-project-control-service';
+import type { MachineDocumentRuntimePort } from '../src/lib/machine-document-runtime-port';
 import { RemoteBridge, type RemoteBridgeRuntime } from '../src/lib/remote-bridge';
 import { fileLocksLegacy } from '../src/utils/file-lock';
 import {
@@ -43,6 +50,94 @@ vi.mock('node:fs', async (importOriginal) => {
 });
 
 describe('LodyFleet local catalog bootstrap', () => {
+  it.each([false, true])(
+    'prepares a local folder from its selected native catalog (%s existing)',
+    async (alreadyRegistered) => {
+      const directory = await mkdtemp(join(tmpdir(), 'fleet-native-project-'));
+      try {
+        const rootPath = await fs.realpath(directory);
+        await writeFile(join(rootPath, 'retained.txt'), 'synthetic project content');
+        const prepared = new LocalProjectControlService(createSilentLogger()).prepareProject(
+          rootPath
+        );
+        const workspaceId = 'lw_native_project' as WorkspaceId;
+        const project = {
+          id: prepared.localProjectId,
+          name: 'Retained native project',
+          rootPath,
+          createdAtMs: 1,
+          lastOpenedAtMs: 2,
+        };
+        const source: Pick<MachineDocumentRuntimePort, 'binding' | 'readCatalog'> = {
+          binding: { accountId: 'user-1', workspaceId, machineId: 'machine-1' as MachineId },
+          readCatalog: async () => ({
+            projects: alreadyRegistered ? { [project.id]: project } : {},
+            capabilities: {},
+            rateLimits: {},
+          }),
+        };
+        const { fleet } = createFleetHarness(
+          createCatalogStub(() => Effect.succeed(catalogSnapshot()))
+        );
+        const controls = fleet as unknown as {
+          runtimes: Map<string, unknown>;
+          dispatchLocalProjectControl(
+            request: LocalProjectControlRequest
+          ): Promise<LocalProjectControlResponse>;
+        };
+        controls.runtimes.set(workspaceId, {
+          workspace: { id: workspaceId },
+          lody: {
+            documentManager: {
+              repo: {
+                getDocMeta() {
+                  throw new Error('Legacy MF metadata is fenced');
+                },
+                openFlockDoc() {
+                  throw new Error('Legacy MF writer is fenced');
+                },
+              },
+              getMachineCatalogRuntimePort: () => source,
+            },
+          },
+        });
+        await expect(
+          controls.dispatchLocalProjectControl({
+            type: 'local-project/prepare-add',
+            machineId: 'machine-1' as MachineId,
+            workspaceId,
+            rootPath,
+          })
+        ).resolves.toEqual({
+          ok: true,
+          type: 'local-project/prepare-add',
+          result: {
+            localProjectId: prepared.localProjectId,
+            name: alreadyRegistered ? project.name : prepared.name,
+            rootPath,
+            alreadyRegistered,
+          },
+        });
+        if (alreadyRegistered) {
+          await expect(
+            controls.dispatchLocalProjectControl({
+              type: 'local-project/list-files',
+              machineId: 'machine-1' as MachineId,
+              workspaceId,
+              localProjectId: prepared.localProjectId,
+            })
+          ).resolves.toEqual({
+            ok: true,
+            type: 'local-project/list-files',
+            result: { paths: ['retained.txt'], truncated: false },
+          });
+        }
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
   it.each([false, true])(
     'rebuilds corrupt discovery while ordinary starts and revocations survive a publication failure (%s)',
     async (failPublication) => {

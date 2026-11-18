@@ -45,7 +45,7 @@ import {
   type SessionStartFailureReason,
   InFlightDedupe,
   normalizeSessionInputBlocks,
-  type AgentConfigMeta,
+  type AgentConfigListSummary,
   type AgentRole,
   type AgentRoleId,
   githubFetchBranches,
@@ -99,7 +99,9 @@ import { getIpcServices, onIpcEvent, sendIpc } from '@/lib/electron-ipc-client';
 import {
   bugReportDialogOpenAtom,
   chatLandingSessionStateAtomFamily,
+  getAllAgentConfigListAtom,
   getAllAgentConfigAtom,
+  getAgentMetaByIdAtomFamily,
   inboxFeatureEnabledAtom,
   mobileKeyboardActionAtom,
   runtimeInitializingAtom,
@@ -140,7 +142,10 @@ import {
   SessionCreateBillingError,
   useSessionActions,
 } from '@/hooks/use-session-actions';
-import { useChatLandingDefaults } from '@/hooks/use-chat-landing-defaults';
+import {
+  useChatLandingDefaults,
+  useRemovedNativeProjectSelection,
+} from '@/hooks/use-chat-landing-defaults';
 import {
   useAcpSessionConfigSelectionState,
   useResolvedAcpSessionConfigSelection,
@@ -717,7 +722,8 @@ function WorkspaceChatLanding({
     controlConnectionState === 'idle' ||
     controlConnectionState === 'connecting' ||
     controlConnectionState === 'syncing';
-  const executorConfigs = useAtomValue(getAllAgentConfigAtom);
+  const executorConfigs = useAtomValue(getAllAgentConfigListAtom);
+  const legacyExecutorConfigs = useAtomValue(getAllAgentConfigAtom);
   const { workspaceId } = useResolvedWorkspaceScope();
   const legacyQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId);
   const legacyQueriesEnabled = legacyQueryStatus === 'allowed';
@@ -1432,6 +1438,28 @@ function WorkspaceChatLanding({
     },
     []
   );
+  const handleRemovedNativeProjectSelection = useCallback(
+    (expected: LocalProjectSelection) => {
+      const current = selectedLocalProjectRef.current;
+      if (
+        contextType !== 'local' ||
+        current?.machineId !== expected.machineId ||
+        current.localProjectId !== expected.localProjectId
+      )
+        return;
+      handleSelectedLocalProjectChange(null);
+      setContextType(hasGitHubRepos ? 'github' : 'chat');
+    },
+    [contextType, handleSelectedLocalProjectChange, hasGitHubRepos]
+  );
+  useRemovedNativeProjectSelection({
+    runtime: workspaceRuntime,
+    workspaceId,
+    accountId: userId ?? null,
+    contextType,
+    selection: selectedLocalProject,
+    onRemoved: handleRemovedNativeProjectSelection,
+  });
   const getFirstVisibleLocalProjectForMachine = useCallback(
     (machineId: MachineId): LocalProjectSelection | null => {
       for (const entry of visibleLocalProjectMap.values()) {
@@ -1778,11 +1806,14 @@ function WorkspaceChatLanding({
   ]);
 
   // ── Agent/Mode/Model config ──
-  const selectedConfig = useMemo<AgentConfigMeta | undefined>(
+  const selectedConfig = useMemo<AgentConfigListSummary | undefined>(
     () =>
       selectedAgent ? executorConfigs.find((cfg) => cfg.id === selectedAgent.agentId) : undefined,
     [executorConfigs, selectedAgent]
   );
+  // The filtered legacy atom never opens a selected native MF room. A native
+  // provider is sent by ID; the Node runtime resolves its private launch config.
+  const legacySelectedConfig = useAtomValue(getAgentMetaByIdAtomFamily(selectedConfig?.id));
   const selectedMachine = useMemo(
     () => (selectedAgent ? machines.get(selectedAgent.machineId) : undefined),
     [machines, selectedAgent]
@@ -1868,7 +1899,7 @@ function WorkspaceChatLanding({
     selectedModeId: sessionConfigCandidates.modeId,
     selectedModelId: sessionConfigCandidates.modelId,
     configOptionValues: sessionConfigCandidates.configOptionValues,
-    runtimeOverrides: selectedConfig?.runtimeOverrides,
+    runtimeOverrides: legacySelectedConfig?.runtimeOverrides,
     machine: selectedMachine,
   });
   const { modeOptions, modelOptions, configOptionSelectors } = selectorOptions;
@@ -1889,32 +1920,35 @@ function WorkspaceChatLanding({
     selectedMachine?.id,
     selectedConfig?.id,
     !!selectedConfig &&
+      !!legacySelectedConfig &&
       selectedMachine?.acpCapabilities?.[selectedConfig.id]?.rateLimits?.query === true &&
       canShowSubscriptionRateLimits({
         cliType: selectedConfig.cliType,
         agentType: selectedConfig.agentType,
-        config: selectedConfig,
+        config: legacySelectedConfig,
         capability: selectedMachine?.acpCapabilities?.[selectedConfig.id]?.rateLimits,
       })
   );
   const selectedRateLimits =
     selectedConfig &&
+    legacySelectedConfig &&
     canShowSubscriptionRateLimits({
       cliType: selectedConfig.cliType,
       agentType: selectedConfig.agentType,
-      config: selectedConfig,
+      config: legacySelectedConfig,
       capability: selectedMachine?.acpCapabilities?.[selectedConfig.id]?.rateLimits,
     })
       ? selectedMachine?.raceLimits
       : undefined;
-  // The landing knows the picked provider's full config, so eligibility is
-  // decided here rather than from `cliType`/`agentType` further down.
+  // A public native summary does not prove subscription eligibility. Keep
+  // private-config inference confined to an actual legacy configuration.
   const showCodexResetForecast =
     !!selectedConfig &&
+    !!legacySelectedConfig &&
     canShowCodexResetForecast({
       cliType: selectedConfig.cliType,
       agentType: selectedConfig.agentType,
-      config: selectedConfig,
+      config: legacySelectedConfig,
     });
   // A row on the new-chat page's "now" board opens its session, as a sidebar row does.
   const handleOpenHomeSession = useCallback(
@@ -1931,13 +1965,16 @@ function WorkspaceChatLanding({
   // provider uses the selected model; the others have none selected.
   const homeWeekUsageOptions = useMemo<HomeWeekUsageOption[]>(() => {
     if (!selectedMachine) return [];
+    const legacyById = new Map(legacyExecutorConfigs.map((config) => [config.id, config]));
     return executorConfigs.flatMap((config) => {
       if (config.machineId !== selectedMachine.id) return [];
+      const legacyConfig = legacyById.get(config.id);
+      if (!legacyConfig) return [];
       if (
         !canShowSubscriptionRateLimits({
           cliType: config.cliType,
           agentType: config.agentType,
-          config,
+          config: legacyConfig,
           capability: selectedMachine.acpCapabilities?.[config.id]?.rateLimits,
         })
       ) {
@@ -1962,13 +1999,19 @@ function WorkspaceChatLanding({
               codexForecast: canShowCodexResetForecast({
                 cliType: config.cliType,
                 agentType: config.agentType,
-                config,
+                config: legacyConfig,
               }),
             },
           ]
         : [];
     });
-  }, [executorConfigs, selectedMachine, selectedConfig?.id, selectedModelId]);
+  }, [
+    executorConfigs,
+    legacyExecutorConfigs,
+    selectedMachine,
+    selectedConfig?.id,
+    selectedModelId,
+  ]);
   const selectedModelLabel = modelOptions.find((option) => option.value === selectedModelId)?.label;
   /* The Role the composer IS, not the one last clicked. The footer names a Role
      only while every value that Role pins is still what will run, so moving a
@@ -2083,7 +2126,7 @@ function WorkspaceChatLanding({
     configId: selectedConfig?.id,
     cliType: selectedConfig?.cliType,
     agentType: selectedConfig?.agentType,
-    runtimeOverrides: selectedConfig?.runtimeOverrides,
+    runtimeOverrides: legacySelectedConfig?.runtimeOverrides,
     machine: selectedMachine,
   });
   // Filters the `$` skill mention to the selected provider's skill directories.
@@ -3324,7 +3367,7 @@ function WorkspaceChatLanding({
          two. A Role only reaches here while it is still what will run. */
       const promptPayload = buildAgentPrompt(
         promptText,
-        buildAgentPrompt(activeAgentRole?.promptPrefix ?? '', selectedConfig.prompt ?? '')
+        buildAgentPrompt(activeAgentRole?.promptPrefix ?? '', legacySelectedConfig?.prompt ?? '')
       );
       const issuePRMentions = extractIssuePRMentionsFromText(
         promptText,
@@ -3365,11 +3408,11 @@ function WorkspaceChatLanding({
           userId,
           cliType: selectedConfig.cliType,
           agentType: selectedConfig.agentType,
-          customAcp: selectedConfig.customAcp,
-          runtimeOverrides: selectedConfig.runtimeOverrides,
+          customAcp: legacySelectedConfig?.customAcp,
+          runtimeOverrides: legacySelectedConfig?.runtimeOverrides,
           machineId: selectedAgent.machineId,
           agentConfigId: selectedAgent.agentId,
-          env: selectedConfig.env,
+          env: legacySelectedConfig?.env,
           repoFullName: repoFullNameForMentions,
           project,
           ...(projectRun ? { projectRun } : {}),
@@ -4162,6 +4205,7 @@ function WorkspaceChatLanding({
           latestMessageAtByRepo={mobileSheetRecency.byRepo}
           onConnectGitRepo={handleConnectGitRepo}
           onAddLocalProject={handleAddLocalProject}
+          addLocalProjectDisabled={!workspaceRuntime}
           onCreateProject={handleCreateProject}
           onEditProjectGroup={handleEditProjectGroup}
           onShareLocalProjectWithTeam={

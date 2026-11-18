@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mergeBootstrapMetaCache } from '../src/lib/doc-meta-bootstrap';
-import type { LoroRepo } from 'loro-repo';
-import { listDocMetaEntries } from '../src/lib/doc-meta-batch';
+import { LoroRepo } from 'loro-repo';
+import {
+  createLegacyWorkspaceDirectory,
+  createObservedWorkspaceDirectory,
+  createLegacyWorkspaceDirectoryReader,
+} from '@lody/shared/workspace-directory';
+import { listDocMetaEntries, readSessionAndMachineMetas } from '../src/lib/doc-meta-batch';
 import {
   planPullRequestLifecycle,
   resolveSessionPullRequests,
@@ -99,7 +104,184 @@ describe('doc-meta-bootstrap', () => {
 });
 
 describe('doc-meta-batch', () => {
+  it('keeps preview and schedule leaf metadata out of the actual background Session activity input', async () => {
+    const repo = await LoroRepo.create({});
+    try {
+      for (const roomId of [
+        'session-live',
+        'preview-comment-live',
+        'schedule-live',
+        'session-comment-legacy',
+        'machine-live',
+      ])
+        await repo.upsertDocMeta(roomId, { id: 'live', lastMessageAt: 50, title: roomId });
+      const directory = createLegacyWorkspaceDirectory(repo);
+      const before = await directory.listEntries();
+      const activity = await readSessionAndMachineMetas(repo, undefined, directory);
+      expect(Object.keys(activity.sessions)).toEqual(['session-live']);
+      expect(Object.keys(activity.machines)).toEqual(['machine-live']);
+      expect(activity.sessions['session-live']).toMatchObject({ id: 'live', lastMessageAt: 50 });
+      expect(await directory.listEntries()).toEqual(before);
+      expect(before.map((entry) => entry.docId)).toEqual(
+        expect.arrayContaining(['preview-comment-live', 'schedule-live', 'session-comment-legacy'])
+      );
+    } finally {
+      await repo.destroy();
+    }
+  });
+
   describe('listDocMetaEntries', () => {
+    it.skipIf(typeof Reflect.get(LoroRepo, 'createWithExternalMetadata') !== 'function')(
+      'reads external directory snapshots and live changes without opening raw Meta',
+      async () => {
+        let snapshot = {
+          revision: 1,
+          docs: [
+            { docId: 'session-visible', deleted: false, meta: { title: 'Initial' } },
+            { docId: 'session-deleted', deleted: true, meta: { title: 'Deleted' } },
+          ],
+          flockDocs: [],
+        };
+        let publish: ((event: { snapshot: typeof snapshot; by: 'sync' }) => void) | undefined;
+        const repo: LoroRepo = await Reflect.apply(
+          Reflect.get(LoroRepo, 'createWithExternalMetadata'),
+          LoroRepo,
+          [
+            {},
+            {
+              capability: 'loro-external-metadata-v1',
+              open: async (listener: typeof publish) => {
+                publish = listener;
+                return {
+                  snapshot,
+                  unsubscribe: () => {
+                    publish = undefined;
+                  },
+                };
+              },
+              read: async () => snapshot,
+              commit: async () => {
+                throw new Error('Reader cannot author');
+              },
+              flush: async () => ({ outcome: 'committed', snapshot }),
+            },
+          ]
+        );
+        const directory = createObservedWorkspaceDirectory(repo, {
+          listActiveIds: async () =>
+            snapshot.docs.filter((row) => !row.deleted).map((row) => row.docId),
+          listEntries: async () => snapshot.docs.map((row) => ({ ...row, exists: !row.deleted })),
+        });
+        const titles: string[] = [];
+        const observation = directory.observe((event) => {
+          if (event.kind === 'doc-metadata' && typeof event.patch.title === 'string')
+            titles.push(event.patch.title);
+        });
+        try {
+          expect(() => repo.getMeta()).toThrow('Legacy Meta Flock is unavailable');
+          expect(await directory.listActiveIds()).toEqual(['session-visible']);
+          expect(await directory.listEntries()).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ docId: 'session-deleted', deleted: true }),
+            ])
+          );
+          expect((await directory.getEntry('session-visible'))?.meta.title).toBe('Initial');
+          snapshot = {
+            ...snapshot,
+            revision: 2,
+            docs: snapshot.docs.map((row) =>
+              row.docId === 'session-visible' ? { ...row, meta: { title: 'Updated' } } : row
+            ),
+          };
+          publish?.({ snapshot, by: 'sync' });
+          expect((await directory.getEntry('session-visible'))?.meta.title).toBe('Updated');
+          expect(titles).toEqual(['Updated']);
+        } finally {
+          observation.unsubscribe();
+          await repo.destroy();
+        }
+      }
+    );
+
+    it('observes directory edits without opening document bodies and releases each reader independently', async () => {
+      const repo = await LoroRepo.create({});
+      const directory = createLegacyWorkspaceDirectory(repo);
+      const first: string[] = [];
+      const second: string[] = [];
+      let changed!: () => void;
+      const nextChange = () =>
+        new Promise<void>((resolve) => {
+          changed = resolve;
+        });
+      const a = directory.observe((event) => {
+        if (event.kind === 'doc-metadata' && typeof event.patch.title === 'string') {
+          first.push(event.patch.title);
+        }
+      });
+      const b = directory.observe((event) => {
+        if (event.kind === 'doc-metadata' && typeof event.patch.title === 'string') {
+          second.push(event.patch.title);
+          changed();
+        }
+      });
+      try {
+        const initial = nextChange();
+        await repo.upsertDocMeta('session-observed', { title: 'First' });
+        await initial;
+        expect(await directory.getEntry('session-observed')).toMatchObject({
+          docId: 'session-observed',
+          meta: { title: 'First' },
+          deleted: false,
+        });
+        a.unsubscribe();
+        const renamed = nextChange();
+        await repo.upsertDocMeta('session-observed', { title: 'Second' });
+        await renamed;
+        expect(first).toEqual(['First']);
+        expect(second).toEqual(['First', 'Second']);
+        await repo.deleteDoc('session-observed');
+        expect(await directory.listActiveIds()).toEqual([]);
+        expect((await directory.getEntry('session-observed'))?.deleted).toBe(true);
+      } finally {
+        a.unsubscribe();
+        b.unsubscribe();
+        await repo.destroy();
+      }
+    });
+    it('shares active directory queries with the CLI contract without changing stored metadata', async () => {
+      const repo = await LoroRepo.create({});
+      try {
+        await repo.upsertDocMeta('session-visible', {
+          title: 'Visible',
+          futureField: { retained: true },
+        });
+        await repo.upsertDocMeta('session-deleted', { title: 'Deleted' });
+        await repo.deleteDoc('session-deleted');
+        await repo.flush();
+        const directory = createLegacyWorkspaceDirectoryReader(repo);
+        expect(await directory.listActiveIds()).toEqual(['session-visible']);
+        expect(await listDocMetaEntries(repo)).toEqual(await directory.listEntries());
+        expect(await directory.listEntries()).toEqual([
+          {
+            docId: 'session-visible',
+            exists: true,
+            meta: { title: 'Visible', futureField: { retained: true } },
+          },
+        ]);
+        await repo.upsertDocMeta('session-visible', { title: 'Renamed' });
+        expect((await directory.listEntries())[0]?.meta).toEqual({
+          title: 'Renamed',
+          futureField: { retained: true },
+        });
+        expect((await repo.getDocMeta('session-visible'))?.meta).toEqual({
+          title: 'Renamed',
+          futureField: { retained: true },
+        });
+      } finally {
+        await repo.destroy();
+      }
+    });
+
     it('skips metadata rows without an active existence marker', async () => {
       const scan = vi.fn(async ({ prefix }: { prefix?: readonly unknown[] } = {}) => {
         if (prefix?.[0] === 'm') {

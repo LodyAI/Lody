@@ -65,6 +65,11 @@ reads the retained map and legacy scalar; new activation must not clear old ackn
 
 ## Machine protocol negotiation
 
+Native machine catalog public DTOs contain explicit safe fields only; saved credentials,
+launch specifications and `sourceVersion` containing runtime overrides stay in trusted Node
+ports. Observer retirement fences locally; confirmed release requires awaited cleanup backed
+by the original unsubscribe acknowledgement or transport loss.
+
 - Sorbet credential metadata and per-provider logout use local Machine RPC or signed E2EE owned execution, gated remotely by `sorbetCredentialsRemote`. The target verifies the signing device belongs to its owner's membership; shared members and plaintext fallback are forbidden. Metadata does not imply credential validity or account identity.
 
 - Ask Question consumers must preserve Core note/replacement semantics and validate

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; connect-src 'none'"
+    />
+    <title>Lody native repository acceptance</title>
+  </head>
+  <body>
+    <button id="connect">Connect repository</button>
+    <label>Message <input id="message" /></label>
+    <button id="send">Send message</button>
+    <output id="state">disconnected</output>
+    <output id="ready"></output>
+    <output id="ack"></output><output id="error"></output><output id="reset"></output>
+    <pre id="history"></pre>
+    <pre id="projects"></pre>
+    <script type="module" src="renderer.js"></script>
+  </body>
+</html>

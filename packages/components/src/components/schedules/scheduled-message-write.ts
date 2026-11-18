@@ -98,13 +98,36 @@ export async function saveScheduledMessage(args: {
   if (args.draft.trigger.kind !== 'once' || Date.parse(args.draft.trigger.at) <= now)
     throw new Error('SCHEDULE_TIME_PASSED');
 
+  const command = {
+    scheduleId: args.scheduleId,
+    actorId: args.actorId,
+    activationId: args.activationId,
+    activityId: args.activityId,
+    draft: args.draft,
+    create: args.create,
+    now,
+  };
+
+  // Native creation must finish before a legacy cache factory can materialize
+  // the same room. The selected creator owns complete absence and its own fence.
+  if (
+    args.create &&
+    args.runtime.contentMode === 'plaintext' &&
+    args.runtime.scheduleDefinitions?.create
+  ) {
+    const document = await args.runtime.scheduleDefinitions.create(command);
+    if (document) return document;
+  }
+
   return args.runtime.withScheduleStore(
     args.scheduleId,
     () =>
       new ScheduleRepository(args.runtime.repo, args.runtime.workspaceId, {
+        registry: args.runtime.scheduleRegistry,
+        definitions: args.runtime.scheduleDefinitions,
         protectedContent: args.runtime.contentMode === 'e2ee',
         signDeclaration: args.runtime.signScheduleDeclaration,
-      }).save({ ...args, now }),
+      }).save(command),
     { create: args.create }
   );
 }

@@ -4,7 +4,7 @@ import { useAtom, useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
 import type { AgentConfigId, AgentRoleId, MachineId, SessionId } from '@lody/shared';
 
-import { getAllAgentConfigAtom } from '@/atoms/agents';
+import { getAllAgentConfigListAtom } from '@/atoms/agents';
 import {
   sessionAgentRoleDurableSnapshotAtomFamily,
   sessionAgentRoleSelectionAtomFamily,
@@ -115,7 +115,7 @@ export function useSessionAgentRole({
     [agentConfigId, machineId, roles]
   );
   const { resolve: resolveAvailability } = useAgentRoleAvailability(scopedRoles);
-  const agentConfigs = useAtomValue(getAllAgentConfigAtom);
+  const agentConfigs = useAtomValue(getAllAgentConfigListAtom);
   const resolvedItems = useMemo(
     () =>
       selectSessionAgentRoles({

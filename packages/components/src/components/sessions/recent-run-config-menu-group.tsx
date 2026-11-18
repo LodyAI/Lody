@@ -26,7 +26,7 @@ import { Menu } from '@/ui/menu';
 export type RecentRunConfigItem = {
   /** Stable identity of the combination; also what `onSelect` reports back. */
   id: string;
-  agent: Pick<AgentConfigMeta, 'name' | 'cliType' | 'agentType' | 'brandId' | 'env'>;
+  agent: Pick<AgentConfigMeta, 'name' | 'cliType' | 'agentType' | 'brandId'> & Partial<Pick<AgentConfigMeta, 'env'>>;
   /**
    * Present when the chat was started AS a Role. The row then leads with the
    * Role's own mark and name instead of the agent's, because that is what the

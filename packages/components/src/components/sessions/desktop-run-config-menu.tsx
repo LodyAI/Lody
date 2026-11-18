@@ -8,13 +8,14 @@ import {
   getAgentRoleEmoji,
   type AgentConfigCliType,
   type AgentConfigMeta,
+  type AgentConfigListSummary,
   type AgentRole,
   type AgentRoleId,
   type MachineId,
   type MachineViewMeta,
 } from '@lody/shared';
 
-import { getAllAgentConfigAtom } from '@/atoms';
+import { getAllAgentConfigListAtom } from '@/atoms';
 import { getModeIcon as getPermissionModeIcon } from '@/components/chat/chat-landing-selectors';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { ComposerAgentRolePanel } from '@/components/sessions/composer-agent-role-panel';
@@ -52,6 +53,8 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { control, space } from '@lody/ui/tokens/scales.stylex';
 import { Tooltip } from '@lody/ui/tooltip';
 import { Menu } from '@/ui/menu';
+
+type AgentConfigMenuSummary = AgentConfigListSummary & Partial<Pick<AgentConfigMeta, 'env'>>;
 
 /**
  * Desktop composer run-config controls. Two buttons on the composer footer:
@@ -355,7 +358,7 @@ export type DesktopRunConfigMenuProps = {
    * Explicit agent pool for non-composer surfaces such as machine settings.
    * Unlike the default pool, these configs are not filtered by online presence.
    */
-  availableAgentConfigs?: ReadonlyArray<AgentConfigMeta>;
+  availableAgentConfigs?: ReadonlyArray<AgentConfigMenuSummary>;
   /** Include the selected agent name in the trigger face. */
   showAgentNameInTrigger?: boolean;
   /** Trigger copy while no agent has been selected. */
@@ -439,7 +442,8 @@ export function DesktopRunConfigMenu({
     align: 'start',
     collisionAvoidance: { side: 'flip', align: 'shift', fallbackAxisSide: 'none' },
   } satisfies Pick<ComponentProps<typeof Menu.Content>, 'align' | 'collisionAvoidance'>;
-  const executorConfigs = useAtomValue(getAllAgentConfigAtom);
+  const executorConfigs: readonly AgentConfigMenuSummary[] =
+    useAtomValue(getAllAgentConfigListAtom);
   const onlineMachines = useOnlineMachines(allowedMachineIds);
   const selectableAgentConfigs = availableAgentConfigs ?? executorConfigs;
   const {

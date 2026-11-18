@@ -410,6 +410,8 @@ export function ScheduleProposalNotice({
           scheduleId,
           () =>
             new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+              registry: runtime.scheduleRegistry,
+        definitions: runtime.scheduleDefinitions,
               protectedContent: runtime.contentMode === 'e2ee',
               signDeclaration: runtime.signScheduleDeclaration,
             }).save({

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createElement, Fragment, useEffect } from 'react';
+import { createElement, Fragment, useEffect, useState } from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
@@ -23,6 +23,14 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 
+import { nativeMachineCatalogSettingsAtom } from '../src/atoms/native-machine-catalog';
+import {
+  nativeMachineCatalogHarness,
+  binding as nativeBinding,
+  machineA,
+  configId as nativeConfigId,
+} from './native-machine-catalog.test-support';
+import { getSessionGoalCommands } from '../src/components/sessions/session-goal-control';
 import { machineMetaCacheAtom } from '../src/atoms/doc-meta';
 import { setMachineFlockRowsForMachineAtom } from '../src/atoms/machine-flock';
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
@@ -32,6 +40,7 @@ import {
   useMachineFlockRows,
   useMachineFlockRowsByMachineIdsState,
 } from '../src/hooks/use-machine-flock-rows';
+import { useRefreshMachineAcpCapabilities } from '../src/hooks/use-refresh-machine-acp-capabilities';
 import { useSessionForkCapabilities } from '../src/hooks/use-session-fork-capabilities';
 import { useSessionAcpSelectorContext } from '../src/hooks/use-session-acp-selector-context';
 import { useResolvedMachineMeta } from '../src/hooks/use-resolved-machine-meta';
@@ -224,6 +233,187 @@ describe('useMachineFlockRows', () => {
     await expect(
       resyncMachineFlockRows(runtime, machineId, { requireRemoteSync: true })
     ).rejects.toThrow(`Failed to sync Machine Flock rows for ${machineId}`);
+  });
+
+  it('makes an acknowledged capability probe ready while optional cloud catch-up is still pending', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const store = createStore();
+    const workspaceId = 'refresh-ack-before-cloud' as WorkspaceId;
+    const machineId = 'refresh-local-machine' as MachineId;
+    const configId = 'refresh-config' as AgentConfigId;
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'custom',
+      agentType: 'synthetic',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      provenance: 'runtime',
+      sourceVersion: 'synthetic-v1',
+      modes: [],
+      models: [{ modelId: 'new', name: 'New model' }],
+      fetchedAt: 1,
+    };
+    const catchup = Promise.withResolvers<{
+      ok: boolean;
+      transports: { transportId: string; ok: boolean; failures: never[] }[];
+    }>();
+    const syncStarted = Promise.withResolvers<void>();
+    const handle = {
+      flock: { scan: () => [], subscribe: () => () => {} },
+      syncOnce: () => {
+        syncStarted.resolve();
+        return catchup.promise;
+      },
+    };
+    const runtime = {
+      workspaceId,
+      workspaceSlug: 'refresh-ack-before-cloud',
+      repo: { openFlockDoc: async () => handle },
+      requestMachineAcpCapabilitiesRefresh: async () => ({
+        type: 'machine/acp-capabilities-refresh_response',
+        machineId,
+        configId,
+        cliType: 'custom',
+        agentType: 'synthetic',
+        success: true,
+        capability,
+      }),
+    } as unknown as WorkspaceRuntime;
+    store.set(runtimeAtom, runtime);
+    store.set(currentWorkspaceIdAtom, workspaceId);
+    store.set(currentWorkspaceSlugAtom, 'refresh-ack-before-cloud');
+    const updates: MachineFlockRowMap[] = [];
+    function Probe() {
+      const refresh = useRefreshMachineAcpCapabilities();
+      const [state, setState] = useState('Test');
+      return createElement(
+        'button',
+        {
+          onClick: async () => {
+            setState('Probing');
+            await refresh({ machineId, configId });
+            setState('Ready');
+          },
+        },
+        state
+      );
+    }
+    render(
+      createElement(
+        Provider,
+        { store },
+        createElement(
+          Fragment,
+          null,
+          createElement(Probe),
+          createElement(RowsProbe, {
+            machineId,
+            remoteMachineIds: [],
+            families: ['acpCapability'],
+            onRows: (rows) => updates.push(rows),
+          })
+        )
+      )
+    );
+    await flushMicrotasks();
+    try {
+      await act(async () => {
+        container!.querySelector('button')!.click();
+        await syncStarted.promise;
+      });
+      expect(container!.querySelector('button')!.textContent).toBe('Ready');
+      const rowId = serializeMachineFlockKey(machineFlockKeys.acpCapability(configId));
+      expect(updates.at(-1)?.[rowId]?.value).toEqual(capability);
+    } finally {
+      // The explicit cloud outcome never owns the already acknowledged probe.
+      await act(async () => {
+        catchup.resolve({
+          ok: false,
+          transports: [{ transportId: 'cloud', ok: false, failures: [] }],
+        });
+      });
+    }
+    expect(container!.querySelector('button')!.textContent).toBe('Ready');
+    expect(
+      updates.at(-1)?.[serializeMachineFlockKey(machineFlockKeys.acpCapability(configId))]?.value
+    ).toEqual(capability);
+  });
+
+  it('does not let an older probe catch-up overwrite a newer acknowledged capability', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const store = createStore();
+    const workspaceId = 'refresh-consecutive-acks' as WorkspaceId;
+    const machineId = 'refresh-machine' as MachineId;
+    const configId = 'refresh-config' as AgentConfigId;
+    const capability = (version: number): AcpCapabilityCacheEntry => ({
+      cliType: 'custom',
+      agentType: 'synthetic',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      provenance: 'runtime',
+      sourceVersion: 'synthetic-v' + version,
+      modes: [],
+      models: [],
+      fetchedAt: version,
+    });
+    const first = Promise.withResolvers<{ ok: boolean; transports: never[] }>();
+    const second = Promise.withResolvers<{ ok: boolean; transports: never[] }>();
+    const bothStarted = Promise.withResolvers<void>();
+    const outcomes = [first, second];
+    const runtime = {
+      workspaceId,
+      workspaceSlug: 'refresh-consecutive-acks',
+      repo: {
+        openFlockDoc: async () => ({
+          flock: { scan: () => [], subscribe: () => () => {} },
+          syncOnce: () => {
+            const outcome = outcomes.shift();
+            if (!outcome) throw new Error('Unexpected catch-up');
+            if (!outcomes.length) bothStarted.resolve();
+            return outcome.promise;
+          },
+        }),
+      },
+    } as unknown as WorkspaceRuntime;
+    store.set(runtimeAtom, runtime);
+    store.set(currentWorkspaceIdAtom, workspaceId);
+    store.set(currentWorkspaceSlugAtom, 'refresh-consecutive-acks');
+    const updates: MachineFlockRowMap[] = [];
+    render(
+      createElement(
+        Provider,
+        { store },
+        createElement(RowsProbe, {
+          machineId,
+          remoteMachineIds: [],
+          families: ['acpCapability'],
+          onRows: (rows) => updates.push(rows),
+        })
+      )
+    );
+    await flushMicrotasks();
+    try {
+      await act(async () => {
+        await resyncMachineFlockRows(runtime, machineId, {
+          refreshedCapability: { configId, value: capability(1) },
+        });
+        await resyncMachineFlockRows(runtime, machineId, {
+          refreshedCapability: { configId, value: capability(2) },
+        });
+        await bothStarted.promise;
+      });
+      const rowId = serializeMachineFlockKey(machineFlockKeys.acpCapability(configId));
+      expect(updates.at(-1)?.[rowId]?.value).toEqual(capability(2));
+      await act(async () => {
+        second.resolve({ ok: true, transports: [] });
+      });
+      await act(async () => {
+        first.resolve({ ok: true, transports: [] });
+      });
+      expect(updates.at(-1)?.[rowId]?.value).toEqual(capability(2));
+    } finally {
+      await act(async () => {
+        first.resolve({ ok: true, transports: [] });
+        second.resolve({ ok: true, transports: [] });
+      });
+    }
   });
 
   it('keeps a freshly returned ACP capability when remote resync reads the previous snapshot', async () => {
@@ -989,6 +1179,82 @@ describe('useMachineFlockRows', () => {
 });
 
 describe('session ACP catalogs from Machine Flock', () => {
+  it('uses only the selected native public goal advertisement and removes controls when it becomes unavailable', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const harness = nativeMachineCatalogHarness();
+    const snapshot = harness.snapshots.get(machineA)!;
+    harness.snapshots.set(machineA, {
+      ...snapshot,
+      projection: {
+        ...snapshot.projection,
+        acp: [
+          {
+            configId: nativeConfigId(machineA),
+            cliType: 'builtin',
+            agentType: 'claude',
+            fetchedAt: 1,
+            sessionFork: false,
+            sessionTitle: false,
+            acknowledgedSteer: false,
+            modes: [],
+            models: [],
+            optionIds: [],
+            publicCapability: {
+              cliType: 'builtin',
+              agentType: 'claude',
+              authority: 'authoritative',
+              canValidateRolePins: false,
+              modes: [],
+              models: [],
+              goalActions: ['pause', 'clear'],
+            },
+          },
+        ],
+      },
+    });
+    const source = harness.source();
+    await source.start();
+    const store = createStore();
+    const publish = () => store.set(nativeMachineCatalogSettingsAtom, source.getSnapshot());
+    const unsubscribe = source.subscribe(publish);
+    publish();
+    store.set(runtimeAtom, {
+      accountId: nativeBinding.accountId,
+      workspaceId: nativeBinding.workspaceId,
+      workspaceSlug: nativeBinding.workspaceId,
+      nativeMachineCatalogSource: source,
+      ownsNativeMachineCatalog: (id: string) => id === machineA,
+      repo: {
+        openFlockDoc: () => {
+          throw new Error('Selected native MF must not open legacy');
+        },
+      },
+    } as unknown as WorkspaceRuntime);
+    store.set(currentWorkspaceIdAtom, nativeBinding.workspaceId);
+    store.set(currentWorkspaceSlugAtom, nativeBinding.workspaceId);
+    function Composer() {
+      const { goalCapability } = useSessionAcpSelectorContext({
+        machineId: machineA,
+        configId: nativeConfigId(machineA),
+        cliType: 'builtin',
+        agentType: 'claude',
+      });
+      return createElement('output', null, JSON.stringify(getSessionGoalCommands(goalCapability)));
+    }
+    try {
+      render(createElement(Provider, { store }, createElement(Composer)));
+      await flushMicrotasks();
+      expect(container?.textContent).toBe('["pause","clear"]');
+      await act(async () => {
+        await source.close();
+      });
+      expect(container?.textContent).toBe('[]');
+    } finally {
+      unsubscribe();
+      await source.close();
+    }
+  });
+
   it('tracks the exact Provider extension selection for models and commands', async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const store = createStore();

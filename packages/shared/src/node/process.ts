@@ -59,6 +59,8 @@ export interface NodeProcessApi {
   readonly platform: NodeJS.Platform;
   /** Application-owned observation; never grants signal authority by itself. */
   readonly observeTree?: (tree: ProcessTree) => void;
+  /** Explicit scoped-handle unref hands the tree to another confirmed owner. */
+  readonly handoffTree?: (tree: ProcessTree) => void;
   /** Synchronous like `child_process.spawn`: async failures arrive as `error`. */
   readonly spawn: (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
   /**
@@ -1018,8 +1020,15 @@ const makeSpawner = (np: NodeProcessApi): ChildProcessSpawner.ChildProcessSpawne
       getOutputFd: () => Stream.empty,
       unref: Effect.sync(() => {
         managed.child.unref();
+        try {
+          np.handoffTree?.(managed.tree);
+        } catch (error) {
+          managed.child.ref();
+          throw error;
+        }
         referenced = false;
         return Effect.sync(() => {
+          np.observeTree?.(managed.tree);
           managed.child.ref();
           referenced = true;
         });
@@ -1149,6 +1158,9 @@ export interface CommandSpec {
   readonly timeout?: Duration.Input;
   /** Combined ceiling per stream; exceeding it fails with `CommandOutputTooLarge`. */
   readonly maxOutputBytes?: number;
+  /** Finite trusted helpers must release their entire tree even on normal exit.
+   * Omit for launchers which intentionally leave a background process running. */
+  readonly requireExitedTree?: true;
   /** Runs right after the OS call, for a caller that must record the pid. */
   readonly onSpawned?: (child: ChildProcess) => void;
   /**
@@ -1230,7 +1242,7 @@ export const runCommand = (
           onSpawned: spec.onSpawned,
         },
         spec.abandonPolicy ?? ABANDONED_COMMAND_POLICY,
-        true
+        spec.requireExitedTree !== true
       );
       const handle = yield* spawner.spawn(command).pipe(
         Effect.catchCause((cause) =>

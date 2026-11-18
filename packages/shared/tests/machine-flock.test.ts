@@ -179,6 +179,42 @@ describe('machine Flock helpers', () => {
     ).toBeUndefined();
   });
 
+  it('retains stored Agent config extensions and credentials while enforcing the persisted Codex profile guard', () => {
+    const flock = new FakeMachineFlock();
+    const config: AgentConfigMeta = {
+      id: 'guarded' as AgentConfigId,
+      machineId: 'machine' as MachineId,
+      name: 'Profile',
+      description: 'Old description',
+      cliType: 'builtin',
+      agentType: 'codex',
+      env: {},
+      codexAuth: {
+        mode: 'api-key',
+        profileId: 'b15bb9a7-d3a5-4438-9f5b-d953dfdc046c',
+        baseUrl: 'https://relay.example.invalid/v1',
+      },
+    };
+    flock.set(machineFlockKeys.agentConfig(config.id), {
+      ...config,
+      futureExtension: { retained: true },
+    });
+    const next = { ...config, name: 'Renamed', description: undefined };
+    writeAgentConfigToFlock(flock, next);
+    const stored = [...flock.scan({ prefix: machineFlockKeys.agentConfig(config.id) })][0]!
+      .value as Record<string, unknown>;
+    expect(stored).toMatchObject({
+      name: 'Renamed',
+      futureExtension: { retained: true },
+      env: {},
+      runtimeOverrides: { codexPath: '\0lody-codex-profile-v1' },
+    });
+    expect(stored.description).toBeUndefined();
+    expect(
+      getMachineFlockAgentConfigs(readMachineFlockRowsFromFlock(flock))[config.id]
+    ).toMatchObject({ name: 'Renamed', codexAuth: config.codexAuth });
+  });
+
   describe('per-model option lists', () => {
     const configId = 'config-1' as AgentConfigId;
     const key = getAcpCapabilityCacheKey(configId);

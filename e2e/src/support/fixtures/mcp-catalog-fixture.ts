@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect } from '@playwright/test';
@@ -59,6 +59,8 @@ export class McpCatalogFixture {
     readonly acpEventLogPath: string,
     readonly mcpEventLogPath: string
   ) {
+    writeFileSync(acpEventLogPath, '', 'utf8');
+    writeFileSync(mcpEventLogPath, '', 'utf8');
     this.scriptedAgentCommandLine = [process.execPath, SCRIPTED_ACP_ENTRY, acpEventLogPath]
       .map(quoteCommandArgument)
       .join(' ');

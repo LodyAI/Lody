@@ -117,7 +117,8 @@ export type SessionDocStore = {
   readonly roomId: string;
   /** Immutable history ownership selected from the session catalog. */
   readonly historyBackend: SessionHistoryBackendKind;
-  readonly doc: LoroDoc;
+  readonly doc: LoroDoc | undefined;
+  readonly nativeBody?: import('../providers/native-session-store').NativeSessionRendererCommands;
   readonly firstSynced: Promise<void>;
   acquireSync: () => () => void;
   getSyncState: () => RoomSyncState;
@@ -172,7 +173,8 @@ export type PreviewVisualCommentDocUpdater =
 export type PreviewVisualCommentDocStore = {
   readonly sessionId: SessionId;
   readonly roomId: string;
-  readonly doc: LoroDoc;
+  readonly doc: LoroDoc | undefined;
+  readonly nativePreview?: { mutate(mutation: import('@lody/shared').PreviewVisualCommentMutation): Promise<void> };
   readonly firstSynced: Promise<void>;
   getSyncState: () => RoomSyncState;
   subscribeSyncState: (listener: (state: RoomSyncState) => void) => () => void;
@@ -185,6 +187,7 @@ export type PreviewVisualCommentDocStore = {
 
 export type ScheduleDocStore = {
   readonly roomId: string;
+  getSyncState?: () => RoomSyncState;
   readonly firstSynced: Promise<void>;
   getState: () => import('@lody/shared').ScheduleDocument | null;
   subscribe: (listener: () => void) => () => void;
@@ -193,6 +196,16 @@ export type ScheduleDocStore = {
 };
 
 export type WorkspaceRuntime = {
+  readonly nativeMachineCatalogSource?: import('../providers/native-machine-catalog-ipc').NativeMachineCatalogSource;
+  readonly subscribeNativeMachineCatalogSource?: (listener: () => void) => () => void;
+  readonly ownsNativeMachineCatalog?: (machineId: MachineId) => boolean;
+  readonly workspaceDirectory?: import('@lody/shared/workspace-directory').WorkspaceDirectory;
+  readonly scheduleRegistry?: import('@lody/shared').ScheduleRegistryPort;
+  readonly scheduleDefinitions?: import('@lody/shared').ScheduleDefinitionResolver;
+  getDocumentDomainEpoch?: (target: import('@lody/shared/native-document-domain-ipc').NativeDocumentDomainTarget) => number;
+  subscribeDocumentDomainEpoch?: (target: import('@lody/shared/native-document-domain-ipc').NativeDocumentDomainTarget, listener: () => void) => () => void;
+  readonly workspaceCatalogReader?: import('@lody/shared').WorkspaceCatalogReader;
+  readonly workspaceCatalogCommands?: import('@lody/shared').WorkspaceCatalogCommands;
   requestSessionAutomationControl?: (
     machineId: MachineId,
     sessionId: SessionId,
@@ -211,7 +224,7 @@ export type WorkspaceRuntime = {
     options?: { create?: boolean }
   ) => Promise<T>;
   acquireScheduleStore: (scheduleId: string) => Promise<ScheduleDocStore>;
-  releaseScheduleStoreRef: (scheduleId: string) => void;
+  releaseScheduleStoreRef: (scheduleId: string, store?: ScheduleDocStore) => void;
   /**
    * The workspace id used for IndexedDB/WebSocket connections.
    */
@@ -297,14 +310,17 @@ export type WorkspaceRuntime = {
    * Optional: runtimes without a synchronous cache always open asynchronously.
    */
   peekSessionStore?: (sessionId: SessionId) => SessionDocStore | undefined;
-  releaseSessionStoreRef: (sessionId: SessionId) => void;
+  releaseSessionStoreRef: (sessionId: SessionId, store?: SessionDocStore) => void;
+  /** A published body-owner change replaces only this Session's view. */
+  getSessionStoreEpoch?: (sessionId: SessionId) => number;
+  subscribeSessionStoreEpoch?: (sessionId: SessionId, listener: () => void) => () => void;
   withPreviewVisualCommentStore: <T>(
     sessionId: SessionId,
     fn: (store: PreviewVisualCommentDocStore) => Promise<T> | T
   ) => Promise<T>;
   releasePreviewVisualCommentStore: (sessionId: SessionId) => Promise<void>;
   acquirePreviewVisualCommentStore: (sessionId: SessionId) => Promise<PreviewVisualCommentDocStore>;
-  releasePreviewVisualCommentStoreRef: (sessionId: SessionId) => void;
+  releasePreviewVisualCommentStoreRef: (sessionId: SessionId, store?: PreviewVisualCommentDocStore) => void;
   sendControl: (message: ClientToServer) => void;
   waitForSessionCreateResponse: (
     sessionId: SessionId,

@@ -9,10 +9,9 @@ export class McpCatalogEditingPage {
 
   async createDefaultEnabledServer(): Promise<void> {
     const settings = await this.openMcpSettings();
-    await settings
-      .getByRole('button', { name: /^(Add server|添加服务器)$/u })
-      .first()
-      .click();
+    const add = settings.getByRole('button', { name: /^(Add server|添加服务器)$/u }).first();
+    await expect(add).toBeEnabled({ timeout: 30_000 });
+    await add.click();
     const editor = this.page.getByRole('dialog', {
       name: /^(Add MCP server|添加 MCP 服务器)$/u,
     });

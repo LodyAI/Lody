@@ -10,6 +10,7 @@ import { Bytes } from '@lody/e2ee-core/protocol'
 import { LedgerPinStore, WorkspaceScope } from '@lody/e2ee-core/services'
 import { sqliteLedgerPinStore } from '@lody/e2ee-core/adapters/node-sqlite'
 import { makeNodeE2eeCustody } from '@lody/e2ee-core/adapters/node-custody'
+import { LoroDoc } from 'loro-crdt'
 
 /** Packaged main's native loaders, real SQLite persistence and encrypted custody.
  * Uses synthetic state in a fresh directory; this is not an OS-keychain probe. */
@@ -55,6 +56,15 @@ export async function runNativeStorageSmoke(): Promise<void> {
       })
     )
   try {
+    // The Session kernel's private read projection resolves the installed Node
+    // WASM distribution from the packaged main, independent of the CLI tree.
+    const synthetic = new LoroDoc()
+    synthetic.getText('stream').insert(0, 'synthetic packaged projection')
+    synthetic.commit()
+    const persisted = synthetic.export({ mode: 'snapshot' })
+    const projection = new LoroDoc()
+    projection.import(persisted)
+    assert.equal(projection.getText('stream').toString(), 'synthetic packaged projection')
     await Effect.runPromise(ledger('create'))
     await Effect.runPromise(ledger('open'))
     const deviceKey = await Effect.runPromise(
