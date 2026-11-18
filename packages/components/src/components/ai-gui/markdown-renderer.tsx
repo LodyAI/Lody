@@ -61,6 +61,7 @@ import {
 import { cn } from '@/lib/utils';
 import { usePrLinkInterceptor } from './pr-link-context';
 import { parseSessionLinkHref, useSessionLinkNavigator } from './session-link-context';
+import { useCoordinatorConversation } from '@/components/project-mode/coordinator-conversation';
 import { parseSessionLink, type SessionLink } from '@lody/shared/session-link';
 import {
   SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME,
@@ -398,18 +399,26 @@ function MarkdownExternalLink({
   ...rest
 }: MarkdownExternalLinkProps) {
   const prHandler = usePrLinkInterceptor(href);
+  const coordinator = useCoordinatorConversation();
   const handleClick = useCallback(
     (event: React.MouseEvent<HTMLAnchorElement>) => {
       onClick?.(event);
       if (event.defaultPrevented) return;
-      if (!prHandler) return;
       // Respect modifier-click / non-primary clicks — let the browser do its thing.
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       if (event.button !== 0) return;
+      if (coordinator?.openExternalLink && href) {
+        const label = markdownLinkText(children).trim() || undefined;
+        if (coordinator.openExternalLink(href, label)) {
+          event.preventDefault();
+          return;
+        }
+      }
+      if (!prHandler) return;
       event.preventDefault();
       prHandler();
     },
-    [onClick, prHandler]
+    [children, coordinator, href, onClick, prHandler]
   );
   return (
     <a {...rest} href={href} target="_blank" rel={ensureLinkRel(rel)} onClick={handleClick}>

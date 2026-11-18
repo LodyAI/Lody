@@ -232,6 +232,7 @@ import { zhCN } from 'date-fns/locale/zh-CN';
 import { buildSessionLink } from '@lody/shared/session-link';
 import { buildAppSessionUrl } from '@/lib/session-app-url';
 import { openSessionDeepLink } from '@/lib/session-deep-link';
+import { useCoordinatorConversation } from '@/components/project-mode/coordinator-conversation';
 import { resolveSessionOpenInIdePathTarget } from '@/lib/session-open-in-ide-path';
 import {
   buildPathLauncherLaunchInput,
@@ -4537,8 +4538,16 @@ export const SessionChatInterface = memo(
       liveSessionStatus ?? undefined,
       permissionSessionHistory
     );
-    const agentActivityLabel =
-      initStatusLabel && !isEmptyConversation
+    const isCoordinatorConversation = isCoordinatorSession(session);
+    const agentActivityLabel = isCoordinatorConversation
+      ? isSessionActive
+        ? isAwaitingQuestion
+          ? t('sessions.statusIndicator.waitingForAnswer')
+          : liveSessionStatus?.type === 'requestPermission'
+            ? t('sessions.statusIndicator.requestPermission')
+            : null
+        : null
+      : initStatusLabel && !isEmptyConversation
         ? initStatusLabel
         : isSessionActive
           ? isAwaitingQuestion
@@ -4570,11 +4579,18 @@ export const SessionChatInterface = memo(
     const agentActivityShimmer = agentActivityTone !== 'warning';
     // Presence, not the history's `finished` flag: a turn whose daemon died
     // before finalizing stays unfinished forever but is not running.
-    const liveTurnActivity: LiveTurnActivity | null = isSessionActive
-      ? isAwaitingQuestion || liveSessionStatus?.type === 'requestPermission'
-        ? 'awaitingUser'
-        : 'working'
-      : null;
+    // Coordinator conversations suppress startup/ACP/finalizing harness states.
+    const liveTurnActivity: LiveTurnActivity | null = isCoordinatorConversation
+      ? isSessionActive && !isFinalizing && liveSessionStatus?.type !== 'initializing'
+        ? isAwaitingQuestion || liveSessionStatus?.type === 'requestPermission'
+          ? 'awaitingUser'
+          : 'working'
+        : null
+      : isSessionActive
+        ? isAwaitingQuestion || liveSessionStatus?.type === 'requestPermission'
+          ? 'awaitingUser'
+          : 'working'
+        : null;
     const historyLive = useHistoryLiveWindow(
       resolveHistoryLiveSync(sessionDocSyncState, browserOnline)
     );
@@ -5912,6 +5928,20 @@ export const SessionChatInterface = memo(
           rootSession: openerRootSessionMeta,
         }),
       [docMetaCacheReady, openerRootSessionMeta, openerSessionMeta, session]
+    );
+    const coordinatorConversation = useCoordinatorConversation();
+    const handleSessionLinkNavigate = useCallback(
+      (target: SessionNavigationTarget & { workspaceId?: string }) => {
+        if (!coordinatorConversation || (target.workspaceId && target.workspaceId !== workspaceId)) {
+          openSessionDeepLink(target);
+          return;
+        }
+        const targetId = target.tabSessionId ?? target.sessionId;
+        if (targetId && targetId !== session.id) {
+          coordinatorConversation.openTask(targetId);
+        }
+      },
+      [coordinatorConversation, session.id, workspaceId]
     );
     const handleOpenRelatedSession = useCallback(
       (target: SessionNavigationTarget & { workspaceId?: string }) => {
@@ -7361,7 +7391,10 @@ export const SessionChatInterface = memo(
 
     return (
       <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>
-        <SessionLinkProvider enabled={!!onNavigateSession}>
+        <SessionLinkProvider
+          enabled={!!onNavigateSession}
+          onNavigate={coordinatorConversation ? handleSessionLinkNavigate : undefined}
+        >
           {plaintextCopyConfirmation}
           {toolbar?.container &&
             createPortal(

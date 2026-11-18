@@ -78,7 +78,10 @@ export const parseSideSessionPanelTabId = (tabId: string): string | null =>
     : null;
 
 export const isViewerTabId = (tabId: string): boolean =>
-  tabId.startsWith('file:') || tabId.startsWith('diff:');
+  tabId.startsWith('file:') ||
+  tabId.startsWith('diff:') ||
+  tabId.startsWith('pr:') ||
+  tabId.startsWith('url:');
 
 export type SidePanelTabSelection = {
   activeSidebarTabId: string | null;

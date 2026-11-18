@@ -131,10 +131,11 @@ export function isCoordinatorTaskAccepted(
 
 /**
  * Every conversation the coordinator opened (wherever it runs), bucketed by
- * derived status. Accepting a task archives it, so it leaves the board. Child
- * Tabs roll up into their root the way sidebar rows do. Only the current user's
- * own conversations are listed, as in the sidebar's "My" scope; an unknown
- * account lists none.
+ * derived status. Accepting a task archives its session while keeping it in the
+ * board's `accepted` group (collapsed by default in the UI). Child Tabs roll up
+ * into their root the way sidebar rows do. Only the current user's own
+ * conversations are listed, as in the sidebar's "My" scope; an unknown account
+ * lists none.
  */
 export function buildProjectBoard(options: {
   sessions: readonly SessionMeta[];
@@ -146,7 +147,7 @@ export function buildProjectBoard(options: {
   sendStates: Readonly<Record<string, SessionSendState>>;
   /** Every session including archived ones, so accepted (archived) tasks keep their numbers. */
   numberingSessions?: readonly SessionMeta[];
-  /** Include archived tasks (used by coordinator conversation history strips so accepted tasks keep their title, number and state). */
+  /** Include non-accepted archived tasks too (used by coordinator conversation history strips so archived tasks keep their title, number and state). */
   includeArchived?: boolean;
 }): ProjectBoard {
   const board: ProjectBoard = { needsYou: [], working: [], review: [], accepted: [] };
@@ -156,7 +157,7 @@ export function buildProjectBoard(options: {
     coordinatorSessionId
   );
   for (const session of options.sessions) {
-    if ((!options.includeArchived && session.isArchived) || session.parentSessionId) continue;
+    if (session.parentSessionId) continue;
     if (session.id === coordinatorSessionId) continue;
     if (!isSessionInMyScope(session, options.currentUserId)) continue;
     // Another coordinator of the same project is a conversation of its own, not a task.
@@ -164,6 +165,9 @@ export function buildProjectBoard(options: {
     // Only the coordinator's own tasks: conversations started by hand in the
     // same project stay in the ordinary sidebar (the owner's choice).
     if (!isOpenedBy(session, coordinatorSessionId)) continue;
+    const isAcceptedArchive =
+      Boolean(session.isArchived) && typeof session.coordinatorTaskAcceptedAt === 'number';
+    if (session.isArchived && !isAcceptedArchive && !options.includeArchived) continue;
     const activity = getEffectiveSessionActivitySummary(
       session,
       options.childSessionsByParent,

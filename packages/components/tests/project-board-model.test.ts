@@ -100,7 +100,22 @@ describe('project board', () => {
     expect(numberOf('third')).toBe(3);
     expect(numberOf('manual')).toBeUndefined();
 
-    // Coordinator history strips include archived tasks so accepted tasks retain their title, T1 and Accepted state.
+    // Accepted tasks auto-archive their session while staying in the board's `accepted` group.
+    const acceptedArchived = board([
+      coordinator,
+      session('accepted-archived', {
+        title: 'Streams presence 桌面前台通知',
+        openedBySessionId: coordinator.id as never,
+        createdAt: created(1),
+        coordinatorTaskAcceptedAt: 20,
+        isArchived: true,
+      }),
+    ]);
+    expect(acceptedArchived.accepted).toHaveLength(1);
+    expect(acceptedArchived.accepted[0]?.session.title).toBe('Streams presence 桌面前台通知');
+    expect(acceptedArchived.accepted[0]?.taskNumber).toBe(1);
+
+    // Coordinator history strips include non-accepted archived tasks too so chips retain their title and T1.
     const allSessions = [
       coordinator,
       session('first-archived', {

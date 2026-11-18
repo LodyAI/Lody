@@ -12,7 +12,8 @@ import {
 } from '@lody/shared';
 import { useRouter } from '@tanstack/react-router';
 import { useAtomValue } from 'jotai';
-import { memo, useCallback, useMemo, useRef, type MouseEvent } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
+import { memo, useCallback, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
 import { sessionSendStatesAtom } from '@/atoms/session-send-status';
@@ -25,6 +26,7 @@ import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import {
   buildProjectBoard,
+  coordinatorProjectKeyId,
   findProjectCoordinatorSession,
   PROJECT_BOARD_BUCKETS,
   type CoordinatorProjectKey,
@@ -53,17 +55,26 @@ const styles = stylex.create({
     color: colors.label,
   },
   section: { display: 'flex', flexDirection: 'column', gap: space[2], minWidth: 0 },
-  heading: {
-    display: 'flex',
-    alignItems: 'baseline',
-    gap: space[2],
-    margin: 0,
+  headingWrap: { display: 'flex', minWidth: 0, flexGrow: 1, margin: 0 },
+  headingButton: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    minWidth: 0,
+    flexGrow: 1,
+    paddingBlock: space[1],
     paddingInline: space[1],
+    borderWidth: 0,
+    borderRadius: radius.medium,
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
     fontSize: text.subheadlineSize,
     lineHeight: text.subheadlineLeading,
     fontWeight: 600,
     color: colors.label,
+    textAlign: 'start',
+    cursor: 'pointer',
   },
+  headingChevron: { flexShrink: 0, color: colors.secondaryLabel },
   count: { fontWeight: 400, color: colors.secondaryLabel },
   card: {
     display: 'flex',
@@ -139,6 +150,13 @@ const BUCKET_LABELS: Record<ProjectBoardBucket, [key: string, fallback: string]>
   accepted: ['projectMode.board.accepted', 'Accepted'],
 };
 
+const DEFAULT_COLLAPSED_BUCKETS: Record<ProjectBoardBucket, boolean> = {
+  needsYou: false,
+  working: false,
+  review: false,
+  accepted: true,
+};
+
 /** `T3` for a coordinator task; manual conversations have no number. */
 export const formatTaskNumber = (taskNumber: number | null): string | null =>
   taskNumber === null ? null : `T${taskNumber}`;
@@ -203,15 +221,14 @@ function useProjectBoardDataInternal(
     return next;
   }, [allActiveSessions, presenceNowMs, presenceStates]);
 
-  const sourceSessions = includeArchived ? allSessionsIncludingArchived : allActiveSessions;
   const childSessionsByParent = useMemo(
-    () => buildChildSessionsByParent(sourceSessions),
-    [sourceSessions]
+    () => buildChildSessionsByParent(allSessionsIncludingArchived),
+    [allSessionsIncludingArchived]
   );
   const board = useMemo(
     () =>
       buildProjectBoard({
-        sessions: sourceSessions,
+        sessions: allSessionsIncludingArchived,
         childSessionsByParent,
         project,
         // The start page has no coordinator of its own; it shows the one the project is still bound to.
@@ -235,7 +252,6 @@ function useProjectBoardDataInternal(
       liveSessionStatuses,
       project,
       sendStates,
-      sourceSessions,
       allSessionsIncludingArchived,
     ]
   );
@@ -244,7 +260,8 @@ function useProjectBoardDataInternal(
 }
 
 /**
- * Active (unarchived) tasks for the project's right-hand board.
+ * Tasks for the project's right-hand board, including accepted (archived) tasks
+ * so the `Accepted` group retains them while collapsed by default.
  */
 export function useProjectBoardData(
   coordinatorSessionId: string | null,
@@ -311,8 +328,10 @@ export function ProjectBoard({
     [router, workspaceSlug]
   );
   const acceptTasks = useAcceptCoordinatorTasks();
+  const boardKey = coordinatorSessionId ?? (project ? coordinatorProjectKeyId(project) : 'board');
   return (
     <ProjectBoardView
+      key={boardKey}
       board={board}
       getSessionHref={getSessionHref}
       onOpenSession={onOpenSession ?? openSession}
@@ -338,6 +357,12 @@ export function ProjectBoardView({
   hideTitle?: boolean;
 }) {
   const { t } = useTranslation();
+  const [collapsedByBucket, setCollapsedByBucket] =
+    useState<Record<ProjectBoardBucket, boolean>>(DEFAULT_COLLAPSED_BUCKETS);
+  const toggleBucket = useCallback((bucket: ProjectBoardBucket) => {
+    setCollapsedByBucket((current) => ({ ...current, [bucket]: !current[bucket] }));
+  }, []);
+
   return (
     <aside {...stylex.props(styles.column)} data-testid="project-board">
       {hideTitle ? null : (
@@ -345,10 +370,11 @@ export function ProjectBoardView({
       )}
       {PROJECT_BOARD_BUCKETS.map((bucket) => {
         const rows = board[bucket];
-        // "In progress" shows only when busy; "Accepted" only while an accepted task
-        // is still unarchived (accepting archives it).
+        // "In progress" shows only when busy; "Accepted" shows once at least one task is accepted.
         if ((bucket === 'working' || bucket === 'accepted') && rows.length === 0) return null;
         const [key, fallback] = BUCKET_LABELS[bucket];
+        const collapsed = collapsedByBucket[bucket];
+        const Chevron = collapsed ? ChevronRight : ChevronDown;
         return (
           <section
             key={bucket}
@@ -356,11 +382,20 @@ export function ProjectBoardView({
             data-project-board-bucket={bucket}
           >
             <div {...stylex.props(styles.headingRow)}>
-              <h3 {...stylex.props(styles.heading)}>
-                {t(key, fallback)}
-                {rows.length > 0 ? (
-                  <span {...stylex.props(styles.count)}>{rows.length}</span>
-                ) : null}
+              <h3 {...stylex.props(styles.headingWrap)}>
+                <button
+                  type="button"
+                  aria-expanded={!collapsed}
+                  data-project-board-bucket-toggle={bucket}
+                  onClick={() => toggleBucket(bucket)}
+                  {...stylex.props(styles.headingButton)}
+                >
+                  <Chevron size={14} aria-hidden="true" {...stylex.props(styles.headingChevron)} />
+                  <span>{t(key, fallback)}</span>
+                  {rows.length > 0 ? (
+                    <span {...stylex.props(styles.count)}>{rows.length}</span>
+                  ) : null}
+                </button>
               </h3>
               {bucket === 'review' && onAcceptTasks && rows.length > 1 ? (
                 <Button
@@ -372,7 +407,7 @@ export function ProjectBoardView({
                 </Button>
               ) : null}
             </div>
-            {rows.length > 0 ? (
+            {collapsed ? null : rows.length > 0 ? (
               <div {...stylex.props(styles.card)}>
                 {rows.map((row) => (
                   <ProjectBoardRowLink
@@ -428,7 +463,7 @@ const ProjectBoardRowLink = memo(function ProjectBoardRowLink({
             // A pending question waits on the user exactly like a permission request.
             isWaitingPermission={row.bucket === 'needsYou' && row.sendState !== 'failed'}
             isWorking={row.isWorking}
-            hasUnreadMessages={row.hasUnreadMessages}
+            hasUnreadMessages={row.bucket !== 'accepted' && row.hasUnreadMessages}
             sendState={row.sendState}
           />
         </span>

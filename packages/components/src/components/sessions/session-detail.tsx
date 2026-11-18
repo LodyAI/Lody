@@ -374,11 +374,16 @@ import {
 import { persistAgentSessionDefaults } from '@/lib/local-storage-cache';
 import { SessionChangesSidebar } from './session-changes-sidebar';
 import { developerModeEnabledAtom } from '@/atoms/settings';
+import { parseBrowserAddress } from '@lody/shared';
+import { parseGitHubReferenceUrl } from '@/components/ai-gui/github-reference-link';
+import { getPublicBrowserBridge } from '@/lib/electron-ipc-client';
 import { ProjectBoard } from '@/components/project-mode/project-board';
 import { CoordinatorConversationProvider } from '@/components/project-mode/coordinator-conversation';
 import { getSessionCoordinatorProjectKey } from '@/components/project-mode/project-board-model';
 import {
+  formatExternalUrlTabLabel,
   OwnedSessionFileViewer,
+  OwnedUrlViewer,
   PROJECT_BOARD_PANEL_TAB_ID,
   usePanelSessionMetas,
 } from '@/components/project-mode/coordinator-side-panel';
@@ -412,6 +417,20 @@ type ViewerTab =
       focusComment?: DiffCommentFocusTarget | null;
       focusRequestSeq: number;
       mode?: 'conversation' | 'base';
+      label: string;
+    }
+  | {
+      id: string;
+      type: 'pr';
+      repoFullName: string;
+      prNumber: number;
+      ownerSessionId?: SessionId | null;
+      label: string;
+    }
+  | {
+      id: string;
+      type: 'url';
+      url: string;
       label: string;
     };
 
@@ -876,6 +895,18 @@ const areViewerTabsEquivalent = (prev: ViewerTab, next: ViewerTab): boolean => {
       prev.focusRequestSeq === next.focusRequestSeq &&
       areStringArraysEqual(prev.filePaths, next.filePaths)
     );
+  }
+
+  if (prev.type === 'pr' && next.type === 'pr') {
+    return (
+      prev.repoFullName === next.repoFullName &&
+      prev.prNumber === next.prNumber &&
+      prev.ownerSessionId === next.ownerSessionId
+    );
+  }
+
+  if (prev.type === 'url' && next.type === 'url') {
+    return prev.url === next.url;
   }
 
   return false;
@@ -4710,7 +4741,7 @@ const SessionDetail = ({
       })),
       ...viewerTabItems.map((tab): SessionSidePanelTabItem => ({
         ...tab,
-        kind: tab.type,
+        kind: tab.type === 'url' ? 'browser' : tab.type,
         closeable: true,
       })),
     ];
@@ -4866,7 +4897,13 @@ const SessionDetail = ({
         }
         captureSessionDetailEvent('session/viewer_tab_closed', {
           viewer_tab_id: tabId,
-          viewer_tab_type: tabId.startsWith('file:') ? 'file' : 'diff',
+          viewer_tab_type: tabId.startsWith('file:')
+            ? 'file'
+            : tabId.startsWith('pr:')
+              ? 'pr'
+              : tabId.startsWith('url:')
+                ? 'url'
+                : 'diff',
           remaining_viewer_tab_count: Math.max(0, viewerTabs.length - 1),
         });
       }
@@ -5283,7 +5320,12 @@ const SessionDetail = ({
       sessionTabId: persistedSessionTabId,
       // Project-mode tabs are rebuilt on entry, never restored.
       viewerTab:
-        activeViewerTab?.type === 'file' && activeViewerTab.ownerSessionId ? null : activeViewerTab,
+        !activeViewerTab ||
+        (activeViewerTab.type === 'file' && activeViewerTab.ownerSessionId) ||
+        activeViewerTab.type === 'pr' ||
+        activeViewerTab.type === 'url'
+          ? null
+          : activeViewerTab,
       sidePanel: {
         open: isSidebarOpen,
         tab: (activeSidebarTab as string) === PROJECT_BOARD_PANEL_TAB_ID ? null : activeSidebarTab,
@@ -5480,6 +5522,91 @@ const SessionDetail = ({
       setIsSidebarOpen(true);
     },
     [selectSidePanelTab]
+  );
+
+  const handleCoordinatorNavigateSession = useCallback(
+    (target: SessionNavigationTarget) => {
+      const targetId = (target.tabSessionId ?? target.sessionId) as SessionId;
+      if (!targetId || targetId === sessionId) return;
+      handleOpenPanelSession(targetId);
+    },
+    [handleOpenPanelSession, sessionId]
+  );
+
+  const handleViewerUrlTabTitleChange = useCallback((tabId: string, title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    setViewerTabs((current) => {
+      const idx = current.findIndex((tab) => tab.id === tabId && tab.type === 'url');
+      if (idx === -1 || current[idx]?.label === trimmed) return current;
+      const next = [...current];
+      const existing = next[idx];
+      if (!existing || existing.type !== 'url') return current;
+      next[idx] = { ...existing, label: trimmed };
+      return next;
+    });
+  }, []);
+
+  /**
+   * Opens GitHub PR links, web session links for this workspace, and public
+   * HTTP(S) URLs clicked inside the coordinator conversation as right-panel tabs.
+   */
+  const handleOpenCoordinatorExternalLink = useCallback(
+    (rawHref: string, linkLabel?: string): boolean => {
+      const trimmed = rawHref.trim();
+      if (!trimmed || isMobile) return false;
+
+      if (workspaceSlug) {
+        const appSessionMatch = /^https?:\/\/[^/]+\/([^/]+)\/sessions\/([A-Za-z0-9_-]+)(?:[/?#].*)?$/i.exec(
+          trimmed
+        );
+        if (appSessionMatch) {
+          const [, linkWorkspaceSlug, linkedSessionId] = appSessionMatch;
+          if (
+            decodeURIComponent(linkWorkspaceSlug ?? '') === workspaceSlug &&
+            linkedSessionId &&
+            linkedSessionId !== sessionId
+          ) {
+            handleOpenPanelSession(linkedSessionId);
+            return true;
+          }
+        }
+      }
+
+      const githubRef = parseGitHubReferenceUrl(trimmed);
+      if (githubRef?.kind === 'pull') {
+        const repoFullName = `${githubRef.owner}/${githubRef.repo}`;
+        const tabId = `pr:${repoFullName.toLowerCase()}#${githubRef.number}`;
+        upsertViewerTab({
+          id: tabId,
+          type: 'pr',
+          repoFullName,
+          prNumber: githubRef.number,
+          ownerSessionId: null,
+          label: `${githubRef.repo} #${githubRef.number}`,
+        });
+        return true;
+      }
+
+      try {
+        const parsed = parseBrowserAddress(trimmed);
+        if (parsed.engine !== 'public-web') return false;
+        if (getPublicBrowserBridge()?.capability !== 'web-contents-view-v1') {
+          return false;
+        }
+        const tabId = `url:${parsed.logicalUrl}`;
+        upsertViewerTab({
+          id: tabId,
+          type: 'url',
+          url: parsed.logicalUrl,
+          label: formatExternalUrlTabLabel(parsed.logicalUrl, linkLabel),
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [handleOpenPanelSession, isMobile, sessionId, upsertViewerTab, workspaceSlug]
   );
 
   /** A file link in a panel-hosted conversation opens a tab on that conversation's workspace. */
@@ -5731,7 +5858,7 @@ const SessionDetail = ({
       list.push({
         id: v.id,
         label: v.label,
-        kind: v.type,
+        kind: v.type === 'url' ? 'browser' : v.type,
         active:
           v.type === 'file'
             ? mobileFileViewerOpen && mobileFileViewerTabId === v.id
@@ -6279,6 +6406,23 @@ const SessionDetail = ({
           });
         }}
         className={className}
+      />
+    ) : tab.type === 'pr' ? (
+      <PrTabContainer
+        repoFullName={tab.repoFullName}
+        prNumber={tab.prNumber}
+        sessionId={tab.ownerSessionId ?? null}
+        actionSessionId={tab.ownerSessionId ?? null}
+        visible={active}
+        className={className}
+      />
+    ) : tab.type === 'url' ? (
+      <OwnedUrlViewer
+        tabId={tab.id}
+        initialUrl={tab.url}
+        active={active}
+        className={className}
+        onTitleChange={(title) => handleViewerUrlTabTitleChange(tab.id, title)}
       />
     ) : (
       <SessionConversationDiffPanel
@@ -7450,7 +7594,10 @@ const SessionDetail = ({
       ),
       onOpenPrTab: handleOpenPrTab,
       onOpenAllChanges: handleOpenAllChanges,
-      onNavigateSession: handleNavigateSession,
+      onNavigateSession:
+        isProjectCoordinator && chatSession.id === sessionId
+          ? handleCoordinatorNavigateSession
+          : handleNavigateSession,
       onConversationPrepared: pendingForkSourceId
         ? () => handleForkedConversationPrepared(pendingForkSourceId, chatSession.id)
         : undefined,
@@ -7520,6 +7667,7 @@ const SessionDetail = ({
                   coordinatorSessionId={tabSession.id}
                   project={coordinatorProject}
                   onOpenTask={handleOpenPanelSession}
+                  onOpenExternalLink={handleOpenCoordinatorExternalLink}
                 >
                   {chatSurface}
                 </CoordinatorConversationProvider>

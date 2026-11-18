@@ -26,6 +26,7 @@ import type {
 type CoordinatorConversationValue = {
   tasks: ReadonlyMap<string, ProjectBoardRow>;
   openTask: (sessionId: string) => void;
+  openExternalLink?: (href: string, label?: string) => boolean;
 };
 
 const CoordinatorConversationContext = createContext<CoordinatorConversationValue | null>(null);
@@ -38,11 +39,13 @@ export function CoordinatorConversationProvider({
   coordinatorSessionId,
   project,
   onOpenTask,
+  onOpenExternalLink,
   children,
 }: {
   coordinatorSessionId: string;
   project: CoordinatorProjectKey | null;
   onOpenTask: (sessionId: string) => void;
+  onOpenExternalLink?: (href: string, label?: string) => boolean;
   children: ReactNode;
 }) {
   const tasks = useCoordinatorTasksData(coordinatorSessionId, project);
@@ -50,8 +53,9 @@ export function CoordinatorConversationProvider({
     () => ({
       tasks,
       openTask: onOpenTask,
+      openExternalLink: onOpenExternalLink,
     }),
-    [onOpenTask, tasks]
+    [onOpenExternalLink, onOpenTask, tasks]
   );
   return (
     <CoordinatorConversationContext.Provider value={value}>

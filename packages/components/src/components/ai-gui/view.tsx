@@ -2097,23 +2097,22 @@ export const SessionChatStreamView = forwardRef<
           }
         }
       }
-      const isWorking =
-        unfinishedAssistant !== null || Boolean(shouldShowAgentActivity && agentActivityLabel);
-      if (!isWorking) return null;
-      const label =
-        agentActivityTone === 'warning' && agentActivityLabel
-          ? agentActivityLabel
-          : explicitStatus ||
-            agentActivityLabel ||
-            t('sessions.statusIndicator.thinking', 'Thinking');
-      return { label, tone: agentActivityTone };
+      if (agentActivityTone === 'warning' && agentActivityLabel) {
+        return { label: agentActivityLabel, tone: agentActivityTone };
+      }
+      // Coordinator conversations show only explicit `lody_coordinator_set_status`
+      // updates while the turn is actively working, never regular harness startup,
+      // ACP initialization, thinking/working or finalization labels.
+      if (!unfinishedAssistant || !shouldShowAgentActivity || !explicitStatus) {
+        return null;
+      }
+      return { label: explicitStatus, tone: agentActivityTone };
     }, [
       agentActivityLabel,
       agentActivityTone,
       coordinatorBubbles,
       items,
       shouldShowAgentActivity,
-      t,
     ]);
     const hasActivityRow = coordinatorBubbles
       ? activeCoordinatorStatus !== null
