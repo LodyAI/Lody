@@ -8,6 +8,10 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
 
 Snapshot compression is available only through `@lody/shared/streams-snapshot-codec`. Keep its runtime imports out of the shared root so Convex isolate bundles can use protocol helpers without loading Node compression dependencies.
 
+Meta/Flock catch-up keeps replica-bound checkpoints and merges into the live replica.
+[Streams catch-up](../../.agents/docs/workspace-catalog-durability.md#streams-catch-up)
+explains size selection and cursor-only timeout recovery.
+
 ## Session history
 
 - History tolerates unknown string item types without rewriting or blocking unrelated writes.
