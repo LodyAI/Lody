@@ -323,11 +323,13 @@ stories. Native device touch acceptance remains separate from browser coverage.
 ## Subagent tasks
 
 `subagent-task-panel.tsx` renders a turn's `subagent_task` items as one card of
-ruled rows. A row's first line is the task and its time; a running task adds a
-second line with its latest step, taken from the last `run.items` entry, then
-`run.progress`, then the legacy `summary`/`lastToolName`, so older tasks keep
-working. While any task is pending or running, the finished turn keeps this
-panel after its answer; once every task is terminal, the panel returns to the
+ruled rows. A row shows the task and its time, followed by any reported model
+and reasoning effort. The dialog header shows the same configuration alongside
+status and usage. Both surfaces read the child's run snapshot or the model on a
+legacy task row. Each missing field is omitted. A running task also shows its
+latest step from the last `run.items` entry, then `run.progress`, then the legacy
+`summary`/`lastToolName`. While any task is pending or running, the finished turn
+keeps this panel after its answer. Once every task is terminal, the panel returns to the
 folded work details. When a turn has both agent runs and other tasks (shell
 commands, MCP tasks, monitors, scheduled wakeups), the rows split into a Subagents
 tab, selected first, and a Tasks tab; each tab shows a spinner while live and

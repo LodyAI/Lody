@@ -4,6 +4,7 @@ import { corner, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 
 const MARK = '14px';
 const MARK_GAP = space[1.5];
+const ROW_INDENT = `calc(${MARK} + ${MARK_GAP})`;
 
 export const styles = stylex.create({
   /**
@@ -80,9 +81,7 @@ export const styles = stylex.create({
 
   /**
    * One task, the width of the card. Its first line is its identity and its
-   * time; a running task adds a second line under the name for what it is doing
-   * now, so the step can change every few seconds without the name, the time or
-   * the rows below it moving sideways.
+   * time; the configuration and the step in flight sit under the name.
    */
   row: {
     display: 'flex',
@@ -138,10 +137,17 @@ export const styles = stylex.create({
     fontVariantNumeric: 'tabular-nums',
     whiteSpace: 'nowrap',
   },
+  configuration: {
+    paddingInlineStart: ROW_INDENT,
+    overflowWrap: 'anywhere',
+    textWrap: 'pretty',
+    fontSize: '0.95em',
+    color: colors.secondaryLabel,
+  },
   /** The step in flight, hung under the name rather than under the mark. */
   latest: {
     minWidth: 0,
-    paddingInlineStart: `calc(${MARK} + ${MARK_GAP})`,
+    paddingInlineStart: ROW_INDENT,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',

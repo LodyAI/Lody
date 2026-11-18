@@ -830,6 +830,8 @@ describe('single history writer', () => {
     };
     emit('a', { type: 'snapshot', snapshot });
     emit('b', { type: 'snapshot', snapshot });
+    const configuration = { modelId: 'worker-model', reasoningEffort: 'high' };
+    emit('a', { type: 'snapshot', snapshot: { ...snapshot, ...configuration } });
     const chunk = (text: string) => ({
       type: 'output',
       nativeTurnId: 'child-turn',
@@ -886,10 +888,17 @@ describe('single history writer', () => {
     );
     emit(
       'a',
-      { type: 'snapshot', snapshot: { ...snapshot, state: 'unknown', outputIncomplete: true } },
+      {
+        type: 'snapshot',
+        snapshot: { ...snapshot, ...configuration, state: 'unknown', outputIncomplete: true },
+      },
       'second'
     );
-    emit('a', { type: 'snapshot', snapshot: { ...snapshot, state: 'completed' } }, 'second');
+    emit(
+      'a',
+      { type: 'snapshot', snapshot: { ...snapshot, ...configuration, state: 'completed' } },
+      'second'
+    );
     emit('a', chunk('late output'), 'second');
     emit('missing', chunk('orphan'), 'second');
     emit('a', chunk('cross root'), 'second', 'another-root');
@@ -900,7 +909,7 @@ describe('single history writer', () => {
     expect(writer.read('second')!.items).toEqual([]);
     expect(tasks).toHaveLength(2);
     expect(tasks[0]?.run).toMatchObject({
-      snapshot: { state: 'completed', outputIncomplete: true },
+      snapshot: { state: 'completed', outputIncomplete: true, ...configuration },
       progress: { summary: null, totalTokens: 10, lastToolName: 'Read' },
       items: [
         { type: 'text', text: 'hellohello' },
@@ -917,6 +926,7 @@ describe('single history writer', () => {
       { type: 'text', text: 'independent' },
       { type: 'tool_call', status: 'in_progress' },
     ]);
+    expect(tasks[1]?.run?.snapshot.reasoningEffort).toBeUndefined();
     const row = doc.getList('history').get(0) as LoroMap;
     const task = (row.get('items') as LoroList).get(0) as LoroMap;
     const run = task.get('run') as LoroMap;
