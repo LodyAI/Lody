@@ -214,7 +214,7 @@
     "baseCommit": "67494b6b1c46df54a4ac8240b03af9b85c5032b2",
     "path": "packages/cloud-runtime",
     "note": "Full package snapshot from the reviewed iOS dependency upgrade commit. SHA256.json records the exact files. Roost authoring source and its generator remain in iOS. This replaces the earlier selective runtime deltas, including the previously excluded transcript windowing and explicit pending-input reconciliation. iOS pnpm 11 installation, check, test and bundle passed; dependency licenses were regenerated.",
-    "commit": "bd5bf4cbda1e4394d8261c240233966ffa2afc80",
-    "export": "git -C apps/mobile/ios archive bd5bf4cbda1e4394d8261c240233966ffa2afc80 packages/cloud-runtime"
+    "commit": "b7f87e88ea1d9f273301afadceefdd60ee1a16ac",
+    "export": "git -C apps/mobile/ios archive b7f87e88ea1d9f273301afadceefdd60ee1a16ac packages/cloud-runtime"
   }
 }
