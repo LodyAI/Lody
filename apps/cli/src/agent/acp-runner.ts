@@ -1,4 +1,3 @@
-import { copilotQuotaArgs, isCopilotQuotaAgent, readCopilotQuota } from './copilot-quota';
 import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
 import { parseLodyExtensionCapabilities, parseRateLimitsSnapshot } from './lody-acp-extension';
 import {
@@ -593,30 +592,6 @@ export async function runLocalSorbetCredentials(
 
 /** Core queries need no session; official Antigravity /usage needs an isolated scratch session. */
 export async function queryLocalAcpRateLimits(options: StartLocalAcpAgentOptions) {
-  if (isCopilotQuotaAgent(options)) {
-    const started = await startLocalAcpProtocol(
-      options,
-      {
-        prepareArgs: copilotQuotaArgs,
-        start: async (child, startupAbort) => ({
-          snapshot: await readCopilotQuota(child, startupAbort),
-        }),
-      },
-      true,
-      true
-    );
-    try {
-      await terminateAcpProcessTree(started.agentProcess, {
-        logger: options.logger,
-        sessionLabel: 'copilot-quota',
-        exitTimeoutMs: 3000,
-      });
-    } catch (cause) {
-      throw new AcpQuotaCleanupError(started.agentProcess, cause);
-    }
-    options.signal?.throwIfAborted();
-    return started.snapshot;
-  }
   if (isAntigravityBuiltinAgent(options)) {
     // Never drop account-selecting ACP arguments and accidentally read another account.
     if (options.extraArgs?.length || options.magpieGatewayUrl)
@@ -720,17 +695,95 @@ export async function prepareAcpProcessEnvironmentLegacy(
   );
 }
 
-async function startLocalAcpProtocol<T>(
+type LocalProcessStart = {
+  child: ChildProcess;
+  startupAbort: Promise<never>;
+  launcher: AcpLauncher;
+  startupTimeouts?: AcpStartupTimeoutOptions;
+};
+
+type LocalProcessOptions = {
+  prepareArgs?: (args: readonly string[]) => string[];
+  sensitiveOutput?: boolean;
+  retainCleanupFailure?: boolean;
+  safeOfflineBeforeInitialization?: () => boolean;
+};
+
+/** Run one operation and confirm process-tree cleanup before returning its result. */
+export async function withLocalAgentProcess<T>(
   options: StartLocalAcpAgentOptions,
-  startClient:
-    | ((options: CreateAcpClientOptions) => Promise<T>)
-    | {
-        prepareArgs: (args: readonly string[]) => string[];
-        start: (child: ChildProcess, startupAbort: Promise<never>) => Promise<T>;
-      },
+  operation: Pick<LocalProcessOptions, 'prepareArgs' | 'sensitiveOutput'> & {
+    sessionLabel: string;
+  },
+  run: (child: ChildProcess, startupAbort: Promise<never>) => Promise<T>
+): Promise<T> {
+  const { agentProcess, result } = await startLocalAgentProcess(
+    options,
+    { ...operation, retainCleanupFailure: true },
+    async ({ child, startupAbort }) => ({ result: await run(child, startupAbort) })
+  );
+  try {
+    await terminateAcpProcessTree(agentProcess, {
+      logger: options.logger,
+      sessionLabel: operation.sessionLabel,
+      exitTimeoutMs: 3000,
+    });
+  } catch (cause) {
+    throw new AcpQuotaCleanupError(agentProcess, cause);
+  }
+  options.signal?.throwIfAborted();
+  return result;
+}
+
+function startLocalAcpProtocol<T>(
+  options: StartLocalAcpAgentOptions,
+  startClient: (options: CreateAcpClientOptions) => Promise<T>,
   retainCleanupFailure = false,
   sensitiveOutput = false,
   safeOfflineBeforeInitialization?: () => boolean
+) {
+  return startLocalAgentProcess(
+    options,
+    { retainCleanupFailure, sensitiveOutput, safeOfflineBeforeInitialization },
+    ({ child, startupAbort, launcher, startupTimeouts }) => {
+      if (!child.stdout) throw new Error('Agent process stdout is not available');
+      if (!child.stdin) throw new Error('Agent process stdin is not available');
+      options.logger.debug('[acp-startup] creating ACP client');
+      return startClient({
+        stream: ndJsonStream(
+          createStdinWritableStream(child.stdin),
+          createStdoutReadableStream(child.stdout)
+        ),
+        workdir: options.workdir,
+        logger: options.logger,
+        terminalManager: options.terminalManager,
+        agentConfig: {
+          cliType: options.cliType,
+          agentType: options.agentType,
+        },
+        launcher,
+        terminalEnabled: options.terminalEnabled,
+        discoverAuthenticationMethods: options.discoverAuthenticationMethods,
+        onUsageUpdate: options.onUsageUpdate,
+        onContextWindowUsageUpdate: options.onContextWindowUsageUpdate,
+        onUpdateMessage: options.onUpdateMessage,
+        onRequestPermission: options.onRequestPermission,
+        startupTimeouts,
+        startupAbort,
+      });
+    }
+  );
+}
+
+async function startLocalAgentProcess<T>(
+  options: StartLocalAcpAgentOptions,
+  {
+    prepareArgs,
+    retainCleanupFailure,
+    sensitiveOutput,
+    safeOfflineBeforeInitialization,
+  }: LocalProcessOptions,
+  start: (context: LocalProcessStart) => Promise<T>
 ) {
   options.signal?.throwIfAborted();
   // Async resolve so registry agents distributed as a platform binary are
@@ -754,7 +807,7 @@ async function startLocalAcpProtocol<T>(
     signal: options.signal,
   });
   options.signal?.throwIfAborted();
-  if (typeof startClient !== 'function') launch.args = startClient.prepareArgs(launch.args);
+  if (prepareArgs) launch.args = prepareArgs(launch.args);
   const launcher: AcpLauncher = resolveAcpLauncher(launch.command);
   const spawnAnalyticsProps = {
     cliType: options.cliType,
@@ -954,15 +1007,6 @@ async function startLocalAcpProtocol<T>(
       }
     );
 
-    // Create streams with proper buffering and backpressure handling.
-    // See utils/stream.ts for details on race condition and backpressure fixes.
-    if (!agentProcess.stdout) {
-      throw new Error('Agent process stdout is not available');
-    }
-    if (!agentProcess.stdin) {
-      throw new Error('Agent process stdin is not available');
-    }
-
     let rejectSignalAbort: ((error: DOMException) => void) | undefined;
     const signalAbort = options.signal
       ? new Promise<never>((_resolve, reject) => {
@@ -975,35 +1019,10 @@ async function startLocalAcpProtocol<T>(
     options.signal?.addEventListener('abort', handleSignalAbort, { once: true });
     try {
       options.signal?.throwIfAborted();
-      options.logger.debug('[acp-startup] creating ACP client');
       const startupAbort = signalAbort
         ? Promise.race([startupMonitor.abortPromise, signalAbort])
         : startupMonitor.abortPromise;
-      const started =
-        typeof startClient !== 'function'
-          ? await startClient.start(agentProcess, startupAbort)
-          : await startClient({
-              stream: ndJsonStream(
-                createStdinWritableStream(agentProcess.stdin),
-                createStdoutReadableStream(agentProcess.stdout)
-              ),
-              workdir: options.workdir,
-              logger: options.logger,
-              terminalManager: options.terminalManager,
-              agentConfig: {
-                cliType: options.cliType,
-                agentType: options.agentType,
-              },
-              launcher,
-              terminalEnabled: options.terminalEnabled,
-              discoverAuthenticationMethods: options.discoverAuthenticationMethods,
-              onUsageUpdate: options.onUsageUpdate,
-              onContextWindowUsageUpdate: options.onContextWindowUsageUpdate,
-              onUpdateMessage: options.onUpdateMessage,
-              onRequestPermission: options.onRequestPermission,
-              startupTimeouts,
-              startupAbort,
-            });
+      const started = await start({ child: agentProcess, startupAbort, launcher, startupTimeouts });
       options.signal?.throwIfAborted();
       return {
         agentProcess,
@@ -1012,6 +1031,9 @@ async function startLocalAcpProtocol<T>(
       };
     } catch (error) {
       const startupError = startupMonitor.resolveError(error);
+      // An operation may fail before observing startupAbort. Our teardown is not a startup exit.
+      startupMonitor.dispose();
+      options.signal?.removeEventListener('abort', handleSignalAbort);
       // The process died/failed to spawn before startup completed (the startup
       // monitor surfaces async ENOENT/EACCES/early-exit here). Protocol-level
       // failures are captured inside AgentClient.startSession, so only

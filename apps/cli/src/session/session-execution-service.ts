@@ -19,7 +19,8 @@ import type { NativeWorkWatch } from './turn-completion';
 import { resolveProjectFileRoots } from './worktree/project-member-access';
 import { type AcpLauncher, resolveAcpLauncher } from '@/agent/acp-analytics';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
-import { queryLocalAcpRateLimits, AcpQuotaCleanupError } from '@/agent/acp-runner';
+import { queryProviderRateLimits } from '@/agent/provider-quota';
+import { AcpQuotaCleanupError } from '@/agent/acp-runner';
 import { isLoroRepoDocDeleted, normalizeSessionTurnInputConfig } from '@lody/shared';
 import {
   isSubscriptionQuotaEligible,
@@ -1459,7 +1460,7 @@ export class SessionExecutionService {
         });
         if (status.success && status.status !== 'installed') return false;
       }
-      const snapshot = await queryLocalAcpRateLimits({
+      const snapshot = await queryProviderRateLimits({
         cliType: config.cliType,
         agentType: config.agentType,
         customAcp: config.customAcp,
