@@ -8,6 +8,7 @@ const REGION = `color-mix(in oklab, transparent, ${colors.label} 5%)`;
 export const dialogLayout = { width: '800px', maxHeight: 'min(760px, 85dvh)' };
 
 export const styles = stylex.create({
+  configuration: { overflowWrap: 'anywhere', textWrap: 'pretty' },
   /** The task at full depth; everything under the heading scrolls as one column. */
   detail: {
     display: 'flex',

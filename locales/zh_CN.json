@@ -2755,6 +2755,8 @@
   "sessions.subagentTasks.runningTool": "正在运行 {{tool}}",
   "sessions.subagentTasks.statusPending": "等待中",
   "sessions.subagentTasks.statusRunning": "运行中",
+  "sessions.subagentTasks.model": "模型：{{value}}",
+  "sessions.subagentTasks.reasoningEffort": "思考强度：{{value}}",
   "sessions.subagentTasks.statusCompleted": "已完成",
   "sessions.subagentTasks.statusFailed": "失败",
   "sessions.subagentTasks.command": "命令",
