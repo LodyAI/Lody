@@ -4,6 +4,7 @@ import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
 import { RepoSyncError, RepoTransportError } from 'loro-repo';
 import {
   createLoroStreamUrl,
+  loroStreamsWebSocketOptions,
   getLoroMetaStreamId,
   getLoroStreamIdForDocId,
   getLoroStreamsShardUrls,
@@ -41,6 +42,7 @@ export type WorkspaceStreamsTransportOptions = {
   documentRemoteCursorStore: RemoteCursorStore;
   auth: ConstructorParameters<typeof StreamsTransportAdapter>[0]['auth'];
   streamsBaseUrl: string;
+  webSocketEnabled?: boolean;
   shardHostSuffix: string | undefined;
   /** Explicit transport policy, separate from workspace admission evidence. */
   content: WorkspaceStreamsContent;
@@ -118,6 +120,11 @@ export const createWorkspaceStreamsTransport = (
       content?.mode === 'protected'
         ? (content.snapshotCodec ?? streamsSnapshotCodec)
         : streamsSnapshotCodec,
+    ...loroStreamsWebSocketOptions(
+      options.webSocketEnabled === true,
+      options.streamsBaseUrl,
+      options.workspaceId
+    ),
     baseUrl: options.streamsBaseUrl,
     shardUrls: getLoroStreamsShardUrls(options.streamsBaseUrl, options.shardHostSuffix),
     snapshotUpload:

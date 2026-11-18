@@ -28,6 +28,18 @@ import {
   LoroStreamsTokenPorts,
 } from '@lody/shared';
 
+const sdkPresenceOptions = vi.hoisted(() => [] as unknown[]);
+vi.mock('@loro-dev/streams-crdt/effect', async (importOriginal) => {
+  const sdk = await importOriginal<typeof import('@loro-dev/streams-crdt/effect')>();
+  return {
+    ...sdk,
+    makeEphemeralStream: (options: Parameters<typeof sdk.makeEphemeralStream>[0]) => {
+      sdkPresenceOptions.push(options);
+      return sdk.makeEphemeralStream(options);
+    },
+  };
+});
+
 const SESSION_ID = '01020304-1111-4222-8333-010203040501' as SessionId;
 const MACHINE_ID = '01020304-1111-4222-8333-010203040502' as MachineId;
 const REMOTE_SESSION_ID = '01020304-1111-4222-8333-010203040503' as SessionId;
@@ -592,6 +604,7 @@ describe('native workspace presence ownership', () => {
 
 import { makeApplicationRuntime } from '@lody/shared/node/application-runtime';
 import {
+  createPresenceWebSocketAuthLegacy,
   bindWorkspacePresenceApplicationLegacy,
   createCliPresenceRuntimeLegacy,
   WorkspacePresenceLegacyFailure,
@@ -843,4 +856,76 @@ describe('presence HTTP response ownership', () => {
       cancelled: 1,
     });
   });
+});
+
+describe('presence WebSocket token bridge', () => {
+  it.each(['initial', 'renew', 'reauth'] as const)(
+    'maps %s with the rejected token retained',
+    async (reason) => {
+      const bridge = createPresenceWebSocketAuthLegacy((context) =>
+        Effect.succeed(JSON.stringify(context))
+      );
+      expect(JSON.parse(await bridge({ reason, previousToken: 'synthetic-rejected' }))).toEqual({
+        reason: reason === 'reauth' ? 'unauthorized' : 'request',
+        previousToken: 'synthetic-rejected',
+      });
+    }
+  );
+  it('preserves provider failures and rejects absent tokens', async () => {
+    const failure = new Error('synthetic provider failure');
+    await expect(
+      createPresenceWebSocketAuthLegacy(() => Effect.fail(failure))({ reason: 'reauth' })
+    ).rejects.toBe(failure);
+    await expect(
+      createPresenceWebSocketAuthLegacy(() => Effect.succeed(undefined))({ reason: 'initial' })
+    ).rejects.toThrow('presence_websocket_token_unavailable');
+  });
+});
+
+describe('CLI presence WebSocket opt-in composition', () => {
+  it.each([undefined, false, true])(
+    'uses the main WS gateway and preserves HTTP shards (%s)',
+    async (enabled) => {
+      vi.stubEnv('LODY_LORO_STREAMS_WS_ENABLED', 'false');
+      const store = new EphemeralStore(LODY_PRESENCE_TTL_MS);
+      try {
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const transport = yield* PresenceTransport;
+              const stream = yield* transport.create(
+                'ws-workspace' as WorkspaceId,
+                store,
+                {
+                  streamsBaseUrl: 'https://api.streams.test',
+                  shardHostSuffix: 'streams.test',
+                  webSocketEnabled: enabled,
+                  auth: (context) => Effect.succeed(JSON.stringify(context)),
+                },
+                1
+              );
+              const options = sdkPresenceOptions.at(-1);
+              expect(options).toMatchObject({
+                streamUrl: expect.stringContaining('https://presence.streams.test/'),
+              });
+              if (enabled)
+                expect(options).toMatchObject({
+                  webSocket: {
+                    enabled: true,
+                    url: 'https://api.streams.test',
+                    authPoolKey: 'ws-workspace',
+                    auth: expect.any(Function),
+                  },
+                });
+              else expect(options).not.toHaveProperty('webSocket');
+              yield* stream.close;
+            }).pipe(Effect.provide(presencePlatformLayer(diagnosticLogger().logger)))
+          )
+        );
+      } finally {
+        store.destroy();
+        vi.unstubAllEnvs();
+      }
+    }
+  );
 });

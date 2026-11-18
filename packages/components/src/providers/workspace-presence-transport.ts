@@ -11,6 +11,7 @@ import {
   type LodyPresenceStateMap,
   type LodySessionViewingPresenceState,
   type LoroStreamsPresenceShardId,
+  type LoroStreamsWebSocketOptions,
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
@@ -62,11 +63,13 @@ export type WorkspacePresenceTransportOptions = EphemeralRoomBaseOptions & {
     streamUrl: string;
     auth: PresenceAuthCallback;
     store: PresenceStoreLike;
+    webSocket?: LoroStreamsWebSocketOptions;
   }) => PresenceTransportLike;
 };
 
 export type WorkspacePresenceTransportStartOptions = {
   baseUrl: string;
+  webSocketEnabled?: boolean;
   auth: PresenceAuthCallback;
   shardHostSuffix?: string;
 };
@@ -230,6 +233,7 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
     streamUrl: string;
     auth: PresenceAuthCallback;
     store: PresenceStoreLike;
+    webSocket?: LoroStreamsWebSocketOptions;
   }): PresenceTransportLike {
     return this.options.createTransport?.(args) ?? super.createTransport(args);
   }
