@@ -508,7 +508,7 @@ extension LodyChatView {
       let limit = ChatMessageContent.collapsedHeight(label: measuringText, width: ChatCell.textWidth(row, width: width))
       return ChatMessageContent.height(textHeight: measured,
         limit: limit,
-        expanded: expandedMessages.contains(row.entryID)) + ChatRowPadding.content + 12
+        expanded: expandedMessages.contains(row.entryID)) + ChatCell.rowExtra(for: row)
     }
     let measuredHeight = measured + ChatCell.rowExtra(for: row, previousKind: previousKind ?? kind(before: row.id))
     // Process summaries sit close together (32 pt rows, the whole width taps); other actionable

@@ -501,9 +501,13 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
   /// A process summary row's height: compact, since runs of them stack between paragraphs.
   static let summaryHeight: CGFloat = 32
 
+  static func userBubbleTop(for row: ChatRow) -> CGFloat {
+    ChatRowPadding.content + (row.author.isEmpty ? 0 : authorHeader)
+  }
+
   static func rowExtra(for row: ChatRow, previousKind: String? = nil) -> CGFloat {
     if row.kind == "delivery" { return 0 }
-    if row.kind == "user" { return 44 + (row.author.isEmpty ? 0 : authorHeader) }
+    if row.kind == "user" { return userBubbleTop(for: row) + 12 }
     if row.kind == "duration" { return ChatRowPadding.content + ChatRowPadding.durationBottom }
     return ChatRowPadding.top(kind: row.kind, previousKind: previousKind) + ChatRowPadding.content
   }
@@ -537,7 +541,7 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
   }
   static func textWidth(_ row: ChatRow, width: CGFloat) -> CGFloat {
     if row.kind == "user" { return max(1, width - 26 - avatarSlot) }
-    if row.kind == "delivery" { return max(1, width * 0.84) }
+    if row.kind == "delivery" { return max(1, width - avatarSlot) }
     if row.kind == "summary" && row.actionable { return max(1, width - leading(row) - chevronSlot) }
     return max(1, width - leading(row))
   }
@@ -575,9 +579,8 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
       let height = ChatMessageContent.height(textHeight: size.height, limit: collapsedHeight, expanded: expanded)
       let bubbleWidth = expandable ? width - Self.avatarSlot : size.width + 26
       // Every bubble of a turn leaves the avatar column free; the first also has the header.
-      let header = row.author.isEmpty ? 0 : Self.authorHeader
       let bubbleRight = width - Self.avatarSlot
-      messageContent.frame = CGRect(x: bubbleRight - bubbleWidth, y: ChatRowPadding.content + header, width: bubbleWidth, height: height)
+      messageContent.frame = CGRect(x: bubbleRight - bubbleWidth, y: Self.userBubbleTop(for: row), width: bubbleWidth, height: height)
       author.layout(width: width, top: ChatRowPadding.content)
       messageContent.setNeedsLayout()
       messageContent.layoutIfNeeded()
@@ -608,7 +611,7 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
       } else {
         y = max(ChatRowPadding.content, (bounds.height - height) / 2)
       }
-      label.frame = CGRect(x: row.kind == "delivery" ? width - textWidth : inset, y: y, width: textWidth, height: height)
+      label.frame = CGRect(x: inset, y: y, width: textWidth, height: height)
       numericText.frame = label.frame
       let markHeight = row.kind == "summary"
         ? (label.lineAdvances(width: textWidth).first ?? height)

@@ -731,6 +731,34 @@ deliveryCell.configure(deliveryRow, text: deliveryText)
 deliveryCell.layoutIfNeeded()
 precondition(deliveryCell.accessibilityIdentifier == deliveryRow.id)
 precondition(deliveryCell.accessibilityLabel == deliveryRow.text)
+
+let firstMessage = ChatRow(id: "local-send:user", entryID: "local-send", kind: "user",
+  text: "This first message takes more than one line so its delivery status needs room below the whole bubble.",
+  author: ChatAuthors.unknownSender)
+let firstMessageText = NSAttributedString(string: firstMessage.text, attributes: [.font: UIFont.systemFont(ofSize: 17)])
+let firstMessageCell = ChatCell(frame: CGRect(x: 0, y: 0, width: 320, height: 1))
+window.addSubview(firstMessageCell)
+firstMessageCell.configure(firstMessage, text: firstMessageText)
+let firstMessageWidth = ChatCell.textWidth(firstMessage, width: 320)
+let firstMessageHeight = firstMessageCell.label.sizeThatFits(CGSize(width: firstMessageWidth, height: .greatestFiniteMagnitude)).height
+let firstMessageLimit = ChatMessageContent.collapsedHeight(label: firstMessageCell.label, width: firstMessageWidth)
+firstMessageCell.frame.size.height = ChatMessageContent.height(textHeight: firstMessageHeight, limit: firstMessageLimit, expanded: false)
+  + ChatCell.rowExtra(for: firstMessage)
+firstMessageCell.layoutIfNeeded()
+let bubbleFrame = firstMessageCell.bubble.convert(firstMessageCell.bubble.bounds, to: window)
+deliveryCell.frame.origin.y = firstMessageCell.frame.maxY
+for key in ["send.status.creating", "send.status.sending"] {
+  var status = deliveryRow
+  status.text = String(localized: String.LocalizationValue(key), bundle: .lody)
+  deliveryCell.configure(status, text: processAttributed(status.text, row: status, traits: traits))
+  deliveryCell.layoutIfNeeded()
+  let statusFrame = deliveryCell.label.convert(deliveryCell.label.bounds, to: window)
+  precondition(abs(statusFrame.maxX - bubbleFrame.maxX) < 0.5,
+    "Delivery text must end at its bubble, leaving the avatar column free")
+  precondition(abs(statusFrame.minY - bubbleFrame.maxY - 12) < 0.5,
+    "A first message with a sender header must leave 12 pt between its bubble and delivery text")
+}
+
 let reusedMeasure = CKTextView()
 reusedMeasure.setText(processAttributed("Offline send", row: ChatRow(id: "local-send:user", entryID: "local-send", kind: "user", text: "Offline send"), traits: traits))
 _ = reusedMeasure.sizeThatFits(CGSize(width: deliveryWidth, height: .greatestFiniteMagnitude))
