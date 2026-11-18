@@ -2,6 +2,14 @@ package app.lody.android.cloud
 import org.junit.Assert.*
 import org.junit.Test
 class StreamAccessTest {
+ @Test fun cspSourcesIncludeOnlyTheValidatedGrantAndItsSecureWebSocketOrigin() {
+  assertEquals("https://api.streams-api-x.loro.dev wss://api.streams-api-x.loro.dev",
+   StreamAccess("workspace", "https://API.streams-api-x.loro.dev/").connectSources)
+  for (origin in listOf("http://streams.example.org", "https://evil@example.org", "https://streams.example.org/path", "https://streams.example.org:8443")) {
+   assertThrows(IllegalArgumentException::class.java) { StreamAccess("workspace", origin) }
+  }
+ }
+
  @Test fun permitsOnlyExactGrantOriginAndScopedCatalogReads() {
   val access=StreamAccess("workspace","https://streams.example.org")
   assertTrue(access.allows("https://streams.example.org/ds/lody/workspace%3Ameta/bootstrap","GET"))

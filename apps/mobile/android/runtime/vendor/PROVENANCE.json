@@ -144,7 +144,7 @@
     "files": [
       "src/runtime/mention-expansion.ts"
     ],
-    "note": "An @session:/@role: chip written straight after non-ASCII text (`让@role:<id>`) expands to its reference at send, so the transcript shows the Role's name instead of the legacy `Role` fallback. Mirrored verbatim from the iOS runtime source in the same change."
+    "note": "An @session:/@role: chip written straight after non-ASCII text (`\u8ba9@role:<id>`) expands to its reference at send, so the transcript shows the Role's name instead of the legacy `Role` fallback. Mirrored verbatim from the iOS runtime source in the same change."
   },
   "perModelConfigOptions": {
     "files": [
@@ -208,5 +208,13 @@
       "src/protocol/schedules.ts"
     ],
     "note": "Agent schedule proposals and the editor accept any whole minute or hour step up to 2147483647 (the 32-bit Int the Android rule model carries), as on Web, instead of dropping a proposal card whose step exceeds 59 minutes or 23 hours. A stored interval longer than that reads as unsupported rather than overflowing. Mirrored verbatim from the iOS source in the same change; dependencies and licenses are unchanged."
+  },
+  "secureWebSocketCsp": {
+    "commit": "491c4d6cffef94c6c9b4a6f2b779a098d233007d",
+    "repository": "LodyAI/lody-ios",
+    "files": [
+      "scripts/build.mjs"
+    ],
+    "note": "Mirrors the reviewed iOS DataRuntime CSP template change verbatim: permit wss: alongside https: while retaining all other directives. Dependencies and licenses are unchanged."
   }
 }

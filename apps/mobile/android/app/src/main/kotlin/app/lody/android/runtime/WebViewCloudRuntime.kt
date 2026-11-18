@@ -44,7 +44,7 @@ class WebViewCloudRuntime internal constructor(
             if (path != document) denied()
             else try {
                 val html = this.context.assets.open("runtime/$document").bufferedReader().use { it.readText() }
-                    .replace("__LODY_STREAM_ORIGIN__", access?.origin ?: "'none'")
+                    .replace("__LODY_STREAM_ORIGIN__", access?.connectSources ?: "'none'")
                 WebResourceResponse("text/html", "UTF-8", ByteArrayInputStream(html.toByteArray()))
             }
             catch (_: java.io.IOException) { denied() }

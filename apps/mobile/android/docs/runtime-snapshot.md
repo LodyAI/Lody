@@ -207,3 +207,9 @@ snapshot unchanged, with the verified identity, and answers the runtime's `share
 share-request operations stay unsupported. The network gates need no new streams: the preview calls
 use the existing machine RPC request and response streams. See [Remote previews](rules/previews.md).
 
+
+NetworkRuntime's CSP includes the validated grant's HTTPS origin and its WSS
+counterpart. Offline documents retain `connect-src 'none'`. The mirrored iOS
+DataRuntime template permits `https:` and `wss:` while retaining its other CSP
+directives. This permits a future WS-capable SDK; it does not enable WS or relax
+workspace authorization, native request interception or TLS checks.

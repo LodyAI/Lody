@@ -14,6 +14,8 @@ internal class StreamAccess(val workspaceId: String, gateway: String) {
         require(host.matches(Regex("[a-zA-Z0-9][a-zA-Z0-9.-]*\\.[a-zA-Z]{2,}")) && !host.endsWith(".local") && !host.endsWith(".internal"))
         origin = "https://${host.lowercase()}"
     }
+    /** CSP sources from the validated HTTPS grant, including its WebSocket counterpart. */
+    val connectSources: String get() = "$origin wss://${URI(origin).rawAuthority}"
     fun allows(url: String, method: String): Boolean = try {
         val uri = URI(url)
         val parts = uri.rawPath.split('/')

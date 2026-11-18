@@ -36,7 +36,7 @@ export async function buildDataRuntime(
   await mkdir(output, { recursive: true });
   await writeFile(
     output + '/DataRuntime.html',
-    '<!doctype html><title>Lody Data Runtime</title><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; connect-src https:; script-src \'unsafe-inline\' \'wasm-unsafe-eval\'"><script type="module">' +
+    '<!doctype html><title>Lody Data Runtime</title><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; connect-src https: wss:; script-src \'unsafe-inline\' \'wasm-unsafe-eval\'"><script type="module">' +
       result.outputFiles[0].text.replaceAll('</script', '<\\/script') +
       '</script>',
   );
