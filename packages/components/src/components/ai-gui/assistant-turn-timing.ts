@@ -144,7 +144,10 @@ export const buildAssistantTurnTimingRows = (
     rows.push({
       kind: 'started',
       atMs: startMs,
-      runningMs: liveness ? resolveLiveSessionHistoryDurationMs(message, nowMs) : null,
+      runningMs:
+        liveness && liveness.kind !== 'offline' && liveness.kind !== 'syncing'
+          ? resolveLiveSessionHistoryDurationMs(message, nowMs)
+          : null,
     });
   }
   if (liveness) {

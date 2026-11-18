@@ -103,6 +103,7 @@ export type SessionInfoBarProps = {
   syncing?: boolean;
   /** Overrides `syncing` with a specific conversation content-sync state. */
   syncStatus?: SessionSyncIndicatorVariant | null;
+  syncDetails?: ReactNode;
   /** Mobile native shell only: lift the bar above the session drawer's
    *  transparent z-30 left-edge swipe-back strip, which otherwise covers the
    *  leftmost ~48px of the row and swallows taps on the first chip. Same
@@ -188,6 +189,7 @@ export function SessionInfoBar({
   diffStat,
   syncing = false,
   syncStatus,
+  syncDetails,
   protectFromEdgeBackZone = false,
   initialStage,
   queue,
@@ -279,6 +281,7 @@ export function SessionInfoBar({
     onOpenIosSimulator ||
     onOpenAndroidEmulator ||
     ambientSync ||
+    syncDetails ||
     privateAccessStatus
   );
   if (!hasSurfaceContent && !hasMachine) {
@@ -505,7 +508,9 @@ export function SessionInfoBar({
               sync-only mode nothing else consumes the row's free space, so
               ml-auto keeps the spinner pinned right; with a stage present
               its flex-1 has already eaten the space (no-op). */}
-          {ambientSync ? (
+          {syncDetails ? (
+            <span className="ml-auto inline-flex shrink-0 items-center">{syncDetails}</span>
+          ) : ambientSync ? (
             <span className="ml-auto inline-flex shrink-0 items-center">
               <SessionSyncingIndicator
                 variant={ambientSync}

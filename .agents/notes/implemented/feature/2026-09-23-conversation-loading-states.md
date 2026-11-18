@@ -31,11 +31,10 @@ uncached open yet.
   (`hooks/use-displayed-content-sync-state.ts`), so routine opens show nothing.
 - A "Loading newer messages" last row was tried and removed: a spinner inside the
   transcript looked out of place. The info bar alone carries the catch-up state.
-- Degraded connections (reconnecting, disconnected, error) are deliberately not shown.
-  A "may be out of date" state was removed earlier by product decision because the
-  reconnect loop owns recovery (see `.agents/docs/sessions-auto-review.md`). Browser
-  offline remains the info bar status chip. The proposal to show a saved-copy warning
-  was therefore not implemented pending that decision.
+- The cold-open and first-catch-up presentation remains quiet during routine
+  live updates. The later [conversation sync details](../../../docs/sessions-info-bar.md)
+  expose observed reconnects and receive failures in a dedicated control.
+  Browser offline continues to use the independent machine and connection status chip.
 
 ## Switching without a blank frame
 

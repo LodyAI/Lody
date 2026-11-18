@@ -3,11 +3,19 @@ import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SESSION_GOAL_COMMANDS, type SessionGoalMessage } from '@lody/shared';
+import en from '../../../locales/en.json';
 import { SessionInfoBar } from '../src/components/sessions/session-info-bar';
+import { SessionSyncDetails } from '../src/components/sessions/session-sync-details';
+import { createConversationSync } from '../src/lib/conversation-sync';
 import type { SessionMachineInfo } from '../src/components/sessions/session-machine-info';
 import { createTestI18n, withTestI18n } from './test-i18n';
 
 const testI18n = createTestI18n();
+testI18n.addResources(
+  'en',
+  'translation',
+  Object.fromEntries(Object.entries(en).filter(([key]) => key.startsWith('sessions.syncDetails.')))
+);
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -52,6 +60,46 @@ describe('SessionInfoBar ambient information', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+  });
+
+  it('shows where session state and Roost messages come from, with this device receiving both', () => {
+    const sync = createConversationSync(true);
+    sync.update('document', { phase: 'confirmed', route: 'cloud' });
+    sync.update('history', { phase: 'retrying', route: 'cloud', reason: 'timeout' });
+    act(() =>
+      root.render(
+        withTestI18n(
+          <SessionSyncDetails sync={sync} browserOnline machineName="Build machine" />,
+          testI18n
+        )
+      )
+    );
+    act(() => container.querySelector('button')!.click());
+    const diagrams = Array.from(document.body.querySelectorAll('[role="dialog"] [role="img"]'));
+    expect(diagrams.map((diagram) => diagram.getAttribute('aria-label'))).toEqual([
+      'Lody server syncs data to This device',
+      'Build machine syncs data through Lody server to This device',
+    ]);
+    expect(diagrams[1]?.textContent).toBe('Build machineSourceLody serverRelayThis deviceReceiver');
+    expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain(
+      'The read timed out'
+    );
+  });
+
+  it('adds the server as the source once the conversation has a selected route', () => {
+    const sync = createConversationSync(false);
+    act(() =>
+      root.render(withTestI18n(<SessionSyncDetails sync={sync} browserOnline />, testI18n))
+    );
+    act(() => container.querySelector('button')!.click());
+    const dialog = document.body.querySelector('[role="dialog"]')!;
+    expect(dialog.querySelector('[role="img"]')).toBeNull();
+    expect(dialog.textContent).toContain('Waiting to identify the sync source');
+
+    act(() => sync.update('document', { phase: 'confirmed', route: 'cloud' }));
+    expect(dialog.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe(
+      'Lody server syncs data to This device'
+    );
   });
 
   it.each([false, true])(

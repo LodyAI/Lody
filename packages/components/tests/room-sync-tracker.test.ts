@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { TransportRoomStatus, TransportSubscription, RepoRoomSubscription } from 'loro-repo';
+import type {
+  RepoTransportRoomSubscription,
+  TransportRoomStatus,
+  TransportSubscription,
+  RepoRoomSubscription,
+} from 'loro-repo';
+import { createConversationSync, observeConversationDocument } from '../src/lib/conversation-sync';
 import { createRoomSyncTracker } from '../src/providers/room-sync-tracker';
 import { readinessBinding } from '../src/lib/room-readiness';
 import { waitForRoomToSync, type SyncRoomSubscription } from '../src/providers/room-sync';
@@ -223,5 +229,78 @@ describe('room-sync', () => {
       });
       expect(result).toBe(sub);
     });
+  });
+});
+
+describe('conversation sync while receiving Roost history', () => {
+  it('keeps the wait time across both paths and ignores completion from the previous connection', async () => {
+    let now = 100;
+    const sync = createConversationSync(true, () => now);
+    type Binding = Parameters<typeof observeConversationDocument>[0];
+    type Status = Binding['status'];
+    type Result = Awaited<ReturnType<RepoTransportRoomSubscription['waitFor']>>;
+    const reads = [
+      Promise.withResolvers<Result>(),
+      Promise.withResolvers<Result>(),
+      Promise.withResolvers<Result>(),
+    ];
+    let status: Status = 'joined';
+    let receive: ((status: Status) => void) | undefined;
+    const waitFor = vi
+      .fn<Binding['waitFor']>()
+      .mockImplementationOnce(() => reads[0].promise)
+      .mockImplementationOnce(() => reads[1].promise)
+      .mockImplementationOnce(() => reads[2].promise);
+    const stop = observeConversationDocument(
+      {
+        transportId: 'cloud',
+        get status() {
+          return status;
+        },
+        onStatusChange: (listener) => {
+          receive = listener;
+          return () => {
+            receive = undefined;
+          };
+        },
+        waitFor,
+      },
+      (step) => sync.update('document', step)
+    );
+    const move = (phase: Status) => {
+      status = phase;
+      receive?.(phase);
+    };
+    const result = (status: Result['status'], generation: number): Result => ({
+      status,
+      phase: 'caught-up',
+      generation,
+    });
+
+    sync.update('history', { route: 'cloud', phase: 'retrying', reason: 'timeout' });
+    reads[0].resolve(result('timeout', 1));
+    await reads[0].promise;
+    expect(sync.getSnapshot()).toMatchObject({
+      since: 100,
+      phase: 'retrying',
+      document: { phase: 'syncing', reason: 'timeout' },
+      history: { phase: 'retrying', reason: 'timeout' },
+    });
+
+    now = 200;
+    move('reconnecting');
+    move('joined');
+    sync.update('history', { phase: 'confirmed' });
+    reads[1].resolve(result('complete', 1));
+    await reads[1].promise;
+    expect(sync.getSnapshot()).toMatchObject({ phase: 'syncing', since: 100 });
+
+    reads[2].resolve(result('complete', 2));
+    await reads[2].promise;
+    expect(sync.getSnapshot()).toMatchObject({ phase: 'confirmed' });
+    now = 300;
+    move('disconnected');
+    expect(sync.getSnapshot()).toMatchObject({ phase: 'disconnected', since: 300 });
+    stop();
   });
 });

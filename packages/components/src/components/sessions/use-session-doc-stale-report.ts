@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { SessionId } from '@lody/shared';
 import type { MachineOnlineStatus } from '@/atoms/presence';
 import type { SessionDocStore } from '@/atoms/runtime';
@@ -43,9 +43,10 @@ export function useSessionDocStaleReport(
     lastMessageAt: number | null | undefined;
     peekStore: () => SessionDocStore | undefined;
   }
-): void {
+): number | null {
   const { sessionId, peekStore } = options;
   const candidateTurnId = resolveStaleCandidateTurnId(options);
+  const [stale, setStale] = useState<{ sessionId: SessionId; turnId: string; since: number }>();
   const latest = useRef(options);
   latest.current = options;
   const reported = useRef<{ sessionId: SessionId; turnIds: Set<string> }>({
@@ -57,11 +58,14 @@ export function useSessionDocStaleReport(
   }
 
   useEffect(() => {
-    if (!candidateTurnId || reported.current.turnIds.has(candidateTurnId)) return undefined;
+    setStale(undefined);
+    if (!candidateTurnId) return undefined;
     const turnIds = reported.current.turnIds;
     const staleSince = Date.now();
     let cancelled = false;
     const timer = setTimeout(() => {
+      setStale({ sessionId, turnId: candidateTurnId, since: staleSince });
+      if (turnIds.has(candidateTurnId)) return;
       turnIds.add(candidateTurnId);
       void (async () => {
         const store = peekStore();
@@ -102,4 +106,5 @@ export function useSessionDocStaleReport(
       clearTimeout(timer);
     };
   }, [candidateTurnId, peekStore, sessionId]);
+  return stale?.sessionId === sessionId && stale.turnId === candidateTurnId ? stale.since : null;
 }

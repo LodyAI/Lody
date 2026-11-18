@@ -357,6 +357,7 @@ import {
 import { SessionPin } from './session-pin';
 import { SessionPinContext, type SessionPinContextValue } from './session-pin-context';
 import { SessionSyncingIndicator } from './session-syncing-indicator';
+import { SessionSyncDetails, useConversationSyncPhase } from './session-sync-details';
 import { ConversationSkeleton } from '@/components/ai-gui/conversation-sync-placeholders';
 import {
   resolveHistoryLiveSync,
@@ -2708,6 +2709,7 @@ export const SessionChatInterface = memo(
       ready: sessionDocReady,
       synced: sessionDocSynced,
       syncState: sessionDocSyncState,
+      conversationSync,
     } = useSessionDoc(session.id, {
       enabled: !hideMessageArea,
       syncEnabled: !hideMessageArea && syncEnabled,
@@ -2859,6 +2861,7 @@ export const SessionChatInterface = memo(
     const isMachineRemoved = !sessionMachine && docMetaCacheReady;
     const sessionMachineOnlineStatus = useMachineOnlineStatus(session.machineId);
     const browserOnline = useAtomValue(browserOnlineAtom);
+    const conversationSyncPhase = useConversationSyncPhase(conversationSync, browserOnline);
     const externalHistorySyncLabel = isExternalHistoryRefreshing
       ? t('sessions.externalHistorySyncing', {
           defaultValue: 'Syncing {{provider}} history',
@@ -4369,7 +4372,7 @@ export const SessionChatInterface = memo(
       () => runtime?.peekSessionStore?.(session.id),
       [runtime, session.id]
     );
-    useSessionDocStaleReport({
+    const historyUnconfirmedSince = useSessionDocStaleReport({
       sessionId: session.id,
       docReady: sessionDocReady && !hideMessageArea,
       machineOnlineStatus: sessionMachineOnlineStatus,
@@ -4519,37 +4522,44 @@ export const SessionChatInterface = memo(
       liveSessionStatus ?? undefined,
       permissionSessionHistory
     );
+    const executionUnconfirmed =
+      conversationSyncPhase !== null && conversationSyncPhase !== 'confirmed';
     const agentActivityLabel =
-      initStatusLabel && !isEmptyConversation
-        ? initStatusLabel
-        : isSessionActive
-          ? isAwaitingQuestion
-            ? t('sessions.statusIndicator.waitingForAnswer')
-            : liveSessionStatus?.type === 'requestPermission'
-              ? t('sessions.statusIndicator.requestPermission')
-              : isFinalizing
-                ? t('sessions.statusIndicator.finalizing')
-                : runningActivity === 'imageGenerating'
-                  ? t('sessions.statusIndicator.imageGenerating')
-                  : // Reading, running and editing all read as "Working"; the
-                    // collapsed tool groups above already say which.
-                    runningActivity === 'exploring' || runningActivity === 'writing'
-                    ? t('sessions.working', 'Working')
-                    : t('sessions.statusIndicator.thinking')
-          : hasPendingDispatch && statusStripState == null
-            ? // Pre-start only while the turn can actually start: any
-              // connection/machine problem (browser offline, machine removed or
-              // offline) hands the story to the status chip instead.
-              t('sessions.statusIndicator.pendingDispatch')
-            : pendingMessages.isSending && statusStripState == null
-              ? t('sessions.sendStatus.sendingWithoutSize')
-              : null;
+      executionUnconfirmed &&
+      isSessionActive &&
+      !isAwaitingQuestion &&
+      liveSessionStatus?.type !== 'requestPermission'
+        ? t('sessions.syncDetails.executionUnconfirmed')
+        : initStatusLabel && !isEmptyConversation
+          ? initStatusLabel
+          : isSessionActive
+            ? isAwaitingQuestion
+              ? t('sessions.statusIndicator.waitingForAnswer')
+              : liveSessionStatus?.type === 'requestPermission'
+                ? t('sessions.statusIndicator.requestPermission')
+                : isFinalizing
+                  ? t('sessions.statusIndicator.finalizing')
+                  : runningActivity === 'imageGenerating'
+                    ? t('sessions.statusIndicator.imageGenerating')
+                    : // Reading, running and editing all read as "Working"; the
+                      // collapsed tool groups above already say which.
+                      runningActivity === 'exploring' || runningActivity === 'writing'
+                      ? t('sessions.working', 'Working')
+                      : t('sessions.statusIndicator.thinking')
+            : hasPendingDispatch && statusStripState == null
+              ? // Pre-start only while the turn can actually start: any
+                // connection/machine problem (browser offline, machine removed or
+                // offline) hands the story to the status chip instead.
+                t('sessions.statusIndicator.pendingDispatch')
+              : pendingMessages.isSending && statusStripState == null
+                ? t('sessions.sendStatus.sendingWithoutSize')
+                : null;
     const agentActivityTone =
       isSessionActive && (isAwaitingQuestion || liveSessionStatus?.type === 'requestPermission')
         ? 'warning'
         : 'primary';
     // Waiting on the user is not work in progress: that status does not shimmer.
-    const agentActivityShimmer = agentActivityTone !== 'warning';
+    const agentActivityShimmer = agentActivityTone !== 'warning' && !executionUnconfirmed;
     // Presence, not the history's `finished` flag: a turn whose daemon died
     // before finalizing stays unfinished forever but is not running.
     const liveTurnActivity: LiveTurnActivity | null = isSessionActive
@@ -4558,7 +4568,15 @@ export const SessionChatInterface = memo(
         : 'working'
       : null;
     const historyLive = useHistoryLiveWindow(
-      resolveHistoryLiveSync(sessionDocSyncState, browserOnline)
+      historyUnconfirmedSince !== null
+        ? 'syncing'
+        : conversationSyncPhase == null
+          ? resolveHistoryLiveSync(sessionDocSyncState, browserOnline)
+          : conversationSyncPhase === 'confirmed'
+            ? 'live'
+            : conversationSyncPhase === 'disconnected' || conversationSyncPhase === 'retrying'
+              ? 'offline'
+              : 'syncing'
     );
 
     /**
@@ -7389,7 +7407,7 @@ export const SessionChatInterface = memo(
                       <SessionProjectInfo
                         session={session}
                         isLoading={shouldShowTitleLoading}
-                        isSyncing={effectiveTitleSyncing}
+                        isSyncing={!conversationSync && effectiveTitleSyncing}
                         isMachineOffline={sessionMachineOnlineStatus === 'offline'}
                         t={t}
                         localProjectMeta={resolvedLocalProjectMeta}
@@ -7731,7 +7749,17 @@ export const SessionChatInterface = memo(
                             : undefined
                         }
                         diffStat={infoBarDiffStat}
-                        // Desktop only: mobile already shows catch-up in its header.
+                        syncDetails={
+                          isVisible && conversationSync ? (
+                            <SessionSyncDetails
+                              key={session.id}
+                              sync={conversationSync}
+                              browserOnline={browserOnline}
+                              historyUnconfirmedSince={historyUnconfirmedSince}
+                              machineName={sessionMachine?.name}
+                            />
+                          ) : null
+                        }
                         syncStatus={
                           isMobile
                             ? null
