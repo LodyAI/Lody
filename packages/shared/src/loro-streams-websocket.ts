@@ -1,6 +1,6 @@
-/** Connection auth context from the loro-ds-v1 multiplexer. */
+/** Connection auth context from the loro-ds-v1 multiplexer (`connect`) and Repo shim (`initial`). */
 export type LoroStreamsWebSocketAuthContext = {
-  readonly reason: 'initial' | 'reauth' | 'renew';
+  readonly reason: 'connect' | 'initial' | 'reauth' | 'renew';
   readonly previousToken?: string;
 };
 
@@ -8,7 +8,7 @@ export type LoroStreamsWebSocketAuthContext = {
 export const isLoroStreamsWebSocketEnabled = (explicit?: boolean, environment?: unknown): boolean =>
   explicit ?? (environment === '1' || environment === 'true');
 
-/** Structural compatibility with the forthcoming SDK; no unavailable dependency required. */
+/** WebSocket transport options shared across @loro-dev/streams-crdt and loro-repo. */
 export type LoroStreamsWebSocketOptions = {
   readonly enabled: true;
   readonly url: string;
