@@ -47,15 +47,18 @@ import { open, rename, rm, type FileHandle } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { Effect, Exit, Layer, Result, type Scope } from 'effect'
 
-/** Emergency/test override for the recovery vault (`off` disables; enabled by default). */
+/** Missing or `on` enables recovery; `off` and malformed explicit values refuse. */
 export const RECOVERY_VAULT_ENV = 'LODY_E2EE_RECOVERY_VAULT'
-export const recoveryVaultEnabled = (env: NodeJS.ProcessEnv = process.env) =>
-  env[RECOVERY_VAULT_ENV] !== 'off'
+export const recoveryVaultEnabled = (env: NodeJS.ProcessEnv = process.env) => {
+  const value = env[RECOVERY_VAULT_ENV]
+  return value === undefined || value.trim() === 'on'
+}
 
 /** A canonical vault-v1 file is about 150 bytes; anything larger is not one. */
 export const MAX_RECOVERY_FILE_BYTES = 4096
 
 const publicCodes = new Set([
+  'disabled',
   'invalid-input',
   'exists',
   'replacing',

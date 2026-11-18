@@ -293,6 +293,14 @@ export class E2eeMemberInvitationRefusedError extends BackendError {
   }
 }
 
+/** Only an explicit backend refusal may be presented as recovery switched off. */
+export class E2eeRecoveryDisabledError extends BackendError {
+  readonly code = 'disabled'
+  constructor() {
+    super({ service: 'E2eeCloud', reason: 'unavailable' })
+  }
+}
+
 function requestFailure(error: unknown): BackendError {
   // Terminal types from authentication, transport or decoding are not authority.
   if (error instanceof E2eeMemberRemovedError || error instanceof E2eeDeviceRevokedError)
@@ -313,6 +321,7 @@ function requestFailure(error: unknown): BackendError {
     return new E2eeStagingCapacityError(capacity.data.data.round, capacity.data.data.limit)
   const result = z.object({ data: z.object({ code: z.string() }) }).safeParse(error)
   const code = result.success ? result.data.data.code : ''
+  if (code === 'e2ee_recovery_vault_disabled') return new E2eeRecoveryDisabledError()
   if (operatorCodes.has(code)) return new E2eeCloudDiagnosticError(code)
   const refusal = accountPairingRefusals.get(code)
   if (refusal) return new E2eeAccountPairingRefusedError(refusal)
