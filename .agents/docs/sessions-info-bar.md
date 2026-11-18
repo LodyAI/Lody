@@ -43,6 +43,9 @@ additions/deletions remain the visible summary for text-only and mixed compariso
 zero-line comparisons show the localized file count. Older daemons without `files`
 retain their positive-line-count behavior. Counts come from the complete comparison,
 not the bounded shared index; per-turn edited-file cards keep their independent scope.
+After a live Changes list completes, its totals supply the bar's workspace summary.
+If that list has unknown line counts, the bar shows its file count. Initial rendering
+uses durable session statistics. Project Member selection retains its Member scope.
 
 Scheduled-message drafts must not add an info-bar item. Their state is the
 composer's secondary action beside Send; the bar only carries machine, status,

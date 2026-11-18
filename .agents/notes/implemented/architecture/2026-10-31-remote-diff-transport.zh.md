@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [#2316](https://github.com/LodyAI/Lody/pull/2316), [#2753](https://github.com/LodyAI/Lody/pull/2753), [#2756](https://github.com/LodyAI/Lody/pull/2756), [#2765](https://github.com/LodyAI/Lody/pull/2765)
+PR: [#2316](https://github.com/LodyAI/Lody/pull/2316), [#2753](https://github.com/LodyAI/Lody/pull/2753), [#2756](https://github.com/LodyAI/Lody/pull/2756), [#2765](https://github.com/LodyAI/Lody/pull/2765), [#2891](https://github.com/LodyAI/Lody/pull/2891)
 
 [English](2026-10-31-remote-diff-transport.md)
 
@@ -110,7 +110,7 @@ generation 会减少文件索引容量：每个改动路径占两条物理行及
 128 条。即使索引陈旧，也以机器返回的文件集合驱动列表和视野加载。这会增加元数据传输，但不重传未变正文。
 
 provider 在自身生命周期内拥有实时 Branch 列表及监听者，完整成功的比较通知 summary hook；
-请求启动序号拒绝较旧的完成结果，取消或缓存释放后不再发布。它只更新本地展示元数据，
+请求启动序号阻止较旧结果覆盖已接受的完整清单；尚无完整清单时，首次完成的比较可以先替换有容量上限的索引，即使较新读取仍在进行。取消或缓存释放后不再发布。它只更新本地展示元数据，
 不由渲染器反写共享索引。provider 更换后先用新索引，下一次实时比较成功后再替换。
 实时 Changes 不等待可选的历史读取器，历史 turn 汇总仍跟随保留证据。接受完整清单后继续保留
 另一份陈旧侧栏列表会给同一比较提供两个矛盾答案，因此不采用。
@@ -131,7 +131,8 @@ owner 或根目录变化时更换 runtime。取消后，RPC 并发许可仍保�
 有权限的读取，不缓存持久失败；损坏缓存会丢弃并重读，部分或未校验 blob 不入缓存。
 解析后 diff 的缓存键包含两侧内容键及路径。
 
-两侧原始大小合计超过 256 KiB 时，远程清单携带三行上下文的 unified patch，最多 256 KiB。
+整份文件清单只传描述符和统计。打开大文件时再校验单文件清单，并按需获取有界补丁。
+两侧原始大小合计超过 256 KiB 时，远程单文件清单携带三行上下文的 unified patch，最多 256 KiB。
 计算也限制在 600 行编辑以内，超过计算、patch 或编码页预算时回退完整 blob；只有原始正文
 超限才不可用。本地清单仍返回完整描述，不应用远程 hunk 策略。Pierre 将 patch 解析为部分元数据，第一次展开上下文时再取得完整且校验通过
 的文件。展开操作有独立的读取 controller，文件块隐藏或卸载后不再启动后续分页；初始清单

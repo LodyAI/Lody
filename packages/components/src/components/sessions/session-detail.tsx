@@ -1356,8 +1356,16 @@ const SessionDetail = ({
     () => viewerTabs.some((tab) => tab.type === 'file' || tab.type === 'diff'),
     [viewerTabs]
   );
+  const isChangesSidebarActive =
+    isSidebarVisible &&
+    (activeSidebarTab === 'changes' ||
+      Boolean(
+        activeSidebarTab &&
+        sidePanelSplit?.includes('changes') &&
+        sidePanelSplit.includes(activeSidebarTab)
+      ));
   const isFileProviderSidebarActive =
-    isSidebarVisible && (activeSidebarTab === 'files' || activeSidebarTab === 'changes');
+    isChangesSidebarActive || (isSidebarVisible && activeSidebarTab === 'files');
   const isSessionStateCurrent = localStateSessionId === sessionId;
   const activeSessionFileProviderRequested = Boolean(
     activeSession &&
@@ -1967,7 +1975,11 @@ const SessionDetail = ({
     ready: sessionDiffReady,
     synced: sessionDiffSynced,
     unavailableMessage: sessionDiffUnavailableMessage,
+    changesReady = sessionDiffReady,
+    changesSynced = sessionDiffSynced,
+    changesUnavailableMessage = sessionDiffUnavailableMessage,
     revision: allChangesRefreshToken,
+    liveDiffStat,
     summary: {
       changeEntries,
       changeFilePaths,
@@ -1979,16 +1991,15 @@ const SessionDetail = ({
     enabled: activeSessionTabId !== null || isEmptyConversation,
     fileProvider: activeSessionFileProvider,
     fileProviderPending: activeSessionFileProviderPending,
+    refreshChanges: isChangesSidebarActive || mobileDiffState?.view === 'files',
   });
   const messageFileDiffEntriesByTurn = useMemo(
     () => (Object.keys(diffEntriesByTurn).length > 0 ? diffEntriesByTurn : undefined),
     [diffEntriesByTurn]
   );
 
-  // Keep the info bar aligned with the left sidebar session row. Both surfaces
-  // use the same durable session-meta snapshot instead of independently
-  // totaling provider entries that can resolve at different times.
-  const changesDiffStat = activeSession?.diffStats?.allChange ?? null;
+  // A completed live Changes list supplies the same totals to the composer.
+  const changesDiffStat = liveDiffStat ?? activeSession?.diffStats?.allChange ?? null;
   // Closing the conversation does not close workspace tools. Keep their owner
   // explicit without making the parent an active conversation again.
   const activeBrowserSession = activeDraftTab ? null : (activeTabSession ?? activeSession);
@@ -6632,9 +6643,9 @@ const SessionDetail = ({
           view={mobileDiffState?.view}
           onBackToFiles={mobileDiffState?.mode === 'base' ? handleBackToMobileChanges : undefined}
           changes={{
-            ready: sessionDiffReady,
-            synced: sessionDiffSynced,
-            unavailableMessage: sessionDiffUnavailableMessage,
+            ready: changesReady,
+            synced: changesSynced,
+            unavailableMessage: changesUnavailableMessage,
             changeEntries,
             changeFilePaths,
             onOpenChangesDiff: handleSelectMobileChange,
@@ -7077,9 +7088,9 @@ const SessionDetail = ({
       />
     ) : activeSidebarTab === 'changes' ? (
       <SessionChangesSidebar
-        ready={sessionDiffReady}
-        synced={sessionDiffSynced}
-        unavailableMessage={sessionDiffUnavailableMessage}
+        ready={changesReady}
+        synced={changesSynced}
+        unavailableMessage={changesUnavailableMessage}
         changeEntries={changeEntries}
         changeFilePaths={changeFilePaths}
         onOpenChangesDiff={handleOpenChangesDiff}

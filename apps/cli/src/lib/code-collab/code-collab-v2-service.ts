@@ -1761,6 +1761,7 @@ export class CodeCollabV2Service {
     }
     if (
       context.plane === 'remote' &&
+      request.path !== undefined &&
       (base.blob?.rawBytes ?? 0) + (head.blob?.rawBytes ?? 0) >
         CODE_COLLAB_DIFF_BLOB_LIMITS.remoteHunkBytes
     ) {
