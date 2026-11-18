@@ -129,6 +129,9 @@ export interface SessionState {
   // ── Context window usage (throttled) ────────────────────────────────────
   contextWindowUsageBuffer: SessionContextWindowUsage | null;
   contextWindowUsageTimer: NodeJS.Timeout | null;
+  // Session-scoped baseline: boundary flushes also reset the running interval.
+  contextWindowUsageLastQueued: SessionContextWindowUsage | null;
+  contextWindowUsageLastQueuedAt: number;
   pendingContextWindowHandlers: Set<Promise<void>>;
 
   // ── Usage tracking ──────────────────────────────────────────────────────
@@ -175,6 +178,8 @@ function createSessionState(): SessionState {
     acpFlushConsecutiveFailures: 0,
     contextWindowUsageBuffer: null,
     contextWindowUsageTimer: null,
+    contextWindowUsageLastQueued: null,
+    contextWindowUsageLastQueuedAt: 0,
     pendingContextWindowHandlers: new Set(),
     pendingUsageHandlers: new Set(),
     pendingHistoryNoticeHandlers: new Set(),
