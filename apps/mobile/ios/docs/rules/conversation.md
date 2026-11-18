@@ -18,7 +18,7 @@ Read before changing the conversation page: the transcript and its turns, header
 
 - Message footers expose copy, turn information and fork as visible 44 pt buttons (`ChatMessageActionsCell`), with prose-aligned glyphs, 32 pt spacing and time 12 pt after Fork. No More menu. Do not repeat model or reasoning metadata above the buttons. User messages collapse to six measured lines and have no inline action row: long-press offers Copy, plus Edit only for `editableMessageID`, with eligibility rechecked when Edit is selected. Copy uses `ChatMessageShare` for visible answer text and gives inline checkmark feedback. Fork revalidates the exact completed provider turn through `forkSession` and creates a new Tab sharing the working directory; uncertain requests are not replayed. Keep source-session identity checks and native scope ownership when opening action sheets.
 
-- Delivery progress and unconfirmed-send actions appear below the user's complete message, after its attachments and bubble. History takeover and confirmation dismissal preserve this placement, and sending anchors the user message rather than the delivery line.
+- Delivery progress and unconfirmed-send actions appear below the user's complete message, after its attachments and bubble, and align with the bubble's trailing edge. Measure the sender header within the user row so the bubble keeps its bottom spacing. History takeover and confirmation dismissal preserve this placement, and sending anchors the user message rather than the delivery line.
 
 - Definite send failures must leave the composer available for a fresh turn. Keep the failed pending turn retryable until an explicit replacement; never reuse its attachments for the new turn or relax the fence for unconfirmed delivery.
 
