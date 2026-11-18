@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { extractAnchors, sourceRoots, sourceExtension } from './anchors.mjs';
 import { git } from './git.mjs';
+import { listRepositoryFiles } from '../repository-files.mjs';
 
 const documentRoots = ['specs', '.agents/docs', '.agents/notes'];
 /** Word ceilings for AGENTS.md files; unlisted files use `default`, and raising one is a reviewed PR change. */
@@ -503,13 +504,7 @@ async function checkRepositoryMarkdown(root) {
   const ownerLinkedNotes = new Set();
   const absentSubmodules = await uninitializedSubmodules(root);
   let skippedSubmoduleLinks = 0;
-  const files = [
-    ...new Set(
-      (await git(root, ['ls-files', '--cached', '--others', '--exclude-standard', '-z']))
-        .toString()
-        .split('\0')
-    ),
-  ];
+  const files = [...new Set(listRepositoryFiles(root))];
   let budgets;
   try {
     budgets = agentsBudgets(root);

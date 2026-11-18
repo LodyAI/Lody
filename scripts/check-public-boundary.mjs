@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
-import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { listRepositoryFiles as listCheckedFiles } from './repository-files.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dependencyFields = [
@@ -45,6 +46,8 @@ const publicRuntimeArtifactHostAllowlist = new Set([
   // Native mobile clients use this host for public cloud APIs, not runtime downloads.
   'apps/mobile/android/AGENTS.md',
   'apps/mobile/backend-config.mjs',
+  'apps/mobile/ios/apps/ios/verification/kit/attachments/README.md',
+  'apps/mobile/ios/packages/cloud-runtime/src/runtime/sharing/runtime.ts',
   'apps/mobile/android/runtime/vendor/cloud-runtime/src/runtime/sharing/runtime.ts',
   'apps/cli/src/ios-simulator/baguette-manifest.json',
   'packages/platform/src/runtime-artifacts.ts',
@@ -52,13 +55,7 @@ const publicRuntimeArtifactHostAllowlist = new Set([
 const hostedScriptNamePattern = /(?:^|:)(?:cloud|prod|production|staging)(?:$|:)/u;
 
 function listRepositoryFiles() {
-  return execFileSync('git', ['ls-files', '-co', '--exclude-standard', '-z'], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    maxBuffer: 40 * 1024 * 1024,
-  })
-    .split('\0')
-    .filter(Boolean)
+  return listCheckedFiles(repoRoot)
     .filter((file) => existsSync(path.join(repoRoot, file)))
     .sort();
 }
