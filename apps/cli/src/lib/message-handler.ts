@@ -54,6 +54,7 @@ import {
 } from '@lody/shared/notifications';
 import type { SessionActivePresencePhase } from './loro/session-active-presence';
 import { projectTurnAttention, type TerminalOutcome } from '@lody/shared/notifications';
+import { reportIfWasmFault } from './loro/wasm-runtime-health';
 import { turnNotificationAudience } from './notifications/turn-notification-audience';
 import { fileLocksLegacy } from '@/utils/file-lock';
 import { Effect } from 'effect';
@@ -200,6 +201,8 @@ import {
   type MessageContent,
   type AcpSessionNotification,
   getServerNow,
+  hasFreshDesktopForegroundPresence,
+  type LodyPresenceStateMap,
   CODE_COLLAB_V2_TEXT_LIMITS,
   isSessionGoalActive,
   type SessionGoalAction,
@@ -695,6 +698,12 @@ export interface MessageHandlerConfig {
   ) => Promise<string>;
   supportRegistryAgentTypes?: string[];
   closeSessionTerminals?: (sessionId: SessionId) => void;
+  /**
+   * Presence snapshots of every workspace this daemon hosts, so a desktop focused
+   * on another hosted workspace also suppresses this workspace's mobile push.
+   * Absent: only this workspace's snapshot is read.
+   */
+  readHostedPresenceStates?: () => LodyPresenceStateMap[];
   localWorkspaceCatalog?: LocalWorkspaceCatalogService;
   cleanupLocalProjectWorktreeSetupIfUnreferenced?: (
     localProjectId: LocalProjectId
@@ -800,6 +809,7 @@ export class MessageHandler {
   private cliVersion: string;
   private supportRegistryAgentTypes: string[];
   private closeSessionTerminals?: (sessionId: SessionId) => void;
+  private readHostedPresenceStates?: () => LodyPresenceStateMap[];
   private cleanupLocalProjectWorktreeSetupIfUnreferenced?: (
     localProjectId: LocalProjectId
   ) => Promise<void>;
@@ -885,7 +895,7 @@ export class MessageHandler {
   private static readonly CODE_COLLAB_EVIDENCE_MAX_AUTOMATIC_RETRIES = 5;
   private static readonly CODE_COLLAB_EVIDENCE_RETRY_BASE_DELAY_MS = 100;
   private static readonly CODE_COLLAB_EVIDENCE_RETRY_MAX_DELAY_MS = 1_600;
-  private static readonly CONTEXT_WINDOW_USAGE_THROTTLE_MS = 400;
+  private static readonly CONTEXT_WINDOW_USAGE_THROTTLE_MS = 10_000;
   // Track permission wait time: requestId -> timestamp when permission was requested
   private readonly permissionRequestStartTimes = new Map<string, number>();
   private readonly pendingPermissionRequests = new Map<SessionId, Set<string>>();
@@ -1746,9 +1756,15 @@ export class MessageHandler {
     usage: SessionContextWindowUsage
   ): Promise<void> {
     try {
+      // A final flush must land after an already-started intermediate write.
+      await Promise.all([...this.store.get(sessionId).pendingContextWindowHandlers]);
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       await sessionDoc.setContextWindowUsage(usage);
     } catch (error) {
+      const state = this.store.get(sessionId);
+      if (state.contextWindowUsageLastQueued === usage) {
+        state.contextWindowUsageLastQueued = null;
+      }
       this.logger.debug(
         `[${sessionId}] Failed to persist context window usage: ${formatErrorMessage(error)}`
       );
@@ -1759,21 +1775,61 @@ export class MessageHandler {
     sessionId: SessionId,
     usage: SessionContextWindowUsage
   ): void {
+    if (
+      !Number.isFinite(usage.size) ||
+      !Number.isFinite(usage.used) ||
+      usage.size < 0 ||
+      usage.used < 0
+    ) {
+      return;
+    }
     const state = this.store.get(sessionId);
     state.contextWindowUsageBuffer = usage;
     if (state.contextWindowUsageTimer) {
       return;
     }
-    state.contextWindowUsageTimer = setTimeout(() => {
+    const publish = () => {
       state.contextWindowUsageTimer = null;
       const latest = state.contextWindowUsageBuffer;
       if (!latest) {
         return;
       }
-      state.contextWindowUsageBuffer = null;
-      const promise = this.persistContextWindowUsage(sessionId, latest);
-      this.trackPendingContextWindowPersist(sessionId, promise);
-    }, MessageHandler.CONTEXT_WINDOW_USAGE_THROTTLE_MS);
+      const previous = state.contextWindowUsageLastQueued;
+      // Compare with the last published snapshot, so small deltas accumulate.
+      // Keep skipped values buffered for an exact boundary flush.
+      if (
+        previous &&
+        latest.size === previous.size &&
+        Math.abs(latest.used - previous.used) < Math.max(1024, latest.size * 0.01)
+      ) {
+        return;
+      }
+      this.queueContextWindowUsagePersist(sessionId, latest);
+    };
+    const delay = state.contextWindowUsageLastQueued
+      ? Math.max(
+          0,
+          MessageHandler.CONTEXT_WINDOW_USAGE_THROTTLE_MS -
+            (Date.now() - state.contextWindowUsageLastQueuedAt)
+        )
+      : 0;
+    if (delay === 0) {
+      publish();
+    } else {
+      state.contextWindowUsageTimer = setTimeout(publish, delay);
+    }
+  }
+
+  private queueContextWindowUsagePersist(
+    sessionId: SessionId,
+    usage: SessionContextWindowUsage
+  ): void {
+    const state = this.store.get(sessionId);
+    state.contextWindowUsageBuffer = null;
+    state.contextWindowUsageLastQueued = usage;
+    state.contextWindowUsageLastQueuedAt = Date.now();
+    const promise = this.persistContextWindowUsage(sessionId, usage);
+    this.trackPendingContextWindowPersist(sessionId, promise);
   }
 
   private async flushSessionContextWindowUsage(sessionId: SessionId): Promise<void> {
@@ -1785,9 +1841,7 @@ export class MessageHandler {
 
     const latest = state.contextWindowUsageBuffer;
     if (latest) {
-      state.contextWindowUsageBuffer = null;
-      const promise = this.persistContextWindowUsage(sessionId, latest);
-      this.trackPendingContextWindowPersist(sessionId, promise);
+      this.queueContextWindowUsagePersist(sessionId, latest);
     }
 
     for (;;) {
@@ -3244,6 +3298,7 @@ export class MessageHandler {
     );
     this.supportRegistryAgentTypes = config.supportRegistryAgentTypes ?? [];
     this.closeSessionTerminals = config.closeSessionTerminals;
+    this.readHostedPresenceStates = config.readHostedPresenceStates;
     this.cleanupLocalProjectWorktreeSetupIfUnreferenced =
       config.cleanupLocalProjectWorktreeSetupIfUnreferenced;
     this.onFatalAuthFailure = config.onFatalAuthFailure;
@@ -10637,6 +10692,7 @@ export class MessageHandler {
       // separate RPC and must not synthesize its tool row ahead of that queue:
       // doing so splits an already-started text block at a batch boundary.
       await this.awaitTurnHistoryGate(sessionId);
+      await this.flushSessionContextWindowUsage(sessionId);
       await this.flushACPUpdatesNow(sessionId);
       if (
         this.deletedSessionIds.has(sessionId) ||
@@ -12045,6 +12101,13 @@ export class MessageHandler {
     }
     const notificationService = this.notificationService;
     await this.runTurnCloudSideEffect(sessionId, 'turn outcome notification', async () => {
+      if (this.isRecipientAtFocusedDesktop(userId)) {
+        // The user is at a Lody desktop: the desktop channel is enough. Only the
+        // mobile push is skipped; the silent Live Activity summary stays current.
+        this.logger.debug(`[${sessionId}] Mobile push skipped: recipient desktop is focused`);
+        await this.syncLiveActivitySummary(userId);
+        return;
+      }
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       const meta = await sessionDoc.getMetaState();
       const workspaceSlug = this.workspaceSlug?.trim() || this.workspaceId;
@@ -12061,6 +12124,24 @@ export class MessageHandler {
       });
       await this.syncLiveActivitySummary(userId);
     });
+  }
+
+  /**
+   * True only on positive evidence: a fresh `desktop-foreground` presence entry for
+   * the recipient in a hosted workspace. Unjoined rooms, read failures and stale
+   * entries answer false, so the mobile push is sent as before.
+   */
+  private isRecipientAtFocusedDesktop(userId: string): boolean {
+    try {
+      const snapshots = this.readHostedPresenceStates?.() ?? [
+        this.workspaceDocument.getPresenceStates() ?? {},
+      ];
+      return hasFreshDesktopForegroundPresence(snapshots, userId, getServerNow());
+    } catch (error) {
+      reportIfWasmFault(error);
+      this.logger.debug(`Desktop foreground presence read failed: ${formatErrorMessage(error)}`);
+      return false;
+    }
   }
 
   private async buildLiveActivitySummary(userId: string): Promise<LiveActivitySummary> {

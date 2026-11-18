@@ -71,6 +71,38 @@ void test('local HTML preview with scripts allowed omits the script-blocking pol
   assert.equal(response.headers.get('content-security-policy'), null)
 })
 
+void test('a nested page can load workspace assets only with the workspace resource grant', async (t) => {
+  const { dir, page } = await site(t)
+  await mkdir(join(dir, 'shared'))
+  await writeFile(join(dir, 'shared', 'app.mjs'), 'export default 42')
+  const sites = new LocalHtmlPreviewSites()
+  const request = {
+    machineId: 'local',
+    path: join(page, 'index.html'),
+    workspaceRoot: dir,
+    allowScripts: true
+  }
+  const limited = openLocalHtmlPreview(sites, 1, request, 'local')
+  assert.equal((await get(sites, new URL('../shared/app.mjs', limited.url))).status, 404)
+  const granted = openLocalHtmlPreview(
+    sites,
+    1,
+    { ...request, allowWorkspaceResources: true },
+    'local'
+  )
+  assert.equal(new URL(granted.url).pathname, '/page/index.html')
+  const module = await get(sites, new URL('../shared/app.mjs', granted.url))
+  assert.equal(await module.text(), 'export default 42')
+  assert.equal((await get(sites, new URL('/page/.env', granted.url))).status, 404)
+  const outside = openLocalHtmlPreview(
+    sites,
+    1,
+    { ...request, allowWorkspaceResources: true, workspaceRoot: join(dir, 'shared') },
+    'local'
+  )
+  assert.equal(outside.status, 'error')
+})
+
 void test('local HTML preview never leaves the page folder or exposes hidden files', async (t) => {
   const { dir, page } = await site(t)
   await symlink(join(dir, 'outside.txt'), join(page, 'link.txt'))

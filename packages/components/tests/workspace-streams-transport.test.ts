@@ -202,6 +202,7 @@ function transportFor(
   const transport = createWorkspaceStreamsTransport({
     repo: tab.repo,
     incompleteRecoveryScope,
+    recoverFlockCheckpointsOnTimeout: true,
     workspaceId: tab.workspaceId,
     documentRemoteCursorStore:
       cursorStore ?? createResilientRemoteCursorStore({ dbName: tab.cursorDbName }),
@@ -278,6 +279,17 @@ function createByteServer(respond?: (url: URL, method: string) => Response | und
         status: url.pathname.includes('/snapshot/') ? 204 : 201,
         headers: { 'Stream-Next-Offset': currentTail() },
       });
+    }
+    if (method === 'GET' && url.pathname.includes('/snapshot/')) {
+      const snapshot = value.snapshot;
+      return snapshot
+        ? new Response(toArrayBuffer(snapshot.body), {
+            headers: {
+              'Content-Length': String(snapshot.body.byteLength),
+              'Stream-Snapshot-Offset': snapshot.offset,
+            },
+          })
+        : new Response(null, { status: 404 });
     }
     if (method === 'HEAD')
       return new Response(null, {
@@ -2303,4 +2315,250 @@ describe('P10 public crypto and published SDK preparation', () => {
     ).toEqual([]);
     expect(doc.toJSON()).toEqual({ data: { draft: 'retained' } });
   });
+});
+
+describe('workspace Flock snapshot catch-up selection', () => {
+  it.each(
+    (['meta', 'mf', 'wf', 'sr'] as const).flatMap((kind) =>
+      (['plaintext', 'protected'] as const).flatMap((mode) =>
+        (
+          [
+            'small-snapshot',
+            'large-snapshot',
+            'local-draft',
+            'edit-during-probe',
+            'edit-during-bootstrap',
+          ] as const
+        ).map((scenario) => ({
+          kind,
+          mode,
+          scenario,
+        }))
+      )
+    )
+  )(
+    '$kind / $mode / $scenario preserves content and replica checkpoints',
+    async ({ kind, mode, scenario }) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      let writeDuringProbe = () => {};
+      let writeDuringBootstrap = () => {};
+      const server = createByteServer((url, method) => {
+        if (method === 'GET' && url.pathname.includes('/snapshot/')) writeDuringProbe();
+        if (url.pathname.endsWith('/bootstrap')) writeDuringBootstrap();
+        return scenario === 'large-snapshot' &&
+          method === 'GET' &&
+          url.pathname.includes('/snapshot/')
+          ? new Response(null, { headers: { 'Content-Length': String(20 * 1024 * 1024) } })
+          : undefined;
+      });
+      const writer = await openTab(`catchup-w-${++sequence}` as WorkspaceId);
+      const reader = await openTab(`catchup-r-${sequence}` as WorkspaceId);
+      reader.workspaceId = writer.workspaceId;
+      const id =
+        kind === 'mf'
+          ? `${writer.workspaceId}:mf:machine`
+          : kind === 'wf'
+            ? `${writer.workspaceId}:wf:workspace`
+            : `${writer.workspaceId}:sr`;
+      const local =
+        kind === 'meta' ? writer.repo.getMeta() : (await writer.repo.openFlockDoc(id)).flock;
+      const remote =
+        kind === 'meta' ? reader.repo.getMeta() : (await reader.repo.openFlockDoc(id)).flock;
+      const content: WorkspaceStreamsContent =
+        mode === 'protected'
+          ? protectedContent({
+              snapshotUpload: {
+                canUpload: () => true,
+                debounceMs: 10,
+                minBytesSinceRemoteSnapshot: 0,
+              },
+            })
+          : { mode: 'plaintext' };
+      const source = transportFor(writer, content);
+      const joined =
+        kind === 'meta' ? source.joinMetaRoom(local) : source.joinFlockDocRoom(id, local);
+      await settle(joined.firstSyncedWithRemote);
+      local.put(['value'], 'baseline');
+      await settle(joined.waitUntilSynced());
+      const oldReader = transportFor(
+        reader,
+        mode === 'protected' ? protectedContent() : { mode: 'plaintext' }
+      );
+      expect(
+        (
+          await settle(
+            kind === 'meta' ? oldReader.syncMeta(remote) : oldReader.syncFlockDoc(id, remote)
+          )
+        ).ok
+      ).toBe(true);
+      await settle(oldReader.close());
+      openTransports.delete(oldReader);
+      // Repeated overwrites make stream history large while current state stays small.
+      for (let i = 0; i < 4; i++) {
+        local.put(['value'], `${i}:${'x'.repeat(600_000)}`);
+        await settle(joined.waitUntilSynced());
+      }
+      local.put(['value'], 'latest');
+      await settle(joined.waitUntilSynced());
+      const url =
+        kind === 'meta'
+          ? getWorkspaceMetaStreamUrl(writer.workspaceId, streamsBaseUrl)
+          : `${streamsBaseUrl}/ds/${LORO_STREAMS_BUCKET_ID}/${encodeURIComponent(id)}`;
+      const path = new URL(url).pathname;
+      if (mode === 'protected') {
+        await vi.advanceTimersByTimeAsync(10);
+        await settle(server.snapshotReady);
+      } else {
+        server.room(path).snapshot = {
+          offset: server.tail(path),
+          body: await streamsSnapshotCodec.compress(local.exportFile()),
+        };
+      }
+      if (scenario === 'local-draft') remote.put(['draft'], 'unsent');
+      if (scenario === 'edit-during-probe')
+        writeDuringProbe = () => {
+          remote.put(['draft'], 'unsent');
+        };
+      if (scenario === 'edit-during-bootstrap')
+        writeDuringBootstrap = () => {
+          remote.put(['draft'], 'unsent');
+        };
+      const start = server.requests.length;
+      const resumed = transportFor(
+        reader,
+        mode === 'protected' ? protectedContent() : { mode: 'plaintext' }
+      );
+      expect(
+        (
+          await settle(
+            kind === 'meta' ? resumed.syncMeta(remote) : resumed.syncFlockDoc(id, remote)
+          )
+        ).ok
+      ).toBe(true);
+      expect(remote.get(['value'])).toBe('latest');
+      const requests = server.requests.slice(start);
+      expect(requests.some(({ url }) => url.pathname.endsWith('/bootstrap'))).toBe(
+        scenario === 'small-snapshot' || scenario === 'edit-during-bootstrap'
+      );
+      if (
+        scenario === 'local-draft' ||
+        scenario === 'edit-during-probe' ||
+        scenario === 'edit-during-bootstrap'
+      ) {
+        expect(remote.get(['draft'])).toBe('unsent');
+        const verifier = await openTab(`catchup-v-${sequence}` as WorkspaceId);
+        verifier.workspaceId = writer.workspaceId;
+        const check =
+          kind === 'meta' ? verifier.repo.getMeta() : (await verifier.repo.openFlockDoc(id)).flock;
+        const verification = transportFor(
+          verifier,
+          mode === 'protected' ? protectedContent() : { mode: 'plaintext' }
+        );
+        expect(
+          (
+            await settle(
+              kind === 'meta' ? verification.syncMeta(check) : verification.syncFlockDoc(id, check)
+            )
+          ).ok
+        ).toBe(true);
+        expect(check.get(['draft'])).toBe('unsent');
+      }
+      const checkpoint = await reader.repo
+        .getReplicaCheckpointStore(
+          kind === 'meta'
+            ? { kind: 'meta', flock: remote }
+            : { kind: 'flock', flockDocId: id, flock: remote }
+        )
+        .load(url);
+      expect(checkpoint?.nextOffset).toBe(server.tail(path));
+      joined.unsubscribe();
+    }
+  );
+});
+
+describe('named Flock initial catch-up timeout recovery', () => {
+  it.each(
+    ['mf:machine', 'wf:workspace', 'sr'].flatMap((suffix) =>
+      ['plaintext', 'protected'].map((mode) => ({ suffix, mode }))
+    )
+  )(
+    'recovers $suffix / $mode independently and uploads offline writes',
+    async ({ suffix, mode }) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const server = createByteServer();
+      const writer = await openTab(`timeout-w-${++sequence}` as WorkspaceId);
+      const reader = await openTab(`timeout-r-${sequence}` as WorkspaceId);
+      reader.workspaceId = writer.workspaceId;
+      const id = `${writer.workspaceId}:${suffix}`;
+      const a = (await writer.repo.openFlockDoc(id)).flock;
+      const b = (await reader.repo.openFlockDoc(id)).flock;
+      const content =
+        mode === 'protected'
+          ? protectedContent({
+              snapshotUpload: {
+                canUpload: () => true,
+                debounceMs: 10,
+                minBytesSinceRemoteSnapshot: 0,
+              },
+            })
+          : { mode: 'plaintext' as const };
+      const readContent =
+        mode === 'protected' ? protectedContent() : { mode: 'plaintext' as const };
+      const source = transportFor(writer, content).joinFlockDocRoom(id, a);
+      await settle(source.firstSyncedWithRemote);
+      a.put(['remote'], 'baseline');
+      await settle(source.waitUntilSynced());
+      const old = transportFor(reader, readContent);
+      expect((await settle(old.syncFlockDoc(id, b))).ok).toBe(true);
+      await settle(old.close());
+      openTransports.delete(old);
+      a.put(['remote'], 'latest');
+      await settle(source.waitUntilSynced());
+      const path = `/ds/${LORO_STREAMS_BUCKET_ID}/${encodeURIComponent(id)}`;
+      if (mode === 'protected') {
+        await vi.advanceTimersByTimeAsync(10);
+        await settle(server.snapshotReady);
+      } else {
+        server.room(path).snapshot = {
+          offset: server.tail(path),
+          body: await streamsSnapshotCodec.compress(a.exportFile()),
+        };
+      }
+      b.put(['draft'], 'retained offline');
+      const originalFetch = globalThis.fetch;
+      const reading = Promise.withResolvers<void>();
+      let stall = true;
+      vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(input instanceof Request ? input.url : input);
+        if (stall && url.pathname === path && (init?.method ?? 'GET') === 'GET') {
+          reading.resolve();
+          return await new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(init.signal!.reason), {
+              once: true,
+            });
+          });
+        }
+        return originalFetch(input, init);
+      });
+      const recovery = transportFor(reader, readContent);
+      const subscription = recovery.joinFlockDocRoom(id, b);
+      const failed = subscription.firstSyncedWithRemote.catch((error: unknown) => error);
+      await settle(reading.promise);
+      await vi.advanceTimersByTimeAsync(240_000);
+      expect(await settle(failed)).toMatchObject({ streamsCode: 'initial_sync_timeout' });
+      stall = false;
+      await settle(subscription.rejoin!());
+      await settle(subscription.firstSyncedWithRemote);
+      expect(b.get(['remote'])).toBe('latest');
+      expect(b.get(['draft'])).toBe('retained offline');
+      expect(server.requests.some(({ url }) => url.pathname === `${path}/bootstrap`)).toBe(true);
+      const verifier = await openTab(`timeout-v-${sequence}` as WorkspaceId);
+      verifier.workspaceId = writer.workspaceId;
+      const c = (await verifier.repo.openFlockDoc(id)).flock;
+      expect((await settle(transportFor(verifier, readContent).syncFlockDoc(id, c))).ok).toBe(true);
+      expect(c.get(['draft'])).toBe('retained offline');
+      subscription.unsubscribe();
+      source.unsubscribe();
+    }
+  );
 });

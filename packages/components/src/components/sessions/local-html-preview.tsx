@@ -62,17 +62,21 @@ export function LocalHtmlPreviewFrame({
 export function LocalHtmlPreviewConsentDialog({
   open,
   fileName,
+  workspaceRoot,
   onConfirm,
   onCancel,
 }: {
   readonly open: boolean;
   readonly fileName: string;
-  readonly onConfirm: (allowScripts: boolean) => void;
+  readonly workspaceRoot?: string | null;
+  readonly onConfirm: (allowScripts: boolean, workspaceRoot?: string) => void;
   readonly onCancel: () => void;
 }) {
   const { t } = useTranslation();
   const [allowScripts, setAllowScripts] = useState(false);
   const checkboxId = useId();
+  const workspaceCheckboxId = useId();
+  const [allowWorkspaceResources, setAllowWorkspaceResources] = useState(false);
   return (
     <AlertDialog.Root
       open={open}
@@ -110,12 +114,35 @@ export function LocalHtmlPreviewConsentDialog({
             </span>
           </span>
         </label>
+        {workspaceRoot && (
+          <label htmlFor={workspaceCheckboxId} {...stylex.props(styles.option)}>
+            <Checkbox
+              id={workspaceCheckboxId}
+              checked={allowWorkspaceResources}
+              onCheckedChange={(next) => setAllowWorkspaceResources(next === true)}
+            />
+            <span>
+              {t(
+                'sessions.fileViewer.htmlPreview.allowWorkspaceResources',
+                'Allow this page to read files in {{folder}}',
+                { folder: workspaceRoot }
+              )}
+            </span>
+          </label>
+        )}
         <AlertDialog.Footer>
           <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
           {/* Not `AlertDialog.Action`: that is a `Close`, whose close request would
               reach `onOpenChange` as a cancellation. Confirming moves the caller's
               state on, which closes this controlled dialog. */}
-          <Button onClick={() => onConfirm(allowScripts)}>
+          <Button
+            onClick={() =>
+              onConfirm(
+                allowScripts,
+                allowWorkspaceResources ? (workspaceRoot ?? undefined) : undefined
+              )
+            }
+          >
             {t('sessions.fileViewer.preview.show', 'Preview')}
           </Button>
         </AlertDialog.Footer>
@@ -162,7 +189,7 @@ export function useLocalHtmlPreview({
   }, [enabled, hostPath]);
 
   const confirm = useCallback(
-    (allowScripts: boolean) => {
+    (allowScripts: boolean, workspaceRoot?: string) => {
       if (hostPath === null) return;
       const request = ++requestRef.current;
       setState({ status: 'opening' });
@@ -170,7 +197,12 @@ export function useLocalHtmlPreview({
         try {
           const services = getIpcServices();
           const result = services
-            ? await services.machineRpc.openHtmlPreview({ machineId, path: hostPath, allowScripts })
+            ? await services.machineRpc.openHtmlPreview({
+                machineId,
+                path: hostPath,
+                allowScripts,
+                ...(workspaceRoot ? { workspaceRoot, allowWorkspaceResources: true } : {}),
+              })
             : null;
           if (request !== requestRef.current) return;
           if (result === null) {

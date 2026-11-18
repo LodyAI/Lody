@@ -109,6 +109,7 @@ type SessionFileAnalyticsAction =
 type SessionFileAnalyticsSource = 'file_fallback' | 'md_link_context_menu' | 'file_menu';
 
 export type SessionFileActions = {
+  readonly workspacePath: string | null;
   /** Absolute path on the machine that owns the file, when it resolves. */
   readonly resolveHostPath: (filePath: string) => string | null;
   readonly copyPath: (filePath: string) => void;
@@ -838,6 +839,7 @@ export function useSessionFileActions({
   ]);
 
   return {
+    workspacePath,
     resolveHostPath,
     copyPath,
     localHost,

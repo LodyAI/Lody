@@ -570,6 +570,9 @@ export type SessionCompletionNotificationClickPayload = {
   workspaceSlug?: string;
 };
 
+/** OS power/session transition forwarded from Electron's `powerMonitor`. */
+export type ElectronPowerState = 'suspend' | 'resume' | 'lock-screen' | 'unlock-screen';
+
 export type SendLocalSessionControlResult =
   | {
       ok: true;

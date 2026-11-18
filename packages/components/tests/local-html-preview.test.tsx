@@ -36,6 +36,7 @@ function Harness({ onCancel }: { readonly onCancel: () => void }) {
       <LocalHtmlPreviewConsentDialog
         open={preview.state.status === 'confirming'}
         fileName="index.html"
+        workspaceRoot="/work"
         onConfirm={preview.confirm}
         onCancel={preview.cancel}
       />
@@ -86,6 +87,27 @@ describe('desktop local HTML preview consent', () => {
     });
     expect(state()).toBe('ready lody-html-preview://t/index.html scripts=true');
     expect(cancelled).toBe(false);
+  });
+
+  it('opens with workspace resources and scripts independently selected', async () => {
+    openHtmlPreview.mockResolvedValue({
+      status: 'ok',
+      url: 'lody-html-preview://t/site/index.html',
+    });
+    await act(async () => root.render(<Harness onCancel={() => {}} />));
+    const labels = Array.from(document.querySelectorAll('label'));
+    const workspace = labels.find((label) => label.textContent?.includes('/work'));
+    expect(workspace).toBeDefined();
+    await act(async () => workspace!.querySelector<HTMLElement>('[role="checkbox"]')!.click());
+    await act(async () => button('Preview').click());
+    expect(openHtmlPreview).toHaveBeenCalledWith({
+      machineId: 'local',
+      path: '/work/site/index.html',
+      allowScripts: false,
+      workspaceRoot: '/work',
+      allowWorkspaceResources: true,
+    });
+    expect(state()).toBe('ready lody-html-preview://t/site/index.html scripts=false');
   });
 
   it('returns to the code view without opening anything when the user cancels', async () => {
