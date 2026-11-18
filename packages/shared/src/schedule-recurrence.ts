@@ -330,7 +330,16 @@ export function applyScheduleRecurrence(
     sameScheduleRecurrence(triggerToRecurrence(previous), recurrence)
   )
     return previous;
-  return recurrenceToTrigger(recurrence, now);
+  const next = recurrenceToTrigger(recurrence, now);
+  // Fixed intervals have no time zone. Compare their duration in case the
+  // editor and the stored trigger use different zones or step units.
+  if (
+    previous?.kind === 'interval' &&
+    next.kind === 'interval' &&
+    previous.everyMs === next.everyMs
+  )
+    return previous;
+  return next;
 }
 
 export function defaultScheduleRecurrence(timeZone = getDeviceTimeZone()): ScheduleRecurrence {
