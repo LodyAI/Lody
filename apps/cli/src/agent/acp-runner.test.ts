@@ -1,12 +1,9 @@
-import { queryProviderRateLimits } from './provider-quota';
+import { queryProviderRateLimits } from '../session/provider-quota-refresh';
 import { isPidAliveSyncLegacy } from '@lody/shared/node/process';
 import { PassThrough } from 'node:stream';
 import { parseCopilotQuota, readCopilotQuota } from './copilot-quota';
 import { AgentSideConnection, PROTOCOL_VERSION, type Stream } from '@agentclientprotocol/sdk';
-import {
-  initializeAndSetAcpSessionArchived,
-  initializeAndReadAcpRateLimits,
-} from './acp-runner';
+import { initializeAndSetAcpSessionArchived, initializeAndReadAcpRateLimits } from './acp-runner';
 import { spawn } from 'node:child_process';
 import * as loginShell from './login-shell-env';
 import * as setting from './setting';
