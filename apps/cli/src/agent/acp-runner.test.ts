@@ -1,4 +1,4 @@
-import { queryProviderRateLimits } from './provider-quota';
+import { queryProviderRateLimits } from '../session/provider-quota-refresh';
 import { PassThrough } from 'node:stream';
 import { parseCopilotQuota, readCopilotQuota } from './copilot-quota';
 import { AgentSideConnection, PROTOCOL_VERSION, type Stream } from '@agentclientprotocol/sdk';

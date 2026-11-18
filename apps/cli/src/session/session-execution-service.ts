@@ -19,14 +19,13 @@ import type { NativeWorkWatch } from './turn-completion';
 import { resolveProjectFileRoots } from './worktree/project-member-access';
 import { type AcpLauncher, resolveAcpLauncher } from '@/agent/acp-analytics';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
-import { queryProviderRateLimits } from '@/agent/provider-quota';
 import { AcpQuotaCleanupError } from '@/agent/acp-runner';
 import { isLoroRepoDocDeleted, normalizeSessionTurnInputConfig } from '@lody/shared';
 import {
   isSubscriptionQuotaEligible,
   type MachineProviderRateLimitsRefreshResponse,
 } from '@lody/shared';
-import { ProviderQuotaRefreshCache } from './provider-quota-refresh-cache';
+import { ProviderQuotaRefreshCache, queryProviderRateLimits } from './provider-quota-refresh';
 import type { TurnOutcome, TurnOutcomeFact, TurnResultAudience } from '@lody/shared/notifications';
 import {
   AcpAuthenticationManager,

@@ -1,6 +1,5 @@
 import { MessageHandler } from '../src/lib/message-handler';
-import * as quotaRunner from '../src/agent/provider-quota';
-import { ProviderQuotaRefreshCache } from '../src/session/provider-quota-refresh-cache';
+import * as quotaRefresh from '../src/session/provider-quota-refresh';
 import { createSessionBackend } from '@/session/session-backend';
 import type { MachineAccessVerification } from '@/session/session-access-retry';
 import {
@@ -1700,7 +1699,7 @@ describe('Provider quota refresh', () => {
   it('publishes a cold query for its exact Provider and coalesces concurrent consumers', async () => {
     const pending = createDeferred<typeof snapshot>();
     const ready = createDeferred();
-    const read = vi.spyOn(quotaRunner, 'queryProviderRateLimits').mockImplementation(async () => {
+    const read = vi.spyOn(quotaRefresh, 'queryProviderRateLimits').mockImplementation(async () => {
       ready.resolve();
       return pending.promise;
     });
@@ -1755,7 +1754,7 @@ describe('Provider quota refresh', () => {
     'refreshes %s with tool env but preserves cached quota for account overrides',
     async (agentType, accountKey) => {
       const read = vi
-        .spyOn(quotaRunner, 'queryProviderRateLimits')
+        .spyOn(quotaRefresh, 'queryProviderRateLimits')
         .mockImplementation(async (options) => {
           expect(options.agentConfigId).toBe(capabilityConfigId);
           expect(options.env?.OP_TOKEN).toBe('synthetic');
@@ -1804,7 +1803,7 @@ describe('Provider quota refresh', () => {
     async (mode) => {
       const pending = createDeferred<typeof snapshot>();
       const ready = createDeferred();
-      const read = vi.spyOn(quotaRunner, 'queryProviderRateLimits').mockImplementation(async () => {
+      const read = vi.spyOn(quotaRefresh, 'queryProviderRateLimits').mockImplementation(async () => {
         ready.resolve();
         return pending.promise;
       });
@@ -1832,7 +1831,7 @@ describe('Provider quota refresh', () => {
 
   it('keeps independent Providers, bounds freshness, and waits for the prior launch before replacement', async () => {
     let now = 0;
-    const cache = new ProviderQuotaRefreshCache(() => now);
+    const cache = new quotaRefresh.ProviderQuotaRefreshCache(() => now);
     const pending = createDeferred<boolean>();
     const ready = createDeferred();
     const states: string[] = [];
@@ -1863,7 +1862,7 @@ describe('Provider quota refresh', () => {
   });
 
   it('quarantines unconfirmed process cleanup across launch changes', async () => {
-    const cache = new ProviderQuotaRefreshCache(
+    const cache = new quotaRefresh.ProviderQuotaRefreshCache(
       () => 100_000,
       () => false
     );
