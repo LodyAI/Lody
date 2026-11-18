@@ -4,13 +4,16 @@ import {
   type CodeCollabReadBlobResponse,
   type CodeCollabDiffBlobKey,
   type CodeCollabDiffManifestEntry,
+  CODE_COLLAB_DIFF_BLOB_LIMITS,
 } from '@lody/shared';
 import { DiffBlobCache } from './diff-blob-cache';
+import i18next from 'i18next';
 import { readDiffBlob, manifestEntryToDiff, DiffBlobReadError } from './diff-blob-client';
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
 import { createLocalPagedFileSource } from './paged-file-source';
 import {
   CODE_COLLAB_V2_TEXT_LIMITS,
+  CODE_COLLAB_LIMITS,
   type CodeCollabAllChangesScope,
   type CodeCollabFileSourceState,
   type CodeCollabRole,
@@ -969,7 +972,18 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
           base = result.base;
           for (const entry of result.entries) {
             if (entry.status === 'not_changed' || entry.status === 'missing') continue;
-            this.rememberDiffManifest(scopeKey, entry);
+            if (entries.length >= CODE_COLLAB_LIMITS.maxSupportedFiles)
+              throw new DiffBlobReadError(
+                'too_large',
+                i18next.t('sessions.changes.tooManyFiles', 'Too many changed files to load.')
+              );
+            // Large files request their bounded patch only when opened.
+            if (
+              entry.hunks !== undefined ||
+              (entry.base?.rawBytes ?? 0) + (entry.head?.rawBytes ?? 0) <=
+                CODE_COLLAB_DIFF_BLOB_LIMITS.remoteHunkBytes
+            )
+              this.rememberDiffManifest(scopeKey, entry);
             const indexedChange = this.allChanges[entry.path];
             entries.push({
               path: entry.path,
@@ -1088,6 +1102,13 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
     };
   }
 
+  async refreshChangedFiles(signal?: AbortSignal): Promise<SessionFileChangedFilesResult> {
+    const result = await this.getAllChangesDiff(undefined, undefined, signal);
+    signal?.throwIfAborted();
+    if (result.status === 'unavailable') return result;
+    return this.listChangedFiles();
+  }
+
   subscribeChangedFiles(listener: () => void): () => void {
     this.changedFileSubscribers.add(listener);
     return () => {
@@ -1099,7 +1120,10 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
     entries: readonly SessionFileAllChangesDiffEntry[],
     request: number
   ): void {
-    if (request !== this.branchChangesRequest || this.diffCacheEpoch !== this.diffBlobCache.epoch)
+    if (
+      (request !== this.branchChangesRequest && this.branchChangeFiles !== undefined) ||
+      this.diffCacheEpoch !== this.diffBlobCache.epoch
+    )
       return;
     const files = entries
       .map((entry): SessionFileChangeEntry => ({

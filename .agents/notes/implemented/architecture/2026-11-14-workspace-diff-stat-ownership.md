@@ -40,6 +40,12 @@ contribute zero text lines; unreadable/budget-deferred paths keep unknown line c
 The composer uses file presence for its entry, positive text totals for ordinary
 and mixed comparisons, and localized file counts for zero-line changes. Older
 writers without `files` retain their positive-line-count entry behavior.
+Opening the Changes surface reads the complete paged Branch manifest and uses its
+totals for the composer's workspace summary. This display uses the live comparison
+to avoid pairing a partial index sum with older durable statistics. Unknown text
+counts display the complete file count. Initial rendering still uses session
+metadata, and Project Member selection retains its Member scope. The live reader
+uses the existing diff transport and leaves metadata publication with its owner.
 Root initialization and terminal refresh reconcile against actual metadata even
 when index content is unchanged. Watcher-only refresh remains Flock-only; no new
 periodic metadata writer, Repo or retry owner is introduced. Cancelled comparisons
