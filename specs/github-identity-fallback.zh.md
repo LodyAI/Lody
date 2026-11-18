@@ -15,9 +15,10 @@ Translation: current
 宿主从可信会话元数据读取 owner；新会话尚未发布时使用创建者。参与者切换不改变
 网络身份。宿主原子写入工作区本地上下文，包含不透明 token 和机器凭据可用资格。
 helper 每次捕获一个上下文。发送 prompt 或 steer 前校验当前运行实例的上下文与 owner。
-owner 变化时撤销该上下文与机器资格，终止旧 ACP/terminal 并报告 github_owner_changed：
-无法原地清除已启动进程的环境。
-被中断操作不重放；下一轮为新 owner 创建运行实例。宿主 worktree 的 clone/fetch
+owner 变化时撤销该上下文与机器资格，终止旧 ACP/terminal 并等待清理完成。
+首次提交 prompt 前，同一轮可替换一次运行实例，按当前 owner 重新校验后再提交。
+steer 绑定正在运行的进程，不能转交给替换实例。已提交的输入不会因 owner 变化而重放。
+宿主 worktree 的 clone/fetch
 和 checkout 使用固定快照。session 与宿主环境均安装 managed credential helper，
 覆盖 checkout filter 和 LFS 的 /info/lfs 路径；非 owner 宿主 checkout 不继承机器
 GitHub token 环境或 shell 启动文件。

@@ -69,6 +69,9 @@ form (at most 30); machine IDs are UUIDs or
 or identity. Non-UUID session IDs do not publish presence in minimal mode: the
 shape of a legacy fallback cannot prove its provenance. Supporting an actual legacy
 session would require trusted local session-record confirmation, not a route value.
+The renderer's `desktop-foreground` entry carries only user/instance IDs and
+`updatedAt`; an identity outside the allowlist publishes nothing, so the Host
+keeps sending the mobile push.
 Invalid viewing routes are discarded before retention/heartbeat and
 clear a previous viewing entry. CLI validates before retaining producer keys:
 Loro emits deletion updates even for absent keys, so filtering only set values

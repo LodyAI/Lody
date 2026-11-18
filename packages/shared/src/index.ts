@@ -102,6 +102,7 @@ export * from './worktree-paths';
 export * from './loro-streams-auth';
 export * from './rpc-secret';
 export * from './presence';
+export * from './loro-streams-websocket';
 export * from './machine-monitor';
 export * from './machine-protocol-capabilities';
 export * from './pi-extensions';

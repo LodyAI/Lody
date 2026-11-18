@@ -1,4 +1,5 @@
 {
+  "e2ee.recovery.restoreWorking": "{{name}}：正在恢复…",
   "e2ee.deviceIdentity.modelUnknown": "型号未识别",
   "e2ee.deviceIdentity.osVersionUnavailable": "系统版本暂缺",
   "e2ee.deviceIdentity.personal": "个人设备",
@@ -2476,6 +2477,7 @@
   "sessions.fileViewer.copyRelativePath": "复制相对路径",
   "sessions.fileViewer.htmlPreview.allowScripts": "允许运行 JavaScript",
   "sessions.fileViewer.htmlPreview.allowScriptsHint": "仅对可信页面开启。脚本可以发起网络请求。",
+  "sessions.fileViewer.htmlPreview.allowWorkspaceResources": "允许此页面读取 {{folder}} 中的文件",
   "sessions.fileViewer.htmlPreview.consentDescription": "页面会直接从磁盘上的文件打开，并可加载同一文件夹中的样式表、图片等资源。它与 Lody 隔离运行。",
   "sessions.fileViewer.htmlPreview.consentTitle": "预览 {{fileName}}？",
   "sessions.fileViewer.htmlPreview.navigationDisabled": "自包含 HTML 预览不支持页面导航。",
@@ -2858,6 +2860,7 @@
   "sessions.messageQueue.editMessage": "编辑排队消息",
   "sessions.messageQueue.guide": "用这条消息引导当前回复",
   "sessions.messageQueue.guideAction": "引导",
+  "sessions.messageQueue.attachmentOnly": "[附件]",
   "sessions.messageQueue.imageOnly": "[仅图片消息]",
   "sessions.messageQueue.queuedCount": "{{count}} 条待发送",
   "sessions.messageQueue.scheduledCount": "{{count}} 条定时消息",
@@ -6820,5 +6823,7 @@
   "settings.agent.credentials.env.keep": "保留已保存的变量",
   "settings.agent.credentials.env.replace": "替换全部",
   "settings.agent.credentials.env.clear": "清除全部",
-  "settings.agent.credentials.env.entries": "修改指定变量"
+  "settings.agent.credentials.env.entries": "修改指定变量",
+  "settings.general.suppressMobilePushWhenFocused.label": "使用这台电脑时暂停手机通知",
+  "settings.general.suppressMobilePushWhenFocused.helper": "Lody 在这台电脑上处于焦点时，任务完成不再推送到手机。授权请求和提问仍会通知。"
 }

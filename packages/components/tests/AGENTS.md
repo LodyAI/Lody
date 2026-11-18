@@ -31,3 +31,9 @@ build/release guarantees; mixed suites keep only their qualifying cases.
   actual ready and exit signals. Confirm host exit before deleting synthetic data.
   A fatal native signal fails the test and retains its data; isolation must never
   turn a native crash into passing coverage.
+
+- Workspace Streams fixtures load replicas through the same Repo passed to
+  `src/providers/workspace-streams-transport.ts:createWorkspaceStreamsTransport`.
+  Its `createRepoStreamsPersistence` wiring checks replica ownership; the Repo
+  transport's `retireOnStaleReplica` rejects unregistered Docs before the intended
+  network scenario runs. Leave registered replica cleanup to `repo.destroy()`.

@@ -2,11 +2,17 @@
 
 `CLAUDE.md` symlinks here. Edit `AGENTS.md` only.
 
+The 1,340-word ceiling keeps complete Session history, machine protocol and native credential-isolation rules together; the 1,200-word default cannot contain their current contracts.
+
 Discover archive/restore/delete from one ready Repo snapshot, never UI caches.
 Archive uses `collectSessionArchiveTargets`; restore/delete keep direct containment.
 Exact deletion bypasses discovery: [relations](../../specs/session-relations.md).
 
 Snapshot compression is available only through `@lody/shared/streams-snapshot-codec`. Keep its runtime imports out of the shared root so Convex isolate bundles can use protocol helpers without loading Node compression dependencies.
+
+Meta/Flock catch-up keeps replica-bound checkpoints and merges into the live replica.
+[Streams catch-up](../../.agents/docs/workspace-catalog-durability.md#streams-catch-up)
+explains size selection and cursor-only timeout recovery.
 
 ## Session history
 
@@ -93,6 +99,10 @@ by the original unsubscribe acknowledgement or transport loss.
 - ACP `cacheVersion` gates freshness, not readability. Preserve understood fields across
   versions and runtime-override matching; omit known-incompatible fields. Pre-v11 commands
   can contain project data: Machine Flock owns probe previews, Sessions own actual lists.
+- Machine Flock retains complete `acpCapability` rows for older readers. Same-source
+  option structures retain their stored current values; session selections live in Sessions.
+  Per-model option rows may share a same-source shape across different current values.
+  Quota deduplication compares reset jitter with the persisted baseline, never the last notification.
 - Quota: share `src/subscription-quota.ts`; key `agentConfigId + limitId`.
   Bound Providers ignore legacy; delete scoped rows.
 

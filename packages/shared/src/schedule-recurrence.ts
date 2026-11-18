@@ -1,4 +1,5 @@
 import type { ScheduleProposalRule } from './ai';
+import { SCHEDULE_CUSTOM_STEP_MAX } from './message-schemas';
 import { validateScheduleTrigger } from './schedule-time';
 import type { ScheduleTrigger } from './schedule-types';
 
@@ -58,13 +59,6 @@ export const SCHEDULE_WEEKDAYS: readonly ScheduleWeekday[] = [0, 1, 2, 3, 4, 5, 
 export const SCHEDULE_MINUTE_STEPS = [5, 10, 15, 20, 30] as const;
 /** Hour steps offered for "every N hours"; all divide the day evenly. */
 export const SCHEDULE_HOUR_STEPS = [1, 2, 3, 4, 6, 8, 12] as const;
-/**
- * Bounds for a typed ("Custom") step. A step that does not divide the clock is
- * stored as an anchored interval by `recurrenceToTrigger`; the caps only keep
- * the field to sizes the other rules do not already name better (a day, a week).
- */
-export const SCHEDULE_CUSTOM_MINUTES_MAX = 1440;
-export const SCHEDULE_CUSTOM_HOURS_MAX = 168;
 
 const CRON_DAY_NAMES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 const WORKWEEK: readonly ScheduleWeekday[] = [1, 2, 3, 4, 5];
@@ -181,10 +175,14 @@ export function triggerToRecurrence(trigger: TimedScheduleTrigger): ScheduleRecu
   if (trigger.kind === 'once') return { kind: 'once', at: trigger.at };
   const unsupported: ScheduleRecurrence = { kind: 'unsupported', trigger };
   if (trigger.kind === 'interval') {
-    // Interval carries the steps that do not divide the clock evenly.
-    if (trigger.everyMs % 3_600_000 === 0)
+    // Interval carries the steps that do not divide the clock evenly. A step
+    // longer than any client can carry is kept verbatim, never truncated.
+    if (
+      trigger.everyMs % 3_600_000 === 0 &&
+      trigger.everyMs / 3_600_000 <= SCHEDULE_CUSTOM_STEP_MAX
+    )
       return { kind: 'hours', every: trigger.everyMs / 3_600_000, timeZone: getDeviceTimeZone() };
-    if (trigger.everyMs % 60_000 === 0)
+    if (trigger.everyMs % 60_000 === 0 && trigger.everyMs / 60_000 <= SCHEDULE_CUSTOM_STEP_MAX)
       return { kind: 'minutes', every: trigger.everyMs / 60_000, timeZone: getDeviceTimeZone() };
     return unsupported;
   }
@@ -332,7 +330,16 @@ export function applyScheduleRecurrence(
     sameScheduleRecurrence(triggerToRecurrence(previous), recurrence)
   )
     return previous;
-  return recurrenceToTrigger(recurrence, now);
+  const next = recurrenceToTrigger(recurrence, now);
+  // Fixed intervals have no time zone. Compare their duration in case the
+  // editor and the stored trigger use different zones or step units.
+  if (
+    previous?.kind === 'interval' &&
+    next.kind === 'interval' &&
+    previous.everyMs === next.everyMs
+  )
+    return previous;
+  return next;
 }
 
 export function defaultScheduleRecurrence(timeZone = getDeviceTimeZone()): ScheduleRecurrence {

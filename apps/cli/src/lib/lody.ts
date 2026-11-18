@@ -8,7 +8,7 @@ import type {
   NativeSessionBodyFreezeResponse,
 } from '@lody/shared/native-session-body-control';
 import type { CodeCollabFileIndexBackendFactory } from './code-collab/code-collab-file-index-backend';
-import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
+import type { LodyPresenceStateMap, ManagedDaemonUpgradeOptions } from '@lody/shared';
 import { daemonLossObserver } from './e2ee/client-loss-observer';
 import type { AuthorizeEncryptedExecution, EncryptedAgentExecution } from './e2ee/agent-execution';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
@@ -95,6 +95,8 @@ interface LodyOptions {
     upgrade?: ManagedDaemonUpgradeOptions
   ) => Promise<string>;
   closeSessionTerminals?: (sessionId: SessionId) => void;
+  /** See `MessageHandlerConfig.readHostedPresenceStates`. */
+  readHostedPresenceStates?: () => LodyPresenceStateMap[];
   cleanupLocalProjectWorktreeSetupIfUnreferenced?: (
     localProjectId: LocalProjectId
   ) => Promise<void>;
@@ -413,6 +415,7 @@ export class Lody {
           ? { localWorkspaceCatalog: options.localWorkspaceCatalog }
           : {}),
         closeSessionTerminals: options.closeSessionTerminals,
+        readHostedPresenceStates: options.readHostedPresenceStates,
         cleanupLocalProjectWorktreeSetupIfUnreferenced:
           options.cleanupLocalProjectWorktreeSetupIfUnreferenced,
         onInboxAvailabilityChange: options.onInboxAvailabilityChange,

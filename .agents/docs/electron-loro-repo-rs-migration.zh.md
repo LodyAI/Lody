@@ -22,7 +22,7 @@
 
 ### Flock 的具体含义
 
-这里 Flock 是 `@loro-dev/flock-wasm` 的 tuple-key CRDT 表，用于当前值、目录和索引；不是 Unix `flock(2)` 文件锁，也不是整个 Loro 栈的统称。[workspace catalog](../../pnpm-workspace.yaml) 当前为 `loro-repo 0.25.0`、`@loro-dev/flock-wasm ^0.5.0`、Loro `1.17.0`、Mirror `2.3.2`，streams-crdt override 为 `0.20.0`。替换旧 TS Repo/Flock 执行和持久化，不等于取消 Flock 数据模型，也不自动迁移 Loro history 或 Roost。
+这里 Flock 是 `@loro-dev/flock-wasm` 的 tuple-key CRDT 表，用于当前值、目录和索引；不是 Unix `flock(2)` 文件锁，也不是整个 Loro 栈的统称。[workspace catalog](../../pnpm-workspace.yaml) 当前为 `loro-repo 0.26.0`、`@loro-dev/flock-wasm ^0.5.0`、Loro `1.17.0`、Mirror `2.3.2`，streams-crdt override 为 `0.22.0`。替换旧 TS Repo/Flock 执行和持久化，不等于取消 Flock 数据模型，也不自动迁移 Loro history 或 Roost。
 
 | 数据范围 | 模型与标识 | 关键文件 |
 | --- | --- | --- |
@@ -382,9 +382,7 @@ Meta 的正式 0.1.0 scan 隐藏 tombstone，会误把已删除 leaf 回退到�
 
 旧 TS SDK 的 body 落盘、purge、TTL 与默认 sync 也会隐式访问 Meta。接入使用显式
 `createWithExternalMetadata` 工厂与 `loro-external-metadata-v1` 能力，初始化前核实工厂，
-初始化后核实 external 模式；不会创建、读取或同步旧 Meta Flock。当前独立 checkout
-固定使用 SDK #298 合入源码 `5ec71a8f716ab025f314805907fed2704959bf07` 的本地 TS 包，
-不把该能力记为正式 registry 已发布。Rust 三包与旧 TS 包分别核对不可变产物；恢复构建会产生新的原生 artifact，不冒用旧产物身份。
+初始化后核实 external 模式；不会创建、读取或同步旧 Meta Flock。合入主分支 `5438a894baa0e76ccb5357b6869d509b7184c8e6` 后，旧 TS Repo 使用正式 `loro-repo 0.26.0`，已核对发布包包含上述 external metadata 接口；不再覆盖为本地 0.25.1。native engine/client/json-patch 三包仍单独固定不可变产物，不将它们的本地修复误记为正式 0.1.0 能力。
 
 main 保留完整元数据，向 renderer 只投影允许的 Session/Machine 字段及封闭嵌套形状，
 不下发 Agent launch、环境变量或旧 capability 的私密快照。WF/MF/SR 必须先完成原生切换；
@@ -392,11 +390,11 @@ Meta 在 renderer Repo 构造前做独立整组冻结和捕获，避免先启动
 未知提交使原实例停止后续写入，不重放；确认原订阅关闭后新 scope 读回实际状态，使用
 新 generation，不能把 revision 重置灌入旧 SDK cache。只有实际 SDK 的明确未提交错误
 可保留后续无关写入。CLI/main/renderer adapter 的联合验证已覆盖这些边界；桌面四次启动
-迁移用例仍需单独验收。
+迁移用例的实际结果见下节。
 
 ### 本地恢复构建与当前验收边界
 
-当前本地 SDK 从 `5ec71a8f716ab025f314805907fed2704959bf07` 重建并逐文件核对 SDK 来源。新的 macOS arm64 原生 artifact 为 `a7579732cf8b8055fdfb4c302697884bf824ae5ed42573e2b0126694e203cc7f`；旧 TS tarball 重新计算的 SHA256 为 `489a6b4ae44a9993b4c9f9907de6111e5c3a089101afb97073de5d32531b19d9`。它们是本地开发产物，不是 npm 新发布版本。
+native 三包从 `5ec71a8f716ab025f314805907fed2704959bf07` 重建并逐文件核对 SDK 来源。macOS arm64 原生 artifact 为 `a7579732cf8b8055fdfb4c302697884bf824ae5ed42573e2b0126694e203cc7f`。早期验收所用旧 TS tarball 的 SHA256 `489a6b4ae44a9993b4c9f9907de6111e5c3a089101afb97073de5d32531b19d9` 仅保留为历史证据，当前使用正式 0.26.0；native 三包仍是本地开发产物。
 
 四次启动的桌面用例位于 `e2e/src/migration/workspace-meta.ts`。默认先验证 WF/MF/SR、external Meta 和旧正文；`LODY_E2E_NATIVE_SESSION_BODY=1` 额外选择 Session 正文迁移，并读取持久 journal 核对旧会话、新会话及关闭开关后的 owner。默认用例已通过四轮真实 Electron 验收：旧历史、新 ACP 对话、关闭开关后的重启及各轮进程退出均通过。这个结果仅覆盖本地 WF/MF/SR 与 external Meta，Session 正文仍为旧路径。
 

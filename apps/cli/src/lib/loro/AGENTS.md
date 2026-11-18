@@ -36,10 +36,8 @@ Replacement rules: [shared](../../../../../packages/shared/AGENTS.md#session-his
 
 ## Opening a doc pulls its stream
 
-`LoroDocumentManager.getOrCreateSessionDoc()` is not a cheap read.
-`SessionDocument.init()` joins and pulls the room immediately. It stays joined
-in the manager cache until `cleanSessionDoc`; each open costs a subscription and
-full initial sync.
+New wrappers from `LoroDocumentManager.getOrCreateSessionDoc()` start a subscription
+and full stream sync in `SessionDocument.init()`, retained until `cleanSessionDoc`.
 
 Rules:
 
@@ -84,6 +82,8 @@ Per identity, share `repo.sqlite3`, not replicas: Meta/Flock cursors use `create
 `createDocumentRemoteCursorStore` (shared rows: daemon only). No shared
 `remoteCursorStore` or schedule-only `onPersist*`. Test:
 `tests/cli-streams-replica-checkpoints.test.ts`.
+
+The manager's incomplete-recovery scope survives cloud reattachment; cursors remain replica-bound.
 
 ## Shared ACP runtime config contains no secrets
 
@@ -177,9 +177,7 @@ not survive `LODY_LORO_HEALTH_STABILITY_WINDOW_MS` (5s) counts as a failed recov
 charges the attempt counter instead of resetting it, and `force` must not clear that
 history. Regression: `tests/reconnect-storm-repro.test.ts`.
 
-Health follows the meta room. While it is joined, an aggregate `disconnected`
-means one doc or Flock room failed: health reads `rooms-degraded`, a backed-off
-per-room sweep (1s to 30s) retries that room, and cloud side effects keep running. Never
-schedule a transport-wide reconnect for it; one room that never finished its
-initial sync did that every two minutes
-([note](../../../../../.agents/notes/implemented/bug-fix/2026-11-02-cross-machine-read-room-lifetime.md)).
+Health follows the Meta room. While Meta is joined, aggregate `disconnected`
+means a doc/Flock failure: report `rooms-degraded`, retry that room with 1s to 30s
+backoff, and keep cloud side effects running. Never reconnect the whole transport
+for one failed room ([rationale](../../../../../.agents/notes/implemented/bug-fix/2026-11-02-cross-machine-read-room-lifetime.md)).

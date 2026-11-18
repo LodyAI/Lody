@@ -197,6 +197,10 @@ export interface RecoveryRestoreTarget {
    * it is open or partial, which resumes as usual.
    */
   readonly hasIdentity: () => boolean | 'unknown';
+  /** Optionally stage a raw first history page before package I/O, so independent
+   * workspace reads can batch. This grants no trust and allocates no identity;
+   * connect must authenticate it against the package and consume it only once. */
+  readonly prepareHistory?: () => Effect.Effect<void>;
   /** Connect only once the authenticated package names the workspace. */
   readonly connect: (anchor: VaultRestoreAnchor) => Effect.Effect<
     VaultRestorePorts & {
@@ -214,6 +218,14 @@ export interface RecoveryRestoreTarget {
   >;
 }
 
+/** A verified, adopted workspace result; partial keys remain separately marked. */
+export type VaultWorkspaceRestoreResult = {
+  readonly workspaceId: string;
+  readonly name: string;
+  readonly outcome: string;
+  readonly partialEpochKey?: boolean;
+};
+
 /**
  * Restore every workspace a vault covers and this account can name. The genesis comes
  * only from the authenticated package; ledger, checkpoint and key commitment are core's
@@ -224,69 +236,99 @@ export const restoreVaultWorkspaces = Effect.fnUntraced(function* (input: {
   readonly vault: RecoveryVault;
   readonly local: WorkspaceRecoveryInput['local'];
   readonly targets: readonly RecoveryRestoreTarget[];
+  /** Observation only, after that attempt's scope has drained. Observer failure cannot undo it. */
+  readonly onResult?: (result: VaultWorkspaceRestoreResult) => Effect.Effect<void>;
 }) {
-  const results: {
-    readonly workspaceId: string;
-    readonly name: string;
-    readonly outcome: string;
-    readonly partialEpochKey?: boolean;
-  }[] = [];
-  for (const reference of yield* listVaultWorkspaces(input.vault)) {
+  const results = new Map<number, VaultWorkspaceRestoreResult>();
+  const report = Effect.fnUntraced(function* (
+    position: number,
+    result: VaultWorkspaceRestoreResult
+  ) {
+    results.set(position, result);
+    if (input.onResult) yield* Effect.exit(input.onResult(result));
+  });
+  const lanes = new Map<
+    string,
+    Array<{ reference: RecoveryEntryReference; target: RecoveryRestoreTarget; position: number }>
+  >();
+  const references = yield* listVaultWorkspaces(input.vault);
+  for (const [position, reference] of references.entries()) {
     const target = input.targets.find((row) => row.genesisHash === reference.genesis);
     if (!target) continue;
-    const key = restoreProgressKey(target.id);
-    const progress = yield* input.local.read(key);
-    const identity = target.hasIdentity();
-    if (identity === 'unknown' && !isIncomplete(progress)) {
-      results.push({ workspaceId: target.id, name: target.name, outcome: 'Failed' });
-      continue;
-    }
-    if (identity === true && !isIncomplete(progress)) continue;
-    const attempt = Effect.scoped(
-      Effect.gen(function* () {
-        // A finished marker from an earlier vault must not hide this attempt's failure.
-        if (!isOpen(progress)) {
-          const opened = yield* input.local.compareAndSwap(key, progress, RESTORE_OPEN);
-          if (opened !== 'Committed')
-            return yield* Effect.fail(new RecoveryVaultError({ code: 'conflict' }));
-        }
-        let connected: Effect.Success<ReturnType<RecoveryRestoreTarget['connect']>> | undefined;
-        const plan = yield* prepareVaultRestore({
-          vault: input.vault,
-          local: input.local,
-          reference,
-          ports: (anchor) =>
-            Effect.tap(target.connect(anchor), (ports) =>
-              Effect.sync(() => {
-                connected = ports;
-              })
-            ),
-        });
-        const workflow = yield* makeWorkspaceRecovery(plan.workflow);
-        const result = yield* workflow.restoreFromRecovery({
-          personal: connected!.personal,
-          submitOriginalAsRecovery: plan.submitOriginalAsRecovery,
-        });
-        if (result.outcome === 'Committed') {
-          yield* connected!.adopt(connected!.recovered());
-          yield* input.local.compareAndSwap(
-            key,
-            RESTORE_OPEN,
-            result.partialEpochKey === true ? RESTORE_PARTIAL : RESTORE_DONE
-          );
-        }
-        return { outcome: result.outcome as string, partialEpochKey: result.partialEpochKey };
-      })
-    );
-    const exit = yield* Effect.exit(attempt);
-    results.push({
-      workspaceId: target.id,
-      name: target.name,
-      outcome: Exit.isSuccess(exit) ? exit.value.outcome : 'Failed',
-      ...(Exit.isSuccess(exit) ? { partialEpochKey: exit.value.partialEpochKey } : {}),
-    });
+    const lane = lanes.get(target.id) ?? [];
+    lane.push({ reference, target, position });
+    lanes.set(target.id, lane);
   }
-  return results;
+  // Different workspaces own separate journals/identities. Old membership
+  // references for one workspace must retain their original serial order.
+  yield* Effect.forEach(
+    lanes.values(),
+    (lane) =>
+      Effect.gen(function* () {
+        for (const { reference, target, position } of lane) {
+          const key = restoreProgressKey(target.id);
+          const progress = yield* input.local.read(key);
+          const identity = target.hasIdentity();
+          if (identity === 'unknown' && !isIncomplete(progress)) {
+            yield* report(position, {
+              workspaceId: target.id,
+              name: target.name,
+              outcome: 'Failed',
+            });
+            continue;
+          }
+          if (identity === true && !isIncomplete(progress)) continue;
+          if (target.prepareHistory) yield* target.prepareHistory();
+          const attempt = Effect.scoped(
+            Effect.gen(function* () {
+              // A finished marker from an earlier vault must not hide this attempt's failure.
+              if (!isOpen(progress)) {
+                const opened = yield* input.local.compareAndSwap(key, progress, RESTORE_OPEN);
+                if (opened !== 'Committed')
+                  return yield* Effect.fail(new RecoveryVaultError({ code: 'conflict' }));
+              }
+              let connected:
+                | Effect.Success<ReturnType<RecoveryRestoreTarget['connect']>>
+                | undefined;
+              const plan = yield* prepareVaultRestore({
+                vault: input.vault,
+                local: input.local,
+                reference,
+                ports: (anchor) =>
+                  Effect.tap(target.connect(anchor), (ports) =>
+                    Effect.sync(() => {
+                      connected = ports;
+                    })
+                  ),
+              });
+              const workflow = yield* makeWorkspaceRecovery(plan.workflow);
+              const result = yield* workflow.restoreFromRecovery({
+                personal: connected!.personal,
+                submitOriginalAsRecovery: plan.submitOriginalAsRecovery,
+              });
+              if (result.outcome === 'Committed') {
+                yield* connected!.adopt(connected!.recovered());
+                yield* input.local.compareAndSwap(
+                  key,
+                  RESTORE_OPEN,
+                  result.partialEpochKey === true ? RESTORE_PARTIAL : RESTORE_DONE
+                );
+              }
+              return { outcome: result.outcome as string, partialEpochKey: result.partialEpochKey };
+            })
+          );
+          const exit = yield* Effect.exit(attempt);
+          yield* report(position, {
+            workspaceId: target.id,
+            name: target.name,
+            outcome: Exit.isSuccess(exit) ? exit.value.outcome : 'Failed',
+            ...(Exit.isSuccess(exit) ? { partialEpochKey: exit.value.partialEpochKey } : {}),
+          });
+        }
+      }),
+    { concurrency: 4, discard: true }
+  );
+  return [...results].sort(([a], [b]) => a - b).map(([, result]) => result);
 });
 
 /** Restore transport for a personal host. The host owns identity and installation;

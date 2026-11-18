@@ -1,5 +1,5 @@
 import type { WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
-import type { StreamsTransportAdapter } from 'loro-repo/transport/streams';
+import type { StreamsCrdtShardUrlsOptions } from '@loro-dev/streams-crdt';
 import type { LocalLoroDataPlaneConnection } from '@lody/shared/local-loro-transport';
 
 export type LocalSyncMessage = Parameters<LocalLoroDataPlaneConnection['send']>[0];
@@ -11,11 +11,8 @@ export type EagerSyncTransport =
   | { plane: 'local' }
   | {
       plane: 'cloud';
-      options: Pick<
-        ConstructorParameters<typeof StreamsTransportAdapter>[0],
-        'bucketId' | 'metaStreamId' | 'baseUrl' | 'shardUrls'
-      >;
-      streamId: string;
+      streamUrl: string;
+      shardUrls?: StreamsCrdtShardUrlsOptions;
     };
 
 /**
@@ -53,6 +50,6 @@ export type EagerSyncWorkerInput =
   | { type: 'auth-result'; id: number; token?: string };
 
 export type EagerSyncWorkerOutput =
-  | { type: 'complete'; outcome: 'synced' | 'failed' | 'skipped' }
+  | { type: 'complete'; outcome: import('./background-sync-coordinator').PrefetchOutcome }
   | { type: 'local-send'; message: LocalSyncMessage }
   | { type: 'auth'; id: number; context?: EagerSyncAuthContext };

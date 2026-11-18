@@ -17,7 +17,6 @@ type Held = {
   release(): void;
   released: boolean;
   prepared: boolean;
-  retiredOnce: boolean;
   original?: ISession;
   work: Map<string, Work>;
   gate: Semaphore.Semaphore;
@@ -106,22 +105,28 @@ export class SessionNativeBodyMigrationControlLegacy {
       );
     });
   }
+  private retireOriginal(entry: Held): Promise<void> {
+    const pending = entry.work.get('retire');
+    if (pending?.state === 'pending') return pending.promise.then(() => undefined);
+    const original = entry.original;
+    if (!original) return Promise.resolve();
+    // SessionManager retains the exact instance until physical retirement succeeds.
+    // Retry through that owner so successful cleanup also removes its cache/events.
+    const work =
+      this.ports.cached(original.sessionId) === original
+        ? this.ports.retire(original)
+        : original.terminate(true);
+    return work.then(() => {
+      entry.original = undefined;
+    });
+  }
   private prepare(entry: Held) {
     return Effect.gen({ self: this }, function* () {
       this.check(entry);
       if (entry.prepared) return;
       const sessionId = entry.request.sessionId as SessionId;
       if (entry.original) {
-        yield* this.io(entry, 'retire', () => {
-          const original = entry.original;
-          if (!original) return Promise.resolve();
-          const alreadyRetired = entry.retiredOnce;
-          entry.retiredOnce = true;
-          const retired = alreadyRetired ? original.terminate(true) : this.ports.retire(original);
-          return retired.then(() => {
-            entry.original = undefined;
-          });
-        });
+        yield* this.io(entry, 'retire', () => this.retireOriginal(entry));
       }
       this.check(entry);
       yield* this.io(entry, 'flush', () => this.ports.flush(sessionId));
@@ -208,7 +213,6 @@ export class SessionNativeBodyMigrationControlLegacy {
           release,
           released: false,
           prepared: false,
-          retiredOnce: false,
           original: this.ports.cached(request.sessionId as SessionId) ?? undefined,
           work: new Map(),
           gate: Semaphore.makeUnsafe(1),
@@ -291,14 +295,7 @@ export class SessionNativeBodyMigrationControlLegacy {
               const failure = yield* Effect.exit(
                 Effect.gen({ self: this }, function* () {
                   if (entry.original)
-                    yield* this.io(entry, 'cleanup', () => {
-                      const original = entry.original;
-                      return original
-                        ? original.terminate(true).then(() => {
-                            entry.original = undefined;
-                          })
-                        : Promise.resolve();
-                    });
+                    yield* this.io(entry, 'cleanup', () => this.retireOriginal(entry));
                   for (const pending of entry.work.values())
                     if (pending.state === 'pending')
                       yield* Effect.tryPromise({

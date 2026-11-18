@@ -1,3 +1,4 @@
+import { EventEmitter } from 'eventemitter3';
 import { withHistoryPort } from './history-port-fixture';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -251,20 +252,17 @@ function createHarness(options?: {
     isTransportConnected: vi.fn(() => true),
     markMachineFlockDocDirty: vi.fn(),
   };
+  const retirementManager = Object.assign(Object.setPrototypeOf(new EventEmitter(), SessionManager.prototype) as SessionManager, {
+    sessions: options?.migration?.cached ?? new Map(),
+    sessionEventDetachers: new WeakMap(),
+    rebalanceSessionSandboxes: async () => {},
+    logger: createSilentLogger(),
+  });
   const sessionManager = {
     getSession: (id: SessionId) => options?.migration?.cached.get(id) ?? null,
     getPendingSession: (id: SessionId) => options?.migration?.pending.get(id) ?? null,
     retireSessionForReconfiguration: (original: ISession) =>
-      SessionManager.prototype.retireSessionForReconfiguration.call(
-        {
-          sessions: options?.migration?.cached,
-          detachSession: (session: ISession) => {
-            if (options?.migration?.cached.get(session.sessionId) === session)
-              options.migration.cached.delete(session.sessionId);
-          },
-        } as unknown as SessionManager,
-        original
-      ),
+      retirementManager.retireSessionForReconfiguration(original),
     on: vi.fn(),
     setRequestPermissionHandler: vi.fn(),
     getActiveChildSessionIds: vi.fn<SessionManager['getActiveChildSessionIds']>(
@@ -1316,14 +1314,14 @@ describe('MessageHandler local Session body migration admission', () => {
     const started = deferred<void>(),
       stopped = deferred<void>();
     let running = true;
-    migration.cached.set(sessionId, {
+    migration.cached.set(sessionId, Object.assign(new EventEmitter(), {
       sessionId,
       terminate: async () => {
         started.resolve();
         await stopped.promise;
         running = false;
       },
-    } as ISession);
+    }) as ISession);
     try {
       const preparing = handler.handleNativeSessionBodyMigrationControl(request);
       // The barrier is synchronous, before even the ACP termination await.
@@ -1334,7 +1332,7 @@ describe('MessageHandler local Session body migration admission', () => {
       expect(sibling).not.toBeNull();
       sibling?.();
       await started.promise;
-      expect(migration.cached.has(sessionId)).toBe(false);
+      expect(migration.cached.has(sessionId)).toBe(true);
       expect(running).toBe(true);
       // A competing nonce cannot replace the original retained ACP cleanup.
       expect(
@@ -1368,21 +1366,21 @@ describe('MessageHandler local Session body migration admission', () => {
     const started = deferred<void>(),
       stopped = deferred<void>();
     let live = true;
-    migration.cached.set(sessionId, {
+    migration.cached.set(sessionId, Object.assign(new EventEmitter(), {
       sessionId,
       terminate: async () => {
         started.resolve();
         await stopped.promise;
         live = false;
       },
-    } as ISession);
+    }) as ISession);
     try {
       const preparing = handler.handleNativeSessionBodyMigrationControl(request);
       await started.promise;
       await vi.advanceTimersByTimeAsync(5001);
       expect(await preparing).toEqual({ ok: false, error: 'freeze_unconfirmed' });
       expect(live).toBe(true);
-      expect(migration.cached.has(sessionId)).toBe(false);
+      expect(migration.cached.has(sessionId)).toBe(true);
       expect(handler.executionService.tryAcquireSessionRewriteConflictLease(sessionId)).toBeNull();
       const retried = handler.handleNativeSessionBodyMigrationControl(request);
       stopped.resolve();
@@ -1439,14 +1437,14 @@ describe('MessageHandler local Session body migration admission', () => {
     const started = deferred<void>(),
       stopped = deferred<void>();
     let live = true;
-    migration.cached.set(sessionId, {
+    migration.cached.set(sessionId, Object.assign(new EventEmitter(), {
       sessionId,
       terminate: async () => {
         started.resolve();
         await stopped.promise;
         live = false;
       },
-    } as ISession);
+    }) as ISession);
     migration.freeze = async () => {
       throw new Error('Shutdown must not start body migration');
     };
@@ -1489,23 +1487,23 @@ describe('MessageHandler local Session body migration admission', () => {
       await handler.cleanup();
     }
   });
-  it('retains a detached ACP when termination fails and retries that original owner during cleanup', async () => {
+  it('retains the cached ACP when termination fails and retries that original owner during cleanup', async () => {
     const { handler, migration, request, sessionId } = migrationHarness();
     const failure = new Error('Synthetic ACP release failed');
     let mayClose = false,
       open = true;
-    migration.cached.set(sessionId, {
+    migration.cached.set(sessionId, Object.assign(new EventEmitter(), {
       sessionId,
       terminate: async () => {
         if (!mayClose) throw failure;
         open = false;
       },
-    } as ISession);
+    }) as ISession);
     expect(await handler.handleNativeSessionBodyMigrationControl(request)).toEqual({
       ok: false,
       error: 'freeze_unconfirmed',
     });
-    expect(migration.cached.has(sessionId)).toBe(false);
+    expect(migration.cached.has(sessionId)).toBe(true);
     expect(open).toBe(true);
     expect(handler.executionService.tryAcquireSessionRewriteConflictLease(sessionId)).toBeNull();
     const owner = handler.nativeSessionBodyMigration;
@@ -1516,7 +1514,41 @@ describe('MessageHandler local Session body migration admission', () => {
     mayClose = true;
     await owner.close();
     expect(open).toBe(false);
+    expect(migration.cached.has(sessionId)).toBe(false);
     await handler.cleanup();
+  });
+  it('retries retirement through the retained manager before admitting native body preparation', async () => {
+    const { handler, migration, request, sessionId } = migrationHarness();
+    let mayStop = false, live = true;
+    const original = Object.assign(new EventEmitter(), {
+      sessionId,
+      terminate: async () => {
+        if (!mayStop) throw new Error('Synthetic physical retirement failed');
+        live = false;
+      },
+    });
+    migration.cached.set(sessionId, original as ISession);
+    try {
+      expect(await handler.handleNativeSessionBodyMigrationControl(request)).toEqual({
+        ok: false, error: 'freeze_unconfirmed',
+      });
+      expect(migration.cached.get(sessionId)).toBe(original);
+      expect(original.listenerCount('terminated')).toBe(1);
+      expect(live).toBe(true);
+      expect(handler.executionService.tryAcquireSessionRewriteConflictLease(sessionId)).toBeNull();
+      mayStop = true;
+      expect(await handler.handleNativeSessionBodyMigrationControl(request)).toMatchObject({
+        ok: true, prepared: true,
+      });
+      expect(live).toBe(false);
+      expect(migration.cached.has(sessionId)).toBe(false);
+      expect(original.listenerCount('terminated')).toBe(0);
+      expect(await handler.handleNativeSessionBodyMigrationControl({ ...request, phase: 'abort' }))
+        .toMatchObject({ ok: true, released: true });
+    } finally {
+      mayStop = true;
+      await handler.cleanup();
+    }
   });
   it('revalidates each assert and releases a published body only after actual route selection', async () => {
     const { handler, migration, request, sessionId } = migrationHarness();

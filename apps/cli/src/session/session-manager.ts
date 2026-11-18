@@ -1179,7 +1179,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const brokerEnv = await this.ensureGitCredentialBrokerEnv();
     if (!brokerEnv) return nativeSessionCredentials;
     if (!config.sessionId) throw new Error('SessionId is required for GitHub credentials');
-    const credentialOwner = await this.resolveGitHubOwner(config.sessionId, config.requesterUserId);
+    const credentialOwner = await this.resolveGitHubOwner(
+      config.sessionId,
+      config.resume ? undefined : config.requesterUserId
+    );
     const broker = this.gitCredentialBroker;
     if (!broker) throw new Error('GitHub credential broker is required');
     const credentials = acquireSessionCredentialsLegacy(broker, {
@@ -1270,16 +1273,20 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     }
   }
 
-  private async resolveGitHubOwner(sessionId: SessionId, initialOwner: string): Promise<string> {
+  private async resolveGitHubOwner(sessionId: SessionId, initialOwner?: string): Promise<string> {
     const record = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
     const owner = record?.meta?.userId;
     if (typeof owner === 'string' && owner) return owner;
-    if (record?.meta) throw new Error('GitHub session owner is missing');
+    if (record?.meta || !initialOwner) throw new Error('GitHub session owner is missing');
     // A new session has not published metadata yet; its creator is the owner.
     return initialOwner;
   }
 
-  async validateSessionCredentials(session: ISession, requesterUserId: string): Promise<void> {
+  async validateSessionCredentials(
+    session: ISession,
+    requesterUserId: string,
+    ownerChange?: 'replace-before-prompt'
+  ): Promise<void | 'retired'> {
     await session.validateMcpRequester?.(requesterUserId);
     const credentials = session.getGitHubCredentials();
     if (credentials.mode === 'native') return;
@@ -1291,20 +1298,27 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     ) {
       throw new GitCredentialContextError({ message: 'github_runtime_context_invalid' });
     }
-    const owner = await this.resolveGitHubOwner(session.sessionId, requesterUserId);
+    const owner = await this.resolveGitHubOwner(
+      session.sessionId,
+      lease.context.requesterUserId === requesterUserId ? requesterUserId : undefined
+    );
     // The runtime may have been retired while trusted metadata was loading.
     if (!lease.active)
       throw new GitCredentialContextError({ message: 'github_runtime_context_released' });
     if (lease.context.requesterUserId !== owner) {
+      const replace =
+        ownerChange === 'replace-before-prompt' && this.getSession(session.sessionId) === session;
       try {
         lease.revoke();
       } finally {
-        await session.terminate(true);
+        if (replace) {
+          await this.retireSessionForReconfiguration(session);
+        } else {
+          await session.terminate(true);
+        }
       }
-      throw new GitCredentialContextError({
-        message:
-          'github_owner_changed: previous session processes were closed; start a new turn with the new owner',
-      });
+      if (replace) return 'retired';
+      throw new GitCredentialContextError({ message: 'github_owner_changed' });
     }
   }
 
@@ -1836,11 +1850,23 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
   /** Retire an instance between prompts without ending its execution owner's turn. */
   async retireSessionForReconfiguration(session: ISession): Promise<void> {
-    if (this.sessions.get(session.sessionId) !== session)
-      throw new Error('Session changed before reconfiguration');
-    // Reconfiguration and stale-prompt replacement preserve the live history owner.
+    const current = this.sessions.get(session.sessionId);
+    if (!current || current !== session) throw new Error('Session changed before reconfiguration');
+    // Suppress agent-death events for the continuing turn. Keep custody of the
+    // exact instance until physical retirement succeeds, including on failure.
+    this.sessionEventDetachers.get(session)?.();
+    this.sessionEventDetachers.delete(session);
+    try {
+      await session.terminate(true);
+    } catch (error) {
+      if (
+        this.sessions.get(session.sessionId) === current &&
+        !this.sessionEventDetachers.has(current)
+      )
+        this.registerSessionEvents(current);
+      throw error;
+    }
     this.detachSession(session);
-    await session.terminate(true);
   }
 
   async terminateSession(sessionId: SessionId, force: boolean = false): Promise<void> {

@@ -167,3 +167,45 @@ export const BrowserHostReplacingElsewhere: Story = {
 export const MobileHostNoVault: Story = {
   args: { ...NoVault.args, browser: { canCreate: false } },
 };
+
+/** The real recovery section: one adopted workspace stays visible while a peer waits. */
+export const RestoreInProgress: Story = {
+  args: { plan: 'unreadable' },
+  render: () => {
+    const plan: RecoveryPlan = {
+      hasVault: true,
+      replacing: false,
+      methods: { hasFile: true, hasPassword: false, hasPasskey: false },
+      covered: [],
+      uncovered: [
+        { id: 'design', name: 'Design' },
+        { id: 'platform', name: 'Platform' },
+        { id: 'archive', name: 'Archive' },
+      ],
+    };
+    const port: RecoveryPort = {
+      ...browserPort(plan as unknown as Plan, false),
+      restore: (_method, _options, onResult) => {
+        onResult?.({ workspaceId: 'design', name: 'Design', outcome: 'Committed' });
+        onResult?.({
+          workspaceId: 'archive',
+          name: 'Archive',
+          outcome: 'Committed',
+          partialEpochKey: true,
+        });
+        return new Promise(() => {});
+      },
+    };
+    const store = createStore();
+    store.set(e2eeRecoveryVaultEnabledAtom, true);
+    return (
+      <Provider store={store}>
+        <E2eeRecoveryHostContext.Provider value={{ port }}>
+          <div className="w-full max-w-[640px] bg-background p-4">
+            <RecoveryVaultSection accountId="synthetic-preview" />
+          </div>
+        </E2eeRecoveryHostContext.Provider>
+      </Provider>
+    );
+  },
+};

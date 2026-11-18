@@ -77,7 +77,8 @@ contract and can delay completion independently of stdio. See the
 Execution publishes typed terminal facts using the frozen invocation requester and
 input turn identity. Input author provenance determines result audience; Session
 containment does not. `onTurnOutcome` is attempted once, even on failure; its consumer
-publishes the latest desktop projection and submits mobile independently. Installing
+publishes the latest desktop projection and submits mobile independently (skipped while the
+recipient has a focused desktop). Installing
 this consumer disables the legacy execution completion sender. Older embedders retain
 that callback. No notification journal, retry or replay. See [notification ownership rules](../lib/notifications/AGENTS.md).
 A notification failure cannot replay Agent execution.
@@ -441,7 +442,8 @@ uses a Session ID lookup. `SessionConfig` carries no credential policy. Session
 creation owns the lease and a failed creation releases it. Validation on create,
 continue, recovery and steer checks that runtime's lease and trusted owner. Owner
 changes revoke it and retire the old runtime, since children retain their old
-environments. Operations are not replayed.
+environments. An unsubmitted prompt can continue on one freshly validated replacement
+within its turn. Active steers remain bound to their original process.
 
 See [the contract](../../../../specs/github-identity-fallback.md) and
 [worktree rules](worktree/AGENTS.md) for ownership, write non-replay and isolation.

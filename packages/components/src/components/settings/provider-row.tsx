@@ -44,19 +44,19 @@ export type ProviderRefreshHandler = (
   options?: { onModelOptionsProgress?: (progress: AcpModelOptionsRefreshProgress) => void }
 ) => Promise<void>;
 
-/** The panel, rather than the viewport, decides whether quota fits beside the name. */
-const ROOMY = '@container (min-width: 28rem)';
-
 const styles = stylex.create({
-  root: { minWidth: 0, containerType: 'inline-size' },
+  root: { minWidth: 0 },
   row: {
     display: 'grid',
-    gridTemplateColumns: { default: 'minmax(0, 1fr) auto', [ROOMY]: 'minmax(0, 1fr) auto auto' },
+    gridTemplateColumns: 'minmax(0, 1fr) auto',
     alignItems: 'center',
     minWidth: 0,
     paddingInlineEnd: space[4],
   },
   main: { gridColumn: 1, gridRow: 1, gap: '10px', paddingInline: space[4], paddingBlock: space[2] },
+  // When quota follows on the next grid row, the main button's bottom padding
+  // becomes the inter-line gap instead of the row's edge — hand it to `usage`.
+  mainWithUsage: { paddingBlockEnd: 0 },
   mainList: {
     gridColumn: 1,
     gridRow: 1,
@@ -77,17 +77,20 @@ const styles = stylex.create({
   glyph: { width: '16px', height: '16px' },
   glyphList: { width: '20px', height: '20px' },
   body: { flexGrow: 1, minWidth: 0 },
+  // Quota is never worth the name it would squeeze: it takes the line under
+  // the identity, aligned with the name text, and wraps at full row width.
   usage: {
-    gridColumn: { default: '1 / -1', [ROOMY]: '2' },
-    gridRow: { default: 2, [ROOMY]: 1 },
+    gridColumn: '1 / -1',
+    gridRow: 2,
     display: 'flex',
-    justifyContent: { default: 'flex-start', [ROOMY]: 'flex-end' },
-    paddingInlineStart: { default: '50px', [ROOMY]: 0 },
-    paddingBottom: { default: space[2], [ROOMY]: 0 },
+    justifyContent: 'flex-start',
+    paddingInlineStart: '50px',
+    paddingTop: space[1],
+    paddingBottom: space[2],
   },
-  usageList: { paddingInlineStart: { default: '60px', [ROOMY]: 0 } },
+  usageList: { paddingInlineStart: '60px' },
   trailing: {
-    gridColumn: { default: 2, [ROOMY]: 3 },
+    gridColumn: 2,
     gridRow: 1,
     display: 'flex',
     alignItems: 'center',
@@ -297,7 +300,11 @@ export function ProviderRow({
         <button
           type="button"
           onClick={() => onEdit(config)}
-          {...stylex.props(catalog.rowMain, compact ? styles.main : styles.mainList)}
+          {...stylex.props(
+            catalog.rowMain,
+            compact ? styles.main : styles.mainList,
+            hasUsageSummary && styles.mainWithUsage
+          )}
           aria-label={t('agents.editConfig', 'Edit config')}
         >
           <div {...stylex.props(styles.icon, !compact && styles.iconList)}>

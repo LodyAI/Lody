@@ -161,7 +161,11 @@ function containsSnapshot(doc: LoroDoc, snapshot: Uint8Array): boolean {
 export function createSessionSnapshotLoader(storage: Pick<StorageAdapter, 'loadDoc' | 'save'>) {
   const pending = new Map<
     string,
-    { snapshot: Promise<Uint8Array | undefined>; loaded?: LoroDoc }
+    {
+      snapshot: Promise<Uint8Array | undefined>;
+      loaded?: LoroDoc;
+      onDurable?: (doc: LoroDoc) => Promise<void>;
+    }
   >();
   const loadDoc = storage.loadDoc;
   storage.loadDoc = async (room) => {
@@ -173,7 +177,10 @@ export function createSessionSnapshotLoader(storage: Pick<StorageAdapter, 'loadD
     try {
       // The cache entry outlives its first merge. Reopening a long conversation
       // must not decode, import and rewrite its whole history again.
-      if (persisted && containsSnapshot(persisted, snapshot)) return persisted;
+      if (persisted && containsSnapshot(persisted, snapshot)) {
+        await request.onDurable?.(persisted).catch(() => {});
+        return persisted;
+      }
       // This candidate is not yet owned by Repo, so merge into it directly: a
       // rebuilt copy decodes the whole history twice more on the UI thread and
       // drops received updates still waiting for missing causal dependencies.
@@ -186,6 +193,7 @@ export function createSessionSnapshotLoader(storage: Pick<StorageAdapter, 'loadD
         docId: room,
         snapshot: seeded.export({ mode: 'snapshot' }),
       });
+      await request.onDurable?.(seeded).catch(() => {});
       request.loaded = seeded;
       return seeded;
     } catch {
@@ -197,9 +205,15 @@ export function createSessionSnapshotLoader(storage: Pick<StorageAdapter, 'loadD
   return async (
     repo: Pick<LoroRepo, 'openPersistedDoc'>,
     room: string,
-    readSnapshot: () => Promise<Uint8Array | undefined>
+    readSnapshot: () => Promise<Uint8Array | undefined>,
+    onDurable?: (doc: LoroDoc) => Promise<void>
   ) => {
-    const request: { snapshot: Promise<Uint8Array | undefined>; loaded?: LoroDoc } = {
+    const request: {
+      snapshot: Promise<Uint8Array | undefined>;
+      loaded?: LoroDoc;
+      onDurable?: (doc: LoroDoc) => Promise<void>;
+    } = {
+      onDurable,
       snapshot: Promise.resolve()
         .then(readSnapshot)
         .catch(() => undefined),

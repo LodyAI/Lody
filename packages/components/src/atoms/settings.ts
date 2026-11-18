@@ -211,6 +211,13 @@ export const electronSessionCompletionNotificationsEnabledAtom = atomWithStorage
   true
 );
 
+// Desktop app, per computer: while this window is focused, the Host that finishes
+// one of your turns skips the mobile push (published as `desktop-foreground` presence).
+export const electronSuppressMobilePushWhenFocusedAtom = atomWithStorage<boolean>(
+  'lody-electron-suppress-mobile-push-when-focused',
+  true
+);
+
 // File viewer (Monaco) line-wrap toggle. Defaults on so a long single line
 // (e.g. an unwrapped Markdown paragraph) stays readable without horizontal
 // scrolling — especially on mobile. Shared by every SessionMonacoTextViewer

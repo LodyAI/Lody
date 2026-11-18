@@ -22,6 +22,7 @@ import { squashProcessFailure } from '@lody/shared/node/process'
 import { Layer } from 'effect'
 import { bindUserShellEnvCacheLegacy } from './services/shell-env'
 import { handleWindowContentReady } from './window-target'
+import { installPowerStateBroadcast } from './power-state-broadcast'
 import { installLocalFileResourceProtocol } from './services/local-file-resource-protocol'
 import { app, BrowserWindow, dialog, safeStorage } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
@@ -272,6 +273,7 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
     await applyPendingDesktopLocalReset()
     await startDevbarDevframeService()
     recordE2EBootDiagnostic('initializing-services')
+    installPowerStateBroadcast()
     if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(macIcon)
     const appIconService = createElectronAppIconService(macIcon, aquaIcon)
     if (process.platform === 'darwin' && app.isPackaged) {

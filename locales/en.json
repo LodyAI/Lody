@@ -1,4 +1,5 @@
 {
+  "e2ee.recovery.restoreWorking": "{{name}}: restoring…",
   "e2ee.deviceIdentity.modelUnknown": "Model unavailable",
   "e2ee.deviceIdentity.osVersionUnavailable": "OS version unavailable",
   "e2ee.deviceIdentity.personal": "Personal device",
@@ -2476,6 +2477,7 @@
   "sessions.fileViewer.copyRelativePath": "Copy relative path",
   "sessions.fileViewer.htmlPreview.allowScripts": "Allow JavaScript",
   "sessions.fileViewer.htmlPreview.allowScriptsHint": "Only allow this for pages you trust. Scripts can make network requests.",
+  "sessions.fileViewer.htmlPreview.allowWorkspaceResources": "Allow this page to read files in {{folder}}",
   "sessions.fileViewer.htmlPreview.consentDescription": "The page opens from the file on disk and may load files from its own folder, such as stylesheets and images. It runs isolated from Lody.",
   "sessions.fileViewer.htmlPreview.consentTitle": "Preview {{fileName}}?",
   "sessions.fileViewer.htmlPreview.navigationDisabled": "Navigation is disabled for self-contained HTML previews.",
@@ -2858,6 +2860,7 @@
   "sessions.messageQueue.editMessage": "Edit queued message",
   "sessions.messageQueue.guide": "Steer the active response with this message",
   "sessions.messageQueue.guideAction": "Steer",
+  "sessions.messageQueue.attachmentOnly": "[Attachment]",
   "sessions.messageQueue.imageOnly": "[Image message]",
   "sessions.messageQueue.queuedCount": "{{count}} queued",
   "sessions.messageQueue.scheduledCount": "{{count}} scheduled",
@@ -6833,5 +6836,7 @@
   "settings.agent.credentials.env.keep": "Keep saved",
   "settings.agent.credentials.env.replace": "Replace all",
   "settings.agent.credentials.env.clear": "Clear all",
-  "settings.agent.credentials.env.entries": "Change individual keys"
+  "settings.agent.credentials.env.entries": "Change individual keys",
+  "settings.general.suppressMobilePushWhenFocused.label": "Pause phone notifications while using this computer",
+  "settings.general.suppressMobilePushWhenFocused.helper": "While Lody is focused on this computer, finished tasks skip your phone. Permission requests and questions still notify."
 }

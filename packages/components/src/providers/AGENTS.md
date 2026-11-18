@@ -16,6 +16,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 ## Streams connection cardinality
 
+- WebSocket defaults off; enabling it must retain HTTP shards and HTTP-only prefetch.
 - Discovery/refresh reuse existing workspace Machine Flock/RPC transports, with no
   subscription per request. Connections follow workspace/machine topology; more configs
   add serialized RPCs only. Release unowned handles and subscriptions.
@@ -54,21 +55,23 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   receipts, workspace ownership, autofocus and external-history refresh until
   presentation. Raw background prefetch never gains this exception.
 
-- Background Session prefetch must never acquire a UI Session store or create a
-  Mirror. Its disposable worker owns raw Doc import/export and a separate,
-  rebuildable snapshot cache. Keep one worker task per renderer, terminate before
-  releasing its slot, and detach local peers from the parent on cancellation. The
-  parent must check the durable activity checkpoint before constructing a worker;
-  scope cache rows by workspace and room so auxiliary windows share them.
-  Keep the timestamp-only high-water index as the pre-queue startup filter; it
-  must not load snapshots, Docs, histories, or foreground cursor state.
+- Background prefetch keeps raw Doc import/export in one disposable worker per renderer
+  with a separate rebuildable snapshot cache. Never acquire UI Session stores or Mirrors.
+  Terminate workers before releasing slots or workspace/room/authorization/plane
+  locks; cancellation detaches local peers. Recheck checkpoints under the claim before
+  constructing workers; skip unavailable locks. Bound metadata waits; retries
+  never confirm sync. Classify `apply_incomplete` separately from network failures; checkpoints retain
+  its 24-hour cap (`eager-sync-admission.ts`).
+  Scope cross-window cache rows by workspace/room. Queue filtering uses
+  timestamp-only high-water marks, never snapshots, Docs, histories or foreground cursors.
   Foreground acquisition cancels that room's prefetch and merges cached binary
-  state into the existing repo document; never replace unsent local edits or share
-  the UI repo's persistence/cursors with the worker. Intent:
+  into its existing Repo document, preserving unsent edits. Keep worker/UI
+  persistence and cursors separate. Seed empty foreground cursors only after
+  durable merges under cross-window exclusion. Intent:
   [background prefetch](../../../../specs/session-background-prefetch.zh.md).
-- Keep one Repo view across auth refresh and unrelated mode-cache changes;
-  `WorkspaceTargetRouter` owns target/transport selection.
-  Never restore a second writer or proxy-authoring/write-intent mirror.
+- Keep one Repo view and recovery owner across auth refresh, adapter replacement
+  and unrelated mode-cache changes. `WorkspaceTargetRouter` owns target/transport selection.
+  Never restore proxy-authoring/write-intent mirrors or additional writers.
 - Runtime close retries recoverable cleanup, retaining fencing until confirmed Repo destruction.
   Failed startup shares this close path.
 - Local-only bootstrap exchanges CRDT snapshots only from already owned documents

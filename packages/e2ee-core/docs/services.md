@@ -113,6 +113,13 @@ compare-and-swap. It never receives the unlock secret, the vault master key or
 a private recovery key. Wire schemas are in `@lody/e2ee-core/host`; see the
 [backend guide](backend-guide.md#5-recovery-vault).
 
+Optional `RecoveryVaultStore.readEntries` reads 1–8 distinct ids in request order,
+with null for missing entries and a 256 KiB combined body budget. Password unlock
+uses it for its fixed eight slots, validates count and ids, then performs the same
+candidate selection, Argon2id, active-index authentication and rollback checks.
+Adapters use four concurrent original reads only when the endpoint is definitively
+absent on an older deployment; other refusals and malformed replies remain failures.
+
 `RecoveryVault.readEntry` borrows its own temporary master-key copy under the
 session lock, then releases that lock before fetching immutable ciphertext. A
 slow workspace package cannot block another package read or index access. The

@@ -17,6 +17,7 @@ import {
   machineFlockKeys,
   writeMachineFlockRowToFlock,
   getAcpConfigOptionsModelId,
+  getAcpConfigOptionStructureKey,
   writeAcpModelConfigOptionsToFlock,
   shouldRenewAcpCapabilityFetchTime,
   type MachineFlockWritableFlock,
@@ -65,6 +66,7 @@ const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry):
     authMethods: entry.authMethods,
     sessionFork: entry.sessionFork,
     acknowledgedSteer: entry.acknowledgedSteer,
+    goalActions: entry.goalActions,
     sessionTitle: entry.sessionTitle,
     rateLimits: entry.rateLimits,
     sessionForkWorktree: entry.sessionForkWorktree,
@@ -162,6 +164,17 @@ export function publishMachineAcpCapabilities(
     sourceVersion,
     modelAnswers
   );
+  // Preserve the probe/default selection when only this Session's model or
+  // effort changed; its per-model answer was captured immediately above.
+  if (
+    existing?.sourceVersion === sourceVersion &&
+    existing.configOptions &&
+    entry.configOptions &&
+    getAcpConfigOptionStructureKey(existing.configOptions) ===
+      getAcpConfigOptionStructureKey(entry.configOptions)
+  ) {
+    entry.configOptions = existing.configOptions;
+  }
   const capabilityUnchanged =
     existing &&
     serializeAcpCapabilityWithoutFetchTime(existing) ===

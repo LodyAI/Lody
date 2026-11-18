@@ -207,6 +207,8 @@ vi.mock('loro-repo/transport/streams', () => ({
     constructor(readonly options: unknown) {
       mocks.streamsTransportConstructors(options);
     }
+    joinFlockDocRoom = vi.fn();
+    syncFlockDoc = vi.fn();
     connect = mocks.streamsConnect;
     close = vi.fn(async () => undefined);
     reconnect = vi.fn(async () => undefined);

@@ -6,7 +6,7 @@ PR: https://github.com/LodyAI/Lody/pull/499
 
 [English](2026-09-07-ci-affected-tests.md) | 中文
 
-后续：[CI 测试分组与 pnpm store 缓存](2026-09-26-ci-test-groups-and-pnpm-store-cache.zh.md) 把 `Tests` 拆成按 runner 划分的几组，必需检查名不变。
+后续：[CI 测试分组与 pnpm store 缓存](2026-09-26-ci-test-groups-and-pnpm-store-cache.zh.md) 把 `Tests` 拆成按 runner 划分的几组，必需检查名不变。[Vitest 相关测试](2026-11-17-ci-vitest-related-tests.zh.md) 重新评估备选方案 5，把 PR 的 Vitest 套件收窄到文件级。
 
 ## 摘要
 
