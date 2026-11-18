@@ -175,12 +175,13 @@ describe('SessionManager sandbox rebalance', () => {
   });
 
   it('keeps the conversation owner when another participant starts a turn', async () => {
+    const document = createWorkspaceDocument();
     const manager = new SessionManager(
       createSilentLogger(),
       'token',
       'machine-1',
       'workspace-1',
-      createWorkspaceDocument(),
+      document,
       { cloudPort: createTestCloudPort() }
     );
     const tokenManager = {
@@ -210,6 +211,10 @@ describe('SessionManager sandbox rebalance', () => {
 
     try {
       await manager.validateSessionCredentials(session, 'user-2');
+      vi.mocked(document.repo.getDocMeta).mockResolvedValue(undefined as never);
+      await expect(
+        manager.validateSessionCredentials(session, 'user-2', 'replace-before-prompt')
+      ).rejects.toThrow('GitHub session owner is missing');
       expect(credentials.mode).toBe('managed');
       if (credentials.mode === 'managed') {
         expect(credentials.lease.active).toBe(true);
@@ -221,101 +226,146 @@ describe('SessionManager sandbox rebalance', () => {
     }
   });
 
-  it('scrubs the new owner environment and retires the old runtime on ownership transfer', async () => {
-    const directory = mkdtempSync(path.join(os.tmpdir(), 'lody-owner-transfer-'));
-    vi.stubEnv('LODY_DATA_DIR', directory);
-    vi.stubEnv('GH_TOKEN', 'machine-owner-secret');
-    vi.stubEnv('GITHUB_TOKEN', 'machine-owner-secondary');
-    const document = createWorkspaceDocument();
-    vi.mocked(document.repo.getDocMeta).mockResolvedValue({ meta: { userId: 'user-2' } } as never);
-    const manager = new SessionManager(
-      createSilentLogger(),
-      'token',
-      'machine-1',
-      'workspace-1',
-      document,
-      { cloudPort: createTestCloudPort() }
-    );
-    const tokenManager = {} as GitHubTokenManager;
-    const broker = new GitCredentialBroker({
-      tokenManager,
-      logger: createSilentLogger(),
-      workspaceId: 'workspace-1',
-      ownerUserId: 'user-1',
-    });
-    const credentials = acquireSessionCredentialsLegacy(broker, {
-      sessionId: 'session-1',
-      requesterUserId: 'user-1',
-      machineId: 'machine-1',
-    });
-    Object.assign(manager, { githubTokenManager: tokenManager, gitCredentialBroker: broker });
-    const config = createConfig('session-1');
-    const sandbox = createSandbox();
-    const child = Object.assign(new EventEmitter(), {
-      pid: 1234,
-      exitCode: null as number | null,
-    }) as ChildProcess;
-    let terminalEnv: NodeJS.ProcessEnv | undefined;
-    vi.spyOn(sandbox, 'spawn').mockImplementation(async (_command, _args, options) => {
-      terminalEnv = options.env;
-      return {
-        child,
-        inspectExit: async () => null,
-        onStdout: () => () => {},
-        onStderr: () => () => {},
-        onExit: (listener) => {
-          child.on('exit', listener);
-          return () => child.off('exit', listener);
-        },
-        onClose: (listener) => {
-          child.on('close', listener);
-          return () => child.off('close', listener);
-        },
-        onError: (listener) => {
-          child.on('error', listener);
-          return () => child.off('error', listener);
-        },
-        terminate: async () => {
-          child.exitCode = 0;
-          child.emit('exit', 0, null);
-          child.emit('close', 0, null);
-        },
+  it.each(['prompt', 'steer', 'cleanup failure'] as const)(
+    'scrubs the old environment on ownership transfer during %s',
+    async (operation) => {
+      const directory = mkdtempSync(path.join(os.tmpdir(), 'lody-owner-transfer-'));
+      vi.stubEnv('LODY_DATA_DIR', directory);
+      vi.stubEnv('GH_TOKEN', 'machine-owner-secret');
+      vi.stubEnv('GITHUB_TOKEN', 'machine-owner-secondary');
+      const document = createWorkspaceDocument();
+      vi.mocked(document.repo.getDocMeta).mockResolvedValue({
+        meta: { userId: 'user-2' },
+      } as never);
+      const sandbox = createSandbox();
+      const manager = new SessionManager(
+        createSilentLogger(),
+        'token',
+        'machine-1',
+        'workspace-1',
+        document,
+        { cloudPort: createTestCloudPort(), sessionSandboxFactory: async () => sandbox }
+      );
+      const tokenManager = {} as GitHubTokenManager;
+      const broker = new GitCredentialBroker({
+        tokenManager,
+        logger: createSilentLogger(),
+        workspaceId: 'workspace-1',
+        ownerUserId: 'user-1',
+      });
+      const credentials = acquireSessionCredentialsLegacy(broker, {
+        sessionId: 'session-1',
+        requesterUserId: 'user-1',
+        machineId: 'machine-1',
+      });
+      Object.assign(manager, { githubTokenManager: tokenManager, gitCredentialBroker: broker });
+      const config = createConfig('session-1');
+      const child = Object.assign(new EventEmitter(), {
+        pid: 1234,
+        exitCode: null as number | null,
+      }) as ChildProcess;
+      let terminalEnv: NodeJS.ProcessEnv | undefined;
+      vi.spyOn(sandbox, 'spawn').mockImplementation(async (_command, _args, options) => {
+        terminalEnv = options.env;
+        return {
+          child,
+          inspectExit: async () => null,
+          onStdout: () => () => {},
+          onStderr: () => () => {},
+          onExit: (listener) => {
+            child.on('exit', listener);
+            return () => child.off('exit', listener);
+          },
+          onClose: (listener) => {
+            child.on('close', listener);
+            return () => child.off('close', listener);
+          },
+          onError: (listener) => {
+            child.on('error', listener);
+            return () => child.off('error', listener);
+          },
+          terminate: async () => {
+            child.exitCode = 0;
+            child.emit('exit', 0, null);
+            child.emit('close', 0, null);
+          },
+        };
+      });
+      const internals = manager as unknown as {
+        createSessionInner(
+          config: SessionConfig,
+          credentials: SessionCredentials
+        ): Promise<Session>;
+        prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<SessionCredentials>;
       };
-    });
-    const session = new Session(config, createSilentLogger(), directory, sandbox, credentials);
-    session.acpSessionId = 'old-owner-acp' as ACPSessionId;
-    await session.terminalManager.createTerminal(
-      session.acpSessionId,
-      'fixture',
-      ['keep-open'],
-      directory
-    );
-    expect(terminalEnv?.GH_TOKEN).toBe('machine-owner-secret');
-    const shell = session as unknown as { buildShellEnv(): NodeJS.ProcessEnv };
-    expect(shell.buildShellEnv().GH_TOKEN).toBe('machine-owner-secret');
-    let terminated = false;
-    session.on('terminated', () => {
-      terminated = true;
-    });
-    try {
-      await expect(manager.validateSessionCredentials(session, 'user-2')).rejects.toThrow(
-        'github_owner_changed'
+      const session = await internals.createSessionInner(
+        { ...config, workdir: directory },
+        credentials
       );
-      expect(credentials.mode === 'managed' && credentials.lease.active).toBe(false);
-      expect(shell.buildShellEnv().GH_TOKEN).toBeUndefined();
-      expect(shell.buildShellEnv().GITHUB_TOKEN).toBeUndefined();
-      expect(terminated).toBe(true);
-      expect(child.exitCode).toBe(0);
-      expect(session.acpSessionId).toBeNull();
-      await expect(session.exec('git', ['status'], directory, false)).rejects.toThrow(
-        'not running'
+      session.acpSessionId = 'old-owner-acp' as ACPSessionId;
+      await session.terminalManager.createTerminal(
+        session.acpSessionId,
+        'fixture',
+        ['keep-open'],
+        directory
       );
-    } finally {
-      await broker.shutdown();
-      vi.unstubAllEnvs();
-      rmSync(directory, { recursive: true, force: true });
+      expect(terminalEnv?.GH_TOKEN).toBe('machine-owner-secret');
+      const shell = session as unknown as { buildShellEnv(): NodeJS.ProcessEnv };
+      expect(shell.buildShellEnv().GH_TOKEN).toBe('machine-owner-secret');
+      let terminated = false;
+      session.on('terminated', () => {
+        terminated = true;
+      });
+      try {
+        if (operation === 'cleanup failure') {
+          vi.spyOn(sandbox, 'terminate').mockRejectedValueOnce(new Error('process survived'));
+          await expect(
+            manager.validateSessionCredentials(session, 'user-2', 'replace-before-prompt')
+          ).rejects.toThrow('resources were not released');
+          expect(manager.getSession(config.sessionId!)).toBe(session);
+          expect(terminated).toBe(false);
+          expect(credentials.mode === 'managed' && credentials.lease.active).toBe(false);
+          await manager.terminateSession(session.sessionId, true);
+        } else if (operation === 'prompt') {
+          await expect(
+            manager.validateSessionCredentials(session, 'user-2', 'replace-before-prompt')
+          ).resolves.toBe('retired');
+          const replacement = await internals.prepareGitHubRepoSessionConfig({
+            ...config,
+            resume: true,
+          });
+          try {
+            if (replacement.mode !== 'managed' || credentials.mode !== 'managed')
+              throw new Error('Expected managed credentials');
+            expect(replacement.lease.active).toBe(true);
+            expect(replacement.lease.context.requesterUserId).toBe('user-2');
+            expect(replacement.lease.allowLocalAuth).toBe(false);
+            expect(replacement.lease.contextToken).not.toBe(credentials.lease.contextToken);
+          } finally {
+            await replacement.release();
+          }
+        } else {
+          await expect(manager.validateSessionCredentials(session, 'user-2')).rejects.toThrow(
+            'github_owner_changed'
+          );
+        }
+        expect(manager.getSession(config.sessionId!)).toBeNull();
+        expect(credentials.mode === 'managed' && credentials.lease.active).toBe(false);
+        expect(shell.buildShellEnv().GH_TOKEN).toBeUndefined();
+        expect(shell.buildShellEnv().GITHUB_TOKEN).toBeUndefined();
+        expect(terminated).toBe(true);
+        expect(child.exitCode).toBe(0);
+        expect(session.acpSessionId).toBeNull();
+        await expect(session.exec('git', ['status'], directory, false)).rejects.toThrow(
+          'not running'
+        );
+      } finally {
+        await broker.shutdown();
+        vi.unstubAllEnvs();
+        rmSync(directory, { recursive: true, force: true });
+      }
     }
-  });
+  );
 
   it.each([false, true])(
     'keeps local project native credentials (worktree=%s)',

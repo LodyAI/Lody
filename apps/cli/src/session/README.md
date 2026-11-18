@@ -442,7 +442,8 @@ uses a Session ID lookup. `SessionConfig` carries no credential policy. Session
 creation owns the lease and a failed creation releases it. Validation on create,
 continue, recovery and steer checks that runtime's lease and trusted owner. Owner
 changes revoke it and retire the old runtime, since children retain their old
-environments. Operations are not replayed.
+environments. An unsubmitted prompt can continue on one freshly validated replacement
+within its turn. Active steers remain bound to their original process.
 
 See [the contract](../../../../specs/github-identity-fallback.md) and
 [worktree rules](worktree/AGENTS.md) for ownership, write non-replay and isolation.
