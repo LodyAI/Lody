@@ -72,8 +72,33 @@ export function registerSessions(
   });
   channel.handle('retryPendingInput', async ({ sessionId, inputId }) => {
     if (!state.workspace || !state.userId) throw new Error('workspace_changed');
-    await actOnPendingInput(sessionId, inputId, 'retry');
-    return {};
+    const workspace = state.workspace,
+      userId = state.userId;
+    return actOnPendingInput(sessionId, inputId, 'retry', () => {
+      if (state.workspace !== workspace || state.userId !== userId)
+        throw new Error('workspace_changed');
+      const replica = state.metaReplica;
+      if (!replica) throw new Error('metadata_not_ready');
+      const room = `session-${sessionId}`;
+      const meta = sessionActionMeta(
+        replica.flock.get(['m', room]),
+        replica.flock.scan({ prefix: ['m', room] }),
+        replica.flock.get(['e', room]),
+      );
+      if (
+        !meta ||
+        meta.isArchived ||
+        !meta.machineId ||
+        (meta.historyBackend && meta.historyBackend !== 'loro')
+      )
+        throw new Error('session_not_ready');
+      if (
+        meta.lastMissingHistoryUserMsgId === inputId ||
+        meta.missingHistoryUserMsgIds?.[inputId] === true
+      )
+        throw new Error('input_already_terminal');
+      return { userId, machineId: meta.machineId };
+    });
   });
   channel.handle('forkSession', async (args) => {
     const replica = metaWrite(args, true);

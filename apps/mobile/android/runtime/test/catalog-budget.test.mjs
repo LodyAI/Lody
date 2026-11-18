@@ -163,3 +163,33 @@ test('stopping a catalog during transport recovery prevents late publication and
  assert.equal(c.bootstraps,1);
  assert.equal(c.requests.length,1);
 });
+
+test('session and Machine RPC uploads keep the native 15-second deadline with the real Streams client', async t => {
+ t.mock.timers.enable({apis:['setTimeout']});
+ const sessionSource=await readFile(new URL('../vendor/cloud-runtime/src/runtime/session.ts',import.meta.url),'utf8');
+ const {transform}=await import('esbuild');
+ const start=sessionSource.indexOf('export async function clientFor(');
+ const code=(await transform(sessionSource.slice(start,sessionSource.indexOf('export async function ensureSession(',start)).replace('export ',''),{loader:'ts'})).code;
+ for(const stream of ['fixture:session:s1','fixture:rpc:req:m1']) {
+  const requestStarted=Promise.withResolvers();
+  let requests=0;
+  const context={StreamsClient:class extends StreamsClient {
+   constructor(options){super({...options,fetch:(_url,init)=>{
+    requests++;requestStarted.resolve();
+    return new Promise((_resolve,reject)=>init.signal.addEventListener('abort',()=>reject(init.signal.reason),{once:true}));
+   }});}
+  }};
+  vm.runInNewContext(code+';globalThis.clientFor=clientFor;',context);
+  const client=await context.clientFor(stream,async()=>({gatewayBaseUrl:'https://example.invalid',token:'synthetic'}));
+  let settled=false;
+  const upload=client.append({part:{body:'synthetic input',contentType:'application/octet-stream'}}).then(result=>{settled=true;return result;});
+  await requestStarted.promise;
+  t.mock.timers.tick(14999);
+  assert.equal(settled,false);
+  t.mock.timers.tick(1);
+  const result=await upload;
+  assert.equal(result.ok,false);
+  assert.equal(result.result.code,'timeout');
+  assert.equal(requests,1,'an uncertain write must not be replayed');
+ }
+});
