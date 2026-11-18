@@ -225,6 +225,8 @@ export class ContextCopyPage {
     await forkMenu
       .getByRole('menuitem', { name: /(Copy context as Markdown|复制 Markdown 上下文)/u })
       .click();
+    // Finish the previous popup’s exit before opening another trigger.
+    await expect(this.page.getByRole('menu', { includeHidden: true })).toHaveCount(0);
   }
 
   private async openForkMenuForAssistantResponse(responseMarker: string): Promise<void> {
