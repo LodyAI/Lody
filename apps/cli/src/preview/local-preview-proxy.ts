@@ -576,7 +576,7 @@ export class LocalPreviewProxyManager {
               injectedHtml.runtimeInjected
             ),
             {
-              localOrigin: record.localOrigin,
+              requestUrl,
               previewOrigin: record.proxyOrigin,
             }
           ),
@@ -590,7 +590,7 @@ export class LocalPreviewProxyManager {
       const responseHeaders = this.buildResponseHeaders(
         record,
         headersToEntries(localResponse.headers, {
-          localOrigin: record.localOrigin,
+          requestUrl,
           previewOrigin: record.proxyOrigin,
         }),
         authorizedByQuery

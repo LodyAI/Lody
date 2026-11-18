@@ -30,6 +30,9 @@ authentication or the development server's origin checks.
 Evidence and browser-validation limits:
 [local module authentication](../../../../.agents/notes/implemented/bug-fix/2026-10-04-local-preview-module-auth.md).
 
+Same-origin redirects resolve against the upstream request URL, so nested pages and modules
+retain their directory and query semantics on the viewer origin.
+
 ## Process ownership
 
 Quick Tunnels start with `--protocol http2`, using TCP for the connection from

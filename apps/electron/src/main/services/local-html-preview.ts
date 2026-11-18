@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
-import { createReadStream } from 'node:fs'
+import { createReadStream, realpathSync } from 'node:fs'
 import { realpath, stat } from 'node:fs/promises'
-import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'node:path'
+import { dirname, extname, isAbsolute, join, relative, sep } from 'node:path'
 import { Readable } from 'node:stream'
 import { z } from 'zod'
 import { resolveFilePreviewPath } from '@lody/shared/node/file-preview-path-policy'
@@ -13,7 +13,8 @@ export const LocalHtmlPreviewRequestSchema = z
     machineId: z.string().min(1),
     path: z.string().min(1),
     workspaceRoot: z.string().nullable().optional(),
-    allowScripts: z.boolean()
+    allowScripts: z.boolean(),
+    allowWorkspaceResources: z.boolean().optional()
   })
   .strict()
 
@@ -84,8 +85,8 @@ const MIME_TYPES: Readonly<Record<string, string>> = {
 /**
  * Serves a local HTML file and its sibling resources from a per-preview origin
  * (`lody-html-preview://<random token>/`). The token is the only capability:
- * it never encodes a filesystem path, only reaches files under the HTML file's
- * own directory, and dies with the renderer document that requested it.
+ * it never encodes a filesystem path, only reaches files under the authorized
+ * resource directory, and dies with the renderer document that requested it.
  */
 export class LocalHtmlPreviewSites {
   private readonly sites = new Map<string, Site>()
@@ -95,12 +96,17 @@ export class LocalHtmlPreviewSites {
   }
 
   /** `absolutePath` must already be symlink-resolved and authorized by the caller. */
-  open(owner: number, absolutePath: string, allowScripts: boolean): string {
+  open(
+    owner: number,
+    absolutePath: string,
+    allowScripts: boolean,
+    root = dirname(absolutePath)
+  ): string {
     const owned = [...this.sites].filter(([, site]) => site.owner === owner)
     if (owned.length >= MAX_SITES_PER_OWNER) this.sites.delete(owned[0][0])
     const token = randomBytes(16).toString('hex')
-    this.sites.set(token, { owner, root: dirname(absolutePath), allowScripts })
-    return `${HTML_PREVIEW_SCHEME}://${token}/${encodeURIComponent(basename(absolutePath))}`
+    this.sites.set(token, { owner, root, allowScripts })
+    return `${HTML_PREVIEW_SCHEME}://${token}/${relative(root, absolutePath).split(sep).map(encodeURIComponent).join('/')}`
   }
 
   async respond(request: Request): Promise<Response> {
@@ -145,12 +151,11 @@ async function resolveSiteFile(root: string, pathname: string) {
   }
   if (segments.length === 0) return null
   try {
-    const realRoot = await realpath(root)
-    const resolved = await realpath(join(realRoot, ...segments))
-    if (!resolved.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep)) return null
+    const resolved = await realpath(join(root, ...segments))
+    if (!resolved.startsWith(root.endsWith(sep) ? root : root + sep)) return null
     // A visible symlink (`config.txt -> .env`) must not reach a hidden file either.
     if (
-      relative(realRoot, resolved)
+      relative(root, resolved)
         .split(sep)
         .some((part) => part.startsWith('.'))
     )
@@ -184,8 +189,34 @@ export function openLocalHtmlPreview(
     options: { allowArbitraryPaths: true }
   })
   if (!resolution.ok) return { status: 'error', ...resolution.rejection }
+  const { absolutePath } = resolution.resolved
+  let root = dirname(absolutePath)
+  if (request.allowWorkspaceResources) {
+    if (!request.workspaceRoot || resolution.resolved.external)
+      return {
+        status: 'error',
+        code: 'path_not_allowed',
+        message: 'The HTML file must be inside the selected workspace.'
+      }
+    try {
+      root = realpathSync.native(request.workspaceRoot)
+    } catch {
+      return {
+        status: 'error',
+        code: 'workspace_root_unavailable',
+        message: 'The selected workspace is unavailable.'
+      }
+    }
+    const prefix = root.endsWith(sep) ? root : root + sep
+    if (!absolutePath.startsWith(prefix))
+      return {
+        status: 'error',
+        code: 'path_not_allowed',
+        message: 'The HTML file is outside the selected workspace.'
+      }
+  }
   return {
     status: 'ok',
-    url: sites.open(owner, resolution.resolved.absolutePath, request.allowScripts)
+    url: sites.open(owner, absolutePath, request.allowScripts, root)
   }
 }
