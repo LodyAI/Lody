@@ -1251,6 +1251,40 @@ export function getSessionLaunchConfigLegacyFields(
   return normalizeSessionLaunchConfig(session);
 }
 
+/** Compare against the persisted reset, so repeated jitter cannot accumulate. */
+function rateLimitsEqualWithinClockJitter(previous: RateLimit, next: RateLimit): boolean {
+  if (
+    !Array.isArray(previous.windows) ||
+    !Array.isArray(next.windows) ||
+    !previous.windows.every(isRecord) ||
+    !next.windows.every(isRecord)
+  )
+    return false;
+  const { windows: previousWindows, ...previousFields } = previous;
+  const { windows: nextWindows, ...nextFields } = next;
+  if (JSON.stringify(previousFields) !== JSON.stringify(nextFields)) return false;
+  if (previousWindows.length !== nextWindows.length) return false;
+  // Windows form a multiset: equal durations may belong to different labels.
+  const sorted = (windows: RateLimit['windows']) =>
+    windows
+      .map(({ resetsAtEpochSeconds, ...fields }) => ({
+        core: JSON.stringify(fields),
+        reset: resetsAtEpochSeconds,
+        duration: fields.windowDurationSeconds,
+      }))
+      .sort((a, b) => a.core.localeCompare(b.core) || (a.reset ?? 0) - (b.reset ?? 0));
+  const oldWindows = sorted(previousWindows);
+  return sorted(nextWindows).every((window, index) => {
+    const old = oldWindows[index];
+    if (!old || old.core !== window.core) return false;
+    if (old.reset === window.reset) return true;
+    if (old.reset === null || window.reset === null) return false;
+    // Do not hide a complete rollover of a very short window.
+    const tolerance = window.duration === null ? 2 : Math.min(2, window.duration / 4);
+    return Math.abs(old.reset - window.reset) <= tolerance;
+  });
+}
+
 export function writeMachineFlockRowToFlock(
   flock: MachineFlockWritableFlock,
   row: MachineFlockRow,
@@ -1263,7 +1297,13 @@ export function writeMachineFlockRowToFlock(
   const previous = readMachineFlockRowsFromFlock(flock, {
     prefixes: [normalized.key],
   })[serializeMachineFlockKey(normalized.key)];
-  if (machineFlockRowsEqual(previous, normalized)) {
+  if (
+    machineFlockRowsEqual(previous, normalized) ||
+    (previous &&
+      isMachineFlockRateLimitRow(previous) &&
+      isMachineFlockRateLimitRow(normalized) &&
+      rateLimitsEqualWithinClockJitter(previous.value, normalized.value))
+  ) {
     return false;
   }
   const persisted =
@@ -1309,25 +1349,36 @@ export function writeAcpModelConfigOptionsToFlock(
       pointers.set(row.key[2], row.value);
     }
   }
+  const shapeByStructure = new Map<string, string>();
+  for (const pointer of pointers.values()) {
+    const shape = shapes.get(pointer.shape);
+    if (pointer.sourceVersion !== sourceVersion || !shape) continue;
+    const structure = getAcpConfigOptionStructureKey(shape);
+    if (!shapeByStructure.has(structure)) shapeByStructure.set(structure, pointer.shape);
+  }
   let changed = false;
   for (const [modelId, answer] of Object.entries(answers)) {
     const stored = toAcpModelConfigOptions(answer);
     const structure = getAcpConfigOptionStructureKey(stored);
     const current = pointers.get(modelId);
     const currentShape = current ? shapes.get(current.shape) : undefined;
+    const sharedShape = shapeByStructure.get(structure);
     if (
       current?.sourceVersion === sourceVersion &&
       currentShape &&
+      current.shape === sharedShape &&
       getAcpConfigOptionStructureKey(currentShape) === structure
     ) {
       continue;
     }
+    // Current selections are session state, not a distinct static shape.
+    // Reuse an already observed same-runtime shape even on a model's first answer.
     const content = JSON.stringify(stored);
-    const baseId = getAcpConfigOptionsShapeId(stored);
+    const baseId = sharedShape ?? getAcpConfigOptionsShapeId(stored);
     let shapeId = baseId;
     for (let suffix = 1; ; suffix += 1) {
       const existing = shapes.get(shapeId);
-      if (!existing || JSON.stringify(existing) === content) break;
+      if (!existing || shapeId === sharedShape || JSON.stringify(existing) === content) break;
       shapeId = `${baseId}-${suffix}`;
     }
     if (!shapes.has(shapeId)) {
@@ -1338,6 +1389,7 @@ export function writeAcpModelConfigOptionsToFlock(
       );
       shapes.set(shapeId, stored);
     }
+    shapeByStructure.set(structure, shapeId);
     const pointer: AcpModelConfigOptions = { version: 1, sourceVersion, shape: shapeId };
     flock.set(machineFlockKeys.acpModelConfigOptions(configId, modelId), pointer, nowMs);
     pointers.set(modelId, pointer);
