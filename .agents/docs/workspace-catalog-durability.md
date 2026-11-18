@@ -122,7 +122,7 @@ is unchanged; existing Meta runtime recovery remains separate. Cursor deletion
 occurs on the next load, after the failed initial read, and never deletes content.
 Pending writes follow the same merge/export path during forced bootstrap.
 
-Repo 0.25.1 / CRDT 0.21.1 / Client 0.13.1 still incur local bootstrap work: Flock
+Repo 0.26.0 / CRDT 0.22.0 / Client 0.14.0 still incur local bootstrap work: Flock
 imports the snapshot and loads a temporary copy to derive its remote version. A
 missing upload baseline can also require an isolated observer. Repo captures the
 received payload and persists it before progress. Replacing the live replica or

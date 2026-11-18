@@ -859,7 +859,7 @@ describe('presence HTTP response ownership', () => {
 });
 
 describe('presence WebSocket token bridge', () => {
-  it.each(['initial', 'renew', 'reauth'] as const)(
+  it.each(['connect', 'initial', 'renew', 'reauth'] as const)(
     'maps %s with the rejected token retained',
     async (reason) => {
       const bridge = createPresenceWebSocketAuthLegacy((context) =>
