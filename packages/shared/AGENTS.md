@@ -88,6 +88,10 @@ reads the retained map and legacy scalar; new activation must not clear old ackn
 - ACP `cacheVersion` gates freshness, not readability. Preserve understood fields across
   versions and runtime-override matching; omit known-incompatible fields. Pre-v11 commands
   can contain project data: Machine Flock owns probe previews, Sessions own actual lists.
+- Machine Flock retains complete `acpCapability` rows for older readers. Same-source
+  option structures retain their stored current values; session selections live in Sessions.
+  Per-model option rows may share a same-source shape across different current values.
+  Quota deduplication compares reset jitter with the persisted baseline, never the last notification.
 - Quota: share `src/subscription-quota.ts`; key `agentConfigId + limitId`.
   Bound Providers ignore legacy; delete scoped rows.
 
