@@ -23,12 +23,6 @@ Baguette v0.2.0 在 WebSocket 自动 ping 任务结束第一次 30 秒等待时�
 
 在 Apple Silicon/macOS 26.6.2、Xcode 26.6 和已启动的 iPhone 17 Pro/iOS 26.2 上，补丁源码构建运行 91.2 秒，收到三个 JPEG 帧和三次 ping，强制断开查看连接并发送 SIGTERM 后以退出码 0 结束。两次规范化归档打包结果一致。新的不可变镜像对象通过 R2 回读及独立公开下载地址的归档、可执行文件完整性检查。运行公开下载的版本持续 91.3 秒，收到三个 JPEG 帧和三次 ping，完成正常 WebSocket 关闭（1000），随后发送 SIGTERM，以退出码 0 结束。画面大部分时间静止，测试期间仅观察到三个帧；这些记录验证心跳与清理，不证明吞吐量或长期稳定性。关闭超时的失败分支及完整侧栏、远程、移动端 E2E 仍未验证。集成 PR：[LodyAI/Lody#1061](https://github.com/LodyAI/Lody/pull/1061)。
 
-## 产物职责
+## v0.2.15 移除补丁（2026-11-18）
 
-[运行时清单](../../../../apps/cli/src/ios-simulator/baguette-manifest.json) 固定归档与可执行文件摘要，并记录上游和依赖版本、补丁摘要、编译器及命令。[打包器](../../../../scripts/package-baguette-runtime.mjs) 保留已验证可执行文件原始字节，生成包含资源、许可证、补丁及构建来源的确定性归档。[运行时 README](../../../../apps/cli/src/ios-simulator/README.md) 维护重建与打包说明。
-
-独立的 Lody 修订版本对应新的下载对象和安装缓存，原上游版本缓存及不可变对象继续有效。更新清单随产品交付前，必须完成本地归档校验和上传后的远端回读校验。后续 mirror 运行复用同一已发布产物；构建字节变化必须再增加运行时修订版本。
-
-## 验证范围
-
-原生验证在 Apple Silicon/macOS 26.6.2 上覆盖 MJPEG、三次真实 ping 及进程关闭，不能替代长期运行或完整 Electron、远程、移动端验收。打包测试覆盖安装布局、确定性元数据，以及对变化的可执行文件、补丁、资源和符号链接的拒绝。以后更换依赖或工具链仍须执行既有 Xcode/iOS 兼容性检查。
+[上游 #109](https://github.com/tddworks/baguette/pull/109) 统一了 Release 构建中各 Swift 模块的 macOS 部署目标。在 Xcode 27.2、iOS 26.2 模拟器上，官方 v0.2.15 原包通过 Lody worker 收到三次真实 WebSocket ping，正常关闭，十次重新连接取得 JPEG 后再次取到 H.264 关键帧。可移除旧补丁并直接镜像官方归档。后续升级仍须验证心跳和关闭。归档校验、缓存和发布流程见[运行时 README](../../../../apps/cli/src/ios-simulator/README.md#runtime-artifact)。

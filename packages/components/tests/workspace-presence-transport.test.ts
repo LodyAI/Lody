@@ -21,6 +21,12 @@ import {
   type PresenceTransportLike,
 } from '../src/providers/workspace-presence-transport';
 import { mergePresenceSnapshots } from '../src/providers/presence-snapshot-merge';
+import type { ElectronPowerState } from '@lody/shared/electron-ipc';
+import {
+  DESKTOP_FOREGROUND_DEBOUNCE_MS,
+  DESKTOP_FOREGROUND_IDLE_MS,
+  startDesktopForegroundPublisher,
+} from '../src/lib/desktop-foreground-presence';
 import type { EphemeralRoomAuthCallback } from '../src/providers/ephemeral-room-transport';
 import {
   resolveSessionDetailPresenceState,
@@ -621,6 +627,65 @@ describe('workspace-presence-transport', () => {
         }
       });
     });
+
+    describe('publishDesktopForeground', () => {
+      const desktopEntriesOf = (store: FakePresenceStore) =>
+        Object.values(parseLodyPresenceStates(store.getAllStates())).filter(
+          (state) => state.kind === 'desktop-foreground'
+        );
+
+      it('keeps a focused desktop fresh for remote Hosts and removes it on blur or teardown', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(10_000);
+        const stores: FakePresenceStore[] = [];
+        const transports: FakePresenceTransport[] = [];
+        const presence = new WorkspacePresenceTransport({
+          workspaceId: 'workspace-1' as WorkspaceId,
+          createStore: () => {
+            const store = new FakePresenceStore();
+            stores.push(store);
+            return store;
+          },
+          createTransport: () => {
+            const transport = new FakePresenceTransport();
+            transports.push(transport);
+            return transport;
+          },
+        });
+        try {
+          presence.start({ baseUrl: 'https://streams.example.test', auth: async () => 'token' });
+          transports[0]?.resolve({ ok: true, value: { unsubscribe: vi.fn() } } as JoinResult);
+          await flush();
+          transports[0]?.emitStatus('joined');
+
+          presence.publishDesktopForeground('user-1');
+          expect(desktopEntriesOf(stores[0]!)).toEqual([
+            {
+              kind: 'desktop-foreground',
+              userId: 'user-1',
+              instanceId: expect.any(String),
+              updatedAt: 10_000,
+            },
+          ]);
+
+          // The shared heartbeat keeps it within the freshness window Hosts read.
+          vi.advanceTimersByTime(LODY_PRESENCE_HEARTBEAT_MS);
+          expect(desktopEntriesOf(stores[0]!)[0]?.updatedAt).toBe(
+            10_000 + LODY_PRESENCE_HEARTBEAT_MS
+          );
+
+          // Blur deletes it actively instead of waiting for the TTL.
+          presence.publishDesktopForeground(null);
+          expect(desktopEntriesOf(stores[0]!)).toEqual([]);
+
+          presence.publishDesktopForeground('user-1');
+          await presence.stop();
+          expect(desktopEntriesOf(stores[0]!)).toEqual([]);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+    });
   });
 });
 
@@ -995,5 +1060,122 @@ describe('session-detail-presence', () => {
         'not-found'
       );
     });
+  });
+});
+
+describe('desktop-foreground-presence', () => {
+  const createEnv = (start: number) => {
+    let foreground = true;
+    let now = start;
+    const listeners: {
+      onFocusChange: () => void;
+      onInput: () => void;
+      onPowerState: (state: ElectronPowerState) => void;
+    } = { onFocusChange: () => {}, onInput: () => {}, onPowerState: () => {} };
+    return {
+      env: {
+        isForeground: () => foreground,
+        now: () => now,
+        subscribe: (next: typeof listeners) => {
+          Object.assign(listeners, next);
+          return () => {};
+        },
+      },
+      setForeground(value: boolean) {
+        foreground = value;
+        listeners.onFocusChange();
+      },
+      input() {
+        listeners.onInput();
+      },
+      power(state: ElectronPowerState) {
+        listeners.onPowerState(state);
+      },
+      advance(ms: number) {
+        now += ms;
+        vi.advanceTimersByTime(ms);
+      },
+    };
+  };
+
+  it('suppresses mobile pushes only while this desktop is focused, collapsing focus flapping', () => {
+    vi.useFakeTimers();
+    try {
+      const harness = createEnv(0);
+      const published: (string | null)[] = [];
+      const stop = startDesktopForegroundPublisher({
+        userId: 'user-1',
+        publish: (value) => published.push(value),
+        env: harness.env,
+      });
+      expect(published).toEqual(['user-1']);
+
+      // Rapid alt-tab produces no presence write until focus settles.
+      harness.setForeground(false);
+      harness.setForeground(true);
+      harness.setForeground(false);
+      harness.advance(DESKTOP_FOREGROUND_DEBOUNCE_MS);
+      expect(published).toEqual(['user-1', null]);
+
+      harness.setForeground(true);
+      harness.advance(DESKTOP_FOREGROUND_DEBOUNCE_MS);
+      expect(published).toEqual(['user-1', null, 'user-1']);
+
+      stop();
+      expect(published).toEqual(['user-1', null, 'user-1', null]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('lets the phone ring again when a focused desktop has had no input (locked or abandoned)', () => {
+    vi.useFakeTimers();
+    try {
+      const harness = createEnv(0);
+      const published: (string | null)[] = [];
+      const stop = startDesktopForegroundPublisher({
+        userId: 'user-1',
+        publish: (value) => published.push(value),
+        env: harness.env,
+      });
+      harness.advance(DESKTOP_FOREGROUND_IDLE_MS + 15_000);
+      expect(published).toEqual(['user-1', null]);
+
+      // Returning to the keyboard restores suppression.
+      harness.input();
+      harness.advance(DESKTOP_FOREGROUND_DEBOUNCE_MS);
+      expect(published).toEqual(['user-1', null, 'user-1']);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('lets the phone ring immediately when the computer sleeps or locks, and only after unlock resumes suppression', () => {
+    vi.useFakeTimers();
+    try {
+      const harness = createEnv(0);
+      const published: (string | null)[] = [];
+      const stop = startDesktopForegroundPublisher({
+        userId: 'user-1',
+        publish: (value) => published.push(value),
+        env: harness.env,
+      });
+      // Withdrawn without waiting for the debounce or the presence TTL.
+      harness.power('lock-screen');
+      expect(published).toEqual(['user-1', null]);
+      harness.power('suspend');
+      // Waking from sleep while the screen is still locked does not suppress again.
+      harness.power('resume');
+      harness.advance(DESKTOP_FOREGROUND_DEBOUNCE_MS);
+      expect(published).toEqual(['user-1', null]);
+      harness.power('unlock-screen');
+      harness.input();
+      harness.advance(DESKTOP_FOREGROUND_DEBOUNCE_MS);
+      expect(published).toEqual(['user-1', null, 'user-1']);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

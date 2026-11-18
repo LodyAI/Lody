@@ -3,10 +3,12 @@ import {
   LODY_PRESENCE_HEARTBEAT_MS,
   MinimalLodyPresenceStateSchema,
   LODY_PRESENCE_TTL_MS,
+  getLodyDesktopForegroundPresenceKey,
   getLodySessionViewingPresenceKey,
   getServerNow,
   parseLodyPresenceStates,
   toLodyPresenceStreamUrl,
+  type LodyDesktopForegroundPresenceState,
   type LodyPresenceInstanceId,
   type LodyPresenceStateMap,
   type LodySessionViewingPresenceState,
@@ -83,6 +85,7 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
   private lastSnapshotAtMs: number | null = null;
   private readonly viewingInstanceId = createViewingInstanceId();
   private viewing: { sessionId: SessionId; userId: string; since: number } | null = null;
+  private desktopForegroundUserId: string | null = null;
   private viewingHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
   /** UI-facing liveness state: the raw state, held through a brief in-place reconnect. */
   private displaySyncState: RoomSyncState = 'idle';
@@ -185,7 +188,7 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
       if (!this.viewing) return;
       const key = getLodySessionViewingPresenceKey(this.viewing.userId, this.viewingInstanceId);
       this.viewing = null;
-      this.stopViewingHeartbeat();
+      this.stopHeartbeatIfIdle();
       this.store?.delete(key);
       return;
     }
@@ -222,7 +225,30 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
     };
     if (previousKey) this.store?.delete(previousKey);
     this.writeViewingEntry();
-    this.startViewingHeartbeat();
+    this.startHeartbeat();
+  }
+
+  /**
+   * Publish (or, with `null`, delete) this app instance's focused-desktop entry
+   * for the signed-in user. Callers own the Electron/focus/setting decision and
+   * must debounce focus flapping; repeated calls with the same user are no-ops.
+   * Like session-viewing, the entry is heartbeated while set, re-asserted on room
+   * start/join and deleted on teardown.
+   */
+  publishDesktopForeground(userId: string | null): void {
+    if (userId === this.desktopForegroundUserId) return;
+    const previousKey =
+      this.desktopForegroundUserId === null
+        ? null
+        : getLodyDesktopForegroundPresenceKey(this.desktopForegroundUserId, this.viewingInstanceId);
+    this.desktopForegroundUserId = userId;
+    if (previousKey) this.store?.delete(previousKey);
+    if (userId === null) {
+      this.stopHeartbeatIfIdle();
+      return;
+    }
+    this.writeDesktopForegroundEntry();
+    this.startHeartbeat();
   }
 
   protected createStore(): PresenceStoreLike {
@@ -263,23 +289,28 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
   protected override onRoomStarted(store: PresenceStoreLike): void {
     this.exposeDebugGlobal();
     // Fresh store per start: re-assert local state and restart its heartbeat.
-    this.writeViewingEntry();
-    this.startViewingHeartbeat();
+    this.writeLocalEntries();
+    this.startHeartbeat();
     this.onStoreChange(store);
   }
 
   protected override onJoined(store: PresenceStoreLike): void {
     // Local writes may have raced the join; re-assert once the room is live.
-    this.writeViewingEntry();
+    this.writeLocalEntries();
     this.awaitingJoinedSnapshot = false;
     super.onJoined(store);
   }
 
   protected override onBeforeTeardown(): void {
-    this.stopViewingHeartbeat();
+    this.stopHeartbeat();
     if (this.viewing) {
       this.store?.delete(
         getLodySessionViewingPresenceKey(this.viewing.userId, this.viewingInstanceId)
+      );
+    }
+    if (this.desktopForegroundUserId !== null) {
+      this.store?.delete(
+        getLodyDesktopForegroundPresenceKey(this.desktopForegroundUserId, this.viewingInstanceId)
       );
     }
   }
@@ -294,17 +325,48 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
     this.retainSnapshotOnStop = false;
   }
 
-  private startViewingHeartbeat(): void {
-    if (!this.viewing || this.viewingHeartbeatTimer) return;
+  /** One shared 30s timer refreshes every locally owned entry. */
+  private startHeartbeat(): void {
+    if (this.viewingHeartbeatTimer) return;
+    if (!this.viewing && this.desktopForegroundUserId === null) return;
     this.viewingHeartbeatTimer = setInterval(() => {
-      this.writeViewingEntry();
+      this.writeLocalEntries();
     }, LODY_PRESENCE_HEARTBEAT_MS);
   }
 
-  private stopViewingHeartbeat(): void {
+  private stopHeartbeatIfIdle(): void {
+    if (this.viewing || this.desktopForegroundUserId !== null) return;
+    this.stopHeartbeat();
+  }
+
+  private stopHeartbeat(): void {
     if (!this.viewingHeartbeatTimer) return;
     clearInterval(this.viewingHeartbeatTimer);
     this.viewingHeartbeatTimer = null;
+  }
+
+  private writeLocalEntries(): void {
+    this.writeViewingEntry();
+    this.writeDesktopForegroundEntry();
+  }
+
+  private writeDesktopForegroundEntry(): void {
+    if (!this.store || this.desktopForegroundUserId === null) return;
+    const state: LodyDesktopForegroundPresenceState = {
+      kind: 'desktop-foreground',
+      userId: this.desktopForegroundUserId,
+      instanceId: this.viewingInstanceId,
+      updatedAt: getServerNow(),
+    };
+    const minimal = this.options.minimal
+      ? MinimalLodyPresenceStateSchema.safeParse(state)
+      : undefined;
+    // An identity outside the encrypted allowlist publishes nothing (the Host then sends).
+    if (minimal && !minimal.success) return;
+    this.store.set(
+      getLodyDesktopForegroundPresenceKey(this.desktopForegroundUserId, this.viewingInstanceId),
+      (minimal?.data ?? state) as unknown as Value
+    );
   }
 
   private writeViewingEntry(): void {

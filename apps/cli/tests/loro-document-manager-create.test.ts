@@ -141,6 +141,8 @@ vi.mock('loro-repo/transport/streams', () => {
       mocks.transportOptions.push(options);
     }
 
+    joinFlockDocRoom = vi.fn();
+    syncFlockDoc = vi.fn();
     connect = vi.fn(async () => {});
     close = mocks.transportClose;
     isConnected = vi.fn(() => mocks.transportStatus === 'connected');

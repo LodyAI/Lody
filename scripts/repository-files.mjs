@@ -2,9 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
-// apps/mobile/ios is a submodule, so git ls-files stops at its gitlink. Public-repository
-// checks still cover it whenever it is checked out, as they did when it lived in this tree.
-export const checkedSubmodules = ['apps/mobile/ios'];
+// Public-repository checks include files inside each checked-out native client.
+export const checkedSubmodules = ['apps/mobile/ios', 'apps/mobile/android'];
 
 function listFiles(cwd, args) {
   return execFileSync('git', ['ls-files', ...args, '-z'], {

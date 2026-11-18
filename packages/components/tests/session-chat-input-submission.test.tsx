@@ -153,6 +153,7 @@ import {
 } from '../src/components/sessions/session-chat-input-area';
 import { initI18n } from '../src/i18n';
 import { PASTED_TEXT_FILE_MIN_CHAR_COUNT } from '../src/lib/pasted-text-draft';
+import { queueTask } from '../src/components/sessions/message-queue/queue-task';
 import { toast } from '@/lib/toast';
 import { formatMessageQuote, getSessionRoomId } from '@lody/shared';
 import { conversationQuoteDraftKey } from '../src/lib/conversation-quote-draft';
@@ -1790,6 +1791,7 @@ describe('SessionChatInputArea submission feedback', () => {
       const pastedText = character.repeat(50_000);
       const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
       const textarea = await renderComposer({
+        overrides: { initialInputText: '' },
         onSendMessage: async (...args) => {
           submissions.push(args);
           return true;
@@ -1802,13 +1804,14 @@ describe('SessionChatInputArea submission feedback', () => {
       });
 
       expect(event.defaultPrevented).toBe(true);
-      expect(textarea.value).toBe('focus regression draft');
+      expect(textarea.value).toBe('');
       expect(container!.textContent).toContain('pasted-text.txt');
       expect(errorToast).not.toHaveBeenCalled();
 
       await submit('keyboard');
 
-      const attachment = submissions[0]?.[2]?.attachments?.[0];
+      const [blocks, , options] = submissions[0]!;
+      const attachment = options?.attachments?.[0];
       expect(attachment).toMatchObject({
         kind: 'file',
         name: 'pasted-text.txt',
@@ -1818,6 +1821,7 @@ describe('SessionChatInputArea submission feedback', () => {
       expect(attachment?.source ? await readBlobAsText(attachment.source) : undefined).toBe(
         pastedText
       );
+      expect(queueTask(blocks, options?.attachments)).toBe('pasted-text.txt');
     });
 
     it('merges the generated file with real clipboard files', async () => {
