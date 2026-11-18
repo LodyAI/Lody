@@ -69,9 +69,13 @@ export function readTerminalUrlLinks(
         const cell = line.getCell(col);
         if (!cell || cell.getWidth() === 0) continue;
         const chars = cell.getChars();
-        const padding = !chars && col === line.length - 1 && next?.isWrapped && next.getCell(0)?.getWidth() === 2;
+        const padding =
+          !chars && col === line.length - 1 && next?.isWrapped && next.getCell(0)?.getWidth() === 2;
         const content = padding ? '' : chars || ' ';
-        if (scannedCells + cell.getWidth() > MAX_SCAN_LENGTH || scannedCodeUnits + content.length > MAX_SCAN_LENGTH) {
+        if (
+          scannedCells + cell.getWidth() > MAX_SCAN_LENGTH ||
+          scannedCodeUnits + content.length > MAX_SCAN_LENGTH
+        ) {
           return { cells, truncated: true };
         }
         scannedCells += cell.getWidth();
@@ -90,7 +94,11 @@ export function readTerminalUrlLinks(
   const positions = cells.flatMap((cell) => Array.from({ length: cell.text.length }, () => cell));
   const links: Array<{ text: string; range: IBufferRange }> = [];
   for (const match of text.matchAll(/https?:\/\/(?:(?![<>"'`])[\u0021-\u007e])+/giu)) {
-    if ((before.truncated && match.index === 0) || (after.truncated && match.index + match[0].length === text.length)) continue;
+    if (
+      (before.truncated && match.index === 0) ||
+      (after.truncated && match.index + match[0].length === text.length)
+    )
+      continue;
     const url = trimUrl(match[0]);
     if (!isHttpUrl(url)) continue;
     const start = positions[match.index];
