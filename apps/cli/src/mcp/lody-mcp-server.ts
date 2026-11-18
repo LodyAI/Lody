@@ -1,6 +1,6 @@
 import { canReadSessionForCliRequester } from '@/lib/cloud-cli-port';
 import { LODY_AUTH_URL } from '@/utils/const';
-import { isContainedSession } from '@lody/shared';
+import { isContainedSession, isCoordinatorSession } from '@lody/shared';
 import { createToolHelpServer, LODY_HELP_INSTRUCTIONS } from './tool-help';
 import { registerAndroidEmulatorPreviewTool } from './android-emulator-tool';
 import { resolveSessionPullRequests } from '@lody/shared';
@@ -227,6 +227,33 @@ const SESSION_RENAME_TOOL_NAME = 'lody_session_rename';
 const SESSION_RENAME_MANY_TOOL_NAME = 'lody_session_rename_many';
 const OPERATION_GET_TOOL_NAME = 'lody_operation_get';
 const OPERATION_CANCEL_TOOL_NAME = 'lody_operation_cancel';
+const COORDINATOR_SEND_MESSAGE_TOOL_NAME = 'lody_coordinator_send_message';
+const COORDINATOR_SET_STATUS_TOOL_NAME = 'lody_coordinator_set_status';
+const MAX_COORDINATOR_MESSAGE_CHARS = 64 * 1024;
+const MAX_COORDINATOR_STATUS_CHARS = 240;
+
+const CoordinatorSendMessageInputSchema = z
+  .object({
+    markdown: z
+      .string()
+      .trim()
+      .min(1)
+      .max(MAX_COORDINATOR_MESSAGE_CHARS)
+      .describe('Markdown content to display to the user as a single chat bubble.'),
+  })
+  .strict();
+
+const CoordinatorSetStatusInputSchema = z
+  .object({
+    status: z
+      .string()
+      .trim()
+      .max(MAX_COORDINATOR_STATUS_CHARS)
+      .describe(
+        'Short single-line working status shown in the coordinator conversation while working.'
+      ),
+  })
+  .strict();
 const SESSION_FILE_MAX_SIZE_MB = Math.floor(SESSION_FILE_MAX_SIZE_BYTES / (1024 * 1024));
 const SESSION_CONTROL_TIMEOUT_MS = 30_000;
 const MAX_MCP_SESSION_WAIT_TIMEOUT_SECONDS = 3_600;
@@ -4698,11 +4725,18 @@ const OPERATION_SNAPSHOT_GUIDANCE = [
   'Delivery: completion is stored before being injected into the requester conversation at a permitted input boundary. A finished snapshot does not prove the agent has already received that notification. Take an occasional diagnostic snapshot when necessary; let automatic delivery handle normal waiting. Do not poll or recreate work to recover a missing notification.',
 ].join('\n\n');
 
-export function buildLodyMcpServer(): McpServer {
-  return buildSessionToolServer();
+export interface LodyMcpServerOptions {
+  coordinator?: boolean;
 }
 
-export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServer {
+export function buildLodyMcpServer(options?: LodyMcpServerOptions): McpServer {
+  return buildSessionToolServer(undefined, options);
+}
+
+export function buildSessionToolServer(
+  handlers?: SessionToolHandlers,
+  options?: LodyMcpServerOptions
+): McpServer {
   // The HTTP host is long-lived and the stdio server normally lives for the
   // Agent session. Initialization is idempotent and local-platform telemetry
   // remains hard-disabled inside the analytics layer.
@@ -4793,6 +4827,82 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     },
     handlers
   );
+
+  if (options?.coordinator === true) {
+    const applyCoordinatorTurnOutput = async (
+      output: { kind: 'message'; markdown: string } | { kind: 'status'; status: string }
+    ) => {
+      const ctx = getSessionContext();
+      const daemon = getDaemonWorkspace();
+      if (!daemon) throw new Error('Coordinator tools require an active daemon session');
+      const row = await daemon.manager.repo.getDocMeta(getSessionRoomId(ctx.sessionId));
+      const meta = row?.meta && !isLoroRepoDocDeleted(row) ? (row.meta as SessionMeta) : undefined;
+      if (!isCoordinatorSession(meta)) {
+        throw new Error('Coordinator tools are available only inside a coordinator conversation');
+      }
+      const sessionDoc = await daemon.manager.getOrCreateSessionDoc(ctx.sessionId);
+      const backend = await createSessionBackend(sessionDoc, meta);
+      const now = getServerNow();
+      const turnId = daemon.readActiveAssistantTurnId?.(ctx.sessionId);
+      const messageId = output.kind === 'message' ? randomUUID() : undefined;
+      const normalizedStatus =
+        output.kind === 'status' ? output.status.replace(/\s+/g, ' ').trim() : '';
+      const result = await backend.applyHistoryAction({
+        kind: 'coordinator-output',
+        ...(turnId ? { turnId } : {}),
+        output:
+          output.kind === 'message'
+            ? { kind: 'message', id: messageId!, body: output.markdown, createdAt: now }
+            : { kind: 'status', status: normalizedStatus, updatedAt: now },
+      });
+      if (!result.matched) {
+        throw new Error('No open assistant turn is available for coordinator output');
+      }
+      if (output.kind === 'message') {
+        await sessionDoc.setLastMessageAt(now);
+        return jsonTextResult({ ok: true, messageId });
+      }
+      return jsonTextResult({ ok: true, status: normalizedStatus });
+    };
+
+    registerSessionTool(
+      COORDINATOR_SEND_MESSAGE_TOOL_NAME,
+      {
+        summary: 'Send one Markdown chat bubble to the user in a coordinator conversation.',
+        title: 'Send message to user',
+        description:
+          'Send one Markdown chat bubble to the user in this coordinator conversation. Plain assistant text and thoughts are hidden from the user; every message you want the user to read must be sent with this tool. Each call renders as an independent chat bubble—keep each bubble concise and natural, communicating your immediate intent first when starting work and following up with outcomes or questions. Ready to call directly without lody_help.',
+        inputSchema: CoordinatorSendMessageInputSchema,
+        exemptFromHelp: true,
+      },
+      async (args) => {
+        try {
+          return await applyCoordinatorTurnOutput({ kind: 'message', markdown: args.markdown });
+        } catch (error) {
+          return mcpErrorResult(error);
+        }
+      }
+    );
+
+    registerSessionTool(
+      COORDINATOR_SET_STATUS_TOOL_NAME,
+      {
+        summary: 'Show a live working status indicator in a coordinator conversation.',
+        title: 'Set coordinator working status',
+        description:
+          'Update the live working status shown in this coordinator conversation while you look up information, inspect tasks, or prepare and dispatch conversations. Pass a short single-line status phrase in the user language (or an empty string to clear). Replaced by newer calls and automatically hidden once your turn finishes. Ready to call directly without lody_help.',
+        inputSchema: CoordinatorSetStatusInputSchema,
+        exemptFromHelp: true,
+      },
+      async (args) => {
+        try {
+          return await applyCoordinatorTurnOutput({ kind: 'status', status: args.status });
+        } catch (error) {
+          return mcpErrorResult(error);
+        }
+      }
+    );
+  }
 
   registerAgentRoleTools(
     registerSessionTool,

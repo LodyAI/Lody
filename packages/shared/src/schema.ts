@@ -444,6 +444,18 @@ const historyMessageItemSchema = schema
               v.anchor !== null
               ? true
               : 'Missing visual annotation reference metadata';
+          case 'coordinator_message':
+            return typeof v.id === 'string' &&
+              v.id.length > 0 &&
+              typeof v.body === 'string' &&
+              (v.createdAt === undefined || typeof v.createdAt === 'number')
+              ? true
+              : 'Missing coordinator message metadata';
+          case 'coordinator_status':
+            return typeof v.status === 'string' &&
+              (v.updatedAt === undefined || typeof v.updatedAt === 'number')
+              ? true
+              : 'Missing coordinator status metadata';
           default:
             // Synced history may contain variants written by newer peers.
             // Rejecting one here blocks every subsequent Mirror.setState,

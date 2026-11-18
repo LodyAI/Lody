@@ -2018,7 +2018,18 @@ export type MessageContent =
     } & CommentReferencePayload)
   | ({
       type: 'visual_annotation_reference';
-    } & VisualAnnotationReferencePayload);
+    } & VisualAnnotationReferencePayload)
+  | {
+      type: 'coordinator_message';
+      id: string;
+      body: string;
+      createdAt?: number;
+    }
+  | {
+      type: 'coordinator_status';
+      status: string;
+      updatedAt?: number;
+    };
 
 export type TerminalExitStatus = {
   exitCode?: number | null;

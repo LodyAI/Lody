@@ -2241,4 +2241,130 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       )
     ).rejects.toThrow('Session tool requires an active Turn');
   });
+
+  it('publishes coordinator message bubbles and live status only inside an active coordinator turn', async () => {
+    const ordinaryServer = buildLodyMcpServer();
+    const coordinatorServer = buildLodyMcpServer({ coordinator: true });
+    const ordinaryClient = new Client({ name: 'ordinary-mcp-test', version: '1' });
+    const coordinatorClient = new Client({ name: 'coordinator-mcp-test', version: '1' });
+    const [ordinaryClientTransport, ordinaryServerTransport] = InMemoryTransport.createLinkedPair();
+    const [coordClientTransport, coordServerTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await ordinaryServer.connect(ordinaryServerTransport);
+      await ordinaryClient.connect(ordinaryClientTransport);
+      await coordinatorServer.connect(coordServerTransport);
+      await coordinatorClient.connect(coordClientTransport);
+
+      const ordinaryTools = (await ordinaryClient.listTools()).tools.map((tool) => tool.name);
+      expect(ordinaryTools).not.toContain('lody_coordinator_send_message');
+      expect(ordinaryTools).not.toContain('lody_coordinator_set_status');
+
+      const coordinatorTools = (await coordinatorClient.listTools()).tools;
+      const sendTool = coordinatorTools.find(
+        (tool) => tool.name === 'lody_coordinator_send_message'
+      );
+      const statusTool = coordinatorTools.find(
+        (tool) => tool.name === 'lody_coordinator_set_status'
+      );
+      expect(sendTool?.description).not.toContain('Before execution, read lody_help');
+      expect(statusTool?.description).not.toContain('Before execution, read lody_help');
+    } finally {
+      await ordinaryClient.close();
+      await coordinatorClient.close();
+      await ordinaryServer.close();
+      await coordinatorServer.close();
+    }
+
+    const nonCoordinatorCall = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_send_message', {
+        markdown: 'Should not publish',
+      })
+    );
+    expect(nonCoordinatorCall.isError).toBe(true);
+    expect(JSON.stringify(nonCoordinatorCall.content)).toContain(
+      'available only inside a coordinator conversation'
+    );
+
+    await manager.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+      coordinator: { version: 1 },
+    });
+    const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
+    const backend = await createSessionBackend(sessionDoc);
+
+    const withoutTurn = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_send_message', {
+        markdown: 'Before assistant opens',
+      })
+    );
+    expect(withoutTurn.isError).toBe(true);
+    expect(JSON.stringify(withoutTurn.content)).toContain('No open assistant turn');
+
+    await backend.openAssistantTurn({
+      turnId: 'coord-turn-1',
+      userTurnId: 'synthetic-turn',
+      timestamp: new Date(1_700_000_000_000).toISOString(),
+    });
+
+    const coordinatorDaemon: DaemonWorkspace = {
+      ...daemon,
+      readActiveAssistantTurnId: () => 'coord-turn-1',
+    };
+
+    const status1 = await runWithDaemonWorkspace(coordinatorDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_set_status', {
+        status: '正在查找合适的 Role…',
+      })
+    );
+    expect(status1.isError).not.toBe(true);
+
+    const bubble1 = await runWithDaemonWorkspace(coordinatorDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_send_message', {
+        markdown: '我先查看一下可用的 Role，马上把任务派出去。',
+      })
+    );
+    expect(bubble1.isError).not.toBe(true);
+
+    const status2 = await runWithDaemonWorkspace(coordinatorDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_set_status', {
+        status: '正在创建子会话…',
+      })
+    );
+    expect(status2.isError).not.toBe(true);
+
+    const bubble2 = await runWithDaemonWorkspace(coordinatorDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_send_message', {
+        markdown: '已交给 **天才程序员** 处理。',
+      })
+    );
+    expect(bubble2.isError).not.toBe(true);
+
+    const storedTurn = await backend.readTurn('coord-turn-1');
+    expect(storedTurn.state).toBe('ready');
+    if (storedTurn.state !== 'ready') throw new Error('Expected ready turn');
+    expect(storedTurn.turn.items).toEqual([
+      {
+        type: 'coordinator_message',
+        id: expect.any(String),
+        body: '我先查看一下可用的 Role，马上把任务派出去。',
+        createdAt: expect.any(Number),
+      },
+      {
+        type: 'coordinator_status',
+        status: '正在创建子会话…',
+        updatedAt: expect.any(Number),
+      },
+      {
+        type: 'coordinator_message',
+        id: expect.any(String),
+        body: '已交给 **天才程序员** 处理。',
+        createdAt: expect.any(Number),
+      },
+    ]);
+
+    await runWithDaemonWorkspace(coordinatorDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_set_status', { status: '' })
+    );
+    const afterClear = await backend.readTurn('coord-turn-1');
+    expect(afterClear.state === 'ready' ? afterClear.turn.items : []).toHaveLength(2);
+  });
 });

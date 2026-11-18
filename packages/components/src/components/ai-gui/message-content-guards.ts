@@ -210,6 +210,18 @@ export const isMessageContent = (value: unknown): value is MessageContent => {
         typeof value.body === 'string' &&
         isRecord(value.anchor)
       );
+    case 'coordinator_message':
+      return (
+        typeof value.id === 'string' &&
+        value.id.length > 0 &&
+        typeof value.body === 'string' &&
+        (value.createdAt === undefined || typeof value.createdAt === 'number')
+      );
+    case 'coordinator_status':
+      return (
+        typeof value.status === 'string' &&
+        (value.updatedAt === undefined || typeof value.updatedAt === 'number')
+      );
     default:
       return false;
   }

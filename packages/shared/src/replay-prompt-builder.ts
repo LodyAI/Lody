@@ -188,6 +188,9 @@ function extractTextFromItem(item: MessageContent, pass: GenerationPass): string
     case 'text':
       return item.text;
 
+    case 'coordinator_message':
+      return item.body;
+
     case 'thought':
       if (!pass.includeThinking) {
         return null;

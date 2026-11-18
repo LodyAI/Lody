@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shared';
-import { getMessageItemPrefix } from '../src/lib/session-chat-search';
+import type { MessageContent, SessionHistory, SessionHistoryParsed, SessionId } from '@lody/shared';
+import {
+  extractSessionSearchBlocks,
+  getCoordinatorMessageSearchBlockId,
+  getMessageItemPrefix,
+} from '../src/lib/session-chat-search';
 import { buildChatVirtualRows, type ChatStreamItem } from '../src/components/ai-gui/view';
 
 // Guards the per-turn row cache behind view.tsx `buildChatVirtualRows`: rows for
@@ -238,5 +242,68 @@ describe('DSH thought visibility', () => {
     expect(
       other.some((row) => row.type === 'assistant' && row.content.kind === 'worked_group_header')
     ).toBe(false);
+  });
+});
+
+describe('coordinator conversation bubbles and search', () => {
+  it('renders one virtual row per coordinator_message while hiding raw text, thoughts, and tool calls', () => {
+    const turnWithBubbles = wrap(
+      makeMessage(
+        'coord-turn-1',
+        'assistant',
+        [
+          { type: 'thought', text: 'Internal reasoning' },
+          text('Internal plain text that must never show'),
+          toolCall(),
+          { type: 'coordinator_status', status: '正在查看可用 Role…' },
+          { type: 'coordinator_message', id: 'b1', body: '我先查一下合适的 Role，马上派发。' },
+          toolCall(),
+          { type: 'coordinator_message', id: 'b2', body: '已经交给 **天才程序员** 处理。' },
+        ],
+        true
+      )
+    );
+    const turnWithoutBubbles = wrap(
+      makeMessage(
+        'coord-turn-2',
+        'assistant',
+        [{ type: 'thought', text: 'Working silently' }, text('Hidden text'), toolCall()],
+        false
+      )
+    );
+
+    const rows = buildChatVirtualRows({
+      items: [turnWithBubbles, turnWithoutBubbles],
+      lastAssistantMessageId: 'coord-turn-2',
+      expansionVersion: 0,
+      coordinatorBubbles: true,
+    });
+
+    // Turn without coordinator_message emits zero rows so Virtua never receives a null DOM row.
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.key)).toEqual([
+      'assistant:coord-turn-1:bubble:b1',
+      'assistant:coord-turn-1:bubble:b2',
+    ]);
+    expect(
+      rows.map((row) =>
+        row.type === 'assistant' && row.content.kind === 'coordinator_bubble'
+          ? row.content.entry.body
+          : null
+      )
+    ).toEqual(['我先查一下合适的 Role，马上派发。', '已经交给 **天才程序员** 处理。']);
+
+    const searchBlocks = extractSessionSearchBlocks(
+      [
+        makeMessage('user-1', 'user', [text('帮我修一下这个问题')]) as unknown as SessionHistory,
+        turnWithBubbles.message as unknown as SessionHistory,
+      ],
+      { coordinator: true }
+    );
+    expect(searchBlocks.map((block) => block.blockId)).toEqual([
+      `${getMessageItemPrefix('user-1', 0)}:text`,
+      getCoordinatorMessageSearchBlockId('coord-turn-1', 4),
+      getCoordinatorMessageSearchBlockId('coord-turn-1', 6),
+    ]);
   });
 });

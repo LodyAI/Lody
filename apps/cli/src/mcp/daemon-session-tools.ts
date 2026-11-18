@@ -20,7 +20,7 @@ let handlers: SessionToolHandlers | undefined;
 const getHandlers = () => {
   if (!handlers) {
     handlers = new Map();
-    void buildSessionToolServer(handlers);
+    void buildSessionToolServer(handlers, { coordinator: true });
   }
   return handlers;
 };

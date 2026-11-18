@@ -136,7 +136,8 @@ export const SESSION_INPUT_DISPATCH_PROTOCOL_VERSION = 1;
 /** `machine/bug-report` accepts an optional `clientLog` and merges it into the upload. */
 export const BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION = 1;
 /** The daemon delivers the coordinator system prompt for `SessionMeta.coordinator` v1. */
-export const COORDINATOR_SESSIONS_PROTOCOL_VERSION = 1;
+// v2 adds coordinator message/status MCP tools and structured turn items.
+export const COORDINATOR_SESSIONS_PROTOCOL_VERSION = 2;
 
 type MachineProtocolCapabilityCarrier = {
   protocolCapabilities?: MachineProtocolCapabilities;

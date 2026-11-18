@@ -5,7 +5,6 @@ import {
   getAcpCapabilityCacheKey,
   getMachineFlockAcpCapabilities,
   machineFlockKeys,
-  getMachineFlockAcpCapabilities,
   getMachineFlockAgentConfigs,
   getMachineFlockRateLimits,
   readMachineFlockRowsFromFlock,

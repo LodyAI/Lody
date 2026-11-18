@@ -1,4 +1,5 @@
 import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
+import { isCoordinatorSession } from '@lody/shared';
 import { MessageQuoteAction } from '../ai-gui/message-quote-action';
 import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
 import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
@@ -3939,7 +3940,9 @@ export const SessionChatInterface = memo(
         t,
       ]
     );
-    const searchBlocks = useIncrementalSearchBlocks(conversationView, isSearchOpen);
+    const searchBlocks = useIncrementalSearchBlocks(conversationView, isSearchOpen, {
+      coordinator: isCoordinatorSession(session),
+    });
     const normalizedSearchQuery = useMemo(
       () => normalizeSessionSearchQuery(deferredSearchQuery),
       [deferredSearchQuery]

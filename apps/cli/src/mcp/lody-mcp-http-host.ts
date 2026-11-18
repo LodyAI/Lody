@@ -13,6 +13,7 @@ import {
 } from './lody-mcp-server';
 import { canReadProcNetTcp, lookupLoopbackPeerUid } from './loopback-peer-uid';
 import {
+  MCP_HTTP_COORDINATOR_HEADER,
   MCP_HTTP_MACHINE_ID_HEADER,
   MCP_HTTP_PREFERRED_PORT_ENV,
   MCP_HTTP_SESSION_ID_HEADER,
@@ -209,7 +210,9 @@ const singleHeader = (req: http.IncomingMessage, name: string): string | null =>
   return null;
 };
 
-const parseSessionContextHeaders = (req: http.IncomingMessage): McpSessionContext | null => {
+const parseSessionContextHeaders = (
+  req: http.IncomingMessage
+): (McpSessionContext & { coordinator: boolean }) | null => {
   const rawSessionId = singleHeader(req, MCP_HTTP_SESSION_ID_HEADER);
   const workspaceId = singleHeader(req, MCP_HTTP_WORKSPACE_ID_HEADER);
   const machineId = singleHeader(req, MCP_HTTP_MACHINE_ID_HEADER);
@@ -236,6 +239,7 @@ const parseSessionContextHeaders = (req: http.IncomingMessage): McpSessionContex
     machineId,
     workdir,
     localControlSocketPath: process.env.LODY_MCP_SOCKET_PATH?.trim() || undefined,
+    coordinator: singleHeader(req, MCP_HTTP_COORDINATOR_HEADER) === '1',
   };
 };
 
@@ -317,7 +321,9 @@ async function handleRequest(
   }
 
   if (req.headers['mcp-protocol-version'] === '2026-07-28') {
-    const handler = createMcpHandler(buildLodyMcpServer);
+    const handler = createMcpHandler(() =>
+      buildLodyMcpServer({ coordinator: context.coordinator })
+    );
     res.on('close', () => void handler.close());
     await runWithMcpSessionContext(context, () => toNodeHandler(handler)(req, res));
     return;
@@ -327,7 +333,7 @@ async function handleRequest(
   // down when the response closes. The MCP client re-initializes per
   // connection, and every tool call carries its full context in headers, so no
   // cross-request state is needed and concurrent sessions cannot interleave.
-  const server = buildLodyMcpServer();
+  const server = buildLodyMcpServer({ coordinator: context.coordinator });
   const transport = new NodeStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,

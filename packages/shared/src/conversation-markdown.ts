@@ -143,6 +143,9 @@ function estimateStoredMessageTokens(items: readonly MessageContent[]): number {
       case 'proposed_plan':
         count(item.markdown);
         break;
+      case 'coordinator_message':
+        count(item.body);
+        break;
       case 'tool_call': {
         count(item.toolName ?? item.title);
         if (item.rawInput) count(JSON.stringify(item.rawInput));
@@ -621,6 +624,15 @@ function renderItem(item: MessageContent, level: LevelConfig, tally: RenderTally
       }
       return demoteMarkdownHeadings(item.markdown);
 
+    case 'coordinator_message':
+      if (!item.body?.trim()) {
+        return null;
+      }
+      return demoteMarkdownHeadings(item.body);
+
+    case 'coordinator_status':
+      return null;
+
     case 'thought': {
       if (!item.text?.trim()) {
         return null;
@@ -1000,6 +1012,12 @@ export function buildConversationMarkdown(
         return {
           ...item,
           markdown: normalizeSessionLinksForExport(item.markdown, options.workspaceId),
+        };
+      }
+      if (item.type === 'coordinator_message' && typeof item.body === 'string') {
+        return {
+          ...item,
+          body: normalizeSessionLinksForExport(item.body, options.workspaceId),
         };
       }
       return item;

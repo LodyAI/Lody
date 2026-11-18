@@ -18,7 +18,8 @@ export const commandHelpReminder = (name: string): string =>
 /** The SDK validates before callbacks; preserve the schema and append a recovery hint to issues. */
 function inputWithHelp<T extends z.ZodObject>(
   schema: T,
-  name: string
+  name: string,
+  exemptFromHelp?: boolean
 ): StandardSchemaWithJSON<
   StandardSchemaWithJSON.InferInput<T>,
   StandardSchemaWithJSON.InferOutput<T>
@@ -28,7 +29,7 @@ function inputWithHelp<T extends z.ZodObject>(
       ...schema['~standard'],
       validate: async (value, options) => {
         const result = await schema['~standard'].validate(value, options);
-        return result.issues
+        return result.issues && !exemptFromHelp
           ? { issues: [...result.issues, { message: commandHelpReminder(name) }] }
           : result;
       },
@@ -51,6 +52,8 @@ export type LodyToolServer = {
       description?: string;
       inputSchema: T;
       annotations?: ToolAnnotations;
+      /** Simple coordinator UI tools include complete documentation inline without a help preflight. */
+      exemptFromHelp?: boolean;
     },
     callback: ToolCallback<T>
   ): RegisteredTool;
@@ -97,11 +100,11 @@ export function createToolHelpServer(server: McpServer): LodyToolServer {
   );
 
   return {
-    registerTool(name, { summary, ...config }, callback) {
-      const inputSchema = inputWithHelp(config.inputSchema, name);
+    registerTool(name, { summary, exemptFromHelp, ...config }, callback) {
+      const inputSchema = inputWithHelp(config.inputSchema, name, exemptFromHelp);
       const execute: ToolCallback<typeof inputSchema> = async (args, context) => {
         const result = await callback(args, context);
-        return isFailedToolResult(result)
+        return !exemptFromHelp && isFailedToolResult(result)
           ? {
               ...result,
               content: [...result.content, { type: 'text', text: commandHelpReminder(name) }],
@@ -114,7 +117,9 @@ export function createToolHelpServer(server: McpServer): LodyToolServer {
         {
           ...config,
           inputSchema,
-          description: `${summary} Before execution, read lody_help({command:"${name}"}); reuse only if full help remains in context.`,
+          description: exemptFromHelp
+            ? (config.description ?? summary)
+            : `${summary} Before execution, read lody_help({command:"${name}"}); reuse only if full help remains in context.`,
         },
         execute
       );

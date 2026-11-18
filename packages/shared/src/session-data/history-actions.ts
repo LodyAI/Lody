@@ -85,6 +85,13 @@ export type HistoryAction =
       fileId: string;
       relayFileId: string;
       encryption?: import('../encrypted-attachment').EncryptedAttachment;
+    }
+  | {
+      kind: 'coordinator-output';
+      turnId?: string;
+      output:
+        | { kind: 'message'; id: string; body: string; createdAt: number }
+        | { kind: 'status'; status: string; updatedAt: number };
     };
 
 /** Which actions can be committed by reading exactly one body. */
@@ -94,7 +101,8 @@ export function historyActionTarget(action: HistoryAction): string | undefined {
     action.kind === 'user-status' ||
     action.kind === 'finish-assistant' ||
     action.kind === 'assistant-file-diff' ||
-    action.kind === 'assistant-token-usage'
+    action.kind === 'assistant-token-usage' ||
+    action.kind === 'coordinator-output'
     ? action.turnId
     : undefined;
 }
@@ -364,6 +372,49 @@ export function applyHistoryAction(
           }
         }
       return { turns: history, matched };
+    }
+    case 'coordinator-output': {
+      const entry = action.turnId
+        ? history.find(
+            (t) =>
+              t.id === action.turnId &&
+              t.role === 'assistant' &&
+              t.finished !== true &&
+              typeof t.endedAt !== 'number'
+          )
+        : [...history]
+            .reverse()
+            .find(
+              (t) => t.role === 'assistant' && t.finished !== true && typeof t.endedAt !== 'number'
+            );
+      if (!entry) return { turns: history, matched: false };
+      if (action.output.kind === 'message') {
+        entry.items = [
+          ...(entry.items ?? []),
+          {
+            type: 'coordinator_message',
+            id: action.output.id,
+            body: action.output.body,
+            createdAt: action.output.createdAt,
+          },
+        ];
+      } else {
+        const withoutStatus = (entry.items ?? []).filter(
+          (item) => item.type !== 'coordinator_status'
+        );
+        const trimmed = action.output.status.trim();
+        entry.items = trimmed
+          ? [
+              ...withoutStatus,
+              {
+                type: 'coordinator_status',
+                status: trimmed,
+                updatedAt: action.output.updatedAt,
+              },
+            ]
+          : withoutStatus;
+      }
+      return { turns: history, matched: true };
     }
   }
   const unreachable: never = action;

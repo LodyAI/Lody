@@ -162,7 +162,8 @@ const turnItem = (
   id: string,
   role: 'user' | 'assistant' | 'system',
   minutes: number,
-  items: unknown[]
+  items: unknown[],
+  finished = true
 ): ChatStreamItem =>
   ({
     turnIndex: 0,
@@ -173,7 +174,7 @@ const turnItem = (
       role,
       timestamp: new Date(minutesAgo(minutes)).toISOString(),
       read: true,
-      finished: true,
+      finished,
       modelInfo: role === 'assistant' ? { modelId: 'sonnet-5.5', name: 'Sonnet 5.5' } : undefined,
       items,
     },
@@ -181,12 +182,18 @@ const turnItem = (
 
 const target = (sessionId: string) => ({ sessionId, userTurnId: `${sessionId}-turn-1` });
 
-/** The rows a real coordinator conversation carries: creation progress and a result batch. */
+/** The rows a real coordinator conversation carries: intent + outcome bubbles, creation progress and a result batch. */
 const streamItems: ChatStreamItem[] = [
   turnItem('turn-0', 'user', 30, [{ type: 'text', text: turns[0]!.text }]),
   turnItem('turn-1', 'assistant', 29, [
-    // Hidden in the coordinator's bubble: only the text output shows.
+    // Plain assistant text, thoughts and tool calls stay hidden; only coordinator_message bubbles show.
     { type: 'thought', text: '三件事互不依赖，可以并行开三个对话。' },
+    { type: 'text', text: 'Let me check available Agent Roles first.' },
+    {
+      type: 'coordinator_message',
+      id: 'msg-intent-1',
+      body: '我先看下合适的 Role，把这三件互不依赖的任务分别派出去。',
+    },
     {
       type: 'tool_call',
       toolCallId: 'call-create',
@@ -194,7 +201,11 @@ const streamItems: ChatStreamItem[] = [
       kind: 'other',
       status: 'completed',
     },
-    { type: 'text', text: turns[1]!.text },
+    {
+      type: 'coordinator_message',
+      id: 'msg-outcome-1',
+      body: turns[1]!.text,
+    },
   ]),
   turnItem('turn-created', 'system', 28, [
     {
@@ -243,7 +254,35 @@ const streamItems: ChatStreamItem[] = [
       ],
     },
   ]),
-  turnItem('turn-2', 'assistant', 10, [{ type: 'text', text: turns[2]!.text }]),
+  turnItem('turn-2', 'assistant', 10, [
+    {
+      type: 'coordinator_message',
+      id: 'msg-results-2',
+      body: turns[2]!.text,
+    },
+  ]),
+].map((item, turnIndex) => ({ ...item, turnIndex }));
+
+const workingStreamItems: ChatStreamItem[] = [
+  ...streamItems,
+  turnItem('turn-3', 'user', 1, [{ type: 'text', text: '现在另外两个任务进展到哪了？' }]),
+  turnItem(
+    'turn-4',
+    'assistant',
+    1,
+    [
+      {
+        type: 'coordinator_message',
+        id: 'msg-intent-4',
+        body: '我去查一下正在运行的子对话状态，稍等。',
+      },
+      {
+        type: 'coordinator_status',
+        status: '正在检查各任务进度…',
+      },
+    ],
+    false
+  ),
 ].map((item, turnIndex) => ({ ...item, turnIndex }));
 
 function ConversationPage({
@@ -339,7 +378,7 @@ const CHILD_TAB = `side-session:${childId}`;
  * left and the session's own right panel, whose resident first tab is the board.
  * A board row opens that conversation as another panel tab.
  */
-function CoordinatorPage() {
+function CoordinatorPage({ working = false }: { working?: boolean }) {
   const [openedChild, setOpenedChild] = useState(true);
   const [activeTab, setActiveTab] = useState(BOARD_TAB);
   const tabs: SessionSidePanelTabItem[] = [
@@ -375,7 +414,7 @@ function CoordinatorPage() {
           <ConversationPage
             sessionId={coordinatorId}
             title="项目协调者 · lody"
-            items={streamItems}
+            items={working ? workingStreamItems : streamItems}
             placeholder="告诉协调者你想做什么"
             trailingContent={
               <ConversationColumn>
@@ -428,13 +467,17 @@ function CoordinatorPage() {
   );
 }
 
-function ProjectModePage({ page = 'coordinator' }: { page?: 'coordinator' | 'start' }) {
+function ProjectModePage({
+  page = 'coordinator',
+}: {
+  page?: 'coordinator' | 'working' | 'start';
+}) {
   const [view, setView] = useState<SidebarProjectView>('projects');
   const [selectedId, setSelectedId] = useState<string | null>(coordinatorProjectKeyId(project));
   const content = useMemo(
     () =>
-      page === 'coordinator' ? (
-        <CoordinatorPage />
+      page === 'coordinator' || page === 'working' ? (
+        <CoordinatorPage working={page === 'working'} />
       ) : (
         <ProjectWorkspace
           main={
@@ -492,6 +535,10 @@ type Story = StoryObj<typeof meta>;
 export const LightZhCn: Story = { globals: { theme: 'light', locale: 'zh_CN' } };
 export const DarkZhCn: Story = { globals: { theme: 'dark', locale: 'zh_CN' } };
 export const LightEn: Story = { globals: { theme: 'light', locale: 'en' } };
+export const WorkingZhCn: Story = {
+  args: { page: 'working' },
+  globals: { theme: 'light', locale: 'zh_CN' },
+};
 /** The start page: the board beside the start form, split by a resizable divider. */
 export const StartPageZhCn: Story = {
   args: { page: 'start' },

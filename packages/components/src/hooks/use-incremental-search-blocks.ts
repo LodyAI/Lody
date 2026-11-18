@@ -17,11 +17,16 @@ const EMPTY_BLOCKS: SessionSearchBlock[] = [];
  */
 export function useIncrementalSearchBlocks(
   view: ConversationView | null | undefined,
-  isSearchOpen: boolean
+  isSearchOpen: boolean,
+  options?: { coordinator?: boolean }
 ): SessionSearchBlock[] {
+  const coordinator = options?.coordinator === true;
   const [blocks, setBlocks] = useState<SessionSearchBlock[]>(EMPTY_BLOCKS);
   const cacheRef = useRef(
-    new WeakMap<SessionHistory, { index: number; blocks: SessionSearchBlock[] }>()
+    new WeakMap<
+      SessionHistory,
+      { index: number; coordinator: boolean; blocks: SessionSearchBlock[] }
+    >()
   );
 
   useEffect(() => {
@@ -42,8 +47,12 @@ export function useIncrementalSearchBlocks(
         const turn = view.turn(i);
         if (!turn) continue;
         let cached = cache.get(turn);
-        if (!cached || cached.index !== i) {
-          cached = { index: i, blocks: extractSearchBlocksForMessage(turn, i) };
+        if (!cached || cached.index !== i || cached.coordinator !== coordinator) {
+          cached = {
+            index: i,
+            coordinator,
+            blocks: extractSearchBlocksForMessage(turn, i, { coordinator }),
+          };
           cache.set(turn, cached);
         }
         for (const block of cached.blocks) next.push(block);
@@ -84,7 +93,7 @@ export function useIncrementalSearchBlocks(
       directory?.release();
       range?.release();
     };
-  }, [isSearchOpen, view]);
+  }, [coordinator, isSearchOpen, view]);
 
   return isSearchOpen ? blocks : EMPTY_BLOCKS;
 }

@@ -7541,6 +7541,7 @@ export class MessageHandler {
           machineId: this.machineId,
           manager: this.workspaceDocument,
           readInvocation: (sessionId) => this.readActiveInvocation(sessionId),
+          readActiveAssistantTurnId: (sessionId) => this.store.getTurnId(sessionId),
           ...(this.readWorkspaceAccess ? { readAccess: this.readWorkspaceAccess } : {}),
           ...(this.encryptedExecution
             ? {
@@ -7594,6 +7595,7 @@ export class MessageHandler {
           },
           readActiveTurnId: (sessionId) =>
             this.executionService.getExecutionSnapshot(sessionId).activeTurnId,
+          readActiveAssistantTurnId: (sessionId) => this.store.getTurnId(sessionId),
           withdrawQueuedInput: async (args) => await this.withdrawQueuedInput(args),
           steerSession: async (input) => await this.steerSessionWithAccessCheck(input),
           dispatchSession: async (sessionId, input) => {

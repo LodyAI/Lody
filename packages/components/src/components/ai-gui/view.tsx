@@ -5,13 +5,13 @@ import { shareFileBytesNatively } from '@/lib/session-file-native-save';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { localMachineIdAtom } from '@/atoms/local-probe';
-import type { SessionLocalAttachment } from '@lody/shared';
+import { isCoordinatorSession, type SessionLocalAttachment } from '@lody/shared';
 import { AgentRoleProposalNotice } from './agent-role-proposal-notice';
 import type { AgentRoleProposalMeta } from '@lody/shared';
 import { MessageAuthorIdentity } from './message-author-identity';
 import { useSessionLinkNavigator } from './session-link-context';
 import * as stylex from '@stylexjs/stylex';
-import { space, text as textScale } from '@lody/ui/tokens/scales.stylex';
+import { radius, space, text as textScale } from '@lody/ui/tokens/scales.stylex';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import {
   type ComponentPropsWithoutRef,
@@ -346,6 +346,7 @@ import {
   type SessionImageGalleryEntry,
 } from '@/lib/session-image-gallery';
 import {
+  getCoordinatorMessageSearchBlockId,
   getMessageItemPrefix,
   getProposedPlanSearchBlockId,
   getTextSearchBlockId,
@@ -443,8 +444,18 @@ export type ChatStreamItem = SessionMessageItem | EmptySessionItem | Placeholder
 
 type AssistantVirtualContent =
   | { kind: 'plan' }
-  /** Project mode: the whole turn as one reply bubble of its text output. */
-  | { kind: 'coordinator_bubble' }
+  /** Coordinator conversation: one chat bubble per `lody_coordinator_send_message` call. */
+  | {
+      kind: 'coordinator_bubble';
+      entry: Extract<MessageContent, { type: 'coordinator_message' }>;
+      itemIndex: number;
+    }
+  /** Coordinator conversation: error/warning notice attached to a coordinator turn. */
+  | {
+      kind: 'coordinator_notice';
+      notice: Extract<MessageContent, { type: 'system_notice' }>;
+      itemIndex: number;
+    }
   | {
       kind: 'worked_group_header';
       segmentKey: string;
@@ -1296,13 +1307,43 @@ export const buildChatVirtualRows = ({
       ? selectionLayout.activeSearchBlockId
       : activeSearchBlockId;
     if (coordinatorBubbles) {
-      rows.push({
-        type: 'assistant',
-        key: `assistant:${message.id}:bubble`,
-        messageIndex,
-        item,
-        content: { kind: 'coordinator_bubble' },
-        isLastRowForMessage: true,
+      const coordinatorEntries: Array<{
+        key: string;
+        itemIndex: number;
+        content: Extract<
+          AssistantVirtualContent,
+          { kind: 'coordinator_bubble' | 'coordinator_notice' }
+        >;
+      }> = [];
+      message.items.forEach((entry, itemIndex) => {
+        if (entry.type === 'coordinator_message' && entry.body.trim().length > 0) {
+          coordinatorEntries.push({
+            key: `assistant:${message.id}:bubble:${entry.id}`,
+            itemIndex,
+            content: { kind: 'coordinator_bubble', entry, itemIndex },
+          });
+        } else if (entry.type === 'system_notice') {
+          coordinatorEntries.push({
+            key: `assistant:${message.id}:notice:${itemIndex}`,
+            itemIndex,
+            content: { kind: 'coordinator_notice', notice: entry, itemIndex },
+          });
+        }
+      });
+      // Never emit a row that renders null: Virtua requires a DOM node on every virtual row.
+      coordinatorEntries.forEach((entry, index) => {
+        const isLast = index === coordinatorEntries.length - 1;
+        rows.push({
+          type: 'assistant',
+          key: entry.key,
+          messageIndex,
+          item,
+          itemIndex: entry.itemIndex,
+          content: entry.content,
+          isFirstRowForMessage: index === 0,
+          isLastRowForMessage: isLast,
+          endsRound: isLast && nextIsUser,
+        });
       });
       continue;
     }
@@ -1694,6 +1735,23 @@ const engineRowOf = (row: ChatVirtualRow): EngineRow => {
       };
     case 'worked_group_header':
       return { ...base, turnId, estimate: ENGINE_ROW_ESTIMATE_PX.compact };
+    case 'coordinator_bubble':
+      return {
+        ...base,
+        turnId,
+        itemIndex: content.itemIndex,
+        itemIdentity: content.entry.id,
+        firstItemIndex: content.itemIndex,
+        estimate: ENGINE_ROW_ESTIMATE_PX.content,
+      };
+    case 'coordinator_notice':
+      return {
+        ...base,
+        turnId,
+        itemIndex: content.itemIndex,
+        firstItemIndex: content.itemIndex,
+        estimate: ENGINE_ROW_ESTIMATE_PX.compact,
+      };
     case 'plan':
       return { ...base, turnId, estimate: ENGINE_ROW_ESTIMATE_PX.plan };
     case 'subagent_tasks':
@@ -1846,6 +1904,14 @@ export const SessionChatStreamView = forwardRef<
       [sessionId]
     );
     const showThoughts = useAtomValue(thoughtVisibilityAtom);
+    const coordinatorSessionAtom = useMemo(
+      () =>
+        selectAtom(sessionMetaAtomFamily(getSessionRoomId(sessionId)), (meta) =>
+          isCoordinatorSession(meta)
+        ),
+      [sessionId]
+    );
+    const isMetaCoordinator = useAtomValue(coordinatorSessionAtom);
     const listRef = useRef<ConversationListHandle>(null);
     const messageSelection = useContext(MessageSelectionContext);
     const nativeTextSelectionActiveRef = useRef(false);
@@ -1935,8 +2001,8 @@ export const SessionChatStreamView = forwardRef<
 
     const copyContextAvailable = onCopyContext !== undefined;
     const selectionLayouts = selectionLayoutsRef.current;
-    // Project mode: a coordinator's own conversation shows its turns as reply bubbles.
-    const coordinatorBubbles = useCoordinatorConversation() !== null;
+    // Coordinator conversations render only explicit `coordinator_message` bubbles and live status.
+    const coordinatorBubbles = isMetaCoordinator || useCoordinatorConversation() !== null;
     const virtualRows = useMemo(() => {
       // Expansion lives in the module cache so virtualized child rows retain
       // their state after unmounting; this counter is its React invalidation
@@ -2035,6 +2101,53 @@ export const SessionChatStreamView = forwardRef<
     );
     const shouldShowAgentActivityRow =
       shouldShowAgentActivity && liveGroupHeaderRowKey === null && liveStatusRowKey === null;
+    const activeCoordinatorStatus = useMemo(() => {
+      if (!coordinatorBubbles) return null;
+      let unfinishedAssistant: SessionHistoryParsed | null = null;
+      for (let i = items.length - 1; i >= 0; i -= 1) {
+        const candidate = items[i];
+        if (!candidate || candidate.type !== 'message') continue;
+        if (candidate.message.role === 'user') break;
+        if (
+          candidate.message.role === 'assistant' &&
+          candidate.message.finished !== true &&
+          typeof candidate.message.endedAt !== 'number'
+        ) {
+          unfinishedAssistant = candidate.message;
+          break;
+        }
+      }
+      let explicitStatus: string | null = null;
+      if (unfinishedAssistant) {
+        for (let i = unfinishedAssistant.items.length - 1; i >= 0; i -= 1) {
+          const entry = unfinishedAssistant.items[i];
+          if (entry?.type === 'coordinator_status') {
+            explicitStatus = entry.status.trim() || null;
+            break;
+          }
+        }
+      }
+      const isWorking =
+        unfinishedAssistant !== null || Boolean(shouldShowAgentActivity && agentActivityLabel);
+      if (!isWorking) return null;
+      const label =
+        agentActivityTone === 'warning' && agentActivityLabel
+          ? agentActivityLabel
+          : explicitStatus ||
+            agentActivityLabel ||
+            t('sessions.statusIndicator.thinking', 'Thinking');
+      return { label, tone: agentActivityTone };
+    }, [
+      agentActivityLabel,
+      agentActivityTone,
+      coordinatorBubbles,
+      items,
+      shouldShowAgentActivity,
+      t,
+    ]);
+    const hasActivityRow = coordinatorBubbles
+      ? activeCoordinatorStatus !== null
+      : Boolean(shouldShowAgentActivityRow && agentActivityLabel);
     const leadingRowCount = leadingContent == null ? 0 : 1;
 
     /**
@@ -2097,16 +2210,10 @@ export const SessionChatStreamView = forwardRef<
     const engineRowMeta = useMemo(() => {
       const meta = virtualRows.map(engineRowOf);
       if (leadingContent != null) meta.unshift(LEADING_ENGINE_ROW);
-      if (shouldShowAgentActivityRow && agentActivityLabel) meta.push(AGENT_ACTIVITY_ENGINE_ROW);
+      if (hasActivityRow) meta.push(AGENT_ACTIVITY_ENGINE_ROW);
       if (trailingContent != null) meta.push(TRAILING_ENGINE_ROW);
       return meta;
-    }, [
-      agentActivityLabel,
-      leadingContent,
-      shouldShowAgentActivityRow,
-      trailingContent,
-      virtualRows,
-    ]);
+    }, [hasActivityRow, leadingContent, trailingContent, virtualRows]);
 
     /**
      * A sent message waiting for its row. The send path learns the turn id
@@ -2633,19 +2740,27 @@ export const SessionChatStreamView = forwardRef<
           </MessageSelectionRow>
         );
       }),
-      shouldShowAgentActivityRow && agentActivityLabel ? (
+      hasActivityRow ? (
         <div
           key={AGENT_ACTIVITY_ROW_KEY}
           className="shrink-0 pt-1"
           data-agent-activity-row-spacer=""
         >
-          <AgentActivityRow
-            label={agentActivityLabel}
-            tone={agentActivityTone}
-            shimmer={agentActivityShimmer}
-            message={liveAgentActivityMessage}
-            conversationFontSize={conversationFontSize}
-          />
+          {coordinatorBubbles && activeCoordinatorStatus ? (
+            <CoordinatorWorkingRow
+              label={activeCoordinatorStatus.label}
+              tone={activeCoordinatorStatus.tone}
+              conversationFontSize={conversationFontSize}
+            />
+          ) : (
+            <AgentActivityRow
+              label={agentActivityLabel!}
+              tone={agentActivityTone}
+              shimmer={agentActivityShimmer}
+              message={liveAgentActivityMessage}
+              conversationFontSize={conversationFontSize}
+            />
+          )}
         </div>
       ) : null,
       trailingContent == null ? null : (
@@ -5480,6 +5595,8 @@ const assistantRowPaintsSurface = (row: ChatVirtualRow | undefined): boolean => 
   switch (row.content.kind) {
     case 'plan':
     case 'subagent_tasks':
+    case 'coordinator_bubble':
+    case 'coordinator_notice':
       return true;
     case 'content':
       return isCardContentBlock(row.content.block);
@@ -6027,6 +6144,17 @@ const areAssistantVirtualContentsEqual = (
     case 'plan':
     case 'subagent_tasks':
       return true;
+    case 'coordinator_bubble':
+      return (
+        b.kind === 'coordinator_bubble' &&
+        a.itemIndex === b.itemIndex &&
+        a.entry.id === b.entry.id &&
+        a.entry.body === b.entry.body
+      );
+    case 'coordinator_notice':
+      return (
+        b.kind === 'coordinator_notice' && a.itemIndex === b.itemIndex && a.notice === b.notice
+      );
     case 'worked_group_header':
       return (
         b.kind === 'worked_group_header' &&
@@ -6150,10 +6278,21 @@ const AssistantChatItem = memo(function AssistantChatItem({
       case 'coordinator_bubble':
         return (
           <CoordinatorReplyBubble
-            message={message}
+            messageId={message.id}
+            entry={content.entry}
+            itemIndex={content.itemIndex}
             sessionId={row.item.sessionId}
             onFilePathClick={onFilePathClick}
             conversationFontSize={conversationFontSize}
+          />
+        );
+      case 'coordinator_notice':
+        return (
+          <SystemNoticeView
+            notice={content.notice}
+            entryId={message.id}
+            sessionId={row.item.sessionId}
+            inTurn
           />
         );
       case 'plan':
@@ -6281,6 +6420,10 @@ const AssistantChatItem = memo(function AssistantChatItem({
     switch (content.kind) {
       case 'content':
         return isCardContentBlock(content.block) ? cardSiblingGap : turnSiblingGap;
+      case 'coordinator_bubble':
+        return coordinatorBubbleStyles.siblingGap;
+      case 'coordinator_notice':
+        return cardSiblingGap;
       case 'plan':
         return cardSiblingGap;
       case 'worked_group_header':
@@ -6527,60 +6670,164 @@ const formatJsonValue = (value: unknown) => {
   }
 };
 
+const coordinatorDotWave = stylex.keyframes({
+  '0%, 80%, 100%': { opacity: 0.3, transform: 'scale(0.85)' },
+  '40%': { opacity: 1, transform: 'scale(1.12)' },
+});
+
 /**
- * Project mode: a coordinator turn reads as a reply, like the user's bubble on
- * the other side. Only its text output shows; thoughts, tool calls and the
- * duration stay in history, out of the way. A turn that has said nothing yet
- * shows an ellipsis while it runs and nothing once it ends.
+ * Coordinator conversation: each `lody_coordinator_send_message` call renders as
+ * its own reply bubble on the left rail. Plain assistant text, thoughts, tool
+ * calls, and duration stay hidden.
  */
 function CoordinatorReplyBubble({
-  message,
-  sessionId,
+  messageId,
+  entry,
+  itemIndex,
   onFilePathClick,
   conversationFontSize,
 }: {
-  message: SessionHistoryParsed;
+  messageId: string;
+  entry: Extract<MessageContent, { type: 'coordinator_message' }>;
+  itemIndex: number;
   sessionId: SessionId;
   onFilePathClick?: (filePath: string) => void;
   conversationFontSize: ConversationFontSize;
 }) {
-  const isStreaming = message.finished !== true;
-  const textItems = message.items.flatMap((item, itemIndex) =>
-    item.type === 'text' && item.text.trim() ? [{ item, itemIndex }] : []
-  );
-  if (textItems.length === 0 && !isStreaming) return null;
   return (
     <div {...stylex.props(coordinatorBubbleStyles.row)} data-coordinator-reply-bubble="">
       <div {...stylex.props(conversationSurface.bubble, coordinatorBubbleStyles.bubble)}>
-        {textItems.length === 0 ? (
-          <span {...stylex.props(coordinatorBubbleStyles.pending)}>…</span>
-        ) : (
-          textItems.map(({ item, itemIndex }) => (
-            <div key={itemIndex}>
-              {renderAssistantContent(item, sessionId, {
-                messageId: message.id,
-                itemIndex,
-                isStreaming,
-                onFilePathClick,
-                conversationFontSize,
-              })}
-            </div>
-          ))
-        )}
+        <MarkdownBlock
+          text={entry.body}
+          size={conversationFontSize}
+          isStreaming={false}
+          onFilePathClick={onFilePathClick}
+          searchBlockId={getCoordinatorMessageSearchBlockId(messageId, itemIndex)}
+        />
       </div>
     </div>
   );
 }
 
+/**
+ * Live working state emitted via `lody_coordinator_set_status` (or while the
+ * coordinator's turn starts up). Sits on the coordinator's left rail as a soft
+ * dynamic pill until the turn finishes.
+ */
+function CoordinatorWorkingRow({
+  label,
+  tone = 'primary',
+  conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
+}: {
+  label: string;
+  tone?: AgentActivityTone;
+  conversationFontSize?: ConversationFontSize;
+}) {
+  const isWarning = tone === 'warning';
+  return (
+    <ConversationColumn className="pb-2 sm:pb-3" data-coordinator-working-row="">
+      <div style={conversationTextFontSizeStyle(conversationFontSize)}>
+        <div
+          role="status"
+          aria-live="polite"
+          data-coordinator-working-status=""
+          {...stylex.props(coordinatorBubbleStyles.statusPill)}
+        >
+          <span {...stylex.props(coordinatorBubbleStyles.dots)} aria-hidden="true">
+            <span
+              {...stylex.props(
+                coordinatorBubbleStyles.dot,
+                isWarning ? coordinatorBubbleStyles.dotWarning : coordinatorBubbleStyles.dotPrimary
+              )}
+            />
+            <span
+              {...stylex.props(
+                coordinatorBubbleStyles.dot,
+                isWarning ? coordinatorBubbleStyles.dotWarning : coordinatorBubbleStyles.dotPrimary,
+                coordinatorBubbleStyles.dotDelay1
+              )}
+            />
+            <span
+              {...stylex.props(
+                coordinatorBubbleStyles.dot,
+                isWarning ? coordinatorBubbleStyles.dotWarning : coordinatorBubbleStyles.dotPrimary,
+                coordinatorBubbleStyles.dotDelay2
+              )}
+            />
+          </span>
+          <span
+            {...stylex.props(coordinatorBubbleStyles.statusLabel)}
+            className={cn(isWarning ? 'text-status-warning' : 'agent-shimmer')}
+          >
+            {label}
+          </span>
+        </div>
+      </div>
+    </ConversationColumn>
+  );
+}
+
 const coordinatorBubbleStyles = stylex.create({
+  siblingGap: {
+    paddingBlock: 3,
+  },
   row: {
     display: 'flex',
     justifyContent: 'flex-start',
     maxWidth: '100%',
-    paddingBlock: 6,
   },
   bubble: { display: 'flex', flexDirection: 'column', gap: 8, maxWidth: '88%' },
-  pending: { color: colors.secondaryLabel },
+  statusPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[2],
+    maxWidth: '88%',
+    paddingBlock: 6,
+    paddingInline: space[3],
+    borderRadius: radius.full,
+    backgroundColor: colors.wellBackground,
+  },
+  dots: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+    flexShrink: 0,
+  },
+  dot: {
+    width: 5,
+    height: 5,
+    borderRadius: radius.full,
+    animationName: coordinatorDotWave,
+    animationDuration: '1.3s',
+    animationIterationCount: 'infinite',
+    animationTimingFunction: 'ease-in-out',
+    '@media (prefers-reduced-motion: reduce)': {
+      animationPlayState: 'paused',
+      opacity: 0.75,
+      transform: 'none',
+    },
+  },
+  dotPrimary: {
+    backgroundColor: colors.accent,
+  },
+  dotWarning: {
+    backgroundColor: colors.warning,
+  },
+  dotDelay1: {
+    animationDelay: '0.18s',
+  },
+  dotDelay2: {
+    animationDelay: '0.36s',
+  },
+  statusLabel: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: textScale.subheadlineSize,
+    lineHeight: textScale.subheadlineLeading,
+    color: colors.secondaryLabel,
+  },
 });
 
 const renderAssistantContent = (
@@ -6691,7 +6938,18 @@ const renderAssistantContent = (
         />
       );
     case 'available_commands':
+    case 'coordinator_status':
       return null;
+    case 'coordinator_message':
+      return (
+        <MarkdownBlock
+          text={content.body}
+          size={conversationFontSize}
+          isStreaming={false}
+          onFilePathClick={options?.onFilePathClick}
+          searchBlockId={getCoordinatorMessageSearchBlockId(messageId, itemIndex)}
+        />
+      );
     // A warning/failure the stream folded back onto its emitting turn. Only the
     // agent's own notices arrive here; `buildChatStreamItems` leaves every other
     // kind on its own system row, where `SystemMessageItems` renders it.
@@ -7710,7 +7968,16 @@ const renderUserContent = (
         </div>
       );
     case 'available_commands':
+    case 'coordinator_status':
       return null;
+    case 'coordinator_message':
+      return (
+        <MarkdownBlock
+          text={content.body}
+          size={options.conversationFontSize}
+          searchBlockId={getCoordinatorMessageSearchBlockId(options.messageId, options.itemIndex)}
+        />
+      );
     default:
       return null;
   }

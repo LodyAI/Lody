@@ -801,6 +801,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           modelId: this.config.modelId,
           configOptionValues: this.config.configOptionValues,
           systemPrompt: resolveSessionSystemPrompt(this.config.coordinator),
+          coordinator: this.config.coordinator === 'v1',
           launcher,
           workspaceId: this.config.workspaceId,
           machineId: this.config.machineId as MachineId,

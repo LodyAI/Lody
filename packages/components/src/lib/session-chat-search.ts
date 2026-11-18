@@ -124,16 +124,21 @@ export const getThoughtSearchBlockId = (messageId: string, itemIndex: number) =>
 export const getProposedPlanSearchBlockId = (messageId: string, itemIndex: number) =>
   `${getMessageItemPrefix(messageId, itemIndex)}:proposed-plan`;
 
+export const getCoordinatorMessageSearchBlockId = (messageId: string, itemIndex: number) =>
+  `${getMessageItemPrefix(messageId, itemIndex)}:coordinator-message`;
+
 /**
  * Extract search blocks from a single message at a given index.
  * This is the building block for both batch and incremental extraction.
  */
 export const extractSearchBlocksForMessage = (
   message: SessionHistory,
-  messageIndex: number
+  messageIndex: number,
+  options?: { coordinator?: boolean }
 ): SessionSearchBlock[] => {
   const blocks: SessionSearchBlock[] = [];
   const rawItems = Array.isArray(message.items) ? message.items : [];
+  const hideInternalAssistantText = options?.coordinator === true && message.role === 'assistant';
   rawItems.forEach((item, itemIndex) => {
     if (!isRecord(item) || typeof item.type !== 'string') {
       return;
@@ -141,6 +146,7 @@ export const extractSearchBlocksForMessage = (
 
     switch (item.type) {
       case 'text':
+        if (hideInternalAssistantText) return;
         pushBlock(blocks, {
           blockId: getTextSearchBlockId(message.id, itemIndex),
           messageId: message.id,
@@ -154,6 +160,7 @@ export const extractSearchBlocksForMessage = (
         });
         return;
       case 'thought':
+        if (hideInternalAssistantText) return;
         pushBlock(blocks, {
           blockId: getThoughtSearchBlockId(message.id, itemIndex),
           messageId: message.id,
@@ -164,6 +171,7 @@ export const extractSearchBlocksForMessage = (
         });
         return;
       case 'proposed_plan':
+        if (hideInternalAssistantText) return;
         pushBlock(blocks, {
           blockId: getProposedPlanSearchBlockId(message.id, itemIndex),
           messageId: message.id,
@@ -171,6 +179,16 @@ export const extractSearchBlocksForMessage = (
           itemIndex,
           blockType: 'assistant_markdown',
           text: getSearchableMarkdownText(getString(item.markdown) ?? ''),
+        });
+        return;
+      case 'coordinator_message':
+        pushBlock(blocks, {
+          blockId: getCoordinatorMessageSearchBlockId(message.id, itemIndex),
+          messageId: message.id,
+          messageIndex,
+          itemIndex,
+          blockType: 'assistant_markdown',
+          text: getSearchableMarkdownText(getString(item.body) ?? ''),
         });
         return;
       default:
@@ -181,7 +199,8 @@ export const extractSearchBlocksForMessage = (
 };
 
 export const extractSessionSearchBlocks = (
-  history: readonly SessionHistory[] | undefined
+  history: readonly SessionHistory[] | undefined,
+  options?: { coordinator?: boolean }
 ): SessionSearchBlock[] => {
   if (!history?.length) {
     return [];
@@ -189,7 +208,7 @@ export const extractSessionSearchBlocks = (
 
   const blocks: SessionSearchBlock[] = [];
   history.forEach((message, messageIndex) => {
-    blocks.push(...extractSearchBlocksForMessage(message, messageIndex));
+    blocks.push(...extractSearchBlocksForMessage(message, messageIndex, options));
   });
 
   return blocks;

@@ -23,16 +23,21 @@ export function createSessionToolRegistrar(
       description?: string;
       inputSchema: T;
       annotations?: ToolAnnotations;
+      exemptFromHelp?: boolean;
     },
     callback: (args: z.output<T>) => Promise<CallToolResult>
   ) => {
     handlers?.set(name, async (args) => {
       const parsed = await config.inputSchema.safeParseAsync(args);
       if (!parsed.success) {
-        throw new z.ZodError([
-          ...parsed.error.issues,
-          { code: 'custom', path: [], message: commandHelpReminder(name) },
-        ]);
+        throw new z.ZodError(
+          config.exemptFromHelp
+            ? parsed.error.issues
+            : [
+                ...parsed.error.issues,
+                { code: 'custom', path: [], message: commandHelpReminder(name) },
+              ]
+        );
       }
       return callback(parsed.data);
     });

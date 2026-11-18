@@ -14,7 +14,8 @@ export const internalCommand = new Command('__internal')
           serveStdioMcp.pipe(
             Effect.provide(
               stdioMcpConnectionLayer({
-                createServer: buildLodyMcpServer,
+                createServer: () =>
+                  buildLodyMcpServer({ coordinator: process.env.LODY_MCP_COORDINATOR === '1' }),
                 stdin: process.stdin,
                 stdout: process.stdout,
                 signals: process,

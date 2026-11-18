@@ -605,6 +605,8 @@ export interface AgentClientOptions {
    * text is never moved into a user message.
    */
   systemPrompt?: string;
+  /** Exposes coordinator-only MCP tools to this ACP session. */
+  coordinator?: boolean;
   /**
    * Overrides terminal capability advertisement. Builtin Grok defaults to false so its
    * adapter uses the native local runner; other agents default to true.
@@ -740,6 +742,7 @@ export class AgentClient implements acp.Client {
               workspaceId: this.options.workspaceId,
               machineId: this.options.machineId,
               workdir,
+              coordinator: this.options.coordinator === true,
             }),
           },
         ];
@@ -755,6 +758,7 @@ export class AgentClient implements acp.Client {
       { name: 'LODY_MCP_WORKSPACE_ID', value: this.options.workspaceId },
       { name: 'LODY_MCP_MACHINE_ID', value: this.options.machineId },
       { name: 'LODY_MCP_WORKDIR', value: workdir },
+      ...(this.options.coordinator === true ? [{ name: 'LODY_MCP_COORDINATOR', value: '1' }] : []),
     ];
 
     // ACP MCP config is an explicit environment allowlist. The MCP subprocess

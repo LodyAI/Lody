@@ -4022,6 +4022,21 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
         .strict()
     ),
   }),
+  z
+    .object({
+      type: z.literal('coordinator_message'),
+      id: SharedTrimmedNonEmptyStringSchema.max(128),
+      body: SharedStringSchema.max(64 * 1024),
+      createdAt: z.number().finite().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('coordinator_status'),
+      status: SharedStringSchema.max(240),
+      updatedAt: z.number().finite().optional(),
+    })
+    .strict(),
 ]);
 
 // System notice message content schema
