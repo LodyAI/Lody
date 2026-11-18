@@ -1,6 +1,11 @@
 import { useSessionStoreEpoch } from '@/hooks/use-session-store-epoch';
 import { deriveSessionTurnFacts, type SessionTurnFacts } from './session-turn-facts';
-import { normalizeFileDiff, type FileDiff, type SessionId } from '@lody/shared';
+import {
+  normalizeFileDiff,
+  type FileDiff,
+  type SessionId,
+  type SessionDiffStats,
+} from '@lody/shared';
 import { useAtomValue } from 'jotai';
 import { useEffect, useRef, useState } from 'react';
 import { activeWorkspaceRuntimeAtom, type SessionDocStore } from '@/atoms/runtime';
@@ -25,6 +30,10 @@ type SessionDiffSummaryState = {
   source: 'initial' | 'fallback' | 'provider';
   summary: SessionDiffSummary;
   unavailableMessage?: string;
+  liveDiffStat?: SessionDiffStats['allChange'];
+  changesReady?: boolean;
+  changesSynced?: boolean;
+  changesUnavailableMessage?: string;
 };
 
 const INITIAL_STATE: SessionDiffSummaryState = {
@@ -237,6 +246,7 @@ export function useSessionDiffSummary(
     readonly fileProvider?: SessionFileProvider | null;
     readonly fileProviderPending?: boolean;
     readonly enabled?: boolean;
+    readonly refreshChanges?: boolean;
   } = {}
 ): SessionDiffSummaryState {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
@@ -245,7 +255,13 @@ export function useSessionDiffSummary(
   const fileProvider = options.fileProvider ?? null;
   const fileProviderPending = options.fileProviderPending ?? false;
   const providerModeActive = enabled && fileProvider !== null;
+  const refreshChanges = options.refreshChanges ?? false;
   const [state, setState] = useState<SessionDiffSummaryState>(INITIAL_STATE);
+  const [liveRead, setLiveRead] = useState<{
+    provider: SessionFileProvider;
+    status: 'loading' | 'ready' | 'unavailable';
+    message?: string;
+  } | null>(null);
   const [diffInputsVersion, setDiffInputsVersion] = useState(0);
   const [changedFilesRevision, setChangedFilesRevision] = useState(0);
   useEffect(() => {
@@ -260,6 +276,52 @@ export function useSessionDiffSummary(
   const fileProviderRef = useRef<SessionFileProvider | null>(fileProvider);
   const providerSummaryRetryAttemptsRef = useRef(0);
   const providerSummaryRetryTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!enabled || !refreshChanges || fileProviderPending || !fileProvider) return;
+    const refresh = fileProvider.refreshChangedFiles?.bind(fileProvider);
+    if (!refresh) return;
+    const controller = new AbortController();
+    setLiveRead({ provider: fileProvider, status: 'loading' });
+    void (async () => {
+      try {
+        const result = await refresh(controller.signal);
+        if (controller.signal.aborted) return;
+        if (result.status === 'unavailable') {
+          setLiveRead({
+            provider: fileProvider,
+            status: 'unavailable',
+            message: result.message ?? result.reason,
+          });
+          return;
+        }
+        const summary = buildSessionDiffSummaryFromProviderChanges(result.files, undefined);
+        setState((previous) => ({
+          ...previous,
+          ready: true,
+          synced: true,
+          source: 'provider',
+          revision: previous.revision + 1,
+          summary: {
+            ...previous.summary,
+            changeEntries: summary.changeEntries,
+            changeFilePaths: summary.changeFilePaths,
+          },
+          unavailableMessage: undefined,
+        }));
+        setLiveRead({ provider: fileProvider, status: 'ready' });
+        setChangedFilesRevision((revision) => revision + 1);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setLiveRead({
+          provider: fileProvider,
+          status: 'unavailable',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    })();
+    return () => controller.abort();
+  }, [enabled, refreshChanges, fileProvider, fileProviderPending, sessionId]);
 
   useEffect(() => {
     fileProviderRef.current = fileProvider;
@@ -585,5 +647,31 @@ export function useSessionDiffSummary(
     };
   }
 
+  const currentLiveRead = liveRead?.provider === fileProvider ? liveRead : null;
+  if (refreshChanges && fileProvider?.refreshChangedFiles && currentLiveRead?.status !== 'ready') {
+    return {
+      ...state,
+      changesReady: currentLiveRead?.status === 'unavailable',
+      changesSynced: true,
+      changesUnavailableMessage: currentLiveRead?.message,
+    };
+  }
+  if (currentLiveRead?.status === 'ready') {
+    let add = 0;
+    let del = 0;
+    for (const entry of state.summary.changeEntries) {
+      if (entry.add === undefined || entry.del === undefined)
+        return {
+          ...state,
+          liveDiffStat: { add: 0, del: 0, files: state.summary.changeEntries.length },
+        };
+      add += entry.add;
+      del += entry.del;
+    }
+    return {
+      ...state,
+      liveDiffStat: { add, del, files: state.summary.changeEntries.length },
+    };
+  }
   return state;
 }

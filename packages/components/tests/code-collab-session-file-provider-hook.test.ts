@@ -45,6 +45,7 @@ import {
 } from '@lody/shared/cloud-file-index-ipc';
 import { readCodeCollabFileIndexSnapshotFromFlock } from '@lody/shared';
 import { SessionAgentFileLinkMenuProvider } from '../src/components/sessions/session-agent-file-link-menu';
+import { useSessionDiffSummary } from '../src/components/sessions/use-session-diff-summary';
 import { useAgentFileLinkMatch } from '../src/components/ai-gui/agent-file-link-context';
 
 vi.mock('../src/hooks/use-session-file-actions', () => ({
@@ -194,6 +195,143 @@ describe('file-index generation replication', () => {
 });
 
 describe('useCodeCollabSessionFileProvider', () => {
+  it.each([
+    ['local', true],
+    ['cloud', true],
+    ['local', false],
+    ['cloud', false],
+  ] as const)(
+    'opens a full Changes list through the %s provider with blob transport %s and leaves bodies deferred',
+    async (plane, blobs) => {
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+      const store = createStore();
+      const sessionId = `changes-${plane}` as SessionId;
+      const machineId = `machine-${plane}` as MachineId;
+      const flock = new Flock(`changes-${plane}`);
+      flock.set(['indexed.ts'], { kind: 'file', change: { diff: [1, 0] } });
+      flock.commit();
+      let bodyBytes = 0;
+      let rootUnavailable = false;
+      store.set(
+        runtimeAtom,
+        createRuntime({
+          prepareSessionTarget: async () => plane,
+          repo: {
+            openFlockDoc: async () => ({ flock, joinRoom: async () => makeSyncedFlockRoom() }),
+          },
+          acquireSessionStore: () => new Promise(() => undefined),
+          requestLocalCodeCollabFileIndex: async () => ({
+            status: 'ok',
+            ownerSessionId: sessionId,
+            fileIndex: { 'indexed.ts': { kind: 'file', change: { diff: [1, 0] } } },
+            updatedAtMs: 1,
+          }),
+          getDiffBlobTransportOptions: async () => ({
+            supported: blobs,
+            scope: plane,
+            persist: false,
+          }),
+          requestCodeCollabInitDirectory: async () => ({ status: 'ok' }),
+          requestCodeCollabOpenDiffManifest: async (
+            _machine: MachineId,
+            request: { cursor?: string }
+          ) => ({
+            status: 'ok',
+            base: 'base',
+            entries: [
+              {
+                path: request.cursor ? '\0lody-root:member:docs/unindexed.ts' : 'indexed.ts',
+                status: 'ok',
+                base: null,
+                head: {
+                  key: `sha256:${'1'.repeat(64)}`,
+                  rawBytes: 6,
+                  format: { encoding: 'utf8' },
+                },
+                add: 1,
+                del: 0,
+              },
+            ],
+            nextCursor: request.cursor ? null : 'page-2',
+          }),
+          requestCodeCollabOpenAllChangesDiff: async (
+            _machine: MachineId,
+            request: { rootId?: string; scope?: string }
+          ) => {
+            if (request.rootId && rootUnavailable)
+              return { status: 'unavailable', reason: 'transient_io' };
+            if (request.rootId && request.scope === 'uncommitted')
+              return { status: 'unavailable', reason: 'not_a_git_worktree' };
+            return {
+              status: 'ok',
+              base: 'base',
+              entries: [
+                {
+                  status: 'deferred',
+                  path: request.rootId ? 'unindexed.ts' : 'indexed.ts',
+                  add: 1,
+                  del: 0,
+                },
+              ],
+              truncated: true,
+            };
+          },
+          requestCodeCollabReadBlob: async () => {
+            bodyBytes++;
+            throw new Error('List reads must not load file bodies.');
+          },
+        })
+      );
+      store.set(sessionMetaCacheAtom, {
+        [getSessionRoomId(sessionId)]: {
+          id: sessionId,
+          machineId,
+          userId: 'user-1',
+          projectRun: { members: { docs: { access: 'additional', path: 'docs' } } },
+        } as SessionMeta,
+      });
+      let state: ReturnType<typeof useSessionDiffSummary> | undefined;
+      let provider: UseCodeCollabSessionFileProviderResult['provider'] = null;
+      function Harness() {
+        const files = useCodeCollabSessionFileProvider({
+          workspaceId: 'workspace-1',
+          sessionId,
+          enabled: true,
+          machineId,
+          requestedByUserId: 'user-1',
+        });
+        provider = files.provider;
+        state = useSessionDiffSummary(sessionId, {
+          fileProvider: files.provider,
+          fileProviderPending: files.status === 'loading' || files.status === 'checking',
+          refreshChanges: true,
+        });
+        return null;
+      }
+      render(createElement(Provider, { store }, createElement(Harness)));
+      await flushMicrotasks(12);
+      expect(state?.summary.changeFilePaths).toEqual(['docs/unindexed.ts', 'indexed.ts']);
+      expect(state?.liveDiffStat).toEqual({ add: 2, del: 0, files: 2 });
+      expect(bodyBytes).toBe(0);
+      if (!blobs) {
+        await act(async () => {
+          expect(await provider?.getAllChangesDiff?.(undefined, 'uncommitted')).toMatchObject({
+            status: 'ready',
+            entries: [{ path: 'indexed.ts' }],
+          });
+        });
+        expect(state?.summary.changeFilePaths).toEqual(['docs/unindexed.ts', 'indexed.ts']);
+        rootUnavailable = true;
+        await act(async () => {
+          expect(await provider?.refreshChangedFiles?.()).toMatchObject({ status: 'unavailable' });
+        });
+        expect(await provider?.listChangedFiles()).toMatchObject({
+          files: [{ path: 'docs/unindexed.ts' }, { path: 'indexed.ts' }],
+        });
+      }
+    }
+  );
+
   it('releases a failed conversation borrower so the next Files open can recover', async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const store = createStore();

@@ -123,6 +123,7 @@ failure-containment rules alongside the existing filesystem and publication cont
   a snapshot database or migrate it. Encrypted calls retain writer authority and
   execution claims. Reauthorize each page and serve only session-issued handles;
   never resolve a caller's hash as global authority.
+  Whole-list manifests omit patches; single-file requests prepare bounded remote hunks.
   Generation rows contain no content hashes. Disk identity and non-Git base metadata
   stay daemon-local and invalidate generations even when line counts are unchanged.
   [Decision](../../../../../.agents/notes/implemented/architecture/2026-10-31-remote-diff-transport.md).

@@ -382,7 +382,7 @@ Meta 的正式 0.1.0 scan 隐藏 tombstone，会误把已删除 leaf 回退到�
 
 旧 TS SDK 的 body 落盘、purge、TTL 与默认 sync 也会隐式访问 Meta。接入使用显式
 `createWithExternalMetadata` 工厂与 `loro-external-metadata-v1` 能力，初始化前核实工厂，
-初始化后核实 external 模式；不会创建、读取或同步旧 Meta Flock。合入主分支 `5438a894baa0e76ccb5357b6869d509b7184c8e6` 后，旧 TS Repo 使用正式 `loro-repo 0.26.0`，已核对发布包包含上述 external metadata 接口；不再覆盖为本地 0.25.1。native engine/client/json-patch 三包仍单独固定不可变产物，不将它们的本地修复误记为正式 0.1.0 能力。
+初始化后核实 external 模式；不会创建、读取或同步旧 Meta Flock。合入主分支 `32536a521f1d03187e4e5c52d79840cd3ba835df`（包含 SDK 升级）后，旧 TS Repo 使用正式 `loro-repo 0.26.0`，已核对发布包包含上述 external metadata 接口；不再覆盖为本地 0.25.1。native engine/client/json-patch 三包仍单独固定不可变产物，不将它们的本地修复误记为正式 0.1.0 能力。
 
 main 保留完整元数据，向 renderer 只投影允许的 Session/Machine 字段及封闭嵌套形状，
 不下发 Agent launch、环境变量或旧 capability 的私密快照。WF/MF/SR 必须先完成原生切换；

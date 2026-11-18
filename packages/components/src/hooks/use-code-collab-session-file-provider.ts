@@ -649,23 +649,45 @@ export function useCodeCollabSessionFileProvider(
           { ownerSessionId }
         ),
       openAllChangesDiff: async (focusPath, scope: CodeCollabAllChangesScope | undefined) => {
-        // All Changes is one root's comparison; focusing a member file asks
-        // that member's root for it.
         const focus = focusPath === undefined ? undefined : at(focusPath);
-        return await runtime.requestCodeCollabOpenAllChangesDiff(
-          machineId,
-          {
-            sessionId,
-            ...(scope === undefined ? {} : { scope }),
-            ...(focus === undefined
-              ? {}
-              : {
-                  focusPath: focus.path,
-                  ...('rootId' in focus ? { rootId: focus.rootId } : {}),
-                }),
-          },
-          { ownerSessionId }
+        const rootIds = [undefined, ...mounts.map((mount) => mount.rootId)];
+        const responses = await Promise.all(
+          rootIds.map((rootId) =>
+            runtime.requestCodeCollabOpenAllChangesDiff(
+              machineId,
+              {
+                sessionId,
+                ...(rootId === undefined ? {} : { rootId }),
+                ...(scope === undefined ? {} : { scope }),
+                ...(focus && focus.rootId === rootId ? { focusPath: focus.path } : {}),
+              },
+              { ownerSessionId }
+            )
+          )
         );
+        const primary = responses[0];
+        if (!primary || primary.status !== 'ok') return primary ?? null;
+        const entries: typeof primary.entries = [];
+        let truncated = false;
+        for (const [index, response] of responses.entries()) {
+          const rootId = rootIds[index];
+          if (
+            rootId &&
+            scope === 'uncommitted' &&
+            response?.status === 'unavailable' &&
+            (response.reason === 'not_a_git_worktree' || response.reason === 'no_commits')
+          )
+            continue;
+          if (!response || response.status !== 'ok') return response;
+          for (const entry of response.entries) {
+            const path = rootId
+              ? encodeSessionFilePath({ rootId, relativePath: entry.path })
+              : entry.path;
+            entries.push({ ...entry, path: toSessionFileDisplayPath(path, mounts) });
+          }
+          truncated ||= response.truncated;
+        }
+        return { ...primary, entries, truncated };
       },
       openTurnDiff: async (path, turnId) =>
         await runtime.requestCodeCollabOpenTurnDiff(

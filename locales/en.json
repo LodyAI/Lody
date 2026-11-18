@@ -2207,6 +2207,7 @@
   "sessions.changes.empty": "No changes yet.",
   "sessions.changes.diffStatsUnavailable": "Diff stats unavailable",
   "sessions.changes.loading": "Loading changes…",
+  "sessions.changes.tooManyFiles": "Too many changed files to load.",
   "sessions.changes.syncing": "Syncing changes…",
   "sessions.changes.title": "Changes",
   "sessions.changes.view.files": "Files",

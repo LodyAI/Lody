@@ -138,9 +138,9 @@ this page is the full text of the rules summarised there.
     the composer (the "canonical cluster + fixed stage" bar detailed below; it
     replaced the header `PullRequestBadge` and the old `session-context-strip.tsx`)
     and in the "…" menu (Repository/Machine/branch info rows). `changesDiffStat`
-    reads the active sidebar session's `SessionMeta.diffStats.allChange`, matching
-    that sidebar row exactly; the bar must never trigger or independently total
-    diff loads.
+    uses the completed live Changes list's totals when available, with the active
+    sidebar session's `SessionMeta.diffStats.allChange` as its initial snapshot.
+    The Changes surface owns the live query and the bar consumes its result.
     In a multi-member workspace, `SessionAccessControl` sits in the desktop toolbar
     before the "…" menu only while effective access is `Private`; Team and unresolved
     states stay hidden. Single-member workspaces do not resolve or pass sharing state.
