@@ -95,6 +95,17 @@ and caps retired vaults at 16.
 - The notification is informational. A hostile service can suppress it, while the R-signed
   admission stays visible in the verified ledger.
 
+## Desktop recovery switch and errors
+
+The desktop runtime enables recovery when `LODY_E2EE_RECOVERY_VAULT` is absent
+or trims to `on`. Explicit `off`, empty and unknown values refuse. This preserves
+the existing default-on desktop path while making a mistyped override refuse.
+Only the structured `e2ee_recovery_vault_disabled` backend refusal maps to the
+public `e2ee_recovery_disabled` result. Transport failures stay unavailable; no raw
+server text leaves main. This switch is not proof of deployed service availability
+or native recovery acceptance. The regression exercises the cloud response through
+the recovery error boundary, including a transport failure.
+
 ## Backend gap
 
 As inspected on 2026-11-05, the private backend implements vault storage, the Recovery
