@@ -2477,6 +2477,7 @@
   "sessions.fileViewer.copyRelativePath": "Copy relative path",
   "sessions.fileViewer.htmlPreview.allowScripts": "Allow JavaScript",
   "sessions.fileViewer.htmlPreview.allowScriptsHint": "Only allow this for pages you trust. Scripts can make network requests.",
+  "sessions.fileViewer.htmlPreview.allowWorkspaceResources": "Allow this page to read files in {{folder}}",
   "sessions.fileViewer.htmlPreview.consentDescription": "The page opens from the file on disk and may load files from its own folder, such as stylesheets and images. It runs isolated from Lody.",
   "sessions.fileViewer.htmlPreview.consentTitle": "Preview {{fileName}}?",
   "sessions.fileViewer.htmlPreview.navigationDisabled": "Navigation is disabled for self-contained HTML previews.",
