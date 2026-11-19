@@ -196,11 +196,17 @@ describe('live agent status', () => {
     );
     await expandActivityGroup();
 
+    await vi.waitFor(() =>
+      expect(
+        [...container.querySelectorAll('ol')].find((list) =>
+          list.textContent?.includes('Confirm the backup is readable')
+        )
+      ).toBeDefined()
+    );
     const thought = [...container.querySelectorAll('ol')].find((list) =>
       list.textContent?.includes('Confirm the backup is readable')
     );
     const status = container.querySelector('[data-agent-activity-status]');
-    expect(thought).toBeDefined();
     expect(status).not.toBeNull();
     expect(status!.closest('[data-virtual-index]')).toBe(thought!.closest('[data-virtual-index]'));
     expect(status!.closest('.markdown-renderer')).toBeNull();
@@ -231,13 +237,19 @@ describe('live agent status', () => {
     );
     await expandActivityGroup();
 
+    await vi.waitFor(() =>
+      expect(
+        [...container.querySelectorAll('ol')].find((list) =>
+          list.textContent?.includes('Keep the live summary in view')
+        )
+      ).toBeDefined()
+    );
     const thought = [...container.querySelectorAll('ol')].find((list) =>
       list.textContent?.includes('Keep the live summary in view')
     );
     const status = container.querySelector('[data-agent-activity-status]');
     const subagent = container.querySelector('[data-subagent-task-id="worker-1"]');
     const footerAction = container.querySelector('[aria-label="Turn configuration"]');
-    expect(thought).toBeDefined();
     expect(status).not.toBeNull();
     expect(subagent).not.toBeNull();
     expect(footerAction).not.toBeNull();
