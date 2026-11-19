@@ -20,14 +20,14 @@ recipient to have machine/project access.
 
 Effective access is the maximum of these sources:
 
-| Source                                                                                         | Access                                                   |
-| ---------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| Machine owner                                                                                  | Manage and edit; always visible                          |
-| Shared machine and, for a local project, shared project                                        | Edit                                                     |
-| Matching team or personal session read grant                                                   | Read only                                                |
-| Assigned session owner                                                                         | Read only, unless machine/project access permits editing |
-| The person who imported it from a workspace bundle, only in the workspace it was imported into | Read only (its machine stays in the source workspace)    |
-| None                                                                                           | Hidden                                                   |
+| Source                                                                     | Access                                                   |
+| -------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Machine owner                                                              | Manage and edit; always visible                          |
+| Shared machine and, for a local project, shared project                    | Edit                                                     |
+| Matching team or personal session read grant                               | Read only                                                |
+| Assigned session owner                                                     | Read only, unless machine/project access permits editing |
+| Every member of the workspace it was imported into from a workspace bundle | Read only (its machine stays in the source workspace)    |
+| None                                                                       | Hidden                                                   |
 
 Grants apply only when their machine equals current Meta's machine. Only direct,
 same-machine contained Tabs and Side Chats inherit the root's grant. Missing

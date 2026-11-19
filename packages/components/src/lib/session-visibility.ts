@@ -16,8 +16,8 @@ export type SessionMachineRecord = {
   machineId?: string | null;
   userId?: string | null;
   project?: { kind?: string; localProjectId?: string | null } | null;
-  /** Set by a workspace bundle import; see `isImportedForUser`. */
-  importFence?: { workspaceId?: string; importedBy?: string } | null;
+  /** Set by a workspace bundle import; see `isImportedIntoWorkspace`. */
+  importFence?: { workspaceId?: string } | null;
 };
 
 type LocalProjectSessionMachineRecord = SessionMachineRecord & {
@@ -39,22 +39,16 @@ type SessionVisibilityOptions = {
 };
 
 /**
- * A conversation this person imported into this workspace from a bundle. Its machine
- * stays in the source workspace, so it is readable here and never editable; only the
- * importer sees it, and only in the workspace the import named.
+ * A conversation imported into this workspace from a bundle. Imports are shared:
+ * every signed-in member sees it, but only in the workspace the import named. Its
+ * machine stays in the source workspace, so it is readable here and never editable.
  */
-export function isImportedForUser(
+export function isImportedIntoWorkspace(
   session: SessionMachineRecord,
   workspaceId: string | null | undefined,
   currentUserId: string | null | undefined
 ): boolean {
-  const fence = session.importFence;
-  return (
-    !!workspaceId &&
-    !!currentUserId &&
-    fence?.workspaceId === workspaceId &&
-    fence.importedBy === currentUserId
-  );
+  return !!workspaceId && !!currentUserId && session.importFence?.workspaceId === workspaceId;
 }
 
 export function isLocalProjectSession(
@@ -156,7 +150,8 @@ export function resolveSessionVisibilityState(
     )
   )
     return 'visible';
-  if (isImportedForUser(session, options.workspaceId, options.currentUserId)) return 'visible';
+  if (isImportedIntoWorkspace(session, options.workspaceId, options.currentUserId))
+    return 'visible';
   if (
     isSessionVisibleToUser(
       session,

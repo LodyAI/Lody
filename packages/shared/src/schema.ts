@@ -1029,7 +1029,7 @@ export type SessionImportFence = {
   workspaceId: string;
   turnIds: string[];
   queueItemIds: string[];
-  /** Who imported it: that person may read it in `workspaceId`, never edit it. */
+  /** Who imported it, as provenance; every member of `workspaceId` may read it, never edit it. */
   importedBy?: string;
 };
 

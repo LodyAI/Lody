@@ -6,7 +6,7 @@ import { allActiveSessionsAtom, archivedSessionListAtom, sessionListAtom } from 
 import {
   filterSessionsByVisibility,
   isSessionEditableToUser,
-  isImportedForUser,
+  isImportedIntoWorkspace,
   isSessionReadShared,
   type SessionListEntry,
 } from '@/lib/session-visibility';
@@ -70,7 +70,7 @@ function useHistoryOnlySessionIds(
           (session) =>
             (isSessionReadShared(session, readSharedSessions, sessionsById, accountId) ||
               (!!accountId && session.userId === accountId) ||
-              isImportedForUser(session, workspaceId, accountId)) &&
+              isImportedIntoWorkspace(session, workspaceId, accountId)) &&
             !isSessionEditableToUser(session, machines, projects, accountId, ownedMachineIds)
         )
         .map((session) => session.id)
@@ -291,8 +291,7 @@ export function useVisibleArchivedSessionMetas(
     workspaceHistoryReadable,
     ownedMachineIds,
     readSharedSessions,
-    sessionsById
-,
+    sessionsById,
     scope.workspaceId
   );
 
