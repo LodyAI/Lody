@@ -203,8 +203,7 @@ nothing extra. They keep the synchronous rules in the
 MCP `lody_session_list`/`status_many` (the execution snapshot), `session_history`,
 quote resolution, the queue list, `lody session status`/`show`, and the GC's
 goal check for an evicted document. These go through a read port
-(`openNativeSessionReader`: `history`, `readHistoryDirectory`, `getMessageQueue`,
-`readLatestGoal`, `getMetaState`).
+(`openNativeSessionReader`, typed as `SessionReadPort`: history, directory, turns, transcript, queue, latest goal, metadata and control changes).
 
 How the rules are kept:
 
@@ -223,9 +222,21 @@ How the rules are kept:
   goal; a Session without any goal reads all its items once, without retaining
   them.
 
-Still opening a replica: automation and schedule condition reads, `lody session
-history`/`observe`, and every write outside a turn (rename, archive, queue edits
-from the CLI). They are correct, only not yet lean.
+The same port serves automation and schedule condition reads (turn finalized,
+pending provider work, schedule run settled), `lody session history`, and
+`lody session observe`: an observed idle Session follows the engine's changed-path
+observation, whose reset after a host restart re-reads the directory. Every path
+goes through `openSessionReadPort`, which also refuses Roost Sessions (their
+history is not in the document). Writes outside a turn (rename, archive, queue
+edits from the CLI) and the dispatch-default reads that precede a send still open
+a replica.
+
+`lody session history` counts every visible turn, and visibility depends on each
+item's type and whether its text is blank, so the remote read projects every
+turn's items page by page and keeps only the projection, then reads the selected
+turns whole. With 50k turns that is about 4.3 s, against 10.4 s for the same
+selection on an open replica (after a 0.7–1.1 s open). Neither is bounded; a
+bounded count needs a visibility index or a nested-field projection primitive.
 
 ## Workspace Meta
 
@@ -292,6 +303,7 @@ handling; a failed write-back is logged and retried on the next start.
 | 6        | Paged Session directory; reopen from retained bytes plus ops since its version                        | 400 (actual ≈140)     |
 | —        | Cold 100k-turn opens: owner decision pending (segmented history or SDK transfer work)                 | to be sized           |
 | 10       | Daemon reads idle Sessions from the engine; replicas only for running Sessions                        | 300 (actual ≈160)     |
+| 11       | Automation, schedule, `session history` and `observe` reads on the same port                          | 250 (actual ≈140 net) |
 | —        | Remaining Loro documents (`schedule-*`, Preview comments) on the same owner                           | small per type        |
 | —        | Cloud replication of native rooms (needs remote Meta design)                                          | separate proposal     |
 
@@ -438,9 +450,12 @@ for a loaded room; RSS deltas below 20 MB are within measurement noise.
   main-process IPC hop per read, which the benchmark does not measure, and no
   packaged desktop run exists yet. The daemon reads idle Sessions from the engine
   for the paths listed above; the others still open a replica.
-- The engine host keeps a room loaded after it is read (about 40 MB per
-  50k-turn room in the measurement below). Unloading idle rooms is the host's
-  policy, not Lody's.
+- The engine host unloads least recently used idle rooms past 16 per namespace
+  and, with `lody/idle-room-byte-budget`, past 64 MiB of their encoded size.
+  Twenty idle 20k-turn Sessions read once: host +275 MB with the count alone,
+  +140 MB with the budget. Freed memory is not always returned to the system:
+  after whole-history transcript reads the host stayed about 330 MB above its
+  start.
 - A commit already sent when the host dies is an unknown outcome. Per the SDK
   contract this latches that repo's metadata writes until it is recreated; reads
   continue. Commits attempted while disconnected are certain non-commits.
