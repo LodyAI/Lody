@@ -126,6 +126,9 @@ type RoomState = {
   // The acknowledged receive target is fixed even as live pushes and local
   // exports advance the separate upload baseline in serverVersion.
   docJoinTarget: VersionVector | null;
+  // Latest remote frontier advertised with this room's live updates.
+  docReceiveTarget: VersionVector | null;
+  docReceiveConfirmed: boolean;
   pendingJoinRequestId: string | null;
   /** Timer for the currently sent join, including its receive reconciliation. */
   joinAttemptTimer: unknown | null;
@@ -158,6 +161,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
   private readonly scheduleTimeout: (callback: () => void, delayMs: number) => unknown;
   private readonly cancelTimeout: (handle: unknown) => void;
   private readonly rooms = new Map<string, RoomState>();
+  private readonly docReceiveListeners = new Map<string, Set<(confirmed: boolean) => void>>();
   private readonly statusListeners = new Set<(status: TransportConnectionStatus) => void>();
   private readonly disposers: Array<() => void> = [];
   private requestSeq = 0;
@@ -251,6 +255,20 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     return this.joinRoom({ scope: 'meta' }, flock, false);
   }
 
+  observeDocReceive(docId: string, listener: (confirmed: boolean) => void): () => void {
+    let listeners = this.docReceiveListeners.get(docId);
+    if (!listeners) {
+      listeners = new Set();
+      this.docReceiveListeners.set(docId, listeners);
+    }
+    listeners.add(listener);
+    listener(this.rooms.get(roomKey({ scope: 'doc', docId }))?.docReceiveConfirmed === true);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) this.docReceiveListeners.delete(docId);
+    };
+  }
+
   async syncDoc(docId: string, doc: LoroDoc): Promise<TransportSyncResult> {
     await this.syncRoom({ scope: 'doc', docId }, doc, true);
     return { ok: true };
@@ -323,6 +341,8 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       flockFlushQueued: false,
       docChunkAssembler: null,
       docJoinTarget: null,
+      docReceiveTarget: null,
+      docReceiveConfirmed: false,
       pendingJoinRequestId: null,
       joinAttemptTimer: null,
       joinAttemptGeneration: null,
@@ -394,6 +414,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     const requestId = `join:${this.peerId}:${++this.requestSeq}`;
     if (state.isDoc) {
       state.docJoinTarget = null;
+      state.docReceiveTarget = null;
       state.docChunkAssembler = null;
       if (state.firstSynced.settled) state.firstSynced = createDeferred<void>();
     }
@@ -477,6 +498,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     state.pendingJoinRequestId = null;
     state.joined = false;
     state.docJoinTarget = null;
+    state.docReceiveTarget = null;
     state.docChunkAssembler = null;
     // Supersede all delayed exports/imports belonging to this failed attempt.
     state.syncGeneration += 1;
@@ -727,11 +749,12 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       try {
         if (message.serverVersion) {
           state.serverVersion = VersionVector.decode(base64ToBytes(message.serverVersion));
+          state.docReceiveTarget = state.serverVersion;
         }
         this.applyPayload(state, message.payload);
         if (state.docJoinTarget) this.finishDocJoin(state);
+        this.updateDocReceive(state);
       } catch (error) {
-        if (!state.docJoinTarget) throw error;
         this.failRecoverably(state, 'doc-reconcile', error);
       }
       return;
@@ -996,11 +1019,29 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     this.resolveSyncedWaiters(state);
   }
 
+  private updateDocReceive(state: RoomState): void {
+    if (state.room.scope !== 'doc') return;
+    const applied = state.docReceiveTarget
+      ? (state.target as LoroDoc).version().compare(state.docReceiveTarget)
+      : 0;
+    const confirmed =
+      state.status === 'joined' &&
+      state.docJoinTarget === null &&
+      state.docChunkAssembler === null &&
+      applied !== undefined &&
+      applied >= 0;
+    if (state.docReceiveConfirmed === confirmed) return;
+    state.docReceiveConfirmed = confirmed;
+    const listeners = this.docReceiveListeners.get(state.room.docId);
+    if (listeners) notify(listeners, confirmed);
+  }
+
   private setRoomStatus(state: RoomState, status: TransportRoomStatus): void {
     if (state.status === status) {
       return;
     }
     state.status = status;
     notify(state.statusListeners, status);
+    this.updateDocReceive(state);
   }
 }
