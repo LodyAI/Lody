@@ -576,18 +576,28 @@ describe('local data plane doc-update chunking', () => {
     expect(text(doc)).toBe(text(harness.serverDoc('doc-1')));
   });
 
-  it('an oversized live push after join is chunked and converges', async () => {
-    const harness = new ChunkHarness();
+  it('withdraws receive confirmation until the last live chunk is applied', async () => {
+    const harness = new ChunkHarness(true);
     const renderer = harness.createAdapter('renderer:a');
-    const docA = new LoroDoc();
-    renderer.joinDocRoom('doc-1', docA);
+    const doc = new LoroDoc();
+    const subscription = renderer.joinDocRoom('doc-1', doc);
+    const confirmations: boolean[] = [];
+    const stop = renderer.observeDocReceive('doc-1', (confirmed) => confirmations.push(confirmed));
     await harness.settle();
+    expect(confirmations).toEqual([false, true]);
 
     appendText(harness.serverDoc('doc-1'), bigText('live-burst '));
     await harness.settle();
-
     expect(errorFrames(harness.pushed)).toEqual([]);
-    expect(text(docA)).toBe(text(harness.serverDoc('doc-1')));
+    expect(subscription.status).toBe('joined');
+    expect(text(doc)).toBe('');
+    expect(confirmations).toEqual([false, true, false]);
+
+    harness.releaseLastChunk();
+    expect(text(doc)).toBe(text(harness.serverDoc('doc-1')));
+    expect(confirmations).toEqual([false, true, false, true]);
+    stop();
+    subscription.unsubscribe();
   });
 
   it('a sibling window converges through a chunked relay of another window’s upload', async () => {
