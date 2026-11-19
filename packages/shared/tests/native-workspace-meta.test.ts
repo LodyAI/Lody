@@ -28,6 +28,7 @@ import {
   createRemoteControlState,
   createRemoteHistoryCommands,
   createRemoteLoroHistoryReader,
+  readRemoteLatestGoal,
   shareObservation,
   type SessionDataChange,
 } from '../src/session-data';
@@ -371,10 +372,9 @@ describe('remote Session history reader', () => {
     const { doc } = await repo.openPersistedDoc(DOC);
     const data = createLoroSessionData({ sessionId: 'remote' as SessionId, doc });
     const commit = () => repo.persistDocNow(DOC, doc);
-    const remote = createRemoteLoroHistoryReader(
-      createNativeRemoteHistoryPort(await peer(dataDir), ns, DOC)
-    );
-    return { data, commit, remote };
+    const port = createNativeRemoteHistoryPort(await peer(dataDir), ns, DOC);
+    const remote = createRemoteLoroHistoryReader(port);
+    return { data, commit, remote, port };
   }
 
   it('reads the latest page, turns and outputs as the in-process reader does', async () => {
@@ -395,6 +395,37 @@ describe('remote Session history reader', () => {
     expect(await remote.readTurn('turn-3')).toEqual(data.history.readTurn('turn-3'));
     expect(await remote.readTurn('turn-404')).toEqual({ state: 'missing' });
     expect(await remote.readTurnOutput('turn-88')).toEqual(data.history.readTurnOutput('turn-88'));
+  });
+
+  it('reads a whole directory past the page byte limit and the newest goal as the in-process reader does', async () => {
+    const { data, commit, remote, port } = await open();
+    const goal = (status: string) => ({
+      type: 'goal',
+      threadId: 'thread-1',
+      turnId: null,
+      objective: 'ship the release',
+      status,
+      tokenBudget: null,
+      tokensUsed: 1,
+      timeUsedSeconds: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    expect(await readRemoteLatestGoal(port)).toBeNull();
+    const big = 'x'.repeat(8192);
+    for (let i = 0; i < 400; i++)
+      await data.commands.appendTurn(
+        i === 41
+          ? turn(i, { items: [goal('complete'), goal('active')] } as never)
+          : turn(i, i % 2 === 0 ? ({ inputConfig: { agentRoleId: big } } as never) : {})
+      );
+    await commit();
+    const whole = await remote.readDirectory(0, 400);
+    expect(whole.map((row) => row.turnId)).toEqual(
+      data.history.readDirectory(0, 400).map((row) => row.turnId)
+    );
+    expect(await readRemoteLatestGoal(port)).toEqual(data.readLatestGoal());
+    expect(data.readLatestGoal()).toMatchObject({ status: 'active' });
   });
 
   it('notifies appends structurally and field edits by turn id, never by content', async () => {

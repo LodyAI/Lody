@@ -1,5 +1,6 @@
 import { createHistoryWriter } from '@lody/shared/history-writer';
 import { createSessionControlPlaneMirror } from '@lody/shared/session-control-plane';
+import { isNativeDocId } from '@lody/shared/native-workspace-meta-ipc';
 import { Cause, Effect } from 'effect';
 import { isDeepStrictEqual } from 'node:util';
 import type { CliE2eeWorkspaceLegacy } from '../e2ee/workspace-legacy';
@@ -372,6 +373,7 @@ import { ConcurrentQueue } from '../concurrent-queue';
 import type { CliSqliteRepoStore } from './sqlite-repo-store';
 import type { NativeWorkspaceMeta } from '@lody/shared/node/native-workspace-meta';
 import {
+  openNativeSessionReader,
   openNativeWorkspaceMeta,
   usesNativeWorkspaceMeta,
   writeBackNativeWorkspaceMeta,
@@ -2485,6 +2487,18 @@ export class LoroDocumentManager {
   /** When a cached Session doc was last handed to a caller; `undefined` if it is not cached. */
   cachedSessionDocLastAccessMs(sessionId: SessionId): number | undefined {
     return this.sessions.has(sessionId) ? this.sessionDocLastAccessMs.get(sessionId) : undefined;
+  }
+
+  /**
+   * A read-only remote view of an idle native Session: only when native mode is
+   * on and this process holds no replica of it. Callers fall back to the
+   * replica otherwise. Reads through it never open, adopt or arm the document.
+   */
+  async openIdleSessionReader(sessionId: SessionId) {
+    if (!this.nativeMeta || this.peekSessionDoc(sessionId)) return undefined;
+    const roomId = getSessionRoomId(sessionId);
+    if (!isNativeDocId(roomId)) return undefined;
+    return openNativeSessionReader(this.workspaceId, roomId);
   }
 
   /** A cached, live Session doc without opening one or counting as an access. */
