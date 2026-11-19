@@ -7,11 +7,12 @@ const LABELS = {
   redo: 'Redo',
   cut: 'Cut',
   copy: 'Copy',
+  copyLink: 'Copy Link',
   paste: 'Paste',
   selectAll: 'Select All'
 }
 
-const ZH_LABELS = { ...LABELS, copy: '复制', paste: '粘贴' }
+const ZH_LABELS = { ...LABELS, copy: '复制', copyLink: '复制链接', paste: '粘贴' }
 
 function params(overrides = {}) {
   const { editFlags = {}, ...rest } = overrides
@@ -19,6 +20,7 @@ function params(overrides = {}) {
     isEditable: false,
     selectionText: '',
     mediaType: 'none',
+    linkURL: '',
     editFlags: {
       canUndo: true,
       canRedo: true,
@@ -35,31 +37,91 @@ function params(overrides = {}) {
 void test('offers Copy for selected read-only text', () => {
   const template = buildContextMenuTemplate(
     params({ selectionText: 'hello from the agent' }),
-    LABELS
+    LABELS,
+    assert.fail
   )
   assert.deepEqual(template, [{ role: 'copy', label: 'Copy', enabled: true }])
 })
 
 void test('draws no menu when the click has nothing to act on', () => {
-  assert.deepEqual(buildContextMenuTemplate(params(), LABELS), [])
-  assert.deepEqual(buildContextMenuTemplate(params({ selectionText: '   \n ' }), LABELS), [])
+  assert.deepEqual(buildContextMenuTemplate(params(), LABELS, assert.fail), [])
+  assert.deepEqual(
+    buildContextMenuTemplate(params({ selectionText: '   \n ' }), LABELS, assert.fail),
+    []
+  )
   // Chromium can report a selection it will not let us copy; a lone disabled
   // Copy reads as broken, so that draws nothing either.
   assert.deepEqual(
-    buildContextMenuTemplate(params({ selectionText: 'x', editFlags: { canCopy: false } }), LABELS),
+    buildContextMenuTemplate(
+      params({ selectionText: 'x', editFlags: { canCopy: false } }),
+      LABELS,
+      assert.fail
+    ),
     []
+  )
+})
+
+void test('copies the clicked link destination without a text selection', () => {
+  for (const linkURL of ['http://example.test/', 'https://example.test/a?x=1#details']) {
+    let clipboardText = 'previous clipboard text'
+    const template = buildContextMenuTemplate(
+      params({ linkURL, editFlags: { canCopy: false } }),
+      ZH_LABELS,
+      (url) => {
+        clipboardText = url
+      }
+    )
+
+    assert.deepEqual(
+      template.map((entry) => entry.label),
+      ['复制链接']
+    )
+    assert.equal(clipboardText, 'previous clipboard text')
+    template[0].click()
+    assert.equal(clipboardText, linkURL)
+  }
+})
+
+void test('offers both Copy and Copy Link when the link label is selected', () => {
+  const template = buildContextMenuTemplate(
+    params({ linkURL: 'https://example.test/', selectionText: 'Read the docs' }),
+    LABELS,
+    assert.fail
+  )
+  assert.deepEqual(
+    template.map((entry) => entry.label),
+    ['Copy', 'Copy Link']
+  )
+  assert.deepEqual(template[0], { role: 'copy', label: 'Copy', enabled: true })
+})
+
+void test('limits Copy Link to HTTP and HTTPS link destinations', () => {
+  for (const linkURL of ['mailto:user@example.test', 'file:///tmp/example', 'lody://session/id']) {
+    assert.deepEqual(buildContextMenuTemplate(params({ linkURL }), LABELS, assert.fail), [])
+  }
+  assert.deepEqual(
+    buildContextMenuTemplate(
+      params({ selectionText: 'https://example.test/' }),
+      LABELS,
+      assert.fail
+    ),
+    [{ role: 'copy', label: 'Copy', enabled: true }]
   )
 })
 
 void test('leaves images to the renderer so one click draws one menu', () => {
   assert.deepEqual(
-    buildContextMenuTemplate(params({ mediaType: 'image', selectionText: 'caption' }), LABELS),
+    buildContextMenuTemplate(
+      params({ mediaType: 'image', selectionText: 'caption', linkURL: 'https://example.test/' }),
+      LABELS,
+      assert.fail
+    ),
     []
   )
 })
 
 void test('gives an editable field the full edit set', () => {
-  const template = buildContextMenuTemplate(params({ isEditable: true }), LABELS)
+  const template = buildContextMenuTemplate(params({ isEditable: true }), LABELS, assert.fail)
   assert.deepEqual(
     template.map((entry) => ('type' in entry ? entry.type : entry.role)),
     ['undo', 'redo', 'separator', 'cut', 'copy', 'paste', 'separator', 'selectAll']
@@ -73,7 +135,8 @@ void test('an editable field with nothing selected still offers Paste', () => {
       isEditable: true,
       editFlags: { canCut: false, canCopy: false, canUndo: false, canRedo: false }
     }),
-    LABELS
+    LABELS,
+    assert.fail
   )
   const byRole = new Map(
     template.filter((entry) => 'role' in entry).map((entry) => [entry.role, entry.enabled])
@@ -86,6 +149,10 @@ void test('an editable field with nothing selected still offers Paste', () => {
 })
 
 void test('labels follow the product language', () => {
-  const template = buildContextMenuTemplate(params({ selectionText: '你好' }), ZH_LABELS)
+  const template = buildContextMenuTemplate(
+    params({ selectionText: '你好' }),
+    ZH_LABELS,
+    assert.fail
+  )
   assert.deepEqual(template, [{ role: 'copy', label: '复制', enabled: true }])
 })

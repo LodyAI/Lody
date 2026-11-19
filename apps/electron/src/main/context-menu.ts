@@ -1,4 +1,4 @@
-import { Menu, type BrowserWindow } from 'electron'
+import { clipboard, Menu, type BrowserWindow } from 'electron'
 import { buildContextMenuTemplate, type ContextMenuLabels } from './context-menu-template'
 import { translateMenu } from './menu'
 
@@ -15,7 +15,9 @@ import { translateMenu } from './menu'
  */
 export function installContextMenu(window: BrowserWindow): void {
   window.webContents.on('context-menu', (_event, params) => {
-    const template = buildContextMenuTemplate(params, resolveLabels())
+    const template = buildContextMenuTemplate(params, resolveLabels(), (url) => {
+      clipboard.writeText(url)
+    })
     if (template.length === 0 || window.isDestroyed()) {
       return
     }
@@ -29,6 +31,7 @@ function resolveLabels(): ContextMenuLabels {
     redo: translateMenu('common.redo', 'Redo'),
     cut: translateMenu('common.cut', 'Cut'),
     copy: translateMenu('common.copy', 'Copy'),
+    copyLink: translateMenu('common.copyLink', 'Copy Link'),
     paste: translateMenu('common.paste', 'Paste'),
     selectAll: translateMenu('common.selectAll', 'Select All')
   }
