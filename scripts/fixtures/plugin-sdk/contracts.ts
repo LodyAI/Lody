@@ -1,31 +1,46 @@
 import {
+  MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES,
   defineMutation,
   defineQuery,
   hostQueries,
+  type MachineRef,
   type PluginCallErrorCode,
   type ProjectRef,
+  type SessionRef,
   type WorkspaceRef,
 } from '@lody/plugin-sdk';
 import { useHost, useMutation, useQuery, type ProjectPageProps } from '@lody/plugin-sdk/client';
-import { defineMachinePlugin } from '@lody/plugin-sdk/machine';
 import type { PluginManifest } from '@lody/plugin-sdk/manifest';
 import { z } from 'zod';
-import { runSuiteTool } from './examples/test-report/shared';
 
-const workspaceBoardQuery = defineQuery('workspace', 'board.summary', {
+// @ts-expect-error Browser client bundles cannot import machine-only SDK modules.
+import('@lody/plugin-sdk/machine');
+
+// @ts-expect-error Browser client bundles cannot import Node built-in modules.
+import('node:fs');
+
+export const machineDigestQuery = defineQuery('machine', 'daemon.digest', {
   input: z.object({ limit: z.number().int().default(10) }),
   output: z.object({ count: z.number().int() }),
 });
 
-const projectPinMutation = defineMutation('project', 'item.pin', {
+export const sessionMonitorQuery = defineQuery('session', 'monitor.state', {
+  input: z.object({}),
+  output: z.object({ activeStep: z.string().nullable() }),
+});
+
+export const projectPinMutation = defineMutation('project', 'item.pin', {
   input: z.object({ itemId: z.string() }),
   output: z.object({ pinned: z.boolean() }),
 });
 
-const recoverReviewMutation = defineMutation('project', 'review.ensure', {
-  input: z.object({ prNumber: z.number().int(), headSha: z.string() }),
-  output: z.object({ sessionId: z.string() }),
+// @ts-expect-error Plugin-defined machine queries cannot use cross-machine 'workspace' scope.
+defineQuery('workspace', 'invalid.workspaceQuery', {
+  input: z.object({}),
+  output: z.object({}),
 });
+
+export const inlineBudgetCheck: 16384 = MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES;
 
 export const validManifest: PluginManifest = {
   id: 'test-report',
@@ -69,25 +84,50 @@ export const invalidSdkRangeManifest: PluginManifest = {
 };
 
 export const retriableOfflineCode: PluginCallErrorCode = 'machine_offline';
+export const unknownOutcomeCode: PluginCallErrorCode = 'outcome_unknown';
+export const quarantinedPluginCode: PluginCallErrorCode = 'plugin_faulted';
 
-export function verifyClientTypeSafety(
+export async function verifyClientTypeSafety(
   workspace: WorkspaceRef,
+  machine: MachineRef,
   project: ProjectRef,
+  session: SessionRef,
   pageProps: ProjectPageProps
 ) {
   const host = useHost();
 
-  const okWorkspaceRead = useQuery(workspace, workspaceBoardQuery, {});
-  if (okWorkspaceRead.status === 'ready') {
-    const count: number = okWorkspaceRead.data.count;
+  // WorkspaceRef is purely logical and has no single machineId.
+  // @ts-expect-error WorkspaceRef does not carry a single machineId.
+  void workspace.machineId;
+
+  const machinesRead = useQuery(workspace, hostQueries.machines, {});
+  if (machinesRead.status === 'ready') {
+    const firstMachine: MachineRef | undefined = machinesRead.data.items[0]?.machine;
+    void firstMachine;
+  }
+
+  const okMachineRead = useQuery(machine, machineDigestQuery, {});
+  if (okMachineRead.status === 'ready') {
+    const count: number = okMachineRead.data.count;
     void count;
+  }
+
+  const okSessionRead = useQuery(session, sessionMonitorQuery, {});
+  if (okSessionRead.status === 'ready') {
+    const step: string | null = okSessionRead.data.activeStep;
+    void step;
+  }
+
+  const detailRead = useQuery(session, hostQueries.sessionDetail, { recentTurnLimit: 5 });
+  if (detailRead.status === 'ready') {
+    const turnCount: number = detailRead.data.recentTurns.length;
+    void turnCount;
   }
 
   const byKeyRead = useQuery(project, hostQueries.sessions, {
     createdByMe: true,
     createdByPlugin: true,
     idempotencyKey: 'review/42/abc123',
-    machineId: project.machineId,
   });
   if (byKeyRead.status === 'ready') {
     const key: string | undefined = byKeyRead.data.items[0]?.idempotencyKey;
@@ -97,6 +137,9 @@ export function verifyClientTypeSafety(
   // @ts-expect-error Project-scoped query cannot be called with a WorkspaceRef.
   useQuery(workspace, hostQueries.worktrees, {});
 
+  // @ts-expect-error Machine-scoped plugin query cannot be called with a WorkspaceRef.
+  useQuery(workspace, machineDigestQuery, {});
+
   // @ts-expect-error Workspace-scoped query cannot be called with a ProjectRef.
   useQuery(project, hostQueries.projects, {});
 
@@ -104,41 +147,17 @@ export function verifyClientTypeSafety(
   // @ts-expect-error Mutation input is validated against the Zod input schema.
   void pin.mutate({ itemId: 42 });
 
+  const sendReceipt = await host.sessions.send(session, {
+    idempotencyKey: 'followup-1',
+    prompt: 'Summarize the latest test failures.',
+    delivery: 'queue',
+  });
+  void sendReceipt.disposition;
+  await host.sessions.requestStop(session);
+
   // @ts-expect-error Raw ID objects cannot forge a branded SessionRef capability.
   host.sessions.open({ workspaceId: 'lw_1', machineId: 'm_1', sessionId: 's_1' });
 
   // @ts-expect-error Route params are immutable; navigation goes through host.pages.openProject.
   pageProps.params.pr = '99';
 }
-
-export const machineContractChecks = defineMachinePlugin((machine) => {
-  machine.query(workspaceBoardQuery, (ctx, input) => {
-    const limit: number = input.limit;
-    // @ts-expect-error Workspace-scoped context does not expose projectId.
-    void ctx.target.projectId;
-    return { count: limit };
-  });
-
-  machine.mutation(recoverReviewMutation, async (ctx, input) => {
-    const key = `review/${input.prNumber}/${input.headSha}`;
-    const existing = await ctx.host.read(ctx.target, hostQueries.sessions, {
-      createdByMe: true,
-      createdByPlugin: true,
-      idempotencyKey: key,
-      limit: 1,
-    });
-    if (existing.items[0]) {
-      return { sessionId: existing.items[0].session.sessionId };
-    }
-    const created = await ctx.host.sessions.create(ctx.target, {
-      idempotencyKey: key,
-      prompt: `Review PR #${input.prNumber} at ${input.headSha}.`,
-    });
-    return { sessionId: created.sessionId };
-  });
-
-  // @ts-expect-error Tool handler return type must satisfy the tool output schema.
-  machine.tool(runSuiteTool, () => ({ wrongField: true }));
-
-  return () => {};
-});

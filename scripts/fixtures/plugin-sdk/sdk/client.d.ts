@@ -1,12 +1,16 @@
 import type { ComponentType, ReactNode } from 'react';
 import type { z } from 'zod';
 import {
+  MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES,
   hostQueries,
   type AttachmentItem,
   type AttachmentSnapshot,
   type AttachmentSourceDescriptor,
   type CreateSessionRequest,
   type HostQueryDescriptor,
+  type MachinePluginScope,
+  type MachineRef,
+  type MachineSummary,
   type MutationDescriptor,
   type PluginCallError,
   type PluginCallErrorCode,
@@ -16,22 +20,38 @@ import {
   type PullRequestSummary,
   type QueryDescriptor,
   type ScopeTarget,
+  type SendSessionMessageReceipt,
+  type SendSessionMessageRequest,
+  type SessionDetail,
   type SessionRef,
   type SessionSummary,
+  type SessionTurnSummary,
   type ToolDescriptor,
   type WorkspaceRef,
   type WorktreeEntry,
 } from './shared';
 
 export {
+  MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES,
   hostQueries,
   type CreateSessionRequest,
   type HostQueryDescriptor,
+  type MachinePluginScope,
+  type MachineRef,
+  type MachineSummary,
   type PluginCallError,
   type PluginCallErrorCode,
+  type PluginScope,
+  type ProjectRef,
   type ProjectSummary,
   type PullRequestSummary,
+  type SendSessionMessageReceipt,
+  type SendSessionMessageRequest,
+  type SessionDetail,
+  type SessionRef,
   type SessionSummary,
+  type SessionTurnSummary,
+  type WorkspaceRef,
   type WorktreeEntry,
 };
 
@@ -98,6 +118,7 @@ export interface ProjectPageProps {
 
 export interface InstallationSettingsProps {
   readonly workspace: WorkspaceRef;
+  readonly machine: MachineRef;
   readonly pluginId: string;
   readonly version: string;
 }
@@ -209,6 +230,11 @@ export interface HostActions {
   readonly sessions: {
     open(session: SessionRef): void;
     create(project: ProjectRef, request: CreateSessionRequest): Promise<SessionRef>;
+    send(
+      session: SessionRef,
+      request: SendSessionMessageRequest
+    ): Promise<SendSessionMessageReceipt>;
+    requestStop(session: SessionRef): Promise<void>;
     requestArchive(session: SessionRef): Promise<void>;
   };
   readonly drafts: {
@@ -238,7 +264,7 @@ export interface HostActions {
 }
 
 export declare function useQuery<
-  S extends PluginScope,
+  S extends MachinePluginScope,
   TInput extends z.ZodType,
   TOutput extends z.ZodType,
 >(
@@ -254,7 +280,7 @@ export declare function useQuery<S extends PluginScope, TInput, TOutput>(
 ): QueryResult<TOutput>;
 
 export declare function useMutation<
-  S extends PluginScope,
+  S extends MachinePluginScope,
   TInput extends z.ZodType,
   TOutput extends z.ZodType,
 >(

@@ -8,25 +8,36 @@ import {
   type SessionSummary,
 } from '@lody/plugin-sdk/client';
 import { Alert, Badge, Button, Card } from '@lody/ui';
-import { issueAttachmentSource, listIssuesQuery, togglePinMutation } from './shared';
+import {
+  issueAttachmentSource,
+  listIssuesQuery,
+  sessionScratchpadQuery,
+  togglePinMutation,
+} from './shared';
 
-const CI_FAILURE_WAIT_PROGRAM = `async ({ ctx }) => {
-  const { value } = await ctx.read('github.workflowRuns');
-  if (value.status !== 'observed') return false;
-  const failed = value.pullRequests.flatMap((pr) =>
-    pr.runs.filter((run) => run.status === 'completed' && run.conclusion === 'failure')
-  );
-  if (!failed.length) return false;
-  return { resumeText: 'CI failed on the associated PR; inspect failures and propose a fix.', payload: failed };
+function buildIssueReadyWaitProgram(identifier: string): string {
+  const argsLiteral = JSON.stringify({ identifier });
+  return `async ({ ctx }) => {
+  const { value } = await ctx.read('plugin.issue-context.issues.state', ${argsLiteral});
+  if (value.state !== 'ready') return false;
+  return {
+    resumeText: 'Tracker marked ${identifier} ready; begin implementation and open a PR.',
+    payload: value,
+  };
 }`;
+}
 
 function IssueSidePanel({ session, project }: SessionPanelProps) {
   const host = useHost();
+  const scratchpad = useQuery(session, sessionScratchpadQuery, {});
+
   if (!project) {
     return (
       <Alert.Root tone="neutral">
         <Alert.Description>
-          Bind this session to a project to view tracker issues.
+          {scratchpad.status === 'ready' && scratchpad.data.linkedIdentifier
+            ? `Linked tracker issue: ${scratchpad.data.linkedIdentifier}`
+            : 'Bind this session to a project to browse and watch tracker issues.'}
         </Alert.Description>
       </Alert.Root>
     );
@@ -78,7 +89,7 @@ function ProjectIssuesList({
   return (
     <div>
       {issues.data.map((issue) => {
-        const watchKey = `ci-watch:${issue.identifier}`;
+        const watchKey = `issue-ready:${issue.identifier}`;
         const existingWatch = sessionsByKey.get(watchKey);
         return (
           <Card.Root key={issue.id}>
@@ -110,13 +121,24 @@ function ProjectIssuesList({
                 Quote in draft
               </Button>
               {existingWatch ? (
-                <Button
-                  size="small"
-                  variant="secondary"
-                  onClick={() => host.sessions.open(existingWatch.session)}
-                >
-                  Open watch ({existingWatch.status})
-                </Button>
+                <>
+                  <Button
+                    size="small"
+                    variant="secondary"
+                    onClick={() => host.sessions.open(existingWatch.session)}
+                  >
+                    Open watch ({existingWatch.status})
+                  </Button>
+                  {existingWatch.status === 'busy' && (
+                    <Button
+                      size="small"
+                      variant="ghost"
+                      onClick={() => void host.sessions.requestStop(existingWatch.session)}
+                    >
+                      Stop
+                    </Button>
+                  )}
+                </>
               ) : (
                 <Button
                   size="small"
@@ -124,15 +146,16 @@ function ProjectIssuesList({
                   onClick={() =>
                     void host.sessions.create(project, {
                       idempotencyKey: watchKey,
-                      prompt: `Watch CI for ${issue.identifier} and investigate the first failure.`,
+                      pullRequestUrl: issue.pullRequestUrl,
+                      prompt: `Implement ${issue.identifier} (${issue.title}) once unblocked.`,
                       waitCondition: {
-                        program: CI_FAILURE_WAIT_PROGRAM,
-                        reason: `Wait for CI failure on ${issue.identifier}`,
+                        program: buildIssueReadyWaitProgram(issue.identifier),
+                        reason: `Wait until ${issue.identifier} reaches ready state`,
                       },
                     })
                   }
                 >
-                  Review on CI failure
+                  Start when ready
                 </Button>
               )}
             </Card.Footer>

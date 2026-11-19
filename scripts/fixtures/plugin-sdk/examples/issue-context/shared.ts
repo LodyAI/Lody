@@ -6,13 +6,16 @@ import {
 } from '@lody/plugin-sdk';
 import { z } from 'zod';
 
+export const issueStateSchema = z.enum(['blocked', 'ready', 'in_progress', 'done']);
+
 export const issueRowSchema = z.object({
   id: z.string(),
   identifier: z.string(),
   title: z.string(),
-  state: z.enum(['todo', 'in_progress', 'done']),
+  state: issueStateSchema,
   pinned: z.boolean(),
   url: z.string(),
+  pullRequestUrl: z.string().optional(),
 });
 
 export type IssueRow = z.infer<typeof issueRowSchema>;
@@ -22,7 +25,7 @@ export const issueAttachmentSource = defineAttachmentSource('issues', {
   placeholder: 'Search issues by key or title…',
   metadataSchema: z.object({
     identifier: z.string(),
-    state: z.string(),
+    state: issueStateSchema,
   }),
 });
 
@@ -36,9 +39,16 @@ export const togglePinMutation = defineMutation('project', 'issues.togglePin', {
   output: z.object({ ok: z.literal(true) }),
 });
 
+export const sessionScratchpadQuery = defineQuery('session', 'session.scratchpad', {
+  input: z.object({}),
+  output: z.object({
+    linkedIdentifier: z.string().nullable(),
+  }),
+});
+
 export const issueStateObservation = defineObservation('project', 'issues.state', {
   input: z.object({ identifier: z.string() }),
   output: z.object({
-    state: z.enum(['todo', 'in_progress', 'done', 'unknown']),
+    state: z.enum(['blocked', 'ready', 'in_progress', 'done', 'unknown']),
   }),
 });

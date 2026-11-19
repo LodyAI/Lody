@@ -1,23 +1,41 @@
 import type { z } from 'zod';
 import {
+  MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES,
   hostQueries,
   type AttachmentItem,
   type AttachmentSnapshot,
   type AttachmentSourceDescriptor,
   type CreateSessionRequest,
   type HostQueryDescriptor,
+  type MachinePluginScope,
+  type MachineRef,
   type MutationDescriptor,
   type ObservationDescriptor,
   type PluginScope,
   type ProjectRef,
   type QueryDescriptor,
   type ScopeTarget,
+  type SendSessionMessageReceipt,
+  type SendSessionMessageRequest,
+  type SessionDetail,
   type SessionRef,
   type ToolDescriptor,
   type WorkspaceRef,
 } from './shared';
 
-export { hostQueries };
+export {
+  MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES,
+  hostQueries,
+  type CreateSessionRequest,
+  type MachinePluginScope,
+  type MachineRef,
+  type ProjectRef,
+  type SendSessionMessageReceipt,
+  type SendSessionMessageRequest,
+  type SessionDetail,
+  type SessionRef,
+  type WorkspaceRef,
+};
 
 export interface MachineHostPort {
   read<S extends PluginScope, TInput, TOutput>(
@@ -27,17 +45,24 @@ export interface MachineHostPort {
   ): Promise<TOutput>;
   readonly sessions: {
     create(project: ProjectRef, request: CreateSessionRequest): Promise<SessionRef>;
+    send(
+      session: SessionRef,
+      request: SendSessionMessageRequest
+    ): Promise<SendSessionMessageReceipt>;
+    requestStop(session: SessionRef): Promise<void>;
+    requestArchive(session: SessionRef): Promise<void>;
   };
 }
 
-export interface MachineContext<S extends PluginScope = PluginScope> {
+export interface MachineContext<S extends MachinePluginScope = MachinePluginScope> {
   readonly target: ScopeTarget<S>;
+  readonly machine: MachineRef;
   readonly workspace: WorkspaceRef;
   readonly dataDir: string;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly signal: AbortSignal;
   readonly host: MachineHostPort;
-  invalidate<QS extends PluginScope>(
+  invalidate<QS extends MachinePluginScope>(
     query: QueryDescriptor<QS, z.ZodType, z.ZodType>,
     target?: ScopeTarget<QS>
   ): void;
@@ -46,12 +71,13 @@ export interface MachineContext<S extends PluginScope = PluginScope> {
 export interface ToolExecutionContext {
   readonly session: SessionRef;
   readonly project?: ProjectRef;
+  readonly machine: MachineRef;
   readonly workspace: WorkspaceRef;
   readonly dataDir: string;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly signal: AbortSignal;
   readonly host: MachineHostPort;
-  invalidate<QS extends PluginScope>(
+  invalidate<QS extends MachinePluginScope>(
     query: QueryDescriptor<QS, z.ZodType, z.ZodType>,
     target?: ScopeTarget<QS>
   ): void;
@@ -60,6 +86,7 @@ export interface ToolExecutionContext {
 export interface AttachmentContext {
   readonly session?: SessionRef;
   readonly project?: ProjectRef;
+  readonly machine: MachineRef;
   readonly workspace: WorkspaceRef;
   readonly dataDir: string;
   readonly env: Readonly<Record<string, string | undefined>>;
@@ -67,7 +94,7 @@ export interface AttachmentContext {
 }
 
 export interface MachinePluginRegistry {
-  query<S extends PluginScope, TInput extends z.ZodType, TOutput extends z.ZodType>(
+  query<S extends MachinePluginScope, TInput extends z.ZodType, TOutput extends z.ZodType>(
     descriptor: QueryDescriptor<S, TInput, TOutput>,
     handler: (
       ctx: MachineContext<S>,
@@ -75,7 +102,7 @@ export interface MachinePluginRegistry {
     ) => Promise<z.input<TOutput>> | z.input<TOutput>
   ): void;
 
-  mutation<S extends PluginScope, TInput extends z.ZodType, TOutput extends z.ZodType>(
+  mutation<S extends MachinePluginScope, TInput extends z.ZodType, TOutput extends z.ZodType>(
     descriptor: MutationDescriptor<S, TInput, TOutput>,
     handler: (
       ctx: MachineContext<S>,
@@ -99,7 +126,7 @@ export interface MachinePluginRegistry {
     }
   ): void;
 
-  observation<S extends PluginScope, TInput extends z.ZodType, TOutput extends z.ZodType>(
+  observation<S extends MachinePluginScope, TInput extends z.ZodType, TOutput extends z.ZodType>(
     descriptor: ObservationDescriptor<S, TInput, TOutput>,
     read: (
       ctx: MachineContext<S>,
