@@ -520,6 +520,12 @@ const SessionCreateCommandInputShape = {
     .describe(
       'Target agent config; required if ambiguous, ignored with agentRoleId. Defaults above.'
     ),
+  agentManaged: z
+    .boolean()
+    .optional()
+    .describe(
+      'Suppress human unread indicators for this session. Omit to inherit the calling session value.'
+    ),
   ...SessionRunConfigInputShape,
 };
 
@@ -764,6 +770,7 @@ const SessionCreateBatchItemShape = {
     .describe('Role target machine; required for multi-machine Roles.'),
   machineId: SessionCreateCommandInputShape.machineId,
   agentConfigId: SessionCreateCommandInputShape.agentConfigId,
+  agentManaged: SessionCreateCommandInputShape.agentManaged,
   ...SessionRunConfigInputShape,
   label: z
     .string()
@@ -1637,6 +1644,9 @@ const buildResolvedMcpCreateCanonicalCommand = (
   ...(resolved.input.useCurrentSessionAsParent !== undefined
     ? { useCurrentSessionAsParent: resolved.input.useCurrentSessionAsParent }
     : {}),
+  ...(resolved.input.agentManaged !== undefined
+    ? { agentManaged: resolved.input.agentManaged }
+    : {}),
   ...(resolved.input.workContext ? { workContext: resolved.input.workContext } : {}),
   ...(deadlineSeconds !== undefined ? { deadlineSeconds } : {}),
 });
@@ -1658,6 +1668,9 @@ const buildMcpCreateOptions = (
   }
   if (input.useCurrentSessionAsParent !== undefined) {
     options.useCurrentSessionAsParent = input.useCurrentSessionAsParent;
+  }
+  if (input.agentManaged !== undefined) {
+    options.agentManaged = input.agentManaged;
   }
   if (input.wait !== undefined) {
     options.wait = input.wait;
@@ -1993,6 +2006,7 @@ const sessionSummaryForMcp = (
   lastActivityAt: isoTimestamp(session.lastMessageAt ?? session.createdAt),
   archived: session.isArchived === true,
   ownerUserId: session.userId,
+  agentManaged: session.agentManaged === true,
   isMine: session.userId === opts.currentUserId,
   machineId: session.machineId,
   ...(session.agentConfigId ? { agentConfigId: session.agentConfigId } : {}),
@@ -4121,6 +4135,7 @@ const startSessionCreateManyOperation = async (
           ...(item.useCurrentSessionAsParent !== undefined
             ? { useCurrentSessionAsParent: item.useCurrentSessionAsParent }
             : {}),
+          ...(item.agentManaged !== undefined ? { agentManaged: item.agentManaged } : {}),
           ...(item.workContext ? { workContext: item.workContext } : {}),
         } as SessionCreateCommandInput;
         return {

@@ -10,6 +10,9 @@ export type PinnedRowOrder = Readonly<Record<string, readonly string[]>>;
 /** Key (and `data-pin-section` value) of the default "Pinned" section. */
 export const DEFAULT_PIN_SECTION_KEY = 'default';
 
+/** Key (and `data-pin-section` value) of the Status view's Focus list. */
+export const FOCUS_SECTION_DND_KEY = '__status_focus__';
+
 export const pinSectionKey = (sectionId: string | null): string =>
   sectionId ?? DEFAULT_PIN_SECTION_KEY;
 

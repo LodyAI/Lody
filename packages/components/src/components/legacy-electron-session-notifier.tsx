@@ -117,7 +117,7 @@ export function LegacyElectronSessionNotifier({
 
     const activeSessionIds = new Set<string>();
     for (const session of sessions) {
-      if (!currentUserId || session.userId !== currentUserId) {
+      if (!currentUserId || session.userId !== currentUserId || session.agentManaged === true) {
         continue;
       }
 

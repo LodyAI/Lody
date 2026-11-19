@@ -1,11 +1,12 @@
 import { FractionalIndex, type JitterOptions } from './vendor/loro-fractional-index';
 
 /**
- * Pinned conversation sections and their manual order.
+ * Pinned conversation sections and manual fractional-index ordering.
  *
  * A section is one workspace Flock row; a conversation's place is two optional
- * fields on its own metadata (`pinSectionId`, `pinOrderKey`) beside `isPinned`.
- * Behavior and compatibility: specs/pinned-session-sections.md.
+ * fields on its own metadata (`pinSectionId`, `orderKey`) beside `isPinned`.
+ * `orderKey` is also shared by the Status view's Focus list.
+ * Behavior and compatibility: specs/pinned-session-sections.md, specs/sidebar-status-view.md.
  */
 export type PinSection = {
   id: string;
@@ -42,7 +43,7 @@ export const comparePinSections = (left: PinSection, right: PinSection): number 
 export type PinnedSessionPlacement = {
   id: string;
   pinSectionId?: string | null;
-  pinOrderKey?: string | null;
+  orderKey?: string | null;
   /** Latest activity; orders conversations that have no key yet. */
   recency: number;
 };
@@ -57,7 +58,7 @@ export type PinnedSectionLayoutEntry<T> = {
 export type PinnedSectionLayout<T> = PinnedSectionLayoutEntry<T>[];
 
 const validKey = (placement: PinnedSessionPlacement): string | null =>
-  isPinOrderKey(placement.pinOrderKey) ? placement.pinOrderKey : null;
+  isPinOrderKey(placement.orderKey) ? placement.orderKey : null;
 
 /**
  * The pin area in render order: the default section, then every user section
@@ -127,7 +128,7 @@ export function buildPinnedSectionLayout<T>(
 export type PinPlacementWrite = {
   sessionId: string;
   pinSectionId: string | undefined;
-  pinOrderKey: string;
+  orderKey: string;
 };
 
 const jitterOptions = (options?: JitterOptions): JitterOptions => ({
@@ -182,13 +183,13 @@ export function planPinnedSessionMove<T extends PinnedSessionPlacement>(
       continue;
     }
     lower = keyBetween(lower, null, options);
-    writes.push({ sessionId: item.id, pinSectionId: sectionId ?? undefined, pinOrderKey: lower });
+    writes.push({ sessionId: item.id, pinSectionId: sectionId ?? undefined, orderKey: lower });
   }
   const upper = below ? validKey(below) : null;
   writes.push({
     sessionId: move.sessionId,
     pinSectionId: sectionId ?? undefined,
-    pinOrderKey: keyBetween(lower, upper, options),
+    orderKey: keyBetween(lower, upper, options),
   });
   return writes;
 }
@@ -197,9 +198,9 @@ export function planPinnedSessionMove<T extends PinnedSessionPlacement>(
 export function planNewPinPlacement<T extends PinnedSessionPlacement>(
   layout: PinnedSectionLayout<T>,
   options?: JitterOptions
-): { pinOrderKey: string } {
+): { orderKey: string } {
   const first = layout.find((entry) => entry.sectionId === null)?.items[0];
-  return { pinOrderKey: keyBetween(null, first ? validKey(first) : null, options) };
+  return { orderKey: keyBetween(null, first ? validKey(first) : null, options) };
 }
 
 /** Key for moving section `sectionId` to `toIndex` among the user sections. */
@@ -221,4 +222,91 @@ export function planNewPinSectionOrderKey(
 ): string {
   const last = [...sections].sort(comparePinSections).at(-1);
   return keyBetween(last?.orderKey ?? null, null, options);
+}
+
+/** Placement input for a single manually ordered list (e.g. Status Focus). */
+export type ManualOrderPlacement = {
+  id: string;
+  orderKey?: string | null;
+  recency: number;
+};
+
+/** One manual-order metadata write. */
+export type ManualOrderWrite = {
+  sessionId: string;
+  orderKey: string;
+};
+
+/**
+ * Sort items by fractional `orderKey` first (deterministic id tie-break),
+ * with unkeyed items trailing by latest activity descending.
+ */
+export function sortByManualOrder<T>(
+  items: readonly T[],
+  getPlacement: (item: T) => ManualOrderPlacement
+): T[] {
+  return items
+    .map((item) => ({ item, placement: getPlacement(item) }))
+    .sort((left, right) => {
+      const leftKey = isPinOrderKey(left.placement.orderKey) ? left.placement.orderKey : null;
+      const rightKey = isPinOrderKey(right.placement.orderKey) ? right.placement.orderKey : null;
+      if (leftKey && rightKey) {
+        return (
+          FractionalIndex.compare(leftKey, rightKey) ||
+          left.placement.id.localeCompare(right.placement.id)
+        );
+      }
+      if (leftKey) return -1;
+      if (rightKey) return 1;
+      return (
+        right.placement.recency - left.placement.recency ||
+        left.placement.id.localeCompare(right.placement.id)
+      );
+    })
+    .map((entry) => entry.item);
+}
+
+/**
+ * Plan moving `sessionId` to `toIndex` within a flat manually ordered list
+ * (index into the list without the moved session). Mirrors `planPinnedSessionMove`:
+ * assigns keys to unkeyed items above the drop slot so the moved item lands
+ * strictly between its neighbors without touching items below.
+ */
+export function planManualOrderMove<T extends ManualOrderPlacement>(
+  orderedItems: readonly T[],
+  move: { sessionId: string; toIndex: number },
+  options?: JitterOptions
+): ManualOrderWrite[] {
+  const list = orderedItems.filter((item) => item.id !== move.sessionId);
+  const index = Math.max(0, Math.min(move.toIndex, list.length));
+  const above = list.slice(0, index);
+  const below = list[index];
+
+  const writes: ManualOrderWrite[] = [];
+  let lower: string | null = null;
+  for (const item of above) {
+    const key = isPinOrderKey(item.orderKey) ? item.orderKey : null;
+    if (key) {
+      lower = key;
+      continue;
+    }
+    lower = keyBetween(lower, null, options);
+    writes.push({ sessionId: item.id, orderKey: lower });
+  }
+  const upper = below && isPinOrderKey(below.orderKey) ? below.orderKey : null;
+  writes.push({
+    sessionId: move.sessionId,
+    orderKey: keyBetween(lower, upper, options),
+  });
+  return writes;
+}
+
+/** Generate an `orderKey` that places an item at the top of a manually ordered list. */
+export function planTopOrderKey<T extends ManualOrderPlacement>(
+  orderedItems: readonly T[],
+  options?: JitterOptions
+): string {
+  const first = orderedItems[0];
+  const upper = first && isPinOrderKey(first.orderKey) ? first.orderKey : null;
+  return keyBetween(null, upper, options);
 }

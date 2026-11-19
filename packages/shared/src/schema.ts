@@ -1099,8 +1099,16 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   isPinned?: boolean;
   /** Pin section this pinned session belongs to; missing or unknown means the default section. Read only while `isPinned`. */
   pinSectionId?: string;
-  /** Fractional index ordering this pinned session within its section. Read only while `isPinned`. */
-  pinOrderKey?: string;
+  /** Fractional index ordering this session manually (shared by Pinned sections and Status Focus). */
+  orderKey?: string;
+  /** When true, this session is managed by an Agent and suppresses human unread indicators. */
+  agentManaged?: boolean;
+  /** Epoch ms until which this session is snoozed in the Status view's Later section. */
+  snoozedUntil?: number;
+  /** Epoch ms when the user explicitly settled this session in the Status view's Settled section. */
+  settledAt?: number;
+  /** Epoch ms when the user explicitly moved an inactive session back to Focus (overrides 7d auto-settle for 7d). */
+  focusRestoredAt?: number;
   cliType: AgentConfigCliType;
   agentType: AgentType;
   /** Backend selected when this session was created. Missing means legacy Loro. */

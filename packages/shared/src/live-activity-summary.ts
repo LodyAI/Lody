@@ -120,6 +120,7 @@ function resolveStatus(
     }
   }
 
+  if (session.agentManaged === true) return null;
   const lastMessageAt = parseTimestamp(session.lastMessageAt);
   if (lastMessageAt === null) return null;
   const lastReadAt = parseTimestamp(session.lastReadAt);

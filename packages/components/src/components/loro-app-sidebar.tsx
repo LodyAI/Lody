@@ -1,3 +1,4 @@
+import { isSidebarBucketCollapsed, sidebarStatusGroup } from '@/lib/sidebar-status-group';
 import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { E2eeMachineWindowPill, E2eeOfflineSummary } from '@/components/e2ee-offline-window';
@@ -46,6 +47,8 @@ import {
   type SessionMeta,
   type SessionStatus,
   buildPinnedSectionLayout,
+  planManualOrderMove,
+  sortByManualOrder,
   planNewPinSectionOrderKey,
   planPinnedSessionMove,
   planPinSectionMove,
@@ -1843,6 +1846,11 @@ export function LoroAppSidebar({
     markSessionUnread,
     setSessionPinned,
     applySessionPinPlacements,
+    applySessionFocusOrder,
+    snoozeSession,
+    settleSession,
+    moveSessionToFocus,
+    setSessionAgentManaged,
     updateSessionTitle,
   } = useSessionActions();
   const {
@@ -2708,8 +2716,19 @@ export function LoroAppSidebar({
 
     const previousById = new Map(previousSidebarItemsRef.current.map((item) => [item.id, item]));
     return items.map((item) => {
-      const previous = previousById.get(item.id);
-      return previous && jsonValueEqual(previous, item) ? previous : item;
+      const meta = sessionById.get(item.id);
+      const enriched: SidebarUpdatedItem = meta
+        ? {
+            ...item,
+            orderKey: meta.orderKey ?? null,
+            agentManaged: meta.agentManaged === true,
+            snoozedUntil: typeof meta.snoozedUntil === 'number' ? meta.snoozedUntil : null,
+            settledAt: typeof meta.settledAt === 'number' ? meta.settledAt : null,
+            focusRestoredAt: typeof meta.focusRestoredAt === 'number' ? meta.focusRestoredAt : null,
+          }
+        : item;
+      const previous = previousById.get(enriched.id);
+      return previous && jsonValueEqual(previous, enriched) ? previous : enriched;
     });
   }, [
     chatSessions,
@@ -2724,6 +2743,7 @@ export function LoroAppSidebar({
     resolveOpenerRowId,
     resolveSessionAuthor,
     sessionsListLoading,
+    sessionById,
     sessionSharingById,
     t,
   ]);
@@ -2751,7 +2771,7 @@ export function LoroAppSidebar({
       return {
         id: item.id,
         pinSectionId: owner?.isPinned ? (owner.pinSectionId ?? null) : null,
-        pinOrderKey: owner?.isPinned ? (owner.pinOrderKey ?? null) : null,
+        orderKey: owner?.isPinned ? (owner.orderKey ?? null) : null,
         recency: latest instanceof Date ? latest.getTime() : Date.parse(String(latest ?? '')) || 0,
       };
     },
@@ -3856,9 +3876,82 @@ export function LoroAppSidebar({
   );
   const handleToggleUpdatedBucket = useCallback(
     (key: SidebarUpdatedBucketKey) => {
-      setUpdatedBucketCollapseState((prev) => ({ ...prev, [key]: !(prev[key] ?? false) }));
+      setUpdatedBucketCollapseState((prev) => ({
+        ...prev,
+        [key]: !isSidebarBucketCollapsed(key, prev),
+      }));
     },
     [setUpdatedBucketCollapseState]
+  );
+
+  const handleSnoozeSession = useCallback(
+    (sessionId: string, snoozedUntil: number) => {
+      void snoozeSession(sessionId as SessionId, snoozedUntil).catch((error) => {
+        toast.error(error instanceof Error ? error.message : String(error));
+      });
+    },
+    [snoozeSession]
+  );
+
+  const handleSettleSession = useCallback(
+    (sessionId: string) => {
+      void settleSession(sessionId as SessionId).catch((error) => {
+        toast.error(error instanceof Error ? error.message : String(error));
+      });
+    },
+    [settleSession]
+  );
+
+  const handleMoveSessionToFocus = useCallback(
+    (sessionId: string) => {
+      void moveSessionToFocus(sessionId as SessionId).catch((error) => {
+        toast.error(error instanceof Error ? error.message : String(error));
+      });
+    },
+    [moveSessionToFocus]
+  );
+
+  const handleToggleSessionAgentManaged = useCallback(
+    (sessionId: string, agentManaged: boolean) => {
+      void setSessionAgentManaged(sessionId as SessionId, agentManaged).catch((error) => {
+        toast.error(error instanceof Error ? error.message : String(error));
+      });
+    },
+    [setSessionAgentManaged]
+  );
+
+  const handleDropFocusItem = useCallback(
+    (sessionId: string, toIndex: number) => {
+      const nowMs = Date.now();
+      const focusItems = sortByManualOrder(
+        updatedItems.filter((item) => sidebarStatusGroup(item, nowMs) === 'focus'),
+        (item) => ({
+          id: item.id,
+          orderKey: item.orderKey ?? null,
+          recency:
+            item.latestMessageAt instanceof Date
+              ? item.latestMessageAt.getTime()
+              : Date.parse(String(item.latestMessageAt ?? '')) || 0,
+        })
+      );
+      const placements = focusItems.map((item) => ({
+        id: item.id,
+        orderKey: item.orderKey ?? null,
+        recency:
+          item.latestMessageAt instanceof Date
+            ? item.latestMessageAt.getTime()
+            : Date.parse(String(item.latestMessageAt ?? '')) || 0,
+      }));
+      const writes = planManualOrderMove(placements, { sessionId, toIndex });
+      const wasInFocus = focusItems.some((item) => item.id === sessionId);
+      void applySessionFocusOrder(
+        writes,
+        wasInFocus ? undefined : (sessionId as SessionId)
+      ).catch((error) => {
+        toast.error(error instanceof Error ? error.message : String(error));
+      });
+    },
+    [applySessionFocusOrder, updatedItems]
   );
   const [updatedBucketShowFullState, setUpdatedBucketShowFullState] = useAtom(
     sidebarUpdatedBucketShowFullStateAtom
@@ -4157,6 +4250,11 @@ export function LoroAppSidebar({
         onMarkUpdatedItemUnread={handleMarkSessionUnread}
         onRenameUpdatedItem={handleRenameSession}
         onToggleUpdatedItemPinned={handleTogglePinSession}
+        onSnoozeUpdatedItem={handleSnoozeSession}
+        onSettleUpdatedItem={handleSettleSession}
+        onMoveUpdatedItemToFocus={handleMoveSessionToFocus}
+        onToggleUpdatedItemAgentManaged={handleToggleSessionAgentManaged}
+        onDropFocusItem={handleDropFocusItem}
         onCopyUpdatedItemUrl={handleCopySessionUrl}
         onShareUpdatedItemWithTeam={handleRequestShareSession}
         onOpenUpdatedItemPullRequest={handleOpenUpdatedItemPullRequest}

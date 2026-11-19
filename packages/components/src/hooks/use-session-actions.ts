@@ -44,6 +44,7 @@ import {
   OPERATION_INBOX_PROTOCOL_VERSION,
   buildPinnedSectionLayout,
   planNewPinPlacement,
+  type ManualOrderWrite,
   type PinPlacementWrite,
   type PinnedSessionPlacement,
 } from '@lody/shared';
@@ -297,12 +298,25 @@ export type SessionActions = {
   setSessionPinned: (sessionId: SessionId, isPinned: boolean) => Promise<void>;
   /** Write planned pin placements (section and order) for pinned conversations. */
   applySessionPinPlacements: (writes: readonly PinPlacementWrite[]) => Promise<void>;
+  /** Write planned manual order placements for Focus conversations (clearing snooze/settled on target). */
+  applySessionFocusOrder: (
+    writes: readonly ManualOrderWrite[],
+    restoredSessionId?: SessionId
+  ) => Promise<void>;
+  /** Snooze a session until `snoozedUntil` (epoch ms) in the Status view's Later section. */
+  snoozeSession: (sessionId: SessionId, snoozedUntil: number) => Promise<void>;
+  /** Mark a session as settled in the Status view's Settled section. */
+  settleSession: (sessionId: SessionId) => Promise<void>;
+  /** Restore a snoozed or settled session back to Focus. */
+  moveSessionToFocus: (sessionId: SessionId) => Promise<void>;
+  /** Toggle whether this session is agent-managed (suppresses human unread indicators). */
+  setSessionAgentManaged: (sessionId: SessionId, agentManaged: boolean) => Promise<void>;
 };
 
 const toPinnedSessionPlacement = (meta: SessionMeta): PinnedSessionPlacement => ({
   id: meta.id,
   pinSectionId: meta.pinSectionId ?? null,
-  pinOrderKey: meta.pinOrderKey ?? null,
+  orderKey: meta.orderKey ?? null,
   recency:
     meta.lastMessageAt ??
     (typeof meta.createdAt === 'number' ? meta.createdAt : Date.parse(meta.createdAt ?? '') || 0),
@@ -530,7 +544,11 @@ export function useSessionActions(): SessionActions {
       patch: {
         isPinned?: boolean;
         pinSectionId?: string | undefined;
-        pinOrderKey?: string | undefined;
+        orderKey?: string | undefined;
+        agentManaged?: boolean | undefined;
+        snoozedUntil?: number | undefined;
+        settledAt?: number | undefined;
+        focusRestoredAt?: number | undefined;
         lastReadAt?: number;
       }
     ) => {
@@ -665,8 +683,22 @@ export function useSessionActions(): SessionActions {
         { lastMessageAt: now, lastReadAt: now },
         assertCanManageSessions
       );
+      const cached = store.get(sessionMetaCacheAtom)[getSessionRoomId(sessionId)] as
+        | SessionMeta
+        | undefined;
+      if (
+        cached?.agentManaged === true ||
+        cached?.snoozedUntil !== undefined ||
+        cached?.settledAt !== undefined
+      ) {
+        await updateSessionPreference(sessionId, {
+          agentManaged: false,
+          snoozedUntil: undefined,
+          settledAt: undefined,
+        });
+      }
     },
-    [runtime, assertCanManageSessions]
+    [runtime, store, assertCanManageSessions, updateSessionPreference]
   );
 
   const updateSessionTitle = useCallback(
@@ -1034,11 +1066,10 @@ export function useSessionActions(): SessionActions {
       const existing = await runtime.repo.getDocMeta(roomId);
       if (isLoroRepoDocDeleted(existing)) return;
       if (!isPinned) {
-        // Unpinning forgets the place; pinning again starts at the top of the default section.
+        // Unpinning clears pinSectionId while preserving orderKey for Focus ordering.
         await updateSessionPreference(sessionId, {
           isPinned: false,
           pinSectionId: undefined,
-          pinOrderKey: undefined,
         });
         return;
       }
@@ -1046,7 +1077,7 @@ export function useSessionActions(): SessionActions {
         (meta) =>
           meta.isPinned === true && !meta.isArchived && !meta.pinSectionId && meta.id !== sessionId
       );
-      const { pinOrderKey } = planNewPinPlacement(
+      const { orderKey } = planNewPinPlacement(
         buildPinnedSectionLayout(
           defaultSectionPins.map(toPinnedSessionPlacement),
           [],
@@ -1056,7 +1087,7 @@ export function useSessionActions(): SessionActions {
       await updateSessionPreference(sessionId, {
         isPinned: true,
         pinSectionId: undefined,
-        pinOrderKey,
+        orderKey,
       });
     },
     [runtime, store, updateSessionPreference]
@@ -1071,11 +1102,74 @@ export function useSessionActions(): SessionActions {
         await updateSessionPreference(write.sessionId as SessionId, {
           isPinned: true,
           pinSectionId: write.pinSectionId,
-          pinOrderKey: write.pinOrderKey,
+          orderKey: write.orderKey,
         });
       }
     },
     [runtime, updateSessionPreference]
+  );
+
+  const applySessionFocusOrder = useCallback(
+    async (writes: readonly ManualOrderWrite[], restoredSessionId?: SessionId) => {
+      if (!runtime) {
+        throw new Error('Runtime not ready');
+      }
+      const now = getServerNow();
+      for (const write of writes) {
+        const isRestored = restoredSessionId != null && write.sessionId === restoredSessionId;
+        await updateSessionPreference(write.sessionId as SessionId, {
+          orderKey: write.orderKey,
+          ...(isRestored
+            ? {
+                snoozedUntil: undefined,
+                settledAt: undefined,
+                focusRestoredAt: now,
+              }
+            : {}),
+        });
+      }
+    },
+    [runtime, updateSessionPreference]
+  );
+
+  const snoozeSession = useCallback(
+    async (sessionId: SessionId, snoozedUntil: number) => {
+      await updateSessionPreference(sessionId, {
+        snoozedUntil,
+        settledAt: undefined,
+      });
+    },
+    [updateSessionPreference]
+  );
+
+  const settleSession = useCallback(
+    async (sessionId: SessionId) => {
+      await updateSessionPreference(sessionId, {
+        settledAt: getServerNow(),
+        snoozedUntil: undefined,
+      });
+    },
+    [updateSessionPreference]
+  );
+
+  const moveSessionToFocus = useCallback(
+    async (sessionId: SessionId) => {
+      await updateSessionPreference(sessionId, {
+        snoozedUntil: undefined,
+        settledAt: undefined,
+        focusRestoredAt: getServerNow(),
+      });
+    },
+    [updateSessionPreference]
+  );
+
+  const setSessionAgentManaged = useCallback(
+    async (sessionId: SessionId, agentManaged: boolean) => {
+      await updateSessionPreference(sessionId, {
+        agentManaged,
+      });
+    },
+    [updateSessionPreference]
   );
 
   return {
@@ -1101,5 +1195,10 @@ export function useSessionActions(): SessionActions {
     deleteArchivedSession,
     setSessionPinned,
     applySessionPinPlacements,
+    applySessionFocusOrder,
+    snoozeSession,
+    settleSession,
+    moveSessionToFocus,
+    setSessionAgentManaged,
   };
 }

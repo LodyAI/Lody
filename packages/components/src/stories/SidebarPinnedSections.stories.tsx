@@ -24,7 +24,7 @@ type DemoConversation = {
   latestMessageAt: number;
   isPinned: boolean;
   pinSectionId?: string;
-  pinOrderKey?: string;
+  orderKey?: string;
 };
 
 const INITIAL_SECTIONS: PinSection[] = [
@@ -38,14 +38,14 @@ const INITIAL_CONVERSATIONS: DemoConversation[] = [
     title: 'Triage today’s inbox',
     latestMessageAt: NOW - HOUR,
     isPinned: true,
-    pinOrderKey: '80',
+    orderKey: '80',
   },
   {
     id: 'c2',
     title: 'Fix login form reset',
     latestMessageAt: NOW - 3 * HOUR,
     isPinned: true,
-    pinOrderKey: '81',
+    orderKey: '81',
   },
   {
     id: 'c3',
@@ -53,7 +53,7 @@ const INITIAL_CONVERSATIONS: DemoConversation[] = [
     latestMessageAt: NOW - 50 * HOUR,
     isPinned: true,
     pinSectionId: 'maintenance',
-    pinOrderKey: '80',
+    orderKey: '80',
   },
   {
     id: 'c4',
@@ -61,7 +61,7 @@ const INITIAL_CONVERSATIONS: DemoConversation[] = [
     latestMessageAt: NOW - 2 * HOUR,
     isPinned: true,
     pinSectionId: 'maintenance',
-    pinOrderKey: '81',
+    orderKey: '81',
   },
   {
     id: 'c5',
@@ -69,7 +69,7 @@ const INITIAL_CONVERSATIONS: DemoConversation[] = [
     latestMessageAt: NOW - 30 * HOUR,
     isPinned: true,
     pinSectionId: 'maintenance',
-    pinOrderKey: '82',
+    orderKey: '82',
   },
   {
     id: 'c6',
@@ -77,7 +77,7 @@ const INITIAL_CONVERSATIONS: DemoConversation[] = [
     latestMessageAt: NOW - 5 * HOUR,
     isPinned: true,
     pinSectionId: 'releases',
-    pinOrderKey: '80',
+    orderKey: '80',
   },
   {
     id: 'c7',
@@ -102,7 +102,7 @@ const toItem = (conversation: DemoConversation): SidebarUpdatedItem => ({
 const toPlacement = (conversation: DemoConversation): PinnedSessionPlacement => ({
   id: conversation.id,
   pinSectionId: conversation.pinSectionId ?? null,
-  pinOrderKey: conversation.pinOrderKey ?? null,
+  orderKey: conversation.orderKey ?? null,
   recency: conversation.latestMessageAt,
 });
 
@@ -148,7 +148,7 @@ function PinnedSectionsPlayground() {
               ...entry,
               isPinned: true,
               pinSectionId: write.pinSectionId,
-              pinOrderKey: write.pinOrderKey,
+              orderKey: write.orderKey,
             }
           : entry;
       })
@@ -201,20 +201,20 @@ function PinnedSectionsPlayground() {
         setConversations((previous) =>
           previous.map((entry) =>
             entry.id === itemId
-              ? { ...entry, isPinned: false, pinSectionId: undefined, pinOrderKey: undefined }
+              ? { ...entry, isPinned: false, pinSectionId: undefined, orderKey: undefined }
               : entry
           )
         );
         return;
       }
       const defaultPins = pinned.filter((entry) => !entry.pinSectionId).map(toPlacement);
-      const { pinOrderKey } = planNewPinPlacement(
+      const { orderKey } = planNewPinPlacement(
         buildPinnedSectionLayout(defaultPins, [], (entry) => entry)
       );
       setConversations((previous) =>
         previous.map((entry) =>
           entry.id === itemId
-            ? { ...entry, isPinned: true, pinSectionId: undefined, pinOrderKey }
+            ? { ...entry, isPinned: true, pinSectionId: undefined, orderKey }
             : entry
         )
       );

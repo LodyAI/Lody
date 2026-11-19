@@ -57,6 +57,7 @@ import {
 } from '@/lib/session-mention-drag';
 import {
   DEFAULT_PIN_SECTION_KEY,
+  FOCUS_SECTION_DND_KEY,
   moveRowIntoSection,
   parsePinnedDndId,
   pinSectionDndId,
@@ -569,6 +570,7 @@ function pinnedPointerTargetAt(
       continue;
     }
     const attr = element.getAttribute('data-pin-section');
+    if (attr === FOCUS_SECTION_DND_KEY) continue;
     const sectionId = attr === DEFAULT_PIN_SECTION_KEY ? null : attr;
     const rows = element.querySelector<HTMLElement>('[data-pin-rows]');
     return { sectionId, index: pinnedDropIndexAt(rows, point.y, draggedId) };

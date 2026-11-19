@@ -274,6 +274,7 @@ export type CreateOptions = CommonOptions &
     /** Trusted human requester supplied by a delegated internal caller. */
     delegatedRequester?: DelegatedSessionRequester;
     sessionOwnerUserId?: string;
+    agentManaged?: boolean;
     parent?: string;
     useCurrentSessionAsParent?: boolean;
     repo?: string;
@@ -3965,6 +3966,17 @@ export async function prepareSessionInput(
   // the generated title lands, which for ACP-owned titles is after the first turn.
   const title = normalizeCliValue(options.title);
   const draftTitle = title ? undefined : deriveDraftSessionTitle(prompt);
+  let effectiveAgentManaged = options.agentManaged;
+  if (effectiveAgentManaged === undefined) {
+    const sourceSessionId = openedBySessionId ?? parentSessionId;
+    if (sourceSessionId) {
+      const sourceRecord = await manager.repo.getDocMeta(getSessionRoomId(sourceSessionId));
+      const sourceMeta = sourceRecord?.meta as SessionMeta | undefined;
+      if (sourceMeta?.agentManaged === true) {
+        effectiveAgentManaged = true;
+      }
+    }
+  }
   const meta = {
     id: sessionId,
     machineId: targetMachine.id,
@@ -3972,6 +3984,7 @@ export async function prepareSessionInput(
     userId: sessionOwnerUserId,
     status: SessionStatusFactory.initializing(),
     isArchived: false,
+    ...(effectiveAgentManaged === true ? { agentManaged: true } : {}),
     cliType: agentConfig.cliType,
     agentType: agentConfig.agentType,
     historyBackend: resolveNewSessionHistoryBackend(targetMachine, {
