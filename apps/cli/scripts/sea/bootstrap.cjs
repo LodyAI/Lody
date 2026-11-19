@@ -55,7 +55,7 @@ async function main() {
       const tmp = nodePath + '.' + require('node:crypto').randomUUID() + '.tmp';
       fs.writeFileSync(tmp, input, { flag: 'wx', mode: 0o700, flush: true });
       fs.renameSync(tmp, nodePath);
-      process.stdout.write('Managed Node installed. Run this executable with daemon install.\n');
+      process.stdout.write('Verified the bundled Node.js runtime.\n');
     } else {
       // A SEA is never silently used as a generic Node or replaced by PATH lookup.
       if (

@@ -30,8 +30,12 @@ Pairing credentials remain local arguments, never public download URLs or servic
 configuration. Existing login and daemon-ready checks remain authoritative.
 
 An explicit first install publishes the fixed entry before authentication and start.
-An occupied Host still requires the owner to stop it and its service first; the
-installer never terminates an unrelated process. Autostart registration is scoped
+An occupied Host is stopped only after the owner confirms in the terminal or passes
+`--replace`; otherwise the installer names it and how to stop it, and changes nothing.
+This profile's own daemon stops through its authenticated control channel. Any other
+Host (desktop app, foreground run, foreign daemon), or a daemon that did not stop, is
+terminated by the pid the live Host reports, re-read just before signalling, only when
+that process runs as the same OS user and never for pid 1 or lower. Autostart registration is scoped
 to the current profile and OS account (boot services for root where supported),
 preserves unknown service definitions, and takes effect on the next login/boot.
 The initial detached start uses the existing bounded ready handshake. Unavailable
