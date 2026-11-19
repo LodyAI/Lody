@@ -1,6 +1,8 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { defineMachinePlugin } from '@lody/plugin-sdk/machine';
+import { z } from 'zod';
 import {
   issueAttachmentSource,
   issueStateObservation,
@@ -10,10 +12,12 @@ import {
   type IssueRow,
 } from './shared';
 
-interface PersistedIssueState {
-  readonly pinnedByProject: Readonly<Record<string, readonly string[]>>;
-  readonly linkedBySession: Readonly<Record<string, string>>;
-}
+const persistedIssueStateSchema = z.strictObject({
+  pinnedByProject: z.record(z.string(), z.array(z.string())),
+  linkedBySession: z.record(z.string(), z.string()),
+});
+
+type PersistedIssueState = z.infer<typeof persistedIssueStateSchema>;
 
 const EMPTY_STATE: PersistedIssueState = {
   pinnedByProject: {},
@@ -21,28 +25,65 @@ const EMPTY_STATE: PersistedIssueState = {
 };
 
 function stateFilePath(dataDir: string): string {
-  return path.join(dataDir, 'issue-context-state.json');
+  return path.resolve(dataDir, 'issue-context-state.json');
 }
 
 async function readPersistedState(dataDir: string): Promise<PersistedIssueState> {
+  let raw: string;
   try {
-    const raw = await readFile(stateFilePath(dataDir), 'utf8');
-    const parsed = JSON.parse(raw) as Partial<PersistedIssueState>;
-    return {
-      pinnedByProject: parsed.pinnedByProject ?? {},
-      linkedBySession: parsed.linkedBySession ?? {},
-    };
-  } catch {
-    return EMPTY_STATE;
+    raw = await readFile(stateFilePath(dataDir), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return EMPTY_STATE;
+    throw error;
   }
+  return persistedIssueStateSchema.parse(JSON.parse(raw));
 }
 
 async function writePersistedState(dataDir: string, next: PersistedIssueState): Promise<void> {
   await mkdir(dataDir, { recursive: true });
   const targetPath = stateFilePath(dataDir);
-  const tempPath = `${targetPath}.tmp`;
-  await writeFile(tempPath, JSON.stringify(next, null, 2), 'utf8');
-  await rename(tempPath, targetPath);
+  const tempPath = `${targetPath}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tempPath, JSON.stringify(next, null, 2), { encoding: 'utf8', flag: 'wx' });
+    await rename(tempPath, targetPath);
+  } catch (error) {
+    // An exclusive-create collision never gives this writer ownership of that file.
+    if ((error as NodeJS.ErrnoException)?.code !== 'EEXIST') {
+      try {
+        await rm(tempPath, { force: true });
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          'State write and temporary-file cleanup failed'
+        );
+      }
+    }
+    throw error;
+  }
+}
+
+// The host owns one active machine instance. Coordinate its complete read/modify/write
+// transactions per state file; a failed transaction must not poison the next attempt.
+const pendingUpdates = new Map<string, Promise<void>>();
+
+function updatePersistedState(
+  dataDir: string,
+  update: (state: PersistedIssueState) => PersistedIssueState
+): Promise<void> {
+  const key = stateFilePath(dataDir);
+  const write = (pendingUpdates.get(key) ?? Promise.resolve()).then(async () => {
+    const state = await readPersistedState(dataDir);
+    await writePersistedState(dataDir, update(state));
+  });
+  const settled = write.then(
+    () => {},
+    () => {}
+  );
+  pendingUpdates.set(key, settled);
+  void settled.then(() => {
+    if (pendingUpdates.get(key) === settled) pendingUpdates.delete(key);
+  });
+  return write;
 }
 
 async function fetchTrackerIssues(
@@ -106,17 +147,17 @@ export default defineMachinePlugin((machine) => {
   });
 
   machine.mutation(togglePinMutation, async (ctx, input) => {
-    const state = await readPersistedState(ctx.dataDir);
-    const nextPinned = new Set(state.pinnedByProject[ctx.target.projectId] ?? []);
-    if (input.pinned) nextPinned.add(input.issueId);
-    else nextPinned.delete(input.issueId);
-
-    await writePersistedState(ctx.dataDir, {
-      ...state,
-      pinnedByProject: {
-        ...state.pinnedByProject,
-        [ctx.target.projectId]: Array.from(nextPinned),
-      },
+    await updatePersistedState(ctx.dataDir, (state) => {
+      const nextPinned = new Set(state.pinnedByProject[ctx.target.projectId] ?? []);
+      if (input.pinned) nextPinned.add(input.issueId);
+      else nextPinned.delete(input.issueId);
+      return {
+        ...state,
+        pinnedByProject: {
+          ...state.pinnedByProject,
+          [ctx.target.projectId]: Array.from(nextPinned),
+        },
+      };
     });
     ctx.invalidate(listIssuesQuery, ctx.target);
     return { ok: true as const };

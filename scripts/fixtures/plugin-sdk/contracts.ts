@@ -4,6 +4,7 @@ import {
   defineQuery,
   hostQueries,
   type MachineRef,
+  type CreateSessionRequest,
   type PluginCallErrorCode,
   type ProjectRef,
   type SessionRef,
@@ -127,10 +128,10 @@ export async function verifyClientTypeSafety(
   const byKeyRead = useQuery(project, hostQueries.sessions, {
     createdByMe: true,
     createdByPlugin: true,
-    idempotencyKey: 'review/42/abc123',
+    businessKey: 'review/42/abc123',
   });
   if (byKeyRead.status === 'ready') {
-    const key: string | undefined = byKeyRead.data.items[0]?.idempotencyKey;
+    const key: string | undefined = byKeyRead.data.items[0]?.businessKey;
     void key;
   }
 
@@ -154,6 +155,28 @@ export async function verifyClientTypeSafety(
   });
   void sendReceipt.disposition;
   await host.sessions.requestStop(session);
+
+  const createRequest: CreateSessionRequest = {
+    requestId: 'create-review-attempt-1',
+    businessKey: 'review/42/abc123',
+    prompt: 'Review PR #42 at abc123.',
+  };
+  await host.sessions.create(project, createRequest);
+  // The same immutable request is used after an uncertain result, even if the
+  // original Session has since been archived. A new generation gets a new ID.
+  await host.sessions.create(project, createRequest);
+  await host.sessions.create(project, { ...createRequest, requestId: 'create-review-attempt-2' });
+
+  // @ts-expect-error A business key alone cannot identify a retryable creation request.
+  const missingRequestId: CreateSessionRequest = { businessKey: 'review/42', prompt: 'Review.' };
+  void missingRequestId;
+  const legacyCreateRequest: CreateSessionRequest = {
+    requestId: 'create-review-attempt-3',
+    // @ts-expect-error Creation separates request identity from business-task identity.
+    idempotencyKey: 'review/42',
+    prompt: 'Review.',
+  };
+  void legacyCreateRequest;
 
   // @ts-expect-error Raw ID objects cannot forge a branded SessionRef capability.
   host.sessions.open({ workspaceId: 'lw_1', machineId: 'm_1', sessionId: 's_1' });

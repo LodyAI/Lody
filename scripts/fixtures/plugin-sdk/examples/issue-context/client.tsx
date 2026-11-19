@@ -82,7 +82,7 @@ function ProjectIssuesList({
   const sessionsByKey = new Map<string, SessionSummary>();
   if (watchedSessions.status === 'ready') {
     for (const item of watchedSessions.data.items) {
-      if (item.idempotencyKey) sessionsByKey.set(item.idempotencyKey, item);
+      if (item.businessKey) sessionsByKey.set(item.businessKey, item);
     }
   }
 
@@ -145,7 +145,8 @@ function ProjectIssuesList({
                   variant="primary"
                   onClick={() =>
                     void host.sessions.create(project, {
-                      idempotencyKey: watchKey,
+                      requestId: crypto.randomUUID(),
+                      businessKey: watchKey,
                       pullRequestUrl: issue.pullRequestUrl,
                       prompt: `Implement ${issue.identifier} (${issue.title}) once unblocked.`,
                       waitCondition: {

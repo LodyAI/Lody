@@ -62,6 +62,7 @@ export type PluginCallErrorCode =
   | 'machine_offline'
   | 'timeout'
   | 'idempotency_conflict'
+  | 'business_key_conflict'
   | 'forbidden'
   | 'unavailable'
   | 'validation_failed'
@@ -143,11 +144,19 @@ export interface ObservationDescriptor<
 
 export interface CreateSessionRequest {
   /**
-   * Deduplicated across non-archived Sessions under `(workspace, user, project, pluginId, idempotencyKey)`.
-   * Archiving the previous Session permits creating a fresh Session under the same domain key;
-   * reusing an active key with a different normalized request rejects with `idempotency_conflict`.
+   * Stable operation identity under `(workspace, user, project, pluginId, requestId)`.
+   * Retrying the same normalized request returns the original SessionRef, including after
+   * archive. A changed request rejects with `idempotency_conflict`. The caller retains
+   * this ID and the complete request across uncertain outcomes; it never generates a new ID to retry.
    */
-  readonly idempotencyKey?: string;
+  readonly requestId: string;
+  /**
+   * Optional active-task identity in the same workspace/user/project/plugin namespace.
+   * A different requestId with an already-active businessKey rejects with
+   * `business_key_conflict`. Archive releases only this active-task reservation,
+   * never the original request receipt. A new generation uses a new requestId.
+   */
+  readonly businessKey?: string;
   readonly roleId?: string;
   readonly prompt: string;
   readonly skillIds?: readonly string[];
@@ -202,7 +211,7 @@ export interface SessionSummary {
   readonly archived: boolean;
   readonly updatedAt: number;
   /** Present only when the Session was created by the calling plugin (`pluginId`). */
-  readonly idempotencyKey?: string;
+  readonly businessKey?: string;
   readonly pullRequests: readonly {
     readonly url: string;
     readonly state: 'open' | 'closed' | 'merged';
@@ -263,8 +272,8 @@ export declare const hostQueries: {
       readonly createdByMe?: boolean;
       /** Filter to Sessions created by the calling plugin (`pluginId`). */
       readonly createdByPlugin?: boolean;
-      /** Exact lookup scoped to the calling plugin's `(pluginId, idempotencyKey)` namespace. */
-      readonly idempotencyKey?: string;
+      /** Business-task lookup within the calling plugin's namespace; archive filtering is independent. */
+      readonly businessKey?: string;
       /** Optional execution-machine filter when querying at `workspace` scope. */
       readonly machineId?: string;
       readonly search?: string;

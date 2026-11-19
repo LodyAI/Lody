@@ -17,7 +17,11 @@ const sessionMonitorQuery = defineQuery('session', 'monitor.state', {
 });
 
 const recoverReviewMutation = defineMutation('project', 'review.ensure', {
-  input: z.object({ prNumber: z.number().int(), headSha: z.string() }),
+  input: z.object({
+    requestId: z.string().uuid(),
+    prNumber: z.number().int(),
+    headSha: z.string(),
+  }),
   output: z.object({ sessionId: z.string() }),
 });
 
@@ -40,22 +44,11 @@ export const machineContractChecks = defineMachinePlugin((machine) => {
 
   machine.mutation(recoverReviewMutation, async (ctx, input) => {
     const key = `review/${input.prNumber}/${input.headSha}`;
-    const existing = await ctx.host.read(ctx.target, hostQueries.sessions, {
-      createdByMe: true,
-      createdByPlugin: true,
-      archived: false,
-      idempotencyKey: key,
-      limit: 1,
-    });
-    if (existing.items[0]) {
-      await ctx.host.sessions.send(existing.items[0].session, {
-        idempotencyKey: `${key}:nudge`,
-        prompt: `Re-check PR #${input.prNumber} at ${input.headSha}.`,
-      });
-      return { sessionId: existing.items[0].session.sessionId };
-    }
+    // Replaying the original request also recovers an archived Session; an active-only
+    // catalog lookup must not decide whether this operation has already been accepted.
     const created = await ctx.host.sessions.create(ctx.target, {
-      idempotencyKey: key,
+      requestId: input.requestId,
+      businessKey: key,
       pullRequestUrl: `https://github.com/lodyai/lody/pull/${input.prNumber}`,
       prompt: `Review PR #${input.prNumber} at ${input.headSha}.`,
     });
