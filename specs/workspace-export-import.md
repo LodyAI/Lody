@@ -32,6 +32,8 @@ the following, which this document does not reopen:
    Shortcuts").
 9. Imported Prompt Shortcuts all become workspace-shared Shortcuts owned by the
    importer.
+10. A same-ID session of a different origin never overwrites the target and never
+    rejects a whole room; the default is to skip it (see "Sessions with the same ID").
 
 ## Scenario and responsibilities
 
@@ -190,6 +192,21 @@ authenticity is not a security premise; safety comes from authorization at impor
   dry-run report lists everything that would be deleted.
 - Merge is monotonic: inputs already executed or dequeued do not return to pending
   because older state was imported.
+- **Sessions with the same ID:** when the target already has a session with the
+  same ID, the importer first checks whether both share an origin, meaning the two
+  Loro documents share causal history (overlapping operations from the same peer in
+  their version vectors; peers are random 64-bit values, so sharing one means a
+  common origin). A shared origin means it is the same session, for example a backup
+  restore or a reimport, and it merges normally. No shared origin is a genuine ID
+  conflict, which should not happen normally; when it does, the default is to **skip**
+  that session together with its Meta row, Preview comments and attachments. The
+  target is not overwritten and the room is not rejected as a whole; the dry-run
+  report lists skipped sessions by title. A conflict copy was not chosen because a
+  copy needs a new session ID, which ripples through the Meta row, parent links of
+  child Tabs/Side Chats, Preview comments, attachment storage paths, forks and
+  references, amounting to rewriting data; each import would also create yet another
+  copy, breaking idempotency. Users who need that data can import the bundle into
+  another workspace.
 
 ### Idempotency and recovery
 
@@ -211,7 +228,7 @@ authenticity is not a security premise; safety comes from authorization at impor
 
 | Reference | Handling |
 | --- | --- |
-| Entity IDs (session, project, schedule, Role, comment) | Kept. They are random UUIDs, so independent workspaces never collide; the same ID appears in both only when the same data was imported into both, and then merging is the desired result. Keeping them also makes reimport idempotent |
+| Entity IDs (session, project, schedule, Role, comment) | Kept. They are random UUIDs, so independent workspaces never collide; sessions with the same ID follow "Sessions with the same ID" above. Keeping them also makes reimport idempotent |
 | Rooms embedding the workspace ID (`<ws>:wf:workspace`, `<ws>:sr`) | Rewritten to the target workspace ID; row contents unchanged |
 | Loro peers, Flock clock peers | Kept, never remapped (remapping breaks CRDT identity and idempotency) |
 | User IDs (authors, `SessionMeta.userId`, Role creators) | Kept as provenance and grant nothing; non-members display as "unknown member" |
@@ -371,9 +388,9 @@ Shortcuts as gaps.
 
 ## Evidence
 
-- Intent: this document; the three owner decisions were relayed by the Lody session
-  "🤯 loro-repo-rs 接入"; decisions 4–9 were given directly by the owner in review on
-  2026-11-19. Neither is an approval record for this Spec.
+- Intent: this document; every owner decision (1–10)
+  was confirmed by the owner on 2026-11-19. They decide specific questions and are not
+  an approval of this Spec revision as a whole, which remains draft.
 - Inspected implementation: [`lody export`](../apps/cli/src/commands/export.ts),
   [session-export](../apps/cli/src/lib/session-export/),
   [OSS migration](../apps/cli/src/lib/oss-migration/README.md),

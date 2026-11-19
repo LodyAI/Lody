@@ -22,6 +22,7 @@ Markdown/JSON，丢了删除记录、时钟和 peer，不能导回去；`lody mi
 7. 机器配置不跨工作区导入。
 8. Roost 会话允许有损导出导入（见下文“Roost 与 Prompt Shortcuts”）。
 9. Prompt Shortcuts 导入后统一成为导入者名下的工作区共享 Shortcuts。
+10. 同 ID 但不同源的会话不覆盖目标，也不拒绝整个 room；默认跳过（见“同 ID 的会话”）。
 
 ## 场景与职责
 
@@ -146,6 +147,13 @@ blobs/sha256/<ab>/<sha256>       附件、图片、diff 快照，按内容哈希
   但 Meta 仍有删除记录的会话，导入器跳过对应正文 room，不留孤儿。反过来，包里更晚的删除会删掉
   目标里对应的数据——这是合并的本义，预演报告会列出全部“将被删除”的条目。
 - 合并是单调的：已执行、已出队的消息不会因导入旧状态而回到待执行。
+- **同 ID 的会话：** 目标已有同 ID 会话时先看两边是否同源，即两份 Loro 文档是否共享因果历史
+  （版本向量里有相同 peer 的重叠操作；peer 是随机 64 位，共享即同源）。同源说明是同一个会话，
+  例如恢复备份或重复导入，照常合并。不同源是真正的 ID 冲突，正常情况下不会出现；出现时**默认
+  跳过**该会话，连同它的 Meta 行、Preview comments 和附件，不覆盖目标，也不拒绝整个 room，预演
+  报告按标题列出被跳过的会话。不选“创建冲突副本”的理由：副本要换新会话 ID，牵连 Meta 行、子
+  Tab/Side Chat 的父会话、Preview comments、附件存放路径、fork 和引用，等于改写数据；而且每次
+  导入都会再产生一份副本，破坏幂等。需要那份数据时，可以把包导入另一个工作区。
 
 ### 幂等与恢复
 
@@ -161,7 +169,7 @@ blobs/sha256/<ab>/<sha256>       附件、图片、diff 快照，按内容哈希
 
 | 引用 | 处理 |
 | --- | --- |
-| 实体 ID（session、项目、schedule、Role、comment） | 保留。都是随机 UUID，两个独立工作区不会撞；只有同一份数据先后导入过两边时才会同 ID，那时合并正是想要的结果。保留也让重复导入幂等 |
+| 实体 ID（session、项目、schedule、Role、comment） | 保留。都是随机 UUID，两个独立工作区不会撞；同 ID 会话的处理见上文“同 ID 的会话”。保留也让重复导入幂等 |
 | 含工作区 ID 的 room（`<ws>:wf:workspace`、`<ws>:sr`） | 改写为目标工作区 ID；行内容不变 |
 | Loro peer、Flock 时钟 peer | 保留，不重映射（重映射会破坏 CRDT 身份和幂等） |
 | 用户 ID（作者、`SessionMeta.userId`、Role 创建者） | 保留为历史出处，不授予任何权限；非目标成员显示为“未知成员” |
@@ -278,8 +286,8 @@ Shortcuts 导入后也会对全体成员可见，预演报告单独列出这些�
 
 ## 证据
 
-- 意图：本文；owner 决定 1–3 来自 lody 会话“🤯 loro-repo-rs 接入”的转达；4–9 是 owner
-  2026-11-19 审阅时直接给出的。两者都不是本 Spec 的批准记录。
+- 意图：本文；全部 owner 决定（1–10）均由 owner 2026-11-19 确认。这些是
+  对具体问题的决定，不是对本 Spec 整体修订的批准，Spec 仍为 draft。
 - 已检查的实现：[`lody export`](../apps/cli/src/commands/export.ts)、
   [session-export](../apps/cli/src/lib/session-export/)、
   [OSS 迁移](../apps/cli/src/lib/oss-migration/README.md)、
