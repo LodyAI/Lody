@@ -13,7 +13,8 @@ export const IPC_INVOKE_SERVICE_GROUPS = [
   'sessionControl',
   'storageGuard',
   'terminal',
-  'updater'
+  'updater',
+  'workspaceBundle'
 ] as const
 
 const INVOKE_SERVICE_GROUP_VALUES = new Set<string>(IPC_INVOKE_SERVICE_GROUPS)
