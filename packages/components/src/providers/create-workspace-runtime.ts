@@ -766,7 +766,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // synced before the cloud plane existed, so only the cloud binding's first
   // sync after such a delete may clear the marker.
   let cloudAttachDroppedSuspectCheckpoint = false;
-  const metaSyncState = (): RoomSyncState => metaTracker?.getSyncState() ?? 'idle';
+  // Native Meta is a live engine view read through main: it is current whenever
+  // the repo exists, with no Meta room whose sync could be pending.
+  const metaSyncState = (): RoomSyncState =>
+    repo.metadataMode === 'external' ? 'synced' : (metaTracker?.getSyncState() ?? 'idle');
 
   // workspaceId is required and provided at initialization
   const workspaceId: WorkspaceId = deps.workspaceId;
@@ -4321,6 +4324,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       initialMetaSyncCompleted = true;
       initialMetaSyncFailed = false;
       resumePendingInputs?.();
+      // The first-sync duties of a joined Meta room, except background
+      // eager-sync: a native renderer holds no Session replicas to prefetch.
+      workspaceMetaFirstSynced = true;
+      notifyConnectionStateInputsChanged();
+      scheduleStartupAcpCapabilitiesRefresh();
       return;
     }
     if (metaRoomJoinPromise) {

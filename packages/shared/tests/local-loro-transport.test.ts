@@ -33,7 +33,10 @@ class Harness {
     // When set, the meta room resolves here instead of `resolveFlockDoc('meta')`,
     // mirroring the CLI wiring where the meta room is the repo's internal
     // metaFlock (the dispatch-critical path), not a named flock doc.
-    metaFlock?: MemoryFlock
+    metaFlock?: MemoryFlock,
+    presenceSource?: ConstructorParameters<
+      typeof LocalLoroDataPlaneServerLegacy
+    >[0]['presenceSource']
   ) {
     this.server = new LocalLoroDataPlaneServerLegacy({
       writerLegacy,
@@ -41,6 +44,7 @@ class Harness {
       resolveDoc: async (docId) => this.serverDoc(docId),
       resolveFlockDoc: async (flockDocId) => this.serverFlock(flockDocId),
       resolveMetaFlock: metaFlock ? async () => metaFlock : undefined,
+      presenceSource,
     });
   }
 
@@ -338,6 +342,26 @@ describe('LocalLoroTransportAdapter push+delta sync', () => {
     expect(metaFlock.get('latestUserMsgId')).toBe('turn-1');
     // ...and NOT in the decoy named 'meta' flock doc.
     expect(harness.serverFlock('meta').get('latestUserMsgId')).toBeUndefined();
+  });
+
+  it('delivers presence to an adapter that joins no room, again after a redial', async () => {
+    // A renderer with native Workspace Meta joins no Meta room over this plane.
+    const presenceStore = new EphemeralStore(30_000);
+    presenceStore.set('machine:m1', { kind: 'machine', machineId: 'm1' });
+    const harness = new Harness('ws', undefined, {
+      encodeLocalOrigin: () => presenceStore.encodeAll(),
+      subscribeLocalOrigin: () => () => {},
+    });
+    const client = harness.createClient('renderer');
+    await client.adapter.connect();
+    await harness.settle();
+    const presence = () => client.received.filter((m) => m.type === 'presence').length;
+    expect(presence()).toBe(1);
+    client.setConnected(false);
+    client.setConnected(true);
+    await harness.settle();
+    expect(presence()).toBe(2);
+    await client.adapter.close();
   });
 
   it('pushes presence on connect and on every presence change', async () => {

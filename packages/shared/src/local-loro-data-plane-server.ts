@@ -412,6 +412,9 @@ export class LocalLoroDataPlaneServerLegacy {
         case 'detach':
           this.detachPeer(message.peerId);
           return;
+        case 'subscribe':
+          // Registration above is the whole effect.
+          return;
         case 'machine-monitor':
           this.registerMachineMonitorReceiver(connection);
           this.options.machineMonitorSource?.apply(base64ToBytes(message.dataBase64));
