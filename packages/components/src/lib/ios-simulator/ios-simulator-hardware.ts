@@ -199,6 +199,7 @@ export type IosSimulatorControlId =
   | 'lock'
   | 'rotate-left'
   | 'rotate-right'
+  | 'software-keyboard'
   | 'shake'
   | 'volume-up'
   | 'volume-down'
@@ -208,7 +209,8 @@ export type IosSimulatorControlId =
   | 'open-url';
 
 export function getIosSimulatorControlAvailability(
-  hardware: IosSimulatorHardware
+  hardware: IosSimulatorHardware,
+  keyboardToggleSupported = false
 ): Record<IosSimulatorControlId, boolean> {
   const handheld = hardware.family === 'iphone' || hardware.family === 'ipad';
   return {
@@ -218,6 +220,7 @@ export function getIosSimulatorControlAvailability(
     lock: handheld || hardware.family === 'watch',
     'rotate-left': handheld,
     'rotate-right': handheld,
+    'software-keyboard': handheld && keyboardToggleSupported,
     shake: handheld,
     'volume-up': handheld,
     'volume-down': handheld,

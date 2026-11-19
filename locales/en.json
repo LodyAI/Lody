@@ -5753,6 +5753,7 @@
   "sessions.iosSimulator.controls.screenshotAttach": "Attach screenshot to message",
   "sessions.iosSimulator.controls.screenshotSave": "Save screenshot",
   "sessions.iosSimulator.controls.shake": "Shake",
+  "sessions.iosSimulator.controls.toggleKeyboard": "Show/hide simulator keyboard",
   "sessions.iosSimulator.controls.typeText": "Type text…",
   "sessions.iosSimulator.controls.updateHint": "Update Lody on {{machine}} to use simulator controls",
   "sessions.iosSimulator.controls.view": "View",

@@ -540,6 +540,19 @@ async function connectControlViewer() {
 }
 
 describe('SessionIosSimulatorPanel controls', () => {
+  it('sends one keyboard toggle to the ready simulator without assuming its visibility', async () => {
+    const machine = createFakeMachine({ devices: [device({ udid: 'phone' })], preview: READY });
+    await renderPanel({ machine, meta: macMeta({ iosSimulator: 1, iosSimulatorControls: 2 }) });
+    const viewer = await connectControlViewer();
+    const toggle = labelled('Show/hide simulator keyboard')!;
+    await act(async () => toggle.click());
+    expect(viewer.requests.map((r) => r.control)).toEqual([{ kind: 'button', button: 'software-keyboard' }]);
+    expect(toggle.disabled).toBe(true);
+    await viewer.reply({ success: false, error: 'unavailable' });
+    expect(toggle.disabled).toBe(false);
+    expect(toggle.hasAttribute('aria-pressed')).toBe(false);
+  });
+
   it('turns the exterior only after the machine confirms a rotation', async () => {
     const machine = createFakeMachine({
       devices: [device({ udid: 'phone', state: 'Booted', occupancy: 'this-session' })],
@@ -666,6 +679,7 @@ describe('SessionIosSimulatorPanel controls', () => {
       preview: READY,
     });
     await renderPanel({ machine, meta: CONTROLS_META });
+    expect(labelled('Show/hide simulator keyboard')?.disabled).toBe(true);
     expect(labelled('Action button')?.disabled).toBe(true);
     expect(labelled('Volume up')?.disabled).toBe(false);
     act(() => root?.unmount());
