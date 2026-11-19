@@ -458,4 +458,96 @@ describe('LoroSidebar pinned section', () => {
     header?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(onTogglePinnedSection).toHaveBeenCalledOnce();
   });
+
+  it('renders user pin sections after the default one, keeping the manual order of their rows', () => {
+    const chat = (id: string, minutesAgo: number) => ({
+      id,
+      kind: 'chat' as const,
+      title: id,
+      sectionLabel: 'Chats',
+      latestMessageAt: new Date(Date.UTC(2026, 6, 14, 9, 60 - minutesAgo)),
+      isPinned: true,
+    });
+    renderSidebar({
+      pinnedItems: [chat('loose', 1), chat('weekly-mirror', 50), chat('deps-bump', 2)],
+      pinnedSections: [
+        { id: null, name: 'Pinned', items: [chat('loose', 1)] },
+        {
+          id: 'maintenance',
+          name: 'Maintenance',
+          // Manual order: the older conversation stays first.
+          items: [chat('weekly-mirror', 50), chat('deps-bump', 2)],
+        },
+        { id: 'empty', name: 'Empty section', items: [] },
+      ],
+    });
+
+    const sections = Array.from(
+      container?.querySelectorAll<HTMLElement>('[data-pin-section]') ?? []
+    ).map((section) => [
+      section.getAttribute('data-pin-section'),
+      Array.from(section.querySelectorAll('[data-sidebar-updated-id]')).map((row) =>
+        row.getAttribute('data-sidebar-updated-id')
+      ),
+    ]);
+    expect(sections).toEqual([
+      ['default', ['loose']],
+      ['maintenance', ['weekly-mirror', 'deps-bump']],
+      ['empty', []],
+    ]);
+    expect(container?.textContent).toContain('Maintenance');
+    expect(container?.textContent).toContain('Empty section');
+  });
+
+  it('collapses one user section without folding the others', () => {
+    const onTogglePinSection = vi.fn();
+    renderSidebar({
+      pinnedSections: [
+        { id: null, name: 'Pinned', items: [pinnedItem] },
+        { id: 'maintenance', name: 'Maintenance', items: [] },
+      ],
+      collapsedPinSectionIds: { maintenance: true },
+      onTogglePinSection,
+    });
+    expect(container?.querySelector('[data-sidebar-updated-id="pinned-session"]')).not.toBeNull();
+    const header = container?.querySelector(
+      '[data-pin-section="maintenance"] [role="button"][aria-expanded="false"]'
+    );
+    header?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(onTogglePinSection).toHaveBeenCalledWith('maintenance');
+  });
+
+  it('moves a pinned conversation to another section from its context menu', async () => {
+    const onMoveItem = vi.fn();
+    renderSidebar({
+      pinnedSections: [
+        { id: null, name: 'Pinned', items: [pinnedItem] },
+        { id: 'maintenance', name: 'Maintenance', items: [] },
+      ],
+      onToggleUpdatedItemPinned: () => {},
+      pinSectionActions: {
+        onMoveItem,
+        onCreateSection: () => {},
+        onRenameSection: () => {},
+        onDeleteSection: () => {},
+      },
+    });
+    const row = container?.querySelector('[data-sidebar-updated-id="pinned-session"]');
+    flushSync(() => {
+      row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 }));
+    });
+    await flushFrame();
+    const trigger = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+      (item) => item.textContent === 'Move to Section'
+    );
+    expect(trigger).toBeDefined();
+    flushSync(() => trigger?.click());
+    await flushFrame();
+    const target = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+      (item) => item.textContent === 'Maintenance'
+    );
+    expect(target).toBeDefined();
+    flushSync(() => target?.click());
+    expect(onMoveItem).toHaveBeenCalledWith('pinned-session', 'maintenance');
+  });
 });

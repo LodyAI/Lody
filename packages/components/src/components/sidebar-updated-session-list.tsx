@@ -15,6 +15,8 @@ import {
   Archive,
   Folders,
   Folder,
+  FolderInput,
+  FolderPlus,
   GitBranch,
   GitPullRequest,
   Link2,
@@ -175,7 +177,21 @@ export type SidebarUpdatedItem = {
 export type SidebarUpdatedBucketKey = 'all' | SidebarStatusGroup;
 
 /** How the list splits its rows: one recency list, or the status groups. */
-export type SidebarUpdatedGrouping = 'recency' | 'status';
+/** `manual` keeps the caller's order (pinned sections); the others sort by activity. */
+export type SidebarUpdatedGrouping = 'recency' | 'status' | 'manual';
+
+/** `data-pin-section` value of the default section. */
+export const DEFAULT_PIN_SECTION_ATTR = 'default';
+
+/** Row menu entries for moving a pinned conversation between pin sections. */
+export type SidebarPinSectionMenu = {
+  /** Sections in display order; `null` is the default section. */
+  sections: readonly { id: string | null; name: string }[];
+  currentSectionId: string | null;
+  onMove: (itemId: string, sectionId: string | null) => void;
+  onCreate: (itemId: string) => void;
+  labels: { moveToSection: string; newSection: string };
+};
 
 export type SidebarUpdatedSessionListLabels = {
   /** Header of the single flat list section. */
@@ -246,6 +262,8 @@ export function buildSidebarUpdatedBuckets(
   items: SidebarUpdatedItem[],
   grouping: SidebarUpdatedGrouping
 ): SidebarUpdatedBucket[] {
+  // A pin section keeps its header while empty: it is still a drop target.
+  if (grouping === 'manual') return [{ key: 'all', items: [...items] }];
   if (!items.length) return [];
   if (grouping === 'recency') return [{ key: 'all', items: sortUpdatedItems(items) }];
   const byGroup = new Map<SidebarStatusGroup, SidebarUpdatedItem[]>();
@@ -336,7 +354,8 @@ export function getVisibleUpdatedItemTree(
   orderedItems: SidebarUpdatedItem[],
   canToggleFullList: boolean,
   showFull: boolean,
-  collapsedOpenedBySessionIds?: Record<string, boolean>
+  collapsedOpenedBySessionIds?: Record<string, boolean>,
+  preserveOrder = false
 ): OpenedBySessionTreeNode<SidebarUpdatedItem>[] {
   const capped = canToggleFullList && !showFull && updatedBucketOverflowsPreview(orderedItems);
   return buildOpenedBySessionTree(orderedItems, {
@@ -344,7 +363,8 @@ export function getVisibleUpdatedItemTree(
     isCollapsed: (openerId) => collapsedOpenedBySessionIds?.[openerId] === true,
     // Updated mode IS the recency list: rank each opener by its freshest opened
     // Session so nesting can never bury a just-updated row under a stale opener.
-    rootRank: updatedItemRootRank,
+    // A manually ordered pin section keeps its roots where the user put them.
+    ...(preserveOrder ? {} : { rootRank: updatedItemRootRank }),
     ...(capped ? { maxRoots: SHOW_FULL_BUCKET_THRESHOLD } : {}),
   });
 }
@@ -353,13 +373,15 @@ export function getVisibleUpdatedItems(
   orderedItems: SidebarUpdatedItem[],
   canToggleFullList: boolean,
   showFull: boolean,
-  collapsedOpenedBySessionIds?: Record<string, boolean>
+  collapsedOpenedBySessionIds?: Record<string, boolean>,
+  preserveOrder = false
 ): SidebarUpdatedItem[] {
   return getVisibleUpdatedItemTree(
     orderedItems,
     canToggleFullList,
     showFull,
-    collapsedOpenedBySessionIds
+    collapsedOpenedBySessionIds,
+    preserveOrder
   ).map((node) => node.item);
 }
 
@@ -448,6 +470,10 @@ export type SidebarUpdatedSessionListProps = {
    * status groups, each with its own header.
    */
   grouping?: SidebarUpdatedGrouping;
+  /** Pinned sections only: "Move to section" entries in each row's context menu. */
+  pinSectionMenu?: SidebarPinSectionMenu;
+  /** Pinned sections only: identifies this list's section for drag and tests. */
+  pinSectionId?: string | null;
 };
 
 const defaultLabels: SidebarUpdatedSessionListLabels = {
@@ -482,7 +508,10 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   headerAction,
   showProjectContext = false,
   grouping = 'recency',
+  pinSectionMenu,
+  pinSectionId,
 }: SidebarUpdatedSessionListProps) {
+  const preserveOrder = grouping === 'manual';
   const { t } = useTranslation();
   const showBranchContext = useAtomValue(sidebarShowBranchNamesAtom);
   const merged: SidebarUpdatedSessionListLabels = useMemo(
@@ -579,7 +608,8 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
             bucket.items,
             canToggleFullBucket && updatedBucketCanFold(bucket.key),
             Boolean(showFullBuckets?.[bucket.key]),
-            collapsedOpenedBySessionIds
+            collapsedOpenedBySessionIds,
+            preserveOrder
           ),
         };
       }),
@@ -588,6 +618,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
       canToggleFullBucket,
       collapsedBuckets,
       collapsedOpenedBySessionIds,
+      preserveOrder,
       sendStates,
       showFullBuckets,
     ]
@@ -606,7 +637,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
     );
   }
 
-  if (!items.length) {
+  if (!items.length && !preserveOrder) {
     return (
       <div className="flex flex-col">
         {headerAction ? <HeaderActionRow action={headerAction} /> : null}
@@ -625,7 +656,12 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
 
   return (
     <Tooltip.Provider>
-      <div className={cn('flex flex-col', className)}>
+      <div
+        className={cn('flex flex-col', className)}
+        data-pin-section={
+          pinSectionId === undefined ? undefined : (pinSectionId ?? DEFAULT_PIN_SECTION_ATTR)
+        }
+      >
         {buckets.map((bucket, bucketIndex) => {
           const bucketHeaderAction = bucketIndex === 0 ? headerAction : null;
           const collapsed = Boolean(collapsedBuckets?.[bucket.key]);
@@ -709,6 +745,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                           onShareWithTeam={onShareItemWithTeam}
                           onOpenPullRequest={onOpenPullRequest}
                           onBeginRename={beginRename}
+                          pinSectionMenu={pinSectionMenu}
                           openedByTree={treeSlot}
                           contextMenuLabels={contextMenuLabels}
                           archiveTooltipLabel={archiveLabels.tooltip}
@@ -815,6 +852,7 @@ type UpdatedItemRowProps = {
   onBeginRename: (id: string, currentTitle: string) => void;
   openedByTree?: SessionRowOpenedByTreeSlot;
   contextMenuLabels: SidebarUpdatedContextMenuLabels;
+  pinSectionMenu?: SidebarPinSectionMenu;
   archiveTooltipLabel: string;
   archiveActionLabel: string;
   archiveConfirmLabel: string;
@@ -838,6 +876,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   onShareWithTeam,
   onOpenPullRequest,
   onBeginRename,
+  pinSectionMenu,
   openedByTree,
   contextMenuLabels,
   archiveTooltipLabel,
@@ -940,7 +979,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       Boolean(branchName) ||
       canGoToOpener ||
       (showPr && Boolean(onOpenPullRequest)) ||
-      Boolean(openedByOpener));
+      Boolean(openedByOpener) ||
+      Boolean(pinSectionMenu));
   const handlePrOpen =
     onOpenPullRequest && prUrl
       ? () =>
@@ -1210,6 +1250,28 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           >
             {item.isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
           </ContextMenu.Item>
+        ) : null}
+        {pinSectionMenu ? (
+          <ContextMenu.Submenu>
+            <ContextMenu.SubmenuTrigger icon={FolderInput}>
+              {pinSectionMenu.labels.moveToSection}
+            </ContextMenu.SubmenuTrigger>
+            <ContextMenu.SubmenuContent className="min-w-[180px]">
+              {pinSectionMenu.sections.map((section) => (
+                <ContextMenu.Item
+                  key={section.id ?? DEFAULT_PIN_SECTION_ATTR}
+                  disabled={section.id === pinSectionMenu.currentSectionId}
+                  onClick={() => pinSectionMenu.onMove(item.id, section.id)}
+                >
+                  {section.name}
+                </ContextMenu.Item>
+              ))}
+              <ContextMenu.Separator />
+              <ContextMenu.Item icon={FolderPlus} onClick={() => pinSectionMenu.onCreate(item.id)}>
+                {pinSectionMenu.labels.newSection}
+              </ContextMenu.Item>
+            </ContextMenu.SubmenuContent>
+          </ContextMenu.Submenu>
         ) : null}
         {canMarkUnread ? (
           <ContextMenu.Item
