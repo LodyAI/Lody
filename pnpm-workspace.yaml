@@ -72,6 +72,15 @@ managePackageManagerVersions: true
 minimumReleaseAge: 10080
 
 minimumReleaseAgeExclude:
+  - "@loro-dev/json-patch@0.1.0"
+  - "@loro-dev/loro-repo-engine-darwin-arm64@0.1.0"
+  - "@loro-dev/loro-repo-engine-darwin-x64@0.1.0"
+  - "@loro-dev/loro-repo-engine-linux-x64-gnu@0.1.0"
+  - "@loro-dev/loro-repo-engine-linux-arm64-gnu@0.1.0"
+  - "@loro-dev/loro-repo-engine-win32-x64-msvc@0.1.0"
+  - "@loro-dev/loro-repo-engine-win32-arm64-msvc@0.1.0"
+  - "@loro-dev/loro-repo-client@0.1.0"
+  - "@loro-dev/loro-repo-engine@0.1.0"
   - '@typescript-eslint/project-service@8.72.2'
   - '@typescript-eslint/scope-manager@8.72.2'
   - '@typescript-eslint/tsconfig-utils@8.72.2'

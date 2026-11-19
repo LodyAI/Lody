@@ -147,6 +147,7 @@
     "ignore": "7.0.5",
     "loro-crdt": "1.17.0",
     "tinypool": "^1.0.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@loro-dev/loro-repo-engine": "0.1.0"
   }
 }

@@ -11,6 +11,7 @@ import { ImageIpc } from './services/image-ipc'
 import { LocalPlatformIpc } from './services/local-platform-ipc'
 import { LocalProjectsIpc } from './services/local-projects-ipc'
 import { LoroIpc } from './services/loro-ipc'
+import { NativePreviewCommentsIpc } from './services/native-preview-comments'
 import { MachineRpcIpc } from './services/machine-rpc-ipc'
 import { NotificationsIpc } from './services/notifications-ipc'
 import { PublicBrowserIpc } from './services/public-browser-ipc'
@@ -33,6 +34,7 @@ export const IPC_SERVICE_CONSTRUCTORS = [
   LocalPlatformIpc,
   LocalProjectsIpc,
   LoroIpc,
+  NativePreviewCommentsIpc,
   MachineRpcIpc,
   NotificationsIpc,
   PublicBrowserIpc,

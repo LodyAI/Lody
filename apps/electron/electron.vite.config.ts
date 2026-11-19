@@ -95,7 +95,7 @@ export default defineConfig(({ mode }) => {
         },
         externalizeDeps: {
           // E2EE's Node SQLite adapter cannot inline its dynamic addon loader.
-          include: ['better-sqlite3'],
+          include: ['better-sqlite3', '@loro-dev/loro-repo-engine'],
           exclude: [
             '@devframes/agentic',
             '@devframes/hub',

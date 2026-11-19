@@ -7,6 +7,7 @@ export const IPC_INVOKE_SERVICE_GROUPS = [
   'localPlatform',
   'localProjects',
   'loro',
+  'nativePreviewComments',
   'machineRpc',
   'notifications',
   'publicBrowser',

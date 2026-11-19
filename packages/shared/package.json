@@ -194,7 +194,10 @@
     },
     "./e2ee-remote-pairing": "./src/e2ee-remote-pairing.ts",
     "./e2ee-rpc": "./src/e2ee-rpc.ts",
-    "./e2ee-execution-intent": "./src/e2ee-execution-intent.ts"
+    "./e2ee-execution-intent": "./src/e2ee-execution-intent.ts",
+    "./room-observation": "./src/room-observation.ts",
+    "./native-preview-comments": "./src/native-preview-comments.ts",
+    "./node/native-repo": "./src/node/native-repo/index.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
@@ -217,7 +220,9 @@
     "acp-extension-core": "workspace:*",
     "zod": "catalog:",
     "croner": "10.0.1",
-    "@effect/platform-node-shared": "catalog:"
+    "@effect/platform-node-shared": "catalog:",
+    "@loro-dev/loro-repo-client": "0.1.0",
+    "@loro-dev/loro-repo-engine": "0.1.0"
   },
   "peerDependencies": {
     "loro-crdt": "catalog:",

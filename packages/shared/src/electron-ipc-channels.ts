@@ -24,6 +24,7 @@ export type IpcPushMap = {
     | TerminalExitEvent
     | TerminalTitleEvent
     | { type: 'error'; code: string; message: string };
+  'loro.previewComments': import('./native-preview-comments').NativePreviewEvent;
   'loro.event': LocalLoroDataPlaneServerMessage;
   'loro.status': boolean;
   'cli.state': ElectronCliState;
@@ -69,6 +70,7 @@ export type IpcSendMap = {
 
 export const IPC_PUSH_CHANNELS = {
   terminalEvent: 'terminal.event',
+  nativePreviewComments: 'loro.previewComments',
   loroEvent: 'loro.event',
   loroStatus: 'loro.status',
   cliState: 'cli.state',

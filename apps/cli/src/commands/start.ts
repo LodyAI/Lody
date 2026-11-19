@@ -5,7 +5,7 @@ import {
   pruneManagedProcessTrees,
   getManagedWorkerLaunchContext,
 } from '@/lib/managed-process-observation';
-import { Effect } from 'effect';
+import { Scope, Exit, Effect } from 'effect';
 import { requestManagedPreparation } from '@/lib/managed-daemon-ipc';
 import {
   pauseMachineTurnsIfIdle,
@@ -661,6 +661,18 @@ async function startAgentService(
     });
   }
 
+  const nativePreviewScope = await Effect.runPromise(Scope.make());
+  if (platformKind === 'local' && process.env.LODY_NATIVE_PREVIEW_COMMENTS === '1') {
+    try {
+      const { acquireNativePreviewHost } = await import('@lody/shared/node/native-repo');
+      await Effect.runPromise(
+        acquireNativePreviewHost().pipe(Effect.provideService(Scope.Scope, nativePreviewScope))
+      );
+    } catch (error) {
+      logger.warn('Native preview comments unavailable', error);
+    }
+  }
+
   const managedRuntimeManager = configureManagedAgentRuntimeManager({
     runtimeBaseUrl: cloudPort.runtimeArtifacts.baseUrl,
   });
@@ -694,6 +706,7 @@ async function startAgentService(
       onProcessLifecycleAction: (action) => triggerProcessLifecycleAction?.(action),
     });
   } catch (error) {
+    await Effect.runPromise(Scope.close(nativePreviewScope, Exit.void));
     await managedRuntimeUpdates.shutdown();
     await cloudPort.dispose();
     throw error;
@@ -723,6 +736,7 @@ async function startAgentService(
       () => startupTimeSync?.stop(),
       () => managedRuntimeUpdates.shutdown(),
       () => fleet.shutdown(),
+      () => Effect.runPromise(Scope.close(nativePreviewScope, Exit.void)),
       closeLoginShellApplicationLegacy,
     ]) {
       try {

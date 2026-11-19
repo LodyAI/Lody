@@ -170,16 +170,17 @@ export type PreviewVisualCommentDocUpdater =
   | ((state: PreviewVisualCommentDocInput) => void);
 
 export type PreviewVisualCommentDocStore = {
+  readonly backend?: 'native';
+  mutate?: (mutation: import('@lody/shared').PreviewVisualCommentMutation) => Promise<void>;
   readonly sessionId: SessionId;
   readonly roomId: string;
-  readonly doc: LoroDoc;
   readonly firstSynced: Promise<void>;
   getSyncState: () => RoomSyncState;
   subscribeSyncState: (listener: (state: RoomSyncState) => void) => () => void;
   getState: () => PreviewVisualCommentDocState;
   setState: (updater: PreviewVisualCommentDocUpdater) => void;
   subscribe: (listener: (state: PreviewVisualCommentDocState) => void) => () => void;
-  dispose: () => void;
+  dispose: () => void | Promise<void>;
   waitUntilSynced: () => Promise<void>;
 };
 

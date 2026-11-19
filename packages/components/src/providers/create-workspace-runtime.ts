@@ -5417,9 +5417,16 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     unload: (sessionId) => repo.unloadDoc(getSessionRoomId(sessionId)),
   });
 
+  const nativePreviewStores = new Set<SessionId>();
   const createPreviewVisualCommentStore = async (
     sessionId: SessionId
   ): Promise<PreviewVisualCommentDocStore> => {
+    const { openNativePreviewCommentStore } = await import('./native-preview-comment-store');
+    const native = await openNativePreviewCommentStore(workspaceId, sessionId);
+    if (native) {
+      nativePreviewStores.add(sessionId);
+      return native;
+    }
     const roomId = getPreviewCommentRoomId(sessionId);
     const persistedDoc = await repo.openPersistedDoc(roomId);
 
@@ -5471,7 +5478,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     return {
       sessionId,
       roomId,
-      doc: persistedDoc.doc as LoroDoc,
       firstSynced,
       getSyncState: syncTracker.getSyncState,
       subscribeSyncState: syncTracker.subscribeSyncState,
@@ -5506,7 +5512,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     releaseDelayMs: STORE_RELEASE_DELAY_MS,
     // Same ownership contract as sessionStoreCache: the cache alone unloads the
     // doc from the repo on hard release, serialized per key.
-    unload: (sessionId) => repo.unloadDoc(getPreviewCommentRoomId(sessionId)),
+    unload: async (sessionId) => {
+      if (nativePreviewStores.delete(sessionId)) return;
+      await repo.unloadDoc(getPreviewCommentRoomId(sessionId));
+    },
   });
 
   const scheduleStoreCache = createManagedStoreCache<string, ScheduleDocStore>({

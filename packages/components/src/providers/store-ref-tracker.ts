@@ -138,7 +138,7 @@ export type ManagedStoreCache<K, V> = {
   disposeAll(): Promise<void>;
 };
 
-export function createManagedStoreCache<K, V extends { dispose(): void }>(opts: {
+export function createManagedStoreCache<K, V extends { dispose(): void | Promise<void> }>(opts: {
   create: (key: K) => Promise<V>;
   releaseDelayMs: number;
   /**
@@ -173,7 +173,7 @@ export function createManagedStoreCache<K, V extends { dispose(): void }>(opts: 
       } catch {
         // Store creation failure was already surfaced to get() callers.
       }
-      store?.dispose();
+      await store?.dispose();
       try {
         await opts.unload?.(key);
       } catch (error) {
@@ -197,7 +197,8 @@ export function createManagedStoreCache<K, V extends { dispose(): void }>(opts: 
 
   const tracker = createStoreRefTracker<K>({
     releaseDelayMs: opts.releaseDelayMs,
-    onRelease: (key) => void release(key),
+    onRelease: (key) =>
+      void release(key).catch((error) => console.warn('Failed to release store', { key, error })),
   });
 
   const get = (key: K): Promise<V> => {
@@ -260,7 +261,7 @@ export function createManagedStoreCache<K, V extends { dispose(): void }>(opts: 
       stores.delete(key);
       try {
         const store = await storePromise;
-        store.dispose();
+        await store.dispose();
       } catch {
         // ignore — store creation may have failed
       }

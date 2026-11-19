@@ -34,6 +34,7 @@ const bundledNodeBuiltins = new Set([
 
 const explicitlyExternal = new Set([
   '@loro-dev/roost-node',
+  '@loro-dev/loro-repo-engine',
   '@napi-rs/keyring',
   'better-sqlite3',
   '@lydell/node-pty',

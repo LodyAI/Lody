@@ -114,8 +114,12 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
     }
   })
   new cli.CliIpc()
+  const { EventEmitter } = await import('node:events')
   const window = () => {
-    const sender = { mainFrame: { url: 'file:///app/out/renderer/index.html' } }
+    const sender = new EventEmitter()
+    sender.mainFrame = { url: 'file:///app/out/renderer/index.html' }
+    sender.isDestroyed = () => false
+    sender.send = (channel, value) => sender.emit(channel, value)
     const owner = { webContents: sender, isDestroyed: () => false }
     windows.set(sender, owner)
     productWindows.add(owner)
@@ -148,6 +152,130 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
     running = true
     sends.get('terminal.input')(event, { data: 'synthetic' })
     assert.equal(running, false)
+  }
+  // Run native domain IPC through the same real trusted-window guard/decorators.
+  const { mkdtemp, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const nativeSdk = await import('@lody/shared/node/native-repo')
+  const nativeContracts = await import('@lody/shared/native-preview-comments')
+  const observationContracts = await import('@lody/shared/room-observation')
+  const nativeDir = await mkdtemp(join(tmpdir(), 'lody-comment-ipc-'))
+  const host = await nativeSdk.startNativePreviewHost(nativeDir)
+  const nativeEnv = {}
+  try {
+    const native = await load(
+      './services/native-preview-comments.ts',
+      {
+        'electron-ipc-decorator': decoratorExports,
+        '../product-window-ipc-service': service,
+        '../../platform': {
+          isLocalPlatform: () => true,
+          readLocalPlatformSnapshot: async () => ({
+            userId: 'local:test',
+            workspace: { workspaceId: 'lw_test' }
+          })
+        },
+        '@lody/shared/native-preview-comments': nativeContracts,
+        '@lody/shared/room-observation': observationContracts,
+        '@lody/shared/node/native-repo': {
+          ...nativeSdk,
+          connectNativePreviewHost: () => nativeSdk.connectNativePreviewHost(nativeDir)
+        }
+      },
+      nativeEnv
+    )
+    new native.NativePreviewCommentsIpc()
+    const scope = { workspaceId: 'lw_test', sessionId: 'synthetic' }
+    assert.equal(await handlers.get('nativePreviewComments.available')(primary, scope), false)
+    nativeEnv.LODY_NATIVE_PREVIEW_COMMENTS = '1'
+    await assert.rejects(
+      handlers.get('nativePreviewComments.available')(unknown, scope),
+      /untrusted renderer/
+    )
+    await assert.rejects(
+      handlers.get('nativePreviewComments.available')(primary, {
+        ...scope,
+        workspaceId: 'lw_foreign'
+      }),
+      /scope_denied/
+    )
+    const first = '00000000-0000-4000-8000-000000000001'
+    const second = '00000000-0000-4000-8000-000000000002'
+    const firstEvents = [],
+      secondEvents = []
+    primary.sender.on(nativeContracts.NATIVE_PREVIEW_CHANNEL, (event) => firstEvents.push(event))
+    auxiliary.sender.on(nativeContracts.NATIVE_PREVIEW_CHANNEL, (event) => secondEvents.push(event))
+    await handlers.get('nativePreviewComments.open')(primary, { ...scope, observationId: first })
+    await handlers.get('nativePreviewComments.open')(auxiliary, { ...scope, observationId: second })
+    assert.equal(firstEvents[0].event.kind, 'snapshot')
+    assert.equal(secondEvents[0].event.kind, 'snapshot')
+    assert.equal(host.engine.stats().namespaces[0].flockSubscriptions, 2)
+    const foreignRelease = await handlers.get('nativePreviewComments.release')(auxiliary, {
+      observationId: first
+    })
+    assert.equal(foreignRelease.status, 'disconnected')
+    assert.equal(host.engine.stats().namespaces[0].flockSubscriptions, 2)
+    const receipt = await handlers.get('nativePreviewComments.release')(primary, {
+      observationId: first
+    })
+    assert.equal(receipt.status, 'acknowledged')
+    assert.equal(host.engine.stats().namespaces[0].flockSubscriptions, 1)
+    // The surviving window observes a real conditional domain write.
+    const created = {
+      id: 'one',
+      turnId: 'turn',
+      status: 'completed',
+      body: 'Synthetic',
+      authorId: 'local:test',
+      createdAt: 1,
+      updatedAt: 1,
+      anchor: {
+        version: 1,
+        page: {
+          url: 'http://localhost/',
+          pathname: '/',
+          viewport: { width: 1, height: 1, scrollX: 0, scrollY: 0, devicePixelRatio: 1 }
+        },
+        click: { clientX: 0, clientY: 0, pageX: 0, pageY: 0, viewportXRatio: 0, viewportYRatio: 0 },
+        target: {
+          tag: 'div',
+          attributes: {},
+          rect: { x: 0, y: 0, width: 1, height: 1 },
+          rectRatio: { x: 0, y: 0, width: 1, height: 1 },
+          selector: '#test'
+        },
+        context: { ancestors: [] }
+      }
+    }
+    await assert.rejects(
+      handlers.get('nativePreviewComments.mutate')(primary, {
+        ...scope,
+        mutation: { kind: 'create', comment: { ...created, authorId: 'local:foreign' } }
+      }),
+      /author_denied/
+    )
+    const observed = new Promise((resolve) =>
+      auxiliary.sender.once(nativeContracts.NATIVE_PREVIEW_CHANNEL, resolve)
+    )
+    await handlers.get('nativePreviewComments.mutate')(auxiliary, {
+      ...scope,
+      mutation: { kind: 'create', comment: created }
+    })
+    const update = await observed
+    assert.equal(update.event.kind, 'changes')
+    assert.equal(update.event.entries[0].comment.body, 'Synthetic')
+    assert.equal(firstEvents.length, 1)
+    auxiliary.sender.emit('did-start-navigation', {}, 'http://localhost/preview', false, false)
+    assert.equal(host.engine.stats().namespaces[0].flockSubscriptions, 1)
+    const released = await handlers.get('nativePreviewComments.release')(auxiliary, {
+      observationId: second
+    })
+    assert.equal(released.status, 'acknowledged')
+    assert.equal(host.engine.stats().namespaces[0].flockSubscriptions, 0)
+  } finally {
+    await host.close()
+    await rm(nativeDir, { recursive: true, force: true })
   }
   let recovered = false
   let reported = false

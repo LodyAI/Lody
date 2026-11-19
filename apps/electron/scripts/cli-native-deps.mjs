@@ -36,6 +36,7 @@ const require = createRequire(import.meta.url)
 // declares them (.pnpm/<pkg>/node_modules/<dep>), not under apps/cli.
 const CLI_RUNTIME_PACKAGE_CHAIN = [
   { name: '@loro-dev/roost-node', from: 'cli', entry: '@loro-dev/roost-node/native' },
+  { name: '@loro-dev/loro-repo-engine', from: 'cli' },
   { name: '@napi-rs/keyring', from: 'cli' },
   { name: 'better-sqlite3', from: 'cli' },
   { name: 'loro-crdt', from: 'cli' },
@@ -516,4 +517,59 @@ function removeStagedNodePtyBinaryPackages() {
     if (!entry.isDirectory() || !entry.name.startsWith('node-pty-')) continue
     fs.rmSync(path.join(scopeDir, entry.name), { recursive: true, force: true })
   }
+}
+
+/** Copies the target addon next to the SDK loader; no Electron ABI rebuild. */
+export function stageNativeRepoBinding(
+  sourceDir,
+  destinationDir,
+  target,
+  { fetchBinaryPackage = fetchNativeBinaryPackage } = {}
+) {
+  if (
+    !['darwin', 'linux', 'win32'].includes(target.platform) ||
+    !['x64', 'arm64'].includes(target.arch)
+  ) {
+    throw new Error(`Unsupported native Repo target ${target.platform}-${target.arch}`)
+  }
+  const suffix = `${target.platform}-${target.arch}${target.platform === 'linux' ? '-gnu' : target.platform === 'win32' ? '-msvc' : ''}`
+  const fileName = `loro-repo-engine.${suffix}.node`
+  let binary = path.join(sourceDir, fileName)
+  let downloaded
+  try {
+    if (!fs.existsSync(binary)) {
+      const packageName = `@loro-dev/loro-repo-engine-${suffix}`
+      const metadata = JSON.parse(fs.readFileSync(path.join(sourceDir, 'package.json'), 'utf8'))
+      const version = metadata.optionalDependencies?.[packageName]
+      if (!version || version !== metadata.version)
+        throw new Error(`No exact native Repo binary for ${suffix}`)
+      let platformDir
+      try {
+        platformDir = resolvePackageDir(packageName, sourceDir)
+      } catch (error) {
+        if (error.code !== 'MODULE_NOT_FOUND') throw error
+        downloaded = fetchBinaryPackage(packageName, version)
+        platformDir = downloaded.packageDir
+      }
+      const platform = JSON.parse(fs.readFileSync(path.join(platformDir, 'package.json'), 'utf8'))
+      if (platform.name !== packageName || platform.version !== version)
+        throw new Error('Native Repo platform package version mismatch')
+      binary = path.join(platformDir, fileName)
+    }
+    const bytes = fs.readFileSync(binary)
+    fs.writeFileSync(path.join(destinationDir, fileName), bytes)
+    for (const name of fs.readdirSync(destinationDir)) {
+      if (name.endsWith('.node') && name !== fileName) fs.rmSync(path.join(destinationDir, name))
+    }
+  } finally {
+    downloaded?.cleanup()
+  }
+}
+
+export function installEmbeddedNativeRepoBinding(target) {
+  stageNativeRepoBinding(
+    resolvePackageDir('@loro-dev/loro-repo-engine', cliAppRoot),
+    path.join(stagedNodeModulesDir, '@loro-dev/loro-repo-engine'),
+    target
+  )
 }

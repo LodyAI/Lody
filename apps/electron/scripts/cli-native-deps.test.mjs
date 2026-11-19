@@ -18,6 +18,7 @@ import path from 'node:path'
 import { test } from 'node:test'
 import { Worker } from 'node:worker_threads'
 import {
+  stageNativeRepoBinding,
   fetchNativeBinaryPackage,
   roostPrebuildFileName,
   stageRoostBinding,
@@ -339,5 +340,32 @@ void test('the inherited environment is preserved except for prefer-offline', ()
     assert.equal(calls[0].options.env.npm_config_prefer_offline, 'false')
   } finally {
     result.cleanup()
+  }
+})
+
+void test('stages a loadable native Repo addon and removes the previous architecture', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'lody-native-repo-package-'))
+  try {
+    const require = createRequire(new URL('../../cli/package.json', import.meta.url))
+    const source = path.dirname(require.resolve('@loro-dev/loro-repo-engine/package.json'))
+    const destination = path.join(root, 'engine')
+    await cp(source, destination, { recursive: true, dereference: true })
+    await writeFile(path.join(destination, 'stale.node'), 'wrong architecture')
+    stageNativeRepoBinding(source, destination, { platform: process.platform, arch: process.arch })
+    assert.equal(fs.existsSync(path.join(destination, 'stale.node')), false)
+    const addon = require(path.join(destination, 'index.js'))
+    const engine = addon.startEngine({ dataDir: path.join(root, 'data') })
+    try {
+      assert.equal(engine.exited, false)
+    } finally {
+      engine.stop()
+    }
+    const before = await readdir(destination)
+    assert.throws(() =>
+      stageNativeRepoBinding(source, destination, { platform: 'unsupported', arch: 'arm64' })
+    )
+    assert.deepEqual(await readdir(destination), before)
+  } finally {
+    await rm(root, { recursive: true, force: true })
   }
 })

@@ -278,6 +278,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
     async mutatePreviewVisualComments(sessionId, mutation) {
       await withPreviewVisualCommentStore(sessionId, (store) => {
+        if (store.mutate) return store.mutate(mutation);
         store.setState((draft: PreviewVisualCommentDocInput) => {
           applyPreviewVisualCommentMutation(draft, mutation);
         });
