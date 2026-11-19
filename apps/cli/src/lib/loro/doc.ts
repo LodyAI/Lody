@@ -672,6 +672,9 @@ export class LoroDocumentManager {
             LoroRepo.create({
               storageAdapter: cliSqliteRepoStore.storageAdapter,
               metaDebounceCommitMs: 0,
+              // Session metadata (what lists a Session) must reach disk with its history;
+              // loro-repo's default 5 s trailing debounce let a crash drop new Sessions.
+              metaPersistDebounceMs: 0,
               flockDocRetentionMs: getFlockDocRetentionMs,
             }),
             createRepoTimeoutMs,
@@ -1505,8 +1508,30 @@ export class LoroDocumentManager {
             }
 
             let sub: RepoRoomSubscription | null = null;
+            let timer: NodeJS.Timeout | undefined;
+            const bound = new Promise<'stop'>((resolve) => {
+              timer = setTimeout(() => resolve('stop'), TRANSIENT_DOC_ROOM_RETAIN_MS);
+              timer.unref?.();
+            });
+            const canceled = bridge.canceled.then(() => 'stop' as const);
             try {
-              sub = await this.repo.joinDocRoom(docId);
+              const joinPromise = this.repo.joinDocRoom(docId);
+              void joinPromise.catch(() => {});
+              const joined = await Promise.race([
+                joinPromise.then((room) => ({ kind: 'joined' as const, room })),
+                canceled.then((stop) => ({ kind: stop })),
+                bound.then((stop) => ({ kind: stop })),
+              ]);
+              if (joined.kind === 'stop') {
+                void joinPromise.then(
+                  (lateSub) => {
+                    lateSub.unsubscribe();
+                  },
+                  () => {}
+                );
+                return;
+              }
+              sub = joined.room;
               if (
                 this.cleaningUp ||
                 generation !== this.localDocRoomBridgeGeneration ||
@@ -1520,12 +1545,13 @@ export class LoroDocumentManager {
               // One cloud reconciliation is sufficient. A later active turn is
               // owned by SessionDispatchWatcher/SessionDocument; keeping this raw
               // subscription forever would recreate the historical-room leak.
-              await Promise.race([streamsRoomBinding(sub).firstSyncedWithRemote, bridge.canceled]);
+              await Promise.race([streamsRoomBinding(sub).firstSyncedWithRemote, canceled, bound]);
             } catch (error: unknown) {
               this.logger.debug(
                 `[${sessionId}] Local data-plane session cloud reconcile failed: ${formatErrorMessage(error)}`
               );
             } finally {
+              clearTimeout(timer);
               sub?.unsubscribe();
               if (this.localDocRoomBridges.get(docId) === bridge) {
                 this.localDocRoomBridges.delete(docId);
@@ -1558,7 +1584,8 @@ export class LoroDocumentManager {
               generation !== this.localDocRoomBridgeGeneration ||
               this.sessions.has(sessionId) ||
               this.pendingSessionDocs.has(sessionId) ||
-              this.localDocRoomBridges.has(docId)
+              this.localDocRoomBridges.has(docId) ||
+              this.localRendererDocRooms.has(docId)
             ) {
               return;
             }

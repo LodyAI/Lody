@@ -52,6 +52,8 @@ export function createSimulatorDeviceControls(options: {
   const execute = async (control: IosSimulatorDeviceControl): Promise<void> => {
     switch (control.kind) {
       case 'button':
+        if (control.button === 'software-keyboard' && !options.softwareKeyboard)
+          throw new Error('Simulator keyboard unavailable.');
         if (
           control.button === 'home' ||
           control.button === 'app-switcher' ||

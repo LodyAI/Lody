@@ -18,6 +18,12 @@ import {
   type ScheduleControlRequest,
   type ScheduleControlResponse,
 } from '../schedule-control';
+import {
+  LOCAL_WORKSPACE_BUNDLE_PATH,
+  WorkspaceBundleControlResponseSchema,
+  type WorkspaceBundleControlRequest,
+  type WorkspaceBundleControlResponse,
+} from '../workspace-bundle-control';
 import crypto from 'node:crypto';
 import {
   AUTOMATION_CONTROL_PATH,
@@ -221,6 +227,10 @@ export type LocalControlClientService = {
     message: ScheduleControlRequest,
     options?: LocalIpcRequestOptions
   ) => Effect.Effect<ScheduleControlResponse, IpcError>;
+  workspaceBundleControl: (
+    message: WorkspaceBundleControlRequest,
+    options?: LocalIpcRequestOptions
+  ) => Effect.Effect<WorkspaceBundleControlResponse, IpcError>;
   sessionControl: (
     message: LocalSessionControlRequest,
     options?: LocalSessionControlRequestOptions
@@ -1105,6 +1115,19 @@ function makeControlClient(
           parseJsonBody<ScheduleControlResponse>(
             ScheduleControlResponseSchema,
             (status) => `Invalid Schedule response (HTTP ${status})`
+          )(response, payload)
+      ),
+    workspaceBundleControl: (message, requestOptions) =>
+      Effect.flatMap(
+        post(
+          LOCAL_WORKSPACE_BUNDLE_PATH,
+          message,
+          requestOptions?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
+        ),
+        ({ response, payload }) =>
+          parseJsonBody<WorkspaceBundleControlResponse>(
+            WorkspaceBundleControlResponseSchema,
+            (status) => `Invalid workspace bundle response (HTTP ${status})`
           )(response, payload)
       ),
     automationControl: (message, requestOptions) =>

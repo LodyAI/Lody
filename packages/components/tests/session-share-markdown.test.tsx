@@ -6,6 +6,8 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { MarkdownRenderer } from '../src/components/ai-gui/markdown-renderer';
 import { SessionReadonlyContext } from '../src/components/ai-gui/session-readonly-context';
 import { SessionLinkProvider } from '../src/components/ai-gui/session-link-context';
+import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
+import type { WorkspaceId } from '@lody/shared';
 import { SESSION_DEEP_LINK_EVENT } from '../src/lib/session-deep-link';
 import { MarkdownFileResources } from '../src/components/ai-gui/markdown-file-image';
 import { SessionCommentMarkdown } from '../src/ui/diff-viewer/session-comment-markdown';
@@ -406,6 +408,100 @@ describe('Markdown session links', () => {
     container.remove();
   });
   const legacyText = 'See [@Independent review](session://1ed6ba53-93bc-46d5-91e3-bb693cb0e729).';
+
+  it.each([
+    ['https://app.example/acme/sessions/target', 'target'],
+    ['https://app.example/acme/sessions/root?tab=session%3Achild', 'child'],
+    ['https://app.example/acme/sessions/root?tab=files', 'root'],
+    ['https://app.example/acme/sessions/target', 'target', 'bare'],
+  ])('opens a trusted current-workspace URL inside Lody: %s', async (url, target, format) => {
+    vi.stubEnv('VITE_SITE_URL', 'https://app.example');
+    const store = createStore();
+    store.set(currentWorkspaceSlugAtom, 'acme');
+    store.set(currentWorkspaceIdAtom, 'ws_1' as WorkspaceId);
+    try {
+      await act(async () =>
+        root.render(
+          withTestI18n(
+            <Provider store={store}>
+              <SessionLinkProvider enabled>
+                <MarkdownRenderer text={format === 'bare' ? url : `[Conversation](${url})`} />
+              </SessionLinkProvider>
+            </Provider>,
+            testI18n
+          )
+        )
+      );
+      const link = container.querySelector('a')!;
+      expect(link.getAttribute('href')).toBe(url);
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+      await act(async () => {
+        link.dispatchEvent(click);
+      });
+      expect(click.defaultPrevented).toBe(true);
+      expect(opened).toEqual([`lody://session/${target}?workspace=ws_1`]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each([
+    { url: 'https://app.example/other/sessions/target' },
+    { url: 'https://foreign.example/acme/sessions/target' },
+    { url: 'https://app.example/acme/settings' },
+    { url: 'https://app.example/acme/sessions/target', enabled: false },
+    { url: 'https://app.example/acme/sessions/target', readonly: true },
+    { url: 'https://app.example/acme/sessions/target', modifier: { metaKey: true } },
+    { url: 'https://app.example/acme/sessions/target', modifier: { ctrlKey: true } },
+    { url: 'https://app.example/acme/sessions/target', modifier: { shiftKey: true } },
+    { url: 'https://app.example/acme/sessions/target', modifier: { altKey: true } },
+    { url: 'https://app.example/acme/sessions/target', missingWorkspace: true },
+  ])('preserves external navigation when the link is not eligible: %j', async (test) => {
+    vi.stubEnv('VITE_SITE_URL', 'https://app.example');
+    const store = createStore();
+    store.set(currentWorkspaceSlugAtom, 'acme');
+    if (!test.missingWorkspace) store.set(currentWorkspaceIdAtom, 'ws_1' as WorkspaceId);
+    try {
+      await act(async () =>
+        root.render(
+          withTestI18n(
+            <Provider store={store}>
+              <SessionReadonlyContext.Provider
+                value={test.readonly ? { renderImage: () => null, renderFiles: () => null } : null}
+              >
+                <SessionLinkProvider enabled={test.enabled !== false}>
+                  <MarkdownRenderer text={`[Conversation](${test.url})`} />
+                </SessionLinkProvider>
+              </SessionReadonlyContext.Provider>
+            </Provider>,
+            testI18n
+          )
+        )
+      );
+      const link = container.querySelector('a')!;
+      // Observe the product decision, then suppress jsdom's unsupported navigation.
+      let intercepted = false;
+      const preventNavigation = (event: MouseEvent) => {
+        intercepted = event.defaultPrevented;
+        event.preventDefault();
+      };
+      document.addEventListener('click', preventNavigation, { once: true });
+      await act(async () => {
+        link.dispatchEvent(
+          new MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            ...test.modifier,
+          })
+        );
+      });
+      expect(intercepted).toBe(false);
+      expect(link.target).toBe('_blank');
+      expect(opened).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 
   it.each([
     [legacyText, 'lody://session/1ed6ba53-93bc-46d5-91e3-bb693cb0e729'],

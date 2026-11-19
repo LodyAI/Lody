@@ -27,7 +27,7 @@ encrypted starts that run only signed input; the default ceiling had no room for
 ## Dispatch
 
 - Metadata reconciliation keeps four global slots and fills each free slot without waiting for siblings.
-- Queue promotion preserves frozen fields; remove only after history+activation succeed.
+- [Queue promotion](README.md#queue-promotion) preserves frozen fields; remove only after history+activation succeed.
 - Queue dispatch uses the same normalized input config as history dispatch. JavaScript-only
   undefined fields must not make an unchanged encrypted original fail equality.
 - Encrypted promotion marks the row `queuedInput` and copies the queue item's signed

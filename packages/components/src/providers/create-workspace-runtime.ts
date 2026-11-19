@@ -610,6 +610,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const repo = await LoroRepo.create({
     storageAdapter: repoStorage,
     metaDebounceCommitMs: 0,
+    // Session metadata (what lists a Session) must reach disk with its history;
+    // loro-repo's default 5 s trailing debounce let a crash drop new Sessions.
+    metaPersistDebounceMs: 0,
     resolveRoomTransports: (room) =>
       resolveRoomTransportsImpl?.(room) ?? { transportIds: ['cloud'] },
   });
@@ -5160,6 +5163,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       if (event.by === 'import') lastRemoteImportAt = Date.now();
     });
 
+    type SyncJoinAttempt = {
+      readonly controller: AbortController;
+      readonly promise: Promise<void>;
+    };
     const syncTracker = createTrackedRoomSyncTracker(roomId);
     // Track subscription for cleanup
     let roomSub: Awaited<ReturnType<typeof persistedDoc.joinRoom>> | null = null;
@@ -5167,7 +5174,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     let disposed = false;
     let syncLeaseCount = 0;
     let syncReleaseTimer: ReturnType<typeof setTimeout> | null = null;
-    let syncJoinPromise: Promise<void> | null = null;
+    let joinAttempt: SyncJoinAttempt | null = null;
     // A join whose every attempt failed leaves no room for repo.reconnect() to
     // repair, so the store re-joins on its own backoff while a lease remains.
     let joinRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -5197,93 +5204,118 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       joinRetryAttempt = 0;
       cloudRepairUnsubscribe?.();
       cloudRepairUnsubscribe = null;
+      const activeAttempt = joinAttempt;
+      joinAttempt = null;
+      activeAttempt?.controller.abort();
       if (roomSub) {
         const sub = roomSub;
         roomSub = null;
         sub.unsubscribe();
-        // unsubscribe() does not emit a status change, so the tracker would keep
-        // reporting its last 'synced' state. Reset it to idle so the room-sync
-        // registry no longer treats this cached UI room as joined, which would
-        // suppress future eager sync.
-        syncTracker.markStopped();
       }
+      // unsubscribe() does not emit a status change, and aborting an in-flight
+      // join may happen before or after attach(). Reset to idle so the room-sync
+      // registry no longer treats this cached UI room as joined or connecting,
+      // which would suppress future eager sync.
+      syncTracker.markStopped();
     };
 
     const startSync = () => {
       clearSyncReleaseTimer();
-      if (disposed || roomSub || syncJoinPromise) {
+      if (disposed || roomSub || joinAttempt) {
         return;
       }
       // A new lease or sync wait is a caller asking now: it pre-empts the
       // pending backoff (keeping its attempt count) instead of waiting it out.
       clearJoinRetryTimer();
 
-      // Join only while a UI surface has an active sync lease. The persisted
-      // doc and Mirror stay in memory for fast tab switches; the SSE connection
-      // is the part we debounce and release.
-      syncJoinPromise = transportReady.promise.then(async () => {
-        if (disposed || syncLeaseCount <= 0) {
-          return;
-        }
-        try {
-          // Best-effort ownership resolution: an unknown room mounts pure cloud
-          // and gains its local member when meta resolves (refreshRoutes).
-          await targetRouter.prepareSessionTarget(sessionId).catch(() => undefined);
-          const joined = await waitForRoomToSync(() => persistedDoc.joinRoom(), {
-            roomId,
-            // Give the caller one task to populate the new doc before bootstrapping
-            // the remote room. This avoids racing brand-new session creation.
-            initialDelayMs: 0,
-            isCancelled: () => disposed || syncLeaseCount <= 0,
-            firstSynced: (sub) => readinessBindingForDocRoom(sub, roomId).firstSyncedWithRemote,
-            onSubscription: (joinedSub) => {
-              roomSub = joinedSub;
-              syncTracker.attach(readinessBindingForDocRoom(joinedSub, roomId));
-              cloudRepairUnsubscribe?.();
-              cloudRepairUnsubscribe = watchCloudBindingForRepair(joinedSub);
-            },
-          });
-          if (!joined) {
+      // Join while a sync cycle is active. Brief tab switches (<2s) keep the
+      // attempt alive until stopSyncNow() aborts its controller; completing inside
+      // that debounce window preserves the live roomSub so a fast switch-back
+      // stays synced instead of wedging on an unsubscribed handle.
+      const controller = new AbortController();
+      let currentAttempt: SyncJoinAttempt | null = null;
+      const isStaleAttempt = () =>
+        disposed || controller.signal.aborted || joinAttempt !== currentAttempt;
+      const promise = waitForPromiseOrAbort(transportReady.promise, controller.signal).then(
+        async () => {
+          if (isStaleAttempt()) {
             return;
           }
-          if (disposed || syncLeaseCount <= 0) {
-            joined.unsubscribe();
-            if (roomSub === joined) {
-              roomSub = null;
+          try {
+            // Best-effort ownership resolution: an unknown room mounts pure cloud
+            // and gains its local member when meta resolves (refreshRoutes).
+            await targetRouter.prepareSessionTarget(sessionId).catch(() => undefined);
+            if (isStaleAttempt()) {
+              return;
             }
-            return;
-          }
-          roomSub = joined;
-          joinRetryAttempt = 0;
-          syncTracker.markFirstSynced();
-          resolveFirstSynced?.();
-          resolveFirstSynced = null;
-        } catch (error) {
-          syncTracker.markFirstSyncFailed();
-          // A returned subscription keeps self-healing inside the SDK; only a
-          // join that never produced one needs a fresh attempt.
-          if (!roomSub && !disposed && syncLeaseCount > 0) {
-            const delayMs = computeLocalReconnectDelayMs(joinRetryAttempt);
-            joinRetryAttempt += 1;
-            console.warn('createWorkspaceRuntime: session room join failed; retrying', {
-              workspaceId,
+            const joined = await waitForRoomToSync(() => persistedDoc.joinRoom(), {
               roomId,
-              attempt: joinRetryAttempt,
-              delayMs,
+              // Give the caller one task to populate the new doc before bootstrapping
+              // the remote room. This avoids racing brand-new session creation.
+              initialDelayMs: 0,
+              signal: controller.signal,
+              isCancelled: isStaleAttempt,
+              firstSynced: (sub) => readinessBindingForDocRoom(sub, roomId).firstSyncedWithRemote,
+              onSubscription: (joinedSub) => {
+                if (isStaleAttempt()) {
+                  joinedSub.unsubscribe();
+                  return;
+                }
+                roomSub = joinedSub;
+                syncTracker.attach(readinessBindingForDocRoom(joinedSub, roomId));
+                cloudRepairUnsubscribe?.();
+                cloudRepairUnsubscribe = watchCloudBindingForRepair(joinedSub);
+              },
             });
-            joinRetryTimer = setTimeout(() => {
-              joinRetryTimer = null;
-              // A pending release owns the room once the last lease is gone.
-              if (syncLeaseCount > 0) startSync();
-            }, delayMs);
+            if (!joined || isStaleAttempt()) {
+              joined?.unsubscribe();
+              if (joined && roomSub === joined) {
+                roomSub = null;
+              }
+              return;
+            }
+            roomSub = joined;
+            joinRetryAttempt = 0;
+            syncTracker.markFirstSynced();
+            resolveFirstSynced?.();
+            resolveFirstSynced = null;
+          } catch (error) {
+            if (isStaleAttempt()) {
+              return;
+            }
+            syncTracker.markFirstSyncFailed();
+            // A returned subscription keeps self-healing inside the SDK; only a
+            // join that never produced one needs a fresh attempt.
+            if (!roomSub && syncLeaseCount > 0) {
+              const delayMs = computeLocalReconnectDelayMs(joinRetryAttempt);
+              joinRetryAttempt += 1;
+              console.warn('createWorkspaceRuntime: session room join failed; retrying', {
+                workspaceId,
+                roomId,
+                attempt: joinRetryAttempt,
+                delayMs,
+              });
+              joinRetryTimer = setTimeout(() => {
+                joinRetryTimer = null;
+                // A pending release owns the room once the last lease is gone.
+                if (syncLeaseCount > 0) startSync();
+              }, delayMs);
+            }
+            throw error;
           }
-          throw error;
         }
-      });
-      void syncJoinPromise
+      );
+      currentAttempt = { controller, promise };
+      joinAttempt = currentAttempt;
+      void promise
         .catch(() => {})
         .finally(() => {
-          syncJoinPromise = null;
+          if (joinAttempt === currentAttempt) {
+            joinAttempt = null;
+          }
+          if (!disposed && syncLeaseCount <= 0 && syncReleaseTimer === null && roomSub) {
+            syncReleaseTimer = setTimeout(stopSyncNow, SESSION_ROOM_SYNC_RELEASE_DELAY_MS);
+          }
         });
     };
 
@@ -5319,10 +5351,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       firstSynced,
       acquireSync,
       getSyncState: () =>
-        syncLeaseCount > 0 || roomSub || syncJoinPromise ? syncTracker.getSyncState() : 'idle',
+        syncLeaseCount > 0 || roomSub || joinAttempt ? syncTracker.getSyncState() : 'idle',
       subscribeSyncState: (listener) =>
         syncTracker.subscribeSyncState((state) => {
-          listener(syncLeaseCount > 0 || roomSub || syncJoinPromise ? state : 'idle');
+          listener(syncLeaseCount > 0 || roomSub || joinAttempt ? state : 'idle');
         }),
       getState: () => mirror.getState() as SessionDocState,
       setState: (updater) => {
@@ -5362,6 +5394,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           openedAt: storeOpenedAt,
           lastRemoteImportAt,
           pendingUploadProbe: probe?.status ?? null,
+          leaseCount: syncLeaseCount,
+          joinInFlight: joinAttempt !== null,
+          roomSubPresent: roomSub !== null,
         };
       },
       waitUntilSynced: async (signal?: AbortSignal) => {
@@ -5381,8 +5416,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
                 signal.addEventListener('abort', () => resolve(), { once: true });
               })
             : null;
-          if (syncJoinPromise) {
-            const join = syncJoinPromise.catch(() => {});
+          if (joinAttempt) {
+            const join = joinAttempt.promise.catch(() => {});
             await (aborted ? Promise.race([join, aborted]) : join);
           }
           if (signal?.aborted) {
@@ -5436,36 +5471,53 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     let roomSub: Awaited<ReturnType<typeof persistedDoc.joinRoom>> | null = null;
     let cloudRepairUnsubscribe: (() => void) | null = null;
     let disposed = false;
+    const syncAbort = new AbortController();
 
-    const firstSynced = transportReady.promise.then(async () => {
-      try {
-        await targetRouter.prepareSessionTarget(sessionId).catch(() => undefined);
-        const joined = await waitForRoomToSync(() => persistedDoc.joinRoom(), {
-          roomId,
-          initialDelayMs: 0,
-          isCancelled: () => disposed,
-          firstSynced: (sub) => readinessBindingForDocRoom(sub, roomId).firstSyncedWithRemote,
-          onSubscription: (joinedSub) => {
-            roomSub = joinedSub;
-            syncTracker.attach(readinessBindingForDocRoom(joinedSub, roomId));
-            cloudRepairUnsubscribe?.();
-            cloudRepairUnsubscribe = watchCloudBindingForRepair(joinedSub);
-          },
-        });
-        if (!joined) {
-          return;
-        }
+    const firstSynced = waitForPromiseOrAbort(transportReady.promise, syncAbort.signal).then(
+      async () => {
         if (disposed) {
-          joined.unsubscribe();
           return;
         }
-        roomSub = joined;
-        syncTracker.markFirstSynced();
-      } catch (error) {
-        syncTracker.markFirstSyncFailed();
-        throw error;
+        try {
+          await targetRouter.prepareSessionTarget(sessionId).catch(() => undefined);
+          if (disposed) {
+            return;
+          }
+          const joined = await waitForRoomToSync(() => persistedDoc.joinRoom(), {
+            roomId,
+            initialDelayMs: 0,
+            signal: syncAbort.signal,
+            isCancelled: () => disposed,
+            firstSynced: (sub) => readinessBindingForDocRoom(sub, roomId).firstSyncedWithRemote,
+            onSubscription: (joinedSub) => {
+              if (disposed) {
+                joinedSub.unsubscribe();
+                return;
+              }
+              roomSub = joinedSub;
+              syncTracker.attach(readinessBindingForDocRoom(joinedSub, roomId));
+              cloudRepairUnsubscribe?.();
+              cloudRepairUnsubscribe = watchCloudBindingForRepair(joinedSub);
+            },
+          });
+          if (!joined) {
+            return;
+          }
+          if (disposed) {
+            joined.unsubscribe();
+            return;
+          }
+          roomSub = joined;
+          syncTracker.markFirstSynced();
+        } catch (error) {
+          if (disposed) {
+            return;
+          }
+          syncTracker.markFirstSyncFailed();
+          throw error;
+        }
       }
-    });
+    );
     void firstSynced.catch(() => {});
 
     return {
@@ -5482,6 +5534,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       subscribe: (listener) => mirror.subscribe(listener),
       dispose: () => {
         disposed = true;
+        syncAbort.abort();
         cloudRepairUnsubscribe?.();
         cloudRepairUnsubscribe = null;
         syncTracker.dispose();
@@ -5523,19 +5576,29 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       let room: RepoRoomSubscription | null = null;
       let disposed = false;
       const syncAbort = new AbortController();
-      const firstSynced = transportReady.promise.then(async () => {
-        const joined = await waitForRoomToSync(() => handle.joinRoom(), {
-          roomId,
-          initialDelayMs: 0,
-          isCancelled: () => disposed,
-          firstSynced: (sub) => readinessBindingForDocRoom(sub, roomId).firstSyncedWithRemote,
-          onSubscription: (sub) => {
-            room = sub;
-          },
-        });
-        if (disposed) joined?.unsubscribe();
-        else room = joined ?? null;
-      });
+      const firstSynced = waitForPromiseOrAbort(transportReady.promise, syncAbort.signal).then(
+        async () => {
+          if (disposed) {
+            return;
+          }
+          const joined = await waitForRoomToSync(() => handle.joinRoom(), {
+            roomId,
+            initialDelayMs: 0,
+            signal: syncAbort.signal,
+            isCancelled: () => disposed,
+            firstSynced: (sub) => readinessBindingForDocRoom(sub, roomId).firstSyncedWithRemote,
+            onSubscription: (sub) => {
+              if (disposed) {
+                sub.unsubscribe();
+                return;
+              }
+              room = sub;
+            },
+          });
+          if (disposed) joined?.unsubscribe();
+          else room = joined ?? null;
+        }
+      );
       void firstSynced.catch(() => {});
       return {
         roomId,

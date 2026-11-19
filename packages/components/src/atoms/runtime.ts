@@ -162,6 +162,9 @@ export type SessionSyncInspection = {
    * applies are flowing; `timeout` means local changes stayed unsent.
    */
   readonly pendingUploadProbe: string | null;
+  readonly leaseCount: number;
+  readonly joinInFlight: boolean;
+  readonly roomSubPresent: boolean;
 };
 
 export type PreviewVisualCommentDocUpdater =

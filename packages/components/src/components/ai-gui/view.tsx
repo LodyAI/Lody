@@ -519,6 +519,7 @@ const viewStyles = stylex.create({
     paddingInline: '4px',
     paddingBlock: themeSpace[0.5],
     color: themeColors.mutedForeground,
+    userSelect: 'none',
   },
   agentActivityStatusMobile: { gap: themeSpace[1.5] },
   /** The collapsed group's label: it takes the rest of the row on mobile.
@@ -3130,19 +3131,37 @@ export const SessionChatStreamView = forwardRef<
       }
       return null;
     }, [agentActivityLabel, agentActivityShimmer, virtualRows]);
-    // Keep status above the task summary, with or without footer actions.
-    // Other live turns put it in the footer or in a separate trailing row.
+    // Keep the live status inside the final expanding assistant row's measurement
+    // boundary. Streaming Markdown can grow between list commits; a separate
+    // absolute status row would retain the previous offset until ResizeObserver
+    // catches up and paint over the new line. Footer actions and subagent summaries
+    // remain later siblings, so the status still precedes both. Empty turns fall
+    // back to those specialized rows. A collapsed live activity group owns the
+    // label itself above.
     const liveStatusRowKey = useMemo(() => {
       if (!agentActivityLabel || liveGroupHeaderRowKey !== null) return null;
-      const last = virtualRows[virtualRows.length - 1];
+      const lastIndex = virtualRows.length - 1;
+      const last = virtualRows[lastIndex];
       if (last?.type !== 'assistant' || last.item.message.finished === true) return null;
-      const footerKey = last.content.kind === 'footer' ? last.key : null;
-      const contentRow = footerKey ? virtualRows[virtualRows.length - 2] : last;
-      return contentRow?.type === 'assistant' &&
-        contentRow.item === last.item &&
-        contentRow.content.kind === 'subagent_tasks'
-        ? contentRow.key
-        : footerKey;
+
+      let attachmentIndex = lastIndex;
+      if (last.content.kind === 'footer') attachmentIndex -= 1;
+      const beforeTrailingFooter = virtualRows[attachmentIndex];
+      if (
+        beforeTrailingFooter?.type === 'assistant' &&
+        beforeTrailingFooter.item === last.item &&
+        beforeTrailingFooter.content.kind === 'subagent_tasks'
+      ) {
+        attachmentIndex -= 1;
+      }
+      const attachment = virtualRows[attachmentIndex];
+      if (attachment?.type === 'assistant' && attachment.item === last.item) {
+        return attachment.key;
+      }
+      if (beforeTrailingFooter?.type === 'assistant' && beforeTrailingFooter.item === last.item) {
+        return beforeTrailingFooter.key;
+      }
+      return last.key;
     }, [agentActivityLabel, liveGroupHeaderRowKey, virtualRows]);
     const liveTurnStatus = useMemo<AgentActivityStatusProps | null>(
       () =>
@@ -3740,7 +3759,12 @@ export const SessionChatStreamView = forwardRef<
               shimmerGroupHeader={row.key === liveGroupHeaderRowKey}
               liveStatus={row.key === liveStatusRowKey ? liveTurnStatus : null}
               liveStatusFollowsSurface={
-                row.key === liveStatusRowKey && assistantRowPaintsSurface(virtualRows[rowIndex - 1])
+                row.key === liveStatusRowKey &&
+                assistantRowPaintsSurface(
+                  row.content.kind === 'footer' || row.content.kind === 'subagent_tasks'
+                    ? virtualRows[rowIndex - 1]
+                    : row
+                )
               }
             />
           </MessageSelectionRow>
@@ -7270,7 +7294,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
         return (
           <>
             {liveStatus ? (
-              <div {...stylex.props(viewStyles.turnStatusPad)}>
+              <div {...stylex.props(viewStyles.turnStatusPad)} data-agent-activity-row="">
                 <AgentActivityStatus {...liveStatus} message={message} />
               </div>
             ) : null}
@@ -7291,6 +7315,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
                 gap or the wider surface gap used after a bordered card. */}
             {liveStatus ? (
               <div
+                data-agent-activity-row=""
                 {...stylex.props(
                   viewStyles.turnStatusPadBottom,
                   liveStatusFollowsSurface
@@ -7322,6 +7347,25 @@ const AssistantChatItem = memo(function AssistantChatItem({
         return null;
     }
   })();
+
+  const rowBodyWithLiveStatus = (
+    <>
+      {rowBody}
+      {liveStatus && content.kind !== 'subagent_tasks' && content.kind !== 'footer' ? (
+        <div
+          data-agent-activity-row=""
+          {...stylex.props(
+            viewStyles.turnStatusPadBottom,
+            liveStatusFollowsSurface
+              ? viewStyles.turnStatusPadTopWide
+              : viewStyles.turnStatusPadTop
+          )}
+        >
+          <AgentActivityStatus {...liveStatus} message={message} />
+        </div>
+      ) : null}
+    </>
+  );
 
   // Progress prose keeps its reading gap even inside expanded work. Only
   // individual activity details share the compact tool-row pitch.
@@ -7416,9 +7460,9 @@ const AssistantChatItem = memo(function AssistantChatItem({
               reserve. Mobile always shows the footer: the reserve goes below it
               (`roundLastRow` above) or the next round reads as crowded. */}
           {row.endsRound && content.kind === 'footer' && !isMobile ? (
-            <div {...stylex.props(conversationSurface.roundFooter)}>{rowBody}</div>
+            <div {...stylex.props(conversationSurface.roundFooter)}>{rowBodyWithLiveStatus}</div>
           ) : (
-            rowBody
+            rowBodyWithLiveStatus
           )}
         </div>
       </div>

@@ -150,6 +150,7 @@ export function createRoomSyncTracker(roomId: string): RoomSyncTracker {
       emitSyncState();
     },
     markFirstSyncFailed: () => {
+      stopped = false;
       initialSyncFailed = true;
       if (!status) {
         status = 'error';

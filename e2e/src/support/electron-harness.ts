@@ -10,12 +10,19 @@ import {
   writeSync,
   writeFileSync,
 } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { _electron, type CDPSession, type ElectronApplication, type Page } from '@playwright/test';
+import {
+  _electron,
+  expect,
+  type CDPSession,
+  type ElectronApplication,
+  type Page,
+} from '@playwright/test';
 import {
   assertNamedPipeReleased,
   assertTcpPortReleased,
@@ -29,10 +36,15 @@ import {
 } from './resource-probe.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-const ELECTRON_DIR = join(ROOT, 'apps', 'electron');
+const OSS_ELECTRON_DIR = join(ROOT, 'apps', 'electron');
+// A composition built elsewhere (same Electron version) may be launched instead of the
+// OSS build: the directory must hold `package.json`, `out/` and `resources/cli/`.
+const ELECTRON_DIR = process.env.LODY_E2E_APP_DIR
+  ? resolve(process.env.LODY_E2E_APP_DIR)
+  : OSS_ELECTRON_DIR;
 const MAIN_ENTRY = join(ELECTRON_DIR, 'out', 'main', 'index.js');
 const BUNDLED_CLI_ENTRY = join(ELECTRON_DIR, 'resources', 'cli', 'index.js');
-const requireFromElectron = createRequire(join(ELECTRON_DIR, 'package.json'));
+const requireFromElectron = createRequire(join(OSS_ELECTRON_DIR, 'package.json'));
 const TEARDOWN_OPERATION_TIMEOUT_MS = 20_000;
 
 async function boundedTeardown<T>(label: string, operation: Promise<T>): Promise<T> {
@@ -121,6 +133,31 @@ export function createIsolatedEnvironment(
   return { ...env, ...overrides };
 }
 
+type AppConfig = { env: Record<string, string>; args: string[] };
+
+/**
+ * `LODY_E2E_APP_CONFIG` names a JSON file `{ "env": {..}, "args": [..] }` from an
+ * embedding repository: extra environment (backend URLs, CA trust) and Chromium
+ * switches for its composition. The isolation keys always override `env`.
+ */
+function readAppConfig(): AppConfig {
+  const path = process.env.LODY_E2E_APP_CONFIG;
+  if (!path) return { env: {}, args: [] };
+  const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<AppConfig> | null;
+  const env = parsed?.env ?? {};
+  const args = parsed?.args ?? [];
+  if (
+    typeof env !== 'object' ||
+    Array.isArray(env) ||
+    !Object.values(env).every((value) => typeof value === 'string') ||
+    !Array.isArray(args) ||
+    !args.every((value) => typeof value === 'string')
+  ) {
+    throw new Error(`${path} must hold { env: Record<string, string>, args: string[] }`);
+  }
+  return { env, args };
+}
+
 export class ElectronHarness {
   app: ElectronApplication | null = null;
   page: Page | null = null;
@@ -159,7 +196,9 @@ export class ElectronHarness {
       this.hostPort = await reserveTcpPort();
     }
 
+    const appConfig = readAppConfig();
     const env = createIsolatedEnvironment({
+      ...appConfig.env,
       LANG: 'en_US.UTF-8',
       LC_ALL: 'en_US.UTF-8',
       LODY_DATA_DIR: this.lodyDataDir,
@@ -178,6 +217,13 @@ export class ElectronHarness {
       LODY_ELECTRON_USER_DATA_DIR: this.electronUserDataDir,
       NODE_ENV: 'test',
     });
+    const instanceArgs = [
+      ...appConfig.args,
+      // An external app directory is launched as an app (its package.json `main`), so
+      // app.getAppPath() is that directory and its own resources/cli is the bundled CLI.
+      process.env.LODY_E2E_APP_DIR ? ELECTRON_DIR : MAIN_ENTRY,
+      `--user-data-dir=${this.electronUserDataDir}`,
+    ];
     this.app = await _electron.launch({
       args: [
         '--js-flags=--expose-gc',
@@ -187,8 +233,7 @@ export class ElectronHarness {
         ...(options.remoteDebuggingPort
           ? [`--remote-debugging-port=${options.remoteDebuggingPort}`]
           : []),
-        MAIN_ENTRY,
-        `--user-data-dir=${this.electronUserDataDir}`,
+        ...instanceArgs,
         '--lang=en-US',
         // macOS system-language detection is independent of Chromium's --lang.
         ...(process.platform === 'darwin' ? ['-AppleLanguages', '(en-US)'] : []),
@@ -341,6 +386,51 @@ export class ElectronHarness {
     return snapshot;
   }
 
+  /**
+   * Replaces the main process's `shell.openExternal` with a recorder so a scenario can
+   * drive the opened page (for example a browser sign-in) itself instead of the OS.
+   */
+  async captureExternalOpens(): Promise<void> {
+    if (!this.app) throw new Error('Electron application is not running');
+    await this.app.evaluate(({ shell }) => {
+      const opened: string[] = [];
+      (globalThis as { __lodyE2eExternalOpens?: string[] }).__lodyE2eExternalOpens = opened;
+      shell.openExternal = async (url: string) => {
+        opened.push(url);
+      };
+    });
+  }
+
+  async readExternalOpens(): Promise<string[]> {
+    if (!this.app) throw new Error('Electron application is not running');
+    return await this.app.evaluate(
+      () => (globalThis as { __lodyE2eExternalOpens?: string[] }).__lodyE2eExternalOpens ?? []
+    );
+  }
+
+  /**
+   * Opens a product link (for example a sign-in callback) through the event the OS
+   * raises for it: `open-url` on macOS, `second-instance` with the link in argv
+   * elsewhere. Isolated E2E runs hold no single-instance lock, so only that lock's
+   * process handoff is skipped; the product's own deep-link handling runs.
+   */
+  async deliverProductLink(url: string): Promise<void> {
+    if (!this.app) throw new Error('Electron application is not running');
+    await this.app.evaluate(({ app }, link) => {
+      if (process.platform === 'darwin') {
+        app.emit('open-url', { preventDefault() {} }, link);
+      } else {
+        app.emit(
+          'second-instance',
+          { preventDefault() {} },
+          [process.execPath, link],
+          process.cwd(),
+          {}
+        );
+      }
+    }, url);
+  }
+
   async captureCliBacklog(): Promise<unknown> {
     if (!this.page) return [];
     return await this.page.evaluate(async () => await window.ipc?.invoke('cli.getOutputBacklog'));
@@ -394,6 +484,53 @@ export class ElectronHarness {
       }
     }
     return { main: mainPath, renderer: rendererPath };
+  }
+
+  /**
+   * Simulates a crash or power loss: SIGKILL the Electron process and every process
+   * it started (bundled CLI, agents), keep the profile, and wait until all are gone.
+   */
+  async killProcessTree(): Promise<void> {
+    const rootPid = this.app?.process().pid;
+    if (!rootPid) throw new Error('Electron application is not running');
+    if (process.platform === 'win32') throw new Error('killProcessTree is POSIX-only');
+    const children = new Map<number, number[]>();
+    const table = spawnSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8' }).stdout;
+    for (const line of table.split('\n')) {
+      const [pid, ppid] = line.trim().split(/\s+/u).map(Number);
+      if (!pid || !ppid) continue;
+      children.set(ppid, [...(children.get(ppid) ?? []), pid]);
+    }
+    const tree: number[] = [];
+    for (const queue = [rootPid]; queue.length > 0;) {
+      const pid = queue.shift()!;
+      tree.push(pid);
+      queue.push(...(children.get(pid) ?? []));
+    }
+    for (const pid of tree) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        // Already gone.
+      }
+    }
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    await expect.poll(() => tree.filter(alive), { timeout: 30_000 }).toEqual([]);
+    this.app = null;
+    this.page = null;
+    this.performanceSession = null;
+    this.traceStarted = false;
+    if (this.hostPort !== null) await assertTcpPortReleased(this.hostPort);
+    this.hostPort = null;
+    this.rendererPaintCount = 0;
+    this.bootProfile = null;
   }
 
   async close(options: { preserveRoot?: boolean } = {}): Promise<void> {

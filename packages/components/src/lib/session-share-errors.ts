@@ -18,6 +18,8 @@ export function sessionShareErrorMessage(
 ): string {
   const data = typeof error === 'object' && error !== null && 'data' in error ? error.data : null;
   const code = typeof data === 'object' && data !== null && 'code' in data ? data.code : null;
+  // Servers before per-limit details send only the code and keep the combined copy.
+  const limit = typeof data === 'object' && data !== null && 'limit' in data ? data.limit : null;
   const message =
     typeof error === 'object' && error !== null && 'message' in error ? error.message : '';
   const name = typeof error === 'object' && error !== null && 'name' in error ? error.name : '';
@@ -37,7 +39,22 @@ export function sessionShareErrorMessage(
       reason = 'unavailable';
       break;
     case 'share_quota_exceeded':
-      reason = 'quota';
+      switch (limit) {
+        case 'deployment_bytes':
+          reason = 'packageLimit';
+          break;
+        case 'pending_deployments':
+          reason = 'quotaPending';
+          break;
+        case 'hourly_deployments':
+          reason = 'quotaHourly';
+          break;
+        case 'workspace_storage':
+          reason = 'quotaStorage';
+          break;
+        default:
+          reason = 'quota';
+      }
       break;
     case 'share_confirmation_required':
     case 'share_confirmation_requires_new_share':
@@ -115,6 +132,21 @@ export function sessionShareErrorMessage(
       return t(
         'sharing.error.quota',
         'The workspace has reached a sharing limit: at most 2 unfinished publications, 10 new publication attempts per hour, and 2 GiB of reserved share storage. Wait for unfinished publications to complete and try later, or reduce the shared content.'
+      );
+    case 'quotaPending':
+      return t(
+        'sharing.error.quotaPending',
+        'This workspace already has 2 share publications in progress. Wait for them to finish or be cancelled, then try again.'
+      );
+    case 'quotaHourly':
+      return t(
+        'sharing.error.quotaHourly',
+        'This workspace has started 10 share publications in the past hour. Try again later.'
+      );
+    case 'quotaStorage':
+      return t(
+        'sharing.error.quotaStorage',
+        'Shares in this workspace have reached the 2 GiB storage limit. Revoke shares you no longer need; their space is freed a few minutes after deletion completes. Or reduce the shared content.'
       );
     case 'confirmation':
       return t(

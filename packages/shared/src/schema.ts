@@ -1025,6 +1025,45 @@ export type SessionPullRequestLifecycleFields = {
   [field: `prLifecycle:${string}`]: SessionPullRequestLifecycle | undefined;
 };
 
+export type SessionImportFence = {
+  workspaceId: string;
+  turnIds: string[];
+  queueItemIds: string[];
+  /** Provenance only. */
+  importedBy?: string;
+};
+
+/** On a schedule document's metadata: the activation an import carried in. */
+export type ScheduleImportFence = { workspaceId: string; activationId: string };
+
+const EMPTY_FENCE: { turnIds: readonly string[]; queueItemIds: readonly string[] } = {
+  turnIds: [],
+  queueItemIds: [],
+};
+
+/** Turn and queue ids an import fenced off in this workspace; empty elsewhere. */
+export function getImportFence(
+  meta: Pick<SessionMeta, 'importFence'> | undefined,
+  workspaceId: string | undefined
+): { turnIds: readonly string[]; queueItemIds: readonly string[] } {
+  const fence = meta?.importFence;
+  if (!workspaceId || !fence || fence.workspaceId !== workspaceId) return EMPTY_FENCE;
+  return {
+    turnIds: Array.isArray(fence.turnIds) ? fence.turnIds : [],
+    queueItemIds: Array.isArray(fence.queueItemIds) ? fence.queueItemIds : [],
+  };
+}
+
+/** True when this schedule activation came from an import into `workspaceId`. */
+export function isScheduleImportFenced(
+  meta: { importFence?: unknown } | undefined,
+  workspaceId: string,
+  activationId: string
+): boolean {
+  const fence = meta?.importFence as Partial<ScheduleImportFence> | undefined;
+  return fence?.workspaceId === workspaceId && fence.activationId === activationId;
+}
+
 export type SessionMeta = SessionPullRequestLifecycleFields & {
   /** Latest assistant's actual model; null means no assistant history, absent means unknown. */
   lastModel?: { modelId?: string; name?: string } | null;
@@ -1051,6 +1090,8 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   isArchived?: boolean;
   /** User-owned tree execution barrier; inherited through containment and precise opener links. */
   collaborationStopped?: boolean;
+  /** Turns and queued items from a bundle import that never run in `workspaceId`. */
+  importFence?: SessionImportFence;
   /** Shared tab visibility only; closing never changes the session lifecycle. */
   isTabClosed?: boolean;
   origin?: 'lody' | 'external-acp';

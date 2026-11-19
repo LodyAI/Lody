@@ -14,6 +14,8 @@
 | `project-reopen.steps.ts`            | Switches between two projects and rejects a duplicate folder registration                        |
 | `session-follow-up.steps.ts`         | Sends follow-ups after completed Turns and proves ordered single dispatch                        |
 | `session-queue.steps.ts`             | Removes one queued follow-up and proves only the retained message dispatches                     |
+| `turn-lifecycle.steps.ts`            | Drives permission, crash recovery, and cold-restart follow-up Turns                              |
+| `workspace-entry.steps.ts`           | Enters an editable workspace through the active desktop target (`LODY_E2E_TARGET`)               |
 | `session-management.steps.ts`        | Exercises metadata, Archive restore, history, and deletion                                       |
 | `session-read-state.steps.ts`        | Exercises unread marking, navigation-based clearing, and UI cleanup                              |
 | `session-fork.steps.ts`              | Forks a completed Session to a worktree and verifies origin and cleanup                          |

@@ -5758,6 +5758,7 @@ const SessionDetail = ({
       localProjectVisibilityLoading,
       currentUserId: myAccountId,
       ownedMachineIds,
+      workspaceId: currentWorkspaceId,
     });
   }, [
     activeSession,

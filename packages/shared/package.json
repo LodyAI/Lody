@@ -82,6 +82,11 @@
       "import": "./src/visual-annotation-inspector-global.ts"
     },
     "./path-launchers": "./src/path-launchers.ts",
+    "./workspace-bundle-control": {
+      "types": "./src/workspace-bundle-control.ts",
+      "import": "./src/workspace-bundle-control.ts",
+      "default": "./src/workspace-bundle-control.ts"
+    },
     "./electron-ipc": {
       "types": "./src/electron-ipc.ts",
       "import": "./src/electron-ipc.ts",

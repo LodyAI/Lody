@@ -63,6 +63,11 @@ export const loadPromptShortcutsSetting = settingsCodeLoader(() =>
 export const loadMcpSetting = settingsCodeLoader(() =>
   import('./mcp-setting').then((module) => ({ default: module.McpSetting }))
 );
+export const loadWorkspaceDataSetting = settingsCodeLoader(() =>
+  import('./workspace-data-setting').then((module) => ({
+    default: module.WorkspaceDataSetting,
+  }))
+);
 export const loadShareManagementSetting = settingsCodeLoader(() =>
   import('./share-management-setting').then((module) => ({
     default: module.ShareManagementSetting,
@@ -88,6 +93,7 @@ const panels = {
   shares: loadShareManagementSetting,
   github: loadIntegrationsSettingsComponent,
   'keyboard-shortcuts': loadKeyboardShortcutsSetting,
+  data: loadWorkspaceDataSetting,
   about: loadAboutSettingsComponent,
 } satisfies Record<SettingsTabId, () => Promise<unknown>>;
 export const loadSettingsModal = settingsCodeLoader(() =>

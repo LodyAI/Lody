@@ -4488,6 +4488,7 @@ export const SessionChatInterface = memo(
     useSessionDocStaleReport({
       sessionId: session.id,
       docReady: sessionDocReady && !hideMessageArea,
+      syncEnabled: !hideMessageArea && syncEnabled,
       machineOnlineStatus: sessionMachineOnlineStatus,
       agentBusy: isAgentBusy,
       activeAssistantTurnId: activeAssistantTurnId ?? null,
