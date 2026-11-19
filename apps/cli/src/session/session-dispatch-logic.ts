@@ -1,4 +1,4 @@
-import { isMissingHistoryUserTurn } from '@lody/shared';
+import { getImportFence, isMissingHistoryUserTurn } from '@lody/shared';
 /**
  * Pure decision functions for session dispatch.
  *
@@ -189,7 +189,9 @@ function isImportedAcpReplayUserTurn(entry: SessionDispatchEntry, meta: SessionM
  */
 export function resolveSessionDispatchAction(
   snapshot: SessionDispatchSnapshot,
-  machineId: MachineId
+  machineId: MachineId,
+  /** This daemon's workspace; input fenced by an import into it never runs. */
+  workspaceId?: string
 ): DispatchAction {
   const {
     meta,
@@ -231,7 +233,7 @@ export function resolveSessionDispatchAction(
   }
 
   // ── Step 3: Find dispatchable turn ──
-  const turn = findNextDispatchableUserTurn(history, meta);
+  const turn = findNextDispatchableUserTurn(history, meta, workspaceId);
   if (!turn) {
     return { type: 'no-dispatchable-turn' };
   }
@@ -317,8 +319,10 @@ export function resolveSessionCancelAction(
  */
 export function findNextDispatchableUserTurn<T extends SessionDispatchEntry>(
   history: readonly T[],
-  meta: SessionMeta
+  meta: SessionMeta,
+  workspaceId?: string
 ): T | null {
+  const fenced = getImportFence(meta, workspaceId).turnIds;
   // Concurrent queue promotion and steering can insert the same turn twice.
   // Match readTurn/updateEntry: only the last stored copy owns that identity.
   const lastPositions = new Map(history.map((entry, index) => [entry.id, index]));
@@ -330,6 +334,8 @@ export function findNextDispatchableUserTurn<T extends SessionDispatchEntry>(
     if (isImportedAcpReplayUserTurn(entry, meta)) {
       continue;
     }
+    // Input carried by a workspace bundle into this workspace is history, not work.
+    if (fenced.has(entry.id)) continue;
     // Applied guidance is already consumed, including across a daemon restart.
     if (entry.inputConfig?._lodyDeliveryKind === 'steer') continue;
     // Recovery already surfaced a delivery failure for this exact activation.
@@ -417,3 +423,16 @@ export function resolveDispatchTurnInput(
 }
 
 export { resolveResumableAcpSessionId, resolveDispatchAcpSessionId };
+
+/** A queued item (or its promotion) that a workspace import fenced off here. */
+export function isImportFencedQueueItem(
+  meta: Pick<SessionMeta, 'importFence'> | undefined,
+  workspaceId: string | undefined,
+  item: { $cid?: string; userTurnId?: string }
+): boolean {
+  const fence = getImportFence(meta, workspaceId);
+  return (
+    (item.$cid !== undefined && fence.queueItemIds.has(item.$cid)) ||
+    (item.userTurnId !== undefined && fence.turnIds.has(item.userTurnId))
+  );
+}

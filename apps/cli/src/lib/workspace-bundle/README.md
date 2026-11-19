@@ -12,7 +12,7 @@ manager and sync each room before reading and after writing.
 | `codecs.ts`                               | Room classification and the codecs import accepts                            |
 | `export.ts`                               | Reads Meta, documents and named Flocks as raw bytes; records gaps            |
 | `import.ts`                               | Plan (dry run), ordered merge, journal, Roost rewrite, import receipt        |
-| `cross-workspace.ts`                      | Room id mapping and post-import writes for another workspace                 |
+| `cross-workspace.ts`                      | Room id mapping and import fences for another workspace                      |
 | `authorize.ts`                            | Row-level checks for changes to existing rows                                |
 | `blobs.ts`                                | Local session-file attachments                                               |
 | `service.ts`, `daemon.ts`, `control.ts`   | Entry points shared by the CLI command and the daemon                        |
@@ -25,8 +25,5 @@ manager and sync each room before reading and after writing.
   for sessions the target does not have (lossy by owner decision).
 - Prompt Shortcuts, the desktop Settings entry and cloud audit registration are not
   implemented yet.
-- Post-import writes for another workspace (collaboration stopped, queue cleared,
-  schedule disabled) are ordinary CRDT writes; importing that workspace's bundle back
-  carries them to the source as well.
 - Storage is today's loro-repo; a native loro-repo-rs source and target adapter will
   reuse the same manifest, codecs and journal.

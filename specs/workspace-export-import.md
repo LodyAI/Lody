@@ -33,6 +33,8 @@ the following (confirmed 2026-11-19), which this document does not reopen:
 9. Prompt Shortcuts are in the first version.
 10. A same-ID session never overwrites the target; it is skipped or imported as a
     conflict copy.
+11. A cross-workspace import does not rewrite imported sessions and schedules; it
+    fences them in the target workspace instead (chosen 2026-11-19).
 
 The following are not the owner's words but this document's recommendations or
 inferences, labeled where they appear: deduplication and skip rules for lossy Roost
@@ -185,8 +187,8 @@ authenticity is not a security premise; safety comes from authorization at impor
    storage marks a document as existing once a non-empty body is written, so an
    interrupted import may briefly list untitled entries until the same bundle is
    imported again.
-5. **Finish:** write an import receipt and, when needed, the post-import writes
-   below.
+5. **Finish:** write an import receipt and, across workspaces, fence the imported
+   sessions and schedules (below).
 
 ### CRDT merge result
 
@@ -245,12 +247,15 @@ authenticity is not a security premise; safety comes from authorization at impor
 | Machines (`<ws>:mf:<machine>`, `SessionMeta.machineId`)           | Machine rooms are not imported; sessions keep the original machine ID and show "machine unavailable", read only                                                                                                                                                       |
 | Attachment/image references                                       | Blobs are uploaded to the target (blobs the target still has are skipped on same-workspace restore); history is not rewritten. A "old reference → new reference" map is written at the session HEAD, reusing the OSS migration's `resolveArchivedAttachment` approach |
 
-After a cross-workspace import, the safety rules proven by
-[OSS migration](../apps/cli/src/lib/oss-migration/README.md) apply as new writes
-(the original state stays in the oplog, so nothing is lost): imported sessions stop
-collaboration and have dispatch pointers and pending queues cleared; imported
-schedules are disabled; machine durable commands do not migrate. A same-workspace
-restore does none of this, because merge itself is monotonic.
+After a cross-workspace import, imported sessions and schedules are not rewritten
+(option (b), chosen by the owner on 2026-11-19). The importer records an import fence
+on their metadata: which user input, queued items and schedule activation came from
+the bundle, naming the target workspace. Execution in the target skips exactly that
+input and activation; new messages and a schedule resumed in the target run as usual.
+A fence applies only to the workspace it names, so importing the target's bundle back
+into the source leaves the source's original sessions and schedules untouched. Machine
+durable commands do not migrate. A same-workspace restore adds no fence, because merge
+itself is monotonic.
 
 ### Importing into an E2EE workspace
 
@@ -365,13 +370,13 @@ Line counts are product-code estimates, excluding tests and docs.
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
 | A. Bundle and core pipeline  | Manifest/chunks/hashes, ZIP read/write, import journal, codec interface; generic `meta-flock`, `flock-room`, `loro-room` codecs; `native-engine` source; same-workspace import; CLI export/import/dry run; local plaintext only | Deletion records and clocks round-trip (read back register evidence, not get/scan); reimport changes and uploads nothing; rerun after interruption at each room boundary gives the same result; truncated/tampered chunks rejected with target untouched; unknown codec rejected | ~1,300                        |
 | B. Legacy migration          | `legacy-repo` source (consistent SQLite backup + IDB export); `enqueueOutbox` source facts; Meta migration converges on this pipeline; Preview comments format conversion                                                       | After old store → native, Loro VVs cover every source; sources with unuploaded edits enter the outbox; rerunning conversion gives the same result                                                                                                                                | ~700                          |
-| C. Blobs and cross-workspace | Attachment/image/diff snapshot blobs; cross-workspace mapping and post-import writes; per-row authorization                                                                                                                     | Changes to another user's Role, another user's machine rows or sharing grants reject the whole room; imported sessions stop collaboration and schedules are disabled; attachment map resolves historical references                                                              | ~1,200                        |
+| C. Blobs and cross-workspace | Attachment/image/diff snapshot blobs; cross-workspace mapping and import fences; per-row authorization                                                                                                                          | Changes to another user's Role, another user's machine rows or sharing grants reject the whole room; imported sessions stop collaboration and schedules are disabled; attachment map resolves historical references                                                              | ~1,200                        |
 | D. Cloud and desktop         | Cloud registration/audit DTOs and port; role checks and abort on revocation; desktop settings page and progress; Prompt Shortcuts (through their cloud API)                                                                     | Non-owner/admin sees no entry and CLI refuses; revocation stops at a room boundary; OSS composition makes zero cloud requests; a private Shortcut is imported only by its original owner and stays private, shared ones stay shared                                              | ~1,400 (plus private backend) |
 | E. E2EE                      | Local decrypted export; import reseals with the target's current keys; attachment re-encryption                                                                                                                                 | Exported bundle imports into an ordinary workspace; other member devices decrypt after import; old execution intents are not executable; ledger/members unchanged                                                                                                                | ~800                          |
 | F. Roost                     | Lossy `roost-turns/v1` codec: export turns through existing history reads; import only creates Roost sessions absent from the target                                                                                            | Visible bodies match after a round trip; an existing same session in the target is untouched; reimport creates no duplicate turns                                                                                                                                                | ~400                          |
 
 Phases A and B can run in parallel with the native Meta integration; each phase after
-C is reviewed independently. Open owner questions follow.
+C is reviewed independently. This Spec currently has no open owner questions.
 
 ## Roost and Prompt Shortcuts
 
@@ -404,24 +409,10 @@ Import keeps the original visibility:
 - Reimport deduplicates by original Shortcut ID. Encrypted workspaces do not support
   Shortcuts yet, so importing into one records Shortcuts as gaps.
 
-## Owner questions
-
-1. **Do post-import writes travel back to the source?** Background: after a
-   cross-workspace import, imported sessions stop collaborating, their pending queues
-   are cleared and schedules are disabled. These are ordinary CRDT writes, so importing
-   the target's bundle back into the source also stops the source's original sessions
-   and disables its schedules (observed in the end-to-end run). Options: (a) accept it,
-   that is what merge means; (b) do not write these states on cross-workspace import;
-   instead record locally in the target that the sessions came from an import, and let
-   execution refuse them; (c) skip these fields when importing back into the source.
-   Cost: (a) one round trip stops work in the source; (b) needs a new local record and
-   an execution check, about 200 lines; (c) special-cases a few fields and makes the
-   rules uneven. **Recommend (b).**
-
 ## Evidence
 
-- Intent: this document; decided items 1–10 were confirmed by the owner on
-  2026-11-19 (premises 1–3 given by the owner personally; 4–10 are the owner's replies
+- Intent: this document; decided items 1–11 were confirmed by the owner on
+  2026-11-19 (premises 1–3 given by the owner personally; 4–11 are the owner's replies
   to seven questions). Content labeled recommendation or inference is not an owner
   decision. None of this approves this Spec revision as a whole, which remains draft.
 - Inspected implementation: [`lody export`](../apps/cli/src/commands/export.ts),

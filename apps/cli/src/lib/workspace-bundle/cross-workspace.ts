@@ -1,4 +1,11 @@
+import { LoroMap } from 'loro-crdt';
 import type { JsonObject, LoroRepo } from 'loro-repo';
+import {
+  createSessionMirror,
+  getPendingUserTurnActivationId,
+  type SessionImportFence,
+  type SessionMeta,
+} from '@lody/shared';
 
 /**
  * Spec: specs/workspace-export-import.md, "来源工作区 ≠ 目标工作区".
@@ -33,57 +40,81 @@ export function crossWorkspaceRowWithheld(codec: string, key: readonly unknown[]
   return codec === 'schedule-registry/v1' && key[0] !== 'schedule' && key[0] !== 'tombstone';
 }
 
-const DISPATCH_FIELDS = [
-  'latestUserMsgId',
-  'processingUserMsgId',
-  'steerTurnStatuses',
-  'steerOperationLedger',
-  'queuePromotionLedger',
-  'messageQueueUpdatedAt',
-  'messageQueueUpdateVersion',
-  'messageQueueCheckedAt',
-  'awaitingUserSince',
-  'previewConnection',
-  'previewCandidate',
-] as const;
-
 /**
- * New writes after a cross-workspace merge, matching OSS migration: imported sessions
- * stop collaborating and lose pending dispatch, imported schedules are disabled. The
- * original state stays in each document's history. Applied only to rooms the target
- * did not have, so a later reimport does not undo the target's own changes.
+ * Spec owner question 1, option (b): a cross-workspace import does not rewrite the
+ * imported sessions or schedules. It records, on their metadata, which input and
+ * which schedule activation came from the bundle, scoped to the target workspace.
+ * Execution there skips exactly those (`getImportFence`, `isScheduleImportFenced`);
+ * new input and a schedule resumed there run normally. Another workspace ignores the
+ * fence, so a bundle exported back to the source does not stop its originals.
+ * Applied only to rooms the target did not have before this import.
  */
-export async function applyPostImportWrites(
+export async function applyImportFences(
   repo: LoroRepo<JsonObject>,
+  workspaceId: string,
   rooms: ReadonlyArray<{ targetId: string; codec: string }>
 ): Promise<void> {
   for (const room of rooms) {
     if (room.codec === 'session/v1') {
-      const lease = await repo.acquireDoc(room.targetId);
-      try {
-        const queue = lease.doc.getMovableList('mq');
-        if (queue.length > 0) queue.delete(0, queue.length);
-        const fork = lease.doc.getMap('forkOperation');
-        for (const key of fork.keys()) fork.delete(key);
-        lease.doc.commit();
-        await repo.persistDocNow(room.targetId, lease.doc);
-      } finally {
-        lease.release();
-      }
-      const patch: JsonObject = { status: { type: 'idle' }, collaborationStopped: true };
-      const meta: Record<string, unknown> = patch;
-      for (const field of DISPATCH_FIELDS) meta[field] = undefined;
-      await repo.upsertDocMeta(room.targetId, patch);
+      const fence = await sessionImportFence(repo, room.targetId, workspaceId);
+      await repo.upsertDocMeta(room.targetId, { importFence: fence });
     } else if (room.codec === 'schedule/v1') {
-      const lease = await repo.acquireDoc(room.targetId);
-      try {
-        const definition = lease.doc.getMap('definition');
-        if (definition.get('enabled') !== false) definition.set('enabled', false);
-        lease.doc.commit();
-        await repo.persistDocNow(room.targetId, lease.doc);
-      } finally {
-        lease.release();
-      }
+      const definition = (await repo.openDetachedDoc(room.targetId)).getMap('definition');
+      const activationId = definition.get('activationId');
+      if (typeof activationId === 'string')
+        await repo.upsertDocMeta(room.targetId, { importFence: { workspaceId, activationId } });
     }
   }
+}
+
+const TERMINAL_TURN_STATUSES = new Set(['handled', 'error', 'canceled', 'cancelled']);
+
+async function sessionImportFence(
+  repo: LoroRepo<JsonObject>,
+  docId: string,
+  workspaceId: string
+): Promise<SessionImportFence> {
+  const turnIds = new Set<string>();
+  const queueItemIds = new Set<string>();
+  const doc = await repo.openDetachedDoc(docId);
+  const mirror = createSessionMirror({ doc, initialState: {} });
+  try {
+    for (const turn of mirror.historyWriter.readStored()) {
+      if (turn.role !== 'user') continue;
+      const status = (turn as { status?: unknown }).status;
+      if (typeof status !== 'string' || !TERMINAL_TURN_STATUSES.has(status)) turnIds.add(turn.id);
+    }
+  } finally {
+    mirror.dispose();
+  }
+  const queue = doc.getMovableList('mq');
+  for (let index = 0; index < queue.length; index += 1) {
+    const item = queue.get(index);
+    if (!(item instanceof LoroMap)) continue;
+    queueItemIds.add(item.id);
+    const userTurnId = item.get('userTurnId');
+    if (typeof userTurnId === 'string' && userTurnId) turnIds.add(userTurnId);
+  }
+  const meta = ((await repo.getDocMeta(docId))?.meta ?? {}) as Partial<SessionMeta>;
+  for (const id of [
+    meta.latestUserMsgId,
+    meta.processingUserMsgId,
+    getPendingUserTurnActivationId(meta as SessionMeta),
+  ])
+    if (typeof id === 'string' && id) turnIds.add(id);
+  for (const id of Object.keys(meta.steerTurnStatuses ?? {})) turnIds.add(id);
+  for (const record of Object.values(meta.queuePromotionLedger ?? {}))
+    if (typeof record?.userTurnId === 'string') turnIds.add(record.userTurnId);
+  return { workspaceId, turnIds: [...turnIds], queueItemIds: [...queueItemIds] };
+}
+
+/** True when this schedule activation came from an import into `workspaceId`. */
+export function isScheduleImportFenced(
+  meta: JsonObject | undefined,
+  workspaceId: string,
+  activationId: string
+): boolean {
+  const fence = meta?.importFence;
+  if (!fence || typeof fence !== 'object' || Array.isArray(fence)) return false;
+  return fence.workspaceId === workspaceId && fence.activationId === activationId;
 }

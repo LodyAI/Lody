@@ -17,6 +17,9 @@ Overview and current limits: [README.md](README.md).
 - A same-ID body with no shared peer is skipped together with its Meta rows. Target
   deletions are not resurrected. Machine records and machine catalogs never cross
   workspaces.
+- A cross-workspace import never rewrites imported sessions or schedules. It records
+  an `importFence` naming the target workspace; dispatch and the schedule engine skip
+  exactly the fenced input and activation there, and every other workspace ignores it.
 - An existing target row may change only under its product rule
   (`authorize.ts`); one violation skips the whole room.
 - New domains add a codec in `codecs.ts`, an export path and an import path, with a

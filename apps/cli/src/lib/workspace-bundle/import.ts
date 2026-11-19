@@ -16,7 +16,7 @@ import {
 } from './codecs';
 import { createSessionMirror, type SessionHistoryInput } from '@lody/shared';
 import {
-  applyPostImportWrites,
+  applyImportFences,
   crossWorkspaceRowWithheld,
   mapMetaKey,
   mapRoomId,
@@ -429,8 +429,9 @@ export async function applyWorkspaceImport(
     input.onProgress?.({ done: index, total: merges.length, roomId: room.targetId });
   }
   if (crossWorkspace)
-    await applyPostImportWrites(
+    await applyImportFences(
       repo,
+      plan.targetWorkspaceId,
       merges.filter((room) => room.state === 'new' && room.model === 'loro')
     );
   await writeImportReceipt(repo, plan, input.actor, input.now);

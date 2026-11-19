@@ -29,6 +29,8 @@ export type ScheduleEnginePorts<Prepared> = {
   encrypted?: boolean;
   authorize?: (request: ScheduleAuthorizationRequest) => Promise<boolean>;
   list: () => Promise<ScheduleRegistryRow[]>;
+  /** True for an activation a workspace import carried in; it never runs automatically here. */
+  importFenced?: (row: ScheduleRegistryRow) => Promise<boolean>;
   read: (scheduleId: string) => Promise<ScheduleDocument | null>;
   validateTarget: (run: ScheduleRun<Prepared>) => Promise<void>;
   /**
@@ -117,6 +119,7 @@ export class ScheduleEngine<Prepared> {
     }
     for (const row of rows) {
       if (!this.owned(row) || !row.enabled) continue;
+      if (await p.importFenced?.(row)) continue;
       if (row.scheduledMessage && p.store.messageDispatch(p.workspaceId, row.scheduleId)) {
         await this.project(row, { nextScheduledAt: undefined });
         continue;

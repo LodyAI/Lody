@@ -1025,6 +1025,26 @@ export type SessionPullRequestLifecycleFields = {
   [field: `prLifecycle:${string}`]: SessionPullRequestLifecycle | undefined;
 };
 
+export type SessionImportFence = {
+  workspaceId: string;
+  turnIds: string[];
+  queueItemIds: string[];
+};
+
+/** Turn and queue ids an import fenced off in this workspace; empty elsewhere. */
+export function getImportFence(
+  meta: Pick<SessionMeta, 'importFence'> | undefined,
+  workspaceId: string | undefined
+): { turnIds: ReadonlySet<string>; queueItemIds: ReadonlySet<string> } {
+  const fence = meta?.importFence;
+  if (!workspaceId || !fence || fence.workspaceId !== workspaceId)
+    return { turnIds: new Set(), queueItemIds: new Set() };
+  return {
+    turnIds: new Set(Array.isArray(fence.turnIds) ? fence.turnIds : []),
+    queueItemIds: new Set(Array.isArray(fence.queueItemIds) ? fence.queueItemIds : []),
+  };
+}
+
 export type SessionMeta = SessionPullRequestLifecycleFields & {
   /** Latest assistant's actual model; null means no assistant history, absent means unknown. */
   lastModel?: { modelId?: string; name?: string } | null;
@@ -1051,6 +1071,12 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   isArchived?: boolean;
   /** User-owned tree execution barrier; inherited through containment and precise opener links. */
   collaborationStopped?: boolean;
+  /**
+   * Set by a workspace bundle import into `workspaceId`: the listed turns and queued
+   * items came from the bundle and never run there. Other workspaces ignore it, so the
+   * fence is harmless when this metadata travels in a later bundle.
+   */
+  importFence?: SessionImportFence;
   /** Shared tab visibility only; closing never changes the session lifecycle. */
   isTabClosed?: boolean;
   origin?: 'lody' | 'external-acp';

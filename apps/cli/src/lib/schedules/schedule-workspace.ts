@@ -1,3 +1,4 @@
+import { isScheduleImportFenced } from '@/lib/workspace-bundle/cross-workspace';
 import { notificationLabel } from '@lody/shared/notifications';
 import type { RepoRoomSubscription } from 'loro-repo';
 import {
@@ -167,6 +168,12 @@ export async function createScheduleWorkspace(args: {
     encrypted: workspace.contentMode === 'e2ee',
     authorize: args.authorize,
     list: () => repository.list(),
+    importFenced: async (row) =>
+      isScheduleImportFenced(
+        (await manager.repo.getDocMeta(getScheduleRoomId(row.scheduleId)))?.meta,
+        workspaceId,
+        row.activationId
+      ),
     read: async (id) => {
       if (!args.localOnly)
         await manager.syncDocOrThrow(getScheduleRoomId(id), {

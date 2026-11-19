@@ -1,7 +1,10 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { LoroMap } from 'loro-crdt';
 import { afterEach, describe, expect, it } from 'vitest';
+import { getImportFence, type SessionMeta } from '@lody/shared';
+import { isScheduleImportFenced } from './cross-workspace';
 import { createBundleWriter, openBundle, type OpenBundle } from './bundle-file';
 import { exportWorkspaceBundle } from './export';
 import { applyWorkspaceImport, ImportRefusedError, planWorkspaceImport } from './import';
@@ -208,15 +211,17 @@ describe('workspace import', () => {
     expect((await target.repo.getDocMeta('session-s1'))?.meta).toMatchObject({ title: 'One' });
   });
 
-  it('maps a bundle from another workspace without machines and stops imported work', async () => {
+  it('maps a bundle from another workspace without machines and fences imported work there only', async () => {
     const source = await repo();
     await writeDoc(source.repo, 'session-s1', { title: 'One', latestUserMsgId: 'u1' }, (doc) => {
       doc.getText('t').insert(0, 'hi');
-      doc.getMovableList('mq').push('queued');
+      const queued = doc.getMovableList('mq').insertContainer(0, new LoroMap());
+      queued.set('userTurnId', 'q1');
     });
-    await writeDoc(source.repo, 'schedule-x', { kind: 'schedule' }, (doc) =>
-      doc.getMap('definition').set('enabled', true)
-    );
+    await writeDoc(source.repo, 'schedule-x', { kind: 'schedule' }, (doc) => {
+      doc.getMap('definition').set('enabled', true);
+      doc.getMap('definition').set('activationId', 'act-1');
+    });
     await writeDoc(source.repo, 'machine-m1', { name: 'M' }, (doc) => doc.getMap('m').set('a', 1));
     await source.repo.upsertDocMeta('machine-m2', { name: 'Meta only' });
     await writeFlock(source.repo, `${WS}:wf:workspace`, (flock) =>
@@ -291,18 +296,64 @@ describe('workspace import', () => {
     expect(registry.get(['schedule', 'x'])).toEqual({ on: true });
     expect(registry.get(['runtime', 'x', 'm1'])).toBeUndefined();
 
-    const meta = (await target.repo.getDocMeta('session-s1'))?.meta;
-    expect(meta).toMatchObject({
-      title: 'One',
-      collaborationStopped: true,
-      status: { type: 'idle' },
-    });
-    expect(meta).not.toHaveProperty('latestUserMsgId');
+    // Imported pending input is fenced in the target, not rewritten.
+    const meta = (await target.repo.getDocMeta('session-s1'))?.meta as SessionMeta | undefined;
+    expect(meta).toMatchObject({ title: 'One', latestUserMsgId: 'u1' });
+    expect(meta).not.toHaveProperty('collaborationStopped');
     const session = await target.repo.openDetachedDoc('session-s1');
-    expect(session.getMovableList('mq').length).toBe(0);
+    expect(session.getMovableList('mq').length).toBe(1);
     expect(session.getText('t').toString()).toBe('hi');
+    const fence = getImportFence(meta, 'ws_b');
+    expect([...fence.turnIds].sort()).toEqual(['q1', 'u1']);
+    expect(fence.queueItemIds.size).toBe(1);
+    expect(getImportFence(meta, WS).turnIds.size).toBe(0);
     const schedule = await target.repo.openDetachedDoc('schedule-x');
-    expect(schedule.getMap('definition').get('enabled')).toBe(false);
+    expect(schedule.getMap('definition').get('enabled')).toBe(true);
+    expect(
+      isScheduleImportFenced((await target.repo.getDocMeta('schedule-x'))?.meta, 'ws_b', 'act-1')
+    ).toBe(true);
+    expect(
+      isScheduleImportFenced((await target.repo.getDocMeta('schedule-x'))?.meta, 'ws_b', 'act-2')
+    ).toBe(false);
+
+    // The return trip: the target's bundle carries the fence back, and the source ignores it.
+    const back = path.join(await tempDir(), 'back.lodybundle');
+    await exportWorkspaceBundle({
+      repo: target.repo,
+      workspaceId: 'ws_b',
+      writer: await createBundleWriter(back),
+      source: {
+        workspaceId: 'ws_b',
+        exporterUserId: 'u',
+        exporterMachineId: 'm',
+        lodyVersion: 't',
+        startedAt: 'a',
+      },
+    });
+    const backBundle = await openBundle(back);
+    cleanup.push(() => backBundle.close());
+    await applyWorkspaceImport({
+      plan: await planWorkspaceImport({
+        bundle: backBundle,
+        repo: source.repo,
+        workspaceId: WS,
+        role: 'owner',
+        actorUserId: 'u',
+      }),
+      bundle: backBundle,
+      repo: source.repo,
+      journalPath: path.join(await tempDir(), 'back.json'),
+    });
+    const original = (await source.repo.getDocMeta('session-s1'))?.meta as SessionMeta | undefined;
+    expect(original).toMatchObject({ latestUserMsgId: 'u1' });
+    expect(original).not.toHaveProperty('collaborationStopped');
+    expect(getImportFence(original, WS).turnIds.size).toBe(0);
+    expect(
+      isScheduleImportFenced((await source.repo.getDocMeta('schedule-x'))?.meta, WS, 'act-1')
+    ).toBe(false);
+    expect(
+      (await source.repo.openDetachedDoc('schedule-x')).getMap('definition').get('enabled')
+    ).toBe(true);
 
     const again = await planWorkspaceImport({
       bundle,
