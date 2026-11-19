@@ -1298,6 +1298,16 @@ pre,
     height: calc(var(--composer-rows, 2) * 1lh + var(--composer-rows-chrome, 0px));
   }
 
+  /* Empty caret targets before line-start mentions/quotes have no glyph metrics
+     as `display: inline`, which shrinks the native caret; give them a zero-width
+     line-height box until text is typed. */
+  [data-composer-editor] span[data-lexical-text]:empty {
+    display: inline-block;
+    width: 0;
+    height: 1lh;
+    vertical-align: top;
+  }
+
   [data-composer-editor][data-empty]::before {
     content: attr(data-placeholder);
     float: left;

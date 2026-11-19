@@ -1479,7 +1479,7 @@
   "composer.messageQuoteSeparatePassages": "每次请选择一段连续正文，可以分别添加多处引用。",
   "composer.messageQuoteTitle": "消息引用",
   "composer.messageQuoteOriginal": "引用原文",
-  "composer.messageQuoteInlineLabel": "[引用：{{text}}]",
+  "composer.messageQuoteInlineLabel": "[{{text}}]",
   "composer.collapseMessageQuote": "收起引用",
   "composer.removeMessageQuote": "移除引用",
   "composer.messageQuoteTooLong": "请选择不超过 50,000 字符的内容进行引用。",
