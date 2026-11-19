@@ -1516,22 +1516,19 @@ export class LoroDocumentManager {
             const canceled = bridge.canceled.then(() => 'stop' as const);
             try {
               const joinPromise = this.repo.joinDocRoom(docId);
-              let abandonedJoin = false;
-              void joinPromise.then(
-                (lateSub) => {
-                  if (abandonedJoin) {
-                    lateSub.unsubscribe();
-                  }
-                },
-                () => {}
-              );
+              void joinPromise.catch(() => {});
               const joined = await Promise.race([
                 joinPromise.then((room) => ({ kind: 'joined' as const, room })),
                 canceled.then((stop) => ({ kind: stop })),
                 bound.then((stop) => ({ kind: stop })),
               ]);
               if (joined.kind === 'stop') {
-                abandonedJoin = true;
+                void joinPromise.then(
+                  (lateSub) => {
+                    lateSub.unsubscribe();
+                  },
+                  () => {}
+                );
                 return;
               }
               sub = joined.room;

@@ -116,18 +116,15 @@ export async function waitForRoomToSync<T extends SyncRoomSubscription>(
     let sub: T | null = null;
     try {
       const joinPromise = joinRoom();
-      let abandonedJoin = false;
-      void joinPromise.then(
-        (lateSub) => {
-          if (abandonedJoin) {
-            lateSub.unsubscribe();
-          }
-        },
-        () => {}
-      );
+      void joinPromise.catch(() => {});
       const joinedOutcome = await raceAbortSignal(joinPromise, signal);
       if (joinedOutcome.aborted) {
-        abandonedJoin = true;
+        void joinPromise.then(
+          (lateSub) => {
+            lateSub.unsubscribe();
+          },
+          () => {}
+        );
         return null;
       }
       sub = joinedOutcome.value;

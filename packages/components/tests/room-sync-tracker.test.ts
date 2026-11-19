@@ -260,5 +260,25 @@ describe('room-sync', () => {
       expect(observedSub).toBe(sub);
       expect(sub.unsubscribe).toHaveBeenCalledTimes(1);
     });
+
+    it('unsubscribes when signal aborts synchronously inside joinRoom for an already-fulfilled lease', async () => {
+      const sub = createSubscription();
+      const controller = new AbortController();
+
+      const result = await waitForRoomToSync(
+        () => {
+          controller.abort();
+          return Promise.resolve(sub);
+        },
+        {
+          roomId: 'room-abort-during-sync-join',
+          signal: controller.signal,
+        }
+      );
+
+      expect(result).toBeNull();
+      await Promise.resolve();
+      expect(sub.unsubscribe).toHaveBeenCalledTimes(1);
+    });
   });
 });
