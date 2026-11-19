@@ -46,40 +46,87 @@ const asRecord = (value: unknown): Record_ =>
   value && typeof value === 'object' && !Array.isArray(value) ? (value as Record_) : {};
 const asNumber = (value: unknown): number => (typeof value === 'number' ? value : 0);
 
+export type BundleKind =
+  | 'conversations'
+  | 'schedules'
+  | 'previewComments'
+  | 'catalog'
+  | 'machines'
+  | 'other';
+export type KindSummary = {
+  kind: BundleKind;
+  new: number;
+  updated: number;
+  unchanged: number;
+  skipped: number;
+};
 export type ImportPlanSummary = {
-  newRooms: number;
-  updatedRooms: number;
-  unchangedRooms: number;
-  metadata: { added: number; updated: number; deleted: number };
-  skipped: Array<{ id: string; reason: string; detail: string | null }>;
+  kinds: KindSummary[];
+  skipped: Array<{ kind: BundleKind; label: string | null; reason: string; detail: string | null }>;
   gaps: number;
 };
 
-/** What a dry run says the import would do, read defensively from the daemon's plan. */
+const KIND_ORDER: readonly BundleKind[] = [
+  'conversations',
+  'schedules',
+  'previewComments',
+  'catalog',
+  'machines',
+  'other',
+];
+
+/** Supporting rooms (indexes) are not counted; they still appear if skipped. */
+function kindOf(codec: string): { kind: BundleKind; counted: boolean } | null {
+  if (codec === 'meta/v1') return null;
+  if (codec === 'session/v1' || codec === 'roost-turns/v1')
+    return { kind: 'conversations', counted: codec === 'session/v1' };
+  if (codec === 'schedule/v1') return { kind: 'schedules', counted: true };
+  if (codec === 'schedule-registry/v1') return { kind: 'schedules', counted: false };
+  if (codec === 'preview-comment/v1') return { kind: 'previewComments', counted: true };
+  if (codec === 'workspace-catalog/v1') return { kind: 'catalog', counted: true };
+  if (codec === 'machine/v1' || codec === 'machine-catalog/v1' || codec === 'agent-config/v1')
+    return { kind: 'machines', counted: codec === 'machine-catalog/v1' };
+  return { kind: 'other', counted: !codec.endsWith('-index/v1') };
+}
+
+/** What a dry run says the import would do, in the terms people use. */
 export function summarizeImportPlan(plan: unknown): ImportPlanSummary {
   const rooms = Array.isArray(asRecord(plan).rooms)
     ? (asRecord(plan).rooms as unknown[]).map(asRecord)
     : [];
-  const bodies = rooms.filter((room) => room.model !== 'meta' && room.action === 'merge');
-  const count = (state: string) => bodies.filter((room) => room.state === state).length;
-  const metaRows = asRecord(rooms.find((room) => room.model === 'meta')?.rows);
-  const gaps = asRecord(plan).gaps;
-  return {
-    newRooms: count('new'),
-    updatedRooms: count('merge'),
-    unchangedRooms: count('unchanged'),
-    metadata: {
-      added: asNumber(metaRows.added),
-      updated: asNumber(metaRows.updated),
-      deleted: asNumber(metaRows.deleted),
-    },
-    skipped: rooms
-      .filter((room) => room.action === 'skip')
-      .map((room) => ({
-        id: String(room.id ?? ''),
+  const kinds = new Map<BundleKind, KindSummary>();
+  const skipped: ImportPlanSummary['skipped'] = [];
+  for (const room of rooms) {
+    const kind = kindOf(String(room.codec ?? ''));
+    if (!kind) continue;
+    if (room.action === 'skip')
+      skipped.push({
+        kind: kind.kind,
+        label: typeof room.label === 'string' && room.label ? room.label : null,
         reason: String(room.reason ?? ''),
         detail: typeof room.detail === 'string' ? room.detail : null,
-      })),
+      });
+    if (!kind.counted && room.action !== 'skip') continue;
+    const entry = kinds.get(kind.kind) ?? {
+      kind: kind.kind,
+      new: 0,
+      updated: 0,
+      unchanged: 0,
+      skipped: 0,
+    };
+    if (room.action === 'skip') entry.skipped += 1;
+    else if (room.state === 'new') entry.new += 1;
+    else if (room.state === 'unchanged') entry.unchanged += 1;
+    else entry.updated += 1;
+    kinds.set(kind.kind, entry);
+  }
+  const gaps = asRecord(plan).gaps;
+  return {
+    kinds: KIND_ORDER.flatMap((kind) => {
+      const entry = kinds.get(kind);
+      return entry ? [entry] : [];
+    }),
+    skipped,
     gaps: Array.isArray(gaps) ? gaps.length : 0,
   };
 }
@@ -95,14 +142,33 @@ const SKIP_REASON_KEYS: Record<string, string> = {
 const styles = stylex.create({
   result: { fontSize: text.footnoteSize, color: colors.secondaryLabel, overflowWrap: 'anywhere' },
   error: { fontSize: text.footnoteSize, color: colors.destructive, overflowWrap: 'anywhere' },
-  list: {
-    margin: 0,
-    paddingInlineStart: space[4],
+  review: {
     display: 'flex',
     flexDirection: 'column',
-    gap: space[1],
+    gap: space[4],
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    maxHeight: 'min(360px, 50dvh)',
+    overflowY: 'auto',
   },
-  review: { display: 'flex', flexDirection: 'column', gap: space[2], fontSize: text.footnoteSize },
+  group: { display: 'flex', flexDirection: 'column', gap: space[1] },
+  heading: { fontWeight: 600, color: colors.label },
+  row: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    gap: space[4],
+    minWidth: 0,
+  },
+  name: {
+    color: colors.label,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  value: { color: colors.secondaryLabel, flexShrink: 0, textAlign: 'end' },
+  note: { color: colors.secondaryLabel },
 });
 
 type Busy = 'export' | 'choose' | 'import' | null;
@@ -138,6 +204,29 @@ export function WorkspaceDataSettingContent({
       : message === 'import_file_expired'
         ? t('settings.workspaceData.errors.importFileExpired')
         : message;
+
+  const describeCounts = (entry: KindSummary) =>
+    entry.kind === 'catalog'
+      ? t(
+          entry.skipped
+            ? 'settings.workspaceData.review.catalogSkipped'
+            : entry.new
+              ? 'settings.workspaceData.review.catalogNew'
+              : entry.updated
+                ? 'settings.workspaceData.review.catalogUpdated'
+                : 'settings.workspaceData.review.catalogUnchanged'
+        )
+      : (
+          [
+            ['new', entry.new],
+            ['updated', entry.updated],
+            ['unchanged', entry.unchanged],
+            ['skippedCount', entry.skipped],
+          ] as const
+        )
+          .filter(([, count]) => count > 0)
+          .map(([key, count]) => t(`settings.workspaceData.review.${key}`, { count }))
+          .join(' · ');
 
   const run = async (kind: Exclude<Busy, null>, work: () => Promise<void>) => {
     setBusy(kind);
@@ -270,42 +359,54 @@ export function WorkspaceDataSettingContent({
         {review ? (
           <AlertDialog.Content>
             <AlertDialog.Header>
-              <AlertDialog.Title>{t('settings.workspaceData.review.title')}</AlertDialog.Title>
+              <AlertDialog.Title>
+                {t('settings.workspaceData.review.title', { file: review.fileName })}
+              </AlertDialog.Title>
               <AlertDialog.Description>
-                {t('settings.workspaceData.review.description', { file: review.fileName })}
+                {t('settings.workspaceData.review.description')}
               </AlertDialog.Description>
             </AlertDialog.Header>
             <div data-testid="workspace-bundle-review" {...stylex.props(styles.review)}>
-              <span>{review.fileName}</span>
-              <span>
-                {t('settings.workspaceData.review.rooms', {
-                  newRooms: review.summary.newRooms,
-                  updatedRooms: review.summary.updatedRooms,
-                  unchangedRooms: review.summary.unchangedRooms,
-                })}
-              </span>
-              <span>{t('settings.workspaceData.review.metadata', review.summary.metadata)}</span>
+              <div {...stylex.props(styles.group)}>
+                <span {...stylex.props(styles.heading)}>
+                  {t('settings.workspaceData.review.changes')}
+                </span>
+                {review.summary.kinds.map((entry) => (
+                  <div key={entry.kind} {...stylex.props(styles.row)}>
+                    <span {...stylex.props(styles.name)}>
+                      {t(`settings.workspaceData.kinds.${entry.kind}`)}
+                    </span>
+                    <span {...stylex.props(styles.value)}>{describeCounts(entry)}</span>
+                  </div>
+                ))}
+              </div>
+              {review.summary.skipped.length > 0 ? (
+                <div {...stylex.props(styles.group)}>
+                  <span {...stylex.props(styles.heading)}>
+                    {t('settings.workspaceData.review.skipped', {
+                      count: review.summary.skipped.length,
+                    })}
+                  </span>
+                  {review.summary.skipped.map((item, index) => (
+                    <div key={index} {...stylex.props(styles.row)}>
+                      <span {...stylex.props(styles.name)}>
+                        {item.label ?? t(`settings.workspaceData.unnamed.${item.kind}`)}
+                      </span>
+                      <span {...stylex.props(styles.value)}>
+                        {item.reason === 'unauthorized' && item.detail
+                          ? t('settings.workspaceData.skipReasons.unauthorized')
+                          : SKIP_REASON_KEYS[item.reason]
+                            ? t(SKIP_REASON_KEYS[item.reason]!)
+                            : item.reason}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               {review.summary.gaps > 0 ? (
-                <span>
+                <span {...stylex.props(styles.note)}>
                   {t('settings.workspaceData.review.gaps', { count: review.summary.gaps })}
                 </span>
-              ) : null}
-              {review.summary.skipped.length > 0 ? (
-                <>
-                  <span>{t('settings.workspaceData.review.skipped')}</span>
-                  <ul {...stylex.props(styles.list)}>
-                    {review.summary.skipped.map((room) => (
-                      <li key={room.id}>
-                        {room.id}
-                        {' — '}
-                        {SKIP_REASON_KEYS[room.reason]
-                          ? t(SKIP_REASON_KEYS[room.reason]!)
-                          : room.reason}
-                        {room.detail ? ` (${room.detail})` : ''}
-                      </li>
-                    ))}
-                  </ul>
-                </>
               ) : null}
             </div>
             <AlertDialog.Footer>

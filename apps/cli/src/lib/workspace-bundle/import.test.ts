@@ -80,6 +80,7 @@ describe('workspace import', () => {
       action: 'merge',
       state: 'new',
     });
+    expect(plan.rooms.find((room) => room.id === 'session-s1')?.label).toBe('One');
     await target.close();
 
     const reopened = await openTestRepo(dir);
@@ -141,6 +142,8 @@ describe('workspace import', () => {
       action: 'skip',
       reason: 'unrelated-same-id',
     });
+    // The skipped item is the bundle's conversation: name it as the bundle does.
+    expect(plan.rooms.find((room) => room.id === 'session-s1')?.label).toBe('One');
     const doc = await target.repo.openDetachedDoc('session-s1');
     expect(doc.getText('t').toString()).toBe('mine');
     expect((await target.repo.getDocMeta('session-s1'))?.meta).toMatchObject({ title: 'Mine' });

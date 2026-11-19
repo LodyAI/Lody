@@ -22,31 +22,59 @@ const plan = {
   rooms: [
     {
       id: 'session-1',
-      targetId: 'session-1',
       codec: 'session/v1',
       model: 'loro',
       action: 'merge',
       state: 'new',
+      label: 'Fix login',
     },
     {
       id: 'session-2',
-      targetId: 'session-2',
       codec: 'session/v1',
       model: 'loro',
       action: 'merge',
       state: 'unchanged',
+      label: 'Old chat',
     },
     {
       id: 'session-3',
-      targetId: 'session-3',
       codec: 'session/v1',
       model: 'loro',
       action: 'skip',
       reason: 'unrelated-same-id',
+      label: 'Release notes',
+    },
+    {
+      id: 'schedule-x',
+      codec: 'schedule/v1',
+      model: 'loro',
+      action: 'merge',
+      state: 'merge',
+      label: 'Daily digest',
+    },
+    {
+      id: 'ws_a:sr',
+      codec: 'schedule-registry/v1',
+      model: 'flock',
+      action: 'merge',
+      state: 'merge',
+    },
+    {
+      id: 'ws_a:wf:workspace',
+      codec: 'workspace-catalog/v1',
+      model: 'flock',
+      action: 'merge',
+      state: 'merge',
+    },
+    {
+      id: 'ws_a:mf:m1',
+      codec: 'machine-catalog/v1',
+      model: 'flock',
+      action: 'skip',
+      reason: 'machine-room',
     },
     {
       id: 'meta',
-      targetId: 'meta',
       codec: 'meta/v1',
       model: 'meta',
       action: 'merge',
@@ -112,13 +140,23 @@ function fakeApi(overrides: Partial<WorkspaceBundleApi> = {}): WorkspaceBundleAp
 }
 
 describe('summarizeImportPlan', () => {
-  it('counts what an import changes and lists what it skips', () => {
+  it('groups changes by what people know and names skipped items', () => {
     expect(summarizeImportPlan(plan)).toEqual({
-      newRooms: 1,
-      updatedRooms: 0,
-      unchangedRooms: 1,
-      metadata: { added: 4, updated: 1, deleted: 2 },
-      skipped: [{ id: 'session-3', reason: 'unrelated-same-id', detail: null }],
+      kinds: [
+        { kind: 'conversations', new: 1, updated: 0, unchanged: 1, skipped: 1 },
+        { kind: 'schedules', new: 0, updated: 1, unchanged: 0, skipped: 0 },
+        { kind: 'catalog', new: 0, updated: 1, unchanged: 0, skipped: 0 },
+        { kind: 'machines', new: 0, updated: 0, unchanged: 0, skipped: 1 },
+      ],
+      skipped: [
+        {
+          kind: 'conversations',
+          label: 'Release notes',
+          reason: 'unrelated-same-id',
+          detail: null,
+        },
+        { kind: 'machines', label: null, reason: 'machine-room', detail: null },
+      ],
       gaps: 1,
     });
   });
@@ -137,10 +175,12 @@ describe('workspace data settings', () => {
     render(fakeApi());
     await click('workspace-bundle-choose');
     const review = byTestId('workspace-bundle-review')?.textContent ?? '';
-    expect(review).toContain('in.lodybundle');
-    expect(review).toContain('session-3');
+    expect(review).toContain('Release notes');
+    expect(review).toContain('settings.workspaceData.kinds.conversations');
     expect(review).toContain('settings.workspaceData.skipReasons.unrelatedSameId');
-    expect(review).not.toContain('unrelated-same-id');
+    // People see names and plain reasons, never storage ids or internal row counts.
+    for (const internal of ['session-3', 'ws_a:mf:m1', 'unrelated-same-id', 'review.metadata'])
+      expect(review).not.toContain(internal);
     expect(byTestId('workspace-bundle-import-result')).toBeNull();
     await click('workspace-bundle-confirm');
     expect(byTestId('workspace-bundle-review')).toBeNull();

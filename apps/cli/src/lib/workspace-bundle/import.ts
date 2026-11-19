@@ -48,6 +48,8 @@ export type RoomPlan = {
     | 'roost-exists';
   detail?: string;
   rows?: RowChanges;
+  /** What a person calls this item (conversation or schedule title, machine name). */
+  label?: string;
 };
 export type ImportPlan = {
   digest: string;
@@ -183,6 +185,7 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
   const provisional = Flock.fromFile(repo.getMeta().exportFile());
   await mergeFlockBytes(provisional, metaBytes, metaPolicy(new Set()));
 
+  const titles = new Map<string, string>();
   const rooms: RoomPlan[] = [];
   for (const entry of manifest.rooms) {
     if (entry.model === 'meta') continue;
@@ -219,6 +222,9 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
     if (entry.model === 'loro') {
       const incoming = new LoroDoc();
       incoming.import(bytes);
+      const definitionTitle = incoming.getMap('definition').get('title');
+      if (typeof definitionTitle === 'string' && definitionTitle)
+        titles.set(entry.id, definitionTitle);
       const current = await repo.openDetachedDoc(targetId);
       const target = versionMap(current);
       const source = versionMap(incoming);
@@ -255,6 +261,15 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
     });
   }
 
+  // Name each item as the bundle does; the target's own copy may be a different item.
+  const sourceMeta = Flock.fromFile(metaBytes);
+  for (const room of rooms) {
+    const label =
+      roomLabel(room.id, sourceMeta, titles, sourceWorkspaceId) ??
+      roomLabel(room.id, provisional, titles, sourceWorkspaceId);
+    if (label) room.label = label;
+  }
+
   // Skipped rooms keep the target's own Meta rows for their ids.
   const mergedMeta = Flock.fromFile(repo.getMeta().exportFile());
   await mergeFlockBytes(mergedMeta, metaBytes, metaPolicy(withheldMetaIds(rooms)));
@@ -275,6 +290,30 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
     rooms: orderForWrite(rooms),
     gaps: manifest.gaps,
   };
+}
+
+/** A readable name for a room, from the merged metadata or the bundled document. */
+function roomLabel(
+  roomId: string,
+  meta: Flock,
+  titles: ReadonlyMap<string, string>,
+  sourceWorkspaceId: string
+): string | undefined {
+  const field = (docId: string, name: string) => {
+    const value = meta.get(['m', docId, name]);
+    return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+  };
+  const docId = roomId.startsWith(ROOST_ROOM_PREFIX)
+    ? roomId.slice(ROOST_ROOM_PREFIX.length)
+    : roomId;
+  const titled = titles.get(docId) ?? field(docId, 'title') ?? field(docId, 'name');
+  if (titled) return titled;
+  if (docId.startsWith('preview-comment-'))
+    return field(`session-${docId.slice('preview-comment-'.length)}`, 'title');
+  const machine = /^(?:.*:mf:|machine-)(.+)$/.exec(docId)?.[1];
+  if (machine && (docId.startsWith('machine-') || docId.startsWith(`${sourceWorkspaceId}:mf:`)))
+    return field(`machine-${machine}`, 'name');
+  return undefined;
 }
 
 function machineOwner(
