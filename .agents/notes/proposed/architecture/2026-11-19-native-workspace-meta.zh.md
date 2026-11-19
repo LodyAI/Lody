@@ -10,7 +10,7 @@ Language: [English](2026-11-19-native-workspace-meta.md)
 IndexedDB）迁到一个 native loro-repo-rs 房间。独立宿主进程持有引擎；daemon 和桌面 main
 各保持一条连接；renderer 经 main 的领域 IPC 访问。现有 `LoroRepo` 调用方保持原 API，
 因为 repo 使用增量 external metadata 适配器。旧 Meta 经 LWW 导入迁移，并做有界覆盖校验。
-实现需要两个 SDK 新增能力，目前只是基于 loro-repo `795bafcb` 的本地提交。验证仅在 Linux：真实宿主进程、
+实现需要两个 SDK 新增能力，已作为 loro-repo #306、#307 合入 main（`0fa4fb92`），尚未发版。验证仅在 Linux：真实宿主进程、
 真实 CLI document manager 与 1 万/10 万基准；未跑打包桌面。实现设计见
 [native Workspace Meta](../../../docs/native-workspace-meta.md)。这是
 [被拒的 native Repo 记录](../../rejected/architecture/2026-10-16-native-workspace-repo.zh.md)
