@@ -610,6 +610,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const repo = await LoroRepo.create({
     storageAdapter: repoStorage,
     metaDebounceCommitMs: 0,
+    // Session metadata (what lists a Session) must reach disk with its history;
+    // loro-repo's default 5 s trailing debounce let a crash drop new Sessions.
+    metaPersistDebounceMs: 0,
     resolveRoomTransports: (room) =>
       resolveRoomTransportsImpl?.(room) ?? { transportIds: ['cloud'] },
   });
