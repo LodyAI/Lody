@@ -15,6 +15,12 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 | Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.                      |
 | Process lifetime | [Session](session.ts)                             | Owns ACP resources, confirmed termination, and bounded Codex refresh-start recovery. |
 
+## Queue promotion
+
+The queue item records when the sender enqueued it. When the watcher promotes the
+item, it timestamps the new user history entry with the current server-adjusted
+time. Recovery reuses an existing history entry with its original timestamp.
+
 ## MCP selection between turns
 
 Session records the MCP ids mounted at startup. Execution compares them with the
