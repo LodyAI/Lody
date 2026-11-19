@@ -279,7 +279,7 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
     await assert.rejects(
       handlers.get('nativeWorkspaceMeta.openDoc')(auxiliary, {
         ...scope,
-        docId: 'schedule-x',
+        docId: 'task-x',
         observationId: '00000000-0000-4000-8000-000000000005'
       })
     )
