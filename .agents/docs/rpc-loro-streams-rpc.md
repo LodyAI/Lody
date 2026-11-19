@@ -45,7 +45,8 @@ publications on the same reply stream as the owner commits. A lease lasts up to
 45 seconds or 64 publications. The client budget is 55 seconds. An idle owner
 parks on Native commit observation outside read capacity, SQLite and the writer
 lane. Each transport has bounded admission, with 128 active subscriptions
-across the daemon and eight owner reads per session. A separate close lane uses
+across the daemon. Owner reads serialize per session with eight active sessions
+across the daemon. A separate close lane uses
 `session/history-unsubscribe` with the original reply stream and read proof.
 Owner shutdown aborts active leases.
 
