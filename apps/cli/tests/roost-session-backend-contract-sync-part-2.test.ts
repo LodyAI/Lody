@@ -142,6 +142,8 @@ describe('Production Roost history semantics (projections, patches and goals)', 
     const ports = {
       workspaceDocument: {
         peekSessionDoc: () => undefined,
+        // Not native: an uncached Session is opened, never read from the engine.
+        openIdleSessionReader: async () => undefined,
         getOrCreateSessionDoc: async () => ({ getMetaState: async () => ({ latestGoal: legacy }) }),
       },
       getSessionBackend: async () => fixture.backend,
