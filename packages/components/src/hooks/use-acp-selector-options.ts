@@ -1,7 +1,9 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { AcpModelConfigOptionsSource, AcpModelControls } from '@lody/shared';
 import {
   buildAcpSelectorOptions,
+  type AcpConfigOptionSelector,
   type AcpSelectorOptions,
   type AcpSelectorTarget,
 } from '@/components/shared/acp-selector-options';
@@ -54,4 +56,39 @@ export function useAcpSelectorOptions(target?: AcpSelectorTarget): AcpSelectorOp
     targetSelectedModelId,
     t,
   ]);
+}
+
+/**
+ * Per-model selector lookup: the config options a model would show if it were
+ * selected, without changing the selection. Used by pickers that compare
+ * controls across models (the Devin Fusion builder). Falls back to empty
+ * selectors when the target lacks an agent identity.
+ */
+export type AcpModelSelectorResolver = (modelId: string) => {
+  selectors: AcpConfigOptionSelector[];
+  source: AcpModelConfigOptionsSource | undefined;
+  /** The adapter's own declaration for this model, when it published one. */
+  declared?: AcpModelControls;
+};
+
+export function useAcpModelSelectorResolver(target?: AcpSelectorTarget): AcpModelSelectorResolver {
+  const { t } = useTranslation();
+  return useCallback(
+    (modelId) => {
+      const resolved =
+        target?.cliType && target.agentType
+          ? buildAcpSelectorOptions({ ...target, selectedModelId: modelId })
+          : buildAcpSelectorOptions(undefined);
+      const options =
+        target?.cliType === 'builtin' && target.agentType?.toLowerCase() === 'grok'
+          ? localizeBuiltinGrokSelectorOptions(resolved, t)
+          : resolved;
+      return {
+        selectors: options.configOptionSelectors,
+        source: options.modelConfigOptionsSource,
+        declared: options.declaredModelControls?.[modelId],
+      };
+    },
+    [target, t]
+  );
 }

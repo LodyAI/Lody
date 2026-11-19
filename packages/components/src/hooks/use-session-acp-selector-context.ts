@@ -5,7 +5,10 @@ import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-fl
 import type { AcpCommandSummary, AgentConfigCliType, AgentConfigId, MachineId } from '@lody/shared';
 import type { AcpConfigOptionValue } from '@/components/shared/acp-selector-options';
 
-import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
+import {
+  useAcpModelSelectorResolver,
+  useAcpSelectorOptions,
+} from '@/hooks/use-acp-selector-options';
 import { useAvailableCommands } from '@/hooks/use-available-commands';
 import { useResolvedMachineMeta } from '@/hooks/use-resolved-machine-meta';
 
@@ -65,12 +68,15 @@ export function useSessionAcpSelectorContext({
     ]
   );
   const selectorOptions = useAcpSelectorOptions(acpTarget);
+  const selectorsForModel = useAcpModelSelectorResolver(acpTarget);
   const availableCommands = useAvailableCommands(acpTarget, sessionCommands);
 
   return {
     ...selectorOptions,
     /** The memoized options object itself, for callers that pass it on whole. */
     selectorOptions,
+    /** Per-model selector lookup for controls that compare across models. */
+    selectorsForModel,
     availableCommands,
     machineFlockRows,
     sessionMachine,

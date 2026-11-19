@@ -214,6 +214,70 @@ describe('declared per-model controls', () => {
     // Declared without effort: no control, rather than a guessed one.
     expect(effortFor('codex', 'model-a')).toBeUndefined();
   });
+
+  /* Devin's Fast control is a `speed` select (Standard/Fast), not a fast/fast-mode
+     toggle: the declaration must still remove it for a model without Fast and
+     keep it for one that has it, while another agent's `speed` option is not
+     treated as a Fast control at all. */
+  it('treats a builtin Devin `speed` select as the model Fast control', () => {
+    const devinMachine = (agentType: string) =>
+      machineWithCapabilities({
+        [agentConfigId]: {
+          cliType: 'builtin',
+          agentType,
+          cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+          provenance: 'runtime',
+          modes: [],
+          models: [],
+          configOptions: [
+            {
+              id: 'model',
+              name: 'Model',
+              category: 'model',
+              type: 'select',
+              currentValue: 'fusion-a-sidekick-x',
+              options: [
+                { value: 'fusion-a-sidekick-x', name: 'Fusion (A + X)' },
+                { value: 'fusion-b-sidekick-x', name: 'Fusion (B + X)' },
+                { value: 'plain-model', name: 'Plain' },
+              ],
+            },
+            {
+              id: 'speed',
+              name: 'Speed',
+              category: 'model_config',
+              type: 'select',
+              currentValue: 'standard',
+              options: [
+                { value: 'standard', name: 'Standard' },
+                { value: 'fast', name: 'Fast' },
+              ],
+            },
+          ],
+          declaredModelControls: {
+            'fusion-a-sidekick-x': { fastMode: true },
+            'fusion-b-sidekick-x': { fastMode: false },
+          },
+          fetchedAt: 1,
+        },
+      });
+    const speedFor = (agentType: string, selectedModelId: string) =>
+      buildAcpSelectorOptions({
+        configId: agentConfigId,
+        cliType: 'builtin',
+        agentType,
+        selectedModelId,
+        machine: devinMachine(agentType),
+      }).configOptionSelectors.find((selector) => selector.configId === 'speed');
+
+    expect(speedFor('devin', 'fusion-a-sidekick-x')).toBeDefined();
+    expect(speedFor('devin', 'fusion-b-sidekick-x')).toBeUndefined();
+    // No declaration covers this model: the probed control stays.
+    expect(speedFor('devin', 'plain-model')).toBeDefined();
+    // Another agent's `speed` select is not a Fast control; a Fast=false
+    // declaration must not strip it.
+    expect(speedFor('codex', 'fusion-b-sidekick-x')).toBeDefined();
+  });
 });
 
 describe('buildAcpSelectorOptions', () => {
