@@ -50,9 +50,8 @@ export async function runEagerSyncWorkerTask(
     }
     let localCatchUp: Promise<void> | undefined;
     if (request.transport.plane === 'local') {
-      // For large docs the daemon sends `joined` BEFORE the update chunks.
-      // The adapter's first-sync signal only acknowledges the join. Keep the
-      // room alive until the advertised version is actually in our document.
+      // Terminal room failures can release the first-sync waiter. Require the
+      // daemon's advertised version before certifying a cache snapshot.
       localCatchUp = new Promise<void>((resolve) => {
         let target: VersionVector | undefined;
         const check = () => {

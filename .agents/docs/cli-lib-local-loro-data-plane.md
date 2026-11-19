@@ -75,6 +75,13 @@ room error; `payload_too_large` stays terminal only for a single flock entry abo
 budget. Receiver-side skip-until-newline is only a backup — a framing overflow must not
 destroy the socket.
 
+A Doc join acknowledgment supplies a fixed server version for the receiver. The
+adapter can reconcile pending local writes as soon as it acknowledges the join.
+It reports receive completion only when the applied document covers the acknowledged
+version, including on rejoin. The existing join deadline also covers this receive
+step. A timeout discards partial fragments and returns the room to its existing
+retry path.
+
 `createJsonLineSplitter` owns a stateful UTF-8 decode and must be fed the RAW socket
 chunk. A per-chunk `toString('utf8')` mangles a multi-byte character split across a
 chunk boundary into U+FFFD. A flock bundle carries file paths as literal UTF-8 JSON, so
