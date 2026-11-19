@@ -186,6 +186,7 @@ describe('workspace import', () => {
       doc.getMap('definition').set('enabled', true)
     );
     await writeDoc(source.repo, 'machine-m1', { name: 'M' }, (doc) => doc.getMap('m').set('a', 1));
+    await source.repo.upsertDocMeta('machine-m2', { name: 'Meta only' });
     await writeFlock(source.repo, `${WS}:wf:workspace`, (flock) => flock.put(['project', 'p1'], { name: 'P' }));
     await writeFlock(source.repo, `${WS}:mf:m1`, (flock) => flock.put(['localProject', 'a'], { p: 1 }));
     await writeFlock(source.repo, `${WS}:sr`, (flock) => {

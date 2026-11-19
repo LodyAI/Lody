@@ -61,10 +61,9 @@ export async function exportWorkspaceBundle(input: ExportWorkspaceBundleInput): 
     await check();
     if (!(await prepare(entry.docId, 'loro'))) continue;
     const doc = await repo.openDetachedDoc(entry.docId);
-    if (doc.frontiers().length === 0) {
-      writer.addGap({ id: entry.docId, kind: 'missing', reason: 'Document body is not available on this device' });
-      continue;
-    }
+    // After a successful sync an empty body is genuinely empty (machine records, for
+    // example, keep every field in Meta); Meta already carries the document.
+    if (doc.frontiers().length === 0) continue;
     await writer.addRoom(
       { id: entry.docId, model: 'loro', codec: room.codec, encoding: room.encoding },
       doc.export({ mode: 'snapshot' })

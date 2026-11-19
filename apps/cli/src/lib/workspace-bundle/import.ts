@@ -7,7 +7,7 @@ import type { JsonObject, LoroRepo } from 'loro-repo';
 import { z } from 'zod';
 import type { OpenBundle } from './bundle-file';
 import { authorizeFlockChanges } from './authorize';
-import { KNOWN_CODECS, MACHINE_CODECS, META_ROOM_ID } from './codecs';
+import { classifyRoom, KNOWN_CODECS, MACHINE_CODECS, META_ROOM_ID } from './codecs';
 import {
   applyPostImportWrites,
   crossWorkspaceRowWithheld,
@@ -95,6 +95,13 @@ export async function mergeFlockBytes(
   target.importJson({ version: source.version, entries });
 }
 
+/** Meta rows of machine records: they describe one machine and never cross workspaces. */
+function metaRowIsMachineScoped(key: readonly unknown[], workspaceId: string): boolean {
+  if (typeof key[1] !== 'string' || !['e', 'm', 'ef', 'efx'].includes(String(key[0]))) return false;
+  const room = classifyRoom(key[1], workspaceId);
+  return room.kind === 'room' && MACHINE_CODECS.has(room.codec);
+}
+
 /** Meta rows that belong to one document or named Flock id. */
 export function metaRowBelongsTo(key: readonly unknown[], ids: ReadonlySet<string>): boolean {
   return (
@@ -152,7 +159,8 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
   const crossWorkspace = sourceWorkspaceId !== workspaceId;
   const targetIdOf = (id: string) => mapRoomId(id, sourceWorkspaceId, workspaceId);
   const metaPolicy = (withheld: ReadonlySet<string>): RowPolicy => ({
-    skip: (key) => metaRowBelongsTo(key, withheld),
+    skip: (key) =>
+      metaRowBelongsTo(key, withheld) || (crossWorkspace && metaRowIsMachineScoped(key, sourceWorkspaceId)),
     ...(crossWorkspace ? { mapKey: (key) => mapMetaKey(key, sourceWorkspaceId, workspaceId) } : {}),
   });
 
@@ -341,7 +349,9 @@ export async function applyWorkspaceImport(input: ApplyWorkspaceImportInput): Pr
     if (room.model === 'meta') {
       const withheld = withheldMetaIds(plan.rooms);
       await mergeFlockBytes(repo.getMeta(), bytes, {
-        skip: (key) => metaRowBelongsTo(key, withheld),
+        skip: (key) =>
+          metaRowBelongsTo(key, withheld) ||
+          (crossWorkspace && metaRowIsMachineScoped(key, plan.sourceWorkspaceId)),
         ...(crossWorkspace
           ? { mapKey: (key) => mapMetaKey(key, plan.sourceWorkspaceId, plan.targetWorkspaceId) }
           : {}),

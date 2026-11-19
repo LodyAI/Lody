@@ -28,6 +28,8 @@ async function repoWithData(): Promise<TestRepo> {
   );
   await writeDoc(repo, 'schedule-x', { kind: 'schedule' }, (doc) => doc.getText('prompt').insert(0, 'p'));
   await writeDoc(repo, 'mystery-1', {}, (doc) => doc.getMap('m').set('a', 1));
+  // Machine records keep all fields in Meta and have no document body.
+  await repo.upsertDocMeta('machine-m1', { name: 'M' });
   await writeFlock(repo, `${WS}:wf:workspace`, (flock) => {
     flock.put(['project', 'p1'], { name: 'P' });
     flock.put(['project', 'p2'], { name: 'Q' });
@@ -86,6 +88,7 @@ describe('exportWorkspaceBundle', () => {
         { id: 'session-r1', kind: 'roost', reason: expect.stringContaining('Roost') },
       ])
     );
+    expect(manifest.gaps.map((gap) => gap.id)).not.toContain('machine-m1');
 
     const bundle = await openBundle(out);
     cleanup.push(() => bundle.close());
