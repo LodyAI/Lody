@@ -141,6 +141,21 @@ describe('room-sync-tracker', () => {
       expect(tracker.getSyncState()).toBe('error');
       expect(tracker.needsReconnect()).toBe(true);
     });
+
+    it('clears the stopped latch when a subsequent re-join fails before attaching', () => {
+      const tracker = createRoomSyncTracker('room-stopped-retry');
+      const subscription = createControlledSubscription('joined');
+      tracker.attach(subscription.sub);
+      tracker.markFirstSynced();
+      expect(tracker.getSyncState()).toBe('synced');
+
+      tracker.markStopped();
+      expect(tracker.getSyncState()).toBe('idle');
+
+      tracker.markFirstSyncFailed();
+      expect(tracker.getSyncState()).toBe('error');
+      expect(tracker.needsReconnect()).toBe(true);
+    });
   });
 });
 
@@ -222,6 +237,28 @@ describe('room-sync', () => {
         firstSynced: () => bindingFirstSynced,
       });
       expect(result).toBe(sub);
+    });
+  });
+
+  describe('waitForRoomToSync abort signal', () => {
+    it('unsubscribes and resolves null immediately when aborted while firstSynced is pending', async () => {
+      const neverSettled = new Promise<void>(() => {});
+      const sub = createSubscription(neverSettled);
+      const controller = new AbortController();
+      let observedSub: SyncRoomSubscription | null = null;
+
+      const waiting = waitForRoomToSync(async () => sub, {
+        roomId: 'room-abort-first-sync',
+        signal: controller.signal,
+        onSubscription: (joined) => {
+          observedSub = joined;
+          controller.abort();
+        },
+      });
+
+      await expect(waiting).resolves.toBeNull();
+      expect(observedSub).toBe(sub);
+      expect(sub.unsubscribe).toHaveBeenCalledTimes(1);
     });
   });
 });
