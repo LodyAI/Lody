@@ -47,6 +47,7 @@ import type {
   SessionEditableTailResult,
   SessionImportResult,
   SessionHistoryCommands,
+  SessionHistoryDirectoryPage,
   SessionHistoryReader,
   SessionModelSummaryReader,
   SessionObservation,
@@ -443,8 +444,11 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
     return inRange.length > 0 ? { structural: false, positions: inRange } : undefined;
   };
 
-  // One shallow identity scan per structural/identity change, never per body.
+  // Identity lookups scan backward from the tail and stop at the match, so
+  // latest-turn reads stay proportional to their distance from the end. The
+  // scanned suffix is reused until a structural or identity change.
   const positions = new Map<string, number>();
+  let scannedFrom = 0;
   let identityDirty = true;
   let indexedLength = -1;
   let indexedOpCount = -1;
@@ -457,21 +461,45 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
     )
       identityDirty = true;
   });
-  const ensureIdentityIndex = () => {
+  const locate = (turnId: string): number | undefined => {
     // Pending writes are readable before subscription delivery. Reuse the scan
     // until another op arrives; merely having a pending transaction is not a change.
     // opCount includes pending ops and does not restart at commit, unlike pending length.
-    if (!identityDirty && indexedLength === list.length) {
-      if (doc.getPendingTxnLength() === 0 || indexedOpCount === doc.opCount()) return;
+    const fresh =
+      !identityDirty &&
+      indexedLength === list.length &&
+      (doc.getPendingTxnLength() === 0 || indexedOpCount === doc.opCount());
+    if (!fresh) {
+      positions.clear();
+      scannedFrom = list.length;
+      indexedLength = list.length;
+      indexedOpCount = doc.opCount();
+      identityDirty = false;
     }
-    positions.clear();
-    for (let i = 0; i < list.length; i++) {
-      const id = readIdentity(list.get(i))?.turnId;
-      if (id !== undefined) positions.set(id, i); // newest duplicate wins, like writer.locate
+    const known = positions.get(turnId);
+    if (known !== undefined) return known;
+    while (scannedFrom > 0) {
+      scannedFrom -= 1;
+      const id = readIdentity(list.get(scannedFrom))?.turnId;
+      // Newest duplicate wins, like writer.locate: a later position is seen first.
+      if (id !== undefined && !positions.has(id)) positions.set(id, scannedFrom);
+      if (id === turnId) return scannedFrom;
     }
-    indexedLength = list.length;
-    indexedOpCount = doc.opCount();
-    identityDirty = false;
+    return undefined;
+  };
+
+  /** A bounded page ending at `end` (exclusive); the cursor is its start position. */
+  const directoryPage = (end: number, limit: number): SessionHistoryDirectoryPage => {
+    const totalCount = list.length;
+    const hi = Math.max(0, Math.min(end, totalCount));
+    const lo = Math.max(0, hi - Math.max(1, Math.floor(limit)));
+    return {
+      startPosition: lo,
+      totalCount,
+      rows: directory(lo, hi),
+      hasMoreOlder: lo > 0,
+      cursor: lo > 0 ? String(lo) : null,
+    };
   };
 
   const history = {
@@ -516,13 +544,11 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
       return readSlot(list, position);
     },
     readTurn(turnId: string): SessionTurnRead {
-      ensureIdentityIndex();
-      const position = positions.get(turnId);
+      const position = locate(turnId);
       return position === undefined ? { state: 'missing' } : readSlot(list, position);
     },
     readTurnForDisplay(turnId: string): SessionTurnRead {
-      ensureIdentityIndex();
-      const position = positions.get(turnId);
+      const position = locate(turnId);
       if (position === undefined) return { state: 'missing' };
       const turn = displayTurn(list.get(position));
       return turn ? { state: 'ready', turn } : { state: 'invalid' };
@@ -532,8 +558,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
       rootSessionId: string,
       runId: string
     ): SessionSubagentRun | undefined {
-      ensureIdentityIndex();
-      const position = positions.get(turnId);
+      const position = locate(turnId);
       if (position === undefined) return undefined;
       const items = readField(list.get(position), 'items');
       for (let index = 0; index < readLength(items); index++) {
@@ -559,6 +584,14 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
     readDirectory(from: number, to: number) {
       return directory(from, to);
     },
+    async readLatestDirectoryPage(limit: number) {
+      return directoryPage(list.length, limit);
+    },
+    async readOlderDirectoryPage(cursor: string, limit: number) {
+      const end = Number(cursor);
+      if (!Number.isSafeInteger(end) || end <= 0) throw new Error('invalid_directory_cursor');
+      return directoryPage(end, limit);
+    },
     readAll() {
       // One detached synchronous read of the stored list: a single consistent
       // snapshot, never a stitched count + paginated read.
@@ -583,10 +616,14 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
           listener({ kind: 'changed', ids });
         }
       });
-      const initial = Promise.resolve(directory(0, list.length));
+      // Paged consumers read the latest page instead; only a consumer that asks
+      // for the whole directory pays for it, as of its first read.
+      let initial: Promise<readonly SessionDirectoryRow[]> | undefined;
       let active = true;
       return {
-        initial,
+        get initial() {
+          return (initial ??= Promise.resolve(directory(0, list.length)));
+        },
         unsubscribe() {
           if (!active) return;
           active = false;

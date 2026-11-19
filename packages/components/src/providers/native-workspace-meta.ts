@@ -178,18 +178,18 @@ export function createRendererNativeDocs(
   return {
     capability: EXTERNAL_DOCS_CAPABILITY,
     owns: isNativeDocId,
-    async open(docId, onUpdate) {
+    async open(docId, onUpdate, known) {
       await migrate(docId);
       const observationId = crypto.randomUUID();
-      let snapshot: Uint8Array | undefined;
+      let first: Uint8Array | undefined;
       let loaded!: () => void;
       const firstSnapshot = new Promise<void>((resolve) => (loaded = resolve));
       const stop = onIpcEvent(NATIVE_DOC_CHANNEL, ({ observationId: id, event }) => {
         if (id !== observationId) return;
         if (event.kind === 'snapshot') {
           // A later snapshot is a reload after reconnect: it imports as an update.
-          if (snapshot === undefined) {
-            snapshot = event.file;
+          if (first === undefined) {
+            first = event.file;
             loaded();
           } else onUpdate(event.file);
         } else if (event.kind === 'changes') {
@@ -198,19 +198,24 @@ export function createRendererNativeDocs(
       });
       try {
         // Main sends the snapshot before its reply; both share one ordered channel.
-        await api.openDoc({ workspaceId, docId, observationId });
+        await api.openDoc({
+          workspaceId,
+          docId,
+          observationId,
+          ...(known ? { since: { ...known.version } } : {}),
+        });
         await firstSnapshot;
       } catch (error) {
         stop();
         throw error;
       }
-      return {
-        snapshot,
-        close: async () => {
-          stop();
-          await api.release({ observationId });
-        },
+      const close = async () => {
+        stop();
+        await api.release({ observationId });
       };
+      // With `known`, main sent only the ops past that version.
+      if (!first?.byteLength) return { close };
+      return known ? { update: first, close } : { snapshot: first, close };
     },
     commit: (docId, updates) => api.commitDoc({ workspaceId, docId, updates: [...updates] }),
   };

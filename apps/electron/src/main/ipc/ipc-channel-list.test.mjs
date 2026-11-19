@@ -309,6 +309,32 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
     for (const event of docEvents.filter((e) => e.event.kind === 'changes'))
       for (const update of event.event.updates) replica.import(update)
     assert.deepEqual(replica.getList('history').toJSON(), ['turn'])
+    // A window reopening a retained replica receives only the ops past its version.
+    const version = Object.fromEntries(replica.oplogVersion().toJSON())
+    const later = new LoroDoc()
+    later.import(replica.export({ mode: 'snapshot' }))
+    later.getList('history').push('later')
+    later.commit()
+    await handlers.get('nativeWorkspaceMeta.commitDoc')(primary, {
+      ...scope,
+      docId: 'session-a',
+      updates: [later.export({ mode: 'update', from: replica.oplogVersion() })]
+    })
+    const reopened = []
+    auxiliary.sender.on(nativeIpc.NATIVE_DOC_CHANNEL, (event) => {
+      if (event.observationId === '00000000-0000-4000-8000-000000000007') reopened.push(event.event)
+    })
+    await handlers.get('nativeWorkspaceMeta.openDoc')(auxiliary, {
+      ...scope,
+      docId: 'session-a',
+      observationId: '00000000-0000-4000-8000-000000000007',
+      since: version
+    })
+    assert.equal(reopened[0].kind, 'snapshot')
+    assert.equal(reopened[0].delta, true)
+    assert.ok(reopened[0].file.byteLength < later.export({ mode: 'snapshot' }).byteLength)
+    replica.import(reopened[0].file)
+    assert.deepEqual(replica.getList('history').toJSON(), ['turn', 'later'])
   } finally {
     const connection = await nativeRepo.connectNativeRepo({
       dataDir: nativeDir,

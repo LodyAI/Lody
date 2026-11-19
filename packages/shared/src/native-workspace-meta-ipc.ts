@@ -91,7 +91,14 @@ export const NativeFlockCommitSchema = Workspace.extend({
 
 const MAX_DOC_COMMIT_BYTES = 64 * 1024 * 1024;
 const DocTarget = Workspace.extend({ docId: Id.refine(isNativeDocId, 'not an owned document') });
-export const NativeDocOpenSchema = DocTarget.extend({ observationId: Observation }).strict();
+const LoroVersion = z
+  .record(z.string().regex(/^\d{1,20}$/), z.number().int().nonnegative())
+  .refine((version) => Object.keys(version).length <= 4096, 'too many peers');
+export const NativeDocOpenSchema = DocTarget.extend({
+  observationId: Observation,
+  /** The replica's retained version: the first load sends only newer ops. */
+  since: LoroVersion.optional(),
+}).strict();
 export const NativeDocCommitSchema = DocTarget.extend({
   updates: z
     .array(z.instanceof(Uint8Array))
@@ -109,7 +116,7 @@ export const NativeDocLegacyCheckSchema = DocTarget.extend({ source: RendererSou
 export const NativeDocLegacySchema = DocTarget.extend({
   source: RendererSource,
   snapshot: z.instanceof(Uint8Array),
-  version: z.record(z.string(), z.number().int().nonnegative()),
+  version: LoroVersion,
 }).strict();
 
 /** One-time import of this renderer's frozen legacy replica (Flock JSON export). */
@@ -146,7 +153,7 @@ export const NATIVE_FLOCK_CHANNEL = 'nativeWorkspaceMeta.flock' as const;
 export type NativeDocEvent = {
   observationId: string;
   event:
-    | { kind: 'snapshot'; file: Uint8Array }
+    | { kind: 'snapshot'; file: Uint8Array; delta: boolean }
     | { kind: 'changes'; updates: Uint8Array[] }
     | { kind: 'invalidated' };
 };

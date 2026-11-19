@@ -345,21 +345,26 @@ export function observeFlockRegisters(
   );
 }
 
-/** Loro document mode: the room's raw snapshot, then binary updates. */
+/**
+ * Loro document mode: the room's raw snapshot (with `since`, only the ops past
+ * that version: `delta`), then binary updates.
+ */
 export type LoroDocObservationEvent =
-  | { kind: 'snapshot'; file: Uint8Array; txId: number }
+  | { kind: 'snapshot'; file: Uint8Array; delta: boolean; txId: number }
   | { kind: 'changes'; updates: Uint8Array[]; txId: number }
   | { kind: 'invalidated' };
 
 /**
  * Update view for an in-memory Loro replica. Initial state is the room's raw
- * export; buffered or repeated updates import in any order.
+ * export, or the ops past `since` for a replica that kept an earlier state;
+ * buffered or repeated updates import in any order.
  */
 export function observeLoroDoc(
   client: RepoClient,
   namespace: string,
   room: RoomKey,
-  listener: (event: LoroDocObservationEvent) => void
+  listener: (event: LoroDocObservationEvent) => void,
+  since?: Readonly<Record<string, number>>
 ): FlockObservation {
   return observe<LoroUpdates>(
     client,
@@ -369,9 +374,13 @@ export function observeLoroDoc(
       return {
         buffer: (update) => buffered.push(...update.updates),
         async run() {
-          const { bytes, roomTxId } = await client.exportLoroRaw(namespace, room);
+          // A reload after reconnect also starts from `since`: the replica
+          // still holds that state, so the ops past it are all it lacks.
+          const { bytes, roomTxId } = since
+            ? await client.exportLoroSince(namespace, room, since)
+            : await client.exportLoroRaw(namespace, room);
           if (!isCurrent()) return false;
-          listener({ kind: 'snapshot', file: bytes, txId: roomTxId });
+          listener({ kind: 'snapshot', file: bytes, delta: since !== undefined, txId: roomTxId });
           if (buffered.length) listener({ kind: 'changes', updates: buffered, txId: roomTxId });
           return true;
         },
