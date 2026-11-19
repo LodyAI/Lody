@@ -1,6 +1,10 @@
 import { produce } from 'immer';
 import { prepareReplacement } from '../history-writer';
-import { HistoryEntryWriteSchema, parseHistoryWrite } from '../history-write-schema';
+import {
+  HistoryEntryWriteSchema,
+  HistoryWriteError,
+  parseHistoryWrite,
+} from '../history-write-schema';
 import { PermissionOutcomeSchema } from '../message-schemas';
 import type { SessionHistory } from '../schema';
 import { applyHistoryAction, historyActionTarget } from './history-actions';
@@ -291,6 +295,7 @@ export function createRemoteControlState<S extends Record<string, unknown>>(
 }
 
 const MAX_ATTEMPTS = 8;
+const equalTurns = (a: unknown, b: unknown) => diffJson(a, b).length === 0;
 
 /**
  * History commands for a remote Session document, with the HistoryWriter's
@@ -337,11 +342,12 @@ export function createRemoteHistoryCommands(
       const turns = reads.map((read) => read.value as SessionEntry);
       // Planners may edit their input in place: plan on copies, diff against the reads.
       const planned = plan(turns.map((turn) => structuredClone(turn)));
-      const ops = positions.flatMap((position, i) =>
-        planned.turns[i] === undefined
-          ? []
-          : diffJson(turns[i], planned.turns[i], ['history', position])
-      );
+      const ops = positions.flatMap((position, i) => {
+        const next = planned.turns[i];
+        if (next === undefined || equalTurns(turns[i], next)) return [];
+        // The writer's changed-field validation, before anything is sent.
+        return diffJson(turns[i], prepareReplacement(turns[i], next), ['history', position]);
+      });
       if (!ops.length) return planned.result;
       try {
         await port.applyPatch(ops, { mode: 'cas', expected_room_tx_id: head });
@@ -371,7 +377,7 @@ export function createRemoteHistoryCommands(
       }
     },
     async replaceTurn(turnId, turn) {
-      if (turn.id !== turnId) throw new Error('immutable_id');
+      if (turn.id !== turnId) throw new HistoryWriteError([{ path: ['id'], code: 'immutable_id' }]);
       const found = await editTurns(turnId, false, ([stored]) => {
         if (!stored) return { turns: [], result: false };
         return {
@@ -379,12 +385,12 @@ export function createRemoteHistoryCommands(
           result: true,
         };
       });
-      if (!found) throw new Error('not_found');
+      if (!found) throw new HistoryWriteError([{ path: ['history'], code: 'not_found' }]);
     },
     async respondPermission(requestId, outcome, options) {
       parseHistoryWrite(PermissionOutcomeSchema, outcome);
-      const turnId = options?.turnId;
-      if (!turnId) throw new Error('remote_permission_response_requires_turn');
+      const turnId = options?.turnId ?? (await turnWithRequest(requestId));
+      if (!turnId) return false;
       return editTurns(turnId, false, ([stored]) => {
         if (!stored) return { turns: [], result: false };
         let matched = false;
@@ -404,6 +410,31 @@ export function createRemoteHistoryCommands(
       });
     },
   };
+
+  /** The newest turn holding the request, read back from the tail in bounded pages. */
+  async function turnWithRequest(requestId: string): Promise<string | undefined> {
+    let end: number | undefined;
+    for (;;) {
+      const page = await port.readListFields(end === undefined ? -32 : Math.max(0, end - 32), end, [
+        { path: ['id'] },
+        { path: ['items'] },
+      ]);
+      for (let i = page.rows.length - 1; i >= 0; i--) {
+        const [id, items] = page.rows[i] ?? [];
+        if (typeof id !== 'string' || !Array.isArray(items)) continue;
+        const holds = items.some(
+          (item) =>
+            isRecord(item) &&
+            item.type === 'tool_call' &&
+            isRecord(item.permissionRequest) &&
+            item.permissionRequest.requestId === requestId
+        );
+        if (holds) return id;
+      }
+      if (page.start === 0) return undefined;
+      end = page.start;
+    }
+  }
 
   async function lengthAt() {
     const page = await port.readListFields(0, 0, []);

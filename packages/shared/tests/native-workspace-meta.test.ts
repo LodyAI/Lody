@@ -688,4 +688,115 @@ describe('remote Session writes', () => {
       return read.state === 'ready' && read.turn.status === 'processing';
     });
   });
+
+  it('writes the same history as the HistoryWriter for every renderer command', async () => {
+    // Differential guard: the remote commands re-apply the writer's planners as
+    // patches, so the same command sequence must leave the same stored history,
+    // containers, results and refusals as the HistoryWriter on a local replica.
+    const { connection } = await setup();
+    await createDocRoom(connection.client, ns, 'session-parity');
+    const port = createNativeRemoteHistoryPort(connection.client, ns, 'session-parity');
+    const remote = createRemoteHistoryCommands(port);
+    const doc = new LoroDoc();
+    const local = createLoroSessionData({ sessionId: 'parity' as SessionId, doc }).commands;
+    const user = (id: string, text: string, extra: object = {}) =>
+      ({
+        id,
+        role: 'user',
+        timestamp: '2026-01-01T00:00:00Z',
+        status: 'pending',
+        items: [{ type: 'text', text }],
+        fileDiff: [],
+        inputConfig: { prompt: text, mcpServerIds: [], configOptionValues: { effort: 'high' } },
+        ...extra,
+      }) as never;
+    const steps: [string, (c: typeof local) => Promise<unknown>][] = [
+      ['append user', (c) => c.appendTurn(user('u-1', 'hello'))],
+      [
+        'append assistant with a request',
+        (c) =>
+          c.appendTurn({
+            id: 'a-1',
+            role: 'assistant',
+            timestamp: '2026-01-01T00:00:00Z',
+            userTurnId: 'u-1',
+            items: [
+              { type: 'text', text: 'working' },
+              {
+                type: 'tool_call',
+                toolCallId: 'tc-1',
+                title: 'Run',
+                status: 'pending',
+                permissionRequest: { requestId: 'p-1', options: [] },
+              },
+            ],
+            plan: [{ content: 'step', status: 'pending', priority: 'medium' }],
+            fileDiff: [],
+          } as never),
+      ],
+      ['replace user', (c) => c.replaceTurn('u-1', user('u-1', 'hello again', { read: true }))],
+      [
+        'answer request',
+        (c) =>
+          c.respondPermission('p-1', { outcome: 'selected', optionId: 'allow' } as never, {
+            turnId: 'a-1',
+          }),
+      ],
+      [
+        'answer again (never overwrites)',
+        (c) => c.respondPermission('p-1', { outcome: 'cancelled' } as never),
+      ],
+      [
+        'answer an unknown request',
+        (c) => c.respondPermission('p-404', { outcome: 'cancelled' } as never),
+      ],
+      [
+        'status processing',
+        (c) =>
+          c.applyHistoryAction({
+            kind: 'user-status',
+            turnId: 'u-1',
+            status: 'processing',
+          } as never),
+      ],
+      [
+        'guarded status refused once started',
+        (c) =>
+          c.applyHistoryAction({
+            kind: 'user-status',
+            turnId: 'u-1',
+            status: 'canceled',
+            onlyAwaitingStart: true,
+          } as never),
+      ],
+      ['duplicate copy', (c) => c.appendTurn(user('u-1', 'copy'))],
+      [
+        'status of every copy',
+        (c) =>
+          c.applyHistoryAction({
+            kind: 'user-status',
+            turnId: 'u-1',
+            status: 'completed',
+          } as never),
+      ],
+      ['invalid append', (c) => c.appendTurn({ id: 'bad', role: 'user', items: 'nope' } as never)],
+      ['replace missing', (c) => c.replaceTurn('nope', user('nope', 'x'))],
+    ];
+    const outcome = async (run: () => Promise<unknown>) => {
+      try {
+        return { ok: await run() };
+      } catch (error) {
+        return { error: (error as Error).name };
+      }
+    };
+    for (const [label, step] of steps) {
+      const a = await outcome(() => step(local));
+      const b = await outcome(() => step(remote as never));
+      expect({ label, result: b }).toEqual({ label, result: a });
+    }
+    const stored = LoroDoc.fromSnapshot(
+      (await connection.client.exportLoroRaw(ns, { kind: 'loro_doc', id: 'session-parity' })).bytes
+    );
+    expect(shape(stored)).toEqual(shape(doc));
+  });
 });
