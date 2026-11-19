@@ -60,7 +60,9 @@
   Body-only edits retain directory cursor validity.
   Independently negotiate `sessionHistorySubscription`. Active bridges receive
   durable owner checkpoints and apply inline deltas only at an exact cached base.
-  Renewals resume at the applied checkpoint. Repeated checkpoints leave bodies intact.
+  Renewals resume at the cached checkpoint. A reader adopts each committed checkpoint
+  in its own view, including those another window wrote. A repeated local checkpoint
+  leaves bodies intact.
   Unknown coverage stages a new snapshot while retaining the durable old one.
   During replacement, display reads use the owner and hints still invalidate the
   view; repeated supersessions back off. Publish only complete checkpoint coverage.

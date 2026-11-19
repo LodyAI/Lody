@@ -46,6 +46,7 @@ import {
   createRoostHistoryCache,
   parseRoostCacheCursor,
   roostCacheCursor,
+  type RoostCachedHead,
 } from './roost-history-cache';
 import type { ConversationSessionDataFactory } from './conversation-view/create-conversation-session';
 import type { SessionSnapshotService } from '@lody/shared/session-data';
@@ -297,6 +298,7 @@ const createRoostSessionDataFactoryFromTransport =
     let hasIncrementalCheckpoint = false;
     let replacingSnapshot = false;
     let displayedCacheRevision: number | undefined;
+    let appliedCheckpoint: string | undefined;
     let seenCacheRevision: number | undefined;
     let scheduleRefresh = () => {};
     const pendingReads = new Map<string, Promise<SessionHistoryReadResponse>>();
@@ -532,6 +534,30 @@ const createRoostSessionDataFactoryFromTransport =
     let latestChange: SessionHistoryChange | null | undefined;
     let observedDirectoryEpoch = 0;
     let notificationQueue: Promise<void> = Promise.resolve();
+    const adoptCachedHead = (head: RoostCachedHead) => {
+      if (!head.checkpoint || head.checkpoint === appliedCheckpoint) return;
+      const previousCount = observedHistoryCount ?? 0;
+      appliedCheckpoint = head.checkpoint;
+      // A different reader committed this projection. Fence reads and cursors
+      // from the previous local view, including a retired owner generation.
+      historyEpoch++;
+      ownerRevision = head.revision;
+      observedHistoryRevision = head.revision;
+      observedHistoryCount = head.count;
+      latestChange = undefined;
+      replacingSnapshot = false;
+      hasIncrementalCheckpoint = true;
+      displayedCacheRevision = head.revision;
+      bodies.clear();
+      observedDirectoryEpoch++;
+      for (const listener of listeners) {
+        try {
+          listener({ kind: 'structure', from: 0, to: Math.max(previousCount, head.count) });
+        } catch (error) {
+          console.error('Roost history observer failed', error);
+        }
+      }
+    };
     const notifyChanged = (
       change?: SessionHistoryChange | null,
       revision?: number,
@@ -745,8 +771,10 @@ const createRoostSessionDataFactoryFromTransport =
       if (disposed || refreshing || listeners.size === 0) return;
       refreshing = true;
       refreshRequested = false;
+      let epoch = historyEpoch;
       try {
         const prior = await cached(() => cache.getHead());
+        if (epoch !== historyEpoch) return;
         const checkpoint = prior?.checkpoint ?? prior?.recoveryCheckpoint;
         let ownerReset = false;
         if (incrementalEnabled() && prior && !checkpoint) {
@@ -774,6 +802,7 @@ const createRoostSessionDataFactoryFromTransport =
             response.historyRevision === prior.revision &&
             response.historyCount === prior.count
           ) {
+            adoptCachedHead(prior);
             retryDelay = 0;
             consecutiveSupersessions = 0;
             return;
@@ -879,6 +908,7 @@ const createRoostSessionDataFactoryFromTransport =
             }
             if (change.bodies === undefined && revision < observedHistoryRevision)
               throw new HistoryRefreshSupersededError();
+            if (epoch !== historyEpoch) return;
             const applied = await cached(() =>
               cache.applyChanges(
                 prior,
@@ -895,9 +925,10 @@ const createRoostSessionDataFactoryFromTransport =
             await notificationQueue;
             // The cache transaction committed this interval. A newer hint can
             // request catch-up, but must not suppress its view invalidations.
-            if (disposed) return;
+            if (disposed || epoch !== historyEpoch) return;
             hasIncrementalCheckpoint = true;
             replacingSnapshot = false;
+            appliedCheckpoint = change.checkpoint;
             if (revision < (ownerRevision ?? 0) || revision < observedHistoryRevision)
               refreshRequested = true;
             displayedCacheRevision = revision;
@@ -923,7 +954,7 @@ const createRoostSessionDataFactoryFromTransport =
             // Revisions belong to a Native generation. An explicit owner reset
             // can start a new generation with a lower revision.
             ownerReset = true;
-            historyEpoch++;
+            epoch = ++historyEpoch;
             ownerRevision = revision;
             observedHistoryRevision = revision;
             observedHistoryCount = count;
@@ -979,12 +1010,16 @@ const createRoostSessionDataFactoryFromTransport =
           );
           if (applied === undefined) throw new Error('Roost history cache is unavailable');
           if (!applied) throw new HistoryRefreshSupersededError();
+          if (disposed || epoch !== historyEpoch) return;
           replacingSnapshot = false;
           hasIncrementalCheckpoint = page.checkpoint !== undefined;
           if (revision! < Math.max(ownerRevision ?? 0, observedHistoryRevision))
             refreshRequested = true;
         }
-        if (!disposed && rebuilding) {
+        const previousCheckpoint = appliedCheckpoint;
+        appliedCheckpoint = page.checkpoint;
+        // Without IndexedDB, an authoritative page is itself the readable view.
+        if (!disposed && (rebuilding || (!prior && page.checkpoint !== previousCheckpoint))) {
           observedDirectoryEpoch += 1;
           for (const listener of listeners)
             listener({ kind: 'structure', from: 0, to: page.totalCount });
@@ -1040,12 +1075,18 @@ const createRoostSessionDataFactoryFromTransport =
           const snapshot = await readDirectorySnapshot({ kind: 'readLatestPage', limit: 40 });
           lastPage = snapshot.page;
           await notificationQueue;
-          if (snapshot.directoryEpoch === observedDirectoryEpoch) return lastPage;
+          if (snapshot.directoryEpoch === observedDirectoryEpoch) {
+            appliedCheckpoint ??= lastPage.checkpoint;
+            return lastPage;
+          }
         } catch (error) {
           if (!isHistorySuperseded(error)) throw error;
         }
         if (++attempt >= INITIAL_DIRECTORY_READ_ATTEMPTS) {
-          if (lastPage) return lastPage;
+          if (lastPage) {
+            appliedCheckpoint ??= lastPage.checkpoint;
+            return lastPage;
+          }
           attempt = 0;
           // Continuous writes can supersede a cold open. Retain this read owner
           // and yield before retrying; an ordinary supersession is not a UI fault.
@@ -1100,11 +1141,16 @@ const createRoostSessionDataFactoryFromTransport =
               if (
                 controller.signal.aborted ||
                 disposed ||
-                ownerPublication !== publication ||
-                applied?.checkpoint === publication.checkpoint
+                !active() ||
+                ownerPublication !== publication
               )
                 return;
-              scheduleRefresh();
+              if (
+                applied?.checkpoint === publication.checkpoint &&
+                applied.revision === publication.revision
+              ) {
+                adoptCachedHead(applied);
+              } else scheduleRefresh();
             });
           },
           controller.signal

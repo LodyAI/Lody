@@ -1993,80 +1993,142 @@ it('renews an idle local subscription from the applied checkpoint and closes it 
   }
 });
 
-it('replaces a retired generation after an owner push with a lower revision', async () => {
-  const h = await cachedRecoveryFixture('retired-generation', 1);
-  const timers = controlledRefreshTimers();
-  const published = Promise.withResolvers<void>();
-  const replaced = Promise.withResolvers<void>();
-  const release = Promise.withResolvers<void>();
-  const old = h.entries[0]!;
-  const current = { ...old, items: [{ type: 'text' as const, text: 'from current generation' }] };
-  const page = (turn: SessionHistoryInput, checkpoint: string) => ({
-    checkpoint,
-    startPosition: 0,
-    totalCount: 1,
-    hasMoreOlder: false,
-    cursor: null,
-    rows: [createRoostDirectoryRow(0, turn)],
-  });
-  expect(await h.cache.acceptPage(page(old, 'retired-8'), [old], 8)).toBe(true);
-  const data = createLocalRoostSessionDataFactory({
-    incremental: true,
-    live: true,
-    workspaceId: h.workspaceId,
-    machineId: h.machineId,
-    sendControl: async (request, publish) => {
-      if (request.type === 'session/history-subscription') {
-        const { subscription } = request;
-        const envelope = {
-          type: 'session/history-subscription_response' as const,
-          sessionId: h.sessionId,
-          subscriptionId: subscription.id,
-        };
-        if (subscription.action === 'open') {
-          expect(subscription.checkpoint).toBe('retired-8');
-          publish?.({
-            ...envelope,
-            event: 'publication',
-            publication: { checkpoint: 'current-1', revision: 1 },
-          });
-          published.resolve();
-          await release.promise;
-        } else release.resolve();
-        return { ok: true, responses: [{ ...envelope, event: 'closed' }] };
-      }
-      if (request.type !== 'session/history-read') throw new Error('Unexpected history mutation');
-      if (request.query.kind === 'readChanges') {
-        expect(request.query.checkpoint).toBe('retired-8');
-        return h.reply(1, { state: 'reset', checkpoint: 'current-1' });
-      }
-      expect(request.query.kind).toBe('readLatestPage');
-      return h.reply(1, page(current, 'current-1'), [current]);
-    },
-  })({ sessionId: h.sessionId, doc: h.doc, backendKind: 'roost' });
-  const observation = data.history.observe(() => {
-    void h.cache.getHead().then((head) => {
-      if (head?.checkpoint === 'current-1') replaced.resolve();
+it.each([1, 9])(
+  'adopts a shared history reset at revision %i in both open windows',
+  async (revision) => {
+    const h = await cachedRecoveryFixture('shared-reset-' + revision, 120, 80);
+    const timers = controlledRefreshTimers();
+    const old = h.entries;
+    const current = old.map((turn) => ({
+      ...turn,
+      items: [{ type: 'text' as const, text: 'current generation' }],
+    }));
+    const checkpoint = 'current-generation';
+    const page = (turns: SessionHistoryInput[], checkpoint: string) => ({
+      checkpoint,
+      startPosition: 80,
+      totalCount: turns.length,
+      hasMoreOlder: true,
+      cursor: '80',
+      rows: turns.slice(80).map((turn, index) => createRoostDirectoryRow(80 + index, turn)),
     });
-  });
-  try {
-    await observation.initial;
-    await published.promise;
-    (await timers.next()).callback();
-    await replaced.promise;
-    expect(await h.cache.getHead()).toMatchObject({ revision: 1, checkpoint: 'current-1' });
-    expect(await data.history.readTurn(current.id)).toMatchObject({
-      state: 'ready',
-      turn: current,
-    });
-  } finally {
-    observation.unsubscribe();
-    data.dispose?.();
-    release.resolve();
-    h.cache.dispose();
-    timers.restore();
+    expect(await h.cache.acceptPage(page(old, 'retired-8'), old.slice(80), 8)).toBe(true);
+    let reset = false;
+    const lateReadStarted = Promise.withResolvers<void>();
+    const releaseLateRead = Promise.withResolvers<void>();
+    function openWindow() {
+      const subscribed = Promise.withResolvers<() => void>();
+      const release = Promise.withResolvers<void>();
+      const updated = Promise.withResolvers<void>();
+      const updates: SessionDataChange[] = [];
+      const data = createLocalRoostSessionDataFactory({
+        incremental: true,
+        live: true,
+        workspaceId: h.workspaceId,
+        machineId: h.machineId,
+        sendControl: async (request, publish) => {
+          if (request.type === 'session/history-subscription') {
+            const { subscription } = request;
+            const envelope = {
+              type: 'session/history-subscription_response' as const,
+              sessionId: h.sessionId,
+              subscriptionId: subscription.id,
+            };
+            if (subscription.action === 'open') {
+              expect(subscription.checkpoint).toBe('retired-8');
+              subscribed.resolve(() =>
+                publish?.({
+                  ...envelope,
+                  event: 'publication',
+                  publication: { checkpoint, revision },
+                })
+              );
+              await release.promise;
+            } else release.resolve();
+            return { ok: true, responses: [{ ...envelope, event: 'closed' as const }] };
+          }
+          if (request.type !== 'session/history-read')
+            throw new Error('Unexpected history mutation');
+          const query = request.query;
+          if (query.kind === 'readTurn') {
+            const { turnId } = query;
+            if (!reset && turnId === old[1]!.id) {
+              lateReadStarted.resolve();
+              await releaseLateRead.promise;
+              return h.reply(8, { state: 'ready', turn: old[1] });
+            }
+            return h.reply(reset ? revision : 8, {
+              state: 'ready',
+              turn: (reset ? current : old).find((turn) => turn.id === turnId),
+            });
+          }
+          if (query.kind === 'readChanges') {
+            expect(query.checkpoint).toBe('retired-8');
+            return h.reply(revision, { state: 'reset', checkpoint });
+          }
+          expect(query.kind).toBe('readLatestPage');
+          return h.reply(revision, page(current, checkpoint), current.slice(80));
+        },
+      })({ sessionId: h.sessionId, doc: new LoroDoc(), backendKind: 'roost' });
+      const observation = data.history.observe((change) => {
+        updates.push(change);
+        void h.cache.getHead().then((head) => {
+          if (head?.checkpoint === checkpoint) updated.resolve();
+        });
+      });
+      return {
+        data,
+        observation,
+        subscribed,
+        updated,
+        updates,
+        dispose: () => {
+          observation.unsubscribe();
+          data.dispose?.();
+          release.resolve();
+        },
+      };
+    }
+    const first = openWindow();
+    const second = openWindow();
+    try {
+      await Promise.all([first.observation.initial, second.observation.initial]);
+      const [publishFirst, publishSecond] = await Promise.all([
+        first.subscribed.promise,
+        second.subscribed.promise,
+      ]);
+      expect(await second.data.history.readTurn(old[0]!.id)).toMatchObject({ turn: old[0] });
+      const inFlight = expect(second.data.history.readTurn(old[1]!.id)).rejects.toThrow(
+        /superseded/
+      );
+      await lateReadStarted.promise;
+      reset = true;
+      publishFirst();
+      (await timers.next()).callback();
+      await first.updated.promise;
+      const beforeSecond = second.updates.length;
+      publishSecond();
+      await second.updated.promise;
+      expect(second.updates).toHaveLength(beforeSecond + 1);
+      releaseLateRead.resolve();
+      await inFlight;
+
+      expect(await h.cache.getHead()).toMatchObject({ revision, checkpoint });
+      expect(await second.data.history.readTurn(old[0]!.id)).toMatchObject({ turn: current[0] });
+      expect(await second.data.history.readTurn(old[1]!.id)).toMatchObject({ turn: current[1] });
+      publishSecond();
+      await second.data.history.readLatestDirectoryPage(40);
+      expect(second.updates).toHaveLength(beforeSecond + 1);
+      expect(timers.pending()).toHaveLength(0);
+    } finally {
+      first.dispose();
+      second.dispose();
+      releaseLateRead.resolve();
+      h.cache.dispose();
+      timers.restore();
+    }
   }
-});
+);
 
 it('commits a bounded reset while the owner keeps writing, then catches up incrementally', async () => {
   const h = await cachedRecoveryFixture('streaming-reset', 120);

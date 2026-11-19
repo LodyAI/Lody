@@ -153,6 +153,7 @@ export function createRoostHistoryCache(scope: string) {
             head,
             turns: rows.map((row) => row.turn),
             page: {
+              ...(head.checkpoint ? { checkpoint: head.checkpoint } : {}),
               startPosition: start,
               totalCount: head.count,
               rows: rows.map((row) => row.row),

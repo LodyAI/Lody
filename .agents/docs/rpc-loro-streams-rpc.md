@@ -54,8 +54,12 @@ Each publication rechecks current ordinary history read access before delivery.
 A coherent delta up to 16 KiB can accompany the checkpoint. The reader applies it
 only at its exact cache base and window. Missing, oversized or unusable deltas
 use the existing `readChanges` path, which handles expired checkpoints by staging
-a new bounded page, including a new generation with a lower revision. Reconnection
-starts at the last applied checkpoint. Local
+a new bounded page, including a new generation with a lower revision. Each reader
+adopts an owner-confirmed shared cache checkpoint in its own view before skipping
+repeated publications. Reconnection starts at the last cached checkpoint. The
+native mobile runtime consumes the reply stream over Streams long-poll. It
+withdraws live readiness on subscription failure and restores it once the
+owner-confirmed checkpoint is readable in the transcript. Local
 Electron uses the same publication contract over `session/history-subscription`
 and needs no network grant. See [peer observation](../notes/implemented/bug-fix/2026-10-16-roost-peer-reader-readiness.md).
 
