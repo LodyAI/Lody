@@ -75,7 +75,10 @@ describe('native Workspace Meta in the CLI daemon', () => {
 
   const open = async (workspace: { id: string }, userId: string) => {
     const workspaceId = workspace.id as WorkspaceId;
-    const cloudPort = createLocalCloudPort({ identity: { userId }, workspaces: [workspace as never] });
+    const cloudPort = createLocalCloudPort({
+      identity: { userId },
+      workspaces: [workspace as never],
+    });
     const manager = await LoroDocumentManager.create(workspaceId, userId, logger(), {
       streamsTokens: cloudPort.streamsTokens,
       cloudBilling: cloudPort.billing,
@@ -89,7 +92,7 @@ describe('native Workspace Meta in the CLI daemon', () => {
     };
   };
 
-  it('migrates the legacy SQLite Meta once and keeps native state across restarts', async () => {
+  it('migrates legacy Meta, keeps native state across restarts and writes it back when disabled', async () => {
     const identity = await loadOrCreateLocalIdentity(logger());
     const workspace = await ensureImplicitLocalWorkspace({
       catalog: makeLocalWorkspaceCatalog({
@@ -118,15 +121,13 @@ describe('native Workspace Meta in the CLI daemon', () => {
     const daemon = await open(workspace, identity.userId);
     try {
       expect(daemon.manager.repo.metadataMode).toBe('external');
-      expect((await daemon.manager.repo.getDocMeta(getSessionRoomId(kept)))?.meta).toMatchObject(
-        { title: 'kept' }
-      );
-      expect((await daemon.manager.repo.getDocMeta(getSessionRoomId(removed)))?.deleted).toBe(
-        true
-      );
-      expect(
-        await listAliveRoomIds(daemon.manager, (id) => id.startsWith('session-'))
-      ).toEqual([getSessionRoomId(kept)]);
+      expect((await daemon.manager.repo.getDocMeta(getSessionRoomId(kept)))?.meta).toMatchObject({
+        title: 'kept',
+      });
+      expect((await daemon.manager.repo.getDocMeta(getSessionRoomId(removed)))?.deleted).toBe(true);
+      expect(await listAliveRoomIds(daemon.manager, (id) => id.startsWith('session-'))).toEqual([
+        getSessionRoomId(kept),
+      ]);
 
       await daemon.manager.repo.upsertDocMeta(getSessionRoomId(kept), { title: 'renamed' });
     } finally {
@@ -134,12 +135,41 @@ describe('native Workspace Meta in the CLI daemon', () => {
     }
     // A restart reads native state; the published legacy source is not re-imported.
     const restarted = await open(workspace, identity.userId);
+    let nativeOnly: string;
     try {
-      expect(
-        (await restarted.manager.repo.getDocMeta(getSessionRoomId(kept)))?.meta.title
-      ).toBe('renamed');
+      expect((await restarted.manager.repo.getDocMeta(getSessionRoomId(kept)))?.meta.title).toBe(
+        'renamed'
+      );
+      nativeOnly = await restarted.manager.createSession('local-machine', 'builtin', 'claude');
     } finally {
       await restarted.close();
+    }
+
+    // Flag off: native edits are written back into the legacy replica.
+    delete process.env.LODY_NATIVE_WORKSPACE_META;
+    const legacyAgain = await open(workspace, identity.userId);
+    try {
+      expect(legacyAgain.manager.repo.metadataMode).toBe('legacy');
+      expect((await legacyAgain.manager.repo.getDocMeta(getSessionRoomId(kept)))?.meta.title).toBe(
+        'renamed'
+      );
+      expect(
+        (await legacyAgain.manager.repo.getDocMeta(getSessionRoomId(nativeOnly)))?.deleted
+      ).toBe(false);
+      await legacyAgain.manager.repo.upsertDocMeta(getSessionRoomId(kept), { title: 'offline' });
+    } finally {
+      await legacyAgain.close();
+    }
+
+    // Flag on again: the replica's newer edits merge back into native.
+    process.env.LODY_NATIVE_WORKSPACE_META = '1';
+    const nativeAgain = await open(workspace, identity.userId);
+    try {
+      expect((await nativeAgain.manager.repo.getDocMeta(getSessionRoomId(kept)))?.meta.title).toBe(
+        'offline'
+      );
+    } finally {
+      await nativeAgain.close();
       await connection.close();
     }
   });

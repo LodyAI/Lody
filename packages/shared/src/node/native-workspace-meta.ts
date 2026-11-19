@@ -277,16 +277,13 @@ export function createNativeWorkspaceMeta(
     const selectors = selectorsFor(command);
     for (let attempt = 0; attempt < MAX_CONFLICT_RETRIES; attempt++) {
       // Not sent while disconnected, so the outcome is a certain non-commit.
-      if (client.connectionState !== 'connected')
-        throw notCommitted('native_repo_disconnected');
+      if (client.connectionState !== 'connected') throw notCommitted('native_repo_disconnected');
       const read = await client.flockReadMany(namespace, META_ROOM, selectors, READ_BUDGET);
       const ops = opsFor(command, read.results);
       if (ops.length === 0) return { outcome: 'committed' as const, revision };
       let txId: number;
       try {
-        txId = (
-          await client.flockBatchConditional(namespace, META_ROOM, ops, read.readSet)
-        ).txId;
+        txId = (await client.flockBatchConditional(namespace, META_ROOM, ops, read.readSet)).txId;
       } catch (error) {
         // A failed read-set check is reported before applying anything.
         if (error instanceof RepoRpcError && error.code === 'precondition_failed') continue;
@@ -344,7 +341,9 @@ const canonical = (value: unknown): string =>
       ? `[${value.map(canonical).join(',')}]`
       : `{${Object.keys(value)
           .sort()
-          .map((key) => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`)
+          .map(
+            (key) => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`
+          )
           .join(',')}}`
     : typeof value === 'bigint'
       ? value.toString()
@@ -450,4 +449,12 @@ export async function importLegacyMeta(
     { op: 'put', key: marker, value: { publishedAt: Date.now(), entries } },
   ]);
   return 'imported';
+}
+
+/**
+ * Returns a source to legacy ownership: its marker is removed, so enabling the
+ * native mode again re-imports that replica (an LWW merge of its newer edits).
+ */
+export async function unpublishLegacyMeta(client: RepoClient, namespace: string, source: string) {
+  await client.flockBatch(namespace, MIGRATIONS_ROOM, [{ op: 'delete', key: ['meta', source] }]);
 }
