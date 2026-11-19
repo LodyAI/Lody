@@ -11,11 +11,15 @@ Markdown/JSON，丢了删除记录、时钟和 peer，不能导回去；`lody mi
 “OSS 本地 → 云”这一个方向。本 Spec 定义一套无损、可校验、可合并的工作区包（bundle），作为
 备份、换设备和今后所有存储迁移的共同底座。
 
-本文是待审草稿，不代表已实现。owner 已定三点，下文不再讨论：
+本文是待审草稿，不代表已实现。owner 已定以下几点，下文不再讨论：
 
 1. 导出和导入只允许工作区 owner 和 admin。
 2. 加密（E2EE）工作区由有权限的成员设备在本机解密后导出明文包。
 3. 导入是合并进一个已存在的工作区，不限于空工作区或新工作区。
+4. “全量”只含导出者本来能读的数据，读不到的记为覆盖缺口。
+5. 包与来源工作区是否加密无关：格式相同，任何包都能导入普通或加密工作区，不需要额外确认。
+6. 包本身不再做口令加密。
+7. 机器配置不跨工作区导入。
 
 ## 场景与职责
 
@@ -49,14 +53,14 @@ flowchart LR
 | Workspace Meta | Meta Flock（`e/m/ef…`） | 是 | 包含删除记录；决定其它 room 是否“可见” |
 | 工作区目录：项目、MCP 定义、Role、项目默认 MCP | `<ws>:wf:workspace` Flock | 是 | 只有共享定义；MCP 凭据本来就不在行里 |
 | Session 控制与历史 | `session-*` Loro 文档 | 是 | 完整 oplog，含 unknown 字段和 opaque 条目 |
-| Roost 会话正文 | 当前为执行机本地 `roost-history.sqlite3`；native 下为 Roost room | 需要 SDK 支持 | 见“待 owner 决定”第 4 条；不支持前列为覆盖缺口。写者身份种子不导出 |
+| Roost 会话正文 | 当前为执行机本地 `roost-history.sqlite3`；native 下为 Roost room | 是（有损，待确认） | 见“待 owner 决定”第 1 条。写者身份种子不导出 |
 | 机器与 Agent 配置 | `<ws>:mf:<machine>` Flock、`machine-*` 文档、旧 `agent-*` 文档 | 是 | 导入规则受限，见下文；持久命令队列（`cmd` 族）不导入 |
 | Schedule | `<ws>:sr` Flock + `schedule-*` 文档 | 是 | |
 | Preview comments | 旧：每会话 Loro 文档；新：Flock 行 | 是 | 包内保存来源格式，导入时按目标格式转换 |
 | 旧 task 文档、旧 session-comment | `task-*`、`${ws}:ti`、`session-comment-*` | 是 | 只为无损，不新增功能 |
 | 附件、图片 | 云：按 `<ws>/<session>/<id>` 存放；本地：`session-files/<ws>/` | 是（blob） | 只导出被当前或历史版本引用的；按内容哈希去重。云端文件 90 天过期，取不到的记为 gap |
 | Code Collab 内容寻址快照 | 执行机本地 `code-collab-v2/<ws>/diff-store.sqlite3`，100 天 / 1 GiB 回收 | 部分（blob） | 从所属机器读取（本机直接读，其它机器在线时经已有的 Machine RPC 和权限）；离线或已回收的记为 gap |
-| Prompt Shortcuts | 工作区命名空间外的 `shortcut-index:*`、`shortcut-body:*` | 第一版不导出 | 独立授权模型，E2EE 下不支持，单独设计 |
+| Prompt Shortcuts | 工作区命名空间外的 `shortcut-index:<ws>:<owner>:<private\|workspace>`、`shortcut-body:*` | 是 | 导出者自己的全部与他人的工作区共享项；导入规则见“待 owner 决定”第 2 条。E2EE 工作区当前不支持 Shortcuts |
 | 文件索引 FI/FIS | `<ws>:fi:*`/`fis` | 否 | 可由 owner 重建，180 天 TTL |
 | presence、machine-monitor、ephemeral | 临时通道 | 否 | 不是持久数据 |
 | 机器本地运行状态 | 自动化 ledger、schedule 运行表、operations/inbox、PR 轮询等 SQLite | 否 | 属于执行机，不属于工作区协作数据 |
@@ -68,10 +72,10 @@ token、GitHub 凭据）；一切密钥与设备身份（E2EE 设备/epoch 密�
 host 身份密钥、配对与 custody 回执）；成员、角色、邀请和计费/套餐/用量账单；机器本地
 运行状态（worktree、终端、ACP agent 的本地会话、源码目录）；缓存和 UI 偏好。
 
-**覆盖报告：** 导出者读不到（无权限、云端已过期、Roost 暂不支持、来源格式未知）的条目不静默
+**覆盖报告：** 导出者读不到（无权限、云端已过期、机器离线、来源格式未知）的条目不静默
 跳过：清单逐条记为 `gap`，写明原因。导入和 UI 都会显示“这份包不完整”。owner/admin 在普通
 工作区不一定能读别人的私有机器会话（见 [单会话访问](session-access.zh.md)），所以“全量”
-天然受导出者可读范围限制；这一点见待决定第 1 条。
+只含导出者能读的部分（owner 已定）。
 
 ## 包格式
 
@@ -87,12 +91,12 @@ blobs/sha256/<ab>/<sha256>       附件、图片、diff 快照，按内容哈希
 清单字段（v1）：
 
 - `format: "lody-workspace-bundle"`、`version: 1`。读到更高主版本直接拒绝，不猜。
-- 来源：工作区 ID、内容模式（`plaintext` / `e2ee-decrypted`）、E2EE 时的 genesis hash、
-  导出者账户 ID 和设备 ID、Lody 与 SDK 版本、导出开始/结束时间。
+- 来源：工作区 ID、导出者账户 ID 和设备 ID、Lody 与 SDK 版本、导出开始/结束时间。不记录来源
+  是否加密：加密工作区解密后的内容与普通工作区的格式完全相同。
 - 每个 room 条目：来源 room ID、`model`（`meta` / `flock` / `loro` / `roost`）、
   `codec`（如 `session-loro/v1`、`preview-comment-loro/v1`）、`encoding`
   （`flock-file/v1` = `Flock.exportFile()`/`exportFlockRaw` 字节；`loro-snapshot/v1` =
-  完整 Loro snapshot；Roost 待定）、来源版本（Loro VV / Flock 版本）、分块列表及每块与整体
+  完整 Loro snapshot；`roost-turns/v1` = 读出的 Roost 回合，有损）、来源版本（Loro VV / Flock 版本）、分块列表及每块与整体
   SHA-256、来源是否含未上传的本地编辑。
 - blob 条目：SHA-256、长度、kind、原文件名/MIME（这些只是展示信息）。
 - `gaps`：未覆盖条目及原因。
@@ -109,14 +113,11 @@ blobs/sha256/<ab>/<sha256>       附件、图片、diff 快照，按内容哈希
 **校验：** 哈希只防损坏和截断，不防篡改——能拿到明文包的 owner/admin 本来就能伪造任意内容。
 包的真实性不作为安全前提；安全靠导入端的权限校验（见下文）。
 
-**明文包保护：**
+**包的保护：** 包不做额外加密（owner 已定），只做以下基本处理：
 
 - 只写到用户在保存对话框里选的位置；CLI 必须给 `--out`。文件以 0600（Windows：仅当前用户
   ACL）创建，先写临时名，`manifest.json` 写完后原子改名。
-- 导出前提示：包含全部对话正文和附件，任何拿到文件的人都能读；E2EE 工作区额外强调“这会
-  解除端到端加密”。
-- 可选口令加密：整个包外面再套一层流式 AEAD（Argon2id 派生密钥，XChaCha20-Poly1305 分块，
-  块号和“最后一块”标志进 AAD），扩展名 `.lodybundle.enc`。默认值见待决定第 3 条。
+- 导出前提示：包含全部对话正文和附件，任何拿到文件的人都能读。
 - 不自动上传、不进云、不写入工作区数据目录或日志。
 
 ## 导入合并语义
@@ -158,7 +159,7 @@ blobs/sha256/<ab>/<sha256>       附件、图片、diff 快照，按内容哈希
 
 | 引用 | 处理 |
 | --- | --- |
-| 实体 ID（session、项目、schedule、Role、comment） | 保留。都是 UUID，碰撞可忽略；保留才能让重复导入幂等 |
+| 实体 ID（session、项目、schedule、Role、comment） | 保留。都是随机 UUID，两个独立工作区不会撞；只有同一份数据先后导入过两边时才会同 ID，那时合并正是想要的结果。保留也让重复导入幂等 |
 | 含工作区 ID 的 room（`<ws>:wf:workspace`、`<ws>:sr`） | 改写为目标工作区 ID；行内容不变 |
 | Loro peer、Flock 时钟 peer | 保留，不重映射（重映射会破坏 CRDT 身份和幂等） |
 | 用户 ID（作者、`SessionMeta.userId`、Role 创建者） | 保留为历史出处，不授予任何权限；非目标成员显示为“未知成员” |
@@ -180,7 +181,7 @@ blobs/sha256/<ab>/<sha256>       附件、图片、diff 快照，按内容哈希
   导入器不重签旧意图。
 - 导入只写 CRDT 内容 room。ledger、成员、设备、机器共享策略都在包外，导入器也没有写它们的
   能力——这些数据只能由各自的签名流程产生。
-- E2EE 来源导入到普通工作区等于把明文放进服务器可读的位置，需要显式确认（见待决定第 2 条）。
+- 反过来，加密工作区导出的包也可以直接导入普通工作区，流程与普通包相同（owner 已定）。
 
 ## 权限与安全
 
@@ -212,10 +213,10 @@ E2EE 工作区的审计记录同样只含不透明计数。导入另在目标工
 
 ## 入口
 
-- **CLI：** `lody workspace export --out <file> [--passphrase] [--workspace <id>]` 和
+- **CLI：** `lody workspace export --out <file> [--workspace <id>]` 和
   `lody workspace import <file> [--workspace <id>] [--dry-run] [--yes]`。默认先显示预演报告并要求
   确认；`--yes` 用于自动化。现有 `lody export`（给人看的导出）保持不变。
-- **桌面：** 设置 → 工作区 → 数据：“导出工作区…”（保存对话框、口令选项、覆盖报告）与
+- **桌面：** 设置 → 工作区 → 数据：“导出工作区…”（保存对话框、覆盖报告）与
   “导入到此工作区…”（选择文件 → 预演报告 → 确认 → 进度，可中断后继续）。非 owner/admin 不显示。
 - **执行位置：** 都在 Node 侧（CLI one-shot 或桌面 data host / daemon）执行，renderer 只看进度和
   报告，不接触 engine 或原始字节。
@@ -253,44 +254,33 @@ E2EE 工作区的审计记录同样只含不透明计数。导入另在目标工
 | A. 包与核心管线 | 清单/分块/哈希、ZIP 读写、导入日志、codec 接口；`meta-flock`、`flock-room`、`loro-room` 三个通用 codec；来源 `native-engine`；同工作区导入；CLI 导出/导入/预演；仅本地明文 | 删除记录与时钟往返一致（读回 register 证据而非 get/scan）；重复导入零变化零上传；中断在每个 room 边界后重跑结果相同；截断/篡改块被拒绝且目标未写；未知 codec 拒绝 | ~1,300 |
 | B. 旧格式迁移 | 来源 `legacy-repo`（一致 SQLite 备份 + IDB 导出）；`enqueueOutbox` 来源事实；Meta 迁移收敛到本管线；Preview comments 格式转换 | 旧库 → native 后 Loro VV 覆盖全部来源；含未上传编辑的来源进入 outbox；转换重跑结果一致 | ~700 |
 | C. Blob 与跨工作区 | 附件/图片/diff 快照 blob；跨工作区映射与导入后处理；逐行授权校验 | 他人 Role、他人机器行、共享授权的改动整 room 拒绝；导入会话停协作、schedule 停用；附件映射可解析历史引用 | ~1,200 |
-| D. 云与桌面 | 云登记/审计 DTO 与端口；角色校验与撤销中止；桌面设置页与进度；口令加密 | 非 owner/admin 看不到入口且 CLI 拒绝；中途撤销停在 room 边界；OSS 组合零云请求 | ~1,100（另有私有后端） |
-| E. E2EE | 设备本机解密导出；导入以目标当前密钥重新封装；附件重新加密；E2EE → 普通的确认 | 导出包可在普通工作区导回；导入后其它成员设备可解密；旧执行意图不可执行；ledger/成员不变 | ~800 |
-| F. Roost | 依赖 SDK 原始导出/导入（保留原签名记录） | Roost 会话往返后正文与签名验证一致 | ~400 + SDK |
+| D. 云与桌面 | 云登记/审计 DTO 与端口；角色校验与撤销中止；桌面设置页与进度；Prompt Shortcuts（走其云 API） | 非 owner/admin 看不到入口且 CLI 拒绝；中途撤销停在 room 边界；OSS 组合零云请求 | ~1,400（另有私有后端） |
+| E. E2EE | 设备本机解密导出；导入以目标当前密钥重新封装；附件重新加密 | 导出包可在普通工作区导回；导入后其它成员设备可解密；旧执行意图不可执行；ledger/成员不变 | ~800 |
+| F. Roost | `roost-turns/v1` 有损 codec：经现有历史读取导出回合，导入时只补建目标中不存在的 Roost 会话 | 往返后可见正文一致；目标已有的同一会话不被改动；重复导入不产生重复回合 | ~400 |
 
 阶段 A、B 可与 Meta native 接入并行；C 之后的阶段各自独立评审。
 
 ## 待 owner 决定
 
-1. **“全量”是否受导出者可读范围限制？** 背景：普通工作区里 owner/admin 未必能读别人私有机器
-   上的会话；E2EE 里 owner/admin 也没有跨成员的机器内容权限。选项：(a) 只导出导出者能读的，
-   其余记为 gap；(b) 给 owner/admin 新增“为导出读取全部”的权限。代价：(b) 改变现有隐私模型，
-   在 E2EE 下还需要新的密钥分发。**推荐 (a)。**
-2. **是否允许把 E2EE 来源的包导入普通工作区？** 选项：(a) 允许但必须二次确认；(b) 禁止；
-   (c) 只允许导入另一个 E2EE 工作区。代价：(b)/(c) 让备份换设备场景受限，(a) 有误操作导致
-   服务器可读的风险。**推荐 (a)。**
-3. **口令加密是否默认开启？** 选项：(a) E2EE 工作区默认开、普通工作区默认关，可关闭；(b) 全部
-   默认关；(c) 全部强制。代价：(c) 忘记口令即丢备份；(b) 明文 E2EE 内容容易被随手放进同步盘。
-   **推荐 (a)。**
-4. **Roost 怎么办？** 背景：Roost 将成默认，但当前 SDK client 只有 `roostRead/roostReadTurns`，没有
-   保留原签名记录的原始导出/导入；迁移计划也明确“Roost 不碰”。选项：(a) 第一版把 Roost 会话
-   列为 gap，补 SDK 原始接口后做阶段 F；(b) 先按读出的 JSON 重新写入（丢签名和原写者，不无损）。
-   **推荐 (a)**，并请 SDK 侧排期 Roost 原始导出/导入。
-5. **跨工作区导入时冲突怎么处理？** 背景：OSS 迁移把“目标已有同 ID 或删除记录”视为冲突并停下；
-   本 Spec 按 owner 决定做 CRDT 合并。选项：(a) 合并，预演报告列出全部覆盖/删除，用户确认；
-   (b) 同 ID 但来源工作区不同时视为冲突、整 room 拒绝。代价：(a) 两个独立工作区恰好共享 ID 的
-   情况（例如从同一份包分别导入后各自修改）会互相覆盖，这正是“合并”的本义；(b) 更保守但
-   无法用于“两边都改过再合回来”。**推荐 (a)。**
-6. **机器配置是否跨工作区导入？** 选项：(a) 不导入，会话标记机器不可用（本文做法）；(b) 导入为
-   “已离线机器”的只读记录；(c) 像 `lody migrate --from-oss` 那样，由导入者把来源机器显式映射到
-   自己在目标里的一台机器，迁入本地项目和 Agent 配置。代价：(b) 会出现一台永远离线、无人能管理
-   的机器；(c) 要改写 `machineId`，属于新写入而非合并，且只能映射到导入者本人的机器。
-   **推荐第一版 (a)，(c) 作为换设备场景的后续阶段。**
-7. **Prompt Shortcuts 是否进第一版？** 它有独立的权限、provider 和 revision 模型。**推荐不进，
-   单独设计。**
+1. **Roost 会话允许有损导出吗？** 背景：Roost 回合由执行机本地的写者身份逐条签名，当前 SDK
+   没有保留原签名记录的原始导出/导入。有损做法：导出时读出每个回合的可见内容，导入时由导入设备
+   重新写成新的 Roost 会话。会丢：原签名和原写者证明、回合的逐次编辑过程；保留：会话里能看到的
+   全部内容。由于重新写入的回合与原回合在 CRDT 上不是同一份数据，有损导入不能合并：目标里已有
+   同一 Roost 会话时整体跳过，只补建目标里没有的；重复导入按原回合 ID 去重。选项：(a) 接受有损，
+   按上述规则做（阶段 F，不依赖 SDK）；(b) 等 SDK 提供原始接口再做无损版。**推荐 (a)**；SDK 以后
+   提供原始接口时再增加无损 codec。
+2. **他人的共享 Prompt Shortcuts 怎么导入？** 背景：Shortcuts 不在工作区 room 里，而是按
+   “工作区 + 所有者 + 可见性”分开存储；只有所有者本人能写自己的 Shortcuts，其他成员只能读
+   “工作区可见”的那些。所以导入者自己的 Shortcuts 可以原样导回，他人的共享 Shortcuts 导入者
+   没有写权限。选项：(a) 跳过他人的，列为缺口；(b) 复制成导入者名下的工作区共享 Shortcuts，
+   报告里注明原作者。代价：(a) 换设备时团队共享的 Shortcuts 要各自重新导；(b) 所有者变成导入者，
+   原作者以后不能直接编辑副本。**推荐 (b)**。另外 E2EE 工作区目前不支持 Shortcuts，导入加密
+   工作区时 Shortcuts 一律列为缺口。
 
 ## 证据
 
-- 意图：本文；owner 三项决定来自 lody 会话“🤯 loro-repo-rs 接入”的转达，尚未有人工批准记录。
+- 意图：本文；owner 决定 1–3 来自 lody 会话“🤯 loro-repo-rs 接入”的转达；4–7 是 owner
+  2026-11-19 审阅时直接给出的。两者都不是本 Spec 的批准记录。
 - 已检查的实现：[`lody export`](../apps/cli/src/commands/export.ts)、
   [session-export](../apps/cli/src/lib/session-export/)、
   [OSS 迁移](../apps/cli/src/lib/oss-migration/README.md)、
