@@ -14,14 +14,16 @@ pin 对话的顺序，并把它们放进自己命名的分组（pin section）�
 ## 行为
 
 - sidebar 的 pin 区由一个默认的“已固定”区和任意多个用户分组组成。默认区始终在最上面，
-  不能重命名、删除或拖动；新 pin 的对话进入默认区最上方。
+  不能重命名、删除或拖动；已有用户分组且默认区为空时不显示默认区。新 pin 的对话进入默认区最上方。
 - 用户可以新建、重命名、删除分组，并拖动分组标题调整分组之间的顺序。
-- 用户可以拖动 pin 对话，在分组内调整顺序或移到另一个分组；右键菜单也提供“移动到分组”。
+- 用户可以拖动 pin 对话，在分组内调整顺序或移到另一个分组；拖到分组标题上会放到该分组最上方。
+  把未 pin 的对话拖进 pin 区会在该位置 pin 它。右键菜单也提供“移动到分组”（放到该分组最上方）
+  和“新建分组…”。
 - 删除分组不会取消 pin：其中的对话回到默认区。
 - 取消 pin 会清除该对话的分组和顺序；再次 pin 时回到默认区最上方。
 - 每个分组可以单独折叠，折叠状态只保存在本机。
 - opener 子对话仍挂在根对话下面，跟随根对话移动，不单独排序。
-- 移动端布局显示分组和顺序，但不提供拖动。
+- 移动端布局显示非空分组和顺序，但不提供拖动和分组管理。
 
 ## 数据归属
 
@@ -70,11 +72,24 @@ pin 对话的顺序，并把它们放进自己命名的分组（pin section）�
 
 ## 证据
 
-已检查的实现（未执行验证）：
+实现：
 
-- `isPinned` 字段：`packages/shared/src/schema.ts`
-- pin 写入：`packages/components/src/hooks/use-session-actions.ts`（`setSessionPinned`）
-- 当前 pin 排序：`packages/components/src/components/sidebar-updated-task-list.tsx`（`sortUpdatedItems`）
-- workspace Flock 行家族与未知家族的处理：`packages/shared/src/workspace-flock.ts`（`parseWorkspaceFlockKey`）
+- 布局与移动规划：`packages/shared/src/pinned-sections.ts`；vendor 的排序库：
+  `packages/shared/src/vendor/loro-fractional-index.ts`
+- `pinSection` 行与未知家族处理：`packages/shared/src/workspace-flock.ts`
+- 会话字段：`packages/shared/src/schema.ts`；pin 写入：
+  `packages/components/src/hooks/use-session-actions.ts`
+- 目录快照与写入：`packages/components/src/lib/workspace-catalog-room.ts`、
+  `packages/components/src/lib/workspace-catalog-write.ts`
+- 侧栏：`packages/components/src/components/sidebar-pinned-sections.tsx`、
+  `sidebar-updated-session-list.tsx`、`loro-app-sidebar.tsx`；移动端：
+  `packages/components/src/components/mobile/mobile-chat-list.tsx`
 - 加密内容选择：`packages/shared/src/workspace-streams-content.ts`
-- 定时任务投递方式：`packages/shared/src/schedule-types.ts`（`ScheduleDestinationSchema`）
+- 定时任务投递方式：`packages/shared/src/schedule-types.ts`
+
+已执行的验证（单元测试与 jsdom 测试，未在运行中的应用里验证）：
+`packages/shared/tests/pinned-sections.test.ts`、`packages/shared/tests/workspace-flock.test.ts`、
+`packages/components/tests/workspace-catalog-write.test.ts`、
+`packages/components/tests/loro-sidebar-pinned-section.test.tsx`、
+`packages/components/tests/sidebar-navigation-model.test.ts`、
+`packages/components/tests/mobile-chat-list-preview-cap.test.tsx`。分组标题拖动和 E2EE 写入准入未覆盖。

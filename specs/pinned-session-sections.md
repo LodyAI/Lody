@@ -17,12 +17,15 @@ place them in named pin sections, such as "Maintenance".
 
 - The sidebar pin area has one default "Pinned" section followed by any number
   of user sections. The default section stays first and cannot be renamed,
-  deleted or dragged. A newly pinned conversation enters the top of the default
-  section.
+  deleted or dragged; while it is empty and user sections exist, it is not
+  shown. A newly pinned conversation enters the top of the default section.
 - The user can create, rename and delete sections, and drag a section header to
   reorder sections.
 - The user can drag a pinned conversation to reorder it within a section or to
-  move it to another section. The context menu also offers "Move to section".
+  move it to another section; dropping on a section header places it at the
+  top. Dropping an unpinned conversation into the pin area pins it there. The
+  context menu also offers "Move to section", which places the conversation at
+  the top of that section, and "New section…".
 - Deleting a section does not unpin its conversations; they return to the
   default section.
 - Unpinning clears the conversation's section and position. Pinning it again
@@ -31,7 +34,8 @@ place them in named pin sections, such as "Maintenance".
   device.
 - Opener child conversations stay under their root conversation and move with
   it; they are not ordered independently.
-- The mobile layout shows sections and order but offers no dragging.
+- The mobile layout shows non-empty sections and their order but offers no
+  dragging or section management.
 
 ## Data ownership
 
@@ -100,11 +104,25 @@ management further.
 
 ## Evidence
 
-Inspected implementation (not executed validation):
+Implementation:
 
-- `isPinned` field: `packages/shared/src/schema.ts`
-- Pin writes: `packages/components/src/hooks/use-session-actions.ts` (`setSessionPinned`)
-- Current pin order: `packages/components/src/components/sidebar-updated-task-list.tsx` (`sortUpdatedItems`)
-- Workspace Flock families and unknown-family handling: `packages/shared/src/workspace-flock.ts` (`parseWorkspaceFlockKey`)
+- Layout and move planning: `packages/shared/src/pinned-sections.ts`; vendored
+  ordering library: `packages/shared/src/vendor/loro-fractional-index.ts`
+- `pinSection` rows and unknown-family handling: `packages/shared/src/workspace-flock.ts`
+- Session fields: `packages/shared/src/schema.ts`; pin writes:
+  `packages/components/src/hooks/use-session-actions.ts`
+- Catalog snapshot and writes: `packages/components/src/lib/workspace-catalog-room.ts`,
+  `packages/components/src/lib/workspace-catalog-write.ts`
+- Sidebar: `packages/components/src/components/sidebar-pinned-sections.tsx`,
+  `sidebar-updated-session-list.tsx`, `loro-app-sidebar.tsx`; mobile:
+  `packages/components/src/components/mobile/mobile-chat-list.tsx`
 - Protected content selection: `packages/shared/src/workspace-streams-content.ts`
-- Scheduled task destinations: `packages/shared/src/schedule-types.ts` (`ScheduleDestinationSchema`)
+- Scheduled task destinations: `packages/shared/src/schedule-types.ts`
+
+Executed validation (unit and jsdom tests, not a running app):
+`packages/shared/tests/pinned-sections.test.ts`, `packages/shared/tests/workspace-flock.test.ts`,
+`packages/components/tests/workspace-catalog-write.test.ts`,
+`packages/components/tests/loro-sidebar-pinned-section.test.tsx`,
+`packages/components/tests/sidebar-navigation-model.test.ts`,
+`packages/components/tests/mobile-chat-list-preview-cap.test.tsx`. Dragging a
+section header and E2EE write admission were not exercised.
