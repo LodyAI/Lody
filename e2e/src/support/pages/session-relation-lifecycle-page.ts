@@ -416,6 +416,12 @@ export class SessionRelationLifecyclePage {
           released: false,
           repoAssigned: false,
           startMetadataScans: () => {
+            if (repoValue && repoValue.metadataMode === 'external') {
+              // Native Workspace Meta: the full metadata read is listDoc.
+              void repoValue.listDoc();
+              void repoValue.listDoc();
+              return;
+            }
             const scanner = instrumentScanner(
               repoValue && repoValue.getMeta ? repoValue.getMeta() : null
             );
@@ -433,7 +439,21 @@ export class SessionRelationLifecyclePage {
           configurable: true,
           get: () => repoValue,
           set: (repo) => {
-            instrumentScanner(repo && repo.getMeta ? repo.getMeta() : null);
+            if (repo && repo.metadataMode === 'external') {
+              // External metadata has no legacy Meta Flock; hold its full listing instead.
+              const originalListDoc = repo.listDoc.bind(repo);
+              repo.listDoc = (...args) => {
+                if (control.released) return originalListDoc(...args);
+                control.blockedScans += 1;
+                return originalListDoc(...args)
+                  .then((rows) => gate.then(() => rows))
+                  .finally(() => {
+                    control.completedScans += 1;
+                  });
+              };
+            } else {
+              instrumentScanner(repo && repo.getMeta ? repo.getMeta() : null);
+            }
             repoValue = repo;
             control.repoAssigned = true;
           },
