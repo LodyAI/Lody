@@ -49,7 +49,7 @@ async function sourceBundle(): Promise<OpenBundle> {
   return bundle;
 }
 
-const owner = { workspaceId: WS, role: 'owner' } as const;
+const owner = { workspaceId: WS, role: 'owner', actorUserId: 'owner-1' } as const;
 
 async function importAll(bundle: OpenBundle, target: TestRepo, journalPath: string) {
   const plan = await planWorkspaceImport({ bundle, repo: target.repo, ...owner });
@@ -132,7 +132,7 @@ describe('workspace import', () => {
     const bundle = await sourceBundle();
     const target = await repo();
     await expect(
-      planWorkspaceImport({ bundle, repo: target.repo, workspaceId: WS, role: 'member' })
+      planWorkspaceImport({ bundle, repo: target.repo, workspaceId: WS, role: 'member', actorUserId: 'm-1' })
     ).rejects.toBeInstanceOf(ImportRefusedError);
 
     const out = path.join(await tempDir(), 'odd.lodybundle');
@@ -204,7 +204,7 @@ describe('workspace import', () => {
     cleanup.push(() => bundle.close());
 
     const target = await repo();
-    const plan = await planWorkspaceImport({ bundle, repo: target.repo, workspaceId: 'ws_b', role: 'admin' });
+    const plan = await planWorkspaceImport({ bundle, repo: target.repo, workspaceId: 'ws_b', role: 'admin', actorUserId: 'admin-1' });
     expect(plan.rooms.find((room) => room.id === `${WS}:wf:workspace`)).toMatchObject({
       targetId: 'ws_b:wf:workspace',
       action: 'merge',
@@ -245,7 +245,56 @@ describe('workspace import', () => {
     const schedule = await target.repo.openDetachedDoc('schedule-x');
     expect(schedule.getMap('definition').get('enabled')).toBe(false);
 
-    const again = await planWorkspaceImport({ bundle, repo: target.repo, workspaceId: 'ws_b', role: 'admin' });
+    const again = await planWorkspaceImport({ bundle, repo: target.repo, workspaceId: 'ws_b', role: 'admin', actorUserId: 'admin-1' });
     expect(again.rooms.filter((room) => room.action === 'merge').every((room) => room.state === 'unchanged')).toBe(true);
+  });
+
+  it("rejects a room that changes another member's Role, and imports the rest", async () => {
+    const source = await repo();
+    await writeDoc(source.repo, 'session-s1', { title: 'One' }, (doc) => doc.getText('t').insert(0, 'hi'));
+    await writeFlock(source.repo, `${WS}:wf:workspace`, (flock) =>
+      flock.put(['agentRole', 'r1'], { name: 'Reviewer', ownerUserId: 'other' })
+    );
+    await source.repo.flush();
+    const exportTo = async (name: string) => {
+      const out = path.join(await tempDir(), name);
+      await exportWorkspaceBundle({
+        repo: source.repo,
+        workspaceId: WS,
+        writer: await createBundleWriter(out),
+        source: { workspaceId: WS, exporterUserId: 'u', exporterMachineId: 'm', lodyVersion: 't', startedAt: 'a' },
+      });
+      const opened = await openBundle(out);
+      cleanup.push(() => opened.close());
+      return opened;
+    };
+    const target = await repo();
+    const first = await exportTo('1.lodybundle');
+    await applyWorkspaceImport({
+      plan: await planWorkspaceImport({ bundle: first, repo: target.repo, ...owner, actorUserId: 'admin-1' }),
+      bundle: first,
+      repo: target.repo,
+      journalPath: path.join(await tempDir(), 'j.json'),
+    });
+
+    await writeFlock(source.repo, `${WS}:wf:workspace`, (flock) =>
+      flock.put(['agentRole', 'r1'], { name: 'Hijacked', ownerUserId: 'other' })
+    );
+    await writeDoc(source.repo, 'session-s1', { title: 'One' }, (doc) => doc.getText('t').insert(2, '!'));
+    await source.repo.flush();
+    const second = await exportTo('2.lodybundle');
+    const plan = await planWorkspaceImport({ bundle: second, repo: target.repo, ...owner, actorUserId: 'admin-1' });
+    expect(plan.rooms.find((room) => room.id === `${WS}:wf:workspace`)).toMatchObject({
+      action: 'skip',
+      reason: 'unauthorized',
+      detail: expect.stringContaining('r1'),
+    });
+    await applyWorkspaceImport({ plan, bundle: second, repo: target.repo, journalPath: path.join(await tempDir(), 'j2.json') });
+    const catalog = await target.repo.openDetachedFlockDoc(`${WS}:wf:workspace`);
+    expect(catalog.get(['agentRole', 'r1'])).toMatchObject({ name: 'Reviewer' });
+    expect((await target.repo.openDetachedDoc('session-s1')).getText('t').toString()).toBe('hi!');
+
+    const byOwner = await planWorkspaceImport({ bundle: second, repo: target.repo, ...owner, actorUserId: 'other' });
+    expect(byOwner.rooms.find((room) => room.id === `${WS}:wf:workspace`)).toMatchObject({ action: 'merge' });
   });
 });

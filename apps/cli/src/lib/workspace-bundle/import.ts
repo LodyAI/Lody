@@ -6,6 +6,7 @@ import { LoroDoc } from 'loro-crdt';
 import type { JsonObject, LoroRepo } from 'loro-repo';
 import { z } from 'zod';
 import type { OpenBundle } from './bundle-file';
+import { authorizeFlockChanges } from './authorize';
 import { KNOWN_CODECS, MACHINE_CODECS, META_ROOM_ID } from './codecs';
 import {
   applyPostImportWrites,
@@ -50,6 +51,8 @@ export type PlanWorkspaceImportInput = {
   workspaceId: string;
   /** The importer's workspace role, from the authority that applies to this workspace. */
   role: string;
+  /** The importer; existing rows may change only where this user could change them. */
+  actorUserId: string;
 };
 
 function versionMap(doc: LoroDoc): Map<string, number> {
@@ -193,6 +196,14 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
     const merged = Flock.fromFile(current.exportFile());
     await mergeFlockBytes(merged, bytes, roomPolicy(entry.codec, crossWorkspace));
     const rows = diffFlock(current, merged);
+    const violation = authorizeFlockChanges(entry.codec, current, merged, {
+      actorUserId: input.actorUserId,
+      ...machineOwner(targetMeta, entry.codec, targetId, workspaceId),
+    });
+    if (violation) {
+      rooms.push({ ...base, action: 'skip', reason: 'unauthorized', detail: violation, rows });
+      continue;
+    }
     rooms.push({
       ...base,
       action: 'merge',
@@ -221,6 +232,18 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
     rooms: orderForWrite(rooms),
     gaps: manifest.gaps,
   };
+}
+
+function machineOwner(
+  meta: Flock,
+  codec: string,
+  roomId: string,
+  workspaceId: string
+): { machineOwnerUserId?: string } {
+  if (codec !== 'machine-catalog/v1') return {};
+  const machineId = roomId.slice(`${workspaceId}:mf:`.length);
+  const owner = meta.get(['m', `machine-${machineId}`, 'ownerUserId']);
+  return typeof owner === 'string' ? { machineOwnerUserId: owner } : {};
 }
 
 function roomPolicy(codec: string, crossWorkspace: boolean): RowPolicy {
