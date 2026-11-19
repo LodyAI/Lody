@@ -370,6 +370,8 @@ import {
 import { FlockSyncUnavailableError } from './flock-sync-errors';
 import { ConcurrentQueue } from '../concurrent-queue';
 import type { CliSqliteRepoStore } from './sqlite-repo-store';
+import type { NativeWorkspaceMeta } from '@lody/shared/node/native-workspace-meta';
+import { openNativeWorkspaceMeta, usesNativeWorkspaceMeta } from './native-workspace-meta';
 import { mentionsSqliteBusy, sqliteLockReporterLegacy } from './sqlite-lock-diagnostics';
 import type { CloudBillingPort, CloudStreamsTokenPort } from '@lody/platform';
 
@@ -525,6 +527,8 @@ export class LoroDocumentManager {
   private readonly sessionHistoryFactory?: SessionBackendFactory;
   private readonly ownerHistoryRouter?: SessionBackendFactory;
   private catalogSync?: WorkspaceCatalogSyncLegacy;
+  /** Native Workspace Meta owner; released after the repo on destroy. */
+  private nativeMeta: NativeWorkspaceMeta | null = null;
 
   /** Reader interest belongs to the daemon, never to a discovery request. */
   isEncryptedWorkspace(): boolean {
@@ -661,22 +665,33 @@ export class LoroDocumentManager {
     let repo: LoroRepo | null = null;
     let presenceRuntime: CliPresenceRuntimeLegacy | null = null;
     let manager: LoroDocumentManager | null = null;
+    let nativeMeta: NativeWorkspaceMeta | null = null;
     try {
       const createRepoStartMs = Date.now();
+      const repoOptions = {
+        storageAdapter: cliSqliteRepoStore.storageAdapter,
+        metaDebounceCommitMs: 0,
+        // Session metadata (what lists a Session) must reach disk with its history;
+        // loro-repo's default 5 s trailing debounce let a crash drop new Sessions.
+        metaPersistDebounceMs: 0,
+        flockDocRetentionMs: getFlockDocRetentionMs,
+      };
+      if (usesNativeWorkspaceMeta(!!options.encryptedWorkspace))
+        nativeMeta = await openNativeWorkspaceMeta(
+          workspaceId,
+          cliSqliteRepoStore.storageAdapter,
+          logger
+        );
+      const externalMeta = nativeMeta;
       repo = await traceAsync(
         logger,
         'startup.loro_repo_create',
         { workspaceId },
         async () =>
           await withTimeout(
-            LoroRepo.create({
-              storageAdapter: cliSqliteRepoStore.storageAdapter,
-              metaDebounceCommitMs: 0,
-              // Session metadata (what lists a Session) must reach disk with its history;
-              // loro-repo's default 5 s trailing debounce let a crash drop new Sessions.
-              metaPersistDebounceMs: 0,
-              flockDocRetentionMs: getFlockDocRetentionMs,
-            }),
+            externalMeta
+              ? LoroRepo.createWithExternalMetadata(repoOptions, externalMeta)
+              : LoroRepo.create(repoOptions),
             createRepoTimeoutMs,
             `Timeout waiting for LoroRepo.create (workspace=${workspaceId})`
           )
@@ -702,17 +717,19 @@ export class LoroDocumentManager {
         machineMonitorRuntime,
         promptSuggestions
       );
-      const metaSub = await traceAsync(
-        logger,
-        'startup.loro_meta_join',
-        { workspaceId },
-        async () =>
-          await withTimeout(
-            createdRepo.joinMetaRoom(),
-            joinMetaTimeoutMs,
-            `Timeout waiting for repo.joinMetaRoom (workspace=${workspaceId})`
-          )
-      );
+      const metaSub = externalMeta
+        ? null
+        : await traceAsync(
+            logger,
+            'startup.loro_meta_join',
+            { workspaceId },
+            async () =>
+              await withTimeout(
+                createdRepo.joinMetaRoom(),
+                joinMetaTimeoutMs,
+                `Timeout waiting for repo.joinMetaRoom (workspace=${workspaceId})`
+              )
+          );
       manager = new LoroDocumentManager({
         repo: createdRepo,
         workspaceId,
@@ -741,7 +758,8 @@ export class LoroDocumentManager {
         sessionHistoryFactory: options.sessionHistoryFactory,
         ownerHistoryRouter: options.ownerHistoryRouter,
       });
-      if (options.keepWorkspaceCatalogJoined) {
+      manager.nativeMeta = externalMeta;
+      if (options.keepWorkspaceCatalogJoined && !externalMeta) {
         manager.catalogSync = new WorkspaceCatalogSyncLegacy(
           createdRepo,
           workspaceId,
@@ -759,7 +777,9 @@ export class LoroDocumentManager {
       try {
         if (repo) {
           await repo.destroy();
+          await nativeMeta?.close();
         } else {
+          await nativeMeta?.close();
           cliSqliteRepoStore.sqliteStore.close();
         }
       } catch (closeError) {
@@ -1427,7 +1447,14 @@ export class LoroDocumentManager {
   }
 
   private async destroyRepo(options: { fast?: boolean }): Promise<void> {
-    const repoDestroyPromise = this.repo.destroy();
+    const nativeMeta = this.nativeMeta;
+    const repoDestroyPromise = this.repo.destroy().finally(() =>
+      nativeMeta?.close().catch((error: unknown) => {
+        this.logger.debug(
+          `[${this.workspaceId}] Native Meta observation release failed: ${formatErrorMessage(error)}`
+        );
+      })
+    );
     if (!options.fast) {
       await repoDestroyPromise;
       return;

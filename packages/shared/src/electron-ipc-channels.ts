@@ -26,6 +26,7 @@ export type IpcPushMap = {
     | { type: 'error'; code: string; message: string };
   'loro.event': LocalLoroDataPlaneServerMessage;
   'loro.status': boolean;
+  'nativeWorkspaceMeta.update': import('./native-workspace-meta-ipc').NativeMetaEvent;
   'cli.state': ElectronCliState;
   'updater.state': ElectronUpdaterState;
   'storageGuard.state': ElectronStorageGuardState;
@@ -71,6 +72,7 @@ export const IPC_PUSH_CHANNELS = {
   terminalEvent: 'terminal.event',
   loroEvent: 'loro.event',
   loroStatus: 'loro.status',
+  nativeWorkspaceMeta: 'nativeWorkspaceMeta.update',
   cliState: 'cli.state',
   updaterState: 'updater.state',
   storageGuardState: 'storageGuard.state',
