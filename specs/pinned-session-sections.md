@@ -20,7 +20,11 @@ place them in named pin sections, such as "Maintenance".
   deleted or dragged; while it is empty and user sections exist, it is not
   shown. A newly pinned conversation enters the top of the default section.
 - The user can create, rename and delete sections, and drag a section header to
-  reorder sections.
+  reorder sections. Every section header's menu offers "New section…", which
+  creates an empty section; user sections also offer rename and delete.
+- While a conversation is dragged over a section, the rows at the drop position
+  slide apart to open a slot of its height, and its own slot closes; the drop
+  lands exactly in that slot.
 - The user can drag a pinned conversation to reorder it within a section or to
   move it to another section; dropping on a section header places it at the
   top. Dropping an unpinned conversation into the pin area pins it there. The

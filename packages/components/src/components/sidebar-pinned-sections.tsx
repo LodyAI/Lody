@@ -18,7 +18,7 @@ import {
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useTranslation } from 'react-i18next';
-import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { FolderPlus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { PIN_SECTION_NAME_MAX_LENGTH } from '@lody/shared';
@@ -195,18 +195,23 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
               ? defaultCollapsed
               : Boolean(sectionId && collapsedSectionIds?.[sectionId]);
             const label = isDefault ? defaultLabel : section.name;
-            const sectionMenu =
-              !isDefault && actions && sectionId ? (
-                <PinSectionHeaderMenu
-                  label={t('sidebar.pinSections.sectionActions', 'Section actions')}
-                  renameLabel={t('sidebar.pinSections.rename', 'Rename Section')}
-                  deleteLabel={t('sidebar.pinSections.delete', 'Delete Section')}
-                  onRename={() =>
-                    setNameDialog({ kind: 'rename', sectionId, initialName: section.name })
-                  }
-                  onDelete={() => actions.onDeleteSection(sectionId)}
-                />
-              ) : null;
+            // Every header menu can start a new (empty) section; the default
+            // one is hidden while empty, so it cannot be the only entry point.
+            const sectionMenu = actions ? (
+              <PinSectionHeaderMenu
+                label={t('sidebar.pinSections.sectionActions', 'Section actions')}
+                newSectionLabel={t('sidebar.pinSections.newSection', 'New Section…')}
+                renameLabel={t('sidebar.pinSections.rename', 'Rename Section')}
+                deleteLabel={t('sidebar.pinSections.delete', 'Delete Section')}
+                onNewSection={() => setNameDialog({ kind: 'create' })}
+                onRename={
+                  sectionId
+                    ? () => setNameDialog({ kind: 'rename', sectionId, initialName: section.name })
+                    : undefined
+                }
+                onDelete={sectionId ? () => actions.onDeleteSection(sectionId) : undefined}
+              />
+            ) : null;
             const firstAction = index === 0 ? headerAction : null;
             const action =
               firstAction && sectionMenu ? (
@@ -224,7 +229,9 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
                 onDropPinnedSession={dropBySection.get(sectionId)}
                 // Same gap between sections as between the sidebar's other groups.
                 className={
-                  index < visibleSections.length - 1 ? (collapsed ? 'mb-1' : 'mb-4') : undefined
+                  // Padding, not margin: the space between sections stays part of a
+                  // drop target, so a drag crossing it never shows "no drop".
+                  index < visibleSections.length - 1 ? (collapsed ? 'pb-1' : 'pb-4') : undefined
                 }
                 items={section.items}
                 grouping="manual"
@@ -313,16 +320,21 @@ function SortablePinSection({
 
 function PinSectionHeaderMenu({
   label,
+  newSectionLabel,
   renameLabel,
   deleteLabel,
+  onNewSection,
   onRename,
   onDelete,
 }: {
   label: string;
+  newSectionLabel: string;
   renameLabel: string;
   deleteLabel: string;
-  onRename: () => void;
-  onDelete: () => void;
+  onNewSection: () => void;
+  /** Absent for the default section, which cannot be renamed or deleted. */
+  onRename?: () => void;
+  onDelete?: () => void;
 }) {
   return (
     <Menu.Root>
@@ -334,12 +346,19 @@ function PinSectionHeaderMenu({
         }
       />
       <Menu.Content align="end" className="min-w-[160px]">
-        <Menu.Item icon={Pencil} onClick={onRename}>
-          {renameLabel}
+        <Menu.Item icon={FolderPlus} onClick={onNewSection}>
+          {newSectionLabel}
         </Menu.Item>
-        <Menu.Item icon={Trash2} onClick={onDelete}>
-          {deleteLabel}
-        </Menu.Item>
+        {onRename ? (
+          <Menu.Item icon={Pencil} onClick={onRename}>
+            {renameLabel}
+          </Menu.Item>
+        ) : null}
+        {onDelete ? (
+          <Menu.Item icon={Trash2} onClick={onDelete}>
+            {deleteLabel}
+          </Menu.Item>
+        ) : null}
       </Menu.Content>
     </Menu.Root>
   );

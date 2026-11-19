@@ -18,6 +18,7 @@ import {
 } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
+  clearSessionMentionDrag,
   getInFlightSessionMentionDragId,
   startSessionMentionDrag,
   subscribeSessionMentionDrag,
@@ -1561,15 +1562,21 @@ function usePinnedDropGap(
       const index = resolveIndex(event);
       if (index === null) return;
       event.preventDefault();
-      // Session drags only allow `copy` (mention drops); a reorder accepts the same effect.
-      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
       setDropIndex(index);
     },
     [resolveIndex]
   );
   const onDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
-    const next = event.relatedTarget;
-    if (next instanceof Node && event.currentTarget.contains(next)) return;
+    // Chrome often reports no relatedTarget when the pointer moves onto a child,
+    // so only a pointer outside the section's box closes the gap.
+    const box = event.currentTarget.getBoundingClientRect();
+    const inside =
+      event.clientX >= box.left &&
+      event.clientX < box.right &&
+      event.clientY >= box.top &&
+      event.clientY < box.bottom;
+    if (inside) return;
     setDropIndex(null);
   }, []);
   const onDrop = useCallback(
@@ -1580,6 +1587,10 @@ function usePinnedDropGap(
       if (index === null || !current) return;
       event.preventDefault();
       event.stopPropagation();
+      // End the drag now, in the same update as the move: no row may stay hidden
+      // or shifted for a frame, and when the move unmounts the source row no
+      // dragend will arrive to end it.
+      clearSessionMentionDrag();
       onDropPinnedSession?.(current, index);
     },
     [liveDragged, onDropPinnedSession, resolveIndex]

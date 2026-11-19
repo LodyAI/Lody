@@ -126,7 +126,8 @@ export function startSessionMentionDrag(
 ): void {
   const dataTransfer = event.dataTransfer;
   if (!dataTransfer) return;
-  dataTransfer.effectAllowed = 'copy';
+  // Mention drops copy a reference; reordering pinned rows in the sidebar moves one.
+  dataTransfer.effectAllowed = 'copyMove';
   dataTransfer.setData(SESSION_MENTION_DRAG_TYPE, payload.sessionId);
   dataTransfer.setData(`${SESSION_MENTION_DRAG_ID_PREFIX}${payload.sessionId.toLowerCase()}`, '');
   // A drop outside any of our surfaces still leaves something readable behind.
