@@ -31,6 +31,7 @@ const SKIP_REASONS: Record<string, string> = {
   'unrelated-same-id': 'same ID, unrelated history',
   'deleted-in-target': 'deleted in this workspace',
   'machine-room': 'machine settings stay with their machine',
+  'roost-exists': 'this workspace already has this Roost conversation',
 };
 
 export function formatImportPlan(plan: ImportPlan): string {

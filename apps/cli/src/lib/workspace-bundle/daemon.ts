@@ -6,6 +6,7 @@ type SyncingManager = {
   syncMetaOrThrow(options: { reason?: string }): Promise<void>;
   syncDocOrThrow(docId: string, options: { reason?: string }): Promise<void>;
   syncFlockDocOrThrow(flockDocId: string, options: { reason?: string }): Promise<void>;
+  getSessionHistorySnapshot(sessionId: string): Promise<readonly unknown[]>;
 };
 
 /**
@@ -21,6 +22,7 @@ export function daemonBundleWorkspace(
   return {
     id: workspaceId,
     repo: manager.repo,
+    readRoostHistory: (sessionId) => manager.getSessionHistorySnapshot(sessionId),
     ...(options.sync
       ? {
           syncRoom: async (roomId: string, model: 'meta' | 'loro' | 'flock') => {

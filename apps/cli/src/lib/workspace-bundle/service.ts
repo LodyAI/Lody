@@ -23,6 +23,8 @@ export type BundleWorkspace = {
   id: string;
   repo: LoroRepo<JsonObject>;
   syncRoom?: (roomId: string, model: 'meta' | 'loro' | 'flock') => Promise<void>;
+  /** Visible turns of a Roost conversation, read through the session backend. */
+  readRoostHistory?: (sessionId: string) => Promise<readonly unknown[]>;
 };
 
 export type BundleActor = { userId: string; machineId: string; lodyVersion: string };
@@ -62,6 +64,7 @@ export async function runWorkspaceExport(input: {
       },
       ...(workspace.syncRoom ? { prepareRoom: workspace.syncRoom } : {}),
       sessionBlobs: localSessionFileBlobs(workspace.id),
+      ...(workspace.readRoostHistory ? { roostHistory: workspace.readRoostHistory } : {}),
       now,
     });
     return {

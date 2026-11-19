@@ -7,7 +7,8 @@ import type { JsonObject, LoroRepo } from 'loro-repo';
 import { z } from 'zod';
 import type { OpenBundle } from './bundle-file';
 import { authorizeFlockChanges } from './authorize';
-import { classifyRoom, KNOWN_CODECS, MACHINE_CODECS, META_ROOM_ID } from './codecs';
+import { classifyRoom, KNOWN_CODECS, MACHINE_CODECS, META_ROOM_ID, ROOST_ROOM_PREFIX } from './codecs';
+import { createSessionMirror, type SessionHistoryInput } from '@lody/shared';
 import {
   applyPostImportWrites,
   crossWorkspaceRowWithheld,
@@ -33,7 +34,7 @@ export type RoomPlan = {
   action: 'merge' | 'skip';
   /** For merges: whether the target lacks the room, already covers it, or gains changes. */
   state?: 'new' | 'unchanged' | 'merge';
-  reason?: 'unrelated-same-id' | 'deleted-in-target' | 'machine-room' | 'unauthorized';
+  reason?: 'unrelated-same-id' | 'deleted-in-target' | 'machine-room' | 'unauthorized' | 'roost-exists';
   detail?: string;
   rows?: RowChanges;
 };
@@ -179,6 +180,19 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
       rooms.push({ ...base, action: 'skip', reason: 'machine-room' });
       continue;
     }
+    if (entry.model === 'roost') {
+      const sessionDocId = entry.id.slice(ROOST_ROOM_PREFIX.length);
+      // Rewritten turns are not the original CRDT data, so they never merge into a
+      // conversation the target already has.
+      if (targetMeta.get(['e', sessionDocId]) !== undefined) {
+        rooms.push({ ...base, targetId: sessionDocId, action: 'skip', reason: 'roost-exists' });
+      } else if (provisional.get(['e', sessionDocId]) !== true) {
+        rooms.push({ ...base, targetId: sessionDocId, action: 'skip', reason: 'deleted-in-target' });
+      } else {
+        rooms.push({ ...base, targetId: sessionDocId, action: 'merge', state: 'new' });
+      }
+      continue;
+    }
     const existenceKey = entry.model === 'flock' ? 'ef' : 'e';
     if (provisional.get([existenceKey, targetId]) !== true) {
       rooms.push({ ...base, action: 'skip', reason: 'deleted-in-target' });
@@ -269,7 +283,8 @@ function withheldMetaIds(rooms: readonly RoomPlan[]): Set<string> {
 
 /** Bodies first, then catalogs, then Meta, so nothing becomes visible before its body. */
 function orderForWrite(rooms: RoomPlan[]): RoomPlan[] {
-  const rank = { loro: 0, roost: 0, shortcuts: 1, flock: 2, meta: 3 } as const;
+  // Roost turns are rewritten after Meta, which would otherwise restore the source backend.
+  const rank = { loro: 0, shortcuts: 1, flock: 2, meta: 3, roost: 4 } as const;
   return [...rooms].sort((a, b) => rank[a.model] - rank[b.model]);
 }
 
@@ -338,7 +353,7 @@ export async function applyWorkspaceImport(input: ApplyWorkspaceImportInput): Pr
   let index = 0;
   for (const room of merges) {
     index += 1;
-    if (done.has(room.targetId)) {
+    if (done.has(room.id)) {
       result.resumed += 1;
       continue;
     }
@@ -373,10 +388,12 @@ export async function applyWorkspaceImport(input: ApplyWorkspaceImportInput): Pr
       } finally {
         lease.release();
       }
+    } else if (room.model === 'roost') {
+      await rewriteRoostTurns(repo, room.targetId, bytes);
     } else {
       throw new Error(`Unsupported room model: ${room.model}`);
     }
-    done.add(room.targetId);
+    done.add(room.id);
     journal.done = [...done];
     await writeJournal(input.journalPath, journal);
     result.imported += 1;
@@ -414,4 +431,28 @@ async function writeImportReceipt(
   } finally {
     lease.release();
   }
+}
+
+/**
+ * Writes exported Roost turns through the shared HistoryWriter as this session's
+ * Loro history and selects the Loro backend: the original Roost store stays on the
+ * source machine, and the importer becomes the writer of the rewritten turns.
+ */
+async function rewriteRoostTurns(repo: LoroRepo<JsonObject>, docId: string, bytes: Uint8Array): Promise<void> {
+  const turns = JSON.parse(Buffer.from(bytes).toString('utf8')) as unknown;
+  if (!Array.isArray(turns)) throw new Error(`Roost turns for ${docId} are malformed`);
+  const lease = await repo.acquireDoc(docId);
+  try {
+    const mirror = createSessionMirror({ doc: lease.doc, initialState: {} });
+    try {
+      if (mirror.historyWriter.readStored().length === 0)
+        mirror.historyWriter.update(() => turns as SessionHistoryInput[]);
+    } finally {
+      mirror.dispose();
+    }
+    await repo.persistDocNow(docId, lease.doc);
+  } finally {
+    lease.release();
+  }
+  await repo.upsertDocMeta(docId, { historyBackend: 'loro' });
 }

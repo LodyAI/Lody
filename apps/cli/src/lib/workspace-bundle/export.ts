@@ -1,7 +1,7 @@
 import type { LoroDoc } from 'loro-crdt';
 import type { JsonObject, LoroRepo } from 'loro-repo';
 import type { BundleWriter } from './bundle-file';
-import { classifyRoom, META_ROOM_ID } from './codecs';
+import { classifyRoom, META_ROOM_ID, ROOST_ROOM_PREFIX } from './codecs';
 import type { BundleManifest, BundleSource } from './manifest';
 
 export type ExportProgress = { phase: 'meta' | 'docs' | 'flocks'; done: number; total: number };
@@ -18,6 +18,8 @@ export type ExportWorkspaceBundleInput = {
   onProgress?: (progress: ExportProgress) => void;
   /** Adds the bytes a session's history references (attachments) to the bundle. */
   sessionBlobs?: (sessionId: string, doc: LoroDoc, writer: BundleWriter) => Promise<void>;
+  /** Reads a Roost conversation's visible turns; absent means Roost bodies are gaps. */
+  roostHistory?: (sessionId: string) => Promise<readonly unknown[]>;
   now?: () => string;
 };
 
@@ -74,11 +76,7 @@ export async function exportWorkspaceBundle(input: ExportWorkspaceBundleInput): 
     if (room.codec === 'session/v1' && input.sessionBlobs)
       await input.sessionBlobs(entry.docId.slice('session-'.length), doc, writer);
     if (room.codec === 'session/v1' && entry.meta.historyBackend === 'roost')
-      writer.addGap({
-        id: entry.docId,
-        kind: 'roost',
-        reason: 'Roost conversation body is exported separately and is not yet supported',
-      });
+      await exportRoostTurns(entry.docId, input);
     input.onProgress?.({ phase: 'docs', done, total: docs.length });
   }
 
@@ -103,4 +101,28 @@ export async function exportWorkspaceBundle(input: ExportWorkspaceBundleInput): 
     input.onProgress?.({ phase: 'flocks', done, total: flocks.length });
   }
   return await writer.finish({ ...input.source, finishedAt: (input.now ?? (() => new Date().toISOString()))() });
+}
+
+/**
+ * Roost bodies live in the executing machine's own store and are signed by its
+ * writer. They are exported lossily: visible turns only, without signatures or
+ * edit history (owner decision; see the Spec's Roost section).
+ */
+async function exportRoostTurns(docId: string, input: ExportWorkspaceBundleInput): Promise<void> {
+  const { writer } = input;
+  if (!input.roostHistory) {
+    writer.addGap({ id: docId, kind: 'roost', reason: 'Roost conversation bodies cannot be read here' });
+    return;
+  }
+  let turns: readonly unknown[];
+  try {
+    turns = await input.roostHistory(docId.slice('session-'.length));
+  } catch (error) {
+    writer.addGap({ id: docId, kind: 'roost', reason: error instanceof Error ? error.message : String(error) });
+    return;
+  }
+  await writer.addRoom(
+    { id: `${ROOST_ROOM_PREFIX}${docId}`, model: 'roost', codec: 'roost-turns/v1', encoding: 'json/v1' },
+    Buffer.from(JSON.stringify(turns), 'utf8')
+  );
 }

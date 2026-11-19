@@ -9,6 +9,7 @@ describe('daemonBundleWorkspace', () => {
       syncMetaOrThrow: async (options: { reason?: string }) => void calls.push(`meta:${options.reason}`),
       syncDocOrThrow: async (id: string) => void calls.push(`doc:${id}`),
       syncFlockDocOrThrow: async (id: string) => void calls.push(`flock:${id}`),
+      getSessionHistorySnapshot: async (id: string) => [{ id: `turn-of-${id}` }],
     };
     const synced = daemonBundleWorkspace('ws', manager, { sync: true });
     await synced.syncRoom?.('meta', 'meta');
@@ -16,5 +17,6 @@ describe('daemonBundleWorkspace', () => {
     await synced.syncRoom?.('ws:sr', 'flock');
     expect(calls).toEqual(['meta:workspace-bundle', 'doc:session-1', 'flock:ws:sr']);
     expect(daemonBundleWorkspace('ws', manager, { sync: false }).syncRoom).toBeUndefined();
+    expect(await synced.readRoostHistory?.('s1')).toEqual([{ id: 'turn-of-s1' }]);
   });
 });

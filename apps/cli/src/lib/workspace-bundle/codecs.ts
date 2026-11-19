@@ -17,6 +17,8 @@ export type RoomClass =
   | { kind: 'unknown' };
 
 export const META_ROOM_ID = 'meta';
+/** Bundle-only room holding a Roost conversation's visible turns, read out as JSON. */
+export const ROOST_ROOM_PREFIX = 'roost:';
 
 const LORO_CODECS = {
   'session-comment-': 'session-comment/v1',
@@ -38,14 +40,16 @@ export type RoomCodec =
   | 'meta/v1'
   | (typeof LORO_CODECS)[keyof typeof LORO_CODECS]
   | (typeof FLOCK_CODECS)[keyof typeof FLOCK_CODECS]
-  | 'machine-catalog/v1';
-export type RoomEncoding = 'flock-file/v1' | 'loro-snapshot/v1';
+  | 'machine-catalog/v1'
+  | 'roost-turns/v1';
+export type RoomEncoding = 'flock-file/v1' | 'loro-snapshot/v1' | 'json/v1';
 
 export const KNOWN_CODECS: ReadonlySet<string> = new Set<string>([
   'meta/v1',
   ...Object.values(LORO_CODECS),
   ...Object.values(FLOCK_CODECS),
   'machine-catalog/v1',
+  'roost-turns/v1',
 ]);
 
 /** Codecs whose rooms describe one machine; they never cross workspaces. */
