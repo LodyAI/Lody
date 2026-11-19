@@ -14,7 +14,7 @@ to cloud. This Spec defines a lossless, verifiable, mergeable workspace bundle. 
 is the shared base for backup, device change and every future storage migration.
 
 This is a draft for review and is not implemented. The owner has already decided
-the following, which this document does not reopen:
+the following (confirmed 2026-11-19), which this document does not reopen:
 
 1. Only workspace owners and admins may export or import.
 2. An encrypted (E2EE) workspace is exported as a plaintext bundle, decrypted
@@ -28,12 +28,17 @@ the following, which this document does not reopen:
    workspace without extra confirmation.
 6. The bundle itself has no passphrase encryption.
 7. Machine configuration is not imported across workspaces.
-8. Roost sessions may be exported and imported lossily (see "Roost and Prompt
-   Shortcuts").
-9. Imported Prompt Shortcuts all become workspace-shared Shortcuts owned by the
-   importer.
-10. A same-ID session of a different origin never overwrites the target and never
-    rejects a whole room; the default is to skip it (see "Sessions with the same ID").
+8. Roost sessions are exported without signatures: content is exported as read and
+   rewritten by the importer.
+9. Prompt Shortcuts are in the first version.
+10. A same-ID session never overwrites the target; it is skipped or imported as a
+    conflict copy.
+
+The following are not the owner's words but this document's recommendations or
+inferences, labeled where they appear: deduplication and skip rules for lossy Roost
+import, distinguishing same-ID sessions by origin and skipping by default
+(recommendation), and the Prompt Shortcuts visibility rules (inferred by the
+coordinator from the owner's privacy principle).
 
 ## Scenario and responsibilities
 
@@ -192,13 +197,15 @@ authenticity is not a security premise; safety comes from authorization at impor
   dry-run report lists everything that would be deleted.
 - Merge is monotonic: inputs already executed or dequeued do not return to pending
   because older state was imported.
-- **Sessions with the same ID:** when the target already has a session with the
+- **Sessions with the same ID:** the owner decided a same-ID session never
+  overwrites the target and is skipped or imported as a conflict copy. The following
+  refinement is a **recommendation**: when the target already has a session with the
   same ID, the importer first checks whether both share an origin, meaning the two
   Loro documents share causal history (overlapping operations from the same peer in
   their version vectors; peers are random 64-bit values, so sharing one means a
   common origin). A shared origin means it is the same session, for example a backup
   restore or a reimport, and it merges normally. No shared origin is a genuine ID
-  conflict, which should not happen normally; when it does, the default is to **skip**
+  conflict, which should not happen normally; when it does, the recommended default is to **skip**
   that session together with its Meta row, Preview comments and attachments. The
   target is not overwritten and the room is not rejected as a whole; the dry-run
   report lists skipped sessions by title. A conflict copy was not chosen because a
@@ -356,7 +363,7 @@ Line counts are product-code estimates, excluding tests and docs.
 | A. Bundle and core pipeline | Manifest/chunks/hashes, ZIP read/write, import journal, codec interface; generic `meta-flock`, `flock-room`, `loro-room` codecs; `native-engine` source; same-workspace import; CLI export/import/dry run; local plaintext only | Deletion records and clocks round-trip (read back register evidence, not get/scan); reimport changes and uploads nothing; rerun after interruption at each room boundary gives the same result; truncated/tampered chunks rejected with target untouched; unknown codec rejected | ~1,300 |
 | B. Legacy migration | `legacy-repo` source (consistent SQLite backup + IDB export); `enqueueOutbox` source facts; Meta migration converges on this pipeline; Preview comments format conversion | After old store → native, Loro VVs cover every source; sources with unuploaded edits enter the outbox; rerunning conversion gives the same result | ~700 |
 | C. Blobs and cross-workspace | Attachment/image/diff snapshot blobs; cross-workspace mapping and post-import writes; per-row authorization | Changes to another user's Role, another user's machine rows or sharing grants reject the whole room; imported sessions stop collaboration and schedules are disabled; attachment map resolves historical references | ~1,200 |
-| D. Cloud and desktop | Cloud registration/audit DTOs and port; role checks and abort on revocation; desktop settings page and progress; Prompt Shortcuts (through their cloud API) | Non-owner/admin sees no entry and CLI refuses; revocation stops at a room boundary; OSS composition makes zero cloud requests | ~1,400 (plus private backend) |
+| D. Cloud and desktop | Cloud registration/audit DTOs and port; role checks and abort on revocation; desktop settings page and progress; Prompt Shortcuts (through their cloud API) | Non-owner/admin sees no entry and CLI refuses; revocation stops at a room boundary; OSS composition makes zero cloud requests; a private Shortcut is imported only by its original owner and stays private, shared ones stay shared | ~1,400 (plus private backend) |
 | E. E2EE | Local decrypted export; import reseals with the target's current keys; attachment re-encryption | Exported bundle imports into an ordinary workspace; other member devices decrypt after import; old execution intents are not executable; ledger/members unchanged | ~800 |
 | F. Roost | Lossy `roost-turns/v1` codec: export turns through existing history reads; import only creates Roost sessions absent from the target | Visible bodies match after a round trip; an existing same session in the target is untouched; reimport creates no duplicate turns | ~400 |
 
@@ -365,32 +372,39 @@ C is reviewed independently. This Spec currently has no open owner questions.
 
 ## Roost and Prompt Shortcuts
 
-**Roost (lossy, owner decision):** each Roost turn is signed by the executing
-machine's local writer identity, and the current SDK has no raw export/import that
-keeps the original signed records. Export reads each turn's visible content
-(`roost-turns/v1`); import has the importing device write it as a new Roost session.
-Original signatures, writer proof and the turn's step-by-step edit process are lost;
-all content visible in the session is kept. Rewritten turns are not the same CRDT
-data as the originals, so they are not merged: if the target already has the same
-Roost session it is skipped as a whole, only sessions the target lacks are created,
-and reimport deduplicates by original turn ID. A lossless codec can be added once
-the SDK offers raw interfaces.
+**Roost (lossy):** the owner decided Roost is exported, possibly without
+signatures. Each Roost turn is signed by the executing machine's local writer
+identity, and the current SDK has no raw export/import that keeps the original signed
+records. Export reads each turn's visible content (`roost-turns/v1`); import has the
+importing device write it as a new Roost session. Original signatures, writer proof
+and the turn's step-by-step edit process are lost; all content visible in the
+session is kept. **Recommended rules:** rewritten turns are not the same CRDT data as
+the originals, so they are not merged: if the target already has the same Roost
+session it is skipped as a whole, only sessions the target lacks are created, and
+reimport deduplicates by original turn ID. A lossless codec can be added once the SDK
+offers raw interfaces.
 
-**Prompt Shortcuts (owner decision):** Shortcuts are stored per workspace + owner +
-visibility, and only the owner writes their own. Export includes all of the
+**Prompt Shortcuts:** the owner decided they are in the first version; the visibility
+rules below are **inferred by the coordinator from the owner's privacy principle**
+(the existing privacy model does not change). Shortcuts are stored per workspace +
+owner + visibility, and only the owner writes their own. Export includes all of the
 exporter's own Shortcuts (private ones too) and others' workspace-shared Shortcuts.
-Import writes every one as a **workspace-shared** Shortcut owned by the importer,
-with the report noting the original author and visibility. Shortcuts that were
-private to the exporter therefore become visible to every member after import; the
-dry-run report lists them separately. Reimport deduplicates by original Shortcut ID.
-Encrypted workspaces do not support Shortcuts yet, so importing into one records
-Shortcuts as gaps.
+Import keeps the original visibility:
+
+- **Private items:** imported only when the importer is the original owner (same
+  account), and they stay private; otherwise they are recorded as gaps and not
+  imported.
+- **Workspace-shared items:** imported as workspace-shared Shortcuts owned by the
+  importer, with the report noting the original author.
+- Reimport deduplicates by original Shortcut ID. Encrypted workspaces do not support
+  Shortcuts yet, so importing into one records Shortcuts as gaps.
 
 ## Evidence
 
-- Intent: this document; every owner decision (1–10)
-  was confirmed by the owner on 2026-11-19. They decide specific questions and are not
-  an approval of this Spec revision as a whole, which remains draft.
+- Intent: this document; decided items 1–10 were confirmed by the owner on
+  2026-11-19 (premises 1–3 given by the owner personally; 4–10 are the owner's replies
+  to seven questions). Content labeled recommendation or inference is not an owner
+  decision. None of this approves this Spec revision as a whole, which remains draft.
 - Inspected implementation: [`lody export`](../apps/cli/src/commands/export.ts),
   [session-export](../apps/cli/src/lib/session-export/),
   [OSS migration](../apps/cli/src/lib/oss-migration/README.md),
