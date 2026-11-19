@@ -13,11 +13,11 @@ import {
 } from 'loro-repo';
 
 const notCommitted = (reason: string) => new ExternalMetadataNotCommittedError(reason);
-import { connectNativeRepo } from '../src/node/native-repo';
+import { Flock } from '@loro-dev/flock-wasm';
+import { createNativeFlockDocs } from '../src/node/native-flock-docs';
+import { connectNativeRepo, importLegacyRoom, type LegacyFlockBundle } from '../src/node/native-repo';
 import {
   createNativeWorkspaceMeta,
-  importLegacyMeta,
-  type LegacyFlockBundle,
 } from '../src/node/native-workspace-meta';
 
 const hostScript = fileURLToPath(new URL('./fixtures/native-repo-host.mjs', import.meta.url));
@@ -108,7 +108,7 @@ describe('native Workspace Meta', () => {
   it('migrates legacy Meta losslessly and publishes once', async () => {
     const { connection } = await setup();
     const bundle = await legacyBundle();
-    expect(await importLegacyMeta(connection.client, ns, 'cli', async () => bundle)).toBe(
+    expect(await importLegacyRoom(connection.client, ns, META_ROOM, 'cli', async () => bundle)).toBe(
       'imported'
     );
     // Registers keep their original clocks, tombstones included.
@@ -129,7 +129,7 @@ describe('native Workspace Meta', () => {
     expect((await repo.getFlockDoc('ws:fi:one'))?.deleted).toBe(false);
     // A published source is not imported again, even if its replica changed.
     expect(
-      await importLegacyMeta(connection.client, ns, 'cli', () => {
+      await importLegacyRoom(connection.client, ns, META_ROOM, 'cli', () => {
         throw new Error('must not load');
       })
     ).toBe('already-published');
@@ -208,7 +208,7 @@ describe('native Workspace Meta', () => {
       entries[JSON.stringify(['e', id])] = { c: `${1_000 + i},0,seed`, d: true };
       entries[JSON.stringify(['m', id, 'n'])] = { c: `${1_000 + i},1,seed`, d: 0 };
     }
-    await importLegacyMeta(connection.client, ns, 'seed', async () => ({ version: 0, entries }));
+    await importLegacyRoom(connection.client, ns, META_ROOM, 'seed', async () => ({ version: 0, entries }));
     const writer = createNativeWorkspaceMeta(await peer(dataDir), ns, notCommitted);
     cleanups.push(() => writer.close());
     await writer.open(() => {});
@@ -237,3 +237,80 @@ describe('native Workspace Meta', () => {
   });
 });
 
+
+describe('natively owned named Flock documents', () => {
+  const CATALOG = 'ws:wf:workspace';
+  const owner = (client: RepoClient) =>
+    createNativeFlockDocs(client, ns, (id) => id === CATALOG, (file) =>
+      Flock.fromFile(file).exportJson()
+    );
+  const replica = async (client: RepoClient) => {
+    const repo = await LoroRepo.create({ externalFlockDocs: owner(client) });
+    cleanups.push(() => repo.destroy());
+    return { repo, handle: await repo.openFlockDoc(CATALOG) };
+  };
+  const until = async (check: () => boolean) => {
+    while (!check()) await new Promise((resolve) => setImmediate(resolve));
+  };
+
+  it('migrates the legacy body and converges a daemon and a renderer replica', async () => {
+    const { dataDir, connection } = await setup();
+    const legacy = new Flock('legacy');
+    legacy.put(['mcpServer', 'a'], { name: 'a' });
+    legacy.delete(['mcpServer', 'gone']);
+    await importLegacyRoom(connection.client, ns, { kind: 'flock', id: CATALOG }, 'cli', async () =>
+      legacy.exportJson() as LegacyFlockBundle
+    );
+    const daemon = await replica(connection.client);
+    const renderer = await replica(await peer(dataDir));
+    expect(daemon.handle.flock.get(['mcpServer', 'a'])).toEqual({ name: 'a' });
+
+    // Same key from both sides, plus one key each.
+    daemon.handle.flock.put(['role', 'shared'], 'daemon');
+    renderer.handle.flock.put(['role', 'shared'], 'renderer');
+    daemon.handle.flock.put(['role', 'daemon'], 1);
+    renderer.handle.flock.put(['role', 'renderer'], 2);
+    await Promise.all([
+      daemon.repo.persistFlockDocNow(CATALOG, daemon.handle.flock),
+      renderer.repo.persistFlockDocNow(CATALOG, renderer.handle.flock),
+    ]);
+    const settled = (flock: Flock) =>
+      flock.get(['role', 'daemon']) === 1 && flock.get(['role', 'renderer']) === 2;
+    await until(() => settled(daemon.handle.flock) && settled(renderer.handle.flock));
+    const native = Flock.fromFile(
+      (await connection.client.exportFlockRaw(ns, { kind: 'flock', id: CATALOG })).bytes
+    );
+    const winner = native.get(['role', 'shared']);
+    expect(['daemon', 'renderer']).toContain(winner);
+    await until(
+      () =>
+        daemon.handle.flock.get(['role', 'shared']) === winner &&
+        renderer.handle.flock.get(['role', 'shared']) === winner
+    );
+    expect(native.get(['role', 'daemon'])).toBe(1);
+    expect(native.get(['role', 'renderer'])).toBe(2);
+  });
+
+  it('keeps a change pending while the host is down and commits it after relaunch', async () => {
+    const { dataDir, connection } = await setup();
+    const daemon = await replica(connection.client);
+    const reconnected = new Promise<void>((resolve) => {
+      const stop = connection.client.onConnectionStateChange((state) => {
+        if (state === 'connected') {
+          stop();
+          resolve();
+        }
+      });
+    });
+    await killHost(dataDir, 'SIGKILL');
+    daemon.handle.flock.put(['row'], 'offline');
+    await expect(daemon.repo.persistFlockDocNow(CATALOG, daemon.handle.flock)).rejects.toThrow();
+    expect(daemon.handle.flock.get(['row'])).toBe('offline');
+    await reconnected;
+    await daemon.repo.flush();
+    const native = Flock.fromFile(
+      (await connection.client.exportFlockRaw(ns, { kind: 'flock', id: CATALOG })).bytes
+    );
+    expect(native.get(['row'])).toBe('offline');
+  });
+});

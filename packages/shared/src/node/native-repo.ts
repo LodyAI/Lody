@@ -8,6 +8,7 @@ import {
 import type {
   FlockChangesUpdate,
   FlockKey,
+  FlockRegisterEntry,
   FlockStateEntry,
   RepoClient,
   RoomKey,
@@ -134,6 +135,12 @@ export type FlockObservationEvent =
   | { kind: 'snapshot' | 'changes'; entries: FlockStateEntry[]; txId: number }
   | { kind: 'invalidated' };
 
+/** Register mode: a complete Flock file, then changes with their clocks. */
+export type FlockRegisterObservationEvent =
+  | { kind: 'snapshot'; file: Uint8Array; txId: number }
+  | { kind: 'changes'; registers: FlockRegisterEntry[]; txId: number }
+  | { kind: 'invalidated' };
+
 export interface FlockObservation {
   /** Resolves after the first snapshot was delivered. */
   readonly ready: Promise<void>;
@@ -144,26 +151,33 @@ export interface FlockObservation {
 }
 
 const PAGE_BUDGET = { maxRows: 4096, maxBytes: 1024 * 1024 };
+type Opening = ReturnType<RepoClient['beginFlockChangesSubscription']>;
+type Loader = (
+  update: FlockChangesUpdate,
+  isCurrent: () => boolean
+) => { buffer(update: FlockChangesUpdate): void; run(): Promise<boolean> };
 
 /**
  * The single observation lifecycle. The engine subscription starts at the head
- * without a snapshot, so no frame grows with the room; initial state is read in
- * bounded pages, each a fresh query at its own head. A change buffered during
- * the load is kept only if it is newer than the page that returned its key.
- * The view then receives one `snapshot`, followed by `changes`. Disconnect or a
- * gap emits `invalidated`; the SDK resubscribes after reconnect (and a gap is
- * resubscribed here), and both reload. Domains own no retry or release state.
+ * without a snapshot, so no frame grows with the room; the loader then reads
+ * initial state and merges changes that raced it. The view receives one
+ * `snapshot`, followed by changes. Disconnect or a gap emits `invalidated`; the
+ * SDK resubscribes after reconnect (and a gap is resubscribed here), and both
+ * reload. Domains own no retry, release or reconnect state.
  */
-export function observeFlock(
+function observe(
   client: RepoClient,
   namespace: string,
   room: RoomKey,
   prefix: FlockKey,
-  listener: (event: FlockObservationEvent) => void
+  registers: boolean,
+  load: Loader,
+  onChanges: (update: FlockChangesUpdate) => void,
+  onInvalidated: () => void
 ): FlockObservation {
   let active = true;
-  let current: ReturnType<RepoClient['beginFlockChangesSubscription']> | undefined;
-  let loading: { buffered: { entries: FlockStateEntry[]; txId: number }[] } | undefined;
+  let current: Opening | undefined;
+  let loading: ReturnType<Loader> | undefined;
   let resolveReady!: () => void;
   let rejectReady!: (error: unknown) => void;
   const ready = new Promise<void>((resolve, reject) => {
@@ -171,77 +185,45 @@ export function observeFlock(
     rejectReady = reject;
   });
   ready.catch(() => {});
-
-  const load = async (opening: NonNullable<typeof current>) => {
-    const load = { buffered: [] as { entries: FlockStateEntry[]; txId: number }[] };
-    loading = load;
-    // A resubscription snapshot arrives during the SDK's reconnect resync,
-    // before ordinary reads are admitted.
-    if (client.connectionState !== 'connected') await client.whenConnected();
-    const pageHead = new Map<string, number>();
-    const rows: FlockStateEntry[] = [];
-    let start: FlockKey | undefined;
-    let head = 0;
-    for (;;) {
-      const page = await client.flockScanPage(
-        namespace,
-        room,
-        { prefix, ...(start ? { start: { bound: 'exclusive', key: start } } : {}) },
-        PAGE_BUDGET
-      );
-      if (!active || current !== opening || loading !== load) return;
-      for (const entry of page.entries) {
-        pageHead.set(JSON.stringify(entry.key), page.roomTxId);
-        rows.push(entry);
-      }
-      head = Math.max(head, page.roomTxId);
-      if (page.eof) break;
-      const last = page.entries.at(-1);
-      if (!last) throw new Error('native_repo_page_without_progress');
-      start = last.key;
-    }
-    loading = undefined;
-    const byKey = new Map(rows.map((row) => [JSON.stringify(row.key), row]));
-    for (const change of load.buffered) {
-      head = Math.max(head, change.txId);
-      for (const entry of change.entries) {
-        const key = JSON.stringify(entry.key);
-        const seen = pageHead.get(key);
-        if (seen === undefined || change.txId > seen) byKey.set(key, entry);
-      }
-    }
-    listener({ kind: 'snapshot', entries: [...byKey.values()], txId: head });
-    resolveReady();
-  };
-
   const stopState = client.onConnectionStateChange((state) => {
-    if (active && state !== 'connected') listener({ kind: 'invalidated' });
+    if (active && state !== 'connected') onInvalidated();
   });
   const begin = () => {
-    const opening = client.beginFlockChangesSubscription(
+    const opening: Opening = client.beginFlockChangesSubscription(
       namespace,
       room,
       prefix,
-      (update: FlockChangesUpdate) => {
+      (update) => {
         if (!active || current !== opening) return;
         if (update.kind === 'gap') {
-          listener({ kind: 'invalidated' });
+          onInvalidated();
           void opening.handle.release().catch(() => {});
           begin();
         } else if (update.kind === 'snapshot') {
           // Initial subscribe or SDK resubscription after reconnect: reload.
-          load(opening).catch((error: unknown) => {
-            if (!active || current !== opening) return;
+          const isCurrent = () => active && current === opening && loading === pending;
+          const pending = load(update, isCurrent);
+          loading = pending;
+          void (async () => {
+            // A resubscription snapshot arrives during the SDK's reconnect
+            // resync, before ordinary reads are admitted.
+            if (client.connectionState !== 'connected') await client.whenConnected();
+            if (await pending.run()) {
+              if (loading === pending) loading = undefined;
+              resolveReady();
+            }
+          })().catch((error: unknown) => {
+            if (!isCurrent()) return;
             rejectReady(error);
-            listener({ kind: 'invalidated' });
+            onInvalidated();
           });
         } else if (loading) {
-          loading.buffered.push({ entries: update.entries, txId: update.roomTxId });
+          loading.buffer(update);
         } else {
-          listener({ kind: 'changes', entries: update.entries, txId: update.txId });
+          onChanges(update);
         }
       },
-      { snapshot: false }
+      { snapshot: false, registers }
     );
     current = opening;
     opening.ready.catch((error: unknown) => {
@@ -266,4 +248,252 @@ export function observeFlock(
       current = undefined;
     },
   };
+}
+
+/**
+ * Key-state view. Initial state is read in bounded pages, each a fresh query
+ * at its own head; a change buffered during the load is kept only if it is
+ * newer than the page that returned its key.
+ */
+export function observeFlock(
+  client: RepoClient,
+  namespace: string,
+  room: RoomKey,
+  prefix: FlockKey,
+  listener: (event: FlockObservationEvent) => void
+): FlockObservation {
+  return observe(
+    client,
+    namespace,
+    room,
+    prefix,
+    false,
+    (_update, isCurrent) => {
+      const buffered: { entries: FlockStateEntry[]; txId: number }[] = [];
+      return {
+        buffer: (update) => buffered.push({ entries: update.entries, txId: update.roomTxId }),
+        async run() {
+          const pageHead = new Map<string, number>();
+          const rows: FlockStateEntry[] = [];
+          let start: FlockKey | undefined;
+          let head = 0;
+          for (;;) {
+            const page = await client.flockScanPage(
+              namespace,
+              room,
+              { prefix, ...(start ? { start: { bound: 'exclusive', key: start } } : {}) },
+              PAGE_BUDGET
+            );
+            if (!isCurrent()) return false;
+            for (const entry of page.entries) {
+              pageHead.set(JSON.stringify(entry.key), page.roomTxId);
+              rows.push(entry);
+            }
+            head = Math.max(head, page.roomTxId);
+            if (page.eof) break;
+            const last = page.entries.at(-1);
+            if (!last) throw new Error('native_repo_page_without_progress');
+            start = last.key;
+          }
+          const byKey = new Map(rows.map((row) => [JSON.stringify(row.key), row]));
+          for (const change of buffered) {
+            head = Math.max(head, change.txId);
+            for (const entry of change.entries) {
+              const key = JSON.stringify(entry.key);
+              const seen = pageHead.get(key);
+              if (seen === undefined || change.txId > seen) byKey.set(key, entry);
+            }
+          }
+          listener({ kind: 'snapshot', entries: [...byKey.values()], txId: head });
+          return true;
+        },
+      };
+    },
+    (update) => listener({ kind: 'changes', entries: update.entries, txId: update.txId }),
+    () => listener({ kind: 'invalidated' })
+  );
+}
+
+/**
+ * Register view for an in-memory Flock replica. Initial state is the room's
+ * complete raw export; changes carry clocks, so buffered and repeated changes
+ * merge in any order.
+ */
+export function observeFlockRegisters(
+  client: RepoClient,
+  namespace: string,
+  room: RoomKey,
+  listener: (event: FlockRegisterObservationEvent) => void
+): FlockObservation {
+  return observe(
+    client,
+    namespace,
+    room,
+    [],
+    true,
+    (_update, isCurrent) => {
+      const buffered: FlockChangesUpdate[] = [];
+      return {
+        buffer: (update) => buffered.push(update),
+        async run() {
+          const { bytes, roomTxId } = await client.exportFlockRaw(namespace, room);
+          if (!isCurrent()) return false;
+          listener({ kind: 'snapshot', file: bytes, txId: roomTxId });
+          const registers = buffered.flatMap((update) => update.registers ?? []);
+          if (registers.length) listener({ kind: 'changes', registers, txId: roomTxId });
+          return true;
+        },
+      };
+    },
+    (update) =>
+      listener({ kind: 'changes', registers: update.registers ?? [], txId: update.txId }),
+    () => listener({ kind: 'invalidated' })
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Legacy replica migration
+
+/** A legacy Flock replica's complete JSON export, tombstones and clocks included. */
+export interface LegacyFlockBundle {
+  readonly version: number;
+  readonly entries: Readonly<Record<string, { readonly c: string; readonly d?: unknown }>>;
+}
+
+const MIGRATIONS_ROOM: RoomKey = { kind: 'flock', id: 'lody-migrations' };
+
+const PAGE = { maxRows: 4096, maxBytes: 1024 * 1024 };
+const READ_CHUNK = 1024;
+
+/** Canonical JSON for value comparison; object key order is not significant. */
+const canonical = (value: unknown): string =>
+  value !== null && typeof value === 'object'
+    ? Array.isArray(value)
+      ? `[${value.map(canonical).join(',')}]`
+      : `{${Object.keys(value)
+          .sort()
+          .map(
+            (key) => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`
+          )
+          .join(',')}}`
+    : typeof value === 'bigint'
+      ? value.toString()
+      : JSON.stringify(value);
+const stateOf = (entry: { deleted: boolean; value: unknown } | undefined) =>
+  entry ? (entry.deleted ? 'deleted' : `=${canonical(entry.value)}`) : 'missing';
+const legacyStateOf = (record: { d?: unknown }) =>
+  'd' in record && record.d !== undefined ? `=${canonical(record.d)}` : 'deleted';
+
+async function readStates(client: RepoClient, namespace: string, room: RoomKey, keys: string[]) {
+  const states = new Map<string, string>();
+  for (let i = 0; i < keys.length; i += READ_CHUNK) {
+    const chunk = keys.slice(i, i + READ_CHUNK);
+    const read = await client.flockReadMany(
+      namespace,
+      room,
+      chunk.map((key) => ({ kind: 'key' as const, key: JSON.parse(key) as FlockKey })),
+      PAGE
+    );
+    chunk.forEach((key, index) => states.set(key, stateOf(read.results[index]?.[0])));
+  }
+  return states;
+}
+
+/**
+ * Legacy registers the native room does not cover, using bounded reads only.
+ * A key whose native state equals the legacy state is covered. For any other
+ * key, the legacy record is imported again: under LWW, an older record cannot
+ * change a key that holds a newer register, so a changed key proves the first
+ * import did not keep that register.
+ */
+export async function findUncoveredRegisters(
+  client: RepoClient,
+  namespace: string,
+  room: RoomKey,
+  bundle: LegacyFlockBundle
+): Promise<string[]> {
+  const native = new Map<string, string>();
+  let start: FlockKey | undefined;
+  for (;;) {
+    const page = await client.flockScanPage(
+      namespace,
+      room,
+      start ? { start: { bound: 'exclusive', key: start } } : {},
+      PAGE
+    );
+    for (const entry of page.entries) native.set(JSON.stringify(entry.key), stateOf(entry));
+    if (page.eof) break;
+    const last = page.entries.at(-1);
+    if (!last) throw new Error('native_repo_page_without_progress');
+    start = last.key;
+  }
+  const differing = Object.entries(bundle.entries)
+    .map(([key, record]) => [JSON.stringify(JSON.parse(key)), record] as const)
+    .filter(([key, record]) => native.get(key) !== legacyStateOf(record));
+  if (differing.length === 0) return [];
+  const keys = differing.map(([key]) => key);
+  const before = await readStates(client, namespace, room, keys);
+  await client.importRoomState(namespace, room, {
+    updates: [
+      new TextEncoder().encode(
+        JSON.stringify({ version: bundle.version, entries: Object.fromEntries(differing) })
+      ),
+    ],
+    enqueueOutbox: false,
+  });
+  const after = await readStates(client, namespace, room, keys);
+  return keys.filter((key) => before.get(key) !== after.get(key));
+}
+
+export type LegacyRoomImport = 'imported' | 'already-published';
+
+/**
+ * Freeze → import → verify → publish one legacy replica of a room. The caller
+ * freezes the source: no legacy writer for that replica runs in native mode,
+ * so the bundle is final. Import is an LWW merge that keeps tombstones, clocks
+ * and unknown fields, so a retry after any failure is safe. The marker is
+ * written only after coverage is proven; until then the source keeps being
+ * offered. This is the room-level step a workspace import reuses.
+ */
+export async function importLegacyRoom(
+  client: RepoClient,
+  namespace: string,
+  room: RoomKey,
+  source: string,
+  load: () => Promise<LegacyFlockBundle | undefined>
+): Promise<LegacyRoomImport> {
+  const marker = [room.kind, room.id, source];
+  await client.createRoom(namespace, MIGRATIONS_ROOM, 'plaintext');
+  if ((await client.flockGet(namespace, MIGRATIONS_ROOM, marker)).found) return 'already-published';
+  await client.createRoom(namespace, room, 'plaintext');
+  const bundle = await load();
+  const entries = bundle ? Object.keys(bundle.entries).length : 0;
+  if (bundle && entries > 0) {
+    await client.importRoomState(namespace, room, {
+      updates: [new TextEncoder().encode(JSON.stringify(bundle))],
+      enqueueOutbox: false,
+    });
+    const missing = await findUncoveredRegisters(client, namespace, room, bundle);
+    if (missing.length > 0)
+      throw new Error(`native_room_migration_incomplete: ${missing.length} registers`);
+  }
+  await client.flockBatch(namespace, MIGRATIONS_ROOM, [
+    { op: 'put', key: marker, value: { publishedAt: Date.now(), entries } },
+  ]);
+  return 'imported';
+}
+
+/**
+ * Returns a source to legacy ownership: its marker is removed, so enabling the
+ * native mode again re-imports that replica (an LWW merge of its newer edits).
+ */
+export async function unpublishLegacyRoom(
+  client: RepoClient,
+  namespace: string,
+  room: RoomKey,
+  source: string
+) {
+  await client.flockBatch(namespace, MIGRATIONS_ROOM, [
+    { op: 'delete', key: [room.kind, room.id, source] },
+  ]);
 }

@@ -31,6 +31,11 @@ IndexedDB）迁到一个 native loro-repo-rs 房间。独立宿主进程持有�
   导出保留寄存器；重复或过期来源在 LWW 下无害，因此同一步骤可供之后的工作区导入复用。
   用 `flockReadRegisters` 校验被否：它一帧返回整个房间（10 万文档时失败）。改用有界状态比对；
   对不同的键再导入一次而状态不变，即证明已有更新的寄存器覆盖它们。
+- **命名 Flock 文档走 SDK 所有者，而非 Lody 端口。** workspace catalog、machine Flock 和
+  schedule registry 在 51 个文件、122 处直接使用同步的 wasm Flock 句柄，包括同步所需的版本和导出调用。
+  逐领域写 Lody 端口被否，那正是 #2892 的模式；类 transport 适配器也被否：正文仍会持久化到本地存储
+  （第二个写入方），而且 `flush` 会在 native 提交前就返回。loro-repo 的外部 Flock 所有者把副本留在内存里，
+  从房间原始导出加载，应用带时钟的变化（为此新增），并经现有持久化屏障提交。
 - **一个宿主进程，由任一方拉起。** 由 daemon 持有引擎（#2895）会让 Meta 可用性绑定 daemon；
   每方各起宿主会争夺 `files.lock`。宿主在最后一条连接关闭后空闲退出。
 

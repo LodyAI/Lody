@@ -150,6 +150,8 @@ Control, probe and Loro data-plane requests require the private daemon token bef
   authorization, never their own retry, release or reconnect state.
 - Ordinary paths use key/prefix reads, read-set conditional writes and changed-key
   observation; never scan or copy a whole room per operation.
-- Legacy Meta migrates by LWW import and is published only after bounded
-  coverage verification. Never dual-write a legacy replica in native mode.
+- Legacy replicas (Meta and owned named Flock documents) migrate by LWW import and
+  are published only after bounded coverage verification. Never dual-write a
+  legacy replica in native mode; owned named Flock documents go through
+  loro-repo's external owner, never storage or the local data plane.
   Design: [native Workspace Meta](../../../../.agents/docs/native-workspace-meta.md).

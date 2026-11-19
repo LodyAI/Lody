@@ -3,17 +3,25 @@ import { rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { META_ROOM } from '@loro-dev/loro-repo-client';
-import { ExternalMetadataNotCommittedError, type LoroRepo, type StorageAdapter } from 'loro-repo';
+import { Flock } from '@loro-dev/flock-wasm';
+import {
+  ExternalMetadataNotCommittedError,
+  type ExternalFlockDocsAdapter,
+  type LoroRepo,
+  type StorageAdapter,
+} from 'loro-repo';
+import { nativeFlockDocIds } from '@lody/shared/native-workspace-meta-ipc';
 import {
   connectNativeRepo,
+  importLegacyRoom,
   isNativeWorkspaceMetaEnabled,
+  unpublishLegacyRoom,
+  type LegacyFlockBundle,
   type NativeRepoHostLauncher,
 } from '@lody/shared/node/native-repo';
+import { createNativeFlockDocs } from '@lody/shared/node/native-flock-docs';
 import {
   createNativeWorkspaceMeta,
-  importLegacyMeta,
-  unpublishLegacyMeta,
-  type LegacyFlockBundle,
   type NativeWorkspaceMeta,
 } from '@lody/shared/node/native-workspace-meta';
 import { getCliPlatformKind } from '@/lib/cli-platform';
@@ -41,29 +49,50 @@ function cliNativeRepoHostLauncher(): NativeRepoHostLauncher {
 export const usesNativeWorkspaceMeta = (encrypted: boolean) =>
   !encrypted && getCliPlatformKind() === 'local' && isNativeWorkspaceMetaEnabled();
 
+const flockRoom = (id: string) => ({ kind: 'flock' as const, id });
+
 /**
- * Opens native Meta for one workspace on the process-wide connection. The CLI
- * replica is frozen by construction: in this mode its legacy Meta is never
- * opened for writing, so its export is final when imported.
+ * Opens native Meta and the owned named Flock documents for one workspace on
+ * the process-wide connection. The CLI replicas are frozen by construction: in
+ * this mode their legacy copies are never opened for writing, so each export is
+ * final when imported.
  */
 export async function openNativeWorkspaceMeta(
   workspaceId: string,
   legacyStorage: StorageAdapter,
   legacyDbPath: string,
   logger: Logger
-): Promise<NativeWorkspaceMeta> {
+): Promise<{ meta: NativeWorkspaceMeta; flockDocs: ExternalFlockDocsAdapter }> {
   const { client } = await connectNativeRepo({ launcher: cliNativeRepoHostLauncher });
-  const result = await importLegacyMeta(client, workspaceId, CLI_SOURCE, async () => {
-    const legacy = await legacyStorage.loadMeta();
-    return legacy?.exportJson() as LegacyFlockBundle | undefined;
-  });
+  const owned = nativeFlockDocIds(workspaceId);
+  const results = [
+    await importLegacyRoom(client, workspaceId, META_ROOM, CLI_SOURCE, async () => {
+      const legacy = await legacyStorage.loadMeta();
+      return legacy?.exportJson() as LegacyFlockBundle | undefined;
+    }),
+  ];
+  for (const id of owned)
+    results.push(
+      await importLegacyRoom(client, workspaceId, flockRoom(id), CLI_SOURCE, async () => {
+        const legacy = await legacyStorage.loadFlockDoc?.(id);
+        return legacy?.exportJson() as LegacyFlockBundle | undefined;
+      })
+    );
   await writeFile(publishedMarker(legacyDbPath), workspaceId);
-  logger.info(`[${workspaceId}] Native Workspace Meta: legacy CLI source ${result}`);
-  return createNativeWorkspaceMeta(
-    client,
-    workspaceId,
-    (reason) => new ExternalMetadataNotCommittedError(reason)
-  );
+  logger.info(`[${workspaceId}] Native Workspace Meta: legacy CLI sources ${results.join(', ')}`);
+  return {
+    meta: createNativeWorkspaceMeta(
+      client,
+      workspaceId,
+      (reason) => new ExternalMetadataNotCommittedError(reason)
+    ),
+    flockDocs: createNativeFlockDocs(
+      client,
+      workspaceId,
+      (id) => owned.includes(id),
+      (file) => Flock.fromFile(file).exportJson()
+    ),
+  };
 }
 
 /**
@@ -83,10 +112,16 @@ export async function writeBackNativeWorkspaceMeta(
   if (getCliPlatformKind() !== 'local' || !existsSync(marker)) return;
   const connection = await connectNativeRepo({ launcher: cliNativeRepoHostLauncher });
   try {
-    const { bytes } = await connection.client.exportFlockRaw(workspaceId, META_ROOM);
-    legacyRepo.getMeta().importFile(bytes);
+    const { client } = connection;
+    legacyRepo.getMeta().importFile((await client.exportFlockRaw(workspaceId, META_ROOM)).bytes);
     await legacyRepo.persistMetaNow();
-    await unpublishLegacyMeta(connection.client, workspaceId, CLI_SOURCE);
+    for (const id of nativeFlockDocIds(workspaceId)) {
+      const handle = await legacyRepo.openFlockDoc(id);
+      handle.flock.importFile((await client.exportFlockRaw(workspaceId, flockRoom(id))).bytes);
+      await legacyRepo.persistFlockDocNow(id, handle.flock);
+      await unpublishLegacyRoom(client, workspaceId, flockRoom(id), CLI_SOURCE);
+    }
+    await unpublishLegacyRoom(client, workspaceId, META_ROOM, CLI_SOURCE);
     await rm(marker, { force: true });
     logger.info(`[${workspaceId}] Native Workspace Meta written back to the legacy replica`);
   } finally {

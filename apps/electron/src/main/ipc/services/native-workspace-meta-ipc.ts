@@ -1,13 +1,21 @@
 import type { WebContents } from 'electron'
 import { getIpcContext, IpcMethod } from 'electron-ipc-decorator'
-import { connectNativeRepo, isNativeWorkspaceMetaEnabled } from '@lody/shared/node/native-repo'
+import {
+  connectNativeRepo,
+  importLegacyRoom,
+  isNativeWorkspaceMetaEnabled
+} from '@lody/shared/node/native-repo'
+import { commitFlockPayloads, observeNativeFlockDoc } from '@lody/shared/node/native-flock-docs'
 import {
   createNativeWorkspaceMeta,
-  importLegacyMeta,
   type NativeWorkspaceMeta
 } from '@lody/shared/node/native-workspace-meta'
 import {
+  NATIVE_FLOCK_CHANNEL,
   NATIVE_META_CHANNEL,
+  NativeFlockCommitSchema,
+  NativeFlockOpenSchema,
+  nativeFlockDocIds,
   NativeMetaCommitSchema,
   NativeMetaImportSchema,
   NativeMetaOpenSchema,
@@ -22,18 +30,21 @@ class NotCommitted extends Error {}
 
 // Host-controlled; renderer input cannot enable it or choose another workspace.
 const enabled = () => isLocalPlatform() && isNativeWorkspaceMetaEnabled()
-async function admit(workspaceId: string) {
+async function admit(workspaceId: string, flockDocId?: string) {
   if (!enabled()) throw new Error('native_meta_disabled')
   const snapshot = await readLocalPlatformSnapshot()
   if (snapshot?.workspace.workspaceId !== workspaceId) throw new Error('native_meta_scope_denied')
+  if (flockDocId !== undefined && !nativeFlockDocIds(workspaceId).includes(flockDocId))
+    throw new Error('native_meta_scope_denied')
 }
+const connect = () => connectNativeRepo({ launcher: bundledNativeRepoHostLauncher })
 
 /** One shared connection and one Meta observation per workspace in main. */
 const metas = new Map<string, Promise<NativeWorkspaceMeta>>()
 function workspaceMeta(workspaceId: string) {
   let meta = metas.get(workspaceId)
   if (!meta) {
-    meta = connectNativeRepo({ launcher: bundledNativeRepoHostLauncher }).then(({ client }) =>
+    meta = connect().then(({ client }) =>
       createNativeWorkspaceMeta(client, workspaceId, (reason) => new NotCommitted(reason))
     )
     metas.set(workspaceId, meta)
@@ -116,9 +127,58 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
 
   @IpcMethod()
   async importLegacy(input: unknown) {
-    const { workspaceId, source, bundle } = NativeMetaImportSchema.parse(input)
-    await admit(workspaceId)
-    const { client } = await connectNativeRepo({ launcher: bundledNativeRepoHostLauncher })
-    return importLegacyMeta(client, workspaceId, source, async () => bundle)
+    const { workspaceId, flockDocId, source, bundle } = NativeMetaImportSchema.parse(input)
+    await admit(workspaceId, flockDocId)
+    const { client } = await connect()
+    const room =
+      flockDocId === undefined
+        ? { kind: 'meta' as const, id: 'meta' }
+        : { kind: 'flock' as const, id: flockDocId }
+    return importLegacyRoom(client, workspaceId, room, source, async () => bundle)
+  }
+
+  /** A window's register view of one owned named Flock document. */
+  @IpcMethod()
+  async openFlockDoc(input: unknown) {
+    const { workspaceId, flockDocId, observationId } = NativeFlockOpenSchema.parse(input)
+    await admit(workspaceId, flockDocId)
+    const sender = getIpcContext().event.sender
+    const owned = windowViews(sender)
+    if (owned.has(observationId) || owned.size >= 16) throw new Error('native_meta_view_denied')
+    const { client } = await connect()
+    const observation = await observeNativeFlockDoc(client, workspaceId, flockDocId, (event) => {
+      if (sender.isDestroyed()) return
+      sender.send(NATIVE_FLOCK_CHANNEL, {
+        observationId,
+        event:
+          event.kind === 'snapshot'
+            ? { kind: 'snapshot', file: event.file }
+            : event.kind === 'changes'
+              ? { kind: 'changes', registers: event.registers }
+              : event
+      })
+    })
+    const release = () => void observation.release().catch(() => {})
+    if (views.get(sender) !== owned) {
+      release()
+      throw new Error('native_meta_view_closed')
+    }
+    owned.set(observationId, release)
+    try {
+      await observation.ready
+    } catch (error) {
+      owned.delete(observationId)
+      release()
+      throw error
+    }
+  }
+
+  /** Resolves only after the payloads are durably committed. */
+  @IpcMethod()
+  async commitFlockDoc(input: unknown) {
+    const { workspaceId, flockDocId, payloads } = NativeFlockCommitSchema.parse(input)
+    await admit(workspaceId, flockDocId)
+    const { client } = await connect()
+    await commitFlockPayloads(client, workspaceId, flockDocId, payloads)
   }
 }
