@@ -570,8 +570,9 @@ an id that did not exist yet. Native multiplied that cost: loro-crdt 1.17 serves
 every container read about five times slower on a replica loaded with
 `LoroDoc.fromSnapshot` (the native feed's form, and legacy's after compaction) than
 on one built from updates, and reading the whole state does not warm it. The
-writer now looks ids up in a per-document index, so only its one-time build pays
-that cost. The remaining wait is the scripted agent's: it does not advertise
+writer and the Loro reader now look ids up in one per-document index, so only
+its one-time build pays that cost; in the desktop the assistant entry's open went
+from 837 ms to 13 ms. The remaining wait is the scripted agent's: it does not advertise
 resume, so the daemon rebuilds the prompt by replaying the whole history (about
 18 s); agents that resume skip it.
 
