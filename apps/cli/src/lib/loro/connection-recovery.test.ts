@@ -220,4 +220,43 @@ describe('LoroConnectionRecoveryController watchdog room sweep', () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(await sweepAfter(fail)).toBe(1_000);
   });
+
+  it('does not re-download a room that stays errored on every 30s watchdog tick', async () => {
+    // Production: a cursor-less session room stuck in 'error' was rejoined by
+    // every watchdog tick, and each rejoin re-read its full 24 MiB stream.
+    const reconnect = vi.fn(async () => {});
+    const rejoin = vi.fn(async () => {});
+    const room = { status: 'error' as TransportRoomStatus };
+    const transportRooms = vi.fn(() => [
+      {
+        room: { kind: 'doc', id: 'stuck-session' },
+        subscription: {
+          get status() {
+            return room.status;
+          },
+          rejoin,
+        },
+      },
+    ]);
+    createController(
+      { reconnect, joinMetaRoom: vi.fn(), transportRooms } as unknown as Partial<LoroRepo>,
+      createMetaSub('joined')
+    );
+    const sweepTimes: number[] = [];
+    const startedAt = Date.now();
+    rejoin.mockImplementation(async () => {
+      sweepTimes.push((Date.now() - startedAt) / 1_000);
+    });
+
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(sweepTimes).toEqual([30, 60, 120, 240, 480]);
+
+    // Once the room recovers, a later failure is retried on the next tick again.
+    room.status = 'joined';
+    await vi.advanceTimersByTimeAsync(30_000);
+    room.status = 'error';
+    sweepTimes.length = 0;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(sweepTimes).toEqual([660]);
+  });
 });

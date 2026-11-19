@@ -37,6 +37,15 @@ const REJOIN_SWEEP_CONCURRENCY = 4;
 // rooms are errored. Leftovers wait for the next watchdog pass.
 const REJOIN_SWEEP_MAX_BATCHES = 3;
 /**
+ * Ceiling for the watchdog's retry of rooms that STAY errored. Rejoining a room
+ * whose initial sync never completed has no saved cursor, so every attempt
+ * re-downloads the whole stream (a 24 MiB cold session stream was fetched on
+ * every 30 s tick in production). The watchdog interval doubles while errored
+ * rooms persist, up to this cap; new failures still take the 1s->30s
+ * `rooms-degraded` sweep.
+ */
+const WATCHDOG_ERRORED_ROOM_MAX_DELAY_MS = 5 * 60_000;
+/**
  * Floor on how often the EXPENSIVE `meta-room-synced` fan-out may run.
  *
  * Its listeners do O(rooms) rescans, so the trigger rate is what decides
@@ -156,6 +165,8 @@ export class LoroConnectionRecoveryController {
   private roomSweepTimer: NodeJS.Timeout | null = null;
   private roomSweepAttempt = 0;
   private lastRoomSweepScheduledMs: number | null = null;
+  private watchdogErroredSweepAttempt = 0;
+  private nextWatchdogErroredSweepMs = 0;
   private reconnectInterval: NodeJS.Timeout | null = null;
   private activeOperation: Promise<void> | null = null;
   private streamsRecoveryGeneration = 0;
@@ -900,6 +911,7 @@ export class LoroConnectionRecoveryController {
       // streams-crdt exits that room's loops permanently and nothing else
       // supervises it, so CLI-authored ops for the room never reach the cloud
       // until a daemon restart. Sweep instead of returning early.
+      if (reason === 'watchdog' && !this.admitWatchdogRoomSweep()) return;
       await this.sweepRooms(reason);
       return;
     }
@@ -963,6 +975,46 @@ export class LoroConnectionRecoveryController {
           error
         )}`
       );
+    }
+  }
+
+  /**
+   * Back off the healthy watchdog sweep while Streams rooms stay errored. Both
+   * `repo.reconnect()` and {@link rejoinFailedStreamsBindings} rejoin every
+   * errored room with no per-room backoff, and a cursor-less rejoin re-reads
+   * the full stream, so a permanently failing room would otherwise cost one
+   * full download per tick. Sweeps resume at the base interval once no room is
+   * errored.
+   */
+  private admitWatchdogRoomSweep(): boolean {
+    if (!this.hasErroredStreamsRoom()) {
+      this.watchdogErroredSweepAttempt = 0;
+      this.nextWatchdogErroredSweepMs = 0;
+      return true;
+    }
+    const now = Date.now();
+    if (now < this.nextWatchdogErroredSweepMs) return false;
+    const intervalMs = readTimeoutEnv('LODY_LORO_AUTO_RECONNECT_INTERVAL_MS', 30_000);
+    const delayMs = Math.min(
+      intervalMs * 2 ** this.watchdogErroredSweepAttempt,
+      WATCHDOG_ERRORED_ROOM_MAX_DELAY_MS
+    );
+    this.watchdogErroredSweepAttempt = Math.min(
+      this.watchdogErroredSweepAttempt + 1,
+      MAX_RECONNECT_ATTEMPT
+    );
+    this.nextWatchdogErroredSweepMs = now + delayMs;
+    return true;
+  }
+
+  private hasErroredStreamsRoom(): boolean {
+    try {
+      return this.repo
+        .transportRooms(STREAMS_TRANSPORT_ID)
+        .some((entry) => entry.subscription.status === 'error');
+    } catch {
+      // Enumeration failure keeps the previous, unthrottled sweep behavior.
+      return false;
     }
   }
 
