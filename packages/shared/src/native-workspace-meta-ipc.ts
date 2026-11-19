@@ -25,9 +25,15 @@ export const isNativeFlockDocId = (workspaceId: string, flockDocId: string): boo
   );
 };
 
-/** Loro documents the native mode owns: Session documents (`session-*`). */
+const hasPrefix = (docId: string, prefix: string) =>
+  docId.startsWith(prefix) && docId.length > prefix.length;
+/** Session documents (`session-*`): read and patched remotely, never held by a renderer. */
+export const isNativeSessionDocId = (docId: string): boolean => hasPrefix(docId, 'session-');
+/** Schedule documents (`schedule-*`): small, so every process keeps a replica. */
+export const isNativeScheduleDocId = (docId: string): boolean => hasPrefix(docId, 'schedule-');
+/** Loro documents the native mode owns. */
 export const isNativeDocId = (docId: string): boolean =>
-  docId.startsWith('session-') && docId.length > 'session-'.length;
+  isNativeSessionDocId(docId) || isNativeScheduleDocId(docId);
 
 /** Owned ids among a legacy replica's documents, plus the fixed ones. */
 export const ownedLegacyFlockDocIds = (workspaceId: string, stored: readonly string[]) => [
@@ -91,6 +97,10 @@ export const NativeFlockCommitSchema = Workspace.extend({
 
 const MAX_DOC_COMMIT_BYTES = 64 * 1024 * 1024;
 const DocTarget = Workspace.extend({ docId: Id.refine(isNativeDocId, 'not an owned document') });
+/** Remote reads and patches serve only Session documents. */
+const SessionDocTarget = Workspace.extend({
+  docId: Id.refine(isNativeSessionDocId, 'not a Session document'),
+});
 const LoroVersion = z
   .record(z.string().regex(/^\d{1,20}$/), z.number().int().nonnegative())
   .refine((version) => Object.keys(version).length <= 4096, 'too many peers');
@@ -166,13 +176,13 @@ export const NATIVE_DOC_CHANNEL = 'nativeWorkspaceMeta.doc' as const;
 
 const PathSeg = z.union([z.string().max(256), z.number().int().nonnegative()]);
 const DocPath = z.array(PathSeg).max(32);
-export const NativeDocReadSchema = DocTarget.extend({ path: DocPath }).strict();
-export const NativeDocListFieldsSchema = DocTarget.extend({
+export const NativeDocReadSchema = SessionDocTarget.extend({ path: DocPath }).strict();
+export const NativeDocListFieldsSchema = SessionDocTarget.extend({
   start: z.number().int(),
   end: z.number().int().optional(),
   fields: z.array(z.object({ path: DocPath, shape: z.boolean().optional() }).strict()).max(64),
 }).strict();
-export const NativeDocObservePathsSchema = DocTarget.extend({
+export const NativeDocObservePathsSchema = SessionDocTarget.extend({
   observationId: Observation,
 }).strict();
 const PatchOp = z.discriminatedUnion('op', [
@@ -189,7 +199,7 @@ const PatchOp = z.discriminatedUnion('op', [
     .strict(),
   z.object({ op: z.literal('move'), from: DocPath, to: DocPath }).strict(),
 ]);
-export const NativeDocPatchSchema = DocTarget.extend({
+export const NativeDocPatchSchema = SessionDocTarget.extend({
   ops: z.array(PatchOp).min(1).max(256),
   precondition: z.union([
     z

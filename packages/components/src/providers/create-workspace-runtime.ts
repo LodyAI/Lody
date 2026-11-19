@@ -58,7 +58,7 @@ import {
   type RepoRoomSubscription,
   type RepoWatchHandle,
 } from 'loro-repo';
-import { isNativeDocId } from '@lody/shared/native-workspace-meta-ipc';
+import { isNativeSessionDocId } from '@lody/shared/native-workspace-meta-ipc';
 import { createNativeRemoteSessionStore } from './native-remote-session-store';
 import {
   createRendererNativeDocs,
@@ -5055,7 +5055,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const createSessionStore = async (sessionId: SessionId): Promise<SessionDocStore> => {
     const roomId = getSessionRoomId(sessionId);
     // Native Session documents stay in the engine: this renderer keeps no replica.
-    if (nativeMeta && isNativeDocId(roomId))
+    if (nativeMeta && isNativeSessionDocId(roomId))
       return createNativeRemoteSessionStore({
         sessionId,
         roomId,
