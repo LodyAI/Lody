@@ -11,6 +11,13 @@ import { useOrganization } from '@/hooks/useOrganization';
 import { CompactRow, CompactSection } from './compact-layout';
 import { SettingsPageLead } from './settings-page-header';
 import { settingsSurface } from './surface';
+import {
+  BUNDLE_KINDS,
+  type BundleKind,
+  type WorkspaceBundleExportSummary,
+  type WorkspaceBundleImportOutcome,
+  type WorkspaceBundlePlan,
+} from '@lody/shared/workspace-bundle-control';
 
 /**
  * Settings > Data: export the whole workspace to a bundle file, or merge one in
@@ -23,7 +30,7 @@ export type WorkspaceBundleApi = {
     workspaceName: string;
   }): Promise<
     | { status: 'canceled' }
-    | { status: 'done'; summary: unknown }
+    | { status: 'done'; summary: WorkspaceBundleExportSummary }
     | { status: 'error'; message: string }
   >;
   chooseImportFile(): Promise<
@@ -34,25 +41,17 @@ export type WorkspaceBundleApi = {
   previewImport(input: {
     workspaceId: string;
     token: string;
-  }): Promise<{ status: 'planned'; plan: unknown } | { status: 'error'; message: string }>;
+  }): Promise<
+    { status: 'planned'; plan: WorkspaceBundlePlan } | { status: 'error'; message: string }
+  >;
   importWorkspace(input: {
     workspaceId: string;
     token: string;
-  }): Promise<{ status: 'done'; outcome: unknown } | { status: 'error'; message: string }>;
+  }): Promise<
+    { status: 'done'; outcome: WorkspaceBundleImportOutcome } | { status: 'error'; message: string }
+  >;
 };
 
-type Record_ = Record<string, unknown>;
-const asRecord = (value: unknown): Record_ =>
-  value && typeof value === 'object' && !Array.isArray(value) ? (value as Record_) : {};
-const asNumber = (value: unknown): number => (typeof value === 'number' ? value : 0);
-
-export type BundleKind =
-  | 'conversations'
-  | 'schedules'
-  | 'previewComments'
-  | 'catalog'
-  | 'machines'
-  | 'other';
 export type KindSummary = {
   kind: BundleKind;
   new: number;
@@ -66,49 +65,22 @@ export type ImportPlanSummary = {
   gaps: number;
 };
 
-const KIND_ORDER: readonly BundleKind[] = [
-  'conversations',
-  'schedules',
-  'previewComments',
-  'catalog',
-  'machines',
-  'other',
-];
-
-/** Supporting rooms (indexes) are not counted; they still appear if skipped. */
-function kindOf(codec: string): { kind: BundleKind; counted: boolean } | null {
-  if (codec === 'meta/v1') return null;
-  if (codec === 'session/v1' || codec === 'roost-turns/v1')
-    return { kind: 'conversations', counted: codec === 'session/v1' };
-  if (codec === 'schedule/v1') return { kind: 'schedules', counted: true };
-  if (codec === 'schedule-registry/v1') return { kind: 'schedules', counted: false };
-  if (codec === 'preview-comment/v1') return { kind: 'previewComments', counted: true };
-  if (codec === 'workspace-catalog/v1') return { kind: 'catalog', counted: true };
-  if (codec === 'machine/v1' || codec === 'machine-catalog/v1' || codec === 'agent-config/v1')
-    return { kind: 'machines', counted: codec === 'machine-catalog/v1' };
-  return { kind: 'other', counted: !codec.endsWith('-index/v1') };
-}
-
 /** What a dry run says the import would do, in the terms people use. */
-export function summarizeImportPlan(plan: unknown): ImportPlanSummary {
-  const rooms = Array.isArray(asRecord(plan).rooms)
-    ? (asRecord(plan).rooms as unknown[]).map(asRecord)
-    : [];
+export function summarizeImportPlan(plan: WorkspaceBundlePlan): ImportPlanSummary {
   const kinds = new Map<BundleKind, KindSummary>();
   const skipped: ImportPlanSummary['skipped'] = [];
-  for (const room of rooms) {
-    const kind = kindOf(String(room.codec ?? ''));
-    if (!kind) continue;
+  for (const room of plan.rooms) {
     if (room.action === 'skip')
       skipped.push({
-        kind: kind.kind,
-        label: typeof room.label === 'string' && room.label ? room.label : null,
-        reason: String(room.reason ?? ''),
-        detail: typeof room.detail === 'string' ? room.detail : null,
+        kind: room.kind,
+        label: room.label || null,
+        reason: room.reason ?? '',
+        detail: room.detail ?? null,
       });
-    if (!kind.counted && room.action !== 'skip') continue;
-    const entry = kinds.get(kind.kind) ?? {
-      kind: kind.kind,
+    // Supporting rooms (indexes, Meta) are not items a person counts unless skipped.
+    if (!room.counted && room.action !== 'skip') continue;
+    const entry = kinds.get(room.kind) ?? {
+      kind: room.kind,
       new: 0,
       updated: 0,
       unchanged: 0,
@@ -118,16 +90,15 @@ export function summarizeImportPlan(plan: unknown): ImportPlanSummary {
     else if (room.state === 'new') entry.new += 1;
     else if (room.state === 'unchanged') entry.unchanged += 1;
     else entry.updated += 1;
-    kinds.set(kind.kind, entry);
+    kinds.set(room.kind, entry);
   }
-  const gaps = asRecord(plan).gaps;
   return {
-    kinds: KIND_ORDER.flatMap((kind) => {
+    kinds: BUNDLE_KINDS.flatMap((kind) => {
       const entry = kinds.get(kind);
       return entry ? [entry] : [];
     }),
     skipped,
-    gaps: Array.isArray(gaps) ? gaps.length : 0,
+    gaps: plan.gaps.length,
   };
 }
 
@@ -245,11 +216,10 @@ export function WorkspaceDataSettingContent({
       const result = await api.exportWorkspace({ workspaceId, workspaceName });
       if (result.status === 'error') setError(describeError(result.message));
       if (result.status !== 'done') return;
-      const summary = asRecord(result.summary);
       setExported({
-        file: String(summary.file ?? ''),
-        rooms: asNumber(summary.rooms),
-        gaps: Array.isArray(summary.gaps) ? summary.gaps.length : 0,
+        file: result.summary.file,
+        rooms: result.summary.rooms,
+        gaps: result.summary.gaps.length,
       });
     });
 
@@ -280,12 +250,11 @@ export function WorkspaceDataSettingContent({
         setError(describeError(result.message));
         return;
       }
-      const outcome = asRecord(result.outcome);
-      const counts = asRecord(outcome.result);
+      const { result: counts, uploadPending } = result.outcome;
       setImported({
-        imported: asNumber(counts.imported),
-        skipped: asNumber(counts.skipped),
-        uploadPending: Array.isArray(outcome.uploadPending) ? outcome.uploadPending.length : 0,
+        imported: counts?.imported ?? 0,
+        skipped: counts?.skipped ?? 0,
+        uploadPending: uploadPending.length,
       });
     });
   };

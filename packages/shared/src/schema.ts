@@ -1031,18 +1031,35 @@ export type SessionImportFence = {
   queueItemIds: string[];
 };
 
+/** On a schedule document's metadata: the activation an import carried in. */
+export type ScheduleImportFence = { workspaceId: string; activationId: string };
+
+const EMPTY_FENCE: { turnIds: readonly string[]; queueItemIds: readonly string[] } = {
+  turnIds: [],
+  queueItemIds: [],
+};
+
 /** Turn and queue ids an import fenced off in this workspace; empty elsewhere. */
 export function getImportFence(
   meta: Pick<SessionMeta, 'importFence'> | undefined,
   workspaceId: string | undefined
-): { turnIds: ReadonlySet<string>; queueItemIds: ReadonlySet<string> } {
+): { turnIds: readonly string[]; queueItemIds: readonly string[] } {
   const fence = meta?.importFence;
-  if (!workspaceId || !fence || fence.workspaceId !== workspaceId)
-    return { turnIds: new Set(), queueItemIds: new Set() };
+  if (!workspaceId || !fence || fence.workspaceId !== workspaceId) return EMPTY_FENCE;
   return {
-    turnIds: new Set(Array.isArray(fence.turnIds) ? fence.turnIds : []),
-    queueItemIds: new Set(Array.isArray(fence.queueItemIds) ? fence.queueItemIds : []),
+    turnIds: Array.isArray(fence.turnIds) ? fence.turnIds : [],
+    queueItemIds: Array.isArray(fence.queueItemIds) ? fence.queueItemIds : [],
   };
+}
+
+/** True when this schedule activation came from an import into `workspaceId`. */
+export function isScheduleImportFenced(
+  meta: { importFence?: unknown } | undefined,
+  workspaceId: string,
+  activationId: string
+): boolean {
+  const fence = meta?.importFence as Partial<ScheduleImportFence> | undefined;
+  return fence?.workspaceId === workspaceId && fence.activationId === activationId;
 }
 
 export type SessionMeta = SessionPullRequestLifecycleFields & {

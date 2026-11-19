@@ -1,3 +1,4 @@
+import { formatErrorMessage } from '@/utils/format-error';
 import type { WorkspaceBundleControlRequest, WorkspaceBundleControlResponse } from '@lody/shared';
 import {
   runWorkspaceExport,
@@ -39,6 +40,6 @@ export async function handleWorkspaceBundleControl(
     });
     return { ok: true, result };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    return { ok: false, error: formatErrorMessage(error) };
   }
 }

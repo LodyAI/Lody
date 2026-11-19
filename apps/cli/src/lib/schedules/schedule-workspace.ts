@@ -1,4 +1,3 @@
-import { isScheduleImportFenced } from '@/lib/workspace-bundle/cross-workspace';
 import { notificationLabel } from '@lody/shared/notifications';
 import type { RepoRoomSubscription } from 'loro-repo';
 import {
@@ -8,6 +7,7 @@ import {
   getServerNow,
   getSessionRoomId,
   isLoroRepoDocDeleted,
+  isScheduleImportFenced,
   ScheduleRepository,
   ScheduledMessageSchema,
   scheduleDefinitionFingerprint,

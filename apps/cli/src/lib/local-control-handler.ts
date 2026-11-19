@@ -322,6 +322,35 @@ async function handleMachineRpcRequest(
   }
 }
 
+/**
+ * A control route whose request names this machine: invalid JSON or schema is 400,
+ * another machine 403, an absent dispatcher 501 and a thrown dispatcher 500.
+ */
+async function handleMachineScopedControl<T extends { machineId: string }>(
+  machineId: MachineId,
+  rawBody: string,
+  schema: { safeParse(value: unknown): { success: true; data: T } | { success: false } },
+  dispatch: ((message: T) => Promise<Record<string, unknown>>) | undefined,
+  errors: { unsupported: string; failed: string }
+): Promise<LocalControlHandlerResponse> {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(rawBody);
+  } catch {
+    return handlerResponse(400, { ok: false, error: 'invalid_request' });
+  }
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) return handlerResponse(400, { ok: false, error: 'invalid_request' });
+  if (parsed.data.machineId !== machineId)
+    return handlerResponse(403, { ok: false, error: 'machine_mismatch' });
+  if (!dispatch) return handlerResponse(501, { ok: false, error: errors.unsupported });
+  try {
+    return handlerResponse(200, await dispatch(parsed.data));
+  } catch {
+    return handlerResponse(500, { ok: false, error: errors.failed });
+  }
+}
+
 export class LocalControlHandler {
   constructor(private readonly config: LocalSessionControlConfig) {}
 
@@ -424,48 +453,22 @@ export class LocalControlHandler {
         }
       })();
     }
-    if (request.path === LOCAL_WORKSPACE_BUNDLE_PATH) {
-      return (async () => {
-        let raw: unknown;
-        try {
-          raw = JSON.parse(request.rawBody);
-        } catch {
-          return handlerResponse(400, { ok: false, error: 'invalid_request' });
-        }
-        const parsed = WorkspaceBundleControlRequestSchema.safeParse(raw);
-        if (!parsed.success) return handlerResponse(400, { ok: false, error: 'invalid_request' });
-        if (parsed.data.machineId !== this.config.machineId)
-          return handlerResponse(403, { ok: false, error: 'machine_mismatch' });
-        if (!this.config.dispatchWorkspaceBundle)
-          return handlerResponse(501, { ok: false, error: 'workspace_bundle_unsupported' });
-        try {
-          return handlerResponse(200, await this.config.dispatchWorkspaceBundle(parsed.data));
-        } catch {
-          return handlerResponse(500, { ok: false, error: 'workspace_bundle_failed' });
-        }
-      })();
-    }
-    if (request.path === LOCAL_SCHEDULE_CONTROL_PATH) {
-      return (async () => {
-        let raw: unknown;
-        try {
-          raw = JSON.parse(request.rawBody);
-        } catch {
-          return handlerResponse(400, { ok: false, error: 'invalid_request' });
-        }
-        const parsed = ScheduleControlRequestSchema.safeParse(raw);
-        if (!parsed.success) return handlerResponse(400, { ok: false, error: 'invalid_request' });
-        if (parsed.data.machineId !== this.config.machineId)
-          return handlerResponse(403, { ok: false, error: 'machine_mismatch' });
-        if (!this.config.dispatchSchedule)
-          return handlerResponse(501, { ok: false, error: 'schedules_unsupported' });
-        try {
-          return handlerResponse(200, await this.config.dispatchSchedule(parsed.data));
-        } catch {
-          return handlerResponse(500, { ok: false, error: 'schedule_control_failed' });
-        }
-      })();
-    }
+    if (request.path === LOCAL_WORKSPACE_BUNDLE_PATH)
+      return handleMachineScopedControl(
+        this.config.machineId,
+        request.rawBody,
+        WorkspaceBundleControlRequestSchema,
+        this.config.dispatchWorkspaceBundle,
+        { unsupported: 'workspace_bundle_unsupported', failed: 'workspace_bundle_failed' }
+      );
+    if (request.path === LOCAL_SCHEDULE_CONTROL_PATH)
+      return handleMachineScopedControl(
+        this.config.machineId,
+        request.rawBody,
+        ScheduleControlRequestSchema,
+        this.config.dispatchSchedule,
+        { unsupported: 'schedules_unsupported', failed: 'schedule_control_failed' }
+      );
     if (request.path === LOCAL_SESSION_CONTROL_PATH) {
       return handleSessionControlRequest(this.config, request.rawBody, request.requestId, {
         onResponse: request.onSessionResponse,

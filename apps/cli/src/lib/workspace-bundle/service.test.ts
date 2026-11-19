@@ -3,18 +3,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runWorkspaceExport, runWorkspaceImport, type BundleWorkspace } from './service';
-import { openTestRepo, writeDoc, type TestRepo } from './test-support';
+import { openTestRepo, writeDoc, type TestRepo, tempDir as makeTempDir } from './test-support';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const step of cleanup.splice(0).reverse()) await step();
 });
 
-async function tempDir(): Promise<string> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-bundle-svc-'));
-  cleanup.push(() => fs.rm(dir, { recursive: true, force: true }));
-  return dir;
-}
+const tempDir = () => makeTempDir(cleanup, 'lody-bundle-svc-');
 
 function workspace(test: TestRepo, id: string, synced: string[] = []): BundleWorkspace {
   return {

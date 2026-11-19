@@ -81,7 +81,6 @@ export async function createBundleWriter(
         start += chunkSize;
       }
       const entry: RoomEntry = { ...descriptor, sha256: whole, size: bytes.byteLength, chunks };
-      if (entry.unsynced === undefined) delete entry.unsynced;
       rooms.push(entry);
       return entry;
     },

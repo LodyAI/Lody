@@ -1,27 +1,24 @@
-import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Flock } from '@loro-dev/flock-wasm';
 import { LoroDoc } from 'loro-crdt';
 import type { JsonObject, LoroRepo } from 'loro-repo';
 import { z } from 'zod';
+import { createSessionMirror, type SessionHistoryInput } from '@lody/shared';
+import type { BundleKind, BundleSkipReason } from '@lody/shared/workspace-bundle-control';
+import { atomicJson } from '../fs-atomic';
 import type { OpenBundle } from './bundle-file';
 import { authorizeFlockChanges } from './authorize';
+import { classifyRoom, codecTraits, KNOWN_CODECS, META_ROOM_ID, ROOST_ROOM_PREFIX } from './codecs';
 import {
-  classifyRoom,
-  KNOWN_CODECS,
-  MACHINE_CODECS,
-  META_ROOM_ID,
-  ROOST_ROOM_PREFIX,
-} from './codecs';
-import { createSessionMirror, type SessionHistoryInput } from '@lody/shared';
-import {
-  applyImportFences,
   crossWorkspaceRowWithheld,
   mapMetaKey,
   mapRoomId,
+  scheduleImportFence,
+  sessionImportFence,
 } from './cross-workspace';
 import type { BundleGap, RoomEntry } from './manifest';
+import { withDoc, withFlock } from './repo-leases';
 
 export class ImportRefusedError extends Error {
   override readonly name = 'ImportRefusedError';
@@ -37,15 +34,13 @@ export type RoomPlan = {
   targetId: string;
   codec: string;
   model: RoomEntry['model'];
+  /** What a person calls this kind of data, and whether it counts as one of their items. */
+  kind: BundleKind;
+  counted: boolean;
   action: 'merge' | 'skip';
   /** For merges: whether the target lacks the room, already covers it, or gains changes. */
   state?: 'new' | 'unchanged' | 'merge';
-  reason?:
-    | 'unrelated-same-id'
-    | 'deleted-in-target'
-    | 'machine-room'
-    | 'unauthorized'
-    | 'roost-exists';
+  reason?: BundleSkipReason;
   detail?: string;
   rows?: RowChanges;
   /** What a person calls this item (conversation or schedule title, machine name). */
@@ -73,11 +68,6 @@ function versionMap(doc: LoroDoc): Map<string, number> {
   return new Map(doc.oplogVersion().toJSON());
 }
 
-/**
- * Merges raw Flock file bytes into `target`, keeping every entry's original clock.
- * `skip` withholds entries (for example the Meta rows of a document that is not
- * imported); withheld entries are never written, not written then deleted.
- */
 export type RowPolicy = {
   /** Withholds an entry: it is never written, not written then deleted. */
   skip?: (key: readonly unknown[]) => boolean;
@@ -109,20 +99,38 @@ export async function mergeFlockBytes(
   target.importJson({ version: source.version, entries });
 }
 
-/** Meta rows of machine records: they describe one machine and never cross workspaces. */
-function metaRowIsMachineScoped(key: readonly unknown[], workspaceId: string): boolean {
-  if (typeof key[1] !== 'string' || !['e', 'm', 'ef', 'efx'].includes(String(key[0]))) return false;
-  const room = classifyRoom(key[1], workspaceId);
-  return room.kind === 'room' && MACHINE_CODECS.has(room.codec);
+/** The document or named Flock id a Meta row belongs to, if it is a per-id row. */
+function metaRowDocId(key: readonly unknown[]): string | undefined {
+  return (key[0] === 'e' || key[0] === 'm' || key[0] === 'ef' || key[0] === 'efx') &&
+    typeof key[1] === 'string'
+    ? key[1]
+    : undefined;
 }
 
-/** Meta rows that belong to one document or named Flock id. */
-export function metaRowBelongsTo(key: readonly unknown[], ids: ReadonlySet<string>): boolean {
-  return (
-    (key[0] === 'e' || key[0] === 'm' || key[0] === 'ef' || key[0] === 'efx') &&
-    typeof key[1] === 'string' &&
-    ids.has(key[1])
-  );
+/**
+ * Meta rows a merge writes: rows of withheld rooms stay the target's own, machine
+ * records never cross workspaces, and named-Flock rows follow the room id mapping.
+ * Plan and apply share it so the plan predicts exactly what apply writes.
+ */
+function metaPolicy(
+  sourceWorkspaceId: string,
+  targetWorkspaceId: string,
+  withheld: ReadonlySet<string>
+): RowPolicy {
+  const crossWorkspace = sourceWorkspaceId !== targetWorkspaceId;
+  return {
+    skip: (key) => {
+      const docId = metaRowDocId(key);
+      if (docId === undefined) return false;
+      if (withheld.has(docId)) return true;
+      if (!crossWorkspace) return false;
+      const room = classifyRoom(docId, sourceWorkspaceId);
+      return room.kind === 'room' && codecTraits(room.codec)?.machine === true;
+    },
+    ...(crossWorkspace
+      ? { mapKey: (key) => mapMetaKey(key, sourceWorkspaceId, targetWorkspaceId) }
+      : {}),
+  };
 }
 
 function covers(target: Map<string, number>, source: Map<string, number>): boolean {
@@ -172,50 +180,50 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
   const sourceWorkspaceId = manifest.source.workspaceId;
   const crossWorkspace = sourceWorkspaceId !== workspaceId;
   const targetIdOf = (id: string) => mapRoomId(id, sourceWorkspaceId, workspaceId);
-  const metaPolicy = (withheld: ReadonlySet<string>): RowPolicy => ({
-    skip: (key) =>
-      metaRowBelongsTo(key, withheld) ||
-      (crossWorkspace && metaRowIsMachineScoped(key, sourceWorkspaceId)),
-    ...(crossWorkspace ? { mapKey: (key) => mapMetaKey(key, sourceWorkspaceId, workspaceId) } : {}),
-  });
 
   const metaBytes = await bundle.readRoom(metaEntry);
-  const targetMeta = Flock.fromFile(repo.getMeta().exportFile());
+  const targetMetaBytes = repo.getMeta().exportFile();
+  const targetMeta = Flock.fromFile(targetMetaBytes);
   // Existence after a full merge decides which bodies may be written at all.
-  const provisional = Flock.fromFile(repo.getMeta().exportFile());
-  await mergeFlockBytes(provisional, metaBytes, metaPolicy(new Set()));
+  const provisional = Flock.fromFile(targetMetaBytes);
+  await mergeFlockBytes(
+    provisional,
+    metaBytes,
+    metaPolicy(sourceWorkspaceId, workspaceId, new Set())
+  );
 
   const titles = new Map<string, string>();
   const rooms: RoomPlan[] = [];
   for (const entry of manifest.rooms) {
     if (entry.model === 'meta') continue;
-    const targetId = targetIdOf(entry.id);
-    const base = { id: entry.id, targetId, codec: entry.codec, model: entry.model };
-    if (crossWorkspace && MACHINE_CODECS.has(entry.codec)) {
+    const traits = codecTraits(entry.codec)!;
+    const isRoost = entry.model === 'roost';
+    const targetId = isRoost ? entry.id.slice(ROOST_ROOM_PREFIX.length) : targetIdOf(entry.id);
+    const base = {
+      id: entry.id,
+      targetId,
+      codec: entry.codec,
+      model: entry.model,
+      kind: traits.kind,
+      counted: traits.counted,
+    };
+    if (crossWorkspace && traits.machine) {
       rooms.push({ ...base, action: 'skip', reason: 'machine-room' });
       continue;
     }
-    if (entry.model === 'roost') {
-      const sessionDocId = entry.id.slice(ROOST_ROOM_PREFIX.length);
-      // Rewritten turns are not the original CRDT data, so they never merge into a
-      // conversation the target already has.
-      if (targetMeta.get(['e', sessionDocId]) !== undefined) {
-        rooms.push({ ...base, targetId: sessionDocId, action: 'skip', reason: 'roost-exists' });
-      } else if (provisional.get(['e', sessionDocId]) !== true) {
-        rooms.push({
-          ...base,
-          targetId: sessionDocId,
-          action: 'skip',
-          reason: 'deleted-in-target',
-        });
-      } else {
-        rooms.push({ ...base, targetId: sessionDocId, action: 'merge', state: 'new' });
-      }
+    // Rewritten Roost turns are not the original CRDT data, so they never merge into
+    // a conversation the target already has.
+    if (isRoost && targetMeta.get(['e', targetId]) !== undefined) {
+      rooms.push({ ...base, action: 'skip', reason: 'roost-exists' });
       continue;
     }
     const existenceKey = entry.model === 'flock' ? 'ef' : 'e';
     if (provisional.get([existenceKey, targetId]) !== true) {
       rooms.push({ ...base, action: 'skip', reason: 'deleted-in-target' });
+      continue;
+    }
+    if (isRoost) {
+      rooms.push({ ...base, action: 'merge', state: 'new' });
       continue;
     }
     const bytes = await bundle.readRoom(entry);
@@ -225,8 +233,7 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
       const definitionTitle = incoming.getMap('definition').get('title');
       if (typeof definitionTitle === 'string' && definitionTitle)
         titles.set(entry.id, definitionTitle);
-      const current = await repo.openDetachedDoc(targetId);
-      const target = versionMap(current);
+      const target = versionMap(await repo.openDetachedDoc(targetId));
       const source = versionMap(incoming);
       if (target.size === 0) {
         rooms.push({ ...base, action: 'merge', state: 'new' });
@@ -271,14 +278,20 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
   }
 
   // Skipped rooms keep the target's own Meta rows for their ids.
-  const mergedMeta = Flock.fromFile(repo.getMeta().exportFile());
-  await mergeFlockBytes(mergedMeta, metaBytes, metaPolicy(withheldMetaIds(rooms)));
+  const mergedMeta = Flock.fromFile(targetMetaBytes);
+  await mergeFlockBytes(
+    mergedMeta,
+    metaBytes,
+    metaPolicy(sourceWorkspaceId, workspaceId, withheldMetaIds(rooms))
+  );
   const metaRows = diffFlock(targetMeta, mergedMeta);
   rooms.push({
     id: metaEntry.id,
     targetId: metaEntry.id,
     codec: metaEntry.codec,
     model: 'meta',
+    kind: 'other',
+    counted: false,
     action: 'merge',
     state: noChanges(metaRows) ? 'unchanged' : 'merge',
     rows: metaRows,
@@ -344,47 +357,48 @@ function withheldMetaIds(rooms: readonly RoomPlan[]): Set<string> {
 /** Bodies first, then catalogs, then Meta, so nothing becomes visible before its body. */
 function orderForWrite(rooms: RoomPlan[]): RoomPlan[] {
   // Roost turns are rewritten after Meta, which would otherwise restore the source backend.
-  const rank = { loro: 0, shortcuts: 1, flock: 2, meta: 3, roost: 4 } as const;
+  const rank = { loro: 0, flock: 1, meta: 2, roost: 3 } as const;
   return [...rooms].sort((a, b) => rank[a.model] - rank[b.model]);
 }
 
-const JournalSchema = z.object({
-  version: z.literal(1),
+const JournalHeaderSchema = z.object({
+  version: z.literal(2),
   digest: z.string(),
   targetWorkspaceId: z.string(),
-  done: z.array(z.string()),
 });
-type Journal = z.infer<typeof JournalSchema>;
 
-async function readJournal(file: string, plan: ImportPlan): Promise<Journal> {
+/**
+ * The journal is a header line followed by one line per merged room id. Appending is
+ * enough: each room is durable before its line, and a lost line only re-merges it.
+ */
+async function readJournal(file: string, plan: ImportPlan): Promise<Set<string>> {
+  let text: string;
   try {
-    const journal = JournalSchema.parse(JSON.parse(await fs.readFile(file, 'utf8')));
-    if (journal.digest !== plan.digest || journal.targetWorkspaceId !== plan.targetWorkspaceId)
-      throw new Error('Import journal belongs to another bundle or workspace');
-    return journal;
+    text = await fs.readFile(file, 'utf8');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT')
-      return {
-        version: 1,
-        digest: plan.digest,
-        targetWorkspaceId: plan.targetWorkspaceId,
-        done: [],
-      };
-    throw error;
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+    await atomicJson(file, {
+      version: 2,
+      digest: plan.digest,
+      targetWorkspaceId: plan.targetWorkspaceId,
+    });
+    return new Set();
   }
-}
-
-async function writeJournal(file: string, journal: Journal): Promise<void> {
-  await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  const handle = await fs.open(temporary, 'wx', 0o600);
-  try {
-    await handle.writeFile(JSON.stringify(journal));
-    await handle.sync();
-  } finally {
-    await handle.close();
+  const [header, ...lines] = text.split('\n');
+  const parsed = JournalHeaderSchema.parse(JSON.parse(header ?? ''));
+  if (parsed.digest !== plan.digest || parsed.targetWorkspaceId !== plan.targetWorkspaceId)
+    throw new Error('Import journal belongs to another bundle or workspace');
+  const done = new Set<string>();
+  for (const line of lines) {
+    try {
+      const id = JSON.parse(line) as unknown;
+      if (typeof id === 'string') done.add(id);
+    } catch {
+      // A torn last line is a room that was not recorded; it merges again.
+    }
   }
-  await fs.rename(temporary, file);
+  return done;
 }
 
 export type ApplyWorkspaceImportInput = {
@@ -412,9 +426,17 @@ export async function applyWorkspaceImport(
   if (plan.digest !== bundle.manifest.digest)
     throw new Error('Import plan does not match this bundle');
   const crossWorkspace = plan.sourceWorkspaceId !== plan.targetWorkspaceId;
-  const journal = await readJournal(input.journalPath, plan);
-  const done = new Set(journal.done);
+  const done = await readJournal(input.journalPath, plan);
   const entries = new Map(bundle.manifest.rooms.map((room) => [room.id, room]));
+  const metaEntry = entries.get(META_ROOM_ID);
+  if (!metaEntry) throw new Error('Bundle has no workspace metadata');
+  const metaBytes = await bundle.readRoom(metaEntry);
+  const sourceMeta = Flock.fromFile(metaBytes);
+  const policy = metaPolicy(
+    plan.sourceWorkspaceId,
+    plan.targetWorkspaceId,
+    withheldMetaIds(plan.rooms)
+  );
   const result: ImportResult = { imported: 0, skipped: 0, resumed: 0 };
   const merges = plan.rooms.filter((room) => room.action === 'merge');
   result.skipped = plan.rooms.length - merges.length;
@@ -428,51 +450,42 @@ export async function applyWorkspaceImport(
     await input.checkContinue?.();
     const entry = entries.get(room.id);
     if (!entry) throw new Error(`Bundle room missing: ${room.id}`);
-    const bytes = await bundle.readRoom(entry);
+    const bytes = room.model === 'meta' ? metaBytes : await bundle.readRoom(entry);
+    // Fences belong to the same unit as the merge, so a resumed import cannot skip them.
+    const fence = crossWorkspace && room.state === 'new';
     if (room.model === 'meta') {
-      const withheld = withheldMetaIds(plan.rooms);
-      await mergeFlockBytes(repo.getMeta(), bytes, {
-        skip: (key) =>
-          metaRowBelongsTo(key, withheld) ||
-          (crossWorkspace && metaRowIsMachineScoped(key, plan.sourceWorkspaceId)),
-        ...(crossWorkspace
-          ? { mapKey: (key) => mapMetaKey(key, plan.sourceWorkspaceId, plan.targetWorkspaceId) }
-          : {}),
-      });
+      await mergeFlockBytes(repo.getMeta(), bytes, policy);
       await repo.persistMetaNow();
     } else if (room.model === 'loro') {
-      const lease = await repo.acquireDoc(room.targetId);
-      try {
-        lease.doc.import(bytes);
-        await repo.persistDocNow(room.targetId, lease.doc);
-      } finally {
-        lease.release();
-      }
+      const importFence = await withDoc(repo, room.targetId, (doc) => {
+        doc.import(bytes);
+        if (!fence) return undefined;
+        if (room.codec === 'schedule/v1') return scheduleImportFence(doc, plan.targetWorkspaceId);
+        if (room.codec !== 'session/v1') return undefined;
+        return sessionImportFence(
+          doc,
+          (field) => sourceMeta.get(['m', room.id, field]),
+          plan.targetWorkspaceId
+        );
+      });
+      if (importFence) await repo.upsertDocMeta(room.targetId, { importFence });
     } else if (room.model === 'flock') {
-      const lease = await repo.acquireFlockDoc(room.targetId);
-      try {
-        await mergeFlockBytes(lease.flock, bytes, roomPolicy(room.codec, crossWorkspace));
-        await repo.persistFlockDocNow(room.targetId, lease.flock);
-      } finally {
-        lease.release();
-      }
-    } else if (room.model === 'roost') {
-      await rewriteRoostTurns(repo, room.targetId, bytes);
+      await withFlock(repo, room.targetId, (flock) =>
+        mergeFlockBytes(flock, bytes, roomPolicy(room.codec, crossWorkspace))
+      );
     } else {
-      throw new Error(`Unsupported room model: ${room.model}`);
+      await rewriteRoostTurns(
+        repo,
+        room.targetId,
+        bytes,
+        fence ? plan.targetWorkspaceId : undefined
+      );
     }
+    await fs.appendFile(input.journalPath, `\n${JSON.stringify(room.id)}`);
     done.add(room.id);
-    journal.done = [...done];
-    await writeJournal(input.journalPath, journal);
     result.imported += 1;
     input.onProgress?.({ done: index, total: merges.length, roomId: room.targetId });
   }
-  if (crossWorkspace)
-    await applyImportFences(
-      repo,
-      plan.targetWorkspaceId,
-      merges.filter((room) => room.state === 'new' && room.model === 'loro')
-    );
   await writeImportReceipt(repo, plan, input.actor, input.now);
   return result;
 }
@@ -485,21 +498,16 @@ async function writeImportReceipt(
   now: (() => string) | undefined
 ): Promise<void> {
   if (!actor) return;
-  const catalogId = `${plan.targetWorkspaceId}:wf:workspace`;
-  const lease = await repo.acquireFlockDoc(catalogId);
-  try {
+  await withFlock(repo, `${plan.targetWorkspaceId}:wf:workspace`, (flock) => {
     const key = ['importReceipt', plan.digest];
-    if (lease.flock.get(key) !== undefined) return;
-    lease.flock.put(key, {
+    if (flock.get(key) !== undefined) return;
+    flock.put(key, {
       actorUserId: actor.userId,
       sourceWorkspaceId: plan.sourceWorkspaceId,
       digest: plan.digest,
       importedAt: (now ?? (() => new Date().toISOString()))(),
     });
-    await repo.persistFlockDocNow(catalogId, lease.flock);
-  } finally {
-    lease.release();
-  }
+  });
 }
 
 /**
@@ -510,22 +518,34 @@ async function writeImportReceipt(
 async function rewriteRoostTurns(
   repo: LoroRepo<JsonObject>,
   docId: string,
-  bytes: Uint8Array
+  bytes: Uint8Array,
+  fenceWorkspaceId: string | undefined
 ): Promise<void> {
   const turns = JSON.parse(Buffer.from(bytes).toString('utf8')) as unknown;
   if (!Array.isArray(turns)) throw new Error(`Roost turns for ${docId} are malformed`);
-  const lease = await repo.acquireDoc(docId);
-  try {
-    const mirror = createSessionMirror({ doc: lease.doc, initialState: {} });
+  await withDoc(repo, docId, (doc) => {
+    const mirror = createSessionMirror({ doc, initialState: {} });
     try {
       if (mirror.historyWriter.readStored().length === 0)
         mirror.historyWriter.update(() => turns as SessionHistoryInput[]);
     } finally {
       mirror.dispose();
     }
-    await repo.persistDocNow(docId, lease.doc);
-  } finally {
-    lease.release();
+  });
+  const patch: JsonObject = { historyBackend: 'loro' };
+  if (fenceWorkspaceId) {
+    // The rewritten turns came from the bundle too: extend the session's fence.
+    const previous = (await repo.getDocMeta(docId))?.meta.importFence as
+      | { turnIds?: string[]; queueItemIds?: string[] }
+      | undefined;
+    const userTurnIds = (turns as Array<{ id?: unknown; role?: unknown }>)
+      .filter((turn) => turn.role === 'user' && typeof turn.id === 'string')
+      .map((turn) => turn.id as string);
+    patch.importFence = {
+      workspaceId: fenceWorkspaceId,
+      turnIds: [...new Set([...(previous?.turnIds ?? []), ...userTurnIds])],
+      queueItemIds: previous?.queueItemIds ?? [],
+    };
   }
-  await repo.upsertDocMeta(docId, { historyBackend: 'loro' });
+  await repo.upsertDocMeta(docId, patch);
 }

@@ -15,7 +15,8 @@ import {
 } from '@/lib/command-runtime';
 import { makeLocalWorkspaceCatalog } from '@/lib/local-workspace-catalog';
 import { daemonBundleWorkspace } from '@/lib/workspace-bundle/daemon';
-import type { ImportPlan } from '@/lib/workspace-bundle/import';
+import type { ImportPlan, RoomPlan } from '@/lib/workspace-bundle/import';
+import type { BundleKind } from '@lody/shared/workspace-bundle-control';
 import {
   runWorkspaceExport,
   runWorkspaceImport,
@@ -34,23 +35,37 @@ const SKIP_REASONS: Record<string, string> = {
   'roost-exists': 'this workspace already has this Roost conversation',
 };
 
+const KIND_NAMES: Record<BundleKind, string> = {
+  conversations: 'Conversations',
+  schedules: 'Schedules',
+  previewComments: 'Preview comments',
+  catalog: 'Projects, Agent Roles and MCP',
+  machines: 'Machine settings',
+  other: 'Other data',
+};
+
 export function formatImportPlan(plan: ImportPlan): string {
   const lines = [`From workspace ${plan.sourceWorkspaceId} into ${plan.targetWorkspaceId}`];
-  const bodies = plan.rooms.filter((room) => room.model !== 'meta' && room.action === 'merge');
-  const count = (state: string) => bodies.filter((room) => room.state === state).length;
-  lines.push(
-    `Rooms: ${count('new')} new, ${count('merge')} updated, ${count('unchanged')} already up to date`
-  );
-  const meta = plan.rooms.find((room) => room.model === 'meta');
-  if (meta?.rows)
-    lines.push(
-      `Metadata rows: ${meta.rows.added} added, ${meta.rows.updated} updated, ${meta.rows.deleted} deleted`
-    );
+  for (const kind of Object.keys(KIND_NAMES) as BundleKind[]) {
+    const rooms = plan.rooms.filter((room) => room.kind === kind && room.counted);
+    if (rooms.length === 0) continue;
+    const count = (match: (room: RoomPlan) => boolean, label: string) => {
+      const n = rooms.filter(match).length;
+      return n > 0 ? [`${n} ${label}`] : [];
+    };
+    const parts = [
+      ...count((room) => room.action === 'merge' && room.state === 'new', 'new'),
+      ...count((room) => room.action === 'merge' && room.state === 'merge', 'updated'),
+      ...count((room) => room.action === 'merge' && room.state === 'unchanged', 'already here'),
+      ...count((room) => room.action === 'skip', 'skipped'),
+    ];
+    lines.push(`${KIND_NAMES[kind]}: ${parts.join(', ')}`);
+  }
   for (const room of plan.rooms) {
     if (room.action !== 'skip') continue;
-    lines.push(
-      `Skipped ${room.id}: ${room.detail ?? SKIP_REASONS[room.reason ?? ''] ?? room.reason}`
-    );
+    const kindName = KIND_NAMES[room.kind].charAt(0).toLowerCase() + KIND_NAMES[room.kind].slice(1);
+    const name = room.label ? `"${room.label}" (${kindName})` : kindName;
+    lines.push(`Skipped ${name}: ${room.detail ?? SKIP_REASONS[room.reason ?? ''] ?? room.reason}`);
   }
   for (const gap of plan.gaps)
     lines.push(`Not in this bundle: ${gap.id} (${gap.kind}): ${gap.reason}`);
@@ -178,6 +193,20 @@ export const workspaceExportCommand = new Command('export')
     });
   });
 
+function reportImport(outcome: ImportOutcome, json: boolean): void {
+  if (json) {
+    printJson({ ok: true, ...outcome });
+    return;
+  }
+  console.log(
+    `Imported ${outcome.result?.imported ?? 0} rooms; skipped ${outcome.result?.skipped ?? 0}.`
+  );
+  if (outcome.uploadPending.length > 0)
+    console.log(
+      `Saved locally but not yet uploaded: ${outcome.uploadPending.join(', ')}. Run \`lody sync\` to retry.`
+    );
+}
+
 export const workspaceImportCommand = new Command('import')
   .description('Merge a workspace bundle into a workspace (owners and admins)')
   .argument('<file>', 'Bundle file')
@@ -190,39 +219,30 @@ export const workspaceImportCommand = new Command('import')
     await runOneShotCommand('workspace-import', options, async () => {
       const file = path.resolve(fileArg);
       const target = await resolveTarget(options.workspace);
+      if (options.yes && !options.dryRun) {
+        await reportImport(await importBundle(target, file, false), options.json === true);
+        return;
+      }
       const preview = await importBundle(target, file, true);
       if (options.dryRun) {
         if (options.json) printJson({ ok: true, plan: preview.plan });
         else console.log(formatImportPlan(preview.plan));
         return;
       }
-      if (!options.yes) {
-        if (!process.stdin.isTTY) throw new Error('Pass --yes to import without confirmation.');
-        console.log(formatImportPlan(preview.plan));
-        const { confirmed } = await inquirer.prompt<{ confirmed: boolean }>([
-          {
-            type: 'confirm',
-            name: 'confirmed',
-            message: 'Merge this bundle into the workspace?',
-            default: false,
-          },
-        ]);
-        if (!confirmed) {
-          console.log('Nothing was imported.');
-          return;
-        }
-      }
-      const outcome = await importBundle(target, file, false);
-      if (options.json) {
-        printJson({ ok: true, ...outcome });
+      if (!process.stdin.isTTY) throw new Error('Pass --yes to import without confirmation.');
+      console.log(formatImportPlan(preview.plan));
+      const { confirmed } = await inquirer.prompt<{ confirmed: boolean }>([
+        {
+          type: 'confirm',
+          name: 'confirmed',
+          message: 'Merge this bundle into the workspace?',
+          default: false,
+        },
+      ]);
+      if (!confirmed) {
+        console.log('Nothing was imported.');
         return;
       }
-      console.log(
-        `Imported ${outcome.result?.imported ?? 0} rooms; skipped ${outcome.result?.skipped ?? 0}.`
-      );
-      if (outcome.uploadPending.length > 0)
-        console.log(
-          `Saved locally but not yet uploaded: ${outcome.uploadPending.join(', ')}. Run \`lody sync\` to retry.`
-        );
+      await reportImport(await importBundle(target, file, false), options.json === true);
     });
   });

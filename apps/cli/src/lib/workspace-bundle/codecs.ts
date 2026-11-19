@@ -1,3 +1,4 @@
+import type { BundleKind } from '@lody/shared/workspace-bundle-control';
 import type { RoomModel } from './manifest';
 
 /**
@@ -10,8 +11,6 @@ export type RoomClass =
       model: RoomModel;
       codec: RoomCodec;
       encoding: RoomEncoding;
-      /** Room id with the workspace prefix removed, for Flock rooms. */
-      suffix?: string;
     }
   | { kind: 'excluded' }
   | { kind: 'unknown' };
@@ -44,20 +43,34 @@ export type RoomCodec =
   | 'roost-turns/v1';
 export type RoomEncoding = 'flock-file/v1' | 'loro-snapshot/v1' | 'json/v1';
 
-export const KNOWN_CODECS: ReadonlySet<string> = new Set<string>([
-  'meta/v1',
-  ...Object.values(LORO_CODECS),
-  ...Object.values(FLOCK_CODECS),
-  'machine-catalog/v1',
-  'roost-turns/v1',
-]);
+/**
+ * What each codec is to a person and to a cross-workspace import. `counted` rooms are
+ * the items a person recognises; the others (indexes, Roost turn payloads) still show
+ * when skipped. `machine` rooms describe one machine and never cross workspaces.
+ */
+export const CODEC_TRAITS: Readonly<
+  Record<RoomCodec, { kind: BundleKind; counted: boolean; machine?: true }>
+> = {
+  'meta/v1': { kind: 'other', counted: false },
+  'session/v1': { kind: 'conversations', counted: true },
+  'roost-turns/v1': { kind: 'conversations', counted: false },
+  'session-comment/v1': { kind: 'other', counted: true },
+  'preview-comment/v1': { kind: 'previewComments', counted: true },
+  'schedule/v1': { kind: 'schedules', counted: true },
+  'schedule-registry/v1': { kind: 'schedules', counted: false },
+  'task/v1': { kind: 'other', counted: true },
+  'task-index/v1': { kind: 'other', counted: false },
+  'workspace-catalog/v1': { kind: 'catalog', counted: true },
+  'machine/v1': { kind: 'machines', counted: false, machine: true },
+  'agent-config/v1': { kind: 'machines', counted: false, machine: true },
+  'machine-catalog/v1': { kind: 'machines', counted: true, machine: true },
+};
 
-/** Codecs whose rooms describe one machine; they never cross workspaces. */
-export const MACHINE_CODECS: ReadonlySet<string> = new Set([
-  'machine/v1',
-  'agent-config/v1',
-  'machine-catalog/v1',
-]);
+export const KNOWN_CODECS: ReadonlySet<string> = new Set(Object.keys(CODEC_TRAITS));
+
+export function codecTraits(codec: string) {
+  return KNOWN_CODECS.has(codec) ? CODEC_TRAITS[codec as RoomCodec] : undefined;
+}
 
 export function classifyRoom(roomId: string, workspaceId: string): RoomClass {
   if (roomId === META_ROOM_ID)
@@ -73,11 +86,10 @@ export function classifyRoom(roomId: string, workspaceId: string): RoomClass {
         model: 'flock',
         codec: 'machine-catalog/v1',
         encoding: 'flock-file/v1',
-        suffix,
       };
     const codec = FLOCK_CODECS[suffix as keyof typeof FLOCK_CODECS];
     return codec
-      ? { kind: 'room', model: 'flock', codec, encoding: 'flock-file/v1', suffix }
+      ? { kind: 'room', model: 'flock', codec, encoding: 'flock-file/v1' }
       : { kind: 'unknown' };
   }
   if (roomId.includes(':')) return { kind: 'unknown' };

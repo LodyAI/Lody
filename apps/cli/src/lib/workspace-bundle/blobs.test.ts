@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,19 +8,15 @@ import { createBundleWriter, openBundle } from './bundle-file';
 import { exportWorkspaceBundle } from './export';
 import { applyWorkspaceImport, planWorkspaceImport } from './import';
 import { localSessionFileBlobs, restoreSessionFileBlobs } from './blobs';
-import { openTestRepo } from './test-support';
+import { sha256 } from './manifest';
+import { openTestRepo, tempDir as makeTempDir } from './test-support';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
   vi.unstubAllEnvs();
   for (const step of cleanup.splice(0).reverse()) await step();
 });
-async function tempDir(): Promise<string> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-bundle-blobs-'));
-  cleanup.push(() => fs.rm(dir, { recursive: true, force: true }));
-  return dir;
-}
-const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+const tempDir = () => makeTempDir(cleanup, 'lody-bundle-blobs-');
 const SID = '11111111-1111-4111-8111-111111111111';
 
 describe('session file blobs', () => {
@@ -58,14 +53,14 @@ describe('session file blobs', () => {
             fileId: 'file1',
             transport: 'local',
             sizeBytes: blob.length,
-            sha256: sha(blob),
+            sha256: sha256(blob),
           },
           {
             ...file,
             fileId: 'cloud1',
             transport: 'r2',
             sizeBytes: 3,
-            sha256: sha(Buffer.from('abc')),
+            sha256: sha256(Buffer.from('abc')),
           },
         ],
       },
@@ -91,7 +86,7 @@ describe('session file blobs', () => {
     });
     expect(manifest.blobs).toEqual([
       expect.objectContaining({
-        sha256: sha(blob),
+        sha256: sha256(blob),
         kind: 'session-file',
         refs: [`session-file:${SID}/file1`],
       }),

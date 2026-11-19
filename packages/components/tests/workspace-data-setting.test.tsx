@@ -8,13 +8,14 @@ import {
   WorkspaceDataSettingContent,
   type WorkspaceBundleApi,
 } from '../src/components/settings/workspace-data-setting';
+import type { WorkspaceBundlePlan } from '@lody/shared/workspace-bundle-control';
 import { createTestI18n } from './test-i18n';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
-const plan = {
+const plan: WorkspaceBundlePlan = {
   digest: 'd',
   sourceWorkspaceId: 'ws_a',
   targetWorkspaceId: 'ws_b',
@@ -22,65 +23,40 @@ const plan = {
   rooms: [
     {
       id: 'session-1',
-      codec: 'session/v1',
-      model: 'loro',
+      kind: 'conversations',
+      counted: true,
       action: 'merge',
       state: 'new',
       label: 'Fix login',
     },
     {
       id: 'session-2',
-      codec: 'session/v1',
-      model: 'loro',
+      kind: 'conversations',
+      counted: true,
       action: 'merge',
       state: 'unchanged',
       label: 'Old chat',
     },
     {
       id: 'session-3',
-      codec: 'session/v1',
-      model: 'loro',
+      kind: 'conversations',
+      counted: true,
       action: 'skip',
       reason: 'unrelated-same-id',
       label: 'Release notes',
     },
     {
       id: 'schedule-x',
-      codec: 'schedule/v1',
-      model: 'loro',
+      kind: 'schedules',
+      counted: true,
       action: 'merge',
       state: 'merge',
       label: 'Daily digest',
     },
-    {
-      id: 'ws_a:sr',
-      codec: 'schedule-registry/v1',
-      model: 'flock',
-      action: 'merge',
-      state: 'merge',
-    },
-    {
-      id: 'ws_a:wf:workspace',
-      codec: 'workspace-catalog/v1',
-      model: 'flock',
-      action: 'merge',
-      state: 'merge',
-    },
-    {
-      id: 'ws_a:mf:m1',
-      codec: 'machine-catalog/v1',
-      model: 'flock',
-      action: 'skip',
-      reason: 'machine-room',
-    },
-    {
-      id: 'meta',
-      codec: 'meta/v1',
-      model: 'meta',
-      action: 'merge',
-      state: 'merge',
-      rows: { added: 4, updated: 1, deleted: 2 },
-    },
+    { id: 'ws_a:sr', kind: 'schedules', counted: false, action: 'merge', state: 'merge' },
+    { id: 'ws_a:wf:workspace', kind: 'catalog', counted: true, action: 'merge', state: 'merge' },
+    { id: 'ws_a:mf:m1', kind: 'machines', counted: true, action: 'skip', reason: 'machine-room' },
+    { id: 'meta', kind: 'other', counted: false, action: 'merge', state: 'merge' },
   ],
 };
 
@@ -127,13 +103,13 @@ function fakeApi(overrides: Partial<WorkspaceBundleApi> = {}): WorkspaceBundleAp
   return {
     exportWorkspace: async () => ({
       status: 'done',
-      summary: { file: '/home/u/Team.lodybundle', rooms: 5, blobs: 2, gaps: [] },
+      summary: { file: '/home/u/Team.lodybundle', rooms: 5, blobs: 2, gaps: [], digest: 'd' },
     }),
     chooseImportFile: async () => ({ status: 'chosen', token: 'tok', fileName: 'in.lodybundle' }),
     previewImport: async () => ({ status: 'planned', plan }),
     importWorkspace: async () => ({
       status: 'done',
-      outcome: { result: { imported: 3, skipped: 1, resumed: 0 }, uploadPending: [] },
+      outcome: { plan, result: { imported: 3, skipped: 1, resumed: 0 }, uploadPending: [] },
     }),
     ...overrides,
   };

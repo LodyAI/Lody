@@ -12,11 +12,12 @@ in main and the renderer holds only a token.
 | File                                      | Role                                                                         |
 | ----------------------------------------- | ---------------------------------------------------------------------------- |
 | `manifest.ts`, `zip.ts`, `bundle-file.ts` | Container: ZIP store entries, chunk and manifest hashes, 0600 atomic publish |
-| `codecs.ts`                               | Room classification and the codecs import accepts                            |
+| `codecs.ts`                               | Room classification, codec traits and the codecs import accepts              |
 | `export.ts`                               | Reads Meta, documents and named Flocks as raw bytes; records gaps            |
 | `import.ts`                               | Plan (dry run), ordered merge, journal, Roost rewrite, import receipt        |
 | `cross-workspace.ts`                      | Room id mapping and import fences for another workspace                      |
 | `authorize.ts`                            | Row-level checks for changes to existing rows                                |
+| `repo-leases.ts`                          | Lease, edit and persist helpers for documents and named Flocks               |
 | `blobs.ts`                                | Local session-file attachments                                               |
 | `service.ts`, `daemon.ts`, `control.ts`   | Entry points shared by the CLI command and the daemon                        |
 

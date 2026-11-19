@@ -18,10 +18,16 @@ const ImportInputSchema = z
 
 let service: WorkspaceBundleService | null = null
 
-function ownerWindow(): BrowserWindow | null {
+/** Shows a dialog attached to the requesting window when it still exists. */
+function forRequestingWindow<O, R>(
+  show: ((window: BrowserWindow, options: O) => Promise<R>) & ((options: O) => Promise<R>),
+  options: O
+): Promise<R> {
   const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
-  return owner && !owner.isDestroyed() ? owner : null
+  return owner && !owner.isDestroyed() ? show(owner, options) : show(options)
 }
+
+const sendersWithCleanup = new Set<number>()
 
 function bundleService(): WorkspaceBundleService {
   if (service) return service
@@ -30,19 +36,17 @@ function bundleService(): WorkspaceBundleService {
     machineId: () => cliService.getLocalMachineId(),
     send: (message) => cliService.sendWorkspaceBundleControl(message),
     chooseSavePath: async (defaultName) => {
-      const owner = ownerWindow()
-      const options = { defaultPath: defaultName, filters: BUNDLE_FILTERS }
-      const result = owner
-        ? await dialog.showSaveDialog(owner, options)
-        : await dialog.showSaveDialog(options)
+      const result = await forRequestingWindow(dialog.showSaveDialog, {
+        defaultPath: defaultName,
+        filters: BUNDLE_FILTERS
+      })
       return result.canceled || !result.filePath ? null : result.filePath
     },
     chooseOpenPath: async () => {
-      const owner = ownerWindow()
-      const options = { properties: ['openFile' as const], filters: BUNDLE_FILTERS }
-      const result = owner
-        ? await dialog.showOpenDialog(owner, options)
-        : await dialog.showOpenDialog(options)
+      const result = await forRequestingWindow(dialog.showOpenDialog, {
+        properties: ['openFile'],
+        filters: BUNDLE_FILTERS
+      })
       return result.canceled ? null : (result.filePaths[0] ?? null)
     }
   })
@@ -64,7 +68,14 @@ export class WorkspaceBundleIpc extends ProductWindowIpcService {
   @IpcMethod()
   async chooseImportFile() {
     const sender = getIpcContext().event.sender
-    sender.once('destroyed', () => service?.forgetSender(sender.id))
+    if (!sendersWithCleanup.has(sender.id)) {
+      sendersWithCleanup.add(sender.id)
+      const senderId = sender.id
+      sender.once('destroyed', () => {
+        sendersWithCleanup.delete(senderId)
+        service?.forgetSender(senderId)
+      })
+    }
     return await bundleService().chooseImportFile(sender.id)
   }
 

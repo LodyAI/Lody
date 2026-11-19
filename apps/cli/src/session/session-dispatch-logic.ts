@@ -335,7 +335,7 @@ export function findNextDispatchableUserTurn<T extends SessionDispatchEntry>(
       continue;
     }
     // Input carried by a workspace bundle into this workspace is history, not work.
-    if (fenced.has(entry.id)) continue;
+    if (fenced.includes(entry.id)) continue;
     // Applied guidance is already consumed, including across a daemon restart.
     if (entry.inputConfig?._lodyDeliveryKind === 'steer') continue;
     // Recovery already surfaced a delivery failure for this exact activation.
@@ -432,7 +432,7 @@ export function isImportFencedQueueItem(
 ): boolean {
   const fence = getImportFence(meta, workspaceId);
   return (
-    (item.$cid !== undefined && fence.queueItemIds.has(item.$cid)) ||
-    (item.userTurnId !== undefined && fence.turnIds.has(item.userTurnId))
+    (item.$cid !== undefined && fence.queueItemIds.includes(item.$cid)) ||
+    (item.userTurnId !== undefined && fence.turnIds.includes(item.userTurnId))
   );
 }

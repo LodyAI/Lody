@@ -9,7 +9,7 @@ export const DEFAULT_CHUNK_SIZE = 64 * 1024 * 1024;
 
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/);
 
-export const RoomModelSchema = z.enum(['meta', 'flock', 'loro', 'roost', 'shortcuts']);
+export const RoomModelSchema = z.enum(['meta', 'flock', 'loro', 'roost']);
 export type RoomModel = z.infer<typeof RoomModelSchema>;
 
 export const ChunkSchema = z.object({
@@ -24,14 +24,12 @@ export const RoomEntrySchema = z.object({
   model: RoomModelSchema,
   codec: z.string().min(1).max(64),
   encoding: z.string().min(1).max(64),
-  /** True when the source holds local edits it could not prove were uploaded. */
-  unsynced: z.boolean().optional(),
   sha256: sha256Hex,
   size: z.number().int().nonnegative(),
   chunks: z.array(ChunkSchema),
 });
 export type RoomEntry = z.infer<typeof RoomEntrySchema>;
-export type RoomDescriptor = Pick<RoomEntry, 'id' | 'model' | 'codec' | 'encoding' | 'unsynced'>;
+export type RoomDescriptor = Pick<RoomEntry, 'id' | 'model' | 'codec' | 'encoding'>;
 
 export const BlobEntrySchema = z.object({
   sha256: sha256Hex,

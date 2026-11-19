@@ -6,17 +6,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createBundleWriter, openBundle } from './bundle-file';
 import { exportWorkspaceBundle } from './export';
 import { applyWorkspaceImport, planWorkspaceImport } from './import';
-import { openTestRepo, writeDoc } from './test-support';
+import { openTestRepo, writeDoc, tempDir as makeTempDir } from './test-support';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const step of cleanup.splice(0).reverse()) await step();
 });
-async function tempDir(): Promise<string> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-bundle-roost-'));
-  cleanup.push(() => fs.rm(dir, { recursive: true, force: true }));
-  return dir;
-}
+const tempDir = () => makeTempDir(cleanup, 'lody-bundle-roost-');
 
 const SID = '44444444-4444-4444-8444-444444444444';
 const turns: SessionHistoryInput[] = [

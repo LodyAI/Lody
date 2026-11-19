@@ -1,10 +1,10 @@
-import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { LoroDoc } from 'loro-crdt';
 import { createSessionMirror } from '@lody/shared';
 import { getSessionFileBlobPath } from '@/lib/session-file-blob-store';
 import type { BundleWriter, OpenBundle } from './bundle-file';
+import { sha256 } from './manifest';
 import type { ImportPlan } from './import';
 
 /**
@@ -87,10 +87,7 @@ export function localSessionFileBlobs(workspaceId: string) {
         });
         continue;
       }
-      if (
-        typeof item.sha256 === 'string' &&
-        createHash('sha256').update(bytes).digest('hex') !== item.sha256
-      ) {
+      if (typeof item.sha256 === 'string' && sha256(bytes) !== item.sha256) {
         writer.addGap({
           id: ref,
           kind: 'attachment',
@@ -133,6 +130,7 @@ export async function restoreSessionFileBlobs(input: {
   );
   const result = { written: 0, existing: 0 };
   for (const blob of input.bundle.manifest.blobs) {
+    let bytes: Uint8Array | undefined;
     for (const ref of blob.refs ?? []) {
       if (!ref.startsWith(SESSION_FILE_REF)) continue;
       const [sessionId, fileId, ...rest] = ref.slice(SESSION_FILE_REF.length).split('/');
@@ -144,7 +142,8 @@ export async function restoreSessionFileBlobs(input: {
         fileId,
       });
       await fs.mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
-      const bytes = await input.bundle.readBlob(blob.sha256);
+      // Read lazily and once per blob, however many references it has.
+      bytes ??= await input.bundle.readBlob(blob.sha256);
       try {
         await fs.writeFile(destination, bytes, { flag: 'wx', mode: 0o600 });
         result.written += 1;

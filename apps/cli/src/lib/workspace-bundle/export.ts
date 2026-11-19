@@ -1,3 +1,4 @@
+import { formatErrorMessage } from '@/utils/format-error';
 import type { LoroDoc } from 'loro-crdt';
 import type { JsonObject, LoroRepo } from 'loro-repo';
 import type { BundleWriter } from './bundle-file';
@@ -42,7 +43,7 @@ export async function exportWorkspaceBundle(
       writer.addGap({
         id: roomId,
         kind: 'unreadable',
-        reason: error instanceof Error ? error.message : String(error),
+        reason: formatErrorMessage(error),
       });
       return false;
     }
@@ -130,7 +131,7 @@ async function exportRoostTurns(docId: string, input: ExportWorkspaceBundleInput
     writer.addGap({
       id: docId,
       kind: 'roost',
-      reason: error instanceof Error ? error.message : String(error),
+      reason: formatErrorMessage(error),
     });
     return;
   }

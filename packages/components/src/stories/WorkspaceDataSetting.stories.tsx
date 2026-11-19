@@ -4,8 +4,9 @@ import {
   WorkspaceDataSettingContent,
   type WorkspaceBundleApi,
 } from '@/components/settings/workspace-data-setting';
+import type { WorkspaceBundlePlan } from '@lody/shared/workspace-bundle-control';
 
-const plan = {
+const plan: WorkspaceBundlePlan = {
   digest: 'd',
   sourceWorkspaceId: 'lw_source',
   targetWorkspaceId: 'lw_target',
@@ -13,16 +14,44 @@ const plan = {
     { id: 'session-roost', kind: 'roost', reason: 'Roost conversation bodies cannot be read here' },
   ],
   rooms: [
-    { id: 'session-1', model: 'loro', action: 'merge', state: 'new' },
-    { id: 'session-2', model: 'loro', action: 'merge', state: 'new' },
-    { id: 'schedule-1', model: 'loro', action: 'merge', state: 'unchanged' },
-    { id: 'session-3', model: 'loro', action: 'skip', reason: 'unrelated-same-id' },
     {
-      id: 'meta',
-      model: 'meta',
+      id: 'session-1',
+      kind: 'conversations',
+      counted: true,
+      action: 'merge',
+      state: 'new',
+      label: 'Fix login redirect',
+    },
+    {
+      id: 'session-2',
+      kind: 'conversations',
+      counted: true,
+      action: 'merge',
+      state: 'new',
+      label: 'Release checklist',
+    },
+    {
+      id: 'schedule-1',
+      kind: 'schedules',
+      counted: true,
+      action: 'merge',
+      state: 'unchanged',
+      label: 'Daily digest',
+    },
+    {
+      id: 'session-3',
+      kind: 'conversations',
+      counted: true,
+      action: 'skip',
+      reason: 'unrelated-same-id',
+      label: 'Draft notes',
+    },
+    {
+      id: 'lw_source:wf:workspace',
+      kind: 'catalog',
+      counted: true,
       action: 'merge',
       state: 'merge',
-      rows: { added: 12, updated: 2, deleted: 0 },
     },
   ],
 };
@@ -30,7 +59,13 @@ const plan = {
 const api: WorkspaceBundleApi = {
   exportWorkspace: async () => ({
     status: 'done',
-    summary: { file: '/Users/alice/Acme-2026-11-19.lodybundle', rooms: 42, blobs: 3, gaps: [] },
+    summary: {
+      file: '/Users/alice/Acme-2026-11-19.lodybundle',
+      rooms: 42,
+      blobs: 3,
+      gaps: [],
+      digest: 'd',
+    },
   }),
   chooseImportFile: async () => ({
     status: 'chosen',
@@ -40,7 +75,7 @@ const api: WorkspaceBundleApi = {
   previewImport: async () => ({ status: 'planned', plan }),
   importWorkspace: async () => ({
     status: 'done',
-    outcome: { result: { imported: 3, skipped: 1, resumed: 0 }, uploadPending: [] },
+    outcome: { plan, result: { imported: 3, skipped: 1, resumed: 0 }, uploadPending: [] },
   }),
 };
 

@@ -1,10 +1,8 @@
-import { LoroMap } from 'loro-crdt';
-import type { JsonObject, LoroRepo } from 'loro-repo';
+import { LoroMap, type LoroDoc } from 'loro-crdt';
 import {
   createSessionMirror,
-  getPendingUserTurnActivationId,
+  type ScheduleImportFence,
   type SessionImportFence,
-  type SessionMeta,
 } from '@lody/shared';
 
 /**
@@ -41,49 +39,25 @@ export function crossWorkspaceRowWithheld(codec: string, key: readonly unknown[]
 }
 
 /**
- * Spec owner question 1, option (b): a cross-workspace import does not rewrite the
- * imported sessions or schedules. It records, on their metadata, which input and
- * which schedule activation came from the bundle, scoped to the target workspace.
- * Execution there skips exactly those (`getImportFence`, `isScheduleImportFenced`);
- * new input and a schedule resumed there run normally. Another workspace ignores the
- * fence, so a bundle exported back to the source does not stop its originals.
- * Applied only to rooms the target did not have before this import.
+ * Spec owner decision 11: a cross-workspace import does not rewrite the imported
+ * sessions or schedules. It records on their metadata which input and which schedule
+ * activation came from the bundle, scoped to the target workspace; execution there
+ * skips exactly those (`getImportFence`, `isScheduleImportFenced`). New input and a
+ * schedule resumed there run normally, and another workspace ignores the fence.
+ * Every user turn and queued item present in the imported document is fenced: by
+ * provenance, not by enumerating which states the dispatcher would act on.
  */
-export async function applyImportFences(
-  repo: LoroRepo<JsonObject>,
-  workspaceId: string,
-  rooms: ReadonlyArray<{ targetId: string; codec: string }>
-): Promise<void> {
-  for (const room of rooms) {
-    if (room.codec === 'session/v1') {
-      const fence = await sessionImportFence(repo, room.targetId, workspaceId);
-      await repo.upsertDocMeta(room.targetId, { importFence: fence });
-    } else if (room.codec === 'schedule/v1') {
-      const definition = (await repo.openDetachedDoc(room.targetId)).getMap('definition');
-      const activationId = definition.get('activationId');
-      if (typeof activationId === 'string')
-        await repo.upsertDocMeta(room.targetId, { importFence: { workspaceId, activationId } });
-    }
-  }
-}
-
-const TERMINAL_TURN_STATUSES = new Set(['handled', 'error', 'canceled', 'cancelled']);
-
-async function sessionImportFence(
-  repo: LoroRepo<JsonObject>,
-  docId: string,
+export function sessionImportFence(
+  doc: LoroDoc,
+  sourceMeta: (field: string) => unknown,
   workspaceId: string
-): Promise<SessionImportFence> {
+): SessionImportFence {
   const turnIds = new Set<string>();
   const queueItemIds = new Set<string>();
-  const doc = await repo.openDetachedDoc(docId);
   const mirror = createSessionMirror({ doc, initialState: {} });
   try {
-    for (const turn of mirror.historyWriter.readStored()) {
-      if (turn.role !== 'user') continue;
-      const status = (turn as { status?: unknown }).status;
-      if (typeof status !== 'string' || !TERMINAL_TURN_STATUSES.has(status)) turnIds.add(turn.id);
-    }
+    for (const turn of mirror.historyWriter.readStored())
+      if (turn.role === 'user') turnIds.add(turn.id);
   } finally {
     mirror.dispose();
   }
@@ -95,26 +69,27 @@ async function sessionImportFence(
     const userTurnId = item.get('userTurnId');
     if (typeof userTurnId === 'string' && userTurnId) turnIds.add(userTurnId);
   }
-  const meta = ((await repo.getDocMeta(docId))?.meta ?? {}) as Partial<SessionMeta>;
-  for (const id of [
-    meta.latestUserMsgId,
-    meta.processingUserMsgId,
-    getPendingUserTurnActivationId(meta as SessionMeta),
-  ])
+  for (const field of ['latestUserMsgId', 'processingUserMsgId']) {
+    const id = sourceMeta(field);
     if (typeof id === 'string' && id) turnIds.add(id);
-  for (const id of Object.keys(meta.steerTurnStatuses ?? {})) turnIds.add(id);
-  for (const record of Object.values(meta.queuePromotionLedger ?? {}))
-    if (typeof record?.userTurnId === 'string') turnIds.add(record.userTurnId);
+  }
+  for (const field of ['steerTurnStatuses', 'queuePromotionLedger']) {
+    const value = sourceMeta(field);
+    if (!value || typeof value !== 'object') continue;
+    for (const [id, record] of Object.entries(value)) {
+      turnIds.add(id);
+      const userTurnId = (record as { userTurnId?: unknown } | null)?.userTurnId;
+      if (typeof userTurnId === 'string') turnIds.add(userTurnId);
+    }
+  }
   return { workspaceId, turnIds: [...turnIds], queueItemIds: [...queueItemIds] };
 }
 
-/** True when this schedule activation came from an import into `workspaceId`. */
-export function isScheduleImportFenced(
-  meta: JsonObject | undefined,
-  workspaceId: string,
-  activationId: string
-): boolean {
-  const fence = meta?.importFence;
-  if (!fence || typeof fence !== 'object' || Array.isArray(fence)) return false;
-  return fence.workspaceId === workspaceId && fence.activationId === activationId;
+/** The imported schedule activation, fenced in the target workspace. */
+export function scheduleImportFence(
+  doc: LoroDoc,
+  workspaceId: string
+): ScheduleImportFence | undefined {
+  const activationId = doc.getMap('definition').get('activationId');
+  return typeof activationId === 'string' ? { workspaceId, activationId } : undefined;
 }

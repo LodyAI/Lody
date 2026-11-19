@@ -88,6 +88,9 @@ export async function runWorkspaceExport(input: {
   }
 }
 
+/** Roost turns are rewritten into their session document, so they sync as Loro. */
+const SYNC_MODEL = { meta: 'meta', loro: 'loro', flock: 'flock', roost: 'loro' } as const;
+
 export type ImportOutcome = {
   plan: ImportPlan;
   result?: ImportResult;
@@ -105,7 +108,7 @@ export async function runWorkspaceImport(input: {
   dryRun?: boolean;
   now?: () => string;
 }): Promise<ImportOutcome> {
-  assertRole(input.role, 'import');
+  // The planner refuses roles that may not import, before anything is written.
   const { workspace } = input;
   const bundle = await openBundle(path.resolve(input.file));
   try {
@@ -133,10 +136,7 @@ export async function runWorkspaceImport(input: {
       for (const room of plan.rooms) {
         if (room.action !== 'merge' || room.state === 'unchanged') continue;
         try {
-          await workspace.syncRoom(
-            room.targetId,
-            room.model === 'meta' ? 'meta' : room.model === 'loro' ? 'loro' : 'flock'
-          );
+          await workspace.syncRoom(room.targetId, SYNC_MODEL[room.model]);
         } catch {
           uploadPending.push(room.targetId);
         }

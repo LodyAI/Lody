@@ -3,12 +3,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { LoroMap } from 'loro-crdt';
 import { afterEach, describe, expect, it } from 'vitest';
-import { getImportFence, type SessionMeta } from '@lody/shared';
-import { isScheduleImportFenced } from './cross-workspace';
+import { getImportFence, isScheduleImportFenced, type SessionMeta } from '@lody/shared';
 import { createBundleWriter, openBundle, type OpenBundle } from './bundle-file';
 import { exportWorkspaceBundle } from './export';
 import { applyWorkspaceImport, ImportRefusedError, planWorkspaceImport } from './import';
-import { openTestRepo, writeDoc, writeFlock, type TestRepo } from './test-support';
+import {
+  openTestRepo,
+  writeDoc,
+  writeFlock,
+  type TestRepo,
+  tempDir as makeTempDir,
+} from './test-support';
 
 const WS = 'ws_a';
 const cleanup: Array<() => Promise<void>> = [];
@@ -16,11 +21,7 @@ afterEach(async () => {
   for (const step of cleanup.splice(0).reverse()) await step();
 });
 
-async function tempDir(): Promise<string> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-import-'));
-  cleanup.push(() => fs.rm(dir, { recursive: true, force: true }));
-  return dir;
-}
+const tempDir = () => makeTempDir(cleanup, 'lody-import-');
 
 async function repo(): Promise<TestRepo> {
   const test = await openTestRepo(await tempDir());
@@ -308,8 +309,8 @@ describe('workspace import', () => {
     expect(session.getText('t').toString()).toBe('hi');
     const fence = getImportFence(meta, 'ws_b');
     expect([...fence.turnIds].sort()).toEqual(['q1', 'u1']);
-    expect(fence.queueItemIds.size).toBe(1);
-    expect(getImportFence(meta, WS).turnIds.size).toBe(0);
+    expect(fence.queueItemIds).toHaveLength(1);
+    expect(getImportFence(meta, WS).turnIds).toHaveLength(0);
     const schedule = await target.repo.openDetachedDoc('schedule-x');
     expect(schedule.getMap('definition').get('enabled')).toBe(true);
     expect(
@@ -350,7 +351,7 @@ describe('workspace import', () => {
     const original = (await source.repo.getDocMeta('session-s1'))?.meta as SessionMeta | undefined;
     expect(original).toMatchObject({ latestUserMsgId: 'u1' });
     expect(original).not.toHaveProperty('collaborationStopped');
-    expect(getImportFence(original, WS).turnIds.size).toBe(0);
+    expect(getImportFence(original, WS).turnIds).toHaveLength(0);
     expect(
       isScheduleImportFenced((await source.repo.getDocMeta('schedule-x'))?.meta, WS, 'act-1')
     ).toBe(false);
@@ -451,5 +452,65 @@ describe('workspace import', () => {
     expect(byOwner.rooms.find((room) => room.id === `${WS}:wf:workspace`)).toMatchObject({
       action: 'merge',
     });
+  });
+
+  it('fences imported work even when a cross-workspace import resumes after a crash', async () => {
+    const source = await repo();
+    await writeDoc(source.repo, 'session-s1', { title: 'One', latestUserMsgId: 'u1' }, (doc) =>
+      doc.getText('t').insert(0, 'hi')
+    );
+    await writeDoc(source.repo, 'schedule-x', { kind: 'schedule' }, (doc) =>
+      doc.getMap('definition').set('activationId', 'act-1')
+    );
+    await source.repo.flush();
+    const out = path.join(await tempDir(), 'c.lodybundle');
+    await exportWorkspaceBundle({
+      repo: source.repo,
+      workspaceId: WS,
+      writer: await createBundleWriter(out),
+      source: {
+        workspaceId: WS,
+        exporterUserId: 'u',
+        exporterMachineId: 'm',
+        lodyVersion: 't',
+        startedAt: 'a',
+      },
+    });
+    const bundle = await openBundle(out);
+    cleanup.push(() => bundle.close());
+    const target = await repo();
+    const journal = path.join(await tempDir(), 'j.json');
+    const input = {
+      bundle,
+      repo: target.repo,
+      workspaceId: 'ws_b',
+      role: 'owner',
+      actorUserId: 'u',
+    };
+    let rooms = 0;
+    await expect(
+      applyWorkspaceImport({
+        plan: await planWorkspaceImport(input),
+        bundle,
+        repo: target.repo,
+        journalPath: journal,
+        checkContinue: async () => {
+          rooms += 1;
+          if (rooms === 3) throw new Error('crash');
+        },
+      })
+    ).rejects.toThrow('crash');
+    // The rerun plans the merged rooms as unchanged; their fences were written with them.
+    await applyWorkspaceImport({
+      plan: await planWorkspaceImport(input),
+      bundle,
+      repo: target.repo,
+      journalPath: journal,
+    });
+    const meta = (await target.repo.getDocMeta('session-s1'))?.meta as SessionMeta | undefined;
+    expect(getImportFence(meta, 'ws_b').turnIds).toContain('u1');
+    expect(
+      isScheduleImportFenced((await target.repo.getDocMeta('schedule-x'))?.meta, 'ws_b', 'act-1')
+    ).toBe(true);
   });
 });
