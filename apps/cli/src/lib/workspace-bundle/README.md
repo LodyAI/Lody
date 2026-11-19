@@ -4,7 +4,10 @@
 <file> [--dry-run] [--yes]` merges one into a workspace. Owners and admins only. On
 the local platform the CLI asks the daemon (local control `/workspace-bundle`)
 because the daemon owns the only replica; cloud commands use their own workspace
-manager and sync each room before reading and after writing.
+manager and sync each room before reading and after writing. The desktop entry is
+Settings → Data: Electron main shows the file dialogs and calls the same daemon path
+(`apps/electron/src/main/services/workspace-bundle-service.ts`); the import path stays
+in main and the renderer holds only a token.
 
 | File                                      | Role                                                                         |
 | ----------------------------------------- | ---------------------------------------------------------------------------- |
@@ -23,7 +26,6 @@ manager and sync each room before reading and after writing.
   carried, and only those referenced by current history.
 - Roost conversations are exported as visible turns and imported as Loro history
   for sessions the target does not have (lossy by owner decision).
-- Prompt Shortcuts, the desktop Settings entry and cloud audit registration are not
-  implemented yet.
+- Prompt Shortcuts and cloud audit registration are not implemented yet.
 - Storage is today's loro-repo; a native loro-repo-rs source and target adapter will
   reuse the same manifest, codecs and journal.

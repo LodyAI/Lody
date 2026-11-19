@@ -13,7 +13,7 @@ cannot be imported. `lody migrate --from-oss` covers only one direction, local O
 to cloud. This Spec defines a lossless, verifiable, mergeable workspace bundle. It
 is the shared base for backup, device change and every future storage migration.
 
-This is a draft for review and is not implemented. The owner has already decided
+This is a draft for review; the implementation and its limits are listed under Evidence. The owner has already decided
 the following (confirmed 2026-11-19), which this document does not reopen:
 
 1. Only workspace owners and admins may export or import.
@@ -425,7 +425,8 @@ Import keeps the original visibility:
   `importRoomState`, `importLoroRaw`, `flockReadRegisters`; migration plan §5 on
   branch `native-repo-integration`.
 - Implementation: [workspace-bundle](../apps/cli/src/lib/workspace-bundle/README.md) (export, import, CLI and
-  daemon entry points; its README lists what is not implemented yet).
+  daemon entry points, desktop Settings → Data; its README lists what is not implemented yet).
 - Executed validation: real-repo unit tests in that directory, and an end-to-end run on the
   local platform with two real daemons (export, dry run, import, idempotent reimport, re-export,
-  reverse import). Cloud and E2EE workspaces were not exercised end to end.
+  reverse import), and the desktop Settings → Data flow driven in the built OSS desktop app
+  (export, review, import). Cloud and E2EE workspaces were not exercised end to end.

@@ -11,7 +11,7 @@ Markdown/JSON，丢了删除记录、时钟和 peer，不能导回去；`lody mi
 “OSS 本地 → 云”这一个方向。本 Spec 定义一套无损、可校验、可合并的工作区包（bundle），作为
 备份、换设备和今后所有存储迁移的共同底座。
 
-本文是待审草稿，不代表已实现。owner 已定以下几点（2026-11-19 确认），下文不再讨论：
+本文是待审草稿；实现情况与限制见文末“证据”。owner 已定以下几点（2026-11-19 确认），下文不再讨论：
 
 1. 导出和导入只允许工作区 owner 和 admin。
 2. 加密（E2EE）工作区由有权限的成员设备在本机解密后导出明文包。
@@ -310,7 +310,8 @@ E2EE 工作区的审计记录同样只含不透明计数。导入另在目标工
   loro-repo `795bafcb` 的 client 类型 `exportFlockRaw`、`exportLoroRaw`、`importRoomState`、
   `importLoroRaw`、`flockReadRegisters`；
   分支 `native-repo-integration` 上的迁移计划 §5。
-- 实现：[workspace-bundle](../apps/cli/src/lib/workspace-bundle/README.md)（导出、导入、CLI 与 daemon 入口；
-  其 README 列出尚未实现的部分）。
+- 实现：[workspace-bundle](../apps/cli/src/lib/workspace-bundle/README.md)（导出、导入、CLI 与 daemon 入口、桌面
+  设置 → 数据；其 README 列出尚未实现的部分）。
 - 已执行的验证：该目录下基于真实仓库的单元测试，以及本地平台上用两个真实 daemon 的端到端运行
-  （导出、预演、导入、重复导入无变化、再导出、反向导入）。云端和 E2EE 工作区未做端到端验证。
+  （导出、预演、导入、重复导入无变化、再导出、反向导入），以及在构建出的 OSS 桌面应用里实际
+  操作设置 → 数据（导出、预览、导入）。云端和 E2EE 工作区未做端到端验证。
