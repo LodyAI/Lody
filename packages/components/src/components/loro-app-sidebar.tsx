@@ -1845,7 +1845,13 @@ export function LoroAppSidebar({
     applySessionPinPlacements,
     updateSessionTitle,
   } = useSessionActions();
-  const { pinSections } = useWorkspaceCatalog();
+  const {
+    pinSections,
+    loaded: pinSectionsRead,
+    failed: pinSectionsUnreadable,
+  } = useWorkspaceCatalog();
+  // A failed read cannot hold rows back forever: they fall back to the default section.
+  const pinSectionsLoaded = pinSectionsRead || pinSectionsUnreadable;
   const { removeLocalProject } = useRemoveLocalProject();
   const presenceStates = useAtomValue(lodyPresenceStatesAtom);
   const presenceNowMs = useAtomValue(lodyPresenceNowMsAtom);
@@ -2752,8 +2758,11 @@ export function LoroAppSidebar({
     [sessionById]
   );
   const pinnedLayout = useMemo(
-    () => buildPinnedSectionLayout(pinnedItems, pinSections, pinnedPlacementOf),
-    [pinnedItems, pinSections, pinnedPlacementOf]
+    () =>
+      buildPinnedSectionLayout(pinnedItems, pinSections, pinnedPlacementOf, {
+        sectionsLoaded: pinSectionsLoaded,
+      }),
+    [pinnedItems, pinSections, pinSectionsLoaded, pinnedPlacementOf]
   );
   const pinnedSections = useMemo<SidebarPinnedSection[]>(
     () =>

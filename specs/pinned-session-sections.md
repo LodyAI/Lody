@@ -59,7 +59,9 @@ device, and workspace members see the same pin layout.
   `isPinned`, as two new optional fields: `pinSectionId` and `pinOrderKey`.
   Dragging a conversation writes only that conversation's metadata.
 - A conversation whose `pinSectionId` is missing or names a section that no
-  longer exists is shown in the default section. Deleting a section never
+  longer exists is shown in the default section. Until the section rows have been
+  read, a conversation that names a section is not shown at all, so it never
+  appears in the default section first and then jumps into its own. Deleting a section never
   rewrites conversations in bulk.
 
 No room or document type is added. The workspace Flock already syncs as

@@ -734,7 +734,8 @@ export function groupChats(
   chats: MobileConversationItem[],
   groupBy: MobileChatGroupBy,
   nowMs: number = getServerNow(),
-  pinSections: readonly PinSection[] = []
+  pinSections: readonly PinSection[] = [],
+  sectionsLoaded = true
 ): Array<{ id: string; items: MobileConversationItem[]; label?: string }> {
   const pinned: MobileConversationItem[] = [];
   const unpinned: MobileConversationItem[] = [];
@@ -746,12 +747,17 @@ export function groupChats(
   const ordered: Array<{ id: string; items: MobileConversationItem[]; label?: string }> = [];
   // Pinned rows split into pin sections (default first), each in its manual order.
   // Empty sections stay hidden here: mobile has no drag target to offer.
-  for (const entry of buildPinnedSectionLayout(pinned, pinSections, (chat) => ({
-    id: chat.id,
-    pinSectionId: chat.pinSectionId ?? null,
-    pinOrderKey: chat.pinOrderKey ?? null,
-    recency: chat.latestMessageAt ?? 0,
-  }))) {
+  for (const entry of buildPinnedSectionLayout(
+    pinned,
+    pinSections,
+    (chat) => ({
+      id: chat.id,
+      pinSectionId: chat.pinSectionId ?? null,
+      pinOrderKey: chat.pinOrderKey ?? null,
+      recency: chat.latestMessageAt ?? 0,
+    }),
+    { sectionsLoaded }
+  )) {
     if (entry.items.length === 0) continue;
     ordered.push(
       entry.section
@@ -1093,6 +1099,9 @@ export function MobileChatList({
 }) {
   const workspaceCatalog = useWorkspaceCatalog();
   const pinSections = pinSectionsOverride ?? workspaceCatalog.pinSections;
+  // Until the section rows are read, sectioned pins wait instead of flashing as unsectioned.
+  const pinSectionsLoaded =
+    pinSectionsOverride !== undefined || workspaceCatalog.loaded || workspaceCatalog.failed;
   /* Multi-select state is owned here so a Select-All hits every row,
      including rows that live in separate group cards when
      `groupBy !== 'none'`. */
@@ -1253,7 +1262,7 @@ export function MobileChatList({
 
   /* Always go through `groupChats` so pinned rows lift into a top
      "Pinned" section in every mode (project / date / flat). */
-  const groups = groupChats(chats, groupBy, undefined, pinSections);
+  const groups = groupChats(chats, groupBy, undefined, pinSections, pinSectionsLoaded);
   const cards = groups.map(({ id, items, label }, index) => {
     const expanded = !collapsedBucketIds.has(id);
     const onToggle = () => toggleBucket(id);

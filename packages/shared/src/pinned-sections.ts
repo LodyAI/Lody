@@ -62,15 +62,24 @@ const validKey = (placement: PinnedSessionPlacement): string | null =>
 /**
  * The pin area in render order: the default section, then every user section
  * (empty ones included, so they stay drop targets). A conversation naming a
- * missing section shows in the default one. Within a section, keyed
+ * missing section shows in the default one, once the sections are known. Within a section, keyed
  * conversations come first by key; conversations without a key (pinned before
  * manual ordering existed) follow by latest activity. Ties fall to the id.
  */
 export function buildPinnedSectionLayout<T>(
   items: readonly T[],
   sections: readonly PinSection[],
-  getPlacement: (item: T) => PinnedSessionPlacement
+  getPlacement: (item: T) => PinnedSessionPlacement,
+  options: {
+    /**
+     * False while the section rows have not been read yet. A conversation that
+     * names a section is then held back rather than shown in the default
+     * section, so it never jumps once its section arrives.
+     */
+    sectionsLoaded?: boolean;
+  } = {}
 ): PinnedSectionLayout<T> {
+  const sectionsLoaded = options.sectionsLoaded ?? true;
   const orderedSections = [...sections].sort(comparePinSections);
   const buckets = new Map<string | null, { item: T; placement: PinnedSessionPlacement }[]>();
   buckets.set(null, []);
@@ -78,6 +87,7 @@ export function buildPinnedSectionLayout<T>(
 
   for (const item of items) {
     const placement = getPlacement(item);
+    if (!sectionsLoaded && placement.pinSectionId) continue;
     const sectionId =
       placement.pinSectionId && buckets.has(placement.pinSectionId) ? placement.pinSectionId : null;
     buckets.get(sectionId)?.push({ item, placement });

@@ -74,6 +74,25 @@ describe('pinned section layout', () => {
     ]);
   });
 
+  it('holds back sectioned conversations until the sections themselves are known', () => {
+    const items = [pinned('loose', 1), pinned('weekly', 2, 'maintenance', '80')];
+    // Section rows not read yet: the sectioned conversation must not flash in the default section.
+    expect(
+      idsBySection(buildPinnedSectionLayout(items, [], (item) => item, { sectionsLoaded: false }))
+    ).toEqual([[null, ['loose']]]);
+    // Read, and the section exists: it lands there.
+    expect(
+      idsBySection(
+        buildPinnedSectionLayout(items, [section('maintenance', '80')], (item) => item, {
+          sectionsLoaded: true,
+        })
+      )
+    ).toEqual([
+      [null, ['loose']],
+      ['maintenance', ['weekly']],
+    ]);
+  });
+
   it('breaks equal keys from concurrent writers by id so every client agrees', () => {
     const layout = buildPinnedSectionLayout(
       [pinned('b', 1, undefined, '80'), pinned('a', 2, undefined, '80')],

@@ -310,3 +310,21 @@ describe('mobile pin sections', () => {
     expect(text.indexOf('Maintenance')).toBeGreaterThan(text.indexOf('Pinned'));
   });
 });
+
+describe('mobile pin sections before the sections are read', () => {
+  it('holds back a sectioned pin instead of showing it unsectioned', () => {
+    // No workspace runtime: the section catalog has not been read.
+    render([
+      makeItem({ id: 'loose', title: 'loose', isPinned: true, latestMessageAt: NOW }),
+      makeItem({
+        id: 'weekly-mirror',
+        title: 'weekly-mirror',
+        isPinned: true,
+        pinSectionId: 'maintenance',
+        pinOrderKey: '80',
+        latestMessageAt: NOW,
+      }),
+    ]);
+    expect(titles()).toEqual(['loose']);
+  });
+});
