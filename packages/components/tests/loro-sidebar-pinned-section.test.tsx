@@ -525,7 +525,7 @@ describe('LoroSidebar pinned section', () => {
   });
 
   it('moves a pinned conversation to another section from its context menu', async () => {
-    const onMoveItem = vi.fn();
+    const onDropItem = vi.fn();
     renderSidebar({
       pinnedSections: [
         { id: null, name: 'Pinned', items: [pinnedItem] },
@@ -533,7 +533,8 @@ describe('LoroSidebar pinned section', () => {
       ],
       onToggleUpdatedItemPinned: () => {},
       pinSectionActions: {
-        onMoveItem,
+        onDropItem,
+        onMoveSection: () => {},
         onCreateSection: () => {},
         onRenameSection: () => {},
         onDeleteSection: () => {},
@@ -555,7 +556,8 @@ describe('LoroSidebar pinned section', () => {
     );
     expect(target).toBeDefined();
     flushSync(() => target?.click());
-    expect(onMoveItem).toHaveBeenCalledWith('pinned-session', 'maintenance');
+    // "Move to Section" puts it at the top of that section.
+    expect(onDropItem).toHaveBeenCalledWith('pinned-session', 'maintenance', 0);
   });
 
   describe('dragging a conversation into a pin section', () => {
@@ -568,7 +570,6 @@ describe('LoroSidebar pinned section', () => {
       isPinned: true,
     });
     const actions = () => ({
-      onMoveItem: vi.fn(),
       onDropItem: vi.fn(),
       onMoveSection: vi.fn(),
       onCreateSection: () => {},
@@ -767,7 +768,6 @@ describe('LoroSidebar pinned section', () => {
       ],
       onTogglePinSection,
       pinSectionActions: {
-        onMoveItem: () => {},
         onDropItem: () => {},
         onMoveSection: () => {},
         onCreateSection: () => {},
@@ -802,7 +802,6 @@ describe('LoroSidebar pinned section', () => {
         },
       ],
       pinSectionActions: {
-        onMoveItem: () => {},
         onDropItem: () => {},
         onMoveSection: () => {},
         onCreateSection: () => {},
@@ -822,7 +821,6 @@ describe('LoroSidebar pinned section', () => {
     renderSidebar({
       pinnedSections: [{ id: null, name: 'Pinned', items: [pinnedItem] }],
       pinSectionActions: {
-        onMoveItem: () => {},
         onDropItem: () => {},
         onMoveSection: () => {},
         onCreateSection,
@@ -861,23 +859,23 @@ describe('LoroSidebar pinned section', () => {
 });
 
 describe('pinned row drag planning', () => {
-  const order = () => ({ __default__: ['a', 'b'], maintenance: ['m1', 'm2', 'm3'] });
+  const order = () => ({ default: ['a', 'b'], maintenance: ['m1', 'm2', 'm3'] });
 
-  it('moves a row into another section at the hovered row, or below it', () => {
-    expect(moveRowIntoSection(order(), 'a', 'maintenance', 'm2', false)).toEqual({
-      __default__: ['b'],
+  it('moves a row into another section at the dropped index', () => {
+    expect(moveRowIntoSection(order(), 'a', 'maintenance', 1)).toEqual({
+      default: ['b'],
       maintenance: ['m1', 'a', 'm2', 'm3'],
     });
-    expect(moveRowIntoSection(order(), 'a', 'maintenance', 'm3', true)).toEqual({
-      __default__: ['b'],
+    expect(moveRowIntoSection(order(), 'a', 'maintenance', 3)).toEqual({
+      default: ['b'],
       maintenance: ['m1', 'm2', 'm3', 'a'],
     });
   });
 
-  it('appends to a section entered through its empty space or header', () => {
-    expect(moveRowIntoSection(order(), 'm1', '__default__', null, false)).toEqual({
-      __default__: ['a', 'b', 'm1'],
-      maintenance: ['m2', 'm3'],
+  it('reorders within a section, counting the index among the other rows', () => {
+    expect(moveRowIntoSection(order(), 'm1', 'maintenance', 2)).toEqual({
+      default: ['a', 'b'],
+      maintenance: ['m2', 'm3', 'm1'],
     });
   });
 });

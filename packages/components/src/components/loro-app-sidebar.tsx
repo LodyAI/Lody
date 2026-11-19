@@ -2792,9 +2792,6 @@ export function LoroAppSidebar({
   const pinSectionActions = useMemo<SidebarPinSectionActions | undefined>(() => {
     if (!runtime) return undefined;
     return {
-      onMoveItem: (itemId, sectionId) => {
-        void applySessionPinPlacements(planPinnedMove(itemId, sectionId, 0)).catch(reportPinError);
-      },
       onDropItem: (itemId, sectionId, toIndex) => {
         void applySessionPinPlacements(planPinnedMove(itemId, sectionId, toIndex)).catch(
           reportPinError

@@ -166,7 +166,6 @@ function PinnedSectionsPlayground() {
 
   const actions = useMemo<SidebarPinSectionActions>(
     () => ({
-      onMoveItem: (itemId, sectionId) => apply(plan(itemId, sectionId, 0)),
       onDropItem: (itemId, sectionId, toIndex) => apply(plan(itemId, sectionId, toIndex)),
       onMoveSection: (sectionId, toIndex) =>
         setSections((previous) =>

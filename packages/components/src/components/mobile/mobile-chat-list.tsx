@@ -1253,152 +1253,151 @@ export function MobileChatList({
 
   /* Always go through `groupChats` so pinned rows lift into a top
      "Pinned" section in every mode (project / date / flat). */
-  const cards = groupChats(chats, groupBy, undefined, pinSections).map(
-    ({ id, items, label }, index) => {
-      const expanded = !collapsedBucketIds.has(id);
-      const onToggle = () => toggleBucket(id);
-      const compactTop = index === 0;
-      /* Multi-select drives a permanent delete, and "select all" operates on
+  const groups = groupChats(chats, groupBy, undefined, pinSections);
+  const cards = groups.map(({ id, items, label }, index) => {
+    const expanded = !collapsedBucketIds.has(id);
+    const onToggle = () => toggleBucket(id);
+    const compactTop = index === 0;
+    /* Multi-select drives a permanent delete, and "select all" operates on
            every id in the list. Capping the rows while it is active would let
            the user confirm a delete of Sessions the surface never showed them,
            so selection mode renders the buckets in full. */
-      const bucketPreview: MobileChatPreviewState | undefined =
-        !capGroupPreviews || selectionToolbarActive
-          ? undefined
-          : {
-              showAll: expandedBucketIds.has(id),
-              onToggle: () => toggleBucketPreview(id),
-            };
-      const trailing =
-        showFirstGroupTrailing && !trailingConsumedByFlatHeading && index === 0
-          ? firstGroupTrailing
-          : undefined;
+    const bucketPreview: MobileChatPreviewState | undefined =
+      !capGroupPreviews || selectionToolbarActive
+        ? undefined
+        : {
+            showAll: expandedBucketIds.has(id),
+            onToggle: () => toggleBucketPreview(id),
+          };
+    const trailing =
+      showFirstGroupTrailing && !trailingConsumedByFlatHeading && index === 0
+        ? firstGroupTrailing
+        : undefined;
 
-      /* Flat unpinned tail under a Pinned section (groupBy none):
+    /* Flat unpinned tail under a Pinned section (groupBy none):
            no heading — just the remaining rows. When nothing is
            pinned, this is the only section and still has no heading
            — mount a trailing-only row so the filter chip still has a
            home. */
-      if (id === FLAT_UNPINNED_BUCKET_ID) {
-        return (
-          <Fragment key={id}>
-            {trailing ? (
-              <div
-                className={cn(
-                  'flex w-full items-center justify-end pb-1.5',
-                  GROUP_HEADING_X,
-                  compactTop ? 'pt-2' : 'pt-4'
-                )}
-              >
-                {trailing}
-              </div>
-            ) : null}
-            <MobileChatListCard
-              chats={items}
-              selectedConversationId={selectedConversationId}
-              onSelect={onSelect}
-              rowActions={rowActions}
-              archived={archived}
-              onRequestDelete={selectionEnabled ? requestSwipeDelete : undefined}
-              selection={selectionState}
-              preview={bucketPreview}
-            />
-          </Fragment>
-        );
-      }
-
-      /* Pinned + date buckets: quiet collapsible text label.
-           Project buckets: identity mark (folder / avatar / chat). */
-      const labeledItem =
-        groupBy === 'project' && !isPinnedBucketId(id)
-          ? // A row nested here under its opener describes another project.
-            items.find((it) => it.projectKey === id && it.projectLabel != null)
-          : undefined;
-      const projectLabel = labeledItem?.projectLabel ?? null;
-      const heading = label
-        ? label
-        : id === PINNED_BUCKET_ID || groupBy === 'date'
-          ? resolveDateBucketLabel(id, groupLabels)
-          : (projectLabel ?? groupLabels[id] ?? id);
-
-      const isLocalBucket =
-        labeledItem != null &&
-        (labeledItem.kind === 'local' ||
-          (labeledItem.kind !== 'github' && !labeledItem.projectAvatarUrl));
-
-      let groupedHeadingNode: ReactNode;
-      if (isPinnedBucketId(id) || groupBy === 'date' || groupBy === 'none') {
-        groupedHeadingNode = (
-          <CollapsibleSectionHeading
-            expanded={expanded}
-            onToggle={onToggle}
-            compactTop={compactTop}
-            trailing={trailing}
-          >
-            {heading}
-          </CollapsibleSectionHeading>
-        );
-      } else if (id === NO_PROJECT_BUCKET_ID) {
-        groupedHeadingNode = (
-          <ProjectBucketHeading
-            label={heading}
-            leading={<NoProjectBucketLeading />}
-            expanded={expanded}
-            onToggle={onToggle}
-            compactTop={compactTop}
-            trailing={trailing}
-          />
-        );
-      } else if (labeledItem) {
-        groupedHeadingNode = (
-          <ProjectBucketHeading
-            label={heading}
-            avatarUrl={labeledItem.projectAvatarUrl}
-            hashSeed={labeledItem.projectKey ?? id}
-            isLocal={isLocalBucket}
-            expanded={expanded}
-            onToggle={onToggle}
-            compactTop={compactTop}
-            trailing={trailing}
-            isPrivate={labeledItem.isPrivateProject}
-            privateLabel={privateLabel}
-            privateHelpAriaLabel={privateHelpAriaLabel}
-            onPrivateHelp={onPrivateHelp}
-          />
-        );
-      } else {
-        groupedHeadingNode = (
-          <CollapsibleSectionHeading
-            expanded={expanded}
-            onToggle={onToggle}
-            compactTop={compactTop}
-            trailing={trailing}
-          >
-            {heading}
-          </CollapsibleSectionHeading>
-        );
-      }
-
+    if (id === FLAT_UNPINNED_BUCKET_ID) {
       return (
         <Fragment key={id}>
-          {groupedHeadingNode}
-          {expanded ? (
-            <MobileChatListCard
-              chats={items}
-              selectedConversationId={selectedConversationId}
-              onSelect={onSelect}
-              rowActions={rowActions}
-              archived={archived}
-              onRequestDelete={selectionEnabled ? requestSwipeDelete : undefined}
-              selection={selectionState}
-              preview={bucketPreview}
-              preserveOrder={isPinnedBucketId(id)}
-            />
+          {trailing ? (
+            <div
+              className={cn(
+                'flex w-full items-center justify-end pb-1.5',
+                GROUP_HEADING_X,
+                compactTop ? 'pt-2' : 'pt-4'
+              )}
+            >
+              {trailing}
+            </div>
           ) : null}
+          <MobileChatListCard
+            chats={items}
+            selectedConversationId={selectedConversationId}
+            onSelect={onSelect}
+            rowActions={rowActions}
+            archived={archived}
+            onRequestDelete={selectionEnabled ? requestSwipeDelete : undefined}
+            selection={selectionState}
+            preview={bucketPreview}
+          />
         </Fragment>
       );
     }
-  );
+
+    /* Pinned + date buckets: quiet collapsible text label.
+           Project buckets: identity mark (folder / avatar / chat). */
+    const labeledItem =
+      groupBy === 'project' && !isPinnedBucketId(id)
+        ? // A row nested here under its opener describes another project.
+          items.find((it) => it.projectKey === id && it.projectLabel != null)
+        : undefined;
+    const projectLabel = labeledItem?.projectLabel ?? null;
+    const heading = label
+      ? label
+      : id === PINNED_BUCKET_ID || groupBy === 'date'
+        ? resolveDateBucketLabel(id, groupLabels)
+        : (projectLabel ?? groupLabels[id] ?? id);
+
+    const isLocalBucket =
+      labeledItem != null &&
+      (labeledItem.kind === 'local' ||
+        (labeledItem.kind !== 'github' && !labeledItem.projectAvatarUrl));
+
+    let groupedHeadingNode: ReactNode;
+    if (isPinnedBucketId(id) || groupBy === 'date' || groupBy === 'none') {
+      groupedHeadingNode = (
+        <CollapsibleSectionHeading
+          expanded={expanded}
+          onToggle={onToggle}
+          compactTop={compactTop}
+          trailing={trailing}
+        >
+          {heading}
+        </CollapsibleSectionHeading>
+      );
+    } else if (id === NO_PROJECT_BUCKET_ID) {
+      groupedHeadingNode = (
+        <ProjectBucketHeading
+          label={heading}
+          leading={<NoProjectBucketLeading />}
+          expanded={expanded}
+          onToggle={onToggle}
+          compactTop={compactTop}
+          trailing={trailing}
+        />
+      );
+    } else if (labeledItem) {
+      groupedHeadingNode = (
+        <ProjectBucketHeading
+          label={heading}
+          avatarUrl={labeledItem.projectAvatarUrl}
+          hashSeed={labeledItem.projectKey ?? id}
+          isLocal={isLocalBucket}
+          expanded={expanded}
+          onToggle={onToggle}
+          compactTop={compactTop}
+          trailing={trailing}
+          isPrivate={labeledItem.isPrivateProject}
+          privateLabel={privateLabel}
+          privateHelpAriaLabel={privateHelpAriaLabel}
+          onPrivateHelp={onPrivateHelp}
+        />
+      );
+    } else {
+      groupedHeadingNode = (
+        <CollapsibleSectionHeading
+          expanded={expanded}
+          onToggle={onToggle}
+          compactTop={compactTop}
+          trailing={trailing}
+        >
+          {heading}
+        </CollapsibleSectionHeading>
+      );
+    }
+
+    return (
+      <Fragment key={id}>
+        {groupedHeadingNode}
+        {expanded ? (
+          <MobileChatListCard
+            chats={items}
+            selectedConversationId={selectedConversationId}
+            onSelect={onSelect}
+            rowActions={rowActions}
+            archived={archived}
+            onRequestDelete={selectionEnabled ? requestSwipeDelete : undefined}
+            selection={selectionState}
+            preview={bucketPreview}
+            preserveOrder={isPinnedBucketId(id)}
+          />
+        ) : null}
+      </Fragment>
+    );
+  });
 
   return (
     /* All cards rendered under a single `MobileSwipeableRowGroup` so the

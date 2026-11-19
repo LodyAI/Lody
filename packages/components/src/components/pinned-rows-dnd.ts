@@ -7,28 +7,23 @@
  */
 export type PinnedRowOrder = Readonly<Record<string, readonly string[]>>;
 
-/** Section key of the default "Pinned" section. */
-export const DEFAULT_PIN_SECTION_KEY = '__default__';
+/** Key (and `data-pin-section` value) of the default "Pinned" section. */
+export const DEFAULT_PIN_SECTION_KEY = 'default';
 
 export const pinSectionKey = (sectionId: string | null): string =>
   sectionId ?? DEFAULT_PIN_SECTION_KEY;
 
-/**
- * Move `rowId` into section `toKey`: above `overRowId`, below it when
- * `below`, or at the end when the pointer is over the section itself.
- */
+/** Move `rowId` to `toIndex` among section `toKey`'s other rows. */
 export function moveRowIntoSection(
   order: PinnedRowOrder,
   rowId: string,
   toKey: string,
-  overRowId: string | null,
-  below: boolean
+  toIndex: number
 ): PinnedRowOrder {
   const next: Record<string, string[]> = {};
   for (const [key, ids] of Object.entries(order)) next[key] = ids.filter((id) => id !== rowId);
   const target = next[toKey] ?? [];
-  const overIndex = overRowId ? target.indexOf(overRowId) : -1;
-  const index = overIndex < 0 ? target.length : overIndex + (below ? 1 : 0);
+  const index = Math.max(0, Math.min(toIndex, target.length));
   next[toKey] = [...target.slice(0, index), rowId, ...target.slice(index)];
   return next;
 }

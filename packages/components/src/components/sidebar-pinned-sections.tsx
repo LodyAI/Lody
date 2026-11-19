@@ -23,7 +23,14 @@ import {
   type DragMoveEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
-import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { dndPointerPoint } from '@/lib/dnd-pointer';
+import { useLatestRef } from '@/hooks/use-latest-ref';
 import { CSS as DndCss } from '@dnd-kit/utilities';
 import { useTranslation } from 'react-i18next';
 import { FolderPlus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
@@ -34,6 +41,7 @@ import { createPortal } from 'react-dom';
 import { Dialog } from '@/ui/dialog';
 import {
   PINNED_DROP_FLIGHT_MS,
+  PINNED_DROP_WAIT_MS,
   endPinnedDropSettle,
   getPinnedDropSettle,
   beginPinnedDropSettle,
@@ -60,7 +68,6 @@ import { Menu } from '@/ui/menu';
 import { toast } from '@/lib/toast';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import {
-  DEFAULT_PIN_SECTION_ATTR,
   pinnedDropIndexAt,
   SidebarUpdatedSessionList,
   type SidebarPinSectionMenu,
@@ -76,7 +83,6 @@ export type SidebarPinnedSection = {
 };
 
 export type SidebarPinSectionActions = {
-  onMoveItem: (itemId: string, sectionId: string | null) => void;
   /** A conversation dragged to `toIndex` of a section's pinned rows. */
   onDropItem: (itemId: string, sectionId: string | null, toIndex: number) => void;
   /** A user section dragged to `toIndex` among the user sections. */
@@ -143,13 +149,22 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
   const { t } = useTranslation();
   const [nameDialog, setNameDialog] = useState<NameDialogTarget | null>(null);
 
+  // Section ids and names only: `sections` is rebuilt on every session update,
+  // and anything handed to memoized rows must not change with it.
+  const sectionHeadsKey = sections
+    .map((section) => `${section.id ?? ''}\u0000${section.name}`)
+    .join('\u0001');
+  const sectionHeads = useMemo(
+    () => sections.map(({ id, name }) => ({ id, name })),
+    [sectionHeadsKey]
+  );
   const menuSections = useMemo(
     () =>
-      sections.map((section) => ({
+      sectionHeads.map((section) => ({
         id: section.id,
         name: section.id === null ? defaultLabel : section.name,
       })),
-    [defaultLabel, sections]
+    [defaultLabel, sectionHeads]
   );
   const menuLabels = useMemo(
     () => ({
@@ -158,35 +173,39 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
     }),
     [t]
   );
-  const onMoveItem = actions?.onMoveItem;
+  const onDropItem = actions?.onDropItem;
+  // "Move to Section" puts the conversation at the top of that section.
+  const moveToSectionTop = useCallback(
+    (itemId: string, sectionId: string | null) => onDropItem?.(itemId, sectionId, 0),
+    [onDropItem]
+  );
   const openCreate = useCallback((itemId: string) => {
     setNameDialog({ kind: 'create', moveItemId: itemId });
   }, []);
   // One stable menu object per section keeps memoized rows from re-rendering.
   const menuBySection = useMemo(() => {
     const menus = new Map<string | null, SidebarPinSectionMenu>();
-    if (!onMoveItem) return menus;
-    for (const section of sections) {
+    if (!onDropItem) return menus;
+    for (const section of sectionHeads) {
       menus.set(section.id, {
         sections: menuSections,
         currentSectionId: section.id,
-        onMove: onMoveItem,
+        onMove: moveToSectionTop,
         onCreate: openCreate,
         labels: menuLabels,
       });
     }
     return menus;
-  }, [menuLabels, menuSections, onMoveItem, openCreate, sections]);
+  }, [menuLabels, menuSections, moveToSectionTop, onDropItem, openCreate, sectionHeads]);
 
-  const onDropItem = actions?.onDropItem;
   const dropBySection = useMemo(() => {
     const handlers = new Map<string | null, (sessionId: string, toIndex: number) => void>();
     if (!onDropItem || listProps.isMobile) return handlers;
-    for (const section of sections) {
+    for (const section of sectionHeads) {
       handlers.set(section.id, (sessionId, toIndex) => onDropItem(sessionId, section.id, toIndex));
     }
     return handlers;
-  }, [listProps.isMobile, onDropItem, sections]);
+  }, [listProps.isMobile, onDropItem, sectionHeads]);
 
   // ---- Drag and drop (dnd-kit): rows within and across sections, and sections.
   const canDragRows = Boolean(onDropItem) && !listProps.isMobile;
@@ -216,48 +235,35 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
     return { items, carried };
   }, [sections]);
   // After a drop the sidebar shows the result until the written order is read
-  // back, so the row never snaps back to where it came from.
-  const [pendingOrder, setPendingOrder] = useState<PinnedRowOrder | null>(null);
-  useEffect(() => {
-    if (pendingOrder && sameRowOrder(pendingOrder, propsOrder)) setPendingOrder(null);
-  }, [pendingOrder, propsOrder]);
-  useEffect(() => {
-    if (!pendingOrder) return undefined;
-    const timer = setTimeout(() => setPendingOrder(null), PINNED_PENDING_ORDER_MS);
-    return () => clearTimeout(timer);
-  }, [pendingOrder]);
+  // back, so neither a row nor a section snaps back to where it came from.
+  const [pendingOrder, setPendingOrder] = usePendingUntil(propsOrder, sameRowOrder);
   const rowOrder = pendingOrder ?? propsOrder;
+  const itemsBySection = useMemo(() => {
+    const bySection = new Map<string, SidebarUpdatedItem[]>();
+    for (const [key, ids] of Object.entries(rowOrder)) {
+      bySection.set(
+        key,
+        ids.flatMap((id) => {
+          const item = rowsById.items.get(id);
+          return item ? [item, ...(rowsById.carried.get(id) ?? [])] : [];
+        })
+      );
+    }
+    return bySection;
+  }, [rowOrder, rowsById]);
   const itemsOf = (sectionId: string | null): SidebarUpdatedItem[] =>
-    (rowOrder[pinSectionKey(sectionId)] ?? []).flatMap((id) => {
-      const item = rowsById.items.get(id);
-      return item ? [item, ...(rowsById.carried.get(id) ?? [])] : [];
-    });
+    itemsBySection.get(pinSectionKey(sectionId)) ?? EMPTY_ITEMS;
 
   const propsSectionIds = useMemo(
-    () => sections.flatMap((section) => (section.id === null ? [] : [section.id])),
-    [sections]
+    () => sectionHeads.flatMap((section) => (section.id === null ? [] : [section.id])),
+    [sectionHeads]
   );
-  const [pendingSectionIds, setPendingSectionIds] = useState<string[] | null>(null);
-  useEffect(() => {
-    if (
-      pendingSectionIds &&
-      pendingSectionIds.length === propsSectionIds.length &&
-      pendingSectionIds.every((id, index) => id === propsSectionIds[index])
-    ) {
-      setPendingSectionIds(null);
-    }
-  }, [pendingSectionIds, propsSectionIds]);
-  useEffect(() => {
-    if (!pendingSectionIds) return undefined;
-    const timer = setTimeout(() => setPendingSectionIds(null), PINNED_PENDING_ORDER_MS);
-    return () => clearTimeout(timer);
-  }, [pendingSectionIds]);
+  const [pendingSectionIds, setPendingSectionIds] = usePendingUntil(propsSectionIds, sameIds);
   const userSectionIds = pendingSectionIds ?? propsSectionIds;
 
   const [activeRow, setActiveRow] = useState<string | null>(null);
   const [activeGhost, setActiveGhost] = useState<HTMLElement | null>(null);
-  const rowOrderRef = useRef(rowOrder);
-  rowOrderRef.current = rowOrder;
+  const rowOrderRef = useLatestRef(rowOrder);
 
   // Pointer only: rows and section headers hold their own Enter/Space.
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -266,7 +272,7 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
   const stopPointerTracking = useRef<(() => void) | null>(null);
   const pointerOf = (event: DragEndEvent | DragMoveEvent) =>
-    pointerRef.current ?? pointerPointOf(event);
+    pointerRef.current ?? dndPointerPoint(event);
 
   const endPointerDrag = useCallback(() => {
     stopPointerTracking.current?.();
@@ -293,7 +299,15 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
     const slot = Array.from(document.querySelectorAll('[data-pin-node]')).find(
       (node) => node.getAttribute('data-pin-node') === target.id
     );
-    setActiveGhost(slot ? (slot.cloneNode(true) as HTMLElement) : null);
+    const ghost = slot ? (slot.cloneNode(true) as HTMLElement) : null;
+    if (ghost) {
+      // The copy keeps the row's look, not its drag state.
+      ghost.style.transform = '';
+      ghost.style.transition = '';
+      ghost.style.opacity = '';
+      ghost.style.pointerEvents = 'none';
+    }
+    setActiveGhost(ghost);
     // The row's slot closes and conversation surfaces light up, as for a native drag.
     armSessionMentionDrag(target.id);
   }, []);
@@ -316,10 +330,7 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
         const from = userSectionIds.indexOf(dragged.id);
         const to = userSectionIds.indexOf(target.id);
         if (from < 0 || to < 0) return;
-        const next = [...userSectionIds];
-        next.splice(from, 1);
-        next.splice(to, 0, dragged.id);
-        setPendingSectionIds(next);
+        setPendingSectionIds(arrayMove(userSectionIds, from, to));
         onMoveSection(dragged.id, to);
         return;
       }
@@ -344,14 +355,7 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
         return;
       }
       const sectionKey = pinSectionKey(target.sectionId);
-      const others = (order[sectionKey] ?? []).filter((id) => id !== dragged.id);
-      const next = moveRowIntoSection(
-        order,
-        dragged.id,
-        sectionKey,
-        others[target.index] ?? null,
-        false
-      );
+      const next = moveRowIntoSection(order, dragged.id, sectionKey, target.index);
       // The lifted copy flies from where it was released into the row's new slot.
       beginPinnedDropSettle({
         sessionId: dragged.id,
@@ -368,7 +372,17 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
         onDropItem?.(dragged.id, target.sectionId, target.index);
       }
     },
-    [activeGhost, endPointerDrag, onDropItem, onMoveSection, propsOrder, userSectionIds]
+    [
+      activeGhost,
+      endPointerDrag,
+      onDropItem,
+      onMoveSection,
+      propsOrder,
+      rowOrderRef,
+      setPendingOrder,
+      setPendingSectionIds,
+      userSectionIds,
+    ]
   );
 
   const handleDragCancel = useCallback(() => {
@@ -444,7 +458,6 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
                 {...listProps}
                 renderHeader={renderHeader}
                 onDropPinnedSession={dropBySection.get(sectionId)}
-                sortableRows={canDragRows}
                 // Same gap between sections as between the sidebar's other groups.
                 className={
                   // Padding, not margin: the space between sections stays part of a
@@ -508,8 +521,29 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
 
 const COLLAPSED = { all: true } as const;
 
-/** How long a dropped order is held while its write is read back. */
-const PINNED_PENDING_ORDER_MS = 1_500;
+const EMPTY_ITEMS: SidebarUpdatedItem[] = [];
+const sameIds = (left: readonly string[], right: readonly string[]) =>
+  left.length === right.length && left.every((id, index) => id === right[index]);
+
+/**
+ * A value shown in place of `actual` until `actual` catches up with it (the
+ * write was read back) or the drop's wait runs out.
+ */
+function usePendingUntil<T>(
+  actual: T,
+  equals: (left: T, right: T) => boolean
+): [T | null, (next: T) => void] {
+  const [pending, setPending] = useState<T | null>(null);
+  useEffect(() => {
+    if (pending !== null && equals(pending, actual)) setPending(null);
+  }, [actual, equals, pending]);
+  useEffect(() => {
+    if (pending === null) return undefined;
+    const timer = setTimeout(() => setPending(null), PINNED_DROP_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [pending]);
+  return [pending, setPending];
+}
 const PINNED_ROW_LIFT_SHADOW = '0 6px 16px rgb(0 0 0 / 0.16), 0 1px 3px rgb(0 0 0 / 0.12)';
 
 /** Sections meet sections; rows aim by pointer position (`pinnedPointerTargetAt`). */
@@ -535,20 +569,11 @@ function pinnedPointerTargetAt(
       continue;
     }
     const attr = element.getAttribute('data-pin-section');
-    const sectionId = attr === DEFAULT_PIN_SECTION_ATTR ? null : attr;
+    const sectionId = attr === DEFAULT_PIN_SECTION_KEY ? null : attr;
     const rows = element.querySelector<HTMLElement>('[data-pin-rows]');
     return { sectionId, index: pinnedDropIndexAt(rows, point.y, draggedId) };
   }
   return null;
-}
-
-/** Where the pointer was released, from the activating event and the drag's travel. */
-function pointerPointOf(event: DragEndEvent | DragMoveEvent): { x: number; y: number } | null {
-  const source = event.activatorEvent;
-  if (!source || !('clientX' in source) || !('clientY' in source)) return null;
-  const { clientX, clientY } = source as { clientX: unknown; clientY: unknown };
-  if (typeof clientX !== 'number' || typeof clientY !== 'number') return null;
-  return { x: clientX + event.delta.x, y: clientY + event.delta.y };
 }
 
 /** Where a row sits now: its section and its index among the section's other rows. */
@@ -570,14 +595,7 @@ function liftedBackground(): string | null {
 function PinnedRowGhost({ source }: { source: HTMLElement | null }) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
-    const body = bodyRef.current;
-    if (!body || !source) return;
-    const ghost = source.cloneNode(true) as HTMLElement;
-    ghost.style.transform = '';
-    ghost.style.transition = '';
-    ghost.style.opacity = '';
-    ghost.style.pointerEvents = 'none';
-    body.replaceChildren(ghost);
+    if (bodyRef.current && source) bodyRef.current.replaceChildren(source);
   }, [source]);
   return (
     <div
@@ -656,7 +674,7 @@ function PinnedDropFlight() {
 
 /**
  * A user section that can be dragged by its header. Only the header carries
- * the pointer listeners: conversation rows keep their own (HTML5) drag.
+ * the pointer listeners: its rows are separate draggables (`DraggablePinnedRowSlot`).
  */
 function SortablePinSection({
   id,

@@ -25,14 +25,14 @@ import {
   subscribeSessionMentionDrag,
 } from '@/lib/session-mention-drag';
 import { useDraggable } from '@dnd-kit/core';
-import { pinnedRowDndId } from './pinned-rows-dnd';
+import { DEFAULT_PIN_SECTION_KEY, pinnedRowDndId } from './pinned-rows-dnd';
 import {
   beginPinnedDropSettle,
   flyPinnedDropSettle,
   getPinnedDropSettle,
   getPinnedPointerTarget,
   subscribePinnedPointerTarget,
-  listenForPinnedDragOrigins,
+  recordPinnedDragOrigin,
   subscribePinnedDropSettle,
   takePinnedDragOrigin,
 } from '@/lib/pinned-drop-settle';
@@ -204,9 +204,6 @@ export type SidebarUpdatedBucketKey = 'all' | SidebarStatusGroup;
 /** How the list splits its rows: one recency list, or the status groups. */
 /** `manual` keeps the caller's order (pinned sections); the others sort by activity. */
 export type SidebarUpdatedGrouping = 'recency' | 'status' | 'manual';
-
-/** `data-pin-section` value of the default section. */
-export const DEFAULT_PIN_SECTION_ATTR = 'default';
 
 /** Row menu entries for moving a pinned conversation between pin sections. */
 export type SidebarPinSectionMenu = {
@@ -506,11 +503,6 @@ export type SidebarUpdatedSessionListProps = {
   onDropPinnedSession?: (sessionId: string, toIndex: number) => void;
   /** Pinned sections only: wraps the section header (the section drag handle). */
   renderHeader?: (header: ReactElement) => ReactNode;
-  /**
-   * Pinned sections only: rows are dnd-kit sortables inside the caller's
-   * `SortableContext` and carry no native drag of their own.
-   */
-  sortableRows?: boolean;
 };
 
 const defaultLabels: SidebarUpdatedSessionListLabels = {
@@ -549,7 +541,6 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   pinSectionId,
   onDropPinnedSession,
   renderHeader,
-  sortableRows = false,
 }: SidebarUpdatedSessionListProps) {
   const preserveOrder = grouping === 'manual';
   const pinDrag = usePinnedDropGap(items, onDropPinnedSession, pinSectionId ?? null);
@@ -700,7 +691,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
       <div
         className={cn('flex flex-col', className)}
         data-pin-section={
-          pinSectionId === undefined ? undefined : (pinSectionId ?? DEFAULT_PIN_SECTION_ATTR)
+          pinSectionId === undefined ? undefined : (pinSectionId ?? DEFAULT_PIN_SECTION_KEY)
         }
         onDragOver={pinDrag?.onDragOver}
         onDragLeave={pinDrag?.onDragLeave}
@@ -801,7 +792,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                             onOpenPullRequest={onOpenPullRequest}
                             onBeginRename={beginRename}
                             pinSectionMenu={pinSectionMenu}
-                            nativeDrag={!sortableRows}
+                            nativeDrag={!pinDrag}
                             openedByTree={treeSlot}
                             contextMenuLabels={contextMenuLabels}
                             archiveTooltipLabel={archiveLabels.tooltip}
@@ -827,16 +818,15 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                       }
                     });
                     return groups.map((group) => {
-                      const Slot = sortableRows ? DraggablePinnedRowSlot : PinnedRowSlot;
                       return (
-                        <Slot
+                        <DraggablePinnedRowSlot
                           key={group.rootId}
                           id={group.rootId}
                           drag={pinDrag}
                           gutter={showTreeGutter}
                         >
                           {group.nodes.map(([nodeIndex, node]) => renderNode(node, nodeIndex))}
-                        </Slot>
+                        </DraggablePinnedRowSlot>
                       );
                     });
                   })()}
@@ -1124,7 +1114,11 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       draggable={nativeDrag}
       onDragStart={
         nativeDrag
-          ? (event) => startSessionMentionDrag(event, { sessionId: item.id, title: item.title })
+          ? (event) => {
+              startSessionMentionDrag(event, { sessionId: item.id, title: item.title });
+              // A drop into a pin section lands from where this row was released.
+              recordPinnedDragOrigin(item.id, event.currentTarget, event);
+            }
           : undefined
       }
       className={cn(
@@ -1350,7 +1344,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             <ContextMenu.SubmenuContent className="min-w-[180px]">
               {pinSectionMenu.sections.map((section) => (
                 <ContextMenu.Item
-                  key={section.id ?? DEFAULT_PIN_SECTION_ATTR}
+                  key={section.id ?? DEFAULT_PIN_SECTION_KEY}
                   disabled={section.id === pinSectionMenu.currentSectionId}
                   onClick={() => pinSectionMenu.onMove(item.id, section.id)}
                 >
@@ -1547,6 +1541,11 @@ export function pinnedDropIndexAt(
   return index;
 }
 
+const escapeAttributeValue = (value: string) =>
+  typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+    ? CSS.escape(value)
+    : value.replace(/["\\]/g, '\\$&');
+
 const PINNED_DROP_DEFAULT_GAP_PX = 29;
 const PINNED_DROP_TRANSITION = 'transform 160ms ease, opacity 120ms ease';
 const PINNED_DROP_ROWS_TRANSITION = 'padding-bottom 160ms ease, margin-bottom 160ms ease';
@@ -1586,17 +1585,20 @@ function usePinnedDropGap(
     enabled ? getPinnedDropSettle : readNoDrag,
     readNoDrag
   );
-  const pointerTarget = useSyncExternalStore(
+  // Only this section's index: moving the pointer elsewhere re-renders nothing here.
+  const readPointerIndex = useCallback(() => {
+    const target = getPinnedPointerTarget();
+    return target && target.sectionId === sectionId ? target.index : null;
+  }, [sectionId]);
+  const pointerIndex = useSyncExternalStore(
     enabled ? subscribePinnedPointerTarget : noopSubscribe,
-    enabled ? getPinnedPointerTarget : readNoDrag,
+    enabled ? readPointerIndex : readNoDrag,
     readNoDrag
   );
   const rowsRef = useRef<HTMLDivElement | null>(null);
   const [nativeDropIndex, setDropIndex] = useState<number | null>(null);
   // A pointer (dnd-kit) drag of a pinned row aims here, or a native drag does.
-  const dropIndex =
-    nativeDropIndex ??
-    (pointerTarget && pointerTarget.sectionId === sectionId ? pointerTarget.index : null);
+  const dropIndex = nativeDropIndex ?? pointerIndex;
   const [gap, setGap] = useState(PINNED_DROP_DEFAULT_GAP_PX);
   // A released row still owns the layout until it lands in its slot.
   const dragged = enabled
@@ -1608,17 +1610,13 @@ function usePinnedDropGap(
   const animate = Boolean(enabled && inFlight);
 
   useEffect(() => {
-    if (enabled) listenForPinnedDragOrigins();
-  }, [enabled]);
-
-  useEffect(() => {
     if (!dragged) {
       setDropIndex(null);
       return;
     }
-    const row = Array.from(
-      document.querySelectorAll<HTMLElement>('[data-sidebar-updated-id]')
-    ).find((element) => element.getAttribute('data-sidebar-updated-id') === dragged);
+    const row = document.querySelector<HTMLElement>(
+      `[data-sidebar-updated-id="${escapeAttributeValue(dragged)}"]`
+    );
     // The list's 1px row gap travels with the slot.
     if (row && row.offsetHeight > 0) setGap(row.offsetHeight + 1);
   }, [dragged]);
@@ -1629,10 +1627,15 @@ function usePinnedDropGap(
       rootOf.set(item.id, item.isPinned ? item.id : (item.openedByRowSessionId ?? item.id));
     }
     const rootIds = items.filter((item) => item.isPinned).map((item) => item.id);
-    return { rootOf, rootIds };
+    const rowIndex = new Map(items.map((item, index) => [item.id, index]));
+    return { rootOf, rootIds, rowIndex };
   }, [items]);
-  const others = useMemo(
-    () => layout.rootIds.filter((id) => id !== dragged),
+  // Each root's position among the section's rows other than the dragged one.
+  const otherIndex = useMemo(
+    () =>
+      new Map(
+        layout.rootIds.filter((id) => id !== dragged).map((id, index) => [id, index] as const)
+      ),
     [dragged, layout.rootIds]
   );
   // Events read the live drag: the first dragover can arrive before a re-render.
@@ -1738,19 +1741,18 @@ function usePinnedDropGap(
       }
       let shift = 0;
       // Rows below the dragged one close its slot.
-      if (sourceHere) {
-        const order = Array.from(layout.rootOf.keys());
-        if (order.indexOf(id) > order.indexOf(dragged)) shift -= gap;
+      if (sourceHere && (layout.rowIndex.get(id) ?? 0) > (layout.rowIndex.get(dragged) ?? 0)) {
+        shift -= gap;
       }
       // Rows at and after the drop position open the gap.
-      const position = others.indexOf(root);
+      const position = otherIndex.get(root) ?? -1;
       if (dropIndex !== null && position >= dropIndex) shift += gap;
       return {
         transform: shift ? `translateY(${shift}px)` : undefined,
         transition: animate ? PINNED_DROP_TRANSITION : undefined,
       };
     },
-    [animate, dragged, dropIndex, flyingId, gap, layout.rootOf, others, sourceHere]
+    [animate, dragged, dropIndex, flyingId, gap, layout, otherIndex, sourceHere]
   );
 
   if (!enabled) return null;
@@ -1784,19 +1786,10 @@ const slotClassName = (gutter: boolean) =>
   // inside its own (paint-contained) box, as `SessionOpenedByTreeRow` does.
   cn('flex min-w-0 flex-col gap-px', gutter && 'relative pb-px -mb-px');
 
-/** One row slot of a pin section; carries the native-drop gap's transform. */
-function PinnedRowSlot({ id, drag, gutter, children }: PinnedRowSlotProps) {
-  return (
-    <div data-pin-node={id} className={slotClassName(gutter)} style={drag.nodeStyle(id)}>
-      {children}
-    </div>
-  );
-}
-
 /**
- * A pin section slot that dnd-kit can pick up: pressing and moving it lifts
- * the row into the pointer overlay (the rows carry no native drag here). The
- * gap, and the empty slot the row left, come from the same layout as a native drop.
+ * One row slot of a pin section (a top-level row and the Sessions it opened).
+ * dnd-kit picks it up (pin rows carry no native drag), and it carries the gap
+ * layout shared by pointer drags and native drops from other lists.
  */
 function DraggablePinnedRowSlot({ id, drag, gutter, children }: PinnedRowSlotProps) {
   const { setNodeRef, listeners } = useDraggable({ id: pinnedRowDndId(id) });

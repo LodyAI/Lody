@@ -109,37 +109,26 @@ export type PinnedDragOrigin = {
 };
 
 let origin: PinnedDragOrigin | null = null;
-let originListening = false;
 
-/** Record sidebar row drags so a drop can start from the released drag image. */
-export function listenForPinnedDragOrigins(): void {
-  if (originListening || typeof document === 'undefined') return;
-  originListening = true;
-  document.addEventListener(
-    'dragstart',
-    (event) => {
-      const row =
-        event.target instanceof Element
-          ? event.target.closest<HTMLElement>('[data-sidebar-updated-id]')
-          : null;
-      const sessionId = row?.getAttribute('data-sidebar-updated-id');
-      if (!row || !sessionId) {
-        origin = null;
-        return;
-      }
-      const rect = row.getBoundingClientRect();
-      origin = {
-        sessionId,
-        offsetX: event.clientX - rect.left,
-        offsetY: event.clientY - rect.top,
-        width: rect.width,
-        height: rect.height,
-        ghost: row.cloneNode(true) as HTMLElement,
-        background: getComputedStyle(row).backgroundColor,
-      };
-    },
-    true
-  );
+/**
+ * Record where a native row drag started (called from the row's own
+ * `dragstart`), so a drop into a pin section can start from the released image.
+ */
+export function recordPinnedDragOrigin(
+  sessionId: string,
+  row: HTMLElement,
+  event: { clientX: number; clientY: number }
+): void {
+  const rect = row.getBoundingClientRect();
+  origin = {
+    sessionId,
+    offsetX: event.clientX - rect.left,
+    offsetY: event.clientY - rect.top,
+    width: rect.width,
+    height: rect.height,
+    ghost: row.cloneNode(true) as HTMLElement,
+    background: getComputedStyle(row).backgroundColor,
+  };
 }
 
 export function takePinnedDragOrigin(sessionId: string): PinnedDragOrigin | null {
@@ -152,17 +141,12 @@ export function takePinnedDragOrigin(sessionId: string): PinnedDragOrigin | null
 // Hover is held off from the drop until the pointer next moves: the landed row
 // sits under a still pointer, and lighting it up then is the jump to avoid.
 
+// The rules live in `tailwind/index.css`, keyed by these body attributes.
 const HOVER_ATTR = 'data-pin-hover-suppressed';
-let styleInstalled = false;
+const DRAGGING_ATTR = 'data-pin-dragging';
 
 function suppressPinnedHover(): void {
   if (typeof document === 'undefined') return;
-  if (!styleInstalled) {
-    styleInstalled = true;
-    const style = document.createElement('style');
-    style.textContent = `body[${HOVER_ATTR}] [data-pin-section] { pointer-events: none; }`;
-    document.head.appendChild(style);
-  }
   document.body.setAttribute(HOVER_ATTR, '');
 }
 
@@ -172,12 +156,6 @@ function releasePinnedHoverOnPointerMove(): void {
   document.addEventListener('pointermove', release, { once: true });
 }
 
-// ---------------------------------------------------------------------------
-// Pointer drags (dnd-kit) of pinned rows and sections.
-
-const DRAGGING_ATTR = 'data-pin-dragging';
-let cursorStyleInstalled = false;
-
 /**
  * While a pin row or section is held: a grabbing cursor everywhere, and no
  * hover under the moving pointer. Hover returns on the first pointer move
@@ -185,12 +163,6 @@ let cursorStyleInstalled = false;
  */
 export function setPinnedPointerDrag(active: boolean): void {
   if (typeof document === 'undefined') return;
-  if (!cursorStyleInstalled) {
-    cursorStyleInstalled = true;
-    const style = document.createElement('style');
-    style.textContent = `body[${DRAGGING_ATTR}], body[${DRAGGING_ATTR}] * { cursor: grabbing !important; }`;
-    document.head.appendChild(style);
-  }
   if (active) {
     document.body.setAttribute(DRAGGING_ATTR, '');
     suppressPinnedHover();
