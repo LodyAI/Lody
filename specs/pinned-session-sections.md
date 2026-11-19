@@ -101,7 +101,6 @@ a private Agent Role. A write path that rejects a `pinSection` row from a
 member with write permission is a gap to fix, not a reason to narrow section
 management further.
 
-
 ## Evidence
 
 Implementation:
