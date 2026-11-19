@@ -29,10 +29,15 @@ import {
 } from './resource-probe.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-const ELECTRON_DIR = join(ROOT, 'apps', 'electron');
+const OSS_ELECTRON_DIR = join(ROOT, 'apps', 'electron');
+// A composition built elsewhere (same Electron version) may be launched instead of the
+// OSS build: the directory must hold `package.json`, `out/` and `resources/cli/`.
+const ELECTRON_DIR = process.env.LODY_E2E_APP_DIR
+  ? resolve(process.env.LODY_E2E_APP_DIR)
+  : OSS_ELECTRON_DIR;
 const MAIN_ENTRY = join(ELECTRON_DIR, 'out', 'main', 'index.js');
 const BUNDLED_CLI_ENTRY = join(ELECTRON_DIR, 'resources', 'cli', 'index.js');
-const requireFromElectron = createRequire(join(ELECTRON_DIR, 'package.json'));
+const requireFromElectron = createRequire(join(OSS_ELECTRON_DIR, 'package.json'));
 const TEARDOWN_OPERATION_TIMEOUT_MS = 20_000;
 
 async function boundedTeardown<T>(label: string, operation: Promise<T>): Promise<T> {
@@ -121,6 +126,21 @@ export function createIsolatedEnvironment(
   return { ...env, ...overrides };
 }
 
+function readExtraEnvironment(): Record<string, string> {
+  const path = process.env.LODY_E2E_EXTRA_ENV_FILE;
+  if (!path) return {};
+  const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+  if (
+    !parsed ||
+    typeof parsed !== 'object' ||
+    Array.isArray(parsed) ||
+    !Object.values(parsed).every((value) => typeof value === 'string')
+  ) {
+    throw new Error(`${path} must be a JSON object of string values`);
+  }
+  return parsed as Record<string, string>;
+}
+
 export class ElectronHarness {
   app: ElectronApplication | null = null;
   page: Page | null = null;
@@ -160,6 +180,9 @@ export class ElectronHarness {
     }
 
     const env = createIsolatedEnvironment({
+      // An external composition supplies its own configuration (backend URLs, CA
+      // trust) as a JSON object of strings; the isolation keys below always win.
+      ...readExtraEnvironment(),
       LANG: 'en_US.UTF-8',
       LC_ALL: 'en_US.UTF-8',
       LODY_DATA_DIR: this.lodyDataDir,
@@ -187,7 +210,9 @@ export class ElectronHarness {
         ...(options.remoteDebuggingPort
           ? [`--remote-debugging-port=${options.remoteDebuggingPort}`]
           : []),
-        MAIN_ENTRY,
+        // An external app directory is launched as an app (its package.json `main`), so
+        // app.getAppPath() is that directory and its own resources/cli is the bundled CLI.
+        process.env.LODY_E2E_APP_DIR ? ELECTRON_DIR : MAIN_ENTRY,
         `--user-data-dir=${this.electronUserDataDir}`,
         '--lang=en-US',
         // macOS system-language detection is independent of Chromium's --lang.
@@ -339,6 +364,28 @@ export class ElectronHarness {
     );
     this.snapshots.push(snapshot);
     return snapshot;
+  }
+
+  /**
+   * Replaces the main process's `shell.openExternal` with a recorder so a scenario can
+   * drive the opened page (for example a browser sign-in) itself instead of the OS.
+   */
+  async captureExternalOpens(): Promise<void> {
+    if (!this.app) throw new Error('Electron application is not running');
+    await this.app.evaluate(({ shell }) => {
+      const opened: string[] = [];
+      (globalThis as { __lodyE2eExternalOpens?: string[] }).__lodyE2eExternalOpens = opened;
+      shell.openExternal = async (url: string) => {
+        opened.push(url);
+      };
+    });
+  }
+
+  async readExternalOpens(): Promise<string[]> {
+    if (!this.app) throw new Error('Electron application is not running');
+    return await this.app.evaluate(
+      () => (globalThis as { __lodyE2eExternalOpens?: string[] }).__lodyE2eExternalOpens ?? []
+    );
   }
 
   async captureCliBacklog(): Promise<unknown> {
