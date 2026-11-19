@@ -27,6 +27,18 @@ describe('buildAssistantTurnTimingRows', () => {
     ]);
   });
 
+  it('does not keep timing a turn when the conversation stops receiving updates', () => {
+    expect(
+      buildAssistantTurnTimingRows(
+        { timestamp: OPENED },
+        { liveness: { kind: 'offline' }, nowMs: OPENED_MS + 86_400_000 }
+      )
+    ).toEqual([
+      { kind: 'started', atMs: OPENED_MS, runningMs: null },
+      { kind: 'lastUpdate', liveness: { kind: 'offline' } },
+    ]);
+  });
+
   it('shows an unfinished turn nothing is running as only started', () => {
     expect(
       buildAssistantTurnTimingRows(

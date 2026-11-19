@@ -91,6 +91,7 @@ export type UseSessionDocResult = {
   synced: boolean;
   /** Raw room sync state; `synced` collapses this + browser online into a boolean. */
   syncState: RoomSyncState;
+  conversationSync?: SessionDocStore['conversationSync'];
 };
 
 export type UseSessionDocOptions = {
@@ -485,6 +486,13 @@ export function useSessionDoc(
     ready,
     synced: browserOnline && syncState === 'synced',
     syncState,
+    conversationSync:
+      enabled &&
+      syncEnabled &&
+      loadedStore &&
+      runtime?.peekSessionStore?.(sessionId) === loadedStore
+        ? loadedStore.conversationSync
+        : undefined,
   };
 }
 

@@ -89,6 +89,7 @@ import type { LocalProjectGitStateRpcResponse } from '@lody/loro-streams-rpc';
 import type { WorkspaceWriter } from '../providers/workspace-writer';
 import type { CodeCollabFileIndexCache } from '@/lib/code-collab-file-index-cache';
 import { readStoredAuthToken } from '@/lib/auth-bootstrap';
+import type { ConversationSync } from '@/lib/conversation-sync';
 import type { RoomSyncState } from '@/lib/room-sync-state';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from './workspace-context';
 
@@ -129,6 +130,7 @@ export type SessionDocStore = {
   readonly history: ConversationView;
   /** CRDT-neutral history reads, commands and stored-copy capabilities. */
   readonly sessionData: SessionData;
+  readonly conversationSync?: Pick<ConversationSync, 'getSnapshot' | 'subscribe'>;
   dispose: () => void;
   /**
    * Resolves when all pending local CRDT changes have been flushed to the server.

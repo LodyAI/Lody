@@ -113,7 +113,8 @@ preview admission, repository-action priority and workspace diff presentation.
 
 - One priority-ordered status slot (browser-offline > machine-removed >
   machine-offline): states hand off, never stack; machine-offline never blocks
-  sends; doc-stream degradation is never re-added.
+  sends. Conversation sync details observe the selected receive route and any
+  separate owner history independently of send and machine availability.
 
 ## [Render cost](../../../../../.agents/docs/sessions-render-cost.md)
 

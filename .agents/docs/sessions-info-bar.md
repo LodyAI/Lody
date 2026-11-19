@@ -92,19 +92,19 @@ sharing when permitted.
   copies the worktree checkout path) + toasts. Remote/repo-only sessions have no
   local path → `workspaceLocation` is null and the leading icon stays an inert
   branch glyph.
-  The bar also takes an ambient `syncing` prop (desktop only — mobile shows
-  catch-up in its header instead): a plain `SessionSyncingIndicator` pinned
-  to the bar's RIGHT edge, outside the cluster/stage model; it must never
-  become a cluster item or steal stage focus. Its label hides below a 560px
-  container width (spinner stays, via `SessionSyncingIndicator
-labelClassName`) so the stage diffstat never clips. Wired from
-  `session-chat-interface.tsx` as `!isMobile && effectiveTitleSyncing` (the
-  same `isSyncingRoomSyncState` + 400ms `useDelayedFlag` signal the mobile
-  header uses). Syncing can render the bar on a context-less chat
-  session (no staged item, no divider; the spinner keeps its right-edge pin
-  via an `ml-auto` wrapper). Regression coverage:
-  `tests/session-info-bar-syncing.test.tsx` + the `SyncOnly` /
-  `EmptyNotSyncingHidden` stories.
+  The cloud conversation's sync control sits at the right edge outside the
+  cluster and stage model on both layouts. It opens per-conversation routes
+  as diagrams with an arrow in the direction conversation data is received.
+  Each diagram names the source, any relay and the receiving device. It
+  reports the state and known reason for that route. The panel shows the
+  elapsed wait separately. The selected Loro subscription supplies
+  receive confirmation for its current connection. Roost adds an independent
+  read through the owner's history checkpoint. The Electron local route
+  reads directly from the local runtime. A quiet connection alone supplies
+  no evidence of staleness. When fresh machine presence repeatedly
+  disagrees with an unfinished reply, the Web control shows that the latest
+  messages are unconfirmed. The existing send and machine status slot
+  remains independent.
   The control has a HOVER bg only (not persistent) and never relayouts, so it
   respects the no-collapse spirit while adding the copy affordance. CI is NOT its own
   cluster item: the `PrCiPill` (a "CI" text pill tinted by verdict, "done/

@@ -160,6 +160,7 @@ import {
 } from './local-reconnect-loop';
 import { resolveWorkspaceControlConnectionState } from './control-connection-state';
 import { createRoomSyncTracker, type RoomSyncTracker } from './room-sync-tracker';
+import { createConversationSync, observeConversationDocument } from '@/lib/conversation-sync';
 import type { RoomSyncState } from '@/lib/room-sync-state';
 import { createRoomSyncRegistry } from './room-sync-registry';
 import {
@@ -5049,6 +5050,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     }
 
     const backendKind = resolveSessionHistoryBackendKind(sessionMeta);
+    const conversationSync = electronLocalDataPlane
+      ? undefined
+      : createConversationSync(backendKind === 'roost');
     let rendererSessionDataFactory = deps.createSessionData;
     let disposeReaderObservation = () => {};
     let conversation: ReturnType<typeof createConversationSession>;
@@ -5098,6 +5102,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           readerWakes.clear();
         };
         rendererSessionDataFactory = createRoostSessionDataFactoryForMachine({
+          onHistorySync: (step) => conversationSync?.update('history', step),
+          onHistoryRoute: (route) => {
+            const history = conversationSync?.getSnapshot().history;
+            if (history && history.route !== route)
+              conversationSync?.update('history', { phase: 'syncing', route });
+          },
           coherentInspection: () => machineSupportsSessionHistoryInspection(ownerMachineMeta),
           incremental: () => machineSupportsSessionHistoryIncremental(ownerMachineMeta),
           patches: () => machineSupportsSessionHistoryPatches(ownerMachineMeta),
@@ -5167,6 +5177,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     // Track subscription for cleanup
     let roomSub: Awaited<ReturnType<typeof persistedDoc.joinRoom>> | null = null;
     let cloudRepairUnsubscribe: (() => void) | null = null;
+    let stopDocumentObservation: (() => void) | undefined;
     let disposed = false;
     let syncLeaseCount = 0;
     let syncReleaseTimer: ReturnType<typeof setTimeout> | null = null;
@@ -5198,6 +5209,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       clearSyncReleaseTimer();
       clearJoinRetryTimer();
       joinRetryAttempt = 0;
+      stopDocumentObservation?.();
+      stopDocumentObservation = undefined;
+      conversationSync?.update('document', { phase: 'connecting' });
       cloudRepairUnsubscribe?.();
       cloudRepairUnsubscribe = null;
       if (roomSub) {
@@ -5241,7 +5255,14 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
             firstSynced: (sub) => readinessBindingForDocRoom(sub, roomId).firstSyncedWithRemote,
             onSubscription: (joinedSub) => {
               roomSub = joinedSub;
-              syncTracker.attach(readinessBindingForDocRoom(joinedSub, roomId));
+              const binding = readinessBindingForDocRoom(joinedSub, roomId);
+              syncTracker.attach(binding);
+              stopDocumentObservation?.();
+              stopDocumentObservation = conversationSync
+                ? observeConversationDocument(binding, (step) =>
+                    conversationSync.update('document', step)
+                  )
+                : undefined;
               cloudRepairUnsubscribe?.();
               cloudRepairUnsubscribe = watchCloudBindingForRepair(joinedSub);
             },
@@ -5263,6 +5284,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           resolveFirstSynced = null;
         } catch (error) {
           syncTracker.markFirstSyncFailed();
+          if (!roomSub) conversationSync?.update('document', { phase: 'retrying', reason: 'read' });
           // A returned subscription keeps self-healing inside the SDK; only a
           // join that never produced one needs a fresh attempt.
           if (!roomSub && !disposed && syncLeaseCount > 0) {
@@ -5334,6 +5356,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       subscribe: (listener) => mirror.subscribe(listener as never),
       history,
       sessionData,
+      conversationSync,
       dispose: () => {
         disposed = true;
         sharedWindowDocuments.delete(roomId);

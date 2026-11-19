@@ -33,6 +33,7 @@ import {
   type SessionInputAcceptanceResult,
   readSessionHistoryMetadata,
 } from '@lody/shared/session-data';
+import type { ConversationSyncRoute, ConversationSyncStep } from './conversation-sync';
 import { sendLocalSessionControl } from './electron-ipc-client';
 import { RoostHistoryError, SessionHistoryRequestError } from './roost-history-error';
 import type {
@@ -71,6 +72,8 @@ type RoostHistoryTransport = {
 };
 
 type RoostHistoryObservationOptions = {
+  readonly onHistorySync?: (step: ConversationSyncStep) => void;
+  readonly onHistoryRoute?: (route: ConversationSyncRoute) => void;
   readonly coherentInspection?: boolean | (() => boolean);
   readonly incremental?: boolean | (() => boolean);
   readonly watch?: boolean | (() => boolean);
@@ -685,6 +688,9 @@ const createRoostSessionDataFactoryFromTransport =
       if (disposed || refreshing || listeners.size === 0) return;
       refreshing = true;
       refreshRequested = false;
+      let failed = false;
+      if (observedHistoryRevision > (ownerRevision ?? 0))
+        options.onHistorySync?.({ phase: 'syncing' });
       try {
         const prior = await cached(() => cache.getHead());
         const checkpoint = prior?.checkpoint ?? prior?.recoveryCheckpoint;
@@ -727,6 +733,7 @@ const createRoostSessionDataFactoryFromTransport =
             consecutiveSupersessions = 0;
             return;
           }
+          options.onHistorySync?.({ phase: 'syncing' });
           if (change.state === 'ready') {
             const from = change.from === undefined ? undefined : Math.min(change.from, count);
             const affected = (await cached(() => cache.readAffected(change.ids))) ?? [];
@@ -935,6 +942,21 @@ const createRoostSessionDataFactoryFromTransport =
         retryDelay = refreshRequested || watchEnabled() ? 0 : 250;
         consecutiveSupersessions = 0;
       } catch (error) {
+        failed = true;
+        if (!disposed) {
+          const failure = error instanceof SessionHistoryRequestError ? error.failure : undefined;
+          if (isHistorySuperseded(error)) options.onHistorySync?.({ phase: 'syncing' });
+          else
+            options.onHistorySync?.({
+              phase: 'retrying',
+              reason:
+                failure?.code === 'timeout' || failure?.code === 'response_timeout'
+                  ? 'timeout'
+                  : failure?.source === 'remote' || error instanceof RoostHistoryError
+                    ? 'owner'
+                    : 'read',
+            });
+        }
         // Cached history remains readable. This retries connection recovery,
         // never a user command or an uncertain provider delivery.
         refreshRequested = true;
@@ -947,6 +969,8 @@ const createRoostSessionDataFactoryFromTransport =
           retryDelay = Math.min(10_000, Math.max(250, retryDelay) * 2);
         }
       } finally {
+        if (!failed && !disposed && !refreshRequested)
+          options.onHistorySync?.({ phase: 'confirmed' });
         refreshing = false;
         if ((refreshRequested || watchEnabled()) && !disposed && listeners.size > 0 && active()) {
           refreshTimerDelay = retryDelay;
@@ -1312,14 +1336,18 @@ export function createRoostSessionDataFactoryForMachine(
       const remote = remoteHistoryTransport(options, sessionId);
       const transport = async () => {
         const plane = await options.resolvePlane(options.machineId);
-        if (plane === 'local') return local;
-        if (plane === 'cloud') return remote;
+        if (plane === 'local') return { reader: local, plane } as const;
+        if (plane === 'cloud') return { reader: remote, plane } as const;
         throw new Error('Roost history target transport is unresolved');
       };
       return {
-        readHistory: async (query) => (await transport()).readHistory(query),
+        readHistory: async (query) => {
+          const { reader, plane } = await transport();
+          options.onHistoryRoute?.(plane);
+          return reader.readHistory(query);
+        },
         writeHistory: async (operation, payload) =>
-          (await transport()).writeHistory(operation, payload),
+          (await transport()).reader.writeHistory(operation, payload),
       };
     },
     (sessionId) => historyCacheScope(options, sessionId),

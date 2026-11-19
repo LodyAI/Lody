@@ -1356,8 +1356,8 @@ export const buildChatVirtualRows = ({
         (lastEntry.content.type === 'thought' || lastEntry.content.kind === 'think')
       );
 
-      const visibleEntries = block.entries.filter((entry) =>
-        entry.content.type === 'thought' || entry.content.kind !== 'think'
+      const visibleEntries = block.entries.filter(
+        (entry) => entry.content.type === 'thought' || entry.content.kind !== 'think'
       );
       if (visibleEntries.length === 0) return;
 
@@ -5502,7 +5502,9 @@ const LiveTurnDurationLabel = ({
      Sampling at 300ms bounds that error to 300ms; the rendered string still
      changes once a second, so the extra samples cost a leaf re-render each and
      no DOM write. */
+  const live = useContext(LiveTurnContext);
   const now = useStableNow(LIVE_TURN_DURATION_SAMPLE_MS);
+  if (live && live.live.sync !== 'live') return null;
   const durationMs = resolveLiveSessionHistoryDurationMs(message, now.getTime());
   if (durationMs === null) return null;
   const duration = formatDurationCompact(durationMs, getDurationUnitLabels(t));
@@ -5519,7 +5521,12 @@ type LiveActivityMessage = Pick<SessionHistoryParsed, 'timestamp' | 'permissionW
 const LiveActivityLabel = ({ label, message }: { label: string; message: LiveActivityMessage }) => {
   const { t } = useTranslation();
   const now = useStableNow(LIVE_TURN_DURATION_SAMPLE_MS);
+  const live = useContext(LiveTurnContext);
   const liveness = useRunningTurnLiveness(now.getTime());
+  if (live && !liveness) return <>{label}</>;
+  if (liveness?.kind === 'offline' || liveness?.kind === 'syncing') {
+    return <>{t('sessions.syncDetails.executionUnconfirmed')}</>;
+  }
   const durationUnitLabels = getDurationUnitLabels(t);
   const durationMs = resolveLiveSessionHistoryDurationMs(message, now.getTime());
   const duration = durationMs === null ? '' : formatDurationCompact(durationMs, durationUnitLabels);

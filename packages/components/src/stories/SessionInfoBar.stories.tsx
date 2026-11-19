@@ -20,6 +20,9 @@ import type { SessionMachineInfo } from '@/components/sessions/session-machine-i
 import type { ContextChipAction, PrCiRun } from '@/components/sessions/session-info-chips';
 import type { SessionStatusStripState } from '@/components/sessions/session-status-strip';
 
+import { SessionSyncDetails } from '@/components/sessions/session-sync-details';
+import { createConversationSync } from '@/lib/conversation-sync';
+
 const openPr: SessionPullRequestMeta = {
   url: 'https://github.com/loro-dev/lody/pull/2857',
   status: 'open',
@@ -679,6 +682,25 @@ export const SyncOnly: Story = {
     pr: null,
     diffStat: null,
     syncing: true,
+  },
+};
+
+export const WaitingForOwnerHistory: Story = {
+  render: function Render() {
+    const [sync] = useState(() => {
+      const store = createConversationSync(true, () => Date.now() - 42_000);
+      store.update('document', { phase: 'confirmed', route: 'cloud' });
+      store.update('history', { phase: 'retrying', route: 'cloud', reason: 'timeout' });
+      return store;
+    });
+    return (
+      <div className="h-96 w-96 max-w-full content-center">
+        <SessionInfoBar
+          status={null}
+          syncDetails={<SessionSyncDetails sync={sync} browserOnline machineName="Build machine" />}
+        />
+      </div>
+    );
   },
 };
 
