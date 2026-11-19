@@ -1771,6 +1771,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     onMoveItemToFocus={onMoveUpdatedItemToFocus}
                     onToggleAgentManagedItem={onToggleUpdatedItemAgentManaged}
                     onDropFocusSession={onDropFocusItem}
+                    onDropFocusIntoPinSection={pinSectionActions?.onDropItem}
                     onCopyItemUrl={onCopyUpdatedItemUrl}
                     onShareItemWithTeam={onShareUpdatedItemWithTeam}
                     onOpenPullRequest={onOpenUpdatedItemPullRequest}

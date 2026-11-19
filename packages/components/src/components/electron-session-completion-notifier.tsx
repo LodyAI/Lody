@@ -80,7 +80,8 @@ export function ElectronSessionCompletionNotifier() {
           !latest.enabled ||
           latest.runtime !== runtime ||
           latest.currentUserId !== currentUserId ||
-          !session
+          !session ||
+          session.agentManaged === true
         )
           return;
         const route = `/${encodeURIComponent(latest.workspaceSlug ?? '')}/sessions/${encodeURIComponent(sessionId)}`;

@@ -18,7 +18,7 @@ Translation: current
 - 当 `agentManaged` 为 `true` 时，抑制该对话的人类未读提示（侧栏/标签页未读圆点、窗口角标、桌面通知与未读汇总计数）。运行中与等待权限审批等实时阻塞标识仍保持可见，避免审批卡死被静默吞掉。
 - Agent 通过 MCP 创建对话（`lody_session_create`、`lody_session_create_many`）时可传入 `agentManaged: boolean`；省略时默认继承当前父对话的 `agentManaged` 值（默认为 `false`）。
 - `lody_session_list` 在原有 `ownerUserId` 旁同步返回 `agentManaged`。
-- 当人类向一个 `agentManaged` 对话发送消息时，自动清除 `agentManaged`（置为 `false`），恢复后续回复的未读提醒；用户也可在对话更多菜单中手动切换。
+- 当人类向一个 `agentManaged` 对话发送消息时，自动清除 `agentManaged`（置为 `false`），恢复后续回复的未读提醒（同时清除暂缓/收尾状态使其回到进行中）；有写权限的用户也可在对话更多菜单中手动切换。
 
 ### 侧栏「状态」视图
 
@@ -40,11 +40,12 @@ Translation: current
 ## 数据归属与排序
 
 - 将尚未上线的 `SessionMeta.pinOrderKey` 重命名为 `SessionMeta.orderKey`（使用 `@loro-dev/fractional-index` 规范大写十六进制键）。Pinned 与进行中共用 `orderKey`；取消固定时清除 `pinSectionId`，但保留 `orderKey`。
-- 在 Meta Flock 的 `SessionMeta` 上新增四个可选字段：
-  - `agentManaged?: boolean`
+- 在 Meta Flock 的 `SessionMeta` 上新增四个可选字段（与 `isPinned` 一致，在工作区成员间共享；按用户私有的状态排序不在本期范围内）：
+  - `agentManaged?: boolean`（需写权限修改）
   - `snoozedUntil?: number`（毫秒时间戳）
-  - `settledAt?: number`（毫秒时间戳）
+  - `settledAt?: number`（毫秒时间戳；写入 `max(serverNow, lastMessageAt)` 避免时钟偏差）
   - `focusRestoredAt?: number`（毫秒时间戳；用于覆盖 7 天无消息自动沉降，自该时间起 7 天内保持在进行中）
+- 正在等待人类权限审批的对话无论是否处于暂缓或收尾，都会强制归入 **进行中（Focus）**；opener 子对话跟随其可见根对话的状态分组。
 - 7 天自动收尾与暂缓到期唤醒均由 `now` 与元数据时间戳纯计算得出（derived state），避免离线多端产生后台 CRDT 写风暴。
 - 不新增 room，不新增文档类型。
 

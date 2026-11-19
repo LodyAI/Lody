@@ -35,8 +35,9 @@ actively tracking today and what can wait or has settled.
   `ownerUserId` field.
 - When a human sends a message into an `agentManaged` session, `agentManaged`
   is cleared (`false`) so the human receives unread notifications for the
-  Agent's reply. Users can also toggle `agentManaged` explicitly from the
-  session context menu.
+  Agent's reply (and any active `snoozedUntil` / `settledAt` state is also
+  cleared so the conversation returns to Focus). Users with write permission
+  can also toggle `agentManaged` explicitly from the session context menu.
 
 ### Sidebar Status view
 
@@ -85,12 +86,18 @@ actively tracking today and what can wait or has settled.
   uppercase hex fractional index via `@loro-dev/fractional-index`). Both
   Pinned and Focus use `orderKey`; unpinning clears `pinSectionId` while
   retaining `orderKey`.
-- Four optional fields are added to `SessionMeta` in Meta Flock:
-  - `agentManaged?: boolean`
+- Four optional fields are added to `SessionMeta` in Meta Flock (shared across
+  workspace members with the same visibility as `isPinned`; per-user private
+  status sorting is out of scope for this phase):
+  - `agentManaged?: boolean` (requires write permission to modify)
   - `snoozedUntil?: number` (epoch ms)
-  - `settledAt?: number` (epoch ms)
+  - `settledAt?: number` (epoch ms; written as `max(serverNow, lastMessageAt)`
+    to tolerate clock skew)
   - `focusRestoredAt?: number` (epoch ms; overrides the 7-day inactivity rule
     until 7 days elapse from `focusRestoredAt`)
+- Conversations waiting on a human permission approval always surface in
+  **Focus** regardless of snooze or settle timestamps, and opened-by child
+  sessions follow their visible root's Status tier.
 - Automatic 7-day settling and snooze expiration are pure derived states
   computed from `now` and metadata timestamps, avoiding background CRDT write
   storms across offline replicas.

@@ -683,22 +683,24 @@ export function useSessionActions(): SessionActions {
         { lastMessageAt: now, lastReadAt: now },
         assertCanManageSessions
       );
-      const cached = store.get(sessionMetaCacheAtom)[getSessionRoomId(sessionId)] as
-        | SessionMeta
-        | undefined;
-      if (
-        cached?.agentManaged === true ||
-        cached?.snoozedUntil !== undefined ||
-        cached?.settledAt !== undefined
-      ) {
+      const roomId = getSessionRoomId(sessionId);
+      const existing = await runtime.repo.getDocMeta(roomId);
+      const existingMeta = !isLoroRepoDocDeleted(existing)
+        ? (existing?.meta as SessionMeta | undefined)
+        : undefined;
+      const cached = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
+      const meta = existingMeta ?? cached;
+      if (meta?.agentManaged === true) {
+        await updateSessionMetadata(sessionId, { agentManaged: false });
+      }
+      if (meta?.snoozedUntil !== undefined || meta?.settledAt !== undefined) {
         await updateSessionPreference(sessionId, {
-          agentManaged: false,
           snoozedUntil: undefined,
           settledAt: undefined,
         });
       }
     },
-    [runtime, store, assertCanManageSessions, updateSessionPreference]
+    [runtime, store, assertCanManageSessions, updateSessionMetadata, updateSessionPreference]
   );
 
   const updateSessionTitle = useCallback(
@@ -1144,12 +1146,25 @@ export function useSessionActions(): SessionActions {
 
   const settleSession = useCallback(
     async (sessionId: SessionId) => {
+      if (!runtime) {
+        throw new Error('Runtime not ready');
+      }
+      const roomId = getSessionRoomId(sessionId);
+      const existing = await runtime.repo.getDocMeta(roomId);
+      const repoMeta = !isLoroRepoDocDeleted(existing)
+        ? (existing?.meta as SessionMeta | undefined)
+        : undefined;
+      const cachedMeta = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
+      const lastMessageAt =
+        getFiniteTimestamp(repoMeta?.lastMessageAt) ??
+        getFiniteTimestamp(cachedMeta?.lastMessageAt) ??
+        0;
       await updateSessionPreference(sessionId, {
-        settledAt: getServerNow(),
+        settledAt: Math.max(getServerNow(), lastMessageAt),
         snoozedUntil: undefined,
       });
     },
-    [updateSessionPreference]
+    [runtime, store, updateSessionPreference]
   );
 
   const moveSessionToFocus = useCallback(
@@ -1165,11 +1180,12 @@ export function useSessionActions(): SessionActions {
 
   const setSessionAgentManaged = useCallback(
     async (sessionId: SessionId, agentManaged: boolean) => {
-      await updateSessionPreference(sessionId, {
+      // Changing unread suppression affects the owner's notifications, so require write permission.
+      await updateSessionMetadata(sessionId, {
         agentManaged,
       });
     },
-    [updateSessionPreference]
+    [updateSessionMetadata]
   );
 
   return {

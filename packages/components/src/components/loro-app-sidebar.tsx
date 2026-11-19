@@ -1,4 +1,4 @@
-import { isSidebarBucketCollapsed, sidebarStatusGroup } from '@/lib/sidebar-status-group';
+import { isSidebarBucketCollapsed } from '@/lib/sidebar-status-group';
 import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { E2eeMachineWindowPill, E2eeOfflineSummary } from '@/components/e2ee-offline-window';
@@ -48,7 +48,6 @@ import {
   type SessionStatus,
   buildPinnedSectionLayout,
   planManualOrderMove,
-  sortByManualOrder,
   planNewPinSectionOrderKey,
   planPinnedSessionMove,
   planPinSectionMove,
@@ -139,6 +138,7 @@ import {
 } from '@/atoms/sidebar-state';
 import {
   sortUpdatedItems,
+  buildSidebarUpdatedBuckets,
   SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS,
   type SidebarUpdatedBucketKey,
   type SidebarUpdatedItem,
@@ -3922,19 +3922,17 @@ export function LoroAppSidebar({
 
   const handleDropFocusItem = useCallback(
     (sessionId: string, toIndex: number) => {
-      const nowMs = Date.now();
-      const focusItems = sortByManualOrder(
-        updatedItems.filter((item) => sidebarStatusGroup(item, nowMs) === 'focus'),
-        (item) => ({
-          id: item.id,
-          orderKey: item.orderKey ?? null,
-          recency:
-            item.latestMessageAt instanceof Date
-              ? item.latestMessageAt.getTime()
-              : Date.parse(String(item.latestMessageAt ?? '')) || 0,
-        })
+      const focusBucket = buildSidebarUpdatedBuckets(updatedItems, 'status').find(
+        (bucket) => bucket.key === 'focus'
       );
-      const placements = focusItems.map((item) => ({
+      // `toIndex` counts top-level `[data-pin-node]` root groups, so plan moves over roots only.
+      const focusRoots = buildOpenedBySessionTree(
+        focusBucket?.items ?? [],
+        SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS
+      )
+        .filter((node) => node.depth === 0)
+        .map((node) => node.item);
+      const placements = focusRoots.map((item) => ({
         id: item.id,
         orderKey: item.orderKey ?? null,
         recency:
@@ -3943,7 +3941,7 @@ export function LoroAppSidebar({
             : Date.parse(String(item.latestMessageAt ?? '')) || 0,
       }));
       const writes = planManualOrderMove(placements, { sessionId, toIndex });
-      const wasInFocus = focusItems.some((item) => item.id === sessionId);
+      const wasInFocus = focusRoots.some((item) => item.id === sessionId);
       void applySessionFocusOrder(
         writes,
         wasInFocus ? undefined : (sessionId as SessionId)

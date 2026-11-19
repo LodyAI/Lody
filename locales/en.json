@@ -4334,6 +4334,7 @@
   "sidebar.updated.empty.title": "Nothing yet",
   "sidebar.updated.heading": "Chats",
   "sidebar.status.focus": "Focus",
+  "sidebar.status.focusEmptyDrop": "Drag a conversation here to focus",
   "sidebar.status.later": "Later",
   "sidebar.status.settled": "Settled",
   "sidebar.status.snooze.quick1h": "1h",

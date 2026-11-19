@@ -68,6 +68,11 @@ export function sidebarStatusGroup(
   input: SidebarStatusGroupInput,
   nowMs: number = Date.now()
 ): SidebarStatusGroup {
+  // Blocked permission approvals always surface in Focus so they are never hidden.
+  if (input.isWaitingPermission) {
+    return 'focus';
+  }
+
   if (typeof input.snoozedUntil === 'number' && input.snoozedUntil > nowMs) {
     return 'later';
   }
@@ -85,7 +90,6 @@ export function sidebarStatusGroup(
   const effectiveActivityMs = Math.max(lastMessageMs, restoredMs);
   if (
     !input.isWorking &&
-    !input.isWaitingPermission &&
     effectiveActivityMs > 0 &&
     nowMs - effectiveActivityMs >= SIDEBAR_SETTLED_INACTIVITY_MS
   ) {
@@ -108,9 +112,9 @@ export function formatSnoozeCountdown(snoozedUntilMs: number, nowMs: number): st
   const dayMs = 24 * hourMs;
 
   if (remainingMs < minuteMs) return '<1m';
-  if (remainingMs < hourMs) return `${Math.ceil(remainingMs / minuteMs)}m`;
-  if (remainingMs < dayMs) return `${Math.ceil(remainingMs / hourMs)}h`;
-  return `${Math.ceil(remainingMs / dayMs)}d`;
+  if (remainingMs < 59.5 * minuteMs) return `${Math.ceil(remainingMs / minuteMs)}m`;
+  if (remainingMs < 23.5 * hourMs) return `${Math.ceil(remainingMs / hourMs)}h`;
+  return `${Math.max(1, Math.round(remainingMs / dayMs))}d`;
 }
 
 export type SnoozePresetId = 'laterToday' | 'tomorrowMorning' | 'nextWeek';
@@ -121,7 +125,7 @@ export type SnoozePreset = {
   countdown: string;
 };
 
-/** Quick snooze targets relative to `now` (local wall clock for morning anchors). */
+/** Quick snooze targets relative to `now` (local wall clock for morning anchors, deduplicated). */
 export function buildSnoozePresets(now: Date): SnoozePreset[] {
   const nowMs = now.getTime();
   const laterToday = nowMs + 3 * 60 * 60 * 1000;
@@ -133,7 +137,8 @@ export function buildSnoozePresets(now: Date): SnoozePreset[] {
 
   const nextMonday = new Date(now);
   const dayOfWeek = nextMonday.getDay(); // 0=Sun..6=Sat
-  const daysUntilMonday = dayOfWeek === 0 ? 1 : 8 - dayOfWeek;
+  // On Sunday, tomorrow morning is already Monday 9:00, so Next week targets the following Monday.
+  const daysUntilMonday = dayOfWeek === 0 ? 8 : 8 - dayOfWeek;
   nextMonday.setDate(nextMonday.getDate() + daysUntilMonday);
   nextMonday.setHours(9, 0, 0, 0);
   const nextWeek = nextMonday.getTime();

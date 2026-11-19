@@ -326,9 +326,28 @@ export function buildSidebarUpdatedBuckets(
   if (grouping === 'manual') return [{ key: 'all', items: [...items] }];
   if (!items.length) return [];
   if (grouping === 'recency') return [{ key: 'all', items: sortUpdatedItems(items) }];
+  const itemById = new Map(items.map((item) => [item.id, item]));
+  const resolveVisibleRoot = (item: SidebarUpdatedItem): SidebarUpdatedItem => {
+    let current = item;
+    const seen = new Set<string>([current.id]);
+    while (true) {
+      const openerId = current.openedByRowSessionId ?? current.openedBySessionId ?? null;
+      if (!openerId || seen.has(openerId)) return current;
+      const opener = itemById.get(openerId);
+      if (!opener) return current;
+      seen.add(opener.id);
+      current = opener;
+    }
+  };
   const byGroup = new Map<SidebarStatusGroup, SidebarUpdatedItem[]>();
   for (const item of items) {
-    const group = sidebarStatusGroup(item, nowMs);
+    // Opened-by child sessions inherit their visible root's Status tier so
+    // snoozing or settling a root moves its subtasks with it.
+    const root = resolveVisibleRoot(item);
+    const group = sidebarStatusGroup(
+      item.isWaitingPermission ? { ...root, isWaitingPermission: true } : root,
+      nowMs
+    );
     const members = byGroup.get(group);
     if (members) members.push(item);
     else byGroup.set(group, [item]);
@@ -512,6 +531,14 @@ export type SidebarUpdatedSessionListProps = {
   onToggleAgentManagedItem?: (id: string, agentManaged: boolean) => void;
   /** Reorder (or restore via drag) a session to `toIndex` inside Status Focus. */
   onDropFocusSession?: (id: string, toIndex: number) => void;
+  /** Pin a Focus session when dragged and dropped onto a Pinned section. */
+  onDropFocusIntoPinSection?: (
+    sessionId: string,
+    pinSectionId: string | null,
+    toIndex: number
+  ) => void;
+  /** Whether Status-specific menu entries and countdown pills are shown. Defaults to `grouping === 'status'`. */
+  showStatusActions?: boolean;
   /** Copy a shareable session URL for the item. */
   onCopyItemUrl?: (id: string) => void;
   /** Open the share-with-team confirmation for a private session. */
@@ -604,6 +631,8 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   onMoveItemToFocus,
   onToggleAgentManagedItem,
   onDropFocusSession,
+  onDropFocusIntoPinSection,
+  showStatusActions,
   onCopyItemUrl,
   onShareItemWithTeam,
   onOpenPullRequest,
@@ -622,6 +651,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   renderHeader,
 }: SidebarUpdatedSessionListProps) {
   const preserveOrder = grouping === 'manual';
+  const effectiveShowStatusActions = showStatusActions ?? grouping === 'status';
   const pinDrag = usePinnedDropGap(items, onDropPinnedSession, pinSectionId ?? null);
   const { t } = useTranslation();
   const showBranchContext = useAtomValue(sidebarShowBranchNamesAtom);
@@ -818,6 +848,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                   items={bucket.items}
                   enabled={!collapsed}
                   onDropFocusSession={onDropFocusSession}
+                  onDropIntoPinSection={onDropFocusIntoPinSection}
                 >
                   {(orderedFocusItems) => (
                     <SidebarUpdatedSessionList
@@ -828,6 +859,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                       showPinnedIcon={showPinnedIcon}
                       showProjectContext={showProjectContext}
                       grouping="manual"
+                      showStatusActions
                       pinSectionId={FOCUS_SECTION_DND_KEY}
                       onDropPinnedSession={onDropFocusSession}
                       labels={{
@@ -953,11 +985,16 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                             onMarkUnread={onMarkItemUnread}
                             onRename={onRenameItem}
                             onTogglePin={onTogglePinItem}
-                            onSnooze={onSnoozeItem}
-                            onSettle={onSettleItem}
-                            onMoveToFocus={onMoveItemToFocus}
+                            onSnooze={effectiveShowStatusActions ? onSnoozeItem : undefined}
+                            onSettle={effectiveShowStatusActions ? onSettleItem : undefined}
+                            onMoveToFocus={
+                              effectiveShowStatusActions ? onMoveItemToFocus : undefined
+                            }
                             onToggleAgentManaged={onToggleAgentManagedItem}
-                            onBeginCustomSnooze={beginCustomSnooze}
+                            onBeginCustomSnooze={
+                              effectiveShowStatusActions ? beginCustomSnooze : undefined
+                            }
+                            showSnoozeCountdown={effectiveShowStatusActions}
                             onCopyUrl={onCopyItemUrl}
                             onShareWithTeam={onShareItemWithTeam}
                             onOpenPullRequest={onOpenPullRequest}
@@ -974,6 +1011,19 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                       );
                     };
                     if (!pinDrag) return visibleNodes.map(renderNode);
+                    if (pinSectionId === FOCUS_SECTION_DND_KEY && visibleNodes.length === 0) {
+                      return (
+                        <div
+                          data-status-focus-empty=""
+                          className="flex min-h-10 items-center justify-center rounded-md border border-dashed border-sidebar-border/60 px-3 py-2 text-xs text-sidebar-foreground-muted/75"
+                        >
+                          {t(
+                            'sidebar.status.focusEmptyDrop',
+                            'Drag a conversation here to focus'
+                          )}
+                        </div>
+                      );
+                    }
                     // A pin section moves an opener together with the Sessions it
                     // opened: each top-level row and its children are one slot.
                     const groups: {
@@ -1103,6 +1153,7 @@ type UpdatedItemRowProps = {
   onMoveToFocus?: (id: string) => void;
   onToggleAgentManaged?: (id: string, agentManaged: boolean) => void;
   onBeginCustomSnooze?: (id: string, title: string) => void;
+  showSnoozeCountdown?: boolean;
   onCopyUrl?: (id: string) => void;
   onShareWithTeam?: (id: string) => void;
   onOpenPullRequest?: (request: SessionListPullRequestOpen) => void;
@@ -1136,6 +1187,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   onMoveToFocus,
   onToggleAgentManaged,
   onBeginCustomSnooze,
+  showSnoozeCountdown = false,
   onCopyUrl,
   onShareWithTeam,
   onOpenPullRequest,
@@ -1211,7 +1263,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   const nowMs = now instanceof Date ? now.getTime() : Date.now();
   const statusGroup = sidebarStatusGroup(item, nowMs);
   const snoozeCountdown =
-    typeof item.snoozedUntil === 'number' ? formatSnoozeCountdown(item.snoozedUntil, nowMs) : null;
+    showSnoozeCountdown && typeof item.snoozedUntil === 'number'
+      ? formatSnoozeCountdown(item.snoozedUntil, nowMs)
+      : null;
   const canSnooze = !readOnly && typeof onSnooze === 'function';
   const canSettle = !readOnly && typeof onSettle === 'function' && statusGroup === 'focus';
   const canMoveToFocus =
@@ -1906,13 +1960,26 @@ function usePinnedDropGap(
 
   const layout = useMemo(() => {
     const rootOf = new Map<string, string>();
-    for (const item of items) {
-      rootOf.set(item.id, item.isPinned ? item.id : (item.openedByRowSessionId ?? item.id));
+    const rootIds: string[] = [];
+    if (sectionId === FOCUS_SECTION_DND_KEY) {
+      const nodes = buildOpenedBySessionTree(items, SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS);
+      let currentRootId: string | null = null;
+      for (const node of nodes) {
+        if (node.depth === 0 || !currentRootId) {
+          currentRootId = node.item.id;
+          rootIds.push(currentRootId);
+        }
+        rootOf.set(node.item.id, currentRootId);
+      }
+    } else {
+      for (const item of items) {
+        rootOf.set(item.id, item.isPinned ? item.id : (item.openedByRowSessionId ?? item.id));
+        if (item.isPinned) rootIds.push(item.id);
+      }
     }
-    const rootIds = items.filter((item) => item.isPinned).map((item) => item.id);
     const rowIndex = new Map(items.map((item, index) => [item.id, index]));
     return { rootOf, rootIds, rowIndex };
-  }, [items]);
+  }, [items, sectionId]);
   // Each root's position among the section's rows other than the dragged one.
   const otherIndex = useMemo(
     () =>

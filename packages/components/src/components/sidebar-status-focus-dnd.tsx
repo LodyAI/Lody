@@ -21,6 +21,7 @@ import {
 } from '@dnd-kit/core';
 import { dndPointerPoint } from '@/lib/dnd-pointer';
 import { useLatestRef } from '@/hooks/use-latest-ref';
+import { buildOpenedBySessionTree } from '@/lib/session-opened-by-tree';
 import {
   PINNED_DROP_FLIGHT_MS,
   PINNED_DROP_WAIT_MS,
@@ -37,28 +38,39 @@ import {
   clearSessionMentionDrag,
   dropSessionMentionAtPoint,
 } from '@/lib/session-mention-drag';
-import { FOCUS_SECTION_DND_KEY, parsePinnedDndId } from './pinned-rows-dnd';
-import { pinnedDropIndexAt, type SidebarUpdatedItem } from './sidebar-updated-session-list';
+import { DEFAULT_PIN_SECTION_KEY, FOCUS_SECTION_DND_KEY, parsePinnedDndId } from './pinned-rows-dnd';
+import {
+  pinnedDropIndexAt,
+  SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS,
+  type SidebarUpdatedItem,
+} from './sidebar-updated-session-list';
 
 const FOCUS_ROW_LIFT_SHADOW = '0 10px 26px -10px rgb(0 0 0 / 0.28), 0 0 0 1px var(--sidebar-border)';
 
 const sameIds = (left: readonly string[], right: readonly string[]) =>
   left.length === right.length && left.every((id, index) => id === right[index]);
 
-function focusPointerTargetAt(
+/**
+ * Find the Focus section (or a Pinned section when `allowPinTarget` is true)
+ * under `point` and the top-level `[data-pin-node]` drop index there.
+ */
+function focusOrPinPointerTargetAt(
   point: { x: number; y: number },
-  draggedId: string
+  draggedId: string,
+  allowPinTarget: boolean
 ): PinnedPointerTarget | null {
-  const element = document.querySelector<HTMLElement>(
-    `[data-pin-section="${FOCUS_SECTION_DND_KEY}"]`
-  );
-  if (!element) return null;
-  const box = element.getBoundingClientRect();
-  if (point.x < box.left || point.x >= box.right || point.y < box.top || point.y >= box.bottom) {
-    return null;
+  for (const element of Array.from(document.querySelectorAll<HTMLElement>('[data-pin-section]'))) {
+    const attr = element.getAttribute('data-pin-section');
+    if (attr !== FOCUS_SECTION_DND_KEY && !allowPinTarget) continue;
+    const box = element.getBoundingClientRect();
+    if (point.x < box.left || point.x >= box.right || point.y < box.top || point.y >= box.bottom) {
+      continue;
+    }
+    const sectionId = attr === DEFAULT_PIN_SECTION_KEY ? null : attr;
+    const rows = element.querySelector<HTMLElement>('[data-pin-rows]');
+    return { sectionId, index: pinnedDropIndexAt(rows, point.y, draggedId) };
   }
-  const rows = element.querySelector<HTMLElement>('[data-pin-rows]');
-  return { sectionId: FOCUS_SECTION_DND_KEY, index: pinnedDropIndexAt(rows, point.y, draggedId) };
+  return null;
 }
 
 function liftedBackground(): string {
@@ -89,7 +101,7 @@ function FocusRowGhost({ source }: { source: HTMLElement | null }) {
 }
 
 /**
- * Renders the Focus drop flight when no Pinned section is mounted to host it.
+ * Renders the Focus drop flight when a Focus drop lands inside Focus.
  */
 function FocusDropFlight() {
   const settle = useSyncExternalStore(
@@ -146,47 +158,65 @@ function FocusDropFlight() {
 
 /**
  * Wraps the Status view's Focus list in the same pointer DnD + 100ms settle
- * interaction used by Pinned sections.
+ * interaction used by Pinned sections. Tracks top-level root groups so child
+ * sessions follow their opener and drop indices match `[data-pin-node]` 1-to-1.
  */
 export function SidebarFocusDndContainer({
   items,
   enabled,
   onDropFocusSession,
+  onDropIntoPinSection,
   children,
 }: {
   items: readonly SidebarUpdatedItem[];
   enabled: boolean;
   onDropFocusSession?: (sessionId: string, toIndex: number) => void;
+  onDropIntoPinSection?: (sessionId: string, pinSectionId: string | null, toIndex: number) => void;
   children: (orderedItems: SidebarUpdatedItem[]) => ReactNode;
 }) {
-  const propsIds = useMemo(() => items.map((item) => item.id), [items]);
-  const [pendingIds, setPendingIds] = useState<readonly string[] | null>(null);
-
-  useEffect(() => {
-    if (pendingIds !== null && sameIds(pendingIds, propsIds)) {
-      setPendingIds(null);
+  // Partition items into top-level root groups (each root carries its opened-by descendants).
+  const rootGroups = useMemo(() => {
+    const nodes = buildOpenedBySessionTree(items, SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS);
+    const rootIds: string[] = [];
+    const membersByRoot = new Map<string, SidebarUpdatedItem[]>();
+    let currentRootId: string | null = null;
+    for (const node of nodes) {
+      if (node.depth === 0 || !currentRootId) {
+        currentRootId = node.item.id;
+        rootIds.push(currentRootId);
+        membersByRoot.set(currentRootId, [node.item]);
+      } else {
+        membersByRoot.get(currentRootId)?.push(node.item);
+      }
     }
-  }, [pendingIds, propsIds]);
+    return { rootIds, membersByRoot };
+  }, [items]);
+
+  const propsRootIds = rootGroups.rootIds;
+  const [pendingRootIds, setPendingRootIds] = useState<readonly string[] | null>(null);
 
   useEffect(() => {
-    if (pendingIds === null) return undefined;
-    const timer = window.setTimeout(() => setPendingIds(null), PINNED_DROP_WAIT_MS);
-    return () => window.clearTimeout(timer);
-  }, [pendingIds]);
+    if (pendingRootIds !== null && sameIds(pendingRootIds, propsRootIds)) {
+      setPendingRootIds(null);
+    }
+  }, [pendingRootIds, propsRootIds]);
 
-  const effectiveIds = pendingIds ?? propsIds;
-  const itemsById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
+  useEffect(() => {
+    if (pendingRootIds === null) return undefined;
+    const timer = window.setTimeout(() => setPendingRootIds(null), PINNED_DROP_WAIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [pendingRootIds]);
+
+  const effectiveRootIds = pendingRootIds ?? propsRootIds;
   const orderedItems = useMemo(
-    () =>
-      effectiveIds
-        .map((id) => itemsById.get(id))
-        .filter((item): item is SidebarUpdatedItem => item != null),
-    [effectiveIds, itemsById]
+    () => effectiveRootIds.flatMap((id) => rootGroups.membersByRoot.get(id) ?? []),
+    [effectiveRootIds, rootGroups.membersByRoot]
   );
 
   const [activeRow, setActiveRow] = useState<string | null>(null);
   const [activeGhost, setActiveGhost] = useState<HTMLElement | null>(null);
-  const idsRef = useLatestRef(effectiveIds);
+  const rootIdsRef = useLatestRef(effectiveRootIds);
+  const allowPinTarget = typeof onDropIntoPinSection === 'function';
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
@@ -229,12 +259,17 @@ export function SidebarFocusDndContainer({
     armSessionMentionDrag(target.id);
   }, []);
 
-  const handleDragMove = useCallback((event: DragMoveEvent) => {
-    const dragged = parsePinnedDndId(event.active.id);
-    if (dragged?.kind !== 'row') return;
-    const point = pointerOf(event);
-    setPinnedPointerTarget(point ? focusPointerTargetAt(point, dragged.id) : null);
-  }, []);
+  const handleDragMove = useCallback(
+    (event: DragMoveEvent) => {
+      const dragged = parsePinnedDndId(event.active.id);
+      if (dragged?.kind !== 'row') return;
+      const point = pointerOf(event);
+      setPinnedPointerTarget(
+        point ? focusOrPinPointerTargetAt(point, dragged.id, allowPinTarget) : null
+      );
+    },
+    [allowPinTarget]
+  );
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
@@ -249,16 +284,33 @@ export function SidebarFocusDndContainer({
         return;
       }
       const lifted = event.active.rect.current.translated;
-      const currentIds = idsRef.current;
-      const homeIndex = currentIds.indexOf(dragged.id);
+      const currentRootIds = rootIdsRef.current;
+      const homeIndex = currentRootIds.indexOf(dragged.id);
       const target =
-        (point ? focusPointerTargetAt(point, dragged.id) : null) ??
+        (point ? focusOrPinPointerTargetAt(point, dragged.id, allowPinTarget) : null) ??
         (homeIndex >= 0 ? { sectionId: FOCUS_SECTION_DND_KEY, index: homeIndex } : null);
       if (!target || !lifted) {
         endPointerDrag();
         return;
       }
-      const withoutDragged = currentIds.filter((id) => id !== dragged.id);
+
+      // Dropped onto a Pinned section: pin the conversation at that exact slot.
+      if (target.sectionId !== FOCUS_SECTION_DND_KEY) {
+        beginPinnedDropSettle({
+          sessionId: dragged.id,
+          toSectionId: target.sectionId,
+          toIndex: target.index,
+          from: { left: lifted.left, top: lifted.top, width: lifted.width, height: lifted.height },
+          ghost: activeGhost,
+          fromBackground: liftedBackground(),
+          fromShadow: FOCUS_ROW_LIFT_SHADOW,
+        });
+        endPointerDrag();
+        onDropIntoPinSection?.(dragged.id, target.sectionId, target.index);
+        return;
+      }
+
+      const withoutDragged = currentRootIds.filter((id) => id !== dragged.id);
       const nextIndex = Math.max(0, Math.min(target.index, withoutDragged.length));
       const nextIds = [
         ...withoutDragged.slice(0, nextIndex),
@@ -275,13 +327,21 @@ export function SidebarFocusDndContainer({
         fromBackground: liftedBackground(),
         fromShadow: FOCUS_ROW_LIFT_SHADOW,
       });
-      setPendingIds(nextIds);
+      setPendingRootIds(nextIds);
       endPointerDrag();
-      if (!sameIds(nextIds, propsIds)) {
+      if (!sameIds(nextIds, propsRootIds)) {
         onDropFocusSession?.(dragged.id, nextIndex);
       }
     },
-    [activeGhost, endPointerDrag, idsRef, onDropFocusSession, propsIds]
+    [
+      activeGhost,
+      allowPinTarget,
+      endPointerDrag,
+      onDropFocusSession,
+      onDropIntoPinSection,
+      propsRootIds,
+      rootIdsRef,
+    ]
   );
 
   if (!enabled) {
