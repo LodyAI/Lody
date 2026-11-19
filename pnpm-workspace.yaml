@@ -52,6 +52,8 @@ catalog:
   loro-mirror-jotai: 2.3.2
   loro-mirror-react: 2.3.2
   loro-repo: 0.26.0
+  '@loro-dev/loro-repo-client': 0.1.0
+  '@loro-dev/loro-repo-engine': 0.1.0
   loro-websocket: ^0.6.2
   lucide-react: ^0.523.0
   react: 19.2.0
@@ -158,6 +160,15 @@ minimumReleaseAgeExclude:
   - '@loro-dev/streams-crdt@0.22.0'
   - '@loro-dev/streams-client@0.14.0'
   - loro-repo@0.26.0
+  - '@loro-dev/json-patch@0.1.0'
+  - '@loro-dev/loro-repo-client@0.1.0'
+  - '@loro-dev/loro-repo-engine@0.1.0'
+  - '@loro-dev/loro-repo-engine-darwin-arm64@0.1.0'
+  - '@loro-dev/loro-repo-engine-darwin-x64@0.1.0'
+  - '@loro-dev/loro-repo-engine-linux-x64-gnu@0.1.0'
+  - '@loro-dev/loro-repo-engine-linux-arm64-gnu@0.1.0'
+  - '@loro-dev/loro-repo-engine-win32-x64-msvc@0.1.0'
+  - '@loro-dev/loro-repo-engine-win32-arm64-msvc@0.1.0'
   - '@loro-dev/flock-wasm@0.5.0'
   - '@lobehub/streamdown@1.4.0'
   - virtua@0.52.7

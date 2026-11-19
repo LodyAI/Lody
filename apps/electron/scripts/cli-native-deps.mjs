@@ -37,6 +37,9 @@ const require = createRequire(import.meta.url)
 const CLI_RUNTIME_PACKAGE_CHAIN = [
   { name: '@loro-dev/roost-node', from: 'cli', entry: '@loro-dev/roost-node/native' },
   { name: '@napi-rs/keyring', from: 'cli' },
+  // The native Repo host entry loads the engine addon; its binary is a sibling
+  // platform package staged by installEmbeddedNativeRepoEngineBinding.
+  { name: '@loro-dev/loro-repo-engine', from: 'cli' },
   { name: 'better-sqlite3', from: 'cli' },
   { name: 'loro-crdt', from: 'cli' },
   { name: '@lydell/node-pty', from: 'cli' },
@@ -164,24 +167,31 @@ export function nodePtyBinaryPackageName({ platform, arch }) {
   return `@lydell/node-pty-${platform}-${arch}`
 }
 
-export function keyringBinaryPackageName({ platform, arch }) {
-  return `@napi-rs/keyring-${platform}-${arch}${platform === 'linux' ? '-gnu' : platform === 'win32' ? '-msvc' : ''}`
+const napiTargetSuffix = ({ platform, arch }) =>
+  `${platform}-${arch}${platform === 'linux' ? '-gnu' : platform === 'win32' ? '-msvc' : ''}`
+
+export function keyringBinaryPackageName(target) {
+  return `@napi-rs/keyring-${napiTargetSuffix(target)}`
 }
 
-export function installEmbeddedKeyringBinding(target) {
-  const packageName = keyringBinaryPackageName(target)
-  const wrapper = resolvePackageDir('@napi-rs/keyring', cliAppRoot)
+export function nativeRepoEngineBinaryPackageName(target) {
+  return `@loro-dev/loro-repo-engine-${napiTargetSuffix(target)}`
+}
+
+/** Stages a napi-rs wrapper's exact-version platform package for the target. */
+function installEmbeddedNapiBinding(wrapperName, packageName, target) {
+  const wrapper = resolvePackageDir(wrapperName, cliAppRoot)
   const metadata = JSON.parse(fs.readFileSync(path.join(wrapper, 'package.json'), 'utf8'))
   const version = metadata.optionalDependencies?.[packageName]
-  if (!version)
-    throw new Error(`No system credential backend for ${target.platform}-${target.arch}`)
-  const scope = path.join(stagedNodeModulesDir, '@napi-rs')
+  if (!version) throw new Error(`No ${wrapperName} binary for ${target.platform}-${target.arch}`)
+  const [scopeName, wrapperBase] = wrapperName.split('/')
+  const scope = path.join(stagedNodeModulesDir, scopeName)
   fs.mkdirSync(scope, { recursive: true })
   for (const entry of fs.readdirSync(scope)) {
-    if (entry.startsWith('keyring-'))
+    if (entry.startsWith(`${wrapperBase}-`))
       fs.rmSync(path.join(scope, entry), { recursive: true, force: true })
   }
-  const sibling = path.join(path.dirname(wrapper), packageName.slice('@napi-rs/'.length))
+  const sibling = path.join(path.dirname(wrapper), packageName.slice(scopeName.length + 1))
   const installed = fs.existsSync(path.join(sibling, 'package.json')) ? sibling : undefined
   const downloaded = installed ? undefined : fetchNativeBinaryPackage(packageName, version)
   try {
@@ -193,6 +203,18 @@ export function installEmbeddedKeyringBinding(target) {
   } finally {
     downloaded?.cleanup()
   }
+}
+
+export function installEmbeddedKeyringBinding(target) {
+  installEmbeddedNapiBinding('@napi-rs/keyring', keyringBinaryPackageName(target), target)
+}
+
+export function installEmbeddedNativeRepoEngineBinding(target) {
+  installEmbeddedNapiBinding(
+    '@loro-dev/loro-repo-engine',
+    nativeRepoEngineBinaryPackageName(target),
+    target
+  )
 }
 
 export function stagedNodePtyBinaryDir({ platform, arch }) {

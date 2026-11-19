@@ -8,6 +8,7 @@ export const IPC_INVOKE_SERVICE_GROUPS = [
   'localProjects',
   'loro',
   'machineRpc',
+  'nativeWorkspaceMeta',
   'notifications',
   'publicBrowser',
   'sessionControl',

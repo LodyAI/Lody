@@ -20,6 +20,7 @@ import {
   writeAgentConfigToFlock,
 } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
+import { listExternalActiveDocIds } from '@/lib/loro/repo-existence';
 
 export type MachineFlockSyncScheduler = {
   markMachineFlockDocDirty: (machineId: MachineId, options?: { reason?: string }) => void;
@@ -227,6 +228,8 @@ async function listAliveDocIds(
   repo: LoroRepo,
   predicate: (docId: string) => boolean
 ): Promise<string[]> {
+  const external = await listExternalActiveDocIds(repo, predicate);
+  if (external) return external;
   const scanner = repo.getMeta();
   if (!scanner) return [];
   const rows = await scanner.scan({ prefix: ['m'] });

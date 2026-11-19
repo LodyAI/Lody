@@ -6,7 +6,7 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import { totalmem } from 'node:os'
-import { basename, join, resolve as resolvePath } from 'node:path'
+import { basename, dirname, join, resolve as resolvePath } from 'node:path'
 import { app, powerSaveBlocker, type WebContents } from 'electron'
 import { Effect, Layer, Logger, LogLevel, References } from 'effect'
 import type { AutomationControlRequest } from '@lody/shared/automations'
@@ -320,6 +320,17 @@ function resolveBundledCliEntry(): string | null {
   }
 
   return null
+}
+
+/** The embedded CLI's separate engine host entry, run as Node. */
+export function bundledNativeRepoHostLauncher() {
+  const entry = resolveBundledCliEntry()
+  if (!entry) throw new Error(`Bundled CLI not found (${BUNDLED_CLI_ENTRY_FILE})`)
+  return {
+    command: resolveBundledCliRuntime(),
+    args: [join(dirname(entry), 'native-repo-host.js')],
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+  }
 }
 
 function resolveBundledCliRuntime(): string {

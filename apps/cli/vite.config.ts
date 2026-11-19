@@ -34,6 +34,7 @@ const bundledNodeBuiltins = new Set([
 
 const explicitlyExternal = new Set([
   '@loro-dev/roost-node',
+  '@loro-dev/loro-repo-engine',
   '@napi-rs/keyring',
   'better-sqlite3',
   '@lydell/node-pty',
@@ -56,6 +57,7 @@ const runtimeEntries = {
   'cloudflared-worker': path.resolve(__dirname, 'src/preview/cloudflared-worker.ts'),
   'baguette-worker': path.resolve(__dirname, 'src/ios-simulator/baguette-worker.ts'),
   'diff-worker': path.resolve(__dirname, 'src/lib/code-collab/diff-worker.ts'),
+  'native-repo-host': path.resolve(__dirname, 'src/native-repo-host-entry.ts'),
   'file-index-scan-worker': path.resolve(
     __dirname,
     'src/lib/code-collab/file-index-scan-worker.ts'

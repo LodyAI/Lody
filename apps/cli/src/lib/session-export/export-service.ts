@@ -14,6 +14,7 @@ import type { ExportManifest, ExportSessionSummary } from './types';
 import { formatErrorMessage } from '@/utils/format-error';
 import { getScheduleRegistryFlockDocId, ScheduleRepository } from '@lody/shared';
 import { listWorkspaceScheduleIds } from '../schedules/schedule-documents';
+import { listExternalActiveDocIds } from '../loro/repo-existence';
 
 type WorkspaceDescriptor = {
   id: string;
@@ -65,19 +66,24 @@ async function writeText(filePath: string, value: string): Promise<void> {
 }
 
 async function writeRepoMetaJson(manager: LoroDocumentManager, outputDir: string): Promise<void> {
+  if (manager.repo.metadataMode === 'external') {
+    await writeJson(path.join(outputDir, 'meta.json'), { docs: await manager.repo.listDoc() });
+    return;
+  }
   const meta = (manager.repo as unknown as RepoWithMetaFlock).metaFlock;
   const exported = await Promise.resolve(meta.exportJson(undefined, Date.now()));
   await writeJson(path.join(outputDir, 'meta.json'), exported);
 }
 
 async function loadSessionMetas(manager: LoroDocumentManager): Promise<SessionMeta[]> {
-  const scanner = manager.repo.getMeta();
-  if (!scanner) {
+  const external = await listExternalActiveDocIds(manager.repo, (id) => id.startsWith('session-'));
+  const scanner = external ? undefined : manager.repo.getMeta();
+  if (!external && !scanner) {
     return [];
   }
 
-  const roomIds = new Set<string>();
-  const rows = await scanner.scan({ prefix: ['m'] });
+  const roomIds = new Set<string>(external);
+  const rows = scanner ? await scanner.scan({ prefix: ['m'] }) : [];
   for (const row of rows) {
     const key = row.key;
     if (!Array.isArray(key) || key.length < 2) {

@@ -71,6 +71,7 @@ import {
 } from './history-session-catalog-client';
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
+import { listExternalActiveDocIds } from '@/lib/loro/repo-existence';
 
 const syncLeases = new Set<string>();
 
@@ -206,13 +207,14 @@ function formatHistoryConflictResolutionBlocker(
 async function listWorkspaceSessionMetas(
   manager: LoroDocumentManager
 ): Promise<Array<{ sessionId: SessionId; meta: SessionMeta }>> {
-  const scanner = manager.repo.getMeta();
-  if (!scanner) {
+  const external = await listExternalActiveDocIds(manager.repo, isSessionDocRoomId);
+  const scanner = external ? undefined : manager.repo.getMeta();
+  if (!external && !scanner) {
     return [];
   }
 
-  const roomIds = new Set<string>();
-  for (const row of await scanner.scan({ prefix: ['m'] })) {
+  const roomIds = new Set<string>(external);
+  for (const row of scanner ? await scanner.scan({ prefix: ['m'] }) : []) {
     const key = row.key;
     if (!Array.isArray(key) || key.length < 2) {
       continue;
