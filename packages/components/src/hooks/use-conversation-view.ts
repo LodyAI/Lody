@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { SessionHistory } from '@lody/shared';
 import {
+  loadedStart,
   collectHydratedRange,
   acquireConversationDerivation,
   findLastIndex,
@@ -213,7 +214,7 @@ function indexRowsStore(view: ConversationView, includeSummary: boolean): IndexR
   let unsubscribe: (() => void) | undefined;
   const rebuild = () => {
     const next: TurnIndexRow[] = [];
-    for (let i = 0; i < view.turnCount; i += 1) {
+    for (let i = loadedStart(view); i < view.turnCount; i += 1) {
       const row = view.index(i);
       if (!row || isUnloadedTurnId(row.id)) continue;
       const position = positions.get(row.id);

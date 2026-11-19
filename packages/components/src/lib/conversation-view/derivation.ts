@@ -94,7 +94,8 @@ export function createConversationDerivation<F>(
    */
   const deriveRange = (from: number, to: number, dropStale = false): boolean => {
     let changed = false;
-    for (let i = Math.max(0, from); i < Math.min(to, view.turnCount); i += 1) {
+    // Below `loadedFrom` every slot is a sentinel with no body to derive.
+    for (let i = Math.max(view.loadedFrom ?? 0, from); i < Math.min(to, view.turnCount); i += 1) {
       const row = view.index(i);
       if (!row) continue;
       // Reverse-paged views keep absolute slots with sentinel rows until the
@@ -159,12 +160,13 @@ export function createConversationDerivation<F>(
       // Next chunk of turns (from the tail backwards) that still lack a fact.
       const pending: number[] = [];
       let cursor = end;
-      while (cursor > 0 && pending.length < chunkSize) {
+      const floor = view.loadedFrom ?? 0;
+      while (cursor > floor && pending.length < chunkSize) {
         cursor -= 1;
         const row = view.index(cursor);
         if (row && !isUnloadedTurnId(row.id) && !facts.has(row.id)) pending.push(cursor);
       }
-      end = cursor;
+      end = cursor > floor ? cursor : 0;
       if (pending.length === 0) continue;
       const lo = pending[pending.length - 1]!;
       const hi = pending[0]! + 1;

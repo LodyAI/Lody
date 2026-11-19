@@ -1,5 +1,6 @@
 import type { MessageContent, SessionHistory, SessionHistoryParsed, SessionId } from '@lody/shared';
 import {
+  loadedStart,
   isEmptyAssistantIndexRow,
   resolveLastAssistantTurnIds,
   isUnloadedTurnId,
@@ -193,7 +194,7 @@ export function buildChatStreamItems(
    *  than an older turn's configuration. */
   let lastUserInputConfig: SessionHistoryParsed['inputConfig'] | undefined;
 
-  for (let turnIndex = 0; turnIndex < view.turnCount; turnIndex += 1) {
+  for (let turnIndex = loadedStart(view); turnIndex < view.turnCount; turnIndex += 1) {
     const row = view.index(turnIndex);
     if (!row) continue;
     // Reverse-page views keep absolute positions with sentinel rows until the
