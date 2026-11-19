@@ -1,0 +1,106 @@
+import {
+  defineClientPlugin,
+  hostQueries,
+  useHost,
+  useQuery,
+  type ProjectPageProps,
+  type WorktreeEntry,
+} from '@lody/plugin-sdk/client';
+import { Alert, Badge, Button, Table, type TableColumn } from '@lody/ui';
+
+function WorktreeManagerPage({ project, repositoryState }: ProjectPageProps) {
+  const host = useHost();
+  const worktrees = useQuery(project, hostQueries.worktrees, { limit: 50 });
+
+  if (repositoryState === 'none') {
+    return (
+      <Alert.Root tone="neutral">
+        <Alert.Description>This project has no Git repository attached.</Alert.Description>
+      </Alert.Root>
+    );
+  }
+
+  if (worktrees.status === 'loading') {
+    return <div>Loading worktrees…</div>;
+  }
+
+  if (worktrees.status === 'unavailable') {
+    return (
+      <Alert.Root tone="warning">
+        <Alert.Description>
+          Worktree state is currently {worktrees.reason}. Verify the owning machine is online.
+        </Alert.Description>
+      </Alert.Root>
+    );
+  }
+
+  if (worktrees.status === 'error') {
+    return (
+      <Alert.Root tone="danger">
+        <Alert.Description>{worktrees.message}</Alert.Description>
+      </Alert.Root>
+    );
+  }
+
+  const columns: readonly TableColumn<WorktreeEntry>[] = [
+    {
+      key: 'branch',
+      header: 'Branch',
+      cell: (row) => row.branch ?? '(detached)',
+    },
+    {
+      key: 'path',
+      header: 'Path',
+      cell: (row) => row.path,
+      wrap: true,
+    },
+    {
+      key: 'locked',
+      header: 'Lock',
+      cell: (row) => (
+        <Badge tone={row.locked ? 'warning' : 'neutral'}>
+          {row.locked === null ? 'unknown' : row.locked ? 'locked' : 'unlocked'}
+        </Badge>
+      ),
+    },
+    {
+      key: 'actions',
+      header: 'Session',
+      cell: (row) => (
+        <div>
+          <Button
+            size="mini"
+            variant="secondary"
+            onClick={() => host.sessions.open(row.rootSession)}
+          >
+            Open
+          </Button>
+          <Button
+            size="mini"
+            variant="ghost"
+            onClick={() => void host.sessions.requestArchive(row.rootSession)}
+          >
+            Archive
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
+  return (
+    <Table
+      columns={columns}
+      rows={worktrees.data.items}
+      rowKey={(row) => row.path}
+      empty="No active session worktrees in this repository."
+    />
+  );
+}
+
+export default defineClientPlugin((lody) => {
+  lody.project.pages.add({
+    id: 'worktrees',
+    title: 'Worktrees',
+    Component: WorktreeManagerPage,
+  });
+});
