@@ -769,7 +769,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // synced before the cloud plane existed, so only the cloud binding's first
   // sync after such a delete may clear the marker.
   let cloudAttachDroppedSuspectCheckpoint = false;
-  const metaSyncState = (): RoomSyncState => metaTracker?.getSyncState() ?? 'idle';
+  const metaSyncState = (): RoomSyncState =>
+    repo.metadataMode === 'external' ? 'synced' : (metaTracker?.getSyncState() ?? 'idle');
 
   // workspaceId is required and provided at initialization
   const workspaceId: WorkspaceId = deps.workspaceId;
@@ -4334,6 +4335,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       initialMetaSyncCompleted = true;
       initialMetaSyncFailed = false;
       resumePendingInputs?.();
+      workspaceMetaFirstSynced = true;
+      notifyConnectionStateInputsChanged();
+      scheduleStartupAcpCapabilitiesRefresh();
       return;
     }
     if (metaRoomJoinPromise) {
