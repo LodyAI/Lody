@@ -23,6 +23,7 @@ import {
   type LoroMap,
   type LoroText,
 } from 'loro-crdt';
+import { historyIdIndex } from '../history-id-index';
 import type { SessionId } from '../ids';
 import type { SessionHistory, SessionHistoryInput } from '../schema';
 import {
@@ -458,7 +459,15 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
     )
       identityDirty = true;
   });
+  const ids = historyIdIndex(doc);
   const locate = (turnId: string): number | undefined => {
+    const indexed = ids.positionsOf(turnId);
+    if (indexed) {
+      const last = indexed.at(-1);
+      if (last === undefined) return undefined;
+      if (readIdentity(list.get(last))?.turnId === turnId) return last;
+      ids.invalidate();
+    }
     // Pending writes are readable before subscription delivery. Reuse the scan
     // until another op arrives; merely having a pending transaction is not a change.
     // opCount includes pending ops and does not restart at commit, unlike pending length.
