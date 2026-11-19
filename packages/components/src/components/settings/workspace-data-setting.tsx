@@ -51,7 +51,7 @@ export type ImportPlanSummary = {
   updatedRooms: number;
   unchangedRooms: number;
   metadata: { added: number; updated: number; deleted: number };
-  skipped: Array<{ id: string; reason: string }>;
+  skipped: Array<{ id: string; reason: string; detail: string | null }>;
   gaps: number;
 };
 
@@ -77,11 +77,20 @@ export function summarizeImportPlan(plan: unknown): ImportPlanSummary {
       .filter((room) => room.action === 'skip')
       .map((room) => ({
         id: String(room.id ?? ''),
-        reason: String(room.detail ?? room.reason ?? ''),
+        reason: String(room.reason ?? ''),
+        detail: typeof room.detail === 'string' ? room.detail : null,
       })),
     gaps: Array.isArray(gaps) ? gaps.length : 0,
   };
 }
+
+const SKIP_REASON_KEYS: Record<string, string> = {
+  'unrelated-same-id': 'settings.workspaceData.skipReasons.unrelatedSameId',
+  'deleted-in-target': 'settings.workspaceData.skipReasons.deletedInTarget',
+  'machine-room': 'settings.workspaceData.skipReasons.machineRoom',
+  'roost-exists': 'settings.workspaceData.skipReasons.roostExists',
+  unauthorized: 'settings.workspaceData.skipReasons.unauthorized',
+};
 
 const styles = stylex.create({
   result: { fontSize: text.footnoteSize, color: colors.secondaryLabel, overflowWrap: 'anywhere' },
@@ -268,7 +277,13 @@ export function WorkspaceDataSettingContent({
             </AlertDialog.Header>
             <div data-testid="workspace-bundle-review" {...stylex.props(styles.review)}>
               <span>{review.fileName}</span>
-              <span>{t('settings.workspaceData.review.rooms', review.summary)}</span>
+              <span>
+                {t('settings.workspaceData.review.rooms', {
+                  newRooms: review.summary.newRooms,
+                  updatedRooms: review.summary.updatedRooms,
+                  unchangedRooms: review.summary.unchangedRooms,
+                })}
+              </span>
               <span>{t('settings.workspaceData.review.metadata', review.summary.metadata)}</span>
               {review.summary.gaps > 0 ? (
                 <span>
@@ -282,7 +297,11 @@ export function WorkspaceDataSettingContent({
                     {review.summary.skipped.map((room) => (
                       <li key={room.id}>
                         {room.id}
-                        {room.reason ? ` — ${room.reason}` : ''}
+                        {' — '}
+                        {SKIP_REASON_KEYS[room.reason]
+                          ? t(SKIP_REASON_KEYS[room.reason]!)
+                          : room.reason}
+                        {room.detail ? ` (${room.detail})` : ''}
                       </li>
                     ))}
                   </ul>

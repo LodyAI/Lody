@@ -118,7 +118,7 @@ describe('summarizeImportPlan', () => {
       updatedRooms: 0,
       unchangedRooms: 1,
       metadata: { added: 4, updated: 1, deleted: 2 },
-      skipped: [{ id: 'session-3', reason: 'unrelated-same-id' }],
+      skipped: [{ id: 'session-3', reason: 'unrelated-same-id', detail: null }],
       gaps: 1,
     });
   });
@@ -139,6 +139,8 @@ describe('workspace data settings', () => {
     const review = byTestId('workspace-bundle-review')?.textContent ?? '';
     expect(review).toContain('in.lodybundle');
     expect(review).toContain('session-3');
+    expect(review).toContain('settings.workspaceData.skipReasons.unrelatedSameId');
+    expect(review).not.toContain('unrelated-same-id');
     expect(byTestId('workspace-bundle-import-result')).toBeNull();
     await click('workspace-bundle-confirm');
     expect(byTestId('workspace-bundle-review')).toBeNull();
