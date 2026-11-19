@@ -6,6 +6,7 @@ import { allActiveSessionsAtom, archivedSessionListAtom, sessionListAtom } from 
 import {
   filterSessionsByVisibility,
   isSessionEditableToUser,
+  isImportedForUser,
   isSessionReadShared,
   type SessionListEntry,
 } from '@/lib/session-visibility';
@@ -58,7 +59,8 @@ function useHistoryOnlySessionIds(
   readable: boolean,
   ownedMachineIds: ReadonlySet<MachineId>,
   readSharedSessions: ReadonlyMap<string, SessionAccessView>,
-  sessionsById: ReadonlyMap<string, SessionMeta>
+  sessionsById: ReadonlyMap<string, SessionMeta>,
+  workspaceId: string | null
 ) {
   const previous = useRef(new Set<string>());
   return useMemo(() => {
@@ -67,7 +69,8 @@ function useHistoryOnlySessionIds(
         .filter(
           (session) =>
             (isSessionReadShared(session, readSharedSessions, sessionsById, accountId) ||
-              (!!accountId && session.userId === accountId)) &&
+              (!!accountId && session.userId === accountId) ||
+              isImportedForUser(session, workspaceId, accountId)) &&
             !isSessionEditableToUser(session, machines, projects, accountId, ownedMachineIds)
         )
         .map((session) => session.id)
@@ -80,6 +83,7 @@ function useHistoryOnlySessionIds(
     machines,
     projects,
     accountId,
+    workspaceId,
     readable,
     ownedMachineIds,
     readSharedSessions,
@@ -182,7 +186,8 @@ export function useVisibleSessionMetas(
     workspaceHistoryReadable,
     ownedMachineIds,
     readSharedSessions,
-    sessionsById
+    sessionsById,
+    scope.workspaceId
   );
 
   const visibleSessions = useMemo(
@@ -197,7 +202,8 @@ export function useVisibleSessionMetas(
             workspaceHistoryReadable,
             ownedMachineIds,
             readSharedSessions,
-            sessionsById
+            sessionsById,
+            scope.workspaceId
           )
         : [],
     [
@@ -211,6 +217,7 @@ export function useVisibleSessionMetas(
       ownedMachineIds,
       readSharedSessions,
       sessionsById,
+      scope.workspaceId,
     ]
   );
   const visibleAllActiveSessions = useMemo(
@@ -225,7 +232,8 @@ export function useVisibleSessionMetas(
             workspaceHistoryReadable,
             ownedMachineIds,
             readSharedSessions,
-            sessionsById
+            sessionsById,
+            scope.workspaceId
           )
         : [],
     [
@@ -239,6 +247,7 @@ export function useVisibleSessionMetas(
       ownedMachineIds,
       readSharedSessions,
       sessionsById,
+      scope.workspaceId,
     ]
   );
 
@@ -283,6 +292,8 @@ export function useVisibleArchivedSessionMetas(
     ownedMachineIds,
     readSharedSessions,
     sessionsById
+,
+    scope.workspaceId
   );
 
   const visibleArchivedSessions = useMemo(
@@ -297,7 +308,8 @@ export function useVisibleArchivedSessionMetas(
             workspaceHistoryReadable,
             ownedMachineIds,
             readSharedSessions,
-            sessionsById
+            sessionsById,
+            scope.workspaceId
           )
         : [],
     [
@@ -311,6 +323,7 @@ export function useVisibleArchivedSessionMetas(
       ownedMachineIds,
       readSharedSessions,
       sessionsById,
+      scope.workspaceId,
     ]
   );
 

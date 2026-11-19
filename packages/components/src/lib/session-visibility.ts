@@ -16,6 +16,8 @@ export type SessionMachineRecord = {
   machineId?: string | null;
   userId?: string | null;
   project?: { kind?: string; localProjectId?: string | null } | null;
+  /** Set by a workspace bundle import; see `isImportedForUser`. */
+  importFence?: { workspaceId?: string; importedBy?: string } | null;
 };
 
 type LocalProjectSessionMachineRecord = SessionMachineRecord & {
@@ -32,7 +34,28 @@ type SessionVisibilityOptions = {
   readSharedSessions?: ReadonlyMap<string, SessionAccessView>;
   sessionsById?: ReadonlyMap<string, SessionMachineRecord>;
   ownedMachineIds?: ReadonlySet<MachineId>;
+  /** The workspace being shown; scopes import fences to the import that set them. */
+  workspaceId?: string | null;
 };
+
+/**
+ * A conversation this person imported into this workspace from a bundle. Its machine
+ * stays in the source workspace, so it is readable here and never editable; only the
+ * importer sees it, and only in the workspace the import named.
+ */
+export function isImportedForUser(
+  session: SessionMachineRecord,
+  workspaceId: string | null | undefined,
+  currentUserId: string | null | undefined
+): boolean {
+  const fence = session.importFence;
+  return (
+    !!workspaceId &&
+    !!currentUserId &&
+    fence?.workspaceId === workspaceId &&
+    fence.importedBy === currentUserId
+  );
+}
 
 export function isLocalProjectSession(
   session: SessionMachineRecord
@@ -133,6 +156,7 @@ export function resolveSessionVisibilityState(
     )
   )
     return 'visible';
+  if (isImportedForUser(session, options.workspaceId, options.currentUserId)) return 'visible';
   if (
     isSessionVisibleToUser(
       session,
@@ -167,7 +191,8 @@ export function filterSessionsByVisibility<T extends SessionMachineRecord>(
   workspaceHistoryReadable = false,
   ownedMachineIds?: ReadonlySet<MachineId>,
   readSharedSessions?: ReadonlyMap<string, SessionAccessView>,
-  sessionsById?: ReadonlyMap<string, SessionMachineRecord>
+  sessionsById?: ReadonlyMap<string, SessionMachineRecord>,
+  workspaceId?: string | null
 ): T[] {
   if (sessions.length === 0) return [];
   if (
@@ -188,6 +213,7 @@ export function filterSessionsByVisibility<T extends SessionMachineRecord>(
         ownedMachineIds,
         readSharedSessions,
         sessionsById,
+        workspaceId,
       }) === 'visible'
   );
 }

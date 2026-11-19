@@ -1029,6 +1029,8 @@ export type SessionImportFence = {
   workspaceId: string;
   turnIds: string[];
   queueItemIds: string[];
+  /** Who imported it: that person may read it in `workspaceId`, never edit it. */
+  importedBy?: string;
 };
 
 /** On a schedule document's metadata: the activation an import carried in. */

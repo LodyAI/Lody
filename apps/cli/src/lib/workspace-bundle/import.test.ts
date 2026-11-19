@@ -311,6 +311,8 @@ describe('workspace import', () => {
     expect([...fence.turnIds].sort()).toEqual(['q1', 'u1']);
     expect(fence.queueItemIds).toHaveLength(1);
     expect(getImportFence(meta, WS).turnIds).toHaveLength(0);
+    // The importer may read the imported conversation here; nobody else gains anything.
+    expect(meta?.importFence?.importedBy).toBe('admin-1');
     const schedule = await target.repo.openDetachedDoc('schedule-x');
     expect(schedule.getMap('definition').get('enabled')).toBe(true);
     expect(

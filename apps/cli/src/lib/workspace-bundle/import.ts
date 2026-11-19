@@ -465,7 +465,8 @@ export async function applyWorkspaceImport(
         return sessionImportFence(
           doc,
           (field) => sourceMeta.get(['m', room.id, field]),
-          plan.targetWorkspaceId
+          plan.targetWorkspaceId,
+          input.actor?.userId
         );
       });
       if (importFence) await repo.upsertDocMeta(room.targetId, { importFence });
@@ -536,12 +537,13 @@ async function rewriteRoostTurns(
   if (fenceWorkspaceId) {
     // The rewritten turns came from the bundle too: extend the session's fence.
     const previous = (await repo.getDocMeta(docId))?.meta.importFence as
-      | { turnIds?: string[]; queueItemIds?: string[] }
+      | { turnIds?: string[]; queueItemIds?: string[]; importedBy?: string }
       | undefined;
     const userTurnIds = (turns as Array<{ id?: unknown; role?: unknown }>)
       .filter((turn) => turn.role === 'user' && typeof turn.id === 'string')
       .map((turn) => turn.id as string);
     patch.importFence = {
+      ...previous,
       workspaceId: fenceWorkspaceId,
       turnIds: [...new Set([...(previous?.turnIds ?? []), ...userTurnIds])],
       queueItemIds: previous?.queueItemIds ?? [],

@@ -244,7 +244,7 @@ authenticity is not a security premise; safety comes from authorization at impor
 | Rooms embedding the workspace ID (`<ws>:wf:workspace`, `<ws>:sr`) | Rewritten to the target workspace ID; row contents unchanged                                                                                                                                                                                                          |
 | Loro peers, Flock clock peers                                     | Kept, never remapped (remapping breaks CRDT identity and idempotency)                                                                                                                                                                                                 |
 | User IDs (authors, `SessionMeta.userId`, Role creators)           | Kept as provenance and grant nothing; non-members display as "unknown member"                                                                                                                                                                                         |
-| Machines (`<ws>:mf:<machine>`, `SessionMeta.machineId`)           | Machine rooms are not imported; sessions keep the original machine ID and show "machine unavailable", read only                                                                                                                                                       |
+| Machines (`<ws>:mf:<machine>`, `SessionMeta.machineId`)           | Machine rooms are not imported; sessions keep the original machine ID and show "machine unavailable", read only; only the importer sees them in the target (recommendation, below)                                                                                    |
 | Attachment/image references                                       | Blobs are uploaded to the target (blobs the target still has are skipped on same-workspace restore); history is not rewritten. A "old reference → new reference" map is written at the session HEAD, reusing the OSS migration's `resolveArchivedAttachment` approach |
 
 After a cross-workspace import, imported sessions and schedules are not rewritten
@@ -256,6 +256,8 @@ A fence applies only to the workspace it names, so importing the target's bundle
 into the source leaves the source's original sessions and schedules untouched. Machine
 durable commands do not migrate. A same-workspace restore adds no fence, because merge
 itself is monotonic.
+
+**Recommendation: who sees imported conversations.** Existing visibility requires the conversation's machine to be visible in this workspace, or the person to be its owner; cross-workspace imports meet neither, so they would be hidden from everyone. The import fence therefore records the importer (`importedBy`): only the importer, and only in the workspace the fence names, sees these conversations, read only. Other members gain no visibility from an import.
 
 ### Importing into an E2EE workspace
 

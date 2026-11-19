@@ -50,7 +50,8 @@ export function crossWorkspaceRowWithheld(codec: string, key: readonly unknown[]
 export function sessionImportFence(
   doc: LoroDoc,
   sourceMeta: (field: string) => unknown,
-  workspaceId: string
+  workspaceId: string,
+  importedBy: string | undefined
 ): SessionImportFence {
   const turnIds = new Set<string>();
   const queueItemIds = new Set<string>();
@@ -82,7 +83,12 @@ export function sessionImportFence(
       if (typeof userTurnId === 'string') turnIds.add(userTurnId);
     }
   }
-  return { workspaceId, turnIds: [...turnIds], queueItemIds: [...queueItemIds] };
+  return {
+    workspaceId,
+    turnIds: [...turnIds],
+    queueItemIds: [...queueItemIds],
+    ...(importedBy ? { importedBy } : {}),
+  };
 }
 
 /** The imported schedule activation, fenced in the target workspace. */
