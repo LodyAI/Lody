@@ -51,7 +51,7 @@ const styles = stylex.create({
   right: { insetBlock: 0, right: 0, borderLeftWidth: 1, borderColor: 'hsl(var(--border) / 1)' },
   rightWidth: {
     width: '75%',
-    maxWidth: { default: null, '@media (width >= 40rem)': 'var(--container-sm)' },
+    maxWidth: { default: null, '@media (width >= 40rem)': '24rem' },
   },
   left: { insetBlock: 0, left: 0, borderRightWidth: 1, borderColor: 'hsl(var(--border) / 1)' },
   leftWidth: { width: 'var(--lody-drawer-width)', maxWidth: 'var(--lody-drawer-width)' },

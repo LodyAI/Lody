@@ -474,6 +474,9 @@ const markdownDescendants = stylex.create({
       overflowY: 'hidden',
       paddingBlock: 'calc(var(--spacing) * 1)',
     },
+    ':is(*) [data-streamdown="mermaid-block"]': {
+      marginBlock: 'calc(var(--spacing) * 5) !important',
+    },
     ':is(*) [data-streamdown="mermaid"]': { overflow: 'hidden' },
     ':is(*) table': {
       marginBlock: 'calc(var(--spacing) * 0) !important',

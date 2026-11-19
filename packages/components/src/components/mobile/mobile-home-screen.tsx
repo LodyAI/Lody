@@ -131,7 +131,7 @@ const styles = stylex.create({
   },
   helpDescription: {
     marginTop: 'calc(var(--spacing)*2)',
-    maxWidth: 'var(--container-sm)',
+    maxWidth: '24rem',
     fontSize: 'var(--text-sm)',
     lineHeight: 'var(--leading-relaxed)',
     color: 'hsl(var(--muted-foreground))',

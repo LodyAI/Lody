@@ -878,7 +878,7 @@ const viewStyles = stylex.create({
     display: { default: 'none', '@container (min-width: 520px)': 'block' },
     position: 'absolute',
     bottom: '13px',
-    right: '-100%',
+    right: '100%',
     marginRight: themeSpace[1.5],
     height: themeSpace[4],
     width: themeSpace[4],

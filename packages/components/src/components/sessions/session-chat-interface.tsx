@@ -452,6 +452,9 @@ const styles = stylex.create({
       default: buttonTokens.ghostLabel,
       ':disabled': 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 40%, transparent)',
     },
+    // The 40%-alpha ink already reads as disabled; stacking the Button's own
+    // `:disabled` opacity on top dims it twice. Neutralize the element opacity.
+    opacity: { default: null, ':disabled': 1 },
   },
   searchInput: {
     borderWidth: 0,

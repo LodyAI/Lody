@@ -59,6 +59,14 @@ const enterFromLeft = stylex.keyframes({
 const styles = stylex.create({
   trigger: {
     [button.ghostHover]: 'hsl(var(--hover) / 1)',
+    // Keep the trigger filled while its menu is open — the affordance that the
+    // menu belongs to this "+" button. `hsl(var(--hover))` (not accent/muted)
+    // because those equal the background in the dark theme and paint nothing.
+    backgroundColor: {
+      default: null,
+      ':is([data-state="open"])': 'hsl(var(--hover) / 1)',
+    },
+    color: { default: null, ':is([data-state="open"])': 'hsl(var(--foreground) / 1)' },
   },
   sheetTrigger: { borderRadius: 'calc(infinity * 1px)' },
   item: { cursor: 'pointer' },
