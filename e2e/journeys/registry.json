@@ -1507,6 +1507,113 @@
       "scoutJourneys": ["session"],
       "blockedReason": null,
       "estimatedMinutes": 7
+    },
+    {
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "owner": "session-turn-lifecycle",
+      "feature": "src/features/turn-lifecycle.feature",
+      "fixture": "turn-lifecycle-scripted-acp",
+      "fingerprint": "9840ff40f86dc622d834f8b4ef37ab91afa1b0ef0d3624eaa4651f7bcee85f89",
+      "blockedReason": null,
+      "freshness": 5,
+      "scoutJourneys": ["session"],
+      "id": "LODY-TURN-001",
+      "title": "Release a Turn after permission approval and an Agent crash, then recover in a new process",
+      "ownerPaths": [
+        "apps/cli/src/lib/message-handler.ts",
+        "apps/cli/src/session/session-execution-service.ts",
+        "apps/cli/src/session/session-manager.ts",
+        "packages/components/src/components/sessions/floating-permission-request.tsx"
+      ],
+      "actions": [
+        {
+          "id": "session.createAwaitingPermission"
+        },
+        {
+          "id": "permission.allowOnce"
+        },
+        {
+          "id": "fixture.crashAgentMidTurn"
+        },
+        {
+          "id": "session.sendFollowUp"
+        }
+      ],
+      "checkpoints": [
+        "the provider receives the selected permission option exactly once",
+        "a provider exit during a prompt releases the Turn and the composer",
+        "the follow-up dispatches once to a replacement provider process in order"
+      ],
+      "cleanup": ["owned ACP processes exit with the isolated desktop"],
+      "coverage": {
+        "renderer": "Floating permission request, Stop state, and composer release",
+        "electronIpc": "Real window and Session RPC",
+        "bundledCli": "Permission relay, agent exit finalization, and replacement agent spawn",
+        "durableState": "Permission, crashed, and recovered Turns in one Session history",
+        "externalWire": "Scripted ACP with permission request and mid-prompt process exit"
+      },
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 5,
+        "escapedDefect": true
+      },
+      "estimatedMinutes": 3
+    },
+    {
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "owner": "session-turn-lifecycle",
+      "feature": "src/features/turn-lifecycle.feature",
+      "fixture": "turn-lifecycle-scripted-acp",
+      "fingerprint": "8f2de5367388d2c5e6d48be34f771c922fcc8fe43b082073ffe9da7fee1f88de",
+      "blockedReason": null,
+      "freshness": 5,
+      "scoutJourneys": ["session"],
+      "id": "LODY-TURN-002",
+      "title": "Admit a follow-up to a reopened Session after a desktop cold restart",
+      "ownerPaths": [
+        "apps/cli/src/lib/message-handler.ts",
+        "apps/cli/src/session/session-execution-service.ts",
+        "apps/cli/src/lib/loro/"
+      ],
+      "actions": [
+        {
+          "id": "session.createAndComplete"
+        },
+        {
+          "id": "desktop.coldRestart"
+        },
+        {
+          "id": "sidebar.openSession"
+        },
+        {
+          "id": "session.sendFollowUp"
+        }
+      ],
+      "checkpoints": [
+        "the reopened Session shows its prior history",
+        "the follow-up reaches the provider exactly once after restart",
+        "the follow-up user message renders before its reply"
+      ],
+      "cleanup": ["owned ACP processes exit with the isolated desktop"],
+      "coverage": {
+        "renderer": "Sidebar reopen, history, and composer after restart",
+        "electronIpc": "Real window across a preserved-profile relaunch",
+        "bundledCli": "Loro Session reopen and follow-up input admission",
+        "durableState": "Session history and agent catalog across restart",
+        "externalWire": "Scripted ACP"
+      },
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 4,
+        "escapedDefect": true
+      },
+      "estimatedMinutes": 3
     }
   ]
 }
