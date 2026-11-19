@@ -286,6 +286,7 @@ session, use Lody's built-in MCP tools for batch creation, chat or status checks
   - `--limit` caps the count.
 - `history [id]` shows the visible conversation only, without reasoning or tool calls.
   Options: `--limit` (default 50), `--all`, `--reverse`, `--json`/`--jsonl`.
+  `--json` reports `hasMore` when earlier turns exist; only `--all` reports `total`.
 - `show [id]` prints session details. `status [id]` prints whether it is running now.
 - `observe [id]` watches a session without marking it read.
   - By default it prints a snapshot. `--jsonl --follow` streams the events `snapshot`,

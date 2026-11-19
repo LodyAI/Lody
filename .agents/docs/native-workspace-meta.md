@@ -231,12 +231,17 @@ history is not in the document). Writes outside a turn (rename, archive, queue
 edits from the CLI) and the dispatch-default reads that precede a send still open
 a replica.
 
-`lody session history` counts every visible turn, and visibility depends on each
-item's type and whether its text is blank, so the remote read projects every
-turn's items page by page and keeps only the projection, then reads the selected
-turns whole. With 50k turns that is about 4.3 s, against 10.4 s for the same
-selection on an open replica (after a 0.7–1.1 s open). Neither is bounded; a
-bounded count needs a visibility index or a nested-field projection primitive.
+`lody session history` reads only as far back as its limit needs. Visibility
+depends on each item's type and whether its text is blank, so the read projects
+turns back from the tail in pages of 64 (`selectTranscriptTail`) until it has the
+limit plus one more visible turn, which sets `hasMore`; then it reads the selected
+turns whole. The local replica does the same through the writer's ranged query.
+With the owner's agreement the JSON output reports `hasMore` instead of a total;
+only `--all`, which reads everything anyway, still reports `total`. Default 50
+turns: 16–33 ms through the engine and 6–10 ms on a replica, the same at 5k and
+50k turns (it was 4.1–4.4 s and 10.1–11.3 s). Roost Sessions keep their owner's
+whole-history transcript reply, which is a wire format; `hasMore` is derived from
+its count.
 
 ## Schedule and Preview comment documents
 

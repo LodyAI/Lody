@@ -296,7 +296,11 @@ export function createRoostRpcSessionServices(
             const value = transcriptResultSchema.parse(
               await readResult<unknown>({ kind: 'readTranscript', limit, reverse })
             );
-            return { ...value, entries: value.entries as SessionHistoryInput[] };
+            return {
+              hasMore: value.total > value.positions.length,
+              positions: value.positions,
+              entries: value.entries as SessionHistoryInput[],
+            };
           },
         }
       : {}),
