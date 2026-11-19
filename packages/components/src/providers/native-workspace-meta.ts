@@ -11,7 +11,8 @@ import {
 import {
   NATIVE_FLOCK_CHANNEL,
   NATIVE_META_CHANNEL,
-  nativeFlockDocIds,
+  isNativeFlockDocId,
+  ownedLegacyFlockDocIds,
 } from '@lody/shared/native-workspace-meta-ipc';
 import { registersToBundle } from '@lody/shared/native-flock-bundle';
 import { getIpcServices, onIpcEvent } from '@/lib/electron-ipc-client';
@@ -33,12 +34,13 @@ export async function openRendererNativeWorkspaceMeta(
   if (!api || !(await api.available({ workspaceId }))) return null;
 
   const source = `renderer:${replicaName.replace(/[^\w.-]/g, '_').slice(0, 128)}`;
-  const importedKey = `lody.nativeWorkspaceMeta.imported.v2.${workspaceId}.${source}`;
+  const importedKey = `lody.nativeWorkspaceMeta.imported.v3.${workspaceId}.${source}`;
   if (localStorage.getItem(importedKey) !== '1') {
     const empty = { version: 0, entries: {} };
     const legacy = await legacyStorage.loadMeta();
     await api.importLegacy({ workspaceId, source, bundle: legacy ? legacy.exportJson() : empty });
-    for (const flockDocId of nativeFlockDocIds(workspaceId)) {
+    const stored = (await legacyStorage.inventory?.())?.flockDocIds ?? [];
+    for (const flockDocId of ownedLegacyFlockDocIds(workspaceId, stored)) {
       const body = await legacyStorage.loadFlockDoc?.(flockDocId);
       await api.importLegacy({
         workspaceId,
@@ -104,10 +106,9 @@ export async function openRendererNativeWorkspaceMeta(
 export function createRendererNativeFlockDocs(workspaceId: string): ExternalFlockDocsAdapter {
   const api = getIpcServices()?.nativeWorkspaceMeta;
   if (!api) throw new Error('native_meta_ipc_unavailable');
-  const owned = nativeFlockDocIds(workspaceId);
   return {
     capability: EXTERNAL_FLOCK_DOCS_CAPABILITY,
-    owns: (id) => owned.includes(id),
+    owns: (id) => isNativeFlockDocId(workspaceId, id),
     async open(flockDocId, onChange) {
       const observationId = crypto.randomUUID();
       let snapshot: Uint8Array | undefined;

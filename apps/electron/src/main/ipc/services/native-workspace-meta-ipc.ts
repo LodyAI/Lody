@@ -15,7 +15,7 @@ import {
   NATIVE_META_CHANNEL,
   NativeFlockCommitSchema,
   NativeFlockOpenSchema,
-  nativeFlockDocIds,
+  isNativeFlockDocId,
   NativeMetaCommitSchema,
   NativeMetaImportSchema,
   NativeMetaOpenSchema,
@@ -34,7 +34,7 @@ async function admit(workspaceId: string, flockDocId?: string) {
   if (!enabled()) throw new Error('native_meta_disabled')
   const snapshot = await readLocalPlatformSnapshot()
   if (snapshot?.workspace.workspaceId !== workspaceId) throw new Error('native_meta_scope_denied')
-  if (flockDocId !== undefined && !nativeFlockDocIds(workspaceId).includes(flockDocId))
+  if (flockDocId !== undefined && !isNativeFlockDocId(workspaceId, flockDocId))
     throw new Error('native_meta_scope_denied')
 }
 const connect = () => connectNativeRepo({ launcher: bundledNativeRepoHostLauncher })
