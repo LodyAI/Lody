@@ -9,7 +9,12 @@ export type DesktopTarget = {
   enterUsableWorkspace(world: LodyWorld): Promise<void>;
 };
 
-const targets = new Map<string, DesktopTarget>();
+// The loader can evaluate this module more than once (ESM import and CommonJS
+// require of the same file), so every instance shares one process-wide registry.
+const registryKey = Symbol.for('lody.e2e.desktopTargets');
+const targets: Map<string, DesktopTarget> = ((globalThis as Record<symbol, unknown>)[
+  registryKey
+] ??= new Map<string, DesktopTarget>()) as Map<string, DesktopTarget>;
 
 /** An embedding repository registers its own target from a support file it imports. */
 export function registerDesktopTarget(name: string, target: DesktopTarget): void {
@@ -25,10 +30,11 @@ export function activeDesktopTarget(): DesktopTarget {
   return target;
 }
 
-registerDesktopTarget('oss-local', {
-  async enterUsableWorkspace(world) {
-    if (!world.onboarding) throw new Error('Scenario is not ready to enter a workspace');
-    await world.onboarding.waitForLocalBootstrap();
-    await world.onboarding.skipConfigurationAndEnterProduct();
-  },
-});
+if (!targets.has('oss-local'))
+  registerDesktopTarget('oss-local', {
+    async enterUsableWorkspace(world) {
+      if (!world.onboarding) throw new Error('Scenario is not ready to enter a workspace');
+      await world.onboarding.waitForLocalBootstrap();
+      await world.onboarding.skipConfigurationAndEnterProduct();
+    },
+  });

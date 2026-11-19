@@ -126,19 +126,29 @@ export function createIsolatedEnvironment(
   return { ...env, ...overrides };
 }
 
-function readExtraEnvironment(): Record<string, string> {
-  const path = process.env.LODY_E2E_EXTRA_ENV_FILE;
-  if (!path) return {};
-  const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+type AppConfig = { env: Record<string, string>; args: string[] };
+
+/**
+ * `LODY_E2E_APP_CONFIG` names a JSON file `{ "env": {..}, "args": [..] }` from an
+ * embedding repository: extra environment (backend URLs, CA trust) and Chromium
+ * switches for its composition. The isolation keys always override `env`.
+ */
+function readAppConfig(): AppConfig {
+  const path = process.env.LODY_E2E_APP_CONFIG;
+  if (!path) return { env: {}, args: [] };
+  const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<AppConfig> | null;
+  const env = parsed?.env ?? {};
+  const args = parsed?.args ?? [];
   if (
-    !parsed ||
-    typeof parsed !== 'object' ||
-    Array.isArray(parsed) ||
-    !Object.values(parsed).every((value) => typeof value === 'string')
+    typeof env !== 'object' ||
+    Array.isArray(env) ||
+    !Object.values(env).every((value) => typeof value === 'string') ||
+    !Array.isArray(args) ||
+    !args.every((value) => typeof value === 'string')
   ) {
-    throw new Error(`${path} must be a JSON object of string values`);
+    throw new Error(`${path} must hold { env: Record<string, string>, args: string[] }`);
   }
-  return parsed as Record<string, string>;
+  return { env, args };
 }
 
 export class ElectronHarness {
@@ -179,10 +189,9 @@ export class ElectronHarness {
       this.hostPort = await reserveTcpPort();
     }
 
+    const appConfig = readAppConfig();
     const env = createIsolatedEnvironment({
-      // An external composition supplies its own configuration (backend URLs, CA
-      // trust) as a JSON object of strings; the isolation keys below always win.
-      ...readExtraEnvironment(),
+      ...appConfig.env,
       LANG: 'en_US.UTF-8',
       LC_ALL: 'en_US.UTF-8',
       LODY_DATA_DIR: this.lodyDataDir,
@@ -201,6 +210,13 @@ export class ElectronHarness {
       LODY_ELECTRON_USER_DATA_DIR: this.electronUserDataDir,
       NODE_ENV: 'test',
     });
+    const instanceArgs = [
+      ...appConfig.args,
+      // An external app directory is launched as an app (its package.json `main`), so
+      // app.getAppPath() is that directory and its own resources/cli is the bundled CLI.
+      process.env.LODY_E2E_APP_DIR ? ELECTRON_DIR : MAIN_ENTRY,
+      `--user-data-dir=${this.electronUserDataDir}`,
+    ];
     this.app = await _electron.launch({
       args: [
         '--js-flags=--expose-gc',
@@ -210,10 +226,7 @@ export class ElectronHarness {
         ...(options.remoteDebuggingPort
           ? [`--remote-debugging-port=${options.remoteDebuggingPort}`]
           : []),
-        // An external app directory is launched as an app (its package.json `main`), so
-        // app.getAppPath() is that directory and its own resources/cli is the bundled CLI.
-        process.env.LODY_E2E_APP_DIR ? ELECTRON_DIR : MAIN_ENTRY,
-        `--user-data-dir=${this.electronUserDataDir}`,
+        ...instanceArgs,
         '--lang=en-US',
         // macOS system-language detection is independent of Chromium's --lang.
         ...(process.platform === 'darwin' ? ['-AppleLanguages', '(en-US)'] : []),
@@ -386,6 +399,29 @@ export class ElectronHarness {
     return await this.app.evaluate(
       () => (globalThis as { __lodyE2eExternalOpens?: string[] }).__lodyE2eExternalOpens ?? []
     );
+  }
+
+  /**
+   * Opens a product link (for example a sign-in callback) through the event the OS
+   * raises for it: `open-url` on macOS, `second-instance` with the link in argv
+   * elsewhere. Isolated E2E runs hold no single-instance lock, so only that lock's
+   * process handoff is skipped; the product's own deep-link handling runs.
+   */
+  async deliverProductLink(url: string): Promise<void> {
+    if (!this.app) throw new Error('Electron application is not running');
+    await this.app.evaluate(({ app }, link) => {
+      if (process.platform === 'darwin') {
+        app.emit('open-url', { preventDefault() {} }, link);
+      } else {
+        app.emit(
+          'second-instance',
+          { preventDefault() {} },
+          [process.execPath, link],
+          process.cwd(),
+          {}
+        );
+      }
+    }, url);
   }
 
   async captureCliBacklog(): Promise<unknown> {

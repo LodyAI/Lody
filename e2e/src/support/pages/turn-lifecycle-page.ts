@@ -6,7 +6,8 @@ const CRASH_PROMPT = '[LODY-TURN-001:CRASH] The agent process dies during this t
 const RECOVER_PROMPT = '[LODY-TURN-001:RECOVER] Continue after the agent crash.';
 const BEFORE_PROMPT = '[LODY-TURN-002:BEFORE] Reply before the desktop restarts.';
 const AFTER_PROMPT = '[LODY-TURN-002:AFTER] Reply after the desktop restarts.';
-const SESSION_URL = /#\/local\/sessions\/([^/?#]+)(?:\?.*)?$/u;
+// Local and cloud workspaces route Sessions under different workspace prefixes.
+const SESSION_URL = /#\/(?:[^?#]*\/)?sessions\/([^/?#]+)(?:\?.*)?$/u;
 
 export class TurnLifecyclePage {
   constructor(
