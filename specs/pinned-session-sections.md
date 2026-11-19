@@ -1,0 +1,110 @@
+# Pinned conversation sections and ordering
+
+Status: draft
+Translation: current
+
+[中文](pinned-session-sections.zh.md)
+
+## Scenario
+
+A workspace keeps some long-lived routine conversations, such as the scheduled
+conversation that checks a mirror for updates every week. Once pinned, they mix
+with every other pinned conversation and keep changing places by recent
+activity. The user wants to choose the order of pinned conversations and to
+place them in named pin sections, such as "Maintenance".
+
+## Behavior
+
+- The sidebar pin area has one default "Pinned" section followed by any number
+  of user sections. The default section stays first and cannot be renamed,
+  deleted or dragged. A newly pinned conversation enters the top of the default
+  section.
+- The user can create, rename and delete sections, and drag a section header to
+  reorder sections.
+- The user can drag a pinned conversation to reorder it within a section or to
+  move it to another section. The context menu also offers "Move to section".
+- Deleting a section does not unpin its conversations; they return to the
+  default section.
+- Unpinning clears the conversation's section and position. Pinning it again
+  places it at the top of the default section.
+- Each section can be collapsed. The collapsed state is stored only on this
+  device.
+- Opener child conversations stay under their root conversation and move with
+  it; they are not ordered independently.
+- The mobile layout shows sections and order but offers no dragging.
+
+## Data ownership
+
+Sections and order have the same visibility as `isPinned`: they sync to every
+device, and workspace members see the same pin layout.
+
+- **Section definitions** live in a new workspace Flock row family,
+  `['pinSection', sectionId]`, with the value `{ name, orderKey }`. A section is
+  one row. Renaming or dragging it writes only that row, and deleting a section
+  deletes the row.
+- **Conversation positions** live in session metadata (meta Flock) beside
+  `isPinned`, as two new optional fields: `pinSectionId` and `pinOrderKey`.
+  Dragging a conversation writes only that conversation's metadata.
+- A conversation whose `pinSectionId` is missing or names a section that no
+  longer exists is shown in the default section. Deleting a section never
+  rewrites conversations in bulk.
+
+No room or document type is added. The workspace Flock already syncs as
+protected content in encrypted workspaces.
+
+## Ordering
+
+Sections and conversations are ordered by fractional index strings, using
+Loro's TypeScript implementation `@loro-dev/fractional-index`, which is
+byte-compatible with the Rust `loro_fractional_index` crate. The package is not
+yet published to npm, so it is vendored unchanged into `packages/shared` under
+its MIT license, recording upstream commit `8932e46ef197`, and replaced by a normal
+dependency once published. Each move generates one new key, between the moved item's new
+neighbours, with random jitter, so that two devices inserting at the same
+position do not produce the same key. Equal keys are ordered by id, so every
+client shows the same order.
+
+Pinned conversations without a `pinOrderKey`, including those pinned before
+this feature, sort after the keyed conversations in their section and keep
+their recent-activity order among themselves. There is no migration.
+
+## Compatibility
+
+- Only optional fields and one row family are added. No existing field changes
+  format.
+- Older clients ignore the unknown `pinSection` rows when parsing the workspace
+  Flock and keep showing all pinned conversations as one list ordered by time.
+- Unpinning on an older client leaves `pinSectionId` and `pinOrderKey` in
+  place. Newer clients read those fields only while `isPinned` is true, so the
+  stale values are harmless. Pinning again on a newer client places the
+  conversation back in the default section.
+
+## Out of scope
+
+- Placing each run of a scheduled task into a section automatically. Routine
+  tasks that need a fixed place use a destination that reuses one conversation
+  (`own_session` or `existing_session`) and are pinned once.
+- Private, per-member pin layouts.
+- Native iOS and Android clients. They ignore the new fields and are
+  unaffected.
+
+## Permissions
+
+Every member with workspace write permission can create, rename, delete and
+drag sections, including in encrypted workspaces; read-only members can only
+view them. Members already write the workspace Flock, for example when creating
+a private Agent Role. A write path that rejects a `pinSection` row from a
+member with write permission is a gap to fix, not a reason to narrow section
+management further.
+
+
+## Evidence
+
+Inspected implementation (not executed validation):
+
+- `isPinned` field: `packages/shared/src/schema.ts`
+- Pin writes: `packages/components/src/hooks/use-session-actions.ts` (`setSessionPinned`)
+- Current pin order: `packages/components/src/components/sidebar-updated-task-list.tsx` (`sortUpdatedItems`)
+- Workspace Flock families and unknown-family handling: `packages/shared/src/workspace-flock.ts` (`parseWorkspaceFlockKey`)
+- Protected content selection: `packages/shared/src/workspace-streams-content.ts`
+- Scheduled task destinations: `packages/shared/src/schedule-types.ts` (`ScheduleDestinationSchema`)
