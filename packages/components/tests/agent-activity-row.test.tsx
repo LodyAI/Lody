@@ -175,6 +175,71 @@ describe('live agent status', () => {
     expect(statusRow()?.textContent).toBe('Working (Worked for 8m 40s · no output for 4m)');
   });
 
+  it('measures a streaming thought and its live status as one virtual row', async () => {
+    await render(
+      liveTurn([
+        {
+          type: 'thought',
+          text: '1. Back up the binary and configuration.\n2. Confirm the backup is readable.',
+        },
+      ]),
+      { label: 'Thinking' }
+    );
+
+    const thought = [...container.querySelectorAll('ol')].find((list) =>
+      list.textContent?.includes('Confirm the backup is readable')
+    );
+    const status = container.querySelector('[data-agent-activity-status]');
+    expect(thought).toBeDefined();
+    expect(status).not.toBeNull();
+    expect(status!.closest('[data-virtual-index]')).toBe(thought!.closest('[data-virtual-index]'));
+    expect(status!.closest('.markdown-renderer')).toBeNull();
+    expect(container.querySelectorAll('[data-agent-activity-row]')).toHaveLength(1);
+  });
+
+  it('keeps the measured status before a trailing subagent summary and footer', async () => {
+    await render(
+      liveTurn(
+        [
+          {
+            type: 'thought',
+            text: '1. Inspect the worker state.\n2. Keep the live summary in view.',
+          },
+          {
+            type: 'subagent_task',
+            taskId: 'worker-1',
+            status: 'in_progress',
+            taskType: 'subagent',
+            subagentType: 'Explore',
+            description: 'Trace the streaming worker',
+            isBackgrounded: true,
+          },
+        ],
+        { modelInfo: { modelId: 'deepseek-chat', name: 'DeepSeek' } }
+      ),
+      { label: 'Thinking' }
+    );
+
+    const thought = [...container.querySelectorAll('ol')].find((list) =>
+      list.textContent?.includes('Keep the live summary in view')
+    );
+    const status = container.querySelector('[data-agent-activity-status]');
+    const subagent = container.querySelector('[data-subagent-task-id="worker-1"]');
+    const footerAction = container.querySelector('[aria-label="Turn configuration"]');
+    expect(thought).toBeDefined();
+    expect(status).not.toBeNull();
+    expect(subagent).not.toBeNull();
+    expect(footerAction).not.toBeNull();
+    expect(status!.closest('[data-virtual-index]')).toBe(thought!.closest('[data-virtual-index]'));
+    expect(
+      status!.compareDocumentPosition(subagent!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      subagent!.compareDocumentPosition(footerAction!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(container.querySelectorAll('[data-agent-activity-row]')).toHaveLength(1);
+  });
+
   it('never reports silence while the agent waits on the user', async () => {
     useTickingClock('2026-09-19T00:04:29Z');
     const { deliverUpdate } = await render(
