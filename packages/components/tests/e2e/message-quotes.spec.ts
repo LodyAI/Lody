@@ -210,10 +210,18 @@ for (const navigation of ['ArrowLeft', 'Home', 'pointer'] as const) {
         range?.startContainer instanceof Element
           ? range.startContainer
           : range?.startContainer.parentElement;
-      const lineHeight = Number.parseFloat(getComputedStyle(element!).lineHeight);
-      return { height: element!.getBoundingClientRect().height, lineHeight };
+      const style = getComputedStyle(element!);
+      const beforeContent = getComputedStyle(element!, '::before').content;
+      return {
+        display: style.display,
+        height: element!.getBoundingClientRect().height,
+        fontSize: Number.parseFloat(style.fontSize),
+        beforeContent,
+      };
     });
-    expect(caretBoxHeight.height).toBeGreaterThanOrEqual(caretBoxHeight.lineHeight - 0.5);
+    expect(caretBoxHeight.display).toBe('inline');
+    expect(caretBoxHeight.height).toBeGreaterThanOrEqual(caretBoxHeight.fontSize);
+    expect(caretBoxHeight.beforeContent).toBe('"\u200B"');
     await page.keyboard.insertText('before');
     expect(await composerText(composer)).toMatch(/^Previous line\nbefore.*\[A quote /s);
     await expect(composer.locator('[data-mention-value]')).toHaveCount(1);

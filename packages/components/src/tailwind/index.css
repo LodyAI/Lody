@@ -1299,13 +1299,11 @@ pre,
   }
 
   /* Empty caret targets before line-start mentions/quotes have no glyph metrics
-     as `display: inline`, which shrinks the native caret; give them a zero-width
-     line-height box until text is typed. */
-  [data-composer-editor] span[data-lexical-text]:empty {
-    display: inline-block;
-    width: 0;
-    height: 1lh;
-    vertical-align: top;
+     as bare `display: inline` spans; a CSS-only zero-width space gives Blink
+     and WebKit a full-height inline caret without adding a DOM character or
+     collapsing the caret like `inline-block` with `width: 0`. */
+  [data-composer-editor] span[data-lexical-text]:empty::before {
+    content: '\200B';
   }
 
   [data-composer-editor][data-empty]::before {
