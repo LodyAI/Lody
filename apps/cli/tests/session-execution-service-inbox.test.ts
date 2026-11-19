@@ -1013,6 +1013,12 @@ describe('Operation Inbox execution boundary', () => {
       const released = f.service.waitForInboxReleases();
       await vi.advanceTimersByTimeAsync(7_000);
       await released;
+      // Its prompt already ended: shutdown interrupts only bookkeeping, so the claim
+      // the next start would continue is cleared.
+      const meta = (await f.deps.workspaceDocument.repo.getDocMeta('')) as {
+        meta: SessionMeta;
+      };
+      expect(meta.meta.processingUserMsgId).toBeUndefined();
       expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeUndefined();
       expect((f.service as any).liveInboxExecutionIds.size).toBe(0);
       const db = new Database(f.storePath, { readonly: true });
@@ -1026,6 +1032,46 @@ describe('Operation Inbox execution boundary', () => {
       }
     } finally {
       raw.resolve();
+      await run;
+      await f.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it('a shutdown during a running prompt retires the input but leaves the crash trace that continues it once', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const started = createDeferred<void>(),
+      work = createDeferred<void>();
+    const f = inboxExecutionFixture(async () => {
+      started.resolve();
+      await work.promise;
+      return { stopReason: 'end_turn' };
+    });
+    let run: Promise<unknown> | undefined;
+    try {
+      await f.accept();
+      run = f.service.continueSession(f.message);
+      await started.promise;
+      f.service.quiesceInboxExecutions();
+      work.resolve();
+      const released = f.service.waitForInboxReleases();
+      await vi.advanceTimersByTimeAsync(7_000);
+      await released;
+      await run;
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(
+        true
+      );
+      const meta = (await f.deps.workspaceDocument.repo.getDocMeta('')) as {
+        meta: SessionMeta;
+      };
+      expect(meta.meta).toMatchObject({ processingUserMsgId: 'human-input' });
+      expect(meta.meta.lastHandledUserMsgId).toBeUndefined();
+      const backend = await createSessionBackend(f.doc);
+      expect((await backend.readTurn('human-input')).turn).toMatchObject({
+        status: 'processing',
+      });
+    } finally {
+      work.resolve();
       await run;
       await f.close();
       vi.useRealTimers();

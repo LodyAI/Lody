@@ -67,7 +67,7 @@ retry first recovers retained resources, then starts a replacement.
 `inbox/sqlite.ts` indexes results in the existing completion transaction, fixes release
 watermarks and persists input/batch/release receipts. `inbox/service.ts` owns coalesced
 signals, scoped workers and the shared admission gate. `inbox/legacy.ts` registers the
-single host runtime and the unfinished Session adapter. Interrupted executions retire without replay. Startup retires old active inputs and clears legacy
+single host runtime and the unfinished Session adapter. Interrupted executions retire without replay; the Session layer may follow one with a separate Lody-authored `continue` input, detected from Session metadata, not from this store ([continuation spec](../../../../specs/interrupted-turn-continuation.md)). Startup retires old active inputs and clears legacy
 blocks; `blocked` and `inbox_resources` are otherwise neither read nor written. Restart retirement
 currently emits a warning rather than a history notice because activation owns SQLite only.
 
