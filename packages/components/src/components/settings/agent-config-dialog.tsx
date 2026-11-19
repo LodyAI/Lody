@@ -486,6 +486,12 @@ const styles = stylex.create({
     transitionTimingFunction: ease.standard,
   },
   footerNarrow: { paddingInline: space[4], paddingBottom: space[3] },
+  /**
+   * Lets the Tooltip trigger wrapper stretch its Button to full width when
+   * `Dialog.Footer` stacks in `column-reverse` on narrow viewports while
+   * staying content-sized in the desktop row.
+   */
+  footerAction: { display: 'flex', flexDirection: 'column' },
   footerNote: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -633,7 +639,9 @@ const styles = stylex.create({
     flexDirection: 'column',
     gap: space[2],
     paddingInline: space[3],
-    paddingBlockStart: focus.ringWidth,
+    // `Collapsible.Panel` clips overflow, and `focus.ringWidth` collapses to 0px
+    // on pointer modality while text controls still paint their ring on focus.
+    paddingBlockStart: space[1],
     paddingBottom: space[3],
   },
   sectionHint: {
@@ -3558,7 +3566,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
           <Tooltip.Root>
             <Tooltip.Trigger
               render={
-                <span>
+                <span {...stylex.props(styles.footerAction)}>
                   <Button
                     size="small"
                     onClick={() => void submit()}
