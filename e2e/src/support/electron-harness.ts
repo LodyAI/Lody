@@ -106,6 +106,8 @@ const INHERITED_ENV_ALLOWLIST = [
   'HOME',
   'LOCALAPPDATA',
   'LODY_E2E_SHOW_WINDOW',
+  // Opt-in native Workspace Meta for local acceptance runs; its data stays under LODY_DATA_DIR.
+  'LODY_NATIVE_WORKSPACE_META',
   'PATH',
   'PATHEXT',
   'SHELL',

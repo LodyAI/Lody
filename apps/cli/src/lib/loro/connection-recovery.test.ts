@@ -79,6 +79,7 @@ describe('LoroConnectionRecoveryController watchdog room sweep', () => {
     options: {
       readonly initialTransportStatus?: TransportConnectionStatus;
       readonly initialMetaSyncCompleted?: boolean;
+      readonly externalMetadata?: boolean;
     } = {}
   ) => {
     const initialMetaSyncCompleted = options.initialMetaSyncCompleted ?? true;
@@ -91,9 +92,30 @@ describe('LoroConnectionRecoveryController watchdog room sweep', () => {
       initialMetaSyncPromise: Promise.resolve(initialMetaSyncCompleted),
       initialMetaSyncCompleted,
       onMetaRoomReady: vi.fn(),
+      externalMetadata: options.externalMetadata,
     });
     return controller;
   };
+
+  it('is connected and synced with native Meta, and never joins a legacy Meta room', async () => {
+    // External metadata has no Meta room: joining one rejects, as in loro-repo.
+    const joinMetaRoom = vi.fn(async () => {
+      throw new Error('Legacy Meta rooms are unavailable in external metadata mode');
+    });
+    const reconnect = vi.fn(async () => {});
+    const instance = createController({ joinMetaRoom, reconnect }, null, {
+      initialMetaSyncCompleted: false,
+      externalMetadata: true,
+    });
+    expect(instance.getStreamsHealth()).toBe('connected');
+    expect(instance.isRecovering()).toBe(false);
+    expect(await instance.waitUntilMetaSynced({ reason: 'command' })).toBe(true);
+    // Startup and watchdog passes find nothing to recover.
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(instance.getStreamsHealth()).toBe('connected');
+    expect(joinMetaRoom).not.toHaveBeenCalled();
+    expect(reconnect).not.toHaveBeenCalled();
+  });
 
   it('keeps one failed doc room from starting a transport-wide recovery', async () => {
     // #2194: a cross-machine read joined a room whose initial sync never

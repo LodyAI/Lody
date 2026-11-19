@@ -415,6 +415,8 @@ export interface LoroDocumentManagerOptions {
   workspaceId: WorkspaceId;
   userId: string;
   metaSub: RepoRoomSubscription | null;
+  /** Native Workspace Meta: the engine replaces the legacy Meta room. */
+  externalMetadata?: boolean;
   logger: Logger;
   initialTransportStatus?: TransportConnectionStatus;
   initialMetaSyncPromise?: Promise<boolean>;
@@ -759,6 +761,7 @@ export class LoroDocumentManager {
         workspaceId,
         userId,
         metaSub,
+        externalMetadata: externalMeta !== null,
         logger,
         // Local-only is a healthy state: with no transport registered, nothing
         // needs recovering. The Streams adapter's own status drives this once
@@ -904,6 +907,7 @@ export class LoroDocumentManager {
       workspaceId: this.workspaceId,
       logger: this.logger,
       initialMetaSub: options.metaSub,
+      externalMetadata: options.externalMetadata,
       initialTransportStatus,
       initialMetaSyncPromise: this.initialMetaSyncPromise,
       initialMetaSyncCompleted,

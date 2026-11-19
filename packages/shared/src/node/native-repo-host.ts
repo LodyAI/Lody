@@ -12,8 +12,14 @@ const EXIT_POLL_MS = 500;
  */
 export async function runNativeRepoHost(
   dataDir: string,
-  addon: Parameters<typeof ensureEngineHost>[0]['addon']
+  addon: Parameters<typeof ensureEngineHost>[0]['addon'] & {
+    readonly closeInheritedDescriptors: () => number;
+  }
 ): Promise<void> {
+  // The host outlives whoever launched it; descriptors inherited from the
+  // desktop or the daemon would stay open after they exit, so their peers never
+  // see end-of-file.
+  addon.closeInheritedDescriptors();
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
   const host = await ensureEngineHost({
     addon,
