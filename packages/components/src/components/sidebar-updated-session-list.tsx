@@ -5,6 +5,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -23,6 +24,14 @@ import {
   startSessionMentionDrag,
   subscribeSessionMentionDrag,
 } from '@/lib/session-mention-drag';
+import {
+  beginPinnedDropSettle,
+  flyPinnedDropSettle,
+  getPinnedDropSettle,
+  listenForPinnedDragOrigins,
+  subscribePinnedDropSettle,
+  takePinnedDragOrigin,
+} from '@/lib/pinned-drop-settle';
 import {
   Archive,
   Folders,
@@ -533,7 +542,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   renderHeader,
 }: SidebarUpdatedSessionListProps) {
   const preserveOrder = grouping === 'manual';
-  const pinDrag = usePinnedDropGap(items, onDropPinnedSession);
+  const pinDrag = usePinnedDropGap(items, onDropPinnedSession, pinSectionId ?? null);
   const { t } = useTranslation();
   const showBranchContext = useAtomValue(sidebarShowBranchNamesAtom);
   const merged: SidebarUpdatedSessionListLabels = useMemo(
@@ -1492,7 +1501,8 @@ const readNoDrag = () => null;
  */
 function usePinnedDropGap(
   items: readonly SidebarUpdatedItem[],
-  onDropPinnedSession: ((sessionId: string, toIndex: number) => void) | undefined
+  onDropPinnedSession: ((sessionId: string, toIndex: number) => void) | undefined,
+  sectionId: string | null
 ): PinnedDropGap | null {
   const enabled = typeof onDropPinnedSession === 'function';
   const inFlight = useSyncExternalStore(
@@ -1500,10 +1510,26 @@ function usePinnedDropGap(
     enabled ? getInFlightSessionMentionDragId : readNoDrag,
     readNoDrag
   );
+  const settle = useSyncExternalStore(
+    enabled ? subscribePinnedDropSettle : noopSubscribe,
+    enabled ? getPinnedDropSettle : readNoDrag,
+    readNoDrag
+  );
   const rowsRef = useRef<HTMLDivElement | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [gap, setGap] = useState(PINNED_DROP_DEFAULT_GAP_PX);
-  const dragged = enabled ? inFlight : null;
+  // A released row still owns the layout until it lands in its slot.
+  const dragged = enabled
+    ? (inFlight ?? (settle?.phase === 'waiting' ? settle.sessionId : null))
+    : null;
+  const flyingId = enabled && settle?.phase === 'flying' ? settle.sessionId : null;
+  // Only a live drag animates. After the release, the rows' new layout equals
+  // what is already on screen, so it must snap: the landing has one motion.
+  const animate = Boolean(enabled && inFlight);
+
+  useEffect(() => {
+    if (enabled) listenForPinnedDragOrigins();
+  }, [enabled]);
 
   useEffect(() => {
     if (!dragged) {
@@ -1535,6 +1561,25 @@ function usePinnedDropGap(
     [enabled]
   );
   const sourceHere = Boolean(dragged && layout.rootOf.has(dragged));
+
+  // The write landed: the row now renders in this section at the dropped index.
+  // Measure its slot before paint and hand the landing to the flight.
+  useLayoutEffect(() => {
+    if (!enabled || settle?.phase !== 'waiting' || settle.toSectionId !== sectionId) return;
+    if (layout.rootIds.indexOf(settle.sessionId) !== settle.toIndex) return;
+    const node = Array.from(rowsRef.current?.children ?? []).find(
+      (child) => child.getAttribute('data-pin-node') === settle.sessionId
+    );
+    const row = node?.querySelector<HTMLElement>('[data-sidebar-updated-id]');
+    if (!row) return;
+    const rect = row.getBoundingClientRect();
+    flyPinnedDropSettle(
+      { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      getComputedStyle(row).backgroundColor,
+      row.cloneNode(true) as HTMLElement,
+      getComputedStyle(row).borderRadius
+    );
+  }, [enabled, layout.rootIds, sectionId, settle]);
 
   const resolveIndex = useCallback(
     (event: DragEvent<HTMLDivElement>): number | null => {
@@ -1583,25 +1628,45 @@ function usePinnedDropGap(
     (event: DragEvent<HTMLDivElement>) => {
       const index = resolveIndex(event);
       const current = liveDragged();
-      setDropIndex(null);
-      if (index === null || !current) return;
+      if (index === null || !current) {
+        setDropIndex(null);
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
-      // End the drag now, in the same update as the move: no row may stay hidden
-      // or shifted for a frame, and when the move unmounts the source row no
-      // dragend will arrive to end it.
+      setDropIndex(index);
+      const origin = takePinnedDragOrigin(current);
+      beginPinnedDropSettle({
+        sessionId: current,
+        toSectionId: sectionId,
+        toIndex: index,
+        from: origin
+          ? {
+              left: event.clientX - origin.offsetX,
+              top: event.clientY - origin.offsetY,
+              width: origin.width,
+              height: origin.height,
+            }
+          : { left: event.clientX - 24, top: event.clientY - gap / 2, width: 0, height: gap },
+        ghost: origin?.ghost ?? null,
+        fromBackground: origin?.background ?? null,
+      });
+      // The drag ends here: when the move unmounts the source row, no dragend
+      // will arrive. The settle keeps the layout until the row lands.
       clearSessionMentionDrag();
       onDropPinnedSession?.(current, index);
     },
-    [liveDragged, onDropPinnedSession, resolveIndex]
+    [gap, liveDragged, onDropPinnedSession, resolveIndex, sectionId]
   );
 
   const nodeStyle = useCallback(
     (id: string): CSSProperties | undefined => {
+      // Under its flying copy, the landed row waits invisible, without a fade.
+      if (flyingId && (layout.rootOf.get(id) ?? id) === flyingId) return { opacity: 0 };
       if (!dragged) return undefined;
       const root = layout.rootOf.get(id) ?? id;
       if (root === dragged) {
-        return { opacity: 0, transition: PINNED_DROP_TRANSITION };
+        return { opacity: 0, transition: animate ? PINNED_DROP_TRANSITION : undefined };
       }
       let shift = 0;
       // Rows below the dragged one close its slot.
@@ -1614,10 +1679,10 @@ function usePinnedDropGap(
       if (dropIndex !== null && position >= dropIndex) shift += gap;
       return {
         transform: shift ? `translateY(${shift}px)` : undefined,
-        transition: PINNED_DROP_TRANSITION,
+        transition: animate ? PINNED_DROP_TRANSITION : undefined,
       };
     },
-    [dragged, dropIndex, gap, layout.rootOf, others, sourceHere]
+    [animate, dragged, dropIndex, flyingId, gap, layout.rootOf, others, sourceHere]
   );
 
   if (!enabled) return null;
@@ -1628,7 +1693,7 @@ function usePinnedDropGap(
     rowsStyle: !dragged
       ? undefined
       : {
-          transition: PINNED_DROP_ROWS_TRANSITION,
+          transition: animate ? PINNED_DROP_ROWS_TRANSITION : undefined,
           ...(dropIndex !== null && !sourceHere ? { paddingBottom: gap } : {}),
           ...(dropIndex === null && sourceHere ? { marginBottom: -gap } : {}),
         },

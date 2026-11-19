@@ -11,6 +11,7 @@ import {
   clearSessionMentionDrag,
   getInFlightSessionMentionDragId,
 } from '../src/lib/session-mention-drag';
+import { endPinnedDropSettle } from '../src/lib/pinned-drop-settle';
 
 const pinnedItem = {
   id: 'pinned-session',
@@ -589,7 +590,10 @@ describe('LoroSidebar pinned section', () => {
       return event as Event & { dataTransfer: { dropEffect: string } };
     };
 
-    afterEach(() => clearSessionMentionDrag());
+    afterEach(() => {
+      clearSessionMentionDrag();
+      endPinnedDropSettle();
+    });
 
     /** jsdom has no layout: give each row slot of a section a 40px height on a 41px pitch. */
     const layoutRows = (sectionId: string) => {
@@ -658,11 +662,12 @@ describe('LoroSidebar pinned section', () => {
       expect(shiftOf('m2')).toBeGreaterThan(0);
     });
 
-    it('settles every row the moment the conversation is dropped', () => {
-      renderSidebar({
-        pinnedSections: [{ id: null, name: 'Pinned', items: [chat('a'), chat('b'), chat('c')] }],
+    it('holds the gap until the moved row arrives, then flies it into its slot', () => {
+      const props = (ids: string[]): Partial<LoroSidebarProps> => ({
+        pinnedSections: [{ id: null, name: 'Pinned', items: ids.map(chat) }],
         pinSectionActions: actions(),
       });
+      renderSidebar(props(['a', 'b', 'c']));
       layoutRows('default');
       armSessionMentionDrag('a');
       const target = container?.querySelector('[data-sidebar-updated-id="c"]');
@@ -670,10 +675,38 @@ describe('LoroSidebar pinned section', () => {
       drag(target, 'drop', 110);
       // No dragend may follow: the source row can unmount when the drop moves it.
       expect(getInFlightSessionMentionDragId()).toBeNull();
-      for (const id of ['a', 'b', 'c']) {
-        expect(node(id)?.style.opacity ?? '').toBe('');
-        expect(node(id)?.style.transform ?? '').toBe('');
-      }
+      // The move has not been written yet, so nothing may snap back.
+      expect(shiftOf('b')).toBeLessThan(0);
+      expect(document.querySelector('[data-pin-drop-flight]')).toBeNull();
+
+      flushSync(() => {
+        root?.render(<LoroSidebar {...baseProps} {...props(['b', 'c', 'a'])} />);
+      });
+      expect(shiftOf('b')).toBe(0);
+      expect(shiftOf('c')).toBe(0);
+      // The row waits under its flying copy, then takes its place.
+      expect(node('a')?.style.opacity).toBe('0');
+      const flight = document.querySelector('[data-pin-drop-flight]');
+      expect(flight).not.toBeNull();
+      flushSync(() => flight?.dispatchEvent(new Event('transitionend', { bubbles: true })));
+      expect(document.querySelector('[data-pin-drop-flight]')).toBeNull();
+      expect(node('a')?.style.opacity ?? '').toBe('');
+    });
+
+    it('gives up waiting for a move that never lands', async () => {
+      renderSidebar({
+        pinnedSections: [{ id: null, name: 'Pinned', items: [chat('a'), chat('b')] }],
+        pinSectionActions: actions(),
+      });
+      layoutRows('default');
+      armSessionMentionDrag('a');
+      const target = container?.querySelector('[data-sidebar-updated-id="b"]');
+      drag(target, 'dragover', 70);
+      drag(target, 'drop', 70);
+      expect(node('a')?.style.opacity).toBe('0');
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(node('a')?.style.opacity ?? '').toBe('');
+      expect(shiftOf('b')).toBe(0);
     });
 
     it('closes the dragged row’s slot and lets the rows it passes move up', () => {

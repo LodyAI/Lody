@@ -2,8 +2,11 @@ import {
   Fragment,
   memo,
   useCallback,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
+  useSyncExternalStore,
   type ReactElement,
   type ReactNode,
 } from 'react';
@@ -22,7 +25,14 @@ import { FolderPlus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { PIN_SECTION_NAME_MAX_LENGTH } from '@lody/shared';
+import { createPortal } from 'react-dom';
 import { Dialog } from '@/ui/dialog';
+import {
+  PINNED_DROP_FLIGHT_MS,
+  endPinnedDropSettle,
+  getPinnedDropSettle,
+  subscribePinnedDropSettle,
+} from '@/lib/pinned-drop-settle';
 import { Menu } from '@/ui/menu';
 import { toast } from '@/lib/toast';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
@@ -261,6 +271,7 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
           })}
         </SortableContext>
       </DndContext>
+      {listProps.isMobile ? null : <PinnedDropFlight />}
       {actions ? (
         <PinSectionNameDialog
           target={nameDialog}
@@ -280,6 +291,70 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
 });
 
 const COLLAPSED = { all: true } as const;
+
+const readNoSettle = () => null;
+
+/**
+ * The landing of a dropped conversation: a copy of the row travels from where
+ * the drag image was released into its slot, its fill easing from the dragged
+ * look to the row's resting one, while the real row waits invisible beneath.
+ */
+function PinnedDropFlight() {
+  const settle = useSyncExternalStore(subscribePinnedDropSettle, getPinnedDropSettle, readNoSettle);
+  const flying = settle?.phase === 'flying' && settle.to ? settle : null;
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [landed, setLanded] = useState(false);
+
+  useLayoutEffect(() => {
+    if (!flying) return undefined;
+    setLanded(false);
+    const body = bodyRef.current;
+    if (body && flying.ghost) {
+      const ghost = flying.ghost.cloneNode(true) as HTMLElement;
+      // The wrapper owns the fill, so the copy's own background cannot jump.
+      ghost.style.background = 'transparent';
+      ghost.style.pointerEvents = 'none';
+      body.replaceChildren(ghost);
+    }
+    // Start from the release point, then move on the next frame.
+    const frame = requestAnimationFrame(() => setLanded(true));
+    const fallback = setTimeout(endPinnedDropSettle, PINNED_DROP_FLIGHT_MS + 200);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(fallback);
+    };
+  }, [flying]);
+
+  if (!flying || !flying.to || typeof document === 'undefined') return null;
+  const { from, to } = flying;
+  const transition = `transform ${PINNED_DROP_FLIGHT_MS}ms ease-out, background-color ${PINNED_DROP_FLIGHT_MS}ms ease-out`;
+  return createPortal(
+    <div
+      aria-hidden="true"
+      data-pin-drop-flight=""
+      onTransitionEnd={(event) => {
+        if (event.target === event.currentTarget) endPinnedDropSettle();
+      }}
+      style={{
+        position: 'fixed',
+        left: to.left,
+        top: to.top,
+        width: to.width,
+        height: to.height,
+        zIndex: 60,
+        pointerEvents: 'none',
+        overflow: 'hidden',
+        borderRadius: flying.radius,
+        transform: landed ? 'none' : `translate(${from.left - to.left}px, ${from.top - to.top}px)`,
+        backgroundColor: (landed ? flying.toBackground : flying.fromBackground) ?? undefined,
+        transition: landed ? transition : 'none',
+      }}
+    >
+      <div ref={bodyRef} />
+    </div>,
+    document.body
+  );
+}
 
 /**
  * A user section that can be dragged by its header. Only the header carries
