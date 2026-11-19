@@ -578,7 +578,24 @@ describe('LoroSidebar pinned section', () => {
 
     afterEach(() => clearSessionMentionDrag());
 
-    it('drops above the row under the pointer, in that row’s section', () => {
+    /** jsdom has no layout: give each row slot of a section a 40px height on a 41px pitch. */
+    const layoutRows = (sectionId: string) => {
+      const nodes = container?.querySelectorAll<HTMLElement>(
+        `[data-pin-section="${sectionId}"] [data-pin-node]`
+      );
+      nodes?.forEach((node, index) => {
+        Object.defineProperty(node, 'offsetTop', { configurable: true, value: index * 41 });
+        Object.defineProperty(node, 'offsetHeight', { configurable: true, value: 40 });
+      });
+    };
+    const node = (id: string) =>
+      container?.querySelector<HTMLElement>(`[data-pin-node="${id}"]`) ?? null;
+    const shiftOf = (id: string) => {
+      const match = /translateY\((-?\d+)px\)/.exec(node(id)?.style.transform ?? '');
+      return match ? Number(match[1]) : 0;
+    };
+
+    it('opens a gap under the pointer in another section and drops into it', () => {
       const pinSectionActions = actions();
       renderSidebar({
         pinnedSections: [
@@ -587,13 +604,42 @@ describe('LoroSidebar pinned section', () => {
         ],
         pinSectionActions,
       });
+      layoutRows('maintenance');
       armSessionMentionDrag('mover');
       const target = container?.querySelector('[data-sidebar-updated-id="m2"]');
-      // jsdom rows have no height, so the pointer is in the row's upper half.
-      expect(drag(target, 'dragover').defaultPrevented).toBe(true);
-      const drop = drag(target, 'drop');
+      // Below m1's middle (20px), above m2's (61px).
+      expect(drag(target, 'dragover', 50).defaultPrevented).toBe(true);
+      expect(shiftOf('m1')).toBe(0);
+      expect(shiftOf('m2')).toBeGreaterThan(0);
+      // The section the row left gives back its slot as the target opens one.
+      const rowsOf = (sectionId: string) =>
+        container?.querySelector<HTMLElement>(`[data-pin-section="${sectionId}"] [data-pin-node]`)
+          ?.parentElement;
+      expect(Number.parseFloat(rowsOf('default')?.style.marginBottom ?? '0')).toBeLessThan(0);
+      expect(Number.parseFloat(rowsOf('maintenance')?.style.paddingBottom ?? '0')).toBeGreaterThan(
+        0
+      );
+      const drop = drag(target, 'drop', 50);
       expect(drop.defaultPrevented).toBe(true);
       expect(pinSectionActions.onDropItem).toHaveBeenCalledWith('mover', 'maintenance', 1);
+    });
+
+    it('closes the dragged row’s slot and lets the rows it passes move up', () => {
+      const pinSectionActions = actions();
+      renderSidebar({
+        pinnedSections: [{ id: null, name: 'Pinned', items: [chat('a'), chat('b'), chat('c')] }],
+        pinSectionActions,
+      });
+      layoutRows('default');
+      armSessionMentionDrag('a');
+      const target = container?.querySelector('[data-sidebar-updated-id="c"]');
+      // Past c's middle (102px): the end of the list.
+      drag(target, 'dragover', 110);
+      expect(node('a')?.style.opacity).toBe('0');
+      expect(shiftOf('b')).toBeLessThan(0);
+      expect(shiftOf('c')).toBeLessThan(0);
+      drag(target, 'drop', 110);
+      expect(pinSectionActions.onDropItem).toHaveBeenCalledWith('a', null, 2);
     });
 
     it('drops at the top of an empty section through its header', () => {

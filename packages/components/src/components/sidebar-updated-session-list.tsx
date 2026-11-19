@@ -2,12 +2,16 @@ import { isElectronRenderer } from '@/lib/electron';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { SessionWindowMenuItem } from './session-window-menu-item';
 import {
-  Fragment,
   memo,
   useCallback,
+  useEffect,
   useMemo,
+  useRef,
   useState,
+  useSyncExternalStore,
+  type CSSProperties,
   type DragEvent,
+  type RefObject,
   type MouseEvent as ReactMouseEvent,
   type ReactElement,
   type ReactNode,
@@ -16,6 +20,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import {
   getInFlightSessionMentionDragId,
   startSessionMentionDrag,
+  subscribeSessionMentionDrag,
 } from '@/lib/session-mention-drag';
 import {
   Archive,
@@ -527,43 +532,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   renderHeader,
 }: SidebarUpdatedSessionListProps) {
   const preserveOrder = grouping === 'manual';
-  const [dropHint, setDropHint] = useState<PinnedDropHint | null>(null);
-  const resolveDrop = useCallback(
-    (event: DragEvent<HTMLDivElement>) =>
-      onDropPinnedSession ? resolvePinnedDrop(event, items) : null,
-    [items, onDropPinnedSession]
-  );
-  const handleDragOver = useCallback(
-    (event: DragEvent<HTMLDivElement>) => {
-      const drop = resolveDrop(event);
-      if (!drop) return;
-      event.preventDefault();
-      // Session drags only allow `copy` (mention drops); a reorder accepts the same effect.
-      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
-      setDropHint((previous) =>
-        previous?.rowId === drop.hint.rowId && previous.after === drop.hint.after
-          ? previous
-          : drop.hint
-      );
-    },
-    [resolveDrop]
-  );
-  const handleDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
-    const next = event.relatedTarget;
-    if (next instanceof Node && event.currentTarget.contains(next)) return;
-    setDropHint(null);
-  }, []);
-  const handleDrop = useCallback(
-    (event: DragEvent<HTMLDivElement>) => {
-      const drop = resolveDrop(event);
-      setDropHint(null);
-      if (!drop) return;
-      event.preventDefault();
-      event.stopPropagation();
-      onDropPinnedSession?.(drop.sessionId, drop.toIndex);
-    },
-    [onDropPinnedSession, resolveDrop]
-  );
+  const pinDrag = usePinnedDropGap(items, onDropPinnedSession);
   const { t } = useTranslation();
   const showBranchContext = useAtomValue(sidebarShowBranchNamesAtom);
   const merged: SidebarUpdatedSessionListLabels = useMemo(
@@ -713,9 +682,9 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
         data-pin-section={
           pinSectionId === undefined ? undefined : (pinSectionId ?? DEFAULT_PIN_SECTION_ATTR)
         }
-        onDragOver={onDropPinnedSession ? handleDragOver : undefined}
-        onDragLeave={onDropPinnedSession ? handleDragLeave : undefined}
-        onDrop={onDropPinnedSession ? handleDrop : undefined}
+        onDragOver={pinDrag?.onDragOver}
+        onDragLeave={pinDrag?.onDragLeave}
+        onDrop={pinDrag?.onDrop}
       >
         {buckets.map((bucket, bucketIndex) => {
           const bucketHeaderAction = bucketIndex === 0 ? headerAction : null;
@@ -763,9 +732,12 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                   onToggleCollapsed={canToggleBucket ? handleToggle : undefined}
                 />
               )}
-              {dropHint?.rowId === null ? <PinnedDropLine /> : null}
               {!collapsed ? (
-                <div className={SIDEBAR_ROW_LIST_CLASS} data-pin-section-rows="">
+                <div
+                  ref={pinDrag?.rowsRef}
+                  className={cn(SIDEBAR_ROW_LIST_CLASS, pinDrag && 'relative')}
+                  style={pinDrag?.rowsStyle}
+                >
                   {visibleNodes.map((node, nodeIndex) => {
                     const openedByTree = buildSessionRowOpenedByTreeSlot(node, t, () =>
                       handleToggleOpenedBySessions(node.item.id)
@@ -779,10 +751,13 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                             tallOpener: true,
                           }
                         : openedByTree;
-                    const hintHere = dropHint?.rowId === node.item.id ? dropHint : null;
                     return (
-                      <Fragment key={node.item.id}>
-                        {hintHere && !hintHere.after ? <PinnedDropLine /> : null}
+                      <PinnedDropNode
+                        key={node.item.id}
+                        id={node.item.id}
+                        drag={pinDrag}
+                        gutter={showTreeGutter}
+                      >
                         <SessionOpenedByTreeRow depth={node.depth} gutter={showTreeGutter}>
                           <UpdatedItemRow
                             item={node.item}
@@ -810,8 +785,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                             archiveConfirmLabel={archiveLabels.confirm}
                           />
                         </SessionOpenedByTreeRow>
-                        {hintHere?.after ? <PinnedDropLine /> : null}
-                      </Fragment>
+                      </PinnedDropNode>
                     );
                   })}
                   {showToggleFullList ? (
@@ -1492,64 +1466,190 @@ UpdatedItemRow.displayName = 'UpdatedItemRow';
 
 const identityHeader = (header: ReactElement): ReactNode => header;
 
-/** Where a dragged conversation would land; `rowId: null` is the section top (header). */
-type PinnedDropHint = { rowId: string | null; after: boolean };
+const PINNED_DROP_DEFAULT_GAP_PX = 29;
+const PINNED_DROP_TRANSITION = 'transform 160ms ease, opacity 120ms ease';
+const PINNED_DROP_ROWS_TRANSITION = 'padding-bottom 160ms ease, margin-bottom 160ms ease';
 
-function PinnedDropLine() {
-  return (
-    <div aria-hidden="true" className="relative h-0" data-pin-drop-line="">
-      <div className="absolute inset-x-2 top-0 h-0.5 rounded-full bg-sidebar-ring" />
-    </div>
-  );
-}
+type PinnedDropGap = {
+  rowsRef: RefObject<HTMLDivElement | null>;
+  rowsStyle: CSSProperties | undefined;
+  nodeStyle: (id: string) => CSSProperties | undefined;
+  onDragOver: (event: DragEvent<HTMLDivElement>) => void;
+  onDragLeave: (event: DragEvent<HTMLDivElement>) => void;
+  onDrop: (event: DragEvent<HTMLDivElement>) => void;
+};
+
+const noopSubscribe = () => () => {};
+const readNoDrag = () => null;
 
 /**
- * Resolve a drag over a pin section into the drop index among its pinned rows
- * (the dragged row excluded). Rows of opened Sessions carried in by a pinned
- * opener count as their opener, below it. Returns null for anything but an
- * in-app conversation drag.
+ * Pin-section drop target. While a conversation is dragged, the dragged row's
+ * slot closes and the rows at the drop position slide down to open a gap of
+ * its height. The drop index is read against the rows' resting layout
+ * (`offsetTop`, which transforms do not move), so the gap cannot chase the pointer.
+ * `null` for lists that accept no drop.
  */
-function resolvePinnedDrop(
-  event: DragEvent<HTMLDivElement>,
-  items: readonly SidebarUpdatedItem[]
-): { sessionId: string; toIndex: number; hint: PinnedDropHint } | null {
-  const sessionId = getInFlightSessionMentionDragId();
-  if (!sessionId) return null;
-  const rootIds = items.filter((item) => item.isPinned).map((item) => item.id);
-  const others = rootIds.filter((id) => id !== sessionId);
-  const target = event.target instanceof Element ? event.target : null;
-  const row = target?.closest('[data-sidebar-updated-id]');
-  if (!row || !event.currentTarget.contains(row)) {
-    // The header (or a folded section) means the top; the space below the rows, the end.
-    const inRows = Boolean(target?.closest('[data-pin-section-rows]'));
-    if (inRows && others.length > 0) {
-      return {
-        sessionId,
-        toIndex: others.length,
-        hint: { rowId: others[others.length - 1] ?? null, after: true },
-      };
+function usePinnedDropGap(
+  items: readonly SidebarUpdatedItem[],
+  onDropPinnedSession: ((sessionId: string, toIndex: number) => void) | undefined
+): PinnedDropGap | null {
+  const enabled = typeof onDropPinnedSession === 'function';
+  const inFlight = useSyncExternalStore(
+    enabled ? subscribeSessionMentionDrag : noopSubscribe,
+    enabled ? getInFlightSessionMentionDragId : readNoDrag,
+    readNoDrag
+  );
+  const rowsRef = useRef<HTMLDivElement | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const [gap, setGap] = useState(PINNED_DROP_DEFAULT_GAP_PX);
+  const dragged = enabled ? inFlight : null;
+
+  useEffect(() => {
+    if (!dragged) {
+      setDropIndex(null);
+      return;
     }
-    return { sessionId, toIndex: 0, hint: { rowId: null, after: false } };
-  }
-  const rowId = row.getAttribute('data-sidebar-updated-id') ?? '';
-  const isRoot = rootIds.includes(rowId);
-  const rootId = isRoot
-    ? rowId
-    : (items.find((item) => item.id === rowId)?.openedByRowSessionId ?? rowId);
-  const rect = row.getBoundingClientRect();
-  // An opened Session's row always means "below its opener's group".
-  const after = !isRoot || (rect.height > 0 && event.clientY > rect.top + rect.height / 2);
-  if (rootId === sessionId) {
-    return {
-      sessionId,
-      toIndex: Math.max(0, rootIds.indexOf(sessionId)),
-      hint: { rowId: rootId, after },
-    };
-  }
-  const index = others.indexOf(rootId);
+    const row = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-sidebar-updated-id]')
+    ).find((element) => element.getAttribute('data-sidebar-updated-id') === dragged);
+    // The list's 1px row gap travels with the slot.
+    if (row && row.offsetHeight > 0) setGap(row.offsetHeight + 1);
+  }, [dragged]);
+
+  const layout = useMemo(() => {
+    const rootOf = new Map<string, string>();
+    for (const item of items) {
+      rootOf.set(item.id, item.isPinned ? item.id : (item.openedByRowSessionId ?? item.id));
+    }
+    const rootIds = items.filter((item) => item.isPinned).map((item) => item.id);
+    return { rootOf, rootIds };
+  }, [items]);
+  const others = useMemo(
+    () => layout.rootIds.filter((id) => id !== dragged),
+    [dragged, layout.rootIds]
+  );
+  // Events read the live drag: the first dragover can arrive before a re-render.
+  const liveDragged = useCallback(
+    () => (enabled ? getInFlightSessionMentionDragId() : null),
+    [enabled]
+  );
+  const sourceHere = Boolean(dragged && layout.rootOf.has(dragged));
+
+  const resolveIndex = useCallback(
+    (event: DragEvent<HTMLDivElement>): number | null => {
+      const current = liveDragged();
+      if (!current) return null;
+      const rows = rowsRef.current;
+      if (!rows) return 0;
+      // Above the rows (the header) is the top; below them, the end.
+      const y = event.clientY - rows.getBoundingClientRect().top;
+      const middles = new Map<string, number>();
+      for (const node of Array.from(rows.children)) {
+        if (!(node instanceof HTMLElement)) continue;
+        const id = node.getAttribute('data-pin-node');
+        if (id) middles.set(id, node.offsetTop + node.offsetHeight / 2);
+      }
+      return layout.rootIds
+        .filter((id) => id !== current)
+        .filter((id) => (middles.get(id) ?? Number.POSITIVE_INFINITY) < y).length;
+    },
+    [layout.rootIds, liveDragged]
+  );
+
+  const onDragOver = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      const index = resolveIndex(event);
+      if (index === null) return;
+      event.preventDefault();
+      // Session drags only allow `copy` (mention drops); a reorder accepts the same effect.
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      setDropIndex(index);
+    },
+    [resolveIndex]
+  );
+  const onDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget;
+    if (next instanceof Node && event.currentTarget.contains(next)) return;
+    setDropIndex(null);
+  }, []);
+  const onDrop = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      const index = resolveIndex(event);
+      const current = liveDragged();
+      setDropIndex(null);
+      if (index === null || !current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onDropPinnedSession?.(current, index);
+    },
+    [liveDragged, onDropPinnedSession, resolveIndex]
+  );
+
+  const nodeStyle = useCallback(
+    (id: string): CSSProperties | undefined => {
+      if (!dragged) return undefined;
+      const root = layout.rootOf.get(id) ?? id;
+      if (root === dragged) {
+        return { opacity: 0, transition: PINNED_DROP_TRANSITION };
+      }
+      let shift = 0;
+      // Rows below the dragged one close its slot.
+      if (sourceHere) {
+        const order = Array.from(layout.rootOf.keys());
+        if (order.indexOf(id) > order.indexOf(dragged)) shift -= gap;
+      }
+      // Rows at and after the drop position open the gap.
+      const position = others.indexOf(root);
+      if (dropIndex !== null && position >= dropIndex) shift += gap;
+      return {
+        transform: shift ? `translateY(${shift}px)` : undefined,
+        transition: PINNED_DROP_TRANSITION,
+      };
+    },
+    [dragged, dropIndex, gap, layout.rootOf, others, sourceHere]
+  );
+
+  if (!enabled) return null;
   return {
-    sessionId,
-    toIndex: index < 0 ? others.length : index + (after ? 1 : 0),
-    hint: { rowId: rootId, after },
+    rowsRef,
+    // A gap opened in another section needs room below its last row, and the
+    // section the row left gives its slot back, so the sidebar keeps its height.
+    rowsStyle: !dragged
+      ? undefined
+      : {
+          transition: PINNED_DROP_ROWS_TRANSITION,
+          ...(dropIndex !== null && !sourceHere ? { paddingBottom: gap } : {}),
+          ...(dropIndex === null && sourceHere ? { marginBottom: -gap } : {}),
+        },
+    nodeStyle,
+    onDragOver,
+    onDragLeave,
+    onDrop,
   };
+}
+
+/** One row slot of a pin section; carries the drag gap's transform. */
+function PinnedDropNode({
+  id,
+  drag,
+  gutter,
+  children,
+}: {
+  id: string;
+  drag: PinnedDropGap | null;
+  gutter: boolean;
+  children: ReactNode;
+}) {
+  if (!drag) return <>{children}</>;
+  return (
+    <div
+      data-pin-node={id}
+      // A nested trunk draws into the list's 1px gap; this slot keeps that pixel
+      // inside its own (paint-contained) box, as `SessionOpenedByTreeRow` does.
+      className={gutter ? 'relative min-w-0 pb-px -mb-px' : 'min-w-0'}
+      style={drag.nodeStyle(id)}
+    >
+      {children}
+    </div>
+  );
 }
