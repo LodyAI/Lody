@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
-/** Spec: specs/workspace-export-import.md#包格式 / #bundle-format. */
+/** Spec: specs/workspace-export-import.md, "Bundle format". */
 export const BUNDLE_FORMAT = 'lody-workspace-bundle';
 export const BUNDLE_VERSION = 1;
 export const MANIFEST_PATH = 'manifest.json';

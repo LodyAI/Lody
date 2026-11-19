@@ -5,11 +5,7 @@ import {
   type SessionImportFence,
 } from '@lody/shared';
 
-/**
- * Spec: specs/workspace-export-import.md, "来源工作区 ≠ 目标工作区".
- * Entity ids, peers and user ids are kept; only room ids that embed the workspace id
- * change. Machine rooms never cross workspaces.
- */
+/** Only room ids that embed the workspace id change; machine rooms never cross. */
 export function mapRoomId(
   roomId: string,
   sourceWorkspaceId: string,
@@ -30,22 +26,14 @@ export function mapMetaKey(
   return [...key];
 }
 
-/**
- * Schedule registry rows that describe one machine's runs or pending manual requests
- * stay behind; only definitions and deletion records move.
- */
+/** Only schedule definitions and deletion records cross; per-machine run rows stay. */
 export function crossWorkspaceRowWithheld(codec: string, key: readonly unknown[]): boolean {
   return codec === 'schedule-registry/v1' && key[0] !== 'schedule' && key[0] !== 'tombstone';
 }
 
 /**
- * Spec owner decision 11: a cross-workspace import does not rewrite the imported
- * sessions or schedules. It records on their metadata which input and which schedule
- * activation came from the bundle, scoped to the target workspace; execution there
- * skips exactly those (`getImportFence`, `isScheduleImportFenced`). New input and a
- * schedule resumed there run normally, and another workspace ignores the fence.
- * Every user turn and queued item present in the imported document is fenced: by
- * provenance, not by enumerating which states the dispatcher would act on.
+ * Spec decision 11: fences every user turn and queued item in the imported document,
+ * so the target workspace never runs them; other workspaces ignore the fence.
  */
 export function sessionImportFence(
   doc: LoroDoc,

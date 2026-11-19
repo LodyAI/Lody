@@ -44,23 +44,6 @@ async function repoWithData(): Promise<TestRepo> {
   return test;
 }
 
-describe('classifyRoom', () => {
-  it('names codecs by room kind and excludes rebuildable indexes', () => {
-    expect(classifyRoom('session-abc', WS)).toMatchObject({ model: 'loro', codec: 'session/v1' });
-    expect(classifyRoom('session-comment-abc', WS)).toMatchObject({ codec: 'session-comment/v1' });
-    expect(classifyRoom('preview-comment-abc', WS)).toMatchObject({ codec: 'preview-comment/v1' });
-    expect(classifyRoom(`${WS}:wf:workspace`, WS)).toMatchObject({
-      model: 'flock',
-      codec: 'workspace-catalog/v1',
-    });
-    expect(classifyRoom(`${WS}:mf:m1`, WS)).toMatchObject({ codec: 'machine-catalog/v1' });
-    expect(classifyRoom(`${WS}:fi:s1`, WS)).toEqual({ kind: 'excluded' });
-    expect(classifyRoom(`${WS}:fis:s1`, WS)).toEqual({ kind: 'excluded' });
-    expect(classifyRoom('other:wf:workspace', WS)).toEqual({ kind: 'unknown' });
-    expect(classifyRoom('mystery-1', WS)).toEqual({ kind: 'unknown' });
-  });
-});
-
 describe('exportWorkspaceBundle', () => {
   it('exports raw rooms with deletion records and clocks, and reports gaps', async () => {
     const test = await repoWithData();

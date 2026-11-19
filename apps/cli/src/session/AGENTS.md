@@ -2,10 +2,9 @@
 
 `CLAUDE.md` links here; edit this file.
 
-The 1,380-word ceiling preserves complete dispatch identity, commit identity precedence and
+The 1,340-word ceiling preserves complete dispatch identity, commit identity precedence and
 output-lifetime rules alongside existing authorization and execution boundaries, including
-encrypted starts that run only signed input and input fenced by workspace imports; the
-default ceiling had no room for those rules.
+encrypted starts that run only signed input; the default ceiling had no room for those rules.
 
 [Docs](README.md); [worktree rules](worktree/AGENTS.md).
 
@@ -50,8 +49,6 @@ default ceiling had no room for those rules.
 - Never replay late history; recovery is a new send. Use last row per ID; stop no-progress repairs.
 - `hasPendingUserTurnActivation` is the ONLY pending-turn predicate; consumers never compare
   pointers.
-- Input and queued items fenced by a workspace import (`getImportFence`) never dispatch
-  in the workspace the fence names; other workspaces ignore the fence.
 - Stop data: control doc; meta: pointer. Never scan old docs for work or change active presence
   here (`../lib/loro/session-active-presence.ts`).
 - Bound reconciliation per README (no per-trigger scans/throttles); close

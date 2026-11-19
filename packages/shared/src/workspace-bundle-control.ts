@@ -1,10 +1,6 @@
 import { z } from 'zod';
 
-/**
- * Local daemon control for workspace bundles (specs/workspace-export-import.md).
- * On the local platform the daemon owns the only replica, so the CLI and desktop
- * ask it to read or write a bundle at an absolute path chosen by the same user.
- */
+/** Local daemon control for workspace bundles at an absolute path. */
 export const LOCAL_WORKSPACE_BUNDLE_PATH = '/workspace-bundle';
 
 const AbsolutePathSchema = z

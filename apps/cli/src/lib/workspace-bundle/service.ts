@@ -15,11 +15,7 @@ import {
 } from './import';
 import type { BundleGap } from './manifest';
 
-/**
- * The workspace the operation runs in. `syncRoom` brings one room up to date with
- * its remote (download before export, upload after import); it is absent on the
- * local platform, where the daemon's repo is the only replica.
- */
+/** `syncRoom` downloads before export and uploads after import; absent locally. */
 export type BundleWorkspace = {
   id: string;
   repo: LoroRepo<JsonObject>;

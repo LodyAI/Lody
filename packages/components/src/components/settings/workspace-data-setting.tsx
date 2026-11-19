@@ -19,11 +19,7 @@ import {
   type WorkspaceBundlePlan,
 } from '@lody/shared/workspace-bundle-control';
 
-/**
- * Settings > Data: export the whole workspace to a bundle file, or merge one in
- * (specs/workspace-export-import.md). Desktop only: main shows the file dialogs and
- * the local agent does the work. Owners and admins only.
- */
+/** Settings > Data: workspace bundle export and import (desktop, owners and admins). */
 export type WorkspaceBundleApi = {
   exportWorkspace(input: {
     workspaceId: string;
@@ -66,7 +62,7 @@ export type ImportPlanSummary = {
 };
 
 /** What a dry run says the import would do, in the terms people use. */
-export function summarizeImportPlan(plan: WorkspaceBundlePlan): ImportPlanSummary {
+function summarizeImportPlan(plan: WorkspaceBundlePlan): ImportPlanSummary {
   const kinds = new Map<BundleKind, KindSummary>();
   const skipped: ImportPlanSummary['skipped'] = [];
   for (const room of plan.rooms) {

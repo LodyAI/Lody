@@ -1,11 +1,6 @@
 import type { Flock } from '@loro-dev/flock-wasm';
 
-/**
- * Spec: specs/workspace-export-import.md, "权限与安全". An import may add rows, but it
- * may change or delete an existing target row only where the importer could make
- * the same edit through the ordinary product rules. Raw Flock bytes cannot be
- * merged partially, so one violation rejects the whole room.
- */
+/** An existing row changes only where the importer could edit it; one violation rejects the room. */
 export type AuthorizationContext = {
   actorUserId: string;
   /** Owner of the machine a machine catalog describes, read from target metadata. */

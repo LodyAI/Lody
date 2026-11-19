@@ -5,430 +5,183 @@ Translation: current
 
 [中文](workspace-export-import.zh.md)
 
-A workspace owner wants to back up a whole workspace, then merge it back after
-changing device or storage. Lody itself must move data from the old loro-repo (TS)
-and old Flock storage into native loro-repo-rs. The existing `lody export` produces
-human-readable Markdown/JSON. It drops deletion records, clocks and peers, so it
-cannot be imported. `lody migrate --from-oss` covers only one direction, local OSS
-to cloud. This Spec defines a lossless, verifiable, mergeable workspace bundle. It
-is the shared base for backup, device change and every future storage migration.
+A workspace owner wants to back up a whole workspace and merge it back after changing
+device or storage, and Lody must move data from the old loro-repo storage into native
+loro-repo-rs. The human-readable `lody export` drops deletion records, clocks and peers,
+and `lody migrate --from-oss` only goes from local OSS to cloud. This Spec defines a
+lossless, verifiable, mergeable workspace bundle shared by backup, device change and
+storage migration.
 
-This is a draft for review; the implementation and its limits are listed under Evidence. The owner has already decided
-the following (confirmed 2026-11-19), which this document does not reopen:
+## Owner decisions
+
+Confirmed by the owner on 2026-11-19; this document does not reopen them.
 
 1. Only workspace owners and admins may export or import.
-2. An encrypted (E2EE) workspace is exported as a plaintext bundle, decrypted
-   locally by an authorized member device.
-3. Import merges into an existing workspace. It is not limited to empty or new
-   workspaces.
-4. "Full" covers only data the exporter can already read; the rest is recorded as
-   coverage gaps.
-5. A bundle is independent of whether its source workspace was encrypted: the
-   format is identical, and any bundle imports into an ordinary or encrypted
-   workspace without extra confirmation.
-6. The bundle itself has no passphrase encryption.
+2. An encrypted (E2EE) workspace exports a plaintext bundle, decrypted locally by an
+   authorized member device.
+3. Import merges into an existing workspace, not only an empty one.
+4. "Full" covers only data the exporter can read; the rest is recorded as gaps.
+5. The bundle format does not depend on whether the source was encrypted, and any
+   bundle imports into either kind of workspace without extra confirmation.
+6. The bundle has no passphrase encryption.
 7. Machine configuration is not imported across workspaces.
-8. Roost sessions are exported without signatures: content is exported as read and
-   rewritten by the importer.
+8. Roost conversations are exported without signatures and rewritten on import.
 9. Prompt Shortcuts are in the first version.
-10. A same-ID session never overwrites the target; it is skipped or imported as a
-    conflict copy.
-11. A cross-workspace import does not rewrite imported sessions and schedules; it
-    fences them in the target workspace instead (chosen 2026-11-19).
+10. A same-ID session never overwrites the target; it is skipped or copied.
+11. A cross-workspace import fences imported sessions and schedules in the target
+    instead of rewriting them.
+12. Imported conversations are shared: every member of the target workspace can read
+    them, and nobody can edit them.
 
-The following are not the owner's words but this document's recommendations or
-inferences, labeled where they appear: deduplication and skip rules for lossy Roost
-import, distinguishing same-ID sessions by origin and skipping by default
-(recommendation), and the Prompt Shortcuts visibility rules (inferred by the
-coordinator from the owner's privacy principle).
+Items labelled recommendation or inference below are not owner decisions.
 
-## Scenario and responsibilities
+## What is exported
 
-```mermaid
-flowchart LR
-  subgraph Source[Sources]
-    L[Old TS Repo / SQLite / IDB]
-    N[Native engine]
-    E[E2EE workspace: decrypted locally]
-  end
-  Source --> X[Exporter: raw bytes per room + blobs]
-  X --> B[(Workspace bundle: manifest + chunks + hashes)]
-  B --> I[Importer: verify → dry run → merge per room]
-  I --> T[Target workspace: native engine, sealed/uploaded per target mode]
-```
+"Full" means every room of collaborative workspace data the exporter may read:
+workspace Meta, the workspace catalog (projects, MCP definitions, Roles), session and
+schedule documents with their registries, machine catalogs, Preview and legacy
+comments, legacy task documents, Roost turns (lossy), attachment blobs and Prompt
+Shortcuts. Rebuildable indexes (file index FI/FIS), transient channels, machine-local
+runtime state, unsent drafts and cloud service records (usage, members, sharing) are
+not exported.
 
-- The **exporter** reads raw CRDT bytes (Loro snapshots, Flock files) room by room
-  through a source adapter, plus referenced blobs, and writes the bundle. It never
-  converts data to JSON and rebuilds it.
-- The **bundle** is a self-describing, versioned file that can be streamed in
-  chunks. Its manifest lists each entry's format, size and hash.
-- The **importer** verifies the whole bundle, runs a dry run that writes nothing
-  and reports the impact, then merges room by room into the target with CRDT
-  merge. An encrypted target reseals with its existing keys. The renderer never
-  takes part.
-- A **domain codec** is the only code each room kind needs: room recognition,
-  format version, references, import validation and, when needed, format
-  conversion. Migration, backup and device change share the same codecs.
-
-## Export scope
-
-"Full" means every room of collaborative workspace data **that the exporter is
-allowed to read**. It does not mean every byte on the server.
-
-| Domain                                                                    | Room / storage                                                                                        | Exported       | Notes                                                                                                                                                                   |
-| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Workspace Meta                                                            | Meta Flock (`e/m/ef…`)                                                                                | Yes            | Includes deletion records; decides whether other rooms are visible                                                                                                      |
-| Workspace catalog: projects, MCP definitions, Roles, project MCP defaults | `<ws>:wf:workspace` Flock                                                                             | Yes            | Shared definitions only; MCP credentials are never in these rows                                                                                                        |
-| Session control and history                                               | `session-*` Loro documents                                                                            | Yes            | Full oplog, including unknown fields and opaque entries                                                                                                                 |
-| Roost session bodies                                                      | Today the executing machine's local `roost-history.sqlite3`; a Roost room under native                | Yes (lossy)    | See "Roost and Prompt Shortcuts" below. The writer identity seed is never exported                                                                                      |
-| Machines and agent configuration                                          | `<ws>:mf:<machine>` Flock, `machine-*` documents, legacy `agent-*` documents                          | Yes            | Restricted on import, see below; the durable command queue (`cmd` family) is never imported                                                                             |
-| Schedules                                                                 | `<ws>:sr` Flock + `schedule-*` documents                                                              | Yes            |                                                                                                                                                                         |
-| Preview comments                                                          | Old: one Loro document per session; new: Flock rows                                                   | Yes            | The bundle keeps the source format; import converts to the target format                                                                                                |
-| Legacy task documents, legacy session comments                            | `task-*`, `${ws}:ti`, `session-comment-*`                                                             | Yes            | Losslessness only; no new feature                                                                                                                                       |
-| Attachments, images                                                       | Cloud: stored under `<ws>/<session>/<id>`; local: `session-files/<ws>/`                               | Yes (blobs)    | Only those referenced by current or historical versions; deduplicated by content hash. Cloud files expire after 90 days; unreachable ones become gaps                   |
-| Code Collab content-addressed snapshots                                   | Executing machine's local `code-collab-v2/<ws>/diff-store.sqlite3`, 100-day / 1 GiB retention         | Partly (blobs) | Read from the owning machine (directly on this machine, otherwise through existing Machine RPC and its permissions while online); offline or collected ones become gaps |
-| Prompt Shortcuts                                                          | `shortcut-index:<ws>:<owner>:<private\|workspace>`, `shortcut-body:*` outside the workspace namespace | Yes            | All of the exporter's own plus others' workspace-shared ones; import rules below. E2EE workspaces do not support Shortcuts yet                                          |
-| File index FI/FIS                                                         | `<ws>:fi:*` / `fis`                                                                                   | No             | Rebuilt by its owner; 180-day TTL                                                                                                                                       |
-| Presence, machine-monitor, ephemeral                                      | Transient channels                                                                                    | No             | Not durable data                                                                                                                                                        |
-| Machine-local runtime state                                               | Automation ledger, schedule runtime, operations/inbox, PR poller SQLite                               | No             | Belongs to the executing machine, not to collaborative workspace data                                                                                                   |
-| Uncommitted pending sends                                                 | Renderer IndexedDB `lody-session-inputs-v1`                                                           | No             | Not yet conversation content; export asks the user to send or discard them first                                                                                        |
-| Usage, notifications, session sharing, members                            | Cloud service records                                                                                 | No             | Not CRDT data; usage remains available through human-readable `lody export`                                                                                             |
-
-**Never exported:** all credentials (provider logins, API keys, MCP local
-authentication values, keychain entries, Streams/cloud tokens, GitHub
-credentials); all keys and device identities (E2EE device/epoch keys, ledger,
-recovery vault, host identity keys, pairing and custody receipts); members, roles,
-invitations, billing/plan/usage billing; machine-local runtime state (worktrees,
-terminals, local ACP agent sessions, source directories); caches and UI
-preferences.
-
-**Coverage report:** entries the exporter cannot read (no permission, expired in
-the cloud, machine offline, unknown source format) are never skipped
-silently. The manifest records each as a `gap` with its reason, and import and the
-UI show "this bundle is incomplete". In an ordinary workspace an owner/admin cannot
-necessarily read other members' private machine sessions (see
-[session access](session-access.md)), so "full" covers only what the exporter can
-read (owner decision).
+Credentials, keys, device identities, ledger, members, roles, invitations and billing
+are never exported. Anything the exporter cannot read is recorded in the manifest as a
+gap with its reason and shown as "this bundle is incomplete"; nothing is skipped
+silently.
 
 ## Bundle format
 
-A bundle is a ZIP64 file (store mode, no further compression) with extension
-`.lodybundle`; the CLI may also write an equivalent directory. ZIP allows streaming
-writes and random reads on every platform, so a large bundle can be verified or
-imported partially.
+A `.lodybundle` is a ZIP64 file with stored entries: raw room bytes in chunks of at
+most 64 MiB, blobs named by SHA-256, and `manifest.json` written last. The manifest
+records the source workspace and exporter, each room's codec, encoding, version and
+chunk hashes, blobs, gaps and a digest of itself. A higher major version is rejected.
 
-```text
-manifest.json                    canonical JSON, written last; without it the bundle is incomplete
-rooms/<model>/<sha256>.<n>       raw room bytes, chunks of at most 64 MiB
-blobs/sha256/<ab>/<sha256>       attachments, images, diff snapshots, named by content hash
-```
+- **Lossless:** rooms hold only raw SDK bytes (`Flock.exportFile()`, complete Loro
+  snapshots), so deletion records, clocks, peers and unknown fields survive. Rebuilding
+  through scan/put or JSON is forbidden.
+- **Consistency:** each room is a complete state of itself; Meta is read first and
+  rooms created later are not included.
+- **Integrity, not authenticity:** hashes detect corruption and truncation. An
+  owner/admin can forge plaintext anyway; safety comes from authorization at import.
+- **Protection:** the file is written only where the user chose, created 0600 and
+  published atomically, and never uploaded. Export warns that anyone holding it can
+  read every conversation.
 
-Manifest fields (v1):
+## Import
 
-- `format: "lody-workspace-bundle"`, `version: 1`. A higher major version is
-  rejected, not guessed.
-- Source: workspace ID, exporter account and device ID, Lody and SDK versions,
-  export start and end time. Whether the source was encrypted is not recorded:
-  decrypted content from an encrypted workspace has exactly the ordinary format.
-- Each room entry: source room ID, `model` (`meta` / `flock` / `loro` / `roost`),
-  `codec` (such as `session-loro/v1`, `preview-comment-loro/v1`), `encoding`
-  (`flock-file/v1` = `Flock.exportFile()` / `exportFlockRaw` bytes;
-  `loro-snapshot/v1` = complete Loro snapshot; `roost-turns/v1` = Roost turns as read, lossy), source version
-  (Loro VV / Flock version), chunk list with per-chunk and whole SHA-256, and whether
-  the source contains unuploaded local edits.
-- Blob entries: SHA-256, length, kind, original file name/MIME (display only).
-- `gaps`: uncovered entries and their reasons.
-- `digest`: SHA-256 of the rest of the manifest (canonical JSON).
+1. **Verify** every hash; any failure leaves the target untouched.
+2. **Admit:** check the importer's role and that every codec is known; an unknown codec
+   rejects the whole bundle.
+3. **Dry run** on detached copies and report additions, updates, skipped rooms with
+   reasons and gaps. Nothing is written until the user confirms.
+4. **Write** bodies, then catalogs, then Meta, so titles appear only once their bodies
+   exist. An interrupted import on today's storage may briefly show untitled rows until
+   it is rerun.
+5. **Finish** with a visible import receipt in the target workspace.
 
-**Lossless:** rooms store only raw SDK export bytes, so deletion records, HLC
-clocks, peers, metadata, unknown fields and container identity are kept as is.
-Rebuilding Flock through `scan → put` and Loro through JSON is forbidden, matching the
-[migration plan](https://github.com/LodyAI/Lody/blob/native-repo-integration/.agents/docs/electron-loro-repo-rs-migration.zh.md#5-旧数据共存和回滚)
-and the [OSS migration rules](../apps/cli/src/lib/oss-migration/AGENTS.md).
+Merging is ordinary CRDT merge, as if two offline devices reconnected. A newer target
+deletion wins and is not resurrected; a newer deletion in the bundle deletes target
+data, and the dry run lists it. Inputs already executed never become pending again.
 
-**Consistency:** the SDK has no atomic cross-room snapshot. Each room is a complete
-state of itself at some moment. Export reads Meta first and then the rooms it
-references; rooms created later are not included. A referenced but missing room is
-a `gap`.
+**Same-ID sessions (recommendation):** if both documents share a peer in their version
+vectors they have one origin, such as a restore, and merge normally. Otherwise the
+session is skipped with its Meta, comments and attachments, and listed by title. A
+conflict copy was not chosen because a new ID ripples through every reference and
+breaks idempotency.
 
-**Verification:** hashes detect corruption and truncation, not tampering. An
-owner/admin holding a plaintext bundle can forge any content anyway. Bundle
-authenticity is not a security premise; safety comes from authorization at import
-(below).
+**Recovery:** a journal keyed by bundle room id lets a rerun of the same bundle
+continue; reimporting merged rooms is a no-op. There is no rollback, because merged
+CRDT data cannot be withdrawn; completing the import is the recovery. Import completes
+when the target is locally durable, and upload is retried by normal sync.
 
-**Protecting the bundle:** the bundle has no extra encryption (owner decision); only these basics apply:
+### Into another workspace
 
-- Write only to the location chosen in the save dialog; the CLI requires `--out`.
-  The file is created 0600 (Windows: current-user-only ACL) under a temporary name
-  and atomically renamed after `manifest.json` is written.
-- Before export, warn that the file contains every conversation body and
-  attachment and anyone holding it can read them.
-- Never uploaded automatically, never placed in the cloud, workspace data directory
-  or logs.
+Entity IDs, peers and user IDs are kept. Room ids that embed the workspace id are
+mapped to the target. Machine rooms stay behind, so imported sessions show their
+original machine as unavailable. Per-machine schedule run rows stay behind as well.
 
-## Import merge semantics
+Imported sessions and schedules are not rewritten. Their metadata gets an import fence
+naming the target workspace, listing the user input, queued items and schedule
+activation from the bundle. Execution in that workspace skips exactly those; new
+messages and schedules resumed there run normally. Other workspaces ignore the fence,
+so a bundle taken back to the source does not stop its originals.
 
-### Flow
+Existing visibility requires the conversation's machine to be visible, or the reader to
+own it, and imports meet neither. Imported conversations are therefore shared (decision
+12): every member of the fenced workspace reads them and no other workspace gains
+access. Conversations that were private in the source become readable to the whole
+target; only an owner or admin can import, and only what they could read. The fence
+records the importer as provenance.
 
-1. **Verify:** stream the bundle, check every chunk hash and stage it in a local
-   directory (0700). Any failure stops; the target is untouched.
-2. **Admit:** check the importer's role, target workspace mode, bundle version and
-   that every codec is known. An unknown codec rejects the whole bundle instead of
-   being treated as empty.
-3. **Dry run:** in a temporary native namespace isolated from the target, merge the
-   target's current state with the bundle, compute per codec which rows/documents
-   would change, and report additions, updates, rejected rooms with reasons,
-   mappings and coverage gaps. The UI shows this report and writes only after
-   confirmation.
-4. **Write:** merge room by room in dependency order, Meta last: blobs → body
-   documents (sessions, schedules, comments…) → catalog Flocks (wf, sr, mf) → Meta.
-   Source titles and other metadata appear only once Meta is merged, so an
-   interruption never shows "a titled session that opens empty". Today's loro-repo
-   storage marks a document as existing once a non-empty body is written, so an
-   interrupted import may briefly list untitled entries until the same bundle is
-   imported again.
-5. **Finish:** write an import receipt and, across workspaces, fence the imported
-   sessions and schedules (below).
+### Into an E2EE workspace
 
-### CRDT merge result
+Import runs on an admitted owner/admin device. Writes go through its protected
+namespace, resealed with the target's current epoch key; attachments get fresh file
+keys. Signed execution intents in the bundle fail verification and never run, and the
+importer never re-signs them. Ledger, members, devices and sharing policies are
+outside the bundle.
 
-- Each room is merged with `importRoomState` (Loro: `importLoroRaw`). The result
-  equals two offline devices reconnecting: Loro merges causally, Flock takes LWW by
-  HLC per key, and deletion records participate.
-- **Target deletions are not resurrected:** a newer target deletion wins under LWW.
-  For a session whose body the target has purged while Meta keeps the deletion
-  record, the importer skips that body room and leaves no orphan. Conversely, a newer
-  deletion in the bundle deletes the target's data; that is what merge means, and the
-  dry-run report lists everything that would be deleted.
-- Merge is monotonic: inputs already executed or dequeued do not return to pending
-  because older state was imported.
-- **Sessions with the same ID:** the owner decided a same-ID session never
-  overwrites the target and is skipped or imported as a conflict copy. The following
-  refinement is a **recommendation**: when the target already has a session with the
-  same ID, the importer first checks whether both share an origin, meaning the two
-  Loro documents share causal history (overlapping operations from the same peer in
-  their version vectors; peers are random 64-bit values, so sharing one means a
-  common origin). A shared origin means it is the same session, for example a backup
-  restore or a reimport, and it merges normally. No shared origin is a genuine ID
-  conflict, which should not happen normally; when it does, the recommended default is to **skip**
-  that session together with its Meta row, Preview comments and attachments. The
-  target is not overwritten and the room is not rejected as a whole; the dry-run
-  report lists skipped sessions by title. A conflict copy was not chosen because a
-  copy needs a new session ID, which ripples through the Meta row, parent links of
-  child Tabs/Side Chats, Preview comments, attachment storage paths, forks and
-  references, amounting to rewriting data; each import would also create yet another
-  copy, breaking idempotency. Users who need that data can import the bundle into
-  another workspace.
+## Authorization
 
-### Idempotency and recovery
+The local OSS desktop's single user is the owner; cloud workspaces use the member role,
+and E2EE workspaces the role in the verified ledger. Export only reads what the
+exporter can already sync, so its role check is product policy plus audit. Import's
+real defense is per-row validation: an existing target row changes only where the
+importer could change it through the ordinary product rules (Roles, machine rows,
+sharing grants). One violation rejects the whole room, because raw Flock bytes cannot
+be merged partially. Both recheck the role before each room and stop on revocation.
 
-- Merging the same bytes again is a no-op (the version is already covered) and
-  causes no new upload.
-- A local import journal keyed by `(target workspace, bundle digest)` records each
-  room as `pending / imported / rejected`, fsynced and atomically renamed. After an
-  interruption, rerunning the same bundle continues; importing a completed room again
-  is a no-op.
-- **No half-imported state** means user-visible data appears only once Meta is
-  merged, and Meta is a single-room write that is atomic by itself. The SDK has no
-  cross-room transaction and merged CRDT data cannot be withdrawn, so rollback is
-  not an option; completing the import is. Rooms rejected in the dry run receive no
-  bytes.
-- Import completes once the target is locally durable. Upload progress is shown
-  separately; failures are retried by normal sync and do not fail the import.
-
-### Source workspace ≠ target workspace
-
-| Reference                                                         | Handling                                                                                                                                                                                                                                                              |
-| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Entity IDs (session, project, schedule, Role, comment)            | Kept. They are random UUIDs, so independent workspaces never collide; sessions with the same ID follow "Sessions with the same ID" above. Keeping them also makes reimport idempotent                                                                                 |
-| Rooms embedding the workspace ID (`<ws>:wf:workspace`, `<ws>:sr`) | Rewritten to the target workspace ID; row contents unchanged                                                                                                                                                                                                          |
-| Loro peers, Flock clock peers                                     | Kept, never remapped (remapping breaks CRDT identity and idempotency)                                                                                                                                                                                                 |
-| User IDs (authors, `SessionMeta.userId`, Role creators)           | Kept as provenance and grant nothing; non-members display as "unknown member"                                                                                                                                                                                         |
-| Machines (`<ws>:mf:<machine>`, `SessionMeta.machineId`)           | Machine rooms are not imported; sessions keep the original machine ID and show "machine unavailable", read only; every member of the target sees them (owner decision, below)                                                                                         |
-| Attachment/image references                                       | Blobs are uploaded to the target (blobs the target still has are skipped on same-workspace restore); history is not rewritten. A "old reference → new reference" map is written at the session HEAD, reusing the OSS migration's `resolveArchivedAttachment` approach |
-
-After a cross-workspace import, imported sessions and schedules are not rewritten
-(option (b), chosen by the owner on 2026-11-19). The importer records an import fence
-on their metadata: which user input, queued items and schedule activation came from
-the bundle, naming the target workspace. Execution in the target skips exactly that
-input and activation; new messages and a schedule resumed in the target run as usual.
-A fence applies only to the workspace it names, so importing the target's bundle back
-into the source leaves the source's original sessions and schedules untouched. Machine
-durable commands do not migrate. A same-workspace restore adds no fence, because merge
-itself is monotonic.
-
-**Who sees imported conversations (owner decision, 2026-11-19: imports are shared).** Existing visibility requires the conversation's machine to be visible in this workspace, or the person to be its owner; cross-workspace imports meet neither, so they would be hidden from everyone. Imported conversations are therefore shared: every member of the workspace the fence names sees them, read only, and no other workspace gains visibility. A conversation that was private in the source becomes readable to the whole target workspace; only an owner or admin can import, and the bundle holds only what that person could read. The fence still records the importer (`importedBy`) as provenance.
-
-### Importing into an E2EE workspace
-
-- Import must run on an admitted owner/admin personal device of the target
-  workspace. Writes go through that device's protected native namespace, whose
-  existing protector reseals them with the target's **current** epoch key and this
-  device's signature. Bundle plaintext never travels through a plaintext cloud path.
-- Attachment blobs are reuploaded with fresh random file keys. The map lives in
-  protected conversation content, never in URLs or plaintext metadata.
-- Signed execution intents carried in the bundle fail signature verification in the
-  target and are therefore not executable. The importer never re-signs old intents.
-- Import writes only CRDT content rooms. Ledger, members, devices and machine
-  sharing policies are outside the bundle, and the importer has no ability to write
-  them; they come only from their own signing workflows.
-- Conversely, a bundle exported from an encrypted workspace imports into an ordinary
-  workspace through the same flow as any other bundle (owner decision).
-
-## Authorization and security
-
-**Who may use it:** the local OSS desktop has one local user, treated as owner.
-Ordinary cloud workspaces use the cloud member role. E2EE workspaces use the role of
-this device's member in the **verified ledger**, never a server-reported role field.
-
-**Where checks happen:**
-
-- Export: checked locally before starting; the cloud composition also requests an
-  export registration from the cloud (role check plus audit). Note that export reads
-  only data the exporter can already sync, so a modified client that bypasses the
-  local check reads nothing more. The export role restriction is product policy plus
-  audit; the real read boundary remains existing sync/decryption permission.
-- Import: checked locally; the cloud composition requests an import registration.
-  The real defense is **per-row validation**: every change computed by the dry run
-  must pass the same authorization rules the domain's ordinary write commands use
-  (for example only users permitted by `canManageAgentRole` change a Role, only the
-  machine owner changes machine rows, session sharing grants belong to the machine
-  owner). Any failure rejects the whole room and is reported: raw Flock bytes cannot
-  be merged partially, and rejecting a whole room is safer than silently rewriting
-  it. Import therefore cannot do anything the importer could not do through the
-  ordinary UI.
-- Writes go through the normal sync path, where existing cloud room write
-  permissions still apply.
-
-**Revocation:** export and import recheck the role before each room (cloud role
-subscription; ledger head for E2EE). On revocation they stop at once: export does
-not write `manifest.json`, so the leftover file cannot be imported; import stops at
-the current room and keeps its journal, and only someone still authorized may
-continue. Data already written to a local file or merged cannot be recalled, which
-matches existing revocation semantics.
-
-**Data import cannot alter:** members, roles, invitations, ledger, device
-identities, signed policies and billing are not in the bundle, and the importer has
-no write path for them. An unrecognized room or codec rejects the whole bundle.
-
-**Audit:** the cloud composition records start/finish, actor, workspace, bundle
-digest, room count and byte count on the server, without bodies; E2EE audit records
-likewise contain only opaque counts. Import also writes a visible import receipt in
-the target workspace (time, actor, source workspace ID, bundle digest) so every
-member can see that a bundle was imported. Local OSS writes only a local log.
+The cloud composition registers each export and import for audit, without bodies. The
+local OSS composition makes no cloud requests.
 
 ## Entry points
 
-- **CLI:** `lody workspace export --out <file> [--workspace <id>]` and
-  `lody workspace import <file> [--workspace <id>] [--dry-run] [--yes]`. The dry-run
-  report is shown and confirmed by default; `--yes` is for automation. The existing
-  human-readable `lody export` stays unchanged.
-- **Desktop:** Settings → Workspace → Data: "Export workspace…" (save dialog,
-  coverage report) and "Import into this workspace…" (choose file →
-  dry-run report → confirm → progress, resumable). Hidden from non-owner/admin users.
-- **Where it runs:** on the Node side (one-shot CLI or desktop data host/daemon). The
-  renderer sees only progress and reports, never the engine or raw bytes.
-- **Local OSS:** fully local, no cloud requests; blobs come from local file storage.
-- **Cloud:** the additional export/import registration and audit use
-  `packages/cloud-api` DTOs and an optional `packages/platform` capability port. The
-  port is absent in the OSS composition and the feature still works. Attachments are
-  read from the cloud relay and uploaded to the target relay.
+- CLI: `lody workspace export --out <file>` and
+  `lody workspace import <file> [--dry-run] [--yes]`; the dry-run report is confirmed
+  unless `--yes` is given.
+- Desktop: Settings → Data, for owners and admins: export through a save dialog, import
+  through an open dialog, a review of the dry run, then the merge.
+- The work runs on the Node side (one-shot CLI or local daemon); the renderer sees only
+  results, never the import file path.
 
-## Relation to the native migration
+## Native migration
 
-Old format → native no longer needs a migration per domain; it is a special case of
-the same pipeline:
-
-```text
-old storage (frozen SQLite backup / flushed IDB) --source adapter--> in-memory bundle entries
-    --> importer (target = native namespace of the same workspace)
-```
-
-- Source adapters: `legacy-repo` (reads a consistent backup read only) and
-  `native-engine` (`exportFlockRaw`, `exportLoroRaw`). Migration need not write a
-  `.lodybundle` file, but uses the same manifest, hashes, journal and codecs.
-- The only difference from a same-workspace import: a source with unuploaded local
-  edits uses `enqueueOutbox: true` attributed to the original writer; proven synced
-  state uses `false`. This is a fact reported by the source adapter, not a guess by
-  the importer.
-- **Format changes** are a codec conversion step, for example
-  `preview-comment-loro/v1` → new Flock rows. Conversion creates new CRDT operations,
-  so old causal history does not appear in the new format; the bundle always keeps
-  the original format, so conversion can be redone.
-- Freezing, publishing the room owner, no dual writes and leaving Roost alone remain
-  the migration coordinator's rules; export/import supplies only "read out
-  completely" and "merge losslessly". The native Workspace Meta integration (in
-  progress in another session) should write Meta read-out/merge as this pipeline's
-  first codec (`meta-flock/v1`) rather than a separate migration framework.
-- `lody migrate --from-oss` can later be replaced by "OSS export → cloud workspace
-  import"; it stays until this pipeline covers all its checks (append-cas,
-  historical attachment scan, collaboration stop).
-
-## Delivery phases
-
-Line counts are product-code estimates, excluding tests and docs.
-
-| Phase                        | Scope                                                                                                                                                                                                                           | Acceptance cases                                                                                                                                                                                                                                                                 | Budget                        |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| A. Bundle and core pipeline  | Manifest/chunks/hashes, ZIP read/write, import journal, codec interface; generic `meta-flock`, `flock-room`, `loro-room` codecs; `native-engine` source; same-workspace import; CLI export/import/dry run; local plaintext only | Deletion records and clocks round-trip (read back register evidence, not get/scan); reimport changes and uploads nothing; rerun after interruption at each room boundary gives the same result; truncated/tampered chunks rejected with target untouched; unknown codec rejected | ~1,300                        |
-| B. Legacy migration          | `legacy-repo` source (consistent SQLite backup + IDB export); `enqueueOutbox` source facts; Meta migration converges on this pipeline; Preview comments format conversion                                                       | After old store → native, Loro VVs cover every source; sources with unuploaded edits enter the outbox; rerunning conversion gives the same result                                                                                                                                | ~700                          |
-| C. Blobs and cross-workspace | Attachment/image/diff snapshot blobs; cross-workspace mapping and import fences; per-row authorization                                                                                                                          | Changes to another user's Role, another user's machine rows or sharing grants reject the whole room; imported sessions stop collaboration and schedules are disabled; attachment map resolves historical references                                                              | ~1,200                        |
-| D. Cloud and desktop         | Cloud registration/audit DTOs and port; role checks and abort on revocation; desktop settings page and progress; Prompt Shortcuts (through their cloud API)                                                                     | Non-owner/admin sees no entry and CLI refuses; revocation stops at a room boundary; OSS composition makes zero cloud requests; a private Shortcut is imported only by its original owner and stays private, shared ones stay shared                                              | ~1,400 (plus private backend) |
-| E. E2EE                      | Local decrypted export; import reseals with the target's current keys; attachment re-encryption                                                                                                                                 | Exported bundle imports into an ordinary workspace; other member devices decrypt after import; old execution intents are not executable; ledger/members unchanged                                                                                                                | ~800                          |
-| F. Roost                     | Lossy `roost-turns/v1` codec: export turns through existing history reads; import only creates Roost sessions absent from the target                                                                                            | Visible bodies match after a round trip; an existing same session in the target is untouched; reimport creates no duplicate turns                                                                                                                                                | ~400                          |
-
-Phases A and B can run in parallel with the native Meta integration; each phase after
-C is reviewed independently. This Spec currently has no open owner questions.
+Old storage to native is the same pipeline with a `legacy-repo` source adapter and the
+native workspace as target; it need not write a file. A source with unuploaded edits is
+enqueued for upload as the original writer. Format changes, such as Preview comments
+moving to Flock rows, are codec conversions; the bundle keeps the original format.
+`lody migrate --from-oss` stays until this pipeline covers its checks.
 
 ## Roost and Prompt Shortcuts
 
-**Roost (lossy):** the owner decided Roost is exported, possibly without
-signatures. Each Roost turn is signed by the executing machine's local writer
-identity, and the current SDK has no raw export/import that keeps the original signed
-records. Export reads each turn's visible content (`roost-turns/v1`); the importer
-rewrites it through the shared HistoryWriter. Original signatures, writer proof and
-the turn's step-by-step edit process are lost; all content visible in the session is
-kept. **Recommended rules (implemented):** Roost bodies live on the executing
-machine, and a rewritten Roost store would be readable only on the importing
-machine, so the turns become that session's Loro history and its history backend
-switches to Loro. Rewritten turns are not the same CRDT data as the originals, so they
-are not merged: if the target already has the session it is skipped as a whole, and
-only sessions the target lacks are created. A lossless codec can be added once the SDK
-offers raw interfaces.
+**Roost:** each turn is signed by the executing machine and the SDK cannot export the
+signed records, so export reads visible turns and import writes them as the session's
+Loro history, switching its backend to Loro. Signatures and edit steps are lost; visible
+content is kept. Rewritten turns never merge into a session the target already has
+(recommendation).
 
-**Prompt Shortcuts:** the owner decided they are in the first version; the visibility
-rules below are **inferred by the coordinator from the owner's privacy principle**
-(the existing privacy model does not change). Shortcuts are stored per workspace +
-owner + visibility, and only the owner writes their own. Export includes all of the
-exporter's own Shortcuts (private ones too) and others' workspace-shared Shortcuts.
-Import keeps the original visibility:
+**Prompt Shortcuts (inferred from the owner's privacy principle):** export includes
+the exporter's own Shortcuts and others' shared ones. A private item is imported only
+for its original owner and stays private; a shared item becomes a shared item owned by
+the importer, noting the original author. Encrypted workspaces record Shortcuts as gaps.
 
-- **Private items:** imported only when the importer is the original owner (same
-  account), and they stay private; otherwise they are recorded as gaps and not
-  imported.
-- **Workspace-shared items:** imported as workspace-shared Shortcuts owned by the
-  importer, with the report noting the original author.
-- Reimport deduplicates by original Shortcut ID. Encrypted workspaces do not support
-  Shortcuts yet, so importing into one records Shortcuts as gaps.
+## Not implemented yet
+
+Prompt Shortcuts, relay-hosted attachments and images (recorded as gaps), cloud audit
+registration, verified-ledger role checks for E2EE (the workspace summary role is
+used), and the native source and target adapters.
 
 ## Evidence
 
-- Intent: this document; decided items 1–11 were confirmed by the owner on
-  2026-11-19 (premises 1–3 given by the owner personally; 4–11 are the owner's replies
-  to seven questions). Content labeled recommendation or inference is not an owner
-  decision. None of this approves this Spec revision as a whole, which remains draft.
-- Inspected implementation: [`lody export`](../apps/cli/src/commands/export.ts),
-  [session-export](../apps/cli/src/lib/session-export/),
+- Intent: decisions 1–11 confirmed by the owner on 2026-11-19, decision 12 on the same
+  day. This revision as a whole is not approved.
+- Inspected: [`lody export`](../apps/cli/src/commands/export.ts),
   [OSS migration](../apps/cli/src/lib/oss-migration/README.md),
   [E2EE room mapping](../packages/shared/src/workspace-streams-content.ts),
-  [session access](session-access.md), [E2EE foundations](e2ee-foundations.md),
-  [encrypted attachment decision](../.agents/notes/implemented/architecture/2026-10-28-encrypted-attachments.md);
-  loro-repo `795bafcb` client types `exportFlockRaw`, `exportLoroRaw`,
-  `importRoomState`, `importLoroRaw`, `flockReadRegisters`; migration plan §5 on
-  branch `native-repo-integration`.
-- Implementation: [workspace-bundle](../apps/cli/src/lib/workspace-bundle/README.md) (export, import, CLI and
-  daemon entry points, desktop Settings → Data; its README lists what is not implemented yet).
-- Executed validation: real-repo unit tests in that directory, and an end-to-end run on the
-  local platform with two real daemons (export, dry run, import, idempotent reimport, re-export,
-  reverse import), and the desktop Settings → Data flow driven in the built OSS desktop app
-  (export, review, import). Cloud and E2EE workspaces were not exercised end to end.
+  [session access](session-access.md), [E2EE foundations](e2ee-foundations.md);
+  loro-repo `795bafcb` raw export/import types.
+- Implementation: [workspace-bundle](../apps/cli/src/lib/workspace-bundle/AGENTS.md).
+- Executed: real-repo unit tests there; an end-to-end local run with two daemons
+  (export, dry run, import, idempotent reimport, reverse import); the desktop Settings →
+  Data flow in the built OSS app. Cloud and E2EE workspaces were not run end to end.

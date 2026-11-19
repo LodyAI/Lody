@@ -8,11 +8,7 @@ import {
 } from '@lody/shared/workspace-bundle-control'
 import { formatUnknownError } from '../utils'
 
-/**
- * Desktop entry for workspace bundles (specs/workspace-export-import.md). Main owns
- * the native file dialogs and the daemon call; the renderer never sees the import
- * path, only an opaque token bound to the window that chose the file.
- */
+/** The renderer never sees the import path, only a token bound to its window. */
 export type WorkspaceBundleServiceDeps = {
   machineId: () => Promise<string | null>
   chooseSavePath: (defaultName: string) => Promise<string | null>

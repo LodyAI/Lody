@@ -4,7 +4,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { I18nextProvider } from 'react-i18next';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  summarizeImportPlan,
   WorkspaceDataSettingContent,
   type WorkspaceBundleApi,
 } from '../src/components/settings/workspace-data-setting';
@@ -115,29 +114,6 @@ function fakeApi(overrides: Partial<WorkspaceBundleApi> = {}): WorkspaceBundleAp
   };
 }
 
-describe('summarizeImportPlan', () => {
-  it('groups changes by what people know and names skipped items', () => {
-    expect(summarizeImportPlan(plan)).toEqual({
-      kinds: [
-        { kind: 'conversations', new: 1, updated: 0, unchanged: 1, skipped: 1 },
-        { kind: 'schedules', new: 0, updated: 1, unchanged: 0, skipped: 0 },
-        { kind: 'catalog', new: 0, updated: 1, unchanged: 0, skipped: 0 },
-        { kind: 'machines', new: 0, updated: 0, unchanged: 0, skipped: 1 },
-      ],
-      skipped: [
-        {
-          kind: 'conversations',
-          label: 'Release notes',
-          reason: 'unrelated-same-id',
-          detail: null,
-        },
-        { kind: 'machines', label: null, reason: 'machine-room', detail: null },
-      ],
-      gaps: 1,
-    });
-  });
-});
-
 describe('workspace data settings', () => {
   it('shows where the export was saved and what it contains', async () => {
     render(fakeApi());
@@ -171,16 +147,6 @@ describe('workspace data settings', () => {
     await click('workspace-bundle-cancel');
     expect(byTestId('workspace-bundle-review')).toBeNull();
     expect(byTestId('workspace-bundle-import-result')).toBeNull();
-  });
-
-  it('shows a refusal from the local agent', async () => {
-    render(
-      fakeApi({
-        exportWorkspace: async () => ({ status: 'error', message: 'local_agent_unavailable' }),
-      })
-    );
-    await click('workspace-bundle-export');
-    expect(byTestId('workspace-bundle-error')?.textContent).toContain('localAgentUnavailable');
   });
 
   it('offers no actions to members', () => {

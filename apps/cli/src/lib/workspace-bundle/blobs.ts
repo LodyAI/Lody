@@ -7,11 +7,7 @@ import type { BundleWriter, OpenBundle } from './bundle-file';
 import { sha256 } from './manifest';
 import type { ImportPlan } from './import';
 
-/**
- * Attachment bytes (spec: "附件、图片"). This version carries local-transport session
- * files, which live only in this installation's file store. Relay-hosted files and
- * images are recorded as gaps; their references keep pointing at the relay.
- */
+/** Carries local session files; relay-hosted files and images are recorded as gaps. */
 const SESSION_FILE_REF = 'session-file:';
 const MAX_FILE_BYTES = 512 * 1024 * 1024;
 
@@ -114,11 +110,7 @@ export function localSessionFileBlobs(workspaceId: string) {
   };
 }
 
-/**
- * Writes bundled session files into the target workspace's file store for every
- * session that was imported. Existing files are kept: the store is content-addressed
- * by server-assigned id, so an existing file is the same attachment.
- */
+/** Restores bundled session files for imported sessions; existing files are kept. */
 export async function restoreSessionFileBlobs(input: {
   bundle: OpenBundle;
   plan: ImportPlan;

@@ -1,10 +1,7 @@
 import type { BundleKind } from '@lody/shared/workspace-bundle-control';
 import type { RoomModel } from './manifest';
 
-/**
- * Room classification shared by export and import. A codec names the domain and
- * the format of its raw bytes; import rejects any codec it does not list here.
- */
+/** Room classification shared by export and import; import rejects unlisted codecs. */
 export type RoomClass =
   | {
       kind: 'room';
@@ -43,11 +40,7 @@ export type RoomCodec =
   | 'roost-turns/v1';
 export type RoomEncoding = 'flock-file/v1' | 'loro-snapshot/v1' | 'json/v1';
 
-/**
- * What each codec is to a person and to a cross-workspace import. `counted` rooms are
- * the items a person recognises; the others (indexes, Roost turn payloads) still show
- * when skipped. `machine` rooms describe one machine and never cross workspaces.
- */
+/** `counted`: an item a person recognises. `machine`: never crosses workspaces. */
 export const CODEC_TRAITS: Readonly<
   Record<RoomCodec, { kind: BundleKind; counted: boolean; machine?: true }>
 > = {

@@ -75,10 +75,7 @@ export type RowPolicy = {
   mapKey?: (key: readonly unknown[]) => unknown[];
 };
 
-/**
- * Merges raw Flock file bytes into `target`, keeping every entry's original clock.
- * Without a policy the file is imported as is.
- */
+/** Merges raw Flock file bytes into `target`, keeping every entry's original clock. */
 export async function mergeFlockBytes(
   target: Flock,
   bytes: Uint8Array,
@@ -107,11 +104,7 @@ function metaRowDocId(key: readonly unknown[]): string | undefined {
     : undefined;
 }
 
-/**
- * Meta rows a merge writes: rows of withheld rooms stay the target's own, machine
- * records never cross workspaces, and named-Flock rows follow the room id mapping.
- * Plan and apply share it so the plan predicts exactly what apply writes.
- */
+/** Meta rows a merge writes; plan and apply share it so the plan matches the write. */
 function metaPolicy(
   sourceWorkspaceId: string,
   targetWorkspaceId: string,
@@ -161,10 +154,7 @@ function diffFlock(before: Flock, after: Flock): RowChanges {
 
 const noChanges = (rows: RowChanges) => rows.added + rows.updated + rows.deleted === 0;
 
-/**
- * Verifies, admits and dry-runs an import. Nothing is written: every merge is computed
- * on detached copies of the target's rooms.
- */
+/** Verifies, admits and dry-runs an import on detached copies; writes nothing. */
 export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Promise<ImportPlan> {
   const { bundle, repo, workspaceId } = input;
   if (!(IMPORT_ROLES as readonly string[]).includes(input.role))
@@ -211,8 +201,7 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
       rooms.push({ ...base, action: 'skip', reason: 'machine-room' });
       continue;
     }
-    // Rewritten Roost turns are not the original CRDT data, so they never merge into
-    // a conversation the target already has.
+    // Rewritten Roost turns never merge into a conversation the target already has.
     if (isRoost && targetMeta.get(['e', targetId]) !== undefined) {
       rooms.push({ ...base, action: 'skip', reason: 'roost-exists' });
       continue;
@@ -367,10 +356,7 @@ const JournalHeaderSchema = z.object({
   targetWorkspaceId: z.string(),
 });
 
-/**
- * The journal is a header line followed by one line per merged room id. Appending is
- * enough: each room is durable before its line, and a lost line only re-merges it.
- */
+/** Header plus one line per merged room; a lost line only re-merges that room. */
 async function readJournal(file: string, plan: ImportPlan): Promise<Set<string>> {
   let text: string;
   try {
@@ -415,10 +401,7 @@ export type ApplyWorkspaceImportInput = {
 };
 export type ImportResult = { imported: number; skipped: number; resumed: number };
 
-/**
- * Merges the planned rooms. Each room is one CRDT merge, durable before the journal
- * records it; a rerun with the same bundle continues where it stopped.
- */
+/** Merges the planned rooms; a rerun with the same bundle continues where it stopped. */
 export async function applyWorkspaceImport(
   input: ApplyWorkspaceImportInput
 ): Promise<ImportResult> {
@@ -511,11 +494,7 @@ async function writeImportReceipt(
   });
 }
 
-/**
- * Writes exported Roost turns through the shared HistoryWriter as this session's
- * Loro history and selects the Loro backend: the original Roost store stays on the
- * source machine, and the importer becomes the writer of the rewritten turns.
- */
+/** Rewrites exported Roost turns as Loro history and switches the session to Loro. */
 async function rewriteRoostTurns(
   repo: LoroRepo<JsonObject>,
   docId: string,

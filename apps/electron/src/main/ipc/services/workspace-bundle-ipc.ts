@@ -53,10 +53,7 @@ function bundleService(): WorkspaceBundleService {
   return service
 }
 
-/**
- * Workspace export/import from Settings. Main shows the native dialogs and asks the
- * local daemon to do the work; the import path never reaches the renderer.
- */
+/** Workspace export/import from Settings; the import path stays in main. */
 export class WorkspaceBundleIpc extends ProductWindowIpcService {
   static override readonly groupName = 'workspaceBundle'
 

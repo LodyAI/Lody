@@ -9,10 +9,7 @@ type SyncingManager = {
   getSessionHistorySnapshot(sessionId: string): Promise<readonly unknown[]>;
 };
 
-/**
- * Adapts a workspace document manager. `sync` is false on the local platform,
- * where the repo is the only replica and no remote exists.
- */
+/** Adapts a workspace document manager; `sync` is false on the local platform. */
 export function daemonBundleWorkspace(
   workspaceId: string,
   manager: SyncingManager,

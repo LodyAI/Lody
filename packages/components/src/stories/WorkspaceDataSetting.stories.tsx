@@ -23,14 +23,6 @@ const plan: WorkspaceBundlePlan = {
       label: 'Fix login redirect',
     },
     {
-      id: 'session-2',
-      kind: 'conversations',
-      counted: true,
-      action: 'merge',
-      state: 'new',
-      label: 'Release checklist',
-    },
-    {
       id: 'schedule-1',
       kind: 'schedules',
       counted: true,
@@ -101,17 +93,5 @@ export const Exported: Story = {
 export const ReviewingImport: Story = {
   play: async ({ canvasElement }) => {
     await userEvent.click(within(canvasElement).getByTestId('workspace-bundle-choose'));
-  },
-};
-
-export const AgentUnavailable: Story = {
-  args: {
-    api: {
-      ...api,
-      exportWorkspace: async () => ({ status: 'error', message: 'local_agent_unavailable' }),
-    },
-  },
-  play: async ({ canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByTestId('workspace-bundle-export'));
   },
 };

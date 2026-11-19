@@ -1029,7 +1029,7 @@ export type SessionImportFence = {
   workspaceId: string;
   turnIds: string[];
   queueItemIds: string[];
-  /** Who imported it, as provenance; every member of `workspaceId` may read it, never edit it. */
+  /** Provenance only. */
   importedBy?: string;
 };
 
@@ -1090,11 +1090,7 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   isArchived?: boolean;
   /** User-owned tree execution barrier; inherited through containment and precise opener links. */
   collaborationStopped?: boolean;
-  /**
-   * Set by a workspace bundle import into `workspaceId`: the listed turns and queued
-   * items came from the bundle and never run there. Other workspaces ignore it, so the
-   * fence is harmless when this metadata travels in a later bundle.
-   */
+  /** Turns and queued items from a bundle import that never run in `workspaceId`. */
   importFence?: SessionImportFence;
   /** Shared tab visibility only; closing never changes the session lifecycle. */
   isTabClosed?: boolean;

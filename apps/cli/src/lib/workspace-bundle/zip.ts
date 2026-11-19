@@ -1,11 +1,7 @@
 import type { FileHandle } from 'node:fs/promises';
 import { crc32 } from 'node:zlib';
 
-/**
- * Minimal streaming ZIP writer: store method only, every entry's bytes are known
- * when written, so no data descriptors are needed. ZIP64 records are emitted when an
- * offset, size or entry count exceeds the classic limits.
- */
+/** Streaming store-only ZIP writer; emits ZIP64 records past the classic limits. */
 const U32 = 0xffffffff;
 const U16 = 0xffff;
 // DOS date 1980-01-01 00:00: entries carry no timestamps.

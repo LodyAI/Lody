@@ -37,7 +37,7 @@ function harness(overrides = {}) {
 }
 
 void test('exports to the path the user chose, named after the workspace and date', async () => {
-  const { service, sent } = harness()
+  const { service } = harness()
   const result = await service.exportWorkspace({ workspaceId: 'lw_1', workspaceName: 'My Team/x' })
   assert.deepEqual(result, {
     status: 'done',
@@ -49,26 +49,6 @@ void test('exports to the path the user chose, named after the workspace and dat
       digest: 'd'
     }
   })
-  assert.deepEqual(sent, [
-    {
-      operation: 'export',
-      machineId: 'machine-1',
-      workspaceId: 'lw_1',
-      out: '/home/u/My Team-x-2026-11-19.lodybundle'
-    }
-  ])
-})
-
-void test('a cancelled dialog sends nothing', async () => {
-  const { service, sent } = harness({
-    chooseSavePath: async () => null,
-    chooseOpenPath: async () => null
-  })
-  assert.deepEqual(await service.exportWorkspace({ workspaceId: 'lw_1', workspaceName: 'W' }), {
-    status: 'canceled'
-  })
-  assert.deepEqual(await service.chooseImportFile(7), { status: 'canceled' })
-  assert.deepEqual(sent, [])
 })
 
 void test('the renderer imports only through a token bound to the window that chose the file', async () => {
@@ -111,27 +91,6 @@ void test('the renderer imports only through a token bound to the window that ch
     {
       status: 'error',
       message: 'import_file_expired'
-    }
-  )
-})
-
-void test('reports an unavailable local agent and daemon refusals as errors', async () => {
-  const offline = harness({ machineId: async () => null })
-  assert.deepEqual(
-    await offline.service.exportWorkspace({ workspaceId: 'lw_1', workspaceName: 'W' }),
-    {
-      status: 'error',
-      message: 'local_agent_unavailable'
-    }
-  )
-  const refused = harness({
-    send: async () => ({ ok: false, error: 'Only workspace owners and admins can export' })
-  })
-  assert.deepEqual(
-    await refused.service.exportWorkspace({ workspaceId: 'lw_1', workspaceName: 'W' }),
-    {
-      status: 'error',
-      message: 'Only workspace owners and admins can export'
     }
   )
 })

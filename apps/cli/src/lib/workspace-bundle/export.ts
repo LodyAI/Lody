@@ -18,7 +18,7 @@ export type ExportWorkspaceBundleInput = {
   source: Omit<BundleSource, 'finishedAt'>;
   /** Brings one room up to date before it is read (cloud sync); absent offline. */
   prepareRoom?: (roomId: string, model: 'loro' | 'flock') => Promise<void>;
-  /** Checked before every room; throwing aborts the export (for example, role revoked). */
+  /** Checked before every room; throwing aborts the export. */
   checkContinue?: () => Promise<void>;
   onProgress?: (progress: ExportProgress) => void;
   /** Adds the bytes a session's history references (attachments) to the bundle. */
@@ -28,20 +28,13 @@ export type ExportWorkspaceBundleInput = {
   now?: () => string;
 };
 
-/**
- * Reads every room of the workspace as raw CRDT bytes. Meta is read first, so rooms
- * created later are not included; each room is a complete state of itself.
- * The caller owns the writer: it finishes or aborts it.
- */
+/** Reads every room as raw CRDT bytes; the caller finishes or aborts the writer. */
 export async function exportWorkspaceBundle(
   input: ExportWorkspaceBundleInput
 ): Promise<BundleManifest> {
   const { repo, workspaceId, writer } = input;
   const check = input.checkContinue ?? (async () => undefined);
-  /**
-   * Brings rooms up to date a few at a time (sync is network-bound), then reads them
-   * in order. A room this device cannot bring up to date is a gap, not a failed export.
-   */
+  /** A room that cannot be brought up to date is a gap, not a failed export. */
   const prepareAll = async (roomIds: readonly string[], model: 'loro' | 'flock') => {
     const failures = new Map<string, string>();
     const prepareRoom = input.prepareRoom;
@@ -90,8 +83,7 @@ export async function exportWorkspaceBundle(
     await check();
     if (!prepared(entry.docId, docFailures)) continue;
     const doc = await repo.openDetachedDoc(entry.docId);
-    // After a successful sync an empty body is genuinely empty (machine records, for
-    // example, keep every field in Meta); Meta already carries the document.
+    // After a successful sync an empty body is genuinely empty; Meta carries it.
     if (doc.frontiers().length === 0) continue;
     await writer.addRoom(
       { id: entry.docId, model: 'loro', codec: room.codec, encoding: room.encoding },
@@ -140,11 +132,7 @@ export async function exportWorkspaceBundle(
   });
 }
 
-/**
- * Roost bodies live in the executing machine's own store and are signed by its
- * writer. They are exported lossily: visible turns only, without signatures or
- * edit history (owner decision; see the Spec's Roost section).
- */
+/** Roost is exported lossily: visible turns only, without signatures (Spec decision 8). */
 async function exportRoostTurns(docId: string, input: ExportWorkspaceBundleInput): Promise<void> {
   const { writer } = input;
   if (!input.roostHistory) {

@@ -38,11 +38,7 @@ type SessionVisibilityOptions = {
   workspaceId?: string | null;
 };
 
-/**
- * A conversation imported into this workspace from a bundle. Imports are shared:
- * every signed-in member sees it, but only in the workspace the import named. Its
- * machine stays in the source workspace, so it is readable here and never editable.
- */
+/** Imported into this workspace from a bundle: every member reads it, nobody edits it. */
 export function isImportedIntoWorkspace(
   session: SessionMachineRecord,
   workspaceId: string | null | undefined,
