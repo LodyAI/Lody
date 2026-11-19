@@ -26,8 +26,8 @@ import {
   type SessionTurnRead,
   type OpenAssistantTurnInput,
 } from '@lody/shared/session-data';
-import type { SessionDocument } from '@/lib/loro/doc';
-import type { AcpSessionNotification, MessageContent, ModelInfo } from '@lody/shared';
+import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
+import type { AcpSessionNotification, MessageContent, ModelInfo, SessionId } from '@lody/shared';
 import type { SessionSnapshot } from '@lody/shared/session-data';
 import {
   readDispatchHistory,
@@ -725,3 +725,41 @@ export {
   type RoostSessionBackendServiceFactory,
   type RoostSessionBackendServices,
 } from './roost-session-backend';
+
+/** A transcript read: a direct transcript reader, or a selection over the stored history. */
+export type SessionTranscriptSource =
+  | Required<Pick<SessionBackend, 'readHistoryTranscript'>>
+  | Pick<SessionBackend, 'readHistorySelection' | 'readHistoryTranscript'>;
+
+/**
+ * What a read-only report needs from a Session: no write methods, so a
+ * check-then-write cannot be built on it (the daemon idle-read boundary).
+ */
+export type SessionReadPort = Pick<
+  SessionBackend,
+  | 'history'
+  | 'readHistoryDirectory'
+  | 'readTurn'
+  | 'readHistory'
+  | 'getMessageQueue'
+  | 'readLatestGoal'
+> &
+  SessionTranscriptSource;
+
+/**
+ * Read access for a report: an idle native Session is read from the engine
+ * without opening or caching its replica; otherwise the replica serves it.
+ */
+export async function openSessionReadPort(
+  manager: Pick<LoroDocumentManager, 'openIdleSessionReader' | 'getOrCreateSessionDoc'>,
+  sessionId: SessionId,
+  meta?: Pick<SessionMeta, 'historyBackend'> | null
+): Promise<SessionReadPort> {
+  const idle = await manager.openIdleSessionReader(sessionId);
+  if (idle) return idle;
+  const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
+  return await createSessionBackend(
+    sessionDoc,
+    meta === undefined ? await sessionDoc.getMetaState() : meta
+  );
+}

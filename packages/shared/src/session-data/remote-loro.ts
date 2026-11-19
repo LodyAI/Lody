@@ -1,4 +1,10 @@
 import { resolveLatestSessionGoalFromHistory, type SessionGoalMessage } from '../goal';
+import {
+  historyQueryRow,
+  selectTranscriptHistoryPositions,
+  type HistoryQueryAccess,
+  type HistoryQueryRow,
+} from './history-selection';
 import { SESSION_DIRECTORY_INPUT_CONFIG_KEYS } from './domain';
 import type { SessionDirectoryRow, SessionEntry, SessionTurnRead } from './domain';
 import {
@@ -435,3 +441,65 @@ export async function readRemoteLatestGoal(
 }
 
 const GOAL_SCAN_PAGE = 32;
+
+const jsonQueryAccess: HistoryQueryAccess = {
+  field: (value, key) =>
+    value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)[key]
+      : undefined,
+  // As the stored reader: containers project to an empty shape, never their content.
+  scalar: (value) =>
+    value !== null && typeof value === 'object' ? (Array.isArray(value) ? [] : {}) : value,
+  keys: (value) =>
+    value !== null && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value) : [],
+  length: (value) => (Array.isArray(value) ? value.length : 0),
+  at: (value, index) => (Array.isArray(value) ? value[index] : undefined),
+};
+
+/**
+ * The visible transcript tail of a remote history, as the in-process
+ * `readHistoryTranscript`: every turn's role and items are projected page by
+ * page (bodies are not kept), then only the selected turns are read whole.
+ * A selected turn whose id moved is a concurrent structural edit and the read
+ * starts again.
+ */
+export async function readRemoteHistoryTranscript(
+  port: Pick<RemoteLoroHistoryPort, 'readListFields'>,
+  options: { limit?: number; reverse?: boolean }
+): Promise<{ total: number; positions: number[]; entries: SessionEntry[] }> {
+  for (let attempt = 0; ; attempt++) {
+    const rows: HistoryQueryRow[] = [];
+    const ids: unknown[] = [];
+    let at = 0;
+    for (;;) {
+      const page = await port.readListFields(at, undefined, TRANSCRIPT_FIELDS);
+      for (const [id, role, items] of page.rows) {
+        ids.push(id);
+        rows.push(historyQueryRow({ role, items }, jsonQueryAccess, true));
+      }
+      at = page.start + page.rows.length;
+      if (page.rows.length === 0 || at >= page.len) break;
+    }
+    const selected = selectTranscriptHistoryPositions(rows, options);
+    const entries: SessionEntry[] = [];
+    let moved = false;
+    for (const position of selected.positions) {
+      const page = await port.readListFields(position, position + 1, WHOLE_TURN);
+      const turn = page.rows[0]?.[0] as SessionEntry | undefined;
+      if (!turn || turn.id !== ids[position]) {
+        moved = true;
+        break;
+      }
+      entries.push(turn);
+    }
+    if (!moved) return { ...selected, entries };
+    if (attempt >= 2) throw new Error('remote_history_changed_during_read');
+  }
+}
+
+const TRANSCRIPT_FIELDS: readonly RemoteListField[] = [
+  { path: ['id'] },
+  { path: ['role'] },
+  { path: ['items'] },
+];
+const WHOLE_TURN: readonly RemoteListField[] = [{ path: [] }];

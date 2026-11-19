@@ -28,7 +28,9 @@ import {
   createRemoteControlState,
   createRemoteHistoryCommands,
   createRemoteLoroHistoryReader,
+  readRemoteHistoryTranscript,
   readRemoteLatestGoal,
+  selectTranscriptHistoryPositions,
   shareObservation,
   type SessionDataChange,
 } from '../src/session-data';
@@ -438,6 +440,40 @@ describe('remote Session history reader', () => {
     // The goal sits ten pages back from the tail: the scan finds the newest item.
     expect(await readRemoteLatestGoal(port)).toEqual(data.readLatestGoal());
     expect(data.readLatestGoal()).toMatchObject({ status: 'active' });
+  });
+
+  it('selects the same visible transcript tail as the in-process history', async () => {
+    const { data, commit, port } = await open();
+    for (let i = 0; i < 120; i++)
+      await data.commands.appendTurn(
+        // Blank and image-only turns exercise the visibility rules.
+        i % 7 === 0
+          ? turn(i, { items: [{ type: 'text', text: '   ' }] } as never)
+          : i % 11 === 0
+            ? turn(i, {
+                items: [
+                  {
+                    type: 'image',
+                    imageId: 'synthetic-image',
+                    mimeType: 'image/png',
+                    sizeBytes: 9,
+                  },
+                ],
+              } as never)
+            : turn(i)
+      );
+    await commit();
+    for (const options of [{ limit: 10 }, { limit: 500, reverse: true }]) {
+      const local = selectTranscriptHistoryPositions(
+        data.writer.readQuery({ transcriptVisibility: true }),
+        options
+      );
+      const remote = await readRemoteHistoryTranscript(port, options);
+      expect({ total: remote.total, positions: remote.positions }).toEqual(local);
+      expect(remote.entries).toEqual(
+        data.writer.readSelected(() => local.positions, { transcriptVisibility: true })
+      );
+    }
   });
 
   it('notifies appends structurally and field edits by turn id, never by content', async () => {

@@ -39,7 +39,7 @@ import type { Lody } from '@/lib/lody';
 import type { AuthContext } from '@/lib/command-runtime';
 import type { WorkspaceSummary } from '@/lib/workspace';
 import type { Logger } from '@/utils/logger';
-import { createSessionBackend } from '@/session/session-backend';
+import { openSessionReadPort } from '@/session/session-backend';
 import { AutomationLedger, automationIdentity } from './storage/ledger';
 import { Automations, AutomationHost } from './runtime/engine';
 import { evaluateCapacity } from './runtime/capacity';
@@ -126,10 +126,10 @@ export async function createAutomationWorkspaceLegacy(options: {
       case 'session.turn.finalized': {
         if (typeof parameters.sessionId !== 'string' || typeof parameters.turnId !== 'string')
           throw new Error('AUTOMATION_CONDITION_INVALID');
-        const doc = await lody.documentManager.getOrCreateSessionDoc(
+        const backend = await openSessionReadPort(
+          lody.documentManager,
           parameters.sessionId as SessionId
         );
-        const backend = await createSessionBackend(doc);
         const read = await backend.readTurn(parameters.turnId);
         if (read.state !== 'ready') return { value: 'unknown', reason: 'turn_unavailable' };
         const ended =

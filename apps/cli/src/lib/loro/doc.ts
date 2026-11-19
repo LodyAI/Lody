@@ -34,6 +34,7 @@ import {
   isCodeCollabFileIndexSignalFlockDocId,
   CODE_COLLAB_FILE_INDEX_FLOCK_TTL_MS,
   SessionMeta,
+  resolveSessionHistoryBackendKind,
   type SessionHistoryBackendKind,
   type SessionQueuePromotionRecord,
   type SessionSteerOperationRecord,
@@ -2502,6 +2503,10 @@ export class LoroDocumentManager {
     if (!this.nativeMeta || this.peekSessionDoc(sessionId)) return undefined;
     const roomId = getSessionRoomId(sessionId);
     if (!isNativeDocId(roomId)) return undefined;
+    // Only Loro history lives in the document; a Roost Session reads through its backend.
+    const record = await this.repo.getDocMeta(roomId);
+    const meta = record?.meta as Pick<SessionMeta, 'historyBackend'> | undefined;
+    if (!meta || resolveSessionHistoryBackendKind(meta) !== 'loro') return undefined;
     return openNativeSessionReader(this.workspaceId, roomId);
   }
 

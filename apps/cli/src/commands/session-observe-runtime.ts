@@ -1,5 +1,10 @@
 import { Effect, Exit, Scope } from 'effect';
-import { isLoroRepoDocDeleted, type SessionId, type SessionMeta } from '@lody/shared';
+import {
+  getSessionRoomId,
+  isLoroRepoDocDeleted,
+  type SessionId,
+  type SessionMeta,
+} from '@lody/shared';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import { createSessionBackend } from '@/session/session-backend';
 import { SessionObserver, type SessionObserveEvent } from './session-observe';
@@ -22,6 +27,33 @@ export async function acquireSessionObservation(options: {
     const reader = await Effect.runPromise(
       Effect.gen(function* () {
         const { manager, sessionId } = options;
+        const readMeta = async () => {
+          const raw = await manager.repo.getDocMeta(getSessionRoomId(sessionId));
+          if (isLoroRepoDocDeleted(raw)) return null;
+          if (!raw?.meta) throw new Error(`Session metadata is unavailable: ${sessionId}`);
+          return raw.meta as SessionMeta;
+        };
+        // An idle native Session is observed in the engine: no replica, and the
+        // engine's observation restarts itself after a reconnect.
+        const idle = yield* attempt(() => manager.openIdleSessionReader(sessionId));
+        if (idle) {
+          if (options.signal.aborted) return undefined;
+          const observer = new SessionObserver({
+            sessionId,
+            history: idle.history,
+            subscribeControl: idle.subscribeControl,
+            readMeta,
+            fresh: true,
+            emit: options.emit,
+            onError: options.onError,
+            onRemoved: options.onRemoved,
+          });
+          yield* Effect.acquireRelease(Effect.succeed(observer), (owned) =>
+            Effect.promise(() => owned.close())
+          );
+          yield* attempt(() => observer.start());
+          return observer;
+        }
         const doc = yield* Effect.acquireRelease(
           attempt(() => manager.getOrCreateSessionDoc(sessionId, { skipAutoRead: true })),
           () => Effect.promise(() => manager.cleanSessionDoc(sessionId, { preserveStatus: true }))
@@ -36,12 +68,7 @@ export async function acquireSessionObservation(options: {
           sessionId,
           history: backend.history,
           subscribeControl: (listener) => doc.subscribeControl(listener),
-          async readMeta() {
-            const raw = await manager.repo.getDocMeta(doc.roomId);
-            if (isLoroRepoDocDeleted(raw)) return null;
-            if (!raw?.meta) throw new Error(`Session metadata is unavailable: ${sessionId}`);
-            return raw.meta as SessionMeta;
-          },
+          readMeta,
           fresh: true,
           emit: options.emit,
           onError: options.onError,

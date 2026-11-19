@@ -10,7 +10,11 @@ import { describe, it } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
 import { createHistoryWriter } from '../src/history-writer';
 import { createLoroSessionData } from '../src/session-data/loro';
-import { createRemoteLoroHistoryReader } from '../src/session-data/remote-loro';
+import {
+  createRemoteLoroHistoryReader,
+  readRemoteHistoryTranscript,
+} from '../src/session-data/remote-loro';
+import { selectTranscriptHistoryPositions } from '../src/session-data/history-selection';
 import type { SessionHistory, SessionId } from '../src';
 
 // Opt-in: LODY_SESSION_LOAD_BENCH=<turns>[,<turns>...]. Measures the
@@ -277,7 +281,10 @@ describe.skipIf(!idleBench)('Daemon reads of idle Sessions', () => {
         at = performance.now();
         await history.readTurn(tail.at(-1)!.turnId);
         const latestTurnMs = ms(at);
-        return { statusMs, listPageMs, latestTurnMs, rows: page.rows.length };
+        at = performance.now();
+        await readRemoteHistoryTranscript(port, { limit: 50 });
+        const transcriptMs = ms(at);
+        return { statusMs, listPageMs, latestTurnMs, transcriptMs, rows: page.rows.length };
       };
       globalThis.gc?.();
       let rssBefore = process.memoryUsage().rss;
@@ -314,7 +321,14 @@ describe.skipIf(!idleBench)('Daemon reads of idle Sessions', () => {
         at = performance.now();
         data.history.readTurn(directory.at(-1)!.turnId);
         const latestTurnMs = ms(at);
-        replicaReads.push({ openMs, statusMs, latestTurnMs });
+        at = performance.now();
+        const visible = selectTranscriptHistoryPositions(
+          data.writer.readQuery({ transcriptVisibility: true }),
+          { limit: 50 }
+        );
+        data.writer.readSelected(() => visible.positions, { transcriptVisibility: true });
+        const transcriptMs = ms(at);
+        replicaReads.push({ openMs, statusMs, latestTurnMs, transcriptMs });
         retained.push(data);
       }
       globalThis.gc?.();
