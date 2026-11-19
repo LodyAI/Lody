@@ -17,10 +17,17 @@ const modelSchema = z.object({
   supported_reasoning_levels: z
     .array(
       z.object({
-        effort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']),
+        // Magpie relays each model's levels in the vendor's own words
+        // (light, extra_high, group-named tiers), so the vocabulary is open;
+        // only the token shape is bounded.
+        effort: z
+          .string()
+          .min(1)
+          .max(64)
+          .regex(/^[^\s\p{Cc}/]+$/u),
       })
     )
-    .max(8)
+    .max(16)
     .optional(),
   context_window: z.number().int().positive().max(100_000_000).optional(),
   max_output_tokens: z.number().int().positive().max(100_000_000).optional(),
@@ -162,6 +169,11 @@ export function buildMagpieKimiConfig(gateway: string, models: readonly MagpieMo
   ].join('\n');
 }
 
+// Grok's effort picker knows only its own ladder; vendor words the catalog
+// relays (light, deep, disabled, ultra, …) are dropped rather than written
+// into its config.
+const grokEfforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+
 export function buildMagpieGrokConfig(gateway: string, models: readonly MagpieModel[]): string {
   return [
     '[models]',
@@ -173,21 +185,22 @@ export function buildMagpieGrokConfig(gateway: string, models: readonly MagpieMo
     `image_description = ${quoted(`magpie/${models.find(acceptsImageInput)?.id ?? models[0]!.id}`)}`,
     '[features]',
     'campaigns = false',
-    ...models.flatMap((m) => [
-      `[model.${quoted(`magpie/${m.id}`)}]`,
-      `model = ${quoted(m.id)}`,
-      `name = ${quoted(m.display_name ?? m.id)}`,
-      `base_url = ${quoted(`${gateway}/v1`)}`,
-      `api_key = ${quoted(MAGPIE_TOKEN)}`,
-      'api_backend = "chat_completions"',
-      `context_window = ${m.context_window ?? 128000}`,
-      `max_completion_tokens = ${m.max_output_tokens ?? 8192}`,
-      ...(m.supported_reasoning_levels?.length
-        ? [
-            `reasoning_efforts = ${stringArray(m.supported_reasoning_levels.map((l) => l.effort).filter((e) => e !== 'ultra'))}`,
-          ]
-        : []),
-    ]),
+    ...models.flatMap((m) => {
+      const efforts = (m.supported_reasoning_levels ?? [])
+        .map((l) => l.effort)
+        .filter((e) => grokEfforts.includes(e));
+      return [
+        `[model.${quoted(`magpie/${m.id}`)}]`,
+        `model = ${quoted(m.id)}`,
+        `name = ${quoted(m.display_name ?? m.id)}`,
+        `base_url = ${quoted(`${gateway}/v1`)}`,
+        `api_key = ${quoted(MAGPIE_TOKEN)}`,
+        'api_backend = "chat_completions"',
+        `context_window = ${m.context_window ?? 128000}`,
+        `max_completion_tokens = ${m.max_output_tokens ?? 8192}`,
+        ...(efforts.length ? [`reasoning_efforts = ${stringArray(efforts)}`] : []),
+      ];
+    }),
     '',
   ].join('\n');
 }

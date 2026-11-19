@@ -119,6 +119,59 @@ describe('Magpie runtime preparation', () => {
     });
     expect(Object.keys(g.model as object)).toEqual([selected, 'magpie/second/model']);
   });
+  it('accepts Magpie vendor effort words and scopes Grok to its own ladder', async () => {
+    const directory = await root();
+    const catalog: typeof fetch = async (input, init) =>
+      String(input).endsWith('/models')
+        ? Response.json({
+            data: [
+              {
+                id: 'auto/group-free',
+                reasoning: true,
+                supported_reasoning_levels: [
+                  { effort: 'light' },
+                  { effort: 'balanced' },
+                  { effort: 'deep' },
+                ],
+              },
+              {
+                id: 'vendor/free-model',
+                reasoning: true,
+                supported_reasoning_levels: [
+                  { effort: 'disabled' },
+                  { effort: 'low' },
+                  { effort: 'medium' },
+                  { effort: 'high' },
+                ],
+              },
+            ],
+          })
+        : fetcher(input, init);
+    expect(await readMagpieModels(gateway, undefined, catalog)).toHaveLength(2);
+    const kimi = await prepareMagpieRuntime('kimi', gateway, undefined, directory, catalog);
+    const k = parseToml(await readFile(join(kimi.env.KIMI_CODE_HOME!, 'config.toml'), 'utf8'));
+    expect(k).toMatchObject({
+      models: {
+        'magpie/auto/group-free': {
+          support_efforts: ['light', 'balanced', 'deep'],
+          default_effort: 'light',
+          capabilities: ['tool_use', 'thinking'],
+        },
+        'magpie/vendor/free-model': {
+          support_efforts: ['disabled', 'low', 'medium', 'high'],
+          default_effort: 'medium',
+        },
+      },
+    });
+    const grok = await prepareMagpieRuntime('grok', gateway, undefined, directory, catalog);
+    const g = parseToml(await readFile(join(grok.env.GROK_HOME!, 'config.toml'), 'utf8'));
+    const grokModels = g.model as Record<string, Record<string, unknown>>;
+    // Vendor words stay out of Grok's picker; its own ladder is kept.
+    expect(grokModels['magpie/auto/group-free']).not.toHaveProperty('reasoning_efforts');
+    expect(grokModels['magpie/vendor/free-model']).toMatchObject({
+      reasoning_efforts: ['low', 'medium', 'high'],
+    });
+  });
   it('configures Bub through its native OpenAI environment without enabling fallback models', async () => {
     const directory = await root();
     vi.stubEnv('NO_PROXY', 'corp.internal');
