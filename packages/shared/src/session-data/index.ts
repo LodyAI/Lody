@@ -23,6 +23,13 @@ export {
 
 export { createLoroSessionData, type LoroSessionData, type LoroSessionDataOptions } from './loro';
 export {
+  createRemoteLoroHistoryReader,
+  type RemoteListField,
+  type RemoteLoroHistoryPort,
+  type RemotePathChange,
+  type RemotePathEvent,
+} from './remote-loro';
+export {
   createRoostHistoryReader,
   createRoostSessionData,
   projectRoostSegments,

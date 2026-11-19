@@ -7,7 +7,9 @@ import { LoroRepo } from 'loro-repo';
 import { describe, it } from 'vitest';
 import { createHistoryWriter, type SessionHistory, type SessionId } from '@lody/shared';
 import { connectNativeRepo } from '../../shared/src/node/native-repo';
-import { createNativeDocs } from '../../shared/src/node/native-docs';
+import { createNativeDocs, createNativeRemoteHistoryPort } from '../../shared/src/node/native-docs';
+import { createRemoteLoroHistoryReader } from '@lody/shared/session-data';
+import { createConversationViewFromReader } from '../src/lib/conversation-view/create-conversation-view-from-reader';
 import { createConversationSession } from '../src/lib/conversation-view';
 import type { IdleScheduler } from '../src/lib/conversation-view/create-conversation-view-from-reader';
 
@@ -19,6 +21,10 @@ const sizes = (process.env.LODY_SESSION_FIRST_SCREEN_BENCH ?? '')
   .map(Number)
   .filter((n) => n > 0);
 
+// LODY_SESSION_FIRST_SCREEN_PATHS=legacy,native,remote selects paths (default all).
+const paths = new Set(
+  (process.env.LODY_SESSION_FIRST_SCREEN_PATHS ?? 'legacy,native,remote').split(',')
+);
 const sessionId = 'bench' as SessionId;
 const docId = 'session-bench';
 const text = (length: number, seed: number) =>
@@ -120,6 +126,78 @@ async function nativePath(turns: number, snapshot: Uint8Array) {
   }
 }
 
+const mb = (bytes: number) => +(bytes / 1024 / 1024).toFixed(1);
+const rssOf = async (pid: number) =>
+  Number(/VmRSS:\s+(\d+)/.exec(await readFile(`/proc/${pid}/status`, 'utf8'))?.[1] ?? 0) * 1024;
+
+/**
+ * No local replica: the view reads directory pages and turns from the engine.
+ * `cold` follows a host restart, so the engine loads the room from disk.
+ */
+async function remotePath(turns: number, snapshot: Uint8Array) {
+  const dataDir = await mkdtemp(join(tmpdir(), `lody-first-screen-remote-${turns}-`));
+  const ns = 'bench';
+  const room = { kind: 'loro_doc' as const, id: docId };
+  const launcher = () => ({ command: process.execPath, args: [hostScript] });
+  const pidOf = async () =>
+    (JSON.parse(await readFile(join(dataDir, 'engine.json'), 'utf8')) as { pid: number }).pid;
+  let connection = await connectNativeRepo({ dataDir, launcher });
+  await connection.client.createRoom(ns, room, 'plaintext');
+  await connection.client.importRoomState(ns, room, { snapshot });
+  await connection.close();
+  const first = await pidOf();
+  process.kill(first, 'SIGTERM');
+  while (
+    (() => {
+      try {
+        process.kill(first, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    })()
+  )
+    await new Promise((resolve) => setImmediate(resolve));
+  connection = await connectNativeRepo({ dataDir, launcher });
+  const pid = await pidOf();
+  try {
+    const screen = async () => {
+      globalThis.gc?.();
+      const rssBefore = process.memoryUsage().rss;
+      const hostBefore = await rssOf(pid);
+      let start = performance.now();
+      const reader = createRemoteLoroHistoryReader(
+        createNativeRemoteHistoryPort(connection.client, ns, docId)
+      );
+      const view = createConversationViewFromReader(reader, { sessionId, scheduleIdle: idleSoon });
+      await view.ready;
+      const viewMs = ms(start);
+      start = performance.now();
+      const count = view.turnCount;
+      const range = view.acquireRange(Math.max(0, count - 50), count);
+      await range.ready;
+      const last50Ms = ms(start);
+      const result = {
+        viewMs,
+        last50Ms,
+        totalMs: +(viewMs + last50Ms).toFixed(1),
+        rendererRssDeltaMb: mb(process.memoryUsage().rss - rssBefore),
+        hostRssDeltaMb: mb((await rssOf(pid)) - hostBefore),
+      };
+      range.release();
+      view.dispose();
+      return result;
+    };
+    const cold = await screen();
+    const warm = await screen();
+    return { cold, warm };
+  } finally {
+    await connection.close();
+    process.kill(pid, 'SIGTERM');
+    await rm(dataDir, { recursive: true, force: true });
+  }
+}
+
 describe.skipIf(sizes.length === 0)('Session first screen', () => {
   it('measures the legacy and native first screens', async () => {
     const results = [];
@@ -132,8 +210,9 @@ describe.skipIf(sizes.length === 0)('Session first screen', () => {
       results.push({
         turns,
         snapshotMb: +(snapshot.byteLength / 1024 / 1024).toFixed(1),
-        legacy: await legacyPath(snapshot),
-        native: await nativePath(turns, snapshot),
+        ...(paths.has('legacy') ? { legacy: await legacyPath(snapshot) } : {}),
+        ...(paths.has('native') ? { native: await nativePath(turns, snapshot) } : {}),
+        ...(paths.has('remote') ? { remote: await remotePath(turns, snapshot) } : {}),
       });
     }
     const out = process.env.LODY_SESSION_FIRST_SCREEN_BENCH_OUT;

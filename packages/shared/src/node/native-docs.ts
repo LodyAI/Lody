@@ -1,6 +1,7 @@
 import type { RepoClient, RoomKey } from '@loro-dev/loro-repo-client';
 import type { ExternalDocFeed, ExternalDocsAdapter } from 'loro-repo';
-import { MIGRATIONS_ROOM, observeLoroDoc } from './native-repo';
+import type { RemoteLoroHistoryPort } from '../session-data/remote-loro';
+import { MIGRATIONS_ROOM, observeLoroDoc, observeLoroPaths } from './native-repo';
 
 /** Type-only loro-repo use keeps its WASM out of the Electron main bundle. */
 const CAPABILITY = 'loro-external-docs-v1' as const;
@@ -169,6 +170,53 @@ export function createNativeDocs(
         marked.add(docId);
       }
       await commitDocUpdates(client, namespace, docId, updates);
+    },
+  };
+}
+
+/** Bounded reads and changed-path observation of one native Session document. */
+export function createNativeRemoteHistoryPort(
+  client: RepoClient,
+  namespace: string,
+  docId: string
+): RemoteLoroHistoryPort {
+  const room = docRoom(docId);
+  const created = client.createRoom(namespace, room, 'plaintext');
+  return {
+    async readListFields(start, end, fields) {
+      await created;
+      const page = await client.readDocListFields(namespace, room, ['history'], {
+        start,
+        ...(end !== undefined ? { end } : {}),
+        fields: fields.map((field) => ({
+          path: [...field.path],
+          ...(field.shape ? { shape: true } : {}),
+        })),
+      });
+      return { len: page.len, start: page.start, rows: page.rows };
+    },
+    async readPath(path) {
+      await created;
+      try {
+        return (await client.readDoc(namespace, room, [...path])).value;
+      } catch (error) {
+        if (/path not found/.test(String(error))) return undefined;
+        throw error;
+      }
+    },
+    observePaths(listener) {
+      const observation = (async () => {
+        await created;
+        return observeLoroPaths(client, namespace, room, (event) => {
+          // A disconnect is followed by a reset once the SDK resubscribes.
+          if (event.kind === 'reset') listener({ kind: 'reset' });
+          else if (event.kind === 'changes') listener({ kind: 'changes', changes: event.changes });
+        });
+      })();
+      return {
+        ready: observation.then((handle) => handle.ready),
+        close: () => void observation.then((handle) => handle.release()).catch(() => {}),
+      };
     },
   };
 }

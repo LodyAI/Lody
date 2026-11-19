@@ -15,10 +15,19 @@ import {
 const notCommitted = (reason: string) => new ExternalMetadataNotCommittedError(reason);
 import { Flock } from '@loro-dev/flock-wasm';
 import { createNativeFlockDocs } from '../src/node/native-flock-docs';
-import { connectNativeRepo, importLegacyRoom, type LegacyFlockBundle } from '../src/node/native-repo';
+import { createNativeDocs, createNativeRemoteHistoryPort } from '../src/node/native-docs';
 import {
-  createNativeWorkspaceMeta,
-} from '../src/node/native-workspace-meta';
+  createLoroSessionData,
+  createRemoteLoroHistoryReader,
+  type SessionDataChange,
+} from '../src/session-data';
+import type { SessionHistory, SessionId } from '../src';
+import {
+  connectNativeRepo,
+  importLegacyRoom,
+  type LegacyFlockBundle,
+} from '../src/node/native-repo';
+import { createNativeWorkspaceMeta } from '../src/node/native-workspace-meta';
 
 const hostScript = fileURLToPath(new URL('./fixtures/native-repo-host.mjs', import.meta.url));
 const launcher = () => ({ command: process.execPath, args: [hostScript] });
@@ -75,7 +84,10 @@ async function nativeRepo(client: RepoClient) {
   return { repo, events };
 }
 
-function nextEvent(events: RepoEvent<JsonObject>[], match: (event: RepoEvent<JsonObject>) => boolean) {
+function nextEvent(
+  events: RepoEvent<JsonObject>[],
+  match: (event: RepoEvent<JsonObject>) => boolean
+) {
   const start = events.length;
   return new Promise<RepoEvent<JsonObject>>((resolve) => {
     const poll = () => {
@@ -108,9 +120,9 @@ describe('native Workspace Meta', () => {
   it('migrates legacy Meta losslessly and publishes once', async () => {
     const { connection } = await setup();
     const bundle = await legacyBundle();
-    expect(await importLegacyRoom(connection.client, ns, META_ROOM, 'cli', async () => bundle)).toBe(
-      'imported'
-    );
+    expect(
+      await importLegacyRoom(connection.client, ns, META_ROOM, 'cli', async () => bundle)
+    ).toBe('imported');
     // Registers keep their original clocks, tombstones included.
     const { registers } = await connection.client.flockReadRegisters(ns, META_ROOM);
     for (const [key, record] of Object.entries(bundle.entries)) {
@@ -141,7 +153,10 @@ describe('native Workspace Meta', () => {
     const daemon = await nativeRepo(connection.client);
     const main = await nativeRepo(other);
 
-    const seen = nextEvent(main.events, (e) => e.kind === 'doc-metadata' && e.docId === 'session-1');
+    const seen = nextEvent(
+      main.events,
+      (e) => e.kind === 'doc-metadata' && e.docId === 'session-1'
+    );
     await daemon.repo.upsertDocMeta('session-1', { title: 'from daemon' });
     expect(await seen).toMatchObject({ patch: { title: 'from daemon' }, by: 'sync' });
     // A write by the other side is visible to its own repo on return.
@@ -189,7 +204,10 @@ describe('native Workspace Meta', () => {
     const { dataDir, connection } = await setup();
     const a = createNativeWorkspaceMeta(connection.client, ns, notCommitted);
     const b = createNativeWorkspaceMeta(await peer(dataDir), ns, notCommitted);
-    cleanups.push(() => a.close(), () => b.close());
+    cleanups.push(
+      () => a.close(),
+      () => b.close()
+    );
     await Promise.all([a.open(() => {}), b.open(() => {})]);
     await Promise.all([
       a.commit({ kind: 'upsert-doc', docId: 'd', patch: { left: 1 } }),
@@ -208,7 +226,10 @@ describe('native Workspace Meta', () => {
       entries[JSON.stringify(['e', id])] = { c: `${1_000 + i},0,seed`, d: true };
       entries[JSON.stringify(['m', id, 'n'])] = { c: `${1_000 + i},1,seed`, d: 0 };
     }
-    await importLegacyRoom(connection.client, ns, META_ROOM, 'seed', async () => ({ version: 0, entries }));
+    await importLegacyRoom(connection.client, ns, META_ROOM, 'seed', async () => ({
+      version: 0,
+      entries,
+    }));
     const writer = createNativeWorkspaceMeta(await peer(dataDir), ns, notCommitted);
     cleanups.push(() => writer.close());
     await writer.open(() => {});
@@ -237,12 +258,14 @@ describe('native Workspace Meta', () => {
   });
 });
 
-
 describe('natively owned named Flock documents', () => {
   const CATALOG = 'ws:wf:workspace';
   const owner = (client: RepoClient) =>
-    createNativeFlockDocs(client, ns, (id) => id === CATALOG, (file) =>
-      Flock.fromFile(file).exportJson()
+    createNativeFlockDocs(
+      client,
+      ns,
+      (id) => id === CATALOG,
+      (file) => Flock.fromFile(file).exportJson()
     );
   const replica = async (client: RepoClient) => {
     const repo = await LoroRepo.create({ externalFlockDocs: owner(client) });
@@ -258,8 +281,12 @@ describe('natively owned named Flock documents', () => {
     const legacy = new Flock('legacy');
     legacy.put(['mcpServer', 'a'], { name: 'a' });
     legacy.delete(['mcpServer', 'gone']);
-    await importLegacyRoom(connection.client, ns, { kind: 'flock', id: CATALOG }, 'cli', async () =>
-      legacy.exportJson() as LegacyFlockBundle
+    await importLegacyRoom(
+      connection.client,
+      ns,
+      { kind: 'flock', id: CATALOG },
+      'cli',
+      async () => legacy.exportJson() as LegacyFlockBundle
     );
     const daemon = await replica(connection.client);
     const renderer = await replica(await peer(dataDir));
@@ -312,5 +339,87 @@ describe('natively owned named Flock documents', () => {
       (await connection.client.exportFlockRaw(ns, { kind: 'flock', id: CATALOG })).bytes
     );
     expect(native.get(['row'])).toBe('offline');
+  });
+});
+
+describe('remote Session history reader', () => {
+  const DOC = 'session-remote';
+  const turn = (index: number, extra: Partial<SessionHistory> = {}): SessionHistory =>
+    ({
+      id: `turn-${index}`,
+      role: index % 2 === 0 ? 'user' : 'assistant',
+      timestamp: '2026-01-01T00:00:00Z',
+      items: [{ type: 'text', text: `body ${index}` }],
+      fileDiff: [],
+      ...(index % 2 === 0
+        ? { inputConfig: { prompt: 'secret prompt', agentRoleId: 'role-a', mcpServerIds: [] } }
+        : { userTurnId: `turn-${index - 1}` }),
+      ...extra,
+    }) as SessionHistory;
+  const until = async (check: () => boolean) => {
+    while (!check()) await new Promise((resolve) => setImmediate(resolve));
+  };
+
+  /** The daemon's writing replica and a second process's remote reader. */
+  async function open() {
+    const { dataDir, connection } = await setup();
+    const repo = await LoroRepo.create({
+      externalDocs: createNativeDocs(connection.client, ns, (id) => id === DOC),
+    });
+    cleanups.push(() => repo.destroy());
+    const { doc } = await repo.openPersistedDoc(DOC);
+    const data = createLoroSessionData({ sessionId: 'remote' as SessionId, doc });
+    const commit = () => repo.persistDocNow(DOC, doc);
+    const remote = createRemoteLoroHistoryReader(
+      createNativeRemoteHistoryPort(await peer(dataDir), ns, DOC)
+    );
+    return { data, commit, remote };
+  }
+
+  it('reads the latest page, turns and outputs as the in-process reader does', async () => {
+    const { data, commit, remote } = await open();
+    for (let i = 0; i < 90; i++) await data.commands.appendTurn(turn(i));
+    await commit();
+    const local = await data.history.readLatestDirectoryPage!(40);
+    const page = await remote.readLatestDirectoryPage!(40);
+    const facts = (rows: typeof page.rows) =>
+      rows.map((row) => ({ ...row, inputConfig: row.inputConfig }));
+    expect(facts(page.rows)).toEqual(facts(local.rows));
+    expect(page).toMatchObject({ startPosition: 50, totalCount: 90, hasMoreOlder: true });
+    // Directory rows carry the send configuration, never the prompt.
+    expect(JSON.stringify(page.rows)).not.toContain('secret prompt');
+    const older = await remote.readOlderDirectoryPage!(page.cursor!, 40);
+    expect(older.rows.map((row) => row.turnId)).toEqual(
+      Array.from({ length: 40 }, (_, i) => `turn-${10 + i}`)
+    );
+    expect(await remote.readTurn('turn-3')).toEqual(data.history.readTurn('turn-3'));
+    expect(await remote.readTurn('turn-404')).toEqual({ state: 'missing' });
+    expect(await remote.readTurnOutput('turn-88')).toEqual(data.history.readTurnOutput('turn-88'));
+  });
+
+  it('notifies appends structurally and field edits by turn id, never by content', async () => {
+    const { data, commit, remote } = await open();
+    for (let i = 0; i < 4; i++) await data.commands.appendTurn(turn(i));
+    await commit();
+    const changes: SessionDataChange[] = [];
+    const observation = remote.observe((change) => changes.push(change));
+    await observation.initial;
+    await remote.readLatestDirectoryPage!(40);
+
+    await data.commands.appendTurn(turn(4));
+    await commit();
+    await until(() => changes.some((change) => change.kind === 'structure'));
+    expect(changes.at(-1)).toEqual({ kind: 'structure', from: 4, to: 5 });
+
+    await data.commands.applyHistoryAction({
+      kind: 'user-status',
+      turnId: 'turn-2',
+      status: 'failed',
+    });
+    await commit();
+    await until(() => changes.some((change) => change.kind === 'changed'));
+    expect(changes.at(-1)).toEqual({ kind: 'changed', ids: ['turn-2'] });
+    expect((await remote.readTurn('turn-2')).state).toBe('ready');
+    observation.unsubscribe();
   });
 });
