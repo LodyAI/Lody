@@ -20,6 +20,7 @@ import {
   createNativeDocs,
   createNativeRemoteHistoryPort,
   importLegacyDoc,
+  listNativeDocIds,
 } from '../src/node/native-docs';
 import { LoroDoc, LoroList, LoroMap, isContainer, type Container } from 'loro-crdt';
 import { createHistoryWriter } from '../src/history-writer';
@@ -962,5 +963,24 @@ describe('natively owned Preview comment documents', () => {
     cleanups.push(() => renderer.destroy());
     const { doc } = await renderer.openPersistedDoc(docId);
     expect(doc.toJSON()).toEqual(legacy.toJSON());
+  });
+});
+
+describe('native document ownership', () => {
+  it('leaves legacy session-comment documents on the legacy store', async () => {
+    const { connection } = await setup();
+    const repo = await LoroRepo.create({
+      externalDocs: createNativeDocs(connection.client, ns, isNativeDocId),
+    });
+    cleanups.push(() => repo.destroy());
+    for (const id of ['session-owned', 'session-comment-legacy']) {
+      const { doc } = await repo.openPersistedDoc(id);
+      doc.getMap('probe').set('id', id);
+      doc.commit();
+      await repo.persistDocNow(id, doc);
+    }
+    const native = await listNativeDocIds(connection.client, ns);
+    expect(native).toContain('session-owned');
+    expect(native).not.toContain('session-comment-legacy');
   });
 });
