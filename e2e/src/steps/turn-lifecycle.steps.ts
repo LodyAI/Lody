@@ -17,16 +17,14 @@ function journeyFor(world: LodyWorld): TurnJourney {
   return journey;
 }
 
-Given('已配置 Turn 生命周期用的确定性 Agent 隔离桌面', async function (this: LodyWorld) {
-  if (!this.artifacts || !this.onboarding || !this.harness?.page) {
+Given('已配置 Turn 生命周期用的确定性 Agent', async function (this: LodyWorld) {
+  if (!this.artifacts || !this.harness?.page) {
     throw new Error('Scenario is not ready for Turn lifecycle setup');
   }
-  await this.onboarding.waitForLocalBootstrap();
   const fixture = new TurnLifecycleFixture(
     `${this.artifacts.scenarioDir}/turn-lifecycle-scripted-acp.ndjson`
   );
   const page = new TurnLifecyclePage(this.harness.page, fixture);
-  await this.onboarding.skipConfigurationAndEnterProduct();
   await page.configureCustomAgent();
   journeys.set(this, { fixture, page });
 });

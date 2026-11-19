@@ -40,6 +40,11 @@ function requireStringArray(value, path, failures, allowEmpty = false) {
   }
 }
 
+/** Desktop compositions a journey runs on; the OSS build is `oss-local`. */
+export function journeyTargets(journey) {
+  return journey.targets ?? ['oss-local'];
+}
+
 export function normalizeSemanticContract(journey) {
   return {
     runtime: journey.runtime,
@@ -94,6 +99,17 @@ export function validateRegistry(registry) {
     if (!states.has(journey.state)) failures.push(`${path}.state is unsupported`);
     if (!priorities.has(journey.priority)) failures.push(`${path}.priority is unsupported`);
     if (!runtimes.has(journey.runtime)) failures.push(`${path}.runtime is unsupported`);
+    if (journey.targets !== undefined) {
+      if (!Array.isArray(journey.targets) || journey.targets.length === 0) {
+        failures.push(`${path}.targets must be a non-empty array of target names`);
+      } else {
+        for (const [targetIndex, target] of journey.targets.entries()) {
+          if (typeof target !== 'string' || !/^[a-z][a-z0-9-]*$/u.test(target)) {
+            failures.push(`${path}.targets[${targetIndex}] must be a lowercase target name`);
+          }
+        }
+      }
+    }
     requireString(journey.title, `${path}.title`, failures);
     requireString(journey.owner, `${path}.owner`, failures);
     requireString(journey.fixture, `${path}.fixture`, failures);
