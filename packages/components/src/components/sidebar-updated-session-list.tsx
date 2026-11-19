@@ -2,15 +2,21 @@ import { isElectronRenderer } from '@/lib/electron';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { SessionWindowMenuItem } from './session-window-menu-item';
 import {
+  Fragment,
   memo,
   useCallback,
   useMemo,
   useState,
+  type DragEvent,
   type MouseEvent as ReactMouseEvent,
+  type ReactElement,
   type ReactNode,
 } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { startSessionMentionDrag } from '@/lib/session-mention-drag';
+import {
+  getInFlightSessionMentionDragId,
+  startSessionMentionDrag,
+} from '@/lib/session-mention-drag';
 import {
   Archive,
   Folders,
@@ -474,6 +480,13 @@ export type SidebarUpdatedSessionListProps = {
   pinSectionMenu?: SidebarPinSectionMenu;
   /** Pinned sections only: identifies this list's section for drag and tests. */
   pinSectionId?: string | null;
+  /**
+   * Pinned sections only: accept a dragged conversation. `toIndex` counts this
+   * section's pinned rows without the dragged one.
+   */
+  onDropPinnedSession?: (sessionId: string, toIndex: number) => void;
+  /** Pinned sections only: wraps the section header (the section drag handle). */
+  renderHeader?: (header: ReactElement) => ReactNode;
 };
 
 const defaultLabels: SidebarUpdatedSessionListLabels = {
@@ -510,8 +523,47 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   grouping = 'recency',
   pinSectionMenu,
   pinSectionId,
+  onDropPinnedSession,
+  renderHeader,
 }: SidebarUpdatedSessionListProps) {
   const preserveOrder = grouping === 'manual';
+  const [dropHint, setDropHint] = useState<PinnedDropHint | null>(null);
+  const resolveDrop = useCallback(
+    (event: DragEvent<HTMLDivElement>) =>
+      onDropPinnedSession ? resolvePinnedDrop(event, items) : null,
+    [items, onDropPinnedSession]
+  );
+  const handleDragOver = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      const drop = resolveDrop(event);
+      if (!drop) return;
+      event.preventDefault();
+      // Session drags only allow `copy` (mention drops); a reorder accepts the same effect.
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      setDropHint((previous) =>
+        previous?.rowId === drop.hint.rowId && previous.after === drop.hint.after
+          ? previous
+          : drop.hint
+      );
+    },
+    [resolveDrop]
+  );
+  const handleDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget;
+    if (next instanceof Node && event.currentTarget.contains(next)) return;
+    setDropHint(null);
+  }, []);
+  const handleDrop = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      const drop = resolveDrop(event);
+      setDropHint(null);
+      if (!drop) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onDropPinnedSession?.(drop.sessionId, drop.toIndex);
+    },
+    [onDropPinnedSession, resolveDrop]
+  );
   const { t } = useTranslation();
   const showBranchContext = useAtomValue(sidebarShowBranchNamesAtom);
   const merged: SidebarUpdatedSessionListLabels = useMemo(
@@ -661,6 +713,9 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
         data-pin-section={
           pinSectionId === undefined ? undefined : (pinSectionId ?? DEFAULT_PIN_SECTION_ATTR)
         }
+        onDragOver={onDropPinnedSession ? handleDragOver : undefined}
+        onDragLeave={onDropPinnedSession ? handleDragLeave : undefined}
+        onDrop={onDropPinnedSession ? handleDrop : undefined}
       >
         {buckets.map((bucket, bucketIndex) => {
           const bucketHeaderAction = bucketIndex === 0 ? headerAction : null;
@@ -697,17 +752,20 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
             >
               {/* Same shared section header as Workspace mode, so section labels
                   read identically (13px medium) across organize modes. */}
-              <SidebarSectionHeader
-                label={bucketLabels[bucket.key]}
-                collapsed={collapsed}
-                activity={collapsedActivity}
-                action={bucketHeaderAction}
-                isMobile={isMobile}
-                toggleLabel={toggleBucketLabel}
-                onToggleCollapsed={canToggleBucket ? handleToggle : undefined}
-              />
+              {(renderHeader ?? identityHeader)(
+                <SidebarSectionHeader
+                  label={bucketLabels[bucket.key]}
+                  collapsed={collapsed}
+                  activity={collapsedActivity}
+                  action={bucketHeaderAction}
+                  isMobile={isMobile}
+                  toggleLabel={toggleBucketLabel}
+                  onToggleCollapsed={canToggleBucket ? handleToggle : undefined}
+                />
+              )}
+              {dropHint?.rowId === null ? <PinnedDropLine /> : null}
               {!collapsed ? (
-                <div className={SIDEBAR_ROW_LIST_CLASS}>
+                <div className={SIDEBAR_ROW_LIST_CLASS} data-pin-section-rows="">
                   {visibleNodes.map((node, nodeIndex) => {
                     const openedByTree = buildSessionRowOpenedByTreeSlot(node, t, () =>
                       handleToggleOpenedBySessions(node.item.id)
@@ -721,38 +779,39 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                             tallOpener: true,
                           }
                         : openedByTree;
+                    const hintHere = dropHint?.rowId === node.item.id ? dropHint : null;
                     return (
-                      <SessionOpenedByTreeRow
-                        key={node.item.id}
-                        depth={node.depth}
-                        gutter={showTreeGutter}
-                      >
-                        <UpdatedItemRow
-                          item={node.item}
-                          now={now}
-                          selected={node.item.id === selectedItemId}
-                          isMobile={isMobile}
-                          showPinnedIcon={showPinnedIcon}
-                          showProjectContext={showProjectContext}
-                          showBranchContext={showBranchContext}
-                          href={getItemHref?.(node.item.id)}
-                          onSelect={onSelectItem}
-                          onArchive={onArchiveItem}
-                          onMarkUnread={onMarkItemUnread}
-                          onRename={onRenameItem}
-                          onTogglePin={onTogglePinItem}
-                          onCopyUrl={onCopyItemUrl}
-                          onShareWithTeam={onShareItemWithTeam}
-                          onOpenPullRequest={onOpenPullRequest}
-                          onBeginRename={beginRename}
-                          pinSectionMenu={pinSectionMenu}
-                          openedByTree={treeSlot}
-                          contextMenuLabels={contextMenuLabels}
-                          archiveTooltipLabel={archiveLabels.tooltip}
-                          archiveActionLabel={archiveLabels.action}
-                          archiveConfirmLabel={archiveLabels.confirm}
-                        />
-                      </SessionOpenedByTreeRow>
+                      <Fragment key={node.item.id}>
+                        {hintHere && !hintHere.after ? <PinnedDropLine /> : null}
+                        <SessionOpenedByTreeRow depth={node.depth} gutter={showTreeGutter}>
+                          <UpdatedItemRow
+                            item={node.item}
+                            now={now}
+                            selected={node.item.id === selectedItemId}
+                            isMobile={isMobile}
+                            showPinnedIcon={showPinnedIcon}
+                            showProjectContext={showProjectContext}
+                            showBranchContext={showBranchContext}
+                            href={getItemHref?.(node.item.id)}
+                            onSelect={onSelectItem}
+                            onArchive={onArchiveItem}
+                            onMarkUnread={onMarkItemUnread}
+                            onRename={onRenameItem}
+                            onTogglePin={onTogglePinItem}
+                            onCopyUrl={onCopyItemUrl}
+                            onShareWithTeam={onShareItemWithTeam}
+                            onOpenPullRequest={onOpenPullRequest}
+                            onBeginRename={beginRename}
+                            pinSectionMenu={pinSectionMenu}
+                            openedByTree={treeSlot}
+                            contextMenuLabels={contextMenuLabels}
+                            archiveTooltipLabel={archiveLabels.tooltip}
+                            archiveActionLabel={archiveLabels.action}
+                            archiveConfirmLabel={archiveLabels.confirm}
+                          />
+                        </SessionOpenedByTreeRow>
+                        {hintHere?.after ? <PinnedDropLine /> : null}
+                      </Fragment>
                     );
                   })}
                   {showToggleFullList ? (
@@ -1430,3 +1489,67 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
 });
 
 UpdatedItemRow.displayName = 'UpdatedItemRow';
+
+const identityHeader = (header: ReactElement): ReactNode => header;
+
+/** Where a dragged conversation would land; `rowId: null` is the section top (header). */
+type PinnedDropHint = { rowId: string | null; after: boolean };
+
+function PinnedDropLine() {
+  return (
+    <div aria-hidden="true" className="relative h-0" data-pin-drop-line="">
+      <div className="absolute inset-x-2 top-0 h-0.5 rounded-full bg-sidebar-ring" />
+    </div>
+  );
+}
+
+/**
+ * Resolve a drag over a pin section into the drop index among its pinned rows
+ * (the dragged row excluded). Rows of opened Sessions carried in by a pinned
+ * opener count as their opener, below it. Returns null for anything but an
+ * in-app conversation drag.
+ */
+function resolvePinnedDrop(
+  event: DragEvent<HTMLDivElement>,
+  items: readonly SidebarUpdatedItem[]
+): { sessionId: string; toIndex: number; hint: PinnedDropHint } | null {
+  const sessionId = getInFlightSessionMentionDragId();
+  if (!sessionId) return null;
+  const rootIds = items.filter((item) => item.isPinned).map((item) => item.id);
+  const others = rootIds.filter((id) => id !== sessionId);
+  const target = event.target instanceof Element ? event.target : null;
+  const row = target?.closest('[data-sidebar-updated-id]');
+  if (!row || !event.currentTarget.contains(row)) {
+    // The header (or a folded section) means the top; the space below the rows, the end.
+    const inRows = Boolean(target?.closest('[data-pin-section-rows]'));
+    if (inRows && others.length > 0) {
+      return {
+        sessionId,
+        toIndex: others.length,
+        hint: { rowId: others[others.length - 1] ?? null, after: true },
+      };
+    }
+    return { sessionId, toIndex: 0, hint: { rowId: null, after: false } };
+  }
+  const rowId = row.getAttribute('data-sidebar-updated-id') ?? '';
+  const isRoot = rootIds.includes(rowId);
+  const rootId = isRoot
+    ? rowId
+    : (items.find((item) => item.id === rowId)?.openedByRowSessionId ?? rowId);
+  const rect = row.getBoundingClientRect();
+  // An opened Session's row always means "below its opener's group".
+  const after = !isRoot || (rect.height > 0 && event.clientY > rect.top + rect.height / 2);
+  if (rootId === sessionId) {
+    return {
+      sessionId,
+      toIndex: Math.max(0, rootIds.indexOf(sessionId)),
+      hint: { rowId: rootId, after },
+    };
+  }
+  const index = others.indexOf(rootId);
+  return {
+    sessionId,
+    toIndex: index < 0 ? others.length : index + (after ? 1 : 0),
+    hint: { rowId: rootId, after },
+  };
+}

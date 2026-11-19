@@ -1,4 +1,28 @@
-import { memo, useCallback, useMemo, useState, type ReactNode } from 'react';
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useMemo,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useTranslation } from 'react-i18next';
 import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@lody/ui/button';
@@ -24,6 +48,10 @@ export type SidebarPinnedSection = {
 
 export type SidebarPinSectionActions = {
   onMoveItem: (itemId: string, sectionId: string | null) => void;
+  /** A conversation dragged to `toIndex` of a section's pinned rows. */
+  onDropItem: (itemId: string, sectionId: string | null, toIndex: number) => void;
+  /** A user section dragged to `toIndex` among the user sections. */
+  onMoveSection: (sectionId: string, toIndex: number) => void;
   onCreateSection: (name: string, moveItemId?: string) => void | Promise<void>;
   onRenameSection: (sectionId: string, name: string) => void | Promise<void>;
   onDeleteSection: (sectionId: string) => void;
@@ -40,6 +68,8 @@ type SharedListProps = Omit<
   | 'headerAction'
   | 'pinSectionMenu'
   | 'pinSectionId'
+  | 'onDropPinnedSession'
+  | 'renderHeader'
 >;
 
 export type SidebarPinnedSectionsProps = {
@@ -119,6 +149,38 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
     return menus;
   }, [menuLabels, menuSections, onMoveItem, openCreate, sections]);
 
+  const onDropItem = actions?.onDropItem;
+  const dropBySection = useMemo(() => {
+    const handlers = new Map<string | null, (sessionId: string, toIndex: number) => void>();
+    if (!onDropItem || listProps.isMobile) return handlers;
+    for (const section of sections) {
+      handlers.set(section.id, (sessionId, toIndex) => onDropItem(sessionId, section.id, toIndex));
+    }
+    return handlers;
+  }, [listProps.isMobile, onDropItem, sections]);
+
+  const userSectionIds = useMemo(
+    () => sections.flatMap((section) => (section.id === null ? [] : [section.id])),
+    [sections]
+  );
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+  const onMoveSection = actions?.onMoveSection;
+  const handleSectionDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const activeId = String(event.active.id);
+      const overId = event.over ? String(event.over.id) : null;
+      if (!onMoveSection || !overId || activeId === overId) return;
+      const toIndex = userSectionIds.indexOf(overId);
+      if (toIndex < 0) return;
+      onMoveSection(activeId, toIndex);
+    },
+    [onMoveSection, userSectionIds]
+  );
+  const canSortSections = Boolean(onMoveSection) && !listProps.isMobile;
+
   const hasUserSections = sections.some((section) => section.id !== null);
   const visibleSections = sections.filter(
     // An empty default section only matters as a heading when nothing else is pinned.
@@ -127,58 +189,74 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
 
   return (
     <div className={className}>
-      {visibleSections.map((section, index) => {
-        const isDefault = section.id === null;
-        const sectionId = section.id;
-        const collapsed = isDefault
-          ? defaultCollapsed
-          : Boolean(sectionId && collapsedSectionIds?.[sectionId]);
-        const label = isDefault ? defaultLabel : section.name;
-        const sectionMenu =
-          !isDefault && actions && sectionId ? (
-            <PinSectionHeaderMenu
-              label={t('sidebar.pinSections.sectionActions', 'Section actions')}
-              renameLabel={t('sidebar.pinSections.rename', 'Rename Section')}
-              deleteLabel={t('sidebar.pinSections.delete', 'Delete Section')}
-              onRename={() =>
-                setNameDialog({ kind: 'rename', sectionId, initialName: section.name })
-              }
-              onDelete={() => actions.onDeleteSection(sectionId)}
-            />
-          ) : null;
-        const firstAction = index === 0 ? headerAction : null;
-        const action =
-          firstAction && sectionMenu ? (
-            <span className="flex items-center">
-              {sectionMenu}
-              {firstAction}
-            </span>
-          ) : (
-            (sectionMenu ?? firstAction ?? undefined)
-          );
-        return (
-          <SidebarUpdatedSessionList
-            key={sectionId ?? '__default__'}
-            {...listProps}
-            items={section.items}
-            grouping="manual"
-            pinSectionId={sectionId}
-            pinSectionMenu={menuBySection.get(sectionId)}
-            showPinnedIcon={false}
-            labels={{ heading: label, emptyTitle, emptyDescription }}
-            collapsedBuckets={collapsed ? COLLAPSED : undefined}
-            onToggleBucket={
-              isDefault
-                ? onToggleDefault
-                : sectionId && onToggleSection
-                  ? () => onToggleSection(sectionId)
-                  : undefined
-            }
-            toggleBucketLabel={label}
-            headerAction={action}
-          />
-        );
-      })}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleSectionDragEnd}
+      >
+        <SortableContext items={userSectionIds} strategy={verticalListSortingStrategy}>
+          {visibleSections.map((section, index) => {
+            const isDefault = section.id === null;
+            const sectionId = section.id;
+            const collapsed = isDefault
+              ? defaultCollapsed
+              : Boolean(sectionId && collapsedSectionIds?.[sectionId]);
+            const label = isDefault ? defaultLabel : section.name;
+            const sectionMenu =
+              !isDefault && actions && sectionId ? (
+                <PinSectionHeaderMenu
+                  label={t('sidebar.pinSections.sectionActions', 'Section actions')}
+                  renameLabel={t('sidebar.pinSections.rename', 'Rename Section')}
+                  deleteLabel={t('sidebar.pinSections.delete', 'Delete Section')}
+                  onRename={() =>
+                    setNameDialog({ kind: 'rename', sectionId, initialName: section.name })
+                  }
+                  onDelete={() => actions.onDeleteSection(sectionId)}
+                />
+              ) : null;
+            const firstAction = index === 0 ? headerAction : null;
+            const action =
+              firstAction && sectionMenu ? (
+                <span className="flex items-center">
+                  {sectionMenu}
+                  {firstAction}
+                </span>
+              ) : (
+                (sectionMenu ?? firstAction ?? undefined)
+              );
+            const list = (renderHeader?: (header: ReactElement) => ReactNode) => (
+              <SidebarUpdatedSessionList
+                {...listProps}
+                renderHeader={renderHeader}
+                onDropPinnedSession={dropBySection.get(sectionId)}
+                items={section.items}
+                grouping="manual"
+                pinSectionId={sectionId}
+                pinSectionMenu={menuBySection.get(sectionId)}
+                showPinnedIcon={false}
+                labels={{ heading: label, emptyTitle, emptyDescription }}
+                collapsedBuckets={collapsed ? COLLAPSED : undefined}
+                onToggleBucket={
+                  isDefault
+                    ? onToggleDefault
+                    : sectionId && onToggleSection
+                      ? () => onToggleSection(sectionId)
+                      : undefined
+                }
+                toggleBucketLabel={label}
+                headerAction={action}
+              />
+            );
+            return sectionId === null || !canSortSections ? (
+              <Fragment key={sectionId ?? '__default__'}>{list()}</Fragment>
+            ) : (
+              <SortablePinSection key={sectionId} id={sectionId}>
+                {list}
+              </SortablePinSection>
+            );
+          })}
+        </SortableContext>
+      </DndContext>
       {actions ? (
         <PinSectionNameDialog
           target={nameDialog}
@@ -198,6 +276,48 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
 });
 
 const COLLAPSED = { all: true } as const;
+
+/**
+ * A user section that can be dragged by its header. Only the header carries
+ * the pointer listeners: conversation rows keep their own (HTML5) drag.
+ */
+function SortablePinSection({
+  id,
+  children,
+}: {
+  id: string;
+  children: (renderHeader: (header: ReactElement) => ReactNode) => ReactNode;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+  const renderHeader = useCallback(
+    (header: ReactElement) => (
+      <div ref={setActivatorNodeRef} {...attributes} {...listeners} data-pin-section-handle="">
+        {header}
+      </div>
+    ),
+    [attributes, listeners, setActivatorNodeRef]
+  );
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Translate.toString(transform),
+        transition,
+        opacity: isDragging ? 0.6 : undefined,
+      }}
+    >
+      {children(renderHeader)}
+    </div>
+  );
+}
 
 function PinSectionHeaderMenu({
   label,

@@ -48,6 +48,7 @@ import {
   buildPinnedSectionLayout,
   planNewPinSectionOrderKey,
   planPinnedSessionMove,
+  planPinSectionMove,
   type PinSection,
   type PinnedSessionPlacement,
 } from '@lody/shared';
@@ -2793,6 +2794,19 @@ export function LoroAppSidebar({
     return {
       onMoveItem: (itemId, sectionId) => {
         void applySessionPinPlacements(planPinnedMove(itemId, sectionId, 0)).catch(reportPinError);
+      },
+      onDropItem: (itemId, sectionId, toIndex) => {
+        void applySessionPinPlacements(planPinnedMove(itemId, sectionId, toIndex)).catch(
+          reportPinError
+        );
+      },
+      onMoveSection: (sectionId, toIndex) => {
+        const section = pinSectionsRef.current.find((entry) => entry.id === sectionId);
+        if (!section) return;
+        void writeWorkspacePinSection(runtime, {
+          ...section,
+          orderKey: planPinSectionMove(pinSectionsRef.current, sectionId, toIndex),
+        }).catch(reportPinError);
       },
       onCreateSection: async (name, moveItemId) => {
         const section: PinSection = {

@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 import { LoroSidebar, type LoroSidebarProps } from '../src/components/loro-sidebar';
 import { initI18n } from '../src/i18n';
+import { armSessionMentionDrag, clearSessionMentionDrag } from '../src/lib/session-mention-drag';
 
 const pinnedItem = {
   id: 'pinned-session',
@@ -549,5 +550,78 @@ describe('LoroSidebar pinned section', () => {
     expect(target).toBeDefined();
     flushSync(() => target?.click());
     expect(onMoveItem).toHaveBeenCalledWith('pinned-session', 'maintenance');
+  });
+
+  describe('dragging a conversation into a pin section', () => {
+    const chat = (id: string) => ({
+      id,
+      kind: 'chat' as const,
+      title: id,
+      sectionLabel: 'Chats',
+      latestMessageAt: new Date('2026-07-14T08:00:00.000Z'),
+      isPinned: true,
+    });
+    const actions = () => ({
+      onMoveItem: vi.fn(),
+      onDropItem: vi.fn(),
+      onMoveSection: vi.fn(),
+      onCreateSection: () => {},
+      onRenameSection: () => {},
+      onDeleteSection: () => {},
+    });
+    const drag = (target: Element | null | undefined, type: 'dragover' | 'drop', clientY = 0) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(event, { clientY, dataTransfer: { dropEffect: 'none', types: [] } });
+      flushSync(() => target?.dispatchEvent(event));
+      return event;
+    };
+
+    afterEach(() => clearSessionMentionDrag());
+
+    it('drops above the row under the pointer, in that row’s section', () => {
+      const pinSectionActions = actions();
+      renderSidebar({
+        pinnedSections: [
+          { id: null, name: 'Pinned', items: [chat('mover')] },
+          { id: 'maintenance', name: 'Maintenance', items: [chat('m1'), chat('m2')] },
+        ],
+        pinSectionActions,
+      });
+      armSessionMentionDrag('mover');
+      const target = container?.querySelector('[data-sidebar-updated-id="m2"]');
+      // jsdom rows have no height, so the pointer is in the row's upper half.
+      expect(drag(target, 'dragover').defaultPrevented).toBe(true);
+      const drop = drag(target, 'drop');
+      expect(drop.defaultPrevented).toBe(true);
+      expect(pinSectionActions.onDropItem).toHaveBeenCalledWith('mover', 'maintenance', 1);
+    });
+
+    it('drops at the top of an empty section through its header', () => {
+      const pinSectionActions = actions();
+      renderSidebar({
+        pinnedSections: [
+          { id: null, name: 'Pinned', items: [chat('mover')] },
+          { id: 'empty', name: 'Empty', items: [] },
+        ],
+        pinSectionActions,
+      });
+      armSessionMentionDrag('mover');
+      const header = container?.querySelector('[data-pin-section="empty"] [role="button"]');
+      drag(header, 'dragover');
+      drag(header, 'drop');
+      expect(pinSectionActions.onDropItem).toHaveBeenCalledWith('mover', 'empty', 0);
+    });
+
+    it('leaves drags that are not conversations alone', () => {
+      const pinSectionActions = actions();
+      renderSidebar({
+        pinnedSections: [{ id: null, name: 'Pinned', items: [chat('a')] }],
+        pinSectionActions,
+      });
+      const row = container?.querySelector('[data-sidebar-updated-id="a"]');
+      expect(drag(row, 'dragover').defaultPrevented).toBe(false);
+      drag(row, 'drop');
+      expect(pinSectionActions.onDropItem).not.toHaveBeenCalled();
+    });
   });
 });
