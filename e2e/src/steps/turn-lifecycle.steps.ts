@@ -69,12 +69,26 @@ When('用户启动一个持续工作的 Turn', async function (this: LodyWorld) 
   journey.interruptedSessionId = await journey.page.startLongRunningTurn();
 });
 
+When('桌面在 Turn 运行中正常退出后重新启动', async function (this: LodyWorld) {
+  const journey = journeyFor(this);
+  const root = this.harness!.getIsolatedRoot();
+  await this.harness!.close({ preserveRoot: true });
+  await this.launch({ reuseRoot: root, forceOnboarding: false });
+  journey.page = new TurnLifecyclePage(this.harness!.page!, journey.fixture);
+});
+
 When('桌面和它启动的全部进程在 Turn 运行中被强制杀死后重新启动', async function (this: LodyWorld) {
   const journey = journeyFor(this);
   const root = this.harness!.getIsolatedRoot();
   await this.harness!.killProcessTree();
   await this.launch({ reuseRoot: root, forceOnboarding: false });
   journey.page = new TurnLifecyclePage(this.harness!.page!, journey.fixture);
+});
+
+Then('被打断的 Turn 无需用户操作就在新的 Agent 进程中继续一次', async function (this: LodyWorld) {
+  const journey = journeyFor(this);
+  if (!journey.interruptedSessionId) throw new Error('No Turn was interrupted');
+  await journey.page.expectInterruptedTurnContinuesWithoutUserAction(journey.interruptedSessionId);
 });
 
 Then('被打断的 Session 仍然列出并能打开之前的对话', async function (this: LodyWorld) {
