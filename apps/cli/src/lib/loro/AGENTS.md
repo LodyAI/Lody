@@ -155,6 +155,6 @@ history. Regression: `tests/reconnect-storm-repro.test.ts`.
 
 Health follows the Meta room. While Meta is joined, aggregate `disconnected`
 means a doc/Flock failure: report `rooms-degraded`, retry that room with 1s to 30s
-backoff, and keep cloud side effects running. While rooms stay `error`, the 30s
-watchdog sweep backs off to 5 minutes; new failures keep the 1s to 30s sweep. Never
+backoff, and keep cloud side effects running. While a room stays `error`, the 30s
+watchdog backs off that room alone, up to 5 minutes; other rooms are not delayed. Never
 reconnect the whole transport for one failed room ([rationale](../../../../../.agents/notes/implemented/bug-fix/2026-11-02-cross-machine-read-room-lifetime.md)).
