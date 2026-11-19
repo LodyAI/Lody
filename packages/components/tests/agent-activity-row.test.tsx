@@ -157,10 +157,12 @@ describe('live agent status', () => {
   const statusRow = () => container.querySelector('[data-agent-activity-row]');
   const expandActivityGroup = async () => {
     const disclosure = container.querySelector<HTMLButtonElement>(
-      '[data-conversation-disclosure="group"][aria-expanded="false"]'
+      '[data-conversation-disclosure="group"]'
     );
     expect(disclosure).not.toBeNull();
-    await act(async () => disclosure!.click());
+    if (disclosure!.getAttribute('aria-expanded') === 'false') {
+      await act(async () => disclosure!.click());
+    }
   };
   const shimmering = () =>
     Array.from(container.querySelectorAll('.agent-shimmer')).map((el) => el.textContent);
