@@ -40,7 +40,7 @@ import { BillingSettingsComponent } from './billing-setting';
 import { StatsSettingsComponent } from './stats-setting';
 import { ProjectSettingsComponent } from './project-settings';
 import { MachineAgentSettings } from './machine-agent-settings';
-import { LodyAgentSetting } from './lody-agent-setting';
+import { Harness } from '@/components/harness';
 import { IntegrationsSettingsComponent } from './integrations-setting';
 import { KeyboardShortcutsSetting } from './keyboard-shortcuts-setting';
 import { AboutSettingsComponent } from './about-setting';
@@ -581,7 +581,9 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
         />
       );
     case 'lody-agent':
-      return <LodyAgentSetting />;
+      // The harness surface owns this page: pairing, providers, models, plugins
+      // and permissions.
+      return <Harness />;
     case 'memory':
       return <MemorySetting />;
     case 'agent-roles':

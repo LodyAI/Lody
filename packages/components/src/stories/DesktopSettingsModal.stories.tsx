@@ -5,6 +5,7 @@ import { useHydrateAtoms } from 'jotai/utils';
 import { settingsActiveTabAtom, settingsDialogOpenAtom, userAtom } from '@/atoms';
 import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { AGENT_ROLE_VERSION, workspaceFlockKeys, type AgentRole } from '@lody/shared';
+import { developerModeEnabledAtom, lodyAgentBetaEnabledAtom } from '@/atoms/settings';
 import type { SettingsTabId } from '@/components/settings/settings-tabs';
 import { DesktopSettingsModal } from '@/components/settings/desktop-settings-modal';
 import { RoutedStory, SettingsStoryProviders } from './settings-story-shell';
@@ -65,6 +66,15 @@ function RolesCatalogFixture({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/** The Lody Agent page only exists while the Lody Agent feature is on. */
+function LodyAgentEnabled({ children }: { children: ReactNode }) {
+  useHydrateAtoms([
+    [developerModeEnabledAtom, true],
+    [lodyAgentBetaEnabledAtom, true],
+  ]);
+  return <>{children}</>;
+}
+
 function SettingsModalStory({ tab }: { tab: SettingsTabId }) {
   return (
     <SettingsStoryProviders capabilities={['cloudAccount']}>
@@ -75,6 +85,10 @@ function SettingsModalStory({ tab }: { tab: SettingsTabId }) {
               <RolesCatalogFixture>
                 <DesktopSettingsModal />
               </RolesCatalogFixture>
+            ) : tab === 'lody-agent' ? (
+              <LodyAgentEnabled>
+                <DesktopSettingsModal />
+              </LodyAgentEnabled>
             ) : (
               <DesktopSettingsModal />
             )}
@@ -116,6 +130,11 @@ export const McpEmptyTab: Story = {
 
 export const AgentRolesTab: Story = {
   render: () => <SettingsModalStory tab="agent-roles" />,
+};
+
+/** Settings → Lody Agent, drawn with the sheet's own hand-made controls. */
+export const LodyAgentTab: Story = {
+  render: () => <SettingsModalStory tab="lody-agent" />,
 };
 
 export const DarkModePreferencesTab: Story = {
