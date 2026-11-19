@@ -19,8 +19,9 @@ import {
   createDocRoom,
   createNativeDocs,
   createNativeRemoteHistoryPort,
+  importLegacyDoc,
 } from '../src/node/native-docs';
-import { LoroDoc, isContainer, type Container } from 'loro-crdt';
+import { LoroDoc, LoroList, LoroMap, isContainer, type Container } from 'loro-crdt';
 import { createHistoryWriter } from '../src/history-writer';
 import { createSessionControlPlaneMirror } from '../src/session-control-plane';
 import {
@@ -928,5 +929,38 @@ describe('natively owned Schedule documents', () => {
       (await connection.client.exportLoroRaw(ns, { kind: 'loro_doc', id: 'schedule-native' })).bytes
     );
     expect(stored.getText('prompt').toString()).toBe('summarize the day');
+  });
+});
+
+describe('natively owned Preview comment documents', () => {
+  it('imports a replica the owning process never opens, then serves it to a renderer replica', async () => {
+    const { dataDir, connection } = await setup();
+    const docId = 'preview-comment-session-1';
+    // The CLI's legacy copy: renderer-authored comments it only relayed.
+    const legacy = new LoroDoc();
+    legacy.getMap('meta').set('sessionId', 'session-1');
+    const turn = legacy.getMap('turns').setContainer('turn-1', new LoroMap());
+    turn.set('turnId', 'turn-1');
+    const comment = turn.setContainer('comments', new LoroList()).insertContainer(0, new LoroMap());
+    comment.set('id', 'comment-1');
+    comment.set('body', 'tighten the header');
+    legacy.commit();
+    const load = async () => ({
+      snapshot: legacy.export({ mode: 'snapshot' }),
+      version: Object.fromEntries(legacy.oplogVersion().toJSON()),
+    });
+    expect(await importLegacyDoc(connection.client, ns, docId, 'cli-sqlite', load)).toBe(
+      'imported'
+    );
+    expect(await importLegacyDoc(connection.client, ns, docId, 'cli-sqlite', load)).toBe(
+      'already-published'
+    );
+
+    const renderer = await LoroRepo.create({
+      externalDocs: createNativeDocs(await peer(dataDir), ns, isNativeDocId),
+    });
+    cleanups.push(() => renderer.destroy());
+    const { doc } = await renderer.openPersistedDoc(docId);
+    expect(doc.toJSON()).toEqual(legacy.toJSON());
   });
 });
