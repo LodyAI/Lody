@@ -39,6 +39,12 @@ export type CreateConversationDerivationOptions = {
   chunkSize?: number;
   /** Yield between chunks; defaults to a macrotask. */
   yieldToEventLoop?: () => Promise<void>;
+  /**
+   * Minimum spacing of the background pass's notifications. Every consumer
+   * re-renders the whole table per notification, so a long pass coalesces its
+   * chunks instead of announcing each; its completion is announced at once.
+   */
+  backgroundNotifyMs?: number;
 };
 
 /**
@@ -61,6 +67,7 @@ export function createConversationDerivation<F>(
   options: CreateConversationDerivationOptions = {}
 ): ConversationDerivation<F> {
   const chunkSize = options.chunkSize ?? 32;
+  const backgroundNotifyMs = options.backgroundNotifyMs ?? 500;
   const yieldToEventLoop = options.yieldToEventLoop ?? defaultYield;
   const facts = new Map<string, F>();
   // Identity is only a reuse hint, never ownership of a released turn.
@@ -77,9 +84,17 @@ export function createConversationDerivation<F>(
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let retryDelay = 250;
 
+  let notifyTimer: ReturnType<typeof setTimeout> | undefined;
   const notify = () => {
+    if (notifyTimer) clearTimeout(notifyTimer);
+    notifyTimer = undefined;
     version += 1;
     for (const listener of listeners) listener();
+  };
+  /** A background chunk's facts, announced with whatever lands in the window. */
+  const notifyBackground = () => {
+    if (notifyTimer || disposed) return;
+    notifyTimer = setTimeout(notify, backgroundNotifyMs);
   };
 
   /**
@@ -92,7 +107,12 @@ export function createConversationDerivation<F>(
    * is asked to run again. The speculative tail window must NOT drop, or every
    * index event would discard the facts of every turn past the hydrated tail.
    */
-  const deriveRange = (from: number, to: number, dropStale = false): boolean => {
+  const deriveRange = (
+    from: number,
+    to: number,
+    dropStale = false,
+    detached?: ReadonlyMap<string, SessionHistory>
+  ): boolean => {
     let changed = false;
     // Below `loadedFrom` every slot is a sentinel with no body to derive.
     for (let i = Math.max(view.loadedFrom ?? 0, from); i < Math.min(to, view.turnCount); i += 1) {
@@ -101,7 +121,7 @@ export function createConversationDerivation<F>(
       // Reverse-paged views keep absolute slots with sentinel rows until the
       // older page arrives.  A sentinel has no body or facts to derive.
       if (isUnloadedTurnId(row.id)) continue;
-      const turn = view.turn(i);
+      const turn = view.turn(i) ?? detached?.get(row.id);
       if (turn) {
         if (derivedFrom.get(row.id)?.deref() === turn) continue;
         const previous = facts.get(row.id);
@@ -170,6 +190,20 @@ export function createConversationDerivation<F>(
       if (pending.length === 0) continue;
       const lo = pending[pending.length - 1]!;
       const hi = pending[0]! + 1;
+      if (view.readDetached) {
+        // Bodies the view neither keeps nor announces: a pass over a long
+        // conversation then costs its own reads, not a view change per chunk
+        // that re-renders every whole-conversation consumer.
+        const { bodies, stale } = await view.readDetached(pending);
+        if (disposed) return;
+        if (stale) passRequested = true;
+        let derived = false;
+        for (const position of pending)
+          derived = deriveRange(position, position + 1, false, bodies) || derived;
+        if (derived) notifyBackground();
+        await yieldToEventLoop();
+        continue;
+      }
       // `acquireRange` pins before its first await, so the release has to run
       // even when this derivation is disposed mid-hydration: the view outlives
       // it in the warm store cache, and a leaked pin makes those turns
@@ -179,7 +213,7 @@ export function createConversationDerivation<F>(
       try {
         await range.ready;
         if (disposed) return;
-        if (deriveRange(lo, hi)) notify();
+        if (deriveRange(lo, hi)) notifyBackground();
       } finally {
         range.release();
         activeRange = undefined;
@@ -274,6 +308,7 @@ export function createConversationDerivation<F>(
     dispose: () => {
       disposed = true;
       if (retryTimer) clearTimeout(retryTimer);
+      if (notifyTimer) clearTimeout(notifyTimer);
       directoryLease?.release();
       activeRange?.release();
       unsubscribe();

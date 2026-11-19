@@ -293,10 +293,11 @@ export function ConversationOutlineRail({
   const tickCount = entries.length;
   const postHog = usePostHog();
 
+  // Resolved once per render: the label runs for every tick of a long conversation.
+  const untitledRound = t('sessions.outline.untitledRound', 'Untitled turn');
   const jumpLabel = useCallback(
-    (entry: ConversationOutlineEntry) =>
-      entry.title || t('sessions.outline.untitledRound', 'Untitled turn'),
-    [t]
+    (entry: ConversationOutlineEntry) => entry.title || untitledRound,
+    [untitledRound]
   );
 
   useActiveTickSync(listRef, activeIndex, entries);

@@ -23,6 +23,7 @@ import {
   type PreparedEncryptedDispatch,
 } from './encrypted-dispatch-outcome';
 import { throwIfSendAborted } from './session-send-resources';
+import type { SessionHistoryReader } from '@lody/shared/session-data';
 
 const log = debug('lody:session-send');
 
@@ -85,6 +86,30 @@ export async function persistHumanInputReceipt(
   );
 }
 
+const LATER_TURN_SCAN_PAGE = 64;
+
+/**
+ * Whether `laterId` sits after `turnId`, scanning back from the tail: the turn
+ * met first is the later one. Activation compares a just-written turn with the
+ * current watermark, both normally at the tail, so this reads one page instead
+ * of the whole directory.
+ */
+async function isLaterTurn(
+  history: Pick<SessionHistoryReader, 'count' | 'readDirectory'>,
+  laterId: string,
+  turnId: string
+): Promise<boolean> {
+  for (let end = await history.count(); end > 0; end -= LATER_TURN_SCAN_PAGE) {
+    const rows = await history.readDirectory(Math.max(0, end - LATER_TURN_SCAN_PAGE), end);
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      const id = rows[index]?.turnId;
+      if (id === laterId) return true;
+      if (id === turnId) return false;
+    }
+  }
+  return false;
+}
+
 /**
  * Point the CLI's activation watermark at this turn unless a later local user
  * turn already owns it. The CLI dispatches pending/seen user turns from synced
@@ -103,16 +128,9 @@ export async function activateUserTurn(
   const latest = meta?.latestUserMsgId;
   if (latest === turnId) return;
   if (latest) {
-    const newer = await runtime.sendResources.withSessionStore(sessionId, async (store) => {
-      const rows = await store.sessionData.history.readDirectory(
-        0,
-        await store.sessionData.history.count()
-      );
-      return (
-        rows.findIndex((row) => row.turnId === latest) >
-        rows.findIndex((row) => row.turnId === turnId)
-      );
-    });
+    const newer = await runtime.sendResources.withSessionStore(sessionId, (store) =>
+      isLaterTurn(store.sessionData.history, latest, turnId)
+    );
     if (newer) return;
   }
   await runtime.writer.upsertDocMeta(roomId, { latestUserMsgId: turnId } as Partial<SessionMeta>);

@@ -193,6 +193,21 @@ export function createRemoteLoroHistoryReader(port: RemoteLoroHistoryPort): Sess
       remember(row.position, row.turnId);
       return row;
     });
+    // The engine bounds a page by bytes, ending it early: read on to the
+    // requested end so the page stays contiguous with the newer one.
+    const pageEnd = Math.min(end ?? page.len, page.len);
+    let at = page.start + rows.length;
+    while (rows.length > 0 && at < pageEnd) {
+      const next = await port.readListFields(at, pageEnd, DIRECTORY_FIELDS);
+      if (next.len !== page.len || next.start !== at || next.rows.length === 0)
+        throw new Error('remote_history_changed_during_read');
+      for (const [offset, cells] of next.rows.entries()) {
+        const row = directoryRow(next.start + offset, cells);
+        remember(row.position, row.turnId);
+        rows.push(row);
+      }
+      at = next.start + next.rows.length;
+    }
     return {
       startPosition: page.start,
       totalCount: page.len,
@@ -223,9 +238,64 @@ export function createRemoteLoroHistoryReader(port: RemoteLoroHistoryPort): Sess
   /** A position seen in a read, else a scan; callers verify the id they read there. */
   const locate = async (turnId: string) => positions.get(turnId) ?? scanFor(turnId);
 
+  /**
+   * Whole-turn reads requested in the same task, served together: one page per
+   * contiguous run of positions instead of one round trip per turn. A view
+   * hydrates a window as many concurrent reads, so this is where they meet.
+   */
+  type BodyWaiter = { resolve: (value: unknown) => void; reject: (error: unknown) => void };
+  let batch: Map<number, BodyWaiter[]> | undefined;
+  const serveRun = async (lo: number, hi: number, waiters: Map<number, BodyWaiter[]>) => {
+    const settle = (position: number, value: unknown) => {
+      for (const waiter of waiters.get(position) ?? []) waiter.resolve(value);
+      waiters.delete(position);
+    };
+    try {
+      let at = lo;
+      while (at < hi) {
+        const page = await port.readListFields(at, hi, WHOLE_TURN);
+        page.rows.forEach((cells, offset) => settle(page.start + offset, cells[0]));
+        if (page.rows.length === 0) break;
+        at = page.start + page.rows.length;
+      }
+      // Past the end of the list: absent, as a path read reports it.
+      for (let position = lo; position < hi; position += 1) settle(position, undefined);
+    } catch (error) {
+      for (let position = lo; position < hi; position += 1) {
+        for (const waiter of waiters.get(position) ?? []) waiter.reject(error);
+        waiters.delete(position);
+      }
+    }
+  };
+  const flushBatch = () => {
+    const waiters = batch ?? new Map<number, BodyWaiter[]>();
+    batch = undefined;
+    const sorted = [...waiters.keys()].sort((a, b) => a - b);
+    for (let index = 0; index < sorted.length;) {
+      const lo = sorted[index] ?? 0;
+      let hi = lo + 1;
+      while (sorted[index + 1] === hi) {
+        index += 1;
+        hi += 1;
+      }
+      index += 1;
+      void serveRun(lo, hi, waiters);
+    }
+  };
+  const readBodyAt = (position: number) =>
+    new Promise<unknown>((resolve, reject) => {
+      if (!batch) {
+        batch = new Map();
+        queueMicrotask(flushBatch);
+      }
+      const waiters = batch.get(position);
+      if (waiters) waiters.push({ resolve, reject });
+      else batch.set(position, [{ resolve, reject }]);
+    });
+
   const readAt = async (position: number): Promise<SessionTurnRead> => {
     if (position < 0) return { state: 'missing' };
-    const value = await port.readPath([HISTORY, position]);
+    const value = await readBodyAt(position);
     return value === undefined ? { state: 'missing' } : asTurnRead(value);
   };
 
@@ -255,10 +325,13 @@ export function createRemoteLoroHistoryReader(port: RemoteLoroHistoryPort): Sess
     readAt,
     readTurn,
     async readRange(from, to) {
-      const out: SessionTurnRead[] = [];
-      for (let position = Math.max(0, from); position < to; position += 1)
-        out.push(await readAt(position));
-      return out;
+      const positions: number[] = [];
+      for (let position = Math.max(0, from); position < to; position += 1) positions.push(position);
+      const reads = await Promise.all(positions.map(readAt));
+      // As the in-process reader: the range ends at the end of the list.
+      let end = reads.length;
+      while (end > 0 && reads[end - 1]?.state === 'missing') end -= 1;
+      return reads.slice(0, end);
     },
     readDirectory: (from, to) => readDirectory(from, to),
     readLatestDirectoryPage: (limit) => readPage(undefined, limit),

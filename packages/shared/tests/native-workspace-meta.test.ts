@@ -413,6 +413,26 @@ describe('remote Session history reader', () => {
     expect(await remote.readTurnOutput('turn-88')).toEqual(data.history.readTurnOutput('turn-88'));
   });
 
+  it('serves concurrent turn reads past the page byte limit as the in-process reader does', async () => {
+    const { data, commit, remote } = await open();
+    // Bodies large enough that one window spans several engine pages.
+    const body = 'y'.repeat(48 * 1024);
+    for (let i = 0; i < 60; i++)
+      await data.commands.appendTurn(
+        turn(i, { items: [{ type: 'text', text: `${i}:${body}` }] } as never)
+      );
+    await commit();
+    await remote.readDirectory(0, 60);
+    // Two separate runs, a duplicate, a missing id and a range read at once.
+    const ids = ['turn-2', 'turn-3', 'turn-4', 'turn-3', 'turn-30', 'turn-59', 'turn-404'];
+    const [reads, range] = await Promise.all([
+      Promise.all(ids.map((id) => remote.readTurn(id))),
+      remote.readRange(55, 62),
+    ]);
+    expect(reads).toEqual(ids.map((id) => data.history.readTurn(id)));
+    expect(range).toEqual(data.history.readRange(55, 62));
+  });
+
   it('reads a whole directory past the page byte limit and the newest goal as the in-process reader does', async () => {
     const { data, commit, remote, port } = await open();
     const goal = (status: string) => ({
@@ -440,6 +460,16 @@ describe('remote Session history reader', () => {
     const whole = await remote.readDirectory(0, 400);
     expect(whole.map((row) => row.turnId)).toEqual(
       data.history.readDirectory(0, 400).map((row) => row.turnId)
+    );
+    // A latest or older page past the byte limit still covers its whole range.
+    const latest = await remote.readLatestDirectoryPage!(300);
+    expect(latest.rows.map((row) => row.turnId)).toEqual(
+      (await data.history.readLatestDirectoryPage!(300)).rows.map((row) => row.turnId)
+    );
+    const older = await remote.readOlderDirectoryPage!(latest.cursor!, 300);
+    expect(older).toMatchObject({ startPosition: 0, hasMoreOlder: false });
+    expect(older.rows.map((row) => row.turnId)).toEqual(
+      data.history.readDirectory(0, 100).map((row) => row.turnId)
     );
     // The goal sits ten pages back from the tail: the scan finds the newest item.
     expect(await readRemoteLatestGoal(port)).toEqual(data.readLatestGoal());

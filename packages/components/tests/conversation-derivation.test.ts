@@ -135,4 +135,73 @@ describe('createConversationDerivation', () => {
       view.dispose();
     }
   );
+
+  it('derives from detached reads that announce nothing and rereads one an edit fenced', async () => {
+    const history = buildFixtureHistory(60);
+    const doc = buildSessionDoc(history);
+    const data = createLoroSessionData({ sessionId: FIXTURE_SESSION_ID, doc });
+    const target = 'a-3';
+    let entered: () => void = () => {};
+    const reached = new Promise<void>((resolve) => (entered = resolve));
+    let release: () => void = () => {};
+    const released = new Promise<void>((resolve) => (release = resolve));
+    // The first body read of the target is taken, then answers only after its
+    // turn has been edited: the reply carries the old body.
+    const readForDisplay = data.history.readTurnForDisplay!.bind(data.history);
+    let gated = true;
+    data.history.readTurnForDisplay = async (turnId) => {
+      const read = structuredClone(await readForDisplay(turnId));
+      if (turnId === target && gated) {
+        gated = false;
+        entered();
+        await released;
+      }
+      return read;
+    };
+    const idle = createManualIdle();
+    const view = createConversationViewFromReader(data.history, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 2,
+      maxHydrated: 4,
+      scheduleIdle: idle.scheduleIdle,
+      yieldToEventLoop: immediate,
+    });
+    await drain(() => view.turnCount === history.length, 1000);
+    const announced = new Set<string>();
+    view.subscribe((change) => {
+      if (change.kind === 'changed') for (const id of change.ids) announced.add(id);
+    });
+    const derivation = createConversationDerivation(view, deriveDiffCount, {
+      chunkSize: 8,
+      yieldToEventLoop: immediate,
+      backgroundNotifyMs: 0,
+    });
+    let atTarget = false;
+    void reached.then(() => (atTarget = true));
+    await drain(() => {
+      idle.runAll();
+      return atTarget;
+    }, 10000);
+    expect(atTarget).toBe(true);
+    const edit = await writeStoredField(data, target, 'fileDiff', {
+      kind: 'set',
+      value: [{ filePath: 'src/edited.ts', add: 1, del: 0 }],
+    });
+    expect(edit.status).toBe('accepted');
+    release();
+    await drain(() => {
+      idle.runAll();
+      return derivation.complete;
+    }, 10000);
+    expect(derivation.complete).toBe(true);
+    expect(derivation.facts.size).toBe(history.length);
+    // The read that started before the edit never became the target's fact.
+    expect(derivation.facts.get(target)?.diffs).toBe(1);
+    expect(view.isHydrated(view.indexOf(target))).toBe(false);
+    // Only the hydrated tail and the edited turn were ever announced.
+    const tail = [history.length - 2, history.length - 1].map((i) => history[i]!.id);
+    expect([...announced].filter((id) => id !== target && !tail.includes(id))).toEqual([]);
+    derivation.dispose();
+    view.dispose();
+  });
 });

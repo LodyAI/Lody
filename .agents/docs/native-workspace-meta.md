@@ -134,8 +134,10 @@ in it is read from the engine, which loads rooms lazily, and written through mai
 ids instead of opening a replica.
 
 - **Reads.** [`remote-loro.ts`](../../packages/shared/src/session-data/remote-loro.ts)
-  pages the history (`readDocListFields`, one subpath read per turn body) for the
-  windowed ConversationView. [`remote-document.ts`](../../packages/shared/src/session-data/remote-document.ts)
+  pages the history (`readDocListFields`) for the windowed ConversationView. Body
+  reads issued in the same task are served together, one whole-turn page per
+  contiguous run, and a directory page reads on past the engine's byte bound so
+  it stays contiguous. [`remote-document.ts`](../../packages/shared/src/session-data/remote-document.ts)
   keeps every control root (`session`, `mq`, `humanInputReceipts`, `cancelRequest`,
   `forkOperation`, `notification`, `preview`, `externalHistoryCursor`,
   `acpRuntimeConfig`) as small JSON. One `doc_subscribe_paths` observation
@@ -518,6 +520,45 @@ The built desktop with native Workspace Meta, run through the E2E harness
   auto-seen writes inside the import of that turn, and loro-repo counted those
   local ops as committed. The baseline now advances by the import's own spans
   (`lody/external-import-baseline`), covered by a daemon test.
+
+### Large Session streaming
+
+Measured on a seeded workspace (3,000 Sessions, one of 50,000 turns), reopening
+the desktop from the same copied profile each run: 20 s idle after the large
+Session's first screen, then a 64 KB reply streamed as 200 chunks.
+
+| Large Session                  | Before (`d150201c4`) |            After |
+| ------------------------------ | -------------------: | ---------------: |
+| Idle: renderer long tasks      |         155 / 11.0 s |       22 / 2.3 s |
+| Streaming: renderer long tasks |         403 / 55.3 s |       54 / 6.5 s |
+| Streaming: renderer read IPC   |  13,507 calls, 29 MB | 69 calls, 0.1 MB |
+| Streaming: main event-loop max |               159 ms |            32 ms |
+| Renderer RSS after GC          |               600 MB |           659 MB |
+
+Streaming chunks were not the cost: each chunk re-reads only its turn, and those
+reads coalesce behind the one in flight. Opening the Session started whole-history
+work that re-rendered every whole-conversation consumer (outline, fact table,
+configuration sources) per page and per 32-turn chunk, and every append on a
+paged view announced a structure change from position 0, which dropped every
+derived fact and re-read all bodies. A send also read the whole directory to
+order two turns. The fixes and their invariants are in the
+[ConversationView rules](../../packages/components/src/lib/conversation-view/AGENTS.md).
+Renderer RSS before GC still peaks above 1 GB: the completed fact sweep reads
+every body once, and the heap after GC stays near 250 MB.
+
+Memory attribution: idle after startup, before the large Session is opened, the
+daemon holds 640–690 MB in every run, its baseline with or without the large data.
+The host holds about 123 MB after a fresh start and 240–270 MB once the large
+Session has been read and streamed; a host that had also performed the seeding
+import held 497 MB. After the large stream the daemon holds 720
+MB to 1 GB, from its 50,000-turn replica and the replay below.
+
+The large Session's reply still appears about 36 s after sending in this run, with
+the renderer idle: the daemon opens its 50,000-turn replica (about 6 s, blocking
+its event loop), each history write takes about 1 s, and the scripted agent does
+not advertise resume, so the daemon rebuilds the prompt by replaying the whole
+history (about 18 s). Agents that resume skip the replay; replica open and write
+cost remain daemon-side follow-ups.
 
 ## Pending acceptance
 
