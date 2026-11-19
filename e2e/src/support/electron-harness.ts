@@ -10,12 +10,19 @@ import {
   writeSync,
   writeFileSync,
 } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { _electron, type CDPSession, type ElectronApplication, type Page } from '@playwright/test';
+import {
+  _electron,
+  expect,
+  type CDPSession,
+  type ElectronApplication,
+  type Page,
+} from '@playwright/test';
 import {
   assertNamedPipeReleased,
   assertTcpPortReleased,
@@ -477,6 +484,53 @@ export class ElectronHarness {
       }
     }
     return { main: mainPath, renderer: rendererPath };
+  }
+
+  /**
+   * Simulates a crash or power loss: SIGKILL the Electron process and every process
+   * it started (bundled CLI, agents), keep the profile, and wait until all are gone.
+   */
+  async killProcessTree(): Promise<void> {
+    const rootPid = this.app?.process().pid;
+    if (!rootPid) throw new Error('Electron application is not running');
+    if (process.platform === 'win32') throw new Error('killProcessTree is POSIX-only');
+    const children = new Map<number, number[]>();
+    const table = spawnSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8' }).stdout;
+    for (const line of table.split('\n')) {
+      const [pid, ppid] = line.trim().split(/\s+/u).map(Number);
+      if (!pid || !ppid) continue;
+      children.set(ppid, [...(children.get(ppid) ?? []), pid]);
+    }
+    const tree: number[] = [];
+    for (const queue = [rootPid]; queue.length > 0;) {
+      const pid = queue.shift()!;
+      tree.push(pid);
+      queue.push(...(children.get(pid) ?? []));
+    }
+    for (const pid of tree) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        // Already gone.
+      }
+    }
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    await expect.poll(() => tree.filter(alive), { timeout: 30_000 }).toEqual([]);
+    this.app = null;
+    this.page = null;
+    this.performanceSession = null;
+    this.traceStarted = false;
+    if (this.hostPort !== null) await assertTcpPortReleased(this.hostPort);
+    this.hostPort = null;
+    this.rendererPaintCount = 0;
+    this.bootProfile = null;
   }
 
   async close(options: { preserveRoot?: boolean } = {}): Promise<void> {

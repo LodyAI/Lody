@@ -7,13 +7,22 @@ import { quoteCommandArgument } from './command-line.js';
 const fixtureDirectory = dirname(fileURLToPath(import.meta.url));
 const SCRIPTED_ACP_ENTRY = resolve(fixtureDirectory, 'turn-lifecycle-scripted-acp.mjs');
 
-export type TurnPromptMode = 'permission' | 'crash' | 'recover' | 'before' | 'after';
+export type TurnPromptMode =
+  | 'permission'
+  | 'crash'
+  | 'recover'
+  | 'before'
+  | 'after'
+  | 'hold'
+  | 'continue';
 const JOURNEY_MODES: ReadonlySet<string> = new Set([
   'permission',
   'crash',
   'recover',
   'before',
   'after',
+  'hold',
+  'continue',
 ]);
 
 export type TurnAcpEvent = {

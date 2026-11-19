@@ -672,6 +672,9 @@ export class LoroDocumentManager {
             LoroRepo.create({
               storageAdapter: cliSqliteRepoStore.storageAdapter,
               metaDebounceCommitMs: 0,
+              // Session metadata (what lists a Session) must reach disk with its history;
+              // loro-repo's default 5 s trailing debounce let a crash drop new Sessions.
+              metaPersistDebounceMs: 0,
               flockDocRetentionMs: getFlockDocRetentionMs,
             }),
             createRepoTimeoutMs,
