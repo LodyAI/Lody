@@ -2341,6 +2341,7 @@
   "sessions.syncDetails.ownerError": "The target computer returned an error",
   "sessions.syncDetails.readFailed": "Could not read updates",
   "sessions.syncDetails.sessionState": "Session state",
+  "sessions.syncDetails.localRuntime": "Local Lody runtime",
   "sessions.syncDetails.messages": "Messages",
   "sessions.syncDetails.device": "This device",
   "sessions.syncDetails.server": "Lody server",

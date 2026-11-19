@@ -102,10 +102,12 @@ clearing covers both the snapshot and the high-water database. The now-obsolete 
 the `maxWarmDocs` policy field are deleted; the Worker releases its Doc at the end of a task, and the
 on-disk snapshot is governed only by the capacity cap.
 
-A large document's local sync emits `joined` first and then sends update chunks, so the adapter's
-initial-sync signal alone cannot be the cache-completion condition. The Worker waits until its own
-version reaches `joined.serverVersion` before exporting the snapshot, avoiding an early cancellation of
-the remaining chunks and an incorrectly saved activity progress.
+A large document's local sync emits `joined` before sending update chunks. The
+adapter waits for the applied document to cover `joined.serverVersion` before
+signaling a successful receive. The Worker also checks this version before
+exporting a snapshot because terminal room failures release first-sync waiters.
+This keeps a failed read from certifying a cache snapshot or advancing activity
+progress.
 
 This complements the read boundary of the [single history writer](2026-09-07-single-history-writer.md):
 background prefetch bypasses the Mirror entirely, while user business writes remain the original

@@ -406,6 +406,7 @@ describe('local data plane doc-update chunking', () => {
   const MAX_PAYLOAD_BYTES = 512;
 
   class ChunkHarness {
+    private heldChunk?: () => void;
     private readonly tasks: Array<() => void | Promise<void>> = [];
     private readonly rendererListeners = new Set<(m: LocalLoroDataPlaneServerMessage) => void>();
     private readonly serverDocs = new Map<string, LoroDoc>();
@@ -424,11 +425,30 @@ describe('local data plane doc-update chunking', () => {
       id: 'dp:relay:1',
       send: (message: LocalLoroDataPlaneServerMessage) => {
         this.pushed.push(message);
-        this.tasks.push(() => {
+        const deliver = () => {
           for (const listener of this.rendererListeners) listener(message);
-        });
+        };
+        if (
+          this.holdLastChunk &&
+          message.type === 'update' &&
+          message.payload.kind === 'doc-update-chunk' &&
+          message.payload.chunkIndex + 1 === message.payload.chunkCount
+        ) {
+          this.heldChunk = deliver;
+        } else {
+          this.tasks.push(deliver);
+        }
       },
     };
+
+    constructor(private readonly holdLastChunk = false) {}
+
+    releaseLastChunk(): void {
+      const deliver = this.heldChunk;
+      if (!deliver) throw new Error('no_final_chunk_to_release');
+      this.heldChunk = undefined;
+      deliver();
+    }
 
     serverDoc(docId: string): LoroDoc {
       const existing = this.serverDocs.get(docId);
@@ -485,18 +505,75 @@ describe('local data plane doc-update chunking', () => {
   const errorFrames = (pushed: LocalLoroDataPlaneServerMessage[]) =>
     pushed.filter((m) => m.type === 'error');
 
-  it('an oversized join catch-up is chunked and converges instead of failing terminally', async () => {
-    const harness = new ChunkHarness();
+  it('keeps an acknowledged chunked join unconfirmed until the document is applied', async () => {
+    const harness = new ChunkHarness(true);
     appendText(harness.serverDoc('doc-1'), bigText('server-history '));
 
     const renderer = harness.createAdapter('renderer:a');
-    const docA = new LoroDoc();
-    const sub = renderer.joinDocRoom('doc-1', docA);
+    const doc = new LoroDoc();
+    const subscription = renderer.joinDocRoom('doc-1', doc);
+    let confirmed = false;
+    const completion = subscription.firstSyncedWithRemote.then(() => {
+      confirmed = true;
+    });
     await harness.settle();
 
     expect(errorFrames(harness.pushed)).toEqual([]);
-    expect(text(docA)).toBe(text(harness.serverDoc('doc-1')));
-    expect(sub.status).toBe('joined');
+    expect(subscription.status).toBe('joined');
+    expect(text(doc)).toBe('');
+    expect(confirmed).toBe(false);
+
+    harness.releaseLastChunk();
+    await completion;
+    expect(text(doc)).toBe(text(harness.serverDoc('doc-1')));
+
+    const applied = text(doc);
+    appendText(harness.serverDoc('doc-1'), bigText('offline-history '));
+    await harness.settle();
+    await renderer.reconnect();
+    let rejoined = false;
+    const catchUp = subscription.firstSyncedWithRemote.then(() => {
+      rejoined = true;
+    });
+    await harness.settle();
+    expect(subscription.status).toBe('joined');
+    expect(text(doc)).toBe(applied);
+    expect(rejoined).toBe(false);
+
+    harness.releaseLastChunk();
+    await catchUp;
+    expect(text(doc)).toBe(text(harness.serverDoc('doc-1')));
+  });
+
+  it('retries a chunked join that timed out after the acknowledgment', async () => {
+    const harness = new ChunkHarness(true);
+    appendText(harness.serverDoc('doc-1'), bigText('server-history '));
+
+    const renderer = harness.createAdapter('renderer:a');
+    const doc = new LoroDoc();
+    const subscription = renderer.joinDocRoom('doc-1', doc);
+    let confirmed = false;
+    const completion = subscription.firstSyncedWithRemote.then(() => {
+      confirmed = true;
+    });
+    await harness.settle();
+    expect(subscription.status).toBe('joined');
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(subscription.status).toBe('error');
+    harness.releaseLastChunk();
+    await harness.settle();
+    expect(text(doc)).toBe('');
+    expect(confirmed).toBe(false);
+
+    await renderer.reconnect();
+    await harness.settle();
+    expect(subscription.status).toBe('joined');
+    expect(confirmed).toBe(false);
+
+    harness.releaseLastChunk();
+    await completion;
+    expect(text(doc)).toBe(text(harness.serverDoc('doc-1')));
   });
 
   it('an oversized live push after join is chunked and converges', async () => {

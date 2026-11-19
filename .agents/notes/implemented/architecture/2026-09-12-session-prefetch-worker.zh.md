@@ -84,9 +84,10 @@ Web Locks 在共享同一数据库的调用者之间互斥条件写入与普通�
 `maxWarmDocs` 策略字段已删除；Worker 任务结束即释放 Doc，磁盘快照只由
 容量上限管理。
 
-大文档本地同步会先发 `joined`，再发送更新分块；适配器的初次同步信号
-不能单独作为缓存完成依据。Worker 等待自身版本达到 `joined.serverVersion`
-后才导出快照，避免提前取消后续分块并错误保存活动进度。
+大文档本地同步先发送 `joined`，随后发送更新分块。适配器等应用到本地文档的
+版本达到 `joined.serverVersion` 后，才报告接收完成。由于房间发生终止错误时
+也会释放初次同步的等待者，Worker 在导出快照前仍会检查该版本，以免把失败的读取
+记为已完成的缓存或推进活动进度。
 
 这补充了[单一 history writer](2026-09-07-single-history-writer.md)的读取边界：
 后台预同步完全绕过 Mirror，但用户业务写入仍由原来的 HistoryWriter 负责。

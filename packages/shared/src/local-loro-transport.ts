@@ -60,20 +60,25 @@ type FlockLike = {
 type Deferred<T> = {
   promise: Promise<T>;
   resolve: (value: T | PromiseLike<T>) => void;
-  reject: (reason?: unknown) => void;
+  settled: boolean;
 };
 
 function createDeferred<T>(): Deferred<T> {
-  let resolve: ((value: T | PromiseLike<T>) => void) | undefined;
-  let reject: ((reason?: unknown) => void) | undefined;
-  const promise = new Promise<T>((nextResolve, nextReject) => {
-    resolve = nextResolve;
-    reject = nextReject;
+  let resolve: Deferred<T>['resolve'] | undefined;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
   });
-  if (!resolve || !reject) {
-    throw new Error('failed_to_create_deferred');
-  }
-  return { promise, resolve, reject };
+  const complete = resolve;
+  if (!complete) throw new Error('failed_to_create_deferred');
+  const deferred = {
+    promise,
+    settled: false,
+    resolve(value: T | PromiseLike<T>) {
+      deferred.settled = true;
+      complete(value);
+    },
+  };
+  return deferred;
 }
 
 function notify<T>(listeners: Set<(value: T) => void>, value: T): void {
@@ -118,8 +123,11 @@ type RoomState = {
   // and on connection loss: frames of an interrupted transfer must never be
   // concatenated with a later transfer's.
   docChunkAssembler: DocUpdateChunkAssembler | null;
+  // The acknowledged receive target is fixed even as live pushes and local
+  // exports advance the separate upload baseline in serverVersion.
+  docJoinTarget: VersionVector | null;
   pendingJoinRequestId: string | null;
-  /** Timer for the currently sent join, retained through Flock reconciliation. */
+  /** Timer for the currently sent join, including its receive reconciliation. */
   joinAttemptTimer: unknown | null;
   joinAttemptGeneration: number | null;
   firstSynced: Deferred<void>;
@@ -314,6 +322,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       flockFlushChain: Promise.resolve(),
       flockFlushQueued: false,
       docChunkAssembler: null,
+      docJoinTarget: null,
       pendingJoinRequestId: null,
       joinAttemptTimer: null,
       joinAttemptGeneration: null,
@@ -383,6 +392,11 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       return;
     }
     const requestId = `join:${this.peerId}:${++this.requestSeq}`;
+    if (state.isDoc) {
+      state.docJoinTarget = null;
+      state.docChunkAssembler = null;
+      if (state.firstSynced.settled) state.firstSynced = createDeferred<void>();
+    }
     state.syncGeneration += 1;
     state.pendingJoinRequestId = requestId;
     // Both room kinds report what they already hold, so (re)join catch-up is
@@ -446,7 +460,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
   /** Invalidate one attempt and expose a retryable error to the existing supervisor. */
   private failRecoverably(
     state: RoomState,
-    _phase: 'join-send' | 'join-timeout' | 'flock-reconcile' | 'flush',
+    _phase: 'join-send' | 'join-timeout' | 'doc-reconcile' | 'flock-reconcile' | 'flush',
     _error?: unknown,
     generation?: number,
     requestId?: string
@@ -462,6 +476,8 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     this.clearJoinAttemptDeadline(state);
     state.pendingJoinRequestId = null;
     state.joined = false;
+    state.docJoinTarget = null;
+    state.docChunkAssembler = null;
     // Supersede all delayed exports/imports belonging to this failed attempt.
     state.syncGeneration += 1;
     this.setRoomStatus(state, 'error');
@@ -696,7 +712,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       // `peerId` was already required to match above; requestId + room pin the
       // exact join this answers.
       const state = this.findByPendingJoin(message.requestId);
-      if (!state || !sameRoom(state.room, message.room)) {
+      if (!state || (state.isDoc && state.joined) || !sameRoom(state.room, message.room)) {
         return;
       }
       this.handleJoined(state, message.serverVersion, message.payload);
@@ -707,9 +723,20 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     if (!state || state.closed || !sameRoom(state.room, message.room)) {
       return;
     }
-    if (state.isDoc && message.serverVersion) {
-      state.serverVersion = VersionVector.decode(base64ToBytes(message.serverVersion));
-    } else if (!state.isDoc && message.serverVersion) {
+    if (state.isDoc) {
+      try {
+        if (message.serverVersion) {
+          state.serverVersion = VersionVector.decode(base64ToBytes(message.serverVersion));
+        }
+        this.applyPayload(state, message.payload);
+        if (state.docJoinTarget) this.finishDocJoin(state);
+      } catch (error) {
+        if (!state.docJoinTarget) throw error;
+        this.failRecoverably(state, 'doc-reconcile', error);
+      }
+      return;
+    }
+    if (message.serverVersion) {
       // The server already holds everything under the frontier it pushed with
       // this delta — advance our up-sync baseline so we never re-upload it.
       state.serverFlockVersion = mergeFlockVersions(
@@ -730,27 +757,20 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     // before must never be concatenated with post-join frames.
     state.docChunkAssembler = null;
     if (state.isDoc) {
-      if (serverVersion) {
-        state.serverVersion = VersionVector.decode(base64ToBytes(serverVersion));
+      try {
+        state.docJoinTarget = serverVersion
+          ? VersionVector.decode(base64ToBytes(serverVersion))
+          : null;
+        if (state.docJoinTarget) state.serverVersion = state.docJoinTarget;
+        this.applyPayload(state, payload);
+        this.finishDocJoin(state);
+      } catch (error) {
+        this.failRecoverably(state, 'doc-reconcile', error);
+        return;
       }
-      if (payload) {
-        try {
-          this.applyPayload(state, payload);
-        } catch (error) {
-          this.failRecoverably(
-            state,
-            'flock-reconcile',
-            error,
-            state.syncGeneration,
-            state.pendingJoinRequestId ?? undefined
-          );
-          return;
-        }
-      }
-      state.pendingJoinRequestId = null;
-      this.clearJoinAttemptDeadline(state);
+      // Large exports acknowledge the join before sending update chunks.
+      // The connection can carry local edits while receive readiness is pending.
       this.setRoomStatus(state, 'joined');
-      state.firstSynced.resolve();
       // Join is the reconciliation point: up-sync whatever the server is
       // missing relative to its returned version — regardless of `dirty`, so
       // offline writes from a previous process run (or frames the relay
@@ -791,6 +811,17 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       });
   }
 
+  private finishDocJoin(state: RoomState): void {
+    if (state.docJoinTarget) {
+      const comparison = (state.target as LoroDoc).version().compare(state.docJoinTarget);
+      if (comparison === undefined || comparison < 0) return;
+    }
+    state.docJoinTarget = null;
+    state.pendingJoinRequestId = null;
+    this.clearJoinAttemptDeadline(state);
+    state.firstSynced.resolve();
+  }
+
   private async reconcileFlockAfterJoin(
     state: RoomState,
     receivedBundle: unknown,
@@ -823,13 +854,17 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     if (!state) {
       return;
     }
-    if (message.requestId && state.pendingJoinRequestId === message.requestId) {
-      state.pendingJoinRequestId = null;
-      this.clearJoinAttemptDeadline(state);
-    }
     if (message.terminal) {
       this.markTerminal(state, message.code);
       return;
+    }
+    if (state.docJoinTarget) {
+      this.failRecoverably(state, 'doc-reconcile');
+      return;
+    }
+    if (message.requestId && state.pendingJoinRequestId === message.requestId) {
+      state.pendingJoinRequestId = null;
+      this.clearJoinAttemptDeadline(state);
     }
     // Non-terminal (e.g. workspace runtime still bootstrapping): surface an
     // error status; the runtime's reconnect loop rejoins with backoff.
@@ -840,6 +875,8 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     this.clearJoinAttemptDeadline(state);
     state.pendingJoinRequestId = null;
     state.terminalError = code;
+    state.docJoinTarget = null;
+    state.docChunkAssembler = null;
     this.setRoomStatus(state, 'error');
     // Never leave waiters hanging on a room that will not converge.
     state.firstSynced.resolve();
@@ -882,6 +919,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
         state.syncGeneration += 1;
         state.joined = false;
         // Frames of an in-flight chunked transfer are lost with the socket.
+        state.docJoinTarget = null;
         state.docChunkAssembler = null;
         if (!state.terminalError) {
           this.setRoomStatus(state, 'reconnecting');
