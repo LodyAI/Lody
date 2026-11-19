@@ -1479,7 +1479,7 @@
   "composer.messageQuoteSeparatePassages": "Select one passage at a time; you can add several quotes.",
   "composer.messageQuoteTitle": "Quoted message",
   "composer.messageQuoteOriginal": "Original quote",
-  "composer.messageQuoteInlineLabel": "[Quote: {{text}}]",
+  "composer.messageQuoteInlineLabel": "[{{text}}]",
   "composer.collapseMessageQuote": "Collapse quote",
   "composer.removeMessageQuote": "Remove quote",
   "composer.messageQuoteTooLong": "Select up to 50,000 characters to quote.",

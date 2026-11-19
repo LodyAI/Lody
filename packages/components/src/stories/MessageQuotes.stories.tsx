@@ -8,6 +8,7 @@ import { applyTextRewrites, reanchorMessageTextSpansForTrim, type SessionId } fr
 import type { CombinedMentionTextareaHandle } from '@/components/mentions/combined-mention-textarea';
 import { ChatComposer } from '@/components/chat/chat-composer';
 import { MessageQuoteAction } from '@/components/ai-gui/message-quote-action';
+import { formatMessageQuoteExcerpt } from '@/components/ai-gui/message-quote-markdown';
 import {
   MessageRowView,
   SessionChatStreamView,
@@ -64,11 +65,13 @@ function QuoteHarness({
   reject = false,
   initialValue = 'Explain this passage: ',
   initialQuotes = [],
+  initialSentQuotes,
   initiallySelected = false,
 }: {
   reject?: boolean;
   initialValue?: string;
   initialQuotes?: string[];
+  initialSentQuotes?: string[];
   initiallySelected?: boolean;
 }) {
   const [area, setArea] = useState<HTMLDivElement | null>(null);
@@ -81,7 +84,7 @@ function QuoteHarness({
       const inserted = insertPastedTextDraft({
         currentValue: value,
         pastedText: text,
-        displayText: wrapPastedTextChipLabel(`[Quote: ${text.slice(0, 32)}]`),
+        displayText: wrapPastedTextChipLabel(`[${formatMessageQuoteExcerpt(text)}]`),
         selectionStart: value.length,
         selectionEnd: value.length,
         kind: 'message_quote',
@@ -95,7 +98,41 @@ function QuoteHarness({
   const caretRef = useRef(initialDraft.value.length);
   const [value, setValue] = useState(initialDraft.value);
   const [drafts, setDrafts] = useState(initialDraft.drafts);
-  const [items, setItems] = useState(initialItems);
+  const [items, setItems] = useState<ChatStreamItem[]>(() => {
+    if (!initialSentQuotes?.length) return initialItems;
+    let sentValue = 'Sent quotes: ';
+    const sentDrafts: PastedTextDraft[] = [];
+    for (const text of initialSentQuotes) {
+      const inserted = insertPastedTextDraft({
+        currentValue: sentValue,
+        pastedText: text,
+        displayText: wrapPastedTextChipLabel(`[${formatMessageQuoteExcerpt(text)}]`),
+        selectionStart: sentValue.length,
+        selectionEnd: sentValue.length,
+        kind: 'message_quote',
+      });
+      if (!inserted) continue;
+      sentValue = `${inserted.nextValue} `;
+      sentDrafts.push(inserted.draft);
+    }
+    const expanded = applyTextRewrites(sentValue, buildPastedTextRewrites(sentDrafts, sentValue));
+    const trimmedText = expanded.text.trim();
+    const spans = reanchorMessageTextSpansForTrim(expanded.text, trimmedText, expanded.spans);
+    return [
+      ...initialItems,
+      {
+        type: 'message',
+        turnIndex: initialItems.length,
+        sessionId,
+        message: {
+          id: 'sent-initial',
+          role: 'user',
+          timestamp: '2026-11-01T00:00:00Z',
+          items: [{ type: 'text', text: trimmedText, spans }],
+        },
+      },
+    ];
+  });
   useEffect(() => {
     const input = textarea.current;
     if (!input) return;
@@ -137,9 +174,7 @@ function QuoteHarness({
           const inserted = insertPastedTextDraft({
             currentValue: value,
             pastedText: text,
-            displayText: wrapPastedTextChipLabel(
-              `[Quote: ${text.replace(/\s+/g, ' ').slice(0, 32)}]`
-            ),
+            displayText: wrapPastedTextChipLabel(`[${formatMessageQuoteExcerpt(text)}]`),
             selectionStart: caret,
             selectionEnd: caret,
             kind: 'message_quote',
@@ -277,6 +312,23 @@ export const LineStartQuote: Story = {
     <QuoteHarness
       initialValue={'Previous line\n'}
       initialQuotes={['A quote at the start of the next line']}
+    />
+  ),
+};
+
+const MARKDOWN_QUOTE_SAMPLES = [
+  '| Feature | Status |\n| --- | --- |\n| Table cell content | Ready |',
+  '2. Second numbered list item with extra explanation that should not cut words',
+  'Keep the reading position stable while selecting text and scrolling.',
+  'supercalifragilisticexpialidociouslongunbreakabletoken',
+];
+
+export const MarkdownAndTruncation: Story = {
+  render: () => (
+    <QuoteHarness
+      initialValue="Compare "
+      initialQuotes={MARKDOWN_QUOTE_SAMPLES}
+      initialSentQuotes={MARKDOWN_QUOTE_SAMPLES}
     />
   ),
 };

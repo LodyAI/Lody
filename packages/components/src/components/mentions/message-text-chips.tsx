@@ -65,6 +65,9 @@ const styles = stylex.create({
     gap: space[1],
     lineHeight: 1.15,
   },
+  quoteButton: {
+    paddingRight: space[1.5],
+  },
   pasteIcon: {
     display: 'inline-flex',
     alignSelf: 'center',
@@ -101,6 +104,11 @@ const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, { granularity: 'graphem
  */
 const CHIP_UNBREAKABLE_HEAD_CHARS = 4;
 
+function formatChipDisplayLabel(kind: MessageTextSpan['kind'], label: string): string {
+  if (kind !== 'pasted_text' && kind !== 'message_quote') return label;
+  return label.replace(/^\u2007?\[(.*)\]\u2007?$/, '$1');
+}
+
 function MessageTextChip({
   span,
   label,
@@ -113,9 +121,15 @@ function MessageTextChip({
   onToggle?: () => void;
 }) {
   const isBoxed = Boolean(onToggle);
+  const displayLabel = formatChipDisplayLabel(span.kind, label);
   const className = cn(
     !isBoxed && CHIP_CLASS_NAME,
-    span.kind === 'pasted_text' ? MENTION_NEUTRAL_CHIP_CLASS_NAME : MENTION_CHIP_CLASS_NAME,
+    span.kind === 'pasted_text'
+      ? MENTION_NEUTRAL_CHIP_CLASS_NAME
+      : span.kind === 'message_quote'
+        ? 'text-markdown-link'
+        : MENTION_CHIP_CLASS_NAME,
+    span.kind === 'message_quote' && stylex.props(styles.quoteButton).className,
     // With no fill to darken, the hover affordance has to be typographic.
     onToggle && 'cursor-pointer hover:underline'
   );
@@ -136,7 +150,7 @@ function MessageTextChip({
   );
   // Split by grapheme rather than code point so a surrogate pair, combining
   // mark, variation selector, or ZWJ sequence cannot be cut in half.
-  const labelChars = Array.from(GRAPHEME_SEGMENTER.segment(label), ({ segment }) => segment);
+  const labelChars = Array.from(GRAPHEME_SEGMENTER.segment(displayLabel), ({ segment }) => segment);
   const head = labelChars.slice(0, CHIP_UNBREAKABLE_HEAD_CHARS).join('');
   const tail = labelChars.slice(CHIP_UNBREAKABLE_HEAD_CHARS).join('');
   // Truncation belongs to the boxed form alone: a wrapping label has nowhere to
@@ -145,7 +159,7 @@ function MessageTextChip({
   const content = isBoxed ? (
     <>
       <span {...stylex.props(styles.pasteIcon)}>{icon}</span>
-      <span className="truncate">{label}</span>
+      <span className="truncate">{displayLabel}</span>
     </>
   ) : (
     <>
