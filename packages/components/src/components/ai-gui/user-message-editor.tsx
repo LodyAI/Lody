@@ -7,6 +7,7 @@ import { Spinner } from '@lody/ui/spinner';
 
 import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
+import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import type { ConversationFontSize } from '@/atoms/settings';
 import { conversationTextFontSizeStyle } from './conversation-font-size-classes';
 import { CombinedMentionTextarea } from '@/components/mentions/combined-mention-textarea';
@@ -92,6 +93,7 @@ function UserMessageEditorContent({
   onQuoteDraftsChange,
 }: UserMessageEditorProps) {
   const { t } = useTranslation();
+  const shortcutsEnabled = useWorkspaceFeature('shortcuts');
   const textareaRef = useRef<ComposerInputElement | null>(null);
   // Live ranges the before-send rewrite needs; they only leave the component
   // on save, alongside the text they were measured against.
@@ -169,6 +171,7 @@ function UserMessageEditorContent({
         readOnly={isSaving}
         mentionSource={mentionSource}
         availableCommands={availableCommands}
+        enablePromptShortcuts={shortcutsEnabled}
         skillAgent={skillAgent}
         currentSessionId={currentSessionId}
         mentionSurface="session_chat"
