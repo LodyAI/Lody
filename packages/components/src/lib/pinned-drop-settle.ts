@@ -22,6 +22,8 @@ export type PinnedDropSettle = {
   /** The row as it looked when the drag started, if it was a sidebar row. */
   ghost: HTMLElement | null;
   fromBackground: string | null;
+  /** A pointer drag's lifted copy settles its shadow on the way down. */
+  fromShadow?: string;
   phase: 'waiting' | 'flying';
   to?: PinnedDropRect;
   toBackground?: string | null;
@@ -168,4 +170,65 @@ function releasePinnedHoverOnPointerMove(): void {
   if (typeof document === 'undefined') return;
   const release = () => document.body.removeAttribute(HOVER_ATTR);
   document.addEventListener('pointermove', release, { once: true });
+}
+
+// ---------------------------------------------------------------------------
+// Pointer drags (dnd-kit) of pinned rows and sections.
+
+const DRAGGING_ATTR = 'data-pin-dragging';
+let cursorStyleInstalled = false;
+
+/**
+ * While a pin row or section is held: a grabbing cursor everywhere, and no
+ * hover under the moving pointer. Hover returns on the first pointer move
+ * after the drop, so the landed row does not light up under a still pointer.
+ */
+export function setPinnedPointerDrag(active: boolean): void {
+  if (typeof document === 'undefined') return;
+  if (!cursorStyleInstalled) {
+    cursorStyleInstalled = true;
+    const style = document.createElement('style');
+    style.textContent = `body[${DRAGGING_ATTR}], body[${DRAGGING_ATTR}] * { cursor: grabbing !important; }`;
+    document.head.appendChild(style);
+  }
+  if (active) {
+    document.body.setAttribute(DRAGGING_ATTR, '');
+    suppressPinnedHover();
+    return;
+  }
+  document.body.removeAttribute(DRAGGING_ATTR);
+  releasePinnedHoverOnPointerMove();
+}
+
+// ---------------------------------------------------------------------------
+// Where a pointer-dragged pinned row would land right now: the pin section
+// under the pointer and the index among its other rows. Each section reads it
+// to open its gap, exactly as for a native drag over it.
+
+export type PinnedPointerTarget = { sectionId: string | null; index: number };
+
+let pointerTarget: PinnedPointerTarget | null = null;
+const pointerTargetListeners = new Set<() => void>();
+
+export function getPinnedPointerTarget(): PinnedPointerTarget | null {
+  return pointerTarget;
+}
+
+export function subscribePinnedPointerTarget(listener: () => void): () => void {
+  pointerTargetListeners.add(listener);
+  return () => pointerTargetListeners.delete(listener);
+}
+
+export function setPinnedPointerTarget(next: PinnedPointerTarget | null): void {
+  if (
+    next === pointerTarget ||
+    (next &&
+      pointerTarget &&
+      next.sectionId === pointerTarget.sectionId &&
+      next.index === pointerTarget.index)
+  ) {
+    return;
+  }
+  pointerTarget = next;
+  for (const listener of pointerTargetListeners) listener();
 }

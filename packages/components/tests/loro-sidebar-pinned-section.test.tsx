@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 import { LoroSidebar, type LoroSidebarProps } from '../src/components/loro-sidebar';
 import { initI18n } from '../src/i18n';
+import { moveRowIntoSection } from '../src/components/pinned-rows-dnd';
 import {
   armSessionMentionDrag,
   clearSessionMentionDrag,
@@ -787,6 +788,35 @@ describe('LoroSidebar pinned section', () => {
     expect(onTogglePinSection).toHaveBeenCalledWith('maintenance');
   });
 
+  it('drags pinned rows with the pointer and leaves other rows on native drag', () => {
+    renderSidebar({
+      organizeMode: 'updated',
+      pinnedSections: [{ id: null, name: 'Pinned', items: [pinnedItem] }],
+      updatedItems: [
+        {
+          id: 'updated-session',
+          kind: 'chat',
+          title: 'Recently updated conversation',
+          sectionLabel: 'Chats',
+          latestMessageAt: new Date('2026-07-14T09:00:00.000Z'),
+        },
+      ],
+      pinSectionActions: {
+        onMoveItem: () => {},
+        onDropItem: () => {},
+        onMoveSection: () => {},
+        onCreateSection: () => {},
+        onRenameSection: () => {},
+        onDeleteSection: () => {},
+      },
+    });
+    const pinned = container?.querySelector('[data-sidebar-updated-id="pinned-session"]');
+    const updated = container?.querySelector('[data-sidebar-updated-id="updated-session"]');
+    expect(pinned?.getAttribute('draggable')).toBe('false');
+    expect(pinned?.closest('[data-pin-sortable]')).not.toBeNull();
+    expect(updated?.getAttribute('draggable')).toBe('true');
+  });
+
   it('creates an empty section from the Pinned header menu', async () => {
     const onCreateSection = vi.fn();
     renderSidebar({
@@ -827,5 +857,27 @@ describe('LoroSidebar pinned section', () => {
     });
     await flushFrame();
     expect(onCreateSection).toHaveBeenCalledWith('Routine', undefined);
+  });
+});
+
+describe('pinned row drag planning', () => {
+  const order = () => ({ __default__: ['a', 'b'], maintenance: ['m1', 'm2', 'm3'] });
+
+  it('moves a row into another section at the hovered row, or below it', () => {
+    expect(moveRowIntoSection(order(), 'a', 'maintenance', 'm2', false)).toEqual({
+      __default__: ['b'],
+      maintenance: ['m1', 'a', 'm2', 'm3'],
+    });
+    expect(moveRowIntoSection(order(), 'a', 'maintenance', 'm3', true)).toEqual({
+      __default__: ['b'],
+      maintenance: ['m1', 'm2', 'm3', 'a'],
+    });
+  });
+
+  it('appends to a section entered through its empty space or header', () => {
+    expect(moveRowIntoSection(order(), 'm1', '__default__', null, false)).toEqual({
+      __default__: ['a', 'b', 'm1'],
+      maintenance: ['m2', 'm3'],
+    });
   });
 });

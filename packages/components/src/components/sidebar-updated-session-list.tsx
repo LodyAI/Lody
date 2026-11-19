@@ -24,10 +24,14 @@ import {
   startSessionMentionDrag,
   subscribeSessionMentionDrag,
 } from '@/lib/session-mention-drag';
+import { useDraggable } from '@dnd-kit/core';
+import { pinnedRowDndId } from './pinned-rows-dnd';
 import {
   beginPinnedDropSettle,
   flyPinnedDropSettle,
   getPinnedDropSettle,
+  getPinnedPointerTarget,
+  subscribePinnedPointerTarget,
   listenForPinnedDragOrigins,
   subscribePinnedDropSettle,
   takePinnedDragOrigin,
@@ -502,6 +506,11 @@ export type SidebarUpdatedSessionListProps = {
   onDropPinnedSession?: (sessionId: string, toIndex: number) => void;
   /** Pinned sections only: wraps the section header (the section drag handle). */
   renderHeader?: (header: ReactElement) => ReactNode;
+  /**
+   * Pinned sections only: rows are dnd-kit sortables inside the caller's
+   * `SortableContext` and carry no native drag of their own.
+   */
+  sortableRows?: boolean;
 };
 
 const defaultLabels: SidebarUpdatedSessionListLabels = {
@@ -540,6 +549,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   pinSectionId,
   onDropPinnedSession,
   renderHeader,
+  sortableRows = false,
 }: SidebarUpdatedSessionListProps) {
   const preserveOrder = grouping === 'manual';
   const pinDrag = usePinnedDropGap(items, onDropPinnedSession, pinSectionId ?? null);
@@ -745,30 +755,33 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
               {!collapsed ? (
                 <div
                   ref={pinDrag?.rowsRef}
+                  data-pin-rows={pinDrag ? '' : undefined}
                   className={cn(SIDEBAR_ROW_LIST_CLASS, pinDrag && 'relative')}
                   style={pinDrag?.rowsStyle}
                 >
-                  {visibleNodes.map((node, nodeIndex) => {
-                    const openedByTree = buildSessionRowOpenedByTreeSlot(node, t, () =>
-                      handleToggleOpenedBySessions(node.item.id)
-                    );
-                    const prevNode = visibleNodes[nodeIndex - 1];
-                    const treeSlot: SessionRowOpenedByTreeSlot | undefined =
-                      openedByTree?.kind === 'child' && (showProjectContext || showBranchContext)
-                        ? {
-                            ...openedByTree,
-                            isFirstChild: prevNode?.depth === 0,
-                            tallOpener: true,
-                          }
-                        : openedByTree;
-                    return (
-                      <PinnedDropNode
-                        key={node.item.id}
-                        id={node.item.id}
-                        drag={pinDrag}
-                        gutter={showTreeGutter}
-                      >
-                        <SessionOpenedByTreeRow depth={node.depth} gutter={showTreeGutter}>
+                  {(() => {
+                    const renderNode = (
+                      node: OpenedBySessionTreeNode<SidebarUpdatedItem>,
+                      nodeIndex: number
+                    ) => {
+                      const openedByTree = buildSessionRowOpenedByTreeSlot(node, t, () =>
+                        handleToggleOpenedBySessions(node.item.id)
+                      );
+                      const prevNode = visibleNodes[nodeIndex - 1];
+                      const treeSlot: SessionRowOpenedByTreeSlot | undefined =
+                        openedByTree?.kind === 'child' && (showProjectContext || showBranchContext)
+                          ? {
+                              ...openedByTree,
+                              isFirstChild: prevNode?.depth === 0,
+                              tallOpener: true,
+                            }
+                          : openedByTree;
+                      return (
+                        <SessionOpenedByTreeRow
+                          key={node.item.id}
+                          depth={node.depth}
+                          gutter={showTreeGutter}
+                        >
                           <UpdatedItemRow
                             item={node.item}
                             now={now}
@@ -788,6 +801,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                             onOpenPullRequest={onOpenPullRequest}
                             onBeginRename={beginRename}
                             pinSectionMenu={pinSectionMenu}
+                            nativeDrag={!sortableRows}
                             openedByTree={treeSlot}
                             contextMenuLabels={contextMenuLabels}
                             archiveTooltipLabel={archiveLabels.tooltip}
@@ -795,9 +809,37 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                             archiveConfirmLabel={archiveLabels.confirm}
                           />
                         </SessionOpenedByTreeRow>
-                      </PinnedDropNode>
-                    );
-                  })}
+                      );
+                    };
+                    if (!pinDrag) return visibleNodes.map(renderNode);
+                    // A pin section moves an opener together with the Sessions it
+                    // opened: each top-level row and its children are one slot.
+                    const groups: {
+                      rootId: string;
+                      nodes: [number, (typeof visibleNodes)[number]][];
+                    }[] = [];
+                    visibleNodes.forEach((node, nodeIndex) => {
+                      const last = groups[groups.length - 1];
+                      if (node.depth === 0 || !last) {
+                        groups.push({ rootId: node.item.id, nodes: [[nodeIndex, node]] });
+                      } else {
+                        last.nodes.push([nodeIndex, node]);
+                      }
+                    });
+                    return groups.map((group) => {
+                      const Slot = sortableRows ? DraggablePinnedRowSlot : PinnedRowSlot;
+                      return (
+                        <Slot
+                          key={group.rootId}
+                          id={group.rootId}
+                          drag={pinDrag}
+                          gutter={showTreeGutter}
+                        >
+                          {group.nodes.map(([nodeIndex, node]) => renderNode(node, nodeIndex))}
+                        </Slot>
+                      );
+                    });
+                  })()}
                   {showToggleFullList ? (
                     <button
                       type="button"
@@ -896,6 +938,8 @@ type UpdatedItemRowProps = {
   openedByTree?: SessionRowOpenedByTreeSlot;
   contextMenuLabels: SidebarUpdatedContextMenuLabels;
   pinSectionMenu?: SidebarPinSectionMenu;
+  /** False in pin sections, whose rows are dragged by dnd-kit instead. */
+  nativeDrag?: boolean;
   archiveTooltipLabel: string;
   archiveActionLabel: string;
   archiveConfirmLabel: string;
@@ -920,6 +964,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   onOpenPullRequest,
   onBeginRename,
   pinSectionMenu,
+  nativeDrag = true,
   openedByTree,
   contextMenuLabels,
   archiveTooltipLabel,
@@ -1074,10 +1119,13 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       data-sidebar-updated-id={item.id}
       data-sidebar-updated-kind={item.kind}
       data-menu-open={rowMenuOpen ? '' : undefined}
-      // Drag a conversation onto a chat surface to mention it there.
-      draggable
-      onDragStart={(event) =>
-        startSessionMentionDrag(event, { sessionId: item.id, title: item.title })
+      // Drag a conversation onto a chat surface to mention it there. Pin
+      // sections drag with dnd-kit and mention through the pointer-drop bridge.
+      draggable={nativeDrag}
+      onDragStart={
+        nativeDrag
+          ? (event) => startSessionMentionDrag(event, { sessionId: item.id, title: item.title })
+          : undefined
       }
       className={cn(
         // Named group ('row') so the archive hover-reveal scopes to the hovered row
@@ -1476,6 +1524,29 @@ UpdatedItemRow.displayName = 'UpdatedItemRow';
 
 const identityHeader = (header: ReactElement): ReactNode => header;
 
+/**
+ * Drop index for a pointer at `clientY` over a pin section's rows element:
+ * how many of its other rows rest above the pointer. Resting layout
+ * (`offsetTop`, which the gap's transforms do not move), so the gap cannot
+ * chase the pointer. Above the rows (the header) is the top; below, the end.
+ */
+export function pinnedDropIndexAt(
+  rows: HTMLElement | null,
+  clientY: number,
+  draggedId: string
+): number {
+  if (!rows) return 0;
+  const y = clientY - rows.getBoundingClientRect().top;
+  let index = 0;
+  for (const node of Array.from(rows.children)) {
+    if (!(node instanceof HTMLElement)) continue;
+    const id = node.getAttribute('data-pin-node');
+    if (!id || id === draggedId) continue;
+    if (node.offsetTop + node.offsetHeight / 2 < y) index += 1;
+  }
+  return index;
+}
+
 const PINNED_DROP_DEFAULT_GAP_PX = 29;
 const PINNED_DROP_TRANSITION = 'transform 160ms ease, opacity 120ms ease';
 const PINNED_DROP_ROWS_TRANSITION = 'padding-bottom 160ms ease, margin-bottom 160ms ease';
@@ -1515,8 +1586,17 @@ function usePinnedDropGap(
     enabled ? getPinnedDropSettle : readNoDrag,
     readNoDrag
   );
+  const pointerTarget = useSyncExternalStore(
+    enabled ? subscribePinnedPointerTarget : noopSubscribe,
+    enabled ? getPinnedPointerTarget : readNoDrag,
+    readNoDrag
+  );
   const rowsRef = useRef<HTMLDivElement | null>(null);
-  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const [nativeDropIndex, setDropIndex] = useState<number | null>(null);
+  // A pointer (dnd-kit) drag of a pinned row aims here, or a native drag does.
+  const dropIndex =
+    nativeDropIndex ??
+    (pointerTarget && pointerTarget.sectionId === sectionId ? pointerTarget.index : null);
   const [gap, setGap] = useState(PINNED_DROP_DEFAULT_GAP_PX);
   // A released row still owns the layout until it lands in its slot.
   const dragged = enabled
@@ -1585,21 +1665,9 @@ function usePinnedDropGap(
     (event: DragEvent<HTMLDivElement>): number | null => {
       const current = liveDragged();
       if (!current) return null;
-      const rows = rowsRef.current;
-      if (!rows) return 0;
-      // Above the rows (the header) is the top; below them, the end.
-      const y = event.clientY - rows.getBoundingClientRect().top;
-      const middles = new Map<string, number>();
-      for (const node of Array.from(rows.children)) {
-        if (!(node instanceof HTMLElement)) continue;
-        const id = node.getAttribute('data-pin-node');
-        if (id) middles.set(id, node.offsetTop + node.offsetHeight / 2);
-      }
-      return layout.rootIds
-        .filter((id) => id !== current)
-        .filter((id) => (middles.get(id) ?? Number.POSITIVE_INFINITY) < y).length;
+      return pinnedDropIndexAt(rowsRef.current, event.clientY, current);
     },
-    [layout.rootIds, liveDragged]
+    [liveDragged]
   );
 
   const onDragOver = useCallback(
@@ -1704,26 +1772,42 @@ function usePinnedDropGap(
   };
 }
 
-/** One row slot of a pin section; carries the drag gap's transform. */
-function PinnedDropNode({
-  id,
-  drag,
-  gutter,
-  children,
-}: {
+type PinnedRowSlotProps = {
   id: string;
-  drag: PinnedDropGap | null;
+  drag: PinnedDropGap;
   gutter: boolean;
   children: ReactNode;
-}) {
-  if (!drag) return <>{children}</>;
+};
+
+const slotClassName = (gutter: boolean) =>
+  // A nested trunk draws into the list's 1px gap; the slot keeps that pixel
+  // inside its own (paint-contained) box, as `SessionOpenedByTreeRow` does.
+  cn('flex min-w-0 flex-col gap-px', gutter && 'relative pb-px -mb-px');
+
+/** One row slot of a pin section; carries the native-drop gap's transform. */
+function PinnedRowSlot({ id, drag, gutter, children }: PinnedRowSlotProps) {
+  return (
+    <div data-pin-node={id} className={slotClassName(gutter)} style={drag.nodeStyle(id)}>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * A pin section slot that dnd-kit can pick up: pressing and moving it lifts
+ * the row into the pointer overlay (the rows carry no native drag here). The
+ * gap, and the empty slot the row left, come from the same layout as a native drop.
+ */
+function DraggablePinnedRowSlot({ id, drag, gutter, children }: PinnedRowSlotProps) {
+  const { setNodeRef, listeners } = useDraggable({ id: pinnedRowDndId(id) });
   return (
     <div
+      ref={setNodeRef}
       data-pin-node={id}
-      // A nested trunk draws into the list's 1px gap; this slot keeps that pixel
-      // inside its own (paint-contained) box, as `SessionOpenedByTreeRow` does.
-      className={gutter ? 'relative min-w-0 pb-px -mb-px' : 'min-w-0'}
+      data-pin-sortable=""
+      className={slotClassName(gutter)}
       style={drag.nodeStyle(id)}
+      {...listeners}
     >
       {children}
     </div>

@@ -11,6 +11,7 @@ import {
   type PinnedSessionPlacement,
 } from '@lody/shared';
 import { LoroSidebar } from '@/components/loro-sidebar';
+import { SessionMentionDropLayer } from '@/components/sessions/session-mention-drop-layer';
 import type { SidebarPinSectionActions } from '@/components/sidebar-pinned-sections';
 import type { SidebarUpdatedItem } from '@/components/sidebar-updated-session-list';
 
@@ -115,6 +116,7 @@ function PinnedSectionsPlayground() {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [defaultCollapsed, setDefaultCollapsed] = useState(false);
   const [selected, setSelected] = useState<string | null>('c3');
+  const [mentioned, setMentioned] = useState<string | null>(null);
 
   const pinned = useMemo(() => conversations.filter((entry) => entry.isPinned), [conversations]);
   const layout = useMemo(
@@ -250,12 +252,26 @@ function PinnedSectionsPlayground() {
           }
         />
       </div>
-      <div className="flex-1 p-6 text-sm text-muted-foreground">
-        <p>Drag conversations between rows and onto section headers.</p>
-        <p>Drag a section header to reorder sections.</p>
-        <p>Right-click a pinned conversation for “Move to Section” and “New Section…”.</p>
-        <p>Use a section header’s ⋯ menu to rename or delete it.</p>
-      </div>
+      <SessionMentionDropLayer
+        enabled
+        className="flex-1"
+        onDropSessionId={(sessionId) =>
+          setMentioned(conversations.find((entry) => entry.id === sessionId)?.title ?? sessionId)
+        }
+      >
+        <div className="p-6 text-sm text-muted-foreground" data-story-mention-target="">
+          <p>Drag conversations between rows and onto section headers.</p>
+          <p>Drag a section header to reorder sections.</p>
+          <p>Right-click a pinned conversation for “Move to Section” and “New Section…”.</p>
+          <p>Use a section header’s ⋯ menu to rename or delete it.</p>
+          <p className="mt-4">
+            Drop a conversation on this pane to mention it, as on a conversation.
+          </p>
+          <p className="mt-2 text-foreground" data-story-mentioned="">
+            {mentioned ? `Mentioned: ${mentioned}` : 'Nothing mentioned yet'}
+          </p>
+        </div>
+      </SessionMentionDropLayer>
     </div>
   );
 }

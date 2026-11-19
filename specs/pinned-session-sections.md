@@ -22,6 +22,9 @@ place them in named pin sections, such as "Maintenance".
 - The user can create, rename and delete sections, and drag a section header to
   reorder sections. Every section header's menu offers "New section…", which
   creates an empty section; user sections also offer rename and delete.
+- Pinned conversations are picked up with the pointer: a grabbing cursor and a
+  lifted copy follow it, and dropping one on a conversation or the new-chat
+  composer still mentions it there. Released outside the pin area, it flies back.
 - While a conversation is dragged over a section, the rows at the drop position
   slide apart to open a slot of its height, and its own slot closes; the drop
   lands exactly in that slot: the row travels from where it was released into
@@ -118,6 +121,8 @@ Implementation:
   `packages/components/src/hooks/use-session-actions.ts`
 - Catalog snapshot and writes: `packages/components/src/lib/workspace-catalog-room.ts`,
   `packages/components/src/lib/workspace-catalog-write.ts`
+- Pointer drag and mention delivery: `packages/components/src/components/pinned-rows-dnd.ts`,
+  `packages/components/src/lib/pinned-drop-settle.ts`, `packages/components/src/lib/session-mention-drag.ts`
 - Sidebar: `packages/components/src/components/sidebar-pinned-sections.tsx`,
   `sidebar-updated-session-list.tsx`, `loro-app-sidebar.tsx`; mobile:
   `packages/components/src/components/mobile/mobile-chat-list.tsx`

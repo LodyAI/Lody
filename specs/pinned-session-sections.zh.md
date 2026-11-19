@@ -17,6 +17,8 @@ pin 对话的顺序，并把它们放进自己命名的分组（pin section）�
   不能重命名、删除或拖动；已有用户分组且默认区为空时不显示默认区。新 pin 的对话进入默认区最上方。
 - 用户可以新建、重命名、删除分组，并拖动分组标题调整分组之间的顺序。每个分组标题的菜单都有
   “新建分组…”，用来新建空分组；用户分组的菜单还可以重命名和删除。
+- pin 对话用指针拖起：拖动时显示抓手光标，并有一张悬浮的卡片跟随；拖到对话或新建对话输入框上
+  仍然会插入引用。拖到 pin 区外松手，卡片会飞回原位。
 - 拖动对话经过某个分组时，落点处的卡片会滑开让出一个空位，被拖卡片原来的位置会收起；
   松手后对话正好落在这个空位里：卡片用约 100ms 从松手处滑入空位，位置和背景色都不跳变，
   鼠标再次移动前不显示 hover 高亮。
@@ -84,6 +86,8 @@ pin 对话的顺序，并把它们放进自己命名的分组（pin section）�
   `packages/components/src/hooks/use-session-actions.ts`
 - 目录快照与写入：`packages/components/src/lib/workspace-catalog-room.ts`、
   `packages/components/src/lib/workspace-catalog-write.ts`
+- 指针拖拽与引用投递：`packages/components/src/components/pinned-rows-dnd.ts`、
+  `packages/components/src/lib/pinned-drop-settle.ts`、`packages/components/src/lib/session-mention-drag.ts`
 - 侧栏：`packages/components/src/components/sidebar-pinned-sections.tsx`、
   `sidebar-updated-session-list.tsx`、`loro-app-sidebar.tsx`；移动端：
   `packages/components/src/components/mobile/mobile-chat-list.tsx`
