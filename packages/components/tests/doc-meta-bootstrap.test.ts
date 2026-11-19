@@ -132,6 +132,19 @@ describe('doc-meta-batch', () => {
         },
       ]);
     });
+
+    it('reads external metadata through listDoc when the repo has no legacy Meta Flock', async () => {
+      const repo = {
+        getMeta: () => {
+          throw new Error('Legacy Meta Flock is unavailable in external metadata mode');
+        },
+        listDoc: vi.fn(async () => [{ docId: 'session-a', meta: { id: 'a' } }]),
+      } as unknown as LoroRepo;
+
+      await expect(listDocMetaEntries(repo)).resolves.toEqual([
+        { docId: 'session-a', meta: { id: 'a' } },
+      ]);
+    });
   });
 });
 

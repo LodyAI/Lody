@@ -31,10 +31,9 @@ async function scanRows(
 }
 
 async function tryListDocMetaEntriesFromFlock(repo: LoroRepo): Promise<DocMetaEntry[] | null> {
-  const scanner = (repo as RepoWithMetaScanner).getMeta?.();
-  if (!scanner) return null;
-
   try {
+    const scanner = (repo as RepoWithMetaScanner).getMeta?.();
+    if (!scanner) return null;
     const [metadataRows, existenceRows] = await Promise.all([
       scanRows(scanner, ['m']),
       scanRows(scanner, ['e']),

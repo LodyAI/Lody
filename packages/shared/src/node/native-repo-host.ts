@@ -12,8 +12,11 @@ const EXIT_POLL_MS = 500;
  */
 export async function runNativeRepoHost(
   dataDir: string,
-  addon: Parameters<typeof ensureEngineHost>[0]['addon']
+  addon: Parameters<typeof ensureEngineHost>[0]['addon'] & {
+    readonly closeInheritedDescriptors: () => number;
+  }
 ): Promise<void> {
+  addon.closeInheritedDescriptors();
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
   const host = await ensureEngineHost({
     addon,
