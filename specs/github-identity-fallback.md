@@ -21,9 +21,10 @@ change network identity. The host atomically writes a workspace-local context
 with an opaque context token and machine-eligibility boolean. Helpers capture it
 once. Before a prompt or steer is submitted, validate the current runtime's context
 and owner. An owner change revokes its context and machine eligibility, terminates
-the old ACP/terminal runtime and reports `github_owner_changed`.
-Existing child environments cannot be scrubbed in place. The interrupted operation
-is not replayed; a subsequent turn creates a fresh runtime for the new owner.
+the old ACP/terminal runtime and waits for its cleanup. Before first prompt submission,
+the same turn can replace that runtime once and validate the replacement under the
+current owner. A steer belongs to the active process and cannot cross that handoff.
+Already-submitted input is never replayed because ownership changed.
 Host worktree operations carry an immutable context snapshot through
 clone/fetch and checkout. Session/host environments install a managed Git credential
 helper for checkout filters and LFS, including repository `/info/lfs` paths. Host

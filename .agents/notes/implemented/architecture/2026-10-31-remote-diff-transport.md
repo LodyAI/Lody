@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [#2316](https://github.com/LodyAI/Lody/pull/2316), [#2753](https://github.com/LodyAI/Lody/pull/2753), [#2756](https://github.com/LodyAI/Lody/pull/2756), [#2765](https://github.com/LodyAI/Lody/pull/2765)
+PR: [#2316](https://github.com/LodyAI/Lody/pull/2316), [#2753](https://github.com/LodyAI/Lody/pull/2753), [#2756](https://github.com/LodyAI/Lody/pull/2756), [#2765](https://github.com/LodyAI/Lody/pull/2765), [#2891](https://github.com/LodyAI/Lody/pull/2891)
 
 [中文](2026-10-31-remote-diff-transport.zh.md)
 
@@ -151,7 +151,9 @@ correctness without retransmitting unchanged bodies.
 
 The provider owns the live Branch list and its listeners for that provider's
 lifetime. Successful complete comparisons notify the summary hook; a request-start
-sequence rejects older completions, and cancellation/cache disposal prevents late
+sequence prevents older completions from replacing an accepted complete list;
+the first complete comparison can replace the bounded index while a newer read is pending.
+Cancellation/cache disposal prevents late
 publication. The list is local presentation metadata, never a renderer write to the
 shared index. Provider replacement returns to the new index until its next live
 comparison completes. Live Changes remains available without the optional history
@@ -180,7 +182,9 @@ memory caches; an epoch prevents a late read from repopulating a cleared cache. 
 corrupt cached bytes are discarded and reread. Partial or unverified blobs are never
 cached. The parsed viewer key includes both content keys and the path.
 
-Above 256 KiB combined raw size, remote manifests carry a unified patch with three
+Whole-list manifests carry descriptors and statistics without patches. Large-file
+opens revalidate a single-file manifest to obtain its bounded patch on demand.
+Above 256 KiB combined raw size, remote single-file manifests carry a unified patch with three
 context lines and at most 256 KiB. Patch work is also bounded at 600 line edits;
 a larger rewrite falls back to verified full blobs, as does an encoded patch that
 exceeds its page budget. Only the raw content cap makes text unavailable. Local

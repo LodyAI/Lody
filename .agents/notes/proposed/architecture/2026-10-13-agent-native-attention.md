@@ -7,7 +7,7 @@ Translation: current
 
 ## Abstract
 
-Lody determines notification eligibility from trusted execution outcomes and input authors, without an agent notification tool, Inbox UI or new Web delivery. Desktop and mobile submit independently and may both alert. The implementation keeps a small shared policy and compatible adapters, with no device heartbeat, retry queue or cross-device arbitration. Current Live Activity producers are silent. Code and local tests exist; actual device display, sound and click acceptance remain outstanding.
+Lody determines notification eligibility from trusted execution outcomes and input authors, without an agent notification tool, Inbox UI or new Web delivery. Desktop and mobile submit independently and may both alert. The one exception (2026-11-17) is that a focused Lody desktop of the recipient suppresses terminal-outcome mobile pushes. The implementation keeps a small shared policy and compatible adapters, with no notification heartbeat table, retry queue or general cross-device arbitration. Current Live Activity producers are silent. Code and local tests exist; actual device display, sound and click acceptance remain outstanding.
 
 ## Source policy and minimal contracts
 
@@ -23,13 +23,44 @@ Schedules currently produce ordinary user turns. Success/failure/unknown follow 
 
 ## Independent best-effort delivery
 
-Each permitted target receives one bounded attempt. Failure, timeout, reconnection or a later lock does not retry or switch channels. Desktop activity, DND, disabled notifications or a visible source cannot suppress mobile. Two devices each alerting is accepted normal behavior, not only a rare race.
+Each permitted target receives one bounded attempt. Failure, timeout, reconnection or a later lock does not retry or switch channels. Desktop DND, disabled desktop notifications or a visible source cannot suppress mobile. The only exception is the focused-desktop rule below. Otherwise, two devices each alerting is accepted normal behavior, not only a rare race.
 
 The control document stores only the latest terminal notification. Metadata carries a low-frequency 36-byte UUID activation index; the desktop reads only changed sources, with four concurrent reads and a five-second deadline. Startup/reconnection establishes a baseline instead of replaying history. Recipient, identity, freshness, current settings and current source visibility are checked before display.
 
 Mobile remains an optional authenticated cloud capability and carries optional bounded conversation/task and project display names. These names cross the cloud/provider boundary; raw tool commands, filesystem paths and errors do not. Current protocols target permitted native subscriptions; legacy protocols retain their existing target behavior. Acceptance is not proof of device display or user reading. Local-only composition never acquires product-cloud notification capability.
 
-The removed desktop sampler, presence heartbeats, arbitration and notification journal are not reserved as empty interfaces. There is no outbox, route epoch, claim, cross-device read protocol or dedicated notification runtime.
+The removed desktop sampler, notification heartbeat table, arbitration and notification journal are not reserved as empty interfaces. The focused-desktop rule below reuses ordinary workspace presence instead. There is no outbox, route epoch, claim, cross-device read protocol or dedicated notification runtime.
+
+## Focused-desktop mobile suppression (2026-11-17)
+
+The owner reversed part of the independent-channel decision. If any of the user's Lody desktops is focused, terminal-outcome pushes to their phones are skipped. Permission and question pushes are unchanged, and so is the desktop's own notification.
+
+- **Desktop side:** an Electron window publishes a `desktop-foreground` presence entry `{userId, instanceId, updatedAt}` into its active workspace room. It does so only when all of these hold:
+  - the platform has the cloud `notifications` capability;
+  - the per-computer setting (localStorage, default on) allows it;
+  - the window is visible and focused;
+  - there has been keyboard or pointer input within five minutes.
+- **Write rate:** focus changes are debounced by one second, and the entry rides the existing 30s presence heartbeat. Blur, hide, idle and teardown delete it actively.
+- **Sleep and lock:** Electron main forwards `powerMonitor` suspend/resume and lock/unlock as `app.powerState`. Suspend or lock deletes the entry immediately, without debounce. Suspend and lock are tracked separately, so a resume while the screen stays locked does not restore suppression. Linux has no lock events and relies on idle and the TTL.
+- **Host side:** `MessageHandler.notifyTurnOutcome` checks the recipient across the presence replicas of every workspace the daemon hosts. A fresh entry skips only `notifySessionCompleted`; the silent Live Activity summary still syncs.
+- **Fail-open:** only a fresh entry suppresses. Absence, staleness, an unjoined room and read failures all send.
+
+Alternatives considered:
+
+- **Convex heartbeat table (the cancelled M2):** rejected again. It needs continuous authenticated writes and a persisted schema, and Convex must not read Streams.
+- **Reusing `session-viewing`:** rejected. It is published only from a mounted session view, tracks visibility rather than focus, and cannot distinguish a desktop from Web.
+
+Remote Hosts see the entry because the renderer publishes to the cloud presence room, not only the local plane. Encrypted workspaces carry it under the minimal allowlist (user/instance IDs and a timestamp).
+
+Accepted gaps:
+
+- A desktop focused on a workspace the finishing Host does not host is invisible to it, so the phone still rings.
+- Old CLIs and old desktops keep sending.
+- A crashed desktop, or one whose suspend event never reaches the renderer, may suppress pushes for up to the 90s TTL.
+- Focus without input for under five minutes still counts.
+- The entry tells workspace members and the Streams service that the user is at a desktop.
+
+Tests cover freshness/recipient filtering, the minimal schema, transport heartbeat/teardown, debounce/idle and Host fail-open behavior. Real Electron focus and lock behavior on each OS, and device delivery, are not verified.
 
 ## Compatibility and silent activity
 

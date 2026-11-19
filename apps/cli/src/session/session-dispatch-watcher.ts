@@ -51,6 +51,7 @@ import {
   resolveDispatchAcpSessionId,
   resolveResumableAcpSessionId,
   resolveSessionCancelAction,
+  isImportFencedQueueItem,
   resolveSessionDispatchAction,
   shouldWatchSession,
   type SessionDispatchSnapshot,
@@ -1444,7 +1445,11 @@ export class SessionDispatchWatcher {
         ...this.deps.executionService.getExecutionSnapshot(sessionId),
       };
 
-      const guardAction = resolveSessionDispatchAction(snapshot, this.deps.machineId);
+      const guardAction = resolveSessionDispatchAction(
+        snapshot,
+        this.deps.machineId,
+        this.deps.workspaceId
+      );
 
       // ── Handle guard/stale-status results (no history needed) ──
       if (guardAction.type === 'noop') {
@@ -1531,7 +1536,11 @@ export class SessionDispatchWatcher {
         history: [nextUserTurn],
         ...this.deps.executionService.getExecutionSnapshot(sessionId),
       };
-      const dispatchAction = resolveSessionDispatchAction(dispatchSnapshot, this.deps.machineId);
+      const dispatchAction = resolveSessionDispatchAction(
+        dispatchSnapshot,
+        this.deps.machineId,
+        this.deps.workspaceId
+      );
 
       if (dispatchAction.type !== 'dispatch') {
         outcome = `fresh-action-${dispatchAction.type}`;
@@ -2441,6 +2450,14 @@ export class SessionDispatchWatcher {
       for (const [operationId] of pending) {
         const record = await backend.getQueuePromotionRecord(operationId);
         if (!record || record.state === 'queue_consumed') continue;
+        // A promotion carried in by a workspace import never runs here.
+        if (
+          isImportFencedQueueItem(currentMeta, this.deps.workspaceId, {
+            $cid: record.queueCid,
+            userTurnId: record.userTurnId,
+          })
+        )
+          continue;
 
         // A previous receipt may have consumed the head. Re-read both the row
         // and the head for every operation so a later receipt can recover in
@@ -2571,6 +2588,8 @@ export class SessionDispatchWatcher {
       if (!queuedItem) {
         return null;
       }
+      // Queued input carried in by a workspace import is held, never promoted here.
+      if (isImportFencedQueueItem(meta, this.deps.workspaceId, queuedItem)) return null;
 
       const queuedTurnId = queuedItem.userTurnId?.trim() || `queued-${queuedItem.$cid}`;
       if (this.deps.executionService.isInboxInputCanceled?.(meta.id, queuedTurnId)) {
@@ -3264,7 +3283,8 @@ export class SessionDispatchWatcher {
           ...(this.rpcTurnStash.get(meta.id)?.keys() ?? []),
         ].filter((id): id is string => typeof id === 'string' && id.length > 0);
       const select = (entries: readonly SessionDispatchEntry[]): string | undefined => {
-        if (!preferred) return findNextDispatchableUserTurn(entries, meta)?.id;
+        if (!preferred)
+          return findNextDispatchableUserTurn(entries, meta, this.deps.workspaceId)?.id;
         const last = findLastHistoryEntry(entries, preferred);
         return last?.role === 'user' && ['pending', 'seen', 'prepared'].includes(last.status ?? '')
           ? last.id

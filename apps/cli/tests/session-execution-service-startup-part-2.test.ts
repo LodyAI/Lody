@@ -637,9 +637,17 @@ describe('SessionExecutionService', () => {
     }
   );
 
-  it.each(['create', 'continue'] as const)(
-    'replays failed first-turn input through %s dispatch without a resumable ACP id',
-    async (mode) => {
+  it.each([
+    ['create', 'stable'],
+    ['continue', 'stable'],
+    ['create', 'transferred'],
+    ['continue', 'transferred'],
+    ['create', 'changed again'],
+    ['continue', 'changed again'],
+    ['continue', 'transferred before disconnect'],
+  ] as const)(
+    'replays failed first-turn input through %s dispatch without a resumable ACP id (owner %s)',
+    async (mode, ownership) => {
       const meta = {
         repoFullName: 'owner/repo',
         isArchived: false,
@@ -685,7 +693,11 @@ describe('SessionExecutionService', () => {
         isCreated: vi.fn(() => true),
         cancel: vi.fn(async () => {}),
         prompt: vi.fn(
-          async (_id: string, _blocks: { type: string; text: string }[], _options: unknown) => ({})
+          async (_id: string, _blocks: { type: string; text: string }[], _options: unknown) => {
+            if (ownership === 'transferred before disconnect')
+              throw new Error('ACP connection closed');
+            return {};
+          }
         ),
         currentModel: undefined,
       };
@@ -707,14 +719,47 @@ describe('SessionExecutionService', () => {
         { type: 'text' as const, text: args.replayPromptText ?? '' },
         { type: 'text' as const, text: '?' },
       ]);
+      const stalePrompts: unknown[] = [];
+      const oldSession = {
+        ...restoredSession,
+        agentClient: {
+          ...agentClient,
+          prompt: async (...args: unknown[]) => {
+            stalePrompts.push(args);
+            return {};
+          },
+        },
+      };
+      let retired = false;
+      let validationReached = false;
       const deps = createBaseDeps({
         sessionManager: {
           getSession: vi.fn(() => null),
           getPendingSession: vi.fn(() => null),
-          createSession: vi.fn(async () => restoredSession as unknown),
+          createSession: async (config: SessionConfig) => {
+            if (ownership !== 'stable' && !retired) {
+              config.env = { ...config.env, LODY_GIT_CRED_CONTEXT_TOKEN: 'old-fixture-lease' };
+              return oldSession;
+            }
+            expect(config.env?.LODY_GIT_CRED_CONTEXT_TOKEN).toBeUndefined();
+            return restoredSession;
+          },
+          retireSessionForReconfiguration: async () => {},
           setSessionError: vi.fn(),
           terminateSession: vi.fn(),
-          validateSessionCredentials: vi.fn(async () => {}),
+          validateSessionCredentials: async (
+            session: unknown,
+            _requester: string,
+            mode?: string
+          ) => {
+            if (session === oldSession) {
+              if (mode !== 'replace-before-prompt') throw new Error('github_owner_changed');
+              retired = true;
+              return 'retired';
+            }
+            validationReached = true;
+            if (ownership === 'changed again') throw new Error('github_owner_changed');
+          },
         } as unknown as SessionManager,
         workspaceDocument: {
           repo: {
@@ -724,6 +769,7 @@ describe('SessionExecutionService', () => {
           getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
           updateAcpCapabilities: vi.fn(async () => {}),
         } as unknown as LoroDocumentManager,
+        hasPromptEventsForTurn: () => ownership !== 'transferred before disconnect',
         buildAcpPromptBlocks,
       });
 
@@ -746,6 +792,18 @@ describe('SessionExecutionService', () => {
         await service.continueSession(request);
       }
 
+      expect(stalePrompts).toEqual([]);
+      expect(validationReached).toBe(true);
+      if (ownership === 'changed again') {
+        expect(agentClient.prompt.mock.calls).toHaveLength(0);
+        expect(deps.recordChatFailure).toHaveBeenCalledWith(
+          sessionDoc,
+          'turn_pre_prompt_failed',
+          expect.stringContaining('github_owner_changed')
+        );
+        return;
+      }
+      expect(agentClient.prompt.mock.calls).toHaveLength(1);
       const delivered = agentClient.prompt.mock.calls[0]?.[1];
       expect(delivered).toEqual([
         { type: 'text', text: expect.stringContaining('Build this on the two MIT packages.') },

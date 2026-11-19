@@ -19,6 +19,12 @@ also applies.
 - Unpackaged smoke sets the existing dev-only plaintext-auth storage flag in
   that disposable profile to avoid shared macOS Keychain approval dialogs.
   These runs do not establish native Keychain acceptance or packaged auth behavior.
+- An embedding repository may launch its own composition of the same desktop by setting
+  `LODY_E2E_APP_DIR` (a directory with `package.json`, `out/` and `resources/cli/`) and
+  `LODY_E2E_APP_CONFIG` (JSON `{ env, args }` with extra environment and Chromium
+  switches). Unset, the harness
+  launches the OSS build unchanged. Isolation keys always override extra values, and
+  nothing private is named in this repository.
 - Run scenarios serially until every remaining fixed OS endpoint has an
   explicit shared test binding. Do not raise Cucumber parallelism first.
 - Keep the unpackaged E2E BrowserWindow hidden by default and disable renderer

@@ -14,6 +14,7 @@ import { Select } from '@lody/ui/select';
 import { toast } from '@/lib/toast';
 import {
   electronSessionCompletionNotificationsEnabledAtom,
+  electronSuppressMobilePushWhenFocusedAtom,
   mobileKeyboardActionAtom,
   prRemoteImagesEnabledAtom,
   queuedMessageBehaviorAtom,
@@ -21,6 +22,7 @@ import {
   userAtom,
 } from '@/atoms';
 import { useAtom, useAtomValue } from 'jotai';
+import { usePlatformCapability } from '@lody/platform/react';
 import { CompactRow, CompactSection } from './compact-layout';
 import { settingContainerClass } from '.';
 import { ExperimentalFeatureRows } from './experimental-features-setting';
@@ -136,6 +138,10 @@ export function GeneralSettingsComponent() {
   const user = useAtomValue(userAtom);
   const [electronCompletionNotificationsEnabled, setElectronCompletionNotificationsEnabled] =
     useAtom(electronSessionCompletionNotificationsEnabledAtom);
+  const [suppressMobilePushWhenFocused, setSuppressMobilePushWhenFocused] = useAtom(
+    electronSuppressMobilePushWhenFocusedAtom
+  );
+  const mobilePushAvailable = usePlatformCapability('notifications');
   const [mobileKeyboardAction, setMobileKeyboardAction] = useAtom(mobileKeyboardActionAtom);
   const [sessionSidebarCodeChangesOnly, setSessionSidebarCodeChangesOnly] = useAtom(
     sessionSidebarCodeChangesOnlyAtom
@@ -789,6 +795,24 @@ export function GeneralSettingsComponent() {
             </div>
             <CliDaemonSetting />
             <AutoLaunchSettingRows autoLaunch={autoLaunch} />
+            {mobilePushAvailable && (
+              <CompactRow
+                label={t(
+                  'settings.general.suppressMobilePushWhenFocused.label',
+                  'Pause phone notifications while using this computer'
+                )}
+                helper={t(
+                  'settings.general.suppressMobilePushWhenFocused.helper',
+                  'While Lody is focused on this computer, finished tasks skip your phone. Permission requests and questions still notify.'
+                )}
+              >
+                <Switch
+                  id="suppress-mobile-push-when-focused-toggle"
+                  checked={suppressMobilePushWhenFocused}
+                  onCheckedChange={setSuppressMobilePushWhenFocused}
+                />
+              </CompactRow>
+            )}
             <div id="prevent-sleep" {...stylex.props(styles.anchor)}>
               <CompactRow
                 label={t('settings.general.preventSleep.label', 'Prevent sleep')}

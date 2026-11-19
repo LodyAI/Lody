@@ -63,6 +63,7 @@ import {
   reportWorkspaceCloseFailure,
   type WorkspaceCloseStage,
 } from './workspace-close-diagnostics';
+import { isLoroStreamsWebSocketEnabled } from '@lody/shared';
 import type { StreamsTransportAdapter } from 'loro-repo/transport/streams';
 import { StreamsCrdt, createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
 import type { PlatformSyncMode } from '@lody/platform';
@@ -289,6 +290,8 @@ export type WorkspaceE2eeTransport = {
   ) => Promise<string[]>;
 };
 type RuntimeDeps = {
+  /** Explicit opt-in; otherwise use VITE_LORO_STREAMS_WS_ENABLED. */
+  streamsWebSocketEnabled?: boolean;
   content: WorkspaceStreamsContent;
   /** Provisional cloud runtimes may read/write locally, but cannot attach a
    * transport or send a body until their immutable mode is authenticated. */
@@ -607,6 +610,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const repo = await LoroRepo.create({
     storageAdapter: repoStorage,
     metaDebounceCommitMs: 0,
+    // Session metadata (what lists a Session) must reach disk with its history;
+    // loro-repo's default 5 s trailing debounce let a crash drop new Sessions.
+    metaPersistDebounceMs: 0,
     resolveRoomTransports: (room) =>
       resolveRoomTransportsImpl?.(room) ?? { transportIds: ['cloud'] },
   });
@@ -3604,17 +3610,29 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     if (protectedContent && !bucketId) throw new Error('e2ee_content_configuration');
     presenceTransport.start({
       ...(bucketId ? { bucketId } : {}),
+      webSocketEnabled: isLoroStreamsWebSocketEnabled(
+        deps.streamsWebSocketEnabled,
+        import.meta.env.VITE_LORO_STREAMS_WS_ENABLED
+      ),
       baseUrl: durableBaseUrl,
       auth: streamsTokenProvider.createAuthCallback(),
       shardHostSuffix,
     });
     if (protectedContent) return;
     promptSuggestions.start({
+      webSocketEnabled: isLoroStreamsWebSocketEnabled(
+        deps.streamsWebSocketEnabled,
+        import.meta.env.VITE_LORO_STREAMS_WS_ENABLED
+      ),
       baseUrl: durableBaseUrl,
       auth: streamsTokenProvider.createAuthCallback(),
       shardHostSuffix,
     });
     machineMonitorTransport.start({
+      webSocketEnabled: isLoroStreamsWebSocketEnabled(
+        deps.streamsWebSocketEnabled,
+        import.meta.env.VITE_LORO_STREAMS_WS_ENABLED
+      ),
       baseUrl: durableBaseUrl,
       auth: streamsTokenProvider.createAuthCallback(),
       shardHostSuffix,
@@ -3706,7 +3724,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   ): StreamsTransportAdapter => {
     durableStreamsBaseUrl = streamsBaseUrl;
     return createWorkspaceStreamsTransport({
+      webSocketEnabled: isLoroStreamsWebSocketEnabled(
+        deps.streamsWebSocketEnabled,
+        import.meta.env.VITE_LORO_STREAMS_WS_ENABLED
+      ),
       incompleteRecoveryScope,
+      recoverFlockCheckpointsOnTimeout: true,
       content: deps.content,
       ...(protectedContent ? { bucketId: deps.e2ee?.bucketId() ?? undefined } : {}),
       repo,
@@ -6235,6 +6258,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     forceMachineMonitorSample: (machineId) => targetMachineMonitor.forceSample(machineId),
     publishSessionViewing: (args: { sessionId: SessionId; userId: string } | null) =>
       presenceTransport.publishSessionViewing(args),
+    publishDesktopForeground: (userId: string | null) =>
+      presenceTransport.publishDesktopForeground(userId),
     ensureDocStream,
     // Every store access must be ref-counted so eviction cannot dispose+unload
     // a doc mid-use. releaseRef only starts the warm-release timer, so this

@@ -77,7 +77,8 @@ contract and can delay completion independently of stdio. See the
 Execution publishes typed terminal facts using the frozen invocation requester and
 input turn identity. Input author provenance determines result audience; Session
 containment does not. `onTurnOutcome` is attempted once, even on failure; its consumer
-publishes the latest desktop projection and submits mobile independently. Installing
+publishes the latest desktop projection and submits mobile independently (skipped while the
+recipient has a focused desktop). Installing
 this consumer disables the legacy execution completion sender. Older embedders retain
 that callback. No notification journal, retry or replay. See [notification ownership rules](../lib/notifications/AGENTS.md).
 A notification failure cannot replay Agent execution.
@@ -348,6 +349,15 @@ turn under the rewrite lease), the entry is dead:
   closes the entry a crashed run left open, at that failure point. A `processing` input is
   never closed this way: it still owes its crash-recovery run on the same entry. Dispatch
   checks do not sweep for dead turns; that would read history on every trigger.
+- A process end (crash, kill, or shutdown during a running prompt) leaves the input's
+  `processingUserMsgId` claim in Session metadata; shutdown keeps it only when the prompt
+  was still in flight and the user had not stopped it. When restart dispatch finds that
+  claim on its own Machine for an ended Inbox input, it settles the input as stopped (not
+  the send-again failure) and appends one Lody-authored `continue` input with the
+  interrupted input's Agent configuration (`interrupted-turn-continuation.ts`), unless the
+  Session is archived or deleted, newer or queued input exists, a continuation already
+  exists, or the input was itself a continuation (id prefix `lody-continue-`). Encrypted
+  workspaces keep the failure. See the [spec](../../../../specs/interrupted-turn-continuation.md).
 - Queue acknowledgement requires an empty local queue **and** observation of the control
   frontier carried by that exact `messageQueueUpdatedAt` signal. Renderer queue mutations
   capture `messageQueueUpdateVersion` before releasing their store. Metadata arriving first
@@ -441,7 +451,8 @@ uses a Session ID lookup. `SessionConfig` carries no credential policy. Session
 creation owns the lease and a failed creation releases it. Validation on create,
 continue, recovery and steer checks that runtime's lease and trusted owner. Owner
 changes revoke it and retire the old runtime, since children retain their old
-environments. Operations are not replayed.
+environments. An unsubmitted prompt can continue on one freshly validated replacement
+within its turn. Active steers remain bound to their original process.
 
 See [the contract](../../../../specs/github-identity-fallback.md) and
 [worktree rules](worktree/AGENTS.md) for ownership, write non-replay and isolation.

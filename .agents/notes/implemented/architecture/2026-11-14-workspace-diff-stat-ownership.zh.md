@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [#2748](https://github.com/LodyAI/Lody/pull/2748), [#2751](https://github.com/LodyAI/Lody/pull/2751), [#2757](https://github.com/LodyAI/Lody/pull/2757)
+PR: [#2748](https://github.com/LodyAI/Lody/pull/2748), [#2751](https://github.com/LodyAI/Lody/pull/2751), [#2757](https://github.com/LodyAI/Lody/pull/2757), [#2891](https://github.com/LodyAI/Lody/pull/2891)
 
 [English](2026-11-14-workspace-diff-stat-ownership.md)
 
@@ -21,6 +21,8 @@ PR: [#2748](https://github.com/LodyAI/Lody/pull/2748), [#2751](https://github.co
 不再让仅已提交的统计写入同一字段，因为用户应当能够先检查已保存的修改，再提交。只强制补刷仍会保留两个含义冲突的写入者。PR 的远端比较保留自己的范围，不覆盖工作区统计。此前的[基准引用决策](../bug-fix/2026-09-30-qualified-all-changes-base.zh.md)继续管理基准选择，[All Changes 范围](../feature/2026-10-19-all-changes-diff-scope.zh.md)保持原义。
 
 本次删除含义冲突的统计生产者，保留现有 Promise Repo/Streams 发布边界；相关依赖链的原生迁移属于其他工作，不声明已完成 Effect 迁移。
+
+打开「变更」面板会读取完整的分页分支清单，其统计用于底栏的工作区摘要，避免部分索引的合计与旧元数据同时显示。文本行数未知时，底栏显示完整文件数量。初次渲染继续使用会话元数据，Project Member 选择继续使用对应 Member 的范围。实时清单沿用既有 diff 传输，元数据发布继续由原来的归属端负责。
 
 ## 验证
 

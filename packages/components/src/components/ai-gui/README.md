@@ -78,6 +78,9 @@ the reasoning behind those rules.
   `session-link-context.tsx`'s explicit-target deep-link dispatch for both same-
   and cross-workspace links. Ordinary related-session navigation remains separate
   so its last-active-tab restoration cannot override a resource destination.
+  Trusted HTTP(S) session URLs for the current workspace also dispatch their exact
+  conversation in-app on an ordinary click, including a selected child tab. Other
+  workspaces, external origins and modified clicks retain external navigation.
   Without live navigation, or on a read-only share, the chip is inert.
   Message/plan copy and UI/CLI Markdown exports normalize prose references using
   shared `session-link-export`, preserving code examples and stored history.

@@ -1,4 +1,6 @@
-import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
+import path from 'node:path';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import type { LodyPresenceStateMap, ManagedDaemonUpgradeOptions } from '@lody/shared';
 import { isCloudE2eeDeviceRevoked, isCloudE2eeMemberRemoved } from './cloud-e2ee-errors';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
 import { worktreeGitLegacy } from '@/session/worktree/git-execution-legacy';
@@ -82,6 +84,7 @@ import {
   isLocalProjectWorktreeConfigRequest,
 } from '@/session/worktree/worktree-setup-config-store';
 import { formatErrorMessage, formatErrorWithCauses } from '@/utils/format-error';
+import { reportIfWasmFault } from '@/lib/loro/wasm-runtime-health';
 import {
   authorityStamp,
   authorityTimeLeft,
@@ -425,6 +428,19 @@ export class LodyFleet {
       },
       dispatchMachineRpc: async (message, signal) =>
         await this.dispatchLocalMachineRpc(message, signal),
+      dispatchWorkspaceBundle: async (message) => {
+        const runtime = await this.resolveWorkspaceRuntime(message.workspaceId as WorkspaceId);
+        const { handleWorkspaceBundleControl } = await import('./workspace-bundle/control');
+        const { daemonBundleWorkspace } = await import('./workspace-bundle/daemon');
+        return await handleWorkspaceBundleControl(message, {
+          workspace: daemonBundleWorkspace(runtime.workspace.id, runtime.lody.documentManager, {
+            sync: !this.localPlatform,
+          }),
+          role: runtime.workspace.role,
+          actor: { userId: this.userId, machineId: this.machineId, lodyVersion: pkg.version },
+          journalDir: path.join(getLodyDataDir(), 'workspace-imports'),
+        });
+      },
     };
     await traceAsync(this.logger, 'startup.local_ipc', undefined, async () => {
       await startLocalIpcSocketServers({
@@ -497,6 +513,23 @@ export class LodyFleet {
       async () =>
         await this.startWorkspaceSubscription({ waitForInitial: !this.localFirstBootstrap })
     );
+  }
+
+  /**
+   * Presence snapshots of every hosted workspace, read on demand when a turn
+   * finishes. A workspace whose presence cannot be read is skipped, never fatal.
+   */
+  private readHostedPresenceStates(): LodyPresenceStateMap[] {
+    const snapshots: LodyPresenceStateMap[] = [];
+    for (const { lody } of this.runtimes.values()) {
+      try {
+        const states = lody.documentManager.getPresenceStates();
+        if (states) snapshots.push(states);
+      } catch (error) {
+        reportIfWasmFault(error);
+      }
+    }
+    return snapshots;
   }
 
   private async bootstrapFromLocalCatalog(): Promise<void> {
@@ -1278,6 +1311,7 @@ export class LodyFleet {
             [...this.runtimes.values()].some((runtime) => runtime.workspace.contentMode === 'e2ee'),
           prepareManagedUpgrade: this.prepareManagedUpgrade,
           closeSessionTerminals: (sessionId) => this.terminalPtyService.closeSession(sessionId),
+          readHostedPresenceStates: () => this.readHostedPresenceStates(),
           cleanupLocalProjectWorktreeSetupIfUnreferenced: (localProjectId) =>
             this.cleanupLocalProjectWorktreeSetupIfUnreferenced(localProjectId),
           onFatalAuthFailure: this.onFatalAuthFailure,

@@ -250,7 +250,7 @@ describe('MessageHandler machine registration', () => {
         androidEmulator: 1,
         androidEmulatorQuality: 1,
         iosSimulator: 1,
-        iosSimulatorControls: 1,
+        iosSimulatorControls: 2,
         iosSimulatorExterior: 1,
         localProjectRemoval: 1,
         localProjectCreateDirectory: 1,

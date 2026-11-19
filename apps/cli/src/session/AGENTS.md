@@ -22,7 +22,7 @@ encrypted starts that run only signed input; the default ceiling had no room for
 - Git: the owner's repository identity, an approved requester, the owner's native config,
   then LodyAI. Only a decided identity is exported as env. Non-owners never read machine config.
   `CloudPort` profiles: 60s deadline, retry failures, reject placeholders.
-  Commit attribution never restarts ACP; owner changes retire the runtime.
+  Attribution preserves ACP. Owner changes replace ACP before prompt submission.
 
 ## Dispatch
 

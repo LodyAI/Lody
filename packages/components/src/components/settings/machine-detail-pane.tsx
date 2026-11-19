@@ -291,10 +291,14 @@ function SupportedMachineProvidersSection({
     </Tooltip.Root>
   );
 
+  // A setup publishes its config under the same id, and the two briefly coexist
+  // (the daemon deletes a queued setup whose config already exists). Prefixed
+  // keys keep those siblings distinct: a duplicate key leaves React unable to
+  // remove the setup row, which then lingers as a stale "waiting" row.
   const providerLines = [
     ...setups.map((setup) => (
       <ProviderSetupRow
-        key={setup.id}
+        key={`setup:${setup.id}`}
         setup={setup}
         machine={machine}
         onRetry={onRetrySetup ?? (async () => undefined)}
@@ -303,7 +307,7 @@ function SupportedMachineProvidersSection({
     )),
     ...configs.map((config) => (
       <ProviderRow
-        key={config.id}
+        key={`config:${config.id}`}
         config={config}
         machine={machine}
         onEdit={onEditConfig}

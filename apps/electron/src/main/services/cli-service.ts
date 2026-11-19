@@ -48,6 +48,10 @@ import {
   makeLocalControlClientAuto,
   makeLocalProbeClientAuto
 } from '@lody/shared/node/local-ipc'
+import type {
+  WorkspaceBundleControlRequest,
+  WorkspaceBundleControlResponse
+} from '@lody/shared/workspace-bundle-control'
 import { getLodyDataDir } from '@lody/shared/node/installation-profile'
 import type {
   LocalProjectControlRequest,
@@ -90,6 +94,7 @@ import type { CliOutputEvent, CliRunResult } from '../types'
 import { resolveLocalSessionControlTimeoutMs } from './local-session-control-budget'
 
 const CLI_OUTPUT_BUFFER_MAX_EVENTS = 2000
+const WORKSPACE_BUNDLE_TIMEOUT_MS = 60 * 60 * 1000
 // How long to wait for the embedded CLI to exit on SIGTERM during app quit before
 // force-killing it after the CLI's seven-second budget. Early exit finishes the wait.
 const CLI_QUIT_GRACE_MS = 10_000
@@ -944,6 +949,19 @@ export class CliService {
         error: error instanceof Error ? error.message : String(error)
       }
     }
+  }
+
+  /** Workspace bundles can take as long as the whole workspace; the daemon replies once. */
+  async sendWorkspaceBundleControl(
+    message: WorkspaceBundleControlRequest
+  ): Promise<WorkspaceBundleControlResponse> {
+    const response = await Effect.runPromise(
+      this.localControlClient.workspaceBundleControl(message, {
+        timeoutMs: WORKSPACE_BUNDLE_TIMEOUT_MS
+      })
+    )
+    if (!response.ok && response.error === 'machine_mismatch') this.clearMachineIdCache()
+    return response
   }
 
   async sendLocalProjectControl(

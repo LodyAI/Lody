@@ -26,7 +26,9 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import type { SessionId } from '@lody/shared';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useStore } from 'jotai';
+import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
+import { parseAppSessionUrl } from '@/lib/session-app-url';
 import type { StreamdownProps } from '@lobehub/streamdown';
 import Markdown, {
   defaultUrlTransform,
@@ -387,8 +389,8 @@ type MarkdownExternalLinkProps = ComponentPropsWithoutRef<'a'> & {
 
 /**
  * Renders an `<a>` for markdown output, with an escape hatch: if the href
- * matches the currently-active session's Pull Request URL, clicking the link
- * opens the in-app PR tab instead of navigating away. Falls back to the
+ * names a conversation in the current workspace or matches the active PR,
+ * clicking opens the in-app destination. Falls back to the
  * default new-tab external link when no interceptor matches.
  */
 function MarkdownExternalLink({
@@ -400,6 +402,9 @@ function MarkdownExternalLink({
 }: MarkdownExternalLinkProps) {
   const prHandler = usePrLinkInterceptor(href);
   const coordinator = useCoordinatorConversation();
+  const navigateSession = useSessionLinkNavigator();
+  const readonly = useContext(SessionReadonlyContext);
+  const store = useStore();
   const handleClick = useCallback(
     (event: React.MouseEvent<HTMLAnchorElement>) => {
       onClick?.(event);
@@ -407,6 +412,18 @@ function MarkdownExternalLink({
       // Respect modifier-click / non-primary clicks — let the browser do its thing.
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       if (event.button !== 0) return;
+      const session = href && navigateSession && !readonly ? parseAppSessionUrl(href) : null;
+      const workspaceId = store.get(currentWorkspaceIdAtom);
+      if (
+        navigateSession &&
+        session &&
+        workspaceId &&
+        session.workspaceSlug === store.get(currentWorkspaceSlugAtom)
+      ) {
+        event.preventDefault();
+        navigateSession({ sessionId: session.sessionId as SessionId, workspaceId });
+        return;
+      }
       if (coordinator?.openExternalLink && href) {
         const label = markdownLinkText(children).trim() || undefined;
         if (coordinator.openExternalLink(href, label)) {
@@ -418,7 +435,7 @@ function MarkdownExternalLink({
       event.preventDefault();
       prHandler();
     },
-    [children, coordinator, href, onClick, prHandler]
+    [children, coordinator, href, navigateSession, onClick, prHandler, readonly, store]
   );
   return (
     <a {...rest} href={href} target="_blank" rel={ensureLinkRel(rel)} onClick={handleClick}>

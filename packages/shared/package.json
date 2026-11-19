@@ -15,6 +15,7 @@
     "./node/e2ee-clock": "./src/node/e2ee-clock.ts",
     "./node/e2ee-identity": "./src/node/e2ee-identity.ts",
     "./e2ee-local-pairing": "./src/e2ee-local-pairing.ts",
+    "./workspace-streams-persistence": "./src/workspace-streams-persistence.ts",
     "./workspace-streams-content": "./src/workspace-streams-content.ts",
     "./notifications": {
       "types": "./src/notifications/index.ts",
@@ -81,6 +82,11 @@
       "import": "./src/visual-annotation-inspector-global.ts"
     },
     "./path-launchers": "./src/path-launchers.ts",
+    "./workspace-bundle-control": {
+      "types": "./src/workspace-bundle-control.ts",
+      "import": "./src/workspace-bundle-control.ts",
+      "default": "./src/workspace-bundle-control.ts"
+    },
     "./electron-ipc": {
       "types": "./src/electron-ipc.ts",
       "import": "./src/electron-ipc.ts",

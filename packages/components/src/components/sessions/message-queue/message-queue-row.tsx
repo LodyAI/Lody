@@ -77,13 +77,14 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
     transition: sortable.transition,
   };
 
-  const imageBlocks = useMemo(
-    () =>
-      normalizeSessionInputBlocks(item.acpSessionConfig?.inputBlocks, '').filter(
-        (block): block is QueuedImageBlock => block.type === 'image'
-      ),
+  const inputBlocks = useMemo(
+    () => normalizeSessionInputBlocks(item.acpSessionConfig?.inputBlocks, ''),
     [item.acpSessionConfig?.inputBlocks]
   );
+  const imageBlocks = inputBlocks.filter(
+    (block): block is QueuedImageBlock => block.type === 'image'
+  );
+  const hasNonTextBlocks = inputBlocks.some((block) => block.type !== 'text');
 
   // Every commit path — Enter, the confirm button, clicking away — funnels through here.
   // The guard keeps the blur that follows a keyboard/button commit (React disables the
@@ -99,13 +100,13 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
       onCancelEdit(item);
       return;
     }
-    if (current.length === 0 && imageBlocks.length === 0) {
+    if (current.length === 0 && !hasNonTextBlocks) {
       // Don't let a commit wipe the queued message to an empty prompt; revert instead.
       onCancelEdit(item);
       return;
     }
     onSaveEdit(item);
-  }, [editValue, imageBlocks.length, item, onCancelEdit, onSaveEdit]);
+  }, [editValue, hasNonTextBlocks, item, onCancelEdit, onSaveEdit]);
 
   // A failed write leaves the row in edit mode; re-arm so the user can commit again.
   useEffect(() => {

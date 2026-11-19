@@ -23,6 +23,7 @@ Parent rules apply; see [Session rules](../session/AGENTS.md).
   the Host lease until it reports ready (`lib/managed-daemon-migration.ts`); older and
   Windows npm installations need explicit migration. Never install global npm packages remotely.
   The official installer reuses foreground authentication and initial readiness.
+  The installer stops an occupying Host only after owner consent; see the upgrade contract.
   Autostart registration targets the next login/boot, never another concurrent Host;
   preserve foreign definitions and report unavailable registration independently.
   Never persist pairing credentials in download URLs or service definitions.

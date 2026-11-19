@@ -110,6 +110,7 @@ import {
   type SessionChatInputAreaHandle,
   type SessionTurnAgentRoleSelection,
 } from './session-chat-input-area';
+import { queueTask } from './message-queue/queue-task';
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
 import {
   MessageQueueDisplay,
@@ -2460,11 +2461,7 @@ export type DispatchInputBlocksOptions = {
   skipMcpOnce?: boolean;
 };
 
-function buildEditedMessageQueueItem(
-  item: MessageQueueItem,
-  task: string,
-  imageOnlyLabel: string
-): MessageQueueItem {
+function buildEditedMessageQueueItem(item: MessageQueueItem, task: string): MessageQueueItem {
   const nextTask = task.trim();
   const inputBlocks = normalizeSessionInputBlocks(
     item.acpSessionConfig?.inputBlocks,
@@ -2480,7 +2477,7 @@ function buildEditedMessageQueueItem(
   if (!item.acpSessionConfig) {
     return {
       ...item,
-      task: nextTask || imageOnlyLabel,
+      task: nextTask || queueTask(nonTextInputBlocks),
       isEditing: false,
       editingStartedAt: undefined,
     };
@@ -2488,7 +2485,7 @@ function buildEditedMessageQueueItem(
 
   return {
     ...item,
-    task: nextTask || imageOnlyLabel,
+    task: nextTask || queueTask(nonTextInputBlocks),
     isEditing: false,
     editingStartedAt: undefined,
     acpSessionConfig: {
@@ -4851,7 +4848,7 @@ export const SessionChatInterface = memo(
           const onAccepted = captureRunConfigForSend(inputConfig);
           await pushMessageQueue(
             {
-              task: prompt || t('sessions.messageQueue.imageOnly', '[Image message]'),
+              task: queueTask(inputBlocks, options?.attachments),
               project: sessionProject,
               userId: derivedUserId,
               userTurnId,
@@ -6740,11 +6737,7 @@ export const SessionChatInterface = memo(
         const isFirstItem = messageQueue[0]?.$cid === item.$cid;
         try {
           await updateMessageQueueItem(item.$cid, (current) =>
-            buildEditedMessageQueueItem(
-              current,
-              task,
-              t('sessions.messageQueue.imageOnly', '[Image message]')
-            )
+            buildEditedMessageQueueItem(current, task)
           );
           if (isFirstItem) {
             await waitUntilSynced();

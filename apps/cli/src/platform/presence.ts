@@ -9,6 +9,8 @@ import {
 } from '@loro-dev/streams-crdt/effect';
 import {
   createLoroStreamUrl,
+  isLoroStreamsWebSocketEnabled,
+  loroStreamsWebSocketOptions,
   getLoroMetaStreamId,
   getLoroStreamsPresenceBaseUrl,
   getServerTimeOffset,
@@ -19,6 +21,7 @@ import {
 import { PresenceHost, PresenceTransport } from '@/lib/loro/workspace-presence';
 import { getCliHttpFetch } from '@/utils/http-transport';
 import type { Logger } from '@/utils/logger';
+import { createPresenceWebSocketAuthLegacy } from '@/lib/loro/presence-legacy';
 import { formatSafeLogFields } from './logger';
 
 /** Published SDK owns all network tasks; this layer only supplies capabilities and safe local logs. */
@@ -69,6 +72,15 @@ export const presencePlatformLayer = (logger: Logger, fetchImpl = getCliHttpFetc
                 options.shardHostSuffix
               ),
             })
+          ),
+          ...loroStreamsWebSocketOptions(
+            isLoroStreamsWebSocketEnabled(
+              options.webSocketEnabled,
+              process.env.LODY_LORO_STREAMS_WS_ENABLED
+            ),
+            options.streamsBaseUrl,
+            workspaceId,
+            createPresenceWebSocketAuthLegacy(options.auth)
           ),
           adaptor: EphemeralStoreAdaptor(store),
           fetch: fetchImpl,
