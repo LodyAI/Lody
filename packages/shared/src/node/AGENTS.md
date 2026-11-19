@@ -146,12 +146,12 @@ Control, probe and Loro data-plane requests require the private daemon token bef
 - The engine runs only in the separate host process. Daemon and desktop main each
   hold one `connectNativeRepo` connection for every observation and command; they
   never stop the host, and a missing host is relaunched by whichever side reconnects.
-- `observeFlock` is the only subscription lifecycle. Domains add projection and
+- `observe` is the only subscription lifecycle. Domains add projection and
   authorization, never their own retry, release or reconnect state.
 - Ordinary paths use key/prefix reads, read-set conditional writes and changed-key
   observation; never scan or copy a whole room per operation.
 - Legacy replicas (Meta and owned named Flock documents) migrate by LWW import and
   are published only after bounded coverage verification. Never dual-write a
-  legacy replica in native mode; owned named Flock documents go through
-  loro-repo's external owner, never storage or the local data plane.
+  legacy replica in native mode; owned named Flock and Loro documents go through
+  loro-repo's external owners, never storage or the local data plane.
   Design: [native Workspace Meta](../../../../.agents/docs/native-workspace-meta.md).

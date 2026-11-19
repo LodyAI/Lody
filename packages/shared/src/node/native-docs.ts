@@ -1,0 +1,163 @@
+import type { RepoClient, RoomKey } from '@loro-dev/loro-repo-client';
+import type { ExternalDocFeed, ExternalDocsAdapter } from 'loro-repo';
+import { MIGRATIONS_ROOM, observeLoroDoc } from './native-repo';
+
+/** Type-only loro-repo use keeps its WASM out of the Electron main bundle. */
+const CAPABILITY = 'loro-external-docs-v1' as const;
+
+const docRoom = (docId: string): RoomKey => ({ kind: 'loro_doc', id: docId });
+/** Migration and native-write markers share one prefix per document. */
+const marker = (docId: string, source: string) => ['loro_doc', docId, source];
+export const NATIVE_WRITE_SOURCE = 'native';
+
+/** A legacy replica's complete document: snapshot bytes and its oplog version. */
+export interface LegacyDoc {
+  readonly snapshot: Uint8Array;
+  readonly version: Readonly<Record<string, number>>;
+}
+
+/** Whether a source's replica of a document was already migrated. */
+export async function isLegacyDocPublished(
+  client: RepoClient,
+  namespace: string,
+  docId: string,
+  source: string
+) {
+  await client.createRoom(namespace, MIGRATIONS_ROOM, 'plaintext');
+  return (await client.flockGet(namespace, MIGRATIONS_ROOM, marker(docId, source))).found;
+}
+
+/**
+ * Lazily migrates one legacy replica of one document: import the complete
+ * snapshot (a lossless Loro merge), verify that the room's version covers the
+ * legacy version, then publish. A published source is skipped on later opens.
+ */
+export async function importLegacyDoc(
+  client: RepoClient,
+  namespace: string,
+  docId: string,
+  source: string,
+  load: () => Promise<LegacyDoc | undefined>
+): Promise<'imported' | 'already-published'> {
+  if (await isLegacyDocPublished(client, namespace, docId, source)) return 'already-published';
+  const key = marker(docId, source);
+  const legacy = await load();
+  if (legacy) {
+    await client.createRoom(namespace, docRoom(docId), 'plaintext');
+    await client.importRoomState(namespace, docRoom(docId), { snapshot: legacy.snapshot });
+    const { version } = await client.inspectDocCausal(namespace, docRoom(docId));
+    const missing = Object.entries(legacy.version).filter(
+      ([peer, counter]) => (version[peer] ?? 0) < counter
+    );
+    if (missing.length > 0)
+      throw new Error(`native_doc_migration_incomplete: ${missing.length} peers`);
+  }
+  await client.flockBatch(namespace, MIGRATIONS_ROOM, [
+    { op: 'put', key, value: { publishedAt: Date.now() } },
+  ]);
+  return 'imported';
+}
+
+/** Documents with native state: migrated from any source or written natively. */
+export async function listNativeDocIds(client: RepoClient, namespace: string) {
+  await client.createRoom(namespace, MIGRATIONS_ROOM, 'plaintext');
+  const ids = new Set<string>();
+  let start: (string | number)[] | undefined;
+  for (;;) {
+    const page = await client.flockScanPage(
+      namespace,
+      MIGRATIONS_ROOM,
+      { prefix: ['loro_doc'], ...(start ? { start: { bound: 'exclusive', key: start } } : {}) },
+      { maxRows: 4096, maxBytes: 1024 * 1024 }
+    );
+    for (const entry of page.entries)
+      if (!entry.deleted && typeof entry.key[1] === 'string') ids.add(entry.key[1]);
+    if (page.eof) return [...ids];
+    const last = page.entries.at(-1);
+    if (!last) throw new Error('native_repo_page_without_progress');
+    start = last.key as (string | number)[];
+  }
+}
+
+/** Returns a source of one document to legacy ownership (re-imported if enabled again). */
+export async function unpublishLegacyDoc(
+  client: RepoClient,
+  namespace: string,
+  docId: string,
+  source: string
+) {
+  await client.flockBatch(namespace, MIGRATIONS_ROOM, [
+    { op: 'delete', key: marker(docId, source) },
+  ]);
+}
+
+/** Commits replica update bytes to the document room. */
+export async function commitDocUpdates(
+  client: RepoClient,
+  namespace: string,
+  docId: string,
+  updates: readonly Uint8Array[]
+) {
+  for (const update of updates)
+    await client.importRoomState(namespace, docRoom(docId), { updates: [update] });
+}
+
+/** Register view of one Loro document room (creates the room if needed). */
+export async function observeNativeDoc(
+  client: RepoClient,
+  namespace: string,
+  docId: string,
+  listener: Parameters<typeof observeLoroDoc>[3]
+) {
+  await client.createRoom(namespace, docRoom(docId), 'plaintext');
+  return observeLoroDoc(client, namespace, docRoom(docId), listener);
+}
+
+/**
+ * Owner of selected Loro documents for a LoroRepo in this process. Each open
+ * replica has one update observation on the shared connection; a reload after
+ * reconnect delivers the whole snapshot again, which imports as an update.
+ * `legacy` migrates this process's own replica of a document on first open.
+ */
+export function createNativeDocs(
+  client: RepoClient,
+  namespace: string,
+  owns: (docId: string) => boolean,
+  legacy?: { source: string; load(docId: string): Promise<LegacyDoc | undefined> }
+): ExternalDocsAdapter {
+  const marked = new Set<string>();
+  return {
+    capability: CAPABILITY,
+    owns,
+    async open(docId, onUpdate): Promise<ExternalDocFeed> {
+      if (legacy)
+        await importLegacyDoc(client, namespace, docId, legacy.source, () => legacy.load(docId));
+      let snapshot: Uint8Array | undefined;
+      const observation = await observeNativeDoc(client, namespace, docId, (event) => {
+        if (event.kind === 'snapshot') {
+          if (snapshot === undefined) snapshot = event.file;
+          else onUpdate(event.file);
+        } else if (event.kind === 'changes') {
+          for (const update of event.updates) onUpdate(update);
+        }
+      });
+      try {
+        await observation.ready;
+      } catch (error) {
+        await observation.release().catch(() => {});
+        throw error;
+      }
+      return { snapshot, close: () => observation.release() };
+    },
+    async commit(docId, updates) {
+      if (!marked.has(docId)) {
+        await client.createRoom(namespace, MIGRATIONS_ROOM, 'plaintext');
+        await client.flockBatch(namespace, MIGRATIONS_ROOM, [
+          { op: 'put', key: marker(docId, NATIVE_WRITE_SOURCE), value: true },
+        ]);
+        marked.add(docId);
+      }
+      await commitDocUpdates(client, namespace, docId, updates);
+    },
+  };
+}

@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import type { ExternalMetadataCommand, IncrementalExternalMetadataUpdate, JsonObject } from 'loro-repo';
+import type {
+  ExternalMetadataCommand,
+  IncrementalExternalMetadataUpdate,
+  JsonObject,
+} from 'loro-repo';
 import type { FlockRegisterEntry } from '@loro-dev/loro-repo-client';
 import type { WorkspaceId } from './ids';
 import { getWorkspaceFlockDocId } from './workspace-flock';
@@ -20,6 +24,10 @@ export const isNativeFlockDocId = (workspaceId: string, flockDocId: string): boo
     (flockDocId.startsWith(machinePrefix) && flockDocId.length > machinePrefix.length)
   );
 };
+
+/** Loro documents the native mode owns: Session documents (`session-*`). */
+export const isNativeDocId = (docId: string): boolean =>
+  docId.startsWith('session-') && docId.length > 'session-'.length;
 
 /** Owned ids among a legacy replica's documents, plus the fixed ones. */
 export const ownedLegacyFlockDocIds = (workspaceId: string, stored: readonly string[]) => [
@@ -75,9 +83,33 @@ export const NativeFlockCommitSchema = Workspace.extend({
     .min(1)
     .max(64)
     .refine(
-      (payloads) => payloads.reduce((total, bytes) => total + bytes.byteLength, 0) <= MAX_COMMIT_BYTES,
+      (payloads) =>
+        payloads.reduce((total, bytes) => total + bytes.byteLength, 0) <= MAX_COMMIT_BYTES,
       'payloads too large'
     ),
+}).strict();
+
+const MAX_DOC_COMMIT_BYTES = 64 * 1024 * 1024;
+const DocTarget = Workspace.extend({ docId: Id.refine(isNativeDocId, 'not an owned document') });
+export const NativeDocOpenSchema = DocTarget.extend({ observationId: Observation }).strict();
+export const NativeDocCommitSchema = DocTarget.extend({
+  updates: z
+    .array(z.instanceof(Uint8Array))
+    .min(1)
+    .max(64)
+    .refine(
+      (updates) =>
+        updates.reduce((total, bytes) => total + bytes.byteLength, 0) <= MAX_DOC_COMMIT_BYTES,
+      'updates too large'
+    ),
+}).strict();
+const RendererSource = z.string().regex(/^renderer:[\w.-]{1,128}$/);
+export const NativeDocLegacyCheckSchema = DocTarget.extend({ source: RendererSource }).strict();
+/** One-time import of this renderer's replica of one document (snapshot + version). */
+export const NativeDocLegacySchema = DocTarget.extend({
+  source: RendererSource,
+  snapshot: z.instanceof(Uint8Array),
+  version: z.record(z.string(), z.number().int().nonnegative()),
 }).strict();
 
 /** One-time import of this renderer's frozen legacy replica (Flock JSON export). */
@@ -109,3 +141,13 @@ export type NativeFlockEvent = {
     | { kind: 'invalidated' };
 };
 export const NATIVE_FLOCK_CHANNEL = 'nativeWorkspaceMeta.flock' as const;
+
+/** Update view of one owned Loro document. */
+export type NativeDocEvent = {
+  observationId: string;
+  event:
+    | { kind: 'snapshot'; file: Uint8Array }
+    | { kind: 'changes'; updates: Uint8Array[] }
+    | { kind: 'invalidated' };
+};
+export const NATIVE_DOC_CHANNEL = 'nativeWorkspaceMeta.doc' as const;
