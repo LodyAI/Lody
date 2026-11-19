@@ -313,7 +313,9 @@ it('requires a new applied Streams tail after waking and while the live read is 
   const doc = new LoroDoc();
   const first = Promise.withResolvers<ReadableStreamDefaultController<Uint8Array>>();
   const second = Promise.withResolvers<ReadableStreamDefaultController<Uint8Array>>();
-  let opened = false;
+  const third = Promise.withResolvers<ReadableStreamDefaultController<Uint8Array>>();
+  const connections = [first, second, third];
+  let opened = 0;
   vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input, init);
     if (new URL(request.url).pathname.endsWith('/bootstrap')) {
@@ -331,8 +333,7 @@ it('requires a new applied Streams tail after waking and while the live read is 
         request.signal.addEventListener('abort', () => controller.error(request.signal.reason), {
           once: true,
         });
-        (opened ? second : first).resolve(controller);
-        opened = true;
+        connections[opened++]?.resolve(controller);
       },
     });
     return new Response(wire, {
@@ -371,14 +372,9 @@ it('requires a new applied Streams tail after waking and while the live read is 
       try {
         await waitFor('confirmed');
         await first.promise;
-        const rejoined = Promise.withResolvers<void>();
-        const stopStatus = binding.onStatusChange((status) => {
-          if (status === 'joined') rejoined.resolve();
-        });
         transport.revalidateDocReceive('session-test');
-        const wire = await second.promise;
-        await rejoined.promise;
-        stopStatus();
+        let wire = await second.promise;
+        await waitFor('syncing');
         expect(sync.getSnapshot().phase).toBe('syncing');
 
         const send = (nextOffset: string, upToDate: boolean, bytes?: Uint8Array) => {
@@ -412,6 +408,16 @@ it('requires a new applied Streams tail after waking and while the live read is 
         send('00000000000000000002', true, doc.export({ mode: 'update' }));
         await applied;
         expect(lease.doc.getText('history').toString()).toBe('new reply');
+
+        // Keep SDK short-lived-connection backoff out of this proof test.
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(Date.now() + 6_000);
+        wire.close();
+        wire = await third.promise;
+        expect(sync.getSnapshot().phase).toBe('syncing');
+        expect(lease.doc.getText('history').toString()).toBe('new reply');
+        send('00000000000000000002', true);
+        await waitFor('confirmed');
       } finally {
         stop();
       }

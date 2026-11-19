@@ -74,7 +74,14 @@ diff --git a/dist/shared-DrhEN-hN.js b/dist/shared-DrhEN-hN.js
 +								if (lastEvent.upToDate) this.noteInitialTailReached(state, pendingRemote.length === 0 && !capturedController?.signal.aborted);
  							}
  							for (let i = events.length - 1; i >= 0; i--) if (events[i].streamCursor != null) {
-@@ -3797,6 +3821,8 @@
+@@ -3246,4 +3270,6 @@
+ 				await flushChain;
+ 				if (state.closed) return;
++				// A clean EOF and transport fallback also replace the receive lane.
++				if (!capturedController?.signal.aborted) this.setReceiveConfirmed(false);
+ 				if (readResult.kind === "ws-fallback") {
+ 					this.logDebug("websocket live read fell back to SSE");
+@@ -3797,6 +3823,8 @@
  		if (state.persistenceTerminal || state.readSubStatus === "disconnected") return /* @__PURE__ */ new Error(`initial sync failed: ${state.lastError?.code ?? "unknown"}`);
  	}
 -	noteInitialTailReached(state) {
@@ -85,7 +92,7 @@ diff --git a/dist/shared-DrhEN-hN.js b/dist/shared-DrhEN-hN.js
 +		if (!state.awaitingInitialTail) return;
  		state.awaitingInitialTail = false;
  		this.setDependencyWait(false);
-@@ -3820,4 +3846,5 @@
+@@ -3820,4 +3848,5 @@
  	}
  	setReadSubStatus(state, sub) {
 +		if (sub !== "ok" && this.joinState === state) this.setReceiveConfirmed(false);
