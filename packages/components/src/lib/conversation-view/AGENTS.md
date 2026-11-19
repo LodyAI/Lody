@@ -58,9 +58,9 @@
   independently; verified catch-up patches only changed rows, including revision gaps.
   Coherent checkpoint replies may advance behind newer hints; keep catching up.
   Body-only edits retain directory cursor validity.
-  Independently negotiate `sessionHistoryWatch`; park one checkpoint observation per
-  active bridge outside body-read capacity. Hints accelerate the same recovery owner,
-  never replace its durable coverage. Idle replies do not invalidate unchanged bodies.
+  Independently negotiate `sessionHistorySubscription`. Active bridges receive
+  durable owner checkpoints and apply inline deltas only at an exact cached base.
+  Renewals resume at the applied checkpoint. Repeated checkpoints leave bodies intact.
   Unknown coverage stages a new snapshot while retaining the durable old one.
   During replacement, display reads use the owner and hints still invalidate the
   view; repeated supersessions back off. Publish only complete checkpoint coverage.

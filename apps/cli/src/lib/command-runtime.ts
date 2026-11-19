@@ -421,20 +421,23 @@ export function createCommandSessionHistoryFactory(
         localProjectId: child.project?.kind === 'local' ? child.project.localProjectId : undefined,
       };
     };
+    const mintReadProof = async () => {
+      return await mintCliSessionHistoryReadProof({
+        ...(await historyTarget()),
+        token: auth.token,
+        authBaseUrl: LODY_AUTH_URL,
+        authSiteUrl: LODY_AUTH_SITE_URL,
+        logger: getLogger('session'),
+        workspaceId,
+        machineId: meta.machineId,
+        sessionId: doc.sessionId,
+        requester: getSessionHistoryRequester(),
+      });
+    };
     return createRoostRpcSessionServices(doc, {
       coherentInspection: machineSupportsSessionHistoryInspection(machine),
       read: async (query) => {
-        const readProof = await mintCliSessionHistoryReadProof({
-          ...(await historyTarget()),
-          token: auth.token,
-          authBaseUrl: LODY_AUTH_URL,
-          authSiteUrl: LODY_AUTH_SITE_URL,
-          logger: getLogger('session'),
-          workspaceId,
-          machineId: meta.machineId,
-          sessionId: doc.sessionId,
-          requester: getSessionHistoryRequester(),
-        });
+        const readProof = await mintReadProof();
         const response = await withRpc(target, (client) =>
           client.requestSessionHistoryRead({
             sessionId: doc.sessionId,
@@ -445,6 +448,23 @@ export function createCommandSessionHistoryFactory(
         );
         if (!response) throw new Error('Owner history read timed out');
         return response;
+      },
+      subscribe: async (subscription, onPublication, signal) => {
+        signal.throwIfAborted();
+        const readProof = await mintReadProof();
+        signal.throwIfAborted();
+        const end = await withRpc(target, (client) =>
+          client.requestSessionHistorySubscription({
+            sessionId: doc.sessionId,
+            ownerSessionId: meta.id,
+            subscription,
+            onPublication,
+            signal,
+            readProof,
+          })
+        );
+        if (!signal.aborted && (!end || end.event !== 'closed' || end.error))
+          throw new Error(end?.event === 'closed' ? end.error : 'Owner history subscription ended');
       },
       write: async (operation, payload) => {
         const requestId = crypto.randomUUID();

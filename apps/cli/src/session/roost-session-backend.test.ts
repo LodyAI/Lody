@@ -189,14 +189,25 @@ describe('Roost owner RPC reader', () => {
     vi.useFakeTimers();
     const doc = { sessionId: 'native-observed-session' } as SessionDocument;
     const waiting = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<SessionHistoryReadResponse>();
+    const release = Promise.withResolvers<void>();
     const changes: unknown[] = [];
     let writeCompleted = false;
     const services = createRoostRpcSessionServices(doc, {
+      subscribe: async (_open, publish, signal) => {
+        waiting.resolve();
+        await release.promise;
+        if (!signal.aborted) publish({ checkpoint: 'native-scope:3', revision: 3 });
+      },
       read: async (query) => {
-        if (query.kind === 'watchChanges') {
-          waiting.resolve();
-          return release.promise;
+        if (query.kind === 'readChanges') {
+          return {
+            type: 'session/history-read_response',
+            sessionId: doc.sessionId,
+            success: true,
+            historyRevision: 3,
+            historyCount: 1,
+            result: { state: 'ready', checkpoint: 'native-scope:3', ids: ['owner-turn'] },
+          };
         }
         return {
           type: 'session/history-read_response',
@@ -238,14 +249,7 @@ describe('Roost owner RPC reader', () => {
         if (change.kind === 'changed') notified.resolve();
       });
       await second.initial;
-      release.resolve({
-        type: 'session/history-read_response',
-        sessionId: doc.sessionId,
-        success: true,
-        historyRevision: 3,
-        historyCount: 1,
-        result: { state: 'ready', checkpoint: 'native-scope:3', ids: ['owner-turn'] },
-      });
+      release.resolve();
       await notified.promise;
       expect(changes).toContainEqual({ kind: 'changed', ids: ['owner-turn'] });
       second.unsubscribe();

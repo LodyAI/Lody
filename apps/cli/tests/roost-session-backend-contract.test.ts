@@ -89,18 +89,25 @@ describe('Production Roost history semantics', () => {
   it('cancels parked history observers without cancelling a writer waiting for the same owner', async () => {
     const fixture = await coldHistoryHandlerFixture(1);
     const id = [...fixture.docs.keys()][0]!;
-    const watching = fixture.rpc.readSessionHistoryForRpc(id, {
-      kind: 'watchChanges',
-      checkpoint: 'synthetic-checkpoint',
-      waitMs: 15_000,
-    });
+    const replies: unknown[] = [];
+    const watching = fixture.handler.handleMessage(
+      {
+        type: 'session/history-subscription',
+        workspaceId: 'test-workspace' as WorkspaceId,
+        machineId: 'test-machine' as MachineId,
+        sessionId: id,
+        subscription: { action: 'open', id: crypto.randomUUID() },
+      },
+      { source: 'local', send: (response) => replies.push(response) }
+    );
     const writing = fixture.rpc.writeSessionHistoryForRpc(id, 'append', {
       entry: nativeUser('writer-survives-observer-stop'),
     });
     try {
       await fixture.observing(2);
-      fixture.handler.cancelPendingHistoryWatches();
-      expect(await watching).toMatchObject({ success: false });
+      fixture.handler.cancelPendingHistorySubscriptions();
+      await watching;
+      expect(replies).toEqual([expect.objectContaining({ event: 'closed' })]);
       expect(fixture.observers.size).toBe(1);
       await fixture.ready(id);
       expect(await writing).toMatchObject({ success: true });
@@ -147,14 +154,12 @@ describe('Production Roost history semantics', () => {
       if (!wait) throw new Error('Expected native watch');
       const parked = Promise.withResolvers<void>();
       let watchSignal: AbortSignal | undefined;
-      vi.spyOn(watchedBackend.history, 'waitForChanges').mockImplementation(
-        (cursor, waitMs, signal) => {
-          watchSignal = signal;
-          const pending = wait(cursor, waitMs, signal);
-          parked.resolve();
-          return pending;
-        }
-      );
+      vi.spyOn(watchedBackend.history, 'waitForChanges').mockImplementation((cursor, signal) => {
+        watchSignal = signal;
+        const pending = wait(cursor, signal);
+        parked.resolve();
+        return pending;
+      });
       vi.useFakeTimers({
         toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
       });
@@ -177,11 +182,11 @@ describe('Production Roost history semantics', () => {
       });
       Reflect.set(runtime, 'handler', fixture.handler);
       const watching = runtime.dispatchLocalMessageForResponse({
-        type: 'session/history-read',
+        type: 'session/history-subscription',
         sessionId: watchedId,
         workspaceId: 'test-workspace' as WorkspaceId,
         machineId: 'test-machine' as MachineId,
-        query: { kind: 'watchChanges', checkpoint, waitMs: 15_000 },
+        subscription: { action: 'open', id: crypto.randomUUID(), checkpoint },
       });
       await parked.promise;
       closing = runtime.cleanup();
@@ -189,7 +194,8 @@ describe('Production Roost history semantics', () => {
       // No native I/O guard or ACP batch timer is advanced to make shutdown pass.
       expect(watchSignal?.aborted).toBe(true);
       expect(await watching).toMatchObject([
-        { type: 'session/history-read_response', success: false },
+        { type: 'session/history-subscription_response', event: 'publication' },
+        { type: 'session/history-subscription_response', event: 'closed' },
       ]);
       await closing;
       expect(Date.now()).toBe(startedAt);
@@ -201,7 +207,7 @@ describe('Production Roost history semantics', () => {
         turn: { items: [{ type: 'text', text: 'final buffered reply' }] },
       });
     } finally {
-      fixture.handler.cancelPendingHistoryWatches();
+      fixture.handler.cancelPendingHistorySubscriptions();
       await closing;
       await fixture.close();
     }

@@ -17,7 +17,7 @@ import {
   machineSupportsSessionHistoryIncremental,
   machineSupportsSessionHistoryInspection,
   machineSupportsSessionHistoryPatches,
-  machineSupportsSessionHistoryWatch,
+  machineSupportsSessionHistorySubscription,
 } from '@lody/shared';
 import type { AgentConfigId, MachineProviderRateLimitsRefreshResponse } from '@lody/shared';
 import { createWorkspacePendingSends } from './workspace-pending-sends';
@@ -2117,6 +2117,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionEditAndResend,
     requestSessionDispatchTurn,
     requestSessionHistoryRead,
+    subscribeSessionHistory,
     requestSessionHistoryWrite,
     requestFilePreview,
     requestFileDownloadChunk,
@@ -5090,18 +5091,21 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         sessionReaderWakeListeners.add(wakeReader);
         document.addEventListener('visibilitychange', wakeReader);
         window.addEventListener('online', wakeReader);
+        window.addEventListener('offline', wakeReader);
         disposeReaderObservation = () => {
           machineObservation.unsubscribe();
           sessionReaderWakeListeners.delete(wakeReader);
           document.removeEventListener('visibilitychange', wakeReader);
           window.removeEventListener('online', wakeReader);
+          window.removeEventListener('offline', wakeReader);
           readerWakes.clear();
         };
         rendererSessionDataFactory = createRoostSessionDataFactoryForMachine({
           coherentInspection: () => machineSupportsSessionHistoryInspection(ownerMachineMeta),
           incremental: () => machineSupportsSessionHistoryIncremental(ownerMachineMeta),
           patches: () => machineSupportsSessionHistoryPatches(ownerMachineMeta),
-          watch: () => machineSupportsSessionHistoryWatch(ownerMachineMeta),
+          live: () => machineSupportsSessionHistorySubscription(ownerMachineMeta),
+          subscribeHistory: subscribeSessionHistory,
           active: () =>
             document.visibilityState !== 'hidden' &&
             (targetRouter.getPlaneForMachine(machineId) === 'local' || isBrowserOnline()),

@@ -1506,150 +1506,82 @@ it('advances coherent streaming replies even while newer owner wakes keep arrivi
   }
 });
 
-it('adopts late owner capabilities and watches a quiet control document from the cached checkpoint', async () => {
-  Object.assign(globalThis, { indexedDB: new IDBFactory(), IDBKeyRange });
-  const sessionId = 'synthetic-quiet-peer' as SessionId;
-  const workspaceId = 'synthetic-workspace' as WorkspaceId;
-  const machineId = 'synthetic-machine' as MachineId;
-  const entry: SessionHistoryInput = {
-    id: 'quiet-tail',
-    role: 'assistant',
-    timestamp: 'synthetic',
-    items: [{ type: 'text', text: 'before' }],
-  };
-  const cache = createRoostHistoryCache(
-    JSON.stringify(['local', workspaceId, machineId, sessionId])
-  );
-  const page = {
-    startPosition: 0,
-    totalCount: 1,
-    rows: [createRoostDirectoryRow(0, entry as never)],
-    hasMoreOlder: false,
-    cursor: null,
-  };
-  await cache.acceptPage({ ...page, checkpoint: 'checkpoint-1' }, [entry], 1);
-  const timers: (() => void)[] = [];
-  const timerWaiters: ((callback: () => void) => void)[] = [];
-  const nextTimer = () =>
-    timers.length
-      ? Promise.resolve(timers.shift()!)
-      : new Promise<() => void>((resolve) => timerWaiters.push(resolve));
-  const setTimer = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
-    callback: () => void
-  ) => {
-    const waiter = timerWaiters.shift();
-    if (waiter) waiter(callback);
-    else timers.push(callback);
-    return callback as never;
-  }) as typeof setTimeout);
-  const clearTimer = vi.spyOn(globalThis, 'clearTimeout').mockImplementation((handle) => {
-    const i = timers.indexOf(handle as never);
-    if (i >= 0) timers.splice(i, 1);
-  });
-  let supports = false;
-  let wake: (() => void) | undefined;
-  const legacyVisited = Promise.withResolvers<void>();
-  const watching = Promise.withResolvers<void>();
-  const reply = Promise.withResolvers<void>();
+it('applies owner-pushed bodies after the machine capability arrives without another history read', async () => {
+  const h = await cachedRecoveryFixture('quiet-session', 1);
+  const timers = controlledRefreshTimers();
+  const opened = Promise.withResolvers<void>();
   const visible = Promise.withResolvers<void>();
-  const doc = new LoroDoc();
+  const finish = Promise.withResolvers<void>();
+  let supports = false;
+  let publish!: () => void;
   const data = createLocalRoostSessionDataFactory({
-    workspaceId,
-    machineId,
+    workspaceId: h.workspaceId,
+    machineId: h.machineId,
     incremental: () => supports,
-    watch: () => supports,
-    subscribeWake: (listener) => {
-      wake = listener;
-      return () => {
-        wake = undefined;
+    live: () => supports,
+    subscribeWake: h.subscribeWake,
+    sendControl: async (request, onResponse) => {
+      if (request.type !== 'session/history-subscription')
+        throw new Error('The pushed bodies should satisfy the read');
+      const { subscription } = request;
+      const end = {
+        type: 'session/history-subscription_response' as const,
+        sessionId: h.sessionId,
+        subscriptionId: subscription.id,
+        event: 'closed' as const,
       };
-    },
-    sendControl: async (request) => {
-      if (request.type !== 'session/history-read') throw new Error('Unexpected write');
-      const query = request.query;
-      if (query.kind === 'readLatestPage') {
-        if (!query.withCheckpoint) legacyVisited.resolve();
-        return {
-          ok: true,
-          responses: [
-            {
-              type: 'session/history-read_response',
-              sessionId,
-              success: true,
-              historyRevision: 1,
-              historyCount: 1,
-              result: { ...page, ...(query.withCheckpoint ? { checkpoint: 'checkpoint-1' } : {}) },
-              pageTurns: [entry],
-            },
-          ],
+      if (subscription.action === 'open') {
+        expect(subscription).toMatchObject({ checkpoint: 'checkpoint-1', includeBodiesFrom: 0 });
+        const tail = {
+          ...h.entries[0]!,
+          items: [{ type: 'text' as const, text: 'after owner push' }],
         };
-      }
-      if (query.kind !== 'watchChanges') throw new Error('Expected independent owner observation');
-      expect(query).toMatchObject({
-        checkpoint: 'checkpoint-1',
-        includeBodiesFrom: 0,
-        waitMs: 15_000,
-      });
-      watching.resolve();
-      await reply.promise;
-      return {
-        ok: true,
-        responses: [
-          {
-            type: 'session/history-read_response',
-            sessionId,
-            success: true,
-            historyRevision: 3,
-            historyCount: 1,
-            historyChange: { kind: 'changed', ids: [entry.id] },
-            result: {
-              state: 'ready',
+        const response = h.reply(3, {
+          state: 'ready',
+          checkpoint: 'checkpoint-3',
+          ids: [tail.id],
+          bodies: { changed: [tail], suffix: [] },
+        }).responses[0]!;
+        publish = () =>
+          onResponse?.({
+            ...end,
+            event: 'publication',
+            publication: {
               checkpoint: 'checkpoint-3',
-              ids: [entry.id],
-              bodies: {
-                changed: [
-                  { ...entry, items: [{ type: 'text', text: 'after missed owner changes' }] },
-                ],
-                suffix: [],
-              },
+              revision: 3,
+              delta: { baseCheckpoint: 'checkpoint-1', includeBodiesFrom: 0, response },
             },
-          },
-        ],
-      };
+          });
+        opened.resolve();
+        await finish.promise;
+      } else finish.resolve();
+      return { ok: true, responses: [end] };
     },
-  })({ sessionId, doc, backendKind: 'roost' });
+  })({ sessionId: h.sessionId, doc: h.doc, backendKind: 'roost' });
   const observation = data.history.observe(() => {
-    void cache.getHead().then((head) => {
+    void h.cache.getHead().then((head) => {
       if (head?.revision === 3) visible.resolve();
     });
   });
   try {
     await observation.initial;
-    (await nextTimer())(); // Legacy owner observation before its capability row arrives.
-    await legacyVisited.promise;
     supports = true;
-    wake?.();
-    for (let i = 0; i < 3; i++) {
-      const next = await Promise.race([nextTimer(), watching.promise.then(() => null)]);
-      if (!next) break;
-      next();
-    }
-    await watching.promise;
-    reply.resolve();
+    h.publish(1);
+    await opened.promise;
+    publish();
+    (await timers.next()).callback();
     await visible.promise;
-    expect(await data.history.readTurn(entry.id)).toMatchObject({
-      state: 'ready',
-      turn: { items: [{ type: 'text', text: 'after missed owner changes' }] },
+    expect(await h.cache.readTurn(h.entries[0]!.id)).toMatchObject({
+      items: [{ type: 'text', text: 'after owner push' }],
     });
-    expect(await cache.getHead()).toMatchObject({ revision: 3, checkpoint: 'checkpoint-3' });
-    expect(doc.toJSON().roostHistoryCursor).toBeUndefined();
+    expect(await h.cache.getHead()).toMatchObject({ revision: 3, checkpoint: 'checkpoint-3' });
+    expect(h.doc.toJSON().roostHistoryCursor).toBeUndefined();
   } finally {
     observation.unsubscribe();
     data.dispose?.();
-    cache.dispose();
-    reply.resolve();
-    setTimer.mockRestore();
-    clearTimer.mockRestore();
+    h.cache.dispose();
+    finish.resolve();
+    timers.restore();
   }
 });
 
@@ -1703,7 +1635,6 @@ it('uses complete bodies to repair an unbound window, then resumes patches from 
   const data = createLocalRoostSessionDataFactory({
     incremental: true,
     patches: true,
-    watch: true,
     subscribeWake: h.subscribeWake,
     workspaceId: h.workspaceId,
     machineId: h.machineId,
@@ -1719,7 +1650,7 @@ it('uses complete bodies to repair an unbound window, then resumes patches from 
           bodies: { changed: [tail], suffix: [] },
         });
       }
-      if (query.kind !== 'watchChanges') throw new Error('Unexpected page or body fetch');
+      if (query.kind !== 'readChanges') throw new Error('Unexpected page or body fetch');
       expect(query).toMatchObject({ checkpoint: 'checkpoint-2', withPatches: true });
       return h.reply(3, {
         state: 'ready',
@@ -1755,6 +1686,7 @@ it('uses complete bodies to repair an unbound window, then resumes patches from 
     (await timers.next()).callback();
     await repaired.promise;
     expect(await h.cache.readTurn(tail.id)).toEqual(tail);
+    h.publish(3);
     (await timers.next()).callback();
     await patched.promise;
     expect((await h.cache.readTurn(tail.id))?.items).toEqual([{ type: 'text', text: 'oldAB' }]);
@@ -1982,87 +1914,156 @@ async function cachedRecoveryFixture(name: string, count: number, first = 0) {
   return { sessionId, workspaceId, machineId, entries, cache, doc, publish, subscribeWake, reply };
 }
 
-it('keeps a local idle watch healthy through the desktop deadline and immediately receives the next reply', async () => {
-  const h = await cachedRecoveryFixture('idle-watch', 1);
+it('renews an idle local subscription from the applied checkpoint and closes it with its observer', async () => {
+  const h = await cachedRecoveryFixture('idle-subscription', 1);
   const timers = controlledRefreshTimers();
-  const visible = Promise.withResolvers<void>();
-  const outcomes: string[] = [];
-  const waits = new Set<() => void>();
-  let revision = 1;
+  const opens = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+  const releases = opens.map(() => Promise.withResolvers<void>());
+  const seenIds: string[] = [];
+  const stop = Promise.withResolvers<string>();
+  const applied = Promise.withResolvers<void>();
   const data = createLocalRoostSessionDataFactory({
     incremental: true,
-    watch: true,
-    subscribeWake: h.subscribeWake,
+    live: true,
     workspaceId: h.workspaceId,
     machineId: h.machineId,
-    sendControl: (request) => {
-      if (request.type !== 'session/history-read' || request.query.kind !== 'watchChanges')
-        throw new Error('Unexpected request');
-      const query = request.query;
-      return new Promise((resolve) => {
-        const finish = () => {
-          clearTimeout(deadline);
-          clearTimeout(idle);
-          waits.delete(finish);
-          outcomes.push(revision === 1 ? 'idle' : 'changed');
-          resolve(
-            h.reply(revision, {
-              state: 'ready',
-              checkpoint: `checkpoint-${revision}`,
-              ids: revision === 1 ? [] : [h.entries[0]!.id],
-              ...(revision === 1
-                ? {}
-                : {
-                    bodies: {
-                      changed: [
-                        { ...h.entries[0], items: [{ type: 'text', text: 'fresh reply' }] },
-                      ],
-                      suffix: [],
-                    },
-                  }),
-            })
-          );
-        };
-        const deadline = setTimeout(() => {
-          clearTimeout(idle);
-          waits.delete(finish);
-          outcomes.push('request_timeout');
-          resolve({ ok: false, error: 'request_timeout' });
-        }, resolveLocalSessionControlTimeoutMs(request));
-        const idle = setTimeout(finish, query.waitMs);
-        waits.add(finish);
+    sendControl: async (request, onResponse) => {
+      if (request.type === 'session/history-read') {
+        if (request.query.kind !== 'readChanges') throw new Error('Unexpected history query');
+        return h.reply(2, {
+          state: 'ready',
+          checkpoint: 'checkpoint-2',
+          ids: [h.entries[0]!.id],
+          bodies: {
+            changed: [{ ...h.entries[0], items: [{ type: 'text', text: 'fresh reply' }] }],
+            suffix: [],
+          },
+        });
+      }
+      if (request.type !== 'session/history-subscription') throw new Error('Unexpected request');
+      const { subscription } = request;
+      const end = {
+        type: 'session/history-subscription_response' as const,
+        sessionId: h.sessionId,
+        subscriptionId: subscription.id,
+        event: 'closed' as const,
+      };
+      if (subscription.action === 'close') {
+        stop.resolve(subscription.id);
+        return { ok: true, responses: [end] };
+      }
+      const index = seenIds.push(subscription.id) - 1;
+      expect(resolveLocalSessionControlTimeoutMs(request)).toBeGreaterThan(45_000);
+      expect(subscription.checkpoint).toBe('checkpoint-1');
+      onResponse?.({
+        ...end,
+        event: 'publication',
+        publication: { checkpoint: `checkpoint-${index + 1}`, revision: index + 1 },
       });
+      opens[index]!.resolve();
+      await releases[index]!.promise;
+      return { ok: true, responses: [end] };
     },
   })({ sessionId: h.sessionId, doc: h.doc, backendKind: 'roost' });
   const observation = data.history.observe(() => {
     void h.cache.getHead().then((head) => {
-      if (head?.revision === 2) visible.resolve();
+      if (head?.revision === 2) applied.resolve();
     });
   });
   try {
     await observation.initial;
+    await opens[0]!.promise;
+    releases[0]!.resolve();
     (await timers.next()).callback();
-    const deadline = await timers.next();
-    const idle = await timers.next();
-    // Execute the first actual deadline, so the former 10s policy fails here.
-    (deadline.delay < idle.delay ? deadline : idle).callback();
-    expect(outcomes).toEqual(['idle']);
+    await opens[1]!.promise;
     (await timers.next()).callback();
-    await timers.next(); // The next request's deadline.
-    await timers.next(); // Its parked idle watch.
-    revision = 2;
-    for (const finish of [...waits]) finish();
-    await visible.promise;
+    await applied.promise;
     expect(await data.history.readAt(0)).toMatchObject({
       state: 'ready',
       turn: { items: [{ text: 'fresh reply' }] },
     });
-    expect(outcomes).toEqual(['idle', 'changed']);
+    observation.unsubscribe();
+    expect(await stop.promise).toBe(seenIds[1]);
   } finally {
     observation.unsubscribe();
     data.dispose?.();
     h.cache.dispose();
-    for (const finish of [...waits]) finish();
+    for (const release of releases) release.resolve();
+    timers.restore();
+  }
+});
+
+it('replaces a retired generation after an owner push with a lower revision', async () => {
+  const h = await cachedRecoveryFixture('retired-generation', 1);
+  const timers = controlledRefreshTimers();
+  const published = Promise.withResolvers<void>();
+  const replaced = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const old = h.entries[0]!;
+  const current = { ...old, items: [{ type: 'text' as const, text: 'from current generation' }] };
+  const page = (turn: SessionHistoryInput, checkpoint: string) => ({
+    checkpoint,
+    startPosition: 0,
+    totalCount: 1,
+    hasMoreOlder: false,
+    cursor: null,
+    rows: [createRoostDirectoryRow(0, turn)],
+  });
+  expect(await h.cache.acceptPage(page(old, 'retired-8'), [old], 8)).toBe(true);
+  const data = createLocalRoostSessionDataFactory({
+    incremental: true,
+    live: true,
+    workspaceId: h.workspaceId,
+    machineId: h.machineId,
+    sendControl: async (request, publish) => {
+      if (request.type === 'session/history-subscription') {
+        const { subscription } = request;
+        const envelope = {
+          type: 'session/history-subscription_response' as const,
+          sessionId: h.sessionId,
+          subscriptionId: subscription.id,
+        };
+        if (subscription.action === 'open') {
+          expect(subscription.checkpoint).toBe('retired-8');
+          publish?.({
+            ...envelope,
+            event: 'publication',
+            publication: { checkpoint: 'current-1', revision: 1 },
+          });
+          published.resolve();
+          await release.promise;
+        } else release.resolve();
+        return { ok: true, responses: [{ ...envelope, event: 'closed' }] };
+      }
+      if (request.type !== 'session/history-read') throw new Error('Unexpected history mutation');
+      if (request.query.kind === 'readChanges') {
+        expect(request.query.checkpoint).toBe('retired-8');
+        return h.reply(1, { state: 'reset', checkpoint: 'current-1' });
+      }
+      expect(request.query.kind).toBe('readLatestPage');
+      return h.reply(1, page(current, 'current-1'), [current]);
+    },
+  })({ sessionId: h.sessionId, doc: h.doc, backendKind: 'roost' });
+  const observation = data.history.observe(() => {
+    void h.cache.getHead().then((head) => {
+      if (head?.checkpoint === 'current-1') replaced.resolve();
+    });
+  });
+  try {
+    await observation.initial;
+    await published.promise;
+    (await timers.next()).callback();
+    await replaced.promise;
+    expect(await h.cache.getHead()).toMatchObject({ revision: 1, checkpoint: 'current-1' });
+    expect(await data.history.readTurn(current.id)).toMatchObject({
+      state: 'ready',
+      turn: current,
+    });
+  } finally {
+    observation.unsubscribe();
+    data.dispose?.();
+    release.resolve();
+    h.cache.dispose();
     timers.restore();
   }
 });

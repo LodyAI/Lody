@@ -164,12 +164,9 @@ describe('Production Roost history semantics (replica sync and bounded stream)',
         beginConversationTurn(id: SessionId, userTurnId: string): string;
         enqueueACPUpdate(id: SessionId, value: import('@lody/shared').AcpSessionNotification): void;
         flushACPUpdatesNow(id: SessionId): Promise<void>;
-        waitForSessionHistoryChanges(args: {
-          sessionId: SessionId;
-          checkpoint: string;
-          waitMs: number;
-          signal: AbortSignal;
-        }): Promise<void>;
+        subscribeSessionHistory: NonNullable<
+          ConstructorParameters<typeof LoroStreamsMachineRpcServer>[0]['subscribeSessionHistory']
+        >;
         store: { get(id: SessionId): { acpUpdateBuffer: unknown[] } };
       };
       // Substitute only delivery. Both production RPC endpoints still serialize,
@@ -245,10 +242,9 @@ describe('Production Roost history semantics (replica sync and bounded stream)',
           fixture.rpc.readSessionHistoryForRpc(id, query, signal),
         writeSessionHistory: ({ sessionId: id, operation, payload }) =>
           fixture.rpc.writeSessionHistoryForRpc(id, operation, payload),
-        waitForSessionHistoryChanges: (args) => {
-          const waiting = host.waitForSessionHistoryChanges(args);
-          observations++;
-          return waiting;
+        subscribeSessionHistory: (args) => {
+          if (args.subscription.action === 'open') observations++;
+          return host.subscribeSessionHistory(args);
         },
       });
       const client = new LoroStreamsMachineRpcClient({
@@ -274,12 +270,12 @@ describe('Production Roost history semantics (replica sync and bounded stream)',
         const doc = fixture.docs.get(sessionId);
         if (!doc) throw new Error('Missing synthetic document');
         const backend = await createSessionBackend(doc);
-        const checkpoint = backend.history.getCheckpoint;
-        if (!checkpoint) throw new Error('Missing native checkpoint observation');
-        vi.spyOn(backend.history, 'getCheckpoint').mockImplementation(async () => {
-          const result = await checkpoint();
-          if (observations > 0 && ++checkedObservations === 2) parked.resolve();
-          return result;
+        const wait = backend.history.waitForChanges;
+        if (!wait) throw new Error('Missing native checkpoint observation');
+        vi.spyOn(backend.history, 'waitForChanges').mockImplementation((checkpoint, signal) => {
+          const waiting = wait(checkpoint, signal);
+          if (++checkedObservations === 2) parked.resolve();
+          return waiting;
         });
         const assistantId = host.beginConversationTurn(sessionId, 'replica-user');
         await backend.appendHistoryTurn(nativeAssistant(assistantId));
@@ -290,7 +286,6 @@ describe('Production Roost history semantics (replica sync and bounded stream)',
         vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
         type Timer = Parameters<typeof clearTimeout>[0];
         const recoveryTimers = new Map<Timer, () => void>();
-        const watchTimeouts = new Map<Timer, () => void>();
         let timerReady = Promise.withResolvers<void>();
         const setTimer = globalThis.setTimeout;
         const clearTimer = globalThis.clearTimeout;
@@ -298,11 +293,7 @@ describe('Production Roost history semantics (replica sync and bounded stream)',
           const scheduled =
             // The two lost reads below need both the first and second retry.
             // Do not drive longer timers that also serve as RPC deadlines.
-            args[1] === 0 || args[1] === 500 || args[1] === 1_000
-              ? recoveryTimers
-              : args[1] === 15_000
-                ? watchTimeouts
-                : undefined;
+            args[1] === 0 || args[1] === 500 || args[1] === 1_000 ? recoveryTimers : undefined;
           if (!scheduled) return setTimer(...args);
           const run = () => {
             if (!scheduled.delete(timer)) return;
@@ -316,7 +307,6 @@ describe('Production Roost history semantics (replica sync and bounded stream)',
         });
         vi.spyOn(globalThis, 'clearTimeout').mockImplementation((timer) => {
           recoveryTimers.delete(timer);
-          watchTimeouts.delete(timer);
           clearTimer(timer);
         });
         const driveRecoveryUntil = async (completed: Promise<unknown>) => {
@@ -340,24 +330,36 @@ describe('Production Roost history semantics (replica sync and bounded stream)',
             workspaceId,
             machineId,
             incremental: true,
-            watch: true,
+            live: true,
             patches: index === 0,
+            subscribeHistory: async (_machine, id, subscription, publish, signal) => {
+              await client.requestSessionHistorySubscription({
+                sessionId: id,
+                readProof: 'synthetic-proof',
+                subscription,
+                signal,
+                onPublication: (publication) => {
+                  const { delta, ...checkpoint } = publication;
+                  if (delta && !lostReadReplies) {
+                    const change = SessionHistoryChangesSchema.parse(delta.response.result);
+                    if (change.state === 'ready' && change.patches) {
+                      expect(index).toBe(0);
+                      receivedContentPatches = true;
+                    }
+                  }
+                  publish(lostReadReplies ? checkpoint : publication);
+                },
+              });
+            },
             requestHistoryRead: async (_machine, id, query) => {
-              if (query.kind === 'watchChanges' || query.kind === 'readChanges')
+              if (query.kind === 'readChanges')
                 expect(query.withPatches).toBe(index === 0 ? true : undefined);
               const result = await client.requestSessionHistoryRead({ sessionId: id, query });
               if (!result) throw new Error('Missing history read response');
               const remaining = remainingReadFailures[index] ?? 0;
-              if (query.kind === 'watchChanges' && remaining > 0) {
+              if (query.kind === 'readChanges' && remaining > 0) {
                 remainingReadFailures[index] = remaining - 1;
                 throw new Error('Synthetic history read reply loss');
-              }
-              if (query.kind === 'watchChanges' || query.kind === 'readChanges') {
-                const changes = SessionHistoryChangesSchema.parse(result.result);
-                if (changes.state === 'ready' && changes.patches) {
-                  expect(index).toBe(0);
-                  receivedContentPatches = true;
-                }
               }
               return result;
             },
@@ -381,7 +383,8 @@ describe('Production Roost history semantics (replica sync and bounded stream)',
           await observation.initial;
         }
         await driveRecoveryUntil(parked.promise);
-        expect(watchTimeouts.size).toBe(2);
+        expect(observations).toBe(2);
+        remainingReadFailures.fill(lostReadReplies);
         host.enqueueACPUpdate(sessionId, {
           sessionId,
           update: {
@@ -418,14 +421,6 @@ describe('Production Roost history semantics (replica sync and bounded stream)',
         }
         await host.flushACPUpdatesNow(sessionId);
         expect(host.store.get(sessionId).acpUpdateBuffer).toEqual([]);
-        remainingReadFailures.fill(lostReadReplies);
-        if (lostNativeReply) {
-          // A committed write whose reply is lost can miss the owner wakeup.
-          // Release the already parked watches through their timeout callback:
-          // fake time must not leave this production recovery path frozen, and
-          // advancing the global clock could expire unrelated RPC deadlines.
-          [...watchTimeouts.values()].forEach((expire) => expire());
-        }
         await driveRecoveryUntil(Promise.all(visible.map((result) => result.promise)));
         expect(remainingReadFailures).toEqual([0, 0]);
         const expected = {

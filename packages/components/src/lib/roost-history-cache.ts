@@ -174,7 +174,8 @@ export function createRoostHistoryCache(scope: string) {
     turns: readonly SessionHistoryInput[],
     revision: number,
     change?: SessionHistoryChange | null,
-    replaceHead?: RoostCachedHead
+    replaceHead?: RoostCachedHead,
+    ownerReset = false
   ) =>
     transact<boolean>('readwrite', (tx, done) => {
       if (
@@ -202,7 +203,8 @@ export function createRoostHistoryCache(scope: string) {
       request.onsuccess = () => {
         const head = request.result as RoostCachedHead | undefined;
         if (replaceHead && (!head || !sameHead(head, replaceHead))) return done(false);
-        if (head && head.revision > revision) return done(false);
+        if (head && head.revision > revision && !(ownerReset && replaceHead && page.checkpoint))
+          return done(false);
         if (!replaceHead && head?.revision === revision && head.count !== page.totalCount) {
           tx.abort();
           return;

@@ -7,6 +7,9 @@ import type {
   SessionHistoryInput,
   SessionHistoryReadQuery,
   SessionHistoryReadResponse,
+  SessionHistoryPublication,
+  SessionHistorySubscription,
+  SessionHistorySubscriptionResponse,
   SessionHistoryWriteOperation,
   SessionId,
   WorkspaceId,
@@ -57,7 +60,14 @@ type HistoryWriteResponse = Extract<
   { type: 'session/history-write_response' }
 >;
 
+type SubscribeHistory = (
+  subscription: Extract<SessionHistorySubscription, { action: 'open' }>,
+  onPublication: (publication: SessionHistoryPublication) => void,
+  signal: AbortSignal
+) => Promise<void>;
+
 type RoostHistoryTransport = {
+  readonly subscribeHistory?: SubscribeHistory;
   readonly readHistory: (query: SessionHistoryReadQuery) => Promise<SessionHistoryReadResponse>;
   readonly writeHistory: (
     operation: SessionHistoryWriteOperation,
@@ -73,7 +83,7 @@ type RoostHistoryTransport = {
 type RoostHistoryObservationOptions = {
   readonly coherentInspection?: boolean | (() => boolean);
   readonly incremental?: boolean | (() => boolean);
-  readonly watch?: boolean | (() => boolean);
+  readonly live?: boolean | (() => boolean);
   readonly patches?: boolean | (() => boolean);
   readonly active?: () => boolean;
   readonly subscribeWake?: (wake: () => void) => () => void;
@@ -95,6 +105,11 @@ export type RemoteRoostSessionBridgeOptions = RoostHistoryObservationOptions & {
     sessionId: SessionId,
     query: SessionHistoryReadQuery
   ) => Promise<SessionHistoryRpcReadResponse>;
+  readonly subscribeHistory?: (
+    machineId: MachineId,
+    sessionId: SessionId,
+    ...args: Parameters<SubscribeHistory>
+  ) => ReturnType<SubscribeHistory>;
   readonly requestHistoryWrite: (args: {
     readonly machineId: MachineId;
     readonly sessionId: SessionId;
@@ -254,10 +269,9 @@ const createRoostSessionDataFactoryFromTransport =
     const patchesEnabled = () =>
       incrementalEnabled() &&
       (typeof options.patches === 'function' ? options.patches() : options.patches === true);
-    const watchEnabled = () =>
+    const subscriptionEnabled = () =>
       incrementalEnabled() &&
-      active() &&
-      (typeof options.watch === 'function' ? options.watch() : options.watch === true);
+      (typeof options.live === 'function' ? options.live() : options.live === true);
     let disposed = false;
     const cache = createRoostHistoryCache(cacheScope(sessionId));
     let cacheWarningReported = false;
@@ -279,6 +293,7 @@ const createRoostSessionDataFactoryFromTransport =
       while (bodies.size > 200) bodies.delete(bodies.keys().next().value!);
     };
     let ownerRevision: number | undefined;
+    let historyEpoch = 0;
     let hasIncrementalCheckpoint = false;
     let replacingSnapshot = false;
     let displayedCacheRevision: number | undefined;
@@ -287,6 +302,34 @@ const createRoostSessionDataFactoryFromTransport =
     const pendingReads = new Map<string, Promise<SessionHistoryReadResponse>>();
     const listeners = new Set<SessionDataChangeListener>();
     const snapshotProvenance = new WeakSet<object>();
+
+    let ownerPublication: SessionHistoryPublication | undefined;
+    const takeInline = (query: SessionHistoryReadQuery) => {
+      const head = ownerPublication;
+      const delta = head?.delta;
+      if (
+        query.kind !== 'readChanges' ||
+        !head ||
+        !delta ||
+        delta.baseCheckpoint !== query.checkpoint ||
+        delta.includeBodiesFrom !== query.includeBodiesFrom ||
+        delta.withPatches !== query.withPatches ||
+        delta.response.sessionId !== sessionId ||
+        !delta.response.success ||
+        delta.response.historyRevision !== head.revision
+      )
+        return undefined;
+      const parsed = SessionHistoryChangesSchema.safeParse(delta.response.result);
+      if (
+        !parsed.success ||
+        parsed.data.state !== 'ready' ||
+        parsed.data.checkpoint !== head.checkpoint ||
+        !parsed.data.bodies
+      )
+        return undefined;
+      ownerPublication = { checkpoint: head.checkpoint, revision: head.revision };
+      return delta.response;
+    };
 
     const readOwner = (query: SessionHistoryReadQuery): Promise<SessionHistoryReadResponse> => {
       const incremental = incrementalEnabled();
@@ -297,14 +340,15 @@ const createRoostSessionDataFactoryFromTransport =
       if (pending) return pending;
       const next = (async () => {
         if (disposed) throw new Error('Roost session bridge is disposed');
-        const response = await transport.readHistory(query);
+        const epoch = historyEpoch;
+        const response = takeInline(query) ?? (await transport.readHistory(query));
         if (disposed) throw new Error('Roost session bridge is disposed');
+        if (epoch !== historyEpoch) throw new HistoryRefreshSupersededError();
         const revision = response.historyRevision;
         const count = response.historyCount;
         const coherentProgress =
           incremental &&
           (query.kind === 'readChanges' ||
-            query.kind === 'watchChanges' ||
             ((query.kind === 'readLatestPage' || query.kind === 'readOlderPage') &&
               query.withCheckpoint));
         if (
@@ -321,9 +365,16 @@ const createRoostSessionDataFactoryFromTransport =
         const firstOwnerObservation = ownerRevision === undefined;
         if (firstOwnerObservation) bodies.clear();
         ownerRevision = Math.max(ownerRevision ?? 0, revision);
-        await notifyChanged(response.historyChange, revision, count);
+        const checkpointCoversThisRead =
+          query.kind === 'readChanges' ||
+          (query.kind === 'readLatestPage' &&
+            query.withCheckpoint &&
+            subscriptionEnabled() &&
+            transport.subscribeHistory !== undefined);
+        await notifyChanged(response.historyChange, revision, count, !checkpointCoversThisRead);
         if (
           disposed ||
+          epoch !== historyEpoch ||
           (!coherentProgress && (revision < ownerRevision || revision < observedHistoryRevision))
         ) {
           throw new HistoryRefreshSupersededError();
@@ -359,6 +410,7 @@ const createRoostSessionDataFactoryFromTransport =
         }
         if (
           disposed ||
+          epoch !== historyEpoch ||
           (!coherentProgress && (revision < ownerRevision || revision < observedHistoryRevision))
         ) {
           throw new HistoryRefreshSupersededError();
@@ -376,6 +428,7 @@ const createRoostSessionDataFactoryFromTransport =
       (await readOwner(query)).result;
     const canReadCache = async () => {
       const head = await cached(() => cache.getHead());
+      if (replacingSnapshot) return undefined;
       if (head) {
         if (incrementalEnabled() && head.checkpoint) hasIncrementalCheckpoint = true;
         const changedOfflineSnapshot =
@@ -384,7 +437,12 @@ const createRoostSessionDataFactoryFromTransport =
           seenCacheRevision !== head.revision;
         seenCacheRevision = head.revision;
         if (head.revision > Math.max(ownerRevision ?? 0, observedHistoryRevision)) {
-          await notifyChanged(undefined, head.revision, head.count);
+          await notifyChanged(
+            undefined,
+            head.revision,
+            head.count,
+            !subscriptionEnabled() || transport.subscribeHistory === undefined
+          );
         } else if (changedOfflineSnapshot) {
           bodies.clear();
           observedDirectoryEpoch += 1;
@@ -477,10 +535,12 @@ const createRoostSessionDataFactoryFromTransport =
     const notifyChanged = (
       change?: SessionHistoryChange | null,
       revision?: number,
-      count?: number
+      count?: number,
+      requestRefresh = true
     ): Promise<void> => {
+      const epoch = historyEpoch;
       const next = notificationQueue.then(async () => {
-        if (disposed) return;
+        if (disposed || epoch !== historyEpoch) return;
         if (revision !== undefined && revision <= observedHistoryRevision) return;
 
         if (
@@ -493,7 +553,7 @@ const createRoostSessionDataFactoryFromTransport =
           if (count !== undefined) observedHistoryCount = count;
           latestChange = change;
           bodies.clear();
-          scheduleRefresh();
+          if (requestRefresh) scheduleRefresh();
           return;
         }
         const hasRevisionGap = revision !== undefined && revision !== observedHistoryRevision + 1;
@@ -505,7 +565,7 @@ const createRoostSessionDataFactoryFromTransport =
             if (entry.position === undefined || entry.position >= change.from) bodies.delete(id);
           }
         }
-        scheduleRefresh();
+        if (requestRefresh) scheduleRefresh();
         if (revision === undefined || change === undefined || hasRevisionGap) {
           if (revision !== undefined) observedHistoryRevision = revision;
           observedHistoryCount = count ?? observedHistoryCount ?? 0;
@@ -688,6 +748,7 @@ const createRoostSessionDataFactoryFromTransport =
       try {
         const prior = await cached(() => cache.getHead());
         const checkpoint = prior?.checkpoint ?? prior?.recoveryCheckpoint;
+        let ownerReset = false;
         if (incrementalEnabled() && prior && !checkpoint) {
           // No verified interval remains. Establish a new bounded window;
           // unknown older bodies must not become a patch baseline.
@@ -696,22 +757,12 @@ const createRoostSessionDataFactoryFromTransport =
         }
         if (incrementalEnabled() && prior && checkpoint) {
           const withPatches = patchesEnabled() && prior.checkpoint !== undefined;
-          const response = await readOwner(
-            watchEnabled() && prior.checkpoint
-              ? {
-                  kind: 'watchChanges',
-                  checkpoint,
-                  waitMs: 15_000,
-                  includeBodiesFrom: prior.start,
-                  ...(withPatches ? { withPatches: true as const } : {}),
-                }
-              : {
-                  kind: 'readChanges',
-                  checkpoint,
-                  includeBodiesFrom: prior.start,
-                  ...(withPatches ? { withPatches: true as const } : {}),
-                }
-          );
+          const response = await readOwner({
+            kind: 'readChanges',
+            checkpoint,
+            includeBodiesFrom: prior.start,
+            ...(withPatches ? { withPatches: true as const } : {}),
+          });
           const revision = response.historyRevision!;
           const count = response.historyCount!;
           const change = SessionHistoryChangesSchema.parse(response.result);
@@ -863,14 +914,20 @@ const createRoostSessionDataFactoryFromTransport =
             }
             if (change.ids.length)
               for (const listener of listeners) listener({ kind: 'changed', ids: [...change.ids] });
-            retryDelay = refreshRequested || watchEnabled() ? 0 : 250;
+            retryDelay = refreshRequested ? 0 : 250;
             consecutiveSupersessions = 0;
             // Complete checkpoint coverage repairs the retained window even
             // when older pages have never been loaded. Do not reread its tail.
             return;
           } else {
-            // A reset rejects prefix coverage. Replace the readable window
-            // atomically, then fetch invalidated older pages on demand.
+            // Revisions belong to a Native generation. An explicit owner reset
+            // can start a new generation with a lower revision.
+            ownerReset = true;
+            historyEpoch++;
+            ownerRevision = revision;
+            observedHistoryRevision = revision;
+            observedHistoryCount = count;
+            latestChange = undefined;
             replacingSnapshot = true;
             bodies.clear();
             observedDirectoryEpoch += 1;
@@ -918,7 +975,7 @@ const createRoostSessionDataFactoryFromTransport =
         if (replacingSnapshot) {
           const turns = validateHistory(response.pageTurns, 'Roost replacement window');
           const applied = await cached(() =>
-            cache.acceptPage(page, turns, revision!, response.historyChange, prior)
+            cache.acceptPage(page, turns, revision!, response.historyChange, prior, ownerReset)
           );
           if (applied === undefined) throw new Error('Roost history cache is unavailable');
           if (!applied) throw new HistoryRefreshSupersededError();
@@ -932,7 +989,7 @@ const createRoostSessionDataFactoryFromTransport =
           for (const listener of listeners)
             listener({ kind: 'structure', from: 0, to: page.totalCount });
         }
-        retryDelay = refreshRequested || watchEnabled() ? 0 : 250;
+        retryDelay = refreshRequested ? 0 : 250;
         consecutiveSupersessions = 0;
       } catch (error) {
         // Cached history remains readable. This retries connection recovery,
@@ -948,7 +1005,7 @@ const createRoostSessionDataFactoryFromTransport =
         }
       } finally {
         refreshing = false;
-        if ((refreshRequested || watchEnabled()) && !disposed && listeners.size > 0 && active()) {
+        if (refreshRequested && !disposed && listeners.size > 0 && active()) {
           refreshTimerDelay = retryDelay;
           refreshTimer = setTimeout(() => {
             refreshTimer = undefined;
@@ -997,7 +1054,91 @@ const createRoostSessionDataFactoryFromTransport =
       }
     };
 
-    const unsubscribeWake = options.subscribeWake?.(scheduleRefresh);
+    let subscription: AbortController | undefined;
+    let subscriptionTimer: ReturnType<typeof setTimeout> | undefined;
+    let subscriptionDelay = 250;
+    const stopSubscription = () => {
+      if (subscriptionTimer) clearTimeout(subscriptionTimer);
+      subscriptionTimer = undefined;
+      subscription?.abort();
+      subscription = undefined;
+      ownerPublication = undefined;
+    };
+    const startSubscription = () => {
+      const subscribe = transport.subscribeHistory;
+      if (
+        !subscribe ||
+        !subscriptionEnabled() ||
+        subscription ||
+        subscriptionTimer ||
+        disposed ||
+        !active() ||
+        listeners.size === 0
+      )
+        return;
+
+      const controller = new AbortController();
+      subscription = controller;
+      const run = async () => {
+        const head = await cached(() => cache.getHead());
+        if (controller.signal.aborted) return;
+        let published = false;
+        await subscribe(
+          {
+            action: 'open',
+            id: crypto.randomUUID(),
+            checkpoint: head?.checkpoint ?? head?.recoveryCheckpoint,
+            includeBodiesFrom: head?.start,
+            ...(patchesEnabled() && head?.checkpoint ? { withPatches: true as const } : {}),
+          },
+          (publication) => {
+            if (controller.signal.aborted || disposed) return;
+            ownerPublication = publication;
+            published = true;
+            subscriptionDelay = 250;
+            void cached(() => cache.getHead()).then((applied) => {
+              if (
+                controller.signal.aborted ||
+                disposed ||
+                ownerPublication !== publication ||
+                applied?.checkpoint === publication.checkpoint
+              )
+                return;
+              scheduleRefresh();
+            });
+          },
+          controller.signal
+        );
+        if (!published) throw new Error('History subscription closed before its first checkpoint');
+      };
+      void run()
+        .then(
+          () => 0,
+          () => {
+            if (controller.signal.aborted) return 0;
+            const delay = subscriptionDelay;
+            subscriptionDelay = Math.min(10_000, delay * 2);
+            return delay;
+          }
+        )
+        .then((delay) => {
+          if (subscription !== controller) return;
+          subscription = undefined;
+          if (disposed || !active() || listeners.size === 0 || !subscriptionEnabled()) return;
+          subscriptionTimer = setTimeout(() => {
+            subscriptionTimer = undefined;
+            startSubscription();
+          }, delay);
+        });
+    };
+
+    const unsubscribeWake = options.subscribeWake?.(() => {
+      if (!active() || !subscriptionEnabled()) stopSubscription();
+      startSubscription();
+      // Control hints remain useful for an explicit history read when the
+      // owner has no live subscription.
+      if (!transport.subscribeHistory || !subscriptionEnabled()) scheduleRefresh();
+    });
 
     const history: SessionHistoryReader = {
       readMetadata: async () => {
@@ -1066,12 +1207,15 @@ const createRoostSessionDataFactoryFromTransport =
         }
         listeners.add(listener);
         const initialPage = readInitialDirectoryPage();
-        scheduleRefresh();
+        if (transport.subscribeHistory) {
+          void initialPage.then(startSubscription, startSubscription);
+        } else scheduleRefresh();
         return {
           initial: initialPage.then((page) => page.rows),
           initialPage,
           unsubscribe: () => {
             listeners.delete(listener);
+            if (listeners.size === 0) stopSubscription();
             if (listeners.size === 0 && refreshTimer) {
               clearTimeout(refreshTimer);
               refreshTimer = undefined;
@@ -1167,6 +1311,7 @@ const createRoostSessionDataFactoryFromTransport =
       },
       dispose: () => {
         disposed = true;
+        stopSubscription();
         unsubscribeWake?.();
         if (refreshTimer) clearTimeout(refreshTimer);
         bodies.clear();
@@ -1186,6 +1331,55 @@ function localHistoryTransport(
 ): RoostHistoryTransport {
   const send = options.sendControl ?? sendLocalSessionControl;
   return {
+    ...(options.live === undefined
+      ? {}
+      : ({
+          subscribeHistory: async (open, onPublication, signal) => {
+            const request: LocalSessionControlRequest = {
+              type: 'session/history-subscription',
+              machineId: options.machineId,
+              workspaceId: options.workspaceId,
+              sessionId,
+              subscription: open,
+            };
+            const close = () => {
+              void send({ ...request, subscription: { action: 'close', id: open.id } }).catch(
+                () => {}
+              );
+            };
+            signal.throwIfAborted();
+            signal.addEventListener('abort', close, { once: true });
+            try {
+              const result = await send(request, (event) => {
+                if (
+                  !signal.aborted &&
+                  event.type === 'session/history-subscription_response' &&
+                  event.event === 'publication' &&
+                  event.sessionId === sessionId &&
+                  event.subscriptionId === open.id
+                )
+                  onPublication(event.publication);
+              });
+              if (signal.aborted) return;
+              const end =
+                result.ok &&
+                result.responses.find(
+                  (
+                    event
+                  ): event is Extract<SessionHistorySubscriptionResponse, { event: 'closed' }> =>
+                    event.type === 'session/history-subscription_response' &&
+                    event.event === 'closed' &&
+                    event.sessionId === sessionId &&
+                    event.subscriptionId === open.id
+                );
+              if (!end || end.error)
+                throw new Error(end ? end.error : 'History subscription unavailable');
+            } finally {
+              signal.removeEventListener('abort', close);
+            }
+          },
+        } satisfies Pick<RoostHistoryTransport, 'subscribeHistory'>)),
+
     readHistory: async (query) => {
       const request: LocalSessionControlRequest = {
         type: 'session/history-read',
@@ -1239,6 +1433,10 @@ function remoteHistoryTransport(
   sessionId: SessionId
 ): RoostHistoryTransport {
   return {
+    ...(options.subscribeHistory && {
+      subscribeHistory: (...args) =>
+        options.subscribeHistory!(options.machineId, sessionId, ...args),
+    }),
     readHistory: async (query) => {
       const response = await options.requestHistoryRead(options.machineId, sessionId, query);
       if (response.sessionId !== sessionId) {
@@ -1317,6 +1515,11 @@ export function createRoostSessionDataFactoryForMachine(
         throw new Error('Roost history target transport is unresolved');
       };
       return {
+        subscribeHistory: async (...args) => {
+          const subscribe = (await transport()).subscribeHistory;
+          if (!subscribe) throw new Error('History subscription unavailable for this transport');
+          await subscribe(...args);
+        },
         readHistory: async (query) => (await transport()).readHistory(query),
         writeHistory: async (operation, payload) =>
           (await transport()).writeHistory(operation, payload),

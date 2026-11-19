@@ -829,13 +829,6 @@ export interface SessionHistoryReadRequest {
 /** Bounded logical reads over the owner session's active history branch. */
 export type SessionHistoryReadQuery =
   | SessionHistoryInspectionQuery
-  | {
-      readonly kind: 'watchChanges';
-      readonly checkpoint: string;
-      readonly includeBodiesFrom?: number;
-      readonly withPatches?: true;
-      readonly waitMs: number;
-    }
   | { readonly kind: 'inputAcceptance'; readonly entry: unknown }
   | { readonly kind: 'count'; readonly withCheckpoint?: true }
   | { readonly kind: 'readAt'; readonly position: number }
@@ -930,6 +923,46 @@ export interface SessionHistoryReadResponse {
   error?: string;
 }
 
+export type SessionHistorySubscription = {
+  readonly id: string;
+} & (
+  | {
+      readonly action: 'open';
+      readonly checkpoint?: string;
+      readonly includeBodiesFrom?: number;
+      readonly withPatches?: true;
+    }
+  | { readonly action: 'close' }
+);
+
+export interface SessionHistoryPublication {
+  readonly checkpoint: string;
+  readonly revision: number;
+  readonly delta?: {
+    readonly baseCheckpoint: string;
+    readonly includeBodiesFrom: number;
+    readonly withPatches?: true;
+    readonly response: SessionHistoryReadResponse;
+  };
+}
+
+export interface SessionHistorySubscriptionRequest {
+  readonly type: 'session/history-subscription';
+  readonly workspaceId: WorkspaceId;
+  readonly machineId: MachineId;
+  readonly sessionId: SessionId;
+  readonly subscription: SessionHistorySubscription;
+}
+
+export type SessionHistorySubscriptionResponse = {
+  readonly type: 'session/history-subscription_response';
+  readonly sessionId: SessionId;
+  readonly subscriptionId: string;
+} & (
+  | { readonly event: 'publication'; readonly publication: SessionHistoryPublication }
+  | { readonly event: 'closed'; readonly error?: string }
+);
+
 export type SessionHistoryWriteOperation =
   | 'accept_input'
   | 'accept_input_and_dispatch'
@@ -991,6 +1024,7 @@ export type LocalSessionControlRequest =
   | SessionImageResolveLocalRequest
   | SessionAttachmentPrepareRequest
   | SessionHistoryReadRequest
+  | SessionHistorySubscriptionRequest
   | SessionHistoryWriteRequest
   | PreviewCandidateReportRequest
   | SessionPreviewCreateRequest
@@ -1024,6 +1058,7 @@ export type LocalSessionControlResponse =
   | SessionImageResolveLocalResponse
   | SessionAttachmentPrepareResponse
   | SessionHistoryReadResponse
+  | SessionHistorySubscriptionResponse
   | SessionHistoryWriteResponse
   | PreviewCandidateReportResponse
   | SessionPreviewCreateResponse
