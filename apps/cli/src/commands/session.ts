@@ -709,31 +709,37 @@ export function selectSessionTranscriptEntries(
   return selected;
 }
 
-/** Count visible rows and hydrate the requested transcript positions. */
+/**
+ * The visible transcript. `all` reads every turn and counts them; otherwise only
+ * the last `limit` visible turns are read back from the tail, and `hasMore`
+ * says whether an earlier one exists.
+ */
 export async function readSessionTranscript(
   backend: Pick<SessionBackend, 'readHistory'> & SessionTranscriptSource,
   options: { all?: boolean; limit?: number; reverse?: boolean }
-): Promise<{ total: number; entries: SessionTranscriptEntry[] }> {
+): Promise<{ total?: number; hasMore: boolean; entries: SessionTranscriptEntry[] }> {
   if (options.all) {
     const transcript = toSessionTranscriptEntries(await backend.readHistory());
     return {
       total: transcript.length,
+      hasMore: false,
       entries: selectSessionTranscriptEntries(transcript, options),
     };
   }
-  let total = 0,
+  let hasMore = false,
     positions: number[] = [];
   let selected: SessionHistoryInput[];
   if (backend.readHistoryTranscript) {
     const result = await backend.readHistoryTranscript(options);
-    total = result.total;
+    hasMore = result.hasMore;
     positions = result.positions;
     selected = result.entries;
   } else if ('readHistorySelection' in backend) {
+    // Backends without a transcript reader select over every row.
     selected = await backend.readHistorySelection(
       (rows) => {
         const result = selectTranscriptHistoryPositions(rows, options);
-        total = result.total;
+        hasMore = result.total > result.positions.length;
         positions = result.positions;
         return positions;
       },
@@ -741,7 +747,7 @@ export async function readSessionTranscript(
     );
   } else throw new Error('session_transcript_unavailable');
   return {
-    total,
+    hasMore,
     entries: selected.flatMap((entry, index) => {
       const formatted = toSessionTranscriptEntry(positions[index]!, entry);
       return formatted ? [formatted] : [];
@@ -5787,10 +5793,10 @@ const sessionHistoryCommand = new Command('history')
   .option('--workspace <selector>', 'Target workspace id, slug, or name')
   .option(
     '--limit <count>',
-    `Maximum number of transcript turns to print (default: ${DEFAULT_SESSION_HISTORY_LIMIT})`,
+    `Print the latest transcript turns, at most this many (default: ${DEFAULT_SESSION_HISTORY_LIMIT}); JSON reports hasMore`,
     parsePositiveIntOption
   )
-  .option('--all', 'Include all transcript turns')
+  .option('--all', 'Include all transcript turns; JSON also reports the total')
   .option('--reverse', 'Print newest transcript turns first')
   .option('--offline', 'Read the local cache without syncing first')
   .option('--json', 'Print JSON output')
@@ -5825,7 +5831,7 @@ const sessionHistoryCommand = new Command('history')
         );
         await resolveSessionMetaOrThrow(manager, sessionId);
         const backend = await openSessionReadPort(manager, sessionId);
-        const { total, entries } = await readSessionTranscript(backend, {
+        const { total, hasMore, entries } = await readSessionTranscript(backend, {
           all: options.all,
           limit: options.limit,
           reverse: options.reverse,
@@ -5836,7 +5842,9 @@ const sessionHistoryCommand = new Command('history')
             ok: true,
             workspaceId: workspace.id,
             sessionId,
-            total,
+            // Only `--all` counts every visible turn; a limited read reports `hasMore`.
+            ...(total === undefined ? {} : { total }),
+            hasMore,
             returned: entries.length,
             entries,
           });

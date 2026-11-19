@@ -114,30 +114,68 @@ export function historyQueryRow(
   return row;
 }
 
+/** Whether a turn shows in a transcript: a user, assistant or completion row with visible content. */
+export function isTranscriptVisibleRow(row: HistoryQueryRow): boolean {
+  if (row.role !== 'user' && row.role !== 'assistant' && row.role !== 'system') return false;
+  const items = row.items ?? [];
+  if (row.role === 'system' && !items.some((item) => item.type === 'operation_completion'))
+    return false;
+  return items.some(
+    (item) =>
+      item.type === 'image' ||
+      item.type === 'operation_completion' ||
+      (item.type === 'image_group' &&
+        typeof item._imageCount === 'number' &&
+        item._imageCount > 0) ||
+      (item.type === 'text' && item._textNonBlank === true)
+  );
+}
+
 export function selectTranscriptHistoryPositions(
   rows: readonly HistoryQueryRow[],
   options: { limit?: number; reverse?: boolean }
 ): { total: number; positions: number[] } {
-  const visible = rows.flatMap((row, index) => {
-    if (row.role !== 'user' && row.role !== 'assistant' && row.role !== 'system') return [];
-    const items = row.items ?? [];
-    if (row.role === 'system' && !items.some((item) => item.type === 'operation_completion'))
-      return [];
-    return items.some(
-      (item) =>
-        item.type === 'image' ||
-        item.type === 'operation_completion' ||
-        (item.type === 'image_group' &&
-          typeof item._imageCount === 'number' &&
-          item._imageCount > 0) ||
-        (item.type === 'text' && item._textNonBlank === true)
-    )
-      ? [index]
-      : [];
-  });
+  const visible = rows.flatMap((row, index) => (isTranscriptVisibleRow(row) ? [index] : []));
   const positions = visible.slice(-(options.limit ?? 50));
   if (options.reverse) positions.reverse();
   return { total: visible.length, positions };
+}
+
+/** Rows scanned per step of a transcript tail read. */
+const TRANSCRIPT_TAIL_PAGE = 64;
+
+/**
+ * The last `limit` visible positions, read back from the tail in pages until
+ * one more visible row proves `hasMore` or the history starts: the rows read
+ * depend on the limit and on hidden rows near the tail, not on history length.
+ * `rows(from, to)` returns transcript-visibility projections of `[from, to)`.
+ */
+export async function selectTranscriptTail(
+  count: number,
+  rows: (
+    from: number,
+    to: number
+  ) => readonly HistoryQueryRow[] | Promise<readonly HistoryQueryRow[]>,
+  options: { limit?: number; reverse?: boolean }
+): Promise<{ hasMore: boolean; positions: number[] }> {
+  const limit = options.limit ?? 50;
+  const found: number[] = [];
+  let hasMore = false;
+  for (let end = count; end > 0 && !hasMore;) {
+    const from = Math.max(0, end - TRANSCRIPT_TAIL_PAGE);
+    const page = await rows(from, end);
+    for (let index = page.length - 1; index >= 0; index--) {
+      if (!isTranscriptVisibleRow(page[index]!)) continue;
+      if (found.length === limit) {
+        hasMore = true;
+        break;
+      }
+      found.push(from + index);
+    }
+    end = from;
+  }
+  if (!options.reverse) found.reverse();
+  return { hasMore, positions: found };
 }
 
 /** Select reducer positions, including matching owners and fallback tails. */

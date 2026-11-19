@@ -28,7 +28,7 @@ import {
 } from '@lody/shared/session-data';
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
 import type { AcpSessionNotification, MessageContent, ModelInfo, SessionId } from '@lody/shared';
-import type { SessionSnapshot } from '@lody/shared/session-data';
+import { selectTranscriptTail, type SessionSnapshot } from '@lody/shared/session-data';
 import {
   readDispatchHistory,
   readDispatchSelection,
@@ -58,8 +58,9 @@ export interface SessionBackend {
   readonly readHistoryReplay?: (
     excludeTurnId?: string
   ) => Promise<import('@lody/shared').ReplayPromptResult>;
+  /** The last `limit` visible turns; `hasMore` when an earlier visible turn exists. */
   readonly readHistoryTranscript?: (options: { limit?: number; reverse?: boolean }) => Promise<{
-    total: number;
+    hasMore: boolean;
     positions: number[];
     entries: SessionHistoryInput[];
   }>;
@@ -280,9 +281,18 @@ class LoroSessionBackend implements SessionBackend {
     to?: number;
     transcriptVisibility?: boolean;
   }): Promise<readonly HistoryQueryRow[]> {
-    return this.sessionDoc.sessionData.writer
-      .readQuery(options)
-      .slice(options?.from ?? 0, options?.to);
+    return this.sessionDoc.sessionData.writer.readQuery(options);
+  }
+
+  /** Reads back from the tail only as far as the limit needs. */
+  async readHistoryTranscript(options: { limit?: number; reverse?: boolean }) {
+    const { writer } = this.sessionDoc.sessionData;
+    const selected = await selectTranscriptTail(
+      await this.readHistoryCount(),
+      (from, to) => writer.readQuery({ transcriptVisibility: true, from, to }),
+      options
+    );
+    return { ...selected, entries: writer.readAt(selected.positions) };
   }
 
   async readHistorySelection(

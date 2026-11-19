@@ -10,6 +10,11 @@ import { LoroRepo } from 'loro-repo';
 
 import { SessionDocument } from '@/lib/loro/doc';
 import {
+  readSessionTranscript,
+  selectSessionTranscriptEntries,
+  toSessionTranscriptEntries,
+} from '@/commands/session';
+import {
   createSessionBackend,
   disposeSessionBackend,
   registerSessionBackendFactory,
@@ -453,4 +458,64 @@ it('retries the same backend after release failure without creating a second wri
   } finally {
     unregister();
   }
+});
+
+describe('Loro transcript reads', () => {
+  it('reads the latest visible turns back from the tail, the same work at any length', async () => {
+    const repo = await LoroRepo.create({});
+    const sessionDoc = new SessionDocument(
+      repo,
+      'loro-transcript' as SessionId,
+      async () => undefined
+    );
+    await sessionDoc.initOffline(undefined, { historyBackend: 'loro' });
+    const backend = await createSessionBackend(sessionDoc, { historyBackend: 'loro' });
+    const { writer, commands } = sessionDoc.sessionData;
+    const append = async (from: number, to: number) => {
+      for (let i = from; i < to; i++)
+        await commands.appendTurn({
+          id: `turn-${i}`,
+          role: i % 2 === 0 ? 'user' : 'assistant',
+          timestamp: '2026-01-01T00:00:00.000Z',
+          // Every fifth turn is blank and hidden from the transcript.
+          items: [{ type: 'text', text: i % 5 === 0 ? '  ' : `body ${i}` }],
+          ...(i % 2 === 0 ? {} : { userTurnId: `turn-${i - 1}` }),
+        } as never);
+    };
+    const projected = vi.spyOn(writer, 'readQuery');
+    const read = async (options: { limit?: number; all?: boolean }) => {
+      projected.mockClear();
+      const result = await readSessionTranscript(backend, options);
+      const rows = projected.mock.results.reduce(
+        (sum, call) => sum + (call.value as unknown[]).length,
+        0
+      );
+      return { result, rows };
+    };
+    try {
+      await append(0, 400);
+      const short = await read({ limit: 50 });
+      await append(400, 4000);
+      const long = await read({ limit: 50 });
+      expect(long.rows).toBe(short.rows);
+      expect(long.rows).toBeLessThanOrEqual(128);
+
+      const every = toSessionTranscriptEntries(await backend.readHistory());
+      expect(long.result).toEqual({
+        hasMore: true,
+        entries: selectSessionTranscriptEntries(every, { limit: 50 }),
+      });
+      expect((await read({ limit: every.length })).result.hasMore).toBe(false);
+      expect((await read({ limit: every.length - 1 })).result.hasMore).toBe(true);
+      // `--all` still counts every visible turn.
+      expect((await read({ all: true })).result).toMatchObject({
+        total: every.length,
+        hasMore: false,
+      });
+    } finally {
+      projected.mockRestore();
+      await sessionDoc.destroy({ preserveStatus: true });
+      await repo.destroy();
+    }
+  });
 });
