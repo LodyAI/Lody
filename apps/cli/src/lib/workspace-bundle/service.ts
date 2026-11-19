@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { mapWithConcurrency } from '../bounded-concurrency';
 import type { JsonObject, LoroRepo } from 'loro-repo';
 import { localSessionFileBlobs, restoreSessionFileBlobs } from './blobs';
 import { createBundleWriter, openBundle } from './bundle-file';
@@ -89,6 +90,8 @@ export async function runWorkspaceExport(input: {
 }
 
 /** Roost turns are rewritten into their session document, so they sync as Loro. */
+/** Same bound as `lody export`: uploads are network-bound but must not flood Streams. */
+const UPLOAD_CONCURRENCY = 4;
 const SYNC_MODEL = { meta: 'meta', loro: 'loro', flock: 'flock', roost: 'loro' } as const;
 
 export type ImportOutcome = {
@@ -132,15 +135,20 @@ export async function runWorkspaceImport(input: {
     });
     await restoreSessionFileBlobs({ bundle, plan });
     const uploadPending: string[] = [];
-    if (workspace.syncRoom) {
-      for (const room of plan.rooms) {
-        if (room.action !== 'merge' || room.state === 'unchanged') continue;
-        try {
-          await workspace.syncRoom(room.targetId, SYNC_MODEL[room.model]);
-        } catch {
-          uploadPending.push(room.targetId);
-        }
-      }
+    const syncRoom = workspace.syncRoom;
+    if (syncRoom) {
+      const changed = plan.rooms.filter(
+        (room) => room.action === 'merge' && room.state !== 'unchanged'
+      );
+      const uploaded = await mapWithConcurrency(changed, UPLOAD_CONCURRENCY, (room) =>
+        syncRoom(room.targetId, SYNC_MODEL[room.model]).then(
+          () => true,
+          () => false
+        )
+      );
+      changed.forEach((room, index) => {
+        if (!uploaded[index]) uploadPending.push(room.targetId);
+      });
     }
     return { plan, result, uploadPending };
   } finally {

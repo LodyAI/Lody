@@ -1,4 +1,8 @@
 import { formatErrorMessage } from '@/utils/format-error';
+import { mapWithConcurrency } from '../bounded-concurrency';
+
+/** Same bound as `lody export`: syncing many rooms at once floods the Streams backend. */
+const PREPARE_CONCURRENCY = 4;
 import type { LoroDoc } from 'loro-crdt';
 import type { JsonObject, LoroRepo } from 'loro-repo';
 import type { BundleWriter } from './bundle-file';
@@ -34,19 +38,26 @@ export async function exportWorkspaceBundle(
 ): Promise<BundleManifest> {
   const { repo, workspaceId, writer } = input;
   const check = input.checkContinue ?? (async () => undefined);
-  /** A room this device cannot bring up to date is a gap, not a failed export. */
-  const prepare = async (roomId: string, model: 'loro' | 'flock'): Promise<boolean> => {
-    try {
-      await input.prepareRoom?.(roomId, model);
-      return true;
-    } catch (error) {
-      writer.addGap({
-        id: roomId,
-        kind: 'unreadable',
-        reason: formatErrorMessage(error),
+  /**
+   * Brings rooms up to date a few at a time (sync is network-bound), then reads them
+   * in order. A room this device cannot bring up to date is a gap, not a failed export.
+   */
+  const prepareAll = async (roomIds: readonly string[], model: 'loro' | 'flock') => {
+    const failures = new Map<string, string>();
+    const prepareRoom = input.prepareRoom;
+    if (!prepareRoom) return failures;
+    await mapWithConcurrency(roomIds, PREPARE_CONCURRENCY, async (roomId) => {
+      await check();
+      await prepareRoom(roomId, model).catch((error: unknown) => {
+        failures.set(roomId, formatErrorMessage(error));
       });
-      return false;
-    }
+    });
+    return failures;
+  };
+  const prepared = (roomId: string, failures: ReadonlyMap<string, string>): boolean => {
+    const reason = failures.get(roomId);
+    if (reason !== undefined) writer.addGap({ id: roomId, kind: 'unreadable', reason });
+    return reason === undefined;
   };
   await check();
   await writer.addRoom(
@@ -56,6 +67,16 @@ export async function exportWorkspaceBundle(
   input.onProgress?.({ phase: 'meta', done: 1, total: 1 });
 
   const docs = await repo.listDoc();
+  const docFailures = await prepareAll(
+    docs
+      .filter((entry) => !entry.deleted)
+      .map((entry) => entry.docId)
+      .filter((docId) => {
+        const room = classifyRoom(docId, workspaceId);
+        return room.kind === 'room' && room.model === 'loro';
+      }),
+    'loro'
+  );
   let done = 0;
   for (const entry of docs) {
     done += 1;
@@ -67,7 +88,7 @@ export async function exportWorkspaceBundle(
       continue;
     }
     await check();
-    if (!(await prepare(entry.docId, 'loro'))) continue;
+    if (!prepared(entry.docId, docFailures)) continue;
     const doc = await repo.openDetachedDoc(entry.docId);
     // After a successful sync an empty body is genuinely empty (machine records, for
     // example, keep every field in Meta); Meta already carries the document.
@@ -84,6 +105,16 @@ export async function exportWorkspaceBundle(
   }
 
   const flocks = await repo.listFlockDoc();
+  const flockFailures = await prepareAll(
+    flocks
+      .filter((entry) => !entry.deleted)
+      .map((entry) => entry.flockDocId)
+      .filter((id) => {
+        const room = classifyRoom(id, workspaceId);
+        return room.kind === 'room' && room.model === 'flock';
+      }),
+    'flock'
+  );
   done = 0;
   for (const entry of flocks) {
     done += 1;
@@ -95,7 +126,7 @@ export async function exportWorkspaceBundle(
       continue;
     }
     await check();
-    if (!(await prepare(entry.flockDocId, 'flock'))) continue;
+    if (!prepared(entry.flockDocId, flockFailures)) continue;
     const flock = await repo.openDetachedFlockDoc(entry.flockDocId);
     await writer.addRoom(
       { id: entry.flockDocId, model: 'flock', codec: room.codec, encoding: room.encoding },
