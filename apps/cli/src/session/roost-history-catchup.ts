@@ -78,11 +78,14 @@ export class RoostHistoryCatchup {
   }): Promise<CatchupResponse> {
     const { owner, response, query, signal } = args;
     const changes = response.result;
-    if (changes.state !== 'ready' || query.includeBodiesFrom === undefined) {
+    const verifiedResponse = async () => {
+      signal?.throwIfAborted();
       await args.validate();
       signal?.throwIfAborted();
       return response;
-    }
+    };
+    if (changes.state !== 'ready' || query.includeBodiesFrom === undefined)
+      return verifiedResponse();
 
     const count = response.historyCount;
     const retainedFrom =
@@ -95,10 +98,6 @@ export class RoostHistoryCatchup {
         : Math.max(retainedFrom, Math.min(changes.from, count));
     const start = from ?? count;
     const work = changes.ids.length + count - start;
-    const reset = (): CatchupResponse => ({
-      ...response,
-      result: { state: 'reset', checkpoint: changes.checkpoint },
-    });
     if (work <= SESSION_HISTORY_READ_MAX_RANGE) {
       const patched = new Set(changes.patches?.turns.map((turn) => turn.turnId));
       const changed: SessionHistoryInput[] = [];
@@ -115,8 +114,7 @@ export class RoostHistoryCatchup {
               if (read.state !== 'ready') throw new Error('History suffix body is unavailable');
               return read.turn as SessionHistoryInput;
             });
-      await args.validate();
-      signal?.throwIfAborted();
+      await verifiedResponse();
       return {
         ...response,
         result: {
@@ -133,14 +131,16 @@ export class RoostHistoryCatchup {
         capture.start <= start &&
         changes.ids.every((id) => capture.turns.has(id))
       )
-        return response;
+        return verifiedResponse();
     }
+    // Capacity does not invalidate a checkpoint. Ordinary pages still verify
+    // the current head and the reader can retry a superseded page.
     if (
       Math.max(changes.ids.length, count - start) > MAX_CAPTURE_TURNS ||
       this.captures.size + this.preparing >= MAX_RETAINED_CAPTURES ||
       this.bytes >= MAX_RETAINED_BYTES
     )
-      return reset();
+      return verifiedResponse();
 
     this.preparing++;
     let bytes = 0;
@@ -168,18 +168,17 @@ export class RoostHistoryCatchup {
         if (page.length !== end - position) throw new Error('History catch-up range is incomplete');
         for (const read of page) {
           if (read.state !== 'ready') throw new Error('History catch-up body is unavailable');
-          if (!record(read.turn.id, read)) return reset();
+          if (!record(read.turn.id, read)) return verifiedResponse();
           range.push(read);
         }
       }
       for (const id of changes.ids) {
         signal?.throwIfAborted();
-        if (!turns.has(id) && !record(id, await args.readTurn(id))) return reset();
+        if (!turns.has(id) && !record(id, await args.readTurn(id))) return verifiedResponse();
       }
       // The proof and the bodies belong to one local owner read. Pages can
       // now be sent independently of later Agent writes.
-      await args.validate();
-      signal?.throwIfAborted();
+      await verifiedResponse();
       const timer = setTimeout(() => this.remove(capture), CAPTURE_LIFETIME_MS);
       timer.unref();
       const capture = { owner, response, start, range, turns, bytes, timer };

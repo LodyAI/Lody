@@ -662,15 +662,21 @@ full catch-up and recovery. No private SDK index formats are copied into Lody.
 See the [atomic metadata decision](../../../../.agents/notes/implemented/architecture/2026-10-21-roost-atomic-commit-metadata.md).
 
 Normal repairs request affected bodies with the change interval in one reply, bounded at
-500 changed/suffix bodies. For a larger repair, the owner captures the needed bodies
-and a verified checkpoint within one local session operation. Requests for that
-exact checkpoint page through the captured bodies while the Agent can commit later
-updates. A capture holds at most 4,000 bodies and 16 MiB of encoded data, and expires
-after two minutes or owner disposal. The daemon budgets 16 concurrent captures and
-64 MiB across retained and in-progress captures. When a capture cannot fit those
-bounds, the reader uses the existing latest-window reset. The renderer atomically
-commits bodies, positions, revision and checkpoint. Coherent replies may advance
-behind newer control hints and immediately catch up again while streaming continues.
+500 changed/suffix bodies. The owner verifies receipts for a fixed checkpoint outside
+the writer queue and stops reading new receipt pages on cancellation. The serialized
+body read can add up to 128 newer events to the verified interval. A larger advance
+triggers another scan outside the queue.
+
+For a larger repair, the owner retains the needed bodies at the verified checkpoint.
+Requests for that exact checkpoint page through the retained bodies while the Agent
+commits later updates. A capture holds at most 4,000 bodies and 16 MiB of encoded data
+and expires after two minutes or owner disposal. The daemon budgets 16 concurrent
+captures and 64 MiB across retained and in-progress captures. When a capture cannot
+fit those bounds, the verified interval still permits paging against the matching
+current head. Superseded pages retry from the last applied checkpoint, preserving
+the cache. A reset requires missing or invalid change coverage. The renderer
+atomically commits bodies, positions, revision and checkpoint. Coherent replies
+may advance behind newer control hints and catch up again while streaming continues.
 Body-only edits retain cached directory cursor validity.
 A successful delta repair finishes even for a partial tail cache, without rereading
 the unchanged latest page.

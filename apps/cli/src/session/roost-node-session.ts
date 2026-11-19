@@ -26,6 +26,7 @@ import {
   PermissionOutcomeSchema,
   isSessionHistoryStatusAwaitingStart,
   createReplayPromptBuilder,
+  type SessionHistoryChanges,
   type SessionHistoryInspectionQuery,
   type SessionHistoryReadResponse,
 } from '@lody/shared';
@@ -110,7 +111,11 @@ import {
   type SessionDispatchSelection,
   type SessionDispatchSelector,
 } from './session-dispatch-history';
-import { createRoostHistoryChanges } from './roost-history-changes';
+import {
+  createRoostHistoryChanges,
+  roostCheckpointCursor,
+  ROOST_HISTORY_RECEIPT_PAGE_SIZE,
+} from './roost-history-changes';
 import {
   roostContentPatches,
   agentReceiptPut,
@@ -1301,13 +1306,14 @@ const createNodeServicesForLease = async (
       return result;
     });
   const readBodyRange = (from: number, to: number) => onOwner(() => readBodyRangeOnOwner(from, to));
-  const getHistoryPublication = () =>
+  const getHistoryPublication = (signal?: AbortSignal) =>
     readStable(async () => {
+      signal?.throwIfAborted();
       const cursor = await publishedNativeCursor();
       const head = publication.current();
-      if (!head) throw staleRead();
+      if (head?.cursor !== cursor.toString()) throw staleRead();
       return {
-        checkpoint: await historyChanges.checkpoint(cursor),
+        checkpoint: await historyChanges.checkpoint(cursor, signal),
         historyRevision: head.historyRevision,
         historyCount: head.historyCount,
         historyChange:
@@ -1316,6 +1322,34 @@ const createNodeServicesForLease = async (
             : head.change,
       };
     });
+
+  const withHistoryPatches = async (
+    changes: SessionHistoryChanges,
+    checkpoint: string,
+    through: bigint,
+    signal?: AbortSignal
+  ): Promise<SessionHistoryChanges> => {
+    if (changes.state !== 'ready' || changes.from !== undefined || !changes.ids.length)
+      return changes;
+    for (const row of currentBranch().messages) {
+      signal?.throwIfAborted();
+      if (
+        row.segmentId === 'primary' &&
+        !row.sealed &&
+        changes.ids.includes(row.businessId) &&
+        (await readState(row))
+      )
+        return changes;
+    }
+    const patches = await readRoostHistoryPatches(
+      historyHost,
+      currentBranch().messages,
+      changes,
+      checkpoint,
+      through
+    );
+    return patches ? { ...changes, patches } : changes;
+  };
 
   const history: SessionHistoryReader = {
     waitForChanges: async (checkpoint, waitMs, signal) => {
@@ -1343,24 +1377,7 @@ const createNodeServicesForLease = async (
       readStable(async () => {
         const through = await publishedNativeCursor();
         const changes = await historyChanges.read(checkpoint, through);
-        if (changes.state !== 'ready' || !options?.withPatches) return changes;
-        for (const row of currentBranch().messages) {
-          if (
-            row.segmentId === 'primary' &&
-            !row.sealed &&
-            changes.ids.includes(row.businessId) &&
-            (await readState(row))
-          )
-            return changes;
-        }
-        const patches = await readRoostHistoryPatches(
-          historyHost,
-          currentBranch().messages,
-          changes,
-          checkpoint,
-          through
-        );
-        return patches ? { ...changes, patches } : changes;
+        return options?.withPatches ? withHistoryPatches(changes, checkpoint, through) : changes;
       }),
     count: () => readStable(async () => totalHistoryCount),
     readAt: async (position) => {
@@ -3636,41 +3653,71 @@ const createNodeServicesForLease = async (
   // after the private initial load; no consumer checkpoint has been exposed yet.
   refreshCommitSubscription();
   const readHistoryCatchup = async (query: RoostCatchupQuery, signal?: AbortSignal) => {
-    signal?.throwIfAborted();
-    if (closing || disposed) throw new Error('Roost session backend is disposed');
+    const assertAvailable = () => {
+      signal?.throwIfAborted();
+      if (closing || disposed) throw new Error('Roost session backend is disposed');
+    };
+    assertAvailable();
     if (query.kind !== 'readChanges') return historyCatchup.read(catchupOwner, query);
-    return await onOwner(() =>
-      readStable(async () => {
-        signal?.throwIfAborted();
-        if (closing || disposed) throw new Error('Roost session backend is disposed');
-        const published = await getHistoryPublication();
-        const changes = await history.readChanges?.(
-          query.checkpoint,
-          query.withPatches ? { withPatches: true } : undefined
-        );
-        if (!changes || changes.checkpoint !== published.checkpoint) throw staleRead();
-        return historyCatchup.prepare({
-          owner: catchupOwner,
-          query,
-          response: {
-            type: 'session/history-read_response',
-            sessionId: sessionDoc.sessionId,
-            success: true,
-            result: changes,
-            historyRevision: published.historyRevision,
-            historyCount: published.historyCount,
-            historyChange: published.historyChange,
-          },
-          readRange: async (from, to) => (await readBodyRangeOnOwner(from, to)).map(readyTurn),
-          readTurn: history.readTurn,
-          validate: async () => {
-            if ((await getHistoryPublication()).checkpoint !== published.checkpoint)
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const before = await getHistoryPublication(signal);
+        const scannedThrough = roostCheckpointCursor(before.checkpoint);
+        // The receipts describe a fixed range. Scanning them does not need the writer.
+        const interval = await historyChanges.read(query.checkpoint, scannedThrough, signal);
+        assertAvailable();
+        if (interval.checkpoint !== before.checkpoint) throw staleRead();
+        const finish = async () => {
+          assertAvailable();
+          const published = await getHistoryPublication(signal);
+          const through = roostCheckpointCursor(published.checkpoint);
+          let changes = interval;
+          if (published.checkpoint !== interval.checkpoint) {
+            // A small number of new writes can join the verified interval. A
+            // longer gap or a new generation requires another unlocked scan.
+            if (
+              interval.state !== 'ready' ||
+              through <= scannedThrough ||
+              through - scannedThrough > ROOST_HISTORY_RECEIPT_PAGE_SIZE
+            )
               throw staleRead();
-          },
-          signal,
-        });
-      })
-    );
+            changes = await historyChanges.read(interval, through, signal);
+            if (changes.state !== 'ready' || changes.checkpoint !== published.checkpoint)
+              throw staleRead();
+          }
+          if (query.withPatches)
+            changes = await withHistoryPatches(changes, query.checkpoint, through, signal);
+          return historyCatchup.prepare({
+            owner: catchupOwner,
+            query,
+            response: {
+              type: 'session/history-read_response',
+              sessionId: sessionDoc.sessionId,
+              success: true,
+              result: changes,
+              historyRevision: published.historyRevision,
+              historyCount: published.historyCount,
+              historyChange: published.historyChange,
+            },
+            readRange: async (from, to) => (await readBodyRangeOnOwner(from, to)).map(readyTurn),
+            readTurn: history.readTurn,
+            validate: async () => {
+              if ((await getHistoryPublication(signal)).checkpoint !== published.checkpoint)
+                throw staleRead();
+              assertAvailable();
+            },
+            signal,
+          });
+        };
+        return await (interval.state === 'ready' && query.includeBodiesFrom !== undefined
+          ? onOwner(finish)
+          : finish());
+      } catch (error) {
+        assertAvailable();
+        if (attempt >= 2 || !(error instanceof Error && 'code' in error && error.code === 'stale'))
+          throw error;
+      }
+    }
   };
 
   const readHistoryInspection = (

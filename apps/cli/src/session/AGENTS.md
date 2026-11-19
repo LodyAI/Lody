@@ -2,9 +2,8 @@
 
 `CLAUDE.md` links here; edit this file.
 
-The 1,340-word ceiling preserves complete dispatch identity, commit identity precedence and
-output-lifetime rules alongside existing authorization and execution boundaries, including
-encrypted starts that run only signed input; the default ceiling had no room for those rules.
+The 1,380-word ceiling preserves dispatch identity, commit identity precedence, output lifetime,
+and the isolation of Roost reads alongside authorization and execution boundaries.
 
 [Docs](README.md); [worktree rules](worktree/AGENTS.md).
 
@@ -101,6 +100,8 @@ encrypted starts that run only signed input; the default ceiling had no room for
   removed-history revival, uncertain steer replay/retry or log/receipt pruning. Atomic edits/digests/metadata;
   agent v2/renderer v3. SDK owns input/permission/branch; local causes+RPC stage/code/ID.
   Native proofs gate path reuse/goal read elision; head/watch replaces Loro cursor.
+  Scan catch-up receipts outside the writer queue. Serialize only the bounded receipt extension
+  and exact body capture. Capture limits preserve verified history coverage.
 - `Session.createAgent` gates ACP spawn; failures reject JSON-RPC. Terminals: argv (shell for
   unsplit lines only), direct exit and bounded drain. Managed Codex reused-refresh retries once after process cleanup, delay and live Provider recheck; other auth errors do not.
 - Child tabs reuse parent workspace. No per-session paths in `MachineMeta`:
