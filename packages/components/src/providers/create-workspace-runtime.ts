@@ -59,6 +59,7 @@ import {
   type RepoWatchHandle,
 } from 'loro-repo';
 import {
+  createRendererNativeDocs,
   createRendererNativeFlockDocs,
   openRendererNativeWorkspaceMeta,
 } from './native-workspace-meta';
@@ -631,7 +632,15 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       : null;
   const repo = nativeMeta
     ? await LoroRepo.createWithExternalMetadata(
-        { ...repoOptions, externalFlockDocs: createRendererNativeFlockDocs(deps.workspaceId) },
+        {
+          ...repoOptions,
+          externalFlockDocs: createRendererNativeFlockDocs(deps.workspaceId),
+          externalDocs: createRendererNativeDocs(
+            deps.workspaceId,
+            repoStorage,
+            cacheIdentity.repoDbName
+          ),
+        },
         nativeMeta
       )
     : await LoroRepo.create(repoOptions);

@@ -162,6 +162,11 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
   const nativeMeta = await import('@lody/shared/node/native-workspace-meta')
   const nativeIpc = await import('@lody/shared/native-workspace-meta-ipc')
   const nativeFlockDocs = await import('@lody/shared/node/native-flock-docs')
+  const nativeDocs = await import('@lody/shared/node/native-docs')
+  // Electron main does not depend on Loro; the test borrows the shared package's copy.
+  const { LoroDoc } = createRequire(
+    new URL('../../../../../packages/shared/package.json', import.meta.url)
+  )('loro-crdt')
   const nativeDir = await mkdtemp(join(tmpdir(), 'lody-native-meta-ipc-'))
   const hostScript = fileURLToPath(
     new URL('../../../../../packages/shared/tests/fixtures/native-repo-host.mjs', import.meta.url)
@@ -185,6 +190,7 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
     },
     '@lody/shared/node/native-workspace-meta': nativeMeta,
     '@lody/shared/node/native-flock-docs': nativeFlockDocs,
+    '@lody/shared/node/native-docs': nativeDocs,
     '@lody/shared/native-workspace-meta-ipc': nativeIpc
   })
   new meta.NativeWorkspaceMetaIpc()
@@ -272,6 +278,37 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
     const changed = flockEvents.find((event) => event.event.kind === 'changes').event.registers
     assert.deepEqual(changed[0].key, ['mcpServer', 'a'])
     assert.equal(changed[0].clockEncoded, '1,0,renderer')
+    // Session documents: only owned ids parse; one window's commit reaches the other.
+    await assert.rejects(
+      handlers.get('nativeWorkspaceMeta.openDoc')(auxiliary, {
+        ...scope,
+        docId: 'schedule-x',
+        observationId: '00000000-0000-4000-8000-000000000005'
+      })
+    )
+    const docEvents = []
+    auxiliary.sender.on(nativeIpc.NATIVE_DOC_CHANNEL, (event) => docEvents.push(event))
+    await handlers.get('nativeWorkspaceMeta.openDoc')(auxiliary, {
+      ...scope,
+      docId: 'session-a',
+      observationId: '00000000-0000-4000-8000-000000000006'
+    })
+    assert.equal(docEvents[0].event.kind, 'snapshot')
+    const authored = new LoroDoc()
+    authored.getList('history').push('turn')
+    authored.commit()
+    await handlers.get('nativeWorkspaceMeta.commitDoc')(primary, {
+      ...scope,
+      docId: 'session-a',
+      updates: [authored.export({ mode: 'update' })]
+    })
+    while (!docEvents.some((event) => event.event.kind === 'changes'))
+      await new Promise((resolve) => setImmediate(resolve))
+    const replica = new LoroDoc()
+    replica.import(docEvents[0].event.file)
+    for (const event of docEvents.filter((e) => e.event.kind === 'changes'))
+      for (const update of event.event.updates) replica.import(update)
+    assert.deepEqual(replica.getList('history').toJSON(), ['turn'])
   } finally {
     const connection = await nativeRepo.connectNativeRepo({
       dataDir: nativeDir,

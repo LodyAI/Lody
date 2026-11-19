@@ -7,11 +7,22 @@ import {
 } from '@lody/shared/node/native-repo'
 import { commitFlockPayloads, observeNativeFlockDoc } from '@lody/shared/node/native-flock-docs'
 import {
+  commitDocUpdates,
+  importLegacyDoc,
+  isLegacyDocPublished,
+  observeNativeDoc
+} from '@lody/shared/node/native-docs'
+import {
   createNativeWorkspaceMeta,
   type NativeWorkspaceMeta
 } from '@lody/shared/node/native-workspace-meta'
 import {
+  NATIVE_DOC_CHANNEL,
   NATIVE_FLOCK_CHANNEL,
+  NativeDocCommitSchema,
+  NativeDocLegacyCheckSchema,
+  NativeDocLegacySchema,
+  NativeDocOpenSchema,
   NATIVE_META_CHANNEL,
   NativeFlockCommitSchema,
   NativeFlockOpenSchema,
@@ -180,5 +191,61 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
     await admit(workspaceId, flockDocId)
     const { client } = await connect()
     await commitFlockPayloads(client, workspaceId, flockDocId, payloads)
+  }
+
+  /** A window's update view of one owned Loro document (Session). */
+  @IpcMethod()
+  async openDoc(input: unknown) {
+    const { workspaceId, docId, observationId } = NativeDocOpenSchema.parse(input)
+    await admit(workspaceId)
+    const sender = getIpcContext().event.sender
+    const owned = windowViews(sender)
+    if (owned.has(observationId) || owned.size >= 64) throw new Error('native_meta_view_denied')
+    const { client } = await connect()
+    const observation = await observeNativeDoc(client, workspaceId, docId, (event) => {
+      if (!sender.isDestroyed()) sender.send(NATIVE_DOC_CHANNEL, { observationId, event })
+    })
+    const release = () => void observation.release().catch(() => {})
+    if (views.get(sender) !== owned) {
+      release()
+      throw new Error('native_meta_view_closed')
+    }
+    owned.set(observationId, release)
+    try {
+      await observation.ready
+    } catch (error) {
+      owned.delete(observationId)
+      release()
+      throw error
+    }
+  }
+
+  /** Resolves only after the updates are durably committed. */
+  @IpcMethod()
+  async commitDoc(input: unknown) {
+    const { workspaceId, docId, updates } = NativeDocCommitSchema.parse(input)
+    await admit(workspaceId)
+    const { client } = await connect()
+    await commitDocUpdates(client, workspaceId, docId, updates)
+  }
+
+  /** Whether this window's legacy replica of a document still needs importing. */
+  @IpcMethod()
+  async needsLegacyDoc(input: unknown) {
+    const { workspaceId, docId, source } = NativeDocLegacyCheckSchema.parse(input)
+    await admit(workspaceId)
+    const { client } = await connect()
+    return !(await isLegacyDocPublished(client, workspaceId, docId, source))
+  }
+
+  @IpcMethod()
+  async importLegacyDoc(input: unknown) {
+    const { workspaceId, docId, source, snapshot, version } = NativeDocLegacySchema.parse(input)
+    await admit(workspaceId)
+    const { client } = await connect()
+    return importLegacyDoc(client, workspaceId, docId, source, async () => ({
+      snapshot,
+      version
+    }))
   }
 }

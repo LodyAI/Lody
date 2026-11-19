@@ -1,0 +1,208 @@
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { connectEngine } from '@loro-dev/loro-repo-client/node';
+import { LoroRepo } from 'loro-repo';
+import { connectNativeRepo } from '../src/node/native-repo';
+import { createNativeDocs } from '../src/node/native-docs';
+import { describe, it } from 'vitest';
+import { LoroDoc } from 'loro-crdt';
+import { createHistoryWriter } from '../src/history-writer';
+import { createLoroSessionData } from '../src/session-data/loro';
+import type { SessionHistory, SessionId } from '../src';
+
+// Opt-in: LODY_SESSION_LOAD_BENCH=<turns>[,<turns>...]. Measures the
+// whole-document first-screen path with the real HistoryWriter and reader, in
+// process and through the native host (open, last 50, append-to-visible).
+const sizes = (process.env.LODY_SESSION_LOAD_BENCH ?? '')
+  .split(',')
+  .map(Number)
+  .filter((n) => n > 0);
+
+const text = (length: number, seed: number) =>
+  `turn ${seed} `.padEnd(length, 'lorem ipsum dolor sit amet ');
+
+const turn = (index: number): SessionHistory =>
+  (index % 2 === 0
+    ? {
+        id: `turn-${index}`,
+        role: 'user',
+        timestamp: '2026-01-01T00:00:00Z',
+        items: [{ type: 'text', text: text(200, index) }],
+        fileDiff: [],
+      }
+    : {
+        id: `turn-${index}`,
+        role: 'assistant',
+        timestamp: '2026-01-01T00:00:00Z',
+        items: [
+          { type: 'text', text: text(1200, index) },
+          { type: 'text', text: text(300, index + 1) },
+        ],
+        fileDiff: [],
+      }) as SessionHistory;
+
+const ms = (start: number) => +(performance.now() - start).toFixed(1);
+const mb = (bytes: number) => +(bytes / 1024 / 1024).toFixed(1);
+
+const hostScript = fileURLToPath(new URL('./fixtures/native-repo-host.mjs', import.meta.url));
+const rssOf = async (pid: number) =>
+  Number(/VmRSS:\s+(\d+)/.exec(await readFile(`/proc/${pid}/status`, 'utf8'))?.[1] ?? 0) * 1024;
+const percentiles = (samples: number[]) => {
+  const sorted = [...samples].sort((a, b) => a - b);
+  const at = (p: number) =>
+    +sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))]!.toFixed(2);
+  return { p50: at(0.5), p95: at(0.95), p99: at(0.99) };
+};
+
+/** The same document through the native host: open, first screen, append-to-visible. */
+async function nativePath(turns: number, snapshot: Uint8Array) {
+  const dataDir = await mkdtemp(join(tmpdir(), `lody-native-session-${turns}-`));
+  const ns = 'bench';
+  const docId = 'session-bench';
+  const connection = await connectNativeRepo({
+    dataDir,
+    launcher: () => ({ command: process.execPath, args: [hostScript] }),
+  });
+  const peer = await connectEngine(dataDir, { queueWhileReconnecting: false });
+  const pid = (JSON.parse(await readFile(join(dataDir, 'engine.json'), 'utf8')) as { pid: number })
+    .pid;
+  try {
+    await connection.client.createRoom(ns, { kind: 'loro_doc', id: docId }, 'plaintext');
+    await connection.client.importRoomState(ns, { kind: 'loro_doc', id: docId }, { snapshot });
+    const owned = (id: string) => id === docId;
+    const daemon = await LoroRepo.create({
+      externalDocs: createNativeDocs(connection.client, ns, owned),
+    });
+    const daemonDoc = (await daemon.openPersistedDoc(docId)).doc;
+    const writer = createLoroSessionData({ sessionId: 'bench' as SessionId, doc: daemonDoc });
+    globalThis.gc?.();
+    const rssBefore = process.memoryUsage().rss;
+    const hostBefore = await rssOf(pid);
+
+    let start = performance.now();
+    const raw = await peer.exportLoroRaw(ns, { kind: 'loro_doc', id: docId });
+    const rawExportMs = ms(start);
+    start = performance.now();
+    LoroDoc.fromSnapshot(raw.bytes).free();
+    const fromSnapshotMs = ms(start);
+    start = performance.now();
+    const renderer = await LoroRepo.create({ externalDocs: createNativeDocs(peer, ns, owned) });
+    const doc = (await renderer.openPersistedDoc(docId)).doc;
+    const openMs = ms(start);
+    const data = createLoroSessionData({ sessionId: 'bench' as SessionId, doc });
+    start = performance.now();
+    data.history.readRange(turns - 50, turns);
+    const last50Ms = ms(start);
+    start = performance.now();
+    const observation = data.history.observe(() => {});
+    await observation.initial;
+    const directoryMs = ms(start);
+    const rendererRssMb = mb(process.memoryUsage().rss - rssBefore);
+    const hostRssMb = mb((await rssOf(pid)) - hostBefore);
+
+    const visible: number[] = [];
+    for (let i = 0; i < 60; i++) {
+      const length = doc.getList('history').length;
+      const seen = new Promise<void>((resolve) => {
+        const stop = doc.subscribe(() => {
+          if (doc.getList('history').length > length) {
+            stop();
+            resolve();
+          }
+        });
+      });
+      start = performance.now();
+      await writer.commands.appendTurn(turn(turns + i));
+      await daemon.persistDocNow(docId, daemonDoc);
+      await seen;
+      if (i >= 10) visible.push(performance.now() - start);
+    }
+    observation.unsubscribe();
+    await renderer.destroy();
+    await daemon.destroy();
+    return {
+      nativeRawExportMs: rawExportMs,
+      nativeFromSnapshotMs: fromSnapshotMs,
+      nativeOpenMs: openMs,
+      nativeLast50Ms: last50Ms,
+      nativeFirstScreenWithoutDirectoryMs: +(openMs + last50Ms).toFixed(1),
+      nativeDirectoryMs: directoryMs,
+      appendVisible: percentiles(visible),
+      rendererRssDeltaMb: rendererRssMb,
+      hostRssDeltaMb: hostRssMb,
+    };
+  } finally {
+    await peer.close();
+    await connection.close();
+    process.kill(pid, 'SIGTERM');
+    while (
+      (() => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      })()
+    )
+      await new Promise((resolve) => setImmediate(resolve));
+    await rm(dataDir, { recursive: true, force: true });
+  }
+}
+
+describe.skipIf(sizes.length === 0)('Session document first-screen load', () => {
+  it('measures import, directory, last-50 read and append', async () => {
+    const results = [];
+    for (const turns of sizes) {
+      const source = new LoroDoc();
+      const writer = createHistoryWriter(source);
+      for (let i = 0; i < turns; i++) writer.append(turn(i));
+      const snapshot = source.export({ mode: 'snapshot' });
+      source.free();
+      globalThis.gc?.();
+      const rssBefore = process.memoryUsage().rss;
+
+      let start = performance.now();
+      const doc = new LoroDoc();
+      doc.import(snapshot);
+      const importMs = ms(start);
+
+      const data = createLoroSessionData({ sessionId: 'bench' as SessionId, doc });
+      start = performance.now();
+      const observation = data.history.observe(() => {});
+      await observation.initial;
+      const directoryMs = ms(start);
+
+      start = performance.now();
+      data.history.readRange(turns - 50, turns);
+      const last50Ms = ms(start);
+      const rssOpen = process.memoryUsage().rss;
+
+      const appendSamples: number[] = [];
+      for (let i = 0; i < 50; i++) {
+        start = performance.now();
+        await data.commands.appendTurn(turn(turns + i));
+        appendSamples.push(performance.now() - start);
+      }
+      appendSamples.sort((a, b) => a - b);
+      observation.unsubscribe();
+      results.push({
+        turns,
+        snapshotMb: mb(snapshot.byteLength),
+        importMs,
+        directoryMs,
+        last50Ms,
+        firstScreenMs: +(importMs + directoryMs + last50Ms).toFixed(1),
+        appendP50Ms: +appendSamples[25]!.toFixed(2),
+        appendP95Ms: +appendSamples[47]!.toFixed(2),
+        rssOpenDeltaMb: mb(rssOpen - rssBefore),
+        ...(await nativePath(turns, snapshot)),
+      });
+      doc.free();
+    }
+    const out = process.env.LODY_SESSION_LOAD_BENCH_OUT;
+    if (out) await writeFile(out, JSON.stringify(results, null, 2));
+  }, 3_600_000);
+});
