@@ -156,10 +156,12 @@ describe('live agent status', () => {
 
   const statusRow = () => container.querySelector('[data-agent-activity-row]');
   const expandActivityGroup = async () => {
-    const disclosure = container.querySelector<HTMLButtonElement>(
+    const disclosures = container.querySelectorAll<HTMLButtonElement>(
       '[data-conversation-disclosure="group"]'
     );
-    expect(disclosure).not.toBeNull();
+    // A live segment may also render an outer "Working" disclosure first.
+    const disclosure = disclosures[disclosures.length - 1];
+    expect(disclosure).toBeDefined();
     if (disclosure!.getAttribute('aria-expanded') === 'false') {
       await act(async () => disclosure!.click());
     }
