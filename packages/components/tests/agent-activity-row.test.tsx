@@ -155,6 +155,13 @@ describe('live agent status', () => {
   const liveNow = (): HistoryLiveWindow => ({ sync: 'live', since: Date.now() });
 
   const statusRow = () => container.querySelector('[data-agent-activity-row]');
+  const expandActivityGroup = async () => {
+    const disclosure = container.querySelector<HTMLButtonElement>(
+      '[data-conversation-disclosure="group"][aria-expanded="false"]'
+    );
+    expect(disclosure).not.toBeNull();
+    await act(async () => disclosure!.click());
+  };
   const shimmering = () =>
     Array.from(container.querySelectorAll('.agent-shimmer')).map((el) => el.textContent);
 
@@ -185,6 +192,7 @@ describe('live agent status', () => {
       ]),
       { label: 'Thinking' }
     );
+    await expandActivityGroup();
 
     const thought = [...container.querySelectorAll('ol')].find((list) =>
       list.textContent?.includes('Confirm the backup is readable')
@@ -219,6 +227,7 @@ describe('live agent status', () => {
       ),
       { label: 'Thinking' }
     );
+    await expandActivityGroup();
 
     const thought = [...container.querySelectorAll('ol')].find((list) =>
       list.textContent?.includes('Keep the live summary in view')
