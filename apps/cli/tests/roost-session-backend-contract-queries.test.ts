@@ -808,6 +808,114 @@ describe('Production Roost dispatch projection', () => {
     ).toEqual(expected.slice(12, 15));
   });
 
+  it('keeps every catch-up page and changed body readable after the owner advances', async () => {
+    const fixture = await coldHistoryHandlerFixture(2);
+    const [sessionId, otherSessionId] = [...fixture.docs.keys()];
+    if (!sessionId || !otherSessionId) throw new Error('Missing synthetic sessions');
+    try {
+      await fixture.ready(sessionId);
+      await fixture.ready(otherSessionId);
+      const write = (operation: 'append' | 'apply_action', payload: Record<string, unknown>) =>
+        fixture.rpc.writeSessionHistoryForRpc(sessionId, operation, payload);
+      expect(await write('append', { entry: nativeUser('cached') })).toMatchObject({
+        success: true,
+      });
+      const base = await fixture.rpc.readSessionHistoryForRpc(sessionId, {
+        kind: 'readLatestPage',
+        withCheckpoint: true,
+        limit: 40,
+      });
+      const baseCheckpoint = (base.result as { checkpoint?: string }).checkpoint;
+      if (!baseCheckpoint) throw new Error('Missing base checkpoint');
+      const doc = fixture.docs.get(sessionId);
+      if (!doc) throw new Error('Missing synthetic document');
+      const backend = await createSessionBackend(doc);
+      await backend.applyHistoryAction({
+        kind: 'user-status',
+        turnId: 'cached',
+        status: 'handled',
+      });
+      for (let index = 0; index < 500; index++) {
+        await backend.appendHistoryTurn(nativeUser(`missing-${index}`));
+      }
+      const active = nativeAssistant('still-writing');
+      await backend.appendHistoryTurn({
+        ...active,
+        items: [{ type: 'text', text: 'captured' }],
+      });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const plan = await fixture.rpc.readSessionHistoryForRpc(sessionId, {
+        kind: 'readChanges',
+        checkpoint: baseCheckpoint,
+        includeBodiesFrom: 0,
+      });
+      expect(plan).toMatchObject({ success: true, historyCount: 502 });
+      const changes = SessionHistoryChangesSchema.parse(plan.result);
+      expect(changes).toMatchObject({
+        state: 'ready',
+        from: 1,
+        ids: expect.arrayContaining(['cached']),
+      });
+      if (changes.state !== 'ready') throw new Error('Expected exact catch-up interval');
+      expect(changes.bodies).toBeUndefined();
+      const edit = async (text: string) => {
+        expect(
+          await write('apply_action', {
+            action: {
+              kind: 'assistant-items',
+              mode: 'replace',
+              turnId: active.id,
+              items: [{ type: 'text', text }],
+            },
+          })
+        ).toMatchObject({ success: true });
+      };
+      const range = (from: number, to: number) => ({
+        kind: 'readRange' as const,
+        from,
+        to,
+        atCheckpoint: changes.checkpoint,
+      });
+      await edit('new before first page');
+      const first = await fixture.rpc.readSessionHistoryForRpc(sessionId, range(1, 501));
+      expect(first).toMatchObject({ success: true, historyRevision: plan.historyRevision });
+      expect(first.result).toHaveLength(500);
+      await edit('new before last page');
+      const last = await fixture.rpc.readSessionHistoryForRpc(sessionId, range(501, 502));
+      expect(last).toMatchObject({
+        success: true,
+        historyRevision: plan.historyRevision,
+        result: [{ state: 'ready', turn: { id: active.id, items: [{ text: 'captured' }] } }],
+      });
+      expect(
+        await fixture.rpc.readSessionHistoryForRpc(sessionId, {
+          kind: 'readTurn',
+          turnId: 'cached',
+          atCheckpoint: changes.checkpoint,
+        })
+      ).toMatchObject({
+        success: true,
+        historyRevision: plan.historyRevision,
+        result: { state: 'ready', turn: { id: 'cached', status: 'handled' } },
+      });
+      expect(
+        await fixture.rpc.readSessionHistoryForRpc(otherSessionId, range(1, 501))
+      ).toMatchObject({ success: false, retryReason: 'superseded' });
+      expect(await fixture.rpc.readSessionHistoryForRpc(sessionId, range(0, 1))).toMatchObject({
+        success: false,
+        retryReason: 'superseded',
+      });
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(await fixture.rpc.readSessionHistoryForRpc(sessionId, range(501, 502))).toMatchObject({
+        success: false,
+        retryReason: 'superseded',
+      });
+    } finally {
+      vi.useRealTimers();
+      await fixture.close();
+    }
+  });
+
   it('retries a positional read when a foreign body changes during hydration', async () => {
     const fixture = await nativeFixture();
     for (let i = 0; i < 45; i++)

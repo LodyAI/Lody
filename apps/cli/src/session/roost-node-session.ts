@@ -92,6 +92,7 @@ import {
   type RoostSessionBackendServices,
 } from './roost-session-backend';
 import { adaptRoostProjectedMessage, encodeRoostContent } from './roost-history-port';
+import { RoostHistoryCatchup, type RoostCatchupQuery } from './roost-history-catchup';
 import { registerSessionBackendFactory } from './session-backend';
 import { RoostHistoryGeneration } from './roost-history-generation';
 import { RoostHistoryHead } from './roost-history-head';
@@ -285,10 +286,13 @@ const record = (value: unknown): value is Record<string, unknown> =>
 const identityKey = (identity: { businessId: string; segmentId: string }): string =>
   `${identity.businessId}\u0000${identity.segmentId}`;
 
+const historyCatchup = new RoostHistoryCatchup();
+
 const createNodeServicesForLease = async (
   sessionDoc: SessionDocument,
   lease: OwnerLease
 ): Promise<RoostSessionBackendServices> => {
+  const catchupOwner = Symbol();
   const historyGeneration = new RoostHistoryGeneration(
     lease.client,
     lease.owner,
@@ -1225,79 +1229,94 @@ const createNodeServicesForLease = async (
           : readMetadataPage({ latest: true, limit })
       )
     );
-  const readBodyRange = (from: number, to: number): Promise<SessionEntry[]> =>
-    onOwner(() =>
-      readStable(async () => {
-        const source = roostHistory,
-          host = historyHost,
-          generation = readGeneration;
-        const cursor = await source.observedEventCursor();
-        const start = Math.max(0, Math.min(from, totalHistoryCount)),
-          end = Math.max(start, Math.min(to, totalHistoryCount));
-        const index = dispatchIndex(),
-          checkpoint = await index.checkpoint(cursor, totalHistoryCount);
-        const result: SessionEntry[] = [];
-        if (
-          cursor === knownCursor &&
-          start >= loadedStartPosition &&
-          end <= loadedStartPosition + entries.length
-        ) {
-          return entries
-            .slice(start - loadedStartPosition, end - loadedStartPosition)
-            .map((entry) => clone(entry));
-        }
-        let useIndex = Boolean(checkpoint);
-        for (let position = start; position < end; position += 500) {
-          const stop = Math.min(end, position + 500);
-          let selected: SessionEntry[] | undefined;
-          if (useIndex && checkpoint)
-            try {
-              selected = await readIndexedEntries(
-                source,
-                await index.range(checkpoint, position, stop)
-              );
-            } catch (error) {
-              if (
-                !(error instanceof z.ZodError) &&
-                !(error instanceof SyntaxError) &&
-                !(error instanceof RoostDispatchIndexCorrupt)
-              )
-                throw error;
-              index.forget();
-              useIndex = false;
-            }
-          if (!selected) {
-            const page = await source.readActiveBranchPage(viewId, {
-              from: position,
-              limit: stop - position,
-            });
-            if (page.totalCount !== totalHistoryCount) {
-              needsRefresh = true;
-              throw staleRead();
-            }
-            if (!page.complete || page.startPosition !== position)
-              throw new Error('Roost requested history range is incomplete');
-            selected = await projectBranchPage(page, decodeMessages(page.messages), false);
-            if (selected.length !== stop - position)
-              throw new Error('Roost requested history range is incomplete');
+  const readBodyRangeOnOwner = (from: number, to: number): Promise<SessionEntry[]> =>
+    readStable(async () => {
+      const source = roostHistory,
+        host = historyHost,
+        generation = readGeneration;
+      const cursor = await source.observedEventCursor();
+      const start = Math.max(0, Math.min(from, totalHistoryCount)),
+        end = Math.max(start, Math.min(to, totalHistoryCount));
+      const index = dispatchIndex(),
+        checkpoint = await index.checkpoint(cursor, totalHistoryCount);
+      const result: SessionEntry[] = [];
+      if (
+        cursor === knownCursor &&
+        start >= loadedStartPosition &&
+        end <= loadedStartPosition + entries.length
+      ) {
+        return entries
+          .slice(start - loadedStartPosition, end - loadedStartPosition)
+          .map((entry) => clone(entry));
+      }
+      let useIndex = Boolean(checkpoint);
+      for (let position = start; position < end; position += 500) {
+        const stop = Math.min(end, position + 500);
+        let selected: SessionEntry[] | undefined;
+        if (useIndex && checkpoint)
+          try {
+            selected = await readIndexedEntries(
+              source,
+              await index.range(checkpoint, position, stop)
+            );
+          } catch (error) {
+            if (
+              !(error instanceof z.ZodError) &&
+              !(error instanceof SyntaxError) &&
+              !(error instanceof RoostDispatchIndexCorrupt)
+            )
+              throw error;
+            index.forget();
+            useIndex = false;
           }
-          result.push(...selected);
+        if (!selected) {
+          const page = await source.readActiveBranchPage(viewId, {
+            from: position,
+            limit: stop - position,
+          });
+          if (page.totalCount !== totalHistoryCount) {
+            needsRefresh = true;
+            throw staleRead();
+          }
+          if (!page.complete || page.startPosition !== position)
+            throw new Error('Roost requested history range is incomplete');
+          selected = await projectBranchPage(page, decodeMessages(page.messages), false);
+          if (selected.length !== stop - position)
+            throw new Error('Roost requested history range is incomplete');
         }
-        if (useIndex && checkpoint) await index.validate(checkpoint);
-        await historyGeneration.resolve();
-        if (
-          source !== historyGeneration.history ||
-          host !== historyGeneration.host ||
-          generation !== readGeneration ||
-          cursor !== (await source.observedEventCursor())
-        ) {
-          needsRefresh = true;
-          throw staleRead();
-        }
-        rememberPageEntries(start, result);
-        return result;
-      })
-    );
+        result.push(...selected);
+      }
+      if (useIndex && checkpoint) await index.validate(checkpoint);
+      await historyGeneration.resolve();
+      if (
+        source !== historyGeneration.history ||
+        host !== historyGeneration.host ||
+        generation !== readGeneration ||
+        cursor !== (await source.observedEventCursor())
+      ) {
+        needsRefresh = true;
+        throw staleRead();
+      }
+      rememberPageEntries(start, result);
+      return result;
+    });
+  const readBodyRange = (from: number, to: number) => onOwner(() => readBodyRangeOnOwner(from, to));
+  const getHistoryPublication = () =>
+    readStable(async () => {
+      const cursor = await publishedNativeCursor();
+      const head = publication.current();
+      if (!head) throw staleRead();
+      return {
+        checkpoint: await historyChanges.checkpoint(cursor),
+        historyRevision: head.historyRevision,
+        historyCount: head.historyCount,
+        historyChange:
+          head.change?.kind === 'changed'
+            ? { kind: 'changed' as const, ids: [...head.change.businessIds] }
+            : head.change,
+      };
+    });
+
   const history: SessionHistoryReader = {
     waitForChanges: async (checkpoint, waitMs, signal) => {
       if (closing || disposed || signal?.aborted) throw new Error('History observer closed');
@@ -1317,20 +1336,7 @@ const createNodeServicesForLease = async (
         signal?.removeEventListener('abort', wake);
       }
     },
-    getPublication: () =>
-      readStable(async () => {
-        const cursor = await publishedNativeCursor();
-        const head = publication.current()!;
-        return {
-          checkpoint: await historyChanges.checkpoint(cursor),
-          historyRevision: head.historyRevision,
-          historyCount: head.historyCount,
-          historyChange:
-            head.change?.kind === 'changed'
-              ? { kind: 'changed' as const, ids: [...head.change.businessIds] }
-              : head.change,
-        };
-      }),
+    getPublication: getHistoryPublication,
     getCheckpoint: () =>
       readStable(async () => historyChanges.checkpoint(await publishedNativeCursor())),
     readChanges: (checkpoint, options) =>
@@ -3629,6 +3635,44 @@ const createNodeServicesForLease = async (
   // Admission follows registration. Its fresh bootstrap hint checks the gap
   // after the private initial load; no consumer checkpoint has been exposed yet.
   refreshCommitSubscription();
+  const readHistoryCatchup = async (query: RoostCatchupQuery, signal?: AbortSignal) => {
+    signal?.throwIfAborted();
+    if (closing || disposed) throw new Error('Roost session backend is disposed');
+    if (query.kind !== 'readChanges') return historyCatchup.read(catchupOwner, query);
+    return await onOwner(() =>
+      readStable(async () => {
+        signal?.throwIfAborted();
+        if (closing || disposed) throw new Error('Roost session backend is disposed');
+        const published = await getHistoryPublication();
+        const changes = await history.readChanges?.(
+          query.checkpoint,
+          query.withPatches ? { withPatches: true } : undefined
+        );
+        if (!changes || changes.checkpoint !== published.checkpoint) throw staleRead();
+        return historyCatchup.prepare({
+          owner: catchupOwner,
+          query,
+          response: {
+            type: 'session/history-read_response',
+            sessionId: sessionDoc.sessionId,
+            success: true,
+            result: changes,
+            historyRevision: published.historyRevision,
+            historyCount: published.historyCount,
+            historyChange: published.historyChange,
+          },
+          readRange: async (from, to) => (await readBodyRangeOnOwner(from, to)).map(readyTurn),
+          readTurn: history.readTurn,
+          validate: async () => {
+            if ((await getHistoryPublication()).checkpoint !== published.checkpoint)
+              throw staleRead();
+          },
+          signal,
+        });
+      })
+    );
+  };
+
   const readHistoryInspection = (
     query: SessionHistoryInspectionQuery
   ): Promise<SessionHistoryReadResponse> =>
@@ -3731,6 +3775,7 @@ const createNodeServicesForLease = async (
   return {
     sessionData,
     readHistoryInspection,
+    readHistoryCatchup,
     readHistoryReplay: (excludeTurnId) =>
       readObservedHistory(() => readReplayFromMembers(roostHistory, excludeTurnId)),
     readLatestGoal,
@@ -3790,6 +3835,7 @@ const createNodeServicesForLease = async (
         await writeSerial;
       } finally {
         disposed = true;
+        historyCatchup.release(catchupOwner);
         branchCursors.clear();
         pageEntries.clear();
         pageIdsByPosition.clear();
