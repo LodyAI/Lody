@@ -29,6 +29,26 @@ async function repo(): Promise<TestRepo> {
   return test;
 }
 
+async function exportFrom(source: TestRepo, workspaceId: string): Promise<OpenBundle> {
+  await source.repo.flush();
+  const out = path.join(await tempDir(), `${workspaceId}-${cleanup.length}.lodybundle`);
+  await exportWorkspaceBundle({
+    repo: source.repo,
+    workspaceId,
+    writer: await createBundleWriter(out),
+    source: {
+      workspaceId,
+      exporterUserId: 'u',
+      exporterMachineId: 'm',
+      lodyVersion: 't',
+      startedAt: 'a',
+    },
+  });
+  const bundle = await openBundle(out);
+  cleanup.push(() => bundle.close());
+  return bundle;
+}
+
 async function sourceBundle(): Promise<OpenBundle> {
   const source = await repo();
   await writeDoc(source.repo, 'session-s1', { title: 'One' }, (doc) =>
@@ -42,22 +62,7 @@ async function sourceBundle(): Promise<OpenBundle> {
     flock.put(['project', 'p2'], { name: 'Q' });
     flock.delete(['project', 'p2']);
   });
-  await source.repo.flush();
-  const out = path.join(await tempDir(), 'b.lodybundle');
-  await exportWorkspaceBundle({
-    repo: source.repo,
-    workspaceId: WS,
-    writer: await createBundleWriter(out),
-    source: {
-      workspaceId: WS,
-      exporterUserId: 'u',
-      exporterMachineId: 'm',
-      lodyVersion: 't',
-      startedAt: 'a',
-    },
-  });
-  const bundle = await openBundle(out);
-  cleanup.push(() => bundle.close());
+  const bundle = await exportFrom(source, WS);
   return bundle;
 }
 
@@ -151,7 +156,7 @@ describe('workspace import', () => {
     expect(plan.rooms.find((room) => room.id === 'schedule-x')).toMatchObject({ action: 'merge' });
   });
 
-  it('refuses members and bundles with unknown codecs', async () => {
+  it('refuses members, unknown codecs and rooms whose codec does not match their id', async () => {
     const bundle = await sourceBundle();
     const target = await repo();
     await expect(
@@ -164,25 +169,31 @@ describe('workspace import', () => {
       })
     ).rejects.toBeInstanceOf(ImportRefusedError);
 
-    const out = path.join(await tempDir(), 'odd.lodybundle');
-    const writer = await createBundleWriter(out);
-    await writer.addRoom(
-      { id: 'x-1', model: 'loro', codec: 'odd/v9', encoding: 'loro-snapshot/v1' },
-      new Uint8Array([1])
-    );
-    await writer.finish({
-      workspaceId: WS,
-      exporterUserId: 'u',
-      exporterMachineId: 'm',
-      lodyVersion: 't',
-      startedAt: 'a',
-      finishedAt: 'b',
-    });
-    const odd = await openBundle(out);
-    cleanup.push(() => odd.close());
-    await expect(planWorkspaceImport({ bundle: odd, repo: target.repo, ...owner })).rejects.toThrow(
-      /odd\/v9/
-    );
+    const craft = async (
+      room: Parameters<Awaited<ReturnType<typeof createBundleWriter>>['addRoom']>[0]
+    ) => {
+      const out = path.join(await tempDir(), 'odd.lodybundle');
+      const writer = await createBundleWriter(out);
+      await writer.addRoom(room, new Uint8Array([1]));
+      await writer.finish({
+        workspaceId: WS,
+        exporterUserId: 'u',
+        exporterMachineId: 'm',
+        lodyVersion: 't',
+        startedAt: 'a',
+        finishedAt: 'b',
+      });
+      const odd = await openBundle(out);
+      cleanup.push(() => odd.close());
+      return planWorkspaceImport({ bundle: odd, repo: target.repo, ...owner });
+    };
+    await expect(
+      craft({ id: 'x-1', model: 'loro', codec: 'odd/v9', encoding: 'loro-snapshot/v1' })
+    ).rejects.toThrow(/odd\/v9/);
+    // A machine document labelled as a conversation would cross workspaces unnoticed.
+    await expect(
+      craft({ id: 'machine-m1', model: 'loro', codec: 'session/v1', encoding: 'loro-snapshot/v1' })
+    ).rejects.toThrow(/machine-m1/);
   });
 
   it('resumes after an interruption and ends in the same state', async () => {
@@ -238,22 +249,7 @@ describe('workspace import', () => {
       flock.put(['schedule', 'x'], { on: true });
       flock.put(['runtime', 'x', 'm1'], { next: 1 });
     });
-    await source.repo.flush();
-    const out = path.join(await tempDir(), 'a.lodybundle');
-    await exportWorkspaceBundle({
-      repo: source.repo,
-      workspaceId: WS,
-      writer: await createBundleWriter(out),
-      source: {
-        workspaceId: WS,
-        exporterUserId: 'u',
-        exporterMachineId: 'm',
-        lodyVersion: 't',
-        startedAt: 'a',
-      },
-    });
-    const bundle = await openBundle(out);
-    cleanup.push(() => bundle.close());
+    const bundle = await exportFrom(source, WS);
 
     const target = await repo();
     const plan = await planWorkspaceImport({
@@ -323,21 +319,7 @@ describe('workspace import', () => {
     ).toBe(false);
 
     // The return trip: the target's bundle carries the fence back, and the source ignores it.
-    const back = path.join(await tempDir(), 'back.lodybundle');
-    await exportWorkspaceBundle({
-      repo: target.repo,
-      workspaceId: 'ws_b',
-      writer: await createBundleWriter(back),
-      source: {
-        workspaceId: 'ws_b',
-        exporterUserId: 'u',
-        exporterMachineId: 'm',
-        lodyVersion: 't',
-        startedAt: 'a',
-      },
-    });
-    const backBundle = await openBundle(back);
-    cleanup.push(() => backBundle.close());
+    const backBundle = await exportFrom(target, 'ws_b');
     await applyWorkspaceImport({
       plan: await planWorkspaceImport({
         bundle: backBundle,
@@ -464,22 +446,7 @@ describe('workspace import', () => {
     await writeDoc(source.repo, 'schedule-x', { kind: 'schedule' }, (doc) =>
       doc.getMap('definition').set('activationId', 'act-1')
     );
-    await source.repo.flush();
-    const out = path.join(await tempDir(), 'c.lodybundle');
-    await exportWorkspaceBundle({
-      repo: source.repo,
-      workspaceId: WS,
-      writer: await createBundleWriter(out),
-      source: {
-        workspaceId: WS,
-        exporterUserId: 'u',
-        exporterMachineId: 'm',
-        lodyVersion: 't',
-        startedAt: 'a',
-      },
-    });
-    const bundle = await openBundle(out);
-    cleanup.push(() => bundle.close());
+    const bundle = await exportFrom(source, WS);
     const target = await repo();
     const journal = path.join(await tempDir(), 'j.json');
     const input = {
@@ -513,6 +480,44 @@ describe('workspace import', () => {
     expect(getImportFence(meta, 'ws_b').turnIds).toContain('u1');
     expect(
       isScheduleImportFenced((await target.repo.getDocMeta('schedule-x'))?.meta, 'ws_b', 'act-1')
+    ).toBe(true);
+  });
+
+  it('fences new work when the same source is imported into the workspace again', async () => {
+    const source = await repo();
+    await writeDoc(source.repo, 'session-s1', { title: 'One', latestUserMsgId: 'u1' }, (doc) =>
+      doc.getText('t').insert(0, 'hi')
+    );
+    await writeDoc(source.repo, 'schedule-x', { kind: 'schedule' }, (doc) =>
+      doc.getMap('definition').set('activationId', 'act-1')
+    );
+    const target = await repo();
+    const input = { repo: target.repo, workspaceId: 'ws_b', role: 'owner', actorUserId: 'u' };
+    const importInto = async (bundle: OpenBundle) =>
+      applyWorkspaceImport({
+        plan: await planWorkspaceImport({ bundle, ...input }),
+        bundle,
+        repo: target.repo,
+        journalPath: path.join(await tempDir(), 'j.json'),
+      });
+    await importInto(await exportFrom(source, WS));
+
+    // The conversation and schedule went on in the source after the first import.
+    await writeDoc(source.repo, 'session-s1', { latestUserMsgId: 'u2' }, (doc) => {
+      const queued = doc.getMovableList('mq').insertContainer(0, new LoroMap());
+      queued.set('userTurnId', 'q2');
+    });
+    await writeDoc(source.repo, 'schedule-x', {}, (doc) =>
+      doc.getMap('definition').set('activationId', 'act-2')
+    );
+    await importInto(await exportFrom(source, WS));
+
+    const meta = (await target.repo.getDocMeta('session-s1'))?.meta as SessionMeta | undefined;
+    expect(meta).toMatchObject({ latestUserMsgId: 'u2' });
+    expect([...getImportFence(meta, 'ws_b').turnIds].sort()).toEqual(['q2', 'u1', 'u2']);
+    expect(getImportFence(meta, 'ws_b').queueItemIds).toHaveLength(1);
+    expect(
+      isScheduleImportFenced((await target.repo.getDocMeta('schedule-x'))?.meta, 'ws_b', 'act-2')
     ).toBe(true);
   });
 });

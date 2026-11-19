@@ -4,12 +4,24 @@ import { Flock } from '@loro-dev/flock-wasm';
 import { LoroDoc } from 'loro-crdt';
 import type { JsonObject, LoroRepo } from 'loro-repo';
 import { z } from 'zod';
-import { createSessionMirror, type SessionHistoryInput } from '@lody/shared';
+import {
+  createSessionMirror,
+  type ScheduleImportFence,
+  type SessionHistoryInput,
+  type SessionImportFence,
+} from '@lody/shared';
 import type { BundleKind, BundleSkipReason } from '@lody/shared/workspace-bundle-control';
 import { atomicJson } from '../fs-atomic';
 import type { OpenBundle } from './bundle-file';
 import { authorizeFlockChanges } from './authorize';
-import { classifyRoom, codecTraits, KNOWN_CODECS, META_ROOM_ID, ROOST_ROOM_PREFIX } from './codecs';
+import {
+  classifyRoom,
+  codecTraits,
+  KNOWN_CODECS,
+  META_ROOM_ID,
+  ROOST_ROOM_PREFIX,
+  roomMatchesId,
+} from './codecs';
 import {
   crossWorkspaceRowWithheld,
   mapMetaKey,
@@ -19,6 +31,8 @@ import {
 } from './cross-workspace';
 import type { BundleGap, RoomEntry } from './manifest';
 import { withDoc, withFlock } from './repo-leases';
+
+type ImportFence = SessionImportFence | ScheduleImportFence;
 
 export class ImportRefusedError extends Error {
   override readonly name = 'ImportRefusedError';
@@ -165,9 +179,14 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
     throw new ImportRefusedError(
       `This bundle contains data this Lody cannot import: ${[...new Set(unknown.map((room) => room.codec))].join(', ')}`
     );
+  const sourceWorkspaceId = manifest.source.workspaceId;
+  const mislabelled = manifest.rooms.filter((room) => !roomMatchesId(room, sourceWorkspaceId));
+  if (mislabelled.length > 0)
+    throw new ImportRefusedError(
+      `This bundle labels rooms inconsistently: ${mislabelled.map((room) => room.id).join(', ')}`
+    );
   const metaEntry = manifest.rooms.find((room) => room.id === META_ROOM_ID);
   if (!metaEntry) throw new ImportRefusedError('Bundle has no workspace metadata');
-  const sourceWorkspaceId = manifest.source.workspaceId;
   const crossWorkspace = sourceWorkspaceId !== workspaceId;
   const targetIdOf = (id: string) => mapRoomId(id, sourceWorkspaceId, workspaceId);
 
@@ -186,7 +205,8 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
   const rooms: RoomPlan[] = [];
   for (const entry of manifest.rooms) {
     if (entry.model === 'meta') continue;
-    const traits = codecTraits(entry.codec)!;
+    const traits = codecTraits(entry.codec);
+    if (!traits) throw new ImportRefusedError(`Unknown bundle codec: ${entry.codec}`);
     const isRoost = entry.model === 'roost';
     const targetId = isRoost ? entry.id.slice(ROOST_ROOM_PREFIX.length) : targetIdOf(entry.id);
     const base = {
@@ -435,24 +455,22 @@ export async function applyWorkspaceImport(
     if (!entry) throw new Error(`Bundle room missing: ${room.id}`);
     const bytes = room.model === 'meta' ? metaBytes : await bundle.readRoom(entry);
     // Fences belong to the same unit as the merge, so a resumed import cannot skip them.
-    const fence = crossWorkspace && room.state === 'new';
+    // They cover what the bundle brings, also when the target already had the room.
+    const fence = crossWorkspace && room.state !== 'unchanged';
     if (room.model === 'meta') {
       await mergeFlockBytes(repo.getMeta(), bytes, policy);
       await repo.persistMetaNow();
     } else if (room.model === 'loro') {
-      const importFence = await withDoc(repo, room.targetId, (doc) => {
-        doc.import(bytes);
-        if (!fence) return undefined;
-        if (room.codec === 'schedule/v1') return scheduleImportFence(doc, plan.targetWorkspaceId);
-        if (room.codec !== 'session/v1') return undefined;
-        return sessionImportFence(
-          doc,
-          (field) => sourceMeta.get(['m', room.id, field]),
-          plan.targetWorkspaceId,
-          input.actor?.userId
-        );
-      });
-      if (importFence) await repo.upsertDocMeta(room.targetId, { importFence });
+      await withDoc(repo, room.targetId, (doc) => doc.import(bytes));
+      const importFence = fence
+        ? await importFenceFor(room, bytes, sourceMeta, plan.targetWorkspaceId, input.actor)
+        : undefined;
+      if (importFence) {
+        const previous = (await repo.getDocMeta(room.targetId))?.meta.importFence;
+        await repo.upsertDocMeta(room.targetId, {
+          importFence: mergeImportFence(previous, importFence),
+        });
+      }
     } else if (room.model === 'flock') {
       await withFlock(repo, room.targetId, (flock) =>
         mergeFlockBytes(flock, bytes, roomPolicy(room.codec, crossWorkspace))
@@ -472,6 +490,41 @@ export async function applyWorkspaceImport(
   }
   await writeImportReceipt(repo, plan, input.actor, input.now);
   return result;
+}
+
+/** The fence for what one bundle room brings, read from the bundle bytes alone. */
+async function importFenceFor(
+  room: RoomPlan,
+  bytes: Uint8Array,
+  sourceMeta: Flock,
+  workspaceId: string,
+  actor: { userId: string } | undefined
+): Promise<ImportFence | undefined> {
+  const incoming = new LoroDoc();
+  incoming.import(bytes);
+  if (room.codec === 'schedule/v1') return scheduleImportFence(incoming, workspaceId);
+  if (room.codec !== 'session/v1') return undefined;
+  return sessionImportFence(
+    incoming,
+    (field) => sourceMeta.get(['m', room.id, field]),
+    workspaceId,
+    actor?.userId
+  );
+}
+
+/** A later import into the same workspace adds to a session fence; it never drops ids. */
+function mergeImportFence(previous: unknown, next: ImportFence): ImportFence {
+  if (!('turnIds' in next)) return next;
+  const old = previous as Partial<SessionImportFence> | undefined;
+  if (old?.workspaceId !== next.workspaceId) return next;
+  const union = (a: unknown, b: readonly string[]) => [
+    ...new Set([...(Array.isArray(a) ? (a as string[]) : []), ...b]),
+  ];
+  return {
+    ...next,
+    turnIds: union(old.turnIds, next.turnIds),
+    queueItemIds: union(old.queueItemIds, next.queueItemIds),
+  };
 }
 
 /** A row every member can see in the workspace catalog: who imported which bundle. */

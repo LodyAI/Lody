@@ -92,3 +92,21 @@ export function classifyRoom(roomId: string, workspaceId: string): RoomClass {
   }
   return { kind: 'unknown' };
 }
+
+/** Whether a bundle room's model and codec are what its id says it is. */
+export function roomMatchesId(
+  room: { id: string; model: RoomModel; codec: string },
+  workspaceId: string
+): boolean {
+  if (room.model === 'roost') {
+    const session = classifyRoom(room.id.slice(ROOST_ROOM_PREFIX.length), workspaceId);
+    return (
+      room.id.startsWith(ROOST_ROOM_PREFIX) &&
+      room.codec === 'roost-turns/v1' &&
+      session.kind === 'room' &&
+      session.codec === 'session/v1'
+    );
+  }
+  const expected = classifyRoom(room.id, workspaceId);
+  return expected.kind === 'room' && expected.model === room.model && expected.codec === room.codec;
+}
