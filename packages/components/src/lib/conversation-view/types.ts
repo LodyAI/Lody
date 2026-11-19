@@ -140,6 +140,12 @@ export interface ConversationView {
   readonly ready: Promise<void>;
   /** True when this backend can page toward older history. */
   readonly hasMoreOlder?: boolean;
+  /**
+   * Lowest loaded position of a paged view; every position below it is an
+   * unloaded sentinel. Whole-history loops start here (`loadedStart`), so
+   * opening a long conversation never walks its unloaded prefix. Absent = 0.
+   */
+  readonly loadedFrom?: number;
   index(i: number): TurnIndexRow | undefined;
   /** -1 when the id is unknown. */
   indexOf(turnId: string): number;

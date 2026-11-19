@@ -13,7 +13,9 @@
   comes from directory reads; bodies are acquired by window. Loro and Roost both
   open the latest directory page and load older pages at the viewport edge; Loro
   still imports the whole document first. A structural change refreshes hydrated
-  survivors only from its reported position; earlier rows keep their objects. Complete index/fact/search
+  survivors only from its reported position; earlier rows keep their objects. A
+  paged view allocates loaded rows only (a stable sentinel per requested hole);
+  whole-history loops start at `loadedFrom` (`loadedStart`), never at 0. Complete index/fact/search
   consumers hold an `acquireDirectory` lease; saved-anchor restoration requests
   that turn before accepting the first viewport report. Unloaded absolute slots are
   sentinels, never messages, body-read targets, or proof of complete fact coverage.

@@ -8,7 +8,11 @@ import { describe, it } from 'vitest';
 import { type SessionHistory, type SessionId } from '@lody/shared';
 import { createHistoryWriter } from '@lody/shared/history-writer';
 import { connectNativeRepo } from '../../shared/src/node/native-repo';
-import { createNativeDocs, createNativeRemoteHistoryPort } from '../../shared/src/node/native-docs';
+import {
+  createDocRoom,
+  createNativeDocs,
+  createNativeRemoteHistoryPort,
+} from '../../shared/src/node/native-docs';
 import { createRemoteLoroHistoryReader } from '@lody/shared/session-data';
 import { createConversationViewFromReader } from '../src/lib/conversation-view/create-conversation-view-from-reader';
 import { createConversationSession } from '../src/lib/conversation-view';
@@ -100,7 +104,7 @@ async function nativePath(turns: number, snapshot: Uint8Array) {
     pid: number;
   };
   try {
-    await connection.client.createRoom(ns, room, 'plaintext');
+    await createDocRoom(connection.client, ns, docId);
     await connection.client.importRoomState(ns, room, { snapshot });
     const owns = (id: string) => id === docId;
     const repo = await LoroRepo.create({
@@ -145,7 +149,7 @@ async function remotePath(turns: number, snapshot: Uint8Array) {
   const pidOf = async () =>
     (JSON.parse(await readFile(join(dataDir, 'engine.json'), 'utf8')) as { pid: number }).pid;
   let connection = await connectNativeRepo({ dataDir, launcher });
-  await connection.client.createRoom(ns, room, 'plaintext');
+  await createDocRoom(connection.client, ns, docId);
   await connection.client.importRoomState(ns, room, { snapshot });
   await connection.close();
   const first = await pidOf();

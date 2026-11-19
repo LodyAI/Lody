@@ -8,7 +8,11 @@ import {
 import { useAtomValue } from 'jotai';
 import { useEffect, useRef, useState } from 'react';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
-import { acquireConversationDerivation, type ConversationView } from '@/lib/conversation-view';
+import {
+  acquireConversationDerivation,
+  loadedStart,
+  type ConversationView,
+} from '@/lib/conversation-view';
 import type {
   SessionFileChangedFilesResult,
   SessionFileChangeEntry,
@@ -103,7 +107,7 @@ function collectDiffInputs(
   facts: ReadonlyMap<string, SessionTurnFacts>
 ): SessionTurnFacts[] {
   const entries: SessionTurnFacts[] = [];
-  for (let i = 0; i < view.turnCount; i += 1) {
+  for (let i = loadedStart(view); i < view.turnCount; i += 1) {
     const row = view.index(i);
     const fact = row ? facts.get(row.id) : undefined;
     if (fact) entries.push(fact);
