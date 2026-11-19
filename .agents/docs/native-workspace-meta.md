@@ -126,28 +126,54 @@ whose changes were all committed keeps its bytes (loro-repo
 asks the owner only for the ops past that version (`exportLoroSince`; through
 main, `openDoc` with `since`).
 
-### Remote Session reads (no local replica)
+### Remote Session documents (no renderer replica)
 
-[`remote-loro.ts`](../../packages/shared/src/session-data/remote-loro.ts) is a
-`SessionHistoryReader` over a Session document that stays in the engine. It reads
-directory pages with one bounded list-field read (`readDocListFields`: the
-directory scalars and send-configuration keys of items `[start, end)`, aligned per
-item), turn bodies with one subpath read, and observes `doc_subscribe_paths`
-(changed container paths and list shapes, never contents) on the shared
-observation lifecycle. List edits and id edits become structural ranges; other
-edits become changed turn ids. Its directory rows equal the in-process reader's.
-The native port is `createNativeRemoteHistoryPort` in
-[`native-docs.ts`](../../packages/shared/src/node/native-docs.ts). Composition is
-not wired yet: the Session document also holds the control-plane roots the
-renderer writes (`mq`, `humanInputReceipts`, `cancelRequest`, ...).
+By the owner's decision, a native renderer holds no Session document: everything
+in it is read from the engine, which loads rooms lazily, and written through main.
+`createSessionStore` composes `native-remote-session-store.ts` for native Session
+ids instead of opening a replica.
 
-Measured choices: JSONPath (`LoroDoc.jsonpath`) was not used for the batch read —
-per-item projections drop absent fields, so results do not align; the first query
-on a loaded 100k-item document costs about 150 ms whatever it selects; filters cost
-0.5–0.8 s; and results are unbounded. Changed paths come from the document's own
-events (0.01–0.1 ms per commit at 100k items), not `LoroDoc::diff` between versions
-(160–1,150 ms). `subscribeJsonpath` only signals that a path may have changed, with
-no position, so it cannot name changed turns.
+- **Reads.** [`remote-loro.ts`](../../packages/shared/src/session-data/remote-loro.ts)
+  pages the history (`readDocListFields`, one subpath read per turn body) for the
+  windowed ConversationView. [`remote-document.ts`](../../packages/shared/src/session-data/remote-document.ts)
+  keeps every control root (`session`, `mq`, `humanInputReceipts`, `cancelRequest`,
+  `forkOperation`, `notification`, `preview`, `externalHistoryCursor`,
+  `acpRuntimeConfig`) as small JSON. One `doc_subscribe_paths` observation
+  (`shareObservation`) serves both: list and id edits become structural ranges,
+  other history edits changed turn ids, and a changed control root is re-read.
+- **Writes.** The renderer computes JSON patches and main applies them with
+  `applyDocPatch`. Session rooms persist a `DocSchema` derived from the Mirror
+  schema (`engine-doc-schema.ts`): objects become maps and arrays lists, strings
+  stay primitive, declared streaming fields are texts, and `mq` is a movable list
+  whose items expose `$cid`. A test compares the containers and JSON with what the
+  HistoryWriter and the Mirror write. Control changes (queue rows by `$cid`,
+  receipts, Stop) are diffed from an optimistic state and applied at the version
+  they were computed on (`rebase`). History commands the renderer uses
+  (`appendTurn`, `replaceTurn`, `respondPermission`, `user-status`) reuse the
+  HistoryWriter's planners and validation on the stored JSON of the turns they
+  touch; appends are `rebase`, edits `cas` with bounded retries. Positional diffs
+  edit only changed fields, so a concurrent stream into the same turn is kept.
+  `replaceEditableTail`, imports and stored copies are refused.
+- **Authorization and outcomes.** Main admits patches only to `history`, `mq`,
+  `humanInputReceipts` and `cancelRequest`; a receipt only as a set for the current
+  local user (`authorizeSessionPatch`). A refused write rolls the optimistic state
+  back to the engine's; a lost reply is `RemoteWriteIndeterminateError` and is never
+  treated as unwritten. Receipts are committed before the turn is written or
+  activated (`commitSessionState`).
+- **Why not a write replica in main.** Running the HistoryWriter in main would
+  need `loro-crdt` in the Electron main bundle (it ships only with the embedded
+  CLI); routing writes to the daemon would reintroduce proxy authoring, which the
+  CLI rules forbid. The SDK's own `LODY_SESSION_DOC_SCHEMA` preset does not match
+  the Mirror (it stores `mq[*].acpSessionConfig` and `project` as values), so the
+  schema is derived instead.
+
+Measured choices for the primitives: JSONPath (`LoroDoc.jsonpath`) was not used
+for the batch read — per-item projections drop absent fields, so results do not
+align; the first query on a loaded 100k-item document costs about 150 ms whatever
+it selects; filters cost 0.5–0.8 s; and results are unbounded. Changed paths come
+from the document's own events (0.01–0.1 ms per commit at 100k items), not
+`LoroDoc::diff` between versions (160–1,150 ms). `subscribeJsonpath` only signals
+that a path may have changed, with no position, so it cannot name changed turns.
 
 ## Workspace Meta
 
@@ -298,15 +324,13 @@ newer ops. The SDK framer fix (`lody/framer-chunks`) is required: without it the
 client recopied its receive buffer per socket chunk, and a 38.5 MB open took
 10–12 s.
 
-Remote reader (no replica), same composition through `createConversationViewFromReader`,
+Remote store (no replica: control roots plus the paged history view),
 `LODY_SESSION_FIRST_SCREEN_PATHS=remote`; _cold_ follows a host restart, so it
-includes launching the host and opening the namespace. Total ms: 1,000 turns 108
-cold / 15 warm; 10,000 turns 48 / 18; 100,000 turns 312 / 20. The opening process
-holds no document; the engine host adds about 60 MB for a loaded 100k-turn room.
-Of a 100k cold open, launching and connecting to the host take about 196 ms (paid
-once per app start) and the first directory page about 174 ms (namespace open
-~50 ms, room load ~45 ms, the read). With a running host, the first read of a cold
-100k-turn room takes about 80 ms.
+includes launching the host and opening the namespace. Total ms: 1,000 turns 82
+cold / 9 warm; 10,000 turns 34–45 / 8–11; 100,000 turns 304–310 / 11–12. The
+renderer's RSS does not grow measurably; the engine host adds about 60 MB for a
+loaded 100k-turn room. Launching and connecting to the host take about 196 ms of
+the 100k cold open (once per app start).
 
 Three engine costs were removed on the way:
 
@@ -316,6 +340,8 @@ Three engine costs were removed on the way:
   the document's shallow value, which registers every container of a freshly
   loaded document (~240 ms at 100k). Session rooms declare `history` as a list
   (`createDocRoom`), and declared roots resolve by type.
+- `lody/declared-root-reads`, second commit: re-declaring an identical schema on
+  a new connection no longer reloads and revalidates the document.
 - The view itself: see below.
 
 ConversationView keeps only loaded rows of a paged reader (holes elsewhere, a
@@ -340,10 +366,10 @@ for a loaded room; RSS deltas below 20 MB are within measurement noise.
   (`lody/doc-list-read`), size-triggered compaction (`lody/compact-by-bytes`) and
   declared-root reads (`lody/declared-root-reads`). Local builds are used only through an uncommitted
   override.
-- With a local replica, a cold open of a 100,000-turn Session misses the 200 ms
-  target (about 1 s; see Performance); the remote reader meets it once the host is
-  running. The renderer path adds main-to-renderer IPC, which the benchmark does
-  not measure.
+- The remote store's measurements use one engine connection; the renderer adds a
+  main-process IPC hop per read, which the benchmark does not measure, and no
+  packaged desktop run exists yet. The daemon still opens a replica for every
+  Session it touches; reading idle Sessions from the engine is the next slice.
 - A commit already sent when the host dies is an unknown outcome. Per the SDK
   contract this latches that repo's metadata writes until it is recreated; reads
   continue. Commits attempted while disconnected are certain non-commits.

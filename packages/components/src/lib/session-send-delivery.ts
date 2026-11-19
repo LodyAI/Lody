@@ -1,3 +1,4 @@
+import { commitSessionState } from './session-store-commit';
 import {
   getSessionRoomId,
   isLoroRepoDocDeleted,
@@ -72,9 +73,9 @@ export async function persistHumanInputReceipt(
   if (!userId) throw new Error('Human input requires an explicit user identity');
   await runtime.sendResources.withSessionStore(
     sessionId,
-    (store) => {
+    async (store) => {
       if (store.getState().humanInputReceipts?.[entry.id]?.userId === userId) return;
-      store.setState((draft: SessionDocDraft) => {
+      await commitSessionState(store, (draft: SessionDocDraft) => {
         draft.humanInputReceipts ??= {};
         draft.humanInputReceipts[entry.id] = { userId };
       });

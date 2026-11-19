@@ -16,8 +16,9 @@ explains size selection and cursor-only timeout recovery.
 
 - History tolerates unknown string item types without rewriting or blocking unrelated writes.
   Keep known-type guards and input parsing; test: `tests/session-doc-forward-compat.test.ts`.
-- `createSessionMirror` owns renderer/CLI history through one `HistoryWriter`, including
+- `createSessionMirror` owns a local replica's history through one `HistoryWriter`, including
   legacy callbacks. No raw history writes or second writer; read flags never change ownership.
+  Replica-less native documents: [session-data scope](src/session-data/AGENTS.md).
 - Validate new turns and changed known fields/items before applying a command, never
   unchanged history. Invalid commands preserve the old values and throw content-free
   diagnostics; they must not leave partial history writes. Keep stored unknown fields

@@ -8,6 +8,7 @@ import {
 import { commitFlockPayloads, observeNativeFlockDoc } from '@lody/shared/node/native-flock-docs'
 import {
   commitDocUpdates,
+  createNativeRemoteHistoryPort,
   importLegacyDoc,
   isLegacyDocPublished,
   observeNativeDoc
@@ -17,6 +18,12 @@ import {
   type NativeWorkspaceMeta
 } from '@lody/shared/node/native-workspace-meta'
 import {
+  authorizeSessionPatch,
+  NATIVE_DOC_PATHS_CHANNEL,
+  NativeDocListFieldsSchema,
+  NativeDocObservePathsSchema,
+  NativeDocPatchSchema,
+  NativeDocReadSchema,
   NATIVE_DOC_CHANNEL,
   NATIVE_FLOCK_CHANNEL,
   NativeDocCommitSchema,
@@ -254,4 +261,77 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
       version
     }))
   }
+
+  /** One JSON path of a remote Session document and the head it was read at. */
+  @IpcMethod()
+  async readDocPath(input: unknown) {
+    const { workspaceId, docId, path } = NativeDocReadSchema.parse(input)
+    await admit(workspaceId)
+    return (await remoteDoc(workspaceId, docId)).readPathAt(path)
+  }
+
+  /** Bounded, field-aligned rows of a remote Session document's history. */
+  @IpcMethod()
+  async readDocListFields(input: unknown) {
+    const { workspaceId, docId, start, end, fields } = NativeDocListFieldsSchema.parse(input)
+    await admit(workspaceId)
+    return (await remoteDoc(workspaceId, docId)).readListFields(start, end, fields)
+  }
+
+  /** A window's changed-path view of one remote Session document. */
+  @IpcMethod()
+  async observeDocPaths(input: unknown) {
+    const { workspaceId, docId, observationId } = NativeDocObservePathsSchema.parse(input)
+    await admit(workspaceId)
+    const sender = getIpcContext().event.sender
+    const owned = windowViews(sender)
+    if (owned.has(observationId) || owned.size >= 64) throw new Error('native_meta_view_denied')
+    const observation = (await remoteDoc(workspaceId, docId)).observePaths((event) => {
+      if (!sender.isDestroyed()) sender.send(NATIVE_DOC_PATHS_CHANNEL, { observationId, event })
+    })
+    if (views.get(sender) !== owned) {
+      observation.close()
+      throw new Error('native_meta_view_closed')
+    }
+    owned.set(observationId, () => observation.close())
+    try {
+      await observation.ready
+    } catch (error) {
+      owned.delete(observationId)
+      observation.close()
+      throw error
+    }
+  }
+
+  /**
+   * Applies a renderer's checked JSON patch. A conflict or an unknown outcome
+   * is reported as such: an unknown outcome is never a non-write.
+   */
+  @IpcMethod()
+  async applyDocPatch(input: unknown) {
+    const { workspaceId, docId, ops, precondition } = NativeDocPatchSchema.parse(input)
+    await admit(workspaceId)
+    const snapshot = await readLocalPlatformSnapshot()
+    if (!snapshot) throw new Error('native_meta_scope_denied')
+    authorizeSessionPatch(ops, snapshot.userId)
+    try {
+      return await (await remoteDoc(workspaceId, docId)).applyPatch(ops, precondition)
+    } catch (error) {
+      const name = (error as { name?: unknown } | null)?.name
+      if (name === 'RemoteWriteConflictError') throw new Error('native_doc_write_conflict')
+      if (name === 'RemoteWriteIndeterminateError')
+        throw new Error('native_doc_write_indeterminate')
+      throw error
+    }
+  }
+}
+
+/** One port per document on main's shared connection. */
+const remoteDocs = new Map<string, ReturnType<typeof createNativeRemoteHistoryPort>>()
+async function remoteDoc(workspaceId: string, docId: string) {
+  const { client } = await connect()
+  const key = `${workspaceId}\0${docId}`
+  let port = remoteDocs.get(key)
+  if (!port) remoteDocs.set(key, (port = createNativeRemoteHistoryPort(client, workspaceId, docId)))
+  return port
 }

@@ -13,7 +13,12 @@ import {
   createNativeDocs,
   createNativeRemoteHistoryPort,
 } from '../../shared/src/node/native-docs';
-import { createRemoteLoroHistoryReader } from '@lody/shared/session-data';
+import {
+  createRemoteControlState,
+  createRemoteLoroHistoryReader,
+  shareObservation,
+} from '@lody/shared/session-data';
+import { sessionDocSchema } from '@lody/shared';
 import { createConversationViewFromReader } from '../src/lib/conversation-view/create-conversation-view-from-reader';
 import { createConversationSession } from '../src/lib/conversation-view';
 import type { IdleScheduler } from '../src/lib/conversation-view/create-conversation-view-from-reader';
@@ -173,11 +178,15 @@ async function remotePath(turns: number, snapshot: Uint8Array) {
       const rssBefore = process.memoryUsage().rss;
       const hostBefore = await rssOf(pid);
       let start = performance.now();
-      const reader = createRemoteLoroHistoryReader(
-        createNativeRemoteHistoryPort(connection.client, ns, docId)
+      const port = shareObservation(createNativeRemoteHistoryPort(connection.client, ns, docId));
+      const control = createRemoteControlState(
+        port,
+        Object.keys(sessionDocSchema.definition).filter((root) => root !== 'history'),
+        {}
       );
+      const reader = createRemoteLoroHistoryReader(port);
       const view = createConversationViewFromReader(reader, { sessionId, scheduleIdle: idleSoon });
-      await view.ready;
+      await Promise.all([view.ready, control.ready]);
       const viewMs = ms(start);
       start = performance.now();
       const count = view.turnCount;
@@ -193,6 +202,7 @@ async function remotePath(turns: number, snapshot: Uint8Array) {
       };
       range.release();
       view.dispose();
+      control.close();
       return result;
     };
     const cold = await screen();
