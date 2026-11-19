@@ -1,0 +1,125 @@
+diff --git a/dist/shared-DrhEN-hN.js b/dist/shared-DrhEN-hN.js
+--- a/dist/shared-DrhEN-hN.js
++++ b/dist/shared-DrhEN-hN.js
+@@ -1326,4 +1326,12 @@
+ 	*/
+ 	static GONE_CATCHUP = { kind: "gone" };
++	/** Applied receive proof, independent of the live connection and local uploads. */
++	receiveConfirmed = false;
++	onReceiveConfirmed;
++	setReceiveConfirmed(confirmed) {
++		if (this.receiveConfirmed === confirmed) return;
++		this.receiveConfirmed = confirmed;
++		try { this.onReceiveConfirmed?.(confirmed); } catch {}
++	}
+ 	onDependencyWait;
+ 	dependencyWaiting = false;
+@@ -1354,4 +1362,5 @@
+ 	/** Creates a transport bound to one stream and local replica. */
+ 	constructor(options) {
++		this.onReceiveConfirmed = options.onReceiveConfirmed;
+ 		this.onDependencyWait = options.onDependencyWait;
+ 		this.streamUrl = options.streamUrl;
+@@ -1532,4 +1541,14 @@
+ 		this.incompleteRecovery.retry();
+ 		this.rejoin();
++	}
++	/** Refresh one document's reader without resetting its upload retries. */
++	revalidateReceive() {
++		const state = this.joinState;
++		if (state == null || state.closed || state.readSubStatus !== "ok") return;
++		this.setReceiveConfirmed(false);
++		const previous = state.requestController;
++		state.requestController = new AbortController();
++		previous?.abort();
++		this.runReadLoop(state);
+ 	}
+ 	rejoin() {
+@@ -2024,4 +2043,5 @@
+ 	}
+ 	async disposeJoinState(state) {
++		if (this.joinState === state) this.setReceiveConfirmed(false);
+ 		await disposeJoinState(state, {
+ 			snapshotManager: this.snapshotManager,
+@@ -2111,4 +2131,5 @@
+ 			if (state.closed) return;
+ 			state.lastError = state.persistenceError ?? (this.writeBlocked ? state.lastWriteError : void 0);
++			this.setReceiveConfirmed(!state.awaitingInitialTail && this.cursorManager.isCursorComplete(state.cursor));
+ 			this.setReadSubStatus(state, "ok");
+ 			this.setWriteSubStatus(state, "ok");
+@@ -3141,4 +3162,6 @@
+ 					this.streamObserved = true;
+ 					const result = response.value;
++					capturedController?.signal.throwIfAborted();
++					if (!result.upToDate || result.updates.length > 0) this.setReceiveConfirmed(false);
+ 					if (isReadNoProgress(requestOffset, result)) throw new Error(`catch-up made no progress at offset ${requestOffset}; server returned empty updates and unchanged next offset with up_to_date=false`);
+ 					await this.enqueueExclusive(async () => {
+@@ -3148,5 +3171,5 @@
+ 						}));
+ 						if (result.streamCursor != null) state.streamCursor = result.streamCursor;
+-						if (result.upToDate && this.cursorManager.isCursorComplete(state.cursor)) this.noteInitialTailReached(state);
++						if (result.upToDate && this.cursorManager.isCursorComplete(state.cursor)) this.noteInitialTailReached(state, !capturedController?.signal.aborted);
+ 					});
+ 					if (state.closed) return;
+@@ -3170,4 +3193,5 @@
+ 					if (capturedController?.signal.aborted) return "stop";
+ 					resetInactivity();
++					if (!upToDate || updates.length > 0) this.setReceiveConfirmed(false);
+ 					pendingRemote.push({
+ 						updates,
+@@ -3192,5 +3216,5 @@
+ 							if (this.cursorManager.isCursorComplete(state.cursor)) {
+ 								sseAppliedProgress = true;
+-								if (lastEvent.upToDate) this.noteInitialTailReached(state);
++								if (lastEvent.upToDate) this.noteInitialTailReached(state, pendingRemote.length === 0 && !capturedController?.signal.aborted);
+ 							}
+ 							for (let i = events.length - 1; i >= 0; i--) if (events[i].streamCursor != null) {
+@@ -3246,4 +3270,6 @@
+ 				await flushChain;
+ 				if (state.closed) return;
++				// A clean EOF and transport fallback also replace the receive lane.
++				if (!capturedController?.signal.aborted) this.setReceiveConfirmed(false);
+ 				if (readResult.kind === "ws-fallback") {
+ 					this.logDebug("websocket live read fell back to SSE");
+@@ -3797,6 +3823,8 @@
+ 		if (state.persistenceTerminal || state.readSubStatus === "disconnected") return /* @__PURE__ */ new Error(`initial sync failed: ${state.lastError?.code ?? "unknown"}`);
+ 	}
+-	noteInitialTailReached(state) {
+-		if (!state.awaitingInitialTail || state.closed) return;
++	noteInitialTailReached(state, publishReceive = true) {
++		if (state.closed) return;
++		if (publishReceive && this.joinState === state) this.setReceiveConfirmed(this.cursorManager.isCursorComplete(state.cursor));
++		if (!state.awaitingInitialTail) return;
+ 		state.awaitingInitialTail = false;
+ 		this.setDependencyWait(false);
+@@ -3820,4 +3848,5 @@
+ 	}
+ 	setReadSubStatus(state, sub) {
++		if (sub !== "ok" && this.joinState === state) this.setReceiveConfirmed(false);
+ 		if (state.readSubStatus === sub) return;
+ 		state.readSubStatus = sub;
+diff --git a/dist/ephemeral-effect-DfACHBDY.d.ts b/dist/ephemeral-effect-DfACHBDY.d.ts
+--- a/dist/ephemeral-effect-DfACHBDY.d.ts
++++ b/dist/ephemeral-effect-DfACHBDY.d.ts
+@@ -1018,4 +1018,6 @@
+  */
+ interface StreamsCrdtOptions<TVersion extends JsonObject> {
++  /** Reports whether the current remote tail is known to be applied. */
++  readonly onReceiveConfirmed?: (confirmed: boolean) => void;
+   /**
+    * Full, opaque Durable Streams URL used for HTTP requests and cursor keys.
+diff --git a/dist/shared-DJ32LkKN.d.ts b/dist/shared-DJ32LkKN.d.ts
+--- a/dist/shared-DJ32LkKN.d.ts
++++ b/dist/shared-DJ32LkKN.d.ts
+@@ -21,4 +21,5 @@
+   private readonly incompleteRecovery;
+   private readonly incompleteProgress;
++  readonly receiveConfirmed: boolean;
+   private get incompleteReadCursor();
+   private set incompleteReadCursor(value);
+@@ -115,4 +116,5 @@
+   /** Explicitly grant one more full recovery; ordinary rejoin never grants it. */
+   retryIncompleteRecovery(): void;
++  revalidateReceive(): void;
+   rejoin(): void;
+   /**

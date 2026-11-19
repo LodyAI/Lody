@@ -1,0 +1,102 @@
+diff --git a/dist/transport/streams.js b/dist/transport/streams.js
+--- a/dist/transport/streams.js
++++ b/dist/transport/streams.js
+@@ -273,4 +273,5 @@
+ 	metaSession;
+ 	docSessions = /* @__PURE__ */ new Map();
++	docReceiveListeners = /* @__PURE__ */ new Map();
+ 	flockDocSessions = /* @__PURE__ */ new Map();
+ 	activeRoomSyncOperations = /* @__PURE__ */ new Map();
+@@ -1723,4 +1724,21 @@
+ 		return session;
+ 	}
++	observeDocReceive(docId, listener) {
++		let listeners = this.docReceiveListeners.get(docId);
++		if (!listeners) {
++			listeners = new Set();
++			this.docReceiveListeners.set(docId, listeners);
++		}
++		listeners.add(listener);
++		listener(this.docSessions.get(docId)?.stream.receiveConfirmed === true);
++		return () => {
++			listeners.delete(listener);
++			if (listeners.size === 0) this.docReceiveListeners.delete(docId);
++		};
++	}
++	revalidateDocReceive(docId) {
++		const session = this.docSessions.get(docId);
++		if (session && !session.closed) session.stream.revalidateReceive();
++	}
+ 	async ensureDocSession(docId, doc, joinAuth) {
+ 		const existing = this.docSessions.get(docId);
+@@ -1766,4 +1784,9 @@
+ 					docId
+ 				}),
++				onReceiveConfirmed: (confirmed) => {
++					if (this.docSessions.get(docId) !== session) return;
++					const listeners = this.docReceiveListeners.get(docId);
++					if (listeners) for (const listener of [...listeners]) listener(confirmed);
++				},
+ 				beforeRemoteCursorSave: persistDoc ? this.retireOnStaleReplica(() => persistDoc(docId, doc), () => this.retireDocSession(session)) : void 0
+ 			}),
+diff --git a/dist/transport/streams.cjs b/dist/transport/streams.cjs
+--- a/dist/transport/streams.cjs
++++ b/dist/transport/streams.cjs
+@@ -279,4 +279,5 @@
+ 	metaSession;
+ 	docSessions = /* @__PURE__ */ new Map();
++	docReceiveListeners = /* @__PURE__ */ new Map();
+ 	flockDocSessions = /* @__PURE__ */ new Map();
+ 	activeRoomSyncOperations = /* @__PURE__ */ new Map();
+@@ -1729,4 +1730,21 @@
+ 		return session;
+ 	}
++	observeDocReceive(docId, listener) {
++		let listeners = this.docReceiveListeners.get(docId);
++		if (!listeners) {
++			listeners = new Set();
++			this.docReceiveListeners.set(docId, listeners);
++		}
++		listeners.add(listener);
++		listener(this.docSessions.get(docId)?.stream.receiveConfirmed === true);
++		return () => {
++			listeners.delete(listener);
++			if (listeners.size === 0) this.docReceiveListeners.delete(docId);
++		};
++	}
++	revalidateDocReceive(docId) {
++		const session = this.docSessions.get(docId);
++		if (session && !session.closed) session.stream.revalidateReceive();
++	}
+ 	async ensureDocSession(docId, doc, joinAuth) {
+ 		const existing = this.docSessions.get(docId);
+@@ -1772,4 +1790,9 @@
+ 					docId
+ 				}),
++				onReceiveConfirmed: (confirmed) => {
++					if (this.docSessions.get(docId) !== session) return;
++					const listeners = this.docReceiveListeners.get(docId);
++					if (listeners) for (const listener of [...listeners]) listener(confirmed);
++				},
+ 				beforeRemoteCursorSave: persistDoc ? this.retireOnStaleReplica(() => persistDoc(docId, doc), () => this.retireDocSession(session)) : void 0
+ 			}),
+diff --git a/dist/streams.d.ts b/dist/streams.d.ts
+--- a/dist/streams.d.ts
++++ b/dist/streams.d.ts
+@@ -350,4 +350,6 @@
+   private metaSession?;
+   private readonly docSessions;
++  observeDocReceive(docId: string, listener: (confirmed: boolean) => void): () => void;
++  revalidateDocReceive(docId: string): void;
+   private readonly flockDocSessions;
+   private readonly activeRoomSyncOperations;
+diff --git a/dist/streams.d.cts b/dist/streams.d.cts
+--- a/dist/streams.d.cts
++++ b/dist/streams.d.cts
+@@ -350,4 +350,6 @@
+   private metaSession?;
+   private readonly docSessions;
++  observeDocReceive(docId: string, listener: (confirmed: boolean) => void): () => void;
++  revalidateDocReceive(docId: string): void;
+   private readonly flockDocSessions;
+   private readonly activeRoomSyncOperations;

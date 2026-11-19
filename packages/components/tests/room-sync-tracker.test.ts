@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { LoroDoc } from 'loro-crdt';
+import { LoroRepo } from 'loro-repo';
+import { StreamsTransportAdapter } from 'loro-repo/transport/streams';
 import type {
   RepoTransportRoomSubscription,
   TransportRoomStatus,
@@ -303,4 +306,127 @@ describe('conversation sync while receiving Roost history', () => {
     expect(sync.getSnapshot()).toMatchObject({ phase: 'disconnected', since: 300 });
     stop();
   });
+});
+
+it('requires a new applied Streams tail after waking and while the live read is behind', async () => {
+  const head = '00000000000000000000';
+  const doc = new LoroDoc();
+  const first = Promise.withResolvers<ReadableStreamDefaultController<Uint8Array>>();
+  const second = Promise.withResolvers<ReadableStreamDefaultController<Uint8Array>>();
+  const third = Promise.withResolvers<ReadableStreamDefaultController<Uint8Array>>();
+  const connections = [first, second, third];
+  let opened = 0;
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input, init);
+    if (new URL(request.url).pathname.endsWith('/bootstrap')) {
+      return new Response('--p\r\nContent-Type: application/octet-stream\r\n\r\n\r\n--p--\r\n', {
+        headers: {
+          'content-type': 'multipart/mixed; boundary=p',
+          'stream-snapshot-offset': '-1',
+          'stream-next-offset': head,
+          'stream-up-to-date': 'true',
+        },
+      });
+    }
+    const wire = new ReadableStream<Uint8Array>({
+      start(controller) {
+        request.signal.addEventListener('abort', () => controller.error(request.signal.reason), {
+          once: true,
+        });
+        connections[opened++]?.resolve(controller);
+      },
+    });
+    return new Response(wire, {
+      headers: { 'content-type': 'text/event-stream', 'stream-sse-data-encoding': 'base64' },
+    });
+  });
+  const repo = await LoroRepo.create({});
+  const transport = new StreamsTransportAdapter({
+    bucketId: 'test',
+    baseUrl: 'https://streams.invalid',
+    auth: () => 'synthetic',
+    createStreamIfMissing: false,
+  });
+  try {
+    await repo.addTransport('cloud', transport);
+    const lease = await repo.acquireDoc('session-test');
+    const room = await repo.joinDocRoom('session-test');
+    try {
+      const sync = createConversationSync(false);
+      let waiting: { phase: string; resolve: () => void } | undefined;
+      const waitFor = (phase: string) => {
+        const next = Promise.withResolvers<void>();
+        waiting = { phase, resolve: next.resolve };
+        if (sync.getSnapshot().phase === phase) next.resolve();
+        return next.promise;
+      };
+      const binding = room.subscription('cloud');
+      const stop = observeConversationDocument(
+        binding,
+        (step) => {
+          sync.update('document', step);
+          if (step.phase === waiting?.phase) waiting.resolve();
+        },
+        (listener) => transport.observeDocReceive('session-test', listener)
+      );
+      try {
+        await waitFor('confirmed');
+        await first.promise;
+        transport.revalidateDocReceive('session-test');
+        let wire = await second.promise;
+        await waitFor('syncing');
+        expect(sync.getSnapshot().phase).toBe('syncing');
+
+        const send = (nextOffset: string, upToDate: boolean, bytes?: Uint8Array) => {
+          let data = '';
+          if (bytes) {
+            const frame = new Uint8Array(4 + bytes.length);
+            new DataView(frame.buffer).setUint32(0, bytes.length);
+            frame.set(bytes, 4);
+            data = 'event: data\ndata: ' + Buffer.from(frame).toString('base64') + '\n\n';
+          }
+          const control = JSON.stringify({
+            streamNextOffset: nextOffset,
+            streamCursor: 'test',
+            upToDate,
+          });
+          wire.enqueue(
+            new TextEncoder().encode(data + 'event: control\ndata: ' + control + '\n\n')
+          );
+        };
+
+        send(head, true);
+        await waitFor('confirmed');
+        const behind = waitFor('syncing');
+        send('00000000000000000001', false);
+        await behind;
+        expect(lease.doc.getText('history').toString()).toBe('');
+
+        const applied = waitFor('confirmed');
+        doc.getText('history').insert(0, 'new reply');
+        doc.commit();
+        send('00000000000000000002', true, doc.export({ mode: 'update' }));
+        await applied;
+        expect(lease.doc.getText('history').toString()).toBe('new reply');
+
+        // Keep SDK short-lived-connection backoff out of this proof test.
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(Date.now() + 6_000);
+        wire.close();
+        wire = await third.promise;
+        expect(sync.getSnapshot().phase).toBe('syncing');
+        expect(lease.doc.getText('history').toString()).toBe('new reply');
+        send('00000000000000000002', true);
+        await waitFor('confirmed');
+      } finally {
+        stop();
+      }
+    } finally {
+      room.unsubscribe();
+      await lease.release();
+    }
+  } finally {
+    await repo.destroy();
+    vi.unstubAllGlobals();
+  }
 });

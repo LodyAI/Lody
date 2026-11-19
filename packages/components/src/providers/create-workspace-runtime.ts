@@ -160,7 +160,10 @@ import {
 } from './local-reconnect-loop';
 import { resolveWorkspaceControlConnectionState } from './control-connection-state';
 import { createRoomSyncTracker, type RoomSyncTracker } from './room-sync-tracker';
-import { createConversationSync, observeConversationDocument } from '@/lib/conversation-sync';
+import {
+  createConversationSync,
+  observeConversationDocument as observeDocumentSync,
+} from '@/lib/conversation-sync';
 import type { RoomSyncState } from '@/lib/room-sync-state';
 import { createRoomSyncRegistry } from './room-sync-registry';
 import {
@@ -689,6 +692,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let localStartupPromise: Promise<void> | null = null;
   let initialTokenAttachPromise: Promise<void> | null = null;
   let localLoroTransport: LocalLoroTransportAdapter | null = null;
+  let durableStreamsTransport: StreamsTransportAdapter | undefined;
   let localMachineMonitorTransport: WorkspaceLocalMachineMonitorTransport | null = null;
   let localDataPlaneConnectionDispose: (() => void) | null = null;
   let localPresenceUnsubscribe: (() => void) | null = null;
@@ -3721,7 +3725,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     streamsBaseUrl: string
   ): StreamsTransportAdapter => {
     durableStreamsBaseUrl = streamsBaseUrl;
-    return createWorkspaceStreamsTransport({
+    durableStreamsTransport = createWorkspaceStreamsTransport({
       webSocketEnabled: isLoroStreamsWebSocketEnabled(
         deps.streamsWebSocketEnabled,
         import.meta.env.VITE_LORO_STREAMS_WS_ENABLED
@@ -3737,6 +3741,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       streamsBaseUrl,
       shardHostSuffix: getStreamsShardHostSuffixForProvider(activeStreamsTokenProvider),
     });
+    return durableStreamsTransport;
   };
 
   const attachCloudMetaHealthTracker = (): void => {
@@ -5187,6 +5192,30 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     const firstSynced = new Promise<void>((resolve) => {
       resolveFirstSynced = resolve;
     });
+
+    const observeConversationDocument: typeof observeDocumentSync = (binding, publish) =>
+      observeDocumentSync(binding, publish, (listener) => {
+        if (
+          binding.transportId === 'local' &&
+          localLoroTransport &&
+          'observeDocReceive' in localLoroTransport &&
+          typeof localLoroTransport.observeDocReceive === 'function'
+        ) {
+          return localLoroTransport.observeDocReceive(roomId, listener);
+        }
+        if (binding.transportId === 'cloud' && durableStreamsTransport) {
+          const transport = durableStreamsTransport;
+          const stop = transport.observeDocReceive(roomId, listener);
+          const wake = () => {
+            if (document.visibilityState === 'visible') transport.revalidateDocReceive(roomId);
+          };
+          document.addEventListener('visibilitychange', wake);
+          return () => {
+            document.removeEventListener('visibilitychange', wake);
+            stop();
+          };
+        }
+      });
 
     const clearSyncReleaseTimer = () => {
       if (syncReleaseTimer !== null) {

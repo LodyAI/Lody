@@ -236,11 +236,13 @@ patchedDependencies:
   '@hpke/common@1.10.1': patches/@hpke__common@1.10.1.patch
   '@lobehub/streamdown@1.4.0': patches/@lobehub__streamdown@1.4.0.patch
   '@loro-dev/sqlite-riverrun@0.3.0': patches/@loro-dev__sqlite-riverrun@0.3.0.patch
+  '@loro-dev/streams-crdt@0.22.0': patches/@loro-dev__streams-crdt@0.22.0.patch
   '@pierre/diffs@1.6.1': patches/@pierre__diffs@1.6.1.patch
   '@shinyoshiaki/binary-data@0.6.1': patches/@shinyoshiaki__binary-data@0.6.1.patch
   '@xterm/xterm@5.5.0': patches/@xterm__xterm@5.5.0.patch
   app-builder-lib@26.15.3: patches/app-builder-lib@26.15.3.patch
   glob@13.0.1: patches/glob@13.0.1.patch
+  loro-repo@0.26.0: patches/loro-repo@0.26.0.patch
   mdast-util-gfm-autolink-literal@2.0.1: patches/mdast-util-gfm-autolink-literal@2.0.1.patch
   pdfjs-dist@6.3.289: patches/pdfjs-dist@6.3.289.patch
   react-photo-view@1.2.7: patches/react-photo-view@1.2.7.patch
