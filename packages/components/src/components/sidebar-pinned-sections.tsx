@@ -222,6 +222,10 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
                 {...listProps}
                 renderHeader={renderHeader}
                 onDropPinnedSession={dropBySection.get(sectionId)}
+                // Same gap between sections as between the sidebar's other groups.
+                className={
+                  index < visibleSections.length - 1 ? (collapsed ? 'mb-1' : 'mb-4') : undefined
+                }
                 items={section.items}
                 grouping="manual"
                 pinSectionId={sectionId}
