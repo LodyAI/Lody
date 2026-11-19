@@ -6,6 +6,94 @@ type ToolCallKind = ToolCallMessage['kind'] | null | undefined;
 type ToolCallLocations = NonNullable<ToolCallMessage['locations']>;
 
 /**
+ * Durable UTF-8 byte ceiling for individual text/diff/plan payloads persisted in
+ * session history. Chosen generously above normal readable tool outputs (e.g.
+ * ~130 KB diffs/plans) while preventing multi-megabyte tool dumps from bloating
+ * the session CRDT.
+ */
+export const MAX_STORED_TOOL_TEXT_BYTES = 256 * 1024;
+
+/**
+ * Audio payloads are binary media data, not readable text. Small inline test
+ * fixtures pass untouched; real multi-KB/MB base64 blobs are cleared on write.
+ */
+export const MAX_STORED_AUDIO_DATA_BYTES = 16 * 1024;
+
+const INLINE_BASE64_DATA_URI_PATTERN =
+  /data:[a-z0-9.+-]+\/[a-z0-9.+-]+(?:;[a-z0-9.=+-]+)*;base64,[A-Za-z0-9+/=\r\n]{1024,}/gi;
+
+const utf8Head = (value: string, maxBytes: number): { end: number; bytes: number } => {
+  let end = 0;
+  let bytes = 0;
+  while (end < value.length) {
+    const unit = value.charCodeAt(end);
+    const isPair =
+      unit >= 0xd800 &&
+      unit <= 0xdbff &&
+      end + 1 < value.length &&
+      (value.charCodeAt(end + 1) & 0xfc00) === 0xdc00;
+    const width = unit < 0x80 ? 1 : unit < 0x800 ? 2 : isPair ? 4 : 3;
+    if (bytes + width > maxBytes) break;
+    bytes += width;
+    end += isPair ? 2 : 1;
+  }
+  return { end, bytes };
+};
+
+const utf8Tail = (value: string, maxBytes: number): { start: number; bytes: number } => {
+  let start = value.length;
+  let bytes = 0;
+  while (start > 0) {
+    const prev = value.charCodeAt(start - 1);
+    const beforePrev = start >= 2 ? value.charCodeAt(start - 2) : 0;
+    const isPair = prev >= 0xdc00 && prev <= 0xdfff && beforePrev >= 0xd800 && beforePrev <= 0xdbff;
+    const width = isPair ? 4 : prev < 0x80 ? 1 : prev < 0x800 ? 2 : 3;
+    if (bytes + width > maxBytes) break;
+    bytes += width;
+    start -= isPair ? 2 : 1;
+  }
+  return { start, bytes };
+};
+
+const utf8ByteLength = (value: string): number => utf8Head(value, Number.MAX_SAFE_INTEGER).bytes;
+
+const exceedsUtf8Bytes = (value: string, maxBytes: number): boolean =>
+  utf8Head(value, maxBytes).end < value.length;
+
+/** Replace large embedded base64 data URIs inside text payloads without touching small examples. */
+export const scrubInlineBase64DataUris = (value: string): string => {
+  if (!value.includes('data:') || !value.includes(';base64,')) return value;
+  return value.replace(INLINE_BASE64_DATA_URI_PATTERN, '[omitted base64 data]');
+};
+
+/**
+ * Scrub large inline base64 data URIs and keep head+tail UTF-8 slices within
+ * `maxBytes` without splitting Unicode surrogate pairs or scanning huge strings twice.
+ */
+export const truncateToolTextForHistory = (
+  value: string,
+  maxBytes: number = MAX_STORED_TOOL_TEXT_BYTES
+): string => {
+  const scrubbed = scrubInlineBase64DataUris(value);
+  if (!exceedsUtf8Bytes(scrubbed, maxBytes)) return scrubbed;
+
+  const formatMarker = (omittedChars: number) => `\n…[truncated ${omittedChars} chars]…\n`;
+  const worstMarkerBytes = utf8ByteLength(formatMarker(scrubbed.length));
+  const remainingBudget = maxBytes - worstMarkerBytes;
+  if (remainingBudget <= 0) {
+    return scrubbed.slice(0, utf8Head(scrubbed, maxBytes).end);
+  }
+
+  const headBudget = Math.floor(remainingBudget / 2);
+  const tailBudget = remainingBudget - headBudget;
+  const head = utf8Head(scrubbed, headBudget);
+  const tail = utf8Tail(scrubbed, tailBudget);
+  if (head.end >= tail.start) return scrubbed;
+  const omittedChars = tail.start - head.end;
+  return `${scrubbed.slice(0, head.end)}${formatMarker(omittedChars)}${scrubbed.slice(tail.start)}`;
+};
+
+/**
  * Session history is persisted in a Loro CRDT document.
  *
  * Tool calls are the biggest contributor to document size because providers often include:
@@ -91,8 +179,32 @@ export const stripToolCallPayloadsForHistory = (content: ToolCallContent): ToolC
   content
     .filter((block) => block.type !== 'content' || !isToolImagePayload(block.content))
     .map((block) => {
+      if (block.type === 'diff') {
+        const nextOldText =
+          typeof block.oldText === 'string'
+            ? truncateToolTextForHistory(block.oldText)
+            : block.oldText;
+        const nextNewText =
+          typeof block.newText === 'string'
+            ? truncateToolTextForHistory(block.newText)
+            : block.newText;
+        if (nextOldText === block.oldText && nextNewText === block.newText) return block;
+        return { ...block, oldText: nextOldText, newText: nextNewText };
+      }
       if (block.type !== 'content') return block;
       const value = block.content;
+      if (value.type === 'text' && typeof value.text === 'string') {
+        const nextText = truncateToolTextForHistory(value.text);
+        if (nextText === value.text) return block;
+        return { ...block, content: { ...value, text: nextText } };
+      }
+      if (
+        value.type === 'audio' &&
+        typeof value.data === 'string' &&
+        exceedsUtf8Bytes(value.data, MAX_STORED_AUDIO_DATA_BYTES)
+      ) {
+        return { ...block, content: { ...value, data: '' } };
+      }
       // The detail view downloads resources through their URI; it never reads
       // non-image blob bytes. Keep the resource and link instead of dropping it.
       if (value.type === 'resource') {
@@ -100,7 +212,10 @@ export const stripToolCallPayloadsForHistory = (content: ToolCallContent): ToolC
         const clearBlob =
           'blob' in resource && typeof resource.blob === 'string' && resource.blob !== '';
         const clearUri = typeof resource.uri === 'string' && /^\s*data:/i.test(resource.uri);
-        if (!clearBlob && !clearUri) return block;
+        const hasText = 'text' in resource && typeof resource.text === 'string';
+        const nextText = hasText ? truncateToolTextForHistory(resource.text) : undefined;
+        const truncateText = hasText && nextText !== resource.text;
+        if (!clearBlob && !clearUri && !truncateText) return block;
         return {
           ...block,
           content: {
@@ -109,6 +224,7 @@ export const stripToolCallPayloadsForHistory = (content: ToolCallContent): ToolC
               ...resource,
               ...(clearBlob ? { blob: '' } : {}),
               ...(clearUri ? { uri: '' } : {}),
+              ...(truncateText ? { text: nextText } : {}),
             },
           },
         };

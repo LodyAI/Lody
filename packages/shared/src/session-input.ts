@@ -792,6 +792,46 @@ export const buildInitialSessionTurnInputConfig = (args: {
   });
 };
 
+/**
+ * Omits `inputConfig.inputBlocks` on persisted user turns when the turn has a
+ * single plain-text block whose trimmed text equals `inputConfig.prompt.trim()`.
+ * The prompt and `items` already preserve that text, and `queuedInputEvidence`
+ * reconstructs the identical `inputBlocks` from `prompt`, keeping E2EE digests exact.
+ */
+export const compactRedundantUserTurnInputBlocks = (
+  inputConfig: SessionTurnInputConfig | undefined,
+  inputBlocks: readonly SessionInputBlock[]
+): SessionTurnInputConfig | undefined => {
+  if (!inputConfig?.inputBlocks || inputConfig.inputBlocks.length === 0) {
+    return inputConfig;
+  }
+  if (typeof inputConfig.prompt !== 'string') {
+    return inputConfig;
+  }
+  const normalized = normalizeSessionInputBlocks(inputBlocks, '');
+  if (normalized.length !== 1) return inputConfig;
+  const [onlyBlock] = normalized;
+  if (!onlyBlock || onlyBlock.type !== 'text' || onlyBlock.spans?.length) {
+    return inputConfig;
+  }
+  const configNormalized = normalizeSessionInputBlocks(inputConfig.inputBlocks, '');
+  if (configNormalized.length !== 1) return inputConfig;
+  const [onlyConfigBlock] = configNormalized;
+  if (
+    !onlyConfigBlock ||
+    onlyConfigBlock.type !== 'text' ||
+    onlyConfigBlock.spans?.length ||
+    onlyConfigBlock.text !== onlyBlock.text
+  ) {
+    return inputConfig;
+  }
+  if (inputConfig.prompt.trim() !== onlyConfigBlock.text) {
+    return inputConfig;
+  }
+  const { inputBlocks: _omitted, ...compacted } = inputConfig;
+  return compacted;
+};
+
 export const buildPendingUserHistoryEntry = (args: {
   userId: string | undefined;
   inputBlocks: readonly SessionInputBlock[];
@@ -816,7 +856,7 @@ export const buildPendingUserHistoryEntry = (args: {
     items,
     timestamp: args.timestamp,
     status: args.status ?? 'pending',
-    inputConfig: args.inputConfig,
+    inputConfig: compactRedundantUserTurnInputBlocks(args.inputConfig, args.inputBlocks),
     read: false,
     fileDiff: [],
     finished: true,
