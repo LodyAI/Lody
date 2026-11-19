@@ -12,7 +12,7 @@ process owns the engine; the daemon and desktop main each hold one connection; t
 renderer uses domain IPC through main. Existing `LoroRepo` callers keep their API
 because the repo runs with an incremental external metadata adapter. Legacy Meta
 migrates by LWW import with bounded coverage verification. The change needed two
-SDK additions, which exist only as local commits on top of loro-repo `795bafcb`. Verified with real
+SDK additions, merged as loro-repo #306 and #307 (main `0fa4fb92`) but not yet released. Verified with real
 host processes, a real CLI document manager and a 10k/100k benchmark on Linux only;
 no packaged desktop run. Implementation design: [native Workspace Meta](../../../docs/native-workspace-meta.md).
 This is the new proposal the [rejected native Repo record](../../rejected/architecture/2026-10-16-native-workspace-repo.md)

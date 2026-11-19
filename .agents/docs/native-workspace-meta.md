@@ -108,8 +108,8 @@ writes made since migration. Reverse export is a later slice.
 
 ## Performance
 
-Linux x64, Node 26.13.1, release engine from loro-repo `795bafcb` plus the two
-local SDK commits below. One host process; the daemon-side repo and a second
+Linux x64, Node 26.13.1, release engine from loro-repo `0fa4fb92` (identical
+to the build measured before #306/#307 merged). One host process; the daemon-side repo and a second
 connection (standing in for main) share it. Synthetic legacy Meta: three registers
 per document; half the documents are soft-deleted and a third have a tombstoned
 field. 20 warm-up and 200 measured samples; milliseconds.
@@ -135,9 +135,9 @@ whole-room auto-compaction inside the write path, an SDK follow-up.
 
 ## Limits
 
-- Requires unreleased SDK changes: loro-repo-rs #301–#305 and two local commits,
-  the incremental external metadata contract and changes subscriptions without a
-  snapshot. Local builds are used only through an uncommitted override.
+- Requires unreleased SDK changes: loro-repo #301–#307 (#306 adds changes
+  subscriptions without a snapshot, #307 the incremental external metadata
+  contract). Local builds are used only through an uncommitted override.
 - A commit already sent when the host dies is an unknown outcome. Per the SDK
   contract this latches that repo's metadata writes until it is recreated; reads
   continue. Commits attempted while disconnected are certain non-commits.
