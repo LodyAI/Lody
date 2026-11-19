@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { Readable, Writable } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
 
-// Synthetic model for LODY-TURN-001/002. Every prompt names its behavior with a
+// Synthetic model for LODY-TURN-001..004. Every prompt names its behavior with a
 // marker so the event log proves which prompts reached the provider, in which
 // process, and how many times.
 const eventLogPath = process.argv[2];
@@ -24,12 +24,19 @@ function promptText(prompt) {
     .join('\n');
 }
 
+const HOLD_OUTPUT = 'Synthetic long-running work started.';
+
 function modeFor(text) {
   if (text.includes('You generate titles for coding sessions.')) return 'title';
   // A replacement process receives prior history in its prompt; the newest
   // marker is the user's current message.
   const markers = [...text.matchAll(/\[LODY-TURN-00\d:([A-Z-]+)\]/gu)];
-  return markers.length > 0 ? markers[markers.length - 1][1].toLowerCase() : 'other';
+  const newest = markers.length > 0 ? markers[markers.length - 1][1].toLowerCase() : null;
+  // The user's hold request can never contain this agent's own hold output, so a
+  // prompt carrying it is Lody resuming the interrupted work with replayed history.
+  // A prompt with no journey marker at all is Lody's own continuation message.
+  if (newest === 'hold' && text.includes(HOLD_OUTPUT)) return 'continue';
+  return newest ?? 'continue';
 }
 
 async function emitText(client, sessionId, text) {
@@ -44,6 +51,7 @@ function flushStdout() {
 }
 
 const replies = {
+  continue: 'Synthetic work resumed after restart.',
   recover: 'Synthetic recovery reply.',
   before: 'Synthetic reply before restart.',
   after: 'Synthetic reply after restart.',
@@ -103,6 +111,13 @@ const agent = acp
       await emitText(client, sessionId, `Synthetic permission outcome: ${outcome}.`);
       record('prompt-end', { sessionId, mode, stopReason: 'end_turn' });
       return { stopReason: 'end_turn' };
+    }
+
+    if (mode === 'hold') {
+      // Long-running work that only ends when the process is stopped or killed.
+      await emitText(client, sessionId, HOLD_OUTPUT);
+      record('hold-started', { sessionId });
+      await new Promise(() => {});
     }
 
     if (mode === 'crash') {

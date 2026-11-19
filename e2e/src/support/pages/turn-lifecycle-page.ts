@@ -6,6 +6,7 @@ const CRASH_PROMPT = '[LODY-TURN-001:CRASH] The agent process dies during this t
 const RECOVER_PROMPT = '[LODY-TURN-001:RECOVER] Continue after the agent crash.';
 const BEFORE_PROMPT = '[LODY-TURN-002:BEFORE] Reply before the desktop restarts.';
 const AFTER_PROMPT = '[LODY-TURN-002:AFTER] Reply after the desktop restarts.';
+const HOLD_PROMPT = '[LODY-TURN-003:HOLD] Keep working until the desktop restarts.';
 // Local and cloud workspaces route Sessions under different workspace prefixes.
 const SESSION_URL = /#\/(?:[^?#]*\/)?sessions\/([^/?#]+)(?:\?.*)?$/u;
 
@@ -145,6 +146,33 @@ export class TurnLifecyclePage {
       'before',
       'after',
     ]);
+  }
+
+  /** Starts a Turn whose agent keeps working until its process ends; returns the Session id. */
+  async startLongRunningTurn(): Promise<string> {
+    await this.send(HOLD_PROMPT);
+    await expect(this.page).toHaveURL(SESSION_URL, { timeout: 60_000 });
+    await expect(
+      this.page.getByText('Synthetic long-running work started.', { exact: true })
+    ).toBeVisible({ timeout: 60_000 });
+    await this.fixture.waitForEvent((event) => event.event === 'hold-started');
+    await expect(this.page.getByRole('button', { name: /^(Stop|停止)$/u })).toBeVisible();
+    const sessionId = SESSION_URL.exec(this.page.url())?.[1];
+    if (!sessionId) throw new Error(`No Session id in ${this.page.url()}`);
+    return decodeURIComponent(sessionId);
+  }
+
+  /** A Session the CLI accepted survives a hard kill: listed, openable, history intact. */
+  async expectSessionListedWithHistory(sessionId: string): Promise<void> {
+    const entry = this.page.locator(`[data-sidebar-session-id="${sessionId}"]`);
+    await expect(entry).toBeVisible({ timeout: 60_000 });
+    await entry.click();
+    await expect(this.page.getByText(HOLD_PROMPT, { exact: true })).toBeVisible({
+      timeout: 60_000,
+    });
+    await expect(
+      this.page.getByText('Synthetic long-running work started.', { exact: true })
+    ).toBeVisible({ timeout: 60_000 });
   }
 
   private allowOnce(): Locator {
