@@ -20,14 +20,13 @@ automatically after the next start, whatever ended the process.
   unknown, never dispatched again. This preserves the
   [Inbox non-replay decision](../.agents/notes/implemented/architecture/2026-10-12-operation-inbox.md)
   and [restart retirement](../.agents/notes/implemented/bug-fix/2026-10-29-inbox-no-durable-block.md).
-- **One new continuation input.** For each retired execution the CLI admits one new input
-  authored by Lody, visible in the conversation, that states the fact: Lody restarted while
-  the Agent was working on the previous request. It carries no other instruction
-  ([agent-text rule](../AGENTS.md)). The Agent is relaunched the ordinary way
-  (`session/load` where supported, otherwise the existing history resume) and receives it.
-- **At most once.** A continuation is created only for an execution that was itself started
-  by a human or an automation input, never for an interrupted continuation, so a crash
-  loop cannot keep restarting work.
+- **One new continuation input.** For each retired execution the CLI resumes the Agent
+  the ordinary way (`session/load` where supported, otherwise the existing history resume)
+  and admits one new input, authored by Lody and visible in the conversation, whose whole
+  text is `continue` — what users send by hand today. It carries no other instruction
+  ([agent-text rule](../AGENTS.md)).
+- **At most once.** An interrupted continuation is not continued again, so a crash loop
+  cannot keep restarting work (owner: keep this simple).
 - **The user wins.** Stop, a paused Inbox, archive or deletion, or new human input
   accepted before the continuation starts cancel it. The continuation queues behind input
   that is already pending, like any other input.
@@ -38,21 +37,14 @@ file) continues from that state.
 ## Durability prerequisite
 
 A Session whose input the CLI accepted must still be listed and openable after a hard kill.
-Today its metadata (the entry that lists it) is persisted by loro-repo on a 5-second
-trailing debounce with no maximum wait, while its history is persisted at once. A SIGKILL
-within that window keeps the conversation on disk but loses the entry, so the restarted
-desktop shows "This session isn't here" although the CLI reports the interrupted run.
-`startSession` intends metadata before history; on disk the order is reversed.
-
-Invariant: a Session's metadata is durable on a replica no later than its first history
-write, and before the CLI records acceptance of or dispatches its input. The fix awaits
-the repository's immediate metadata persistence at Session creation (renderer, including
-fork and child tabs) and before CLI acceptance; a shorter debounce alone only narrows the
-window.
+loro-repo's default 5-second trailing metadata debounce let a SIGKILL drop the entry that
+lists a new Session while its history stayed on disk. Both repositories now persist
+metadata without a debounce (owner, 2026-11-19: local incremental writes need no such
+delay); `LODY-TURN-005` guards it.
 
 ## Open questions
 
-- Exact continuation wording and how the conversation labels it.
+- How the conversation labels the Lody-authored `continue`.
 - Remote machines and cloud Sessions: whether a machine restart continues Turns that a
   different device dispatched.
 - Scheduled automations: whether an interrupted scheduled run continues or waits for its
