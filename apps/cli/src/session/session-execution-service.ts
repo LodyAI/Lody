@@ -182,6 +182,11 @@ import {
 import type { MachineAccessVerification } from './session-access-retry';
 import { createSessionBackend, getSteerOperationId, type SessionBackend } from './session-backend';
 import {
+  interruptedTurnContinuationId,
+  isTurnInterruptedByProcessEnd,
+  planInterruptedTurnContinuation,
+} from './interrupted-turn-continuation';
+import {
   findLastHistoryEntry,
   isActivationAwaitingHistory,
   resolveDispatchAcpSessionId,
@@ -390,6 +395,12 @@ type TurnRuntimeState = {
   /** Start step in progress; cleared once a Session is bound, so later failures name none. */
   startStage?: SessionStartStage;
   cancelRequested: boolean;
+  /**
+   * Shutdown interrupted this input's running prompt; the user did not stop it. Its
+   * cancellation keeps the dispatch claim in Session metadata, exactly as a crash
+   * leaves it, so the next start continues the Turn once.
+   */
+  interruptedByProcessEnd?: boolean;
   pendingInputOnCancel: PendingInputCancellationPolicy;
   releaseFailure?: unknown;
   releaseParentAdmission?: () => void;
@@ -1275,6 +1286,9 @@ export class SessionExecutionService {
   quiesceInboxExecutions(): void {
     this.shutdownAbort.abort();
     for (const runtime of this.turnRuntimeBySession.values()) {
+      // A Turn whose prompt already ended is only finishing bookkeeping: not continued.
+      if (runtime.inboxOwner?.input && runtime.promptInFlight && !runtime.cancelRequested)
+        runtime.interruptedByProcessEnd = true;
       runtime.cancelRequested = true;
       runtime.pendingInputOnCancel = 'preserve';
       runtime.terminateSessionOnCancel = true;
@@ -3843,13 +3857,16 @@ export class SessionExecutionService {
       // assistant as success unless the user turn already carries a stronger
       // failed/cancelled outcome, so reversing these writes creates a window
       // where a cancelled turn can be durably folded as succeeded.
-      yield* self.ignoreWithWarning(
-        options.sessionId,
-        'Failed to mark dispatch cancelled',
-        self.tryPromise(() =>
-          self.markDispatchCancelled(options.sessionId, options.sessionDoc, options.userTurnId)
-        )
-      );
+      // A shutdown interruption leaves the same trace as a crash: the input stays
+      // `processing` and claimed in metadata until the next start continues it.
+      if (!runtime?.interruptedByProcessEnd)
+        yield* self.ignoreWithWarning(
+          options.sessionId,
+          'Failed to mark dispatch cancelled',
+          self.tryPromise(() =>
+            self.markDispatchCancelled(options.sessionId, options.sessionDoc, options.userTurnId)
+          )
+        );
 
       if (options.reportTurnError) {
         yield* self.ignoreWithWarning(
@@ -4143,6 +4160,49 @@ export class SessionExecutionService {
     }
     await options.sessionDoc.setStatus(SessionStatusFactory.idle());
     this.captureStatusChanged(options.sessionId, 'idle', undefined, 'turn_failed');
+  }
+
+  /**
+   * Restart dispatch of an input a process end interrupted (its metadata claim survived
+   * on this Machine). The input itself is never replayed: it settles as stopped, and
+   * one new Lody-authored `continue` input follows unless the user already moved on.
+   * Returns false when the input was not interrupted, so the caller fails it as before.
+   * Spec: `specs/interrupted-turn-continuation.md`.
+   */
+  private async continueInterruptedTurn(
+    sessionId: SessionId,
+    sessionDoc: SessionDocument,
+    userTurnId: string
+  ): Promise<boolean> {
+    // Encrypted starts run only signed input; Lody cannot sign for the requester.
+    if (this.deps.encryptedExecution) return false;
+    const raw = await this.deps.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+    const meta = raw?.meta as SessionMeta | undefined;
+    if (!isTurnInterruptedByProcessEnd(meta, this.deps.machineId, userTurnId)) return false;
+    const backend = await createSessionBackend(sessionDoc);
+    const [interrupted, existing, queue] = await Promise.all([
+      backend.readTurn(userTurnId),
+      backend.readTurn(interruptedTurnContinuationId(userTurnId)),
+      backend.getMessageQueue(),
+    ]);
+    const plan = planInterruptedTurnContinuation({
+      interruptedTurnId: userTurnId,
+      interruptedTurn: interrupted.state === 'ready' ? interrupted.turn : undefined,
+      meta: raw && !isLoroRepoDocDeleted(raw) ? meta : undefined,
+      queuedInputCount: queue.length,
+      continuationExists: existing.state !== 'missing',
+      timestamp: new Date(getServerNow()).toISOString(),
+    });
+    await this.markDispatchCancelled(sessionId, sessionDoc, userTurnId);
+    await sessionDoc.setStatus(SessionStatusFactory.idle());
+    this.deps.logger.info(
+      `[${sessionId}] Interrupted Turn ${userTurnId}: ${plan.kind === 'continue' ? 'continuing' : `not continued (${plan.reason})`}`
+    );
+    if (plan.kind === 'continue') {
+      await backend.appendUserTurn(plan.entry);
+      this.onInboxReleased?.(sessionId);
+    }
+    return true;
   }
 
   /**
@@ -5093,6 +5153,22 @@ export class SessionExecutionService {
         !options.inboxBatch &&
         inbox!.inputEnded(this.deps.workspaceId, sessionId, inboxInput.inputId)
       ) {
+        // A process end interrupted this input: settle it like Stop and continue once.
+        const continued = await this.continueInterruptedTurn(
+          sessionId,
+          sessionDoc,
+          userTurnId
+        ).catch((continueCause: unknown) => {
+          this.deps.logger.warn(
+            `[${sessionId}] Cannot continue interrupted input ${userTurnId}: ${formatErrorMessage(continueCause)}`
+          );
+          return false;
+        });
+        if (continued) {
+          await closeLeftoverEntry();
+          span.end({ outcome: 'inbox-input-interrupted' });
+          return 'inbox-input-ended';
+        }
         // An ended input is never admitted again (no replay), so leaving its user
         // turn pending would make dispatch select it ahead of every later message.
         await this.retireEndedInboxInputTurn(sessionId, sessionDoc, userTurnId).catch(

@@ -349,6 +349,15 @@ turn under the rewrite lease), the entry is dead:
   closes the entry a crashed run left open, at that failure point. A `processing` input is
   never closed this way: it still owes its crash-recovery run on the same entry. Dispatch
   checks do not sweep for dead turns; that would read history on every trigger.
+- A process end (crash, kill, or shutdown during a running prompt) leaves the input's
+  `processingUserMsgId` claim in Session metadata; shutdown keeps it only when the prompt
+  was still in flight and the user had not stopped it. When restart dispatch finds that
+  claim on its own Machine for an ended Inbox input, it settles the input as stopped (not
+  the send-again failure) and appends one Lody-authored `continue` input with the
+  interrupted input's Agent configuration (`interrupted-turn-continuation.ts`), unless the
+  Session is archived or deleted, newer or queued input exists, a continuation already
+  exists, or the input was itself a continuation (id prefix `lody-continue-`). Encrypted
+  workspaces keep the failure. See the [spec](../../../../specs/interrupted-turn-continuation.md).
 - Queue acknowledgement requires an empty local queue **and** observation of the control
   frontier carried by that exact `messageQueueUpdatedAt` signal. Renderer queue mutations
   capture `messageQueueUpdateVersion` before releasing their store. Metadata arriving first

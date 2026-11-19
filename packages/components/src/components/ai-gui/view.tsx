@@ -781,8 +781,10 @@ const AgentActivityStatus = ({
       aria-live="polite"
       data-agent-activity-status=""
       className={cn(
-        /* `px-[4px]` is `conversation.railInset`: the status sits on the prose rail. */
-        'flex w-full items-center px-[4px] py-0.5 text-muted-foreground',
+        /* `px-[4px]` is `conversation.railInset`: the status sits on the prose rail.
+           It is live chrome rather than authored prose, so native selection must
+           not copy it when it shares the streaming row's measurement boundary. */
+        'flex w-full select-none items-center px-[4px] py-0.5 text-muted-foreground',
         isMobile && 'gap-1.5'
       )}
     >
@@ -1956,19 +1958,37 @@ export const SessionChatStreamView = forwardRef<
       }
       return null;
     }, [agentActivityLabel, agentActivityShimmer, virtualRows]);
-    // Keep status above the task summary, with or without footer actions.
-    // Other live turns put it in the footer or in a separate trailing row.
+    // Keep the live status inside the final expanding assistant row's measurement
+    // boundary. Streaming Markdown can grow between list commits; a separate
+    // absolute status row would retain the previous offset until ResizeObserver
+    // catches up and paint over the new line. Footer actions and subagent summaries
+    // remain later siblings, so the status still precedes both. Empty turns fall
+    // back to those specialized rows. A collapsed live activity group owns the
+    // label itself above.
     const liveStatusRowKey = useMemo(() => {
       if (!agentActivityLabel || liveGroupHeaderRowKey !== null) return null;
-      const last = virtualRows[virtualRows.length - 1];
+      const lastIndex = virtualRows.length - 1;
+      const last = virtualRows[lastIndex];
       if (last?.type !== 'assistant' || last.item.message.finished === true) return null;
-      const footerKey = last.content.kind === 'footer' ? last.key : null;
-      const contentRow = footerKey ? virtualRows[virtualRows.length - 2] : last;
-      return contentRow?.type === 'assistant' &&
-        contentRow.item === last.item &&
-        contentRow.content.kind === 'subagent_tasks'
-        ? contentRow.key
-        : footerKey;
+
+      let attachmentIndex = lastIndex;
+      if (last.content.kind === 'footer') attachmentIndex -= 1;
+      const beforeTrailingFooter = virtualRows[attachmentIndex];
+      if (
+        beforeTrailingFooter?.type === 'assistant' &&
+        beforeTrailingFooter.item === last.item &&
+        beforeTrailingFooter.content.kind === 'subagent_tasks'
+      ) {
+        attachmentIndex -= 1;
+      }
+      const attachment = virtualRows[attachmentIndex];
+      if (attachment?.type === 'assistant' && attachment.item === last.item) {
+        return attachment.key;
+      }
+      if (beforeTrailingFooter?.type === 'assistant' && beforeTrailingFooter.item === last.item) {
+        return beforeTrailingFooter.key;
+      }
+      return last.key;
     }, [agentActivityLabel, liveGroupHeaderRowKey, virtualRows]);
     const liveTurnStatus = useMemo<AgentActivityStatusProps | null>(
       () =>
@@ -2571,7 +2591,12 @@ export const SessionChatStreamView = forwardRef<
               shimmerGroupHeader={row.key === liveGroupHeaderRowKey}
               liveStatus={row.key === liveStatusRowKey ? liveTurnStatus : null}
               liveStatusFollowsSurface={
-                row.key === liveStatusRowKey && assistantRowPaintsSurface(virtualRows[rowIndex - 1])
+                row.key === liveStatusRowKey &&
+                assistantRowPaintsSurface(
+                  row.content.kind === 'footer' || row.content.kind === 'subagent_tasks'
+                    ? virtualRows[rowIndex - 1]
+                    : row
+                )
               }
             />
           </MessageSelectionRow>
@@ -6107,7 +6132,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
         return (
           <>
             {liveStatus ? (
-              <div className="pb-2">
+              <div className="pb-2" data-agent-activity-row="">
                 <AgentActivityStatus {...liveStatus} message={message} />
               </div>
             ) : null}
@@ -6127,7 +6152,10 @@ const AssistantChatItem = memo(function AssistantChatItem({
                 row itself suppresses top padding, so restore the normal prose
                 gap or the wider surface gap used after a bordered card. */}
             {liveStatus ? (
-              <div className={cn('pb-1.5', liveStatusFollowsSurface ? 'pt-3' : 'pt-1')}>
+              <div
+                className={cn('pb-1.5', liveStatusFollowsSurface ? 'pt-3' : 'pt-1')}
+                data-agent-activity-row=""
+              >
                 <AgentActivityStatus {...liveStatus} message={message} />
               </div>
             ) : null}
@@ -6152,6 +6180,20 @@ const AssistantChatItem = memo(function AssistantChatItem({
         return null;
     }
   })();
+
+  const rowBodyWithLiveStatus = (
+    <>
+      {rowBody}
+      {liveStatus && content.kind !== 'subagent_tasks' && content.kind !== 'footer' ? (
+        <div
+          className={cn('pb-1.5', liveStatusFollowsSurface ? 'pt-3' : 'pt-1')}
+          data-agent-activity-row=""
+        >
+          <AgentActivityStatus {...liveStatus} message={message} />
+        </div>
+      ) : null}
+    </>
+  );
 
   // Progress prose keeps its reading gap even inside expanded work. Only
   // individual activity details share the compact tool-row pitch.
@@ -6241,9 +6283,9 @@ const AssistantChatItem = memo(function AssistantChatItem({
               reserve. Mobile always shows the footer: the reserve goes below it
               (`roundLastRow` above) or the next round reads as crowded. */}
           {row.endsRound && content.kind === 'footer' && !isMobile ? (
-            <div {...stylex.props(conversationSurface.roundFooter)}>{rowBody}</div>
+            <div {...stylex.props(conversationSurface.roundFooter)}>{rowBodyWithLiveStatus}</div>
           ) : (
-            rowBody
+            rowBodyWithLiveStatus
           )}
         </div>
       </div>

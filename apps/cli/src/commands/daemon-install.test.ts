@@ -17,12 +17,17 @@ vi.mock('./daemon-auth-preflight', () => ({ ensureDaemonBackendAuth: ports.prefl
 vi.mock('@lody/shared/node/local-cli-host-lease', () => ({
   inspectLocalCliHost: ports.host,
   requestLocalCliHostUpgrade: vi.fn(),
+  requestLocalCliHostShutdown: vi.fn(),
 }));
 vi.mock('./daemon-autostart', async (original) => ({
   ...(await original<typeof import('./daemon-autostart')>()),
   registerDaemonAutostart: ports.autostart,
 }));
-import { installManagedDaemon } from './daemon-install';
+import {
+  InstallActionRequiredError,
+  installManagedDaemon,
+  type InstallHostPorts,
+} from './daemon-install';
 const roots: string[] = [];
 beforeEach(() => {
   ports.host.mockResolvedValue(null);
@@ -105,13 +110,77 @@ it('a rejected credential leaves an installed entry but never registers or start
   expect(await fs.readFile(f.service)).toEqual(await fs.readFile(f.capsule));
   await expect(fs.access(f.events)).rejects.toThrow();
 });
-it('refuses to replace files or credentials while another Host owns this profile', async () => {
+function hostPorts(overrides: Partial<InstallHostPorts>) {
+  const stopped: string[] = [];
+  const value: InstallHostPorts = {
+    interactive: false,
+    confirm: async () => false,
+    ownsDaemon: (host) => host.mode === 'daemon',
+    stopDaemon: async () => {
+      stopped.push('daemon-control');
+      ports.host.mockResolvedValue(null);
+      return { status: 'stopped', pid: 42, attempts: 1 };
+    },
+    terminate: async (pid) => {
+      stopped.push(`pid:${pid}`);
+      ports.host.mockResolvedValue(null);
+    },
+    ownedByCurrentUser: async () => true,
+    ...overrides,
+  };
+  return { ports: value, stopped };
+}
+const daemonHost = {
+  version: 1,
+  instanceId: 'i',
+  pid: 42,
+  mode: 'daemon',
+  startedAtMs: 1,
+} as const;
+
+it('never stops a running Lody without the owner agreeing, and leaves files and credentials untouched', async () => {
   const f = await fixture();
-  ports.host.mockResolvedValue({ pid: 42, mode: 'electron' });
-  await expect(installManagedDaemon({ auth: 'synthetic', start: true })).rejects.toThrow(
-    /Stop the existing/
-  );
+  for (const mode of ['daemon', 'electron'] as const) {
+    ports.host.mockResolvedValue({ ...daemonHost, mode });
+    const declined = hostPorts({ interactive: true, confirm: async () => false });
+    await expect(installManagedDaemon({ start: true }, declined.ports)).rejects.toThrow(
+      /Cancelled/
+    );
+    const unattended = hostPorts({});
+    const attempt = installManagedDaemon({ auth: 'synthetic', start: true }, unattended.ports);
+    await expect(attempt).rejects.toBeInstanceOf(InstallActionRequiredError);
+    await expect(attempt).rejects.toThrow(/--replace/);
+    expect([...declined.stopped, ...unattended.stopped]).toEqual([]);
+  }
   await expect(fs.access(path.join(f.data, 'daemon-managed'))).rejects.toThrow();
+  expect(ports.login).not.toHaveBeenCalled();
+});
+
+it("after the owner agrees, re-running the installer stops this profile's daemon through its control channel, ends any other Host, and installs and starts the new release", async () => {
+  const f = await fixture();
+  ports.host.mockResolvedValue(daemonHost);
+  const own = hostPorts({ interactive: true, confirm: async () => true });
+  await installManagedDaemon({ start: true }, own.ports);
+  expect(own.stopped).toEqual(['daemon-control']);
+  expect(await fs.readFile(f.service)).toEqual(await fs.readFile(f.capsule));
+
+  ports.host.mockResolvedValue({ ...daemonHost, mode: 'electron', pid: 77 });
+  const desktop = hostPorts({});
+  await installManagedDaemon({ start: true, replace: true }, desktop.ports);
+  expect(desktop.stopped).toEqual(['pid:77']);
+  expect(await fs.readFile(f.events, 'utf8')).toBe(
+    'started:daemon start --skip-auth-check\n'.repeat(2)
+  );
+});
+
+it('never signals a Host process that belongs to another OS user', async () => {
+  await fixture();
+  ports.host.mockResolvedValue({ ...daemonHost, mode: 'foreground' });
+  const foreign = hostPorts({ ownedByCurrentUser: async () => false });
+  await expect(installManagedDaemon({ start: true, replace: true }, foreign.ports)).rejects.toThrow(
+    /another OS user/
+  );
+  expect(foreign.stopped).toEqual([]);
 });
 
 it('generic non-interactive installation does not bypass required authentication', async () => {
