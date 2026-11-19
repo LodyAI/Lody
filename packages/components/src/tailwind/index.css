@@ -1298,14 +1298,6 @@ pre,
     height: calc(var(--composer-rows, 2) * 1lh + var(--composer-rows-chrome, 0px));
   }
 
-  /* Empty caret targets before line-start mentions/quotes have no glyph metrics
-     as bare `display: inline` spans; a CSS-only zero-width space gives Blink
-     and WebKit a full-height inline caret without adding a DOM character or
-     collapsing the caret like `inline-block` with `width: 0`. */
-  [data-composer-editor] span[data-lexical-text]:empty::before {
-    content: '\200B';
-  }
-
   [data-composer-editor][data-empty]::before {
     content: attr(data-placeholder);
     float: left;
