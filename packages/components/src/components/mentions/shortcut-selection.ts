@@ -50,8 +50,7 @@ export async function prepareShortcutSelection(input: {
     snapshot.id !== entry.id ||
     snapshot.revision !== entry.revision ||
     snapshot.workspaceId !== entry.workspaceId ||
-    snapshot.ownerUserId !== entry.ownerUserId ||
-    snapshot.visibility !== entry.visibility
+    snapshot.ownerUserId !== entry.ownerUserId
   )
     throw new PromptShortcutError('revision_pending', 'Index and body do not agree');
   const availability = resolveShortcutAvailability({

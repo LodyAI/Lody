@@ -537,3 +537,8 @@ export {
   sessionHistoryWriteIntentDigest,
   type SessionAccessRecord,
 } from './session-access';
+
+export {
+  getWorkspaceShortcutBodyStreamId,
+  getWorkspaceShortcutIndexStreamId,
+} from './prompt-shortcuts/access';

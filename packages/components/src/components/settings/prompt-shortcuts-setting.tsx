@@ -198,7 +198,6 @@ function PromptShortcutsSettingContent({
         revision: crypto.randomUUID(),
         workspaceId: runtime.workspaceId,
         ownerUserId: runtime.userId,
-        visibility: 'private',
         name: '',
         slug: '',
         prompt: '',
@@ -215,7 +214,7 @@ function PromptShortcutsSettingContent({
       <SettingsPageLead>
         {t(
           'settings.promptShortcuts.intro',
-          'Saved Prompts you can call with a slash command. Each one says where it applies; a Shortcut with nothing set works anywhere in this workspace. Private until you share it.'
+          'Saved Prompts you can call with a slash command. Each one says where it applies; a Shortcut with nothing set works anywhere in this workspace.'
         )}
       </SettingsPageLead>
 
@@ -259,7 +258,7 @@ function PromptShortcutsSettingContent({
                   )
                 : t(
                     'settings.promptShortcuts.readOnlyHelp',
-                    'Shared by another member. Only its author can change it.'
+                    'Created by another member. Only its author can change it.'
                   )}
             </Dialog.Description>
           </Dialog.Header>
@@ -269,7 +268,6 @@ function PromptShortcutsSettingContent({
                 key={shownEditor.value.id}
                 initial={shownEditor.value}
                 isNew={!shownEditor.base}
-                canShare={runtime.canShare}
                 saving={busy}
                 scope={scope}
                 onCancel={() => setEditor(null)}
@@ -279,20 +277,12 @@ function PromptShortcutsSettingContent({
                     await runtime.save({
                       value: { ...value, revision: crypto.randomUUID(), updatedAt: getServerNow() },
                       base: shownEditor.base,
-                      bodyDocId:
-                        !shownEditor.base || shownEditor.base.visibility !== value.visibility
-                          ? crypto.randomUUID()
-                          : shownEditor.base.bodyDocId,
+                      bodyDocId: shownEditor.base ? shownEditor.base.bodyDocId : value.id,
                     });
                     capturePostHogEvent(
                       postHog,
                       shownEditor.base ? 'prompt_shortcut/updated' : 'prompt_shortcut/created',
-                      {
-                        ...getPromptShortcutAnalyticsProperties(value, value.mentions.length),
-                        ...(shownEditor.base
-                          ? { visibility_changed: shownEditor.base.visibility !== value.visibility }
-                          : {}),
-                      }
+                      getPromptShortcutAnalyticsProperties(value, value.mentions.length)
                     );
                     setEditor(null);
                   } finally {
@@ -450,10 +440,10 @@ export function PromptShortcutsList({
 /**
  * One catalog row: a line of the catalog's card, not a card of its own.
  *
- * States what the author decided — the command, who can read it, where it
- * applies, how many values a caller has to fill in — and, separately, anything
- * that stops it working. Scope pills are the author's intent; the status line
- * below them is a fact about right now, and the two never merge.
+ * States what the author decided — the command, where it applies, how many
+ * values a caller has to fill in — and, separately, anything that stops it
+ * working. Scope pills are the author's intent; the status line below them is
+ * a fact about right now, and the two never merge.
  */
 export function PromptShortcutRow({
   entry,
@@ -497,12 +487,6 @@ export function PromptShortcutRow({
           <span {...stylex.props(catalog.titleLine, styles.titleLine)}>
             <span {...stylex.props(catalog.name)}>{entry.name}</span>
             <span {...stylex.props(styles.slug)}>/{entry.slug}</span>
-            {/* Visibility, not scope: the pills say where it can be called,
-                this says who can read it. Private is the default, so only a
-                shared one is marked. */}
-            {entry.visibility === 'workspace' ? (
-              <Badge>{t('settings.promptShortcuts.shared', 'Shared')}</Badge>
-            ) : null}
             {/* Owned by someone else: the missing delete button is the only
                 other sign, and an absence is not a signal. */}
             {canManage ? null : (
@@ -556,7 +540,7 @@ export function PromptShortcutRow({
 }
 
 /**
- * Someone else's shared Shortcut.
+ * Someone else's Shortcut in this workspace.
  *
  * Read-only because only its author may change it (a copy-to-mine action is not
  * built yet). Rendered with the editor's own sections so the same Shortcut looks
@@ -583,7 +567,7 @@ export function PromptShortcutReadOnlyView({
           </span>
           <span {...stylex.props(styles.identityName)}>{shortcut.name}</span>
           <span {...stylex.props(styles.slug)}>/{shortcut.slug}</span>
-          <Badge>{t('settings.promptShortcuts.shared', 'Shared')}</Badge>
+          <Badge>{t('settings.promptShortcuts.readOnly', 'Read-only')}</Badge>
         </div>
         {shortcut.description ? (
           <p {...stylex.props(styles.description)}>{shortcut.description}</p>
@@ -671,7 +655,6 @@ function ShortcutEditor({
 }: {
   initial: PromptShortcut;
   isNew: boolean;
-  canShare: boolean;
   saving: boolean;
   scope: ShortcutScopeData;
   className?: string;

@@ -82,7 +82,6 @@ export class PromptShortcutDocument {
           head.id !== first.id ||
           head.workspaceId !== first.workspaceId ||
           head.ownerUserId !== first.ownerUserId ||
-          head.visibility !== first.visibility ||
           head.createdAt !== first.createdAt
       )
     ) {
@@ -140,7 +139,6 @@ export class PromptShortcutDocument {
       (current.id !== content.id ||
         current.workspaceId !== content.workspaceId ||
         current.ownerUserId !== content.ownerUserId ||
-        current.visibility !== content.visibility ||
         current.createdAt !== content.createdAt)
     ) {
       throw new PromptShortcutError('invalid_template', 'Document identity cannot change');
