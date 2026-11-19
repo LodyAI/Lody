@@ -281,11 +281,11 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
     const changed = flockEvents.find((event) => event.event.kind === 'changes').event.registers
     assert.deepEqual(changed[0].key, ['mcpServer', 'a'])
     assert.equal(changed[0].clockEncoded, '1,0,renderer')
-    // Session documents: only owned ids parse; one window's commit reaches the other.
+    // Owned documents: only owned ids parse; one window's commit reaches the other.
     await assert.rejects(
       handlers.get('nativeWorkspaceMeta.openDoc')(auxiliary, {
         ...scope,
-        docId: 'schedule-x',
+        docId: 'task-x',
         observationId: '00000000-0000-4000-8000-000000000005'
       })
     )
