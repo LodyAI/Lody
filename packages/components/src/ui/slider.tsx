@@ -1,4 +1,5 @@
-import { control } from '@lody/ui/tokens/scales.stylex';
+import { control, focus } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import * as React from 'react';
 
 import { clsx } from 'clsx';
@@ -57,8 +58,8 @@ const styles = stylex.create({
     },
     ':focus-visible': {
       boxShadow: 'none',
-      '::-webkit-slider-thumb': { boxShadow: '0 0 0 3px hsl(var(--primary) / 0.3)' },
-      '::-moz-range-thumb': { boxShadow: '0 0 0 3px hsl(var(--primary) / 0.3)' },
+      '::-webkit-slider-thumb': { boxShadow: `0 0 0 ${focus.ringWidth} ${colors.accent}` },
+      '::-moz-range-thumb': { boxShadow: `0 0 0 ${focus.ringWidth} ${colors.accent}` },
     },
   },
 });

@@ -185,7 +185,7 @@ const styles = stylex.create({
     width: '100%',
     [field.background]: 'hsl(var(--input-field) / 1)',
     [field.well]: 'none',
-    [field.ringWidth]: '0px',
+    [field.ringWidth]: '2px',
   },
   stack: {
     display: 'flex',

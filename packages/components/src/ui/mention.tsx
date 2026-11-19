@@ -33,7 +33,7 @@ const styles = stylex.create({
     '--mention-chip-surface': colors.background,
     '--mention-chip-overlay': `linear-gradient(${field.background},${field.background})`,
     backgroundColor: field.background,
-    boxShadow: { default: field.well, ':focus-within': `0 0 0 2px ${field.ring}, ${field.well}` },
+    boxShadow: { default: field.well, ':focus-within': `0 0 0 ${field.ringWidth} ${field.ring}, ${field.well}` },
     borderRadius: field.radiusMedium,
     cornerShape: corner.round,
     transitionProperty: 'box-shadow, opacity',
@@ -43,8 +43,8 @@ const styles = stylex.create({
   quietWell: { boxShadow: field.well },
   inputInvalid: {
     boxShadow: {
-      default: `0 0 0 2px ${field.invalidRing}, ${field.well}`,
-      ':focus-within': `0 0 0 2px ${field.invalidRing}, ${field.well}`,
+      default: `0 0 0 ${field.ringWidth} ${field.invalidRing}, ${field.well}`,
+      ':focus-within': `0 0 0 ${field.ringWidth} ${field.invalidRing}, ${field.well}`,
     },
   },
   inputDisabled: { opacity: control.disabledOpacity },

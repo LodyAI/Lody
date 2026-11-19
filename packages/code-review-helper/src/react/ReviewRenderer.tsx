@@ -365,8 +365,7 @@ const rootLayoutStyles = stylex.create({
       'var(--crh-ordinal,) var(--crh-slashed-zero,) var(--crh-numeric-figure,) var(--crh-numeric-spacing,) var(--crh-numeric-fraction,)',
     'margin-top': 'calc(var(--spacing) * 0.5)',
     display: 'block',
-    fontFamily:
-      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontFamily: 'var(--font-mono)',
     fontSize: '11px',
   },
   additions: { color: 'hsl(var(--github-addition))' },
@@ -439,8 +438,7 @@ const rootLayoutStyles = stylex.create({
     '--crh-numeric-spacing': 'tabular-nums',
     fontVariantNumeric:
       'var(--crh-ordinal,) var(--crh-slashed-zero,) var(--crh-numeric-figure,) var(--crh-numeric-spacing,) var(--crh-numeric-fraction,)',
-    fontFamily:
-      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontFamily: 'var(--font-mono)',
   },
   content: {
     minWidth: 'calc(var(--spacing) * 0)',
@@ -1884,8 +1882,7 @@ const findingsStyles = stylex.create({
     'padding-inline': 'calc(var(--spacing) * 1)',
     'padding-block': '1px',
     verticalAlign: 'baseline',
-    fontFamily:
-      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontFamily: 'var(--font-mono)',
     fontSize: '11px',
     color: {
       default: 'hsl(var(--foreground))',
@@ -2210,8 +2207,7 @@ const markdownStyles = stylex.create({
         'color-mix(in oklab, hsl(var(--muted)) 70%, transparent)',
     },
     'padding-inline': 'calc(var(--spacing) * 1)',
-    fontFamily:
-      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontFamily: 'var(--font-mono)',
     fontSize: '12px',
   },
   body: {
@@ -2472,8 +2468,7 @@ const groupSectionStyles = stylex.create({
     '--crh-numeric-spacing': 'tabular-nums',
     fontVariantNumeric:
       'var(--crh-ordinal,) var(--crh-slashed-zero,) var(--crh-numeric-figure,) var(--crh-numeric-spacing,) var(--crh-numeric-fraction,)',
-    fontFamily:
-      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontFamily: 'var(--font-mono)',
     fontSize: '12px',
   },
   additions: { color: 'hsl(var(--github-addition))' },
@@ -3067,8 +3062,7 @@ const treeCommitStyles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontFamily:
-      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontFamily: 'var(--font-mono)',
     fontSize: '13px',
     color: {
       default: 'hsl(var(--foreground))',
@@ -3093,8 +3087,7 @@ const treeCommitStyles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontFamily:
-      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontFamily: 'var(--font-mono)',
     fontSize: '13px',
   },
   fileLabelChecked: {
@@ -3115,8 +3108,7 @@ const treeCommitStyles = stylex.create({
     lineHeight: '1',
     'margin-left': 'auto',
     flexShrink: 0,
-    fontFamily:
-      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontFamily: 'var(--font-mono)',
     fontSize: '10px',
   },
   additions: {
@@ -3133,8 +3125,7 @@ const treeCommitStyles = stylex.create({
     alignItems: 'center',
     gap: 'calc(var(--spacing) * 1)',
     borderRadius: 'calc(var(--radius) - 2px)',
-    fontFamily:
-      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontFamily: 'var(--font-mono)',
     fontSize: '10px',
     textTransform: 'uppercase',
     color: {
@@ -3317,8 +3308,7 @@ const treeCommitStyles = stylex.create({
     color: 'hsl(var(--muted-foreground))',
   },
   tooltipSha: {
-    fontFamily:
-      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontFamily: 'var(--font-mono)',
     fontSize: '10.5px',
     color: 'hsl(var(--muted-foreground))',
   },
@@ -3331,8 +3321,7 @@ const treeCommitStyles = stylex.create({
     alignItems: 'center',
     gap: 'calc(var(--spacing) * 1)',
     borderRadius: 'calc(var(--radius) - 2px)',
-    fontFamily:
-      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontFamily: 'var(--font-mono)',
     fontSize: '11px',
     color: {
       default: 'hsl(var(--muted-foreground))',
@@ -3419,7 +3408,7 @@ const treeCommitStyles = stylex.create({
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: '3.40282e38px',
+    borderRadius: '999px',
     fontSize: '10px',
     color: 'var(--color-white)',
   },
@@ -3845,8 +3834,7 @@ const diffBlockStyles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontFamily:
-      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontFamily: 'var(--font-mono)',
     fontSize: '12.5px',
     color: 'hsl(var(--foreground))',
   },
@@ -3860,8 +3848,7 @@ const diffBlockStyles = stylex.create({
     '--crh-numeric-spacing': 'tabular-nums',
     fontVariantNumeric:
       'var(--crh-ordinal,) var(--crh-slashed-zero,) var(--crh-numeric-figure,) var(--crh-numeric-spacing,) var(--crh-numeric-fraction,)',
-    fontFamily:
-      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontFamily: 'var(--font-mono)',
     fontSize: '11px',
     color: 'hsl(var(--muted-foreground))',
   },
@@ -3912,8 +3899,7 @@ const contextBlockStyles = stylex.create({
     lineHeight: 'calc(var(--spacing) * 5)',
     width: '100%',
     borderCollapse: 'collapse',
-    fontFamily:
-      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontFamily: 'var(--font-mono)',
     fontSize: '12.5px',
   },
   range: {
@@ -3935,8 +3921,7 @@ const contextBlockStyles = stylex.create({
   status: {
     letterSpacing: 'var(--tracking-wide)',
     flexShrink: 0,
-    fontFamily:
-      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontFamily: 'var(--font-mono)',
     fontSize: '10px',
     textTransform: 'uppercase',
     color: 'hsl(var(--muted-foreground))',
@@ -4874,8 +4859,7 @@ const commentStyles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontFamily:
-      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontFamily: 'var(--font-mono)',
     fontSize: '11.5px',
     color: {
       default: 'hsl(var(--muted-foreground))',
@@ -4927,8 +4911,7 @@ const commentStyles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontFamily:
-      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontFamily: 'var(--font-mono)',
     fontSize: '11px',
     color: 'hsl(var(--muted-foreground))',
   },
