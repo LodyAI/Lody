@@ -19,13 +19,11 @@ import { useTranslation } from 'react-i18next';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
 import { sessionSendStatesAtom } from '@/atoms/session-send-status';
 import { allSessionsIncludingArchivedAtom } from '@/atoms/doc-meta';
-import { PR_STATUS_META } from '@/components/sessions/pull-request-badge';
-import { SessionPrIcon, SessionRowStatusIndicator } from '@/components/sidebar-row-shared';
+import { SessionRowStatusIndicator } from '@/components/sidebar-row-shared';
 import { buildChildSessionsByParent } from '@/components/sessions/session-list-rows';
 import { useMySessionScope, useVisibleSessionMetas } from '@/hooks/use-visible-session-metas';
 import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
-import { openExternalUrl } from '@/lib/native-browser';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import {
   buildProjectBoard,
@@ -37,6 +35,7 @@ import {
   type ProjectBoardBucket,
   type ProjectBoardRow,
 } from './project-board-model';
+import { ProjectBoardPrMenu } from './project-board-pr-menu';
 
 const styles = stylex.create({
   column: {
@@ -137,24 +136,6 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   mark: { display: 'flex', width: '14px', flexShrink: 0, justifyContent: 'center' },
-  prButton: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: space[1],
-    flexShrink: 0,
-    paddingBlock: space[1],
-    paddingInline: space[2],
-    borderWidth: 0,
-    borderRadius: radius.medium,
-    backgroundColor: { default: colors.wellBackground, ':hover': colors.hoverFill },
-    color: colors.label,
-    fontSize: text.footnoteSize,
-    lineHeight: text.footnoteLeading,
-    fontVariantNumeric: 'tabular-nums',
-    cursor: 'pointer',
-  },
-  prStatus: { color: colors.secondaryLabel },
-  prMergeable: { color: colors.success },
   empty: {
     margin: 0,
     paddingInline: space[1],
@@ -457,45 +438,6 @@ export function ProjectBoardView({
   );
 }
 
-function ProjectBoardPrButton({
-  sessionId,
-  pr,
-  onOpenPr,
-}: {
-  sessionId: string;
-  pr: SessionPullRequestView;
-  onOpenPr?: (sessionId: string, pr: SessionPullRequestView) => void;
-}) {
-  const { t } = useTranslation();
-  const statusMeta = PR_STATUS_META[pr.status] ?? PR_STATUS_META.open;
-  const isMergeable = pr.readiness === 'y' && pr.status !== 'merged' && pr.status !== 'closed';
-  const statusText = isMergeable
-    ? t('sessions.pr.mergeable', 'Mergeable')
-    : t(statusMeta.labelKey, statusMeta.labelFallback);
-  const numberLabel = pr.number !== null ? `#${pr.number}` : 'PR';
-  return (
-    <button
-      type="button"
-      title={`${numberLabel} · ${statusText}`}
-      data-project-board-pr={pr.number ?? 'pr'}
-      onClick={() => {
-        if (onOpenPr) {
-          onOpenPr(sessionId, pr);
-        } else {
-          void openExternalUrl(pr.url);
-        }
-      }}
-      {...stylex.props(styles.prButton)}
-    >
-      <SessionPrIcon prStatus={pr.status} prCiState={pr.ci} />
-      <span>{numberLabel}</span>
-      <span {...stylex.props(styles.prStatus, isMergeable && styles.prMergeable)}>
-        {statusText}
-      </span>
-    </button>
-  );
-}
-
 const ProjectBoardRowLink = memo(function ProjectBoardRowLink({
   row,
   href,
@@ -548,7 +490,7 @@ const ProjectBoardRowLink = memo(function ProjectBoardRowLink({
         ) : null}
       </a>
       {row.pullRequest ? (
-        <ProjectBoardPrButton
+        <ProjectBoardPrMenu
           sessionId={row.session.id}
           pr={row.pullRequest}
           onOpenPr={onOpenPr}
