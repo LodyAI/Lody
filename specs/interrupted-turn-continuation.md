@@ -62,5 +62,33 @@ delay); `LODY-TURN-005` guards it.
 - Executed: a killed profile's `repo.sqlite3` holds the Session's history rows but no
   metadata row; with a seven-second delay before the kill a metadata row appears 5.2 s
   after the last history write and the Session is listed after restart.
-- Validation (failing until implemented): `e2e/src/features/turn-lifecycle.feature`
-  `LODY-TURN-003` (orderly restart) and `LODY-TURN-004` (process-tree SIGKILL).
+- Implementation: detection reads Session metadata only. Dispatch claims an input with
+  `processingUserMsgId`; every ending clears it except a process end. A crash leaves it, and
+  shutdown quiesce now leaves it too (skipping only the cancel bookkeeping: user turn
+  `canceled`, `lastHandledUserMsgId`, claim cleared) when the agent prompt was still running
+  and the user had not stopped it; a finished prompt doing bookkeeping is canceled as before.
+  The Inbox still retires the input. On restart the dispatch watcher re-dispatches the
+  claimed input; when its Inbox input has ended and `machineId` is this Machine,
+  `SessionExecutionService.continueInterruptedTurn` settles it like Stop instead of the
+  send-again failure, then `session/interrupted-turn-continuation.ts` appends one user turn
+  with text `continue`, author `{ kind: 'system' }`, id `lody-continue-<interrupted id>` and
+  the interrupted input's agent, model, mode, options, MCP and Role selection; ordinary
+  dispatch runs it. It is skipped for continuation ids (at most once), an existing
+  continuation, archived or deleted Sessions, a newer activated input or queued input. No
+  local table or schema is added. Other devices see the same metadata a crash leaves: the
+  Session idle with the input still claimed until this Machine starts again.
+- Limits: the conversation shows the `system`-authored `continue` like a human message (no
+  distinct label yet). Automatic Inbox batches are not continued. Encrypted workspaces keep
+  the send-again failure (Lody cannot sign the requester's intent). An orderly exit before
+  the prompt starts is not continued; a crash after the prompt ended but before its
+  bookkeeping cleared the claim (at most seconds) is continued once. Remote machines
+  continue their own interrupted Turns; scheduled runs continue as their recorded input.
+- Executed validation: `apps/cli/src/session/interrupted-turn-continuation.test.ts`
+  (detection incl. Machine filter, text, attribution, configuration, at-most-once, user
+  wins), `apps/cli/tests/session-execution-service-inbox.test.ts` (shutdown keeps the claim
+  of a running prompt and clears that of a finished one) and
+  `apps/cli/tests/session-execution-service-turns-part-2.test.ts` (restart dispatch settles
+  as stopped and appends one continuation); desktop journeys
+  `e2e/src/features/turn-lifecycle.feature` `LODY-TURN-001`..`005` pass, and `LODY-TURN-003`
+  (orderly restart) and `LODY-TURN-004` (process-tree SIGKILL) fail with the continuation
+  hook disabled.
