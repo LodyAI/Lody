@@ -32,6 +32,7 @@ describe('targeted history writes', () => {
     const receiver = {
       workspaceDocument: {
         peekSessionDoc: () => undefined,
+        openIdleSessionReader: async () => undefined,
         getOrCreateSessionDoc: async () => ({ getMetaState: async () => undefined }),
       },
       getSessionBackend: async () => backend,
