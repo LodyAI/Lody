@@ -94,7 +94,7 @@ describe('native Workspace Meta in the CLI daemon', () => {
     };
   };
 
-  it('migrates the legacy SQLite Meta once and keeps native state across restarts', async () => {
+  it('migrates legacy Meta, keeps native state across restarts and writes it back when disabled', async () => {
     const identity = await loadOrCreateLocalIdentity(logger());
     const workspace = await ensureImplicitLocalWorkspace({
       catalog: makeLocalWorkspaceCatalog({
@@ -135,12 +135,39 @@ describe('native Workspace Meta in the CLI daemon', () => {
       await daemon.close();
     }
     const restarted = await open(workspace, identity.userId);
+    let nativeOnly: string;
     try {
       expect((await restarted.manager.repo.getDocMeta(getSessionRoomId(kept)))?.meta.title).toBe(
         'renamed'
       );
+      nativeOnly = await restarted.manager.createSession('local-machine', 'builtin', 'claude');
     } finally {
       await restarted.close();
+    }
+
+    delete process.env.LODY_NATIVE_WORKSPACE_META;
+    const legacyAgain = await open(workspace, identity.userId);
+    try {
+      expect(legacyAgain.manager.repo.metadataMode).toBe('legacy');
+      expect((await legacyAgain.manager.repo.getDocMeta(getSessionRoomId(kept)))?.meta.title).toBe(
+        'renamed'
+      );
+      expect(
+        (await legacyAgain.manager.repo.getDocMeta(getSessionRoomId(nativeOnly)))?.deleted
+      ).toBe(false);
+      await legacyAgain.manager.repo.upsertDocMeta(getSessionRoomId(kept), { title: 'offline' });
+    } finally {
+      await legacyAgain.close();
+    }
+
+    process.env.LODY_NATIVE_WORKSPACE_META = '1';
+    const nativeAgain = await open(workspace, identity.userId);
+    try {
+      expect((await nativeAgain.manager.repo.getDocMeta(getSessionRoomId(kept)))?.meta.title).toBe(
+        'offline'
+      );
+    } finally {
+      await nativeAgain.close();
       await connection.close();
     }
   });
