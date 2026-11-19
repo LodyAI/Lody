@@ -6,7 +6,13 @@ import { LoroDoc } from 'loro-crdt';
 import type { JsonObject, LoroRepo } from 'loro-repo';
 import { z } from 'zod';
 import type { OpenBundle } from './bundle-file';
-import { KNOWN_CODECS, META_ROOM_ID } from './codecs';
+import { KNOWN_CODECS, MACHINE_CODECS, META_ROOM_ID } from './codecs';
+import {
+  applyPostImportWrites,
+  crossWorkspaceRowWithheld,
+  mapMetaKey,
+  mapRoomId,
+} from './cross-workspace';
 import type { BundleGap, RoomEntry } from './manifest';
 
 export class ImportRefusedError extends Error {
@@ -55,23 +61,35 @@ function versionMap(doc: LoroDoc): Map<string, number> {
  * `skip` withholds entries (for example the Meta rows of a document that is not
  * imported); withheld entries are never written, not written then deleted.
  */
+export type RowPolicy = {
+  /** Withholds an entry: it is never written, not written then deleted. */
+  skip?: (key: readonly unknown[]) => boolean;
+  /** Rewrites an entry's key; its value and clock are kept. */
+  mapKey?: (key: readonly unknown[]) => unknown[];
+};
+
+/**
+ * Merges raw Flock file bytes into `target`, keeping every entry's original clock.
+ * Without a policy the file is imported as is.
+ */
 export async function mergeFlockBytes(
   target: Flock,
   bytes: Uint8Array,
-  skip?: (key: readonly unknown[]) => boolean
+  policy: RowPolicy = {}
 ): Promise<void> {
-  if (!skip) {
+  const { skip, mapKey } = policy;
+  if (!skip && !mapKey) {
     target.importFile(bytes);
     return;
   }
-  const bundle = Flock.fromFile(bytes).exportJson();
-  await target.importJson({
-    bundle,
-    hooks: {
-      preprocess: (context) =>
-        skip(context.key) ? { accept: false, reason: 'withheld by import plan' } : undefined,
-    },
-  });
+  const source = Flock.fromFile(bytes).exportJson();
+  const entries: typeof source.entries = {};
+  for (const [encoded, record] of Object.entries(source.entries)) {
+    const key = JSON.parse(encoded) as unknown[];
+    if (skip?.(key)) continue;
+    entries[mapKey ? JSON.stringify(mapKey(key)) : encoded] = record;
+  }
+  target.importJson({ version: source.version, entries });
 }
 
 /** Meta rows that belong to one document or named Flock id. */
@@ -127,21 +145,31 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
     );
   const metaEntry = manifest.rooms.find((room) => room.id === META_ROOM_ID);
   if (!metaEntry) throw new ImportRefusedError('Bundle has no workspace metadata');
-  if (manifest.source.workspaceId !== workspaceId)
-    throw new ImportRefusedError('Importing into a different workspace is not supported yet');
+  const sourceWorkspaceId = manifest.source.workspaceId;
+  const crossWorkspace = sourceWorkspaceId !== workspaceId;
+  const targetIdOf = (id: string) => mapRoomId(id, sourceWorkspaceId, workspaceId);
+  const metaPolicy = (withheld: ReadonlySet<string>): RowPolicy => ({
+    skip: (key) => metaRowBelongsTo(key, withheld),
+    ...(crossWorkspace ? { mapKey: (key) => mapMetaKey(key, sourceWorkspaceId, workspaceId) } : {}),
+  });
 
   const metaBytes = await bundle.readRoom(metaEntry);
   const targetMeta = Flock.fromFile(repo.getMeta().exportFile());
   // Existence after a full merge decides which bodies may be written at all.
   const provisional = Flock.fromFile(repo.getMeta().exportFile());
-  await mergeFlockBytes(provisional, metaBytes);
+  await mergeFlockBytes(provisional, metaBytes, metaPolicy(new Set()));
 
   const rooms: RoomPlan[] = [];
   for (const entry of manifest.rooms) {
     if (entry.model === 'meta') continue;
-    const base = { id: entry.id, targetId: entry.id, codec: entry.codec, model: entry.model };
+    const targetId = targetIdOf(entry.id);
+    const base = { id: entry.id, targetId, codec: entry.codec, model: entry.model };
+    if (crossWorkspace && MACHINE_CODECS.has(entry.codec)) {
+      rooms.push({ ...base, action: 'skip', reason: 'machine-room' });
+      continue;
+    }
     const existenceKey = entry.model === 'flock' ? 'ef' : 'e';
-    if (provisional.get([existenceKey, entry.id]) !== true) {
+    if (provisional.get([existenceKey, targetId]) !== true) {
       rooms.push({ ...base, action: 'skip', reason: 'deleted-in-target' });
       continue;
     }
@@ -149,7 +177,7 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
     if (entry.model === 'loro') {
       const incoming = new LoroDoc();
       incoming.import(bytes);
-      const current = await repo.openDetachedDoc(entry.id);
+      const current = await repo.openDetachedDoc(targetId);
       const target = versionMap(current);
       const source = versionMap(incoming);
       if (target.size === 0) {
@@ -161,9 +189,9 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
       }
       continue;
     }
-    const current = await repo.openDetachedFlockDoc(entry.id);
+    const current = await repo.openDetachedFlockDoc(targetId);
     const merged = Flock.fromFile(current.exportFile());
-    merged.importFile(bytes);
+    await mergeFlockBytes(merged, bytes, roomPolicy(entry.codec, crossWorkspace));
     const rows = diffFlock(current, merged);
     rooms.push({
       ...base,
@@ -174,9 +202,8 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
   }
 
   // Skipped rooms keep the target's own Meta rows for their ids.
-  const withheld = withheldMetaIds(rooms);
   const mergedMeta = Flock.fromFile(repo.getMeta().exportFile());
-  await mergeFlockBytes(mergedMeta, metaBytes, (key) => metaRowBelongsTo(key, withheld));
+  await mergeFlockBytes(mergedMeta, metaBytes, metaPolicy(withheldMetaIds(rooms)));
   const metaRows = diffFlock(targetMeta, mergedMeta);
   rooms.push({
     id: metaEntry.id,
@@ -189,11 +216,15 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
   });
   return {
     digest: manifest.digest,
-    sourceWorkspaceId: manifest.source.workspaceId,
+    sourceWorkspaceId,
     targetWorkspaceId: workspaceId,
     rooms: orderForWrite(rooms),
     gaps: manifest.gaps,
   };
+}
+
+function roomPolicy(codec: string, crossWorkspace: boolean): RowPolicy {
+  return crossWorkspace ? { skip: (key) => crossWorkspaceRowWithheld(codec, key) } : {};
 }
 
 /** Rooms whose Meta rows must not be merged: the target keeps its own. */
@@ -253,6 +284,9 @@ export type ApplyWorkspaceImportInput = {
   /** Checked before each room; throwing stops the import at a room boundary. */
   checkContinue?: () => Promise<void>;
   onProgress?: (progress: { done: number; total: number; roomId: string }) => void;
+  /** Recorded in the visible import receipt. */
+  actor?: { userId: string };
+  now?: () => string;
 };
 export type ImportResult = { imported: number; skipped: number; resumed: number };
 
@@ -263,6 +297,7 @@ export type ImportResult = { imported: number; skipped: number; resumed: number 
 export async function applyWorkspaceImport(input: ApplyWorkspaceImportInput): Promise<ImportResult> {
   const { plan, bundle, repo } = input;
   if (plan.digest !== bundle.manifest.digest) throw new Error('Import plan does not match this bundle');
+  const crossWorkspace = plan.sourceWorkspaceId !== plan.targetWorkspaceId;
   const journal = await readJournal(input.journalPath, plan);
   const done = new Set(journal.done);
   const entries = new Map(bundle.manifest.rooms.map((room) => [room.id, room]));
@@ -282,7 +317,12 @@ export async function applyWorkspaceImport(input: ApplyWorkspaceImportInput): Pr
     const bytes = await bundle.readRoom(entry);
     if (room.model === 'meta') {
       const withheld = withheldMetaIds(plan.rooms);
-      await mergeFlockBytes(repo.getMeta(), bytes, (key) => metaRowBelongsTo(key, withheld));
+      await mergeFlockBytes(repo.getMeta(), bytes, {
+        skip: (key) => metaRowBelongsTo(key, withheld),
+        ...(crossWorkspace
+          ? { mapKey: (key) => mapMetaKey(key, plan.sourceWorkspaceId, plan.targetWorkspaceId) }
+          : {}),
+      });
       await repo.persistMetaNow();
     } else if (room.model === 'loro') {
       const lease = await repo.acquireDoc(room.targetId);
@@ -295,7 +335,7 @@ export async function applyWorkspaceImport(input: ApplyWorkspaceImportInput): Pr
     } else if (room.model === 'flock') {
       const lease = await repo.acquireFlockDoc(room.targetId);
       try {
-        lease.flock.importFile(bytes);
+        await mergeFlockBytes(lease.flock, bytes, roomPolicy(room.codec, crossWorkspace));
         await repo.persistFlockDocNow(room.targetId, lease.flock);
       } finally {
         lease.release();
@@ -309,5 +349,36 @@ export async function applyWorkspaceImport(input: ApplyWorkspaceImportInput): Pr
     result.imported += 1;
     input.onProgress?.({ done: index, total: merges.length, roomId: room.targetId });
   }
+  if (crossWorkspace)
+    await applyPostImportWrites(
+      repo,
+      merges.filter((room) => room.state === 'new' && room.model === 'loro')
+    );
+  await writeImportReceipt(repo, plan, input.actor, input.now);
   return result;
+}
+
+/** A row every member can see in the workspace catalog: who imported which bundle. */
+async function writeImportReceipt(
+  repo: LoroRepo<JsonObject>,
+  plan: ImportPlan,
+  actor: { userId: string } | undefined,
+  now: (() => string) | undefined
+): Promise<void> {
+  if (!actor) return;
+  const catalogId = `${plan.targetWorkspaceId}:wf:workspace`;
+  const lease = await repo.acquireFlockDoc(catalogId);
+  try {
+    const key = ['importReceipt', plan.digest];
+    if (lease.flock.get(key) !== undefined) return;
+    lease.flock.put(key, {
+      actorUserId: actor.userId,
+      sourceWorkspaceId: plan.sourceWorkspaceId,
+      digest: plan.digest,
+      importedAt: (now ?? (() => new Date().toISOString()))(),
+    });
+    await repo.persistFlockDocNow(catalogId, lease.flock);
+  } finally {
+    lease.release();
+  }
 }

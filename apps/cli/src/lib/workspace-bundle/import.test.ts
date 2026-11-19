@@ -175,4 +175,77 @@ describe('workspace import', () => {
     expect(result.resumed).toBeGreaterThan(0);
     expect((await target.repo.getDocMeta('session-s1'))?.meta).toMatchObject({ title: 'One' });
   });
+
+  it('maps a bundle from another workspace without machines and stops imported work', async () => {
+    const source = await repo();
+    await writeDoc(source.repo, 'session-s1', { title: 'One', latestUserMsgId: 'u1' }, (doc) => {
+      doc.getText('t').insert(0, 'hi');
+      doc.getMovableList('mq').push('queued');
+    });
+    await writeDoc(source.repo, 'schedule-x', { kind: 'schedule' }, (doc) =>
+      doc.getMap('definition').set('enabled', true)
+    );
+    await writeDoc(source.repo, 'machine-m1', { name: 'M' }, (doc) => doc.getMap('m').set('a', 1));
+    await writeFlock(source.repo, `${WS}:wf:workspace`, (flock) => flock.put(['project', 'p1'], { name: 'P' }));
+    await writeFlock(source.repo, `${WS}:mf:m1`, (flock) => flock.put(['localProject', 'a'], { p: 1 }));
+    await writeFlock(source.repo, `${WS}:sr`, (flock) => {
+      flock.put(['schedule', 'x'], { on: true });
+      flock.put(['runtime', 'x', 'm1'], { next: 1 });
+    });
+    await source.repo.flush();
+    const out = path.join(await tempDir(), 'a.lodybundle');
+    await exportWorkspaceBundle({
+      repo: source.repo,
+      workspaceId: WS,
+      writer: await createBundleWriter(out),
+      source: { workspaceId: WS, exporterUserId: 'u', exporterMachineId: 'm', lodyVersion: 't', startedAt: 'a' },
+    });
+    const bundle = await openBundle(out);
+    cleanup.push(() => bundle.close());
+
+    const target = await repo();
+    const plan = await planWorkspaceImport({ bundle, repo: target.repo, workspaceId: 'ws_b', role: 'admin' });
+    expect(plan.rooms.find((room) => room.id === `${WS}:wf:workspace`)).toMatchObject({
+      targetId: 'ws_b:wf:workspace',
+      action: 'merge',
+    });
+    expect(plan.rooms.find((room) => room.id === `${WS}:mf:m1`)).toMatchObject({ action: 'skip', reason: 'machine-room' });
+    expect(plan.rooms.find((room) => room.id === 'machine-m1')).toMatchObject({ action: 'skip', reason: 'machine-room' });
+    const journal = path.join(await tempDir(), 'j.json');
+    await applyWorkspaceImport({
+      plan,
+      bundle,
+      repo: target.repo,
+      journalPath: journal,
+      actor: { userId: 'admin-1' },
+      now: () => '2026-11-19T00:00:00.000Z',
+    });
+
+    const flocks = (await target.repo.listFlockDoc()).map((entry) => entry.flockDocId).sort();
+    expect(flocks).toEqual(['ws_b:sr', 'ws_b:wf:workspace']);
+    const docs = (await target.repo.listDoc()).map((entry) => entry.docId).sort();
+    expect(docs).toEqual(['schedule-x', 'session-s1']);
+    const catalog = await target.repo.openDetachedFlockDoc('ws_b:wf:workspace');
+    expect(catalog.get(['project', 'p1'])).toEqual({ name: 'P' });
+    expect(catalog.get(['importReceipt', bundle.manifest.digest])).toMatchObject({
+      actorUserId: 'admin-1',
+      sourceWorkspaceId: WS,
+      importedAt: '2026-11-19T00:00:00.000Z',
+    });
+    const registry = await target.repo.openDetachedFlockDoc('ws_b:sr');
+    expect(registry.get(['schedule', 'x'])).toEqual({ on: true });
+    expect(registry.get(['runtime', 'x', 'm1'])).toBeUndefined();
+
+    const meta = (await target.repo.getDocMeta('session-s1'))?.meta;
+    expect(meta).toMatchObject({ title: 'One', collaborationStopped: true, status: { type: 'idle' } });
+    expect(meta).not.toHaveProperty('latestUserMsgId');
+    const session = await target.repo.openDetachedDoc('session-s1');
+    expect(session.getMovableList('mq').length).toBe(0);
+    expect(session.getText('t').toString()).toBe('hi');
+    const schedule = await target.repo.openDetachedDoc('schedule-x');
+    expect(schedule.getMap('definition').get('enabled')).toBe(false);
+
+    const again = await planWorkspaceImport({ bundle, repo: target.repo, workspaceId: 'ws_b', role: 'admin' });
+    expect(again.rooms.filter((room) => room.action === 'merge').every((room) => room.state === 'unchanged')).toBe(true);
+  });
 });
