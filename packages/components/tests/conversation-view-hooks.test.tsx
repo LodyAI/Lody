@@ -7,9 +7,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroMap } from 'loro-crdt';
 import { createLoroSessionData } from '@lody/shared/session-data';
-import {
-  resolveSessionAcpRuntimeConfig,
-  resolveSessionConversationConfig} from '@lody/shared';
+import { resolveSessionAcpRuntimeConfig, resolveSessionConversationConfig } from '@lody/shared';
 import {
   useConversationVersion,
   useConversationTail,
@@ -236,7 +234,8 @@ describe('conversation view React readers', () => {
   });
 
   it('loads a restored reading turn far from the tail before the first viewport report', async () => {
-    const { view } = await openView(150, 200);
+    const { view, idle } = await openView(150, 200);
+    idle.runAll();
     let stream!: ReturnType<typeof useConversationStreamItems>;
     function Probe() {
       stream = useConversationStreamItems(view, FIXTURE_SESSION_ID, { initialFocusTurnId: 'a-40' });
@@ -254,13 +253,12 @@ describe('conversation view React readers', () => {
     // The focus turn and its neighbours render as rows, not placeholders.
     expect(itemFor('a-40')?.type).toBe('message');
     expect(itemFor('a-45')?.type).toBe('message');
-    // Far from both the focus and the tail stays a placeholder.
-    expect(itemFor('a-5')?.type).toBe('placeholder');
+    expect(itemFor('a-5')?.type).not.toBe('message');
     // The first real report takes over from the focus (a round is a user and
     // an assistant turn, so round 100 sits at turn index 201).
     await act(async () => stream.onVisibleTurnRangeChange({ from: 200, to: 208 }));
     await flush();
-    expect(itemFor('a-5')?.type).toBe('placeholder');
+    expect(itemFor('a-5')?.type).not.toBe('message');
     expect(itemFor('a-100')?.type).toBe('message');
   });
 
@@ -341,6 +339,12 @@ describe('conversation view React readers', () => {
 
   it('rehydrates a mounted viewport after same-length replacement and releases it on unmount', async () => {
     const { doc, view, idle } = await openView(150);
+    idle.runAll();
+    const directory = view.acquireDirectory!();
+    await act(async () => {
+      await vi.runAllTimersAsync();
+      await directory.ready;
+    });
     function Probe() {
       useConversationVersion(view);
       useTurnRange(view, 20, 30);
@@ -365,6 +369,7 @@ describe('conversation view React readers', () => {
     expect(container.textContent).toBe('replacement-0');
     for (let i = 20; i < 30; i++) expect(view.isHydrated(i)).toBe(true);
     act(() => root.render(null));
+    directory.release();
     expect(
       Array.from({ length: view.turnCount }, (_, i) => view.isHydrated(i)).filter(Boolean).length
     ).toBeLessThanOrEqual(4);

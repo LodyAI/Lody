@@ -196,15 +196,21 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
   /** A window's update view of one owned Loro document (Session). */
   @IpcMethod()
   async openDoc(input: unknown) {
-    const { workspaceId, docId, observationId } = NativeDocOpenSchema.parse(input)
+    const { workspaceId, docId, observationId, since } = NativeDocOpenSchema.parse(input)
     await admit(workspaceId)
     const sender = getIpcContext().event.sender
     const owned = windowViews(sender)
     if (owned.has(observationId) || owned.size >= 64) throw new Error('native_meta_view_denied')
     const { client } = await connect()
-    const observation = await observeNativeDoc(client, workspaceId, docId, (event) => {
-      if (!sender.isDestroyed()) sender.send(NATIVE_DOC_CHANNEL, { observationId, event })
-    })
+    const observation = await observeNativeDoc(
+      client,
+      workspaceId,
+      docId,
+      (event) => {
+        if (!sender.isDestroyed()) sender.send(NATIVE_DOC_CHANNEL, { observationId, event })
+      },
+      since
+    )
     const release = () => void observation.release().catch(() => {})
     if (views.get(sender) !== owned) {
       release()
