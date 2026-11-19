@@ -20,22 +20,41 @@ async function tempDir(): Promise<string> {
 
 const SID = '44444444-4444-4444-8444-444444444444';
 const turns: SessionHistoryInput[] = [
-  { id: 'u1', role: 'user', timestamp: '2026-11-19T00:00:00.000Z', items: [{ type: 'text', text: 'question' }] },
-  { id: 'a1', role: 'assistant', timestamp: '2026-11-19T00:00:01.000Z', items: [{ type: 'text', text: 'answer' }] },
+  {
+    id: 'u1',
+    role: 'user',
+    timestamp: '2026-11-19T00:00:00.000Z',
+    items: [{ type: 'text', text: 'question' }],
+  },
+  {
+    id: 'a1',
+    role: 'assistant',
+    timestamp: '2026-11-19T00:00:01.000Z',
+    items: [{ type: 'text', text: 'answer' }],
+  },
 ];
 
 async function roostBundle() {
   const source = await openTestRepo(await tempDir());
   cleanup.push(() => source.close());
-  await writeDoc(source.repo, `session-${SID}`, { title: 'Roost one', historyBackend: 'roost' }, (doc) =>
-    doc.getMap('session').set('id', SID)
+  await writeDoc(
+    source.repo,
+    `session-${SID}`,
+    { title: 'Roost one', historyBackend: 'roost' },
+    (doc) => doc.getMap('session').set('id', SID)
   );
   const out = path.join(await tempDir(), 'r.lodybundle');
   const manifest = await exportWorkspaceBundle({
     repo: source.repo,
     workspaceId: 'ws_a',
     writer: await createBundleWriter(out),
-    source: { workspaceId: 'ws_a', exporterUserId: 'u', exporterMachineId: 'm', lodyVersion: 't', startedAt: 'a' },
+    source: {
+      workspaceId: 'ws_a',
+      exporterUserId: 'u',
+      exporterMachineId: 'm',
+      lodyVersion: 't',
+      startedAt: 'a',
+    },
     roostHistory: async (sessionId) => (sessionId === SID ? turns : []),
   });
   const bundle = await openBundle(out);
@@ -54,9 +73,23 @@ describe('Roost conversations', () => {
 
     const target = await openTestRepo(await tempDir());
     cleanup.push(() => target.close());
-    const plan = await planWorkspaceImport({ bundle, repo: target.repo, workspaceId: 'ws_b', role: 'owner', actorUserId: 'u' });
-    expect(plan.rooms.find((room) => room.codec === 'roost-turns/v1')).toMatchObject({ action: 'merge', state: 'new' });
-    await applyWorkspaceImport({ plan, bundle, repo: target.repo, journalPath: path.join(await tempDir(), 'j') });
+    const plan = await planWorkspaceImport({
+      bundle,
+      repo: target.repo,
+      workspaceId: 'ws_b',
+      role: 'owner',
+      actorUserId: 'u',
+    });
+    expect(plan.rooms.find((room) => room.codec === 'roost-turns/v1')).toMatchObject({
+      action: 'merge',
+      state: 'new',
+    });
+    await applyWorkspaceImport({
+      plan,
+      bundle,
+      repo: target.repo,
+      journalPath: path.join(await tempDir(), 'j'),
+    });
 
     expect((await target.repo.getDocMeta(`session-${SID}`))?.meta).toMatchObject({
       title: 'Roost one',
@@ -67,18 +100,46 @@ describe('Roost conversations', () => {
     expect(mirror.historyWriter.readStored().map((turn) => turn.id)).toEqual(['u1', 'a1']);
     mirror.dispose();
 
-    const again = await planWorkspaceImport({ bundle, repo: target.repo, workspaceId: 'ws_b', role: 'owner', actorUserId: 'u' });
-    expect(again.rooms.find((room) => room.codec === 'roost-turns/v1')).toMatchObject({ action: 'skip', reason: 'roost-exists' });
+    const again = await planWorkspaceImport({
+      bundle,
+      repo: target.repo,
+      workspaceId: 'ws_b',
+      role: 'owner',
+      actorUserId: 'u',
+    });
+    expect(again.rooms.find((room) => room.codec === 'roost-turns/v1')).toMatchObject({
+      action: 'skip',
+      reason: 'roost-exists',
+    });
   });
 
   it('leaves a Roost conversation the target already has untouched', async () => {
     const { bundle } = await roostBundle();
     const target = await openTestRepo(await tempDir());
     cleanup.push(() => target.close());
-    await target.repo.upsertDocMeta(`session-${SID}`, { title: 'Here already', historyBackend: 'roost' });
-    const plan = await planWorkspaceImport({ bundle, repo: target.repo, workspaceId: 'ws_a', role: 'owner', actorUserId: 'u' });
-    expect(plan.rooms.find((room) => room.codec === 'roost-turns/v1')).toMatchObject({ action: 'skip', reason: 'roost-exists' });
-    await applyWorkspaceImport({ plan, bundle, repo: target.repo, journalPath: path.join(await tempDir(), 'j') });
-    expect((await target.repo.getDocMeta(`session-${SID}`))?.meta).toMatchObject({ historyBackend: 'roost' });
+    await target.repo.upsertDocMeta(`session-${SID}`, {
+      title: 'Here already',
+      historyBackend: 'roost',
+    });
+    const plan = await planWorkspaceImport({
+      bundle,
+      repo: target.repo,
+      workspaceId: 'ws_a',
+      role: 'owner',
+      actorUserId: 'u',
+    });
+    expect(plan.rooms.find((room) => room.codec === 'roost-turns/v1')).toMatchObject({
+      action: 'skip',
+      reason: 'roost-exists',
+    });
+    await applyWorkspaceImport({
+      plan,
+      bundle,
+      repo: target.repo,
+      journalPath: path.join(await tempDir(), 'j'),
+    });
+    expect((await target.repo.getDocMeta(`session-${SID}`))?.meta).toMatchObject({
+      historyBackend: 'roost',
+    });
   });
 });

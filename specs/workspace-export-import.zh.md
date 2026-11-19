@@ -55,24 +55,24 @@ flowchart LR
 
 “全量”指**导出者有权读取、且属于工作区可协作数据**的全部 room；不是服务器上所有字节。
 
-| 领域 | room / 存储 | 是否导出 | 说明 |
-| --- | --- | --- | --- |
-| Workspace Meta | Meta Flock（`e/m/ef…`） | 是 | 包含删除记录；决定其它 room 是否“可见” |
-| 工作区目录：项目、MCP 定义、Role、项目默认 MCP | `<ws>:wf:workspace` Flock | 是 | 只有共享定义；MCP 凭据本来就不在行里 |
-| Session 控制与历史 | `session-*` Loro 文档 | 是 | 完整 oplog，含 unknown 字段和 opaque 条目 |
-| Roost 会话正文 | 当前为执行机本地 `roost-history.sqlite3`；native 下为 Roost room | 是（有损） | 见下文“Roost 与 Prompt Shortcuts”。写者身份种子不导出 |
-| 机器与 Agent 配置 | `<ws>:mf:<machine>` Flock、`machine-*` 文档、旧 `agent-*` 文档 | 是 | 导入规则受限，见下文；持久命令队列（`cmd` 族）不导入 |
-| Schedule | `<ws>:sr` Flock + `schedule-*` 文档 | 是 | |
-| Preview comments | 旧：每会话 Loro 文档；新：Flock 行 | 是 | 包内保存来源格式，导入时按目标格式转换 |
-| 旧 task 文档、旧 session-comment | `task-*`、`${ws}:ti`、`session-comment-*` | 是 | 只为无损，不新增功能 |
-| 附件、图片 | 云：按 `<ws>/<session>/<id>` 存放；本地：`session-files/<ws>/` | 是（blob） | 只导出被当前或历史版本引用的；按内容哈希去重。云端文件 90 天过期，取不到的记为 gap |
-| Code Collab 内容寻址快照 | 执行机本地 `code-collab-v2/<ws>/diff-store.sqlite3`，100 天 / 1 GiB 回收 | 部分（blob） | 从所属机器读取（本机直接读，其它机器在线时经已有的 Machine RPC 和权限）；离线或已回收的记为 gap |
-| Prompt Shortcuts | 工作区命名空间外的 `shortcut-index:<ws>:<owner>:<private\|workspace>`、`shortcut-body:*` | 是 | 导出者自己的全部与他人的工作区共享项；导入规则见下文。E2EE 工作区当前不支持 Shortcuts |
-| 文件索引 FI/FIS | `<ws>:fi:*`/`fis` | 否 | 可由 owner 重建，180 天 TTL |
-| presence、machine-monitor、ephemeral | 临时通道 | 否 | 不是持久数据 |
-| 机器本地运行状态 | 自动化 ledger、schedule 运行表、operations/inbox、PR 轮询等 SQLite | 否 | 属于执行机，不属于工作区协作数据 |
-| 未提交的待发送输入 | renderer IndexedDB `lody-session-inputs-v1` | 否 | 尚未成为会话内容；导出前提示先发送或丢弃 |
-| 用量、通知、会话分享、成员 | 云端服务记录 | 否 | 不是 CRDT 数据；用量可继续用 `lody export` 导出给人看 |
+| 领域                                           | room / 存储                                                                              | 是否导出     | 说明                                                                                            |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------ | ----------------------------------------------------------------------------------------------- |
+| Workspace Meta                                 | Meta Flock（`e/m/ef…`）                                                                  | 是           | 包含删除记录；决定其它 room 是否“可见”                                                          |
+| 工作区目录：项目、MCP 定义、Role、项目默认 MCP | `<ws>:wf:workspace` Flock                                                                | 是           | 只有共享定义；MCP 凭据本来就不在行里                                                            |
+| Session 控制与历史                             | `session-*` Loro 文档                                                                    | 是           | 完整 oplog，含 unknown 字段和 opaque 条目                                                       |
+| Roost 会话正文                                 | 当前为执行机本地 `roost-history.sqlite3`；native 下为 Roost room                         | 是（有损）   | 见下文“Roost 与 Prompt Shortcuts”。写者身份种子不导出                                           |
+| 机器与 Agent 配置                              | `<ws>:mf:<machine>` Flock、`machine-*` 文档、旧 `agent-*` 文档                           | 是           | 导入规则受限，见下文；持久命令队列（`cmd` 族）不导入                                            |
+| Schedule                                       | `<ws>:sr` Flock + `schedule-*` 文档                                                      | 是           |                                                                                                 |
+| Preview comments                               | 旧：每会话 Loro 文档；新：Flock 行                                                       | 是           | 包内保存来源格式，导入时按目标格式转换                                                          |
+| 旧 task 文档、旧 session-comment               | `task-*`、`${ws}:ti`、`session-comment-*`                                                | 是           | 只为无损，不新增功能                                                                            |
+| 附件、图片                                     | 云：按 `<ws>/<session>/<id>` 存放；本地：`session-files/<ws>/`                           | 是（blob）   | 只导出被当前或历史版本引用的；按内容哈希去重。云端文件 90 天过期，取不到的记为 gap              |
+| Code Collab 内容寻址快照                       | 执行机本地 `code-collab-v2/<ws>/diff-store.sqlite3`，100 天 / 1 GiB 回收                 | 部分（blob） | 从所属机器读取（本机直接读，其它机器在线时经已有的 Machine RPC 和权限）；离线或已回收的记为 gap |
+| Prompt Shortcuts                               | 工作区命名空间外的 `shortcut-index:<ws>:<owner>:<private\|workspace>`、`shortcut-body:*` | 是           | 导出者自己的全部与他人的工作区共享项；导入规则见下文。E2EE 工作区当前不支持 Shortcuts           |
+| 文件索引 FI/FIS                                | `<ws>:fi:*`/`fis`                                                                        | 否           | 可由 owner 重建，180 天 TTL                                                                     |
+| presence、machine-monitor、ephemeral           | 临时通道                                                                                 | 否           | 不是持久数据                                                                                    |
+| 机器本地运行状态                               | 自动化 ledger、schedule 运行表、operations/inbox、PR 轮询等 SQLite                       | 否           | 属于执行机，不属于工作区协作数据                                                                |
+| 未提交的待发送输入                             | renderer IndexedDB `lody-session-inputs-v1`                                              | 否           | 尚未成为会话内容；导出前提示先发送或丢弃                                                        |
+| 用量、通知、会话分享、成员                     | 云端服务记录                                                                             | 否           | 不是 CRDT 数据；用量可继续用 `lody export` 导出给人看                                           |
 
 **明确不导出：** 一切凭据（provider 登录、API key、MCP 本地认证值、keychain、Streams/云
 token、GitHub 凭据）；一切密钥与设备身份（E2EE 设备/epoch 密钥、ledger、恢复 vault、
@@ -138,8 +138,9 @@ blobs/sha256/<ab>/<sha256>       附件、图片、diff 快照，按内容哈希
    计算“会改变哪些行/文档”，产出报告：新增、更新、被拒绝的 room 及原因、映射、覆盖缺口。
    UI 默认先展示报告，用户确认后才写。
 4. **写入：** 按依赖顺序逐 room 合并，Meta 最后：blob → 正文文档（session、schedule、
-   comments…）→ 目录类 Flock（wf、sr、mf）→ Meta。正文在 Meta 发布前对用户不可见，所以
-   中断只会留下不可见的 room，不会出现“列表里有会话、点开是空的”。
+   comments…）→ 目录类 Flock（wf、sr、mf）→ Meta。源工作区的标题等元数据只在 Meta 合并后出现，
+   所以中断不会出现“列表里有标题、点开是空的”。现有 loro-repo 存储在写入非空正文时会把文档
+   标记为存在，因此中断后可能短暂出现没有标题的条目，重跑同一份包即补齐。
 5. **收尾：** 写入一条导入回执，并按需在目标里追加“导入后处理”写入（见下文）。
 
 ### CRDT 合并结果
@@ -171,14 +172,14 @@ blobs/sha256/<ab>/<sha256>       附件、图片、diff 快照，按内容哈希
 
 ### 来源工作区 ≠ 目标工作区
 
-| 引用 | 处理 |
-| --- | --- |
-| 实体 ID（session、项目、schedule、Role、comment） | 保留。都是随机 UUID，两个独立工作区不会撞；同 ID 会话的处理见上文“同 ID 的会话”。保留也让重复导入幂等 |
-| 含工作区 ID 的 room（`<ws>:wf:workspace`、`<ws>:sr`） | 改写为目标工作区 ID；行内容不变 |
-| Loro peer、Flock 时钟 peer | 保留，不重映射（重映射会破坏 CRDT 身份和幂等） |
-| 用户 ID（作者、`SessionMeta.userId`、Role 创建者） | 保留为历史出处，不授予任何权限；非目标成员显示为“未知成员” |
-| 机器（`<ws>:mf:<machine>`、`SessionMeta.machineId`） | 机器 room 不导入；会话保留原机器 ID，显示为“机器不可用”，只读 |
-| 附件 / 图片引用 | blob 重新上传到目标（同工作区恢复时目标仍有的 blob 跳过）；不改写历史，在会话 HEAD 写入一张“旧引用 → 新引用”映射表，沿用 OSS 迁移的 `resolveArchivedAttachment` 方式 |
+| 引用                                                  | 处理                                                                                                                                                                 |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 实体 ID（session、项目、schedule、Role、comment）     | 保留。都是随机 UUID，两个独立工作区不会撞；同 ID 会话的处理见上文“同 ID 的会话”。保留也让重复导入幂等                                                                |
+| 含工作区 ID 的 room（`<ws>:wf:workspace`、`<ws>:sr`） | 改写为目标工作区 ID；行内容不变                                                                                                                                      |
+| Loro peer、Flock 时钟 peer                            | 保留，不重映射（重映射会破坏 CRDT 身份和幂等）                                                                                                                       |
+| 用户 ID（作者、`SessionMeta.userId`、Role 创建者）    | 保留为历史出处，不授予任何权限；非目标成员显示为“未知成员”                                                                                                           |
+| 机器（`<ws>:mf:<machine>`、`SessionMeta.machineId`）  | 机器 room 不导入；会话保留原机器 ID，显示为“机器不可用”，只读                                                                                                        |
+| 附件 / 图片引用                                       | blob 重新上传到目标（同工作区恢复时目标仍有的 blob 跳过）；不改写历史，在会话 HEAD 写入一张“旧引用 → 新引用”映射表，沿用 OSS 迁移的 `resolveArchivedAttachment` 方式 |
 
 跨工作区导入后，沿用 [OSS 迁移](../apps/cli/src/lib/oss-migration/README.md) 已验证的安全
 规则，以新写入的方式（原状态仍在 oplog 里，不算丢失）：导入的会话停止协作、清空派发指针和
@@ -263,25 +264,26 @@ E2EE 工作区的审计记录同样只含不透明计数。导入另在目标工
 
 行数为产品代码估算，不含测试和文档。
 
-| 阶段 | 范围 | 验收用例 | 预算 |
-| --- | --- | --- | --- |
-| A. 包与核心管线 | 清单/分块/哈希、ZIP 读写、导入日志、codec 接口；`meta-flock`、`flock-room`、`loro-room` 三个通用 codec；来源 `native-engine`；同工作区导入；CLI 导出/导入/预演；仅本地明文 | 删除记录与时钟往返一致（读回 register 证据而非 get/scan）；重复导入零变化零上传；中断在每个 room 边界后重跑结果相同；截断/篡改块被拒绝且目标未写；未知 codec 拒绝 | ~1,300 |
-| B. 旧格式迁移 | 来源 `legacy-repo`（一致 SQLite 备份 + IDB 导出）；`enqueueOutbox` 来源事实；Meta 迁移收敛到本管线；Preview comments 格式转换 | 旧库 → native 后 Loro VV 覆盖全部来源；含未上传编辑的来源进入 outbox；转换重跑结果一致 | ~700 |
-| C. Blob 与跨工作区 | 附件/图片/diff 快照 blob；跨工作区映射与导入后处理；逐行授权校验 | 他人 Role、他人机器行、共享授权的改动整 room 拒绝；导入会话停协作、schedule 停用；附件映射可解析历史引用 | ~1,200 |
-| D. 云与桌面 | 云登记/审计 DTO 与端口；角色校验与撤销中止；桌面设置页与进度；Prompt Shortcuts（走其云 API） | 非 owner/admin 看不到入口且 CLI 拒绝；中途撤销停在 room 边界；OSS 组合零云请求；私有 Shortcut 只在原所有者导入时导入且仍为私有，共享项导入后仍为共享 | ~1,400（另有私有后端） |
-| E. E2EE | 设备本机解密导出；导入以目标当前密钥重新封装；附件重新加密 | 导出包可在普通工作区导回；导入后其它成员设备可解密；旧执行意图不可执行；ledger/成员不变 | ~800 |
-| F. Roost | `roost-turns/v1` 有损 codec：经现有历史读取导出回合，导入时只补建目标中不存在的 Roost 会话 | 往返后可见正文一致；目标已有的同一会话不被改动；重复导入不产生重复回合 | ~400 |
+| 阶段               | 范围                                                                                                                                                                       | 验收用例                                                                                                                                                          | 预算                   |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| A. 包与核心管线    | 清单/分块/哈希、ZIP 读写、导入日志、codec 接口；`meta-flock`、`flock-room`、`loro-room` 三个通用 codec；来源 `native-engine`；同工作区导入；CLI 导出/导入/预演；仅本地明文 | 删除记录与时钟往返一致（读回 register 证据而非 get/scan）；重复导入零变化零上传；中断在每个 room 边界后重跑结果相同；截断/篡改块被拒绝且目标未写；未知 codec 拒绝 | ~1,300                 |
+| B. 旧格式迁移      | 来源 `legacy-repo`（一致 SQLite 备份 + IDB 导出）；`enqueueOutbox` 来源事实；Meta 迁移收敛到本管线；Preview comments 格式转换                                              | 旧库 → native 后 Loro VV 覆盖全部来源；含未上传编辑的来源进入 outbox；转换重跑结果一致                                                                            | ~700                   |
+| C. Blob 与跨工作区 | 附件/图片/diff 快照 blob；跨工作区映射与导入后处理；逐行授权校验                                                                                                           | 他人 Role、他人机器行、共享授权的改动整 room 拒绝；导入会话停协作、schedule 停用；附件映射可解析历史引用                                                          | ~1,200                 |
+| D. 云与桌面        | 云登记/审计 DTO 与端口；角色校验与撤销中止；桌面设置页与进度；Prompt Shortcuts（走其云 API）                                                                               | 非 owner/admin 看不到入口且 CLI 拒绝；中途撤销停在 room 边界；OSS 组合零云请求；私有 Shortcut 只在原所有者导入时导入且仍为私有，共享项导入后仍为共享              | ~1,400（另有私有后端） |
+| E. E2EE            | 设备本机解密导出；导入以目标当前密钥重新封装；附件重新加密                                                                                                                 | 导出包可在普通工作区导回；导入后其它成员设备可解密；旧执行意图不可执行；ledger/成员不变                                                                           | ~800                   |
+| F. Roost           | `roost-turns/v1` 有损 codec：经现有历史读取导出回合，导入时只补建目标中不存在的 Roost 会话                                                                                 | 往返后可见正文一致；目标已有的同一会话不被改动；重复导入不产生重复回合                                                                                            | ~400                   |
 
-阶段 A、B 可与 Meta native 接入并行；C 之后的阶段各自独立评审。本 Spec 当前没有待 owner 决定的问题。
+阶段 A、B 可与 Meta native 接入并行；C 之后的阶段各自独立评审。待 owner 决定的问题见下一节。
 
 ## Roost 与 Prompt Shortcuts
 
 **Roost（有损）：** owner 已定 Roost 支持导出、可以不含签名。Roost 回合由执行机本地写者身份
 签名，当前 SDK 没有保留原签名记录的原始导出/导入。导出时读出每个回合的可见内容
-（`roost-turns/v1`），导入时由导入设备重新写成新的 Roost 会话。丢失原签名、原写者证明和回合的
-逐次编辑过程；保留会话里能看到的全部内容。**推荐规则：** 重写的回合与原回合不是同一份 CRDT
-数据，所以不合并：目标已有同一 Roost 会话时整体跳过，只补建目标里没有的；重复导入按原回合 ID
-去重。SDK 以后提供原始接口时再增加无损 codec。
+（`roost-turns/v1`），导入时由导入者通过共享 HistoryWriter 重新写入。丢失原签名、原写者证明和
+回合的逐次编辑过程；保留会话里能看到的全部内容。**推荐规则（实现采用）：** Roost 正文存放在执行
+机本地，重写成新的 Roost 存储只在导入那台机器上可读，所以重写为该会话的 Loro 历史，并把它的
+历史后端改为 Loro。重写的回合与原回合不是同一份 CRDT 数据，所以不合并：目标已有同一会话时整体
+跳过，只补建目标里没有的。SDK 以后提供原始接口时再增加无损 codec。
 
 **Prompt Shortcuts：** owner 已定进入第一版；下面的可见性规则是**主控按 owner 的隐私原则推定**
 （不改变现有隐私模型）。Shortcuts 按“工作区 + 所有者 + 可见性”分开存储，只有所有者能写自己的。
@@ -291,6 +293,15 @@ E2EE 工作区的审计记录同样只含不透明计数。导入另在目标工
 - **工作区共享项：** 导入为导入者名下的工作区共享项，报告注明原作者。
 - 重复导入按原 Shortcut ID 去重。加密工作区目前不支持 Shortcuts，导入加密工作区时 Shortcuts
   一律记为缺口。
+
+## 待 owner 决定
+
+1. **导入后处理会不会“传回”来源？** 背景：跨工作区导入后，导入的会话会被停止协作、清空待执行
+   队列，schedule 被停用。这些是普通的 CRDT 写入，所以如果之后把目标工作区导出的包再导回来源
+   工作区，来源里的原会话也会被停止、原 schedule 也会被停用（端到端测试中实际出现）。选项：
+   (a) 接受，这就是合并；(b) 跨工作区导入时不写这些状态，改为目标本地记录“这些会话来自导入”，
+   由执行侧据此拦截；(c) 导回来源时跳过这几个字段。代价：(a) 往返一次会让来源停工；(b) 需要新的
+   本地记录和执行侧检查，约 200 行；(c) 只对这几个字段做特例，规则不统一。**推荐 (b)。**
 
 ## 证据
 
@@ -306,4 +317,7 @@ E2EE 工作区的审计记录同样只含不透明计数。导入另在目标工
   loro-repo `795bafcb` 的 client 类型 `exportFlockRaw`、`exportLoroRaw`、`importRoomState`、
   `importLoroRaw`、`flockReadRegisters`；
   分支 `native-repo-integration` 上的迁移计划 §5。
-- 未执行任何验证；本 Spec 只含设计。
+- 实现：[workspace-bundle](../apps/cli/src/lib/workspace-bundle/README.md)（导出、导入、CLI 与 daemon 入口；
+  其 README 列出尚未实现的部分）。
+- 已执行的验证：该目录下基于真实仓库的单元测试，以及本地平台上用两个真实 daemon 的端到端运行
+  （导出、预演、导入、重复导入无变化、再导出、反向导入）。云端和 E2EE 工作区未做端到端验证。

@@ -1,8 +1,10 @@
-import type {
-  WorkspaceBundleControlRequest,
-  WorkspaceBundleControlResponse,
-} from '@lody/shared';
-import { runWorkspaceExport, runWorkspaceImport, type BundleActor, type BundleWorkspace } from './service';
+import type { WorkspaceBundleControlRequest, WorkspaceBundleControlResponse } from '@lody/shared';
+import {
+  runWorkspaceExport,
+  runWorkspaceImport,
+  type BundleActor,
+  type BundleWorkspace,
+} from './service';
 
 export type WorkspaceBundleControlDeps = {
   workspace: BundleWorkspace;

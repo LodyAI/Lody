@@ -28,7 +28,9 @@ export type ExportWorkspaceBundleInput = {
  * created later are not included; each room is a complete state of itself.
  * The caller owns the writer: it finishes or aborts it.
  */
-export async function exportWorkspaceBundle(input: ExportWorkspaceBundleInput): Promise<BundleManifest> {
+export async function exportWorkspaceBundle(
+  input: ExportWorkspaceBundleInput
+): Promise<BundleManifest> {
   const { repo, workspaceId, writer } = input;
   const check = input.checkContinue ?? (async () => undefined);
   /** A room this device cannot bring up to date is a gap, not a failed export. */
@@ -100,7 +102,10 @@ export async function exportWorkspaceBundle(input: ExportWorkspaceBundleInput): 
     );
     input.onProgress?.({ phase: 'flocks', done, total: flocks.length });
   }
-  return await writer.finish({ ...input.source, finishedAt: (input.now ?? (() => new Date().toISOString()))() });
+  return await writer.finish({
+    ...input.source,
+    finishedAt: (input.now ?? (() => new Date().toISOString()))(),
+  });
 }
 
 /**
@@ -111,18 +116,31 @@ export async function exportWorkspaceBundle(input: ExportWorkspaceBundleInput): 
 async function exportRoostTurns(docId: string, input: ExportWorkspaceBundleInput): Promise<void> {
   const { writer } = input;
   if (!input.roostHistory) {
-    writer.addGap({ id: docId, kind: 'roost', reason: 'Roost conversation bodies cannot be read here' });
+    writer.addGap({
+      id: docId,
+      kind: 'roost',
+      reason: 'Roost conversation bodies cannot be read here',
+    });
     return;
   }
   let turns: readonly unknown[];
   try {
     turns = await input.roostHistory(docId.slice('session-'.length));
   } catch (error) {
-    writer.addGap({ id: docId, kind: 'roost', reason: error instanceof Error ? error.message : String(error) });
+    writer.addGap({
+      id: docId,
+      kind: 'roost',
+      reason: error instanceof Error ? error.message : String(error),
+    });
     return;
   }
   await writer.addRoom(
-    { id: `${ROOST_ROOM_PREFIX}${docId}`, model: 'roost', codec: 'roost-turns/v1', encoding: 'json/v1' },
+    {
+      id: `${ROOST_ROOM_PREFIX}${docId}`,
+      model: 'roost',
+      codec: 'roost-turns/v1',
+      encoding: 'json/v1',
+    },
     Buffer.from(JSON.stringify(turns), 'utf8')
   );
 }

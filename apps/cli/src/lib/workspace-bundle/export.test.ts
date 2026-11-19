@@ -26,7 +26,9 @@ async function repoWithData(): Promise<TestRepo> {
   await writeDoc(repo, 'session-r1', { title: 'Roost', historyBackend: 'roost' }, (doc) =>
     doc.getMap('session').set('id', 'r1')
   );
-  await writeDoc(repo, 'schedule-x', { kind: 'schedule' }, (doc) => doc.getText('prompt').insert(0, 'p'));
+  await writeDoc(repo, 'schedule-x', { kind: 'schedule' }, (doc) =>
+    doc.getText('prompt').insert(0, 'p')
+  );
   await writeDoc(repo, 'mystery-1', {}, (doc) => doc.getMap('m').set('a', 1));
   // Machine records keep all fields in Meta and have no document body.
   await repo.upsertDocMeta('machine-m1', { name: 'M' });
@@ -80,7 +82,15 @@ describe('exportWorkspaceBundle', () => {
 
     const ids = manifest.rooms.map((room) => room.id).sort();
     expect(ids).toEqual(
-      ['meta', 'schedule-x', 'session-r1', 'session-s1', `${WS}:mf:m1`, `${WS}:sr`, `${WS}:wf:workspace`].sort()
+      [
+        'meta',
+        'schedule-x',
+        'session-r1',
+        'session-s1',
+        `${WS}:mf:m1`,
+        `${WS}:sr`,
+        `${WS}:wf:workspace`,
+      ].sort()
     );
     expect(manifest.gaps).toEqual(
       expect.arrayContaining([
@@ -120,13 +130,23 @@ describe('exportWorkspaceBundle', () => {
       repo: test.repo,
       workspaceId: WS,
       writer: await createBundleWriter(out),
-      source: { workspaceId: WS, exporterUserId: 'u', exporterMachineId: 'm', lodyVersion: 't', startedAt: 'a' },
+      source: {
+        workspaceId: WS,
+        exporterUserId: 'u',
+        exporterMachineId: 'm',
+        lodyVersion: 't',
+        startedAt: 'a',
+      },
       prepareRoom: async (roomId) => {
         if (roomId === 'schedule-x') throw new Error('forbidden');
       },
     });
     expect(manifest.rooms.map((room) => room.id)).not.toContain('schedule-x');
     expect(manifest.rooms.map((room) => room.id)).toContain('session-s1');
-    expect(manifest.gaps).toContainEqual({ id: 'schedule-x', kind: 'unreadable', reason: 'forbidden' });
+    expect(manifest.gaps).toContainEqual({
+      id: 'schedule-x',
+      kind: 'unreadable',
+      reason: 'forbidden',
+    });
   });
 });

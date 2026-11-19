@@ -68,7 +68,13 @@ export function classifyRoom(roomId: string, workspaceId: string): RoomClass {
     // File indexes are rebuilt by their owner and expire; they are not workspace data.
     if (/^(fi|fis):/.test(suffix)) return { kind: 'excluded' };
     if (/^mf:[^:]+$/.test(suffix))
-      return { kind: 'room', model: 'flock', codec: 'machine-catalog/v1', encoding: 'flock-file/v1', suffix };
+      return {
+        kind: 'room',
+        model: 'flock',
+        codec: 'machine-catalog/v1',
+        encoding: 'flock-file/v1',
+        suffix,
+      };
     const codec = FLOCK_CODECS[suffix as keyof typeof FLOCK_CODECS];
     return codec
       ? { kind: 'room', model: 'flock', codec, encoding: 'flock-file/v1', suffix }

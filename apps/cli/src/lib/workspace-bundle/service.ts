@@ -31,10 +31,18 @@ export type BundleActor = { userId: string; machineId: string; lodyVersion: stri
 
 function assertRole(role: string, action: 'export' | 'import'): void {
   if (!(IMPORT_ROLES as readonly string[]).includes(role))
-    throw new ImportRefusedError(`Only workspace owners and admins can ${action} a workspace bundle`);
+    throw new ImportRefusedError(
+      `Only workspace owners and admins can ${action} a workspace bundle`
+    );
 }
 
-export type ExportSummary = { file: string; rooms: number; blobs: number; gaps: BundleGap[]; digest: string };
+export type ExportSummary = {
+  file: string;
+  rooms: number;
+  blobs: number;
+  gaps: BundleGap[];
+  digest: string;
+};
 
 export async function runWorkspaceExport(input: {
   workspace: BundleWorkspace;
@@ -125,7 +133,10 @@ export async function runWorkspaceImport(input: {
       for (const room of plan.rooms) {
         if (room.action !== 'merge' || room.state === 'unchanged') continue;
         try {
-          await workspace.syncRoom(room.targetId, room.model === 'meta' ? 'meta' : room.model === 'loro' ? 'loro' : 'flock');
+          await workspace.syncRoom(
+            room.targetId,
+            room.model === 'meta' ? 'meta' : room.model === 'loro' ? 'loro' : 'flock'
+          );
         } catch {
           uploadPending.push(room.targetId);
         }

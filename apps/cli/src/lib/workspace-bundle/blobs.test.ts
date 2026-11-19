@@ -53,8 +53,20 @@ describe('session file blobs', () => {
         role: 'user',
         timestamp: '2026-11-19T00:00:00.000Z',
         items: [
-          { ...file, fileId: 'file1', transport: 'local', sizeBytes: blob.length, sha256: sha(blob) },
-          { ...file, fileId: 'cloud1', transport: 'r2', sizeBytes: 3, sha256: sha(Buffer.from('abc')) },
+          {
+            ...file,
+            fileId: 'file1',
+            transport: 'local',
+            sizeBytes: blob.length,
+            sha256: sha(blob),
+          },
+          {
+            ...file,
+            fileId: 'cloud1',
+            transport: 'r2',
+            sizeBytes: 3,
+            sha256: sha(Buffer.from('abc')),
+          },
         ],
       },
     ]);
@@ -68,11 +80,21 @@ describe('session file blobs', () => {
       repo: source.repo,
       workspaceId: 'ws_a',
       writer: await createBundleWriter(out),
-      source: { workspaceId: 'ws_a', exporterUserId: 'u', exporterMachineId: 'm', lodyVersion: 't', startedAt: 'a' },
+      source: {
+        workspaceId: 'ws_a',
+        exporterUserId: 'u',
+        exporterMachineId: 'm',
+        lodyVersion: 't',
+        startedAt: 'a',
+      },
       sessionBlobs: localSessionFileBlobs('ws_a'),
     });
     expect(manifest.blobs).toEqual([
-      expect.objectContaining({ sha256: sha(blob), kind: 'session-file', refs: [`session-file:${SID}/file1`] }),
+      expect.objectContaining({
+        sha256: sha(blob),
+        kind: 'session-file',
+        refs: [`session-file:${SID}/file1`],
+      }),
     ]);
     expect(manifest.gaps).toContainEqual(
       expect.objectContaining({ id: `session-file:${SID}/cloud1`, kind: 'attachment' })
@@ -89,7 +111,12 @@ describe('session file blobs', () => {
       role: 'owner',
       actorUserId: 'u',
     });
-    await applyWorkspaceImport({ plan, bundle, repo: target.repo, journalPath: path.join(await tempDir(), 'j') });
+    await applyWorkspaceImport({
+      plan,
+      bundle,
+      repo: target.repo,
+      journalPath: path.join(await tempDir(), 'j'),
+    });
     const restored = await restoreSessionFileBlobs({ bundle, plan });
     expect(restored).toEqual({ written: 1, existing: 0 });
     const copy = getSessionFileBlobPath({ workspaceId: 'ws_b', sessionId: SID, fileId: 'file1' });

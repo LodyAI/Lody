@@ -9,9 +9,30 @@ describe('formatImportPlan', () => {
       targetWorkspaceId: 'ws_b',
       gaps: [{ id: 'session-r', kind: 'roost', reason: 'not supported' }],
       rooms: [
-        { id: 'session-1', targetId: 'session-1', codec: 'session/v1', model: 'loro', action: 'merge', state: 'new' },
-        { id: 'session-2', targetId: 'session-2', codec: 'session/v1', model: 'loro', action: 'merge', state: 'unchanged' },
-        { id: 'session-3', targetId: 'session-3', codec: 'session/v1', model: 'loro', action: 'skip', reason: 'unrelated-same-id' },
+        {
+          id: 'session-1',
+          targetId: 'session-1',
+          codec: 'session/v1',
+          model: 'loro',
+          action: 'merge',
+          state: 'new',
+        },
+        {
+          id: 'session-2',
+          targetId: 'session-2',
+          codec: 'session/v1',
+          model: 'loro',
+          action: 'merge',
+          state: 'unchanged',
+        },
+        {
+          id: 'session-3',
+          targetId: 'session-3',
+          codec: 'session/v1',
+          model: 'loro',
+          action: 'skip',
+          reason: 'unrelated-same-id',
+        },
         {
           id: 'ws_a:wf:workspace',
           targetId: 'ws_b:wf:workspace',

@@ -6,7 +6,8 @@ describe('daemonBundleWorkspace', () => {
     const calls: string[] = [];
     const manager = {
       repo: {} as never,
-      syncMetaOrThrow: async (options: { reason?: string }) => void calls.push(`meta:${options.reason}`),
+      syncMetaOrThrow: async (options: { reason?: string }) =>
+        void calls.push(`meta:${options.reason}`),
       syncDocOrThrow: async (id: string) => void calls.push(`doc:${id}`),
       syncFlockDocOrThrow: async (id: string) => void calls.push(`flock:${id}`),
       getSessionHistorySnapshot: async (id: string) => [{ id: `turn-of-${id}` }],

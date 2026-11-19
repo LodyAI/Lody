@@ -11,9 +11,12 @@ const AbsolutePathSchema = z
   .string()
   .min(1)
   .max(4096)
-  .refine((value) => value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\'), {
-    message: 'Path must be absolute',
-  });
+  .refine(
+    (value) => value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\'),
+    {
+      message: 'Path must be absolute',
+    }
+  );
 
 export const WorkspaceBundleControlRequestSchema = z.discriminatedUnion('operation', [
   z

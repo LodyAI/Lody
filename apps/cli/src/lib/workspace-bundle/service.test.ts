@@ -32,7 +32,9 @@ describe('workspace bundle service', () => {
   it('exports to a file and imports it into another workspace with a dry run first', async () => {
     const source = await openTestRepo(await tempDir());
     cleanup.push(() => source.close());
-    await writeDoc(source.repo, 'session-s1', { title: 'One' }, (doc) => doc.getText('t').insert(0, 'hi'));
+    await writeDoc(source.repo, 'session-s1', { title: 'One' }, (doc) =>
+      doc.getText('t').insert(0, 'hi')
+    );
     await source.repo.flush();
     const out = path.join(await tempDir(), 'w.lodybundle');
     const synced: string[] = [];

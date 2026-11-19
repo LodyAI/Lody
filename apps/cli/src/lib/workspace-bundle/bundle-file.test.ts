@@ -27,10 +27,18 @@ async function writeSample(file: string) {
     new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
   );
   await writer.addRoom(
-    { id: 'ws_source:wf:workspace', model: 'flock', codec: 'flock-room/v1', encoding: 'flock-file/v1' },
+    {
+      id: 'ws_source:wf:workspace',
+      model: 'flock',
+      codec: 'flock-room/v1',
+      encoding: 'flock-file/v1',
+    },
     new Uint8Array([42])
   );
-  const blobSha = await writer.addBlob({ kind: 'image', name: 'a.png', mime: 'image/png' }, new Uint8Array([7, 7, 7]));
+  const blobSha = await writer.addBlob(
+    { kind: 'image', name: 'a.png', mime: 'image/png' },
+    new Uint8Array([7, 7, 7])
+  );
   writer.addGap({ id: 'session-2', kind: 'roost', reason: 'unsupported' });
   const manifest = await writer.finish({ ...source, finishedAt: '2026-11-19T00:01:00.000Z' });
   return { manifest, blobSha };
@@ -45,7 +53,9 @@ describe('workspace bundle file', () => {
     const bundle = await openBundle(file);
     try {
       expect(bundle.manifest.digest).toBe(manifest.digest);
-      expect(bundle.manifest.gaps).toEqual([{ id: 'session-2', kind: 'roost', reason: 'unsupported' }]);
+      expect(bundle.manifest.gaps).toEqual([
+        { id: 'session-2', kind: 'roost', reason: 'unsupported' },
+      ]);
       const [session, flock] = bundle.manifest.rooms;
       expect([...(await bundle.readRoom(session!))]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
       expect([...(await bundle.readRoom(flock!))]).toEqual([42]);
@@ -93,7 +103,10 @@ describe('workspace bundle file', () => {
     const file = path.join(dir, 'a.lodybundle');
     await writeSample(file);
     const bytes = await fs.readFile(file);
-    const tampered = Buffer.from(bytes.toString('latin1').replace('ws_source"', 'ws_sourcX"'), 'latin1');
+    const tampered = Buffer.from(
+      bytes.toString('latin1').replace('ws_source"', 'ws_sourcX"'),
+      'latin1'
+    );
     await fs.writeFile(file, tampered);
     await expect(openBundle(file)).rejects.toBeInstanceOf(BundleFormatError);
 

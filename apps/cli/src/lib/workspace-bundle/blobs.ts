@@ -33,7 +33,8 @@ function attachmentItems(doc: LoroDoc): Array<FileItem | { type: 'image' | 'imag
     for (const turn of mirror.historyWriter.readStored()) {
       for (const item of [...(turn.items ?? []), ...(turn.inputConfig?.inputBlocks ?? [])]) {
         if (item.type === 'file') items.push(item as FileItem);
-        else if (item.type === 'image' || item.type === 'image_group') items.push({ type: item.type });
+        else if (item.type === 'image' || item.type === 'image_group')
+          items.push({ type: item.type });
       }
     }
     return items;
@@ -43,7 +44,10 @@ function attachmentItems(doc: LoroDoc): Array<FileItem | { type: 'image' | 'imag
 }
 
 const safeId = (value: unknown): value is string =>
-  typeof value === 'string' && /^[A-Za-z0-9._-]{1,200}$/.test(value) && value !== '.' && value !== '..';
+  typeof value === 'string' &&
+  /^[A-Za-z0-9._-]{1,200}$/.test(value) &&
+  value !== '.' &&
+  value !== '..';
 
 /** Export hook: adds this workspace's local session files referenced by a session's history. */
 export function localSessionFileBlobs(workspaceId: string) {
@@ -58,21 +62,40 @@ export function localSessionFileBlobs(workspaceId: string) {
       if (!safeId(item.fileId) || !safeId(storageSessionId)) continue;
       const ref = `${SESSION_FILE_REF}${storageSessionId}/${item.fileId}`;
       if (item.transport !== 'local') {
-        writer.addGap({ id: ref, kind: 'attachment', reason: 'Relay-hosted files are not copied into bundles yet' });
+        writer.addGap({
+          id: ref,
+          kind: 'attachment',
+          reason: 'Relay-hosted files are not copied into bundles yet',
+        });
         continue;
       }
       let bytes: Buffer;
       try {
-        const file = getSessionFileBlobPath({ workspaceId, sessionId: storageSessionId, fileId: item.fileId });
+        const file = getSessionFileBlobPath({
+          workspaceId,
+          sessionId: storageSessionId,
+          fileId: item.fileId,
+        });
         const stat = await fs.stat(file);
         if (!stat.isFile() || stat.size > MAX_FILE_BYTES) throw new Error('not a regular file');
         bytes = await fs.readFile(file);
       } catch {
-        writer.addGap({ id: ref, kind: 'attachment', reason: 'File bytes are not available on this device' });
+        writer.addGap({
+          id: ref,
+          kind: 'attachment',
+          reason: 'File bytes are not available on this device',
+        });
         continue;
       }
-      if (typeof item.sha256 === 'string' && createHash('sha256').update(bytes).digest('hex') !== item.sha256) {
-        writer.addGap({ id: ref, kind: 'attachment', reason: 'Stored file does not match its history record' });
+      if (
+        typeof item.sha256 === 'string' &&
+        createHash('sha256').update(bytes).digest('hex') !== item.sha256
+      ) {
+        writer.addGap({
+          id: ref,
+          kind: 'attachment',
+          reason: 'Stored file does not match its history record',
+        });
         continue;
       }
       await writer.addBlob(
@@ -113,7 +136,8 @@ export async function restoreSessionFileBlobs(input: {
     for (const ref of blob.refs ?? []) {
       if (!ref.startsWith(SESSION_FILE_REF)) continue;
       const [sessionId, fileId, ...rest] = ref.slice(SESSION_FILE_REF.length).split('/');
-      if (rest.length > 0 || !safeId(sessionId) || !safeId(fileId) || !imported.has(sessionId)) continue;
+      if (rest.length > 0 || !safeId(sessionId) || !safeId(fileId) || !imported.has(sessionId))
+        continue;
       const destination = getSessionFileBlobPath({
         workspaceId: input.plan.targetWorkspaceId,
         sessionId,

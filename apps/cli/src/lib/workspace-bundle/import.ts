@@ -7,7 +7,13 @@ import type { JsonObject, LoroRepo } from 'loro-repo';
 import { z } from 'zod';
 import type { OpenBundle } from './bundle-file';
 import { authorizeFlockChanges } from './authorize';
-import { classifyRoom, KNOWN_CODECS, MACHINE_CODECS, META_ROOM_ID, ROOST_ROOM_PREFIX } from './codecs';
+import {
+  classifyRoom,
+  KNOWN_CODECS,
+  MACHINE_CODECS,
+  META_ROOM_ID,
+  ROOST_ROOM_PREFIX,
+} from './codecs';
 import { createSessionMirror, type SessionHistoryInput } from '@lody/shared';
 import {
   applyPostImportWrites,
@@ -34,7 +40,12 @@ export type RoomPlan = {
   action: 'merge' | 'skip';
   /** For merges: whether the target lacks the room, already covers it, or gains changes. */
   state?: 'new' | 'unchanged' | 'merge';
-  reason?: 'unrelated-same-id' | 'deleted-in-target' | 'machine-room' | 'unauthorized' | 'roost-exists';
+  reason?:
+    | 'unrelated-same-id'
+    | 'deleted-in-target'
+    | 'machine-room'
+    | 'unauthorized'
+    | 'roost-exists';
   detail?: string;
   rows?: RowChanges;
 };
@@ -161,7 +172,8 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
   const targetIdOf = (id: string) => mapRoomId(id, sourceWorkspaceId, workspaceId);
   const metaPolicy = (withheld: ReadonlySet<string>): RowPolicy => ({
     skip: (key) =>
-      metaRowBelongsTo(key, withheld) || (crossWorkspace && metaRowIsMachineScoped(key, sourceWorkspaceId)),
+      metaRowBelongsTo(key, withheld) ||
+      (crossWorkspace && metaRowIsMachineScoped(key, sourceWorkspaceId)),
     ...(crossWorkspace ? { mapKey: (key) => mapMetaKey(key, sourceWorkspaceId, workspaceId) } : {}),
   });
 
@@ -187,7 +199,12 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
       if (targetMeta.get(['e', sessionDocId]) !== undefined) {
         rooms.push({ ...base, targetId: sessionDocId, action: 'skip', reason: 'roost-exists' });
       } else if (provisional.get(['e', sessionDocId]) !== true) {
-        rooms.push({ ...base, targetId: sessionDocId, action: 'skip', reason: 'deleted-in-target' });
+        rooms.push({
+          ...base,
+          targetId: sessionDocId,
+          action: 'skip',
+          reason: 'deleted-in-target',
+        });
       } else {
         rooms.push({ ...base, targetId: sessionDocId, action: 'merge', state: 'new' });
       }
@@ -210,7 +227,11 @@ export async function planWorkspaceImport(input: PlanWorkspaceImportInput): Prom
       } else if (![...source.keys()].some((peer) => target.has(peer))) {
         rooms.push({ ...base, action: 'skip', reason: 'unrelated-same-id' });
       } else {
-        rooms.push({ ...base, action: 'merge', state: covers(target, source) ? 'unchanged' : 'merge' });
+        rooms.push({
+          ...base,
+          action: 'merge',
+          state: covers(target, source) ? 'unchanged' : 'merge',
+        });
       }
       continue;
     }
@@ -304,7 +325,12 @@ async function readJournal(file: string, plan: ImportPlan): Promise<Journal> {
     return journal;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT')
-      return { version: 1, digest: plan.digest, targetWorkspaceId: plan.targetWorkspaceId, done: [] };
+      return {
+        version: 1,
+        digest: plan.digest,
+        targetWorkspaceId: plan.targetWorkspaceId,
+        done: [],
+      };
     throw error;
   }
 }
@@ -340,9 +366,12 @@ export type ImportResult = { imported: number; skipped: number; resumed: number 
  * Merges the planned rooms. Each room is one CRDT merge, durable before the journal
  * records it; a rerun with the same bundle continues where it stopped.
  */
-export async function applyWorkspaceImport(input: ApplyWorkspaceImportInput): Promise<ImportResult> {
+export async function applyWorkspaceImport(
+  input: ApplyWorkspaceImportInput
+): Promise<ImportResult> {
   const { plan, bundle, repo } = input;
-  if (plan.digest !== bundle.manifest.digest) throw new Error('Import plan does not match this bundle');
+  if (plan.digest !== bundle.manifest.digest)
+    throw new Error('Import plan does not match this bundle');
   const crossWorkspace = plan.sourceWorkspaceId !== plan.targetWorkspaceId;
   const journal = await readJournal(input.journalPath, plan);
   const done = new Set(journal.done);
@@ -438,7 +467,11 @@ async function writeImportReceipt(
  * Loro history and selects the Loro backend: the original Roost store stays on the
  * source machine, and the importer becomes the writer of the rewritten turns.
  */
-async function rewriteRoostTurns(repo: LoroRepo<JsonObject>, docId: string, bytes: Uint8Array): Promise<void> {
+async function rewriteRoostTurns(
+  repo: LoroRepo<JsonObject>,
+  docId: string,
+  bytes: Uint8Array
+): Promise<void> {
   const turns = JSON.parse(Buffer.from(bytes).toString('utf8')) as unknown;
   if (!Array.isArray(turns)) throw new Error(`Roost turns for ${docId} are malformed`);
   const lease = await repo.acquireDoc(docId);

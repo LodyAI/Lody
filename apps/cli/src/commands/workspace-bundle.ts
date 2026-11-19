@@ -48,9 +48,12 @@ export function formatImportPlan(plan: ImportPlan): string {
     );
   for (const room of plan.rooms) {
     if (room.action !== 'skip') continue;
-    lines.push(`Skipped ${room.id}: ${room.detail ?? SKIP_REASONS[room.reason ?? ''] ?? room.reason}`);
+    lines.push(
+      `Skipped ${room.id}: ${room.detail ?? SKIP_REASONS[room.reason ?? ''] ?? room.reason}`
+    );
   }
-  for (const gap of plan.gaps) lines.push(`Not in this bundle: ${gap.id} (${gap.kind}): ${gap.reason}`);
+  for (const gap of plan.gaps)
+    lines.push(`Not in this bundle: ${gap.id} (${gap.kind}): ${gap.reason}`);
   return lines.join('\n');
 }
 
@@ -66,19 +69,26 @@ async function resolveTarget(selector: string | undefined): Promise<Target> {
   const catalog = await Effect.runPromise(makeLocalWorkspaceCatalog().read());
   const wanted = selector ?? process.env.LODY_WORKSPACE_ID;
   const candidates = catalog.workspaces.filter(
-    (row) => row.state === 'active' && (!wanted || [row.workspaceId, row.slug, row.name].includes(wanted))
+    (row) =>
+      row.state === 'active' && (!wanted || [row.workspaceId, row.slug, row.name].includes(wanted))
   );
   const workspace = candidates.length === 1 ? candidates[0] : undefined;
   if (!workspace || !catalog.machine)
     throw new Error('Choose an active workspace with --workspace; start the daemon first');
-  return { kind: 'local', machineId: catalog.machine.machineId as MachineId, workspaceId: workspace.workspaceId };
+  return {
+    kind: 'local',
+    machineId: catalog.machine.machineId as MachineId,
+    workspaceId: workspace.workspaceId,
+  };
 }
 
 async function viaDaemon(
   request: Parameters<ReturnType<typeof makeLocalControlClientAuto>['workspaceBundleControl']>[0]
 ): Promise<unknown> {
   const response = await Effect.runPromise(
-    makeLocalControlClientAuto().workspaceBundleControl(request, { timeoutMs: DAEMON_BUNDLE_TIMEOUT_MS })
+    makeLocalControlClientAuto().workspaceBundleControl(request, {
+      timeoutMs: DAEMON_BUNDLE_TIMEOUT_MS,
+    })
   );
   if (!response.ok) throw new Error(response.error);
   return response.result;
@@ -127,8 +137,20 @@ async function importBundle(target: Target, file: string, dryRun: boolean): Prom
   );
 }
 
-type ExportOptions = { out: string; workspace?: string; offline?: boolean; json?: boolean; debug?: boolean };
-type ImportOptions = { workspace?: string; dryRun?: boolean; yes?: boolean; json?: boolean; debug?: boolean };
+type ExportOptions = {
+  out: string;
+  workspace?: string;
+  offline?: boolean;
+  json?: boolean;
+  debug?: boolean;
+};
+type ImportOptions = {
+  workspace?: string;
+  dryRun?: boolean;
+  yes?: boolean;
+  json?: boolean;
+  debug?: boolean;
+};
 
 export const workspaceExportCommand = new Command('export')
   .description('Export a complete workspace bundle that can be imported again (owners and admins)')
@@ -141,13 +163,18 @@ export const workspaceExportCommand = new Command('export')
     await runOneShotCommand('workspace-export', options, async () => {
       const out = path.resolve(options.out);
       if (!options.json) console.error(PLAINTEXT_WARNING);
-      const summary = await exportBundle(await resolveTarget(options.workspace), out, options.offline === true);
+      const summary = await exportBundle(
+        await resolveTarget(options.workspace),
+        out,
+        options.offline === true
+      );
       if (options.json) {
         printJson({ ok: true, ...summary });
         return;
       }
       console.log(`Exported ${summary.rooms} rooms and ${summary.blobs} files to ${summary.file}`);
-      for (const gap of summary.gaps) console.log(`Not included: ${gap.id} (${gap.kind}): ${gap.reason}`);
+      for (const gap of summary.gaps)
+        console.log(`Not included: ${gap.id} (${gap.kind}): ${gap.reason}`);
     });
   });
 
@@ -173,7 +200,12 @@ export const workspaceImportCommand = new Command('import')
         if (!process.stdin.isTTY) throw new Error('Pass --yes to import without confirmation.');
         console.log(formatImportPlan(preview.plan));
         const { confirmed } = await inquirer.prompt<{ confirmed: boolean }>([
-          { type: 'confirm', name: 'confirmed', message: 'Merge this bundle into the workspace?', default: false },
+          {
+            type: 'confirm',
+            name: 'confirmed',
+            message: 'Merge this bundle into the workspace?',
+            default: false,
+          },
         ]);
         if (!confirmed) {
           console.log('Nothing was imported.');

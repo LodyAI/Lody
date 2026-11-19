@@ -26,7 +26,9 @@ afterEach(async () => {
   for (const step of cleanup.splice(0).reverse()) await step();
 });
 
-function handler(dispatch: ConstructorParameters<typeof LocalControlHandler>[0]['dispatchWorkspaceBundle']) {
+function handler(
+  dispatch: ConstructorParameters<typeof LocalControlHandler>[0]['dispatchWorkspaceBundle']
+) {
   return new LocalControlHandler({
     machineId,
     logger: createSilentLogger(),
@@ -47,7 +49,11 @@ describe('workspace bundle local control', () => {
     });
     const body = { operation: 'export', machineId, workspaceId: 'lw_1', out: '/tmp/x.lodybundle' };
     await expect(
-      control.handle({ path: LOCAL_WORKSPACE_BUNDLE_PATH, rawBody: JSON.stringify(body), requestId: 1 })
+      control.handle({
+        path: LOCAL_WORKSPACE_BUNDLE_PATH,
+        rawBody: JSON.stringify(body),
+        requestId: 1,
+      })
     ).resolves.toEqual({ status: 200, payload: { ok: true, result: { rooms: 1 } } });
     expect(seen).toEqual([body]);
     const other = await control.handle({
@@ -75,7 +81,9 @@ describe('workspace bundle local control', () => {
     cleanup.push(() => fs.rm(dir, { recursive: true, force: true }));
     const test = await openTestRepo(path.join(dir));
     cleanup.push(() => test.close());
-    await writeDoc(test.repo, 'session-s1', { title: 'One' }, (doc) => doc.getText('t').insert(0, 'hi'));
+    await writeDoc(test.repo, 'session-s1', { title: 'One' }, (doc) =>
+      doc.getText('t').insert(0, 'hi')
+    );
     const deps = {
       workspace: { id: 'lw_1', repo: test.repo },
       role: 'owner',

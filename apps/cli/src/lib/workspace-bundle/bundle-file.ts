@@ -137,7 +137,9 @@ export type OpenBundle = {
 function openZip(file: string): Promise<ZipFile> {
   return new Promise((resolve, reject) => {
     openYauzl(file, { lazyEntries: true, autoClose: false, strictFileNames: true }, (error, zip) =>
-      error || !zip ? reject(new BundleFormatError(`Cannot read bundle: ${error?.message}`)) : resolve(zip)
+      error || !zip
+        ? reject(new BundleFormatError(`Cannot read bundle: ${error?.message}`))
+        : resolve(zip)
     );
   });
 }
@@ -172,7 +174,9 @@ function readEntry(zip: ZipFile, entry: Entry): Promise<Buffer> {
       }
       const parts: Buffer[] = [];
       stream.on('data', (part: Buffer) => parts.push(part));
-      stream.once('error', (streamError: Error) => reject(new BundleFormatError(streamError.message)));
+      stream.once('error', (streamError: Error) =>
+        reject(new BundleFormatError(streamError.message))
+      );
       stream.once('end', () => resolve(Buffer.concat(parts)));
     });
   });

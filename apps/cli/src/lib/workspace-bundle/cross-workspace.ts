@@ -5,7 +5,11 @@ import type { JsonObject, LoroRepo } from 'loro-repo';
  * Entity ids, peers and user ids are kept; only room ids that embed the workspace id
  * change. Machine rooms never cross workspaces.
  */
-export function mapRoomId(roomId: string, sourceWorkspaceId: string, targetWorkspaceId: string): string {
+export function mapRoomId(
+  roomId: string,
+  sourceWorkspaceId: string,
+  targetWorkspaceId: string
+): string {
   const prefix = `${sourceWorkspaceId}:`;
   return roomId.startsWith(prefix) ? `${targetWorkspaceId}:${roomId.slice(prefix.length)}` : roomId;
 }
