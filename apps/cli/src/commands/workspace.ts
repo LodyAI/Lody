@@ -10,6 +10,7 @@ import {
 } from '@/lib/command-runtime';
 import { renderTerminalTable } from '@/lib/terminal-table';
 import { listWorkspacesForToken, type WorkspaceSummary } from '@/lib/workspace';
+import { workspaceExportCommand, workspaceImportCommand } from './workspace-bundle';
 
 type WorkspaceListOptions = Pick<CommonCommandOptions, 'json' | 'debug'>;
 
@@ -68,6 +69,9 @@ export const workspaceCommand = new Command('workspace')
         });
       })
   );
+
+workspaceCommand.addCommand(workspaceExportCommand);
+workspaceCommand.addCommand(workspaceImportCommand);
 
 workspaceCommand.addCommand(
   new Command('reset-identity')

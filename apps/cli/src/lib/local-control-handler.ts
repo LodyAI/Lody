@@ -15,6 +15,10 @@ import {
   type LocalE2eeActivateResponse,
 } from '@lody/shared/e2ee-local-pairing';
 import {
+  LOCAL_WORKSPACE_BUNDLE_PATH,
+  WorkspaceBundleControlRequestSchema,
+  type WorkspaceBundleControlRequest,
+  type WorkspaceBundleControlResponse,
   LOCAL_SCHEDULE_CONTROL_PATH,
   ScheduleControlRequestSchema,
   type ScheduleControlRequest,
@@ -62,6 +66,9 @@ export interface LocalSessionControlConfig {
     message: LocalE2eePairingRequest
   ) => Promise<LocalE2eePrepareReply | LocalE2eeActivateResponse>;
   dispatchSchedule?: (message: ScheduleControlRequest) => Promise<ScheduleControlResponse>;
+  dispatchWorkspaceBundle?: (
+    message: WorkspaceBundleControlRequest
+  ) => Promise<WorkspaceBundleControlResponse>;
   machineId: MachineId;
   logger: Logger;
   dispatchSession: (
@@ -414,6 +421,27 @@ export class LocalControlHandler {
             503,
             refusal.success ? refusal.data : { ok: false, error: 'e2ee_pairing_unavailable' }
           );
+        }
+      })();
+    }
+    if (request.path === LOCAL_WORKSPACE_BUNDLE_PATH) {
+      return (async () => {
+        let raw: unknown;
+        try {
+          raw = JSON.parse(request.rawBody);
+        } catch {
+          return handlerResponse(400, { ok: false, error: 'invalid_request' });
+        }
+        const parsed = WorkspaceBundleControlRequestSchema.safeParse(raw);
+        if (!parsed.success) return handlerResponse(400, { ok: false, error: 'invalid_request' });
+        if (parsed.data.machineId !== this.config.machineId)
+          return handlerResponse(403, { ok: false, error: 'machine_mismatch' });
+        if (!this.config.dispatchWorkspaceBundle)
+          return handlerResponse(501, { ok: false, error: 'workspace_bundle_unsupported' });
+        try {
+          return handlerResponse(200, await this.config.dispatchWorkspaceBundle(parsed.data));
+        } catch {
+          return handlerResponse(500, { ok: false, error: 'workspace_bundle_failed' });
         }
       })();
     }
