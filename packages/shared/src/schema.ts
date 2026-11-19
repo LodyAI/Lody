@@ -1097,6 +1097,10 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   origin?: 'lody' | 'external-acp';
   /** When true, this session is pinned to the top of the sidebar list. */
   isPinned?: boolean;
+  /** Pin section this pinned session belongs to; missing or unknown means the default section. Read only while `isPinned`. */
+  pinSectionId?: string;
+  /** Fractional index ordering this pinned session within its section. Read only while `isPinned`. */
+  pinOrderKey?: string;
   cliType: AgentConfigCliType;
   agentType: AgentType;
   /** Backend selected when this session was created. Missing means legacy Loro. */

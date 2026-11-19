@@ -15,10 +15,17 @@ import {
 } from '@lody/shared';
 import {
   ProjectMcpDefaultWriteError,
+  deleteWorkspacePinSection,
   putProjectMcpDefault,
   writeWorkspaceAgentRole,
+  writeWorkspacePinSection,
   type WorkspaceCatalogWriteDeps,
 } from '../src/lib/workspace-catalog-write';
+import {
+  acquireWorkspaceCatalog,
+  EMPTY_WORKSPACE_CATALOG,
+} from '../src/lib/workspace-catalog-room';
+import type { WorkspaceRuntime } from '../src/atoms/runtime';
 import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
 
 const workspaceId = 'workspace-1' as WorkspaceCatalogWriteDeps['workspaceId'];
@@ -114,6 +121,57 @@ describe('workspace catalog writes', () => {
     expect(flock.get(key)).toMatchObject({ v: 2 });
     expect(flock.get(key)).not.toHaveProperty('additionalTargets');
     expect(normalizeAgentRole(flock.get(key))).toEqual(multi);
+  });
+});
+
+describe('pin section writes', () => {
+  const settle = async () => {
+    for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
+  };
+
+  it('publishes created, renamed and deleted sections to the shared catalog snapshot', async () => {
+    const flock = new Flock('catalog-pin-sections');
+    const repo = {
+      openFlockDoc: async () => ({
+        flock,
+        syncOnce: async () => {},
+        joinRoom: async () => ({
+          unsubscribe: () => {},
+          firstSyncedWithRemote: new Promise(() => {}),
+        }),
+      }),
+    };
+    const deps = {
+      workspaceId,
+      repo,
+      writer: createDirectWorkspaceWriter({ repo } as never),
+    } as unknown as WorkspaceCatalogWriteDeps;
+    const runtime = { workspaceId, repo } as unknown as WorkspaceRuntime;
+    let latest = EMPTY_WORKSPACE_CATALOG;
+    const watched = acquireWorkspaceCatalog(runtime, (snapshot) => {
+      latest = snapshot;
+    });
+    await settle();
+    expect(latest.pinSections).toEqual([]);
+
+    await writeWorkspacePinSection(deps, { id: 'later', name: 'Later', orderKey: '81' });
+    await writeWorkspacePinSection(deps, { id: 'ops', name: 'Ops', orderKey: '80' });
+    await settle();
+    expect(latest.pinSections.map((section) => section.id)).toEqual(['ops', 'later']);
+
+    await writeWorkspacePinSection(deps, { id: 'ops', name: 'Maintenance', orderKey: '82' });
+    await deleteWorkspacePinSection(deps, 'later');
+    await settle();
+    expect(latest.pinSections).toEqual([{ id: 'ops', name: 'Maintenance', orderKey: '82' }]);
+
+    watched.release();
+  });
+
+  it('refuses a section the shared catalog would drop', async () => {
+    const { deps } = createDeps();
+    await expect(
+      writeWorkspacePinSection(deps, { id: 'blank', name: '  ', orderKey: '80' })
+    ).rejects.toThrow();
   });
 });
 
