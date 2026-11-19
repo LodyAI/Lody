@@ -672,6 +672,15 @@ export class LoroDocumentManager {
     let nativeMeta: NativeWorkspaceMeta | null = null;
     try {
       const createRepoStartMs = Date.now();
+      const native = usesNativeWorkspaceMeta(!!options.encryptedWorkspace)
+        ? await openNativeWorkspaceMeta(
+            workspaceId,
+            cliSqliteRepoStore.storageAdapter,
+            cliSqliteRepoStore.dbPath,
+            logger
+          )
+        : undefined;
+      nativeMeta = native?.meta ?? null;
       const repoOptions = {
         storageAdapter: cliSqliteRepoStore.storageAdapter,
         metaDebounceCommitMs: 0,
@@ -679,14 +688,8 @@ export class LoroDocumentManager {
         // loro-repo's default 5 s trailing debounce let a crash drop new Sessions.
         metaPersistDebounceMs: 0,
         flockDocRetentionMs: getFlockDocRetentionMs,
+        ...(native ? { externalFlockDocs: native.flockDocs } : {}),
       };
-      if (usesNativeWorkspaceMeta(!!options.encryptedWorkspace))
-        nativeMeta = await openNativeWorkspaceMeta(
-          workspaceId,
-          cliSqliteRepoStore.storageAdapter,
-          cliSqliteRepoStore.dbPath,
-          logger
-        );
       const externalMeta = nativeMeta;
       repo = await traceAsync(
         logger,

@@ -42,6 +42,15 @@ owns the long-term directory contract, and both stay active.
   because it returns the whole room in one frame (it fails at 100k documents).
   Bounded state comparison is used instead; for keys that differ, a re-import
   showing no change proves that a newer register covers them.
+- **Named Flock documents through an SDK owner, not Lody ports.** The workspace
+  catalog, machine Flocks and schedule registry are used through synchronous wasm
+  Flock handles at 122 call sites in 51 files, including version and export calls
+  for sync. Per-domain Lody ports were rejected as the #2892 pattern. A
+  transport-style adapter was rejected too: the body would still persist to local
+  storage (a second writer) and `flush` would resolve before the native commit.
+  loro-repo's external Flock owner keeps the replica in memory, loads it from the
+  room's raw export, applies changes that carry clocks (added for this), and
+  commits through the existing persistence barriers.
 - **One host process, launched by either side.** The daemon owning the engine (#2895)
   would couple Meta availability to the daemon; a host per side would race
   `files.lock`. The host idles out after its last connection.
