@@ -5069,6 +5069,8 @@ function WorkspaceChatLanding({
           isOffline: !isOnline,
           hasUnreadMessages: activity.hasUnreadMessages,
           isPinned: Boolean(session.isPinned),
+          pinSectionId: session.pinSectionId ?? null,
+          pinOrderKey: session.pinOrderKey ?? null,
           readOnly: activeReadOnlyIds.has(session.id) || archivedReadOnlyIds.has(session.id),
           machineId: session.machineId,
           /* Provenance for the list's opened-by tree. TWO fields, never
@@ -5991,6 +5993,8 @@ function WorkspaceChatLanding({
           isOffline: !isOnline,
           hasUnreadMessages: activity.hasUnreadMessages,
           isPinned: Boolean(session.isPinned),
+          pinSectionId: session.pinSectionId ?? null,
+          pinOrderKey: session.pinOrderKey ?? null,
           readOnly: activeReadOnlyIds.has(session.id) || archivedReadOnlyIds.has(session.id),
           machineId: session.machineId,
           /* See the home Chat-tab builder: precise opener for navigation, row

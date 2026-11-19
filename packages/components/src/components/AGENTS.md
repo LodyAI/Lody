@@ -9,7 +9,8 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
   "Hide Empty Projects" switch is documented in the [README](README.md).
 - Desktop Workspace, Local Project, Updated and Pinned rows support mention drag
   and Mark as unread (hide on unread). Use `lib/session-mention-drag.ts` for
-  conversation/landing drops; parent tabs use HTML5 drag, child tabs dnd-kit.
+  conversation/landing drops; parent tabs and unpinned rows use HTML5 drag; child
+  tabs and Pinned rows use dnd-kit via `dropSessionMentionAtPoint`.
   `startSessionMentionDrag` / `armSessionMentionDrag` must light
   `ConversationDropOverlay` before `dragenter`. Navigation overlays use
   `draggable={false}`; rows own `draggable`.

@@ -286,11 +286,12 @@ it.each(['Archive', 'Restore', 'Delete', 'Pin'])(
       for (const original of [meta, child]) {
         const entry = await repo.getDocMeta(getSessionRoomId(original.id));
         expect.soft(isLoroRepoDocDeleted(entry)).toBe(false);
-        expect
-          .soft(entry?.meta)
-          .toEqual(
-            operation === 'Pin' && original.id === id ? { ...original, isPinned: true } : original
-          );
+        expect.soft(entry?.meta).toEqual(
+          operation === 'Pin' && original.id === id
+            ? // Pinning also records the pin position (specs/pinned-session-sections.md).
+              { ...original, isPinned: true, pinOrderKey: expect.stringMatching(/^[0-9A-F]+$/) }
+            : original
+        );
       }
     } finally {
       await repo.destroy();

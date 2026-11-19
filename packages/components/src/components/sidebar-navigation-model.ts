@@ -58,8 +58,13 @@ export type SidebarNavigationModelOptions = {
    * Keyboard navigation must skip rows the user cannot see.
    */
   collapsedOpenedBySessions?: Record<string, boolean>;
-  pinnedItems: SidebarUpdatedItem[];
-  pinnedSectionCollapsed: boolean;
+  pinnedItems?: SidebarUpdatedItem[];
+  pinnedSectionCollapsed?: boolean;
+  /**
+   * Pin sections as rendered (default first, rows in manual order). When
+   * present it replaces {@link pinnedItems}/{@link pinnedSectionCollapsed}.
+   */
+  pinnedSections?: readonly SidebarNavPinSection[];
   workspace: {
     localSections: SidebarNavigationLocalSection[];
     githubSectionCollapsed: boolean;
@@ -160,18 +165,37 @@ function emitLocalProjects(
   }
 }
 
+export type SidebarNavPinSection = {
+  id: string | null;
+  items: SidebarUpdatedItem[];
+  collapsed: boolean;
+};
+
 export function buildSidebarNavigationItems({
   organizeMode,
   showFullSessionGroups,
   collapsedOpenedBySessions = {},
-  pinnedItems,
-  pinnedSectionCollapsed,
+  pinnedItems = [],
+  pinnedSectionCollapsed = false,
+  pinnedSections,
   workspace,
   updated,
 }: SidebarNavigationModelOptions): SidebarNavItem[] {
   const items: SidebarNavItem[] = [];
 
-  if (!pinnedSectionCollapsed) {
+  if (pinnedSections) {
+    for (const section of pinnedSections) {
+      if (section.collapsed) continue;
+      // Manual order: roots stay where the user put them, nesting as rendered.
+      const nodes = buildOpenedBySessionTree(section.items, {
+        ...SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS,
+        isCollapsed: (openerId) => collapsedOpenedBySessions[openerId] === true,
+      });
+      for (const node of nodes) {
+        items.push({ kind: 'session', sessionId: node.item.id, groupKey: '__pinned__' });
+      }
+    }
+  } else if (!pinnedSectionCollapsed) {
     // The Pinned section renders through the same list component, so it gets the
     // same opened-by tree, including descendants placed here with a pinned opener.
     const pinnedNodes = buildOpenedBySessionTree(sortUpdatedItems(pinnedItems), {

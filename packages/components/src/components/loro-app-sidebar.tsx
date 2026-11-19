@@ -45,7 +45,16 @@ import {
   type SessionId,
   type SessionMeta,
   type SessionStatus,
+  buildPinnedSectionLayout,
+  planNewPinSectionOrderKey,
+  planPinnedSessionMove,
+  planPinSectionMove,
+  type PinSection,
+  type PinnedSessionPlacement,
 } from '@lody/shared';
+import { useWorkspaceCatalog } from '@/hooks/use-workspace-catalog';
+import { deleteWorkspacePinSection, writeWorkspacePinSection } from '@/lib/workspace-catalog-write';
+import type { SidebarPinSectionActions, SidebarPinnedSection } from './sidebar-pinned-sections';
 import { useTranslation } from 'react-i18next';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useAppCapability } from '@/lib/app-platform';
@@ -112,6 +121,7 @@ import {
   moveLocalProjectOrder,
   localProjectsSectionCollapseStateAtom,
   pinnedSectionCollapsedAtom,
+  pinSectionsCollapsedAtom,
   repoCollapseStateAtom,
   repoOrderAtom,
   sidebarCollapsedAtom,
@@ -1828,8 +1838,20 @@ export function LoroAppSidebar({
     [postHog, setHideEmptyProjects]
   );
   const sessionSidebarCodeChangesOnly = useAtomValue(sessionSidebarCodeChangesOnlyAtom);
-  const { archiveSession, markSessionUnread, setSessionPinned, updateSessionTitle } =
-    useSessionActions();
+  const {
+    archiveSession,
+    markSessionUnread,
+    setSessionPinned,
+    applySessionPinPlacements,
+    updateSessionTitle,
+  } = useSessionActions();
+  const {
+    pinSections,
+    loaded: pinSectionsRead,
+    failed: pinSectionsUnreadable,
+  } = useWorkspaceCatalog();
+  // A failed read cannot hold rows back forever: they fall back to the default section.
+  const pinSectionsLoaded = pinSectionsRead || pinSectionsUnreadable;
   const { removeLocalProject } = useRemoveLocalProject();
   const presenceStates = useAtomValue(lodyPresenceStatesAtom);
   const presenceNowMs = useAtomValue(lodyPresenceNowMsAtom);
@@ -2718,6 +2740,111 @@ export function LoroAppSidebar({
     () => sortUpdatedItems(allSidebarItems.filter((item) => pinnedSessionIds.has(item.id))),
     [allSidebarItems, pinnedSessionIds]
   );
+  // Where each pinned row sits. An opened Session shown here only because its
+  // opener is pinned follows its opener's section and position.
+  const pinnedPlacementOf = useCallback(
+    (item: SidebarUpdatedItem): PinnedSessionPlacement => {
+      const owner = sessionById.get(
+        item.isPinned ? item.id : (item.openedByRowSessionId ?? item.id)
+      );
+      const latest = item.latestMessageAt;
+      return {
+        id: item.id,
+        pinSectionId: owner?.isPinned ? (owner.pinSectionId ?? null) : null,
+        pinOrderKey: owner?.isPinned ? (owner.pinOrderKey ?? null) : null,
+        recency: latest instanceof Date ? latest.getTime() : Date.parse(String(latest ?? '')) || 0,
+      };
+    },
+    [sessionById]
+  );
+  const pinnedLayout = useMemo(
+    () =>
+      buildPinnedSectionLayout(pinnedItems, pinSections, pinnedPlacementOf, {
+        sectionsLoaded: pinSectionsLoaded,
+      }),
+    [pinnedItems, pinSections, pinSectionsLoaded, pinnedPlacementOf]
+  );
+  const pinnedSections = useMemo<SidebarPinnedSection[]>(
+    () =>
+      pinnedLayout.map((entry) => ({
+        id: entry.sectionId,
+        name: entry.section?.name ?? '',
+        items: entry.items,
+      })),
+    [pinnedLayout]
+  );
+  const pinnedLayoutRef = useRef(pinnedLayout);
+  pinnedLayoutRef.current = pinnedLayout;
+  const pinSectionsRef = useRef(pinSections);
+  pinSectionsRef.current = pinSections;
+  /** Plan against the pinned rows themselves; carried opened Sessions never move alone. */
+  const planPinnedMove = useCallback(
+    (
+      itemId: string,
+      toSectionId: string | null,
+      toIndex: number,
+      sections: readonly PinSection[] = pinSectionsRef.current
+    ) => {
+      const placements = pinnedLayoutRef.current.flatMap((entry) =>
+        entry.items.filter((item) => item.isPinned).map(pinnedPlacementOf)
+      );
+      return planPinnedSessionMove(
+        buildPinnedSectionLayout(placements, sections, (placement) => placement),
+        { sessionId: itemId, toSectionId, toIndex }
+      );
+    },
+    [pinnedPlacementOf]
+  );
+  const reportPinError = useCallback((error: unknown) => {
+    toast.error(error instanceof Error ? error.message : String(error));
+  }, []);
+  const pinSectionActions = useMemo<SidebarPinSectionActions | undefined>(() => {
+    if (!runtime) return undefined;
+    return {
+      onDropItem: (itemId, sectionId, toIndex) => {
+        void applySessionPinPlacements(planPinnedMove(itemId, sectionId, toIndex)).catch(
+          reportPinError
+        );
+      },
+      onMoveSection: (sectionId, toIndex) => {
+        const section = pinSectionsRef.current.find((entry) => entry.id === sectionId);
+        if (!section) return;
+        void writeWorkspacePinSection(runtime, {
+          ...section,
+          orderKey: planPinSectionMove(pinSectionsRef.current, sectionId, toIndex),
+        }).catch(reportPinError);
+      },
+      onCreateSection: async (name, moveItemId) => {
+        const section: PinSection = {
+          id: crypto.randomUUID(),
+          name,
+          orderKey: planNewPinSectionOrderKey(pinSectionsRef.current),
+        };
+        await writeWorkspacePinSection(runtime, section);
+        if (moveItemId) {
+          await applySessionPinPlacements(
+            planPinnedMove(moveItemId, section.id, 0, [...pinSectionsRef.current, section])
+          );
+        }
+      },
+      onRenameSection: async (sectionId, name) => {
+        const section = pinSectionsRef.current.find((entry) => entry.id === sectionId);
+        if (!section) return;
+        await writeWorkspacePinSection(runtime, { ...section, name });
+      },
+      onDeleteSection: (sectionId) => {
+        void deleteWorkspacePinSection(runtime, sectionId).catch(reportPinError);
+      },
+    };
+  }, [applySessionPinPlacements, planPinnedMove, reportPinError, runtime]);
+  const [pinSectionsCollapsed, setPinSectionsCollapsed] = useAtom(pinSectionsCollapsedAtom);
+  const handleTogglePinSection = useCallback(
+    (sectionId: string) => {
+      setPinSectionsCollapsed((prev) => ({ ...prev, [sectionId]: !prev[sectionId] }));
+    },
+    [setPinSectionsCollapsed]
+  );
+
   const updatedItems = useMemo(
     () => allSidebarItems.filter((item) => !pinnedSessionIds.has(item.id)),
     [allSidebarItems, pinnedSessionIds]
@@ -3068,7 +3195,10 @@ export function LoroAppSidebar({
         getSessionHref={getSessionHref}
       />
     ) : null;
-  const firstSectionFilterAction = pinnedItems.length === 0 ? sidebarFilterPopover : null;
+  // The pinned area takes the filter whenever it renders, including when it only
+  // holds empty pin sections.
+  const firstSectionFilterAction =
+    pinnedItems.length === 0 && pinSections.length === 0 ? sidebarFilterPopover : null;
   const localProjectsTopContent =
     localProjectSections.length === 0 ? null : (
       // Sections carry their own bottom margin (see sidebarTopContent): 12px
@@ -3883,8 +4013,14 @@ export function LoroAppSidebar({
         organizeMode,
         showFullSessionGroups,
         collapsedOpenedBySessions: collapsedOpenedBySessionIds,
-        pinnedItems,
-        pinnedSectionCollapsed,
+        pinnedSections: pinnedSections.map((section) => ({
+          id: section.id,
+          items: section.items,
+          collapsed:
+            section.id === null
+              ? pinnedSectionCollapsed
+              : pinSectionsCollapsed[section.id] === true,
+        })),
         workspace: {
           localSections: keyboardNavLocalSections,
           githubSectionCollapsed: githubWorktreesSectionCollapsed,
@@ -3907,8 +4043,9 @@ export function LoroAppSidebar({
       projectGroupPlacement,
       keyboardNavLocalSections,
       organizeMode,
-      pinnedItems,
+      pinnedSections,
       pinnedSectionCollapsed,
+      pinSectionsCollapsed,
       repos,
       showFullSessionGroups,
       updatedBucketCollapseState,
@@ -3995,6 +4132,10 @@ export function LoroAppSidebar({
         chatScope={chatScope}
         pinnedItems={pinnedItems}
         pinnedSectionCollapsed={pinnedSectionCollapsed}
+        pinnedSections={pinnedSections}
+        collapsedPinSectionIds={pinSectionsCollapsed}
+        onTogglePinSection={handleTogglePinSection}
+        pinSectionActions={pinSectionActions}
         updatedItems={updatedItems}
         updatedSelectedItemId={updatedSelectedItemId}
         updatedBucketsCollapsed={updatedBucketCollapseState}

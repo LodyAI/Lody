@@ -245,6 +245,31 @@ describe('sidebar navigation model', () => {
   });
 });
 
+describe('sidebar navigation model pin sections', () => {
+  it('walks pin sections in their order and manual row order, skipping folded sections', () => {
+    const items = buildSidebarNavigationItems({
+      ...baseOptions,
+      pinnedSections: [
+        { id: null, items: [updatedItem('loose', '2026-07-16T12:00:00Z')], collapsed: false },
+        {
+          id: 'maintenance',
+          // Manual order: the older conversation stays first.
+          items: [
+            updatedItem('weekly-mirror', '2026-07-01T12:00:00Z'),
+            updatedItem('deps-bump', '2026-07-16T13:00:00Z'),
+          ],
+          collapsed: false,
+        },
+        { id: 'folded', items: [updatedItem('hidden', '2026-07-16T14:00:00Z')], collapsed: true },
+      ],
+    });
+    expect(sessionIds(items)).toEqual(['loose', 'weekly-mirror', 'deps-bump']);
+    expect(
+      items.find((item) => item.kind === 'session' && item.sessionId === 'deps-bump')
+    ).toMatchObject({ groupKey: '__pinned__' });
+  });
+});
+
 describe('sidebar navigation model opened-by tree', () => {
   it('visits opened sessions right after their opener in Updated mode', () => {
     const items = buildSidebarNavigationItems({

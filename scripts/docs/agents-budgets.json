@@ -12,6 +12,7 @@
     "packages/components/src/hooks/AGENTS.md": 1280,
     "packages/e2ee-client/AGENTS.md": 1400,
     "apps/electron/src/main/services/AGENTS.md": 1290,
-    ".github/AGENTS.md": 1220
+    ".github/AGENTS.md": 1220,
+    "packages/components/src/components/AGENTS.md": 1220
   }
 }
