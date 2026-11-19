@@ -496,6 +496,29 @@ for a loaded room; RSS deltas below 20 MB are within measurement noise.
 - No signed installer, real-window acceptance or platforms other than Linux x64
   have been exercised (see Pending acceptance).
 
+## Desktop acceptance (Linux x64)
+
+The built desktop with native Workspace Meta, run through the E2E harness
+(`LODY_NATIVE_WORKSPACE_META=1` passes its allowlist; data stays under the run's
+`LODY_DATA_DIR`), found faults unit tests could not reach:
+
+- The CLI's and the renderer's connection state both counted health from a
+  joined legacy Meta room. With external metadata they now count Meta as joined
+  and synced, never join a room, and the renderer runs the first-sync duties
+  (capability refresh, first-synced latch) without background eager-sync.
+- The renderer's first metadata scan read the legacy Meta Flock outside its
+  `try`; it now falls back to `listDoc`.
+- Main dropped a window's native views on in-place route changes; only a
+  cross-document navigation drops them now.
+- Presence reached a renderer only after it joined a room; the data plane now
+  has an explicit `subscribe`.
+- The host kept the desktop's inherited descriptors open after quit; it closes
+  them on start (loro-repo #327).
+- After a renderer's follow-up turn, the daemon's replies stayed uncommitted:
+  auto-seen writes inside the import of that turn, and loro-repo counted those
+  local ops as committed. The baseline now advances by the import's own spans
+  (`lody/external-import-baseline`), covered by a daemon test.
+
 ## Pending acceptance
 
 These checks wait for the real desktop acceptance run:
@@ -504,3 +527,6 @@ These checks wait for the real desktop acceptance run:
   repeatedly, so the byte budget unloads rooms) and record the host RSS per
   cycle. The trim fix applies only to glibc; macOS uses its own allocator.
 - A packaged desktop with its main-process IPC hop, on each shipped platform.
+- Packaging: the bundled `@loro-dev/loro-repo-engine-linux-x64-gnu` platform
+  package carries an older addon. Local runs load the main package's own binary
+  first, so they are unaffected; switching to the released packages replaces both.
