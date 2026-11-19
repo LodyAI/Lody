@@ -1752,6 +1752,7 @@ describe('session MCP input schemas', () => {
     const data = createLoroSessionData({ sessionId, doc, writer });
     const manager = {
       getOrCreateSessionDoc: async () => ({ sessionData: data, getMessageQueue: async () => [{}] }),
+      openIdleSessionReader: async () => undefined,
     };
     const spy = vi.spyOn(LoroMap.prototype, 'toJSON').mockImplementation(() => {
       throw new Error('Status must not materialize a body');

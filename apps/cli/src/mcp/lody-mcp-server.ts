@@ -1836,18 +1836,41 @@ const REMOTE_SESSION_HISTORY_SYNC_WAIT_MS = 8_000;
  * Reads another Machine's Session doc without keeping its cloud room joined.
  * This Machine's own Sessions keep the shared cached doc that execution uses.
  */
+/** What MCP status, history, quote and queue reads need from a Session: nothing writable. */
+type SessionReadPort = Pick<
+  Awaited<ReturnType<typeof createSessionBackend>>,
+  'history' | 'readHistoryDirectory' | 'getMessageQueue'
+>;
+
+/**
+ * Reads one Session for MCP. An idle native Session of this machine is read
+ * from the engine without a replica, so status and history reads over many
+ * Sessions neither load nor retain their documents; otherwise the cached or
+ * opened replica (or another machine's transient read) serves it.
+ */
 const readSessionDocForMcp = async <T>(
   manager: LoroDocumentManager,
   session: SessionMeta,
   localMachineId: string,
-  read: (sessionDoc: SessionDocument) => Promise<T>,
+  read: (session: SessionReadPort) => Promise<T>,
   remoteSyncTimeoutMs: number
-): Promise<T> =>
-  session.machineId === localMachineId
-    ? await read(await manager.getOrCreateSessionDoc(session.id))
-    : await manager.readSessionDocTransiently(session.id, read, { remoteSyncTimeoutMs });
+): Promise<T> => {
+  if (session.machineId !== localMachineId)
+    return await manager.readSessionDocTransiently(
+      session.id,
+      async (sessionDoc) => await read(await createSessionBackend(sessionDoc, session)),
+      { remoteSyncTimeoutMs }
+    );
+  const idle = await manager.openIdleSessionReader(session.id);
+  if (idle) return await read(idle);
+  return await read(
+    await createSessionBackend(await manager.getOrCreateSessionDoc(session.id), session)
+  );
+};
 
 const FAILURE_DIRECTORY_SCAN_ROWS = 64;
+/** Status reads this many trailing rows: the failure scan's window plus margin. */
+const STATUS_TAIL_ROWS = 128;
 const FAILURE_NOTICE_SCAN_ROWS = 16;
 
 /**
@@ -1856,7 +1879,7 @@ const FAILURE_NOTICE_SCAN_ROWS = 16;
  * notice window, never the full transcript or another Session.
  */
 const readLastTurnFailure = async (
-  backend: Awaited<ReturnType<typeof createSessionBackend>>,
+  backend: SessionReadPort,
   directory: readonly import('@lody/shared/session-data').SessionDirectoryRow[]
 ): Promise<LodyTurnFailure | undefined> => {
   const start = Math.max(0, directory.length - FAILURE_DIRECTORY_SCAN_ROWS);
@@ -1910,12 +1933,18 @@ const readSessionExecutionSnapshot = async (
     manager,
     session,
     localMachineId,
-    async (sessionDoc) => {
-      const backend = await createSessionBackend(sessionDoc, session);
-      const [directory, queue] = await Promise.all([
-        backend.readHistoryDirectory(0, Number.MAX_SAFE_INTEGER),
+    async (backend) => {
+      // The active assistant and the latest failure are near the tail: read a
+      // bounded tail first, and the whole directory only when it holds no assistant.
+      const total = await backend.history.count();
+      const [tail, queue] = await Promise.all([
+        backend.readHistoryDirectory(Math.max(0, total - STATUS_TAIL_ROWS), total),
         backend.getMessageQueue(),
       ]);
+      const directory =
+        total > STATUS_TAIL_ROWS && !tail.some((row) => row.scalars?.role === 'assistant')
+          ? await backend.readHistoryDirectory(0, total)
+          : tail;
       const activeTurnId = resolveActiveAssistantTurnId(directory.map((row) => row.scalars));
       const queuedTurnCount =
         queue?.length ?? (hasPendingUserTurnActivation(session) && !activeTurnId ? 1 : 0);
@@ -2456,8 +2485,7 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
         manager,
         session,
         auth.machineId,
-        async (sessionDoc) => {
-          const backend = await createSessionBackend(sessionDoc, session);
+        async (backend) => {
           // Bounded business paging: `limit` counts displayable turns, the cursor is a
           // raw position, and entries removed by the 128 KiB byte cap stay reachable.
           return await buildSessionHistoryForReader({
@@ -3509,10 +3537,8 @@ const appendQuotedMessages = async (
             manager,
             source,
             machineId as MachineId,
-            async (sessionDoc) => {
-              const read = await (
-                await createSessionBackend(sessionDoc, source)
-              ).history.readTurn(quote.messageId);
+            async (backend) => {
+              const read = await backend.history.readTurn(quote.messageId);
               return read.state === 'ready' ? read.turn : undefined;
             },
             REMOTE_SESSION_HISTORY_SYNC_WAIT_MS
@@ -3888,8 +3914,8 @@ const listQueuedSessionInputs = async (
     manager,
     session,
     machineId as MachineId,
-    async (sessionDoc) => {
-      const history = (await createSessionBackend(sessionDoc, session)).history;
+    async (backend) => {
+      const history = backend.history;
       const total = await history.count();
       const rows = await history.readDirectory(Math.max(0, total - MAX_QUEUE_LIST_ROWS), total);
       const queued = rows

@@ -85,6 +85,7 @@ owns the long-term directory contract, and both stay active.
   Meta writes until it is recreated (SDK contract).
 - With no renderer replica, a 100,000-turn Session's first screen takes about
   11 ms warm and 305 ms after a host restart (including host launch); renderer
-  memory does not grow with history. The daemon still holds replicas of the
-  Sessions it touches.
+  memory does not grow with history. The daemon holds replicas only for Sessions
+  it runs; status and history reports on idle Sessions read the engine (four idle
+  50k-turn Sessions: daemon +0.6 MB instead of +254 MB, warm status 6 ms).
 - Cloud and encrypted workspaces are out of scope: the OSS desktop is local-only.
