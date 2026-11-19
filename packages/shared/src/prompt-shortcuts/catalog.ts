@@ -1,14 +1,15 @@
 import { z } from 'zod';
 import {
   PROMPT_SHORTCUT_LIMITS,
-  PromptShortcutSchema,
+  PromptShortcutObjectSchema,
   PromptShortcutTargetSchema,
   PromptShortcutError,
   shortcutByteLength,
+  stripLegacyShortcutVisibility,
   type PromptShortcut,
 } from './model';
 
-export const PromptShortcutIndexSchema = PromptShortcutSchema.omit({
+export const PromptShortcutIndexObjectSchema = PromptShortcutObjectSchema.omit({
   prompt: true,
   mentions: true,
 })
@@ -18,7 +19,12 @@ export const PromptShortcutIndexSchema = PromptShortcutSchema.omit({
   })
   .strict();
 
-export type PromptShortcutIndexEntry = z.infer<typeof PromptShortcutIndexSchema>;
+export const PromptShortcutIndexSchema = z.preprocess(
+  stripLegacyShortcutVisibility,
+  PromptShortcutIndexObjectSchema
+);
+
+export type PromptShortcutIndexEntry = z.output<typeof PromptShortcutIndexObjectSchema>;
 export type PromptShortcutCatalogRecord =
   | { kind: 'active'; entry: PromptShortcutIndexEntry }
   | { kind: 'deleted'; id: string; revision: string };
@@ -88,6 +94,22 @@ export class PromptShortcutCatalog {
     return record;
   }
 
+  deletedIds(): Set<string> {
+    const ids = new Set<string>();
+    for (const row of this.flock.scan({ prefix: ['deletedPromptShortcut'] })) {
+      if (
+        row.key.length === 2 &&
+        typeof row.key[1] === 'string' &&
+        row.key[1].length > 0 &&
+        typeof row.value === 'string' &&
+        row.value.length > 0
+      ) {
+        ids.add(row.key[1]);
+      }
+    }
+    return ids;
+  }
+
   list(): PromptShortcutIndexEntry[] {
     const entries: PromptShortcutIndexEntry[] = [];
     for (const row of this.flock.scan({ prefix: ['promptShortcut'] })) {
@@ -125,7 +147,6 @@ export class PromptShortcutCatalog {
     this.flock.commit();
   }
 
-  /** A visibility withdrawal is reversible, unlike business-identity deletion. */
   withdraw(id: string, bodyDocId: string): void {
     const current = this.get(id);
     if (current?.kind !== 'active' || current.entry.bodyDocId !== bodyDocId) return;

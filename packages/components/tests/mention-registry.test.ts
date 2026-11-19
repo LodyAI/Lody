@@ -258,7 +258,6 @@ describe('Prompt Shortcut discovery', () => {
       id: slug,
       workspaceId: context.workspaceId,
       ownerUserId: context.userId,
-      visibility: 'private',
       name: slug,
       slug,
       scope: {},
@@ -271,13 +270,13 @@ describe('Prompt Shortcut discovery', () => {
     };
   }
 
-  it('ranks visible, executable shortcuts while retaining only an unavailable exact match', () => {
+  it('ranks visible, executable workspace shortcuts while retaining only an unavailable exact match', () => {
     const entries = [
       shortcut('create-intro-video'),
       shortcut('videoer'),
+      shortcut('video-teammate', { ownerUserId: 'another-user' }),
       shortcut('video', { scope: { machineId: 'another-machine' } }),
       shortcut('video-remote', { scope: { machineId: 'another-machine' } }),
-      shortcut('video-private', { ownerUserId: 'another-user' }),
       shortcut('video-foreign', { workspaceId: 'another-workspace' }),
     ];
 
@@ -285,11 +284,12 @@ describe('Prompt Shortcut discovery', () => {
 
     expect(candidates.map((candidate) => candidate.insertText)).toEqual([
       '/videoer',
+      '/video-teammate',
       '/create-intro-video',
       '/video',
     ]);
-    expect(candidates.map((candidate) => candidate.disabled)).toEqual([false, false, true]);
-    expect(candidates[2]?.disabledReason).toBe('Requires a different machine.');
+    expect(candidates.map((candidate) => candidate.disabled)).toEqual([false, false, false, true]);
+    expect(candidates[3]?.disabledReason).toBe('Requires a different machine.');
   });
 });
 

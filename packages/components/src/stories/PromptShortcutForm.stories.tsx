@@ -8,7 +8,6 @@ const shortcut: PromptShortcut = {
   id: 'shortcut-review',
   workspaceId: 'workspace-story',
   ownerUserId: 'user-story',
-  visibility: 'private',
   name: 'Review PR',
   emoji: '🔍',
   slug: 'review-pr',
@@ -28,7 +27,6 @@ const meta = {
   args: {
     initial: shortcut,
     options: { projects: [], machines: [], providers: [] },
-    canShare: true,
     saving: false,
     onSave: fn(async () => {}),
     onCancel: fn(),
