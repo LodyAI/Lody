@@ -482,13 +482,25 @@ for a loaded room; RSS deltas below 20 MB are within measurement noise.
   packaged desktop run exists yet. The daemon reads idle Sessions from the engine
   for the paths listed above; the others still open a replica.
 - The engine host unloads least recently used idle rooms past 16 per namespace
-  and, with `lody/idle-room-byte-budget`, past 64 MiB of their encoded size.
+  and past 64 MiB of their encoded size (loro-repo #325).
   Twenty idle 20k-turn Sessions read once: host +275 MB with the count alone,
-  +140 MB with the budget. Freed memory is not always returned to the system:
-  after whole-history transcript reads the host stayed about 330 MB above its
-  start.
+  +140 MB with the budget. A loaded room costs about 4.5 times its encoded size,
+  so the default budget can keep about 300 MB of idle rooms resident.
+- On Linux glibc the host kept memory freed by unloaded rooms mapped: six 50k-turn
+  Sessions read in cycles reached 412–699 MB against a live set of about 312 MB.
+  The engine now trims after unloading rooms (loro-repo #326): 337–375 MB, flat
+  across cycles. Other allocators were not measured.
 - A commit already sent when the host dies is an unknown outcome. Per the SDK
   contract this latches that repo's metadata writes until it is recreated; reads
   continue. Commits attempted while disconnected are certain non-commits.
 - No signed installer, real-window acceptance or platforms other than Linux x64
-  have been exercised.
+  have been exercised (see Pending acceptance).
+
+## Pending acceptance
+
+These checks wait for the real desktop acceptance run:
+
+- macOS: repeat the load/unload cycle above (six large idle Sessions read
+  repeatedly, so the byte budget unloads rooms) and record the host RSS per
+  cycle. The trim fix applies only to glibc; macOS uses its own allocator.
+- A packaged desktop with its main-process IPC hop, on each shipped platform.
