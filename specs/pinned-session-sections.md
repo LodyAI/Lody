@@ -24,7 +24,9 @@ place them in named pin sections, such as "Maintenance".
   creates an empty section; user sections also offer rename and delete.
 - While a conversation is dragged over a section, the rows at the drop position
   slide apart to open a slot of its height, and its own slot closes; the drop
-  lands exactly in that slot.
+  lands exactly in that slot: the row travels from where it was released into
+  the slot in about 100 ms, with no jump in position or background, and hover
+  stays off until the pointer moves.
 - The user can drag a pinned conversation to reorder it within a section or to
   move it to another section; dropping on a section header places it at the
   top. Dropping an unpinned conversation into the pin area pins it there. The
