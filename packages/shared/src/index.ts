@@ -508,6 +508,7 @@ export interface Attachment {
 }
 
 export * from './schedule-control';
+export * from './workspace-bundle-control';
 export * from './codex-auth-profile';
 export * from './ios-simulator';
 export * from './session-acp-identity';

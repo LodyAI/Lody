@@ -105,6 +105,18 @@ function harness(d = document()) {
 }
 
 describe('Schedule worker handoff', () => {
+  it('holds an activation that arrived through a workspace import until it is resumed here', async () => {
+    const d = document();
+    d.definition.trigger = { kind: 'once', at: '2026-10-01T09:21:00.000Z' };
+    d.definition.activeFrom = Date.parse('2026-10-01T00:00:00Z');
+    const h = harness(d);
+    const imported = d.definition.activationId;
+    h.ports.importFenced = async (row) => row.activationId === imported;
+    h.time(Date.parse('2026-10-01T09:21:00Z'));
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', 'schedule')).toEqual([]);
+  });
+
   it('dispatches a machine-clock Once slot at its saved instant, retaining the ledger on restart', async () => {
     const instant = zonedLocalInputToInstant('2026-10-01T02:21', 'America/Los_Angeles');
     expect(instant).toBe(Date.parse('2026-10-01T09:21:00Z'));

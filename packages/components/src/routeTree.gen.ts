@@ -69,6 +69,9 @@ const WorkspaceNameAuthSettingsAppearanceLazyRouteImport = createFileRoute(
 const WorkspaceNameAuthSettingsBillingLazyRouteImport = createFileRoute(
   '/$workspaceName/_auth/settings/billing'
 )();
+const WorkspaceNameAuthSettingsDataLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/data'
+)();
 const WorkspaceNameAuthSettingsGeneralLazyRouteImport = createFileRoute(
   '/$workspaceName/_auth/settings/general'
 )();
@@ -316,6 +319,13 @@ const WorkspaceNameAuthSettingsBillingLazyRoute =
   } as any).lazy(() =>
     import('./routes/$workspaceName/_auth/settings/billing.lazy').then((d) => d.Route)
   );
+const WorkspaceNameAuthSettingsDataLazyRoute = WorkspaceNameAuthSettingsDataLazyRouteImport.update({
+  id: '/data',
+  path: '/data',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any).lazy(() =>
+  import('./routes/$workspaceName/_auth/settings/data.lazy').then((d) => d.Route)
+);
 const WorkspaceNameAuthSettingsDevicesRoute = WorkspaceNameAuthSettingsDevicesRouteImport.update({
   id: '/devices',
   path: '/devices',
@@ -479,6 +489,7 @@ export interface FileRoutesByFullPath {
   '/$workspaceName/settings/ai-usage': typeof WorkspaceNameAuthSettingsAiUsageLazyRoute;
   '/$workspaceName/settings/appearance': typeof WorkspaceNameAuthSettingsAppearanceLazyRoute;
   '/$workspaceName/settings/billing': typeof WorkspaceNameAuthSettingsBillingLazyRoute;
+  '/$workspaceName/settings/data': typeof WorkspaceNameAuthSettingsDataLazyRoute;
   '/$workspaceName/settings/general': typeof WorkspaceNameAuthSettingsGeneralLazyRoute;
   '/$workspaceName/settings/github': typeof WorkspaceNameAuthSettingsGithubLazyRoute;
   '/$workspaceName/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute;
@@ -532,6 +543,7 @@ export interface FileRoutesByTo {
   '/$workspaceName/settings/ai-usage': typeof WorkspaceNameAuthSettingsAiUsageLazyRoute;
   '/$workspaceName/settings/appearance': typeof WorkspaceNameAuthSettingsAppearanceLazyRoute;
   '/$workspaceName/settings/billing': typeof WorkspaceNameAuthSettingsBillingLazyRoute;
+  '/$workspaceName/settings/data': typeof WorkspaceNameAuthSettingsDataLazyRoute;
   '/$workspaceName/settings/general': typeof WorkspaceNameAuthSettingsGeneralLazyRoute;
   '/$workspaceName/settings/github': typeof WorkspaceNameAuthSettingsGithubLazyRoute;
   '/$workspaceName/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute;
@@ -590,6 +602,7 @@ export interface FileRoutesById {
   '/$workspaceName/_auth/settings/ai-usage': typeof WorkspaceNameAuthSettingsAiUsageLazyRoute;
   '/$workspaceName/_auth/settings/appearance': typeof WorkspaceNameAuthSettingsAppearanceLazyRoute;
   '/$workspaceName/_auth/settings/billing': typeof WorkspaceNameAuthSettingsBillingLazyRoute;
+  '/$workspaceName/_auth/settings/data': typeof WorkspaceNameAuthSettingsDataLazyRoute;
   '/$workspaceName/_auth/settings/general': typeof WorkspaceNameAuthSettingsGeneralLazyRoute;
   '/$workspaceName/_auth/settings/github': typeof WorkspaceNameAuthSettingsGithubLazyRoute;
   '/$workspaceName/_auth/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute;
@@ -648,6 +661,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/settings/ai-usage'
     | '/$workspaceName/settings/appearance'
     | '/$workspaceName/settings/billing'
+    | '/$workspaceName/settings/data'
     | '/$workspaceName/settings/general'
     | '/$workspaceName/settings/github'
     | '/$workspaceName/settings/keyboard-shortcuts'
@@ -701,6 +715,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/settings/ai-usage'
     | '/$workspaceName/settings/appearance'
     | '/$workspaceName/settings/billing'
+    | '/$workspaceName/settings/data'
     | '/$workspaceName/settings/general'
     | '/$workspaceName/settings/github'
     | '/$workspaceName/settings/keyboard-shortcuts'
@@ -758,6 +773,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/_auth/settings/ai-usage'
     | '/$workspaceName/_auth/settings/appearance'
     | '/$workspaceName/_auth/settings/billing'
+    | '/$workspaceName/_auth/settings/data'
     | '/$workspaceName/_auth/settings/general'
     | '/$workspaceName/_auth/settings/github'
     | '/$workspaceName/_auth/settings/keyboard-shortcuts'
@@ -1065,6 +1081,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameAuthSettingsBillingLazyRouteImport;
       parentRoute: typeof WorkspaceNameAuthSettingsRoute;
     };
+    '/$workspaceName/_auth/settings/data': {
+      id: '/$workspaceName/_auth/settings/data';
+      path: '/data';
+      fullPath: '/$workspaceName/settings/data';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsDataLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/devices': {
       id: '/$workspaceName/_auth/settings/devices';
       path: '/devices';
@@ -1212,6 +1235,7 @@ interface WorkspaceNameAuthSettingsRouteChildren {
   WorkspaceNameAuthSettingsAiUsageLazyRoute: typeof WorkspaceNameAuthSettingsAiUsageLazyRoute;
   WorkspaceNameAuthSettingsAppearanceLazyRoute: typeof WorkspaceNameAuthSettingsAppearanceLazyRoute;
   WorkspaceNameAuthSettingsBillingLazyRoute: typeof WorkspaceNameAuthSettingsBillingLazyRoute;
+  WorkspaceNameAuthSettingsDataLazyRoute: typeof WorkspaceNameAuthSettingsDataLazyRoute;
   WorkspaceNameAuthSettingsGeneralLazyRoute: typeof WorkspaceNameAuthSettingsGeneralLazyRoute;
   WorkspaceNameAuthSettingsGithubLazyRoute: typeof WorkspaceNameAuthSettingsGithubLazyRoute;
   WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute: typeof WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute;
@@ -1240,6 +1264,7 @@ const WorkspaceNameAuthSettingsRouteChildren: WorkspaceNameAuthSettingsRouteChil
   WorkspaceNameAuthSettingsAiUsageLazyRoute: WorkspaceNameAuthSettingsAiUsageLazyRoute,
   WorkspaceNameAuthSettingsAppearanceLazyRoute: WorkspaceNameAuthSettingsAppearanceLazyRoute,
   WorkspaceNameAuthSettingsBillingLazyRoute: WorkspaceNameAuthSettingsBillingLazyRoute,
+  WorkspaceNameAuthSettingsDataLazyRoute: WorkspaceNameAuthSettingsDataLazyRoute,
   WorkspaceNameAuthSettingsGeneralLazyRoute: WorkspaceNameAuthSettingsGeneralLazyRoute,
   WorkspaceNameAuthSettingsGithubLazyRoute: WorkspaceNameAuthSettingsGithubLazyRoute,
   WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute:

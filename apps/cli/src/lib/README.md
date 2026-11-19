@@ -262,6 +262,8 @@ provides LocalProjects. See the [decision](../../../../.agents/notes/implemented
   ([AGENTS.md](pr-poller/AGENTS.md)).
 - `analytics/`, `git/`, `notifications/`, `session-export/`, `usage/` — supporting
   services.
+- `workspace-bundle/` — lossless workspace export/import bundles
+  ([AGENTS.md](workspace-bundle/AGENTS.md)).
 
 ### Session active presence
 

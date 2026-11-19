@@ -325,3 +325,39 @@ it('limits personal read grants to that account, bound machine and contained roo
   view.memberReadSharedSessions = [];
   expect(resolveSessionVisibilityState(root, new Set(), new Set(), options)).toBe('hidden');
 });
+
+describe('imported conversations', () => {
+  it('shows conversations imported into this workspace to every member, read only', () => {
+    const imported = {
+      id: 'imported',
+      machineId: 'machine-from-another-workspace',
+      userId: 'original-author',
+      importFence: { workspaceId: 'ws_b', importedBy: 'me' },
+    };
+    const visibleTo = (userId: string, workspaceId: string) =>
+      filterSessionsByVisibility(
+        [imported],
+        new Set(),
+        new Set(),
+        false,
+        userId,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        workspaceId
+      ).map((session) => session.id);
+    expect(visibleTo('me', 'ws_b')).toEqual(['imported']);
+    expect(visibleTo('teammate', 'ws_b')).toEqual(['imported']);
+    // Only in the workspace the import went into.
+    expect(visibleTo('me', 'ws_a')).toEqual([]);
+    expect(
+      resolveSessionVisibilityState(imported, new Set(), new Set(), {
+        currentUserId: 'me',
+        workspaceId: 'ws_b',
+      })
+    ).toBe('visible');
+    expect(isSessionEditableToUser(imported, new Set(), new Set(), 'me')).toBe(false);
+    expect(isSessionEditableToUser(imported, new Set(), new Set(), 'teammate')).toBe(false);
+  });
+});
