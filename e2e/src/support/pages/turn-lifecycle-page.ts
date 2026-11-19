@@ -175,6 +175,26 @@ export class TurnLifecyclePage {
     ).toBeVisible({ timeout: 60_000 });
   }
 
+  /**
+   * After a restart that interrupted a running Turn, the agent is relaunched and
+   * continues on its own: no user action, the original request is not re-sent, and
+   * the continuation is asked for exactly once, in a new agent process.
+   */
+  async expectInterruptedTurnContinuesWithoutUserAction(sessionId: string): Promise<void> {
+    const entry = this.page.locator(`[data-sidebar-session-id="${sessionId}"]`);
+    await expect(entry).toBeVisible({ timeout: 60_000 });
+    await entry.click();
+    await expect(
+      this.page.getByText('Synthetic work resumed after restart.', { exact: true })
+    ).toBeVisible({ timeout: 45_000 });
+    await this.expectTurnSettled();
+    const starts = this.fixture.journeyPromptStarts();
+    expect(starts.map((start) => start.mode)).toEqual(['hold', 'continue']);
+    expect(starts[1].pid, 'the continuation runs in a relaunched agent process').not.toBe(
+      starts[0].pid
+    );
+  }
+
   private allowOnce(): Locator {
     return this.page.getByRole('button', { name: 'Allow once', exact: true });
   }

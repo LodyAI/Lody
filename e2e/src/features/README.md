@@ -1,6 +1,6 @@
 # Feature index
 
-The active suite contains 27 scenarios: 6 `@P0` smoke journeys and 21 `@P1` deeper journeys.
+The active suite contains 29 scenarios: 6 `@P0` smoke journeys and 23 `@P1` deeper journeys.
 
 | Feature                             | Scope                                                                                          |
 | ----------------------------------- | ---------------------------------------------------------------------------------------------- |
