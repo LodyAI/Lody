@@ -8,6 +8,7 @@ import {
   buildMissingEmail,
   buildPendingUserHistoryEntry,
   buildSessionTurnInputConfig,
+  getServerNow,
   normalizeSessionTurnInputConfig,
   getSessionRoomId,
   isSessionCancelRequestMarker,
@@ -2372,7 +2373,8 @@ export class SessionDispatchWatcher {
   private buildQueuedMessageEntry(
     queuedItem: Awaited<ReturnType<SessionBackend['getMessageQueue']>>[number],
     meta: SessionMeta,
-    queuedTurnId: string
+    queuedTurnId: string,
+    timestamp = new Date(getServerNow()).toISOString()
   ): SessionHistoryInput | null {
     const inputBlocks = normalizeSessionInputBlocks(
       queuedItem.acpSessionConfig?.inputBlocks,
@@ -2407,7 +2409,7 @@ export class SessionDispatchWatcher {
     const pendingEntry = buildPendingUserHistoryEntry({
       userId: queuedItem.userId ?? meta.userId,
       inputBlocks,
-      timestamp: queuedItem.timestamp,
+      timestamp,
       inputConfig: { ...inputConfig, ...(automation ? { _lodyAutomation: automation } : {}) },
     });
     return pendingEntry
@@ -2593,7 +2595,12 @@ export class SessionDispatchWatcher {
 
       const queuedTurnId = queuedItem.userTurnId?.trim() || `queued-${queuedItem.$cid}`;
       if (this.deps.executionService.isInboxInputCanceled?.(meta.id, queuedTurnId)) {
-        const canceled = this.buildQueuedMessageEntry(queuedItem, meta, queuedTurnId);
+        const canceled = this.buildQueuedMessageEntry(
+          queuedItem,
+          meta,
+          queuedTurnId,
+          queuedItem.timestamp
+        );
         if (canceled) {
           await backend.applyHistoryAction({
             kind: 'upsert-turn',
