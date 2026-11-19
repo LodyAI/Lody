@@ -28,6 +28,10 @@ the following, which this document does not reopen:
    workspace without extra confirmation.
 6. The bundle itself has no passphrase encryption.
 7. Machine configuration is not imported across workspaces.
+8. Roost sessions may be exported and imported lossily (see "Roost and Prompt
+   Shortcuts").
+9. Imported Prompt Shortcuts all become workspace-shared Shortcuts owned by the
+   importer.
 
 ## Scenario and responsibilities
 
@@ -67,14 +71,14 @@ allowed to read**. It does not mean every byte on the server.
 | Workspace Meta | Meta Flock (`e/m/ef…`) | Yes | Includes deletion records; decides whether other rooms are visible |
 | Workspace catalog: projects, MCP definitions, Roles, project MCP defaults | `<ws>:wf:workspace` Flock | Yes | Shared definitions only; MCP credentials are never in these rows |
 | Session control and history | `session-*` Loro documents | Yes | Full oplog, including unknown fields and opaque entries |
-| Roost session bodies | Today the executing machine's local `roost-history.sqlite3`; a Roost room under native | Yes (lossy, pending confirmation) | See owner question 1. The writer identity seed is never exported |
+| Roost session bodies | Today the executing machine's local `roost-history.sqlite3`; a Roost room under native | Yes (lossy) | See "Roost and Prompt Shortcuts" below. The writer identity seed is never exported |
 | Machines and agent configuration | `<ws>:mf:<machine>` Flock, `machine-*` documents, legacy `agent-*` documents | Yes | Restricted on import, see below; the durable command queue (`cmd` family) is never imported |
 | Schedules | `<ws>:sr` Flock + `schedule-*` documents | Yes | |
 | Preview comments | Old: one Loro document per session; new: Flock rows | Yes | The bundle keeps the source format; import converts to the target format |
 | Legacy task documents, legacy session comments | `task-*`, `${ws}:ti`, `session-comment-*` | Yes | Losslessness only; no new feature |
 | Attachments, images | Cloud: stored under `<ws>/<session>/<id>`; local: `session-files/<ws>/` | Yes (blobs) | Only those referenced by current or historical versions; deduplicated by content hash. Cloud files expire after 90 days; unreachable ones become gaps |
 | Code Collab content-addressed snapshots | Executing machine's local `code-collab-v2/<ws>/diff-store.sqlite3`, 100-day / 1 GiB retention | Partly (blobs) | Read from the owning machine (directly on this machine, otherwise through existing Machine RPC and its permissions while online); offline or collected ones become gaps |
-| Prompt Shortcuts | `shortcut-index:<ws>:<owner>:<private\|workspace>`, `shortcut-body:*` outside the workspace namespace | Yes | All of the exporter's own plus others' workspace-shared ones; import rules in owner question 2. E2EE workspaces do not support Shortcuts yet |
+| Prompt Shortcuts | `shortcut-index:<ws>:<owner>:<private\|workspace>`, `shortcut-body:*` outside the workspace namespace | Yes | All of the exporter's own plus others' workspace-shared ones; import rules below. E2EE workspaces do not support Shortcuts yet |
 | File index FI/FIS | `<ws>:fi:*` / `fis` | No | Rebuilt by its owner; 180-day TTL |
 | Presence, machine-monitor, ephemeral | Transient channels | No | Not durable data |
 | Machine-local runtime state | Automation ledger, schedule runtime, operations/inbox, PR poller SQLite | No | Belongs to the executing machine, not to collaborative workspace data |
@@ -340,38 +344,35 @@ Line counts are product-code estimates, excluding tests and docs.
 | F. Roost | Lossy `roost-turns/v1` codec: export turns through existing history reads; import only creates Roost sessions absent from the target | Visible bodies match after a round trip; an existing same session in the target is untouched; reimport creates no duplicate turns | ~400 |
 
 Phases A and B can run in parallel with the native Meta integration; each phase after
-C is reviewed independently.
+C is reviewed independently. This Spec currently has no open owner questions.
 
-## Owner questions
+## Roost and Prompt Shortcuts
 
-1. **May Roost sessions be exported lossily?** Background: each Roost turn is signed
-   by the executing machine's local writer identity, and the current SDK has no raw
-   export/import that keeps the original signed records. The lossy approach reads
-   each turn's visible content on export and has the importing device write it as a
-   new Roost session. Lost: original signatures and writer proof, and the turn's
-   step-by-step edit process. Kept: all content visible in the session. Rewritten
-   turns are not the same CRDT data as the originals, so a lossy import cannot merge:
-   if the target already has the same Roost session it is skipped as a whole, only
-   sessions the target lacks are created, and reimport deduplicates by original turn
-   ID. Options: (a) accept the loss with these rules (phase F, no SDK dependency);
-   (b) wait for SDK raw interfaces and build a lossless version. **Recommend (a)**,
-   adding a lossless codec once the SDK offers raw interfaces.
-2. **How are other members' shared Prompt Shortcuts imported?** Background: Shortcuts
-   are not in workspace rooms; they are stored per workspace + owner + visibility.
-   Only the owner can write their own Shortcuts; other members can only read the
-   "workspace"-visible ones. So the importer's own Shortcuts import as is, but the
-   importer has no write permission for others' shared Shortcuts. Options: (a) skip
-   others' and record gaps; (b) copy them as workspace-shared Shortcuts owned by the
-   importer, noting the original author in the report. Cost: with (a) team-shared
-   Shortcuts must be reimported by each author after a device change; with (b) the
-   importer becomes owner and the original author cannot edit the copy directly.
-   **Recommend (b).** E2EE workspaces do not support Shortcuts yet, so importing into
-   an encrypted workspace always records Shortcuts as gaps.
+**Roost (lossy, owner decision):** each Roost turn is signed by the executing
+machine's local writer identity, and the current SDK has no raw export/import that
+keeps the original signed records. Export reads each turn's visible content
+(`roost-turns/v1`); import has the importing device write it as a new Roost session.
+Original signatures, writer proof and the turn's step-by-step edit process are lost;
+all content visible in the session is kept. Rewritten turns are not the same CRDT
+data as the originals, so they are not merged: if the target already has the same
+Roost session it is skipped as a whole, only sessions the target lacks are created,
+and reimport deduplicates by original turn ID. A lossless codec can be added once
+the SDK offers raw interfaces.
+
+**Prompt Shortcuts (owner decision):** Shortcuts are stored per workspace + owner +
+visibility, and only the owner writes their own. Export includes all of the
+exporter's own Shortcuts (private ones too) and others' workspace-shared Shortcuts.
+Import writes every one as a **workspace-shared** Shortcut owned by the importer,
+with the report noting the original author and visibility. Shortcuts that were
+private to the exporter therefore become visible to every member after import; the
+dry-run report lists them separately. Reimport deduplicates by original Shortcut ID.
+Encrypted workspaces do not support Shortcuts yet, so importing into one records
+Shortcuts as gaps.
 
 ## Evidence
 
 - Intent: this document; the three owner decisions were relayed by the Lody session
-  "🤯 loro-repo-rs 接入"; decisions 4–7 were given directly by the owner in review on
+  "🤯 loro-repo-rs 接入"; decisions 4–9 were given directly by the owner in review on
   2026-11-19. Neither is an approval record for this Spec.
 - Inspected implementation: [`lody export`](../apps/cli/src/commands/export.ts),
   [session-export](../apps/cli/src/lib/session-export/),

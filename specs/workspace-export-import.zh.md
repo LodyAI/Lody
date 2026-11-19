@@ -20,6 +20,8 @@ Markdown/JSON，丢了删除记录、时钟和 peer，不能导回去；`lody mi
 5. 包与来源工作区是否加密无关：格式相同，任何包都能导入普通或加密工作区，不需要额外确认。
 6. 包本身不再做口令加密。
 7. 机器配置不跨工作区导入。
+8. Roost 会话允许有损导出导入（见下文“Roost 与 Prompt Shortcuts”）。
+9. Prompt Shortcuts 导入后统一成为导入者名下的工作区共享 Shortcuts。
 
 ## 场景与职责
 
@@ -53,14 +55,14 @@ flowchart LR
 | Workspace Meta | Meta Flock（`e/m/ef…`） | 是 | 包含删除记录；决定其它 room 是否“可见” |
 | 工作区目录：项目、MCP 定义、Role、项目默认 MCP | `<ws>:wf:workspace` Flock | 是 | 只有共享定义；MCP 凭据本来就不在行里 |
 | Session 控制与历史 | `session-*` Loro 文档 | 是 | 完整 oplog，含 unknown 字段和 opaque 条目 |
-| Roost 会话正文 | 当前为执行机本地 `roost-history.sqlite3`；native 下为 Roost room | 是（有损，待确认） | 见“待 owner 决定”第 1 条。写者身份种子不导出 |
+| Roost 会话正文 | 当前为执行机本地 `roost-history.sqlite3`；native 下为 Roost room | 是（有损） | 见下文“Roost 与 Prompt Shortcuts”。写者身份种子不导出 |
 | 机器与 Agent 配置 | `<ws>:mf:<machine>` Flock、`machine-*` 文档、旧 `agent-*` 文档 | 是 | 导入规则受限，见下文；持久命令队列（`cmd` 族）不导入 |
 | Schedule | `<ws>:sr` Flock + `schedule-*` 文档 | 是 | |
 | Preview comments | 旧：每会话 Loro 文档；新：Flock 行 | 是 | 包内保存来源格式，导入时按目标格式转换 |
 | 旧 task 文档、旧 session-comment | `task-*`、`${ws}:ti`、`session-comment-*` | 是 | 只为无损，不新增功能 |
 | 附件、图片 | 云：按 `<ws>/<session>/<id>` 存放；本地：`session-files/<ws>/` | 是（blob） | 只导出被当前或历史版本引用的；按内容哈希去重。云端文件 90 天过期，取不到的记为 gap |
 | Code Collab 内容寻址快照 | 执行机本地 `code-collab-v2/<ws>/diff-store.sqlite3`，100 天 / 1 GiB 回收 | 部分（blob） | 从所属机器读取（本机直接读，其它机器在线时经已有的 Machine RPC 和权限）；离线或已回收的记为 gap |
-| Prompt Shortcuts | 工作区命名空间外的 `shortcut-index:<ws>:<owner>:<private\|workspace>`、`shortcut-body:*` | 是 | 导出者自己的全部与他人的工作区共享项；导入规则见“待 owner 决定”第 2 条。E2EE 工作区当前不支持 Shortcuts |
+| Prompt Shortcuts | 工作区命名空间外的 `shortcut-index:<ws>:<owner>:<private\|workspace>`、`shortcut-body:*` | 是 | 导出者自己的全部与他人的工作区共享项；导入规则见下文。E2EE 工作区当前不支持 Shortcuts |
 | 文件索引 FI/FIS | `<ws>:fi:*`/`fis` | 否 | 可由 owner 重建，180 天 TTL |
 | presence、machine-monitor、ephemeral | 临时通道 | 否 | 不是持久数据 |
 | 机器本地运行状态 | 自动化 ledger、schedule 运行表、operations/inbox、PR 轮询等 SQLite | 否 | 属于执行机，不属于工作区协作数据 |
@@ -258,28 +260,25 @@ E2EE 工作区的审计记录同样只含不透明计数。导入另在目标工
 | E. E2EE | 设备本机解密导出；导入以目标当前密钥重新封装；附件重新加密 | 导出包可在普通工作区导回；导入后其它成员设备可解密；旧执行意图不可执行；ledger/成员不变 | ~800 |
 | F. Roost | `roost-turns/v1` 有损 codec：经现有历史读取导出回合，导入时只补建目标中不存在的 Roost 会话 | 往返后可见正文一致；目标已有的同一会话不被改动；重复导入不产生重复回合 | ~400 |
 
-阶段 A、B 可与 Meta native 接入并行；C 之后的阶段各自独立评审。
+阶段 A、B 可与 Meta native 接入并行；C 之后的阶段各自独立评审。本 Spec 当前没有待 owner 决定的问题。
 
-## 待 owner 决定
+## Roost 与 Prompt Shortcuts
 
-1. **Roost 会话允许有损导出吗？** 背景：Roost 回合由执行机本地的写者身份逐条签名，当前 SDK
-   没有保留原签名记录的原始导出/导入。有损做法：导出时读出每个回合的可见内容，导入时由导入设备
-   重新写成新的 Roost 会话。会丢：原签名和原写者证明、回合的逐次编辑过程；保留：会话里能看到的
-   全部内容。由于重新写入的回合与原回合在 CRDT 上不是同一份数据，有损导入不能合并：目标里已有
-   同一 Roost 会话时整体跳过，只补建目标里没有的；重复导入按原回合 ID 去重。选项：(a) 接受有损，
-   按上述规则做（阶段 F，不依赖 SDK）；(b) 等 SDK 提供原始接口再做无损版。**推荐 (a)**；SDK 以后
-   提供原始接口时再增加无损 codec。
-2. **他人的共享 Prompt Shortcuts 怎么导入？** 背景：Shortcuts 不在工作区 room 里，而是按
-   “工作区 + 所有者 + 可见性”分开存储；只有所有者本人能写自己的 Shortcuts，其他成员只能读
-   “工作区可见”的那些。所以导入者自己的 Shortcuts 可以原样导回，他人的共享 Shortcuts 导入者
-   没有写权限。选项：(a) 跳过他人的，列为缺口；(b) 复制成导入者名下的工作区共享 Shortcuts，
-   报告里注明原作者。代价：(a) 换设备时团队共享的 Shortcuts 要各自重新导；(b) 所有者变成导入者，
-   原作者以后不能直接编辑副本。**推荐 (b)**。另外 E2EE 工作区目前不支持 Shortcuts，导入加密
-   工作区时 Shortcuts 一律列为缺口。
+**Roost（有损，owner 已定）：** Roost 回合由执行机本地写者身份签名，当前 SDK 没有保留原签名
+记录的原始导出/导入。导出时读出每个回合的可见内容（`roost-turns/v1`），导入时由导入设备重新
+写成新的 Roost 会话。丢失原签名、原写者证明和回合的逐次编辑过程；保留会话里能看到的全部内容。
+重写的回合与原回合不是同一份 CRDT 数据，所以不合并：目标已有同一 Roost 会话时整体跳过，只补建
+目标里没有的；重复导入按原回合 ID 去重。SDK 以后提供原始接口时再增加无损 codec。
+
+**Prompt Shortcuts（owner 已定）：** Shortcuts 按“工作区 + 所有者 + 可见性”分开存储，只有所有者
+能写自己的。导出包含导出者自己的全部 Shortcuts（含私有）和他人的工作区共享 Shortcuts。导入时
+一律写成导入者名下的**工作区共享** Shortcuts，报告注明原作者和原可见性；导出者原本私有的
+Shortcuts 导入后也会对全体成员可见，预演报告单独列出这些条目。重复导入按原 Shortcut ID 去重。
+加密工作区目前不支持 Shortcuts，导入加密工作区时 Shortcuts 一律列为缺口。
 
 ## 证据
 
-- 意图：本文；owner 决定 1–3 来自 lody 会话“🤯 loro-repo-rs 接入”的转达；4–7 是 owner
+- 意图：本文；owner 决定 1–3 来自 lody 会话“🤯 loro-repo-rs 接入”的转达；4–9 是 owner
   2026-11-19 审阅时直接给出的。两者都不是本 Spec 的批准记录。
 - 已检查的实现：[`lody export`](../apps/cli/src/commands/export.ts)、
   [session-export](../apps/cli/src/lib/session-export/)、
