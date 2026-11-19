@@ -105,6 +105,9 @@ with the full access description in its accessible name/title.
 
 ## File, diff, and browser surfaces
 
+Opening Changes reads the complete paged Branch list through the file provider.
+The list and composer share its totals; file diff bodies load when opened.
+
 | File                                                                                                                                      | Responsibility                                                                           |
 | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `session-changes-sidebar.tsx`                                                                                                             | All Changes panel                                                                        |

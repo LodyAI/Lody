@@ -468,6 +468,16 @@ describe('CodeCollabV2Service text RPC boundary', () => {
       });
       try {
         const request = { sessionId: SESSION_ID, path: 'large.txt' };
+        const list = await service.openDiffManifest(
+          { sessionId: SESSION_ID },
+          {
+            plane: 'remote',
+            measureResponse: async (value) => Buffer.byteLength(JSON.stringify(value)),
+          }
+        );
+        if (list.status !== 'ok') throw new Error('Expected a change list.');
+        expect(list.entries).toMatchObject([{ path: 'large.txt', status: 'ok', add: 1, del: 1 }]);
+        expect(list.entries[0]?.hunks).toBeUndefined();
         const remote = await service.openDiffManifest(request, {
           plane: 'remote',
           measureResponse: async (value) => Buffer.byteLength(JSON.stringify(value)),
@@ -482,6 +492,7 @@ describe('CodeCollabV2Service text RPC boundary', () => {
         if (local.status !== 'ok') throw new Error('Expected a local manifest.');
         expect(local.entries[0]?.hunks).toBeUndefined();
         expect(local.entries[0]?.head).toEqual(remote.entries[0]?.head);
+        expect(list.entries[0]?.head).toEqual(remote.entries[0]?.head);
         await writeFile(
           path.join(workspaceRoot, 'large.txt'),
           Array.from({ length: 2500 }, (_, i) => `rewritten ${i} ${'y'.repeat(120)}\n`).join('')

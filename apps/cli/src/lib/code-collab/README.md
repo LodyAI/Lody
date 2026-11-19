@@ -25,6 +25,8 @@ See the [decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-21-c
   Current diff readers verify equal-content candidates against that same Git base
   so binary replacements and mode-only changes remain visible. Failed comparisons
   stay retryable per file; turn evidence never queries current Git state.
+  Whole-list manifests return descriptors and statistics. Remote patches are prepared
+  by single-file reads when a viewer opens that file.
   Ordinary Git All Changes uses the owner base; non-Git uses local diff evidence only when a
   trustworthy base exists. It owns in-memory file-index state replacement and Flock
   publish even when the scan itself ran in a worker. Full comparison totals, before

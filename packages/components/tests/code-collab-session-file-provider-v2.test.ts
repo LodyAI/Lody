@@ -7,6 +7,7 @@ import { readDiffBlob } from '../src/lib/diff-blob-client';
 import { hydratePartialDiff } from '@pierre/diffs';
 import type {
   CodeCollabDiffManifestEntry,
+  CodeCollabOpenDiffManifestResponse,
   CodeCollabDiffBlobKey,
   CodeCollabV2FileDigest,
   CodeCollabV2OpenTextOk,
@@ -258,6 +259,113 @@ describe('code-collab-session-file-provider-v2', () => {
         reason: 'permission-denied',
         message: 'Guest diff access is unavailable.',
       });
+    });
+
+    it('loads a legacy daemon’s complete list when file bodies exceed the inline budget', async () => {
+      let truncated = false;
+      const provider = new CodeCollabSessionFileProvider({
+        runtime: createRuntime({
+          openAllChangesDiff: async () => ({
+            status: 'ok',
+            base: 'base',
+            entries: [
+              { path: truncated ? 'large.ts' : 'live.ts', status: 'deferred', add: 1, del: 0 },
+            ],
+            truncated,
+          }),
+        }),
+      });
+      expect(await provider.refreshChangedFiles()).toMatchObject({ files: [{ path: 'live.ts' }] });
+      truncated = true;
+      expect(await provider.refreshChangedFiles()).toMatchObject({ files: [{ path: 'large.ts' }] });
+      expect(await provider.listChangedFiles()).toMatchObject({ files: [{ path: 'large.ts' }] });
+    });
+
+    it('requests a large file patch when opened after loading its change-list metadata', async () => {
+      let patchBytes = 0;
+      const patch = '--- large.ts\n+++ large.ts\n@@ -1,1 +1,1 @@\n-before\n+after\n';
+      const provider = new CodeCollabSessionFileProvider({
+        runtime: createRuntime({
+          diffBlobTransportOptions: async () => ({
+            supported: true,
+            scope: 'test',
+            persist: false,
+          }),
+          openDiffManifest: async (request) => {
+            if (request.path) patchBytes += Buffer.byteLength(patch);
+            return {
+              status: 'ok',
+              entries: [
+                {
+                  path: 'large.ts',
+                  status: 'ok',
+                  base: { key: DIGEST_1, rawBytes: 300_000, format: { encoding: 'utf8' } },
+                  head: { key: DIGEST_2, rawBytes: 300_000, format: { encoding: 'utf8' } },
+                  add: 1,
+                  del: 1,
+                  ...(request.path ? { hunks: patch } : {}),
+                },
+              ],
+              nextCursor: null,
+            };
+          },
+          readDiffBlob: async () => {
+            throw new Error('The bounded patch is sufficient.');
+          },
+        }),
+      });
+      expect(await provider.refreshChangedFiles()).toMatchObject({
+        files: [{ path: 'large.ts', add: 1, del: 1 }],
+      });
+      expect(patchBytes).toBe(0);
+      expect(await provider.getDiff('large.ts')).toMatchObject({
+        status: 'ready-parsed',
+        newTextLength: 300_000,
+      });
+      expect(patchBytes).toBe(Buffer.byteLength(patch));
+    });
+
+    it('uses the first complete list while a newer comparison is pending', async () => {
+      let firstRequest = true;
+      const firstReply = Promise.withResolvers<CodeCollabOpenDiffManifestResponse>();
+      const nextReply = Promise.withResolvers<CodeCollabOpenDiffManifestResponse>();
+      const firstEntered = Promise.withResolvers<void>();
+      const nextEntered = Promise.withResolvers<void>();
+      const provider = new CodeCollabSessionFileProvider({
+        allChanges: { 'partial-index.ts': true },
+        runtime: createRuntime({
+          diffBlobTransportOptions: async () => ({
+            supported: true,
+            scope: 'test',
+            persist: false,
+          }),
+          openDiffManifest: () => {
+            if (firstRequest) {
+              firstRequest = false;
+              firstEntered.resolve();
+              return firstReply.promise;
+            }
+            nextEntered.resolve();
+            return nextReply.promise;
+          },
+          readDiffBlob: async () => {
+            throw new Error('No bodies needed.');
+          },
+        }),
+      });
+      const first = provider.refreshChangedFiles();
+      await firstEntered.promise;
+      const next = provider.getAllChangesDiff();
+      await nextEntered.promise;
+      firstReply.resolve({
+        status: 'ok',
+        entries: [{ path: 'full.ts', status: 'binary', base: null, head: null }],
+        nextCursor: null,
+      });
+      expect(await first).toMatchObject({ files: [{ path: 'full.ts' }] });
+      nextReply.resolve({ status: 'ok', entries: [], nextCursor: null });
+      await next;
+      expect(await provider.listChangedFiles()).toMatchObject({ files: [] });
     });
 
     it('publishes only a complete successful Branch list and fences late or failed comparisons', async () => {

@@ -27,7 +27,7 @@
   iPhone/iPad preparation disables device-local `AutomaticMinimizationEnabled` and
   notifies keyboard preferences so the guest software keyboard remains available.
   Never rewrite host-global Simulator preferences or reboot to change keyboards.
-  Negotiate `iosSimulatorControls: 1`.
+  Controls v1 supports the original actions; v2 adds the iPhone/iPad software keyboard toggle.
 - `exterior.ts` reads only the bound device's fixed definition/bezel routes, strips all
   upstream URLs, and validates geometry plus bounded PNG dimensions. The gateway serves
   these behind the same private capability; resource reads never renew the lease.

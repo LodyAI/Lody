@@ -32,6 +32,9 @@ describe('simulator device controls', () => {
         );
       },
     });
+    await expect(
+      controller.execute({ kind: 'button', button: 'software-keyboard' })
+    ).rejects.toThrow('keyboard unavailable');
     await controller.execute({ kind: 'button', button: 'volume-up' });
     await controller.execute({ kind: 'rotate', direction: 'left' });
     expect(controller.rotation()).toBe(270);

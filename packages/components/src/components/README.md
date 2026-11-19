@@ -257,8 +257,14 @@ companion `useSessionShareStatus` answering the header's "already shared?".
 and the "…" menu open. Rationale:
 [header share control](../../../../.agents/notes/implemented/feature/2026-09-14-session-header-share-control.md).
 
-## Terminal colors
+## Terminal
 
 `terminal/terminal-theme.ts` resolves CSS colors synchronously through a disposable
 probe with transitions disabled, so the global reduced-motion rule cannot blank a
 terminal. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-09-terminal-reduced-motion-colors.md).
+
+In the bottom terminal panel, hold Cmd on macOS or Ctrl on Windows/Linux and
+left-click an HTTP(S) URL to open it. A text selection prevents the click from
+opening a URL. Plain-text links show a pointer and underline while the modifier
+is held. OSC 8 links keep the default xterm decoration and use the same click rule.
+Plain-text detection accepts ASCII URLs and joins wrapped rows.
