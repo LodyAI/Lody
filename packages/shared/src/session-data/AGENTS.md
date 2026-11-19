@@ -5,6 +5,10 @@
 - `HistoryWriter` is the only history writer. Reuse its validation, changed-field
   diff, legacy representation, stored-copy and conditional rollback rules.
   Shared business rules live in the planners, not in UI or CLI copies.
+- A native renderer holds no Session replica: `remote-document.ts` reads the engine
+  and writes checked patches under the Mirror-derived schema, using the writer's
+  planners and validation. Edits are `cas`, appends `rebase`; an unknown outcome is
+  never a non-write.
 - Directory reads contain identities, scalars and input configuration, never
   bodies. Model summary reads use the narrow scalar/count reader, including legacy
   rows; never serialize items, plans, or provider extension metadata. Input configuration projects on first read and memoizes: the

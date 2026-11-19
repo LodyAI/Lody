@@ -12,6 +12,7 @@ import {
   type StorageAdapter,
 } from 'loro-repo';
 import {
+  NATIVE_DOC_PATHS_CHANNEL,
   NATIVE_DOC_CHANNEL,
   NATIVE_FLOCK_CHANNEL,
   isNativeDocId,
@@ -21,6 +22,11 @@ import {
 } from '@lody/shared/native-workspace-meta-ipc';
 import { registersToBundle } from '@lody/shared/native-flock-bundle';
 import { getIpcServices, onIpcEvent } from '@/lib/electron-ipc-client';
+import {
+  RemoteWriteConflictError,
+  RemoteWriteIndeterminateError,
+  type RemoteSessionDocPort,
+} from '@lody/shared/session-data';
 
 /** A receipt's revision normally arrives before the IPC reply; bound the gap. */
 const RECEIPT_VISIBILITY_MS = 10_000;
@@ -156,6 +162,30 @@ export function createRendererNativeFlockDocs(workspaceId: string): ExternalFloc
  * Owned Loro documents (Sessions) for this renderer, through main. This
  * window's own IndexedDB replica of a document is imported once, on first open.
  */
+/**
+ * Imports this window's own IndexedDB replica of one document, once. The legacy
+ * replica is read only for this and never kept.
+ */
+export async function migrateRendererLegacyDoc(
+  workspaceId: string,
+  legacyStorage: StorageAdapter,
+  replicaName: string,
+  docId: string
+) {
+  const api = getIpcServices()?.nativeWorkspaceMeta;
+  if (!api) throw new Error('native_meta_ipc_unavailable');
+  const source = `renderer:${replicaName.replace(/[^\w.-]/g, '_').slice(0, 128)}`;
+  if (!(await api.needsLegacyDoc({ workspaceId, docId, source }))) return;
+  const legacy = (await legacyStorage.loadDoc(docId)) ?? new LoroDoc();
+  await api.importLegacyDoc({
+    workspaceId,
+    docId,
+    source,
+    snapshot: legacy.export({ mode: 'snapshot' }),
+    version: Object.fromEntries(legacy.oplogVersion().toJSON()),
+  });
+}
+
 export function createRendererNativeDocs(
   workspaceId: string,
   legacyStorage: StorageAdapter,
@@ -163,18 +193,8 @@ export function createRendererNativeDocs(
 ): ExternalDocsAdapter {
   const api = getIpcServices()?.nativeWorkspaceMeta;
   if (!api) throw new Error('native_meta_ipc_unavailable');
-  const source = `renderer:${replicaName.replace(/[^\w.-]/g, '_').slice(0, 128)}`;
-  const migrate = async (docId: string) => {
-    if (!(await api.needsLegacyDoc({ workspaceId, docId, source }))) return;
-    const legacy = (await legacyStorage.loadDoc(docId)) ?? new LoroDoc();
-    await api.importLegacyDoc({
-      workspaceId,
-      docId,
-      source,
-      snapshot: legacy.export({ mode: 'snapshot' }),
-      version: Object.fromEntries(legacy.oplogVersion().toJSON()),
-    });
-  };
+  const migrate = (docId: string) =>
+    migrateRendererLegacyDoc(workspaceId, legacyStorage, replicaName, docId);
   return {
     capability: EXTERNAL_DOCS_CAPABILITY,
     owns: isNativeDocId,
@@ -218,5 +238,70 @@ export function createRendererNativeDocs(
       return known ? { update: first, close } : { snapshot: first, close };
     },
     commit: (docId, updates) => api.commitDoc({ workspaceId, docId, updates: [...updates] }),
+  };
+}
+
+/**
+ * A remote Session document for this renderer, through main: bounded reads,
+ * one changed-path view per call, and checked patch commits. No replica.
+ */
+export function createRendererRemoteSessionPort(
+  workspaceId: string,
+  docId: string
+): RemoteSessionDocPort {
+  const api = getIpcServices()?.nativeWorkspaceMeta;
+  if (!api) throw new Error('native_meta_ipc_unavailable');
+  const readPathAt = (path: readonly (string | number)[]) =>
+    api.readDocPath({ workspaceId, docId, path: [...path] });
+  return {
+    readListFields: (start, end, fields) =>
+      api.readDocListFields({
+        workspaceId,
+        docId,
+        start,
+        ...(end !== undefined ? { end } : {}),
+        fields: fields.map((field) => ({
+          path: [...field.path],
+          ...(field.shape ? { shape: true } : {}),
+        })),
+      }),
+    readPathAt,
+    readPath: async (path) => (await readPathAt(path)).value,
+    async applyPatch(ops, precondition) {
+      try {
+        return await api.applyDocPatch({
+          workspaceId,
+          docId,
+          ops: ops as never,
+          precondition,
+        });
+      } catch (error) {
+        const message = String((error as Error | undefined)?.message ?? error);
+        if (message.includes('native_doc_write_conflict')) throw new RemoteWriteConflictError();
+        if (message.includes('native_doc_write_indeterminate'))
+          throw new RemoteWriteIndeterminateError(error);
+        // A reply lost between main and this window is also an unknown outcome.
+        if (/ipc|disconnected|destroyed|timed? ?out/i.test(message))
+          throw new RemoteWriteIndeterminateError(error);
+        throw error;
+      }
+    },
+    observePaths(listener) {
+      const observationId = crypto.randomUUID();
+      const stop = onIpcEvent(NATIVE_DOC_PATHS_CHANNEL, ({ observationId: id, event }) => {
+        if (id === observationId) listener(event);
+      });
+      const ready = api.observeDocPaths({ workspaceId, docId, observationId }).catch((error) => {
+        stop();
+        throw error;
+      });
+      return {
+        ready,
+        close() {
+          stop();
+          void api.release({ observationId }).catch(() => {});
+        },
+      };
+    },
   };
 }

@@ -46,7 +46,13 @@ export interface RemoteLoroHistoryPort {
     start: number,
     end: number | undefined,
     fields: readonly RemoteListField[]
-  ): Promise<{ len: number; start: number; rows: readonly (readonly unknown[])[] }>;
+  ): Promise<{
+    len: number;
+    start: number;
+    rows: readonly (readonly unknown[])[];
+    /** The room head the page was read at. */
+    roomTxId?: number;
+  }>;
   /** The JSON value at `path` from the document root, or undefined when absent. */
   readPath(path: readonly PathSegment[]): Promise<unknown>;
   /** Changed-path observation; `ready` settles once it is established at the head. */

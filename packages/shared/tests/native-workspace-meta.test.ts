@@ -15,10 +15,20 @@ import {
 const notCommitted = (reason: string) => new ExternalMetadataNotCommittedError(reason);
 import { Flock } from '@loro-dev/flock-wasm';
 import { createNativeFlockDocs } from '../src/node/native-flock-docs';
-import { createNativeDocs, createNativeRemoteHistoryPort } from '../src/node/native-docs';
+import {
+  createDocRoom,
+  createNativeDocs,
+  createNativeRemoteHistoryPort,
+} from '../src/node/native-docs';
+import { LoroDoc, isContainer, type Container } from 'loro-crdt';
+import { createHistoryWriter } from '../src/history-writer';
+import { createSessionControlPlaneMirror } from '../src/session-control-plane';
 import {
   createLoroSessionData,
+  createRemoteControlState,
+  createRemoteHistoryCommands,
   createRemoteLoroHistoryReader,
+  shareObservation,
   type SessionDataChange,
 } from '../src/session-data';
 import type { SessionHistory, SessionId } from '../src';
@@ -422,5 +432,260 @@ describe('remote Session history reader', () => {
     expect(changes.at(-1)).toEqual({ kind: 'changed', ids: ['turn-2'] });
     expect((await remote.readTurn('turn-2')).state).toBe('ready');
     observation.unsubscribe();
+  });
+});
+
+describe('remote Session writes', () => {
+  /** Container kind at every path, then the plain JSON, of a document. */
+  const shape = (doc: LoroDoc) => {
+    const kinds: Record<string, string> = {};
+    const walk = (value: unknown, path: string) => {
+      if (!isContainer(value)) return;
+      const container = value as Container;
+      kinds[path] = container.kind();
+      if (container.kind() === 'Map') {
+        const map = container as unknown as { keys(): string[]; get(k: string): unknown };
+        for (const key of map.keys()) walk(map.get(key), `${path}.${key}`);
+      } else if (container.kind() === 'List' || container.kind() === 'MovableList') {
+        const list = container as unknown as { length: number; get(i: number): unknown };
+        for (let i = 0; i < list.length; i++) walk(list.get(i), `${path}[${i}]`);
+      }
+    };
+    const roots = doc.getShallowValue() as Record<string, unknown>;
+    const json = doc.toJSON() as Record<string, unknown>;
+    // A Mirror registers every control root when it opens; an empty one holds nothing.
+    const empty = (value: unknown) =>
+      value === undefined ||
+      (Array.isArray(value) ? value.length === 0 : Object.keys(value as object).length === 0);
+    for (const name of Object.keys(roots)) {
+      if (empty(json[name])) continue;
+      const kind = String(roots[name]).split(':').pop() ?? '';
+      const root =
+        kind === 'List'
+          ? doc.getList(name)
+          : kind === 'MovableList'
+            ? doc.getMovableList(name)
+            : kind === 'Text'
+              ? doc.getText(name)
+              : doc.getMap(name);
+      walk(root, name);
+    }
+    return {
+      kinds,
+      json: Object.fromEntries(Object.entries(json).filter(([, value]) => !empty(value))),
+    };
+  };
+
+  it('creates the containers the HistoryWriter and the control Mirror create', async () => {
+    const { connection } = await setup();
+    const client = connection.client;
+    const turn = {
+      id: 'u-1',
+      role: 'user',
+      timestamp: '2026-01-01T00:00:00Z',
+      status: 'pending',
+      items: [{ type: 'text', text: 'hello' }],
+      fileDiff: [],
+      plan: [{ content: 'step', status: 'pending', priority: 'medium' }],
+      inputConfig: { prompt: 'hello', agentRoleId: 'role-a', mcpServerIds: ['m'] },
+    } as unknown as SessionHistory;
+    const queued = {
+      task: 'next',
+      userId: 'local:me',
+      timestamp: '2026-01-01T00:00:00Z',
+      project: { kind: 'local', id: 'p' },
+      acpSessionConfig: { prompt: 'next', cliType: 'codex', agentType: 'codex' },
+    };
+
+    // Reference: a local replica written by the HistoryWriter and the Mirror.
+    const local = new LoroDoc();
+    createHistoryWriter(local).append(turn);
+    const mirror = createSessionControlPlaneMirror({
+      doc: local,
+      initialState: { session: { id: 'remote' } } as never,
+    });
+    mirror.setState((draft) => {
+      draft.mq = [queued as never];
+      draft.humanInputReceipts = { 'u-1': { userId: 'local:me' } } as never;
+      draft.cancelRequest = { id: 'c-1', turnId: 'u-1' } as never;
+    });
+    local.commit();
+    await createDocRoom(client, ns, 'session-reference');
+    await client.importRoomState(
+      ns,
+      { kind: 'loro_doc', id: 'session-reference' },
+      {
+        snapshot: local.export({ mode: 'snapshot' }),
+      }
+    );
+
+    // Remote: the same writes as JSON patches applied by the engine.
+    await createDocRoom(client, ns, 'session-remote-writes');
+    const room = { kind: 'loro_doc' as const, id: 'session-remote-writes' };
+    await client.applyDocPatch(ns, room, [
+      { op: 'arr_splice', path: ['history'], at: 0, del: 0, items: [turn as never] },
+      { op: 'arr_splice', path: ['mq'], at: 0, del: 0, items: [queued as never] },
+      { op: 'set', path: ['humanInputReceipts', 'u-1'], value: { userId: 'local:me' } },
+      { op: 'set', path: ['cancelRequest', 'id'], value: 'c-1' },
+      { op: 'set', path: ['cancelRequest', 'turnId'], value: 'u-1' },
+    ]);
+
+    const load = async (id: string) =>
+      LoroDoc.fromSnapshot((await client.exportLoroRaw(ns, { kind: 'loro_doc', id })).bytes);
+    const reference = shape(await load('session-reference'));
+    const remote = shape(await load('session-remote-writes'));
+    expect(remote.kinds).toEqual(reference.kinds);
+    expect(remote.json).toEqual(reference.json);
+  });
+
+  const CONTROL_ROOTS = ['mq', 'humanInputReceipts', 'cancelRequest'] as const;
+  type Control = Record<(typeof CONTROL_ROOTS)[number], unknown>;
+  const until = async (check: () => boolean) => {
+    while (!check()) await new Promise((resolve) => setImmediate(resolve));
+  };
+
+  /** The daemon's writing replica plus two renderer-side remote views. */
+  async function openRemote(docId: string) {
+    const { dataDir, connection } = await setup();
+    const repo = await LoroRepo.create({
+      externalDocs: createNativeDocs(connection.client, ns, (id) => id === docId),
+    });
+    cleanups.push(() => repo.destroy());
+    const { doc } = await repo.openPersistedDoc(docId);
+    const daemon = {
+      doc,
+      data: createLoroSessionData({ sessionId: 'remote' as SessionId, doc }),
+      mirror: createSessionControlPlaneMirror({
+        doc,
+        initialState: { session: { id: 'remote' } } as never,
+      }),
+      commit: () => repo.persistDocNow(docId, doc),
+    };
+    const view = async () => {
+      const port = shareObservation(createNativeRemoteHistoryPort(await peer(dataDir), ns, docId));
+      const control = createRemoteControlState<Control>(port, CONTROL_ROOTS, {} as Control);
+      cleanups.push(async () => control.close());
+      await control.ready;
+      return { port, control, commands: createRemoteHistoryCommands(port) };
+    };
+    return { daemon, a: await view(), b: await view() };
+  }
+
+  it('queues, edits, reorders and removes control rows by identity across replicas', async () => {
+    const { daemon, a, b } = await openRemote('session-control');
+    const item = (task: string) => ({
+      task,
+      userId: 'local:me',
+      timestamp: '2026-01-01T00:00:00Z',
+      acpSessionConfig: { prompt: task, cliType: 'codex', agentType: 'codex' },
+    });
+    const mq = (state: Control) => (state.mq ?? []) as { $cid?: string; task: string }[];
+    await a.control.update((draft) => {
+      draft.mq = [...mq(draft), item('one'), item('two')];
+      draft.humanInputReceipts = { 'u-1': { userId: 'local:me' } };
+    });
+    await until(() => mq(b.control.getState()).length === 2);
+    const [one, two] = mq(b.control.getState());
+    expect(one?.$cid).toEqual(expect.any(String));
+
+    // The daemon's Mirror sees the same rows, with the same identities.
+    await until(() => (daemon.mirror.getState().mq ?? []).length === 2);
+    expect(daemon.mirror.getState().mq?.map((row) => row.$cid)).toEqual([one!.$cid, two!.$cid]);
+
+    // B edits and reorders by identity while the daemon pops a row concurrently.
+    daemon.mirror.setState((draft) => {
+      draft.mq = (draft.mq ?? []).filter((row) => row.$cid !== one!.$cid);
+    });
+    daemon.doc.commit();
+    await daemon.commit();
+    await b.control.update((draft) => {
+      draft.mq = mq(draft)
+        .map((row) => (row.$cid === two!.$cid ? { ...row, task: 'two (edited)' } : row))
+        .concat([item('three') as never]);
+    });
+    await until(
+      () =>
+        JSON.stringify(mq(a.control.getState()).map((row) => row.task)) ===
+        JSON.stringify(['two (edited)', 'three'])
+    );
+    expect(daemon.mirror.getState().humanInputReceipts).toEqual({ 'u-1': { userId: 'local:me' } });
+  });
+
+  it('appends, edits and answers turns with the writer planners under concurrent writes', async () => {
+    const { daemon, a } = await openRemote('session-history');
+    await daemon.data.commands.appendTurn({
+      id: 'u-1',
+      role: 'user',
+      timestamp: '2026-01-01T00:00:00Z',
+      status: 'pending',
+      items: [{ type: 'text', text: 'hi' }],
+      fileDiff: [],
+    } as never);
+    await daemon.data.commands.appendTurn({
+      id: 'a-1',
+      role: 'assistant',
+      timestamp: '2026-01-01T00:00:00Z',
+      userTurnId: 'u-1',
+      items: [
+        { type: 'text', text: 'working' },
+        {
+          type: 'tool_call',
+          toolCallId: 'tc-1',
+          title: 'Run',
+          status: 'pending',
+          permissionRequest: { requestId: 'p-1', options: [] },
+        },
+      ],
+      fileDiff: [],
+    } as never);
+    await daemon.commit();
+
+    // The daemon keeps writing while the renderer answers the request: each of
+    // its commits moves the head, so the renderer's conditional edit retries.
+    const writing = (async () => {
+      for (let i = 0; i < 10; i++) {
+        await daemon.data.commands.appendTurn({
+          id: `n-${i}`,
+          role: 'assistant',
+          timestamp: '2026-01-01T00:00:00Z',
+          items: [{ type: 'text', text: `note ${i}` }],
+          fileDiff: [],
+        } as never);
+        await daemon.commit();
+      }
+    })();
+    const answered = await a.commands.respondPermission(
+      'p-1',
+      { outcome: 'selected', optionId: 'allow' } as never,
+      { turnId: 'a-1' }
+    );
+    await writing;
+    expect(answered).toBe(true);
+
+    await a.commands.appendTurn({
+      id: 'u-2',
+      role: 'user',
+      timestamp: '2026-01-01T00:00:01Z',
+      status: 'pending',
+      items: [{ type: 'text', text: 'next' }],
+      fileDiff: [],
+    } as never);
+    await a.commands.applyHistoryAction({
+      kind: 'user-status',
+      turnId: 'u-2',
+      status: 'processing',
+    } as never);
+
+    await until(() => daemon.data.history.count() === 13);
+    const answer = daemon.data.history.readTurn('a-1');
+    expect(answer.state).toBe('ready');
+    const tool = (
+      answer as { turn: { items: { permissionRequest?: { outcome?: unknown } }[] } }
+    ).turn.items.find((item) => item.permissionRequest);
+    expect(tool?.permissionRequest?.outcome).toEqual({ outcome: 'selected', optionId: 'allow' });
+    await until(() => {
+      const read = daemon.data.history.readTurn('u-2');
+      return read.state === 'ready' && read.turn.status === 'processing';
+    });
   });
 });

@@ -58,6 +58,8 @@ import {
   type RepoRoomSubscription,
   type RepoWatchHandle,
 } from 'loro-repo';
+import { isNativeDocId } from '@lody/shared/native-workspace-meta-ipc';
+import { createNativeRemoteSessionStore } from './native-remote-session-store';
 import {
   createRendererNativeDocs,
   createRendererNativeFlockDocs,
@@ -5052,6 +5054,15 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
   const createSessionStore = async (sessionId: SessionId): Promise<SessionDocStore> => {
     const roomId = getSessionRoomId(sessionId);
+    // Native Session documents stay in the engine: this renderer keeps no replica.
+    if (nativeMeta && isNativeDocId(roomId))
+      return createNativeRemoteSessionStore({
+        sessionId,
+        roomId,
+        workspaceId: deps.workspaceId,
+        legacyStorage: repoStorage,
+        replicaName: cacheIdentity.repoDbName,
+      });
     // Backend selection is part of the persisted session identity, so resolve it
     // before composing the reader even when this runtime has no injected factory.
     // That lets createConversationSession fail closed for a Roost session instead

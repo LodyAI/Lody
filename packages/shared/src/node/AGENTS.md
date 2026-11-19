@@ -154,4 +154,5 @@ Control, probe and Loro data-plane requests require the private daemon token bef
   are published only after bounded coverage verification. Never dual-write a
   legacy replica in native mode; owned named Flock and Loro documents go through
   loro-repo's external owners, never storage or the local data plane.
+  A renderer patch reaches the engine only after `authorizeSessionPatch`.
   Design: [native Workspace Meta](../../../../.agents/docs/native-workspace-meta.md).
