@@ -420,14 +420,25 @@ describe('lody schedule --every', () => {
     ).toThrow('Unknown time zone');
   });
 
-  it('keeps the stored trigger when an edit repeats the same step', () => {
+  it('keeps a fixed interval anchored when an edit repeats the same duration', () => {
     const previous = scheduleEveryTrigger(parseScheduleEvery('90m'), {
       timeZone: 'UTC',
       now: now - 86_400_000,
     });
     expect(
       scheduleEveryTrigger(parseScheduleEvery('90m'), { timeZone: 'UTC', now, previous })
-    ).toBe(previous);
+    ).toEqual(previous);
+    const fiveHours = scheduleEveryTrigger(parseScheduleEvery('5h'), {
+      timeZone: 'UTC',
+      now: now - 86_400_000,
+    });
+    expect(
+      scheduleEveryTrigger(parseScheduleEvery('300m'), {
+        timeZone: 'Asia/Shanghai',
+        now,
+        previous: fiveHours,
+      })
+    ).toEqual(fiveHours);
     expect(
       scheduleEveryTrigger(parseScheduleEvery('100m'), { timeZone: 'UTC', now, previous })
     ).toMatchObject({

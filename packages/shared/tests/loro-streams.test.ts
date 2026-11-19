@@ -15,6 +15,8 @@ import {
   LORO_STREAMS_LARGE_POST_SHARD_MIN_BYTES,
   getLoroStreamsRemoteCursorUrlAliases,
   getLoroStreamsBaseUrl,
+  isLoroStreamsWebSocketEnabled,
+  loroStreamsWebSocketOptions,
   getLoroStreamsPresenceBaseUrl,
   getLoroStreamsShardUrls,
   normalizeLoroStreamsShardHostSuffix,
@@ -26,6 +28,26 @@ const workspaceId = 'workspace-1' as WorkspaceId;
 const sessionId = 'session-1' as SessionId;
 
 describe('loro streams helpers', () => {
+  it.each([undefined, '', 'false', '0', 'TRUE', 'yes', true])(
+    'keeps WS disabled for non opt-in environment %s',
+    (value) => {
+      expect(
+        loroStreamsWebSocketOptions(
+          isLoroStreamsWebSocketEnabled(undefined, value),
+          'https://gateway.test',
+          'workspace'
+        )
+      ).toEqual({});
+    }
+  );
+  it.each(['1', 'true'])(
+    'accepts explicit WS environment %s, with explicit false taking precedence',
+    (value) => {
+      expect(isLoroStreamsWebSocketEnabled(undefined, value)).toBe(true);
+      expect(isLoroStreamsWebSocketEnabled(false, value)).toBe(false);
+      expect(isLoroStreamsWebSocketEnabled(true, '0')).toBe(true);
+    }
+  );
   it('lets a Convex isolate bundle and execute protocol helpers without loading snapshot compression', async () => {
     const result = await build({
       stdin: {

@@ -137,6 +137,7 @@ preview admission, repository-action priority and workspace diff presentation.
 
 ## [File surfaces](../../../../../.agents/docs/sessions-file-surfaces.md)
 
+- Visible Changes lists fetch the complete Branch manifest on opening; hidden lists cancel paging, and file bodies load on demand.
 - File actions use `hooks/use-session-file-actions.ts` + `lib/session-file-actions.ts`;
   never duplicate capability checks or expose unavailable local-host actions.
 - A failed conversation file-link index must release its optional cache lease and

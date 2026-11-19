@@ -1,6 +1,7 @@
 import { Outlet } from '@tanstack/react-router';
 import { WorkspaceCheckoutPendingDialog } from '@/components/workspace-checkout-pending-dialog';
 import { ElectronSessionCompletionNotifier } from '@/components/electron-session-completion-notifier';
+import { ElectronDesktopForegroundPresence } from '@/components/electron-desktop-foreground-presence';
 import { ElectronMenuHandler } from '@/components/electron-menu-handler';
 import { AppCommands } from '@/components/app-commands';
 import { CommandPalette } from '@/components/commands/command-palette';
@@ -15,6 +16,7 @@ export function AuthenticatedWorkspaceContent({
     <>
       <Outlet />
       <ElectronSessionCompletionNotifier />
+      <ElectronDesktopForegroundPresence />
       <ElectronMenuHandler />
       <AppCommands />
       <CommandPalette />

@@ -400,6 +400,13 @@ explicit retry proves actual SDK and token cleanup before handoff. Session-activ
 leases remain P6; the local relay's upper owners remain pending. See the
 [decision](../notes/implemented/architecture/2026-10-12-effect-workspace-presence.md).
 
+The optional presence WS token callback executes at the existing
+`presence-legacy.ts:createPresenceWebSocketAuthLegacy` boundary, consumed by
+`platform/presence.ts`. This is third-party callback compatibility, not a new
+presence lifecycle or runtime. Remove this bridge when the SDK accepts native
+Effect WS authentication. The provider retains ownership of token producers.
+
+
 ## Session active presence leases
 
 `session-active-presence.ts` provides the native local-publication lease and heartbeat

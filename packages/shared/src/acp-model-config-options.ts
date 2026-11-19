@@ -10,6 +10,8 @@ import type { AcpConfigOptionSummary } from './ai';
  * ladder and toggles. The model selector is not stored: the snapshot owns the
  * model list.
  *
+ * Current values are retained from the first same-runtime observation of a shape;
+ * session selections do not define distinct shapes.
  * Most models of one agent share the same list, so a list is stored once as a
  * shape and each model points at its shape:
  * - `['acpModelConfigOptionsShape', configId, shapeId]` → {@link AcpModelConfigOptionsShape}

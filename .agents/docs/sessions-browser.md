@@ -63,7 +63,9 @@ this page is the full text of the rules summarised there.
   file is on this desktop's machine and `useSessionFileActions().resolveHostPath` yields its
   absolute path. Each entry into rendered mode first shows a consent dialog. Its "Allow
   JavaScript" checkbox starts unchecked. Electron main (`machineRpc.openHtmlPreview`) then serves
-  the file's folder from a fresh `lody-html-preview://<random token>/` origin. Relative CSS,
+  the file's folder by default. For a nested page the user can authorize the displayed workspace
+  folder for that preview, preserving the page’s workspace-relative URL and asset paths. Both
+  choices serve content from a fresh `lody-html-preview://<random token>/` origin. Relative CSS,
   scripts and images load, and reload re-reads disk. Without consent the iframe sandbox is
   empty and the response carries `script-src 'none'`. With consent the sandbox adds scripts,
   same-origin and forms, never modals, popups or top navigation. The unique origin keeps that

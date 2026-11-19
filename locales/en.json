@@ -2207,6 +2207,7 @@
   "sessions.changes.empty": "No changes yet.",
   "sessions.changes.diffStatsUnavailable": "Diff stats unavailable",
   "sessions.changes.loading": "Loading changes…",
+  "sessions.changes.tooManyFiles": "Too many changed files to load.",
   "sessions.changes.syncing": "Syncing changes…",
   "sessions.changes.title": "Changes",
   "sessions.changes.view.files": "Files",
@@ -2477,6 +2478,7 @@
   "sessions.fileViewer.copyRelativePath": "Copy relative path",
   "sessions.fileViewer.htmlPreview.allowScripts": "Allow JavaScript",
   "sessions.fileViewer.htmlPreview.allowScriptsHint": "Only allow this for pages you trust. Scripts can make network requests.",
+  "sessions.fileViewer.htmlPreview.allowWorkspaceResources": "Allow this page to read files in {{folder}}",
   "sessions.fileViewer.htmlPreview.consentDescription": "The page opens from the file on disk and may load files from its own folder, such as stylesheets and images. It runs isolated from Lody.",
   "sessions.fileViewer.htmlPreview.consentTitle": "Preview {{fileName}}?",
   "sessions.fileViewer.htmlPreview.navigationDisabled": "Navigation is disabled for self-contained HTML previews.",
@@ -2859,6 +2861,7 @@
   "sessions.messageQueue.editMessage": "Edit queued message",
   "sessions.messageQueue.guide": "Steer the active response with this message",
   "sessions.messageQueue.guideAction": "Steer",
+  "sessions.messageQueue.attachmentOnly": "[Attachment]",
   "sessions.messageQueue.imageOnly": "[Image message]",
   "sessions.messageQueue.queuedCount": "{{count}} queued",
   "sessions.messageQueue.scheduledCount": "{{count}} scheduled",
@@ -6807,5 +6810,7 @@
   "e2ee.recovery.passwordNudgeBody": "Passkeys protect your cloud backup with full-entropy keys immune to password guessing. If all your devices support passkeys (or you saved an offline recovery file), removing the recovery password hardens your backup.",
   "e2ee.recovery.wrongPassword": "Incorrect recovery password, or no recovery password is set on this account.",
   "e2ee.lostAll.password.title": "Use recovery password",
-  "e2ee.lostAll.password.help": "Enter the recovery password you set up earlier."
+  "e2ee.lostAll.password.help": "Enter the recovery password you set up earlier.",
+  "settings.general.suppressMobilePushWhenFocused.label": "Pause phone notifications while using this computer",
+  "settings.general.suppressMobilePushWhenFocused.helper": "While Lody is focused on this computer, finished tasks skip your phone. Permission requests and questions still notify."
 }

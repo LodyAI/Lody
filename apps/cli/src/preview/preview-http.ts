@@ -191,13 +191,14 @@ export function stripLocalWebSocketHeaders(headers: HeaderEntry[]): HeaderEntry[
   );
 }
 
-function rewriteLocalRedirectLocation(value: string, localOrigin: URL, previewOrigin: URL): string {
-  const locationUrl = new URL(value, localOrigin);
-  assertBoundLocalUrl(locationUrl, localOrigin);
-  return new URL(
-    `${locationUrl.pathname}${locationUrl.search}${locationUrl.hash}`,
-    previewOrigin
-  ).toString();
+function rewriteLocalRedirectLocation(value: string, requestUrl: URL, previewOrigin: URL): string {
+  const locationUrl = new URL(value, requestUrl);
+  assertBoundLocalUrl(locationUrl, requestUrl);
+  const viewerUrl = new URL(previewOrigin.origin);
+  viewerUrl.pathname = locationUrl.pathname;
+  viewerUrl.search = locationUrl.search;
+  viewerUrl.hash = locationUrl.hash;
+  return viewerUrl.href;
 }
 
 function canInjectVisualAnnotationRuntime(response: Response, method: string): boolean {
@@ -399,7 +400,7 @@ export function rewritePreviewSetCookie(value: string, prefix: string): string |
 
 export function headersToEntries(
   headers: Headers,
-  options?: { localOrigin: URL; previewOrigin: URL }
+  options?: { requestUrl: URL; previewOrigin: URL }
 ): HeaderEntry[] {
   const responseHeaders: HeaderEntry[] = [];
   // Undici decodes fetch bodies but retains the local server's compression metadata.
@@ -414,7 +415,7 @@ export function headersToEntries(
       responseHeaders.push([
         name,
         options && lowerName === 'location'
-          ? rewriteLocalRedirectLocation(value, options.localOrigin, options.previewOrigin)
+          ? rewriteLocalRedirectLocation(value, options.requestUrl, options.previewOrigin)
           : value,
       ]);
     }

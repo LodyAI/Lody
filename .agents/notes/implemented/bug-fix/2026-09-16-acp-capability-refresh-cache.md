@@ -159,6 +159,35 @@ initial probe has confirmed the command preview and launch inputs. A threshold e
 entry used every 20 hours still lapse; a smaller one only adds writes. Probes after expiry always
 renew, since an expired entry is by definition past half its lifetime.
 
+### Machine Flock volume and mixed versions
+
+Capability comparison includes `goalActions`. Same-source option structures retain the stored
+`currentValue` defaults; session model/mode/effort selections do not replace that baseline.
+The incoming model answer is recorded first. Per-model pointers share a same-source shape
+when only current values differ; unreferenced shapes are removed. New sources or changed
+choices still publish their declarations.
+
+The complete `['acpCapability', configId]` value remains readable without joining new keys.
+Flock currently replaces whole JSON values; there is no field patch operation. Half-TTL
+renewal and real `authMethods` changes therefore still rewrite the complete row. Splitting
+fields while mirroring the old row saves no bytes; stopping the mirror gives old Web/CLI/Mobile
+readers stale freshness or sign-in methods. References replacing options or commands likewise
+remove understood data from old readers. A cache-version bump cannot teach them to join keys.
+
+Future splitting requires readers deployed first and an explicit minimum-reader boundary
+before retiring the complete row, source-bound references, and atomic generation publication.
+Old full-row writers must remain on the legacy format or invalidate the new generation when
+they write, so readers cannot combine stale split fields with a fresh legacy row. This change
+uses existing-format deduplication and does not activate that migration or compact Streams history.
+
+Quota rows also retain their format. Unchanged usage, scope, plan, wallet and window multisets
+skip writes when only resets differ by at most two seconds from the persisted baseline (less
+for very short windows). A persisted baseline prevents consecutive small drifts from hiding
+real changes indefinitely. Null transitions, usage changes and cycle rollovers are published.
+`machine-document-capabilities.test.ts` checks native Flock checkpoints; shared
+`machine-flock.test.ts` covers shape reuse and quota publication boundaries. These tests do
+not establish acceptance by installed old clients or deployed transport behavior.
+
 ### Why the TTL is 24 hours
 
 The TTL bounds changes in unlaunched agents' own configuration, including command previews and

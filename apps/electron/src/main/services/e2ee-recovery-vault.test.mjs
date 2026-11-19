@@ -163,10 +163,12 @@ async function withClient(service, work) {
   }
 }
 
-void test('the recovery vault gate is enabled by default unless explicitly turned off', () => {
+void test('recovery defaults on while off and malformed explicit configuration refuse', () => {
   assert.equal(recoveryVaultEnabled({}), true)
   assert.equal(recoveryVaultEnabled({ LODY_E2EE_RECOVERY_VAULT: 'on' }), true)
-  assert.equal(recoveryVaultEnabled({ LODY_E2EE_RECOVERY_VAULT: 'off' }), false)
+  assert.equal(recoveryVaultEnabled({ LODY_E2EE_RECOVERY_VAULT: ' on ' }), true)
+  for (const mode of ['off', ' off ', '', ' ', 'maybe', 'ON'])
+    assert.equal(recoveryVaultEnabled({ LODY_E2EE_RECOVERY_VAULT: mode }), false)
 })
 
 void test('creates an account vault, reopens it from the saved file through the wire, and rejects a foreign file', async () => {

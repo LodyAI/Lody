@@ -173,7 +173,7 @@ Token、分享）保留卡片。`settings/material.stylex.ts` 把分组的画法
 
 **Agents 重新设计。** 桌面 Agents 页用的是 Provider 的移动端宽松密度（`variant="list"`）：
 行高 56px、32px 图标方块，额度条被隐藏（只有紧凑行才显示）。现在窗口内使用紧凑行
-（`MachineProvidersSection bare`）：24px 图标、上下 8px 内边距，额度条显示在名称旁。刷新和删除
+（`MachineProvidersSection bare`）：24px 图标、上下 8px 内边距，额度条显示在名称下方一行。刷新和删除
 只在指针悬停或键盘聚焦时出现，浮在行尾、铺行的悬停底色；列表静止时只显示每个 Provider 的状态并
 延伸到右边缘（隐藏时若仍占位，会留下一条空白，Owner 指出过）。
 机器胶囊改为标题下的标签页（`SettingsLineTabs`，即项目窗口的滑动细线标签页，抽成共享组件），
