@@ -603,6 +603,7 @@ describe('LoroSidebar pinned section', () => {
           { id: null, name: 'Pinned', items: [chat('mover')] },
           { id: 'empty', name: 'Empty', items: [] },
         ],
+        onTogglePinSection: () => {},
         pinSectionActions,
       });
       armSessionMentionDrag('mover');
@@ -623,5 +624,35 @@ describe('LoroSidebar pinned section', () => {
       drag(row, 'drop');
       expect(pinSectionActions.onDropItem).not.toHaveBeenCalled();
     });
+  });
+
+  it('folds a draggable section from the keyboard', () => {
+    const onTogglePinSection = vi.fn();
+    renderSidebar({
+      pinnedSections: [
+        { id: null, name: 'Pinned', items: [pinnedItem] },
+        { id: 'maintenance', name: 'Maintenance', items: [] },
+      ],
+      onTogglePinSection,
+      pinSectionActions: {
+        onMoveItem: () => {},
+        onDropItem: () => {},
+        onMoveSection: () => {},
+        onCreateSection: () => {},
+        onRenameSection: () => {},
+        onDeleteSection: () => {},
+      },
+    });
+    const header = container?.querySelector<HTMLElement>(
+      '[data-pin-section="maintenance"] [role="button"][aria-expanded]'
+    );
+    // The drag handle wraps the header but must not add a second button role.
+    expect(header?.closest('[data-pin-section-handle]')?.getAttribute('role')).toBeNull();
+    flushSync(() =>
+      header?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      )
+    );
+    expect(onTogglePinSection).toHaveBeenCalledWith('maintenance');
   });
 });

@@ -9,19 +9,13 @@ import {
 } from 'react';
 import {
   DndContext,
-  KeyboardSensor,
   PointerSensor,
   closestCenter,
   useSensor,
   useSensors,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import {
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useTranslation } from 'react-i18next';
 import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
@@ -163,10 +157,9 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
     () => sections.flatMap((section) => (section.id === null ? [] : [section.id])),
     [sections]
   );
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
+  // Pointer only: the handle is the whole header, whose collapse toggle and
+  // menu button own Enter and Space. A keyboard sensor would take those keys.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const onMoveSection = actions?.onMoveSection;
   const handleSectionDragEnd = useCallback(
     (event: DragEndEvent) => {
@@ -288,22 +281,17 @@ function SortablePinSection({
   id: string;
   children: (renderHeader: (header: ReactElement) => ReactNode) => ReactNode;
 }) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    setActivatorNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id });
+  // No `attributes`: the header already holds its own buttons, and a second
+  // focusable button role around them would only add a dead tab stop.
+  const { listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } =
+    useSortable({ id });
   const renderHeader = useCallback(
     (header: ReactElement) => (
-      <div ref={setActivatorNodeRef} {...attributes} {...listeners} data-pin-section-handle="">
+      <div ref={setActivatorNodeRef} {...listeners} data-pin-section-handle="">
         {header}
       </div>
     ),
-    [attributes, listeners, setActivatorNodeRef]
+    [listeners, setActivatorNodeRef]
   );
   return (
     <div
