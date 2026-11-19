@@ -37,6 +37,34 @@ export class TurnLifecyclePage {
     await this.page.keyboard.press('Escape');
     await expect(settings).toBeHidden();
     await this.expectComposerReady();
+    await this.selectDeterministicAgent();
+  }
+
+  /** A new provider is not guaranteed to become the composer's selection; choose it. */
+  private async selectDeterministicAgent(): Promise<void> {
+    const trigger = this.page.locator(
+      'button[aria-label="Run configuration"], button[aria-label="运行设置"]'
+    );
+    await trigger.click();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    const agentSubmenu = this.page.getByRole('menuitem', { name: /^Agent(?:\s|$)/u });
+    await agentSubmenu.hover();
+    await expect(agentSubmenu).toHaveAttribute('aria-expanded', 'true');
+    const option = this.page.getByRole('menuitemradio', {
+      name: 'Deterministic Turn Lifecycle Agent',
+      exact: true,
+    });
+    const bounds = await option.boundingBox();
+    if (!bounds) throw new Error('The deterministic agent is not offered in the composer');
+    // Cross the submenu gap the way a pointer does so the submenu stays open.
+    await this.page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, {
+      steps: 8,
+    });
+    await option.click();
+    await expect(option).toHaveAttribute('aria-checked', 'true');
+    await this.page.keyboard.press('Escape');
+    if (await agentSubmenu.isVisible()) await this.page.keyboard.press('Escape');
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
   }
 
   /** Starts a Session whose first Turn waits on a provider permission request. */
