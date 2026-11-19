@@ -288,8 +288,14 @@ export function createRemoteLoroHistoryReader(port: RemoteLoroHistoryPort): Sess
           listener({ kind: 'structure', from: 0, to: Number.MAX_SAFE_INTEGER });
         });
       };
+      // The first reset only establishes the observation; nothing is held yet.
+      let established = false;
       const observation = port.observePaths((event) => {
         if (event.kind === 'reset') {
+          if (!established) {
+            established = true;
+            return;
+          }
           positions = new Map();
           ids = new Map();
           enqueue(async () =>

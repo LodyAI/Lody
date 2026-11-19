@@ -409,7 +409,8 @@ describe('remote Session history reader', () => {
     await data.commands.appendTurn(turn(4));
     await commit();
     await until(() => changes.some((change) => change.kind === 'structure'));
-    expect(changes.at(-1)).toEqual({ kind: 'structure', from: 4, to: 5 });
+    // Establishing the observation notifies nothing; the append is the first change.
+    expect(changes).toEqual([{ kind: 'structure', from: 4, to: 5 }]);
 
     await data.commands.applyHistoryAction({
       kind: 'user-status',
