@@ -77,10 +77,12 @@ export function observeConversationDocument(
     RepoTransportRoomSubscription,
     'transportId' | 'status' | 'onStatusChange' | 'waitFor'
   >,
-  publish: (step: ConversationSyncStep) => void
+  publish: (step: ConversationSyncStep) => void,
+  observeReceive?: (listener: (confirmed: boolean) => void) => (() => void) | undefined
 ): () => void {
   let status: RepoTransportRoomSubscription['status'] | undefined;
   let read: AbortController | undefined;
+  let stopReceive: (() => void) | undefined;
   let connectTimer: ReturnType<typeof setTimeout> | undefined;
   const route =
     binding.transportId === 'local' || binding.transportId === 'cloud'
@@ -91,6 +93,8 @@ export function observeConversationDocument(
     status = next;
     read?.abort();
     read = undefined;
+    stopReceive?.();
+    stopReceive = undefined;
     clearTimeout(connectTimer);
     if (next !== 'joined') {
       if (next === 'error') publish({ route, phase: 'disconnected', reason: 'read' });
@@ -108,6 +112,23 @@ export function observeConversationDocument(
         );
       }
       return;
+    }
+    if (observeReceive) {
+      let confirmed: boolean | undefined;
+      const publishReceive = (next: boolean) => {
+        if (next === confirmed) return;
+        confirmed = next;
+        clearTimeout(connectTimer);
+        publish({ route, phase: next ? 'confirmed' : 'syncing' });
+        if (!next) {
+          connectTimer = setTimeout(
+            () => publish({ route, phase: 'syncing', reason: 'timeout' }),
+            15_000
+          );
+        }
+      };
+      stopReceive = observeReceive(publishReceive);
+      if (stopReceive) return;
     }
     const attempt = new AbortController();
     read = attempt;
@@ -141,6 +162,7 @@ export function observeConversationDocument(
   update(binding.status);
   return () => {
     read?.abort();
+    stopReceive?.();
     clearTimeout(connectTimer);
     detach();
   };

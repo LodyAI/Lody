@@ -458,3 +458,13 @@ receive no WS option. The pinned `loro-repo` 0.26.0, `@loro-dev/streams-crdt` 0.
 and `@loro-dev/streams-client` 0.14.0 packages implement URL override and Repo
 forwarding while keeping WS default off. Physical connection reuse is not proven by
 HTTP compatibility tests.
+
+## Conversation receive confirmation
+
+Conversation details keep receive confirmation separate from room connectivity
+and upload acknowledgements. The pinned Streams SDK patches expose the applied
+tail of each live document. Opening a new connection carries no receive proof.
+The local Electron transport tracks the advertised document frontier through
+both the initial join and live chunk transfers. A visible session rechecks
+its receive proof on foreground wake. Cached conversation content stays
+readable during the check. Roost owner history retains its independent status.
