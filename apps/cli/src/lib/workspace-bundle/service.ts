@@ -1,5 +1,6 @@
 import path from 'node:path';
 import type { JsonObject, LoroRepo } from 'loro-repo';
+import { localSessionFileBlobs, restoreSessionFileBlobs } from './blobs';
 import { createBundleWriter, openBundle } from './bundle-file';
 import { META_ROOM_ID } from './codecs';
 import { exportWorkspaceBundle } from './export';
@@ -60,6 +61,7 @@ export async function runWorkspaceExport(input: {
         startedAt,
       },
       ...(workspace.syncRoom ? { prepareRoom: workspace.syncRoom } : {}),
+      sessionBlobs: localSessionFileBlobs(workspace.id),
       now,
     });
     return {
@@ -114,6 +116,7 @@ export async function runWorkspaceImport(input: {
       actor: { userId: input.actor.userId },
       ...(input.now ? { now: input.now } : {}),
     });
+    await restoreSessionFileBlobs({ bundle, plan });
     const uploadPending: string[] = [];
     if (workspace.syncRoom) {
       for (const room of plan.rooms) {

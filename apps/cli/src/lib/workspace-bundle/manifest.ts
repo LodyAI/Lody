@@ -40,10 +40,12 @@ export const BlobEntrySchema = z.object({
   /** Display information only. */
   name: z.string().max(1024).optional(),
   mime: z.string().max(256).optional(),
+  /** Where the bytes are referenced, for example `session-file:<sessionId>/<fileId>`. */
+  refs: z.array(z.string().min(1).max(1024)).optional(),
   path: z.string().min(1),
 });
 export type BlobEntry = z.infer<typeof BlobEntrySchema>;
-export type BlobDescriptor = Pick<BlobEntry, 'kind' | 'name' | 'mime'>;
+export type BlobDescriptor = Pick<BlobEntry, 'kind' | 'name' | 'mime' | 'refs'>;
 
 export const GapSchema = z.object({
   id: z.string().min(1).max(1024),

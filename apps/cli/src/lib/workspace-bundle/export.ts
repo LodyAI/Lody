@@ -1,3 +1,4 @@
+import type { LoroDoc } from 'loro-crdt';
 import type { JsonObject, LoroRepo } from 'loro-repo';
 import type { BundleWriter } from './bundle-file';
 import { classifyRoom, META_ROOM_ID } from './codecs';
@@ -15,6 +16,8 @@ export type ExportWorkspaceBundleInput = {
   /** Checked before every room; throwing aborts the export (for example, role revoked). */
   checkContinue?: () => Promise<void>;
   onProgress?: (progress: ExportProgress) => void;
+  /** Adds the bytes a session's history references (attachments) to the bundle. */
+  sessionBlobs?: (sessionId: string, doc: LoroDoc, writer: BundleWriter) => Promise<void>;
   now?: () => string;
 };
 
@@ -68,6 +71,8 @@ export async function exportWorkspaceBundle(input: ExportWorkspaceBundleInput): 
       { id: entry.docId, model: 'loro', codec: room.codec, encoding: room.encoding },
       doc.export({ mode: 'snapshot' })
     );
+    if (room.codec === 'session/v1' && input.sessionBlobs)
+      await input.sessionBlobs(entry.docId.slice('session-'.length), doc, writer);
     if (room.codec === 'session/v1' && entry.meta.historyBackend === 'roost')
       writer.addGap({
         id: entry.docId,

@@ -87,7 +87,12 @@ export async function createBundleWriter(
     },
     async addBlob(descriptor, bytes) {
       const digest = sha256(bytes);
-      if (blobs.has(digest)) return digest;
+      const existing = blobs.get(digest);
+      if (existing) {
+        if (descriptor.refs?.length)
+          existing.refs = [...new Set([...(existing.refs ?? []), ...descriptor.refs])];
+        return digest;
+      }
       const blobPath = `blobs/sha256/${digest.slice(0, 2)}/${digest}`;
       await zip.add(blobPath, bytes);
       blobs.set(digest, { ...descriptor, sha256: digest, size: bytes.byteLength, path: blobPath });
