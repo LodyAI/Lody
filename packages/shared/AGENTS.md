@@ -19,6 +19,11 @@ explains size selection and cursor-only timeout recovery.
 - `createSessionMirror` owns a local replica's history through one `HistoryWriter`, including
   legacy callbacks. No raw history writes or second writer; read flags never change ownership.
   Replica-less native documents: [session-data scope](src/session-data/AGENTS.md).
+- Writer id lookups (`locate`, every copy for `updateCopies`, progress cards) use the
+  per-document index in `history-id-index.ts`. One scan builds it and synchronous Loro
+  events keep it exact; it answers nothing inside a pending transaction, and callers
+  verify each position against its row. Never add a per-write scan of the whole list:
+  at 50,000 turns one costs about 130 ms, five times that on a snapshot-loaded replica.
 - Validate new turns and changed known fields/items before applying a command, never
   unchanged history. Invalid commands preserve the old values and throw content-free
   diagnostics; they must not leave partial history writes. Keep stored unknown fields

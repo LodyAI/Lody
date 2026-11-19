@@ -1,5 +1,6 @@
 import { inheritHistoryStreamText } from './history-stream-text';
 import { historyValuesEqual } from './history-values-equal';
+import { historyIdIndex } from './history-id-index';
 export { historyValuesEqual } from './history-values-equal';
 import { Immer } from 'immer';
 import { isContainer, LoroMap, type LoroDoc, type LoroList } from 'loro-crdt';
@@ -438,7 +439,21 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
   // No subscription lifetime to manage. Unknown writes/imports/checkout invalidate
   // this metadata-only directory, including edits in an uncommitted transaction.
   let progressDirectory: { stamp: string; rows: Map<string, number[]> } | undefined;
+  const ids = historyIdIndex(doc);
   const progressPositions = (id: string) => {
+    const prefix = `${id}:duplicate:`;
+    const indexed = ids.entries();
+    if (indexed) {
+      const positions: number[] = [];
+      for (const [rowId, copies] of indexed) {
+        if (rowId !== id && !rowId.startsWith(prefix)) continue;
+        if (!rowId.startsWith('operation-progress:')) continue;
+        for (const index of copies)
+          if (storedScalar(storedField(list.get(index), 'role')) === 'system')
+            positions.push(index);
+      }
+      return positions.sort((a, b) => a - b);
+    }
     const stamp = JSON.stringify([doc.opCount(), doc.frontiers(), doc.getPendingTxnLength()]);
     if (progressDirectory?.stamp !== stamp) {
       const rows = new Map<string, number[]>();
@@ -453,7 +468,6 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       }
       progressDirectory = { stamp, rows };
     }
-    const prefix = `${id}:duplicate:`;
     const positions = [...(progressDirectory.rows.get(id) ?? [])];
     for (const [rowId, copies] of progressDirectory.rows)
       if (rowId.startsWith(prefix)) positions.push(...copies);
@@ -467,7 +481,31 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       return { map: undefined, inline: map as unknown as SessionHistoryInput, index };
     return undefined;
   };
+  /** Every stored row with `id`, ascending; the index unless it is stale or a transaction is open. */
+  const rowsWithId = (id: string) => {
+    const positions = ids.positionsOf(id);
+    if (positions) {
+      const rows = positions.map((index) => rowWithId(index, id));
+      if (rows.every((row) => row !== undefined)) return rows;
+      ids.invalidate();
+    }
+    const rows: NonNullable<ReturnType<typeof rowWithId>>[] = [];
+    for (let index = 0; index < list.length; index++) {
+      const found = rowWithId(index, id);
+      if (found) rows.push(found);
+    }
+    return rows;
+  };
+  /** The last stored row with `id`. */
   const locate = (id: string) => {
+    const positions = ids.positionsOf(id);
+    if (positions) {
+      const last = positions.at(-1);
+      if (last === undefined) return undefined;
+      const found = rowWithId(last, id);
+      if (found) return found;
+      ids.invalidate();
+    }
     for (let index = list.length - 1; index >= 0; index--) {
       const found = rowWithId(index, id);
       if (found) return found;
@@ -916,11 +954,7 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       );
     },
     updateCopies(id, updater) {
-      const targets: NonNullable<ReturnType<typeof rowWithId>>[] = [];
-      for (let index = 0; index < list.length; index++) {
-        const found = rowWithId(index, id);
-        if (found) targets.push(found);
-      }
+      const targets = rowsWithId(id);
       if (targets.length === 0) return false;
       const projected = readHistory?.();
       const previous = targets.map(({ map, inline, index }) => {

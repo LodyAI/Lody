@@ -553,12 +553,27 @@ Session has been read and streamed; a host that had also performed the seeding
 import held 497 MB. After the large stream the daemon holds 720
 MB to 1 GB, from its 50,000-turn replica and the replay below.
 
-The large Session's reply still appears about 36 s after sending in this run, with
-the renderer idle: the daemon opens its 50,000-turn replica (about 6 s, blocking
-its event loop), each history write takes about 1 s, and the scripted agent does
-not advertise resume, so the daemon rebuilds the prompt by replaying the whole
-history (about 18 s). Agents that resume skip the replay; replica open and write
-cost remain daemon-side follow-ups.
+The large Session's reply still appeared about 36 s after sending, with the
+renderer idle; the rest was the daemon. Measured on its own (the daemon's
+`LoroDocumentManager`, 50,000 turns, a cold reopen, legacy and native side by side):
+
+| Daemon, 50,000 turns              |   Legacy | Native |
+| --------------------------------- | -------: | -----: |
+| Open the Session replica          | 4,241 ms | 781 ms |
+| `user-status` write, before       |   145 ms | 650 ms |
+| Write plus flush, after the index |     1 ms |   2 ms |
+| First id lookup after open        |   158 ms |  1.1 s |
+
+Opening is not slower in native mode. Every `user-status` write scanned the whole
+history for copies of the turn, and an assistant entry's first open scanned it for
+an id that did not exist yet. Native multiplied that cost: loro-crdt 1.17 serves
+every container read about five times slower on a replica loaded with
+`LoroDoc.fromSnapshot` (the native feed's form, and legacy's after compaction) than
+on one built from updates, and reading the whole state does not warm it. The
+writer now looks ids up in a per-document index, so only its one-time build pays
+that cost. The remaining wait is the scripted agent's: it does not advertise
+resume, so the daemon rebuilds the prompt by replaying the whole history (about
+18 s); agents that resume skip it.
 
 ## Pending acceptance
 
