@@ -61,6 +61,8 @@ rules live in [AGENTS.md](AGENTS.md); the pipeline and its reasoning live in
 - `mention-chips.tsx` owns the kind → glyph and kind → colour tables for both chip
   surfaces; `message-text-chips.tsx` paints the transcript chip. Its paste button
   shares the prose baseline through its label, while the clipboard icon stays centered.
+  Session chips activate through `ai-gui/session-link-context.tsx` and stay inert
+  where that navigator is absent or the surface is read-only.
 - Composer quotes use the Markdown prose link colour without a background, with outer spacing between
   atomic snapshots. Chat quote drafts reuse external atomic range editing, with a read-only preview
   and a dedicated `message_quote` history span. The shared formatter includes full

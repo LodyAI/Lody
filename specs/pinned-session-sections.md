@@ -37,8 +37,9 @@ place them in named pin sections, such as "Maintenance".
   the top of that section, and "New section…".
 - Deleting a section does not unpin its conversations; they return to the
   default section.
-- Unpinning clears the conversation's section and position. Pinning it again
-  places it at the top of the default section.
+- Unpinning clears the conversation's section (`pinSectionId`) while retaining
+  its `orderKey` so manual ordering in the Status view is preserved. Pinning it
+  again places it at the top of the default section with a fresh `orderKey`.
 - Each section can be collapsed. The collapsed state is stored only on this
   device.
 - Opener child conversations stay under their root conversation and move with
@@ -56,7 +57,7 @@ device, and workspace members see the same pin layout.
   one row. Renaming or dragging it writes only that row, and deleting a section
   deletes the row.
 - **Conversation positions** live in session metadata (meta Flock) beside
-  `isPinned`, as two new optional fields: `pinSectionId` and `pinOrderKey`.
+  `isPinned`, as two new optional fields: `pinSectionId` and `orderKey`.
   Dragging a conversation writes only that conversation's metadata.
 - A conversation whose `pinSectionId` is missing or names a section that no
   longer exists is shown in the default section. Until the section rows have been
@@ -79,7 +80,7 @@ neighbours, with random jitter, so that two devices inserting at the same
 position do not produce the same key. Equal keys are ordered by id, so every
 client shows the same order.
 
-Pinned conversations without a `pinOrderKey`, including those pinned before
+Pinned conversations without a `orderKey`, including those pinned before
 this feature, sort after the keyed conversations in their section and keep
 their recent-activity order among themselves. There is no migration.
 
@@ -89,7 +90,7 @@ their recent-activity order among themselves. There is no migration.
   format.
 - Older clients ignore the unknown `pinSection` rows when parsing the workspace
   Flock and keep showing all pinned conversations as one list ordered by time.
-- Unpinning on an older client leaves `pinSectionId` and `pinOrderKey` in
+- Unpinning on an older client leaves `pinSectionId` and `orderKey` in
   place. Newer clients read those fields only while `isPinned` is true, so the
   stale values are harmless. Pinning again on a newer client places the
   conversation back in the default section.

@@ -58,10 +58,13 @@ import { createPortal } from 'react-dom';
 import { useOpenSettings } from '../../hooks/use-open-settings';
 import { v4 as uuidv4 } from 'uuid';
 import {
+  AlarmClock,
   ArrowDown,
   ArrowUp,
+  ArrowUpCircle,
   Archive,
   ArchiveRestore,
+  CheckCircle2,
   ChevronDown,
   Copy,
   CornerLeftUp,
@@ -85,11 +88,17 @@ import {
   Search,
   Share2,
   SquareArrowOutUpRight,
+  Timer,
   Trash2,
   UserRoundCog,
   Users,
   X,
 } from 'lucide-react';
+import { buildSnoozePresets, sidebarStatusGroup } from '@/lib/sidebar-status-group';
+import {
+  CustomSnoozeDialog,
+  type CustomSnoozeDialogTarget,
+} from '../sidebar-status-snooze-dialog';
 import { useRouter } from '@tanstack/react-router';
 import { Spinner } from '@lody/ui/spinner';
 import { Switch } from '@lody/ui/switch';
@@ -1368,6 +1377,9 @@ export function SessionHeaderMenu({
   forkWorktreeAvailability = 'hidden',
   onForkMenuOpen,
   onRename,
+  onSnooze,
+  onSettle,
+  onMoveToFocus,
   owner,
   openedByRelations,
   onArchive,
@@ -1399,6 +1411,9 @@ export function SessionHeaderMenu({
   forkWorktreeAvailability?: SessionForkWorktreeAvailability;
   onForkMenuOpen?: () => void;
   onRename?: () => void | Promise<void>;
+  onSnooze?: (snoozedUntil: number) => void | Promise<void>;
+  onSettle?: () => void | Promise<void>;
+  onMoveToFocus?: () => void | Promise<void>;
   /** Multi-member workspaces only; omitted elsewhere. */
   owner?: SessionOwnerMenuState;
   /** Omitted when this Session neither opened nor was opened by another. */
@@ -1423,6 +1438,21 @@ export function SessionHeaderMenu({
   const sharingReason = useWorkspaceFeatureReason('sharing');
   const previewReason = useWorkspaceFeatureReason('remote-preview');
   const isArchived = !!session.isArchived;
+  const [customSnoozeTarget, setCustomSnoozeTarget] = useState<CustomSnoozeDialogTarget | null>(
+    null
+  );
+  const statusNow = new Date();
+  const statusGroup = sidebarStatusGroup(
+    {
+      latestMessageAt: session.lastMessageAt ?? session.createdAt,
+      isWorking: session.status?.type === 'running' || session.status?.type === 'initializing',
+      isWaitingPermission: session.status?.type === 'requestPermission',
+      snoozedUntil: session.snoozedUntil,
+      settledAt: session.settledAt,
+      focusRestoredAt: session.focusRestoredAt,
+    },
+    statusNow.getTime()
+  );
   const project = session.project as
     | { kind: 'github'; repoFullName?: string; branch?: string }
     | { kind: 'local'; localProjectId?: string; branch?: string; githubRepoFullName?: string }
@@ -1860,6 +1890,60 @@ export function SessionHeaderMenu({
             </Menu.Item>
           )}
 
+          {!isArchived && (onSnooze || onSettle || onMoveToFocus) ? (
+            <>
+              {onSnooze ? (
+                <Menu.Submenu>
+                  <Menu.SubmenuTrigger icon={AlarmClock}>
+                    {t('sessions.contextMenu.snooze', 'Later')}
+                  </Menu.SubmenuTrigger>
+                  <Menu.Content className="min-w-[200px]">
+                    {buildSnoozePresets(statusNow).map((preset) => {
+                      const label =
+                        preset.id === 'laterToday'
+                          ? t('sessions.contextMenu.snoozeLaterToday', 'Later today')
+                          : preset.id === 'tomorrowMorning'
+                            ? t('sessions.contextMenu.snoozeTomorrowMorning', 'Tomorrow morning')
+                            : t('sessions.contextMenu.snoozeNextWeek', 'Next week');
+                      return (
+                        <Menu.Item key={preset.id} onClick={() => void onSnooze(preset.timestamp)}>
+                          <span className="flex w-full items-center justify-between gap-4">
+                            <span>{label}</span>
+                            <span className="text-[11px] tabular-nums text-muted-foreground">
+                              {preset.countdown}
+                            </span>
+                          </span>
+                        </Menu.Item>
+                      );
+                    })}
+                    <Menu.Separator />
+                    <Menu.Item
+                      icon={Timer}
+                      onClick={() =>
+                        setCustomSnoozeTarget({
+                          sessionId: session.id,
+                          title: session.title ?? '',
+                        })
+                      }
+                    >
+                      {t('sessions.contextMenu.snoozeCustom', 'Custom time…')}
+                    </Menu.Item>
+                  </Menu.Content>
+                </Menu.Submenu>
+              ) : null}
+              {statusGroup !== 'settled' && onSettle ? (
+                <Menu.Item icon={CheckCircle2} onClick={() => void onSettle()}>
+                  {t('sessions.contextMenu.settle', 'Settle')}
+                </Menu.Item>
+              ) : null}
+              {statusGroup !== 'focus' && onMoveToFocus ? (
+                <Menu.Item icon={ArrowUpCircle} onClick={() => void onMoveToFocus()}>
+                  {t('sessions.contextMenu.moveToFocus', 'Move to Focus')}
+                </Menu.Item>
+              ) : null}
+            </>
+          ) : null}
+
           {owner && !isArchived ? (
             <Menu.Submenu>
               <Menu.SubmenuTrigger icon={UserRoundCog}>
@@ -2088,6 +2172,14 @@ export function SessionHeaderMenu({
               )}
         </Menu.Content>
       </Menu.Root>
+      {onSnooze ? (
+        <CustomSnoozeDialog
+          target={customSnoozeTarget}
+          now={statusNow}
+          onClose={() => setCustomSnoozeTarget(null)}
+          onConfirm={(_sessionId, snoozedUntil) => void onSnooze(snoozedUntil)}
+        />
+      ) : null}
     </>
   );
 }
@@ -3130,6 +3222,9 @@ export const SessionChatInterface = memo(
       transferSessionOwner,
       setTreeCollaborationStopped,
       updateSessionMetadata,
+      snoozeSession,
+      settleSession,
+      moveSessionToFocus,
     } = useSessionActions();
     const [renameDialogTarget, setRenameDialogTarget] = useState<RenameSessionDialogTarget | null>(
       null
@@ -7252,6 +7347,17 @@ export const SessionChatInterface = memo(
                     initialTitle: session.title ?? '',
                   });
                 }
+        }
+        onSnooze={
+          headerSharing?.access !== 'read'
+            ? (snoozedUntil) => snoozeSession(session.id, snoozedUntil)
+            : undefined
+        }
+        onSettle={
+          headerSharing?.access !== 'read' ? () => settleSession(session.id) : undefined
+        }
+        onMoveToFocus={
+          headerSharing?.access !== 'read' ? () => moveSessionToFocus(session.id) : undefined
         }
         owner={ownerMenuState}
         openedByRelations={openedByRelations}

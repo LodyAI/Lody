@@ -289,7 +289,7 @@ describe('mobile pin sections', () => {
           title: 'deps-bump',
           isPinned: true,
           pinSectionId: 'maintenance',
-          pinOrderKey: '81',
+          orderKey: '81',
           latestMessageAt: NOW,
         }),
         makeItem({
@@ -297,7 +297,7 @@ describe('mobile pin sections', () => {
           title: 'weekly-mirror',
           isPinned: true,
           pinSectionId: 'maintenance',
-          pinOrderKey: '80',
+          orderKey: '80',
           latestMessageAt: NOW - 50 * HOUR,
         }),
         ...makeProjectItems(1),
@@ -321,7 +321,7 @@ describe('mobile pin sections before the sections are read', () => {
         title: 'weekly-mirror',
         isPinned: true,
         pinSectionId: 'maintenance',
-        pinOrderKey: '80',
+        orderKey: '80',
         latestMessageAt: NOW,
       }),
     ]);

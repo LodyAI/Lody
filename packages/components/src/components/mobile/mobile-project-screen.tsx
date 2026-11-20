@@ -131,7 +131,7 @@ export type MobileConversationItem = {
   isPinned?: boolean;
   /** Pin section and manual order of a pinned conversation (see specs/pinned-session-sections.md). */
   pinSectionId?: string | null;
-  pinOrderKey?: string | null;
+  orderKey?: string | null;
   readOnly?: boolean;
   /** Machine id the conversation lives on. Powers the machine filter. */
   machineId?: string | null;

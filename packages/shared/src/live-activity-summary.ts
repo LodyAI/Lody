@@ -2,6 +2,7 @@ import type { AgentConfigMeta, SessionMeta, SessionStatus } from './schema';
 import { isSessionActiveWithHeartbeat } from './session-status-machine';
 import { resolveAgentBrandId, type AgentBrandId } from './agent-brand';
 import { getSessionLaunchConfigLegacyFields } from './machine-flock';
+import { getServerNow } from './time-sync';
 
 export type LiveActivityConversationStatus = 'permission' | 'question' | 'running' | 'unread';
 export type LiveActivityAgentLogoKind =
@@ -121,13 +122,31 @@ function resolveStatus(
   }
 
   const lastMessageAt = parseTimestamp(session.lastMessageAt);
-  if (lastMessageAt === null) return null;
+  const expiredSnoozeAt =
+    typeof session.snoozedUntil === 'number' &&
+    Number.isFinite(session.snoozedUntil) &&
+    session.snoozedUntil <= getServerNow()
+      ? session.snoozedUntil
+      : null;
+  const effectiveLastMessageAt =
+    lastMessageAt !== null && expiredSnoozeAt !== null
+      ? Math.max(lastMessageAt, expiredSnoozeAt)
+      : (lastMessageAt ?? expiredSnoozeAt);
+  if (effectiveLastMessageAt === null) return null;
   const lastReadAt = parseTimestamp(session.lastReadAt);
-  return lastReadAt === null || lastMessageAt > lastReadAt ? 'unread' : null;
+  return lastReadAt === null || effectiveLastMessageAt > lastReadAt ? 'unread' : null;
 }
 
 function resolveUpdatedAt(session: SessionMeta): number {
-  return parseTimestamp(session.lastMessageAt) ?? parseTimestamp(session.createdAt) ?? 0;
+  const lastMessageAt = parseTimestamp(session.lastMessageAt) ?? 0;
+  const expiredSnoozeAt =
+    typeof session.snoozedUntil === 'number' &&
+    Number.isFinite(session.snoozedUntil) &&
+    session.snoozedUntil <= getServerNow()
+      ? session.snoozedUntil
+      : 0;
+  const effective = Math.max(lastMessageAt, expiredSnoozeAt);
+  return effective > 0 ? effective : (parseTimestamp(session.createdAt) ?? 0);
 }
 
 /** Two-letter logo abbreviation per brand; keep exhaustive over AgentBrandId. */

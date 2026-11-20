@@ -44,6 +44,10 @@ import {
   OPERATION_INBOX_PROTOCOL_VERSION,
   buildPinnedSectionLayout,
   planNewPinPlacement,
+  planTopOrderKey,
+  isPinOrderKey,
+  FractionalIndex,
+  type ManualOrderWrite,
   type PinPlacementWrite,
   type PinnedSessionPlacement,
 } from '@lody/shared';
@@ -297,12 +301,23 @@ export type SessionActions = {
   setSessionPinned: (sessionId: SessionId, isPinned: boolean) => Promise<void>;
   /** Write planned pin placements (section and order) for pinned conversations. */
   applySessionPinPlacements: (writes: readonly PinPlacementWrite[]) => Promise<void>;
+  /** Write planned manual order placements for Focus conversations (clearing snooze/settled on target). */
+  applySessionFocusOrder: (
+    writes: readonly ManualOrderWrite[],
+    restoredSessionId?: SessionId
+  ) => Promise<void>;
+  /** Snooze a session until `snoozedUntil` (epoch ms) in the Status view's Later section. */
+  snoozeSession: (sessionId: SessionId, snoozedUntil: number) => Promise<void>;
+  /** Mark a session as settled in the Status view's Settled section. */
+  settleSession: (sessionId: SessionId) => Promise<void>;
+  /** Restore a snoozed or settled session back to Focus. */
+  moveSessionToFocus: (sessionId: SessionId) => Promise<void>;
 };
 
 const toPinnedSessionPlacement = (meta: SessionMeta): PinnedSessionPlacement => ({
   id: meta.id,
   pinSectionId: meta.pinSectionId ?? null,
-  pinOrderKey: meta.pinOrderKey ?? null,
+  orderKey: meta.orderKey ?? null,
   recency:
     meta.lastMessageAt ??
     (typeof meta.createdAt === 'number' ? meta.createdAt : Date.parse(meta.createdAt ?? '') || 0),
@@ -480,6 +495,19 @@ export function useSessionActions(): SessionActions {
         publishSessionMeta: setDocMetaByRoomId,
         readSessionMeta: (sessionId) =>
           store.get(sessionMetaCacheAtom)[getSessionRoomId(sessionId)],
+        // Key below every existing orderKey so a new top-level conversation
+        // lands at the top of Status Focus; child Sessions get none (they
+        // render nested under their opener row).
+        planNewSessionOrderKey: () => {
+          let topKey: string | null = null;
+          for (const meta of Object.values(store.get(sessionMetaCacheAtom))) {
+            if (!isPinOrderKey(meta.orderKey)) continue;
+            if (topKey === null || FractionalIndex.compare(meta.orderKey, topKey) < 0) {
+              topKey = meta.orderKey;
+            }
+          }
+          return planTopOrderKey([{ id: '', orderKey: topKey }]);
+        },
         onRpcDelivered: (sessionId, turnId) =>
           store.set(rpcDeliveredTurnsAtom, (previous) =>
             addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, turnId))
@@ -530,7 +558,7 @@ export function useSessionActions(): SessionActions {
       patch: {
         isPinned?: boolean;
         pinSectionId?: string | undefined;
-        pinOrderKey?: string | undefined;
+        orderKey?: string | undefined;
         lastReadAt?: number;
       }
     ) => {
@@ -665,8 +693,21 @@ export function useSessionActions(): SessionActions {
         { lastMessageAt: now, lastReadAt: now },
         assertCanManageSessions
       );
+      const roomId = getSessionRoomId(sessionId);
+      const existing = await runtime.repo.getDocMeta(roomId);
+      const existingMeta = !isLoroRepoDocDeleted(existing)
+        ? (existing?.meta as SessionMeta | undefined)
+        : undefined;
+      const cached = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
+      const meta = existingMeta ?? cached;
+      if (meta?.snoozedUntil !== undefined || meta?.settledAt !== undefined) {
+        await updateSessionMetadata(sessionId, {
+          ...(meta.snoozedUntil !== undefined ? { snoozedUntil: undefined } : {}),
+          ...(meta.settledAt !== undefined ? { settledAt: undefined } : {}),
+        });
+      }
     },
-    [runtime, assertCanManageSessions]
+    [runtime, store, assertCanManageSessions, updateSessionMetadata]
   );
 
   const updateSessionTitle = useCallback(
@@ -722,7 +763,13 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const readAt = getFiniteTimestamp(lastMessageAt) ?? getServerNow();
+      const now = getServerNow();
+      const baseReadAt = getFiniteTimestamp(lastMessageAt) ?? now;
+      const roomId = getSessionRoomId(sessionId);
+      const cachedMeta = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
+      const snoozedUntil = getFiniteTimestamp(cachedMeta?.snoozedUntil);
+      const expiredSnoozeAt = snoozedUntil !== null && snoozedUntil <= now ? snoozedUntil : 0;
+      const readAt = Math.max(baseReadAt, expiredSnoozeAt);
       await assertReadablePreferences([sessionId]);
       await touchSessionActivityMeta(
         runtime,
@@ -731,7 +778,7 @@ export function useSessionActions(): SessionActions {
         assertReadablePreferences
       );
     },
-    [runtime, assertReadablePreferences]
+    [runtime, store, assertReadablePreferences]
   );
 
   const markSessionUnread = useCallback(
@@ -750,13 +797,21 @@ export function useSessionActions(): SessionActions {
       const lastMessageAt =
         getFiniteTimestamp(repoMeta?.lastMessageAt) ??
         getFiniteTimestamp(cachedMeta?.lastMessageAt);
-      if (lastMessageAt === null) return;
+      const now = getServerNow();
+      const snoozedUntil =
+        getFiniteTimestamp(repoMeta?.snoozedUntil) ?? getFiniteTimestamp(cachedMeta?.snoozedUntil);
+      const expiredSnoozeAt = snoozedUntil !== null && snoozedUntil <= now ? snoozedUntil : null;
+      const effectiveLastMessageAt =
+        lastMessageAt !== null && expiredSnoozeAt !== null
+          ? Math.max(lastMessageAt, expiredSnoozeAt)
+          : (lastMessageAt ?? expiredSnoozeAt);
+      if (effectiveLastMessageAt === null) return;
 
-      // Unread is the durable comparison `lastMessageAt > lastReadAt`. Move
-      // only this receipt behind the latest known message; do not touch the
+      // Unread is the durable comparison `effectiveLastMessageAt > lastReadAt`. Move
+      // only this receipt behind the latest known activity; do not touch the
       // activity timestamp, which would reorder the sidebar.
       await updateSessionPreference(sessionId, {
-        lastReadAt: lastMessageAt - 1,
+        lastReadAt: effectiveLastMessageAt - 1,
       } as Partial<SessionMeta>);
     },
     [runtime, store, updateSessionPreference]
@@ -1034,11 +1089,10 @@ export function useSessionActions(): SessionActions {
       const existing = await runtime.repo.getDocMeta(roomId);
       if (isLoroRepoDocDeleted(existing)) return;
       if (!isPinned) {
-        // Unpinning forgets the place; pinning again starts at the top of the default section.
+        // Unpinning clears pinSectionId while preserving orderKey for Focus ordering.
         await updateSessionPreference(sessionId, {
           isPinned: false,
           pinSectionId: undefined,
-          pinOrderKey: undefined,
         });
         return;
       }
@@ -1046,7 +1100,7 @@ export function useSessionActions(): SessionActions {
         (meta) =>
           meta.isPinned === true && !meta.isArchived && !meta.pinSectionId && meta.id !== sessionId
       );
-      const { pinOrderKey } = planNewPinPlacement(
+      const { orderKey } = planNewPinPlacement(
         buildPinnedSectionLayout(
           defaultSectionPins.map(toPinnedSessionPlacement),
           [],
@@ -1056,7 +1110,7 @@ export function useSessionActions(): SessionActions {
       await updateSessionPreference(sessionId, {
         isPinned: true,
         pinSectionId: undefined,
-        pinOrderKey,
+        orderKey,
       });
     },
     [runtime, store, updateSessionPreference]
@@ -1071,11 +1125,92 @@ export function useSessionActions(): SessionActions {
         await updateSessionPreference(write.sessionId as SessionId, {
           isPinned: true,
           pinSectionId: write.pinSectionId,
-          pinOrderKey: write.pinOrderKey,
+          orderKey: write.orderKey,
         });
       }
     },
     [runtime, updateSessionPreference]
+  );
+
+  const applySessionFocusOrder = useCallback(
+    async (writes: readonly ManualOrderWrite[], restoredSessionId?: SessionId) => {
+      if (!runtime) {
+        throw new Error('Runtime not ready');
+      }
+      const now = getServerNow();
+      for (const write of writes) {
+        const targetId = write.sessionId as SessionId;
+        const isRestored = restoredSessionId != null && write.sessionId === restoredSessionId;
+        const roomId = getSessionRoomId(targetId);
+        const existing = await runtime.repo.getDocMeta(roomId);
+        const meta = !isLoroRepoDocDeleted(existing)
+          ? (existing?.meta as SessionMeta | undefined)
+          : undefined;
+        const hasExpiredSnooze =
+          typeof meta?.snoozedUntil === 'number' && meta.snoozedUntil <= now;
+        const existingRestored = getFiniteTimestamp(meta?.focusRestoredAt) ?? 0;
+        await updateSessionMetadata(targetId, {
+          orderKey: write.orderKey,
+          ...(isRestored
+            ? {
+                snoozedUntil: undefined,
+                settledAt: undefined,
+                focusRestoredAt: now,
+              }
+            : hasExpiredSnooze
+              ? {
+                  snoozedUntil: undefined,
+                  focusRestoredAt: Math.max(existingRestored, meta.snoozedUntil!),
+                }
+              : {}),
+        });
+      }
+    },
+    [runtime, updateSessionMetadata]
+  );
+
+  const snoozeSession = useCallback(
+    async (sessionId: SessionId, snoozedUntil: number) => {
+      await updateSessionMetadata(sessionId, {
+        snoozedUntil,
+        settledAt: undefined,
+      });
+    },
+    [updateSessionMetadata]
+  );
+
+  const settleSession = useCallback(
+    async (sessionId: SessionId) => {
+      if (!runtime) {
+        throw new Error('Runtime not ready');
+      }
+      const roomId = getSessionRoomId(sessionId);
+      const existing = await runtime.repo.getDocMeta(roomId);
+      const repoMeta = !isLoroRepoDocDeleted(existing)
+        ? (existing?.meta as SessionMeta | undefined)
+        : undefined;
+      const cachedMeta = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
+      const lastMessageAt =
+        getFiniteTimestamp(repoMeta?.lastMessageAt) ??
+        getFiniteTimestamp(cachedMeta?.lastMessageAt) ??
+        0;
+      await updateSessionMetadata(sessionId, {
+        settledAt: Math.max(getServerNow(), lastMessageAt),
+        snoozedUntil: undefined,
+      });
+    },
+    [runtime, store, updateSessionMetadata]
+  );
+
+  const moveSessionToFocus = useCallback(
+    async (sessionId: SessionId) => {
+      await updateSessionMetadata(sessionId, {
+        snoozedUntil: undefined,
+        settledAt: undefined,
+        focusRestoredAt: getServerNow(),
+      });
+    },
+    [updateSessionMetadata]
   );
 
   return {
@@ -1101,5 +1236,9 @@ export function useSessionActions(): SessionActions {
     deleteArchivedSession,
     setSessionPinned,
     applySessionPinPlacements,
+    applySessionFocusOrder,
+    snoozeSession,
+    settleSession,
+    moveSessionToFocus,
   };
 }

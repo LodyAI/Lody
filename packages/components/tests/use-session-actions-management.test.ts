@@ -33,6 +33,8 @@ import {
   getMachineRoomId,
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   getSessionRoomId,
+  isPinOrderKey,
+  FractionalIndex,
   getSessionCancelRequestMarker,
   createSessionControlPlaneMirror,
   isLoroRepoDocDeleted,
@@ -693,6 +695,56 @@ describe('useSessionActions', () => {
     expect(meta).not.toHaveProperty('baseBranch');
     expect(meta.project).toMatchObject({ branch: selector });
   });
+
+  it('writes a Focus orderKey below every existing key so a new top-level session leads 进行中', async () => {
+    const sessionId = 'session-focus-order' as SessionId;
+    const metaRepo = createSessionMetaRepo([]);
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const keyed = {
+      ...createSessionPayload('keyed-a' as SessionId),
+      id: 'keyed-a',
+      orderKey: 'a0',
+    };
+    const actions = await renderActions(runtime, {
+      sessionMetaCache: { [getSessionRoomId('keyed-a' as SessionId)]: keyed as SessionMeta },
+    });
+
+    const result = await actions.createSession(createSessionPayload(sessionId));
+
+    expect(isPinOrderKey(result.sessionMeta.orderKey)).toBe(true);
+    expect(FractionalIndex.compare(result.sessionMeta.orderKey!, 'a0')).toBeLessThan(0);
+    expect(metaRepo.getSession(sessionId)).toMatchObject({
+      orderKey: result.sessionMeta.orderKey,
+    });
+  });
+
+  it.each(['parentSessionId', 'openedBySessionId'] as const)(
+    'leaves a session without orderKey when it is created under an opener (%s)',
+    async (field) => {
+      const openerId = 'opener-session' as SessionId;
+      const sessionId = `child-via-${field}` as SessionId;
+      const metaRepo = createSessionMetaRepo([existingSession(openerId)]);
+      const runtime = createRuntime({ repo: metaRepo.repo });
+      const openerMeta = {
+        ...createSessionPayload(openerId),
+        id: openerId,
+        orderKey: 'a0',
+      } as SessionMeta;
+      const actions = await renderActions(runtime, {
+        sessionMetaCache: { [getSessionRoomId(openerId)]: openerMeta },
+      });
+
+      const result = await actions.createSession({
+        ...createSessionPayload(sessionId),
+        [field]: openerId,
+      } as SessionToCreate);
+
+      expect(result.sessionMeta.orderKey).toBeUndefined();
+      expect(metaRepo.getSession(sessionId)).not.toMatchObject({
+        orderKey: expect.anything(),
+      });
+    }
+  );
 
   const userInput = (text: string) =>
     ({
