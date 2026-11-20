@@ -17,8 +17,10 @@ import type { LoroDoc } from 'loro-crdt';
  *
  * Registration and joining follow the session rooms: a join that produced a
  * subscription keeps it (the SDK heals it, even when its first sync failed);
- * a step that failed outright retries with backoff while the page is open,
- * and a local edit retries at once. A page opened with local content that
+ * a step that failed outright retries with backoff while the page is open.
+ * A local edit retries a failed registration (a local write) at once, but
+ * never cuts a join's backoff short: typing must not hammer a failing
+ * backend. A page opened with local content that
  * never got registered registers then, so a failed registration cannot leave
  * notes local-only.
  * Behavior: specs/today-outline.md (Page stream and dates, Data ownership).
@@ -73,6 +75,7 @@ export function createTodayPageStore(options: {
   let room: RoomSubscription | undefined;
   let failures = 0;
   let cancelRetry: (() => void) | undefined;
+  let retryStage: 'register' | 'join' | undefined;
   let markSynced: () => void = () => {};
   const synced = new Promise<void>((resolve) => {
     markSynced = resolve;
@@ -81,6 +84,7 @@ export function createTodayPageStore(options: {
   const clearRetry = () => {
     cancelRetry?.();
     cancelRetry = undefined;
+    retryStage = undefined;
   };
   // One pending retry at a time; it re-runs whichever step is still missing.
   const retryLater = (stage: 'register' | 'join', error: unknown) => {
@@ -88,8 +92,10 @@ export function createTodayPageStore(options: {
     if (disposed || cancelRetry) return;
     const delay = options.retryDelayMs(failures);
     failures += 1;
+    retryStage = stage;
     cancelRetry = options.setTimer(() => {
       cancelRetry = undefined;
+      retryStage = undefined;
       advance();
     }, delay);
   };
@@ -144,7 +150,8 @@ export function createTodayPageStore(options: {
     for (const listener of listeners) listener();
   });
   const unsubscribeLocal = doc.subscribeLocalUpdates(() => {
-    // A local edit is a caller asking now: it pre-empts a pending backoff.
+    // A join waits out its backoff; a registration retries on the edit.
+    if (retryStage === 'join') return;
     clearRetry();
     advance();
   });

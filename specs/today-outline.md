@@ -155,10 +155,11 @@ any time; when off it changes none of the app's existing behavior.
   date in Stream ids are visible to the server by design (content stays encrypted in encrypted workspaces).
 - On a page's first write, `repo.upsertDocMeta` registers `{ userId, date }` in the meta flock. A member's dates
   are listed by docId prefix; the meta holds no content or summary.
-- A failed registration or room join retries with backoff while the page is open, and at once on a local edit. A
-  room whose subscription exists but whose first sync failed keeps that subscription and heals inside the SDK, as
-  session rooms do. Opening a page that holds local content but was never registered registers it then, so one
-  failure cannot leave notes local-only.
+- A failed registration or room join retries with exponential backoff, at most 5 minutes apart, while the page is
+  open, so failures do not keep loading the backend. A local edit retries a registration (a local write) at once but
+  never cuts a join's backoff short. A room whose subscription exists but whose first sync failed keeps that
+  subscription and heals inside the SDK, as session rooms do. Opening a page that holds local content but was never
+  registered registers it then, so one failure cannot leave notes local-only.
 - Page content: a `LoroTree` holds the outline structure (fractional-index ordering); each node's data holds a
   `LoroText` for its text (conversation mentions are marked characters in it), and fold state is stored alongside.
 - Data is workspace-shared: every member can read and write every member's Today; neither the UI nor the sync

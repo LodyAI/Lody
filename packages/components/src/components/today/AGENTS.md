@@ -11,8 +11,9 @@ Behavior: [Today Spec](../../../../../specs/today-outline.md). Files: [README.md
   structural edits go through `TodayOutline` inside `undo.structural`. Lexical history stays off.
 - Outline keys are guarded against IME composition (`isComposing`, keyCode 229, `Process`).
 - Viewing a day never creates it remotely: a page joins its room only once registered.
-  A failed registration or join retries with backoff while the page is open; never leave a
-  page with local content unregistered, and keep a joined subscription even if its first sync failed.
+  A failed registration or join retries with backoff (capped at 5 minutes) while the page is open,
+  and typing never cuts a join's backoff short. Never leave a page with local content unregistered,
+  and keep a joined subscription even if its first sync failed.
 - A conversation mention is one U+FFFC carrying the `mention` mark. Node text is read and
   written only through `readTodayText`/`insertTodayRich` (never `toString()` slices), so
   marks survive split, merge, paste and the binding ([why](../../../../../.agents/notes/implemented/architecture/2026-11-20-today-inline-mentions.md)).

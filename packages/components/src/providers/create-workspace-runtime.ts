@@ -826,6 +826,19 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const STORE_RELEASE_DELAY_MS = 600_000;
   // Idle Today pages kept warm while scrolling the day stream.
   const TODAY_IDLE_PAGE_CAP = 12;
+  // A Today page's failed registration or join backs off to 5 minutes: many open
+  // pages retrying every 30s added up to real backend load.
+  const TODAY_RETRY_BASE_DELAY_MS = 1_000;
+  const TODAY_RETRY_MAX_DELAY_MS = 300_000;
+  const todayPageRetryDelayMs = (attempt: number) => {
+    const exponential = Math.min(
+      TODAY_RETRY_MAX_DELAY_MS,
+      TODAY_RETRY_BASE_DELAY_MS * 2 ** Math.min(attempt, 20)
+    );
+    // ±20% jitter so pages that failed together do not retry together.
+    const jittered = exponential * (0.8 + Math.random() * 0.4);
+    return Math.min(TODAY_RETRY_MAX_DELAY_MS, Math.round(jittered));
+  };
   // Short grace period before leaving an inactive session room. This avoids
   // reconnect churn during quick tab switches while keeping SSE fan-out bounded.
   const SESSION_ROOM_SYNC_RELEASE_DELAY_MS = 2_000;
@@ -5649,7 +5662,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const todayPageStoreCache = createTodayPageStoreCache({
     releaseDelayMs: STORE_RELEASE_DELAY_MS,
     idleCap: TODAY_IDLE_PAGE_CAP,
-    retryDelayMs: (attempt) => computeLocalReconnectDelayMs(attempt),
+    retryDelayMs: todayPageRetryDelayMs,
     setTimer: (callback, ms) => {
       const timer = setTimeout(callback, ms);
       return () => clearTimeout(timer);

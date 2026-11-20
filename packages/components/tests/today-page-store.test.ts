@@ -170,6 +170,19 @@ describe('Today page store', () => {
     expect(timers.delays()).toEqual([]);
   });
 
+  it('does not cut a failed join’s backoff short when the user types', async () => {
+    const { store, calls, timers } = harness({ registered: true, joins: ['fail'] });
+    await flush();
+    const focus = store.outline.insertFirst('a') as { nodeId: never };
+    store.undo.editText(store.outline.getText(focus.nodeId)!, (text) => text.insert(1, 'b'));
+    await flush();
+    expect(calls.joins).toBe(1);
+    expect(timers.delays()).toEqual([RETRY_MS]);
+    timers.fireAll();
+    await flush();
+    expect(calls.joins).toBe(2);
+  });
+
   it('keeps a room whose first sync failed instead of joining again, and releases it on dispose', async () => {
     const { store, calls, timers } = harness({ registered: true, joins: ['unsynced'] });
     let synced = false;
