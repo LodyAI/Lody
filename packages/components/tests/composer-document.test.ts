@@ -148,14 +148,16 @@ describe('composer DOM caret mapping', () => {
     editor.setRootElement(root);
     write(editor, 'ab\n@chip cd', [{ start: 3, end: 8, value: 'chip', kind: 'file' }]);
     const paragraph = root.firstElementChild!;
-    const [firstText, , chip, lastText] = Array.from(paragraph.childNodes);
+    const [firstText, , caretTarget, chip, lastText] = Array.from(paragraph.childNodes);
     const map = (node: Node, offset: number) =>
       editor.read(() => $domPointToOffset(editor, node, offset));
     expect(map(firstText!.firstChild!, 1)).toBe(1);
     expect(map(lastText!.firstChild!, 2)).toBe(10);
     // Between the line break and the chip, by child index in the paragraph.
     expect(map(paragraph, 2)).toBe(3);
-    expect(map(paragraph, 3)).toBe(8);
+    expect(map(caretTarget!.firstChild!, 0)).toBe(3);
+    expect(map(paragraph, 3)).toBe(3);
+    expect(map(paragraph, 4)).toBe(8);
     // A point inside the chip's own DOM lands on an edge.
     expect(map(chip!, 0)).toBe(3);
     expect(map(chip!, 1)).toBe(8);

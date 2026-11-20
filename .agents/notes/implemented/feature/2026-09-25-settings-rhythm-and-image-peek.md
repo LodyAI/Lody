@@ -250,7 +250,7 @@ preferences with boxed records after all.
 density (`variant="list"`): 56px rows, a 32px icon tile, and the rate-limit
 meters hidden, since only the compact row shows them. The pane now draws the
 compact row (`MachineProvidersSection bare`): a 24px glyph, 8px block padding,
-and the meters beside the name. Refresh and delete appear only under the pointer
+and the meters on the line under the name. Refresh and delete appear only under the pointer
 or keyboard focus, laid over the row's end on its hover fill, so a list at rest
 shows what is true of each provider and reaches the edge (kept in the flow while
 hidden, they left an empty band the owner spotted). The machine pills became the page's tabs under its title

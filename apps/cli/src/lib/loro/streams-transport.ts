@@ -1,3 +1,4 @@
+import { createWorkspaceStreamsTransportAdapter } from '@lody/shared/workspace-streams-persistence';
 import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
 import {
   WorkspaceStreamsConfigurationError,
@@ -46,6 +47,8 @@ export async function createCliStreamsTransport(args: {
   workspaceId: WorkspaceId;
   tokenProvider: LoroStreamsTokenProviderLegacy;
   repo: LoroRepo;
+  /** Owner bound to the manager's replica/account/content lifetime. */
+  incompleteRecoveryScope?: object;
   /**
    * LoroDoc room cursors only. Meta and named Flock cursors are replica-bound:
    * `SqliteRepoStore` restores each one in the same transaction as the data it
@@ -68,61 +71,70 @@ export async function createCliStreamsTransport(args: {
     throw new WorkspaceStreamsConfigurationError('Incomplete workspace Streams content protection');
   const tokenProvider = args.tokenProvider;
   const gatewayBaseUrl = await prepareCliStreamsGatewayBaseUrl(tokenProvider);
+  const auth = tokenProvider.createAuthCallback();
 
   return {
     gatewayBaseUrl,
     tokenProvider,
-    adapter: new StreamsTransportAdapter({
-      diagnostics: (event) => {
-        const diagnostic = getLoroSyncDiagnostic(event);
-        if (diagnostic) {
-          args.logger[diagnostic.level]('[loro-streams] transport failure', {
-            workspaceId: args.workspaceId,
-            ...diagnostic,
-          });
-        }
-      },
-      bucketId: args.bucketId ?? LORO_STREAMS_BUCKET_ID,
-      metaStreamId: getLoroMetaStreamId(args.workspaceId),
-      docStreamId: (docId) => getLoroStreamIdForDocId(args.workspaceId, docId),
-      flockDocStreamId: (flockDocId) => flockDocId,
-      flockDocStreamTtlMs: (flockDocId) =>
-        isCodeCollabFileIndexFlockDocId(flockDocId) ||
-        isCodeCollabFileIndexSignalFlockDocId(flockDocId)
-          ? CODE_COLLAB_FILE_INDEX_FLOCK_TTL_MS
-          : undefined,
-      auth: tokenProvider.createAuthCallback(),
-      // Every cursor save first awaits the covered resource's durability
-      // barrier (`persistMetaNow` / `persistDocNow` / `persistFlockDocNow`).
-      persistence: createRepoStreamsPersistence(args.repo, {
-        documentRemoteCursorStore: args.documentRemoteCursorStore,
-      }),
-      snapshotCodec:
-        content.mode === 'protected'
-          ? (content.snapshotCodec ?? streamsSnapshotCodec)
-          : streamsSnapshotCodec,
-      baseUrl: gatewayBaseUrl,
-      shardUrls: getLoroStreamsShardUrls(gatewayBaseUrl, tokenProvider.getShardHostSuffix()),
-      snapshotUpload:
-        content.mode === 'protected'
-          ? content.snapshotUpload
-          : {
-              canUpload: async () => true,
-              debounceMs: 5_000,
-            },
-      ...(content.mode === 'protected'
-        ? {
-            payloadProtectionNamespace: content.namespace,
-            payloadProtection: ((room) => {
-              const selected = content.resolve(room);
-              if (selected?.mode !== 'protected')
-                throw new WorkspaceStreamsConfigurationError(
-                  'Workspace Streams room requires content protection'
-                );
-              return selected;
-            }) satisfies StreamsRoomPayloadProtectionResolver,
-          }
-        : { payloadProtection: undefined }),
-    }),
+    adapter: createWorkspaceStreamsTransportAdapter(
+      (persistence) =>
+        new StreamsTransportAdapter({
+          incompleteRecoveryScope: args.incompleteRecoveryScope,
+          diagnostics: (event) => {
+            const diagnostic = getLoroSyncDiagnostic(event);
+            if (diagnostic) {
+              args.logger[diagnostic.level]('[loro-streams] transport failure', {
+                workspaceId: args.workspaceId,
+                ...diagnostic,
+              });
+            }
+          },
+          bucketId: args.bucketId ?? LORO_STREAMS_BUCKET_ID,
+          metaStreamId: getLoroMetaStreamId(args.workspaceId),
+          docStreamId: (docId) => getLoroStreamIdForDocId(args.workspaceId, docId),
+          flockDocStreamId: (flockDocId) => flockDocId,
+          flockDocStreamTtlMs: (flockDocId) =>
+            isCodeCollabFileIndexFlockDocId(flockDocId) ||
+            isCodeCollabFileIndexSignalFlockDocId(flockDocId)
+              ? CODE_COLLAB_FILE_INDEX_FLOCK_TTL_MS
+              : undefined,
+          auth,
+          snapshotCodec:
+            content.mode === 'protected'
+              ? (content.snapshotCodec ?? streamsSnapshotCodec)
+              : streamsSnapshotCodec,
+          baseUrl: gatewayBaseUrl,
+          shardUrls: getLoroStreamsShardUrls(gatewayBaseUrl, tokenProvider.getShardHostSuffix()),
+          snapshotUpload:
+            content.mode === 'protected'
+              ? content.snapshotUpload
+              : {
+                  canUpload: async () => true,
+                  debounceMs: 5_000,
+                },
+          ...(content.mode === 'protected'
+            ? {
+                payloadProtectionNamespace: content.namespace,
+                payloadProtection: ((room) => {
+                  const selected = content.resolve(room);
+                  if (selected?.mode !== 'protected')
+                    throw new WorkspaceStreamsConfigurationError(
+                      'Workspace Streams room requires content protection'
+                    );
+                  return selected;
+                }) satisfies StreamsRoomPayloadProtectionResolver,
+              }
+            : { payloadProtection: undefined }),
+          persistence,
+        }),
+      {
+        auth,
+        owner: args.incompleteRecoveryScope ?? args.repo,
+        persistence: createRepoStreamsPersistence(args.repo, {
+          documentRemoteCursorStore: args.documentRemoteCursorStore,
+        }),
+        recoverFlockCheckpointsOnTimeout: true,
+      }
+    ),
   };
 }

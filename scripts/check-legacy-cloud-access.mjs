@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+
+import { listRepositoryFiles } from './repository-files.mjs';
 
 // Public protocol families whose ordinary content APIs reject encrypted workspaces.
 // A new operation in one of these families requires admission without updating this list.
@@ -304,17 +305,7 @@ export function auditLegacyCloudSource(file, source) {
 }
 
 export function auditLegacyCloudTree(root) {
-  const files = [
-    ...new Set(
-      execFileSync('git', ['ls-files', '-co', '--exclude-standard'], {
-        cwd: root,
-        encoding: 'utf8',
-        maxBuffer: 20 * 1024 * 1024,
-      })
-        .trim()
-        .split('\n')
-    ),
-  ];
+  const files = [...new Set(listRepositoryFiles(root))];
   const rows = [],
     errors = [];
   for (const file of files) {

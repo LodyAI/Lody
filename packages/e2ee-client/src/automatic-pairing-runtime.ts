@@ -611,7 +611,6 @@ export function makeAutomaticPairingRuntime(options: {
               if (current.hasCurrentKey) return current;
               return yield* promise(() =>
                 runtime.refresh(value.context.workspaceId, {
-                  installKeys: true,
                   keyMode: 'receive',
                 })
               );
@@ -629,9 +628,7 @@ export function makeAutomaticPairingRuntime(options: {
     if (status?.deviceKind === 'personal' && status.hasDeviceCredential && !status.hasCurrentKey) {
       const received = yield* Effect.result(
         // Only this device's own current key; a host without modes runs its full round.
-        promise(() =>
-          runtime.refresh(value.context.workspaceId, { installKeys: true, keyMode: 'receive' })
-        )
+        promise(() => runtime.refresh(value.context.workspaceId, { keyMode: 'receive' }))
       );
       yield* check();
       if (Result.isFailure(received) && settleLost(value, received.failure)) return;

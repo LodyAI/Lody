@@ -439,7 +439,7 @@ export function E2eeWorkspaceConsole({
               // only its exact whole-member result authorizes local erasure.
               if (!disposed) {
                 try {
-                  await runtime.refresh(workspaceId, { installKeys: false });
+                  await runtime.refresh(workspaceId, { keyMode: 'none' });
                 } catch (checked) {
                   if (e2eeAccessLoss(checked)) throw checked;
                 }
@@ -762,7 +762,6 @@ export function E2eeWorkspaceConsole({
         if (cancelled || accountPairingJoins.get(identity) !== join) return false;
         try {
           const next = await runtime.refresh(workspaceId, {
-            installKeys: true,
             keyMode: 'receive',
           });
           if (next?.hasCurrentKey) return true;

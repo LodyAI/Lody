@@ -133,11 +133,6 @@ import {
 } from '@/lib/local-project-meta';
 import { loadSessionMcpCatalog } from '@/agent/session-mcp-resolver';
 import { waitForMcpCatalogBaseline } from '@/lib/workspace-mcp-store';
-import {
-  claimLegacySpeculativeWorktree,
-  completeLegacySpeculativeWorktreeSetup,
-  recoverLegacySpeculativeWorktrees,
-} from './worktree/legacy-speculative-worktrees';
 
 function formatManagedRuntimeProgressDetail(event: ManagedRuntimeProgressEvent): string {
   const runtimeLabel =
@@ -227,6 +222,7 @@ export interface ISession {
   getAcpCapabilitySourceVersion?(): string | null;
   getProviderBinding?(): import('./automation-observations').ProviderBinding | undefined;
   getMemoryBinding?(): SessionConfig['memory'];
+  getMcpServerIds?(): Readonly<SessionConfig['mcpServerIds']>;
   getWorkdir(): string;
   /**
    * Host-side working directory for file operations.
@@ -243,6 +239,8 @@ export interface ISession {
   getMonitorRuntimeInfo(): Promise<SessionMonitorRuntimeInfo>;
   exec(command: string, args: string[], workdir: string, isAI: boolean): Promise<string>;
   terminate(force?: boolean): Promise<void>;
+  /** False once the agent process has exited or termination has started. */
+  hasLiveAgentProcess?(): boolean;
   /**
    * Update git identity for commits made in this session.
    * This should be called when a new user sends a chat request to an existing session.
@@ -401,12 +399,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private readonly pendingTerminationPromises = new Map<SessionId, Promise<void>>();
   private readonly sessionSandboxFactory: SessionSandboxFactory;
   private readonly cloudPort: CloudPort;
-  private detachSpeculativeWorktreeRecovery: (() => void) | null = null;
-  private speculativeWorktreeRecoveryChain: Promise<void> = Promise.resolve();
   readonly mcpAuthentication: McpAuthenticationLegacy;
-  /** Coalescing latch for {@link enqueueSpeculativeWorktreeRecovery}. */
-  private speculativeWorktreeRecoveryQueued = false;
-  private speculativeWorktreeRecoveryGeneration = 0;
   // Rebalance requests are serialized because the per-session limit is derived from a
   // shared machine-wide budget. This avoids create/exit races briefly applying stale
   // shares of the 90% execution-plane budget. See docs/exec-sandbox.md.
@@ -618,64 +611,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   async initialize(): Promise<void> {
-    const recoveryGeneration = ++this.speculativeWorktreeRecoveryGeneration;
-    this.detachSpeculativeWorktreeRecovery?.();
-    this.detachSpeculativeWorktreeRecovery = this.workspaceDocument.onMetaRoomSynced((reason) => {
-      if (this.speculativeWorktreeRecoveryGeneration === recoveryGeneration) {
-        this.enqueueSpeculativeWorktreeRecovery(`meta-room-synced:${reason}`);
-      }
-    });
-    void this.workspaceDocument
-      .waitUntilMetaSynced({ reason: 'legacy-speculative-worktree-recovery' })
-      .then((synced) => {
-        if (synced && this.speculativeWorktreeRecoveryGeneration === recoveryGeneration) {
-          this.enqueueSpeculativeWorktreeRecovery('initialize');
-        }
-      })
-      .catch((error: unknown) => {
-        this.logger.debug(
-          `Failed to wait for metadata sync before speculative worktree recovery: ${formatErrorMessage(
-            error
-          )}`
-        );
-      });
     this.logger.debug('Session manager initialized');
-  }
-
-  private enqueueSpeculativeWorktreeRecovery(reason: string): void {
-    // Bound a burst to one running + one queued pass. This is an O(sessions)
-    // filesystem sweep on a recovery signal, and without a latch every
-    // transport edge appended another full pass to the chain — the dispatch
-    // bootstrap scan has had this latch all along, this one was missing it.
-    if (this.speculativeWorktreeRecoveryQueued) {
-      return;
-    }
-    this.speculativeWorktreeRecoveryQueued = true;
-    this.speculativeWorktreeRecoveryChain = this.speculativeWorktreeRecoveryChain
-      .then(async () => {
-        // Released before the sweep runs, so a signal arriving DURING it still
-        // gets its own follow-up pass and nothing is silently skipped.
-        this.speculativeWorktreeRecoveryQueued = false;
-        await recoverLegacySpeculativeWorktrees({
-          workspaceId: this.workspaceId,
-          machineId: this.machineId,
-          logger: this.logger,
-          isActiveSession: (sessionId) =>
-            this.pendingSessionCreates.has(sessionId) || this.sessions.has(sessionId),
-          isDurableSession: async (sessionId) => {
-            const record = await this.workspaceDocument.repo.getDocMeta(
-              getSessionRoomId(sessionId)
-            );
-            return !!record?.meta && !isLoroRepoDocDeleted(record);
-          },
-        });
-      })
-      .catch((error: unknown) => {
-        this.speculativeWorktreeRecoveryQueued = false;
-        this.logger.debug(
-          `Failed speculative worktree recovery (${reason}): ${formatErrorMessage(error)}`
-        );
-      });
   }
 
   private buildCreateAgentConfig(
@@ -1241,7 +1177,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const brokerEnv = await this.ensureGitCredentialBrokerEnv();
     if (!brokerEnv) return nativeSessionCredentials;
     if (!config.sessionId) throw new Error('SessionId is required for GitHub credentials');
-    const credentialOwner = await this.resolveGitHubOwner(config.sessionId, config.requesterUserId);
+    const credentialOwner = await this.resolveGitHubOwner(
+      config.sessionId,
+      config.resume ? undefined : config.requesterUserId
+    );
     const broker = this.gitCredentialBroker;
     if (!broker) throw new Error('GitHub credential broker is required');
     const credentials = acquireSessionCredentialsLegacy(broker, {
@@ -1332,16 +1271,20 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     }
   }
 
-  private async resolveGitHubOwner(sessionId: SessionId, initialOwner: string): Promise<string> {
+  private async resolveGitHubOwner(sessionId: SessionId, initialOwner?: string): Promise<string> {
     const record = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
     const owner = record?.meta?.userId;
     if (typeof owner === 'string' && owner) return owner;
-    if (record?.meta) throw new Error('GitHub session owner is missing');
+    if (record?.meta || !initialOwner) throw new Error('GitHub session owner is missing');
     // A new session has not published metadata yet; its creator is the owner.
     return initialOwner;
   }
 
-  async validateSessionCredentials(session: ISession, requesterUserId: string): Promise<void> {
+  async validateSessionCredentials(
+    session: ISession,
+    requesterUserId: string,
+    ownerChange?: 'replace-before-prompt'
+  ): Promise<void | 'retired'> {
     await session.validateMcpRequester?.(requesterUserId);
     const credentials = session.getGitHubCredentials();
     if (credentials.mode === 'native') return;
@@ -1353,20 +1296,27 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     ) {
       throw new GitCredentialContextError({ message: 'github_runtime_context_invalid' });
     }
-    const owner = await this.resolveGitHubOwner(session.sessionId, requesterUserId);
+    const owner = await this.resolveGitHubOwner(
+      session.sessionId,
+      lease.context.requesterUserId === requesterUserId ? requesterUserId : undefined
+    );
     // The runtime may have been retired while trusted metadata was loading.
     if (!lease.active)
       throw new GitCredentialContextError({ message: 'github_runtime_context_released' });
     if (lease.context.requesterUserId !== owner) {
+      const replace =
+        ownerChange === 'replace-before-prompt' && this.getSession(session.sessionId) === session;
       try {
         lease.revoke();
       } finally {
-        await session.terminate(true);
+        if (replace) {
+          await this.retireSessionForReconfiguration(session);
+        } else {
+          await session.terminate(true);
+        }
       }
-      throw new GitCredentialContextError({
-        message:
-          'github_owner_changed: previous session processes were closed; start a new turn with the new owner',
-      });
+      if (replace) return 'retired';
+      throw new GitCredentialContextError({ message: 'github_owner_changed' });
     }
   }
 
@@ -1804,25 +1754,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.logger.debug(
         `[${config.sessionId}] Preparing worktree (repoId=${worktreeTarget.managerConfig.repoId} sessionId=${config.sessionId}) in host`
       );
-      // An older daemon may have prepared this Session's worktree for a draft.
-      // Claim before probing the directory: a mismatched one is removed here.
-      const legacyTarget = {
-        repoId: worktreeTarget.managerConfig.repoId,
-        source: worktreeTarget.managerConfig.source ?? {
-          kind: 'github' as const,
-          repoUrl: worktreeTarget.managerConfig.repoUrl,
-        },
-        ...(config.branch ? { baseBranch: config.branch } : {}),
-      };
-      const legacyClaim = await claimLegacySpeculativeWorktree({
-        sessionId: config.sessionId!,
-        workspaceId: config.workspaceId,
-        machineId: this.machineId,
-        target: legacyTarget,
-        restoreBranchName: config.restoreBranchName,
-        logger: this.logger,
-      });
-      const legacySetupPending = legacyClaim === 'setup-pending';
       const worktreeAlreadyExisted = worktreeManager.hasWorktree(config.sessionId!);
       const worktreeInfo = await worktreeManager.createWorktree(
         config.sessionId!,
@@ -1844,7 +1775,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.logger.debug(
         `[${config.sessionId}] Worktree details (branch=${worktreeInfo.branch} head=${worktreeInfo.headSha ?? 'unknown'}): host=${worktreeInfo.hostPath}`
       );
-      if (config.resume && worktreeAlreadyExisted && !legacySetupPending) {
+      if (config.resume && worktreeAlreadyExisted) {
         this.logger.debug(
           `[${config.sessionId}] Skipping worktree setup for restored session because the worktree already exists`
         );
@@ -1879,13 +1810,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             onEnd: (event) => setupHistory.onEnd?.(event),
           },
         });
-        if (legacySetupPending) {
-          await completeLegacySpeculativeWorktreeSetup({
-            sessionId: config.sessionId!,
-            workspaceId: config.workspaceId,
-            machineId: this.machineId,
-          });
-        }
       }
     } else if (config.parentSessionId) {
       const parentSessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(
@@ -1923,11 +1847,23 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
   /** Retire an instance between prompts without ending its execution owner's turn. */
   async retireSessionForReconfiguration(session: ISession): Promise<void> {
-    if (this.sessions.get(session.sessionId) !== session)
-      throw new Error('Session changed before reconfiguration');
-    // Reconfiguration and stale-prompt replacement preserve the live history owner.
+    const current = this.sessions.get(session.sessionId);
+    if (!current || current !== session) throw new Error('Session changed before reconfiguration');
+    // Suppress agent-death events for the continuing turn. Keep custody of the
+    // exact instance until physical retirement succeeds, including on failure.
+    this.sessionEventDetachers.get(session)?.();
+    this.sessionEventDetachers.delete(session);
+    try {
+      await session.terminate(true);
+    } catch (error) {
+      if (
+        this.sessions.get(session.sessionId) === current &&
+        !this.sessionEventDetachers.has(current)
+      )
+        this.registerSessionEvents(current);
+      throw error;
+    }
     this.detachSession(session);
-    await session.terminate(true);
   }
 
   async terminateSession(sessionId: SessionId, force: boolean = false): Promise<void> {
@@ -1942,9 +1878,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   async cleanUp(options: { keepWorkspaceDocumentOpen?: boolean } = {}) {
-    this.speculativeWorktreeRecoveryGeneration += 1;
-    this.detachSpeculativeWorktreeRecovery?.();
-    this.detachSpeculativeWorktreeRecovery = null;
     const failures: unknown[] = [];
     const attempt = async (step: () => Promise<unknown>) => {
       try {
@@ -1953,7 +1886,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         failures.push(error);
       }
     };
-    await attempt(() => this.speculativeWorktreeRecoveryChain);
     await attempt(() => this.cleanupSessions());
     // MessageHandler drains final callbacks between these two cleanup phases.
     if (!options.keepWorkspaceDocumentOpen) {

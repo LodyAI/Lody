@@ -174,7 +174,6 @@ describe('Lody.registerAgent', () => {
         fetchedAt: 0,
       })),
       updateAcpCapabilities: vi.fn(async () => {}),
-      applyTitleGenerationDefaults: vi.fn(async () => {}),
     } as unknown as LoroDocumentManager;
 
     const { Lody } = await import('../src/lib/lody');
@@ -228,7 +227,6 @@ describe('Lody.registerAgent', () => {
         fetchedAt: 0,
       })),
       updateAcpCapabilities: vi.fn(async () => {}),
-      applyTitleGenerationDefaults: vi.fn(async () => {}),
     } as unknown as LoroDocumentManager;
 
     const { Lody } = await import('../src/lib/lody');
@@ -276,7 +274,6 @@ describe('Lody.registerAgent', () => {
         fetchedAt: 0,
       })),
       updateAcpCapabilities: vi.fn(async () => {}),
-      applyTitleGenerationDefaults: vi.fn(async () => {}),
     } as unknown as LoroDocumentManager;
 
     const { Lody } = await import('../src/lib/lody');
@@ -385,7 +382,6 @@ describe('Lody.registerAgent', () => {
       createAgentConfig: vi.fn(async () => 'agent-config-id'),
       getAcpCapabilities,
       updateAcpCapabilities,
-      applyTitleGenerationDefaults: vi.fn(async () => {}),
     } as unknown as LoroDocumentManager;
 
     const { Lody } = await import('../src/lib/lody');
@@ -512,7 +508,6 @@ describe('Lody.registerAgent', () => {
       createAgentConfig,
       getAcpCapabilities: vi.fn(async () => null),
       updateAcpCapabilities: vi.fn(async () => {}),
-      applyTitleGenerationDefaults: vi.fn(async () => {}),
     } as unknown as LoroDocumentManager;
 
     const { Lody } = await import('../src/lib/lody');

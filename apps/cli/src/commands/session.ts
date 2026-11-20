@@ -42,6 +42,7 @@ import {
   getDeclaredModelControls,
   getAcpModelEffortChoices,
   getAcpModelFastSupport,
+  getAcpModelSpeedTiers,
   withAcpConfigOptionsForModel,
   machineSupportsPreparedSessionInputProtocol,
   machineSupportsMemoryProviders,
@@ -98,6 +99,8 @@ import {
   hasAgentRunConfigSelection,
   ACP_CONFIG_OPTION_OFF_VALUE,
   ACP_CONFIG_OPTION_ON_VALUE,
+  ACP_FAST_MODE_VALUE_FAST,
+  ACP_FAST_MODE_VALUE_ULTRAFAST,
   isAcpFastModeConfigId,
   isAcpThoughtLevelConfigOption,
   resolveAgentRunConfigSelection,
@@ -456,9 +459,6 @@ type SessionActivityTimestampManager = {
     upsertDocMeta(roomId: string, meta: Partial<SessionMeta>): Promise<unknown>;
   };
 };
-
-// Re-export for backward compatibility with tests
-export { normalizeCliValue, selectWorkspaceSummary };
 
 export function resolvePromptCandidate(input: {
   prompt?: string;
@@ -2017,6 +2017,7 @@ function validateModelDependentTurnConfigOptionValues(
     ])
   );
   const efforts = getAcpModelEffortChoices(capability, targetModelId);
+  const declaredSpeedTiers = getAcpModelSpeedTiers(capability, targetModelId);
   const declaredFast = getAcpModelFastSupport(capability, targetModelId);
   for (const [id, value] of Object.entries(values)) {
     if (isTurnEffortEntry(optionsById, id)) {
@@ -2040,12 +2041,48 @@ function validateModelDependentTurnConfigOptionValues(
       }
     } else if (isAcpFastModeConfigId(id)) {
       const option = optionsById.get(id);
+      const isNamedSpeedTier =
+        value === ACP_FAST_MODE_VALUE_FAST || value === ACP_FAST_MODE_VALUE_ULTRAFAST;
+      if (isNamedSpeedTier) {
+        if (declaredSpeedTiers !== undefined) {
+          if (!declaredSpeedTiers.includes(value)) {
+            assertMachineFlockCacheSufficient(
+              freshness,
+              `Speed tier ${value} is unavailable in the local replica for model ${targetModelId}.`,
+              { kind: 'ACP option', id }
+            );
+            throw new Error(
+              declaredSpeedTiers.length === 0
+                ? `Model ${targetModelId} does not offer fast mode.`
+                : `Invalid speed tier for model ${targetModelId}: ${value}. Allowed values: ${[ACP_CONFIG_OPTION_OFF_VALUE, ...declaredSpeedTiers].join(', ')}.`
+            );
+          }
+          validatedIds.add(id);
+          continue;
+        }
+        if (targetModelId !== probedModelId) {
+          validatedIds.add(id);
+          continue;
+        }
+      }
       if (option?.type === 'boolean' && typeof value !== 'boolean') {
         throw new Error(`Config option "${id}" expects a boolean value.`);
       }
       if (option?.type === 'select') {
-        if (typeof value !== 'string') {
+        if (typeof value !== 'string' && typeof value !== 'boolean') {
           throw new Error(`Config option "${id}" expects a select value.`);
+        }
+        if (typeof value === 'boolean') {
+          if (declaredFast === false && value === true) {
+            assertMachineFlockCacheSufficient(
+              freshness,
+              `Fast mode is unavailable in the local replica for model ${targetModelId}.`,
+              { kind: 'ACP option', id }
+            );
+            throw new Error(`Model ${targetModelId} does not offer fast mode.`);
+          }
+          validatedIds.add(id);
+          continue;
         }
         // A custom raw select value has no model-independent toggle meaning.
         // Leave its membership validation to the ordinary catalog validator.
@@ -2101,6 +2138,7 @@ export function filterCompatibleTurnConfigOptionValues(
   );
   const probedModelId = findTurnConfigOptionByCategory(capability, 'model')?.currentValue;
   const efforts = getAcpModelEffortChoices(capability, targetModelId);
+  const speedTiers = getAcpModelSpeedTiers(capability, targetModelId);
   const fastSupport = getAcpModelFastSupport(capability, targetModelId);
   // A different (or unknown) probe model cannot invalidate the target's
   // recorded controls. Without per-model data, preserve them for runtime.
@@ -2114,13 +2152,24 @@ export function filterCompatibleTurnConfigOptionValues(
           if (efforts !== undefined) return typeof value === 'string' && efforts.includes(value);
           if (keepUnverified) return typeof value === 'string';
         } else if (isAcpFastModeConfigId(id)) {
+          if (speedTiers !== undefined) {
+            if (speedTiers.length === 0) return false;
+            if (value === ACP_FAST_MODE_VALUE_ULTRAFAST) {
+              return speedTiers.includes(ACP_FAST_MODE_VALUE_ULTRAFAST);
+            }
+            if (value === ACP_FAST_MODE_VALUE_FAST) {
+              return speedTiers.includes(ACP_FAST_MODE_VALUE_FAST);
+            }
+          }
           // A model known without Fast has nothing to carry a Fast value to.
           if (fastSupport === false) return false;
           if (keepUnverified) {
             return (
               typeof value === 'boolean' ||
               value === ACP_CONFIG_OPTION_ON_VALUE ||
-              value === ACP_CONFIG_OPTION_OFF_VALUE
+              value === ACP_CONFIG_OPTION_OFF_VALUE ||
+              value === ACP_FAST_MODE_VALUE_FAST ||
+              value === ACP_FAST_MODE_VALUE_ULTRAFAST
             );
           }
         }

@@ -11,7 +11,7 @@ The docked landing composer’s Role submenu appeared far above its parent menu,
 
 ## Decision
 
-The positioning decision is superseded by [trigger-row cascading placement](2026-09-30-composer-cascading-submenu-placement.md). The pane sizing and inset decisions remain in effect.
+The positioning decision is superseded by [trigger-row cascading placement](2026-09-30-composer-cascading-submenu-placement.md). Pane sizing is now owned by [composer run config](../../../docs/sessions-run-config.md): the two-pane submenu has a fixed 14rem height. The inset decision remains in effect.
 
 `DesktopRunConfigMenu` anchors the Role submenu to the parent menu’s popup. It centers vertically when shorter than the parent and shifts up by half the excess height when taller, keeping its bottom from extending beyond the parent's. The Role row still controls opening and selection, but anchoring the positioner to that row placed a tall pane over the footer controls at the bottom of the landing page. Vertical collision shifting keeps the pane on screen in smaller viewports. The list and detail pane no longer impose a fixed height; the 14rem cap bounds large content while each pane owns its own scrolling. The product does not cancel the shared popup's horizontal inset in either menu: that compensation made the parent and submenu rows appear uneven across contexts.
 

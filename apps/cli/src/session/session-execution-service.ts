@@ -11,7 +11,11 @@ import { daemonLossObserver, createDaemonLossTasks } from '@/lib/e2ee/client-los
 import type { EncryptedAgentExecution } from '@/lib/e2ee/agent-execution';
 import { MAX_DERIVED_TURNS_PER_ORIGIN } from '@/lib/e2ee/derivation-limits';
 import type { RealtimeStartPermit } from '@/lib/e2ee/realtime-journal';
-import { publishTurnCompletionLegacy } from './turn-completion-legacy';
+import {
+  awaitNativeWorkSettlementLegacy,
+  publishTurnCompletionLegacy,
+} from './turn-completion-legacy';
+import type { NativeWorkWatch } from './turn-completion';
 import { resolveProjectFileRoots } from './worktree/project-member-access';
 import { type AcpLauncher, resolveAcpLauncher } from '@/agent/acp-analytics';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
@@ -178,6 +182,11 @@ import {
 import type { MachineAccessVerification } from './session-access-retry';
 import { createSessionBackend, getSteerOperationId, type SessionBackend } from './session-backend';
 import {
+  interruptedTurnContinuationId,
+  isTurnInterruptedByProcessEnd,
+  planInterruptedTurnContinuation,
+} from './interrupted-turn-continuation';
+import {
   findLastHistoryEntry,
   isActivationAwaitingHistory,
   resolveDispatchAcpSessionId,
@@ -211,6 +220,12 @@ type FinalizeTurnContext = {
 };
 
 type InboxExecutionHandle = Awaited<ReturnType<OperationInboxLegacy['openExecution']>>;
+
+function mcpSelectionChanged(session: ISession, input: SessionTurnInputConfig): boolean {
+  const selected = new Set(input.mcpServerIds ?? []);
+  const mounted = new Set(session.getMcpServerIds?.() ?? []);
+  return selected.size !== mounted.size || [...selected].some((id) => !mounted.has(id));
+}
 
 /** One message per definite encrypted refusal; only a sender without rights reads as one. */
 function encryptedRefusalMessage(
@@ -380,6 +395,12 @@ type TurnRuntimeState = {
   /** Start step in progress; cleared once a Session is bound, so later failures name none. */
   startStage?: SessionStartStage;
   cancelRequested: boolean;
+  /**
+   * Shutdown interrupted this input's running prompt; the user did not stop it. Its
+   * cancellation keeps the dispatch claim in Session metadata, exactly as a crash
+   * leaves it, so the next start continues the Turn once.
+   */
+  interruptedByProcessEnd?: boolean;
   pendingInputOnCancel: PendingInputCancellationPolicy;
   releaseFailure?: unknown;
   releaseParentAdmission?: () => void;
@@ -735,6 +756,8 @@ export type SessionExecutionServiceDeps = {
     turnId: string,
     failure: { phase: SessionStopFailurePhase; message: string }
   ) => Promise<void>;
+  /** Persists the notice that agent work outliving this Turn ended unfinished. */
+  recordNativeWorkInterrupted?: (sessionId: SessionId, turnId: string) => Promise<void>;
   maybeGenerateAndStoreSessionTitle: (
     sessionId: SessionId,
     cliType: AgentConfigCliType,
@@ -1263,6 +1286,9 @@ export class SessionExecutionService {
   quiesceInboxExecutions(): void {
     this.shutdownAbort.abort();
     for (const runtime of this.turnRuntimeBySession.values()) {
+      // A Turn whose prompt already ended is only finishing bookkeeping: not continued.
+      if (runtime.inboxOwner?.input && runtime.promptInFlight && !runtime.cancelRequested)
+        runtime.interruptedByProcessEnd = true;
       runtime.cancelRequested = true;
       runtime.pendingInputOnCancel = 'preserve';
       runtime.terminateSessionOnCancel = true;
@@ -1349,6 +1375,12 @@ export class SessionExecutionService {
   private readonly canceledTurnBySession = new Map<SessionId, string>();
   private readonly currentTurnBySession = new Map<SessionId, string>();
   private readonly turnRuntimeBySession = new Map<SessionId, TurnRuntimeState>();
+  /**
+   * The last cleanly released turn per Session. Work its own Agent continues by itself
+   * (woken by a background task, a scheduled wake-up or a cron) still acts for this
+   * turn's frozen invocation. See `readInvokingRuntime`.
+   */
+  private readonly releasedTurnBySession = new Map<SessionId, TurnRuntimeState>();
   /** Admission ownership outlives replaceable turn runtime registrations. */
   private readonly liveInboxExecutionIds = new Set<string>();
   /** Start times of recent start retries, shared by every Session this service runs. */
@@ -2403,6 +2435,9 @@ export class SessionExecutionService {
     if (!agentClient || !acpSessionId || !steerCapability) {
       return await rejectAndPromote('unsupported');
     }
+    if (mcpSelectionChanged(runtime.session, options.inputConfig)) {
+      return await rejectAndPromote('unsupported', 'MCP selection requires a new turn.');
+    }
     if (steerCapability.configPolicy === 'active') {
       const mismatch = agentClient.findSteerConfigMismatch(options.inputConfig);
       if (mismatch) {
@@ -3259,7 +3294,125 @@ export class SessionExecutionService {
   }
 
   private registerTurnRuntime(runtime: TurnRuntimeState): void {
+    this.releasedTurnBySession.delete(runtime.sessionId);
     this.turnRuntimeBySession.set(runtime.sessionId, runtime);
+    // A newer Turn owns the Session's completion signals from here on.
+    this.withdrawNativeWorkCompletion(runtime.sessionId);
+  }
+
+  /** Completion publications still waiting for agent work that outlived their Turn. */
+  private readonly nativeWorkSupersede = new Map<SessionId, Set<() => void>>();
+
+  /**
+   * Withdraws any pending post-turn background completion wait so Stop, archive, delete,
+   * or a newer Turn will not emit stale `nativeWorkInterrupted` notices or outcomes.
+   */
+  withdrawNativeWorkCompletion(sessionId: SessionId): void {
+    for (const supersede of [...(this.nativeWorkSupersede.get(sessionId) ?? [])]) supersede();
+  }
+
+  private registerNativeWorkWithdraw(sessionId: SessionId, withdraw: () => void): () => void {
+    const supersedeSet = this.nativeWorkSupersede.get(sessionId) ?? new Set();
+    supersedeSet.add(withdraw);
+    this.nativeWorkSupersede.set(sessionId, supersedeSet);
+    return () => {
+      supersedeSet.delete(withdraw);
+      if (!supersedeSet.size && this.nativeWorkSupersede.get(sessionId) === supersedeSet)
+        this.nativeWorkSupersede.delete(sessionId);
+    };
+  }
+
+  /**
+   * Watches the released Turn's own agent instance while it still reports work. Absent
+   * for agents that report no `sessionActivity`, which keep immediate completion.
+   */
+  private watchNativeWork(sessionId: SessionId): NativeWorkWatch | undefined {
+    const sessionManager = this.deps.sessionManager;
+    const session = sessionManager.getSession(sessionId);
+    const client = session?.agentClient;
+    if (!session || !client || session.hasLiveAgentProcess?.() === false) return undefined;
+    const readPending = (): 'running' | 'background' | null => {
+      try {
+        return client.getNativeWork() ?? (client.hasUnsettledNativeWork?.() ? 'background' : null);
+      } catch (cause) {
+        this.deps.logger.debug(
+          `[${sessionId}] Native agent work unreadable at release: ${formatErrorMessage(cause)}`
+        );
+        return null;
+      }
+    };
+    // An unreadable observation must not hold back completion; publish it as before.
+    if (readPending() === null) return undefined;
+    const isInstanceLive = () =>
+      sessionManager.getSession(sessionId) === session && session.hasLiveAgentProcess?.() !== false;
+    return {
+      current: readPending,
+      subscribe: (onEvent) => {
+        const unregister = this.registerNativeWorkWithdraw(sessionId, () => onEvent('superseded'));
+        // Detach publishes null before removing the instance; read it after that.
+        const onChanged = (changed: SessionId) => {
+          if (changed !== sessionId) return;
+          queueMicrotask(() => onEvent(isInstanceLive() ? 'changed' : 'ended'));
+        };
+        const onEnded = (event: { sessionId: SessionId }) => {
+          if (event.sessionId === sessionId) onEvent('ended');
+        };
+        sessionManager.on('onNativeWorkChanged', onChanged);
+        sessionManager.on('exit', onEnded);
+        sessionManager.on('terminated', onEnded);
+        if (!isInstanceLive()) queueMicrotask(() => onEvent('ended'));
+        return () => {
+          unregister();
+          sessionManager.off('onNativeWorkChanged', onChanged);
+          sessionManager.off('exit', onEnded);
+          sessionManager.off('terminated', onEnded);
+        };
+      },
+    };
+  }
+
+  /**
+   * The runtime whose invocation the Session's Agent currently acts for: the
+   * registered turn, else the last cleanly released turn while that same Agent
+   * process is still live. Only that Agent holds the Session's tool binding, so a
+   * call proves it is working; whether it reports its own activity does not
+   * matter (Codex reports none to Lody). A replaced or exited Agent acts for nobody.
+   */
+  private readInvokingRuntime(sessionId: SessionId): TurnRuntimeState | undefined {
+    const live = this.turnRuntimeBySession.get(sessionId);
+    if (live) return live;
+    const released = this.releasedTurnBySession.get(sessionId);
+    if (!released) return undefined;
+    const session = released.session;
+    if (
+      !session ||
+      this.deps.sessionManager.getSession(sessionId) !== session ||
+      session.hasLiveAgentProcess?.() === false
+    ) {
+      this.releasedTurnBySession.delete(sessionId);
+      return undefined;
+    }
+    return released;
+  }
+
+  /** The Agent process ended or was replaced; its self-started work ends with it. */
+  forgetReleasedTurn(sessionId: SessionId): void {
+    this.releasedTurnBySession.delete(sessionId);
+  }
+
+  private canContinueAfterRelease(runtime: TurnRuntimeState): boolean {
+    return (
+      runtime.promptStarted &&
+      Boolean(runtime.session) &&
+      !runtime.cancelRequested &&
+      !runtime.releaseFailure &&
+      !runtime.disconnectedTransport &&
+      !runtime.initializationStalled &&
+      !(
+        runtime.inboxOwner?.input &&
+        this.isInboxInputCanceled(runtime.sessionId, runtime.inboxOwner.input.inputId)
+      )
+    );
   }
 
   /**
@@ -3300,6 +3453,8 @@ export class SessionExecutionService {
         this.releaseParentAdmission(runtime);
       }
       this.turnRuntimeBySession.delete(sessionId);
+      if (this.canContinueAfterRelease(runtime)) this.releasedTurnBySession.set(sessionId, runtime);
+      else this.releasedTurnBySession.delete(sessionId);
       daemonLossObserver.changed();
     }
     // Safety net: drop per-turn analytics state if the turn ended without a
@@ -3702,13 +3857,16 @@ export class SessionExecutionService {
       // assistant as success unless the user turn already carries a stronger
       // failed/cancelled outcome, so reversing these writes creates a window
       // where a cancelled turn can be durably folded as succeeded.
-      yield* self.ignoreWithWarning(
-        options.sessionId,
-        'Failed to mark dispatch cancelled',
-        self.tryPromise(() =>
-          self.markDispatchCancelled(options.sessionId, options.sessionDoc, options.userTurnId)
-        )
-      );
+      // A shutdown interruption leaves the same trace as a crash: the input stays
+      // `processing` and claimed in metadata until the next start continues it.
+      if (!runtime?.interruptedByProcessEnd)
+        yield* self.ignoreWithWarning(
+          options.sessionId,
+          'Failed to mark dispatch cancelled',
+          self.tryPromise(() =>
+            self.markDispatchCancelled(options.sessionId, options.sessionDoc, options.userTurnId)
+          )
+        );
 
       if (options.reportTurnError) {
         yield* self.ignoreWithWarning(
@@ -4002,6 +4160,49 @@ export class SessionExecutionService {
     }
     await options.sessionDoc.setStatus(SessionStatusFactory.idle());
     this.captureStatusChanged(options.sessionId, 'idle', undefined, 'turn_failed');
+  }
+
+  /**
+   * Restart dispatch of an input a process end interrupted (its metadata claim survived
+   * on this Machine). The input itself is never replayed: it settles as stopped, and
+   * one new Lody-authored `continue` input follows unless the user already moved on.
+   * Returns false when the input was not interrupted, so the caller fails it as before.
+   * Spec: `specs/interrupted-turn-continuation.md`.
+   */
+  private async continueInterruptedTurn(
+    sessionId: SessionId,
+    sessionDoc: SessionDocument,
+    userTurnId: string
+  ): Promise<boolean> {
+    // Encrypted starts run only signed input; Lody cannot sign for the requester.
+    if (this.deps.encryptedExecution) return false;
+    const raw = await this.deps.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+    const meta = raw?.meta as SessionMeta | undefined;
+    if (!isTurnInterruptedByProcessEnd(meta, this.deps.machineId, userTurnId)) return false;
+    const backend = await createSessionBackend(sessionDoc);
+    const [interrupted, existing, queue] = await Promise.all([
+      backend.readTurn(userTurnId),
+      backend.readTurn(interruptedTurnContinuationId(userTurnId)),
+      backend.getMessageQueue(),
+    ]);
+    const plan = planInterruptedTurnContinuation({
+      interruptedTurnId: userTurnId,
+      interruptedTurn: interrupted.state === 'ready' ? interrupted.turn : undefined,
+      meta: raw && !isLoroRepoDocDeleted(raw) ? meta : undefined,
+      queuedInputCount: queue.length,
+      continuationExists: existing.state !== 'missing',
+      timestamp: new Date(getServerNow()).toISOString(),
+    });
+    await this.markDispatchCancelled(sessionId, sessionDoc, userTurnId);
+    await sessionDoc.setStatus(SessionStatusFactory.idle());
+    this.deps.logger.info(
+      `[${sessionId}] Interrupted Turn ${userTurnId}: ${plan.kind === 'continue' ? 'continuing' : `not continued (${plan.reason})`}`
+    );
+    if (plan.kind === 'continue') {
+      await backend.appendUserTurn(plan.entry);
+      this.onInboxReleased?.(sessionId);
+    }
+    return true;
   }
 
   /**
@@ -4952,6 +5153,22 @@ export class SessionExecutionService {
         !options.inboxBatch &&
         inbox!.inputEnded(this.deps.workspaceId, sessionId, inboxInput.inputId)
       ) {
+        // A process end interrupted this input: settle it like Stop and continue once.
+        const continued = await this.continueInterruptedTurn(
+          sessionId,
+          sessionDoc,
+          userTurnId
+        ).catch((continueCause: unknown) => {
+          this.deps.logger.warn(
+            `[${sessionId}] Cannot continue interrupted input ${userTurnId}: ${formatErrorMessage(continueCause)}`
+          );
+          return false;
+        });
+        if (continued) {
+          await closeLeftoverEntry();
+          span.end({ outcome: 'inbox-input-interrupted' });
+          return 'inbox-input-ended';
+        }
         // An ended input is never admitted again (no replay), so leaving its user
         // turn pending would make dispatch select it ahead of every later message.
         await this.retireEndedInboxInputTurn(sessionId, sessionDoc, userTurnId).catch(
@@ -5832,30 +6049,90 @@ export class SessionExecutionService {
         const notify = async () => {
           if (fact) await this.publishTurnOutcomeFact(fact);
         };
+        const own = (work: Promise<unknown>) => {
+          const owned = Promise.allSettled([work]);
+          this.ownedWork.add(owned);
+          void owned.then(() => {
+            this.ownedWork.delete(owned);
+            daemonLossObserver.changed();
+          });
+        };
         // Failure attention is independent of successful delivery. Never delay it on sync.
         const completion = runtime.finalizeCompleted && !runtime.releaseFailure;
-        const delivery = completion
-          ? publishTurnCompletionLegacy({
-              signal: this.completionPublicationAbort.signal,
-              completedAt,
-              sessionDoc,
-              workspaceDocument: this.deps.workspaceDocument,
-              notify: fact?.outcome.kind === 'succeeded' ? notify : async () => {},
-            }).catch((error: unknown) => {
-              this.deps.logger.warn(
-                `[${sessionId}] Turn completion publication incomplete (turnId=${runtime.turnId}): ${formatErrorMessage(error)}`
+        const publishCompletion = (settlement: 'settled' | 'interrupted', at: number) =>
+          publishTurnCompletionLegacy({
+            signal: this.completionPublicationAbort.signal,
+            completedAt: at,
+            sessionDoc,
+            workspaceDocument: this.deps.workspaceDocument,
+            notify:
+              fact?.outcome.kind !== 'succeeded'
+                ? async () => {}
+                : settlement === 'interrupted'
+                  ? () =>
+                      this.publishTurnOutcomeFact({
+                        ...fact,
+                        outcome: { kind: 'unknown', code: 'native_work_interrupted' },
+                      })
+                  : notify,
+          }).catch((error: unknown) => {
+            this.deps.logger.warn(
+              `[${sessionId}] Turn completion publication incomplete (turnId=${runtime.turnId}): ${formatErrorMessage(error)}`
+            );
+          });
+        // Agent work that outlived the Turn keeps it unfinished for its reader. The wait
+        // holds no write, so only the publication after it is owned bookkeeping.
+        const nativeWork = completion ? this.watchNativeWork(sessionId) : undefined;
+        if (nativeWork) {
+          let withdrawn = false;
+          const unregisterWithdraw = this.registerNativeWorkWithdraw(sessionId, () => {
+            withdrawn = true;
+          });
+          void awaitNativeWorkSettlementLegacy(nativeWork, this.completionPublicationAbort.signal)
+            .then((settlement) => {
+              if (
+                settlement === 'superseded' ||
+                withdrawn ||
+                this.completionPublicationAbort.signal.aborted
+              ) {
+                unregisterWithdraw();
+                return;
+              }
+              own(
+                (async () => {
+                  try {
+                    if (settlement === 'interrupted')
+                      await this.recordNativeWorkInterrupted(sessionId, runtime.turnId);
+                    if (withdrawn || this.completionPublicationAbort.signal.aborted) return;
+                    unregisterWithdraw();
+                    await publishCompletion(settlement, Math.max(completedAt, getServerNow()));
+                  } finally {
+                    unregisterWithdraw();
+                  }
+                })()
               );
             })
-          : Promise.resolve();
-        const attention = fact?.outcome.kind !== 'succeeded' ? notify() : Promise.resolve();
-        const owned = Promise.allSettled([delivery, attention]);
-        this.ownedWork.add(owned);
-        void owned.then(() => {
-          this.ownedWork.delete(owned);
-          daemonLossObserver.changed();
-        });
+            .catch(() => {
+              // Shutdown withdrew the wait; nothing was published or written.
+              unregisterWithdraw();
+            });
+        } else if (completion) own(publishCompletion('settled', completedAt));
+        if (fact?.outcome.kind !== 'succeeded') own(notify());
       }
     }
+  }
+
+  /**
+   * The agent reported work after its Turn and its process ended first: the conversation
+   * records it, and the reader is alerted to an unknown result rather than a success.
+   */
+  private recordNativeWorkInterrupted(sessionId: SessionId, turnId: string): Promise<void> {
+    return (this.deps.recordNativeWorkInterrupted?.(sessionId, turnId) ?? Promise.resolve()).catch(
+      (cause: unknown) =>
+        this.deps.logger.warn(
+          `[${sessionId}] Failed to record interrupted background work: ${formatErrorMessage(cause)}`
+        )
+    );
   }
 
   /** Freeze provenance once the exact input is available; never changes authorization. */
@@ -6100,7 +6377,7 @@ export class SessionExecutionService {
     sourceTurnId: string,
     requestId: string
   ): { kind: 'owner' } | { kind: 'member' } | undefined {
-    const runtime = this.turnRuntimeBySession.get(sessionId);
+    const runtime = this.readInvokingRuntime(sessionId);
     if (!runtime || runtime.cancelRequested || runtime.invocation?.sourceTurnId !== sourceTurnId)
       return undefined;
     if (runtime.encryptedPrincipal === 'owner') return { kind: 'owner' };
@@ -6123,7 +6400,7 @@ export class SessionExecutionService {
     | { kind: 'owner' }
     | { kind: 'member'; requesterDevice: string; localProjectIds: readonly string[] }
     | undefined {
-    const runtime = this.turnRuntimeBySession.get(sessionId);
+    const runtime = this.readInvokingRuntime(sessionId);
     if (!runtime || runtime.cancelRequested) return undefined;
     if (runtime.encryptedPrincipal === 'owner') return { kind: 'owner' };
     if (
@@ -6144,7 +6421,7 @@ export class SessionExecutionService {
         sender?: { kind: 'user' } | { kind: 'agent'; sessionId: SessionId };
       }
     | undefined {
-    const runtime = this.turnRuntimeBySession.get(sessionId);
+    const runtime = this.readInvokingRuntime(sessionId);
     if (
       !runtime ||
       runtime.cancelRequested ||
@@ -7349,7 +7626,7 @@ export class SessionExecutionService {
 
       const applyPromptConfig = (
         targetSession: ISession,
-        triggerReason: 'initial' | 'stale_acp_recovery'
+        triggerReason: 'initial' | 'stale_acp_recovery' | 'owner_change'
       ): Effect.Effect<void, unknown, never> =>
         self.tryPromise((signal) =>
           traceAsync(
@@ -7372,21 +7649,34 @@ export class SessionExecutionService {
           )
         );
 
-      const validatePromptCredentials = Effect.fnUntraced(function* (
+      const validatePromptCredentials = (
         targetSession: ISession,
-        triggerReason: 'initial' | 'stale_acp_recovery'
-      ): Effect.fn.Return<void, unknown, never> {
-        // Validate this runtime's owner-bound authority before submitting a turn.
-        yield* self.tryPromise(() =>
+        triggerReason: 'initial' | 'stale_acp_recovery' | 'owner_change'
+      ) =>
+        self.tryPromise(() =>
           traceAsync(
             self.deps.logger,
             'execution.validate_credentials',
             { sessionId, turnId, triggerReason },
-            async () =>
-              await self.deps.sessionManager.validateSessionCredentials(targetSession, userId)
+            () =>
+              self.deps.sessionManager.validateSessionCredentials(
+                targetSession,
+                userId,
+                triggerReason === 'initial' ? 'replace-before-prompt' : undefined
+              )
           )
         );
-        return undefined;
+
+      const restoreRetiredSession = Effect.fnUntraced(function* () {
+        runtime.cancellationDrain = undefined;
+        session = null;
+        runtime.session = undefined;
+        runtime.pendingSession = undefined;
+        yield* abortIfCancelled();
+        const replacement = yield* restoreMissingSession(ctx);
+        bindReadySession(replacement);
+        yield* acpReplaySuppression.release;
+        return replacement;
       });
 
       // Inbox has already crossed its durable start fence before prompt submission.
@@ -7433,14 +7723,7 @@ export class SessionExecutionService {
                 self.deps.sessionManager.retireSessionForReconfiguration(activeSession)
               );
               runtime.disconnectedTransport = false;
-              runtime.cancellationDrain = undefined;
-              session = null;
-              runtime.session = undefined;
-              runtime.pendingSession = undefined;
-
-              const restoredSession = yield* restoreMissingSession(ctx);
-              bindReadySession(restoredSession);
-              yield* acpReplaySuppression.release;
+              const restoredSession = yield* restoreRetiredSession();
               yield* applyPromptConfig(restoredSession, 'stale_acp_recovery');
               yield* maybeRecordHistoryReplayNotice();
               yield* validatePromptCredentials(restoredSession, 'stale_acp_recovery');
@@ -7478,11 +7761,19 @@ export class SessionExecutionService {
 
       yield* abortIfCancelled();
 
-      const promptBlocks = yield* self.tryPromise(() => promptBlocksPromise);
+      let promptBlocks = yield* self.tryPromise(() => promptBlocksPromise);
 
       yield* abortIfCancelled();
 
-      yield* validatePromptCredentials(activeSession, 'initial');
+      const ownerChanged =
+        (yield* validatePromptCredentials(activeSession, 'initial')) === 'retired';
+      if (ownerChanged) {
+        const replacement = yield* restoreRetiredSession();
+        yield* applyPromptConfig(replacement, 'owner_change');
+        yield* maybeRecordHistoryReplayNotice();
+        promptBlocks = yield* self.tryPromise(buildPromptBlocksForCurrentResumeState);
+        yield* validatePromptCredentials(replacement, 'owner_change');
+      }
       runtime.project = project;
 
       yield* abortIfCancelled();
@@ -7491,7 +7782,9 @@ export class SessionExecutionService {
 
       yield* abortIfCancelled();
 
-      yield* promptWithStaleACPRecovery(promptBlocks);
+      // The owner handoff permits one submission. A disconnect after that handoff
+      // cannot establish that the replacement did not consume the prompt.
+      yield* ownerChanged ? prompt(promptBlocks) : promptWithStaleACPRecovery(promptBlocks);
 
       const completedTurnId = runtime.turnId;
       const completedUserTurnId = runtime.userTurnId ?? executionUserTurnId;
@@ -7671,10 +7964,13 @@ export class SessionExecutionService {
           self.captureStatusChanged(sessionId, 'initializing', undefined, 'chat_dispatch');
 
           let readySession = session;
+          // MCP servers are mounted at ACP startup. Replace between prompts so the
+          // driving turn's selection takes effect without hot-loading a busy agent.
           if (
             readySession &&
-            JSON.stringify(readySession.getMemoryBinding?.() ?? null) !==
-              JSON.stringify(acpSessionConfig.memory ?? null)
+            (mcpSelectionChanged(readySession, acpSessionConfig) ||
+              JSON.stringify(readySession.getMemoryBinding?.() ?? null) !==
+                JSON.stringify(acpSessionConfig.memory ?? null))
           ) {
             yield* ctx.abortIfCancelled();
             const previousSession = readySession;
@@ -8176,7 +8472,10 @@ export class SessionExecutionService {
             yield* self.tryPromise(() => self.assertEncryptedScopeWithin(allowed, scopeInputs()));
             sessionConfig.authorizeExecutionInputs = self.encryptedInputGuard(allowed);
           }
-          const session = yield* self.startWithTransientRetry({
+          // Session creation enriches its config with the acquired credential environment.
+          // Preserve launch inputs for a replacement before handing them to the manager.
+          const replacementConfig = { ...sessionConfig, resume: true };
+          let session = yield* self.startWithTransientRetry({
             sessionId,
             runtime,
             config: sessionConfig,
@@ -8245,26 +8544,29 @@ export class SessionExecutionService {
           self.deps.logger.debug(
             `[${sessionId}] session ready (workdir=${session.getWorkdir()} acpSessionId=${session.acpSessionId ?? 'null'})`
           );
-          yield* self.tryPromise((signal) =>
-            traceAsync(
-              self.deps.logger,
-              'execution.apply_acp_mode_model',
-              { sessionId, turnId },
-              async () =>
-                await self.deps.applyAcpModeAndModel(
-                  session,
-                  {
-                    ...agentConfig,
-                    configOptionValues: agentConfig.configOptionValues,
-                  },
-                  {
-                    sessionDoc,
-                    basedOnUserTurnId: userTurnId,
-                    signal,
-                  }
-                )
-            )
-          );
+          const configurePrompt = (target: ISession) =>
+            self.tryPromise((signal) =>
+              traceAsync(
+                self.deps.logger,
+                'execution.apply_acp_mode_model',
+                { sessionId, turnId },
+                async () =>
+                  await self.deps.applyAcpModeAndModel(
+                    target,
+                    {
+                      ...agentConfig,
+                      configOptionValues: agentConfig.configOptionValues,
+                    },
+                    {
+                      sessionDoc,
+                      basedOnUserTurnId: userTurnId,
+                      signal,
+                    }
+                  )
+              )
+            );
+
+          yield* configurePrompt(session);
 
           yield* abortIfCancelled();
 
@@ -8274,13 +8576,37 @@ export class SessionExecutionService {
 
           yield* openAssistantEntry();
 
-          const promptBlocks = yield* self.tryPromise(() => promptBlocksPromise);
-          yield* self.tryPromise(() =>
+          let promptBlocks = yield* self.tryPromise(() => promptBlocksPromise);
+          const validation = yield* self.tryPromise(() =>
             self.deps.sessionManager.validateSessionCredentials(
               session,
-              sessionConfig.requesterUserId
+              sessionConfig.requesterUserId,
+              'replace-before-prompt'
             )
           );
+          if (validation === 'retired') {
+            runtime.session = undefined;
+            yield* abortIfCancelled();
+            if (authorizedIds) {
+              yield* self.tryPromise(() =>
+                self.assertEncryptedScopeWithin(authorizedIds, scopeInputs())
+              );
+            }
+            session = yield* trackPendingSession(
+              () => self.deps.sessionManager.createSession(replacementConfig),
+              { terminateOnCancel: true }
+            );
+            bindSession(session);
+            yield* abortIfCancelled({ terminateSession: true });
+            yield* configurePrompt(session);
+            promptBlocks = yield* self.tryPromise(() => startPromptBlocksBuild(session));
+            yield* self.tryPromise(() =>
+              self.deps.sessionManager.validateSessionCredentials(
+                session,
+                sessionConfig.requesterUserId
+              )
+            );
+          }
           yield* abortIfCancelled();
 
           yield* prompt(promptBlocks);
@@ -8389,6 +8715,10 @@ export class SessionExecutionService {
 
   /** Metadata stop barriers also cover descendants created after the UI snapshot. */
   async reconcileCollaborationStops(): Promise<void> {
+    for (const sessionId of [...this.releasedTurnBySession.keys()]) {
+      if (await isSessionCollaborationStopped(this.deps.workspaceDocument.repo, sessionId))
+        this.releasedTurnBySession.delete(sessionId);
+    }
     for (const [sessionId, runtime] of this.turnRuntimeBySession) {
       if (await isSessionCollaborationStopped(this.deps.workspaceDocument.repo, sessionId)) {
         await this.cancelSession(
@@ -8422,6 +8752,35 @@ export class SessionExecutionService {
         .map((e) => e.id),
       ...queued.map((e) => e.userTurnId?.trim() || `queued-${e.$cid}`),
     ];
+  }
+
+  private async pauseQueuedDrafts(sessionId: SessionId): Promise<void> {
+    // Stop must not wait for a document join or a stalled preparation read.
+    // The renderer also pauses its drafts before publishing the durable Stop marker.
+    const doc = this.deps.workspaceDocument.sessions?.get(sessionId);
+    if (!doc) return;
+    const queue = await doc.getMessageQueue();
+    const cids = queue.filter((item) => !item.paused).map((item) => item.$cid);
+    if (cids.length) await doc.pauseMessageQueueItems(cids);
+  }
+
+  private async retainStoppedQueue(sessionId: SessionId): Promise<void> {
+    try {
+      const doc = this.deps.workspaceDocument.sessions?.get(sessionId);
+      if (!doc) return;
+      const queue = await doc.getMessageQueue();
+      const stopped = queue.filter(
+        (item) =>
+          !item.paused &&
+          this.isInboxInputCanceled(sessionId, item.userTurnId?.trim() || `queued-${item.$cid}`)
+      );
+      if (stopped.length) await doc.pauseMessageQueueItems(stopped.map((item) => item.$cid));
+    } catch (error) {
+      // SQLite already prevents dispatch; the watcher repairs the display marker.
+      this.deps.logger.warn(
+        `[${sessionId}] Could not retain stopped queue: ${formatErrorMessage(error)}`
+      );
+    }
   }
 
   private liveTurnId(sessionId: SessionId): string | undefined {
@@ -8528,6 +8887,9 @@ export class SessionExecutionService {
         return { success: false, error: error instanceof Error ? error.message : String(error) };
       }
     }
+    // Stop also ends the authority of work the Agent continues by itself.
+    this.releasedTurnBySession.delete(sessionId);
+    this.withdrawNativeWorkCompletion(sessionId);
     this.deps.logger.info(`Session stop requested: ${sessionId}`);
     this.deps.logger.debug(`[${sessionId}] Received stop request for turn ${turnId}`);
     const activeTurnId = this.deps.getActiveTurnId(sessionId);
@@ -8548,6 +8910,7 @@ export class SessionExecutionService {
           message.cancelId
         );
         if (paused) {
+          await this.retainStoppedQueue(sessionId);
           const successor = this.turnRuntimeBySession.get(sessionId);
           if (successor?.inboxOwner?.input?.inputId === `inbox:${target.executionId}`)
             return this.cancelSession({ ...message, turnId: successor.turnId }, options);
@@ -8557,6 +8920,8 @@ export class SessionExecutionService {
       // Stop always ends the turn the user sees: with no execution here, the
       // unfinished entry is closed instead of ignored.
       if (await this.closeDeadAssistantTurn(sessionId, { turnId, requireSettledUserTurn: false })) {
+        if (options.pauseInbox !== false && message.pauseInbox !== false)
+          await this.pauseQueuedDrafts(sessionId);
         this.refreshCodeCollabSharedStateAfterTurn(sessionId);
       } else {
         this.deps.logger.debug(
@@ -8569,6 +8934,15 @@ export class SessionExecutionService {
     }
 
     const stoppedRuntime = this.turnRuntimeBySession.get(sessionId);
+    // Legacy and degraded hosts still retain ordinary queued drafts on Stop.
+    // Interrupt-and-send and Edit & Resend opt out explicitly.
+    if (
+      (!this.operationInbox || !pauseInbox) &&
+      options.pauseInbox !== false &&
+      message.pauseInbox !== false
+    ) {
+      await this.pauseQueuedDrafts(sessionId);
+    }
     if (this.operationInbox && stoppedRuntime?.invocation?.requesterUserId && pauseInbox) {
       const scope = {
         workspaceId: this.deps.workspaceId,
@@ -8584,6 +8958,7 @@ export class SessionExecutionService {
           message.cancelId
         );
         if (!paused) return { success: false, error: 'Execution changed before Stop.' };
+        await this.retainStoppedQueue(sessionId);
         const successor = this.turnRuntimeBySession.get(sessionId);
         if (
           successor &&

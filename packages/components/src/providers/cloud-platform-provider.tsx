@@ -349,8 +349,8 @@ export function CloudPlatformProvider({
               revokeDevice: (workspaceId, signingPublicKey, confirmation) =>
                 native.revokeDevice(workspaceId, signingPublicKey, confirmation),
               refresh: (workspaceId, options) => native.refresh(workspaceId, options),
-              contentStreamsToken: (workspaceId, rejectedToken, requestSnapshotFor, rpcOnly) =>
-                native.contentStreamsToken(workspaceId, rejectedToken, requestSnapshotFor, rpcOnly),
+              contentStreamsToken: (workspaceId, rejectedToken, rpcOnly) =>
+                native.contentStreamsToken(workspaceId, rejectedToken, rpcOnly),
               prepareFeatureRpc: (workspaceId, input) =>
                 native.prepareFeatureRpc(workspaceId, input),
               acceptFeatureRpcResponse: (workspaceId, input, frame) =>

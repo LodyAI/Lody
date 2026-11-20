@@ -1,6 +1,5 @@
 import {
   isAskUserQuestionPermissionRequest,
-  normalizePersistedRateLimit,
   parseLodyMessagePhase,
   type AgentConfigCliType,
 } from '@lody/shared';
@@ -154,66 +153,19 @@ const RateLimitsSnapshotSchema = z.object({
   fetchedAtEpochSeconds: z.number().nonnegative().optional(),
 });
 
-const LegacyProposedPlanSchema = z.object({
-  schemaVersion: z.literal(1),
-  sessionId: z.string(),
-  turnId: z.string(),
-  markdown: z.string(),
-  status: z.enum(['delta', 'completed', 'cleared']),
-  isLatest: z.boolean(),
-});
-
-const LEGACY_METHODS = {
-  usageUpdate: '_acp_ext:session_usage_update',
-  rateLimitsUpdate: '_acp_ext:session_rate_limits',
-  proposedPlan: '_acp_ext:codex_proposed_plan',
-  claudeTaskLifecycle: '_claude/taskLifecycle',
-  kimiTaskLifecycle: '_kimi/taskLifecycle',
-} as const;
-
 export type LodyExtensionEvent =
   | { readonly type: 'subagent'; readonly event: LodySubagentEvent }
   | { readonly type: 'usage'; readonly update: SessionUsageUpdate; readonly accountingId?: string }
   | { readonly type: 'rateLimits'; readonly snapshot: RateLimitsSnapshot }
   | { readonly type: 'sessionActivity'; readonly update: LodySessionActivityUpdate }
-  | { readonly type: 'promptSuggestion'; readonly update: LodyPromptSuggestion }
-  | {
-      readonly type: 'legacyProposedPlan';
-      readonly plan: z.infer<typeof LegacyProposedPlanSchema>;
-    }
-  | {
-      readonly type: 'legacyTaskLifecycle';
-      readonly provider: 'claude' | 'kimi';
-      readonly params: Record<string, unknown>;
-    };
+  | { readonly type: 'promptSuggestion'; readonly update: LodyPromptSuggestion };
 
 export function parseLodyExtensionCapabilities(
   meta: Record<string, unknown> | null | undefined
 ): LodyExtensionCapabilities {
   const lody = meta?.lody;
   const parsed = LodyCapabilitiesSchema.safeParse(lody);
-  const capabilities = parsed.success ? parsed.data : {};
-  const legacyKimi = meta?.['lody.ai/kimi'];
-  const legacyKimiParsed = z
-    .object({
-      protocolVersion: z.literal(1),
-      features: z.object({
-        subagentLifecycle: z.literal(true).optional(),
-        subagentManagement: z.literal(true).optional(),
-      }),
-    })
-    .safeParse(legacyKimi);
-  if (!legacyKimiParsed.success || capabilities.subagents) return capabilities;
-  const features = legacyKimiParsed.data.features;
-  if (!features.subagentLifecycle && !features.subagentManagement) return capabilities;
-  return {
-    ...capabilities,
-    subagents: {
-      version: 1,
-      lifecycle: true,
-      ...(features.subagentManagement ? { list: true, cancel: true, output: true } : {}),
-    },
-  };
+  return parsed.success ? parsed.data : {};
 }
 
 export function parseRateLimitsSnapshot(value: unknown): RateLimitsSnapshot {
@@ -226,24 +178,17 @@ const UsageScopeIdSchema = z.string().min(1).max(MAX_USAGE_SCOPE_ID_LENGTH);
 
 // A scoped update is cumulative only within its scope, so each scope gets its own
 // accounting identity. Unscoped adapters retain their session-lifetime identity.
-function parseUsageScopeId(params: Record<string, unknown>, provider: string): string | null {
+function parseUsageScopeId(params: Record<string, unknown>): string | null {
   const scoped = z
     .object({ _meta: z.object({ lody: z.object({ usageScopeId: UsageScopeIdSchema }) }) })
     .safeParse(params);
-  if (scoped.success) return scoped.data._meta.lody.usageScopeId;
-  // One-release compatibility for Codex adapters predating Core usage scopes.
-  if (provider !== 'codex') return null;
-  const legacy = z
-    .object({ _meta: z.object({ codex: z.object({ usageTurnId: UsageScopeIdSchema }) }) })
-    .safeParse(params);
-  return legacy.success ? legacy.data._meta.codex.usageTurnId : null;
+  return scoped.success ? scoped.data._meta.lody.usageScopeId : null;
 }
 
 export function parseLodyExtensionMessage(args: {
   method: string;
   params: Record<string, unknown>;
   sessionId: string;
-  provider: string;
 }): LodyExtensionEvent | null {
   const method = normalizeLodyExtensionMethod(args.method);
   if (method === LODY_SUBAGENT_EVENT_METHOD) {
@@ -253,7 +198,7 @@ export function parseLodyExtensionMessage(args: {
   }
   if (method === LODY_EXTENSION_METHODS.sessionUsageUpdate) {
     const update = SessionUsageUpdateSchema.parse(args.params);
-    const scopeId = parseUsageScopeId(args.params, args.provider);
+    const scopeId = parseUsageScopeId(args.params);
     return {
       type: 'usage',
       update,
@@ -274,25 +219,5 @@ export function parseLodyExtensionMessage(args: {
     return { type: 'sessionActivity', update: SessionActivityUpdateSchema.parse(args.params) };
   }
 
-  // One-release compatibility for pre-Core-v0.1 managed runtimes.
-  if (method === LEGACY_METHODS.usageUpdate) {
-    return {
-      type: 'usage',
-      update: SessionUsageUpdateSchema.parse({ ...args.params, sessionId: args.sessionId }),
-    };
-  }
-  if (method === LEGACY_METHODS.rateLimitsUpdate) {
-    const rateLimit = normalizePersistedRateLimit(args.provider, null, args.params);
-    return rateLimit ? { type: 'rateLimits', snapshot: { rateLimits: [rateLimit] } } : null;
-  }
-  if (method === LEGACY_METHODS.proposedPlan) {
-    return { type: 'legacyProposedPlan', plan: LegacyProposedPlanSchema.parse(args.params) };
-  }
-  if (method === LEGACY_METHODS.claudeTaskLifecycle) {
-    return { type: 'legacyTaskLifecycle', provider: 'claude', params: args.params };
-  }
-  if (method === LEGACY_METHODS.kimiTaskLifecycle) {
-    return { type: 'legacyTaskLifecycle', provider: 'kimi', params: args.params };
-  }
   return null;
 }

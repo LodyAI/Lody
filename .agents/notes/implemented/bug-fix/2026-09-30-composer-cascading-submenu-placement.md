@@ -25,8 +25,9 @@ refinement and rejected size/position experiments are recorded in
 owns the current searchable Model offset and its verification.
 
 This replaces only the positioning decision in the
-[previous Role note](2026-09-29-composer-role-submenu-placement.md). Content-driven
-Role panes, their 14rem cap, independent scrolling, and standard insets remain.
+[previous Role note](2026-09-29-composer-role-submenu-placement.md). Role pane sizing is described in [composer run config](../../../docs/sessions-run-config.md);
+the two-pane submenu now has a fixed 14rem height. Independent scrolling and
+standard insets remain.
 The rejected alternative was to extend whole-parent centering and bottom-clamping
 to every submenu; that made placement uniform relative to the parent surface,
 not to the option that opened it.

@@ -16,6 +16,13 @@
   and publishes neither unread nor success. Failure attention stays independent.
   Freeze activity time before waking successors; never lower activity metadata.
   Shutdown cancels confirmation before the Host drain; begun writes remain owned.
+- A Turn whose agent still reports native work at release publishes success only
+  after that work settles; if the process ends first (including ACP child exit or
+  reaching Antigravity's cap unsettled), it awaits an interruption notice on a live
+  document before flushing completion and alerts an `unknown` result. That wait
+  holds no write and is not owned bookkeeping; a newer Turn, Stop, archive/delete,
+  or shutdown withdraws it
+  ([decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-18-gc-respects-native-agent-work.md#completion-signals)).
 - MessageHandler consumes the actual AttentionItem (source, scope, outcome) and
   `notifyTurnOutcome` submits mobile through the legacy-named cloud adapter. It
   projects user terminal outcomes into a latest control-document
@@ -36,6 +43,11 @@
   input before accepting an Operation, or reject retryably without persisting it.
 - Permission push and silent Live Activity sync are independent. Provider
   acceptance cannot suppress an ordinary permission alert.
+- A fresh `desktop-foreground` presence entry for the recipient, found in any
+  workspace this daemon hosts, skips only the terminal-outcome mobile push. Live
+  Activity sync, the desktop projection and permission/question pushes are unchanged.
+  Suppress only on positive evidence: an unreadable, unjoined or stale presence
+  sends. [Decision](../../../../../.agents/notes/proposed/architecture/2026-10-13-agent-native-attention.md#focused-desktop-mobile-suppression-2026-11-17).
 - Best-effort delivery is intentional. No notification database, outbox, pending
   TTL, notification-send retry, reconnect replay, lock-to-mobile handoff or exactly-once
   protocol. Existing execution/Operation persistence and recovery are unchanged.

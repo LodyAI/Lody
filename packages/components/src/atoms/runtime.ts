@@ -162,6 +162,9 @@ export type SessionSyncInspection = {
    * applies are flowing; `timeout` means local changes stayed unsent.
    */
   readonly pendingUploadProbe: string | null;
+  readonly leaseCount: number;
+  readonly joinInFlight: boolean;
+  readonly roomSubPresent: boolean;
 };
 
 export type PreviewVisualCommentDocUpdater =
@@ -226,6 +229,11 @@ export type WorkspaceRuntime = {
     subscribe(listener: () => void): () => void;
   };
   readonly attachmentToken?: () => Promise<string>;
+  readonly cloudStreamsEnabled?: boolean;
+  readonly getWorkspaceStreamsGrant?: (options?: {
+    forceRefresh?: boolean;
+    signal?: AbortSignal;
+  }) => Promise<{ token: string; gatewayBaseUrl: string }>;
   readonly sendResources: SessionSendResources;
   /** In-memory sends whose attachments are still preparing; lost with the page. */
   readonly pendingSends: PendingSessionSends | null;
@@ -278,6 +286,12 @@ export type WorkspaceRuntime = {
    * entry for this app instance — the PR poller's activity signal.
    */
   publishSessionViewing: (args: { sessionId: SessionId; userId: string } | null) => void;
+  /**
+   * Publish (or clear, with null) this app instance's ephemeral
+   * `desktop-foreground` presence entry; Hosts skip mobile pushes for that user
+   * while it is fresh.
+   */
+  publishDesktopForeground: (userId: string | null) => void;
   ensureDocStream: (roomId: string) => Promise<void>;
   /**
    * Run `fn` while holding a ref on the session store, so cache eviction cannot
@@ -580,7 +594,7 @@ export type WorkspaceRuntime = {
     machineId: MachineId,
     sessionId: SessionId,
     requestedByUserId: string,
-    options?: { reason?: string; timeoutMs?: number }
+    options?: { reason?: string; stopProcess?: boolean; timeoutMs?: number }
   ) => Promise<SessionPreviewRevokeResponse | null>;
   requestLocalProjectGitState: (
     machineId: MachineId,

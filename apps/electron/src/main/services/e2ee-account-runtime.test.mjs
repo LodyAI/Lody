@@ -1772,13 +1772,13 @@ void test('credential-authenticated member removal drains and deletes through th
   await owner.create()
   const status = await owner.ipc.status(f.workspaceId)
   await assert.rejects(
-    owner.ipc.refresh(f.workspaceId, { installKeys: false }),
+    owner.ipc.refresh(f.workspaceId, { keyMode: 'none' }),
     /unauthorized history/
   )
   assert.equal((await owner.ipc.status(f.workspaceId)).signingPublicKey, status.signingPublicKey)
   f.relay.memberRemoved = true
   await assert.rejects(
-    owner.ipc.refresh(f.workspaceId, { installKeys: false }),
+    owner.ipc.refresh(f.workspaceId, { keyMode: 'none' }),
     /^Error: e2ee_member_removed$/
   )
   await assert.rejects(owner.ipc.status(f.workspaceId), /^Error: e2ee_member_removed$/)

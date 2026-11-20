@@ -16,6 +16,14 @@ import {
   type SessionContentSyncInput,
   type SessionContentSyncState,
 } from '../src/lib/session-content-sync-state';
+import type { SessionId } from '@lody/shared';
+import type { SessionDocStore, SessionSyncInspection } from '../src/atoms/runtime';
+import {
+  SESSION_DOC_STALE_REPORT_DELAY_MS,
+  useSessionDocStaleReport,
+  type SessionDocStaleSignal,
+} from '../src/components/sessions/use-session-doc-stale-report';
+import { simulateClientLogReloadForTests } from '../src/lib/client-log';
 
 const base: SessionContentSyncInput = {
   docReady: true,
@@ -157,5 +165,87 @@ describe('useDisplayedContentSyncState', () => {
     // The cache fills with a still-syncing copy: the switch is immediate.
     await render('catching-up');
     expect(shown).toBe('catching-up');
+  });
+});
+
+describe('useSessionDocStaleReport', () => {
+  let root: Root | null = null;
+  let container: HTMLDivElement | null = null;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    act(() => root?.unmount());
+    container?.remove();
+    await simulateClientLogReloadForTests();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('suppresses false stale warnings on mounted inactive tabs whose sync lease is disabled, and reports active stale tabs with lease diagnostics', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fakeStore = {
+      historyBackend: 'loro',
+      inspectSync: vi.fn(async (): Promise<SessionSyncInspection> => ({
+        transportId: 'local',
+        bindingStatus: 'joined',
+        syncState: 'synced',
+        openedAt: Date.now() - 60_000,
+        lastRemoteImportAt: Date.now() - 45_000,
+        pendingUploadProbe: 'complete',
+        leaseCount: 1,
+        joinInFlight: false,
+        roomSubPresent: true,
+      })),
+    } as unknown as SessionDocStore;
+
+    function StaleProbe({ syncEnabled }: { syncEnabled: boolean }) {
+      const signal: SessionDocStaleSignal = {
+        docReady: true,
+        syncEnabled,
+        machineOnlineStatus: 'online',
+        agentBusy: false,
+        activeAssistantTurnId: 'assistant:turn-1',
+      };
+      useSessionDocStaleReport({
+        ...signal,
+        sessionId: 'session-stale-check' as SessionId,
+        lastMessageAt: Date.now() - 5_000,
+        peekStore: () => fakeStore,
+      });
+      return null;
+    }
+
+    await act(async () => {
+      root!.render(React.createElement(StaleProbe, { syncEnabled: false }));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SESSION_DOC_STALE_REPORT_DELAY_MS + 1_000);
+    });
+    expect(warnSpy).not.toHaveBeenCalled();
+
+    await act(async () => {
+      root!.render(React.createElement(StaleProbe, { syncEnabled: true }));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SESSION_DOC_STALE_REPORT_DELAY_MS);
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[session-sync] conversation looks stale',
+      expect.objectContaining({
+        sessionId: 'session-stale-check',
+        turnId: 'assistant:turn-1',
+        leaseCount: 1,
+        joinInFlight: false,
+        roomSubPresent: true,
+      })
+    );
   });
 });

@@ -90,6 +90,8 @@ describe('billing-overview-cache', () => {
       ]) {
         delete rawOverview[field];
       }
+      // Older clients cached the retired yearly early-bird flag.
+      rawOverview.yearlyEarlyBirdEligible = true;
       localStorage.setItem(
         'lody:billingOverview',
         JSON.stringify({
@@ -109,6 +111,9 @@ describe('billing-overview-cache', () => {
         scheduleManaged: false,
         subscriptionSetupPending: false,
       });
+      expect(readBillingOverviewCache('workspace-1', 'session-1')).not.toHaveProperty(
+        'yearlyEarlyBirdEligible'
+      );
     });
   });
 

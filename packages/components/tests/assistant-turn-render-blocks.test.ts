@@ -28,6 +28,26 @@ describe('assistant-turn-render-blocks', () => {
   });
 
   describe('buildAssistantTurnRenderLayout', () => {
+    it('groups alternating thoughts and tools, counting tools across thoughts', () => {
+      const items: MessageContent[] = [
+        tool('command-1', 'execute'),
+        { type: 'thought', text: 'Inspect the command result.' },
+        tool('command-2', 'execute'),
+        { type: 'thought', text: 'Read the source next.' },
+        tool('read-1', 'read', { locations: [{ path: '/project/source.ts' }] }),
+        { type: 'thought', text: 'Ready to answer.' },
+        { type: 'text', text: 'Answer' },
+      ];
+      const layout = buildAssistantTurnRenderLayout('mixed', items, false);
+      expect(layout.blocks).toHaveLength(2);
+      expect(layout.blocks[0]).toMatchObject({
+        kind: 'activity_group',
+        entries: items.slice(0, 6).map((content, itemIndex) => ({ content, itemIndex })),
+        summary: { hasThought: true, commandCount: 2, readFileCount: 1 },
+      });
+      expect(layout.blocks[1]).toMatchObject({ kind: 'content', entry: { content: items[6] } });
+    });
+
     it('folds earlier text and activity while keeping the final text run visible', () => {
       const layout = buildAssistantTurnRenderLayout(
         'assistant-1',

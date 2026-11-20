@@ -21,6 +21,27 @@ and durable state/cursor retention. This [P10 preparation](../notes/implemented/
 does not supply historical-author authorization, a production signer, host snapshot
 admission or client recovery from an unusable remote snapshot.
 
+## Cloud room recovery
+
+The dual-plane renderer enumerates every `cloud` binding, including rooms whose
+readiness comes from cloud. `cloud-room-recovery.ts` selects room-local repairs
+when errors exist: even an SDK reconnect with `resetBackoff: false` revives every
+failed adapter session, bypassing a backed-off room's deadline. Each continuously
+errored `kind:id` waits 30s, 60s, 120s, 240s, then at most five minutes between
+attempts. Leaving error or losing the room clears its record. Disconnected and
+newly failing rooms remain eligible independently; untouched sweep leftovers
+retain eligibility. Batch width and total sweep time stay bounded.
+
+The existing Effect-based reconnect loop waits until the earliest room deadline
+when all problem rooms are backing off. Status updates can shorten that wait for
+a new problem; visibility, online and token edges force immediate recovery while
+preserving retry history. Periodic reconnects in both cloud-only and dual-plane
+runtimes pass `resetBackoff: false`. The workspace runtime retains raw SDK rejoin
+promises after waiter timeouts and joins them before Repo destruction. This fix
+keeps the published Promise Repo boundary described in the
+[Effect selection guide](cli-effect-ts.md#small-migrations-during-feature-and-fix-work);
+it changes retry selection rather than migrating the Repo owner.
+
 ## Encrypted-workspace feature availability
 
 `workspaceSupports` owns ordinary-channel capability verdicts. UI reads the existing admission-mode
@@ -160,6 +181,15 @@ Recovery and diagnostic contracts, including callers outside `lib/`, are owned b
 A crash the user cannot read or copy is a crash we never hear about, which is why the
 `ErrorBoundary` fallback shows the real error text and offers a one-click copy of the
 full report on every build rather than only in development.
+
+Automatic boundary diagnostics use the existing fixed error categories in every scope.
+The mounted boundary owns one report through re-renders and failed retries; a healthy
+commit permits the next independent failure. There is no companion
+`app/error_boundary_triggered` analytics event. Use `$exception` with
+`source=errorBoundary` for the product failure count, deduplicated by event UUID
+across transport retries. Older dashboard queries for the retired event need to
+move to that signal; raw error text, custom names/codes and message hashes stay out
+of automatic diagnostics. User-initiated support copies retain their full details.
 
 Crash screens wait for explicit user recovery; `resetKeys` cannot clear an error.
 Authenticated cloud queries retry opaque server failures before reaching a boundary,
@@ -437,3 +467,15 @@ Project members or existing group runs and disables standalone display; otherwis
 it runs normal deletion. Dependency checks stay internal. Cleanup-result notifications
 remain available for earlier commands that explicitly requested cleanup. Behavior and scope:
 [Spec](../../specs/multi-repo-projects.md#direct-folder-selection-and-standalone-visibility).
+
+## Streams WebSocket rollout
+
+Foreground workspace runtimes default to HTTP. An explicit
+`streamsWebSocketEnabled` overrides `VITE_LORO_STREAMS_WS_ENABLED`; the environment
+opts in only with `true` or `1`. Durable and ephemeral transports then forward
+`webSocket: { enabled: true, url: streamsBaseUrl, authPoolKey: workspaceId }`.
+Presence retains its sharded HTTP URL for fallback. Disposable eager-sync workers
+receive no WS option. The pinned `loro-repo` 0.26.0, `@loro-dev/streams-crdt` 0.22.1,
+and `@loro-dev/streams-client` 0.14.0 packages implement URL override and Repo
+forwarding while keeping WS default off. Physical connection reuse is not proven by
+HTTP compatibility tests.

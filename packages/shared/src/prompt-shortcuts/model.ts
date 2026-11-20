@@ -96,13 +96,32 @@ export const PromptShortcutMentionSchema = z
   })
   .strict();
 
-export const PromptShortcutSchema = z
+/**
+ * Strip legacy `visibility: 'private' | 'workspace'` persisted before Prompt Shortcuts
+ * unified onto workspace-visible streams, while keeping `.strict()` rejection for unknown fields.
+ */
+export const stripLegacyShortcutVisibility = (value: unknown): unknown => {
+  if (
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    'visibility' in value &&
+    ((value as { visibility?: unknown }).visibility === 'private' ||
+      (value as { visibility?: unknown }).visibility === 'workspace' ||
+      (value as { visibility?: unknown }).visibility === undefined)
+  ) {
+    const { visibility: _legacyVisibility, ...rest } = value as Record<string, unknown>;
+    return rest;
+  }
+  return value;
+};
+
+export const PromptShortcutObjectSchema = z
   .object({
     v: z.literal(1),
     id: identifier,
     workspaceId: identifier,
     ownerUserId: identifier,
-    visibility: z.enum(['private', 'workspace']),
     name: z.string().trim().min(1).max(PROMPT_SHORTCUT_LIMITS.name),
     // Stored normalized: a synced row from another client is rejected rather
     // than silently repaired, so every reader sees the same glyph.
@@ -126,7 +145,12 @@ export const PromptShortcutSchema = z
   })
   .strict();
 
-export type PromptShortcut = z.infer<typeof PromptShortcutSchema>;
+export const PromptShortcutSchema = z.preprocess(
+  stripLegacyShortcutVisibility,
+  PromptShortcutObjectSchema
+);
+
+export type PromptShortcut = z.output<typeof PromptShortcutObjectSchema>;
 
 export const getShortcutEmoji = (shortcut: Pick<PromptShortcut, 'emoji'>): string =>
   shortcut.emoji || DEFAULT_PROMPT_SHORTCUT_EMOJI;
@@ -241,18 +265,14 @@ export type ShortcutAvailability =
   | { kind: 'unavailable'; reason: string };
 
 export function resolveShortcutAvailability(input: {
-  shortcut: Pick<PromptShortcut, 'workspaceId' | 'ownerUserId' | 'visibility' | 'scope'>;
+  shortcut: Pick<PromptShortcut, 'workspaceId' | 'ownerUserId' | 'scope'>;
   dependencies: readonly PromptShortcutTarget[];
   context: { workspaceId: string; userId: string; scope: PromptShortcutScope };
   canRead: boolean;
   resolveDependency: (target: PromptShortcutTarget) => ShortcutAvailability;
 }): ShortcutAvailability {
   const { shortcut, context, dependencies } = input;
-  if (
-    !input.canRead ||
-    shortcut.workspaceId !== context.workspaceId ||
-    (shortcut.visibility === 'private' && shortcut.ownerUserId !== context.userId)
-  ) {
+  if (!input.canRead || shortcut.workspaceId !== context.workspaceId) {
     return { kind: 'unavailable', reason: 'permission_denied' };
   }
   for (const target of dependencies) {

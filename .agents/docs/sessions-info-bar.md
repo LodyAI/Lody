@@ -43,6 +43,9 @@ additions/deletions remain the visible summary for text-only and mixed compariso
 zero-line comparisons show the localized file count. Older daemons without `files`
 retain their positive-line-count behavior. Counts come from the complete comparison,
 not the bounded shared index; per-turn edited-file cards keep their independent scope.
+After a live Changes list completes, its totals supply the bar's workspace summary.
+If that list has unknown line counts, the bar shows its file count. Initial rendering
+uses durable session statistics. Project Member selection retains its Member scope.
 
 Scheduled-message drafts must not add an info-bar item. Their state is the
 composer's secondary action beside Send; the bar only carries machine, status,
@@ -206,10 +209,11 @@ labelClassName`) so the stage diffstat never clips. Wired from
     must preventDefault onPointerDownOutside when the target is the anchor,
     or dismiss + click-toggle cancel out. GoalChip's popover reuses
     `GoalActionButton`/`formatTokensCompact` from `session-goal-banner.tsx`.
-    Goal controls are transport-gated: the current `/goal …` prompt bridge is
-    Codex-only, so provider-neutral snapshots remain read-only until their advertised
-    `_session/goal` method is routed through the session control plane; Stop must never
-    synthesize `pause` for those providers. Paused and blocked Codex goals both expose
+    Goal controls are transport-gated by the agent's advertised Core goal capability
+    (`apps/cli/src/agent/goal-control.ts`: the `_lody/session/goal` request, a
+    `_meta.lody.goalControl` prompt, or the older `/goal …` bridge); goals from an agent
+    that advertises no control stay read-only, and Stop must never synthesize `pause`
+    for it. Paused and blocked Codex goals both expose
     Resume; a blocked goal is waiting for explicit user continuation, not terminal.
     An `active` goal is persistent session state,
     not proof that an ACP prompt is running: current busy/running UI, message queue routing,

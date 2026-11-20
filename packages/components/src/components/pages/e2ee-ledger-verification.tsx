@@ -19,6 +19,7 @@ import {
   parseVerificationCode,
   type VerificationResult,
 } from '@/lib/e2ee-ledger-verification';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const styles = stylex.create({
   card: {
@@ -503,7 +504,7 @@ export function LedgerVerificationCard(props: { history: VerifiedLedgerHistory }
   const [verifying, setVerifying] = useState(false);
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(`${t('e2ee.verify.copyHeader')}\n${groups.join(' ')}`);
+      await copyTextToClipboard(`${t('e2ee.verify.copyHeader')}\n${groups.join(' ')}`);
       setCopied(true);
     } catch {
       // Denied clipboard: the code stays selectable on screen.

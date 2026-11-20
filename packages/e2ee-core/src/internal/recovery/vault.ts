@@ -1273,15 +1273,22 @@ export const openRecoveryVaultWithPassword = Effect.fnUntraced(function* (input:
       (indexHeader.revision === pin.revision && indexHash !== pin.digest))
   )
     return yield* vaultError('rollback');
-  const slots = yield* Effect.all(
+  const ids = yield* attempt(() =>
     Array.from({ length: MAX_VAULT_PASSWORD_GENERATIONS }, (_, generation) =>
-      Effect.gen(function* () {
-        const id = yield* attempt(() => passwordWrapEntryId(input.vaultId, generation));
-        const entry = yield* input.store.readEntry(input.vaultId, id);
-        return entry ? { generation, entry } : null;
-      })
+      passwordWrapEntryId(input.vaultId, generation)
     )
   );
+  const entries = input.store.readEntries
+    ? yield* input.store.readEntries(input.vaultId, ids)
+    : yield* Effect.forEach(ids, (id) => input.store.readEntry(input.vaultId, id), {
+        concurrency: 4,
+      });
+  if (
+    entries.length !== ids.length ||
+    entries.some((entry, i) => entry !== null && entry.entryId !== ids[i])
+  )
+    return yield* vaultError('authentication');
+  const slots = entries.map((entry, generation) => (entry ? { generation, entry } : null));
   const candidates = slots
     .filter((row): row is NonNullable<typeof row> => row !== null)
     .sort((a, b) => b.generation - a.generation)

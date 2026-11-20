@@ -368,7 +368,6 @@ type BillingOverview = {
     | 'early_bird_yearly_6000_forever'
     | 'promo_yearly_6000_limited'
     | null;
-  yearlyEarlyBirdEligible: boolean;
   effectivePlanTier: PlanTier;
   entitlementSource: BillingEntitlementSource;
   promotionalEntitlementEndsAt: number | null;
@@ -579,6 +578,11 @@ export type CloudApi = {
     abandonReplacement: Mutation<{ vaultId: string }, { ok: true }>;
     putImmutable: Mutation<RecoveryVaultPutRequest, { ok: true }>;
     readEntry: Query<RecoveryVaultReadRequest, RecoveryVaultCiphertextDto | null>;
+    /** Bounded to eight distinct ids and 256 KiB combined ciphertext bodies, ordered. */
+    readEntries: Query<
+      { vaultId: string; entryIds: string[] },
+      (RecoveryVaultCiphertextDto | null)[]
+    >;
     readIndex: Query<RecoveryVaultIndexReadRequest, RecoveryVaultCiphertextDto | null>;
     compareAndSwapIndex: Mutation<RecoveryVaultIndexCasRequest, RecoveryVaultIndexCasReply>;
     deleteUnreferenced: Mutation<RecoveryVaultDeleteRequest, { ok: true }>;
@@ -650,6 +654,7 @@ export type CloudApi = {
       },
       { token: string; expiresIn: number; gatewayBaseUrl: string; streamId: string }
     >;
+    getStreamTokenV2: Action<ShortcutTokenRequest, ShortcutTokenReply>;
   };
   sessionSharing: {
     requestFromCli: Mutation<
@@ -1604,3 +1609,42 @@ export type E2eeAccountSecurityEvent = {
   kind: 'vault_replacement_reserved' | 'vault_replacement_finished' | 'personal_device_recovered';
   occurredAt: number;
 };
+
+/** Additive protocol: V1's success token and rejection contract remain unchanged. */
+export type ShortcutTokenRequest = {
+  workspaceId: string;
+  target:
+    | { kind: 'index'; ownerUserId: string; visibility: 'private' | 'workspace' }
+    | { kind: 'body'; bodyDocId: string };
+  write: boolean;
+};
+export type ShortcutTokenFailure = {
+  kind: 'denied' | 'retryable' | 'fatal';
+  code:
+    | 'unauthenticated'
+    | 'forbidden'
+    | 'account_deletion'
+    | 'workspace_deletion'
+    | 'e2ee_control_only'
+    | 'workspace_mode_unclassified'
+    | 'workspace_mode_unsupported'
+    | 'workspace_not_found'
+    | 'published_body_immutable'
+    | 'authorization_changed'
+    | 'exchange_unavailable'
+    | 'exchange_rejected'
+    | 'exchange_invalid'
+    | 'exchange_not_configured'
+    | 'token_expired';
+  phase: 'authorize' | 'register' | 'exchange' | 'reauthorize' | 'delivery';
+  status?: number;
+};
+export type ShortcutTokenGrant = {
+  token: string;
+  expiresIn: number;
+  gatewayBaseUrl: string;
+  streamId: string;
+};
+export type ShortcutTokenReply =
+  | { ok: true; grant: ShortcutTokenGrant }
+  | { ok: false; failure: ShortcutTokenFailure };

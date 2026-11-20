@@ -31,7 +31,7 @@ Translation: current
 
 这个结论只适用于云端 Worker 路径。双通道桌面端对本机会话的预取走本地 transport，远端机器会话走云端；纯云模式的桌面端则全部走云端。自动候选限制为 20 个，串行执行，并跳过已加入、已有前台资源或活动检查点已覆盖的会话。侧栏、可见性和离线状态会暂停工作。需要新的活动或其他符合条件的调度事件；15 秒新鲜度不是无条件轮询周期。
 
-大文档还有一条额外失败路径。[`writeEagerSyncSnapshot`](../../../../packages/components/src/providers/eager-sync-snapshot-cache.ts)拒绝超过 128 MiB 的原始 Loro 快照。Worker 随后返回 `skipped`，而 [`background-sync-coordinator.ts`](../../../../packages/components/src/providers/background-sync-coordinator.ts)只有收到 `synced` 才记录完成的活动检查点。任何会话的 metadata 事件都会重建候选列表，因此其他会话的 metadata 变化也能重新排入同一个超大文档，即使大会话自己的活动时间未变。确定性协调器实验固定两个会话的时间、让预取返回 `skipped`，在启动及两次其他会话 metadata 事件后，观察到大会话被预取三次。这不是一次完整的超大云文档下载实验：证据分别是源码中的缓存拒绝、真实 adapter 的重复 bootstrap，以及协调器的调度实验。128 MiB 缓存门槛指原始文档编码，不是压缩后的网络大小。
+大文档还有一条额外失败路径。[`writeEagerSyncSnapshot`](../../../../packages/components/src/providers/eager-sync-snapshot-cache.ts)拒绝超过 128 MiB 的原始 Loro 快照。调查版本的 Worker 随后返回 `skipped`，而 [`background-sync-coordinator.ts`](../../../../packages/components/src/providers/background-sync-coordinator.ts)只有收到 `synced` 才记录完成的活动检查点。任何会话的 metadata 事件都会重建候选列表，因此其他会话的 metadata 变化也能重新排入同一个超大文档，即使大会话自己的活动时间未变。确定性协调器实验固定两个会话的时间、让预取返回 `skipped`，在启动及两次其他会话 metadata 事件后，观察到大会话被预取三次。这不是一次完整的超大云文档下载实验：证据分别是源码中的缓存拒绝、真实 adapter 的重复 bootstrap，以及协调器的调度实验。128 MiB 缓存门槛指原始文档编码，不是压缩后的网络大小。
 
 [串行 Worker 决策](../../implemented/architecture/2026-09-12-session-prefetch-worker.zh.md)明确避免共享前台 cursor，[候选窗口限制](../../implemented/architecture/2026-09-16-bounded-session-prefetch-window.zh.md)约束预取范围。后续优化必须将 Worker 自己的快照与对应 cursor 一起保存；直接复制其他副本的 cursor 会跳过缺失数据。
 
@@ -39,7 +39,7 @@ Translation: current
 
 Chromium 将 `ERR_CONNECTION_CLOSED` 定义为 TCP FIN，将 `ERR_PROXY_CONNECTION_FAILED` 定义为解析或连接代理本身失败，明确不包括 HTTP CONNECT 阶段失败。参见 [Chromium 错误定义](https://chromium.googlesource.com/chromium/src/+/main/net/base/net_error_list.h)。API、presence、control 多类流一起失败，支持优先检查共用代理路径；它不能定位此前是谁关闭连接，也不能证明反复传输了大数据。
 
-锁定 SDK 的同房间 `rejoin()` 保留 cursor，普通 live read 失败会退避。合成实验先从 100000 完成 bootstrap，再将 100123 写入注入的内存 cursor store，随后注入网络失败。下一次 SSE 从 100123 读取，bootstrap 总数仍为一次；实验没有验证磁盘持久化。缺少 cursor、服务端返回 410、恢复未完整导入等是另外的 bootstrap 路径。历史上的 [read-loop spin](2026-10-19-streams-read-loop-spin.zh.md)可能不再发出请求，不能用它解释大流量。
+锁定 SDK 的同房间 `rejoin()` 保留 cursor，普通 live read 失败会退避。合成实验先从 100000 完成 bootstrap，再将 100123 写入注入的内存 cursor store，随后注入网络失败。下一次 SSE 从 100123 读取，bootstrap 总数仍为一次；实验没有验证磁盘持久化。缺少 cursor、服务端返回 410、恢复未完整导入等是另外的 bootstrap 路径。历史上的 [read-loop spin](../../implemented/bug-fix/2026-10-19-streams-read-loop-spin.zh.md)可能不再发出请求，不能用它解释大流量。
 
 renderer 的 Chromium 网络与 daemon 的 Node 网络也分别管理代理。[`system-proxy-env.ts`](../../../../apps/electron/src/main/services/system-proxy-env.ts) 在启动子进程时，从 Chromium 解析出的系统代理补齐缺失的代理环境变量，已有环境变量优先。子进程环境是启动时的快照，而 renderer 使用 Chromium 的代理配置；关闭环境补齐并不会关闭 renderer 代理。
 
@@ -86,3 +86,7 @@ renderer 的 Chromium 网络与 daemon 的 Node 网络也分别管理代理。[`
 自动更新按固定间隔检查，托管 runtime 复用已安装版本、合并同版本下载，本次没有发现应用自己快速循环下载。隐藏的公共浏览器 view 仍然存活，因此网页媒体和请求是另一条有条件的候选。本地预览 HTTP/WebSocket 也可能进入某些进程统计。这些都没有被确认为用户流量来源。
 
 候选修复仍是提议：限制不完整导入的恢复次数并进入退避、拒绝 cursor 倒退、依据快照大小设置增量门槛或最短上传间隔、为预取副本保存配套检查点，以及限制超大或无法写入缓存的文档再次进入候选的频率。不能把跳过的下载标成已持久化或已同步。提高门槛会减少上传但增加尾部重放，取消预取会减少流量但增加冷打开等待。应先归因实际字节；空闲报告优先检查反复 bootstrap/续读和 `apply_incomplete` 证据。本次没有产品修复、生产抓包、部署或全量应用检查。
+
+
+缓存拒绝冷却与跨窗口领取已由[Worker 决策](../../implemented/architecture/2026-09-12-session-prefetch-worker.zh.md)
+说明。该修复收窄了当前预取风险，不建立线上流量归因；其他调查与优化建议仍为提案。

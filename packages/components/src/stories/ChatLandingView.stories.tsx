@@ -12,7 +12,6 @@ import { HomeDashboard } from '@/components/chat/home/home-dashboard';
 import { useChatLandingKeyboardNav } from '@/hooks/use-chat-landing-keyboard-nav';
 import { ContextSwitch } from '@/components/chat/context-switch';
 import type { SessionContextType } from '@/components/chat/context-switch';
-import { getSelectorTagClassName } from '@/components/chat/chat-landing-selectors';
 import { AcpBottomBarModeSelector, AcpFooterSelectorGroup } from '@/components/shared';
 import type { OptionSelectorOption } from '@/components/shared/option-selector';
 import { OptionSelector } from '@/components/shared/option-selector';
@@ -306,8 +305,6 @@ function DemoLandingContent({
     verbosity: 'balanced',
   });
 
-  const selectorTagClassName = getSelectorTagClassName(tone);
-
   // Top selector: repo (shown above textarea)
   const topSelectorNode = (
     <div className="flex items-center gap-1">
@@ -317,7 +314,6 @@ function DemoLandingContent({
         onSelect={(option) => setSelectedRepo(option.value)}
         placeholder="Select repo"
         placeholderIcon={Github}
-        tone={tone}
         searchable
         searchPlaceholder="Search repos"
         className="h-6 gap-1 rounded-md border-none bg-transparent px-1 [&_span]:text-[11px] [&_span]:leading-tight"
@@ -349,8 +345,6 @@ function DemoLandingContent({
           onSelect={(option) => setSelectedMachine(option.value)}
           placeholder="Machine"
           placeholderIcon={Monitor}
-          tone={tone}
-          className={selectorTagClassName}
           contentClassName="w-56"
           renderTriggerValue={(option) => (
             <div className="flex min-w-0 items-center gap-1.5">
@@ -371,8 +365,6 @@ function DemoLandingContent({
           onSelect={(option) => setSelectedAgent(option.value)}
           placeholder="Select agent"
           placeholderIcon={Bot}
-          tone={tone}
-          className={selectorTagClassName}
           contentClassName="w-64"
         />
       </div>

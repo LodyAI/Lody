@@ -65,3 +65,8 @@ or the authenticated recovery identity at epoch zero. Report partial key recover
 never equate restored governance with current-key readiness. New owner transfers
 require a successor personal device, and last-personal revocation requires explicit
 recovery-loss confirmation in the workflow. Preserve v1 replay rules.
+
+Password unlock reads the eight bounded ciphertext slots through optional
+`readEntries`, otherwise with at most four individual reads in flight. It still waits for the complete scan, tests the same two newest
+candidates and authenticates the active index and rollback pin before returning.
+It does not cache password wraps or reduce Argon2id parameters.

@@ -54,6 +54,7 @@ import {
 } from '@lody/shared/notifications';
 import type { SessionActivePresencePhase } from './loro/session-active-presence';
 import { projectTurnAttention, type TerminalOutcome } from '@lody/shared/notifications';
+import { reportIfWasmFault } from './loro/wasm-runtime-health';
 import { turnNotificationAudience } from './notifications/turn-notification-audience';
 import { fileLocksLegacy } from '@/utils/file-lock';
 import { Effect } from 'effect';
@@ -151,7 +152,6 @@ import {
   type ChatFailedCode,
   type ChatFailedReason,
   type ProjectRef,
-  type SessionPreparationCancelSpec,
   getProjectRefBranch,
   resolveBaseBranchPreference,
   MachineStatusRequestValidated,
@@ -164,8 +164,6 @@ import {
   MachineAcpCapabilitiesRefreshResponse,
   type MachineAcpAuthenticateRequestValidated,
   type MachineAcpAuthenticateResponse,
-  SessionCodeCollabHostStartRequestValidated,
-  SessionCodeCollabHostStartResponse,
   type MachineAcpBinaryStatusRequestValidated,
   type MachineAcpBinaryInstallRequestValidated,
   type LocalProjectControlErrorCode,
@@ -187,9 +185,6 @@ import {
   sessionForkFailure,
   type SessionEditAndResendResponse,
   sessionEditAndResendFailure,
-  type SessionPreparationSpec,
-  type SessionPrepareCancelResponse,
-  type SessionPrepareResponse,
   type MachineLifecycleCapability,
   PreviewCandidateReportRequestValidated,
   SessionPreviewCreateRequestValidated,
@@ -209,6 +204,8 @@ import {
   type MessageContent,
   type AcpSessionNotification,
   getServerNow,
+  hasFreshDesktopForegroundPresence,
+  type LodyPresenceStateMap,
   CODE_COLLAB_V2_TEXT_LIMITS,
   isSessionGoalActive,
   type SessionGoalAction,
@@ -326,7 +323,7 @@ import {
   clearThreadGoalFromHistory,
 } from '@/lib/acp/history';
 import type { AcpAgentEditEvidence, AcpStandardDiffBlockEvidence } from '@/lib/acp/history';
-import { mergeAcpRuntimeConfigUpdates } from '@/lib/acp/runtime-config';
+import { getAcpRuntimeConfigPatch, mergeAcpRuntimeConfigUpdates } from '@/lib/acp/runtime-config';
 import { generateTitleIsolated, sanitizeTitle } from '@/agent/title-generator';
 import type { AgentSessionWarning, NativeAgentWork } from '@/agent/agent-client';
 import { SessionActivePresenceControllerLegacy } from './loro/session-active-presence-legacy';
@@ -704,6 +701,12 @@ export interface MessageHandlerConfig {
   ) => Promise<string>;
   supportRegistryAgentTypes?: string[];
   closeSessionTerminals?: (sessionId: SessionId) => void;
+  /**
+   * Presence snapshots of every workspace this daemon hosts, so a desktop focused
+   * on another hosted workspace also suppresses this workspace's mobile push.
+   * Absent: only this workspace's snapshot is read.
+   */
+  readHostedPresenceStates?: () => LodyPresenceStateMap[];
   localWorkspaceCatalog?: LocalWorkspaceCatalogService;
   cleanupLocalProjectWorktreeSetupIfUnreferenced?: (
     localProjectId: LocalProjectId
@@ -809,6 +812,7 @@ export class MessageHandler {
   private cliVersion: string;
   private supportRegistryAgentTypes: string[];
   private closeSessionTerminals?: (sessionId: SessionId) => void;
+  private readHostedPresenceStates?: () => LodyPresenceStateMap[];
   private cleanupLocalProjectWorktreeSetupIfUnreferenced?: (
     localProjectId: LocalProjectId
   ) => Promise<void>;
@@ -894,7 +898,7 @@ export class MessageHandler {
   private static readonly CODE_COLLAB_EVIDENCE_MAX_AUTOMATIC_RETRIES = 5;
   private static readonly CODE_COLLAB_EVIDENCE_RETRY_BASE_DELAY_MS = 100;
   private static readonly CODE_COLLAB_EVIDENCE_RETRY_MAX_DELAY_MS = 1_600;
-  private static readonly CONTEXT_WINDOW_USAGE_THROTTLE_MS = 400;
+  private static readonly CONTEXT_WINDOW_USAGE_THROTTLE_MS = 10_000;
   // Track permission wait time: requestId -> timestamp when permission was requested
   private readonly permissionRequestStartTimes = new Map<string, number>();
   private readonly pendingPermissionRequests = new Map<SessionId, Set<string>>();
@@ -1755,9 +1759,15 @@ export class MessageHandler {
     usage: SessionContextWindowUsage
   ): Promise<void> {
     try {
+      // A final flush must land after an already-started intermediate write.
+      await Promise.all([...this.store.get(sessionId).pendingContextWindowHandlers]);
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       await sessionDoc.setContextWindowUsage(usage);
     } catch (error) {
+      const state = this.store.get(sessionId);
+      if (state.contextWindowUsageLastQueued === usage) {
+        state.contextWindowUsageLastQueued = null;
+      }
       this.logger.debug(
         `[${sessionId}] Failed to persist context window usage: ${formatErrorMessage(error)}`
       );
@@ -1768,21 +1778,61 @@ export class MessageHandler {
     sessionId: SessionId,
     usage: SessionContextWindowUsage
   ): void {
+    if (
+      !Number.isFinite(usage.size) ||
+      !Number.isFinite(usage.used) ||
+      usage.size < 0 ||
+      usage.used < 0
+    ) {
+      return;
+    }
     const state = this.store.get(sessionId);
     state.contextWindowUsageBuffer = usage;
     if (state.contextWindowUsageTimer) {
       return;
     }
-    state.contextWindowUsageTimer = setTimeout(() => {
+    const publish = () => {
       state.contextWindowUsageTimer = null;
       const latest = state.contextWindowUsageBuffer;
       if (!latest) {
         return;
       }
-      state.contextWindowUsageBuffer = null;
-      const promise = this.persistContextWindowUsage(sessionId, latest);
-      this.trackPendingContextWindowPersist(sessionId, promise);
-    }, MessageHandler.CONTEXT_WINDOW_USAGE_THROTTLE_MS);
+      const previous = state.contextWindowUsageLastQueued;
+      // Compare with the last published snapshot, so small deltas accumulate.
+      // Keep skipped values buffered for an exact boundary flush.
+      if (
+        previous &&
+        latest.size === previous.size &&
+        Math.abs(latest.used - previous.used) < Math.max(1024, latest.size * 0.01)
+      ) {
+        return;
+      }
+      this.queueContextWindowUsagePersist(sessionId, latest);
+    };
+    const delay = state.contextWindowUsageLastQueued
+      ? Math.max(
+          0,
+          MessageHandler.CONTEXT_WINDOW_USAGE_THROTTLE_MS -
+            (Date.now() - state.contextWindowUsageLastQueuedAt)
+        )
+      : 0;
+    if (delay === 0) {
+      publish();
+    } else {
+      state.contextWindowUsageTimer = setTimeout(publish, delay);
+    }
+  }
+
+  private queueContextWindowUsagePersist(
+    sessionId: SessionId,
+    usage: SessionContextWindowUsage
+  ): void {
+    const state = this.store.get(sessionId);
+    state.contextWindowUsageBuffer = null;
+    state.contextWindowUsageLastQueued = usage;
+    state.contextWindowUsageLastQueuedAt = Date.now();
+    const promise = this.persistContextWindowUsage(sessionId, usage);
+    this.trackPendingContextWindowPersist(sessionId, promise);
   }
 
   private async flushSessionContextWindowUsage(sessionId: SessionId): Promise<void> {
@@ -1794,9 +1844,7 @@ export class MessageHandler {
 
     const latest = state.contextWindowUsageBuffer;
     if (latest) {
-      state.contextWindowUsageBuffer = null;
-      const promise = this.persistContextWindowUsage(sessionId, latest);
-      this.trackPendingContextWindowPersist(sessionId, promise);
+      this.queueContextWindowUsagePersist(sessionId, latest);
     }
 
     for (;;) {
@@ -1869,7 +1917,17 @@ export class MessageHandler {
         await this.awaitTurnHistoryGate(session.sessionId);
         if (context.signal?.aborted) return;
         const backend = await this.getSessionBackend(context.sessionDoc);
-        await backend.applyAcpRuntimeConfigPatch(basedOnUserTurnId, runtimeConfigPatch);
+        // Read commands at write time: one advertised after the run config was applied found
+        // no snapshot for this ACP session yet, so this write is the one that must carry it.
+        const availableCommands = session.agentClient?.getAvailableCommandsForSession(
+          runtimeConfigPatch.acpSessionId
+        );
+        await backend.applyAcpRuntimeConfigPatch(
+          basedOnUserTurnId,
+          availableCommands === undefined
+            ? runtimeConfigPatch
+            : { ...runtimeConfigPatch, availableCommands }
+        );
       };
       void persistRuntimeConfig().catch((error) => {
         this.logger.warn(
@@ -2967,35 +3025,6 @@ export class MessageHandler {
     });
   }
 
-  /**
-   * Draft session preparation is retired. Desktops that predate its removal
-   * still ask for it, so both requests answer at once without doing any work.
-   * Prepare reports an accepted duplicate: an older desktop then holds that one
-   * lease until the draft idles or is sent. A rejection would make it ask again,
-   * and cancel, after every pause in typing.
-   */
-  private declineSessionPreparation(spec: SessionPreparationSpec): SessionPrepareResponse {
-    return {
-      type: 'session/prepare_response',
-      preparationId: spec.preparationId,
-      sessionId: spec.sessionId,
-      accepted: true,
-      disposition: 'duplicate',
-    };
-  }
-
-  private declineSessionPreparationCancel(
-    args: SessionPreparationCancelSpec
-  ): SessionPrepareCancelResponse {
-    return {
-      type: 'session/prepare-cancel_response',
-      preparationId: args.preparationId,
-      sessionId: args.sessionId,
-      cancelled: false,
-      disposition: 'not-found',
-    };
-  }
-
   // Single access choke point for prompt-handoff steer: both RPC arrival paths
   // (Loro Streams deps callback and local Machine RPC switch) route through here
   // so neither can bypass machine/local-project verification.
@@ -3282,6 +3311,7 @@ export class MessageHandler {
     );
     this.supportRegistryAgentTypes = config.supportRegistryAgentTypes ?? [];
     this.closeSessionTerminals = config.closeSessionTerminals;
+    this.readHostedPresenceStates = config.readHostedPresenceStates;
     this.cleanupLocalProjectWorktreeSetupIfUnreferenced =
       config.cleanupLocalProjectWorktreeSetupIfUnreferenced;
     this.onFatalAuthFailure = config.onFatalAuthFailure;
@@ -3546,6 +3576,17 @@ export class MessageHandler {
           },
           { noticeId: `session-stop-failure-${turnId}-${failure.phase}` }
         ),
+      recordNativeWorkInterrupted: async (sessionId, turnId) => {
+        if (this.deletedSessionIds.has(sessionId) || this.archiveInFlight.has(sessionId)) return;
+        await this.recordAgentWarning(
+          sessionId,
+          {
+            message: 'The agent process ended while it still reported background work.',
+            source: 'nativeWorkInterrupted',
+          },
+          { noticeId: `native-work-interrupted-${turnId}` }
+        );
+      },
       maybeGenerateAndStoreSessionTitle: async (
         sessionId,
         cliType,
@@ -3997,8 +4038,6 @@ export class MessageHandler {
             disposition,
           };
         },
-        prepareSession: async (spec) => this.declineSessionPreparation(spec),
-        cancelSessionPreparation: async (args) => this.declineSessionPreparationCancel(args),
         resolveSessionHistoryOwnerSessionId: this.resolveSessionHistoryOwnerSessionId,
         authorizeSessionHistoryRead: async ({ sessionId, readProof }) => {
           if (!readProof || !this.cloudPort.access.verifySessionHistoryRead) return false;
@@ -4135,7 +4174,7 @@ export class MessageHandler {
           await this.previewService.authorizeRemoteControl(
             request.sessionId,
             request.requestedByUserId,
-            { action: 'revoke' },
+            { action: 'revoke', ...(request.stopProcess ? { stopProcess: true } : {}) },
             proof
           );
           return this.previewService.revokePreview({
@@ -4530,6 +4569,7 @@ export class MessageHandler {
 
     // Session exit: flush ACP updates before marking idle.
     this.sessionManager.on('exit', (exit) => {
+      this.executionService.forgetReleasedTurn(exit.sessionId);
       void (async () => {
         const sessionId = exit.sessionId;
         this.logger.debug(`[${sessionId}] Session exit event received (exitCode=${exit.exitCode})`);
@@ -4549,6 +4589,7 @@ export class MessageHandler {
     // Session termination can race with exit/error; always flush ACP updates first.
     // Skip if session was already cleaned by GC to avoid re-creating transient state.
     this.sessionManager.on('terminated', (event) => {
+      this.executionService.forgetReleasedTurn(event.sessionId);
       this.codeCollabV2Service.releaseWorkspaceWatchForOwner(event.sessionId);
       void (async () => {
         const sessionId = event.sessionId;
@@ -4881,6 +4922,7 @@ export class MessageHandler {
     options: { writeIdleStatus?: boolean } = {}
   ): Promise<void> {
     this.logger.debug(`[${sessionId}] Releasing archived session runtime`);
+    this.executionService.withdrawNativeWorkCompletion(sessionId);
 
     this.clearSessionActivePresence(sessionId);
     this.closeSessionTerminals?.(sessionId);
@@ -5213,6 +5255,7 @@ export class MessageHandler {
    * orphan to report, not a reason to leave the archive half done.
    */
   private async terminateSessionForRelease(sessionId: SessionId): Promise<void> {
+    this.executionService.withdrawNativeWorkCompletion(sessionId);
     try {
       await this.sessionManager.terminateSession(sessionId, true);
     } catch (error) {
@@ -5329,6 +5372,11 @@ export class MessageHandler {
     }
     const target = this.store.getCurrentACPUpdateTarget(sessionId);
     if (target) this.recordLiveActivity(sessionId, update);
+    if (!target && update.update.sessionUpdate === 'available_commands_update') {
+      // Standard agents advertise commands right after session/new, before any assistant entry.
+      this.persistOutOfTurnAvailableCommands(sessionId, update);
+      return;
+    }
     if (!target) {
       this.captureACPUpdateInvariant('out_of_turn_acp_update_without_target', sessionId, update);
       this.logger.debug(
@@ -5363,6 +5411,23 @@ export class MessageHandler {
       target,
     });
     this.scheduleFlushACPUpdates(sessionId);
+  }
+
+  private persistOutOfTurnAvailableCommands(
+    sessionId: SessionId,
+    notification: AcpSessionNotification
+  ): void {
+    const patch = getAcpRuntimeConfigPatch(notification);
+    if (!patch) return;
+    void (async () => {
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
+      await backend.applyAcpRuntimeConfigPatchToCurrentSnapshot(patch);
+    })().catch((error: unknown) => {
+      this.logger.debug(
+        `[${sessionId}] Failed to persist out-of-turn ACP commands: ${formatErrorMessage(error)}`
+      );
+    });
   }
 
   private clearScheduledACPFlush(sessionId: SessionId): void {
@@ -8111,10 +8176,6 @@ export class MessageHandler {
           disposition,
         };
       }
-      case 'session/prepare':
-        return this.declineSessionPreparation(request.params);
-      case 'session/prepare-cancel':
-        return this.declineSessionPreparationCancel(request.params);
       case 'ios-simulator/agent-control': {
         const sessionId = request.params.sessionId as SessionId;
         const invocation = this.executionService.getActiveInvocationContext(sessionId);
@@ -8249,24 +8310,6 @@ export class MessageHandler {
     }
   }
 
-  private async respondToLegacyCodeCollabHostStart(
-    message: SessionCodeCollabHostStartRequestValidated
-  ): Promise<SessionCodeCollabHostStartResponse> {
-    const sessionId = message.sessionId;
-    this.touchSession(sessionId);
-    this.logger.debug(
-      `[${sessionId}] Ignoring legacy Code Collab host-start request; v1 session-specific host has been removed.`
-    );
-    return {
-      type: 'session/code-collab-host-start_response',
-      sessionId,
-      success: false,
-      status: 'disabled',
-      error: 'unsupported',
-      message: 'Code Collab v1 session-specific host is no longer supported.',
-    };
-  }
-
   /**
    * Handles a validated local control message.
    */
@@ -8318,9 +8361,6 @@ export class MessageHandler {
         break;
       case 'machine/acp-binary-install':
         await this.handleMachineAcpBinaryInstall(message, context);
-        break;
-      case 'session/code-collab-host-start':
-        await this.handleCodeCollabHostStart(message, context);
         break;
       case 'session/image-upload':
         await this.handleSessionImageUpload(message, context);
@@ -8988,14 +9028,6 @@ export class MessageHandler {
         message.payload as Record<string, unknown>
       )
     );
-  }
-
-  private async handleCodeCollabHostStart(
-    message: SessionCodeCollabHostStartRequestValidated,
-    dispatchContext: MessageDispatchContext
-  ): Promise<void> {
-    const response = await this.respondToLegacyCodeCollabHostStart(message);
-    dispatchContext.send(response);
   }
 
   private async handlePreviewCandidateReport(
@@ -10695,6 +10727,7 @@ export class MessageHandler {
       // separate RPC and must not synthesize its tool row ahead of that queue:
       // doing so splits an already-started text block at a batch boundary.
       await this.awaitTurnHistoryGate(sessionId);
+      await this.flushSessionContextWindowUsage(sessionId);
       await this.flushACPUpdatesNow(sessionId);
       if (
         this.deletedSessionIds.has(sessionId) ||
@@ -12103,6 +12136,13 @@ export class MessageHandler {
     }
     const notificationService = this.notificationService;
     await this.runTurnCloudSideEffect(sessionId, 'turn outcome notification', async () => {
+      if (this.isRecipientAtFocusedDesktop(userId)) {
+        // The user is at a Lody desktop: the desktop channel is enough. Only the
+        // mobile push is skipped; the silent Live Activity summary stays current.
+        this.logger.debug(`[${sessionId}] Mobile push skipped: recipient desktop is focused`);
+        await this.syncLiveActivitySummary(userId);
+        return;
+      }
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       const meta = await sessionDoc.getMetaState();
       const workspaceSlug = this.workspaceSlug?.trim() || this.workspaceId;
@@ -12119,6 +12159,24 @@ export class MessageHandler {
       });
       await this.syncLiveActivitySummary(userId);
     });
+  }
+
+  /**
+   * True only on positive evidence: a fresh `desktop-foreground` presence entry for
+   * the recipient in a hosted workspace. Unjoined rooms, read failures and stale
+   * entries answer false, so the mobile push is sent as before.
+   */
+  private isRecipientAtFocusedDesktop(userId: string): boolean {
+    try {
+      const snapshots = this.readHostedPresenceStates?.() ?? [
+        this.workspaceDocument.getPresenceStates() ?? {},
+      ];
+      return hasFreshDesktopForegroundPresence(snapshots, userId, getServerNow());
+    } catch (error) {
+      reportIfWasmFault(error);
+      this.logger.debug(`Desktop foreground presence read failed: ${formatErrorMessage(error)}`);
+      return false;
+    }
   }
 
   private async buildLiveActivitySummary(userId: string): Promise<LiveActivitySummary> {
@@ -12324,7 +12382,9 @@ export class MessageHandler {
    * model turn it started itself). GC must not stop such a session as idle.
    */
   getNativeWork(sessionId: SessionId): NativeAgentWork {
-    return this.sessionManager.getSession(sessionId)?.agentClient?.getNativeWork() ?? null;
+    const session = this.sessionManager.getSession(sessionId);
+    if (!session || session.hasLiveAgentProcess?.() === false) return null;
+    return session.agentClient?.getNativeWork() ?? null;
   }
 
   /**
@@ -12414,8 +12474,9 @@ export class MessageHandler {
         this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
       hasGoal: (sessionId) => this.hasActiveGoal(sessionId),
       nativeActivity: (sessionId) => {
-        const client = this.sessionManager.getSession(sessionId)?.agentClient;
-        return client ? client.getNativeActivityObservation() : 'idle';
+        const session = this.sessionManager.getSession(sessionId);
+        if (!session || session.hasLiveAgentProcess?.() === false) return 'idle';
+        return session.agentClient ? session.agentClient.getNativeActivityObservation() : 'idle';
       },
       author: (sessionId) =>
         this.executionService.getActiveInvocationContext(sessionId)?.requesterUserId,

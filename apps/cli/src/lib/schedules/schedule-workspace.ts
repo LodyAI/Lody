@@ -7,6 +7,7 @@ import {
   getServerNow,
   getSessionRoomId,
   isLoroRepoDocDeleted,
+  isScheduleImportFenced,
   ScheduleRepository,
   ScheduledMessageSchema,
   scheduleDefinitionFingerprint,
@@ -49,10 +50,7 @@ import {
 import { createScheduleSyncGate } from './schedule-sync-gate';
 import { ScheduleStore } from './schedule-store';
 import { ScheduleEngine, ScheduleConfigurationError } from './schedule-engine';
-import {
-  isQuotaReservationCandidate,
-  isUnassociatedQuotaReservation,
-} from './legacy-quota-reservation';
+import { isQuotaReservationCandidate } from './quota-reservation';
 
 // Ticks plan Schedules serially, so this wait delays every other Schedule. A
 // timeout blocks only this definition until the next tick retries it.
@@ -61,7 +59,6 @@ const DEFINITION_SYNC_TIMEOUT_MS = 8_000;
 export type ScheduleWorkspaceHandle = {
   evaluate: () => Promise<void>;
   dispose: () => Promise<void>;
-  hasUncertainLegacyQuota: (sessionId: SessionId) => boolean;
 };
 
 export async function createScheduleWorkspace(args: {
@@ -171,6 +168,12 @@ export async function createScheduleWorkspace(args: {
     encrypted: workspace.contentMode === 'e2ee',
     authorize: args.authorize,
     list: () => repository.list(),
+    importFenced: async (row) =>
+      isScheduleImportFenced(
+        (await manager.repo.getDocMeta(getScheduleRoomId(row.scheduleId)))?.meta,
+        workspaceId,
+        row.activationId
+      ),
     read: async (id) => {
       if (!args.localOnly)
         await manager.syncDocOrThrow(getScheduleRoomId(id), {
@@ -434,14 +437,6 @@ export async function createScheduleWorkspace(args: {
   wake();
   return {
     evaluate,
-    hasUncertainLegacyQuota: (sessionId) =>
-      store
-        .unfinishedForSession(workspaceId, sessionId)
-        .some(
-          (run) =>
-            (run.prepared !== undefined || run.state === 'dispatched') &&
-            isUnassociatedQuotaReservation(run)
-        ),
     dispose: async () => {
       disposed = true;
       clearInterval(timer);

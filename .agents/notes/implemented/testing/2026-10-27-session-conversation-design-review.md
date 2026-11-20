@@ -11,7 +11,7 @@ The session reading story showed prose and file summaries but omitted several su
 
 ## Decision
 
-Extend the existing [session conversation story](../../../../packages/components/src/stories/SessionConversationPage.stories.tsx) rather than creating a separate visual implementation. The reading session identifies as builtin DeepSeek because the conversation renderer exposes thought prose for that provider. File selections open the real desktop diff panel or mobile drawer against a synthetic file provider. The annotation variant renders the real managed-preview surface with an inert page and an in-memory comment store; it does not emulate a live inspector or network connection. The [story guide](../../../docs/sessions-stories.md) owns the navigation and scope of these examples.
+Extend the existing [session conversation story](../../../../packages/components/src/stories/SessionConversationPage.stories.tsx) rather than creating a separate visual implementation. The reading session identifies as builtin DeepSeek; thought prose is shown for every provider. File selections open the real desktop diff panel or mobile drawer against a synthetic file provider. The annotation variant renders the real managed-preview surface with an inert page and an in-memory comment store; it does not emulate a live inspector or network connection. The [story guide](../../../docs/sessions-stories.md) owns the navigation and scope of these examples.
 
 ## Verification
 

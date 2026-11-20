@@ -342,8 +342,7 @@ export class MachineRuntime {
   ): Promise<LocalSessionControlResponse[]> {
     if (
       this.options.handlerConfig.encryptedWorkspace &&
-      (message.type.startsWith('session/preview-') ||
-        message.type === 'session/code-collab-host-start')
+      message.type.startsWith('session/preview-')
     )
       throw new Error('e2ee_feature_unavailable');
     const handler = this.requireHandler();

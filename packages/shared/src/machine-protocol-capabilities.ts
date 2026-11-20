@@ -50,11 +50,14 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   markdownFileLinks: 'markdownFileLinks',
   acpProtocolAuthentication: 'acpProtocolAuthentication',
   previewControl: 'previewControl',
+  previewStopProcess: 'previewStopProcess',
   androidEmulator: 'androidEmulator',
   androidEmulatorQuality: 'androidEmulatorQuality',
+  androidEmulatorShutdown: 'androidEmulatorShutdown',
   iosSimulator: 'iosSimulator',
   iosSimulatorControls: 'iosSimulatorControls',
   iosSimulatorExterior: 'iosSimulatorExterior',
+  iosSimulatorShutdown: 'iosSimulatorShutdown',
   piExtensions: 'piExtensions',
   antigravitySkipPermissions: 'antigravitySkipPermissions',
   acpCapabilityRefreshCache: 'acpCapabilityRefreshCache',
@@ -118,7 +121,7 @@ export const LOCAL_FILE_RESOURCES_PROTOCOL_VERSION = 1;
 export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 2;
 export const PREVIEW_CONTROL_PROTOCOL_VERSION = 1;
 export const IOS_SIMULATOR_PROTOCOL_VERSION = 1;
-export const IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION = 1;
+export const IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION = 2;
 export const PI_EXTENSIONS_PROTOCOL_VERSION = 1;
 /** `runtimeOverrides.antigravitySkipPermissions`; older strict schemas reject the field. */
 export const ANTIGRAVITY_SKIP_PERMISSIONS_PROTOCOL_VERSION = 1;
@@ -252,11 +255,14 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.markdownFileLinks]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication]: ACP_PROTOCOL_AUTHENTICATION_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.previewControl]: PREVIEW_CONTROL_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.previewStopProcess]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.androidEmulator]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.androidEmulatorQuality]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.androidEmulatorShutdown]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.iosSimulator]: IOS_SIMULATOR_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorControls]: IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorExterior]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorShutdown]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.acpCapabilityRefreshCache]:
     ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.acpModelOptionsRead]: ACP_MODEL_OPTIONS_READ_PROTOCOL_VERSION,
@@ -574,12 +580,13 @@ export function machineSupportsIosSimulatorProtocol(
 }
 
 export function machineSupportsIosSimulatorControls(
-  machine: MachineProtocolCapabilityCarrier | null | undefined
+  machine: MachineProtocolCapabilityCarrier | null | undefined,
+  minimumVersion = 1
 ): boolean {
   return machineSupportsProtocolCapability(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorControls,
-    IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION
+    minimumVersion
   );
 }
 
@@ -688,6 +695,36 @@ export function machineSupportsAndroidEmulatorQuality(
   return machineSupportsProtocolCapability(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.androidEmulatorQuality,
+    1
+  );
+}
+
+export function machineSupportsPreviewStopProcess(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.previewStopProcess,
+    1
+  );
+}
+
+export function machineSupportsIosSimulatorShutdown(
+  machine: Parameters<typeof machineSupportsIosSimulatorProtocol>[0]
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorShutdown,
+    1
+  );
+}
+
+export function machineSupportsAndroidEmulatorShutdown(
+  machine: Parameters<typeof machineSupportsIosSimulatorProtocol>[0]
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.androidEmulatorShutdown,
     1
   );
 }

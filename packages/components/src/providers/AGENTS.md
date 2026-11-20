@@ -2,10 +2,9 @@
 
 `CLAUDE.md` links here; ancestor rules apply.
 
-`CloudPlatformProvider` also wraps standalone login without authenticated Convex
-context. Keep organization queries and E2EE email inbox hosts in its optional
-authenticated child; absence of that context must still render login. The shared
-router supplies the context and retains workspace actions and owner/admin inboxes.
+Standalone login must render without authenticated Convex context; keep protected
+queries and E2EE hosts in its optional authenticated child.
+Commands and imperative subscriptions follow [cloud auth admission](../hooks/README.md#cloud-query-recovery).
 
 ## Mirrors over synced docs tolerate unknown root keys
 
@@ -17,6 +16,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 ## Streams connection cardinality
 
+- WebSocket defaults off; enabling it must retain HTTP shards and HTTP-only prefetch.
 - Discovery/refresh reuse existing workspace Machine Flock/RPC transports, with no
   subscription per request. Connections follow workspace/machine topology; more configs
   add serialized RPCs only. Release unowned handles and subscriptions.
@@ -27,11 +27,11 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 ## Workspace switching
 
-- Prompt Shortcuts instances belong to one initialization effect lifetime. Cleanup
-  must retire the published instance immediately, before asynchronous durable close.
-  Never reuse retired instances; fence platform, cloud capability and retry generation.
-  Cloud discovery, store opening, tokens and writes require the shared legacy
-  admission verdict; unknown waits and encrypted disables. Preserve the local store path.
+- Prompt Shortcut instances retire on effect cleanup and never cross platform, capability,
+  retry generation, account/session or workspace boundaries. Legacy admission gates cloud
+  work: unknown waits, encrypted disables; preserve local stores. V2 token owners retain
+  local retry counts and one diagnostic per fault until success, notify auth recovery,
+  and never cache authorization; see [retry reporting](../../../../.agents/notes/implemented/bug-fix/2026-11-17-shortcut-token-retry-diagnostics.md).
 - The `$workspaceName` route owns the render-time target slug. Workspace-scoped UI must
   require that target, the active runtime, and the runtime-owned doc-meta snapshot to agree
   before reading singleton caches. Shared visibility and sharing hooks enforce this gate by
@@ -55,21 +55,23 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   receipts, workspace ownership, autofocus and external-history refresh until
   presentation. Raw background prefetch never gains this exception.
 
-- Background Session prefetch must never acquire a UI Session store or create a
-  Mirror. Its disposable worker owns raw Doc import/export and a separate,
-  rebuildable snapshot cache. Keep one worker task per renderer, terminate before
-  releasing its slot, and detach local peers from the parent on cancellation. The
-  parent must check the durable activity checkpoint before constructing a worker;
-  scope cache rows by workspace and room so auxiliary windows share them.
-  Keep the timestamp-only high-water index as the pre-queue startup filter; it
-  must not load snapshots, Docs, histories, or foreground cursor state.
+- Background prefetch keeps raw Doc import/export in one disposable worker per renderer
+  with a separate rebuildable snapshot cache. Never acquire UI Session stores or Mirrors.
+  Terminate workers before releasing slots or workspace/room/authorization/plane
+  locks; cancellation detaches local peers. Recheck checkpoints under the claim before
+  constructing workers; skip unavailable locks. Bound metadata waits; retries
+  never confirm sync. Classify `apply_incomplete` separately from network failures; checkpoints retain
+  its 24-hour cap (`eager-sync-admission.ts`).
+  Scope cross-window cache rows by workspace/room. Queue filtering uses
+  timestamp-only high-water marks, never snapshots, Docs, histories or foreground cursors.
   Foreground acquisition cancels that room's prefetch and merges cached binary
-  state into the existing repo document; never replace unsent local edits or share
-  the UI repo's persistence/cursors with the worker. Intent:
+  into its existing Repo document, preserving unsent edits. Keep worker/UI
+  persistence and cursors separate. Seed empty foreground cursors only after
+  durable merges under cross-window exclusion. Intent:
   [background prefetch](../../../../specs/session-background-prefetch.zh.md).
-- Keep one Repo view across auth refresh and unrelated mode-cache changes;
-  `WorkspaceTargetRouter` owns target/transport selection.
-  Never restore a second writer or proxy-authoring/write-intent mirror.
+- Keep one Repo view and recovery owner across auth refresh, adapter replacement
+  and unrelated mode-cache changes. `WorkspaceTargetRouter` owns target/transport selection.
+  Never restore proxy-authoring/write-intent mirrors or additional writers.
 - Runtime close retries recoverable cleanup, retaining fencing until confirmed Repo destruction.
   Failed startup shares this close path.
 - Local-only bootstrap exchanges CRDT snapshots only from already owned documents
@@ -105,10 +107,11 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - Cloud Electron dual runtimes await the first **Run local agent** snapshot; encrypted
   runtimes always sync through cloud and ignore the setting. Enabled uses dual sync;
   disabled uses cloud-only sync without the local data plane or reconnect state.
-- Meta-room attachment is single-flight per runtime. Token, network, and visibility edges may
-  force one immediate recovery attempt, but they must preserve the current outage's retry history;
-  only a sustained healthy dwell resets backoff. Every attempt after the first is a `recovery`
-  phase, including one prompted by a rotated token.
+- Meta attachment is single-flight; retries use `recovery`. External wakes preserve
+  outage history; sustained health resets loop backoff. Periodic cloud repair honors per-`kind:id`
+  error backoff (30s–5min), clears it on leaving error, and charges only attempted rooms.
+  Waiting rooms cannot delay new failures or be revived by periodic global reconnect.
+  [Recovery](../../../../.agents/docs/components-package.md#cloud-room-recovery).
 - Workspace-level rooms without a machine owner use the platform fallback.
   Returning no transport silently disables synchronization for those rooms.
 - Resource monitoring follows machine ownership: local or optional remote transport;

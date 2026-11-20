@@ -1151,7 +1151,7 @@ void test(
     await f.joiner.memberSettleIdle('member', 'team')
     await f.approver.setMemberRole('team', admin.requestId, 'admin')
     await f.joiner.open('team')
-    await f.joiner.refresh('team', { installKeys: false })
+    await f.joiner.refresh('team', { keyMode: 'none' })
     const mint = async () => {
       const minted = await f.memberApi.withDesktopE2eeAccount(
         (account) => account.host.memberOffer('team', 'email', 9_000_000_000_000),
@@ -1834,7 +1834,7 @@ void test('after workspace creation (length 1, no prior cursor), ingesting inlin
   })
   // Brand-new workspace (position === null, length === 1): contiguous startIndex=1 skips history().
   f.ipc.retainInlineHistory('team', inlinePage(1))
-  await f.ipc.refresh('team', { installKeys: false })
+  await f.ipc.refresh('team', { keyMode: 'none' })
   assert.equal(historyCalls.length, 0)
   assert.deepEqual(ingestedPages, [1])
   assert.equal(length, 2)
@@ -1842,7 +1842,7 @@ void test('after workspace creation (length 1, no prior cursor), ingesting inlin
 
   // Bootstrapped workspace (position !== null): inline suffix serves refresh without calling history.
   f.ipc.retainInlineHistory('team', inlinePage(2))
-  await f.ipc.refresh('team', { installKeys: false })
+  await f.ipc.refresh('team', { keyMode: 'none' })
   assert.equal(historyCalls.length, 0)
   assert.deepEqual(ingestedPages, [1, 2])
 
@@ -1850,14 +1850,14 @@ void test('after workspace creation (length 1, no prior cursor), ingesting inlin
   position = null
   length = 1
   f.ipc.retainInlineHistory('team', inlinePage(2))
-  await f.ipc.refresh('team', { installKeys: false })
+  await f.ipc.refresh('team', { keyMode: 'none' })
   assert.equal(historyCalls.length, 1)
   assert.deepEqual(ingestedPages, [1, 2, 0])
 
   position = null
   length = 2
   f.ipc.retainInlineHistory('team', inlinePage(2))
-  await f.ipc.refresh('team', { installKeys: false })
+  await f.ipc.refresh('team', { keyMode: 'none' })
   assert.equal(historyCalls.length, 2)
   assert.deepEqual(ingestedPages, [1, 2, 0, 0])
 })

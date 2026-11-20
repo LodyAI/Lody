@@ -153,6 +153,7 @@ import {
 } from '../src/components/sessions/session-chat-input-area';
 import { initI18n } from '../src/i18n';
 import { PASTED_TEXT_FILE_MIN_CHAR_COUNT } from '../src/lib/pasted-text-draft';
+import { queueTask } from '../src/components/sessions/message-queue/queue-task';
 import { toast } from '@/lib/toast';
 import { formatMessageQuote, getSessionRoomId } from '@lody/shared';
 import { conversationQuoteDraftKey } from '../src/lib/conversation-quote-draft';
@@ -688,7 +689,7 @@ describe('SessionChatInputArea submission feedback', () => {
     });
   });
 
-  it('appends an inline quote question after the draft and sends it, or keeps it as a draft', async () => {
+  it('inserts at the saved composer caret after focus leaves, without sending', async () => {
     scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
     const composerRef = createRef<SessionChatInputAreaHandle>();
     const submitted: SessionInputBlock[][] = [];
@@ -699,43 +700,23 @@ describe('SessionChatInputArea submission feedback', () => {
         return true;
       },
     });
+    textarea.focus();
+    textarea.setSelectionRange(6, 6);
+    textarea.blur();
     await act(async () => {
-      expect(
-        composerRef.current!.addMessageQuote('Keep this', { comment: '  Why keep it?  ' })
-      ).toBe(true);
+      expect(composerRef.current!.addMessageQuote('Keep this')).toBe(true);
     });
     expect(submitted).toHaveLength(0);
-    expect(textarea.value.startsWith('focus regression draft')).toBe(true);
-    expect(textarea.value.endsWith('Why keep it?')).toBe(true);
-    expect(textarea.value).not.toContain('\n');
-    await act(async () => {
-      expect(
-        composerRef.current!.addMessageQuote('Second passage', {
-          comment: 'And this?',
-          send: true,
-        })
-      ).toBe(true);
-    });
-    expect(submitted).toHaveLength(1);
+    expect(textarea.value.startsWith('focus ')).toBe(true);
+    expect(textarea.value.endsWith('regression draft')).toBe(true);
+    await submit('button');
     const block = submitted[0]![0]!;
     expect(block).toMatchObject({
       type: 'text',
-      spans: [
-        { kind: 'message_quote', quoteVersion: 1 },
-        { kind: 'message_quote', quoteVersion: 1 },
-      ],
+      spans: [{ kind: 'message_quote', quoteVersion: 1 }],
     });
     const sent = block.type === 'text' ? block.text : '';
-    const order = [
-      'focus regression draft',
-      formatMessageQuote('Keep this'),
-      'Why keep it?',
-      formatMessageQuote('Second passage'),
-      'And this?',
-    ].map((part) => sent.indexOf(part));
-    expect(order.every((index) => index >= 0)).toBe(true);
-    expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(textarea.value).toBe('');
+    expect(sent).toBe('focus ' + formatMessageQuote('Keep this') + 'regression draft');
   });
 
   it('preserves a quote draft when the target machine loses support', async () => {
@@ -1810,6 +1791,7 @@ describe('SessionChatInputArea submission feedback', () => {
       const pastedText = character.repeat(50_000);
       const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
       const textarea = await renderComposer({
+        overrides: { initialInputText: '' },
         onSendMessage: async (...args) => {
           submissions.push(args);
           return true;
@@ -1822,13 +1804,14 @@ describe('SessionChatInputArea submission feedback', () => {
       });
 
       expect(event.defaultPrevented).toBe(true);
-      expect(textarea.value).toBe('focus regression draft');
+      expect(textarea.value).toBe('');
       expect(container!.textContent).toContain('pasted-text.txt');
       expect(errorToast).not.toHaveBeenCalled();
 
       await submit('keyboard');
 
-      const attachment = submissions[0]?.[2]?.attachments?.[0];
+      const [blocks, , options] = submissions[0]!;
+      const attachment = options?.attachments?.[0];
       expect(attachment).toMatchObject({
         kind: 'file',
         name: 'pasted-text.txt',
@@ -1838,6 +1821,7 @@ describe('SessionChatInputArea submission feedback', () => {
       expect(attachment?.source ? await readBlobAsText(attachment.source) : undefined).toBe(
         pastedText
       );
+      expect(queueTask(blocks, options?.attachments)).toBe('pasted-text.txt');
     });
 
     it('merges the generated file with real clipboard files', async () => {

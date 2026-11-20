@@ -177,22 +177,6 @@ const ManagedRuntimeInstallMetadataSchema = z
 
 type ManagedRuntimeInstallMetadata = z.infer<typeof ManagedRuntimeInstallMetadataSchema>;
 
-const LegacyManagedRuntimeInstallMetadataSchema = z
-  .object({
-    name: ManagedRuntimeNameSchema,
-    version: z.string().min(1),
-    platform: z.string().min(1),
-    archiveSha256: z.string().regex(/^[a-f0-9]{64}$/u),
-    archiveSize: z.number().int().positive(),
-    executableSha256: z
-      .string()
-      .regex(/^[a-f0-9]{64}$/u)
-      .optional(),
-    executableSize: z.number().int().positive().optional(),
-    installedAt: z.string().min(1),
-  })
-  .strict();
-
 export type ManagedRuntimeDiagnostics = {
   runtimeName: ManagedRuntimeName;
   version: string;
@@ -813,30 +797,7 @@ export class ManagedAgentRuntimeManager {
     let metadata: ManagedRuntimeInstallMetadata;
     try {
       const rawMetadata: unknown = JSON.parse(await readFile(join(dir, 'metadata.json'), 'utf8'));
-      const currentMetadata = ManagedRuntimeInstallMetadataSchema.safeParse(rawMetadata);
-      if (currentMetadata.success) {
-        metadata = currentMetadata.data;
-      } else {
-        const legacyMetadata = LegacyManagedRuntimeInstallMetadataSchema.parse(rawMetadata);
-        const legacyDefinition = RUNTIMES[legacyMetadata.name];
-        const legacyArchive = legacyDefinition.platforms[legacyMetadata.platform];
-        if (!legacyArchive) {
-          throw new CorruptRuntimeCacheError(
-            `Managed runtime legacy cache platform is unsupported for ${legacyMetadata.name}/${legacyMetadata.version}/${legacyMetadata.platform}`
-          );
-        }
-        metadata = {
-          schemaVersion: 1,
-          runtimeName: legacyMetadata.name,
-          runtimeVersion: legacyMetadata.version,
-          platformArch: legacyMetadata.platform,
-          command: legacyArchive.cmd,
-          minNodeVersion: legacyDefinition.minNodeVersion,
-          archiveSha256: legacyMetadata.archiveSha256,
-          archiveSize: legacyMetadata.archiveSize,
-          installedAt: legacyMetadata.installedAt,
-        };
-      }
+      metadata = ManagedRuntimeInstallMetadataSchema.parse(rawMetadata);
     } catch (error) {
       throw new CorruptRuntimeCacheError(
         `Managed runtime cache metadata is invalid for ${name}/${version}/${platformArch}`,

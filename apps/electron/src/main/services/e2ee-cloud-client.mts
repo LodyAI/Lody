@@ -293,6 +293,14 @@ export class E2eeMemberInvitationRefusedError extends BackendError {
   }
 }
 
+/** Only an explicit backend refusal may be presented as recovery switched off. */
+export class E2eeRecoveryDisabledError extends BackendError {
+  readonly code = 'disabled'
+  constructor() {
+    super({ service: 'E2eeCloud', reason: 'unavailable' })
+  }
+}
+
 function requestFailure(error: unknown): BackendError {
   // Terminal types from authentication, transport or decoding are not authority.
   if (error instanceof E2eeMemberRemovedError || error instanceof E2eeDeviceRevokedError)
@@ -313,6 +321,7 @@ function requestFailure(error: unknown): BackendError {
     return new E2eeStagingCapacityError(capacity.data.data.round, capacity.data.data.limit)
   const result = z.object({ data: z.object({ code: z.string() }) }).safeParse(error)
   const code = result.success ? result.data.data.code : ''
+  if (code === 'e2ee_recovery_vault_disabled') return new E2eeRecoveryDisabledError()
   if (operatorCodes.has(code)) return new E2eeCloudDiagnosticError(code)
   const refusal = accountPairingRefusals.get(code)
   if (refusal) return new E2eeAccountPairingRefusedError(refusal)
@@ -1291,10 +1300,42 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
     },
     historyBatch: (items: E2eeWorkspaceHistoryRequest[]) => {
       const original = structuredClone(items)
-      return request(
-        (client) => client.action(api.e2eeWorkspaces.historyBatch, { items: original }),
-        workspaceBatch(historyPage)
-      )
+      return request(async (client) => {
+        try {
+          return await client.action(api.e2eeWorkspaces.historyBatch, { items: original })
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !error.message.includes('Could not find public function') ||
+            !error.message.includes('e2eeWorkspaces:historyBatch')
+          )
+            throw error
+          const items: Array<
+            import('@lody/cloud-api').E2eeWorkspaceBatchReply<E2eeWorkspaceHistoryPage>['items'][number]
+          > = []
+          for (let i = 0; i < original.length; i += 4)
+            items.push(
+              ...(await Promise.all(
+                original.slice(i, i + 4).map(async (item) => {
+                  try {
+                    return {
+                      workspaceId: item.workspaceId,
+                      status: 'ok' as const,
+                      result: await client.action(api.e2eeWorkspaces.history, item)
+                    }
+                  } catch {
+                    return {
+                      workspaceId: item.workspaceId,
+                      status: 'error' as const,
+                      code: 'e2ee_unavailable'
+                    }
+                  }
+                })
+              ))
+            )
+          return { items }
+        }
+      }, workspaceBatch(historyPage))
     },
     appendRecordsBatch: (items: E2eeAppendRecordRequest[]) => {
       const original = structuredClone(items)
@@ -1449,6 +1490,38 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
             z.unknown(),
             signal
           ).pipe(Effect.flatMap(ciphertext)),
+        readEntries: (vaultId, entryIds) =>
+          request(
+            async (client) => {
+              try {
+                return await client.query(api.e2eeRecoveryVault.readEntries, {
+                  vaultId,
+                  entryIds: [...entryIds]
+                })
+              } catch (error) {
+                if (
+                  !(error instanceof Error) ||
+                  !error.message.includes('Could not find public function') ||
+                  !error.message.includes('e2eeRecoveryVault:readEntries')
+                )
+                  throw error
+                const rows: unknown[] = []
+                for (let i = 0; i < entryIds.length; i += 4)
+                  rows.push(
+                    ...(await Promise.all(
+                      entryIds
+                        .slice(i, i + 4)
+                        .map((entryId) =>
+                          client.query(api.e2eeRecoveryVault.readEntry, { vaultId, entryId })
+                        )
+                    ))
+                  )
+                return rows
+              }
+            },
+            z.array(z.unknown()),
+            signal
+          ).pipe(Effect.flatMap((rows) => Effect.forEach(rows, ciphertext))),
         readIndex: (vaultId) =>
           request(
             (client) => client.query(api.e2eeRecoveryVault.readIndex, { vaultId }),

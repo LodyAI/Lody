@@ -94,8 +94,6 @@ export interface ChatLandingViewProps {
   onFileRetry?: (id: string) => void;
   /** Per-turn MCP selection, rendered inside the composer's "+" menu. */
   mcp?: AttachmentAddMenuMcp;
-  /** @deprecated Use topSelector and footerSelector instead */
-  selector?: ReactNode;
   /** Selector node displayed above the textarea (e.g., repo, branch) */
   topSelector?: ReactNode;
   /** Selector node displayed inside the input footer (e.g., model, mode) */
@@ -183,7 +181,7 @@ export interface ChatLandingViewProps {
  */
 function useSessionMentionDrop(enabled: boolean) {
   const mentionActionsRef = useRef<CombinedMentionTextareaHandle | null>(null);
-  const { dropZone, overlayActive } = useSessionMentionDropZone({
+  const { dropZone, pointerDropRef, overlayActive } = useSessionMentionDropZone({
     enabled,
     onDropSessionId: useCallback((sessionId: string) => {
       mentionActionsRef.current?.insertSessionMention(sessionId);
@@ -192,6 +190,7 @@ function useSessionMentionDrop(enabled: boolean) {
   return {
     mentionActionsRef,
     dropZone,
+    pointerDropRef,
     overlayActive,
   };
 }
@@ -226,7 +225,6 @@ export function ChatLandingView({
   onFileRemove,
   onFileRetry,
   mcp,
-  selector,
   topSelector,
   footerSelector,
   bottomBar,
@@ -261,7 +259,7 @@ export function ChatLandingView({
   errorLabels = {},
 }: ChatLandingViewProps) {
   const postHog = usePostHog();
-  const { mentionActionsRef, dropZone, overlayActive } = useSessionMentionDrop(
+  const { mentionActionsRef, dropZone, pointerDropRef, overlayActive } = useSessionMentionDrop(
     !isMobile && !submissionPending
   );
   // A folder is not an attachment — it becomes a `@path` mention, through the
@@ -417,7 +415,7 @@ export function ChatLandingView({
         </div>
       ) : null}
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <div className="flex flex-wrap items-center gap-1">{selector ?? footerSelector}</div>
+        <div className="flex flex-wrap items-center gap-1">{footerSelector}</div>
         <div className="ml-auto flex items-center gap-2">
           {primaryActionNode}
           <button
@@ -475,7 +473,7 @@ export function ChatLandingView({
         onFileRetry={submissionPending ? undefined : onFileRetry}
         mcp={mcp}
         topSelector={topSelector}
-        footerSelector={footerSelector ?? selector}
+        footerSelector={footerSelector}
         bottomBar={bottomBar}
         statusMessage={composerStatusMessage}
         statusTone={composerStatusTone}
@@ -505,6 +503,7 @@ export function ChatLandingView({
       dropActive={overlayActive}
       dropKind="session-mention"
       dropHandlers={dropZone.handlers}
+      dropRef={pointerDropRef}
       navRootRef={navRootRef}
       contextSwitch={contextSwitch}
       ambient={

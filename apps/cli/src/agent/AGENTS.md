@@ -9,7 +9,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 ## `agent-client.ts`
 
 - Consume Core extensions via `agentCapabilities._meta.lody`, session `_meta.lody`, and
-  `_lody/...`. Provider compatibility stays in `lody-acp-extension.ts` and `antigravity-quota.ts`; consumers stay neutral.
+  `_lody/...`. Provider compatibility stays in `lody-acp-extension.ts` and `antigravity-*.ts`; consumers stay neutral.
 - Grok Always Approve uses `allow_once`, never lasting grants; pending calls drain through
   the durable permission flow on accepted config changes. Questions remain interactive.
 - Builtin Grok must default `clientCapabilities.terminal` to false.
@@ -60,7 +60,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   only before the first prompt. Per-Agent ACP stdio/HTTP MCP belongs in the adapter.
   Never modify JSONL; mixed roots fail naming both paths.
 - `managed-agent-runtime.ts`: native pins live only in `<name>-runtime-manifest.json`.
-  Reject version mismatches and unknown legacy fields; do not duplicate pins or weaken the schema.
+  Treat version mismatches and metadata failing the current schema as misses; never weaken the schema.
   Read Claude metadata from the adapter's installed SDK; the CLI dev SDK may differ.
   Definition drift is a miss; cleanup and update scans are best effort. Grok/Devin submodules never build official runtime binaries, and the desktop must not depend on the Kimi submodule workspace. Custom
   methods stay capability-gated. Inject the artifact base URL from
@@ -79,7 +79,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   to the shared abort signal; ZIP cancellation destroys the yauzl endpoint, awaits the
   relay/output pipeline, and fences cleanup on the reader's real close/error event — never await
   the yauzl endpoint, whose `destroy()` does not settle.
-- Builtin Antigravity follows its [runtime contract](README.md#managed-antigravity).
+- Antigravity follows its [runtime contract](README.md#managed-antigravity).
 - Builtin Dimcode is user-installed.
 - `npx-cache.ts`: ACP `npx` spawns force `npm_config_cache`/`NPM_CONFIG_CACHE` to the active
   profile's `npm-cache`. Automatic `_npx`/`_cacache` cleanup is allowed ONLY for that Lody-owned

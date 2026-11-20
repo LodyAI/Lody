@@ -129,6 +129,9 @@ export type MobileConversationItem = {
   isOffline?: boolean;
   hasUnreadMessages?: boolean;
   isPinned?: boolean;
+  /** Pin section and manual order of a pinned conversation (see specs/pinned-session-sections.md). */
+  pinSectionId?: string | null;
+  orderKey?: string | null;
   readOnly?: boolean;
   /** Machine id the conversation lives on. Powers the machine filter. */
   machineId?: string | null;
@@ -197,9 +200,6 @@ export type MobileProjectScreenLabels = {
   searchPlaceholder?: string;
   /** Aria label for the X chip that clears the search query. */
   clearSearchAriaLabel?: string;
-  /** @deprecated Chat list no longer shows a section heading in the
-     active (non-archived) mode. Kept for call-site compatibility. */
-  allConversationsHeading?: string;
   /** Heading rendered above the project list when the archive toggle
      is on. Falls back to "归档对话" when omitted. */
   archivedConversationsHeading?: string;
@@ -441,7 +441,7 @@ export function conversationRowHasActivity(conversation: MobileConversationItem)
  * Conversation row — Linear-inspired single line:
  *   [status circle] [team owner?] [pin?] title .............. [+/-] [worktree] [PR]
  * Always-on leading status, comfortable row height, medium title weight.
- * Age / branch / project meta omitted. `secondaryField` kept for callers.
+ * Age / branch / project meta omitted.
  *
  * The trailing metric cluster keeps the desktop sidebar's order and glyphs
  * (`sidebar-row-shared.tsx`): line diff, then the worktree marker, then the PR
@@ -460,7 +460,6 @@ export function ConversationRow({
   onToggleSelect,
   onLongPress,
   treeSlot,
-  secondaryField: _secondaryField = 'branch',
 }: {
   conversation: MobileConversationItem;
   selected: boolean;
@@ -489,13 +488,8 @@ export function ConversationRow({
      undefined for a plain top-level row. Built by the caller with the shared
      `buildSessionRowOpenedByTreeSlot` so the labels match the desktop sidebar. */
   treeSlot?: SessionRowOpenedByTreeSlot;
-  /** @deprecated Second-line branch/project meta is no longer shown.
-     Kept so existing callers (home Chat tab, project page, list
-     grouping) do not need a simultaneous API change. */
-  secondaryField?: 'branch' | 'project';
 }) {
   const { t } = useTranslation();
-  void _secondaryField;
   const treeChild = treeSlot?.kind === 'child' ? treeSlot : null;
   /* One node, one meaning. An active row shows its status and drops both the
      fold chevron and the ├/└ — same rule the desktop sidebar row applies. */
@@ -880,7 +874,6 @@ export function MobileProjectScreen({
                    project's surface, so the project label would be
                    redundant chrome — branch is the disambiguating piece
                    of info between rows. */
-                rowSecondaryField="branch"
                 /* Active list is flat — no "全部对话" section label. Only
                    the archived surface keeps a heading so the mode is
                    obvious. */

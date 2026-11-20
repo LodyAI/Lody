@@ -22,12 +22,12 @@ encrypted starts that run only signed input; the default ceiling had no room for
 - Git: the owner's repository identity, an approved requester, the owner's native config,
   then LodyAI. Only a decided identity is exported as env. Non-owners never read machine config.
   `CloudPort` profiles: 60s deadline, retry failures, reject placeholders.
-  Commit attribution never restarts ACP; owner changes retire the runtime.
+  Attribution preserves ACP. Owner changes replace ACP before prompt submission.
 
 ## Dispatch
 
 - Metadata reconciliation keeps four global slots and fills each free slot without waiting for siblings.
-- Queue promotion preserves frozen fields; remove only after history+activation succeed.
+- [Queue promotion](README.md#queue-promotion) preserves frozen fields; remove only after history+activation succeed.
 - Queue dispatch uses the same normalized input config as history dispatch. JavaScript-only
   undefined fields must not make an unchanged encrypted original fail equality.
 - Encrypted promotion marks the row `queuedInput` and copies the queue item's signed
@@ -73,11 +73,12 @@ encrypted starts that run only signed input; the default ceiling had no room for
 - Turn execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; no start
   or terminal path may read-await-rewrite the other slots.
 - Never steer after cancellation or infer delivery from it. Stop uses
-  preserve/discard and cancels pre-Stop queued eligibility; Edit & Resend uses preserve/keep,
+  preserve/discard; paused drafts require explicit resends; Edit & Resend uses preserve/keep,
   access revocation preserve/discard. Limit create/restore fences to initialization.
 - Promote only proven non-delivery via `steerTurnStatuses`, never producer pointers.
   Unknown never replays; RPC ACKs never revive history. Encrypted recovery preserves terminal
   decisions and newer pointers, closes partial replies with one notice, and isolates unrelated failures.
+- MCP selection changes retire ACP between prompts; changed-selection steer returns to dispatch for a new turn.
 - Config uses its owner signal; fence mutations after interrupt.
 - Resume must REOPEN the in-progress assistant entry, clearing
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
@@ -112,8 +113,7 @@ encrypted starts that run only signed input; the default ceiling had no room for
 
 ## Sagas
 
-- ACP processes and worktrees start at dispatch, never while a draft is typed. Answer
-  `session/prepare`/`-cancel` at once as no-ops (prepare: accepted duplicate), with no access check
+- ACP processes and worktrees start at dispatch, never while a draft is typed
   ([decision](../../../../.agents/notes/implemented/simplification/2026-10-16-remove-draft-session-preparation.md)).
 - Credentials are runtime leases: a failed creation releases that generation; local has none.
 - Nested child Sessions are rejected: ownership resolves one parent hop only.

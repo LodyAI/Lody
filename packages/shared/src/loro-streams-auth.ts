@@ -239,6 +239,11 @@ export type LoroStreamsTokenProviderEvent =
       error: unknown;
     }
   | {
+      /** Confirmed owner shutdown, after producer I/O finalizers settled. */
+      type: 'fetch-cancelled';
+      reason: 'owner_released';
+    }
+  | {
       type: 'in-flight-reuse';
       workspaceId: string;
     }

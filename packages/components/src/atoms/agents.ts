@@ -167,7 +167,6 @@ async function cancelProviderSetupInMachineFlock(
 /**
  * Agent config meta as persisted before the machine-association refactor.
  * Exposed for the one-shot migration in `useAgentConfigMigration` only.
- * See docs/backward-compatibility.md BC-AGENT-CONFIG-MACHINE-ASSOCIATION.
  */
 export type LegacyAgentConfigMeta = Omit<AgentConfigMeta, 'machineId'>;
 

@@ -27,7 +27,7 @@ import {
 import { hashRecordBytes, recordSigningBytes, verifyLedger } from '@lody/e2ee-core/protocol';
 import { encodeCbor } from '@lody/e2ee-core/protocol';
 import { encodeStreamsRoomAdditionalData } from 'loro-repo/transport/streams';
-import { PayloadProtectionError } from '@loro-dev/streams-crdt';
+import { InMemoryRemoteCursorStore, PayloadProtectionError } from '@loro-dev/streams-crdt';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
@@ -54,6 +54,20 @@ import {
   WorkspaceStreamsConfigurationError,
   type WorkspaceStreamsContent,
 } from '../src/providers/workspace-streams-transport';
+
+const sdkOptions = vi.hoisted(() => [] as unknown[]);
+vi.mock('loro-repo/transport/streams', async (importOriginal) => {
+  const sdk = await importOriginal<typeof import('loro-repo/transport/streams')>();
+  return {
+    ...sdk,
+    StreamsTransportAdapter: class extends sdk.StreamsTransportAdapter {
+      constructor(options: ConstructorParameters<typeof sdk.StreamsTransportAdapter>[0]) {
+        sdkOptions.push(options);
+        super(options);
+      }
+    },
+  };
+});
 
 const streamsBaseUrl = 'https://streams.checkpoint.invalid';
 const tail100 = '00000000000000000100';
@@ -119,11 +133,16 @@ const openTabs = new Set<Tab>();
 const openTransports = new Set<ReturnType<typeof createWorkspaceStreamsTransport>>();
 
 /** One tab of the workspace: same databases as its siblings, its own replica. */
-async function openTab(workspaceId: WorkspaceId, storage?: IndexedDBStorageAdaptor): Promise<Tab> {
+async function openTab(
+  workspaceId: WorkspaceId,
+  storage?: IndexedDBStorageAdaptor,
+  cloudOnly = false
+): Promise<Tab> {
   const identity = resolveWorkspaceRuntimeCacheIdentity(workspaceId, '');
   const repo = await LoroRepo.create({
     storageAdapter: storage ?? new IndexedDBStorageAdaptor({ dbName: identity.repoDbName }),
     metaDebounceCommitMs: 0,
+    ...(cloudOnly ? { resolveRoomTransports: () => ({ transportIds: ['cloud'] }) } : {}),
   });
   const tab = { repo, workspaceId, cursorDbName: identity.remoteCursorDbName };
   openTabs.add(tab);
@@ -169,6 +188,24 @@ afterEach(async () => {
 });
 
 describe('renderer Streams checkpoints are bound to the replica that loaded them', () => {
+  it.each([undefined, false, true])(
+    'passes foreground WS opt-in %s while the installed HTTP SDK still syncs',
+    async (enabled) => {
+      const server = createMetaServer();
+      const tab = await openTab(`ws-opt-in-${++sequence}` as WorkspaceId);
+      const transport = transportFor(tab, undefined, undefined, undefined, undefined, enabled);
+      const options = sdkOptions.at(-1);
+      if (enabled)
+        expect(options).toMatchObject({
+          webSocket: { enabled: true, url: streamsBaseUrl, authPoolKey: tab.workspaceId },
+        });
+      else expect(options).not.toHaveProperty('webSocket');
+      const result = await transport.syncMeta(tab.repo.getMeta());
+      expect(result.ok).toBe(true);
+      expect(tab.repo.getMeta().get(keyA)).toBe('A');
+      expect(server.bootstraps()).toBe(1);
+    }
+  );
   it('bootstraps a tab that hydrated before a sibling tab advanced the shared databases', async () => {
     const workspaceId = `ws-tabs-${++sequence}` as WorkspaceId;
     const server = createMetaServer();
@@ -190,14 +227,20 @@ describe('renderer Streams checkpoints are bound to the replica that loaded them
 function transportFor(
   tab: Tab,
   content?: WorkspaceStreamsContent,
-  cursorStore?: RemoteCursorStore
+  cursorStore?: RemoteCursorStore,
+  auth?: Parameters<typeof createWorkspaceStreamsTransport>[0]['auth'],
+  incompleteRecoveryScope?: object,
+  webSocketEnabled?: boolean
 ) {
   const transport = createWorkspaceStreamsTransport({
     repo: tab.repo,
+    webSocketEnabled,
+    incompleteRecoveryScope,
+    recoverFlockCheckpointsOnTimeout: true,
     workspaceId: tab.workspaceId,
     documentRemoteCursorStore:
       cursorStore ?? createResilientRemoteCursorStore({ dbName: tab.cursorDbName }),
-    auth: async () => 'streams-jwt',
+    auth: auth ?? (async () => 'streams-jwt'),
     streamsBaseUrl,
     shardHostSuffix: undefined,
     bucketId: LORO_STREAMS_BUCKET_ID,
@@ -215,7 +258,7 @@ const docUrl = (workspaceId: WorkspaceId, docId: string) =>
   });
 
 /** Byte storage only: CRDT encoding, merge, protection and cursor logic all run in the SDK. */
-function createByteServer() {
+function createByteServer(respond?: (url: URL, method: string) => Response | undefined) {
   type Room = {
     batches: Uint8Array[];
     trimmed?: boolean;
@@ -244,6 +287,8 @@ function createByteServer() {
     const body = new Uint8Array(await new Response(init?.body).arrayBuffer());
     const headers = new Headers(init?.headers);
     requests.push({ url, method, body, auth: headers.get('Authorization') });
+    const intercepted = respond?.(url, method);
+    if (intercepted) return intercepted;
     const path = url.pathname.replace(/\/(bootstrap|snapshot(?:\/.*)?)$/, '');
     const value = room(path);
     const currentTail = () => tail(path);
@@ -268,6 +313,17 @@ function createByteServer() {
         status: url.pathname.includes('/snapshot/') ? 204 : 201,
         headers: { 'Stream-Next-Offset': currentTail() },
       });
+    }
+    if (method === 'GET' && url.pathname.includes('/snapshot/')) {
+      const snapshot = value.snapshot;
+      return snapshot
+        ? new Response(toArrayBuffer(snapshot.body), {
+            headers: {
+              'Content-Length': String(snapshot.body.byteLength),
+              'Stream-Snapshot-Offset': snapshot.offset,
+            },
+          })
+        : new Response(null, { status: 404 });
     }
     if (method === 'HEAD')
       return new Response(null, {
@@ -400,6 +456,886 @@ class FailingStorage extends IndexedDBStorageAdaptor {
     await super.saveMany(payloads);
   }
 }
+
+describe('workspace Streams gateway headers preserve drafts and prevent fenced resource recreation', () => {
+  for (const kind of ['doc', 'flock', 'meta'] as const) {
+    for (const [status, code] of [
+      [404, 'space_not_found'],
+      [410, 'space_generation_fenced'],
+      [403, 'space_read_only'],
+      [403, 'space_suspended'],
+    ] as const) {
+      it(`${kind}: ${status} ${code} retains local edits without creating streams, uploading or refreshing auth`, async () => {
+        let denied = true;
+        const server = createByteServer((_url, method) =>
+          method === 'GET' && denied
+            ? new Response(null, { status, headers: { 'Stream-Error-Code': code } })
+            : undefined
+        );
+        const tab = await openTab(`header-${++sequence}` as WorkspaceId);
+        const id = 'local-draft';
+        const doc = kind === 'doc' ? (await tab.repo.openPersistedDoc(id)).doc : undefined;
+        const flock =
+          kind === 'meta'
+            ? tab.repo.getMeta()
+            : kind === 'flock'
+              ? (await tab.repo.openFlockDoc(id)).flock
+              : undefined;
+        if (doc) {
+          doc.getMap('data').set('draft', 'unsent local edit');
+          doc.commit();
+        } else flock!.put(['draft'], 'unsent local edit');
+        const reasons: string[] = [];
+        const cursors = createResilientRemoteCursorStore({ dbName: tab.cursorDbName });
+        const transport = transportFor(tab, undefined, cursors, async (context) => {
+          reasons.push(context?.reason ?? 'request');
+          return 'streams-jwt';
+        });
+        const result = doc
+          ? await transport.syncDoc(id, doc)
+          : kind === 'meta'
+            ? await transport.syncMeta(flock!)
+            : await transport.syncFlockDoc(id, flock!);
+        expect(result.ok).toBe(false);
+        expect(doc ? doc.getMap('data').get('draft') : flock!.get(['draft'])).toBe(
+          'unsent local edit'
+        );
+        expect(server.requests.some(({ method }) => method === 'PUT' || method === 'POST')).toBe(
+          false
+        );
+        expect(reasons).not.toContain('unauthorized');
+        const url =
+          kind === 'meta'
+            ? getWorkspaceMetaStreamUrl(tab.workspaceId, streamsBaseUrl)
+            : kind === 'doc'
+              ? docUrl(tab.workspaceId, id)
+              : createLoroStreamUrl({
+                  bucketId: LORO_STREAMS_BUCKET_ID,
+                  streamId: id,
+                  baseUrl: streamsBaseUrl,
+                });
+        const checkpoint = doc
+          ? await cursors.load(url)
+          : await tab.repo
+              .getReplicaCheckpointStore(
+                kind === 'meta'
+                  ? { kind: 'meta', flock: flock! }
+                  : { kind: 'flock', flockDocId: id, flock: flock! }
+              )
+              .load(url);
+        expect(checkpoint).toBeNull();
+        if (status === 404 || status === 410) {
+          // A transient healthy response cannot resurrect a latched namespace fence.
+          denied = false;
+          const requestsBeforeRetry = server.requests.length;
+          const retried = doc
+            ? await transport.syncDoc(id, doc)
+            : kind === 'meta'
+              ? await transport.syncMeta(flock!)
+              : await transport.syncFlockDoc(id, flock!);
+          expect(retried.ok).toBe(false);
+          expect(server.requests).toHaveLength(requestsBeforeRetry);
+        }
+      });
+    }
+    for (const code of [undefined, 'future_unrecognized_code']) {
+      it(`${kind}: ordinary 404 (${code ?? 'no header'}) creates the missing stream, resumes its cursor and preserves edits through retention 410`, async () => {
+        let exists = false;
+        let retentionExpired = false;
+        let returnedGone = false;
+        const server = createByteServer((url, method) => {
+          if (method === 'PUT') exists = true;
+          if (method === 'GET' && !url.pathname.endsWith('/bootstrap') && retentionExpired) {
+            retentionExpired = false;
+            returnedGone = true;
+            return new Response(null, {
+              status: 410,
+              headers: { 'Stream-Error-Code': 'gc_watermark_expired' },
+            });
+          }
+          if (method === 'GET' && !exists)
+            return new Response(null, {
+              status: 404,
+              headers: code ? { 'Stream-Error-Code': code } : {},
+            });
+          return undefined;
+        });
+        const tab = await openTab(`missing-stream-${++sequence}` as WorkspaceId);
+        const id = 'local-draft';
+        const doc = kind === 'doc' ? (await tab.repo.openPersistedDoc(id)).doc : undefined;
+        const flock =
+          kind === 'meta'
+            ? tab.repo.getMeta()
+            : kind === 'flock'
+              ? (await tab.repo.openFlockDoc(id)).flock
+              : undefined;
+        if (doc) {
+          doc.getMap('data').set('draft', 'offline text');
+          doc.commit();
+        } else flock!.put(['draft'], 'offline text');
+        const transport = transportFor(tab);
+        const sync = () =>
+          doc
+            ? transport.syncDoc(id, doc)
+            : kind === 'meta'
+              ? transport.syncMeta(flock!)
+              : transport.syncFlockDoc(id, flock!);
+        expect((await sync()).ok).toBe(true);
+        expect(
+          server.requests.filter(
+            ({ method, url }) => method === 'PUT' && !url.pathname.includes('/snapshot/')
+          )
+        ).toHaveLength(1);
+        const path = server.requests.find(({ method }) => method === 'POST')!.url.pathname;
+        const checkpoint = server.tail(path);
+        const bootstraps = () =>
+          server.requests.filter(({ url }) => url.pathname.endsWith('/bootstrap')).length;
+        const beforeResume = bootstraps();
+        const beforeReads = server.requests.length;
+        expect((await sync()).ok).toBe(true);
+        expect(bootstraps()).toBe(beforeResume);
+        expect(
+          server.requests
+            .slice(beforeReads)
+            .some(({ url }) => url.searchParams.get('offset') === checkpoint)
+        ).toBe(true);
+        if (doc) {
+          doc.getMap('data').set('draft', 'local edit during retention expiry');
+          doc.commit();
+        } else flock!.put(['draft'], 'local edit during retention expiry');
+        retentionExpired = true;
+        expect((await sync()).ok).toBe(true);
+        expect(returnedGone).toBe(true);
+        expect(bootstraps()).toBeGreaterThan(beforeResume);
+        const reader = await openTab(`missing-stream-reader-${++sequence}` as WorkspaceId);
+        reader.workspaceId = tab.workspaceId;
+        const receiver = transportFor(reader);
+        if (doc) {
+          const remote = (await reader.repo.openPersistedDoc(id)).doc;
+          expect((await receiver.syncDoc(id, remote)).ok).toBe(true);
+          expect(remote.getMap('data').get('draft')).toBe('local edit during retention expiry');
+        } else {
+          const remote =
+            kind === 'meta' ? reader.repo.getMeta() : (await reader.repo.openFlockDoc(id)).flock;
+          expect(
+            (
+              await (kind === 'meta'
+                ? receiver.syncMeta(remote)
+                : receiver.syncFlockDoc(id, remote))
+            ).ok
+          ).toBe(true);
+          expect(remote.get(['draft'])).toBe('local edit during retention expiry');
+        }
+      });
+    }
+    for (const status of [401, 403] as const) {
+      it(`${kind}: ordinary ${status} refreshes the rejected token and preserves local uploads`, async () => {
+        let rejected = false;
+        const authContexts: { reason?: string; previousToken?: string }[] = [];
+        const server = createByteServer((_url, method) => {
+          if (method === 'GET' && !rejected) {
+            rejected = true;
+            return new Response(null, {
+              status,
+              headers: status === 401 ? { 'WWW-Authenticate': 'Bearer' } : {},
+            });
+          }
+          return undefined;
+        });
+        const tab = await openTab(`auth-refresh-${++sequence}` as WorkspaceId);
+        const id = 'local-draft';
+        const doc = kind === 'doc' ? (await tab.repo.openPersistedDoc(id)).doc : undefined;
+        const flock =
+          kind === 'meta'
+            ? tab.repo.getMeta()
+            : kind === 'flock'
+              ? (await tab.repo.openFlockDoc(id)).flock
+              : undefined;
+        if (doc) {
+          doc.getMap('data').set('draft', 'offline authenticated edit');
+          doc.commit();
+        } else flock!.put(['draft'], 'offline authenticated edit');
+        let token = 'rejected-token';
+        const transport = transportFor(tab, undefined, undefined, async (context) => {
+          authContexts.push(context ?? {});
+          if (context?.reason === 'unauthorized') token = 'refreshed-token';
+          return token;
+        });
+        const result = doc
+          ? await transport.syncDoc(id, doc)
+          : kind === 'meta'
+            ? await transport.syncMeta(flock!)
+            : await transport.syncFlockDoc(id, flock!);
+        expect(result.ok).toBe(true);
+        expect(authContexts.filter(({ reason }) => reason === 'unauthorized')).toEqual([
+          expect.objectContaining({ previousToken: 'rejected-token' }),
+        ]);
+        const upload = server.requests.find(({ method }) => method === 'POST');
+        expect(upload?.auth).toBe('Bearer refreshed-token');
+        const reader = await openTab(`auth-reader-${++sequence}` as WorkspaceId);
+        reader.workspaceId = tab.workspaceId;
+        const receiver = transportFor(reader);
+        if (doc) {
+          const restored = (await reader.repo.openPersistedDoc(id)).doc;
+          expect((await receiver.syncDoc(id, restored)).ok).toBe(true);
+          expect(restored.getMap('data').get('draft')).toBe('offline authenticated edit');
+        } else {
+          const restored =
+            kind === 'meta' ? reader.repo.getMeta() : (await reader.repo.openFlockDoc(id)).flock;
+          expect(
+            (
+              await (kind === 'meta'
+                ? receiver.syncMeta(restored)
+                : receiver.syncFlockDoc(id, restored))
+            ).ok
+          ).toBe(true);
+          expect(restored.get(['draft'])).toBe('offline authenticated edit');
+        }
+      });
+    }
+  }
+});
+
+describe('renderer snapshot authorization stays separate from live write authorization', () => {
+  it.each([undefined, 'space_read_only'])(
+    'PUT snapshot 403 (%s) suppresses the same token without refreshing or stopping local uploads',
+    async (code) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      let currentToken = 'snapshot-token-1';
+      let allowed = false;
+      const rejected = Promise.withResolvers<void>();
+      const uploaded = Promise.withResolvers<void>();
+      const reasons: string[] = [];
+      const server = createByteServer((url, method) =>
+        method === 'PUT' && url.pathname.includes('/snapshot/') && !allowed
+          ? new Response(null, { status: 403, headers: code ? { 'Stream-Error-Code': code } : {} })
+          : undefined
+      );
+      const tab = await openTab(`snapshot-auth-${++sequence}` as WorkspaceId);
+      const doc = (await tab.repo.openPersistedDoc('doc-a')).doc;
+      const content = protectedContent({
+        snapshotUpload: {
+          canUpload: () => true,
+          debounceMs: 10,
+          minBytesSinceRemoteSnapshot: 0,
+          onDiagnostic: (event) => {
+            if (event.stage === 'put' && event.outcome === 'failed') rejected.resolve();
+            if (event.stage === 'put' && event.outcome === 'succeeded') uploaded.resolve();
+          },
+        },
+      });
+      const transport = transportFor(tab, content, undefined, async (context) => {
+        reasons.push(context?.reason ?? 'request');
+        return currentToken;
+      });
+      const sub = transport.joinDocRoom('doc-a', doc);
+      try {
+        await settle(sub.firstSyncedWithRemote);
+        doc.getMap('data').set('draft', 'first');
+        doc.commit();
+        await settle(sub.waitUntilSynced());
+        await vi.advanceTimersByTimeAsync(10);
+        await settle(rejected.promise);
+        const puts = () =>
+          server.requests.filter(
+            ({ method, url }) => method === 'PUT' && url.pathname.includes('/snapshot/')
+          );
+        expect(puts()).toHaveLength(1);
+        expect(reasons).not.toContain('unauthorized');
+        const heads = server.requests.filter(({ method }) => method === 'HEAD').length;
+        doc.getMap('data').set('draft', 'second');
+        doc.commit();
+        await settle(sub.waitUntilSynced());
+        await vi.advanceTimersByTimeAsync(10);
+        expect(puts()).toHaveLength(1);
+        expect(server.requests.filter(({ method }) => method === 'HEAD')).toHaveLength(heads);
+        currentToken = 'snapshot-token-2';
+        allowed = true;
+        doc.getMap('data').set('draft', 'after token rotation');
+        doc.commit();
+        await settle(sub.waitUntilSynced());
+        await vi.advanceTimersByTimeAsync(10);
+        await settle(uploaded.promise);
+        expect(puts()).toHaveLength(2);
+        expect(puts().at(-1)!.auth).toBe('Bearer snapshot-token-2');
+        expect(reasons).not.toContain('unauthorized');
+        const reader = await openTab(`snapshot-auth-reader-${++sequence}` as WorkspaceId);
+        reader.workspaceId = tab.workspaceId;
+        const restored = (await reader.repo.openPersistedDoc('doc-a')).doc;
+        expect((await settle(transportFor(reader, content).syncDoc('doc-a', restored))).ok).toBe(
+          true
+        );
+        expect(restored.toJSON()).toEqual(doc.toJSON());
+      } finally {
+        sub.unsubscribe();
+      }
+    }
+  );
+});
+
+describe('pure-cloud room recovery keeps independent rooms alive', () => {
+  it('retains a bounded incomplete-recovery budget across cloud adapter replacement without restarting healthy rooms', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const server = createByteServer();
+    const tab = await openTab(`cloud-budget-${++sequence}` as WorkspaceId, undefined, true);
+    const owner = {};
+    const healthyId = 'healthy-doc';
+    const brokenId = 'missing-dependency-doc';
+    const healthy = (await tab.repo.openPersistedDoc(healthyId)).doc;
+    const broken = (await tab.repo.openPersistedDoc(brokenId)).doc;
+    const remote = new LoroDoc();
+    remote.getText('text').insert(0, 'dependency');
+    remote.commit();
+    const from = remote.version();
+    remote.getText('text').push('|dependent');
+    remote.commit();
+    const pending = remote.export({ mode: 'update', from });
+    const frame = new Uint8Array(4 + pending.byteLength);
+    new DataView(frame.buffer).setUint32(0, pending.byteLength);
+    frame.set(pending, 4);
+    const brokenPath = new URL(docUrl(tab.workspaceId, brokenId)).pathname;
+    server.room(brokenPath).batches.push(frame);
+    const metaPath = new URL(getWorkspaceMetaStreamUrl(tab.workspaceId, streamsBaseUrl)).pathname;
+    const healthyPath = new URL(docUrl(tab.workspaceId, healthyId)).pathname;
+    const count = (path: string, suffix: string) =>
+      server.requests.filter(({ url }) => url.pathname === path + suffix).length;
+    const subscriptions: { unsubscribe(): void }[] = [];
+    try {
+      await settle(
+        tab.repo.addTransport('cloud', transportFor(tab, undefined, undefined, undefined, owner), {
+          ephemeral: true,
+        })
+      );
+      const meta = await settle(tab.repo.joinMetaRoom());
+      subscriptions.push(meta);
+      const live = await settle(tab.repo.joinDocRoom(healthyId));
+      subscriptions.push(live);
+      await settle(meta.firstSyncedWithRemote);
+      await settle(live.firstSyncedWithRemote);
+      const fault = await settle(tab.repo.joinDocRoom(brokenId));
+      subscriptions.push(fault);
+      let faultSettled = false;
+      void fault.firstSyncedWithRemote.then(
+        () => {
+          faultSettled = true;
+        },
+        () => {
+          faultSettled = true;
+        }
+      );
+      await vi.waitFor(
+        () => expect(broken.exportPendingUpdates()?.byteLength ?? 0).toBeGreaterThan(0),
+        { interval: 0 }
+      );
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(faultSettled).toBe(false);
+      expect(broken.getText('text').toString()).toBe('');
+      expect(count(brokenPath, '/bootstrap')).toBeGreaterThan(0);
+      await settle(tab.repo.removeTransport('cloud', { close: true }));
+      await settle(
+        tab.repo.addTransport('cloud', transportFor(tab, undefined, undefined, undefined, owner), {
+          ephemeral: true,
+        })
+      );
+      const replacement = await settle(tab.repo.joinDocRoom(brokenId));
+      subscriptions.push(replacement);
+      let replacementSettled = false;
+      void replacement.firstSyncedWithRemote.then(
+        () => {
+          replacementSettled = true;
+        },
+        () => {
+          replacementSettled = true;
+        }
+      );
+      let replacementSyncSettled = false;
+      void replacement.waitUntilSynced().then(
+        () => {
+          replacementSyncSettled = true;
+        },
+        () => {
+          replacementSyncSettled = true;
+        }
+      );
+      // Explicit adapter replacement is allowed; subsequent room recovery must
+      // not keep replacing unrelated streams or replenish the same owner's budget.
+      await settle(meta.firstSyncedWithRemote);
+      await settle(live.firstSyncedWithRemote);
+      const metaBootstraps = count(metaPath, '/bootstrap');
+      const healthyBootstraps = count(healthyPath, '/bootstrap');
+      const brokenBootstraps = count(brokenPath, '/bootstrap');
+      const healthyConnections = server.requests.filter(
+        ({ url }) => url.pathname === healthyPath && url.searchParams.get('live') === 'sse'
+      ).length;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        await settle(tab.repo.reconnect({ resetBackoff: true }));
+        // Keep healthy SSE channels active; an idle timeout is a separate failure.
+        for (const [path, controller] of server.live) {
+          if (path === brokenPath) continue;
+          try {
+            controller.enqueue(
+              new TextEncoder().encode(
+                `event: control\ndata: ${JSON.stringify({ streamNextOffset: server.tail(path), upToDate: true })}\n\n`
+              )
+            );
+          } catch {
+            /* a superseded channel is no longer the observed stream */
+          }
+        }
+        await vi.advanceTimersByTimeAsync(10_000);
+      }
+      expect(count(brokenPath, '/bootstrap')).toBeLessThanOrEqual(brokenBootstraps + 1);
+      expect(count(metaPath, '/bootstrap')).toBe(metaBootstraps);
+      expect(count(healthyPath, '/bootstrap')).toBe(healthyBootstraps);
+      expect(
+        server.requests.filter(
+          ({ url }) => url.pathname === healthyPath && url.searchParams.get('live') === 'sse'
+        )
+      ).toHaveLength(healthyConnections);
+      healthy.getMap('data').set('value', 'uploaded while another room is incomplete');
+      healthy.commit();
+      await settle(live.waitUntilSynced());
+      const reader = await openTab(`cloud-budget-reader-${++sequence}` as WorkspaceId);
+      reader.workspaceId = tab.workspaceId;
+      const restored = (await reader.repo.openPersistedDoc(healthyId)).doc;
+      expect((await settle(transportFor(reader).syncDoc(healthyId, restored))).ok).toBe(true);
+      expect(restored.toJSON()).toEqual(healthy.toJSON());
+      expect(replacementSettled).toBe(false);
+      expect(replacementSyncSettled).toBe(false);
+    } finally {
+      for (const sub of subscriptions) sub.unsubscribe();
+      remote.free();
+    }
+  });
+  it('uploads cached missing predecessors and old unsent writes on the first admitted baseline', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const server = createByteServer();
+    const tab = await openTab(
+      `first-cached-baseline-${++sequence}` as WorkspaceId,
+      undefined,
+      true
+    );
+    const common = new LoroDoc();
+    const author = new LoroDoc();
+    const reader = new LoroDoc();
+    const id = 'first-cached-gap';
+    const path = new URL(docUrl(tab.workspaceId, id)).pathname;
+    common.getMap('base').set('cached', 'server-known'.repeat(1000));
+    common.commit();
+    const snapshot = common.export({ mode: 'snapshot' });
+    author.import(snapshot);
+    author.getText('gap').insert(0, 'a');
+    author.commit();
+    const predecessor = author.export({ mode: 'update', from: common.version() });
+    const afterA = author.version();
+    author.getText('gap').insert(1, 'b');
+    author.commit();
+    const dependent = author.export({ mode: 'update', from: afterA });
+    const framed = new Uint8Array(4 + dependent.byteLength);
+    new DataView(framed.buffer).setUint32(0, dependent.byteLength);
+    framed.set(dependent, 4);
+    server.room(path).snapshot = {
+      offset: server.offset(0),
+      body: await streamsSnapshotCodec.compress(snapshot),
+    };
+    server.room(path).batches.push(framed);
+    const cached = (await tab.repo.openPersistedDoc(id)).doc;
+    cached.import(snapshot);
+    cached.import(predecessor);
+    cached.getMap('local').set('unsent', true);
+    cached.commit();
+    await tab.repo.flush();
+    const transport = transportFor(tab, undefined, new InMemoryRemoteCursorStore(), undefined, {});
+    let subscription: Awaited<ReturnType<LoroRepo['joinDocRoom']>> | undefined;
+    try {
+      await settle(tab.repo.addTransport('cloud', transport, { ephemeral: true }));
+      subscription = await settle(tab.repo.joinDocRoom(id));
+      await settle(subscription.firstSyncedWithRemote);
+      await settle(subscription.waitUntilSynced());
+      reader.import(await streamsSnapshotCodec.decompress(server.room(path).snapshot!.body));
+      // Reconstruct only what actually reached the server, including its B.
+      for (const body of server.room(path).batches) {
+        for (let offset = 0; offset < body.byteLength;) {
+          const size = new DataView(body.buffer, body.byteOffset + offset, 4).getUint32(0);
+          reader.import(body.subarray(offset + 4, offset + 4 + size));
+          offset += 4 + size;
+        }
+      }
+      const posts = server.requests.filter((r) => r.url.pathname === path && r.method === 'POST');
+      const postBytes = posts.reduce((bytes, request) => bytes + request.body.byteLength, 0);
+      expect(
+        {
+          gap: reader.getText('gap').toString(),
+          hasPending: reader.exportPendingUpdates() !== undefined,
+          unsent: reader.getMap('local').get('unsent'),
+        },
+        `Server replay after ${posts.length} POSTs (${postBytes} bytes)`
+      ).toEqual({
+        gap: 'ab',
+        hasPending: false,
+        unsent: true,
+      });
+      expect(reader.toJSON()).toEqual(cached.toJSON());
+    } finally {
+      subscription?.unsubscribe();
+      await settle(transport.close());
+      openTransports.delete(transport);
+      reader.free();
+      author.free();
+      common.free();
+    }
+  });
+
+  it.each(['local-commit', 'explicit-sync', 'passive-wait'] as const)(
+    '%s respects writer intent and passive waiting at the thirty-minute host cap',
+    async (trigger) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+      vi.setSystemTime(0);
+      const server = createByteServer();
+      const owner = {};
+      const workspace = `writer-floor-${++sequence}` as WorkspaceId;
+      const id = 'writer-gap';
+      const path = new URL(docUrl(workspace, id)).pathname;
+      const common = new LoroDoc();
+      const author = new LoroDoc();
+      const reader = new LoroDoc();
+      common.getMap('base').set('cached', 'server-known'.repeat(1000));
+      common.commit();
+      const snapshot = common.export({ mode: 'snapshot' });
+      author.import(snapshot);
+      author.getText('gap').insert(0, 'a');
+      author.commit();
+      const predecessor = author.export({ mode: 'update', from: common.version() });
+      const afterA = author.version();
+      author.getText('gap').insert(1, 'b');
+      author.commit();
+      const dependent = author.export({ mode: 'update', from: afterA });
+      const framed = new Uint8Array(4 + dependent.byteLength);
+      new DataView(framed.buffer).setUint32(0, dependent.byteLength);
+      framed.set(dependent, 4);
+      server.room(path).snapshot = {
+        offset: server.offset(0),
+        body: await streamsSnapshotCodec.compress(snapshot),
+      };
+      server.room(path).batches.push(framed);
+      const countBootstrap = () =>
+        server.requests.filter((r) => r.url.pathname === path + '/bootstrap').length;
+      const isRead = (method: string, url: URL) =>
+        method === 'GET' && (url.pathname === path + '/bootstrap' || url.pathname === path);
+      const opened: Array<{
+        transport: ReturnType<typeof transportFor>;
+        subscription: ReturnType<ReturnType<typeof transportFor>['joinDocRoom']>;
+      }> = [];
+      const fixtureFetch = globalThis.fetch;
+      const releaseWriterRead = Promise.withResolvers<void>();
+      let writerReadIssued = false;
+      let writerReadDelivered = false;
+      let triggered = false;
+      vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(input instanceof Request ? input.url : input);
+        const auth = new Headers(init?.headers).get('Authorization');
+        if (
+          triggered &&
+          auth === 'Bearer writer-acceptance' &&
+          isRead(init?.method ?? 'GET', url) &&
+          !writerReadDelivered
+        ) {
+          writerReadIssued = true;
+          await releaseWriterRead.promise;
+          const response = await fixtureFetch(input, init);
+          writerReadDelivered = true;
+          return response;
+        }
+        return fixtureFetch(input, init);
+      });
+      const openReplica = async (role: string, cached: boolean, hasPredecessor = false) => {
+        const tab = await openTab(`writer-peer-${++sequence}` as WorkspaceId);
+        tab.workspaceId = workspace;
+        const doc = (await tab.repo.openPersistedDoc(id)).doc;
+        if (cached) doc.import(snapshot);
+        if (hasPredecessor) {
+          doc.import(predecessor);
+          doc.getMap('local').set('oldUnsent', true);
+          doc.commit();
+        }
+        await tab.repo.flush();
+        const transport = transportFor(
+          tab,
+          undefined,
+          new InMemoryRemoteCursorStore(),
+          async () => role,
+          owner
+        );
+        const subscription = transport.joinDocRoom(id, doc);
+        void subscription.firstSyncedWithRemote.catch(() => {});
+        const item = { transport, subscription };
+        opened.push(item);
+        return { doc, ...item };
+      };
+      const closeReplica = async (replica: Awaited<ReturnType<typeof openReplica>>) => {
+        replica.subscription.unsubscribe();
+        await settle(replica.transport.close());
+        openTransports.delete(replica.transport);
+      };
+      try {
+        // Actual reanchor admissions: 30s, 60s, ... 960s, then the 1800s cap.
+        // No private SDK budget API is called or mocked.
+        for (let attempt = 0; attempt < 7; attempt++) {
+          if (attempt > 0) await vi.advanceTimersByTimeAsync(30_000 * 2 ** (attempt - 1));
+          const before = countBootstrap();
+          const warm = await openReplica('warm-acceptance', false);
+          await vi.waitFor(
+            () => {
+              expect(countBootstrap()).toBeGreaterThan(before);
+              expect(warm.doc.exportPendingUpdates()?.byteLength ?? 0).toBeGreaterThan(0);
+              expect(warm.subscription.status).toBe('reconnecting');
+            },
+            { interval: 0 }
+          );
+          await closeReplica(warm);
+        }
+        const readOnly = await openReplica('readonly-acceptance', true);
+        let readOnlySettled = false;
+        void readOnly.subscription.firstSyncedWithRemote.then(
+          () => {
+            readOnlySettled = true;
+          },
+          () => {
+            readOnlySettled = true;
+          }
+        );
+        await vi.waitFor(() => expect(readOnly.subscription.status).not.toBe('connecting'), {
+          interval: 0,
+        });
+        const writer = await openReplica('writer-acceptance', true, true);
+        let writerFirstSettled = false;
+        void writer.subscription.firstSyncedWithRemote.then(
+          () => {
+            writerFirstSettled = true;
+          },
+          () => {
+            writerFirstSettled = true;
+          }
+        );
+        await vi.waitFor(() => expect(writer.subscription.status).not.toBe('connecting'), {
+          interval: 0,
+        });
+        const beforeTrigger = server.requests.length;
+        const preTriggerPosts = server.requests.filter(
+          (r) =>
+            r.url.pathname === path &&
+            r.method === 'POST' &&
+            (r.auth === 'Bearer readonly-acceptance' || r.auth === 'Bearer writer-acceptance')
+        );
+        const preTriggerReads = server.requests.filter(
+          (r) =>
+            isRead(r.method, r.url) &&
+            (r.auth === 'Bearer readonly-acceptance' || r.auth === 'Bearer writer-acceptance')
+        );
+        const firstSettledBeforeTrigger = writerFirstSettled;
+        let passiveWaitSettled = false;
+        triggered = true;
+        if (trigger === 'local-commit') {
+          writer.doc.getMap('local').set('newCommit', true);
+          writer.doc.commit();
+        } else if (trigger === 'explicit-sync') {
+          void writer.transport.syncDoc(id, writer.doc).catch(() => {});
+        } else {
+          // Observing upload completion is passive; it is not SDK awaitUploaded.
+          void writer.subscription.waitUntilSynced().then(
+            () => {
+              passiveWaitSettled = true;
+            },
+            () => {
+              passiveWaitSettled = true;
+            }
+          );
+        }
+        // The agreed one-second writer first-read floor is much less
+        // than the host's current thirty-minute admission deadline.
+        for (let elapsed = 0; elapsed < 1_000 && !writerReadIssued; elapsed += 1_000) {
+          await vi.advanceTimersByTimeAsync(1_000);
+        }
+        const readOnlyReadsDuringFloor = server.requests.filter(
+          (r) => isRead(r.method, r.url) && r.auth === 'Bearer readonly-acceptance'
+        );
+        const readOnlySettledDuringFloor = readOnlySettled;
+        const beforeBaselinePosts = server.requests
+          .slice(beforeTrigger)
+          .filter(
+            (r) =>
+              r.url.pathname === path &&
+              r.method === 'POST' &&
+              r.auth === 'Bearer writer-acceptance'
+          );
+        const readIssuedWithinFloor = writerReadIssued;
+        if (trigger === 'passive-wait') {
+          const passiveRequests = server.requests.filter(
+            (r) =>
+              (r.auth === 'Bearer readonly-acceptance' || r.auth === 'Bearer writer-acceptance') &&
+              (isRead(r.method, r.url) || (r.method === 'POST' && r.url.pathname === path))
+          );
+          expect(writer.doc.getMap('local').get('oldUnsent')).toBe(true);
+          expect.soft(passiveRequests.length).toBe(0);
+          expect.soft(readIssuedWithinFloor).toBe(false);
+          expect.soft(writerFirstSettled).toBe(false);
+          expect.soft(passiveWaitSettled).toBe(false);
+          expect.soft(readOnlyReadsDuringFloor.length).toBe(0);
+          expect.soft(readOnlySettledDuringFloor).toBe(false);
+          // No writer intent was issued: do not require remote repair here.
+          return;
+        }
+        releaseWriterRead.resolve();
+        if (readIssuedWithinFloor) {
+          // The released baseline can schedule upload/rejoin work. Drive its
+          // fake timers within the existing completion budget.
+          await vi.waitFor(() => expect(writerFirstSettled).toBe(true), {
+            interval: 100,
+            timeout: 5_000,
+          });
+          await settle(writer.subscription.firstSyncedWithRemote);
+          await settle(writer.subscription.waitUntilSynced());
+        }
+        reader.import(await streamsSnapshotCodec.decompress(server.room(path).snapshot!.body));
+        for (const body of server.room(path).batches) {
+          for (let offset = 0; offset < body.byteLength;) {
+            const size = new DataView(body.buffer, body.byteOffset + offset, 4).getUint32(0);
+            reader.import(body.subarray(offset + 4, offset + 4 + size));
+            offset += 4 + size;
+          }
+        }
+        expect.soft(preTriggerReads.length).toBe(0);
+        expect.soft(preTriggerPosts.length).toBe(0);
+        expect.soft(firstSettledBeforeTrigger).toBe(false);
+        expect.soft(readIssuedWithinFloor).toBe(true);
+        expect.soft(beforeBaselinePosts.length).toBe(0);
+        expect.soft(readOnlyReadsDuringFloor.length).toBe(0);
+        expect.soft(readOnlySettledDuringFloor).toBe(false);
+        expect(reader.getText('gap').toString()).toBe('ab');
+        expect(reader.exportPendingUpdates()).toBeUndefined();
+        expect(reader.getMap('local').get('oldUnsent')).toBe(true);
+        if (trigger === 'local-commit') expect(reader.getMap('local').get('newCommit')).toBe(true);
+      } finally {
+        releaseWriterRead.resolve();
+        for (const { transport, subscription } of opened) {
+          subscription.unsubscribe();
+          await settle(transport.close());
+          openTransports.delete(transport);
+        }
+        reader.free();
+        author.free();
+        common.free();
+      }
+    }
+  );
+
+  it('does not reupload cached server history when replacement replicas cannot reanchor', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const server = createByteServer();
+    const tab = await openTab(`cached-budget-${++sequence}` as WorkspaceId);
+    const owner = {};
+    const common = new LoroDoc();
+    const author = new LoroDoc();
+    common.getMap('body').set('cached', 'already-server-known'.repeat(20_000));
+    common.commit();
+    const snapshot = common.export({ mode: 'snapshot' });
+    author.import(snapshot);
+    author.getText('gap').insert(0, 'a');
+    author.commit();
+    const from = author.version();
+    author.getText('gap').insert(1, 'b');
+    author.commit();
+    const pending = author.export({ mode: 'update', from });
+    const frame = new Uint8Array(4 + pending.byteLength);
+    new DataView(frame.buffer).setUint32(0, pending.byteLength);
+    frame.set(pending, 4);
+    const path = new URL(docUrl(tab.workspaceId, 'cached-gap')).pathname;
+    server.room(path).snapshot = {
+      offset: server.offset(0),
+      body: await streamsSnapshotCodec.compress(snapshot),
+    };
+    server.room(path).batches.push(frame);
+    const bootstraps = () =>
+      server.requests.filter(({ url }) => url.pathname === path + '/bootstrap').length;
+    const posts = () =>
+      server.requests.filter(({ url, method }) => url.pathname === path && method === 'POST');
+    const observe = async (replica: LoroDoc, initial: boolean, replicaTab: Tab) => {
+      // Each new replica gets its own cursor. Only the runtime's recovery
+      // owner survives adapter replacement; no volatile position is shared.
+      const transport = transportFor(
+        replicaTab,
+        undefined,
+        new InMemoryRemoteCursorStore(),
+        undefined,
+        owner
+      );
+      const subscription = transport.joinDocRoom('cached-gap', replica);
+      let firstSyncSettled = false;
+      void subscription.firstSyncedWithRemote.then(
+        () => {
+          firstSyncSettled = true;
+        },
+        () => {
+          firstSyncSettled = true;
+        }
+      );
+      let syncSettled = false;
+      void subscription.waitUntilSynced().then(
+        () => {
+          syncSettled = true;
+        },
+        () => {
+          syncSettled = true;
+        }
+      );
+      try {
+        if (initial) {
+          await vi.waitFor(
+            () => {
+              expect(replica.exportPendingUpdates()?.byteLength ?? 0).toBeGreaterThan(0);
+              expect(bootstraps()).toBe(2);
+            },
+            { interval: 0 }
+          );
+        }
+        // Observe the completed live-join startup before teardown can hide a
+        // queued historical append. Keep this passive: explicit sync would be
+        // writer intent and may legitimately admit a writer-priority baseline.
+        await vi.waitFor(() => expect(subscription.status).toBe('reconnecting'), { interval: 0 });
+        expect(firstSyncSettled).toBe(false);
+        expect(syncSettled).toBe(false);
+        expect(replica.getMap('body').toJSON()).toEqual(common.getMap('body').toJSON());
+        expect(replica.toJSON().gap ?? '').toBe('');
+      } finally {
+        subscription.unsubscribe();
+        await settle(transport.close());
+        openTransports.delete(transport);
+      }
+    };
+    try {
+      const initial = (await tab.repo.openPersistedDoc('cached-gap')).doc;
+      await observe(initial, true, tab);
+      // These replicas restore only the known prefix, not the pending suffix.
+      // A bootstrap-only counter would miss their repeated 400 KiB POSTs.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const replicaTab = await openTab(`cached-replica-${++sequence}` as WorkspaceId);
+        replicaTab.workspaceId = tab.workspaceId;
+        const cached = (await replicaTab.repo.openPersistedDoc('cached-gap')).doc;
+        cached.import(snapshot);
+        await observe(cached, false, replicaTab);
+      }
+      expect({
+        bootstraps: bootstraps(),
+        posts: posts().length,
+        postBytes: posts().reduce((bytes, request) => bytes + request.body.byteLength, 0),
+      }).toEqual({ bootstraps: 2, posts: 0, postBytes: 0 });
+    } finally {
+      // Registered replicas are destroyed by their owning Repo in afterEach.
+      common.free();
+      author.free();
+    }
+  });
+});
 
 describe('workspace Streams content boundary', () => {
   it.each([
@@ -742,6 +1678,13 @@ describe('workspace Streams content boundary', () => {
     const path = new URL(docUrl(tab.workspaceId, 'doc-a')).pathname;
     expect(Number(server.tail(path))).toBeGreaterThan(102400);
     await vi.advanceTimersByTimeAsync(10_000);
+    expect(server.room(path).snapshot).toBeUndefined();
+    doc.getMap('data').set('aboveNewThreshold', text.repeat(6));
+    doc.commit();
+    await settle(subscription.waitUntilSynced());
+    expect(Number(server.tail(path))).toBeGreaterThan(1024 * 1024);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await settle(server.snapshotReady);
     const snapshot = server.room(path).snapshot;
     expect(snapshot?.offset).toBe(server.tail(path));
     const restored = new LoroDoc();
@@ -1406,4 +2349,250 @@ describe('P10 public crypto and published SDK preparation', () => {
     ).toEqual([]);
     expect(doc.toJSON()).toEqual({ data: { draft: 'retained' } });
   });
+});
+
+describe('workspace Flock snapshot catch-up selection', () => {
+  it.each(
+    (['meta', 'mf', 'wf', 'sr'] as const).flatMap((kind) =>
+      (['plaintext', 'protected'] as const).flatMap((mode) =>
+        (
+          [
+            'small-snapshot',
+            'large-snapshot',
+            'local-draft',
+            'edit-during-probe',
+            'edit-during-bootstrap',
+          ] as const
+        ).map((scenario) => ({
+          kind,
+          mode,
+          scenario,
+        }))
+      )
+    )
+  )(
+    '$kind / $mode / $scenario preserves content and replica checkpoints',
+    async ({ kind, mode, scenario }) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      let writeDuringProbe = () => {};
+      let writeDuringBootstrap = () => {};
+      const server = createByteServer((url, method) => {
+        if (method === 'GET' && url.pathname.includes('/snapshot/')) writeDuringProbe();
+        if (url.pathname.endsWith('/bootstrap')) writeDuringBootstrap();
+        return scenario === 'large-snapshot' &&
+          method === 'GET' &&
+          url.pathname.includes('/snapshot/')
+          ? new Response(null, { headers: { 'Content-Length': String(20 * 1024 * 1024) } })
+          : undefined;
+      });
+      const writer = await openTab(`catchup-w-${++sequence}` as WorkspaceId);
+      const reader = await openTab(`catchup-r-${sequence}` as WorkspaceId);
+      reader.workspaceId = writer.workspaceId;
+      const id =
+        kind === 'mf'
+          ? `${writer.workspaceId}:mf:machine`
+          : kind === 'wf'
+            ? `${writer.workspaceId}:wf:workspace`
+            : `${writer.workspaceId}:sr`;
+      const local =
+        kind === 'meta' ? writer.repo.getMeta() : (await writer.repo.openFlockDoc(id)).flock;
+      const remote =
+        kind === 'meta' ? reader.repo.getMeta() : (await reader.repo.openFlockDoc(id)).flock;
+      const content: WorkspaceStreamsContent =
+        mode === 'protected'
+          ? protectedContent({
+              snapshotUpload: {
+                canUpload: () => true,
+                debounceMs: 10,
+                minBytesSinceRemoteSnapshot: 0,
+              },
+            })
+          : { mode: 'plaintext' };
+      const source = transportFor(writer, content);
+      const joined =
+        kind === 'meta' ? source.joinMetaRoom(local) : source.joinFlockDocRoom(id, local);
+      await settle(joined.firstSyncedWithRemote);
+      local.put(['value'], 'baseline');
+      await settle(joined.waitUntilSynced());
+      const oldReader = transportFor(
+        reader,
+        mode === 'protected' ? protectedContent() : { mode: 'plaintext' }
+      );
+      expect(
+        (
+          await settle(
+            kind === 'meta' ? oldReader.syncMeta(remote) : oldReader.syncFlockDoc(id, remote)
+          )
+        ).ok
+      ).toBe(true);
+      await settle(oldReader.close());
+      openTransports.delete(oldReader);
+      // Repeated overwrites make stream history large while current state stays small.
+      for (let i = 0; i < 4; i++) {
+        local.put(['value'], `${i}:${'x'.repeat(600_000)}`);
+        await settle(joined.waitUntilSynced());
+      }
+      local.put(['value'], 'latest');
+      await settle(joined.waitUntilSynced());
+      const url =
+        kind === 'meta'
+          ? getWorkspaceMetaStreamUrl(writer.workspaceId, streamsBaseUrl)
+          : `${streamsBaseUrl}/ds/${LORO_STREAMS_BUCKET_ID}/${encodeURIComponent(id)}`;
+      const path = new URL(url).pathname;
+      if (mode === 'protected') {
+        await vi.advanceTimersByTimeAsync(10);
+        await settle(server.snapshotReady);
+      } else {
+        server.room(path).snapshot = {
+          offset: server.tail(path),
+          body: await streamsSnapshotCodec.compress(local.exportFile()),
+        };
+      }
+      if (scenario === 'local-draft') remote.put(['draft'], 'unsent');
+      if (scenario === 'edit-during-probe')
+        writeDuringProbe = () => {
+          remote.put(['draft'], 'unsent');
+        };
+      if (scenario === 'edit-during-bootstrap')
+        writeDuringBootstrap = () => {
+          remote.put(['draft'], 'unsent');
+        };
+      const start = server.requests.length;
+      const resumed = transportFor(
+        reader,
+        mode === 'protected' ? protectedContent() : { mode: 'plaintext' }
+      );
+      expect(
+        (
+          await settle(
+            kind === 'meta' ? resumed.syncMeta(remote) : resumed.syncFlockDoc(id, remote)
+          )
+        ).ok
+      ).toBe(true);
+      expect(remote.get(['value'])).toBe('latest');
+      const requests = server.requests.slice(start);
+      expect(requests.some(({ url }) => url.pathname.endsWith('/bootstrap'))).toBe(
+        scenario === 'small-snapshot' || scenario === 'edit-during-bootstrap'
+      );
+      if (
+        scenario === 'local-draft' ||
+        scenario === 'edit-during-probe' ||
+        scenario === 'edit-during-bootstrap'
+      ) {
+        expect(remote.get(['draft'])).toBe('unsent');
+        const verifier = await openTab(`catchup-v-${sequence}` as WorkspaceId);
+        verifier.workspaceId = writer.workspaceId;
+        const check =
+          kind === 'meta' ? verifier.repo.getMeta() : (await verifier.repo.openFlockDoc(id)).flock;
+        const verification = transportFor(
+          verifier,
+          mode === 'protected' ? protectedContent() : { mode: 'plaintext' }
+        );
+        expect(
+          (
+            await settle(
+              kind === 'meta' ? verification.syncMeta(check) : verification.syncFlockDoc(id, check)
+            )
+          ).ok
+        ).toBe(true);
+        expect(check.get(['draft'])).toBe('unsent');
+      }
+      const checkpoint = await reader.repo
+        .getReplicaCheckpointStore(
+          kind === 'meta'
+            ? { kind: 'meta', flock: remote }
+            : { kind: 'flock', flockDocId: id, flock: remote }
+        )
+        .load(url);
+      expect(checkpoint?.nextOffset).toBe(server.tail(path));
+      joined.unsubscribe();
+    }
+  );
+});
+
+describe('named Flock initial catch-up timeout recovery', () => {
+  it.each(
+    ['mf:machine', 'wf:workspace', 'sr'].flatMap((suffix) =>
+      ['plaintext', 'protected'].map((mode) => ({ suffix, mode }))
+    )
+  )(
+    'recovers $suffix / $mode independently and uploads offline writes',
+    async ({ suffix, mode }) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const server = createByteServer();
+      const writer = await openTab(`timeout-w-${++sequence}` as WorkspaceId);
+      const reader = await openTab(`timeout-r-${sequence}` as WorkspaceId);
+      reader.workspaceId = writer.workspaceId;
+      const id = `${writer.workspaceId}:${suffix}`;
+      const a = (await writer.repo.openFlockDoc(id)).flock;
+      const b = (await reader.repo.openFlockDoc(id)).flock;
+      const content =
+        mode === 'protected'
+          ? protectedContent({
+              snapshotUpload: {
+                canUpload: () => true,
+                debounceMs: 10,
+                minBytesSinceRemoteSnapshot: 0,
+              },
+            })
+          : { mode: 'plaintext' as const };
+      const readContent =
+        mode === 'protected' ? protectedContent() : { mode: 'plaintext' as const };
+      const source = transportFor(writer, content).joinFlockDocRoom(id, a);
+      await settle(source.firstSyncedWithRemote);
+      a.put(['remote'], 'baseline');
+      await settle(source.waitUntilSynced());
+      const old = transportFor(reader, readContent);
+      expect((await settle(old.syncFlockDoc(id, b))).ok).toBe(true);
+      await settle(old.close());
+      openTransports.delete(old);
+      a.put(['remote'], 'latest');
+      await settle(source.waitUntilSynced());
+      const path = `/ds/${LORO_STREAMS_BUCKET_ID}/${encodeURIComponent(id)}`;
+      if (mode === 'protected') {
+        await vi.advanceTimersByTimeAsync(10);
+        await settle(server.snapshotReady);
+      } else {
+        server.room(path).snapshot = {
+          offset: server.tail(path),
+          body: await streamsSnapshotCodec.compress(a.exportFile()),
+        };
+      }
+      b.put(['draft'], 'retained offline');
+      const originalFetch = globalThis.fetch;
+      const reading = Promise.withResolvers<void>();
+      let stall = true;
+      vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(input instanceof Request ? input.url : input);
+        if (stall && url.pathname === path && (init?.method ?? 'GET') === 'GET') {
+          reading.resolve();
+          return await new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(init.signal!.reason), {
+              once: true,
+            });
+          });
+        }
+        return originalFetch(input, init);
+      });
+      const recovery = transportFor(reader, readContent);
+      const subscription = recovery.joinFlockDocRoom(id, b);
+      const failed = subscription.firstSyncedWithRemote.catch((error: unknown) => error);
+      await settle(reading.promise);
+      await vi.advanceTimersByTimeAsync(240_000);
+      expect(await settle(failed)).toMatchObject({ streamsCode: 'initial_sync_timeout' });
+      stall = false;
+      await settle(subscription.rejoin!());
+      await settle(subscription.firstSyncedWithRemote);
+      expect(b.get(['remote'])).toBe('latest');
+      expect(b.get(['draft'])).toBe('retained offline');
+      expect(server.requests.some(({ url }) => url.pathname === `${path}/bootstrap`)).toBe(true);
+      const verifier = await openTab(`timeout-v-${sequence}` as WorkspaceId);
+      verifier.workspaceId = writer.workspaceId;
+      const c = (await verifier.repo.openFlockDoc(id)).flock;
+      expect((await settle(transportFor(verifier, readContent).syncFlockDoc(id, c))).ok).toBe(true);
+      expect(c.get(['draft'])).toBe('retained offline');
+      subscription.unsubscribe();
+      source.unsubscribe();
+    }
+  );
 });

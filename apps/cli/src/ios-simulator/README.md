@@ -33,8 +33,10 @@ There is no wildcard-origin reply. Web parents retain their exact-origin handsha
 live frames never enter React, RPC, or synchronized documents. An explicitly requested
 screenshot transfers one bounded PNG to the parent for saving or staging as a composer
 attachment; capture never sends a message automatically. Input text and deep links also
-stay out of workspace RPC. Device controls advertise `iosSimulatorControls: 1` independently
-of lifecycle protocol compatibility.
+stay out of workspace RPC. Device controls advertise `iosSimulatorControls: 2` independently
+of lifecycle protocol compatibility. Version 1 covers the original device controls. Version 2
+adds a software keyboard toggle for focused text fields on iPhone and iPad. The reply
+acknowledges the command without reporting keyboard visibility.
 
 ## Two-finger input
 
@@ -64,76 +66,26 @@ an unavailable initial tunnel, and real constrained-network acceptance remains r
 
 ## Runtime artifact
 
-`baguette-manifest.json` pins the Lody-patched archive and executable digests. The
-installer fetches only the platform runtime channel:
+The [manifest](baguette-manifest.json) pins the official Apple Silicon release
+archive, its executable and the upstream commit. The distribution mirror reads
+`source` and copies the verified tarball unchanged. Publish the versioned object
+and verify its readback before shipping a CLI that references it. To verify a
+candidate without uploading, run the distribution mirror with
+`--runtime baguette --skip-upload` against the candidate manifest.
 
-```
-/api/runtimes/baguette/0.2.1-lody.1/darwin-arm64/baguette_v0.2.1-lody.1_macOS_arm64.tar.gz
-```
+The CLI downloads only from the configured runtime channel at
+`/api/runtimes/baguette/<version>/darwin-arm64/<fileName>`. It verifies archive
+size and SHA-256, checks the extracted executable digest, writes
+[third-party notices](baguette-notices.json), and reuses the verified versioned
+cache offline. Preview requires Apple Silicon, macOS 15+, Xcode and an installed
+iOS Simulator runtime.
 
-The deployment composition must publish these exact bytes before shipping. The
-private distribution repository provides `mirror-agent-runtimes.mjs --runtime
-baguette` (use `--dry-run` to inspect the plan). There is no upstream, Homebrew or
-PATH fallback. Reuse the verified versioned cache; downloads need connectivity,
-while a cached same-machine preview does not require Cloud authorization.
-
-`baguette-notices.json` contains Baguette's Apache-2.0 license and licenses/notices from
-the exact dependency revisions in v0.2.1's `Package.resolved`; source URLs accompany
-each notice. The installer writes them as `THIRD_PARTY_NOTICES.txt`. Version changes
-must refresh both digests and notices, then rerun native compatibility checks.
-
-Supported native artifact: Apple Silicon, macOS 15+, Xcode and an installed iOS
-runtime. Intel has no pinned artifact. Local smoke evidence used Xcode 26.6 / iOS
-26.5 and verified device enumeration, managed installation, real JPEG delivery and
-preview cleanup. Full Electron sidebar, remote Quick Tunnel and mobile E2E remain
-unverified. Three-or-more-finger input, physical-key forwarding and advanced device configuration are later work.
-
-## Maintaining the patched build
-
-The upstream v0.2.0 and v0.2.1 Release binaries crash at the first 30-second
-WebSocket ping. A symbolized source build reproduces this at `Task.sleep(for:)`;
-replacing all three sleeps in `swift-websocket`'s `WebSocketHandler` also prevents the same
-crash during connection shutdown. See the [decision](../../../../.agents/notes/implemented/bug-fix/2026-09-29-baguette-runtime-sleep.md).
-
-Upstream v0.2.1 fixes the separate `baguette stream` startup crash
-([PR #88](https://github.com/tddworks/baguette/pull/88)); Lody uses `baguette serve`.
-Its dependency lock and license are unchanged from v0.2.0. The official v0.2.1
-arm64 archive reproduced the sleep abort after 31.4 seconds, so `0.2.1-lody.1`
-retains the same three-call patch. Recheck both ping and close paths before
-removing it on a later upgrade. The patched build and public-channel download each
-survived three real pings (~91 seconds) on Xcode 26.6/iOS 26.2; the download also
-completed a normal WebSocket close before clean process shutdown. This is bounded
-compatibility evidence, not a long soak or full application E2E.
-
-`baguette-manifest.json.build` records the exact source revision, dependency
-revision, patch digest, Swift version and build command. To rebuild, clone the
-upstream repository at that revision, resolve the checked-in `Package.resolved`
-with `swift package resolve --force-resolved-versions`, and check the
-`swift-websocket` checkout revision. Apply
-`patches/swift-websocket-continuous-clock.patch` in that checkout (SwiftPM marks
-it read-only; grant owner write access to `Sources/WSCore/WebSocketHandler.swift`
-first). Run the recorded build command. Keep the executable and adjacent
-`Baguette_Baguette.bundle` together.
-
-From this repository root, package the already verified build:
-
-```sh
-node scripts/package-baguette-runtime.mjs --build-dir <swift-release-directory> --output-dir <artifact-directory>
-```
-
-The packager verifies the pinned executable and patch, includes resources,
-notices, the patch and `BUILD_PROVENANCE.json`, and compares two normalized gzip
-archives. It excludes debug-symbol bundles. `--print-pins` writes the candidate
-archive and prints its hash/size without changing the manifest or publishing.
-A new native build requires a reviewed executable pin and a fresh `-lody.N`
-version if any published bytes differ. Archive packaging is deterministic;
-Swift compilation across paths/toolchains is not promised byte-reproducible.
-Never overwrite an existing immutable version to accept a rebuild.
-
-The initial publication supplies the local archive to the distribution mirror
-with `--runtime baguette --baguette-artifact <archive>`. Later mirror runs can
-retrieve the same pinned bytes from the manifest's public channel URL. Publish
-and verify the new object before shipping the updated CLI manifest.
+For upgrades, compare the release checksum and tag revision, hash the extracted
+executable, and refresh notices against the tagged license and dependency lock.
+Exercise the final binary and adjacent resource bundle through the CLI worker on
+a booted simulator. Keep a stream open for three native WebSocket pings, close
+normally, reconnect and verify that stopping the worker reaps the server. These
+checks cover the [historical WebSocket sleep crash](../../../../.agents/notes/implemented/bug-fix/2026-09-29-baguette-runtime-sleep.md).
 
 ## Verification
 

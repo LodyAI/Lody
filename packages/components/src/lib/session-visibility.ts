@@ -16,6 +16,8 @@ export type SessionMachineRecord = {
   machineId?: string | null;
   userId?: string | null;
   project?: { kind?: string; localProjectId?: string | null } | null;
+  /** Set by a workspace bundle import; see `isImportedIntoWorkspace`. */
+  importFence?: { workspaceId?: string } | null;
 };
 
 type LocalProjectSessionMachineRecord = SessionMachineRecord & {
@@ -32,7 +34,18 @@ type SessionVisibilityOptions = {
   readSharedSessions?: ReadonlyMap<string, SessionAccessView>;
   sessionsById?: ReadonlyMap<string, SessionMachineRecord>;
   ownedMachineIds?: ReadonlySet<MachineId>;
+  /** The workspace being shown; scopes import fences to the import that set them. */
+  workspaceId?: string | null;
 };
+
+/** Imported into this workspace from a bundle: every member reads it, nobody edits it. */
+export function isImportedIntoWorkspace(
+  session: SessionMachineRecord,
+  workspaceId: string | null | undefined,
+  currentUserId: string | null | undefined
+): boolean {
+  return !!workspaceId && !!currentUserId && session.importFence?.workspaceId === workspaceId;
+}
 
 export function isLocalProjectSession(
   session: SessionMachineRecord
@@ -133,6 +146,8 @@ export function resolveSessionVisibilityState(
     )
   )
     return 'visible';
+  if (isImportedIntoWorkspace(session, options.workspaceId, options.currentUserId))
+    return 'visible';
   if (
     isSessionVisibleToUser(
       session,
@@ -167,7 +182,8 @@ export function filterSessionsByVisibility<T extends SessionMachineRecord>(
   workspaceHistoryReadable = false,
   ownedMachineIds?: ReadonlySet<MachineId>,
   readSharedSessions?: ReadonlyMap<string, SessionAccessView>,
-  sessionsById?: ReadonlyMap<string, SessionMachineRecord>
+  sessionsById?: ReadonlyMap<string, SessionMachineRecord>,
+  workspaceId?: string | null
 ): T[] {
   if (sessions.length === 0) return [];
   if (
@@ -188,6 +204,7 @@ export function filterSessionsByVisibility<T extends SessionMachineRecord>(
         ownedMachineIds,
         readSharedSessions,
         sessionsById,
+        workspaceId,
       }) === 'visible'
   );
 }

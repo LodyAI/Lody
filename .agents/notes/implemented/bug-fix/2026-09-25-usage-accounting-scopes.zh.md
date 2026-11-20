@@ -35,8 +35,8 @@ Codex 通过 `usageTurnId` 做到了。
 - **Claude**：每条 SDK result 是一个范围，以其 `uuid` 为键，只携带该 result 对
   query 级读数的新增。读数低于上一次时表示新的 `query()`，整份读数都计入。
   query 被替换时不携带任何状态。
-- **Codex**：native turn id 作为 Core 范围发送，并在一个版本内同时以旧字段
-  `codex.usageTurnId` 发送。
+- **Codex**：native turn id 作为 Core 范围发送。adapter 仍重复发送旧字段
+  `codex.usageTurnId`，CLI 已不再读取。
 - **Kimi**：每次激活使用一个随机范围。
 - **CLI**：任何 provider 的范围都映射为 `nativeSessionId:scope:encodedId`；无范围
   更新沿用 ACP session ID。

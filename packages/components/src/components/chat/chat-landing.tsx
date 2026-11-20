@@ -324,7 +324,7 @@ import {
 } from '@/components/sessions/desktop-run-config-menu';
 import { resolvePermissionModeFace } from '@/lib/permission-mode-face';
 import { SessionUsagePopover } from '@/components/sessions/session-usage-popover';
-import { useArchiveSessionWithConfirmation } from '@/components/sessions/session-archive-confirmation';
+import { useArchiveSessionWithConfirmation } from '@/components/sessions/session-sub-conversation-confirmation';
 import { MachinePairingDialog } from './machine-pairing-dialog';
 import {
   DATE_BUCKET_THIS_MONTH,
@@ -3695,7 +3695,6 @@ function WorkspaceChatLanding({
         value={currentBranch}
         onChange={setCurrentBranch}
         options={branchOptions}
-        tone={tone}
         placeholder={t('chat.branchPlaceholder')}
         searchPlaceholder={t('chat.branchSearchPlaceholder', { defaultValue: 'Search branches' })}
         emptyText={t('chat.branchEmpty', { defaultValue: 'No branches found' })}
@@ -5070,6 +5069,8 @@ function WorkspaceChatLanding({
           isOffline: !isOnline,
           hasUnreadMessages: activity.hasUnreadMessages,
           isPinned: Boolean(session.isPinned),
+          pinSectionId: session.pinSectionId ?? null,
+          orderKey: session.orderKey ?? null,
           readOnly: activeReadOnlyIds.has(session.id) || archivedReadOnlyIds.has(session.id),
           machineId: session.machineId,
           /* Provenance for the list's opened-by tree. TWO fields, never
@@ -5992,6 +5993,8 @@ function WorkspaceChatLanding({
           isOffline: !isOnline,
           hasUnreadMessages: activity.hasUnreadMessages,
           isPinned: Boolean(session.isPinned),
+          pinSectionId: session.pinSectionId ?? null,
+          orderKey: session.orderKey ?? null,
           readOnly: activeReadOnlyIds.has(session.id) || archivedReadOnlyIds.has(session.id),
           machineId: session.machineId,
           /* See the home Chat-tab builder: precise opener for navigation, row
@@ -6707,7 +6710,6 @@ function WorkspaceChatLanding({
             archiveToggleLabel: t('chat.mobileHome.archiveToggleLabel', '归档'),
             searchPlaceholder: t('chat.mobileProject.searchPlaceholder', '搜索对话'),
             clearSearchAriaLabel: t('common.clear', '清空'),
-            allConversationsHeading: t('chat.mobileHome.allChatsHeading', '全部对话'),
             archivedConversationsHeading: t('chat.mobileHome.archivedChatsHeading', '归档对话'),
             archiveSelection: {
               selectedCount: (count) =>
@@ -6906,7 +6908,6 @@ function WorkspaceChatLanding({
             recentLocalProjectsHeading: t('chat.mobileHome.recentLocalProjectsHeading', '最近常用'),
             allLocalProjectsHeading: t('chat.mobileHome.allLocalProjectsHeading', '全部项目'),
             allGitHubReposHeading: t('chat.mobileHome.allGitHubReposHeading', '全部仓库'),
-            allChatsHeading: t('chat.mobileHome.allChatsHeading', '全部对话'),
             archivedChatsHeading: t('chat.mobileHome.archivedChatsHeading', '归档对话'),
             archiveSelection: {
               selectedCount: (count) =>

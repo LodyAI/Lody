@@ -8,6 +8,10 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
 
 Snapshot compression is available only through `@lody/shared/streams-snapshot-codec`. Keep its runtime imports out of the shared root so Convex isolate bundles can use protocol helpers without loading Node compression dependencies.
 
+Meta/Flock catch-up keeps replica-bound checkpoints and merges into the live replica.
+[Streams catch-up](../../.agents/docs/workspace-catalog-durability.md#streams-catch-up)
+explains size selection and cursor-only timeout recovery.
+
 ## Session history
 
 - History tolerates unknown string item types without rewriting or blocking unrelated writes.
@@ -63,6 +67,8 @@ Snapshot compression is available only through `@lody/shared/streams-snapshot-co
 Missing-history acknowledgements are exact-ID receipts; only the serialized host watcher adds them. `isMissingHistoryUserTurn`
 reads the retained map and legacy scalar; new activation must not clear old acknowledgements.
 
+Stopped queue rows retain paused drafts; explicit resends use new input identities.
+
 ## Machine protocol negotiation
 
 - Sorbet credential metadata and per-provider logout use local Machine RPC or signed E2EE owned execution, gated remotely by `sorbetCredentialsRemote`. The target verifies the signing device belongs to its owner's membership; shared members and plaintext fallback are forbidden. Metadata does not imply credential validity or account identity.
@@ -88,6 +94,10 @@ reads the retained map and legacy scalar; new activation must not clear old ackn
 - ACP `cacheVersion` gates freshness, not readability. Preserve understood fields across
   versions and runtime-override matching; omit known-incompatible fields. Pre-v11 commands
   can contain project data: Machine Flock owns probe previews, Sessions own actual lists.
+- Machine Flock retains complete `acpCapability` rows for older readers. Same-source
+  option structures retain their stored current values; session selections live in Sessions.
+  Per-model option rows may share a same-source shape across different current values.
+  Quota deduplication compares reset jitter with the persisted baseline, never the last notification.
 - Quota: share `src/subscription-quota.ts`; key `agentConfigId + limitId`.
   Bound Providers ignore legacy; delete scoped rows.
 
@@ -114,3 +124,5 @@ ordinary behavior stays unchanged. [Contract](../../.agents/docs/cli-lib-loro-pr
 Encrypted attachment manifests contain secret per-file keys and belong only in protected conversation content or local recovery receipts. Relay requests use opaque metadata and attachment-only grants; never publish a manifest or key in a URL. Format and recovery rationale: [attachment decision](../../.agents/notes/implemented/architecture/2026-10-28-encrypted-attachments.md).
 
 Native `local_attachment` inputs require exact submission scope and explicit inheritance. Never backfill or silently discard them. [Contract](../../.agents/docs/cli-lib-session-files.md#native-local-references).
+
+Shortcut sync preserves handled token/auth causes through SDK refresh, rather than producing new generic exceptions; [diagnostic ownership](../../.agents/notes/implemented/bug-fix/2026-11-17-shortcut-token-retry-diagnostics.md) remains with the client operation.

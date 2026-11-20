@@ -6,10 +6,20 @@ import {
   sidebarNavItemsAtom,
   type SidebarNavItem,
 } from '@/atoms/focus-layer';
+import {
+  MAX_SIDEBAR_SHORTCUT_SLOTS,
+  getVisibleSidebarShortcutSessionIds,
+} from '@/atoms/sidebar-shortcuts';
 import { toggleNavigationSidebarAtom } from '@/atoms/layout-state';
-import { getCommandKeybindings, useCommand } from '@/lib/commands';
+import {
+  commands,
+  getCommandKeybindings,
+  useCommand,
+  type ShortcutCommandId,
+} from '@/lib/commands';
 import { useFocusScopeSwitcher } from '@/ui/focus-scope';
 import { useIsMobile } from './use-mobile';
+import { useSidebarShortcutHold } from './use-sidebar-shortcut-hold';
 
 export type { SidebarNavItem } from '@/atoms/focus-layer';
 
@@ -144,6 +154,68 @@ export function useKeyboardNavigation(): void {
     },
     [abandonBurst, claimBurstTarget, flushSessionNavigation, getCallbacks, getVisibleSessionIds]
   );
+
+  const getVisibleShortcutSessionIds = useCallback(
+    () => getVisibleSidebarShortcutSessionIds(store.get(sidebarNavItemsAtom)),
+    [store]
+  );
+
+  const canRevealShortcutOverlay = useCallback(
+    () =>
+      !isMobile &&
+      !isPopupOpen() &&
+      getCallbacks() !== null &&
+      getVisibleShortcutSessionIds().length > 0,
+    [getCallbacks, getVisibleShortcutSessionIds, isMobile]
+  );
+
+  useSidebarShortcutHold({
+    enabled: !isMobile,
+    canReveal: canRevealShortcutOverlay,
+  });
+
+  const navigateToVisibleSlot = useCallback(
+    (slot: number) => {
+      const callbacks = getCallbacks();
+      if (!callbacks) return;
+      const targetId = getVisibleShortcutSessionIds()[slot - 1];
+      if (!targetId) return;
+      abandonBurst();
+      if (callbacks.getSelectedSessionId() === targetId) return;
+      callbacks.onNavigateToSession(targetId);
+    },
+    [abandonBurst, getCallbacks, getVisibleShortcutSessionIds]
+  );
+
+  const canNavigateToVisibleSlotRef = useRef<(slot: number) => boolean>(() => false);
+  canNavigateToVisibleSlotRef.current = (slot: number) =>
+    !isMobile &&
+    !isPopupOpen() &&
+    getCallbacks() !== null &&
+    getVisibleShortcutSessionIds().length >= slot;
+  const navigateToVisibleSlotRef = useRef(navigateToVisibleSlot);
+  navigateToVisibleSlotRef.current = navigateToVisibleSlot;
+
+  useEffect(() => {
+    const disposers: Array<() => void> = [];
+    for (let slot = 1; slot <= MAX_SIDEBAR_SHORTCUT_SLOTS; slot += 1) {
+      const id = `session.switchToVisible${slot}` as ShortcutCommandId;
+      disposers.push(
+        commands.register({
+          id,
+          titleKey: `commands.session.switchToVisible${slot}`,
+          title: t(`commands.session.switchToVisible${slot}`, `Switch to Session ${slot}`),
+          category: 'Navigation',
+          keybindings: getCommandKeybindings(id),
+          when: () => canNavigateToVisibleSlotRef.current(slot),
+          run: () => navigateToVisibleSlotRef.current(slot),
+        })
+      );
+    }
+    return () => {
+      for (const dispose of disposers) dispose();
+    };
+  }, [t]);
 
   useFocusScopeSwitcher({ enabled: !isMobile });
 

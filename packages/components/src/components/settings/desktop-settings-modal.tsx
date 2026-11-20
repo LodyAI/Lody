@@ -16,6 +16,7 @@ import {
   loadPromptShortcutsSetting,
   loadMcpSetting,
   loadShareManagementSetting,
+  loadWorkspaceDataSetting,
   preloadSettingsPanel,
 } from './settings-code';
 const WorkspaceSettings = lazy(loadWorkspaceSettings);
@@ -76,6 +77,7 @@ const AgentRolesSetting = lazy(loadAgentRolesSetting);
 const PromptShortcutsSetting = lazy(loadPromptShortcutsSetting);
 const McpSetting = lazy(loadMcpSetting);
 const ShareManagementSetting = lazy(loadShareManagementSetting);
+const WorkspaceDataSetting = lazy(loadWorkspaceDataSetting);
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 import { productDarkPalette, productLightPalette } from '@/lib/vscode-theme/lody-ui-palette.stylex';
 import { useResolvedTheme } from '@/theme-provider';
@@ -630,6 +632,8 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
       return <McpSetting />;
     case 'shares':
       return <ShareManagementSetting />;
+    case 'data':
+      return <WorkspaceDataSetting />;
     case 'machines':
       return (
         <MachineAgentSettings

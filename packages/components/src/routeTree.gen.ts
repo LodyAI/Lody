@@ -11,149 +11,107 @@
 import { createFileRoute } from '@tanstack/react-router';
 
 import { Route as rootRouteImport } from './routes/__root';
-import { Route as ResetPasswordRouteImport } from './routes/reset-password';
-import { Route as RecoveryRouteImport } from './routes/recovery';
-import { Route as OnboardingRouteImport } from './routes/onboarding';
-import { Route as NotFoundRouteImport } from './routes/notFound';
-import { Route as LoginRouteImport } from './routes/login';
-import { Route as ForgotPasswordRouteImport } from './routes/forgot-password';
-import { Route as CompleteEmailRouteImport } from './routes/complete-email';
-import { Route as AppRouteImport } from './routes/app';
-import { Route as WorkspaceNameRouteImport } from './routes/$workspaceName';
 import { Route as IndexRouteImport } from './routes/index';
+import { Route as WorkspaceNameRouteImport } from './routes/$workspaceName';
+import { Route as AppRouteImport } from './routes/app';
+import { Route as CompleteEmailRouteImport } from './routes/complete-email';
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password';
+import { Route as LoginRouteImport } from './routes/login';
+import { Route as NotFoundRouteImport } from './routes/notFound';
+import { Route as OnboardingRouteImport } from './routes/onboarding';
+import { Route as RecoveryRouteImport } from './routes/recovery';
+import { Route as ResetPasswordRouteImport } from './routes/reset-password';
 import { Route as WorkspaceNameIndexRouteImport } from './routes/$workspaceName/index';
-import { Route as WorkspaceCreateRouteImport } from './routes/workspace/create';
-import { Route as SettingsGithubRouteImport } from './routes/settings.github';
-import { Route as JoinTokenRouteImport } from './routes/join/$token';
-import { Route as InviteInvitationIdRouteImport } from './routes/invite/$invitationId';
-import { Route as DesktopGithubInstallRouteImport } from './routes/desktop/github-install';
-import { Route as DesktopCheckoutReturnRouteImport } from './routes/desktop/checkout-return';
 import { Route as WorkspaceNameAuthRouteImport } from './routes/$workspaceName/_auth';
-import { Route as WorkspaceE2eeWorkspaceIdRouteImport } from './routes/workspace/e2ee/$workspaceId';
-import { Route as WorkspaceNameAuthSettingsRouteImport } from './routes/$workspaceName/_auth/settings';
-import { Route as WorkspaceNameAuthSessionsRouteImport } from './routes/$workspaceName/_auth/sessions';
-import { Route as WorkspaceNameAuthChatRouteImport } from './routes/$workspaceName/_auth/chat';
+import { Route as DesktopCheckoutReturnRouteImport } from './routes/desktop/checkout-return';
+import { Route as DesktopGithubInstallRouteImport } from './routes/desktop/github-install';
+import { Route as InviteInvitationIdRouteImport } from './routes/invite/$invitationId';
+import { Route as JoinTokenRouteImport } from './routes/join/$token';
+import { Route as SettingsGithubRouteImport } from './routes/settings.github';
+import { Route as WorkspaceCreateRouteImport } from './routes/workspace/create';
 import { Route as WorkspaceNameAuthArchiveRouteImport } from './routes/$workspaceName/_auth/archive';
-import { Route as WorkspaceNameAuthSettingsIndexRouteImport } from './routes/$workspaceName/_auth/settings.index';
+import { Route as WorkspaceNameAuthChatRouteImport } from './routes/$workspaceName/_auth/chat';
+import { Route as WorkspaceNameAuthSessionsRouteImport } from './routes/$workspaceName/_auth/sessions';
+import { Route as WorkspaceNameAuthSettingsRouteImport } from './routes/$workspaceName/_auth/settings';
+import { Route as WorkspaceE2eeWorkspaceIdRouteImport } from './routes/workspace/e2ee/$workspaceId';
 import { Route as WorkspaceNameAuthSchedulesIndexRouteImport } from './routes/$workspaceName/_auth/schedules.index';
-import { Route as WorkspaceNameAuthSettingsProjectsRouteImport } from './routes/$workspaceName/_auth/settings/projects';
-import { Route as WorkspaceNameAuthSettingsMyMachinesRouteImport } from './routes/$workspaceName/_auth/settings/my-machines';
-import { Route as WorkspaceNameAuthSettingsMachinesRouteImport } from './routes/$workspaceName/_auth/settings/machines';
-import { Route as WorkspaceNameAuthSettingsDevicesRouteImport } from './routes/$workspaceName/_auth/settings/devices';
-import { Route as WorkspaceNameAuthSettingsAgentsRouteImport } from './routes/$workspaceName/_auth/settings/agents';
-import { Route as WorkspaceNameAuthSettingsAgentConfigRouteImport } from './routes/$workspaceName/_auth/settings/agent-config';
-import { Route as WorkspaceNameAuthSessionsSessionIdRouteImport } from './routes/$workspaceName/_auth/sessions/$sessionId';
 import { Route as WorkspaceNameAuthSchedulesScheduleIdRouteImport } from './routes/$workspaceName/_auth/schedules.$scheduleId';
+import { Route as WorkspaceNameAuthSessionsSessionIdRouteImport } from './routes/$workspaceName/_auth/sessions/$sessionId';
+import { Route as WorkspaceNameAuthSettingsIndexRouteImport } from './routes/$workspaceName/_auth/settings.index';
+import { Route as WorkspaceNameAuthSettingsAgentConfigRouteImport } from './routes/$workspaceName/_auth/settings/agent-config';
+import { Route as WorkspaceNameAuthSettingsAgentsRouteImport } from './routes/$workspaceName/_auth/settings/agents';
+import { Route as WorkspaceNameAuthSettingsDevicesRouteImport } from './routes/$workspaceName/_auth/settings/devices';
+import { Route as WorkspaceNameAuthSettingsMachinesRouteImport } from './routes/$workspaceName/_auth/settings/machines';
+import { Route as WorkspaceNameAuthSettingsMyMachinesRouteImport } from './routes/$workspaceName/_auth/settings/my-machines';
+import { Route as WorkspaceNameAuthSettingsProjectsRouteImport } from './routes/$workspaceName/_auth/settings/projects';
 import { Route as WorkspaceNameAuthLocalMachineIdLocalProjectIdRouteImport } from './routes/$workspaceName/_auth/local/$machineId/$localProjectId';
 
-const EmailVerifiedLazyRouteImport = createFileRoute('/email-verified')();
 const DeviceLazyRouteImport = createFileRoute('/device')();
+const EmailVerifiedLazyRouteImport = createFileRoute('/email-verified')();
 const WorkspaceNameAuthSchedulesLazyRouteImport = createFileRoute(
   '/$workspaceName/_auth/schedules'
-)();
-const WorkspaceNameAuthSettingsWorkspaceLazyRouteImport = createFileRoute(
-  '/$workspaceName/_auth/settings/workspace'
-)();
-const WorkspaceNameAuthSettingsStatsLazyRouteImport = createFileRoute(
-  '/$workspaceName/_auth/settings/stats'
-)();
-const WorkspaceNameAuthSettingsSharesLazyRouteImport = createFileRoute(
-  '/$workspaceName/_auth/settings/shares'
-)();
-const WorkspaceNameAuthSettingsPromptShortcutsLazyRouteImport = createFileRoute(
-  '/$workspaceName/_auth/settings/prompt-shortcuts'
-)();
-const WorkspaceNameAuthSettingsPreferencesLazyRouteImport = createFileRoute(
-  '/$workspaceName/_auth/settings/preferences'
-)();
-const WorkspaceNameAuthSettingsPeopleLazyRouteImport = createFileRoute(
-  '/$workspaceName/_auth/settings/people'
-)();
-const WorkspaceNameAuthSettingsMemoryLazyRouteImport = createFileRoute(
-  '/$workspaceName/_auth/settings/memory'
-)();
-const WorkspaceNameAuthSettingsMcpLazyRouteImport = createFileRoute(
-  '/$workspaceName/_auth/settings/mcp'
-)();
-const WorkspaceNameAuthSettingsLodyAgentLazyRouteImport = createFileRoute(
-  '/$workspaceName/_auth/settings/lody-agent'
-)();
-const WorkspaceNameAuthSettingsKeyboardShortcutsLazyRouteImport = createFileRoute(
-  '/$workspaceName/_auth/settings/keyboard-shortcuts'
-)();
-const WorkspaceNameAuthSettingsGithubLazyRouteImport = createFileRoute(
-  '/$workspaceName/_auth/settings/github'
-)();
-const WorkspaceNameAuthSettingsGeneralLazyRouteImport = createFileRoute(
-  '/$workspaceName/_auth/settings/general'
-)();
-const WorkspaceNameAuthSettingsBillingLazyRouteImport = createFileRoute(
-  '/$workspaceName/_auth/settings/billing'
-)();
-const WorkspaceNameAuthSettingsAppearanceLazyRouteImport = createFileRoute(
-  '/$workspaceName/_auth/settings/appearance'
-)();
-const WorkspaceNameAuthSettingsAiUsageLazyRouteImport = createFileRoute(
-  '/$workspaceName/_auth/settings/ai-usage'
-)();
-const WorkspaceNameAuthSettingsAgentRolesLazyRouteImport = createFileRoute(
-  '/$workspaceName/_auth/settings/agent-roles'
-)();
-const WorkspaceNameAuthSettingsAccountLazyRouteImport = createFileRoute(
-  '/$workspaceName/_auth/settings/account'
 )();
 const WorkspaceNameAuthSettingsAboutLazyRouteImport = createFileRoute(
   '/$workspaceName/_auth/settings/about'
 )();
+const WorkspaceNameAuthSettingsAccountLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/account'
+)();
+const WorkspaceNameAuthSettingsAgentRolesLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/agent-roles'
+)();
+const WorkspaceNameAuthSettingsAiUsageLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/ai-usage'
+)();
+const WorkspaceNameAuthSettingsAppearanceLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/appearance'
+)();
+const WorkspaceNameAuthSettingsBillingLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/billing'
+)();
+const WorkspaceNameAuthSettingsDataLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/data'
+)();
+const WorkspaceNameAuthSettingsGeneralLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/general'
+)();
+const WorkspaceNameAuthSettingsGithubLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/github'
+)();
+const WorkspaceNameAuthSettingsKeyboardShortcutsLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/keyboard-shortcuts'
+)();
+const WorkspaceNameAuthSettingsLodyAgentLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/lody-agent'
+)();
+const WorkspaceNameAuthSettingsMcpLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/mcp'
+)();
+const WorkspaceNameAuthSettingsMemoryLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/memory'
+)();
+const WorkspaceNameAuthSettingsPeopleLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/people'
+)();
+const WorkspaceNameAuthSettingsPreferencesLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/preferences'
+)();
+const WorkspaceNameAuthSettingsPromptShortcutsLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/prompt-shortcuts'
+)();
+const WorkspaceNameAuthSettingsSharesLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/shares'
+)();
+const WorkspaceNameAuthSettingsStatsLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/stats'
+)();
+const WorkspaceNameAuthSettingsWorkspaceLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/workspace'
+)();
 
-const EmailVerifiedLazyRoute = EmailVerifiedLazyRouteImport.update({
-  id: '/email-verified',
-  path: '/email-verified',
-  getParentRoute: () => rootRouteImport,
-} as any).lazy(() => import('./routes/email-verified.lazy').then((d) => d.Route));
-const DeviceLazyRoute = DeviceLazyRouteImport.update({
-  id: '/device',
-  path: '/device',
-  getParentRoute: () => rootRouteImport,
-} as any).lazy(() => import('./routes/device.lazy').then((d) => d.Route));
-const ResetPasswordRoute = ResetPasswordRouteImport.update({
-  id: '/reset-password',
-  path: '/reset-password',
-  getParentRoute: () => rootRouteImport,
-} as any);
-const RecoveryRoute = RecoveryRouteImport.update({
-  id: '/recovery',
-  path: '/recovery',
-  getParentRoute: () => rootRouteImport,
-} as any);
-const OnboardingRoute = OnboardingRouteImport.update({
-  id: '/onboarding',
-  path: '/onboarding',
-  getParentRoute: () => rootRouteImport,
-} as any);
-const NotFoundRoute = NotFoundRouteImport.update({
-  id: '/notFound',
-  path: '/notFound',
-  getParentRoute: () => rootRouteImport,
-} as any);
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any);
-const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
-  id: '/forgot-password',
-  path: '/forgot-password',
-  getParentRoute: () => rootRouteImport,
-} as any);
-const CompleteEmailRoute = CompleteEmailRouteImport.update({
-  id: '/complete-email',
-  path: '/complete-email',
-  getParentRoute: () => rootRouteImport,
-} as any);
-const AppRoute = AppRouteImport.update({
-  id: '/app',
-  path: '/app',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any);
 const WorkspaceNameRoute = WorkspaceNameRouteImport.update({
@@ -161,9 +119,54 @@ const WorkspaceNameRoute = WorkspaceNameRouteImport.update({
   path: '/$workspaceName',
   getParentRoute: () => rootRouteImport,
 } as any);
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AppRoute = AppRouteImport.update({
+  id: '/app',
+  path: '/app',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const CompleteEmailRoute = CompleteEmailRouteImport.update({
+  id: '/complete-email',
+  path: '/complete-email',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const DeviceLazyRoute = DeviceLazyRouteImport.update({
+  id: '/device',
+  path: '/device',
+  getParentRoute: () => rootRouteImport,
+} as any).lazy(() => import('./routes/device.lazy').then((d) => d.Route));
+const EmailVerifiedLazyRoute = EmailVerifiedLazyRouteImport.update({
+  id: '/email-verified',
+  path: '/email-verified',
+  getParentRoute: () => rootRouteImport,
+} as any).lazy(() => import('./routes/email-verified.lazy').then((d) => d.Route));
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const NotFoundRoute = NotFoundRouteImport.update({
+  id: '/notFound',
+  path: '/notFound',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const OnboardingRoute = OnboardingRouteImport.update({
+  id: '/onboarding',
+  path: '/onboarding',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const RecoveryRoute = RecoveryRouteImport.update({
+  id: '/recovery',
+  path: '/recovery',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any);
 const WorkspaceNameIndexRoute = WorkspaceNameIndexRouteImport.update({
@@ -171,24 +174,13 @@ const WorkspaceNameIndexRoute = WorkspaceNameIndexRouteImport.update({
   path: '/',
   getParentRoute: () => WorkspaceNameRoute,
 } as any);
-const WorkspaceCreateRoute = WorkspaceCreateRouteImport.update({
-  id: '/workspace/create',
-  path: '/workspace/create',
-  getParentRoute: () => rootRouteImport,
+const WorkspaceNameAuthRoute = WorkspaceNameAuthRouteImport.update({
+  id: '/_auth',
+  getParentRoute: () => WorkspaceNameRoute,
 } as any);
-const SettingsGithubRoute = SettingsGithubRouteImport.update({
-  id: '/settings/github',
-  path: '/settings/github',
-  getParentRoute: () => rootRouteImport,
-} as any);
-const JoinTokenRoute = JoinTokenRouteImport.update({
-  id: '/join/$token',
-  path: '/join/$token',
-  getParentRoute: () => rootRouteImport,
-} as any);
-const InviteInvitationIdRoute = InviteInvitationIdRouteImport.update({
-  id: '/invite/$invitationId',
-  path: '/invite/$invitationId',
+const DesktopCheckoutReturnRoute = DesktopCheckoutReturnRouteImport.update({
+  id: '/desktop/checkout-return',
+  path: '/desktop/checkout-return',
   getParentRoute: () => rootRouteImport,
 } as any);
 const DesktopGithubInstallRoute = DesktopGithubInstallRouteImport.update({
@@ -196,33 +188,29 @@ const DesktopGithubInstallRoute = DesktopGithubInstallRouteImport.update({
   path: '/desktop/github-install',
   getParentRoute: () => rootRouteImport,
 } as any);
-const DesktopCheckoutReturnRoute = DesktopCheckoutReturnRouteImport.update({
-  id: '/desktop/checkout-return',
-  path: '/desktop/checkout-return',
+const InviteInvitationIdRoute = InviteInvitationIdRouteImport.update({
+  id: '/invite/$invitationId',
+  path: '/invite/$invitationId',
   getParentRoute: () => rootRouteImport,
 } as any);
-const WorkspaceNameAuthRoute = WorkspaceNameAuthRouteImport.update({
-  id: '/_auth',
-  getParentRoute: () => WorkspaceNameRoute,
-} as any);
-const WorkspaceNameAuthSchedulesLazyRoute = WorkspaceNameAuthSchedulesLazyRouteImport.update({
-  id: '/schedules',
-  path: '/schedules',
-  getParentRoute: () => WorkspaceNameAuthRoute,
-} as any).lazy(() => import('./routes/$workspaceName/_auth/schedules.lazy').then((d) => d.Route));
-const WorkspaceE2eeWorkspaceIdRoute = WorkspaceE2eeWorkspaceIdRouteImport.update({
-  id: '/workspace/e2ee/$workspaceId',
-  path: '/workspace/e2ee/$workspaceId',
+const JoinTokenRoute = JoinTokenRouteImport.update({
+  id: '/join/$token',
+  path: '/join/$token',
   getParentRoute: () => rootRouteImport,
 } as any);
-const WorkspaceNameAuthSettingsRoute = WorkspaceNameAuthSettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => WorkspaceNameAuthRoute,
+const SettingsGithubRoute = SettingsGithubRouteImport.update({
+  id: '/settings/github',
+  path: '/settings/github',
+  getParentRoute: () => rootRouteImport,
 } as any);
-const WorkspaceNameAuthSessionsRoute = WorkspaceNameAuthSessionsRouteImport.update({
-  id: '/sessions',
-  path: '/sessions',
+const WorkspaceCreateRoute = WorkspaceCreateRouteImport.update({
+  id: '/workspace/create',
+  path: '/workspace/create',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const WorkspaceNameAuthArchiveRoute = WorkspaceNameAuthArchiveRouteImport.update({
+  id: '/archive',
+  path: '/archive',
   getParentRoute: () => WorkspaceNameAuthRoute,
 } as any);
 const WorkspaceNameAuthChatRoute = WorkspaceNameAuthChatRouteImport.update({
@@ -230,147 +218,55 @@ const WorkspaceNameAuthChatRoute = WorkspaceNameAuthChatRouteImport.update({
   path: '/chat',
   getParentRoute: () => WorkspaceNameAuthRoute,
 } as any);
-const WorkspaceNameAuthArchiveRoute = WorkspaceNameAuthArchiveRouteImport.update({
-  id: '/archive',
-  path: '/archive',
+const WorkspaceNameAuthSchedulesLazyRoute = WorkspaceNameAuthSchedulesLazyRouteImport.update({
+  id: '/schedules',
+  path: '/schedules',
+  getParentRoute: () => WorkspaceNameAuthRoute,
+} as any).lazy(() => import('./routes/$workspaceName/_auth/schedules.lazy').then((d) => d.Route));
+const WorkspaceNameAuthSessionsRoute = WorkspaceNameAuthSessionsRouteImport.update({
+  id: '/sessions',
+  path: '/sessions',
   getParentRoute: () => WorkspaceNameAuthRoute,
 } as any);
-const WorkspaceNameAuthSettingsIndexRoute = WorkspaceNameAuthSettingsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+const WorkspaceNameAuthSettingsRoute = WorkspaceNameAuthSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => WorkspaceNameAuthRoute,
+} as any);
+const WorkspaceE2eeWorkspaceIdRoute = WorkspaceE2eeWorkspaceIdRouteImport.update({
+  id: '/workspace/e2ee/$workspaceId',
+  path: '/workspace/e2ee/$workspaceId',
+  getParentRoute: () => rootRouteImport,
 } as any);
 const WorkspaceNameAuthSchedulesIndexRoute = WorkspaceNameAuthSchedulesIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => WorkspaceNameAuthSchedulesLazyRoute,
 } as any);
-const WorkspaceNameAuthSettingsWorkspaceLazyRoute =
-  WorkspaceNameAuthSettingsWorkspaceLazyRouteImport.update({
-    id: '/workspace',
-    path: '/workspace',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any).lazy(() =>
-    import('./routes/$workspaceName/_auth/settings/workspace.lazy').then((d) => d.Route)
-  );
-const WorkspaceNameAuthSettingsStatsLazyRoute =
-  WorkspaceNameAuthSettingsStatsLazyRouteImport.update({
-    id: '/stats',
-    path: '/stats',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any).lazy(() =>
-    import('./routes/$workspaceName/_auth/settings/stats.lazy').then((d) => d.Route)
-  );
-const WorkspaceNameAuthSettingsSharesLazyRoute =
-  WorkspaceNameAuthSettingsSharesLazyRouteImport.update({
-    id: '/shares',
-    path: '/shares',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any).lazy(() =>
-    import('./routes/$workspaceName/_auth/settings/shares.lazy').then((d) => d.Route)
-  );
-const WorkspaceNameAuthSettingsPromptShortcutsLazyRoute =
-  WorkspaceNameAuthSettingsPromptShortcutsLazyRouteImport.update({
-    id: '/prompt-shortcuts',
-    path: '/prompt-shortcuts',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any).lazy(() =>
-    import('./routes/$workspaceName/_auth/settings/prompt-shortcuts.lazy').then((d) => d.Route)
-  );
-const WorkspaceNameAuthSettingsPreferencesLazyRoute =
-  WorkspaceNameAuthSettingsPreferencesLazyRouteImport.update({
-    id: '/preferences',
-    path: '/preferences',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any).lazy(() =>
-    import('./routes/$workspaceName/_auth/settings/preferences.lazy').then((d) => d.Route)
-  );
-const WorkspaceNameAuthSettingsPeopleLazyRoute =
-  WorkspaceNameAuthSettingsPeopleLazyRouteImport.update({
-    id: '/people',
-    path: '/people',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any).lazy(() =>
-    import('./routes/$workspaceName/_auth/settings/people.lazy').then((d) => d.Route)
-  );
-const WorkspaceNameAuthSettingsMemoryLazyRoute =
-  WorkspaceNameAuthSettingsMemoryLazyRouteImport.update({
-    id: '/memory',
-    path: '/memory',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any).lazy(() =>
-    import('./routes/$workspaceName/_auth/settings/memory.lazy').then((d) => d.Route)
-  );
-const WorkspaceNameAuthSettingsMcpLazyRoute = WorkspaceNameAuthSettingsMcpLazyRouteImport.update({
-  id: '/mcp',
-  path: '/mcp',
+const WorkspaceNameAuthSchedulesScheduleIdRoute =
+  WorkspaceNameAuthSchedulesScheduleIdRouteImport.update({
+    id: '/$scheduleId',
+    path: '/$scheduleId',
+    getParentRoute: () => WorkspaceNameAuthSchedulesLazyRoute,
+  } as any);
+const WorkspaceNameAuthSessionsSessionIdRoute =
+  WorkspaceNameAuthSessionsSessionIdRouteImport.update({
+    id: '/$sessionId',
+    path: '/$sessionId',
+    getParentRoute: () => WorkspaceNameAuthSessionsRoute,
+  } as any);
+const WorkspaceNameAuthSettingsIndexRoute = WorkspaceNameAuthSettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-} as any).lazy(() =>
-  import('./routes/$workspaceName/_auth/settings/mcp.lazy').then((d) => d.Route)
-);
-const WorkspaceNameAuthSettingsLodyAgentLazyRoute =
-  WorkspaceNameAuthSettingsLodyAgentLazyRouteImport.update({
-    id: '/lody-agent',
-    path: '/lody-agent',
+} as any);
+const WorkspaceNameAuthSettingsAboutLazyRoute =
+  WorkspaceNameAuthSettingsAboutLazyRouteImport.update({
+    id: '/about',
+    path: '/about',
     getParentRoute: () => WorkspaceNameAuthSettingsRoute,
   } as any).lazy(() =>
-    import('./routes/$workspaceName/_auth/settings/lody-agent.lazy').then((d) => d.Route)
-  );
-const WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute =
-  WorkspaceNameAuthSettingsKeyboardShortcutsLazyRouteImport.update({
-    id: '/keyboard-shortcuts',
-    path: '/keyboard-shortcuts',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any).lazy(() =>
-    import('./routes/$workspaceName/_auth/settings/keyboard-shortcuts.lazy').then((d) => d.Route)
-  );
-const WorkspaceNameAuthSettingsGithubLazyRoute =
-  WorkspaceNameAuthSettingsGithubLazyRouteImport.update({
-    id: '/github',
-    path: '/github',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any).lazy(() =>
-    import('./routes/$workspaceName/_auth/settings/github.lazy').then((d) => d.Route)
-  );
-const WorkspaceNameAuthSettingsGeneralLazyRoute =
-  WorkspaceNameAuthSettingsGeneralLazyRouteImport.update({
-    id: '/general',
-    path: '/general',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any).lazy(() =>
-    import('./routes/$workspaceName/_auth/settings/general.lazy').then((d) => d.Route)
-  );
-const WorkspaceNameAuthSettingsBillingLazyRoute =
-  WorkspaceNameAuthSettingsBillingLazyRouteImport.update({
-    id: '/billing',
-    path: '/billing',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any).lazy(() =>
-    import('./routes/$workspaceName/_auth/settings/billing.lazy').then((d) => d.Route)
-  );
-const WorkspaceNameAuthSettingsAppearanceLazyRoute =
-  WorkspaceNameAuthSettingsAppearanceLazyRouteImport.update({
-    id: '/appearance',
-    path: '/appearance',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any).lazy(() =>
-    import('./routes/$workspaceName/_auth/settings/appearance.lazy').then((d) => d.Route)
-  );
-const WorkspaceNameAuthSettingsAiUsageLazyRoute =
-  WorkspaceNameAuthSettingsAiUsageLazyRouteImport.update({
-    id: '/ai-usage',
-    path: '/ai-usage',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any).lazy(() =>
-    import('./routes/$workspaceName/_auth/settings/ai-usage.lazy').then((d) => d.Route)
-  );
-const WorkspaceNameAuthSettingsAgentRolesLazyRoute =
-  WorkspaceNameAuthSettingsAgentRolesLazyRouteImport.update({
-    id: '/agent-roles',
-    path: '/agent-roles',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any).lazy(() =>
-    import('./routes/$workspaceName/_auth/settings/agent-roles.lazy').then((d) => d.Route)
+    import('./routes/$workspaceName/_auth/settings/about.lazy').then((d) => d.Route)
   );
 const WorkspaceNameAuthSettingsAccountLazyRoute =
   WorkspaceNameAuthSettingsAccountLazyRouteImport.update({
@@ -380,58 +276,172 @@ const WorkspaceNameAuthSettingsAccountLazyRoute =
   } as any).lazy(() =>
     import('./routes/$workspaceName/_auth/settings/account.lazy').then((d) => d.Route)
   );
-const WorkspaceNameAuthSettingsAboutLazyRoute =
-  WorkspaceNameAuthSettingsAboutLazyRouteImport.update({
-    id: '/about',
-    path: '/about',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any).lazy(() =>
-    import('./routes/$workspaceName/_auth/settings/about.lazy').then((d) => d.Route)
-  );
-const WorkspaceNameAuthSettingsProjectsRoute = WorkspaceNameAuthSettingsProjectsRouteImport.update({
-  id: '/projects',
-  path: '/projects',
-  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-} as any);
-const WorkspaceNameAuthSettingsMyMachinesRoute =
-  WorkspaceNameAuthSettingsMyMachinesRouteImport.update({
-    id: '/my-machines',
-    path: '/my-machines',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any);
-const WorkspaceNameAuthSettingsMachinesRoute = WorkspaceNameAuthSettingsMachinesRouteImport.update({
-  id: '/machines',
-  path: '/machines',
-  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-} as any);
-const WorkspaceNameAuthSettingsDevicesRoute = WorkspaceNameAuthSettingsDevicesRouteImport.update({
-  id: '/devices',
-  path: '/devices',
-  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-} as any);
-const WorkspaceNameAuthSettingsAgentsRoute = WorkspaceNameAuthSettingsAgentsRouteImport.update({
-  id: '/agents',
-  path: '/agents',
-  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-} as any);
 const WorkspaceNameAuthSettingsAgentConfigRoute =
   WorkspaceNameAuthSettingsAgentConfigRouteImport.update({
     id: '/agent-config',
     path: '/agent-config',
     getParentRoute: () => WorkspaceNameAuthSettingsRoute,
   } as any);
-const WorkspaceNameAuthSessionsSessionIdRoute =
-  WorkspaceNameAuthSessionsSessionIdRouteImport.update({
-    id: '/$sessionId',
-    path: '/$sessionId',
-    getParentRoute: () => WorkspaceNameAuthSessionsRoute,
+const WorkspaceNameAuthSettingsAgentRolesLazyRoute =
+  WorkspaceNameAuthSettingsAgentRolesLazyRouteImport.update({
+    id: '/agent-roles',
+    path: '/agent-roles',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/agent-roles.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsAgentsRoute = WorkspaceNameAuthSettingsAgentsRouteImport.update({
+  id: '/agents',
+  path: '/agents',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
+const WorkspaceNameAuthSettingsAiUsageLazyRoute =
+  WorkspaceNameAuthSettingsAiUsageLazyRouteImport.update({
+    id: '/ai-usage',
+    path: '/ai-usage',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/ai-usage.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsAppearanceLazyRoute =
+  WorkspaceNameAuthSettingsAppearanceLazyRouteImport.update({
+    id: '/appearance',
+    path: '/appearance',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/appearance.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsBillingLazyRoute =
+  WorkspaceNameAuthSettingsBillingLazyRouteImport.update({
+    id: '/billing',
+    path: '/billing',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/billing.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsDataLazyRoute = WorkspaceNameAuthSettingsDataLazyRouteImport.update({
+  id: '/data',
+  path: '/data',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any).lazy(() =>
+  import('./routes/$workspaceName/_auth/settings/data.lazy').then((d) => d.Route)
+);
+const WorkspaceNameAuthSettingsDevicesRoute = WorkspaceNameAuthSettingsDevicesRouteImport.update({
+  id: '/devices',
+  path: '/devices',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
+const WorkspaceNameAuthSettingsGeneralLazyRoute =
+  WorkspaceNameAuthSettingsGeneralLazyRouteImport.update({
+    id: '/general',
+    path: '/general',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/general.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsGithubLazyRoute =
+  WorkspaceNameAuthSettingsGithubLazyRouteImport.update({
+    id: '/github',
+    path: '/github',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/github.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute =
+  WorkspaceNameAuthSettingsKeyboardShortcutsLazyRouteImport.update({
+    id: '/keyboard-shortcuts',
+    path: '/keyboard-shortcuts',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/keyboard-shortcuts.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsLodyAgentLazyRoute =
+  WorkspaceNameAuthSettingsLodyAgentLazyRouteImport.update({
+    id: '/lody-agent',
+    path: '/lody-agent',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/lody-agent.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsMachinesRoute = WorkspaceNameAuthSettingsMachinesRouteImport.update({
+  id: '/machines',
+  path: '/machines',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
+const WorkspaceNameAuthSettingsMcpLazyRoute = WorkspaceNameAuthSettingsMcpLazyRouteImport.update({
+  id: '/mcp',
+  path: '/mcp',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any).lazy(() =>
+  import('./routes/$workspaceName/_auth/settings/mcp.lazy').then((d) => d.Route)
+);
+const WorkspaceNameAuthSettingsMemoryLazyRoute =
+  WorkspaceNameAuthSettingsMemoryLazyRouteImport.update({
+    id: '/memory',
+    path: '/memory',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/memory.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsMyMachinesRoute =
+  WorkspaceNameAuthSettingsMyMachinesRouteImport.update({
+    id: '/my-machines',
+    path: '/my-machines',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
   } as any);
-const WorkspaceNameAuthSchedulesScheduleIdRoute =
-  WorkspaceNameAuthSchedulesScheduleIdRouteImport.update({
-    id: '/$scheduleId',
-    path: '/$scheduleId',
-    getParentRoute: () => WorkspaceNameAuthSchedulesLazyRoute,
-  } as any);
+const WorkspaceNameAuthSettingsPeopleLazyRoute =
+  WorkspaceNameAuthSettingsPeopleLazyRouteImport.update({
+    id: '/people',
+    path: '/people',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/people.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsPreferencesLazyRoute =
+  WorkspaceNameAuthSettingsPreferencesLazyRouteImport.update({
+    id: '/preferences',
+    path: '/preferences',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/preferences.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsProjectsRoute = WorkspaceNameAuthSettingsProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
+const WorkspaceNameAuthSettingsPromptShortcutsLazyRoute =
+  WorkspaceNameAuthSettingsPromptShortcutsLazyRouteImport.update({
+    id: '/prompt-shortcuts',
+    path: '/prompt-shortcuts',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/prompt-shortcuts.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsSharesLazyRoute =
+  WorkspaceNameAuthSettingsSharesLazyRouteImport.update({
+    id: '/shares',
+    path: '/shares',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/shares.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsStatsLazyRoute =
+  WorkspaceNameAuthSettingsStatsLazyRouteImport.update({
+    id: '/stats',
+    path: '/stats',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/stats.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthSettingsWorkspaceLazyRoute =
+  WorkspaceNameAuthSettingsWorkspaceLazyRouteImport.update({
+    id: '/workspace',
+    path: '/workspace',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/workspace.lazy').then((d) => d.Route)
+  );
 const WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute =
   WorkspaceNameAuthLocalMachineIdLocalProjectIdRouteImport.update({
     id: '/local/$machineId/$localProjectId',
@@ -441,7 +451,7 @@ const WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute;
-  '/$workspaceName': typeof WorkspaceNameAuthRouteWithChildren;
+  '/$workspaceName': typeof WorkspaceNameRouteWithChildren;
   '/app': typeof AppRoute;
   '/complete-email': typeof CompleteEmailRoute;
   '/forgot-password': typeof ForgotPasswordRoute;
@@ -479,6 +489,7 @@ export interface FileRoutesByFullPath {
   '/$workspaceName/settings/ai-usage': typeof WorkspaceNameAuthSettingsAiUsageLazyRoute;
   '/$workspaceName/settings/appearance': typeof WorkspaceNameAuthSettingsAppearanceLazyRoute;
   '/$workspaceName/settings/billing': typeof WorkspaceNameAuthSettingsBillingLazyRoute;
+  '/$workspaceName/settings/data': typeof WorkspaceNameAuthSettingsDataLazyRoute;
   '/$workspaceName/settings/general': typeof WorkspaceNameAuthSettingsGeneralLazyRoute;
   '/$workspaceName/settings/github': typeof WorkspaceNameAuthSettingsGithubLazyRoute;
   '/$workspaceName/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute;
@@ -532,6 +543,7 @@ export interface FileRoutesByTo {
   '/$workspaceName/settings/ai-usage': typeof WorkspaceNameAuthSettingsAiUsageLazyRoute;
   '/$workspaceName/settings/appearance': typeof WorkspaceNameAuthSettingsAppearanceLazyRoute;
   '/$workspaceName/settings/billing': typeof WorkspaceNameAuthSettingsBillingLazyRoute;
+  '/$workspaceName/settings/data': typeof WorkspaceNameAuthSettingsDataLazyRoute;
   '/$workspaceName/settings/general': typeof WorkspaceNameAuthSettingsGeneralLazyRoute;
   '/$workspaceName/settings/github': typeof WorkspaceNameAuthSettingsGithubLazyRoute;
   '/$workspaceName/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute;
@@ -590,6 +602,7 @@ export interface FileRoutesById {
   '/$workspaceName/_auth/settings/ai-usage': typeof WorkspaceNameAuthSettingsAiUsageLazyRoute;
   '/$workspaceName/_auth/settings/appearance': typeof WorkspaceNameAuthSettingsAppearanceLazyRoute;
   '/$workspaceName/_auth/settings/billing': typeof WorkspaceNameAuthSettingsBillingLazyRoute;
+  '/$workspaceName/_auth/settings/data': typeof WorkspaceNameAuthSettingsDataLazyRoute;
   '/$workspaceName/_auth/settings/general': typeof WorkspaceNameAuthSettingsGeneralLazyRoute;
   '/$workspaceName/_auth/settings/github': typeof WorkspaceNameAuthSettingsGithubLazyRoute;
   '/$workspaceName/_auth/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute;
@@ -648,6 +661,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/settings/ai-usage'
     | '/$workspaceName/settings/appearance'
     | '/$workspaceName/settings/billing'
+    | '/$workspaceName/settings/data'
     | '/$workspaceName/settings/general'
     | '/$workspaceName/settings/github'
     | '/$workspaceName/settings/keyboard-shortcuts'
@@ -701,6 +715,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/settings/ai-usage'
     | '/$workspaceName/settings/appearance'
     | '/$workspaceName/settings/billing'
+    | '/$workspaceName/settings/data'
     | '/$workspaceName/settings/general'
     | '/$workspaceName/settings/github'
     | '/$workspaceName/settings/keyboard-shortcuts'
@@ -758,6 +773,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/_auth/settings/ai-usage'
     | '/$workspaceName/_auth/settings/appearance'
     | '/$workspaceName/_auth/settings/billing'
+    | '/$workspaceName/_auth/settings/data'
     | '/$workspaceName/_auth/settings/general'
     | '/$workspaceName/_auth/settings/github'
     | '/$workspaceName/_auth/settings/keyboard-shortcuts'
@@ -799,74 +815,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/email-verified': {
-      id: '/email-verified';
-      path: '/email-verified';
-      fullPath: '/email-verified';
-      preLoaderRoute: typeof EmailVerifiedLazyRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    '/device': {
-      id: '/device';
-      path: '/device';
-      fullPath: '/device';
-      preLoaderRoute: typeof DeviceLazyRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    '/reset-password': {
-      id: '/reset-password';
-      path: '/reset-password';
-      fullPath: '/reset-password';
-      preLoaderRoute: typeof ResetPasswordRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    '/recovery': {
-      id: '/recovery';
-      path: '/recovery';
-      fullPath: '/recovery';
-      preLoaderRoute: typeof RecoveryRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    '/onboarding': {
-      id: '/onboarding';
-      path: '/onboarding';
-      fullPath: '/onboarding';
-      preLoaderRoute: typeof OnboardingRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    '/notFound': {
-      id: '/notFound';
-      path: '/notFound';
-      fullPath: '/notFound';
-      preLoaderRoute: typeof NotFoundRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    '/login': {
-      id: '/login';
-      path: '/login';
-      fullPath: '/login';
-      preLoaderRoute: typeof LoginRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    '/forgot-password': {
-      id: '/forgot-password';
-      path: '/forgot-password';
-      fullPath: '/forgot-password';
-      preLoaderRoute: typeof ForgotPasswordRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    '/complete-email': {
-      id: '/complete-email';
-      path: '/complete-email';
-      fullPath: '/complete-email';
-      preLoaderRoute: typeof CompleteEmailRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    '/app': {
-      id: '/app';
-      path: '/app';
-      fullPath: '/app';
-      preLoaderRoute: typeof AppRouteImport;
+    '/': {
+      id: '/';
+      path: '/';
+      fullPath: '/';
+      preLoaderRoute: typeof IndexRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     '/$workspaceName': {
@@ -876,11 +829,74 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameRouteImport;
       parentRoute: typeof rootRouteImport;
     };
-    '/': {
-      id: '/';
-      path: '/';
-      fullPath: '/';
-      preLoaderRoute: typeof IndexRouteImport;
+    '/app': {
+      id: '/app';
+      path: '/app';
+      fullPath: '/app';
+      preLoaderRoute: typeof AppRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/complete-email': {
+      id: '/complete-email';
+      path: '/complete-email';
+      fullPath: '/complete-email';
+      preLoaderRoute: typeof CompleteEmailRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/device': {
+      id: '/device';
+      path: '/device';
+      fullPath: '/device';
+      preLoaderRoute: typeof DeviceLazyRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/email-verified': {
+      id: '/email-verified';
+      path: '/email-verified';
+      fullPath: '/email-verified';
+      preLoaderRoute: typeof EmailVerifiedLazyRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/forgot-password': {
+      id: '/forgot-password';
+      path: '/forgot-password';
+      fullPath: '/forgot-password';
+      preLoaderRoute: typeof ForgotPasswordRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/login': {
+      id: '/login';
+      path: '/login';
+      fullPath: '/login';
+      preLoaderRoute: typeof LoginRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/notFound': {
+      id: '/notFound';
+      path: '/notFound';
+      fullPath: '/notFound';
+      preLoaderRoute: typeof NotFoundRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/onboarding': {
+      id: '/onboarding';
+      path: '/onboarding';
+      fullPath: '/onboarding';
+      preLoaderRoute: typeof OnboardingRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/recovery': {
+      id: '/recovery';
+      path: '/recovery';
+      fullPath: '/recovery';
+      preLoaderRoute: typeof RecoveryRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/reset-password': {
+      id: '/reset-password';
+      path: '/reset-password';
+      fullPath: '/reset-password';
+      preLoaderRoute: typeof ResetPasswordRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     '/$workspaceName/': {
@@ -890,32 +906,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameIndexRouteImport;
       parentRoute: typeof WorkspaceNameRoute;
     };
-    '/workspace/create': {
-      id: '/workspace/create';
-      path: '/workspace/create';
-      fullPath: '/workspace/create';
-      preLoaderRoute: typeof WorkspaceCreateRouteImport;
-      parentRoute: typeof rootRouteImport;
+    '/$workspaceName/_auth': {
+      id: '/$workspaceName/_auth';
+      path: '';
+      fullPath: '/$workspaceName';
+      preLoaderRoute: typeof WorkspaceNameAuthRouteImport;
+      parentRoute: typeof WorkspaceNameRoute;
     };
-    '/settings/github': {
-      id: '/settings/github';
-      path: '/settings/github';
-      fullPath: '/settings/github';
-      preLoaderRoute: typeof SettingsGithubRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    '/join/$token': {
-      id: '/join/$token';
-      path: '/join/$token';
-      fullPath: '/join/$token';
-      preLoaderRoute: typeof JoinTokenRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    '/invite/$invitationId': {
-      id: '/invite/$invitationId';
-      path: '/invite/$invitationId';
-      fullPath: '/invite/$invitationId';
-      preLoaderRoute: typeof InviteInvitationIdRouteImport;
+    '/desktop/checkout-return': {
+      id: '/desktop/checkout-return';
+      path: '/desktop/checkout-return';
+      fullPath: '/desktop/checkout-return';
+      preLoaderRoute: typeof DesktopCheckoutReturnRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     '/desktop/github-install': {
@@ -925,46 +927,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DesktopGithubInstallRouteImport;
       parentRoute: typeof rootRouteImport;
     };
-    '/desktop/checkout-return': {
-      id: '/desktop/checkout-return';
-      path: '/desktop/checkout-return';
-      fullPath: '/desktop/checkout-return';
-      preLoaderRoute: typeof DesktopCheckoutReturnRouteImport;
+    '/invite/$invitationId': {
+      id: '/invite/$invitationId';
+      path: '/invite/$invitationId';
+      fullPath: '/invite/$invitationId';
+      preLoaderRoute: typeof InviteInvitationIdRouteImport;
       parentRoute: typeof rootRouteImport;
     };
-    '/$workspaceName/_auth': {
-      id: '/$workspaceName/_auth';
-      path: '';
-      fullPath: '/$workspaceName';
-      preLoaderRoute: typeof WorkspaceNameAuthRouteImport;
-      parentRoute: typeof WorkspaceNameRoute;
-    };
-    '/$workspaceName/_auth/schedules': {
-      id: '/$workspaceName/_auth/schedules';
-      path: '/schedules';
-      fullPath: '/$workspaceName/schedules';
-      preLoaderRoute: typeof WorkspaceNameAuthSchedulesLazyRouteImport;
-      parentRoute: typeof WorkspaceNameAuthRoute;
-    };
-    '/workspace/e2ee/$workspaceId': {
-      id: '/workspace/e2ee/$workspaceId';
-      path: '/workspace/e2ee/$workspaceId';
-      fullPath: '/workspace/e2ee/$workspaceId';
-      preLoaderRoute: typeof WorkspaceE2eeWorkspaceIdRouteImport;
+    '/join/$token': {
+      id: '/join/$token';
+      path: '/join/$token';
+      fullPath: '/join/$token';
+      preLoaderRoute: typeof JoinTokenRouteImport;
       parentRoute: typeof rootRouteImport;
     };
-    '/$workspaceName/_auth/settings': {
-      id: '/$workspaceName/_auth/settings';
-      path: '/settings';
-      fullPath: '/$workspaceName/settings';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsRouteImport;
-      parentRoute: typeof WorkspaceNameAuthRoute;
+    '/settings/github': {
+      id: '/settings/github';
+      path: '/settings/github';
+      fullPath: '/settings/github';
+      preLoaderRoute: typeof SettingsGithubRouteImport;
+      parentRoute: typeof rootRouteImport;
     };
-    '/$workspaceName/_auth/sessions': {
-      id: '/$workspaceName/_auth/sessions';
-      path: '/sessions';
-      fullPath: '/$workspaceName/sessions';
-      preLoaderRoute: typeof WorkspaceNameAuthSessionsRouteImport;
+    '/workspace/create': {
+      id: '/workspace/create';
+      path: '/workspace/create';
+      fullPath: '/workspace/create';
+      preLoaderRoute: typeof WorkspaceCreateRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/$workspaceName/_auth/archive': {
+      id: '/$workspaceName/_auth/archive';
+      path: '/archive';
+      fullPath: '/$workspaceName/archive';
+      preLoaderRoute: typeof WorkspaceNameAuthArchiveRouteImport;
       parentRoute: typeof WorkspaceNameAuthRoute;
     };
     '/$workspaceName/_auth/chat': {
@@ -974,19 +969,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameAuthChatRouteImport;
       parentRoute: typeof WorkspaceNameAuthRoute;
     };
-    '/$workspaceName/_auth/archive': {
-      id: '/$workspaceName/_auth/archive';
-      path: '/archive';
-      fullPath: '/$workspaceName/archive';
-      preLoaderRoute: typeof WorkspaceNameAuthArchiveRouteImport;
+    '/$workspaceName/_auth/schedules': {
+      id: '/$workspaceName/_auth/schedules';
+      path: '/schedules';
+      fullPath: '/$workspaceName/schedules';
+      preLoaderRoute: typeof WorkspaceNameAuthSchedulesLazyRouteImport;
       parentRoute: typeof WorkspaceNameAuthRoute;
     };
-    '/$workspaceName/_auth/settings/': {
-      id: '/$workspaceName/_auth/settings/';
-      path: '/';
-      fullPath: '/$workspaceName/settings/';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsIndexRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    '/$workspaceName/_auth/sessions': {
+      id: '/$workspaceName/_auth/sessions';
+      path: '/sessions';
+      fullPath: '/$workspaceName/sessions';
+      preLoaderRoute: typeof WorkspaceNameAuthSessionsRouteImport;
+      parentRoute: typeof WorkspaceNameAuthRoute;
+    };
+    '/$workspaceName/_auth/settings': {
+      id: '/$workspaceName/_auth/settings';
+      path: '/settings';
+      fullPath: '/$workspaceName/settings';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsRouteImport;
+      parentRoute: typeof WorkspaceNameAuthRoute;
+    };
+    '/workspace/e2ee/$workspaceId': {
+      id: '/workspace/e2ee/$workspaceId';
+      path: '/workspace/e2ee/$workspaceId';
+      fullPath: '/workspace/e2ee/$workspaceId';
+      preLoaderRoute: typeof WorkspaceE2eeWorkspaceIdRouteImport;
+      parentRoute: typeof rootRouteImport;
     };
     '/$workspaceName/_auth/schedules/': {
       id: '/$workspaceName/_auth/schedules/';
@@ -995,123 +1004,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameAuthSchedulesIndexRouteImport;
       parentRoute: typeof WorkspaceNameAuthSchedulesLazyRoute;
     };
-    '/$workspaceName/_auth/settings/workspace': {
-      id: '/$workspaceName/_auth/settings/workspace';
-      path: '/workspace';
-      fullPath: '/$workspaceName/settings/workspace';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsWorkspaceLazyRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    '/$workspaceName/_auth/schedules/$scheduleId': {
+      id: '/$workspaceName/_auth/schedules/$scheduleId';
+      path: '/$scheduleId';
+      fullPath: '/$workspaceName/schedules/$scheduleId';
+      preLoaderRoute: typeof WorkspaceNameAuthSchedulesScheduleIdRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSchedulesLazyRoute;
     };
-    '/$workspaceName/_auth/settings/stats': {
-      id: '/$workspaceName/_auth/settings/stats';
-      path: '/stats';
-      fullPath: '/$workspaceName/settings/stats';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsStatsLazyRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    '/$workspaceName/_auth/sessions/$sessionId': {
+      id: '/$workspaceName/_auth/sessions/$sessionId';
+      path: '/$sessionId';
+      fullPath: '/$workspaceName/sessions/$sessionId';
+      preLoaderRoute: typeof WorkspaceNameAuthSessionsSessionIdRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSessionsRoute;
     };
-    '/$workspaceName/_auth/settings/shares': {
-      id: '/$workspaceName/_auth/settings/shares';
-      path: '/shares';
-      fullPath: '/$workspaceName/settings/shares';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsSharesLazyRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/prompt-shortcuts': {
-      id: '/$workspaceName/_auth/settings/prompt-shortcuts';
-      path: '/prompt-shortcuts';
-      fullPath: '/$workspaceName/settings/prompt-shortcuts';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsPromptShortcutsLazyRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/preferences': {
-      id: '/$workspaceName/_auth/settings/preferences';
-      path: '/preferences';
-      fullPath: '/$workspaceName/settings/preferences';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsPreferencesLazyRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/people': {
-      id: '/$workspaceName/_auth/settings/people';
-      path: '/people';
-      fullPath: '/$workspaceName/settings/people';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsPeopleLazyRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/memory': {
-      id: '/$workspaceName/_auth/settings/memory';
-      path: '/memory';
-      fullPath: '/$workspaceName/settings/memory';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsMemoryLazyRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/mcp': {
-      id: '/$workspaceName/_auth/settings/mcp';
-      path: '/mcp';
-      fullPath: '/$workspaceName/settings/mcp';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsMcpLazyRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/lody-agent': {
-      id: '/$workspaceName/_auth/settings/lody-agent';
-      path: '/lody-agent';
-      fullPath: '/$workspaceName/settings/lody-agent';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsLodyAgentLazyRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/keyboard-shortcuts': {
-      id: '/$workspaceName/_auth/settings/keyboard-shortcuts';
-      path: '/keyboard-shortcuts';
-      fullPath: '/$workspaceName/settings/keyboard-shortcuts';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsKeyboardShortcutsLazyRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/github': {
-      id: '/$workspaceName/_auth/settings/github';
-      path: '/github';
-      fullPath: '/$workspaceName/settings/github';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsGithubLazyRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/general': {
-      id: '/$workspaceName/_auth/settings/general';
-      path: '/general';
-      fullPath: '/$workspaceName/settings/general';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsGeneralLazyRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/billing': {
-      id: '/$workspaceName/_auth/settings/billing';
-      path: '/billing';
-      fullPath: '/$workspaceName/settings/billing';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsBillingLazyRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/appearance': {
-      id: '/$workspaceName/_auth/settings/appearance';
-      path: '/appearance';
-      fullPath: '/$workspaceName/settings/appearance';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAppearanceLazyRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/ai-usage': {
-      id: '/$workspaceName/_auth/settings/ai-usage';
-      path: '/ai-usage';
-      fullPath: '/$workspaceName/settings/ai-usage';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAiUsageLazyRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/agent-roles': {
-      id: '/$workspaceName/_auth/settings/agent-roles';
-      path: '/agent-roles';
-      fullPath: '/$workspaceName/settings/agent-roles';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentRolesLazyRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/account': {
-      id: '/$workspaceName/_auth/settings/account';
-      path: '/account';
-      fullPath: '/$workspaceName/settings/account';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAccountLazyRouteImport;
+    '/$workspaceName/_auth/settings/': {
+      id: '/$workspaceName/_auth/settings/';
+      path: '/';
+      fullPath: '/$workspaceName/settings/';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsIndexRouteImport;
       parentRoute: typeof WorkspaceNameAuthSettingsRoute;
     };
     '/$workspaceName/_auth/settings/about': {
@@ -1121,39 +1032,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameAuthSettingsAboutLazyRouteImport;
       parentRoute: typeof WorkspaceNameAuthSettingsRoute;
     };
-    '/$workspaceName/_auth/settings/projects': {
-      id: '/$workspaceName/_auth/settings/projects';
-      path: '/projects';
-      fullPath: '/$workspaceName/settings/projects';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsProjectsRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/my-machines': {
-      id: '/$workspaceName/_auth/settings/my-machines';
-      path: '/my-machines';
-      fullPath: '/$workspaceName/settings/my-machines';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsMyMachinesRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/machines': {
-      id: '/$workspaceName/_auth/settings/machines';
-      path: '/machines';
-      fullPath: '/$workspaceName/settings/machines';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsMachinesRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/devices': {
-      id: '/$workspaceName/_auth/settings/devices';
-      path: '/devices';
-      fullPath: '/$workspaceName/settings/devices';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsDevicesRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/settings/agents': {
-      id: '/$workspaceName/_auth/settings/agents';
-      path: '/agents';
-      fullPath: '/$workspaceName/settings/agents';
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentsRouteImport;
+    '/$workspaceName/_auth/settings/account': {
+      id: '/$workspaceName/_auth/settings/account';
+      path: '/account';
+      fullPath: '/$workspaceName/settings/account';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAccountLazyRouteImport;
       parentRoute: typeof WorkspaceNameAuthSettingsRoute;
     };
     '/$workspaceName/_auth/settings/agent-config': {
@@ -1163,19 +1046,159 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentConfigRouteImport;
       parentRoute: typeof WorkspaceNameAuthSettingsRoute;
     };
-    '/$workspaceName/_auth/sessions/$sessionId': {
-      id: '/$workspaceName/_auth/sessions/$sessionId';
-      path: '/$sessionId';
-      fullPath: '/$workspaceName/sessions/$sessionId';
-      preLoaderRoute: typeof WorkspaceNameAuthSessionsSessionIdRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSessionsRoute;
+    '/$workspaceName/_auth/settings/agent-roles': {
+      id: '/$workspaceName/_auth/settings/agent-roles';
+      path: '/agent-roles';
+      fullPath: '/$workspaceName/settings/agent-roles';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentRolesLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
     };
-    '/$workspaceName/_auth/schedules/$scheduleId': {
-      id: '/$workspaceName/_auth/schedules/$scheduleId';
-      path: '/$scheduleId';
-      fullPath: '/$workspaceName/schedules/$scheduleId';
-      preLoaderRoute: typeof WorkspaceNameAuthSchedulesScheduleIdRouteImport;
-      parentRoute: typeof WorkspaceNameAuthSchedulesLazyRoute;
+    '/$workspaceName/_auth/settings/agents': {
+      id: '/$workspaceName/_auth/settings/agents';
+      path: '/agents';
+      fullPath: '/$workspaceName/settings/agents';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentsRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/ai-usage': {
+      id: '/$workspaceName/_auth/settings/ai-usage';
+      path: '/ai-usage';
+      fullPath: '/$workspaceName/settings/ai-usage';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAiUsageLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/appearance': {
+      id: '/$workspaceName/_auth/settings/appearance';
+      path: '/appearance';
+      fullPath: '/$workspaceName/settings/appearance';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAppearanceLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/billing': {
+      id: '/$workspaceName/_auth/settings/billing';
+      path: '/billing';
+      fullPath: '/$workspaceName/settings/billing';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsBillingLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/data': {
+      id: '/$workspaceName/_auth/settings/data';
+      path: '/data';
+      fullPath: '/$workspaceName/settings/data';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsDataLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/devices': {
+      id: '/$workspaceName/_auth/settings/devices';
+      path: '/devices';
+      fullPath: '/$workspaceName/settings/devices';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsDevicesRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/general': {
+      id: '/$workspaceName/_auth/settings/general';
+      path: '/general';
+      fullPath: '/$workspaceName/settings/general';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsGeneralLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/github': {
+      id: '/$workspaceName/_auth/settings/github';
+      path: '/github';
+      fullPath: '/$workspaceName/settings/github';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsGithubLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/keyboard-shortcuts': {
+      id: '/$workspaceName/_auth/settings/keyboard-shortcuts';
+      path: '/keyboard-shortcuts';
+      fullPath: '/$workspaceName/settings/keyboard-shortcuts';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsKeyboardShortcutsLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/lody-agent': {
+      id: '/$workspaceName/_auth/settings/lody-agent';
+      path: '/lody-agent';
+      fullPath: '/$workspaceName/settings/lody-agent';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsLodyAgentLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/machines': {
+      id: '/$workspaceName/_auth/settings/machines';
+      path: '/machines';
+      fullPath: '/$workspaceName/settings/machines';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsMachinesRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/mcp': {
+      id: '/$workspaceName/_auth/settings/mcp';
+      path: '/mcp';
+      fullPath: '/$workspaceName/settings/mcp';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsMcpLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/memory': {
+      id: '/$workspaceName/_auth/settings/memory';
+      path: '/memory';
+      fullPath: '/$workspaceName/settings/memory';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsMemoryLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/my-machines': {
+      id: '/$workspaceName/_auth/settings/my-machines';
+      path: '/my-machines';
+      fullPath: '/$workspaceName/settings/my-machines';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsMyMachinesRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/people': {
+      id: '/$workspaceName/_auth/settings/people';
+      path: '/people';
+      fullPath: '/$workspaceName/settings/people';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsPeopleLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/preferences': {
+      id: '/$workspaceName/_auth/settings/preferences';
+      path: '/preferences';
+      fullPath: '/$workspaceName/settings/preferences';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsPreferencesLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/projects': {
+      id: '/$workspaceName/_auth/settings/projects';
+      path: '/projects';
+      fullPath: '/$workspaceName/settings/projects';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsProjectsRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/prompt-shortcuts': {
+      id: '/$workspaceName/_auth/settings/prompt-shortcuts';
+      path: '/prompt-shortcuts';
+      fullPath: '/$workspaceName/settings/prompt-shortcuts';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsPromptShortcutsLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/shares': {
+      id: '/$workspaceName/_auth/settings/shares';
+      path: '/shares';
+      fullPath: '/$workspaceName/settings/shares';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsSharesLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/stats': {
+      id: '/$workspaceName/_auth/settings/stats';
+      path: '/stats';
+      fullPath: '/$workspaceName/settings/stats';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsStatsLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/workspace': {
+      id: '/$workspaceName/_auth/settings/workspace';
+      path: '/workspace';
+      fullPath: '/$workspaceName/settings/workspace';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsWorkspaceLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
     };
     '/$workspaceName/_auth/local/$machineId/$localProjectId': {
       id: '/$workspaceName/_auth/local/$machineId/$localProjectId';
@@ -1212,6 +1235,7 @@ interface WorkspaceNameAuthSettingsRouteChildren {
   WorkspaceNameAuthSettingsAiUsageLazyRoute: typeof WorkspaceNameAuthSettingsAiUsageLazyRoute;
   WorkspaceNameAuthSettingsAppearanceLazyRoute: typeof WorkspaceNameAuthSettingsAppearanceLazyRoute;
   WorkspaceNameAuthSettingsBillingLazyRoute: typeof WorkspaceNameAuthSettingsBillingLazyRoute;
+  WorkspaceNameAuthSettingsDataLazyRoute: typeof WorkspaceNameAuthSettingsDataLazyRoute;
   WorkspaceNameAuthSettingsGeneralLazyRoute: typeof WorkspaceNameAuthSettingsGeneralLazyRoute;
   WorkspaceNameAuthSettingsGithubLazyRoute: typeof WorkspaceNameAuthSettingsGithubLazyRoute;
   WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute: typeof WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute;
@@ -1240,6 +1264,7 @@ const WorkspaceNameAuthSettingsRouteChildren: WorkspaceNameAuthSettingsRouteChil
   WorkspaceNameAuthSettingsAiUsageLazyRoute: WorkspaceNameAuthSettingsAiUsageLazyRoute,
   WorkspaceNameAuthSettingsAppearanceLazyRoute: WorkspaceNameAuthSettingsAppearanceLazyRoute,
   WorkspaceNameAuthSettingsBillingLazyRoute: WorkspaceNameAuthSettingsBillingLazyRoute,
+  WorkspaceNameAuthSettingsDataLazyRoute: WorkspaceNameAuthSettingsDataLazyRoute,
   WorkspaceNameAuthSettingsGeneralLazyRoute: WorkspaceNameAuthSettingsGeneralLazyRoute,
   WorkspaceNameAuthSettingsGithubLazyRoute: WorkspaceNameAuthSettingsGithubLazyRoute,
   WorkspaceNameAuthSettingsKeyboardShortcutsLazyRoute:

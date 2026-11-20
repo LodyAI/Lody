@@ -15,6 +15,21 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 | Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.                      |
 | Process lifetime | [Session](session.ts)                             | Owns ACP resources, confirmed termination, and bounded Codex refresh-start recovery. |
 
+## Queue promotion
+
+The queue item records when the sender enqueued it. When the watcher promotes the
+item, it timestamps the new user history entry with the current server-adjusted
+time. Recovery reuses an existing history entry with its original timestamp.
+
+## MCP selection between turns
+
+Session records the MCP ids mounted at startup. Execution compares them with the
+next turn's frozen selection as sets. Adding, removing or replacing a selection
+retires the idle Agent through the existing reconfiguration path, then restores
+the conversation with the new MCP configuration through normal resume/replay. Unchanged selections,
+including a different order, keep the current Agent. A steer with changed MCP ids
+returns to dispatch as pending input so it runs after the active turn ends.
+
 ## Machine identity recovery admission
 
 Fleet checks both active presence and registered execution owners before accepting
@@ -68,7 +83,8 @@ contract and can delay completion independently of stdio. See the
 Execution publishes typed terminal facts using the frozen invocation requester and
 input turn identity. Input author provenance determines result audience; Session
 containment does not. `onTurnOutcome` is attempted once, even on failure; its consumer
-publishes the latest desktop projection and submits mobile independently. Installing
+publishes the latest desktop projection and submits mobile independently (skipped while the
+recipient has a focused desktop). Installing
 this consumer disables the legacy execution completion sender. Older embedders retain
 that callback. No notification journal, retry or replay. See [notification ownership rules](../lib/notifications/AGENTS.md).
 A notification failure cannot replay Agent execution.
@@ -251,11 +267,17 @@ applied processing record becomes canceled, never an ordinary replay.
 
 The execution service does not decide that interruption means non-delivery. AgentClient returns
 `applied`, `not-applied`, or `unknown`; only `not-applied` can move a steer back to ordinary
-dispatch, and only when the cancellation boundary selected `pendingInput: 'promote'`. User Stop preserves history and cancels queued execution eligibility; Edit & Resend and
+dispatch, and only when the cancellation boundary selected `pendingInput: 'promote'`. User Stop preserves history and retains queued drafts with `paused: true`, canceling their old execution eligibility; Edit & Resend and
 access revocation also preserve pending input. Inbox recovery never revives pre-Stop input. `unknown` becomes `delivery_unknown` in history. The UI offers a
 confirmed fresh send with a duplicate-work warning, never an automatic retry. RPC application
 ACKs update presentation only; the execution service alone projects processing and terminal
 steer status, so delayed ACKs cannot resurrect canceled or completed history.
+
+Paused queue rows never promote automatically, including after fresh input or restart. An explicit
+queue Send/Steer accepts only the selected draft under a stable fresh input id, preserving its
+content and frozen configuration while leaving the old cancellation receipt final. The renderer
+marks its observed queue paused before publishing Stop; the host repairs missing markers from
+Inbox cancellation receipts. Legacy and degraded hosts persist the pause directly in the control doc.
 
 Stop and target completion abort local steer waits before entering the serialized completion
 lane. A submitted request keeps its late verdict outside that lane and its rewrite lease.
@@ -339,6 +361,15 @@ turn under the rewrite lease), the entry is dead:
   closes the entry a crashed run left open, at that failure point. A `processing` input is
   never closed this way: it still owes its crash-recovery run on the same entry. Dispatch
   checks do not sweep for dead turns; that would read history on every trigger.
+- A process end (crash, kill, or shutdown during a running prompt) leaves the input's
+  `processingUserMsgId` claim in Session metadata; shutdown keeps it only when the prompt
+  was still in flight and the user had not stopped it. When restart dispatch finds that
+  claim on its own Machine for an ended Inbox input, it settles the input as stopped (not
+  the send-again failure) and appends one Lody-authored `continue` input with the
+  interrupted input's Agent configuration (`interrupted-turn-continuation.ts`), unless the
+  Session is archived or deleted, newer or queued input exists, a continuation already
+  exists, or the input was itself a continuation (id prefix `lody-continue-`). Encrypted
+  workspaces keep the failure. See the [spec](../../../../specs/interrupted-turn-continuation.md).
 - Queue acknowledgement requires an empty local queue **and** observation of the control
   frontier carried by that exact `messageQueueUpdatedAt` signal. Renderer queue mutations
   capture `messageQueueUpdateVersion` before releasing their store. Metadata arriving first
@@ -432,7 +463,8 @@ uses a Session ID lookup. `SessionConfig` carries no credential policy. Session
 creation owns the lease and a failed creation releases it. Validation on create,
 continue, recovery and steer checks that runtime's lease and trusted owner. Owner
 changes revoke it and retire the old runtime, since children retain their old
-environments. Operations are not replayed.
+environments. An unsubmitted prompt can continue on one freshly validated replacement
+within its turn. Active steers remain bound to their original process.
 
 See [the contract](../../../../specs/github-identity-fallback.md) and
 [worktree rules](worktree/AGENTS.md) for ownership, write non-replay and isolation.
@@ -508,13 +540,9 @@ Every Session starts its ACP process and worktree when its first turn is dispatc
 Draft preparation, which started both while the user typed, was removed: its runtime was
 almost never adopted, and discarding it cost more than a cold start
 ([decision](../../../../.agents/notes/implemented/simplification/2026-10-16-remove-draft-session-preparation.md)).
-`session/prepare` and `session/prepare-cancel` still parse, because older desktops send
-them. The daemon answers both at once without work; prepare reports an accepted duplicate
-so an older desktop holds one lease per draft instead of re-asking after every pause.
-`worktree/legacy-speculative-worktrees.ts` handles worktrees an older daemon prepared:
-creation claims the Session's marker and reruns setup on its worktree. Only a worktree no
-Session adopted is rebuilt for a target mismatch: an adopted one keeps its branch, which
-resume restores by name. A sweep removes orphans whose Session never became durable.
+The `session/prepare` and `session/prepare-cancel` requests and the speculative-worktree
+markers older daemons left are no longer recognized
+([decision](../../../../.agents/notes/implemented/simplification/2026-11-16-drop-pre-october-compatibility.md)).
 
 Memory identity references travel with turn configuration. `Session.createAgent` maps
 them through `../lib/memory-providers.ts` at spawn; the execution service restarts a
@@ -562,14 +590,14 @@ Older owners retain the single-`readAll` compatibility path; v2 failures propaga
 without that fallback. Certified goals and recovery replay avoid preparing unrelated
 query fields; replay formats ordered members individually on the owner. Transcript
 queries reuse visibility flags for unchanged records. Sparse membership edits
-rebase existing fields only across a Native-certified local write interval. The [selected-history decision](../../../../.agents/notes/proposed/architecture/2026-10-31-roost-selective-history-reads.md)
+rebase existing fields only across a Native-certified local write interval. The [selected-history decision](../../../../.agents/notes/implemented/architecture/2026-10-31-roost-selective-history-reads.md)
 records the affected paths and memory measurements.
 
 Roost progress retains cursor, revision, count and change hints. Operation identities
 are verified by Native receipts; the control notification does not repeat an
 unused operation ID. Publication order, per-action persistence and the existing
 control schema/readers are retained. See the
-[control storage investigation](../../../../.agents/notes/proposed/architecture/2026-10-23-roost-control-storage.md).
+[control storage investigation](../../../../.agents/notes/rejected/architecture/2026-10-23-roost-control-storage.md).
 
 Dispatch reads pending identities, requested turns and completion evidence from
 body-free indexes, then hydrates only the selected input. The complete marker

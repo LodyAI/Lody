@@ -4,6 +4,12 @@ import { expect, test, type Page } from '@playwright/test';
 const story = (name = 'inline') => `/iframe.html?id=chat-messagequotes--${name}&viewMode=story`;
 const input = (page: Page) => page.getByRole('combobox', { name: 'Message', exact: true });
 
+async function openQuoteStory(page: Page, name = 'inline', globals = '') {
+  await page.goto(story(name) + globals);
+  // Wait for the real editor: the dev server may still be compiling the story.
+  await expect(input(page)).toBeVisible({ timeout: 30_000 });
+}
+
 async function selectPassage(page: Page, index: number) {
   const paragraph = page.locator(`[data-conversation-turn-id="quote-source-${index}"] p`).first();
   await paragraph.scrollIntoViewIfNeeded();
@@ -19,7 +25,7 @@ async function selectPassage(page: Page, index: number) {
 test('native selection action does not resize or scroll the conversation, and quotes keep question order', async ({
   page,
 }, testInfo) => {
-  await page.goto(story());
+  await openQuoteStory(page);
   await expect(input(page)).toBeVisible();
   const viewport = page.locator('.chat-scrollbar');
   const before = await viewport.evaluate((node) => ({
@@ -51,29 +57,38 @@ test('native selection action does not resize or scroll the conversation, and qu
   await page.getByRole('button', { name: 'Quote', exact: true }).click();
   await page.keyboard.insertText(' Question B? ');
   const value = await composerText(input(page));
-  expect(value.match(/\[Quote:/g)).toHaveLength(2);
-  expect(value.indexOf('Question A?')).toBeLessThan(value.lastIndexOf('[Quote:'));
-  expect(value.lastIndexOf('[Quote:')).toBeLessThan(value.indexOf('Question B?'));
-  // A translucent cover leaks the native placeholder brackets through the icon.
-  const coverAlpha = await page
-    .locator('[data-composer-editor] [data-mention-value]')
-    .filter({ has: page.locator('svg') })
+  expect(value.match(/\[Passage /g)).toHaveLength(2);
+  expect(value.indexOf('Question A?')).toBeLessThan(value.lastIndexOf('[Passage '));
+  expect(value.lastIndexOf('[Passage ')).toBeLessThan(value.indexOf('Question B?'));
+  const quoteStyles = await input(page)
+    .locator('[data-mention-value]')
     .evaluateAll((chips) =>
       chips.map((chip) => {
-        const context = new OffscreenCanvas(1, 1).getContext('2d')!;
-        context.fillStyle = getComputedStyle(chip).backgroundColor;
-        context.fillRect(0, 0, 1, 1);
-        return context.getImageData(0, 0, 1, 1).data[3];
+        const style = getComputedStyle(chip);
+        return {
+          background: style.backgroundColor,
+          colourMatchesLink:
+            style.color ===
+            getComputedStyle(chip.ownerDocument.querySelector('.markdown-renderer a')!).color,
+          marginInline: Number.parseFloat(style.marginInlineStart),
+          marginBlock: Number.parseFloat(style.marginBlockStart),
+        };
       })
     );
-  expect(coverAlpha).toEqual([255, 255]);
+  expect(quoteStyles).toHaveLength(2);
+  for (const quote of quoteStyles) {
+    expect(quote.background).toBe('rgba(0, 0, 0, 0)');
+    expect(quote.colourMatchesLink).toBe(true);
+    expect(quote.marginInline).toBe(1);
+    expect(quote.marginBlock).toBe(0);
+  }
   await page.screenshot({ path: testInfo.outputPath('inline-quotes.png') });
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   await expectComposerText(input(page), '');
   const bubble = page.locator('[data-user-message-bubble]').last();
   await expect(bubble).toContainText('Question A?');
   await expect(bubble).toContainText('Question B?');
-  const chips = bubble.getByRole('button').filter({ hasText: 'Quote:' });
+  const chips = bubble.getByRole('button').filter({ hasText: 'Passage ' });
   await expect(chips).toHaveCount(2);
   await chips.first().click();
   await expect(bubble).toContainText(first.trim());
@@ -81,8 +96,262 @@ test('native selection action does not resize or scroll the conversation, and qu
   await expect(bubble).toContainText(second.trim());
 });
 
+test('quotes insert at the saved caret and grow the composer before typing resumes', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 360, height: 780 });
+  await openQuoteStory(page);
+  await input(page).fill('Before the quote\nAfter the quote with trailing text');
+  await input(page).press('Home');
+  const before = (await input(page).boundingBox())!.height;
+  await selectPassage(page, 11);
+  await page.getByRole('button', { name: 'Quote', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(input(page)).toBeFocused();
+  await expect.poll(async () => (await input(page).boundingBox())!.height).toBeGreaterThan(before);
+  await page.screenshot({ path: testInfo.outputPath('quote-caret-and-growth.png') });
+  await page.keyboard.insertText('QUESTION');
+  const value = await composerText(input(page));
+  expect(value).toMatch(/^Before the quote\n.*\[Passage /s);
+  expect(value).toContain('QUESTIONAfter the quote with trailing text');
+});
+
+test('a capped composer reveals the insertion caret in a long draft', async ({
+  page,
+}, testInfo) => {
+  await openQuoteStory(page, 'scrollable-draft');
+  await input(page).click();
+  // End/Meta+End scroll instead of moving the caret on some hosts.
+  for (let line = 0; line < 20; line += 1) await input(page).press('ArrowDown');
+  await selectPassage(page, 11);
+  await page.getByRole('button', { name: 'Quote', exact: true }).click();
+  await expect(input(page)).toBeFocused();
+  expect(await composerText(input(page))).toMatch(/^(Existing draft line\n){18}.*\[Passage /s);
+  // A collapsed native range immediately after a decorator has no client rect.
+  // Its preceding quote's end is the visible insertion point; measure that DOM.
+  const chip = input(page).locator('[data-mention-value]').last();
+  await expect
+    .poll(async () => {
+      const [caret, bounds] = [(await chip.boundingBox())!, (await input(page).boundingBox())!];
+      return caret.y >= bounds.y && caret.y + caret.height <= bounds.y + bounds.height + 1;
+    })
+    .toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('quote-scrollable-draft.png') });
+  await page.keyboard.insertText('VISIBLE_CARET');
+  expect(await composerText(input(page))).toMatch(/\[Passage .*VISIBLE_CARET$/s);
+});
+
+for (const theme of ['light', 'dark']) {
+  test(`adjacent quotes retain spacing without overflow in ${theme} mode`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 360, height: 780 });
+    await openQuoteStory(page, 'multiple-quotes', `&globals=theme:${theme}`);
+    await expect(page.locator('html')).toHaveClass(new RegExp(theme));
+    const chips = input(page).locator('[data-mention-value]');
+    await expect(chips).toHaveCount(3);
+    const linkColour = await page
+      .locator('.markdown-renderer a')
+      .first()
+      .evaluate((link) => getComputedStyle(link).color);
+    const quoteColours = await chips.evaluateAll((nodes) =>
+      nodes.map((node) => getComputedStyle(node).color)
+    );
+    expect(quoteColours).toEqual([linkColour, linkColour, linkColour]);
+    await expect
+      .poll(async () =>
+        input(page).evaluate((element) => element.scrollWidth <= element.clientWidth)
+      )
+      .toBe(true);
+    const [first, second] = await chips.evaluateAll((nodes) => [
+      Array.from(nodes[0]!.getClientRects()).at(-1)!.toJSON(),
+      nodes[1]!.getClientRects()[0]!.toJSON(),
+    ]);
+    if (Math.abs(second.top - first.top) < 1) {
+      expect(second.left - first.right).toBeGreaterThanOrEqual(2);
+    } else {
+      expect(second.top).toBeGreaterThanOrEqual(first.bottom);
+    }
+    await page.screenshot({ path: testInfo.outputPath(`multiple-quotes-${theme}.png`) });
+    await input(page).focus();
+    await input(page).press('ControlOrMeta+a');
+    await expect(input(page).locator('[data-mention-value][data-selected]')).toHaveCount(3);
+    const selectionColours = await chips.evaluateAll((nodes) =>
+      nodes.map((node) => ({
+        actual: getComputedStyle(node).backgroundColor,
+        text: getComputedStyle(node.closest('p')!, '::selection').backgroundColor,
+        shadow: getComputedStyle(node).boxShadow,
+      }))
+    );
+    for (const colour of selectionColours) {
+      expect(colour.actual).toBe(colour.text);
+      expect(colour.shadow).toBe('none');
+    }
+    await page.screenshot({ path: testInfo.outputPath(`multiple-quotes-selected-${theme}.png`) });
+  });
+}
+
+for (const navigation of ['ArrowLeft', 'Home', 'pointer'] as const) {
+  test(`a line-start quote accepts typing on its left via ${navigation}`, async ({
+    page,
+  }, testInfo) => {
+    await openQuoteStory(page, 'line-start-quote');
+    const composer = input(page);
+    await composer.focus();
+    await composer.press('ControlOrMeta+a');
+    await composer.press('ArrowRight');
+    if (navigation === 'pointer') {
+      const chip = (await composer.locator('[data-mention-value]').boundingBox())!;
+      await page.mouse.click(chip.x - 2, chip.y + chip.height / 2);
+    } else await composer.press(navigation);
+    const caretBoxHeight = await composer.evaluate(() => {
+      const range = getSelection()?.getRangeAt(0);
+      const element =
+        range?.startContainer instanceof Element
+          ? range.startContainer
+          : range?.startContainer.parentElement;
+      const style = getComputedStyle(element!);
+      return {
+        display: style.display,
+        height: element!.getBoundingClientRect().height,
+        fontSize: Number.parseFloat(style.fontSize),
+        beforeContent: getComputedStyle(element!, '::before').content,
+        afterContent: getComputedStyle(element!, '::after').content,
+      };
+    });
+    expect(caretBoxHeight.display).toBe('inline');
+    expect(caretBoxHeight.height).toBeGreaterThanOrEqual(caretBoxHeight.fontSize);
+    expect(caretBoxHeight.beforeContent).toBe('none');
+    expect(caretBoxHeight.afterContent).toBe('none');
+    await page.keyboard.insertText('before');
+    expect(await composerText(composer)).toMatch(/^Previous line\nbefore.*\[A quote /s);
+    await expect(composer.locator('[data-mention-value]')).toHaveCount(1);
+    await composer.press('ControlOrMeta+z');
+    expect(await composerText(composer)).toMatch(/^Previous line\n.*\[A quote /s);
+    await page.screenshot({ path: testInfo.outputPath(`left-edge-${navigation}.png`) });
+  });
+}
+
+test('IME input at a line-start quote stays before the snapshot', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'IME uses the Chromium DevTools protocol');
+  await openQuoteStory(page, 'line-start-quote');
+  const composer = input(page);
+  await composer.focus();
+  await composer.press('ControlOrMeta+a');
+  await composer.press('ArrowRight');
+  await composer.press('ArrowLeft');
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.imeSetComposition', { text: 'zhong', selectionStart: 5, selectionEnd: 5 });
+  await expect(composer.locator('[data-mention-value]')).toHaveCount(1);
+  await cdp.send('Input.insertText', { text: '中' });
+  await expect.poll(() => composerText(composer)).toMatch(/^Previous line\n中.*\[A quote /s);
+});
+
+test('quote selection has no invisible tail and replaces the whole snapshot with undo', async ({
+  page,
+  context,
+  browserName,
+}, testInfo) => {
+  await openQuoteStory(page, 'quote-selection');
+  const composer = input(page);
+  const chip = composer.locator('[data-mention-value]');
+  await expect(chip).toHaveCount(1);
+  const raw = await composerText(composer);
+  const geometry = await chip.evaluate((node) => {
+    const label = node.querySelector('[data-mention-label]')!;
+    const paddingRight = Number.parseFloat(getComputedStyle(node).paddingRight);
+    return {
+      text: node.textContent,
+      paddingRight,
+      trailingWidth:
+        node.getBoundingClientRect().right - label.getBoundingClientRect().right - paddingRight,
+    };
+  });
+  expect(geometry.text).toBe('Selecting text and scrolling');
+  expect(geometry.paddingRight).toBe(6);
+  expect(geometry.trailingWidth).toBeLessThan(0.5);
+  await composer.click();
+  await composer.press('ControlOrMeta+a');
+  await composer.press('ArrowRight');
+  await composer.press('Shift+ArrowLeft');
+  await expect(chip).toHaveAttribute('data-selected', '');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const selection = await chip.evaluate((node) => ({
+    background: getComputedStyle(node).backgroundColor,
+    nativeBackground: getComputedStyle(node, '::selection').backgroundColor,
+    color: getComputedStyle(node).color,
+    labelColor: getComputedStyle(node.querySelector('[data-mention-label]')!).color,
+    textSelectionBackground: getComputedStyle(node.closest('p')!, '::selection').backgroundColor,
+    textSelectionColor: getComputedStyle(node.closest('p')!, '::selection').color,
+    shadow: getComputedStyle(node).boxShadow,
+    radius: getComputedStyle(node).borderRadius,
+  }));
+  expect(selection.background).toBe(selection.textSelectionBackground);
+  expect(selection.color).toBe(selection.textSelectionColor);
+  expect(selection.shadow).toBe('none');
+  expect(selection.radius).toBe('0px');
+  expect(selection.nativeBackground).toBe('rgba(0, 0, 0, 0)');
+  expect(selection.color).toBe(selection.labelColor);
+  await page.screenshot({ path: testInfo.outputPath('quote-selected.png') });
+  if (browserName === 'chromium') {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await composer.press('ControlOrMeta+c');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(
+      '> Selecting text and scrolling'
+    );
+  }
+  await page.keyboard.insertText('Replacement');
+  await expectComposerText(composer, 'Before Replacement');
+  await expect(chip).toHaveCount(0);
+  await composer.press('ControlOrMeta+z');
+  await expectComposerText(composer, raw);
+  await expect(chip).toHaveCount(1);
+  await composer.press('ControlOrMeta+a');
+  await chip.click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByLabel('Original quote', { exact: true })).toHaveValue(
+    'Selecting text and scrolling'
+  );
+});
+
+test('dragging back across a quote keeps the range instead of opening its preview', async ({
+  page,
+}, testInfo) => {
+  await openQuoteStory(page, 'quote-selection');
+  const composer = input(page);
+  await composer.click();
+  await composer.press('ControlOrMeta+a');
+  await composer.press('ArrowRight');
+  await page.keyboard.insertText(' after');
+  const chip = composer.locator('[data-mention-value]');
+  const box = (await chip.boundingBox())!;
+  const tail = await composer.locator('p').evaluate((p) => {
+    const range = document.createRange();
+    range.selectNodeContents(p.lastChild!);
+    return range.getBoundingClientRect().toJSON();
+  });
+  await page.mouse.move(tail.right - 1, tail.top + tail.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 10 });
+  await page.mouse.up();
+  await expect(chip).toHaveAttribute('data-selected', '');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('quote-drag-selection.png') });
+  await page.keyboard.press('Backspace');
+  await expect(chip).toHaveCount(0);
+  expect(await composerText(composer)).toContain('Before ');
+  await composer.press('ControlOrMeta+z');
+  await expect(chip).toHaveCount(1);
+  await page.mouse.click(tail.right - 1, tail.top + tail.height / 2);
+  await page.keyboard.down('Shift');
+  await page.mouse.click(box.x + 1, box.y + box.height / 2);
+  await page.keyboard.up('Shift');
+  await expect(chip).toHaveAttribute('data-selected', '');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
 test('the quote action flips below a selection at the viewport top edge', async ({ page }) => {
-  await page.goto(story());
+  await openQuoteStory(page);
   const paragraph = page.locator('[data-conversation-turn-id="quote-source-8"] p').first();
   await expect(paragraph).toBeAttached();
   const viewport = page.locator('.chat-scrollbar');
@@ -106,7 +375,7 @@ test('the quote action flips below a selection at the viewport top edge', async 
 });
 
 test('a quote has read-only preview, explicit removal and atomic undo/redo', async ({ page }) => {
-  await page.goto(story());
+  await openQuoteStory(page);
   await selectPassage(page, 11);
   await page.getByRole('button', { name: 'Quote', exact: true }).click();
   const quoted = await composerText(input(page));
@@ -121,7 +390,7 @@ test('a quote has read-only preview, explicit removal and atomic undo/redo', asy
   // A click inside the painted quote opens it, through the editor's chip hit testing.
   const chip = page
     .locator('[data-composer-editor] [data-mention-value]')
-    .filter({ hasText: 'Quote:' })
+    .filter({ hasText: 'Passage ' })
     .first();
   const box = (await chip.boundingBox())!;
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
@@ -134,7 +403,7 @@ test('a quote has read-only preview, explicit removal and atomic undo/redo', asy
 
 test('rejected sends preserve the narrow-screen quote draft', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 780 });
-  await page.goto(story('rejected'));
+  await openQuoteStory(page, 'rejected');
   await selectPassage(page, 11);
   await page.getByRole('button', { name: 'Quote', exact: true }).click();
   const draft = await composerText(input(page));
@@ -147,14 +416,13 @@ test('a sent quote stays inside a narrow chat column in a wide window', async ({
   // Desktop split panes narrow the chat column while the window stays wide, so
   // window-width breakpoints must not lift the bubble's column bound.
   await page.setViewportSize({ width: 1280, height: 780 });
-  await page.goto(story());
+  await openQuoteStory(page);
   await selectPassage(page, 11);
   await page.getByRole('button', { name: 'Quote', exact: true }).click();
-  await page.getByTestId('message-quote-add').click();
-  await expect.poll(() => composerText(input(page))).toContain('[Quote:');
+  await expect.poll(() => composerText(input(page))).toContain('[Passage ');
   await page.locator('#storybook-root').getByRole('button', { name: 'Send', exact: true }).click();
   const bubble = page.locator('[data-user-message-bubble]').last();
-  await expect(bubble.getByRole('button').filter({ hasText: 'Quote:' })).toBeVisible();
+  await expect(bubble.getByRole('button').filter({ hasText: 'Passage ' })).toBeVisible();
   await page.evaluate(() => {
     document.body.style.width = '340px';
   });
@@ -245,7 +513,7 @@ for (const wide of [false, true]) {
 test('a continuous selection across text rows in one response is quoted in full', async ({
   page,
 }) => {
-  await page.goto(story());
+  await openQuoteStory(page);
   await expect(input(page)).toBeVisible();
   await page.evaluate(() => {
     const rows = document.querySelectorAll(
@@ -258,7 +526,7 @@ test('a continuous selection across text rows in one response is quoted in full'
   await page.getByRole('button', { name: 'Quote', exact: true }).click();
   const chip = page
     .locator('[data-composer-editor] [data-mention-value]')
-    .filter({ hasText: 'Quote:' })
+    .filter({ hasText: 'Passage ' })
     .first();
   const box = (await chip.boundingBox())!;
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
@@ -273,7 +541,7 @@ test('a continuous selection across text rows in one response is quoted in full'
   await expect(page.getByRole('dialog')).not.toBeVisible();
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   const bubble = page.locator('[data-user-message-bubble]').last();
-  await bubble.getByRole('button').filter({ hasText: 'Quote:' }).click();
+  await bubble.getByRole('button').filter({ hasText: 'Passage ' }).click();
   await expect(bubble).toContainText('Passage 11:');
   await expect(bubble).toContainText('**Critical** [guide](https://example.com/guide)');
   await expect(bubble).toContainText('A second rendered passage in the same response.');
@@ -282,7 +550,7 @@ test('a continuous selection across text rows in one response is quoted in full'
 test('a selection across separate message regions explains the boundary without truncating the draft', async ({
   page,
 }) => {
-  await page.goto(story());
+  await openQuoteStory(page);
   await expect(input(page)).toBeVisible();
   const draft = await composerText(input(page));
   await page.evaluate(() => {

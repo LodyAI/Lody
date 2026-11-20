@@ -79,7 +79,7 @@ describe('usage-share-stats', () => {
   }
 
   describe('usage share stats', () => {
-    it('shows actual partial-bucket extents without shifting the plotted start', () => {
+    it('shows partial-bucket extents in a half-hour time zone and keeps the plotted start', () => {
       const startMs = Date.UTC(2026, 8, 30, 23);
       const timeline = createTimeline({
         range: 'day',
@@ -87,16 +87,16 @@ describe('usage-share-stats', () => {
         endMs: startMs + HOUR_MS + 17 * 60_000,
         bucketSizeMs: HOUR_MS,
       });
-      const formatter = createUsageTimelineFormatter('en-US');
+      const formatter = createUsageTimelineFormatter('en-US', 'Asia/Kolkata');
       expect(formatUsageTimelineBucketInterval(timeline, bucket(startMs, 80), formatter)).toBe(
-        'Sep 30, 23:12 – Oct 1, 00:00 UTC'
+        'Oct 1, 04:42 GMT+5:30 – Oct 1, 05:30 GMT+5:30'
       );
       expect(
         formatUsageTimelineBucketInterval(timeline, bucket(startMs + HOUR_MS, 20), formatter)
-      ).toBe('Oct 1, 00:00 – Oct 1, 00:17 UTC');
+      ).toBe('Oct 1, 05:30 GMT+5:30 – Oct 1, 05:47 GMT+5:30');
       expect(
         formatUsageTimelineBucketLabel(timeline, bucket(startMs + HOUR_MS, 20), formatter)
-      ).toBe('Oct 1, 00:00 UTC');
+      ).toBe('Oct 1, 05:30 GMT+5:30');
     });
 
     it('counts active days and the longest streak inside the shared window only', () => {

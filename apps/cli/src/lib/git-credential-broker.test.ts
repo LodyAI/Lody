@@ -100,31 +100,6 @@ describe('GitCredentialBroker', () => {
     expect(JSON.parse(res.body)).toEqual({ status: 'ok' });
   });
 
-  it('serves legacy context locally even when cloud policy is unavailable', async () => {
-    const handler = createGitCredentialBrokerHandler({
-      authToken: 'bearer',
-      ownerUserId: 'owner',
-      logger: { debug: vi.fn() } as unknown as Logger,
-      tokenManager: {
-        getCredentialPolicy: async () => {
-          throw new Error('offline');
-        },
-      } as unknown as GitHubTokenManager,
-      resolveContext: () => ({ sessionId: 's1', requesterUserId: 'owner', machineId: 'm1' }),
-    });
-    const res = makeRes();
-    handler(
-      makeReq({
-        url: '/github-auth-context',
-        auth: 'Bearer bearer',
-        body: { contextToken: 'valid' },
-      }),
-      res
-    );
-    await res.finished;
-    expect(res.statusCode).toBe(200);
-    expect(JSON.parse(res.body)).toMatchObject({ personalEnabled: true, allowLocalAuth: true });
-  });
   it('fences a pending candidate response when the owner context rotates', async () => {
     let resolvePending!: (value: unknown) => void;
     let started!: () => void;

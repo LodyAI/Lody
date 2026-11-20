@@ -18,6 +18,7 @@ import { SessionControlIpc } from './services/session-control-ipc'
 import { StorageGuardIpc } from './services/storage-guard-ipc'
 import { TerminalIpc } from './services/terminal-ipc'
 import { UpdaterIpc } from './services/updater-ipc'
+import { WorkspaceBundleIpc } from './services/workspace-bundle-ipc'
 import { setIpcServiceDeps, type IpcServiceDeps } from './ipc-service-deps'
 import { onProductWindowMessage } from './product-window-ipc-service'
 import { registerClientLossProbe } from '../services/e2ee-client-loss-probe'
@@ -39,7 +40,8 @@ export const IPC_SERVICE_CONSTRUCTORS = [
   SessionControlIpc,
   StorageGuardIpc,
   TerminalIpc,
-  UpdaterIpc
+  UpdaterIpc,
+  WorkspaceBundleIpc
 ] as const
 
 function createRegisteredIpcServices() {

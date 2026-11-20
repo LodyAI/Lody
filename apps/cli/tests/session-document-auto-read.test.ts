@@ -181,6 +181,41 @@ describe('SessionDocument auto read', () => {
     }
   });
 
+  it('keeps paused queued drafts out of later dispatch without blocking fresh input', async () => {
+    const repo = await LoroRepo.create({});
+    try {
+      const doc = new SessionDocument(repo, uuidv4() as SessionId);
+      await doc.initOffline({ history: [] });
+      for (const id of ['B', 'C', 'D', 'E', 'F']) {
+        await doc.pushMessageQueue({
+          task: id,
+          userId: 'user-1',
+          userTurnId: id,
+          timestamp: '2026-11-20T00:00:00Z',
+          project: undefined,
+          acpSessionConfig: { prompt: id, cliType: 'builtin', agentType: 'codex' },
+        });
+      }
+      await doc.pauseMessageQueueItems((await doc.getMessageQueue()).map((item) => item.$cid));
+      expect(await doc.popMessageQueue()).toBeNull();
+      await doc.pushMessageQueue({
+        task: 'G',
+        userId: 'user-1',
+        userTurnId: 'G',
+        timestamp: '2026-11-20T00:00:01Z',
+        project: undefined,
+        acpSessionConfig: { prompt: 'G', cliType: 'builtin', agentType: 'codex' },
+      });
+      expect(await doc.popMessageQueue()).toMatchObject({ userTurnId: 'G' });
+      expect((await doc.getMessageQueue()).map((item) => [item.userTurnId, item.paused])).toEqual(
+        ['B', 'C', 'D', 'E', 'F'].map((id) => [id, true])
+      );
+      expect(await doc.popMessageQueue()).toBeNull();
+    } finally {
+      await repo.destroy();
+    }
+  });
+
   it('pops a queued message whose editing lease has expired', async () => {
     const repo = await LoroRepo.create({});
     try {

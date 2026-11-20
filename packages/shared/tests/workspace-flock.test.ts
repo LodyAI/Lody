@@ -6,6 +6,7 @@ import {
   applyWorkspaceFlockRowEvents,
   getProjectMcpDefaults,
   listWorkspaceAgentRoles,
+  listWorkspacePinSections,
   writeWorkspaceAgentRoleToFlock,
   listWorkspaceMcpServers,
   readWorkspaceFlockRowsFromFlock,
@@ -123,6 +124,44 @@ class FakeWorkspaceFlock implements WorkspaceFlockWritableFlock {
 }
 
 describe('workspace Flock helpers', () => {
+  it('reads pin sections in order and drops malformed rows without disturbing other families', () => {
+    const flock = new FakeWorkspaceFlock();
+    const role = agentRole('role-1');
+    flock.set(workspaceFlockKeys.agentRole(role.id), role);
+    flock.set(workspaceFlockKeys.pinSection('later'), {
+      id: 'later',
+      name: 'Later',
+      orderKey: '81',
+    });
+    flock.set(workspaceFlockKeys.pinSection('first'), {
+      id: 'first',
+      name: '  Maintenance  ',
+      orderKey: '80',
+    });
+    flock.set(workspaceFlockKeys.pinSection('no-key'), { id: 'no-key', name: 'No key' });
+    flock.set(workspaceFlockKeys.pinSection('blank'), { id: 'blank', name: ' ', orderKey: '82' });
+    flock.set(workspaceFlockKeys.pinSection('other-id'), {
+      id: 'mismatch',
+      name: 'Mismatch',
+      orderKey: '83',
+    });
+
+    const rows = readWorkspaceFlockRowsFromFlock(flock);
+    expect(listWorkspacePinSections(rows)).toEqual([
+      { id: 'first', name: 'Maintenance', orderKey: '80' },
+      { id: 'later', name: 'Later', orderKey: '81' },
+    ]);
+    expect(listWorkspaceAgentRoles(rows).map((entry) => entry.id)).toEqual(['role-1']);
+  });
+
+  it('applies pin section deletions from remote events', () => {
+    const flock = new FakeWorkspaceFlock();
+    flock.set(workspaceFlockKeys.pinSection('s'), { id: 's', name: 'S', orderKey: '80' });
+    const rows = readWorkspaceFlockRowsFromFlock(flock);
+    const next = applyWorkspaceFlockRowEvents(rows, [{ key: ['pinSection', 's'] }]);
+    expect(listWorkspacePinSections(next)).toEqual([]);
+  });
+
   it('normalizes a secret-shaped option out of a stored role row', () => {
     const flock = new FakeWorkspaceFlock();
     const role = agentRole('role-1');

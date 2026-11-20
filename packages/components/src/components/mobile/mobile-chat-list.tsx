@@ -12,7 +12,8 @@ import {
 import { atom, useAtom, useAtomValue, useSetAtom, type PrimitiveAtom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
 import { useTranslation } from 'react-i18next';
-import { getServerNow } from '@lody/shared';
+import { buildPinnedSectionLayout, getServerNow, type PinSection } from '@lody/shared';
+import { useWorkspaceCatalog } from '@/hooks/use-workspace-catalog';
 import {
   buildOpenedBySessionTree,
   countOpenedByTreeRoots,
@@ -84,6 +85,10 @@ export const PINNED_BUCKET_ID = '__pinned__';
 /* Flat unpinned tail when groupBy is `none` and there is a Pinned
    section above — no heading; just the remaining rows. */
 const FLAT_UNPINNED_BUCKET_ID = '__flat-unpinned__';
+/** Bucket id prefix of a user pin section. */
+const PIN_SECTION_BUCKET_PREFIX = `${PINNED_BUCKET_ID}:`;
+const isPinnedBucketId = (id: string): boolean =>
+  id === PINNED_BUCKET_ID || id.startsWith(PIN_SECTION_BUCKET_PREFIX);
 
 /* Rows a bucket shows before it collapses behind "Show all (N)".
    Same value as the desktop sidebar's `MAX_VISIBLE_SESSIONS`
@@ -421,9 +426,11 @@ export function MobileChatListCard({
   onRequestDelete,
   selection,
   preview,
-  secondaryField = 'branch',
+  preserveOrder = false,
 }: {
   chats: MobileConversationItem[];
+  /** A pin section: keep the given manual order instead of ranking by activity. */
+  preserveOrder?: boolean;
   selectedConversationId?: string | null;
   onSelect?: (chatId: string) => void;
   rowActions?: MobileChatListRowActions;
@@ -446,9 +453,6 @@ export function MobileChatListCard({
      and appends a "Show all (N)" toggle. Omit to render every row (what a
      standalone card without a `MobileChatList` around it does). */
   preview?: MobileChatPreviewState;
-  /** @deprecated Conversation rows are single-line; branch/project meta
-     is no longer shown. Kept for call-site compatibility. */
-  secondaryField?: 'branch' | 'project';
 }) {
   /* The archived list swaps the pin/archive chips for restore/delete;
      each list mode only honours its own callbacks so a stray handler
@@ -488,10 +492,15 @@ export function MobileChatListCard({
         /* Bucket order is pinned-first then latest activity; rank an opener by
            its freshest opened Session so nesting cannot bury a just-updated
            row under a stale opener. */
-        rootRank: (chat) => pinnedFirstRootRank(chat.latestMessageAt ?? 0, chat.isPinned),
+        ...(preserveOrder
+          ? {}
+          : {
+              rootRank: (chat: MobileConversationItem) =>
+                pinnedFirstRootRank(chat.latestMessageAt ?? 0, chat.isPinned),
+            }),
         ...(capped ? { maxRoots: MOBILE_CHAT_PREVIEW_MAX_ROOTS } : {}),
       }),
-    [capped, chats, collapsedOpeners]
+    [capped, chats, collapsedOpeners, preserveOrder]
   );
   /* Gate the toggle on TOP-LEVEL rows, matching what the cap actually limits:
      five openers plus the Sessions they opened is not an overflowing bucket,
@@ -568,7 +577,6 @@ export function MobileChatListCard({
                   ? () => selection.onLongPress(conversation.id)
                   : undefined
               }
-              secondaryField={secondaryField}
             />
           );
           return (
@@ -725,8 +733,10 @@ function MobileChatPreviewToggle({
 export function groupChats(
   chats: MobileConversationItem[],
   groupBy: MobileChatGroupBy,
-  nowMs: number = getServerNow()
-): Array<{ id: string; items: MobileConversationItem[] }> {
+  nowMs: number = getServerNow(),
+  pinSections: readonly PinSection[] = [],
+  sectionsLoaded = true
+): Array<{ id: string; items: MobileConversationItem[]; label?: string }> {
   const pinned: MobileConversationItem[] = [];
   const unpinned: MobileConversationItem[] = [];
   for (const chat of chats) {
@@ -734,9 +744,30 @@ export function groupChats(
     else unpinned.push(chat);
   }
 
-  const ordered: Array<{ id: string; items: MobileConversationItem[] }> = [];
-  if (pinned.length > 0) {
-    ordered.push({ id: PINNED_BUCKET_ID, items: pinned });
+  const ordered: Array<{ id: string; items: MobileConversationItem[]; label?: string }> = [];
+  // Pinned rows split into pin sections (default first), each in its manual order.
+  // Empty sections stay hidden here: mobile has no drag target to offer.
+  for (const entry of buildPinnedSectionLayout(
+    pinned,
+    pinSections,
+    (chat) => ({
+      id: chat.id,
+      pinSectionId: chat.pinSectionId ?? null,
+      orderKey: chat.orderKey ?? null,
+      recency: chat.latestMessageAt ?? 0,
+    }),
+    { sectionsLoaded }
+  )) {
+    if (entry.items.length === 0) continue;
+    ordered.push(
+      entry.section
+        ? {
+            id: `${PIN_SECTION_BUCKET_PREFIX}${entry.section.id}`,
+            items: entry.items,
+            label: entry.section.name,
+          }
+        : { id: PINNED_BUCKET_ID, items: entry.items }
+    );
   }
 
   if (groupBy === 'none') {
@@ -994,15 +1025,17 @@ export function MobileChatList({
   archived = false,
   onPermanentDelete,
   selectionLabels,
-  rowSecondaryField,
   capGroupPreviews = false,
   privateLabel,
   privateHelpAriaLabel,
   onPrivateHelp,
   bucketStateKey,
   splitTargets,
+  pinSections: pinSectionsOverride,
 }: {
   chats: MobileConversationItem[];
+  /** Pin sections to split pinned rows by; defaults to the workspace catalog's. */
+  pinSections?: readonly PinSection[];
   groupBy?: MobileChatGroupBy;
   /** Per-bucket headings keyed by the ids that `bucketIdFor` emits
      ('chat' / 'local' / 'github' / 'open' / 'merged' / 'closed' /
@@ -1063,10 +1096,12 @@ export function MobileChatList({
   privateLabel?: string;
   privateHelpAriaLabel?: string;
   onPrivateHelp?: () => void;
-  /** @deprecated Conversation rows are single-line; branch/project meta
-     is no longer shown. Kept for call-site compatibility. */
-  rowSecondaryField?: 'branch' | 'project';
 }) {
+  const workspaceCatalog = useWorkspaceCatalog();
+  const pinSections = pinSectionsOverride ?? workspaceCatalog.pinSections;
+  // Until the section rows are read, sectioned pins wait instead of flashing as unsectioned.
+  const pinSectionsLoaded =
+    pinSectionsOverride !== undefined || workspaceCatalog.loaded || workspaceCatalog.failed;
   /* Multi-select state is owned here so a Select-All hits every row,
      including rows that live in separate group cards when
      `groupBy !== 'none'`. */
@@ -1215,14 +1250,6 @@ export function MobileChatList({
     </div>
   ) : null;
 
-  /* Default secondary-text source: flat list → project label so users
-     can tell rows apart across projects; grouped list → branch name
-     (the bucket heading already carries the project identity). Caller
-     can override via `rowSecondaryField` — project sub-pages do that
-     to keep their original branch-name look regardless of groupBy. */
-  const resolvedSecondaryField: 'branch' | 'project' =
-    rowSecondaryField ?? (groupBy === 'none' ? 'project' : 'branch');
-
   /* `firstGroupTrailing` only mounts on the first *visible* group
      heading while multi-select is off — selection toolbar already owns
      that vertical band. */
@@ -1235,7 +1262,8 @@ export function MobileChatList({
 
   /* Always go through `groupChats` so pinned rows lift into a top
      "Pinned" section in every mode (project / date / flat). */
-  const cards = groupChats(chats, groupBy).map(({ id, items }, index) => {
+  const groups = groupChats(chats, groupBy, undefined, pinSections, pinSectionsLoaded);
+  const cards = groups.map(({ id, items, label }, index) => {
     const expanded = !collapsedBucketIds.has(id);
     const onToggle = () => toggleBucket(id);
     const compactTop = index === 0;
@@ -1283,7 +1311,6 @@ export function MobileChatList({
             onRequestDelete={selectionEnabled ? requestSwipeDelete : undefined}
             selection={selectionState}
             preview={bucketPreview}
-            secondaryField={resolvedSecondaryField}
           />
         </Fragment>
       );
@@ -1292,13 +1319,14 @@ export function MobileChatList({
     /* Pinned + date buckets: quiet collapsible text label.
            Project buckets: identity mark (folder / avatar / chat). */
     const labeledItem =
-      groupBy === 'project' && id !== PINNED_BUCKET_ID
+      groupBy === 'project' && !isPinnedBucketId(id)
         ? // A row nested here under its opener describes another project.
           items.find((it) => it.projectKey === id && it.projectLabel != null)
         : undefined;
     const projectLabel = labeledItem?.projectLabel ?? null;
-    const heading =
-      id === PINNED_BUCKET_ID || groupBy === 'date'
+    const heading = label
+      ? label
+      : id === PINNED_BUCKET_ID || groupBy === 'date'
         ? resolveDateBucketLabel(id, groupLabels)
         : (projectLabel ?? groupLabels[id] ?? id);
 
@@ -1308,7 +1336,7 @@ export function MobileChatList({
         (labeledItem.kind !== 'github' && !labeledItem.projectAvatarUrl));
 
     let groupedHeadingNode: ReactNode;
-    if (id === PINNED_BUCKET_ID || groupBy === 'date' || groupBy === 'none') {
+    if (isPinnedBucketId(id) || groupBy === 'date' || groupBy === 'none') {
       groupedHeadingNode = (
         <CollapsibleSectionHeading
           expanded={expanded}
@@ -1373,7 +1401,7 @@ export function MobileChatList({
             onRequestDelete={selectionEnabled ? requestSwipeDelete : undefined}
             selection={selectionState}
             preview={bucketPreview}
-            secondaryField={resolvedSecondaryField}
+            preserveOrder={isPinnedBucketId(id)}
           />
         ) : null}
       </Fragment>

@@ -64,13 +64,12 @@ describe('machine E2EE custody', () => {
     }
   });
 
-  it('keeps credentials per identity and only reads an exact current-format original at the old location', async () => {
+  it('keeps credentials per identity and refuses a corrupt keyed original', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'machine-credential-identities-'));
     const keyring: MachineKeyring = async () => {
       throw new Error('synthetic unavailable');
     };
     const genesisHex = Buffer.from(genesis.toBytes()).toString('hex');
-    const oldPath = join(directory, `device-credential-${genesisHex}.sealed`);
     const pathFor = (key: string) =>
       join(directory, `device-credential-${genesisHex}-${key}.sealed`);
     try {
@@ -87,23 +86,6 @@ describe('machine E2EE custody', () => {
         )
       );
       const firstHex = Buffer.from(first.key.toBytes()).toString('hex');
-      renameSync(pathFor(firstHex), oldPath);
-      const original = readFileSync(oldPath);
-      // This is the same v1 AEAD blob, not an import/conversion of an old format.
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const custody = yield* makeCliE2eeCustody({ directory, keyring });
-            expect(yield* custody.deviceCredential(genesis, first.key)).toBe(
-              first.credential.credential
-            );
-            expect(yield* custody.prepareDeviceCredential(genesis, first.key)).toEqual(
-              first.credential
-            );
-          })
-        )
-      );
-      expect(existsSync(pathFor(firstHex))).toBe(false);
       unlinkSync(join(directory, `${genesisHex}.machine.device`));
       const second = await Effect.runPromise(
         Effect.scoped(
@@ -126,13 +108,10 @@ describe('machine E2EE custody', () => {
       const secondHex = Buffer.from(second.key.toBytes()).toString('hex');
       expect(secondHex).not.toBe(firstHex);
       expect(second.credential).not.toEqual(first.credential);
-      expect(readFileSync(oldPath)).toEqual(original);
       expect(existsSync(pathFor(secondHex))).toBe(true);
-      // A corrupt keyed file cannot fall back to a valid same-key old file.
-      renameSync(oldPath, pathFor(firstHex));
+      const original = readFileSync(pathFor(firstHex));
       const bad = Buffer.from(original);
       bad.writeUInt8(bad.readUInt8(bad.length - 1) ^ 1, bad.length - 1);
-      writeFileSync(oldPath, original, { mode: 0o600 });
       writeFileSync(pathFor(firstHex), bad, { mode: 0o600 });
       await Effect.runPromise(
         Effect.scoped(
@@ -147,7 +126,6 @@ describe('machine E2EE custody', () => {
           })
         )
       );
-      expect(readFileSync(oldPath)).toEqual(original);
       expect(readFileSync(pathFor(firstHex))).toEqual(bad);
     } finally {
       rmSync(directory, { recursive: true, force: true });

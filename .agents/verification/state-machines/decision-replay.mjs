@@ -27,7 +27,7 @@ if(process.argv[4]==='unsafe-negative-ack') {
 }
 const index=await read('packages/shared/src/index.ts');
 const contents=[
- span(schema,'export const resolveSessionHistoryStatus =','export const getLegacyReadForSessionHistoryStatus ='),
+ span(schema,'export const resolveSessionHistoryStatus =','export const isSessionHistoryDelivered ='),
  span(schema,'export function isMissingHistoryUserTurn','export type SessionLegacyMetaFields ='),
  span(control,"const CANCEL_REQUEST_PREFIX =",'// # Session control-plane Mirror'),
  span(project,'export function getLocalProjectHistoryProviderKey','/** Catalogs are account-scoped;'),

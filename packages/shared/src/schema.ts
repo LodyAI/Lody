@@ -157,8 +157,7 @@ export type AgentConfigMeta = {
    * each machine has its own binaries, auth state, env, and rate-limit context.
    *
    * Legacy configs written before this field existed are normalized by the one-time
-   * migration tracked in docs/backward-compatibility.md (BC-AGENT-CONFIG-MACHINE-
-   * ASSOCIATION); see also plans/20260420-machine-agent-settings.md. Consumers should filter
+   * `useAgentConfigMigration` hook in `@lody/components`. Consumers should filter
    * out configs without a resolved machineId while the migration is running.
    */
   machineId: MachineId;
@@ -639,15 +638,6 @@ export const resolveSessionHistoryStatus = (
   return undefined;
 };
 
-export const getLegacyReadForSessionHistoryStatus = (
-  status: SessionHistoryStatus | undefined
-): boolean | undefined => {
-  if (!status) {
-    return undefined;
-  }
-  return status !== 'pending' && status !== 'pending_apply';
-};
-
 export const isSessionHistoryDelivered = (
   entry: SessionHistoryStatusReadable | null | undefined
 ): boolean => {
@@ -1035,6 +1025,45 @@ export type SessionPullRequestLifecycleFields = {
   [field: `prLifecycle:${string}`]: SessionPullRequestLifecycle | undefined;
 };
 
+export type SessionImportFence = {
+  workspaceId: string;
+  turnIds: string[];
+  queueItemIds: string[];
+  /** Provenance only. */
+  importedBy?: string;
+};
+
+/** On a schedule document's metadata: the activation an import carried in. */
+export type ScheduleImportFence = { workspaceId: string; activationId: string };
+
+const EMPTY_FENCE: { turnIds: readonly string[]; queueItemIds: readonly string[] } = {
+  turnIds: [],
+  queueItemIds: [],
+};
+
+/** Turn and queue ids an import fenced off in this workspace; empty elsewhere. */
+export function getImportFence(
+  meta: Pick<SessionMeta, 'importFence'> | undefined,
+  workspaceId: string | undefined
+): { turnIds: readonly string[]; queueItemIds: readonly string[] } {
+  const fence = meta?.importFence;
+  if (!workspaceId || !fence || fence.workspaceId !== workspaceId) return EMPTY_FENCE;
+  return {
+    turnIds: Array.isArray(fence.turnIds) ? fence.turnIds : [],
+    queueItemIds: Array.isArray(fence.queueItemIds) ? fence.queueItemIds : [],
+  };
+}
+
+/** True when this schedule activation came from an import into `workspaceId`. */
+export function isScheduleImportFenced(
+  meta: { importFence?: unknown } | undefined,
+  workspaceId: string,
+  activationId: string
+): boolean {
+  const fence = meta?.importFence as Partial<ScheduleImportFence> | undefined;
+  return fence?.workspaceId === workspaceId && fence.activationId === activationId;
+}
+
 export type SessionMeta = SessionPullRequestLifecycleFields & {
   /** Latest assistant's actual model; null means no assistant history, absent means unknown. */
   lastModel?: { modelId?: string; name?: string } | null;
@@ -1061,11 +1090,23 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   isArchived?: boolean;
   /** User-owned tree execution barrier; inherited through containment and precise opener links. */
   collaborationStopped?: boolean;
+  /** Turns and queued items from a bundle import that never run in `workspaceId`. */
+  importFence?: SessionImportFence;
   /** Shared tab visibility only; closing never changes the session lifecycle. */
   isTabClosed?: boolean;
   origin?: 'lody' | 'external-acp';
   /** When true, this session is pinned to the top of the sidebar list. */
   isPinned?: boolean;
+  /** Pin section this pinned session belongs to; missing or unknown means the default section. Read only while `isPinned`. */
+  pinSectionId?: string;
+  /** Fractional index ordering this session manually (shared by Pinned sections and Status Focus). */
+  orderKey?: string;
+  /** Epoch ms until which this session is snoozed in the Status view's Later section. */
+  snoozedUntil?: number;
+  /** Epoch ms when the user explicitly settled this session in the Status view's Settled section. */
+  settledAt?: number;
+  /** Epoch ms when the user explicitly moved an inactive session back to Focus (overrides 7d auto-settle for 7d). */
+  focusRestoredAt?: number;
   cliType: AgentConfigCliType;
   agentType: AgentType;
   /** Backend selected when this session was created. Missing means legacy Loro. */
@@ -1325,6 +1366,8 @@ export const messageQueueItemSchema = schema.LoroMap({
   operationId: schema.String({ required: false }),
   timestamp: schema.String(),
   isEditing: schema.Boolean({ required: false }),
+  /** Stop retains this row for an explicit send, without automatic promotion. */
+  paused: schema.Boolean({ required: false }),
   // Calibrated server time (`getServerNow()`) when the current editor entered the row.
   // Used as a lease so the CLI dispatcher does not block the queue forever if the
   // editing client never gets a chance to clear `isEditing` (hard close / crash /
@@ -1340,9 +1383,10 @@ export type MessageQueueItem = Omit<InferType<typeof messageQueueItemSchema>, 'p
 };
 export type MessageQueueItemInput = Omit<
   InferInputType<typeof messageQueueItemSchema>,
-  'project' | 'acpSessionConfig'
+  'project' | 'acpSessionConfig' | 'paused'
 > & {
   project: ProjectRef | undefined;
+  paused?: boolean;
   acpSessionConfig?: import('./ai').ACPSessionConfig &
     Pick<import('./ai').SessionTurnInputConfig, '_lodyAutomation'>;
 };

@@ -131,6 +131,11 @@ pre,
   .dark .markdown-renderer a {
     color: hsl(200 69% 70%);
   }
+  /* Reference/link colours must yield to the same selected foreground as prose. */
+  [data-composer-editor] [data-mention-value][data-selected] {
+    color: HighlightText;
+  }
+
   /* A link rendered as a reference label (GitHub PR / issue): a link-blue
      tinted chip (no border) instead of the prose underline, so it reads as
      clickable at a glance. The hue is the prose link's (`.text-markdown-link`). Outranks the
@@ -1309,6 +1314,14 @@ pre,
     color: HighlightText;
   }
 
+  /* Atomic mentions paint one selection surface from the editor's range.
+     Native text fragments must not add a second rectangle or recolour the icon. */
+  [data-composer-editor][data-system-selection] [data-mention-value]::selection,
+  [data-composer-editor][data-system-selection] [data-mention-value] *::selection {
+    background-color: transparent;
+    color: inherit;
+  }
+
   /* Pro focus style: only show on keyboard navigation */
   :where(a, button, input, textarea, select, [tabindex], [data-composer-editor]):focus {
     outline: none;
@@ -2352,4 +2365,16 @@ html:active-view-transition-type(home-board-fold)::view-transition-old(home-boar
     transform: none;
     opacity: 1;
   }
+}
+
+/* Pinned sidebar drags (`lib/pinned-drop-settle.ts`): while a pin row or section is
+   held the cursor is grabbing everywhere; from the drop until the pointer next moves,
+   pin sections take no hover, so a landed row does not light up under a still pointer. */
+body[data-pin-dragging],
+body[data-pin-dragging] * {
+  cursor: grabbing !important;
+}
+
+body[data-pin-hover-suppressed] [data-pin-section] {
+  pointer-events: none;
 }

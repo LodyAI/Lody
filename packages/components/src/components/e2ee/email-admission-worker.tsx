@@ -46,7 +46,7 @@ export function startEmailAdmissionWorker(
       }
       if (stopped) return;
       // Eligibility must recover from an initial offline refresh or later role change.
-      if (runtime.refresh) await runtime.refresh(workspaceId, { installKeys: false });
+      if (runtime.refresh) await runtime.refresh(workspaceId, { keyMode: 'none' });
       const status = await runtime.status(workspaceId);
       if (
         stopped ||

@@ -3,8 +3,8 @@
 Conversation rendering for a Session: the message stream, assistant turn folding,
 the outline rail, and the markdown/terminal/file content surfaces.
 
-Builtin DeepSeek Harness separates thought disclosures from tool groups. Thoughts
-start open, tools closed, and explicit toggles remain respected. DSH thought prose
+Every provider groups adjacent thoughts and tool calls in one default-closed disclosure.
+Explicit toggles remain respected. Thought prose
 uses the same Markdown typography as ordinary answers, aligned with its disclosure
 label and shown in secondary text color; tool
 labels and details retain their compact process styling. While streaming,
@@ -12,7 +12,7 @@ intermediate prose stays visible in order. When the turn finishes, the final con
 plans or notices stays visible, and the shared work disclosure folds earlier prose and tools;
 expanding it restores their order and independent disclosure states. Interrupted
 turns without an answer remain visible. Duration follows the shared header/footer
-policy. Both layout and virtual-row caches include provider visibility. Other providers retain their grouping and filtering. This is
+policy. Group identity follows its first entry, so appended tools and thoughts preserve the reader’s expansion choice. This is
 presentation only: stored thought/text types and provider delivery remain unchanged.
 
 Binding rules live in [AGENTS.md](AGENTS.md); this file is the directory index and
@@ -78,6 +78,9 @@ the reasoning behind those rules.
   `session-link-context.tsx`'s explicit-target deep-link dispatch for both same-
   and cross-workspace links. Ordinary related-session navigation remains separate
   so its last-active-tab restoration cannot override a resource destination.
+  Trusted HTTP(S) session URLs for the current workspace also dispatch their exact
+  conversation in-app on an ordinary click, including a selected child tab. Other
+  workspaces, external origins and modified clicks retain external navigation.
   Without live navigation, or on a read-only share, the chip is inert.
   Message/plan copy and UI/CLI Markdown exports normalize prose references using
   shared `session-link-export`, preserving code examples and stored history.
@@ -433,6 +436,10 @@ records the boundary and its trade-off. `message-quote-markdown.ts` converts the
 selected rendered content to a Markdown snapshot, preserving supported formatting,
 code lines and math source for the preview and Agent-bound text. It reconstructs
 Markdown from rendered content; it does not promise byte-identical source syntax.
+Clicking Quote inserts directly at the composer's last used caret and returns focus
+there. Questions are typed in the main composer. Its height follows the committed
+editor layout; after reaching the row limit, internal scrolling keeps the caret
+visible. `Chat/MessageQuotes` includes caret/growth and scrollable-draft stories.
 
 The [decision note](../../../../../.agents/notes/implemented/bug-fix/2026-09-20-conversation-text-selection.md)
 records lifecycle, alternatives, and platform verification limits.

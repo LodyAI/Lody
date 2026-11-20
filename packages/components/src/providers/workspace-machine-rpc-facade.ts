@@ -1732,8 +1732,9 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     machineId: MachineId,
     sessionId: SessionId,
     requestedByUserId: string,
-    options?: { reason?: string; timeoutMs?: number }
+    options?: { reason?: string; stopProcess?: boolean; timeoutMs?: number }
   ): Promise<SessionPreviewRevokeResponse | null> => {
+    const stopProcess = options?.stopProcess === true ? true : undefined;
     try {
       await waitForMachineRoute(machineId);
       if (
@@ -1744,7 +1745,12 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           method: 'session/preview-revoke',
           machineId,
           workspaceId,
-          params: { sessionId, requestedByUserId, reason: options?.reason },
+          params: {
+            sessionId,
+            requestedByUserId,
+            reason: options?.reason,
+            ...(stopProcess ? { stopProcess: true } : {}),
+          },
           timeoutMs: options?.timeoutMs ?? 15_000,
         });
         if (!response) throw new Error('Local preview control is unavailable.');
@@ -1757,7 +1763,12 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           machineId,
           workspaceId,
           method: 'session/preview-revoke',
-          params: { sessionId, requestedByUserId, reason: options?.reason },
+          params: {
+            sessionId,
+            requestedByUserId,
+            reason: options?.reason,
+            ...(stopProcess ? { stopProcess: true } : {}),
+          },
           timeoutMs: options?.timeoutMs ?? 30_000,
         });
         if (!response.ok) throw new Error(response.error);
@@ -1768,8 +1779,12 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       ).requestSessionPreviewRevoke({
         sessionId,
         requestedByUserId,
-        proof: await previewProof(machineId, sessionId, requestedByUserId, { action: 'revoke' }),
+        proof: await previewProof(machineId, sessionId, requestedByUserId, {
+          action: 'revoke',
+          ...(stopProcess ? { stopProcess: true } : {}),
+        }),
         reason: options?.reason,
+        ...(stopProcess ? { stopProcess: true } : {}),
         timeoutMs: options?.timeoutMs ?? 30_000,
       });
     } catch (error) {

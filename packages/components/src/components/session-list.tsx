@@ -89,6 +89,7 @@ import {
   SessionPrIcon,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
+  SessionRowMenuButton,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
   SessionMergeablePill,
@@ -118,6 +119,7 @@ import {
   RenameSessionDialogView,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type { PrStatus };
 
@@ -857,7 +859,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
     : undefined;
   // Mobile keeps swipe-to-archive as the only row gesture; the context
   // menu (and its ⋯ button) is desktop-only. Computed before the row so
-  // the leading slot can show the ⋯ affordance.
+  // the end slot can reveal the ⋯ affordance.
   const canGoToOpener = Boolean(openerSessionId && isSelectable);
   const baseOpenedByTreeSlot = buildSessionRowOpenedByTreeSlot(
     node,
@@ -1134,11 +1136,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         {/* On a two-line row the leading and end slots sit in a box one title line
             tall, so they stay on the title line; otherwise the box disappears. */}
         <div className={showMetaLine ? lineBoxClassName : 'contents'}>
-          <SessionRowLeadingSlot
-            showMenuButton={hasMenuActions}
-            menuLabel={moreActionsLabel}
-            openedByTree={openedByTreeSlot}
-          />
+          <SessionRowLeadingSlot openedByTree={openedByTreeSlot} />
         </div>
         <div className={showMetaLine ? 'flex min-w-0 flex-1 flex-col gap-1' : 'contents'}>
           <div
@@ -1178,6 +1176,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         <div className={showMetaLine ? lineBoxClassName : 'contents'}>
           <SidebarRowEndSlot
             sessionId={session.sessionId}
+            selected={showSelectedState}
             isWaitingPermission={session.isWaitingPermission}
             isWorking={session.isWorking}
             hasUnreadMessages={session.hasUnreadMessages}
@@ -1210,6 +1209,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
                 </span>
               ) : undefined
             }
+            menu={hasMenuActions ? <SessionRowMenuButton label={moreActionsLabel} /> : undefined}
             archive={
               showInlineArchive ? (
                 <SidebarRowArchiveButton
@@ -1282,7 +1282,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
           <ContextMenu.Item
             icon={GitBranch}
             onClick={() => {
-              void navigator.clipboard.writeText(session.branchName).catch(() => {});
+              void copyTextToClipboard(session.branchName).catch(() => {});
             }}
           >
             {contextMenuLabels.copyBranch}

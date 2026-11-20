@@ -233,9 +233,16 @@ describe('plan-turn-virtual-rows', () => {
         'activity_group_header',
         'content:tool_call',
         'worked_group_header',
+        // The post-plan thought and edit share one disclosure.
         'activity_group_header',
         'content:text',
       ]);
+      const activityGroups = rows.flatMap((row) =>
+        row.type === 'assistant' && row.content.kind === 'activity_group_header'
+          ? [row.content.block.entries.map((entry) => entry.content)]
+          : []
+      );
+      expect(activityGroups).toEqual([planTurnItems.slice(0, 2), planTurnItems.slice(3, 5)]);
     });
   });
 

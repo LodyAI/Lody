@@ -1902,6 +1902,7 @@ describe('SessionExecutionService', () => {
             userEmail: 'user@example.com',
             agentCliType: 'builtin',
             agentType: 'codex',
+            mcpServerIds: [],
           },
           createSilentLogger(),
           '/tmp'
@@ -1928,6 +1929,7 @@ describe('SessionExecutionService', () => {
           isCreated: () => child.exitCode === null,
           currentModel: undefined,
           getAvailableCommands: () => [],
+          getAvailableCommandsForSession: () => [],
           getConfigOptions: () => [],
           setSessionConfigOption: async (id: string, _configId: string, value: unknown) => {
             assertLive(id);

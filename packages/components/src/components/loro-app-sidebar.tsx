@@ -1,3 +1,4 @@
+import { isSidebarBucketCollapsed } from '@/lib/sidebar-status-group';
 import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { E2eeMachineWindowPill, E2eeOfflineSummary } from '@/components/e2ee-offline-window';
@@ -45,7 +46,19 @@ import {
   type SessionId,
   type SessionMeta,
   type SessionStatus,
+  buildPinnedSectionLayout,
+  getServerNow,
+  planManualOrderMove,
+  planNewPinSectionOrderKey,
+  planPinnedSessionMove,
+  planPinSectionMove,
+  planTopOrderKey,
+  type PinSection,
+  type PinnedSessionPlacement,
 } from '@lody/shared';
+import { useWorkspaceCatalog } from '@/hooks/use-workspace-catalog';
+import { deleteWorkspacePinSection, writeWorkspacePinSection } from '@/lib/workspace-catalog-write';
+import type { SidebarPinSectionActions, SidebarPinnedSection } from './sidebar-pinned-sections';
 import { useTranslation } from 'react-i18next';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useAppCapability } from '@/lib/app-platform';
@@ -91,6 +104,8 @@ import {
   setWorkspaceContextAtom,
 } from '@/atoms';
 import { docMetaCacheScopeAtom } from '@/atoms/doc-meta';
+import { expiredSnoozeTimestamp } from '@/lib/sidebar-status-group';
+import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import { useWorkspaceRouteTargetSlug } from '../providers/workspace-route-target';
 import { resolveWorkspaceDataScope } from '@/lib/workspace-data-scope';
 
@@ -101,7 +116,12 @@ import { getLocalProjectVisibilityKey } from '@/lib/visible-local-project-index'
 import { selectAndWriteLocalProject } from '@/lib/local-project-import';
 import { importSidebarLocalProject } from '@/components/sidebar-local-project-import';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
-import { useArchiveSessionWithConfirmation } from '@/components/sessions/session-archive-confirmation';
+import {
+  useArchiveSessionWithConfirmation,
+  useMoveToFocusWithConfirmation,
+  useSettleSessionWithConfirmation,
+  useSnoozeSessionWithConfirmation,
+} from '@/components/sessions/session-sub-conversation-confirmation';
 import {
   chatScopeAtom,
   chatsCollapsedAtom,
@@ -112,11 +132,13 @@ import {
   moveLocalProjectOrder,
   localProjectsSectionCollapseStateAtom,
   pinnedSectionCollapsedAtom,
+  pinSectionsCollapsedAtom,
   repoCollapseStateAtom,
   repoOrderAtom,
   sidebarCollapsedAtom,
   sidebarLastWidthAtom,
   sidebarOrganizeModeAtom,
+  sidebarHideEmptyProjectsAtom,
   sidebarShowBranchNamesAtom,
   sidebarUpdatedShowProjectNamesAtom,
   sidebarUpdatedBucketCollapseStateAtom,
@@ -125,6 +147,7 @@ import {
 } from '@/atoms/sidebar-state';
 import {
   sortUpdatedItems,
+  buildSidebarUpdatedBuckets,
   SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS,
   type SidebarUpdatedBucketKey,
   type SidebarUpdatedItem,
@@ -163,7 +186,10 @@ import {
   type SessionListRow,
 } from '@/components/session-list';
 import { projectEditorRequestAtom } from '@/atoms/project-editor';
-import { placeProjectGroups } from '@/lib/project-group-placement';
+import {
+  placeProjectGroups,
+  selectVisibleLocalProjectSections,
+} from '@/lib/project-group-placement';
 import {
   buildChildSessionsByParent,
   buildSessionListRows,
@@ -214,6 +240,7 @@ import {
   SessionPrIcon,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
+  SessionRowMenuButton,
   SessionRowWorktreeIndicator,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
@@ -255,6 +282,7 @@ import {
   RenameSessionDialogView,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 /** A machine's sidebar label: its name without the mDNS `.local` suffix. */
 const sidebarMachineLabel = (name: string): string => name.trim().replace(/\.local$/i, '');
@@ -594,11 +622,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         {/* On a two-line row the leading and end slots sit in a box one title line
             tall, so they stay on the title line; otherwise the box disappears. */}
         <div className={lineBoxClassName}>
-          <SessionRowLeadingSlot
-            showMenuButton={hasContextMenuActions}
-            menuLabel={moreActionsLabel}
-            openedByTree={openedByTree}
-          />
+          <SessionRowLeadingSlot openedByTree={openedByTree} />
         </div>
         <div className={showMetaLine ? 'flex min-w-0 flex-1 flex-col gap-1' : 'contents'}>
           <div
@@ -644,11 +668,12 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           </span>
         ) : null}
         {/* ④ Fixed end slot: the PR status sits here at rest when the session
-            has one, with a faint worktree glyph just to its left; the Archive
-            button replaces it on desktop hover. */}
+            has one, with a faint worktree glyph just to its left; the ⋯ menu and
+            Archive buttons replace it on desktop hover. */}
         <div className={lineBoxClassName}>
           <SidebarRowEndSlot
             sessionId={session.id}
+            selected={showSelectedState}
             isWaitingPermission={isWaitingPermission}
             isWorking={isWorking}
             hasUnreadMessages={hasUnreadMessages}
@@ -661,6 +686,9 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
                   ) : null}
                 </span>
               ) : undefined
+            }
+            menu={
+              hasContextMenuActions ? <SessionRowMenuButton label={moreActionsLabel} /> : undefined
             }
             archive={
               showInlineArchive ? (
@@ -1777,6 +1805,7 @@ export function LoroAppSidebar({
     sidebarUpdatedShowProjectNamesAtom
   );
   const [showBranchNames, setShowBranchNames] = useAtom(sidebarShowBranchNamesAtom);
+  const [hideEmptyProjects, setHideEmptyProjects] = useAtom(sidebarHideEmptyProjectsAtom);
   const setSidebarCollapsed = useSetAtom(sidebarCollapsedAtom);
   const [sidebarLastWidth, setSidebarLastWidth] = useAtom(sidebarLastWidthAtom);
   const handleChatScopeChanged = useCallback(
@@ -1812,14 +1841,43 @@ export function LoroAppSidebar({
     },
     [postHog, setShowBranchNames]
   );
+  const handleHideEmptyProjectsChange = useCallback(
+    (next: boolean) => {
+      capturePostHogEvent(postHog, 'settings/changed', {
+        key: 'sidebar_hide_empty_projects',
+        value: next,
+      });
+      setHideEmptyProjects(next);
+    },
+    [postHog, setHideEmptyProjects]
+  );
   const sessionSidebarCodeChangesOnly = useAtomValue(sessionSidebarCodeChangesOnlyAtom);
-  const { archiveSession, markSessionUnread, setSessionPinned, updateSessionTitle } =
-    useSessionActions();
+  const {
+    archiveSession,
+    markSessionUnread,
+    setSessionPinned,
+    applySessionPinPlacements,
+    applySessionFocusOrder,
+    snoozeSession,
+    settleSession,
+    moveSessionToFocus,
+    updateSessionTitle,
+  } = useSessionActions();
+  const {
+    pinSections,
+    loaded: pinSectionsRead,
+    failed: pinSectionsUnreadable,
+  } = useWorkspaceCatalog();
+  // A failed read cannot hold rows back forever: they fall back to the default section.
+  const pinSectionsLoaded = pinSectionsRead || pinSectionsUnreadable;
   const { removeLocalProject } = useRemoveLocalProject();
   const presenceStates = useAtomValue(lodyPresenceStatesAtom);
   const presenceNowMs = useAtomValue(lodyPresenceNowMsAtom);
 
   const archiveSessionWithConfirmation = useArchiveSessionWithConfirmation(archiveSession);
+  const settleSessionWithConfirmation = useSettleSessionWithConfirmation(settleSession);
+  const snoozeSessionWithConfirmation = useSnoozeSessionWithConfirmation(snoozeSession);
+  const moveToFocusWithConfirmation = useMoveToFocusWithConfirmation(moveSessionToFocus);
   const rejectHistoryWrite = useCallback(
     (ids: string[]) => {
       if (!ids.some((id) => historyOnlySessionIds.has(id))) return false;
@@ -1885,7 +1943,7 @@ export function LoroAppSidebar({
       if (!workspaceId) return;
       if (typeof window === 'undefined') return;
       const url = buildSessionLink({ sessionId, workspaceId });
-      await navigator.clipboard.writeText(url);
+      await copyTextToClipboard(url);
       toast.success(successMessage);
     },
     [workspaceId]
@@ -2510,6 +2568,7 @@ export function LoroAppSidebar({
   // Rows are memoized, so an unchanged item keeps its previous object and only
   // the rows whose data changed re-render.
   const previousSidebarItemsRef = useRef<readonly SidebarUpdatedItem[]>([]);
+  const statusTick = useStableNow(SIDEBAR_RELATIVE_TIME_REFRESH_MS);
   const allSidebarItems = useMemo<SidebarUpdatedItem[]>(() => {
     if (sessionsListLoading) return [];
 
@@ -2669,10 +2728,37 @@ export function LoroAppSidebar({
       }
     }
 
+    void statusTick;
+    const nowMs = getServerNow();
     const previousById = new Map(previousSidebarItemsRef.current.map((item) => [item.id, item]));
     return items.map((item) => {
-      const previous = previousById.get(item.id);
-      return previous && jsonValueEqual(previous, item) ? previous : item;
+      const meta = sessionById.get(item.id);
+      if (!meta) {
+        const previous = previousById.get(item.id);
+        return previous && jsonValueEqual(previous, item) ? previous : item;
+      }
+      const expiredSnoozeAt = expiredSnoozeTimestamp(meta.snoozedUntil, nowMs);
+      const baseLatestMs =
+        typeof item.latestMessageAt === 'number'
+          ? item.latestMessageAt
+          : item.latestMessageAt instanceof Date
+            ? item.latestMessageAt.getTime()
+            : Date.parse(item.latestMessageAt) || 0;
+      const latestMessageAt =
+        expiredSnoozeAt !== null && expiredSnoozeAt > baseLatestMs
+          ? expiredSnoozeAt
+          : item.latestMessageAt;
+      const enriched: SidebarUpdatedItem = {
+        ...item,
+        latestMessageAt,
+        hasUnreadMessages: sessionHasUnreadMessages(meta, nowMs),
+        orderKey: meta.orderKey ?? null,
+        snoozedUntil: typeof meta.snoozedUntil === 'number' ? meta.snoozedUntil : null,
+        settledAt: typeof meta.settledAt === 'number' ? meta.settledAt : null,
+        focusRestoredAt: typeof meta.focusRestoredAt === 'number' ? meta.focusRestoredAt : null,
+      };
+      const previous = previousById.get(enriched.id);
+      return previous && jsonValueEqual(previous, enriched) ? previous : enriched;
     });
   }, [
     chatSessions,
@@ -2687,7 +2773,9 @@ export function LoroAppSidebar({
     resolveOpenerRowId,
     resolveSessionAuthor,
     sessionsListLoading,
+    sessionById,
     sessionSharingById,
+    statusTick,
     t,
   ]);
   previousSidebarItemsRef.current = allSidebarItems;
@@ -2703,6 +2791,111 @@ export function LoroAppSidebar({
     () => sortUpdatedItems(allSidebarItems.filter((item) => pinnedSessionIds.has(item.id))),
     [allSidebarItems, pinnedSessionIds]
   );
+  // Where each pinned row sits. An opened Session shown here only because its
+  // opener is pinned follows its opener's section and position.
+  const pinnedPlacementOf = useCallback(
+    (item: SidebarUpdatedItem): PinnedSessionPlacement => {
+      const owner = sessionById.get(
+        item.isPinned ? item.id : (item.openedByRowSessionId ?? item.id)
+      );
+      const latest = item.latestMessageAt;
+      return {
+        id: item.id,
+        pinSectionId: owner?.isPinned ? (owner.pinSectionId ?? null) : null,
+        orderKey: owner?.isPinned ? (owner.orderKey ?? null) : null,
+        recency: latest instanceof Date ? latest.getTime() : Date.parse(String(latest ?? '')) || 0,
+      };
+    },
+    [sessionById]
+  );
+  const pinnedLayout = useMemo(
+    () =>
+      buildPinnedSectionLayout(pinnedItems, pinSections, pinnedPlacementOf, {
+        sectionsLoaded: pinSectionsLoaded,
+      }),
+    [pinnedItems, pinSections, pinSectionsLoaded, pinnedPlacementOf]
+  );
+  const pinnedSections = useMemo<SidebarPinnedSection[]>(
+    () =>
+      pinnedLayout.map((entry) => ({
+        id: entry.sectionId,
+        name: entry.section?.name ?? '',
+        items: entry.items,
+      })),
+    [pinnedLayout]
+  );
+  const pinnedLayoutRef = useRef(pinnedLayout);
+  pinnedLayoutRef.current = pinnedLayout;
+  const pinSectionsRef = useRef(pinSections);
+  pinSectionsRef.current = pinSections;
+  /** Plan against the pinned rows themselves; carried opened Sessions never move alone. */
+  const planPinnedMove = useCallback(
+    (
+      itemId: string,
+      toSectionId: string | null,
+      toIndex: number,
+      sections: readonly PinSection[] = pinSectionsRef.current
+    ) => {
+      const placements = pinnedLayoutRef.current.flatMap((entry) =>
+        entry.items.filter((item) => item.isPinned).map(pinnedPlacementOf)
+      );
+      return planPinnedSessionMove(
+        buildPinnedSectionLayout(placements, sections, (placement) => placement),
+        { sessionId: itemId, toSectionId, toIndex }
+      );
+    },
+    [pinnedPlacementOf]
+  );
+  const reportPinError = useCallback((error: unknown) => {
+    toast.error(error instanceof Error ? error.message : String(error));
+  }, []);
+  const pinSectionActions = useMemo<SidebarPinSectionActions | undefined>(() => {
+    if (!runtime) return undefined;
+    return {
+      onDropItem: (itemId, sectionId, toIndex) => {
+        void applySessionPinPlacements(planPinnedMove(itemId, sectionId, toIndex)).catch(
+          reportPinError
+        );
+      },
+      onMoveSection: (sectionId, toIndex) => {
+        const section = pinSectionsRef.current.find((entry) => entry.id === sectionId);
+        if (!section) return;
+        void writeWorkspacePinSection(runtime, {
+          ...section,
+          orderKey: planPinSectionMove(pinSectionsRef.current, sectionId, toIndex),
+        }).catch(reportPinError);
+      },
+      onCreateSection: async (name, moveItemId) => {
+        const section: PinSection = {
+          id: crypto.randomUUID(),
+          name,
+          orderKey: planNewPinSectionOrderKey(pinSectionsRef.current),
+        };
+        await writeWorkspacePinSection(runtime, section);
+        if (moveItemId) {
+          await applySessionPinPlacements(
+            planPinnedMove(moveItemId, section.id, 0, [...pinSectionsRef.current, section])
+          );
+        }
+      },
+      onRenameSection: async (sectionId, name) => {
+        const section = pinSectionsRef.current.find((entry) => entry.id === sectionId);
+        if (!section) return;
+        await writeWorkspacePinSection(runtime, { ...section, name });
+      },
+      onDeleteSection: (sectionId) => {
+        void deleteWorkspacePinSection(runtime, sectionId).catch(reportPinError);
+      },
+    };
+  }, [applySessionPinPlacements, planPinnedMove, reportPinError, runtime]);
+  const [pinSectionsCollapsed, setPinSectionsCollapsed] = useAtom(pinSectionsCollapsedAtom);
+  const handleTogglePinSection = useCallback(
+    (sectionId: string) => {
+      setPinSectionsCollapsed((prev) => ({ ...prev, [sectionId]: !prev[sectionId] }));
+    },
+    [setPinSectionsCollapsed]
+  );
+
   const updatedItems = useMemo(
     () => allSidebarItems.filter((item) => !pinnedSessionIds.has(item.id)),
     [allSidebarItems, pinnedSessionIds]
@@ -2818,6 +3011,7 @@ export function LoroAppSidebar({
       detailsHeading: t('sidebar.filter.detailsHeading', 'Details'),
       updatedProjectNames: t('sidebar.filter.updatedProjectNames', 'Show Project'),
       showBranchNames: t('sidebar.filter.showBranchNames', 'Show Branch'),
+      hideEmptyProjects: t('sidebar.filter.hideEmptyProjects', 'Hide Empty Projects'),
       showMyTasks: t('sessions.sidebar.my', 'My Tasks'),
       showAllTasks: t('sessions.sidebar.team', 'All Tasks'),
       emptyMyTasks: t('sidebar.filter.emptyMyTasks', 'No tasks match this view'),
@@ -2851,6 +3045,8 @@ export function LoroAppSidebar({
       onShowUpdatedProjectNamesChange={handleShowUpdatedProjectNamesChange}
       showBranchNames={showBranchNames}
       onShowBranchNamesChange={handleShowBranchNamesChange}
+      hideEmptyProjects={hideEmptyProjects}
+      onHideEmptyProjectsChange={handleHideEmptyProjectsChange}
       labels={filterLabels}
       open={sidebarFilterOpen}
       onOpenChange={setSidebarFilterOpen}
@@ -2904,7 +3100,7 @@ export function LoroAppSidebar({
       projectGroupSessions.map((session) => session.projectGroup?.id)
     );
     const defined = workspaceProjects
-      .filter((project) => activeProjectIds.has(project.id))
+      .filter((project) => !hideEmptyProjects || activeProjectIds.has(project.id))
       .map((project, index) => ({ project, index }))
       .sort(
         (left, right) =>
@@ -2934,7 +3130,14 @@ export function LoroAppSidebar({
       ...defined,
       ...[...removed.values()].sort((left, right) => left.name.localeCompare(right.name)),
     ];
-  }, [projectGroupOrder, projectGroupSessions, repoCollapseState, userId, workspaceProjects]);
+  }, [
+    hideEmptyProjects,
+    projectGroupOrder,
+    projectGroupSessions,
+    repoCollapseState,
+    userId,
+    workspaceProjects,
+  ]);
   const projectGroupPlacement = useMemo(
     () =>
       placeProjectGroups({
@@ -2951,24 +3154,23 @@ export function LoroAppSidebar({
   );
   // Filter after pinned trees and opened-by placement have assigned each row
   // its final group. Keep the catalog above for Updated/Pinned and saved order.
+  // With "Hide Empty Projects" off, every catalog project stays listed.
   const localProjectSections = useMemo(
     () =>
-      catalogLocalProjectSections
-        .map((section) => ({
-          ...section,
-          projects: section.projects.filter(
-            (project) =>
-              (workspaceLocalProjectSessionsByKey.get(`${section.machineId}:${project.id}`)
-                ?.length ?? 0) > 0
-          ),
-        }))
-        .filter(
-          (section) =>
-            section.projects.length > 0 ||
-            (section.machineId &&
-              (projectGroupPlacement.byMachine.get(section.machineId)?.sessions.length ?? 0) > 0)
-        ),
-    [catalogLocalProjectSections, projectGroupPlacement, workspaceLocalProjectSessionsByKey]
+      selectVisibleLocalProjectSections({
+        sections: catalogLocalProjectSections,
+        hideEmptyProjects,
+        sessionCountOf: (machineId, projectId) =>
+          workspaceLocalProjectSessionsByKey.get(`${machineId}:${projectId}`)?.length ?? 0,
+        projectGroupSessionCountOf: (machineId) =>
+          projectGroupPlacement.byMachine.get(machineId)?.sessions.length ?? 0,
+      }),
+    [
+      catalogLocalProjectSections,
+      hideEmptyProjects,
+      projectGroupPlacement,
+      workspaceLocalProjectSessionsByKey,
+    ]
   );
   const showGithubWorktrees =
     sessionsListLoading ||
@@ -3044,7 +3246,10 @@ export function LoroAppSidebar({
         getSessionHref={getSessionHref}
       />
     ) : null;
-  const firstSectionFilterAction = pinnedItems.length === 0 ? sidebarFilterPopover : null;
+  // The pinned area takes the filter whenever it renders, including when it only
+  // holds empty pin sections.
+  const firstSectionFilterAction =
+    pinnedItems.length === 0 && pinSections.length === 0 ? sidebarFilterPopover : null;
   const localProjectsTopContent =
     localProjectSections.length === 0 ? null : (
       // Sections carry their own bottom margin (see sidebarTopContent): 12px
@@ -3702,9 +3907,89 @@ export function LoroAppSidebar({
   );
   const handleToggleUpdatedBucket = useCallback(
     (key: SidebarUpdatedBucketKey) => {
-      setUpdatedBucketCollapseState((prev) => ({ ...prev, [key]: !(prev[key] ?? false) }));
+      setUpdatedBucketCollapseState((prev) => ({
+        ...prev,
+        [key]: !isSidebarBucketCollapsed(key, prev),
+      }));
     },
     [setUpdatedBucketCollapseState]
+  );
+
+  const handleSnoozeSession = useCallback(
+    (sessionId: string, snoozedUntil: number) => {
+      void snoozeSessionWithConfirmation(sessionId as SessionId, snoozedUntil).catch((error) => {
+        toast.error(error instanceof Error ? error.message : String(error));
+      });
+    },
+    [snoozeSessionWithConfirmation]
+  );
+
+  const handleSettleSession = useCallback(
+    (sessionId: string) => {
+      void settleSessionWithConfirmation(sessionId as SessionId).catch((error) => {
+        toast.error(error instanceof Error ? error.message : String(error));
+      });
+    },
+    [settleSessionWithConfirmation]
+  );
+
+  const handleMoveSessionToFocus = useCallback(
+    (sessionId: string) => {
+      void moveToFocusWithConfirmation(sessionId as SessionId).catch((error) => {
+        toast.error(error instanceof Error ? error.message : String(error));
+      });
+    },
+    [moveToFocusWithConfirmation]
+  );
+
+  const handleDropFocusItem = useCallback(
+    (sessionId: string, toIndex: number) => {
+      const nowMs = getServerNow();
+      const focusBucket = buildSidebarUpdatedBuckets(updatedItems, 'status', nowMs).find(
+        (bucket) => bucket.key === 'focus'
+      );
+      // `toIndex` counts top-level `[data-pin-node]` root groups, so plan moves over roots only.
+      const focusRoots = buildOpenedBySessionTree(
+        focusBucket?.items ?? [],
+        SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS
+      )
+        .filter((node) => node.depth === 0)
+        .map((node) => node.item);
+
+      // Expired-snooze roots float to the top of Focus without background writes.
+      // When the user explicitly drags in Focus, materialize top orderKeys for any
+      // expired-snooze roots so the planned drop index matches the visual order 1:1.
+      const wokenRoots = focusRoots.filter(
+        (item) => expiredSnoozeTimestamp(item.snoozedUntil, nowMs) !== null
+      );
+      const regularPlacements = focusRoots
+        .filter((item) => expiredSnoozeTimestamp(item.snoozedUntil, nowMs) === null)
+        .map((item) => ({ id: item.id, orderKey: item.orderKey ?? null }));
+      const materializedPlacements = [...regularPlacements];
+      const materializedWrites = new Map<string, string>();
+      for (let i = wokenRoots.length - 1; i >= 0; i -= 1) {
+        const woken = wokenRoots[i]!;
+        const topKey = planTopOrderKey(materializedPlacements);
+        materializedPlacements.unshift({ id: woken.id, orderKey: topKey });
+        materializedWrites.set(woken.id, topKey);
+      }
+
+      const moveWrites = planManualOrderMove(materializedPlacements, { sessionId, toIndex });
+      for (const write of moveWrites) {
+        materializedWrites.set(write.sessionId, write.orderKey);
+      }
+      const writes = Array.from(materializedWrites, ([id, orderKey]) => ({
+        sessionId: id,
+        orderKey,
+      }));
+      const wasInFocus = focusRoots.some((item) => item.id === sessionId);
+      void applySessionFocusOrder(writes, wasInFocus ? undefined : (sessionId as SessionId)).catch(
+        (error) => {
+          toast.error(error instanceof Error ? error.message : String(error));
+        }
+      );
+    },
+    [applySessionFocusOrder, updatedItems]
   );
   const [updatedBucketShowFullState, setUpdatedBucketShowFullState] = useAtom(
     sidebarUpdatedBucketShowFullStateAtom
@@ -3859,8 +4144,14 @@ export function LoroAppSidebar({
         organizeMode,
         showFullSessionGroups,
         collapsedOpenedBySessions: collapsedOpenedBySessionIds,
-        pinnedItems,
-        pinnedSectionCollapsed,
+        pinnedSections: pinnedSections.map((section) => ({
+          id: section.id,
+          items: section.items,
+          collapsed:
+            section.id === null
+              ? pinnedSectionCollapsed
+              : pinSectionsCollapsed[section.id] === true,
+        })),
         workspace: {
           localSections: keyboardNavLocalSections,
           githubSectionCollapsed: githubWorktreesSectionCollapsed,
@@ -3883,8 +4174,9 @@ export function LoroAppSidebar({
       projectGroupPlacement,
       keyboardNavLocalSections,
       organizeMode,
-      pinnedItems,
+      pinnedSections,
       pinnedSectionCollapsed,
+      pinSectionsCollapsed,
       repos,
       showFullSessionGroups,
       updatedBucketCollapseState,
@@ -3971,6 +4263,10 @@ export function LoroAppSidebar({
         chatScope={chatScope}
         pinnedItems={pinnedItems}
         pinnedSectionCollapsed={pinnedSectionCollapsed}
+        pinnedSections={pinnedSections}
+        collapsedPinSectionIds={pinSectionsCollapsed}
+        onTogglePinSection={handleTogglePinSection}
+        pinSectionActions={pinSectionActions}
         updatedItems={updatedItems}
         updatedSelectedItemId={updatedSelectedItemId}
         updatedBucketsCollapsed={updatedBucketCollapseState}
@@ -3981,6 +4277,8 @@ export function LoroAppSidebar({
         onShowUpdatedProjectNamesChange={handleShowUpdatedProjectNamesChange}
         showBranchNames={showBranchNames}
         onShowBranchNamesChange={handleShowBranchNamesChange}
+        hideEmptyProjects={hideEmptyProjects}
+        onHideEmptyProjectsChange={handleHideEmptyProjectsChange}
         onChatScopeChange={handleChatScopeChanged}
         onSelectUpdatedItem={handleSelectUpdatedItem}
         onTogglePinnedSection={handleTogglePinnedSection}
@@ -3990,6 +4288,10 @@ export function LoroAppSidebar({
         onMarkUpdatedItemUnread={handleMarkSessionUnread}
         onRenameUpdatedItem={handleRenameSession}
         onToggleUpdatedItemPinned={handleTogglePinSession}
+        onSnoozeUpdatedItem={handleSnoozeSession}
+        onSettleUpdatedItem={handleSettleSession}
+        onMoveUpdatedItemToFocus={handleMoveSessionToFocus}
+        onDropFocusItem={handleDropFocusItem}
         onCopyUpdatedItemUrl={handleCopySessionUrl}
         onShareUpdatedItemWithTeam={handleRequestShareSession}
         onOpenUpdatedItemPullRequest={handleOpenUpdatedItemPullRequest}

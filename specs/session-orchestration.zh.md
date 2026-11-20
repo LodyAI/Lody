@@ -171,6 +171,11 @@ OSS 的 Agent Role mention 必须无需 Lody 账号、无需经过产品云端�
 和持久化 Operation 状态机。支持已注册的本地项目和普通聊天；托管仓库上下文
 仍不可用。
 
+Turn 结束后，Agent 可能被自己的后台任务、定时唤醒或 cron 唤醒继续工作。在 Stop、
+Agent 退出或被替换、协作停止或下一个 Turn 之前，这个 Agent 的调用代表最近一个未被
+Stop 或取消的 Turn，沿用该 Turn 冻结的身份。只有这个 Agent 持有会话的工具绑定，所以
+Lody 不要求它报告自身活动；Codex 等 provider 不报告。
+
 恢复使用冻结的 prompt、Role revision 和派发配置。重放缺失的目标输入前，
 Cloud 确认远端文档追平；OSS 确认权威 daemon repo，并在已有创建 claim 下重新
 检查固定 Turn。Cloud workspace 不能把云端断连当成本地权威。完成结果在同一

@@ -23,6 +23,9 @@ import {
 import { createE2eeContent } from './desktop-e2ee-content';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { SessionPendingSendsHost } from '../components/chat/session-pending-sends-host';
+import { clearAllDevicePreviewCaches } from '../components/sessions/ios-simulator/device-preview-cache';
+import { clearAllManagedPreviewFrames } from '../components/sessions/managed-preview-frame-cache';
+import { clearAllSessionBrowserResumeStates } from '../components/sessions/session-browser-resume-state';
 import {
   WorkspaceKeyReceptionNotice,
   type KeyReceptionWait,
@@ -254,7 +257,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     if (token && draftAccountId) setRunConfigDraftAccount(draftAccountId);
   }, [token, draftAccountId, setRunConfigDraftAccount]);
   useEffect(() => {
-    const unsubscribe = subscribeLocalAuthStateCleared(() => setRunConfigDraftAccount(null));
+    const unsubscribe = subscribeLocalAuthStateCleared(() => {
+      setRunConfigDraftAccount(null);
+      clearAllManagedPreviewFrames();
+      clearAllSessionBrowserResumeStates();
+      clearAllDevicePreviewCaches();
+    });
     return () => {
       unsubscribe();
       setRunConfigDraftAccount(null);
@@ -715,7 +723,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           install: () =>
             status.hasCurrentKey
               ? native.status(leased)
-              : native.refresh(leased, { installKeys: true, keyMode: 'receive' }),
+              : native.refresh(leased, { keyMode: 'receive' }),
         });
         if (disposed || retired) return;
         if (encryptedAccess.phase() === 'ready') setKeyUpdateWorkspace(null);
@@ -739,7 +747,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       if (!native) return;
       const leased = nativeLease;
       const pending = native
-        .refresh(leased, { installKeys: !nativeHasUsableKey && workspaceRuntime === null })
+        .refresh(leased, {
+          keyMode: !nativeHasUsableKey && workspaceRuntime === null ? 'full' : 'none',
+        })
         .then(acceptStatus)
         .catch(async (error: unknown) => {
           if (disposed || retired) return;

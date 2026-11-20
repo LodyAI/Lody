@@ -60,6 +60,7 @@ import {
   LEGACY_SESSION_HISTORY_BACKEND,
   getMachineFlockAcpCapabilities,
   getAcpConfigOptionsModelId,
+  getAcpConfigOptionStructureKey,
   writeAcpModelConfigOptionsToFlock,
   getMachineFlockProviderSetupCancellations,
   getMachineFlockProviderSetups,
@@ -467,6 +468,9 @@ function describeDocOpener(stack: string | undefined): string {
 
 export class LoroDocumentManager {
   public readonly repo: LoroRepo;
+  // A cloud transport can be detached and replaced while this manager's replica
+  // remains alive. Keep its repair budget across those adapter generations.
+  private readonly incompleteRecoveryScope = {};
   sessions: Map<SessionId, SessionDocument> = new Map();
   /**
    * When each cached Session doc was last handed to a caller. Every opener, not
@@ -668,6 +672,9 @@ export class LoroDocumentManager {
             LoroRepo.create({
               storageAdapter: cliSqliteRepoStore.storageAdapter,
               metaDebounceCommitMs: 0,
+              // Session metadata (what lists a Session) must reach disk with its history;
+              // loro-repo's default 5 s trailing debounce let a crash drop new Sessions.
+              metaPersistDebounceMs: 0,
               flockDocRetentionMs: getFlockDocRetentionMs,
             }),
             createRepoTimeoutMs,
@@ -924,6 +931,7 @@ export class LoroDocumentManager {
     this.remoteStreamsTokens = streamsTokens;
     if (this.encryptedWorkspace) await streamsTokens.legacy.getToken();
     const streamsTransport = await createCliStreamsTransport({
+      incompleteRecoveryScope: this.incompleteRecoveryScope,
       content: this.encryptedWorkspace?.content ?? { mode: 'plaintext' },
       bucketId: this.encryptedWorkspace?.bucketId(),
       workspaceId: this.workspaceId,
@@ -1500,8 +1508,30 @@ export class LoroDocumentManager {
             }
 
             let sub: RepoRoomSubscription | null = null;
+            let timer: NodeJS.Timeout | undefined;
+            const bound = new Promise<'stop'>((resolve) => {
+              timer = setTimeout(() => resolve('stop'), TRANSIENT_DOC_ROOM_RETAIN_MS);
+              timer.unref?.();
+            });
+            const canceled = bridge.canceled.then(() => 'stop' as const);
             try {
-              sub = await this.repo.joinDocRoom(docId);
+              const joinPromise = this.repo.joinDocRoom(docId);
+              void joinPromise.catch(() => {});
+              const joined = await Promise.race([
+                joinPromise.then((room) => ({ kind: 'joined' as const, room })),
+                canceled.then((stop) => ({ kind: stop })),
+                bound.then((stop) => ({ kind: stop })),
+              ]);
+              if (joined.kind === 'stop') {
+                void joinPromise.then(
+                  (lateSub) => {
+                    lateSub.unsubscribe();
+                  },
+                  () => {}
+                );
+                return;
+              }
+              sub = joined.room;
               if (
                 this.cleaningUp ||
                 generation !== this.localDocRoomBridgeGeneration ||
@@ -1515,12 +1545,13 @@ export class LoroDocumentManager {
               // One cloud reconciliation is sufficient. A later active turn is
               // owned by SessionDispatchWatcher/SessionDocument; keeping this raw
               // subscription forever would recreate the historical-room leak.
-              await Promise.race([streamsRoomBinding(sub).firstSyncedWithRemote, bridge.canceled]);
+              await Promise.race([streamsRoomBinding(sub).firstSyncedWithRemote, canceled, bound]);
             } catch (error: unknown) {
               this.logger.debug(
                 `[${sessionId}] Local data-plane session cloud reconcile failed: ${formatErrorMessage(error)}`
               );
             } finally {
+              clearTimeout(timer);
               sub?.unsubscribe();
               if (this.localDocRoomBridges.get(docId) === bridge) {
                 this.localDocRoomBridges.delete(docId);
@@ -1553,7 +1584,8 @@ export class LoroDocumentManager {
               generation !== this.localDocRoomBridgeGeneration ||
               this.sessions.has(sessionId) ||
               this.pendingSessionDocs.has(sessionId) ||
-              this.localDocRoomBridges.has(docId)
+              this.localDocRoomBridges.has(docId) ||
+              this.localRendererDocRooms.has(docId)
             ) {
               return;
             }
@@ -1663,7 +1695,7 @@ export class LoroDocumentManager {
     // any one-shot renderer reconciliation without unloading the shared doc.
     this.cancelLocalDocRoomBridge(docId);
     const existing = this.sessions.get(sessionId);
-    if (existing?.isDestroyed) {
+    if (existing && (existing.isDestroyed || this.sessionDocCleanup.has(sessionId))) {
       try {
         await withTimeout(
           this.cleanSessionDoc(sessionId),
@@ -2104,19 +2136,6 @@ export class LoroDocumentManager {
     return agentConfigId;
   }
 
-  /**
-   * Historical hook kept for startup flow compatibility. Title generation defaults are
-   * now runtime-only and are not persisted into agent config meta.
-   */
-  async applyTitleGenerationDefaults(
-    _cliType: AgentConfigCliType,
-    _agentType: string,
-    _configOptions: AcpConfigOptionSummary[]
-  ): Promise<void> {
-    // Intentionally no-op. New builtin agent configs no longer persist title defaults;
-    // runtime generation computes least-privilege defaults from current ACP configOptions.
-  }
-
   async registerMachine(machineId: MachineId, machine: MachineMetaPatch): Promise<void> {
     if (!this.machine) {
       this.machine = this.createMachineDocument(machineId);
@@ -2425,6 +2444,11 @@ export class LoroDocumentManager {
   peekSessionDoc(sessionId: SessionId): SessionDocument | undefined {
     const sessionDoc = this.sessions.get(sessionId);
     return sessionDoc && !sessionDoc.isDestroyed ? sessionDoc : undefined;
+  }
+
+  /** Whether `cleanSessionDoc` is currently tearing down this Session's cached doc. */
+  isSessionDocCleaning(sessionId: SessionId): boolean {
+    return this.sessionDocCleanup.has(sessionId);
   }
 
   cleanSessionDoc(sessionId: SessionId, options: { preserveStatus?: boolean } = {}): Promise<void> {
@@ -3252,6 +3276,30 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     basedOnUserTurnId: string,
     patch: SessionAcpRuntimeConfigPatch
   ): Promise<boolean> {
+    return this.enqueueAcpRuntimeConfigPatch(() => basedOnUserTurnId, patch);
+  }
+
+  /**
+   * Applies a patch observed outside any turn to the snapshot of the same ACP session, at
+   * that snapshot's own user turn. Without such a snapshot the next turn's run-config
+   * capture carries the value, so nothing is written.
+   */
+  applyAcpRuntimeConfigPatchToCurrentSnapshot(
+    patch: SessionAcpRuntimeConfigPatch
+  ): Promise<boolean> {
+    return this.enqueueAcpRuntimeConfigPatch(
+      (current) =>
+        current?.acpSessionId === patch.acpSessionId ? current.basedOnUserTurnId : undefined,
+      patch
+    );
+  }
+
+  private enqueueAcpRuntimeConfigPatch(
+    resolveBasedOnUserTurnId: (
+      current: SessionAcpRuntimeConfigSnapshot | undefined
+    ) => string | undefined,
+    patch: SessionAcpRuntimeConfigPatch
+  ): Promise<boolean> {
     const next = this.acpRuntimeConfigPatchSerial.then(async () => {
       if (!this.mirror) {
         throw new Error('SessionDocument not initialized');
@@ -3285,12 +3333,14 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
 
       const state = this.mirror?.getState();
       if (!state) throw new Error('SessionDocument not initialized');
+      const current = state.acpRuntimeConfig as SessionAcpRuntimeConfigSnapshot | undefined;
+      const basedOnUserTurnId = resolveBasedOnUserTurnId(current);
+      if (basedOnUserTurnId === undefined) return false;
       const incomingTurnIndex = userTurnIndex.get(basedOnUserTurnId) ?? -1;
       if (incomingTurnIndex < 0 || incomingTurnIndex !== latestUserTurnIndex) {
         return false;
       }
 
-      const current = state.acpRuntimeConfig as SessionAcpRuntimeConfigSnapshot | undefined;
       const currentTurnIndex = current ? (userTurnIndex.get(current.basedOnUserTurnId) ?? -1) : -1;
       if (currentTurnIndex > incomingTurnIndex) {
         return false;
@@ -3834,7 +3884,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       return null;
     }
 
-    const first = queue[0];
+    const first = queue.find((item) => !item.paused);
     if (first?.isEditing) {
       // The editing client may never get a chance to clear `isEditing` (hard close,
       // crash, killed tab). Treat `editingStartedAt` as a lease; once it expires we
@@ -3848,6 +3898,17 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     }
 
     return first ?? null;
+  }
+
+  async pauseMessageQueueItems(cids: readonly string[]): Promise<void> {
+    if (!this.mirror) throw new Error('SessionDocument not initialized');
+    const targets = new Set(cids);
+    this.mirror.setState((prev) => {
+      for (const item of (prev.mq ?? []) as MessageQueueItem[]) {
+        if (targets.has(item.$cid)) item.paused = true;
+      }
+      return prev;
+    });
   }
 
   async popMessageQueue(): Promise<MessageQueueItem | null> {
@@ -4080,6 +4141,7 @@ const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry):
     authMethods: entry.authMethods,
     sessionFork: entry.sessionFork,
     acknowledgedSteer: entry.acknowledgedSteer,
+    goalActions: entry.goalActions,
     sessionTitle: entry.sessionTitle,
     rateLimits: entry.rateLimits,
     sessionForkWorktree: entry.sessionForkWorktree,
@@ -4263,6 +4325,17 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       sourceVersion,
       modelAnswers
     );
+    // Keep the probe/default selection when only a session's model, mode or
+    // effort changed. Capture the session's own per-model answer above first.
+    if (
+      existing?.sourceVersion === sourceVersion &&
+      existing.configOptions &&
+      entry.configOptions &&
+      getAcpConfigOptionStructureKey(existing.configOptions) ===
+        getAcpConfigOptionStructureKey(entry.configOptions)
+    ) {
+      entry.configOptions = existing.configOptions;
+    }
     const capabilityUnchanged =
       existing &&
       serializeAcpCapabilityWithoutFetchTime(existing) ===
@@ -4306,7 +4379,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     )[key];
     // No row yet means no probe has described this Provider: the panel discovers it.
     if (!existing) return;
-    if (JSON.stringify(existing.authMethods ?? []) === JSON.stringify(authMethods)) return;
+    if (JSON.stringify(existing.authMethods) === JSON.stringify(authMethods)) return;
     const changed = writeMachineFlockRowToFlock(handle.flock, {
       key: machineFlockKeys.acpCapability(configId),
       // Every other field stays the earlier probe's; this call only knows the methods.

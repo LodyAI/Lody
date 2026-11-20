@@ -139,6 +139,11 @@ settles. A lost response does not authorize repeating an uncertain execution.
   RPC wiring, local project control, session file upload/send, and the turn cloud
   side-effect gate. Turn execution itself lives in
   `../session/session-execution-service.ts`.
+  Context occupancy writes to workspace metadata show the first valid value
+  immediately, then at most once per 10 seconds when capacity changes or usage
+  differs from the last queued value by at least `max(1024 tokens, 1% of capacity)`.
+  Smaller changes remain buffered; permission wait and turn finalization flush
+  the exact latest value, including the completed-turn value used by idle compaction.
   Machine registration passes the daemon's `TZ` hint to `getDeviceTimeZone`:
   when Intl exposes no zone name, named zoneinfo paths and fixed whole-hour
   POSIX zones such as `HKT-8` are resolved before the legacy UTC fallback.
@@ -242,6 +247,9 @@ provides LocalProjects. See the [decision](../../../../.agents/notes/implemented
   waiting for causal dependencies through the existing SQLite journal. A durable
   save does not establish complete synchronization or advance another replica's
   cursor. See the [persistence decision](../../../../.agents/notes/implemented/bug-fix/2026-10-22-loro-pending-persistence.md).
+  Released streams-crdt and LoroRepo builds own storage-failure recovery: a failed save no
+  longer spins the live-read loop ([read-loop decision](../../../../.agents/notes/implemented/bug-fix/2026-10-19-streams-read-loop-spin.md))
+  or re-downloads applied updates ([release adoption](../../../../.agents/notes/implemented/bug-fix/2026-10-23-storage-recovery-release-adoption.md)).
   `sqlite-lock-diagnostics.ts` logs, at most once a minute, which processes hold a
   workspace `repo.sqlite3` open when loro-repo or streams-crdt reports
   `database is locked`; it only observes (`lsof`) and never retries or blocks.
@@ -254,6 +262,8 @@ provides LocalProjects. See the [decision](../../../../.agents/notes/implemented
   ([AGENTS.md](pr-poller/AGENTS.md)).
 - `analytics/`, `git/`, `notifications/`, `session-export/`, `usage/` — supporting
   services.
+- `workspace-bundle/` — lossless workspace export/import bundles
+  ([AGENTS.md](workspace-bundle/AGENTS.md)).
 
 ### Session active presence
 

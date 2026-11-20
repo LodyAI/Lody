@@ -1,3 +1,4 @@
+import { recoveryHistoryBatcher } from '../../services/e2ee-recovery-history.mjs'
 import { ProductWindowIpcService } from '../product-window-ipc-service'
 import {
   id as sharingId,
@@ -878,7 +879,7 @@ export class E2eeIpc extends ProductWindowIpcService {
     // A lost ACK is reconciled from genuine ledger history, never by signing again.
     // Ledger ingest only: key delivery must not hold the admission result.
     try {
-      await this.refresh(workspaceId, { installKeys: false })
+      await this.refresh(workspaceId, { keyMode: 'none' })
     } catch (cause) {
       this.pairingFailure = cause
     }
@@ -1487,7 +1488,7 @@ export class E2eeIpc extends ProductWindowIpcService {
       try {
         // Admission must be verified locally before publishing its invitation. Own-key
         // receive/repair and unrelated deliveries do not belong to this approval wait.
-        await this.refresh(workspaceId, { installKeys: false })
+        await this.refresh(workspaceId, { keyMode: 'none' })
       } catch (error) {
         this.pairingFailure = error
       }
@@ -1831,7 +1832,6 @@ export class E2eeIpc extends ProductWindowIpcService {
       options !== undefined &&
       (typeof options !== 'object' ||
         options === null ||
-        (options.installKeys !== undefined && typeof options.installKeys !== 'boolean') ||
         (options.keyMode !== undefined && !REFRESH_KEY_MODES.has(options.keyMode)) ||
         (options.recipients !== undefined &&
           (!Array.isArray(options.recipients) ||
@@ -1841,8 +1841,7 @@ export class E2eeIpc extends ProductWindowIpcService {
             ))))
     )
       throw new Error('e2ee_invalid-input')
-    // Without `keyMode`, only `installKeys: false` skips the key round, as before.
-    const keyMode = options?.keyMode ?? (options?.installKeys === false ? 'none' : 'full')
+    const keyMode = options?.keyMode ?? 'full'
     const id = sender()
     const access = await withDesktopE2eeAccount(
       (owner) =>
@@ -2083,22 +2082,16 @@ export class E2eeIpc extends ProductWindowIpcService {
     await this.manage(workspaceId, { type: 'transferOwner', membershipId })
   }
   @IpcMethod()
-  async contentStreamsToken(
-    workspaceId: string,
-    rejectedToken?: string,
-    requestSnapshotFor?: string,
-    rpcOnly?: true
-  ) {
+  async contentStreamsToken(workspaceId: string, rejectedToken?: string, rpcOnly?: true) {
     const id = sender()
     return observeClientLossOperation('token', workspaceId, id, () =>
-      this.contentStreamsTokenFor(id, workspaceId, rejectedToken, requestSnapshotFor, rpcOnly)
+      this.contentStreamsTokenFor(id, workspaceId, rejectedToken, rpcOnly)
     )
   }
   private async contentStreamsTokenFor(
     id: number,
     workspaceId: string,
     rejectedToken?: string,
-    requestSnapshotFor?: string,
     rpcOnly?: true
   ) {
     const access = await withDesktopE2eeAccount(
@@ -2122,7 +2115,6 @@ export class E2eeIpc extends ProductWindowIpcService {
         workspaceId,
         credential: access.credential,
         ...(rejectedToken ? { rejectedToken } : {}),
-        ...(requestSnapshotFor ? { requestSnapshotFor } : {}),
         ...(rpcOnly ? { rpcOnly } : {})
       })
     ).catch((error) => {
@@ -2962,22 +2954,41 @@ export class E2eeIpc extends ProductWindowIpcService {
     }) => Effect.Effect<A, unknown>
   ): Promise<A> {
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const auth = getIpcServiceDeps().authService
+    const requested = auth.getCachedSessionIdentity()
     const run = this.recoveryQueue.then(async () => {
+      if (auth.getCachedSessionIdentity().generation !== requested.generation)
+        throw new Error('e2ee_account_mismatch')
       const { accountId, client } = await desktopE2eeCloudClient()
+      if (
+        auth.getCachedSessionIdentity().generation !== requested.generation ||
+        (requested.userId !== null && requested.userId !== accountId)
+      )
+        throw new Error('e2ee_account_mismatch')
       const result = await Effect.runPromise(
-        work({
-          accountId,
-          store: client.recoveryVault(),
-          journalPath: desktopE2eeRecoveryJournalPath(accountId),
-          client,
-          exists: client.hasRecoveryVault(),
-          replacement: client.recoveryVaultReplacement(),
-          accountWorkspaces: client.recoveryVaultAccountWorkspaces()
-        })
+        Effect.scoped(
+          Effect.gen(function* () {
+            const history = yield* recoveryHistoryBatcher(client)
+            return yield* work({
+              accountId,
+              store: client.recoveryVault(),
+              journalPath: desktopE2eeRecoveryJournalPath(accountId),
+              client: {
+                ...client,
+                history: (request, signal) =>
+                  signal ? client.history(request, signal) : history(request)
+              },
+              exists: client.hasRecoveryVault(),
+              replacement: client.recoveryVaultReplacement(),
+              accountWorkspaces: client.recoveryVaultAccountWorkspaces()
+            })
+          })
+        )
       ).catch((error) => {
         throw recoveryVaultFailure(error)
       })
-      if (getIpcServiceDeps().authService.getCachedSessionIdentity().userId !== accountId)
+      const latest = auth.getCachedSessionIdentity()
+      if (latest.userId !== accountId || latest.generation !== requested.generation)
         throw new Error('e2ee_account_mismatch')
       return result
     })
@@ -3552,9 +3563,38 @@ export class E2eeIpc extends ProductWindowIpcService {
   @IpcMethod()
   async restoreFromRecoveryFile(
     method: RecoveryUnlockMethod = 'file',
-    options?: RecoveryUnlockOptions
+    options?: RecoveryUnlockOptions,
+    operationId?: string
   ) {
     sender()
+    if (
+      operationId !== undefined &&
+      (typeof operationId !== 'string' || !/^[a-zA-Z0-9-]{1,64}$/.test(operationId))
+    )
+      throw new Error('e2ee_recovery_invalid-input')
+    const window = getIpcContext().event.sender
+    const lifetime = readerLifetimes.get(window)
+    const identity = getIpcServiceDeps().authService.getCachedSessionIdentity()
+    const onResult = (
+      result: import('@lody/e2ee-client/recovery-restore').VaultWorkspaceRestoreResult
+    ) =>
+      Effect.sync(() => {
+        const latest = getIpcServiceDeps().authService.getCachedSessionIdentity()
+        if (
+          !operationId ||
+          window.isDestroyed() ||
+          readerLifetimes.get(window) !== lifetime ||
+          latest.userId !== identity.userId ||
+          latest.generation !== identity.generation
+        )
+          return
+        // Renderer observation cannot fail or roll back an adopted workspace.
+        try {
+          window.send('e2ee.recoveryProgress', { operationId, result })
+        } catch {
+          /* document closed */
+        }
+      })
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
     const unlock = await this.recoveryUnlock(method, options)
     if (!unlock) return { outcome: 'cancelled' as const }
@@ -3580,6 +3620,7 @@ export class E2eeIpc extends ProductWindowIpcService {
               restoreAccountWorkspaces({
                 store,
                 journalPath,
+                onResult,
                 unlock: this.bindRecoveryUnlock(unlock, replacement),
                 workspaces: rows.map((row) =>
                   recoveryRestoreTarget<E2eeWorkspaceHistoryPage>({

@@ -43,6 +43,7 @@ import {
 import { isArchivedOutsideWorkspace, isSessionTabClosed } from '@/lib/session-tab-url';
 import { AdaptiveTabStrip, AdaptiveTabStripItem } from './adaptive-tab-strip';
 import { SESSION_PAGE_CONTAINER_CLASS } from './session-conversation-page';
+import { dndPointerPoint } from '@/lib/dnd-pointer';
 import {
   armSessionMentionDrag,
   clearSessionMentionDrag,
@@ -374,20 +375,6 @@ const styles = stylex.create({
     maxHeight: '15rem',
   },
 });
-
-function clientPointFromDragEnd(event: DragEndEvent): { x: number; y: number } | null {
-  const source = event.activatorEvent;
-  if (
-    !source ||
-    !('clientX' in source) ||
-    !('clientY' in source) ||
-    typeof source.clientX !== 'number' ||
-    typeof source.clientY !== 'number'
-  ) {
-    return null;
-  }
-  return { x: source.clientX + event.delta.x, y: source.clientY + event.delta.y };
-}
 
 function getTabLabel(
   session: SessionMeta,
@@ -949,7 +936,7 @@ export const SessionTabBar = memo(function SessionTabBar({
       const { active, over } = event;
       const activeId = String(active.id);
       const overId = over ? String(over.id) : null;
-      const point = clientPointFromDragEnd(event);
+      const point = dndPointerPoint(event);
       // Tab droppables stay the closest collision even when the pointer is in
       // the conversation below, so mention wins whenever the pointer is there.
       const droppedOnConversation =

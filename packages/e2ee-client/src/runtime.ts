@@ -835,8 +835,8 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
       run(
         withSession(id, (session) =>
           Effect.gen(function* () {
-            // Here a refresh without `keyMode` runs a key round only for `installKeys: true`.
-            const mode = input?.keyMode ?? (input?.installKeys ? 'full' : 'none');
+            // The portable host runs no key round unless `keyMode` asks for one.
+            const mode = input?.keyMode ?? 'none';
             if (mode !== 'none' && mode !== 'full' && mode !== 'receive' && mode !== 'distribute')
               return yield* fail('invalid-input');
             if (
@@ -882,7 +882,7 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
           return undefined;
         })
       ),
-    contentStreamsToken: (id, rejectedToken, requestSnapshotFor, rpcOnly) =>
+    contentStreamsToken: (id, rejectedToken, rpcOnly) =>
       run(
         withSession(id, (session) =>
           Effect.gen(function* () {
@@ -890,14 +890,11 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
             if (
               (rejectedToken !== undefined &&
                 (typeof rejectedToken !== 'string' || rejectedToken.length > 16384)) ||
-              (requestSnapshotFor !== undefined &&
-                (typeof requestSnapshotFor !== 'string' || requestSnapshotFor.length > 2048)) ||
               (rpcOnly !== undefined && rpcOnly !== true)
             )
               return yield* fail('invalid-input');
             const grant = yield* session.contentToken({
               ...(rejectedToken !== undefined ? { rejectedToken } : {}),
-              ...(requestSnapshotFor !== undefined ? { requestSnapshotFor } : {}),
               ...(rpcOnly ? { rpcOnly } : {}),
             });
             const now = yield* Clock.currentTimeMillis;

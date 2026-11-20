@@ -72,6 +72,17 @@ Decisions:
 [display preference](../../../../.agents/notes/implemented/feature/2026-09-20-sidebar-updated-project-display-preference.md),
 and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sidebar-row-details-group.md).
 
+In the Project (Workspace) view the Details group adds a third switch, `Hide
+Empty Projects` (`sidebarHideEmptyProjectsAtom`, on by default). On, a project
+is listed only while it has Session rows after pinned-tree separation and opener
+placement, and an emptied machine section is hidden unless it still holds a
+multi-repository project with conversations; off, every registered project under
+each machine stays listed. The
+selection lives in `selectVisibleLocalProjectSections`
+(`lib/project-group-placement.ts`). Multi-repository projects that run anywhere
+sit with the GitHub repositories and stay listed only while they have
+conversations, whatever the switch says.
+
 Status organize mode lists the same rows as Updated, split into the native mobile
 Home's status groups in its order: Needs you, Just finished, Open pull requests,
 Running, Idle. `lib/sidebar-status-group.ts` classifies each row through the new-chat
@@ -246,19 +257,14 @@ companion `useSessionShareStatus` answering the header's "already shared?".
 and the "…" menu open. Rationale:
 [header share control](../../../../.agents/notes/implemented/feature/2026-09-14-session-header-share-control.md).
 
-## Terminal colors
+## Terminal
 
 `terminal/terminal-theme.ts` resolves CSS colors synchronously through a disposable
 probe with transitions disabled, so the global reduced-motion rule cannot blank a
 terminal. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-09-terminal-reduced-motion-colors.md).
 
-## PR auto-archive
-
-`auto-archive-pr-watcher.tsx` keeps observed PR transitions separate from unfinished
-archive attempts. Its owning window retries the existing Session action with capped
-backoff and drops superseded work on scope changes. The action's automatic-only
-progress receipt records accepted targets; its cancellation check uses the
-authoritative snapshot before retry side effects, so restoring a partially archived
-Session or Tab supersedes the unfinished operation. Startup and restore still only
-establish the PR baseline.
-See the [retry decision](../../../../.agents/notes/implemented/bug-fix/2026-10-17-pr-auto-archive-retry.md).
+In the bottom terminal panel, hold Cmd on macOS or Ctrl on Windows/Linux and
+left-click an HTTP(S) URL to open it. A text selection prevents the click from
+opening a URL. Plain-text links show a pointer and underline while the modifier
+is held. OSC 8 links keep the default xterm decoration and use the same click rule.
+Plain-text detection accepts ASCII URLs and joins wrapped rows.

@@ -116,6 +116,46 @@ describe('selectSkillMentionCandidates', () => {
     expect(tokens).not.toContain('qwen-only');
   });
 
+  it('offers Antigravity its config, workspace and built-in skills but not other providers', () => {
+    const groups: ProjectSkillGroup[] = [
+      ...GROUPS,
+      {
+        scope: 'project',
+        dir: '.agent/skills',
+        truncated: false,
+        skills: [
+          skill({ name: 'workspace-agy', relativePath: '.agent/skills/workspace-agy/SKILL.md' }),
+        ],
+      },
+      {
+        scope: 'global',
+        dir: '~/.gemini/config/skills',
+        truncated: false,
+        skills: [
+          skill({ name: 'pr-writer', relativePath: '~/.gemini/config/skills/pr-writer/SKILL.md' }),
+        ],
+      },
+      {
+        scope: 'system',
+        dir: '~/.gemini/antigravity-cli/builtin/skills',
+        truncated: false,
+        skills: [
+          skill({
+            name: 'browser',
+            relativePath: '~/.gemini/antigravity-cli/builtin/skills/browser/SKILL.md',
+          }),
+        ],
+      },
+    ];
+    const allowed = getAllowedSkillMentionDirs({ cliType: 'builtin', agentType: 'antigravity' });
+    const tokens = selectSkillMentionCandidates(buildSkillMentionItems(groups), '', allowed).map(
+      (item) => item.token
+    );
+    expect(tokens.sort()).toEqual(
+      ['browser', 'code-review', 'deep-research', 'pr-writer', 'workspace-agy'].sort()
+    );
+  });
+
   it('includes global skill subdirectories under the selected provider root only', () => {
     const nestedItems = buildSkillMentionItems([
       ...GROUPS,

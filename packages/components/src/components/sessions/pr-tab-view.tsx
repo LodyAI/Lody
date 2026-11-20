@@ -57,6 +57,7 @@ import { Menu } from '@/ui/menu';
 import { PrChangesView } from './pr-changes-view';
 import type { UseGitHubPrDiffResult } from '@/hooks/use-github-pr-diff';
 import type { PrCommitSelection } from '@/lib/github-pr-diff';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 /** The tab's own width, not the window's: the PR tab lives in a resizable side panel. */
 const NARROW = '@container pr-tab (width < 420px)';
@@ -716,7 +717,7 @@ function BranchChip({ role, value }: { role: 'base' | 'head'; value: string }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
     if (!value) return;
-    void navigator.clipboard.writeText(value);
+    void copyTextToClipboard(value);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
   }, [value]);

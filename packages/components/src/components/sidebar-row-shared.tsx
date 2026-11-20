@@ -22,6 +22,7 @@ import {
   Github,
   GitBranch,
   Hand,
+  MoreHorizontal,
   X,
   type LucideIcon,
 } from 'lucide-react';
@@ -50,6 +51,7 @@ import { WorktreeIcon } from '@/components/icons/worktree-icon';
 import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
 import { useStableNow } from '@/hooks/use-stable-now';
 import { formatCompactRelativeTime, type RelativeTimeValue } from '@/lib/format-relative-time';
+import { SidebarShortcutPill, useSidebarRowShortcut } from './sidebar-shortcut-pill';
 import { sidebarSurface } from './sidebar-surface';
 
 /**
@@ -58,10 +60,11 @@ import { sidebarSurface } from './sidebar-surface';
  * flat Updated list in `sidebar-updated-task-list.tsx`) render the same anatomy,
  * so the pieces live here once instead of being copied three times.
  *
- * Row anatomy: `[① tree affordance | more][② author avatar? + title][③ status | mergeable? + worktree? + PR icon? | archive]`.
+ * Row anatomy: `[① tree affordance][② author avatar? + title][③ status | mergeable? + worktree? + PR icon? | ⋯ archive]`.
  * The author avatar (`SessionRowAuthorAvatar`) only appears in team ("All Tasks") scope on a
  * multi-member workspace; otherwise the title owns the leading edge of slot ②. The leading slot
- * stays reserved even when empty (the ⋯ menu button reveals there on hover). A local worktree
+ * stays reserved even when empty so flat and nested rows keep one title edge; the ⋯ menu button
+ * now reveals in the end slot, immediately before Archive. A local worktree
  * session shows a faint worktree glyph (`SessionRowWorktreeIndicator`) inside the metric cluster,
  * immediately before the PR icon (taking the PR's right-edge spot when there is no PR);
  * GitHub sessions are always worktrees so they never show it. The full
@@ -72,8 +75,8 @@ import { sidebarSurface } from './sidebar-surface';
  * REPLACES the whole resting metric cluster there, so an active row reads
  * `[title][status]` and nothing else competes with it. Only a resting row shows
  * metrics, where PR status owns the right edge when present. Line totals stay
- * off the row (hover card only). Archive replaces the trailing content on hover, so the
- * row's rightmost mark never shifts. The leading slot (①) is therefore free to
+ * off the row (hover card only). The ⋯ and Archive actions replace the trailing content on
+ * hover, so the row's rightmost mark never shifts. The leading slot (①) is therefore free to
  * ALWAYS draw the opened-by tree: a running or unread child keeps its ├/└ and an
  * active opener keeps its disclosure.
  */
@@ -431,11 +434,11 @@ export function SessionPrIcon({
       />
     );
 
-  // Sidebar rows park this mark in `SidebarRowEndSlot`, which centers anything
-  // narrower than its 20px reserve (`min-w-5`, the archive target). A Mergeable
-  // pill widens that cluster past 20px, the centering inset disappears, and the
-  // mark slides to the trailing edge. Hold the compact mark in a box the same
-  // size as the reserve so the pill grows to the left and the mark stays put.
+  // Sidebar rows park this mark in `SidebarRowEndSlot`, which right-aligns
+  // anything narrower than its reserve (the archive target). A Mergeable
+  // pill widens that cluster past the reserve and the mark keeps the trailing
+  // edge. Hold the compact mark in a box the same size as the reserve so the
+  // pill grows to the left and the mark stays put.
   if (!compact) return mark;
   return (
     <span
@@ -627,6 +630,54 @@ export function SessionOpenedByTreeRow({
 }
 
 /**
+ * ③ The hover-revealed ⋯ action. It opens the row's ordinary right-click menu from
+ * a left click by re-dispatching `contextmenu` at its own corner, so the button and
+ * the right-click gesture can never diverge. `SidebarRowEndSlot` parks it one 20px
+ * column left of Archive (or at the right edge itself on a menu-only row).
+ */
+export function SessionRowMenuButton({
+  label,
+  /** Which group's hover reveals the button — e.g. 'group-hover/row:...' for named groups. */
+  revealClassName = 'group-hover:opacity-100 group-hover:pointer-events-auto group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto',
+}: {
+  label: string;
+  revealClassName?: string;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={(event) => {
+        // Open the row's existing right-click menu from a left click on ⋯.
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = event.currentTarget.getBoundingClientRect();
+        event.currentTarget.dispatchEvent(
+          new MouseEvent('contextmenu', {
+            bubbles: true,
+            cancelable: true,
+            clientX: Math.round(rect.left),
+            clientY: Math.round(rect.bottom),
+          })
+        );
+      }}
+      className={cn(
+        'flex h-5 w-5 items-center justify-center rounded-sm opacity-0 pointer-events-none',
+        'text-sidebar-foreground-muted/80 transition-[opacity,color,background-color] duration-100',
+        'hover:bg-sidebar-foreground/15 hover:text-sidebar-foreground',
+        'focus-visible:outline-hidden',
+        // The trigger itself stays pressed-looking while its menu is open,
+        // not just the row around it.
+        'group-data-[menu-open]:bg-sidebar-foreground/15 group-data-[menu-open]:text-sidebar-foreground',
+        revealClassName
+      )}
+    >
+      <MoreHorizontal className="h-3.5 w-3.5" />
+    </button>
+  );
+}
+
+/**
  * ③ The hover-revealed archive action. Absolutely pinned to the RIGHT edge of its
  * (relative) trailing container so it always lands in the same fixed spot,
  * replacing whatever sits there at rest (the diff / time, which fades out on
@@ -668,6 +719,54 @@ export function SidebarRowArchiveButton({
 }
 
 /**
+ * A single-click counterpart to {@link SidebarRowArchiveButton} for a
+ * non-destructive row action (for example the Status view's "mark as
+ * completed"): same right-edge slot and hover reveal, but one press commits —
+ * nothing here needs the archive button's two-step confirm.
+ */
+export function SidebarRowActionButton({
+  label,
+  icon,
+  onConfirm,
+  /** Which group's hover reveals the button — e.g. 'group-hover/row:...' for named groups. */
+  revealClassName = 'group-hover:opacity-100 group-hover:pointer-events-auto group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto',
+}: {
+  label: string;
+  icon: ReactNode;
+  onConfirm: () => void;
+  revealClassName?: string;
+}) {
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        delay={500}
+        render={
+          <button
+            type="button"
+            aria-label={label}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onConfirm();
+            }}
+            className={cn(
+              'absolute right-0 top-0 z-20 inline-flex h-5 w-5 items-center justify-center rounded-sm',
+              'text-sidebar-foreground-muted/80 opacity-0 pointer-events-none transition-[opacity,color,background-color] duration-100',
+              'hover:text-sidebar-foreground',
+              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40',
+              revealClassName
+            )}
+          >
+            {icon}
+          </button>
+        }
+      />
+      <Tooltip.Content side="top">{label}</Tooltip.Content>
+    </Tooltip.Root>
+  );
+}
+
+/**
  * ③ The final slot at the row's right edge, and the row's ONE status channel.
  *
  * A working / waiting / unread session shows only its status mark here: the
@@ -677,16 +776,19 @@ export function SidebarRowArchiveButton({
  * info card, and collapsing them keeps the right edge to a single 14px mark
  * instead of a cluster that competes with it and eats the title.
  *
- * Archive is absolutely overlaid on hover, so a wide rest cluster never causes
- * layout movement. When the rest content is absent but Archive is available, it still
- * reserves the action's 20px hit target.
+ * The hover actions (the ⋯ menu, then Archive) are absolutely overlaid on hover, so a
+ * wide rest cluster never causes layout movement. The slot reserves one 20px
+ * column per action even when no rest content shows, so the ⋯ stays inside the
+ * row's trailing edge instead of overlaying the title.
  */
 export function SidebarRowEndSlot({
   sessionId,
+  selected = false,
   isWaitingPermission,
   isWorking,
   hasUnreadMessages,
   restIcon,
+  menu,
   archive,
   /** Fade the rest icon while hovering (match the row's group, e.g. 'group-hover/row:opacity-0'). */
   fadeClassName = 'group-hover:opacity-0 group-data-[menu-open]:opacity-0',
@@ -696,23 +798,30 @@ export function SidebarRowEndSlot({
    * progress re-renders only the slot and never the memoized row around it.
    */
   sessionId?: string;
+  /** Whether the hosting row is currently selected, used to tune pill contrast. */
+  selected?: boolean;
   isWaitingPermission?: boolean;
   isWorking?: boolean;
   hasUnreadMessages?: boolean;
   restIcon?: ReactNode;
+  /** The hover-revealed ⋯ menu (`SessionRowMenuButton`), pinned left of Archive. */
+  menu?: ReactNode;
   archive?: ReactNode;
   fadeClassName?: string;
 }) {
   // The end slot outlives the status mark, so the hand-over hold lives here.
   const drawWorking = useWorkingHandOver(isWorking === true, hasUnreadMessages === true);
   const sendStatus = useAtomValue(sessionSendStatusAtomFamily(sessionId ?? ''));
+  const shortcut = useSidebarRowShortcut(sessionId);
   const sendLabel = useSessionSendLabel(sendStatus);
-  const restContent = hasSessionRowStatus({
-    isWaitingPermission,
-    isWorking: drawWorking,
-    hasUnreadMessages,
-    sendState: sendStatus?.state,
-  }) ? (
+  const restContent = shortcut ? (
+    <SidebarShortcutPill index={shortcut.index} platform={shortcut.platform} selected={selected} />
+  ) : hasSessionRowStatus({
+      isWaitingPermission,
+      isWorking: drawWorking,
+      hasUnreadMessages,
+      sendState: sendStatus?.state,
+    }) ? (
     <SessionRowStatusIndicator
       isWaitingPermission={isWaitingPermission}
       isWorking={drawWorking}
@@ -725,27 +834,49 @@ export function SidebarRowEndSlot({
     restIcon
   );
   const hasRest = Boolean(restContent);
+  const showActions = !shortcut && (Boolean(menu) || Boolean(archive));
   // Reserve the action hit target whenever something can occupy it; otherwise the
-  // slot sizes to its resting content (for example, a PR icon).
-  const reserve = hasRest || Boolean(archive);
+  // slot sizes to its resting content (for example, a PR icon). Each revealed
+  // action owns one 20px column: ⋯ parks left of Archive, so a pair needs two —
+  // one column would leave the ⋯ absolutely positioned over the title's tail.
+  const actionColumns = showActions ? (menu ? 1 : 0) + (archive ? 1 : 0) : 0;
+  const reserve = hasRest || showActions;
   return (
     // pointer-events-none so the resting PR icon area still passes clicks through to
-    // the row's navigation; the Archive button re-enables pointer events on hover.
+    // the row's navigation; the hover action buttons re-enable pointer events on hover.
+    // justify-end keeps a narrower resting mark's right edge exactly where the
+    // revealed action lands, so the row's rightmost mark never shifts on hover.
     <div
       data-session-row-end-slot=""
       className={cn(
-        'relative flex h-5 shrink-0 items-center justify-center pointer-events-none',
-        reserve ? 'min-w-5' : 'w-0'
+        'relative flex h-5 shrink-0 items-center justify-end pointer-events-none',
+        reserve ? (actionColumns > 1 ? 'min-w-10' : 'min-w-5') : 'w-0'
       )}
     >
       {hasRest ? (
         <span
-          className={cn('flex', archive && cn('transition-opacity duration-100', fadeClassName))}
+          className={cn(
+            'flex',
+            showActions && cn('transition-opacity duration-100', fadeClassName)
+          )}
         >
           {restContent}
         </span>
       ) : null}
-      {archive}
+      {!shortcut && menu ? (
+        // The ⋯ shares Archive's 20px column when Archive is absent, and parks one
+        // column to its left when both reveal — the pair stays flush at the right edge.
+        <span
+          data-session-row-menu=""
+          className={cn(
+            'absolute top-0 z-20 flex h-5 items-center',
+            archive ? 'right-5' : 'right-0'
+          )}
+        >
+          {menu}
+        </span>
+      ) : null}
+      {!shortcut ? archive : null}
     </div>
   );
 }
@@ -1090,8 +1221,6 @@ export function SidebarSectionHeader({
   icon?: ReactNode;
   label: ReactNode;
   collapsed?: boolean;
-  /** @deprecated The collapsed count badge has been removed; this prop is ignored. */
-  count?: number;
   action?: ReactNode;
   /**
    * Status of the Sessions this section hides. Drawn only while collapsed, as

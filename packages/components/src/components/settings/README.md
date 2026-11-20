@@ -64,6 +64,12 @@ custom endpoints through the encrypted-only Provider API.
 
 ## Usage range transitions
 
+The interactive hourly charts follow the device time zone. The calendar and
+day detail use the server's UTC dates. The [timeline Spec](../../../../../specs/usage-timeline.md)
+defines how the charts place hours and open day detail. The
+[share report](../../../../../.agents/notes/implemented/feature/2026-09-09-usage-share-image.md)
+uses UTC for its static graphics.
+
 `usage-calendar-visualization.tsx` keeps a positioned view frame across hourly and
 calendar ranges so exiting charts retain their measured coordinates. The hourly
 ring grid changes inside that frame. Whole-view opacity fades handle the handoff;

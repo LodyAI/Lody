@@ -27,25 +27,8 @@ import {
   type Manifest,
 } from './model';
 
-export async function atomicJson(file: string, value: unknown): Promise<void> {
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  const handle = await fs.open(temporary, 'wx', 0o600);
-  try {
-    await handle.writeFile(JSON.stringify(value));
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  await fs.rename(temporary, file);
-  if (process.platform !== 'win32') {
-    const directory = await fs.open(path.dirname(file), 'r');
-    try {
-      await directory.sync();
-    } finally {
-      await directory.close();
-    }
-  }
-}
+import { atomicJson } from '../fs-atomic';
+export { atomicJson };
 export async function readJson(file: string): Promise<unknown> {
   return JSON.parse(await fs.readFile(file, 'utf8'));
 }

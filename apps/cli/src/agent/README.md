@@ -32,10 +32,7 @@ context/message-flow.md "Upstream".
   Claude single-question forms retain their request-message prompt. The shared bridge
   maps recognized Droid AskUser labels and custom answers back to its option IDs and
   companion fields ([Droid decision](../../../../.agents/notes/implemented/bug-fix/2026-11-03-droid-ask-user-elicitation.md)).
-- `claude-task-lifecycle.ts` — converts Claude task lifecycle events into ACP task
-  updates. Rendered titles may use a fallback; persisted actor metadata is omitted when
-  Claude reports no actor, so later events preserve an earlier identity. Providers that
-  rely on an unknown-actor label can configure a separate metadata fallback.
+- `antigravity-background.ts` — keeps Antigravity background work after `end_turn` safe from idle GC with synthesized `sessionActivity`.
 - `acp-runner.ts` — process spawn/restart around the client. Spawn + initialize +
   `newSession`/`loadSession` share `acp-session-start-gate.ts`.
 - `acp-session-start-gate.ts` — process-wide start semaphore used by
@@ -53,6 +50,9 @@ context/message-flow.md "Upstream".
   upstream auto-update in its child process and never downloads a fallback. Credentials
   remain in Dimcode's own configuration or provider environment. Refresh capabilities
   after upgrading. Existing registry configurations retain their saved launch contract.
+  Builtin Devin is a bundled proxy over the pinned official runtime; discovery hides duplicate
+  registry Devin, Dimcode and Kimi entries while saved configurations keep their launch
+  contracts ([decision and ablations](../../../../.agents/notes/implemented/feature/2026-09-30-builtin-devin.md)).
   [Sorbet authentication](../../../../.agents/notes/proposed/feature/2026-11-02-sorbet-acp-authentication.md)
   uses the existing protected ACP interaction path. Its `sorbet.dev` credentials v1
   extension runs in a separate bounded builtin Sorbet ACP process, with no session or
@@ -307,6 +307,20 @@ results were reported in parent assistant text, not structured child events;
 no `subagentEvents` capability was advertised. Keep these as tool calls rather
 than inventing child lifecycle or treating spawn acknowledgement as child success.
 
+A custom Provider whose `initialize` reports `Antigravity ACP Server` gets the same
+compatibility as builtin Antigravity; legacy `antigravity-acp` does not. AgentClient
+negotiates the `realpath` of the workdir as the ACP `cwd`, because agy compares edit
+targets by realpath and would otherwise ask permission for in-workspace edits under a
+symlinked path such as macOS `/tmp`.
+
+agy ends `session/prompt` with `end_turn` while background work (commands, timers,
+subagents, swarms) is still running, then stops writing to stdout. Lody ends the turn
+normally, and `antigravity-background.ts` reports `sessionActivity` from side-effect-free
+`session/list` activity so idle GC keeps the process until that work has woken the model
+and gone quiet. Output from those wakeups is not replayed: `session/load` restarts the
+session's MCP servers. See the
+[background work decision](../../../../.agents/notes/implemented/bug-fix/2026-11-16-antigravity-background-wakeup.md).
+
 `antigravity-usage.ts` projects end-turn `PromptResponse.usage` into disjoint token
 buckets. Each submitted request has a fresh accounting scope and freezes its
 confirmed session model before dispatch, so later model changes and smaller next
@@ -350,9 +364,8 @@ then rank eligible candidates by installedAt and command. Best-effort cleanup co
 because the manager cannot prove their readers have exited. Downloads have a 60-second idle deadline;
 progressing transfers have no total deadline. Idle timeout retains partial bytes for Range resume. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-21-acp-auth-runtime-download.md).
 
-Completed caches written before metadata schema v1 remain reusable through a separate strict
-legacy schema; their old `name`/`version`/`platform` fields are normalized in memory and only
-the trusted runtime definition's command and host requirement are inferred. Repacked Node
+Completed caches must match metadata schema v1; a pre-v1 cache is invalid and the runtime is
+installed again. Repacked Node
 packages intentionally publish no convenience link because non-ACP subcommands may be
 omitted. A fully validated install that has already crossed the final complete-marker commit
 may remain a safe cache hit even though that caller observes cancellation, and network
@@ -430,9 +443,14 @@ Codex only — other agents use the same brackets for unrelated variants (Claude
 is a context window). Vendor model `_meta` never enters the CLI.
 
 Commands have separate ownership: only independent probes replace the Provider's
-startup command preview. Real sessions retain their commands in `AgentClient` and
+startup command preview. Standard ACP agents (Antigravity among them) advertise commands
+with `available_commands_update` after `session/new` returns, so a probe without a
+response list waits up to `ACP_PROBE_COMMANDS_WAIT_MS` (2 s), overlapped with its other
+reads, for that notification. Real sessions retain their commands in `AgentClient` and
 publish them through the existing Session runtime-config path; an explicit empty
-list clears that Session's menu. Session capability writes preserve the latest
+list clears that Session's menu. The run-config snapshot reads the client's commands at
+write time, and a command notification arriving before any assistant entry patches the
+snapshot of the same ACP session instead of being dropped. Session capability writes preserve the latest
 same-runtime preview without copying project commands into it. A capability entry
 without a confirmed probe list is re-probed; an empty probed list is confirmed.
 

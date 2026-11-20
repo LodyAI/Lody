@@ -165,6 +165,15 @@ export const pinnedSectionCollapsedAtom = atomWithStorage<boolean>(
   false
 );
 
+/**
+ * Folded user pin sections on this device, by section id (ids are unique
+ * across workspaces). The default section keeps `pinnedSectionCollapsedAtom`.
+ */
+export const pinSectionsCollapsedAtom = atomWithStorage<Record<string, boolean>>(
+  'lody-sidebar-pin-sections-collapsed',
+  {}
+);
+
 // ============================================================================
 // Local Project Collapse State (folders under Local Projects / <Machine> project)
 // ============================================================================
@@ -347,6 +356,17 @@ export const sidebarUpdatedShowProjectNamesAtom = atomWithStorage<boolean>(
 export const sidebarShowBranchNamesAtom = atomWithStorage<boolean>(
   'lody-sidebar-show-branch-names',
   false
+);
+
+/**
+ * Project (Workspace) organize mode only: when true, a project with no visible
+ * Session rows is left out of the sidebar, and a machine section with no
+ * remaining projects goes with it. When false, every registered local project
+ * and every workspace project is listed, empty or not. Defaults on.
+ */
+export const sidebarHideEmptyProjectsAtom = atomWithStorage<boolean>(
+  'lody-sidebar-hide-empty-projects',
+  true
 );
 
 /**
