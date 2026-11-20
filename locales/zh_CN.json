@@ -6906,5 +6906,17 @@
   "today.resize": "调整 Today 宽度",
   "today.convertTitle": "转换为任务",
   "today.convertToTask": "转换为任务",
+  "today.mentionUnsupported": "不支持的引用",
+  "today.mentionLabel": "对话：{{title}}，{{status}}",
+  "today.changeStatus": "状态：{{status}}，更改状态",
+  "today.status.waiting": "等待处理",
+  "today.status.running": "运行中",
+  "today.status.later": "稍后",
+  "today.status.done": "已完成",
+  "today.status.unread": "未读",
+  "today.status.idle": "空闲",
+  "today.markRead": "标记为已读",
+  "today.markDone": "完成",
+  "today.laterWithCountdown": "{{label}} · {{countdown}}",
   "chat.embeddedHandoffFailed": "对话已创建，但当前视图未能更新。"
 }
