@@ -1466,6 +1466,100 @@ describe('Operation Inbox execution boundary', () => {
     }
   });
 
+  it('Stop preserves all queued drafts and an explicit resend runs only its selected task', async () => {
+    const prompting = createDeferred();
+    const release = createDeferred();
+    const received: string[] = [];
+    const f = inboxExecutionFixture(async (blocks) => {
+      const text = blocks.map((block) => (block.type === 'text' ? block.text : '')).join('');
+      received.push(text);
+      if (text === 'CURRENT_REQUEST') {
+        prompting.resolve();
+        await release.promise;
+      }
+      return {};
+    });
+    try {
+      await f.accept();
+      const running = f.service.continueSession(f.message);
+      await prompting.promise;
+      const turnId = f.service.getExecutionSnapshot(f.message.sessionId).activeTurnId!;
+      for (const id of ['B', 'C', 'D', 'E', 'F']) {
+        await f.doc.pushMessageQueue({
+          task: id,
+          userTurnId: id,
+          userId: 'user-1',
+          timestamp: '2026-11-20T00:00:00Z',
+          project: undefined,
+          acpSessionConfig: { ...f.message.acpSessionConfig, prompt: id },
+        });
+      }
+      const stop = {
+        type: 'session/cancel' as const,
+        sessionId: f.message.sessionId,
+        turnId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        cancelId: 'stop-A',
+      };
+      await f.service.cancelSession(stop);
+      release.resolve();
+      await running;
+      expect(received).toEqual(['CURRENT_REQUEST']);
+      const retained = await f.doc.getMessageQueue();
+      expect(retained.map((item) => [item.userTurnId, item.paused])).toEqual(
+        ['B', 'C', 'D', 'E', 'F'].map((id) => [id, true])
+      );
+      expect(await f.doc.peekReadyMessageQueue()).toBeNull();
+      const config = { ...f.message.acpSessionConfig, prompt: 'C' };
+      const inputId = 'queue-resend:C';
+      await f.doc.appendUserTurn({
+        id: inputId,
+        role: 'user',
+        userId: 'user-1',
+        timestamp: '2026-11-20T00:00:01Z',
+        status: 'pending',
+        items: [{ type: 'text', text: 'C' }],
+        inputConfig: config,
+      });
+      await f.service.acceptInboxHumanInput({
+        sessionId: f.message.sessionId,
+        inputId,
+        userId: 'user-1',
+        config,
+      });
+      await f.doc.removeMessageQueueItem(retained[1]!.$cid);
+      await f.service.continueSession({
+        ...f.message,
+        userTurnId: inputId,
+        acpSessionConfig: config,
+      });
+      expect(received).toEqual(['CURRENT_REQUEST', 'C']);
+      expect(f.service.isInboxInputCanceled(f.message.sessionId, 'C')).toBe(true);
+      expect((await f.doc.getMessageQueue()).map((item) => item.userTurnId)).toEqual([
+        'B',
+        'D',
+        'E',
+        'F',
+      ]);
+      expect(await f.doc.peekReadyMessageQueue()).toBeNull();
+      // A duplicate old Stop cannot pause a later queued input.
+      await f.doc.pushMessageQueue({
+        task: 'G',
+        userTurnId: 'G',
+        userId: 'user-1',
+        timestamp: '2026-11-20T00:00:02Z',
+        project: undefined,
+        acpSessionConfig: { ...config, prompt: 'G' },
+      });
+      await f.service.cancelSession(stop);
+      expect(await f.doc.peekReadyMessageQueue()).toMatchObject({ userTurnId: 'G' });
+    } finally {
+      release.resolve();
+      await f.close();
+    }
+  });
+
   // #2050: interrupt-and-send ends the running turn so the queued guidance runs
   // next. It must not use the Stop identity, which pauses the Inbox and cancels
   // the eligibility of every input queued before it.
@@ -1646,6 +1740,53 @@ describe('Operation Inbox execution boundary', () => {
       await f.close();
     }
   });
+
+  it.each(['legacy', 'without Inbox'] as const)(
+    'retains queued drafts on %s Stop',
+    async (mode) => {
+      const prompting = createDeferred();
+      const release = createDeferred();
+      const received: string[] = [];
+      const f = inboxExecutionFixture(async (blocks) => {
+        received.push(blocks.map((b) => (b.type === 'text' ? b.text : '')).join(''));
+        prompting.resolve();
+        await release.promise;
+        return {};
+      });
+      if (mode === 'without Inbox') f.service.setOperationInbox(undefined);
+      try {
+        await f.accept();
+        const running = f.service.continueSession(f.message);
+        await prompting.promise;
+        await f.doc.pushMessageQueue({
+          task: 'B',
+          userTurnId: 'B',
+          userId: 'user-1',
+          timestamp: '2026-11-20T00:00:00Z',
+          project: undefined,
+          acpSessionConfig: { ...f.message.acpSessionConfig, prompt: 'B' },
+        });
+        const turnId = f.service.getExecutionSnapshot(f.message.sessionId).activeTurnId!;
+        await f.service.cancelSession({
+          type: 'session/cancel',
+          sessionId: f.message.sessionId,
+          turnId,
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1' as WorkspaceId,
+        });
+        release.resolve();
+        await running;
+        expect(await f.doc.getMessageQueue()).toEqual([
+          expect.objectContaining({ userTurnId: 'B', paused: true }),
+        ]);
+        expect(await f.doc.peekReadyMessageQueue()).toBeNull();
+        expect(received).toEqual(['CURRENT_REQUEST']);
+      } finally {
+        release.resolve();
+        await f.close();
+      }
+    }
+  );
 
   it('Stop accepted while input is being built submits nothing and retains all eight results', async () => {
     const building = createDeferred();

@@ -1158,7 +1158,31 @@ describe('useSessionActions', () => {
     const doc = new LoroDoc();
     const control = createSessionControlPlaneMirror({
       doc,
-      initialState: { session: { id: sessionId } },
+      initialState: {
+        session: { id: sessionId },
+        mq: [
+          {
+            task: 'queued B',
+            userId: 'user-1',
+            userTurnId: 'queued-B',
+            timestamp: '2026-11-20T00:00:00Z',
+            project: undefined,
+            acpSessionConfig: { prompt: 'queued B', cliType: 'builtin', agentType: 'codex' },
+          },
+        ],
+      },
+    });
+    control.setState((draft) => {
+      draft.mq = [
+        {
+          task: 'queued B',
+          userId: 'user-1',
+          userTurnId: 'queued-B',
+          timestamp: '2026-11-20T00:00:00Z',
+          project: undefined,
+          acpSessionConfig: { prompt: 'queued B', cliType: 'builtin', agentType: 'codex' },
+        },
+      ] as never;
     });
     const runtime = createRuntime({ repo: metaRepo.repo });
     runtime.withSessionStore = async (_id, fn) =>
@@ -1174,6 +1198,7 @@ describe('useSessionActions', () => {
 
       expect(rpcOptions).toEqual([{ timeoutMs: 2_000, pauseInbox: false }]);
       expect(control.getState().cancelRequest?.id).toBeUndefined();
+      expect(control.getState().mq?.[0]?.paused).not.toBe(true);
       expect(metaRepo.getSession(sessionId)?.lastCanceledTurn).toBe('assistant-running');
     } finally {
       control.dispose();
@@ -1198,7 +1223,31 @@ describe('useSessionActions', () => {
     const doc = new LoroDoc();
     const control = createSessionControlPlaneMirror({
       doc,
-      initialState: { session: { id: sessionId } },
+      initialState: {
+        session: { id: sessionId },
+        mq: [
+          {
+            task: 'queued B',
+            userId: 'user-1',
+            userTurnId: 'queued-B',
+            timestamp: '2026-11-20T00:00:00Z',
+            project: undefined,
+            acpSessionConfig: { prompt: 'queued B', cliType: 'builtin', agentType: 'codex' },
+          },
+        ],
+      },
+    });
+    control.setState((draft) => {
+      draft.mq = [
+        {
+          task: 'queued B',
+          userId: 'user-1',
+          userTurnId: 'queued-B',
+          timestamp: '2026-11-20T00:00:00Z',
+          project: undefined,
+          acpSessionConfig: { prompt: 'queued B', cliType: 'builtin', agentType: 'codex' },
+        },
+      ] as never;
     });
     const runtime = createRuntime({ repo: metaRepo.repo });
     runtime.withSessionStore = async (_id, fn) =>
@@ -1222,6 +1271,7 @@ describe('useSessionActions', () => {
       const stopped = actions.requestSessionCancel(sessionId, 'assistant-stop');
       await flushEntered.promise;
       expect(control.getState().cancelRequest?.turnId).toBe('assistant-stop');
+      expect(control.getState().mq?.[0]).toMatchObject({ task: 'queued B', paused: true });
       expect(metaRepo.getSession(sessionId)?.lastCanceledTurn).toBeUndefined();
       expect(rpcReceipts).toEqual([
         {

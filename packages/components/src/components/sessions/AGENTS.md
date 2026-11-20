@@ -101,7 +101,7 @@ Read parent rules and linked context.
 - No presence: queue behind unfinished turns; never relight Working.
 - Busy composer without authoritative steer uses Queue.
 - Interrupt-and-send cancels with `{ interrupt: true }`, never the Stop identity:
-  an Inbox-aware Stop pauses and cancels every queued input, losing the guidance (#2050).
+  Stop retains paused drafts; only explicit queue actions reissue them.
 - Uploads: [contract](../../../../../specs/composer-send-during-upload.md).
 
 ## [Composer info bar](../../../../../.agents/docs/sessions-info-bar.md)

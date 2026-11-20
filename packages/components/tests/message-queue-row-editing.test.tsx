@@ -75,6 +75,43 @@ describe('queued message editing commits', () => {
     container = undefined;
   });
 
+  it('offers Send for each retained row while idle and sends only the selected row', async () => {
+    const sent: string[] = [];
+    const items = ['B', 'C', 'D', 'E', 'F'].map((name) => ({
+      ...makeItem(),
+      $cid: `cid-${name}`,
+      task: name,
+      userTurnId: name,
+      paused: true,
+    }));
+    function StoppedQueue() {
+      const [queued, setQueued] = useState(items);
+      return createElement(MessageQueueDisplay, {
+        sessionId: 'session-test' as SessionId,
+        items: queued,
+        showSteerAction: true,
+        sendWhileIdle: true,
+        onRemove: () => {},
+        onReorder: () => {},
+        onEditStart: () => {},
+        onEditCancel: () => {},
+        onEditSave: () => {},
+        onSteer: (item) => {
+          sent.push(item.task);
+          setQueued((rows) => rows.filter((row) => row.$cid !== item.$cid));
+        },
+      });
+    }
+    await act(async () => root?.render(createElement(StoppedQueue)));
+    const sends = container!.querySelectorAll<HTMLButtonElement>('[aria-label="Send"]');
+    expect(sends).toHaveLength(5);
+    expect(sent).toEqual([]);
+    await act(async () => sends[1]!.click());
+    expect(sent).toEqual(['C']);
+    expect(container!.querySelectorAll('[aria-label="Send"]')).toHaveLength(4);
+    for (const name of ['B', 'D', 'E', 'F']) expect(container!.textContent).toContain(name);
+  });
+
   it('renders dedicated scheduled rows in a final section without queue affordances', async () => {
     const opened: string[] = [];
     const cancelledRows: string[] = [];

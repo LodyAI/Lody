@@ -2868,6 +2868,7 @@
   "sessions.messageQueue.editMessage": "Edit queued message",
   "sessions.messageQueue.guide": "Steer the active response with this message",
   "sessions.messageQueue.guideAction": "Steer",
+  "sessions.messageQueue.sendAction": "Send",
   "sessions.messageQueue.attachmentOnly": "[Attachment]",
   "sessions.messageQueue.imageOnly": "[Image message]",
   "sessions.messageQueue.queuedCount": "{{count}} queued",
