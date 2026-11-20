@@ -55,8 +55,7 @@ any time; when off it changes none of the app's existing behavior.
     creates a sibling.
   - Tab indents under the previous sibling (expanding it if folded); Shift+Tab outdents directly, and the
     following siblings become its children (user decision).
-  - Backspace at line start merges into the previous visible node, re-parenting children to it; if the previous
-    node is a session node, it is block-selected instead.
+  - Backspace at line start merges into the previous visible node, re-parenting children to it.
   - ↑/↓ cross nodes only from the first/last visual line, keep the visual column, and skip folded subtrees;
     moving past a day's first/last node enters the adjacent date.
   - `Mod+Shift+↑/↓` moves a node with its children; `Mod+↑/↓` folds/unfolds; `Esc` enters block selection
@@ -85,38 +84,46 @@ any time; when off it changes none of the app's existing behavior.
   the node a child of a folded node, that node expands after a ~0.5s hover.
 - Dragging works only within one day; over another date it shows "Can't move to another date" and the card
   flies back on release. Esc during a drag only cancels the drag.
-- Dragging a conversation from any section of the left sidebar between two nodes creates a session node.
+- Dragging a conversation from any section of the left sidebar between two nodes creates a node holding its
+  mention.
   Dropping into a node's text to make an inline reference is not supported.
 - Visuals reuse the pinned section's floating card, 5px threshold and ~100ms settle animation, with an insertion
   line instead of opening a gap.
 
-### Session nodes
+### Conversation mentions (mention blocks)
 
-- A session node references one conversation and shows only its live title and status; it has no editable text.
-  Notes go in child nodes.
-- Insertion: drag from the sidebar; type `@` (or full-width `＠`) at the start of an empty node to open the
-  existing session menu, and choosing one converts the node; or paste a resolvable `lody://session` link into an
-  empty node. Inline mentions are not supported. One undo returns to the `@query` text.
-- Status matches the sidebar exactly by reusing the sidebar's status grouping and its unread, running and
-  approval signals; Today derives nothing on its own:
+- A conversation appears as an inline mention block inside a node's text; text can be written before and after
+  it. It shows the live title in link color, led by a status icon. In data each mention is one character
+  (U+FFFC) of the node text carrying a `mention = {kind: 'session', id}` mark (`expand: none`); there is no longer
+  a whole-row session node kind. An unknown `kind` shows as a grey placeholder and is kept as-is when copied.
+- Insertion: typing `@` (or full-width `＠`) anywhere opens the conversation menu and inserts the mention in place;
+  one undo returns to the `@query` text. Pasting a resolvable same-workspace `lody://session` link (bare or
+  Markdown) anywhere converts it to a mention. Dragging a conversation from the sidebar between two nodes creates
+  a node holding just that mention.
+- Caret: a mention takes one caret position. With the caret right after it, ← first selects the whole mention
+  (highlighted); a second ← moves before it; → is symmetric. Backspace after it (Delete before it) first selects,
+  the second press deletes; `Alt/⌘+Backspace` deletes at once. Enter on a selected mention opens the conversation,
+  like clicking its title (in the main area when pinned, otherwise by navigating). Typing replaces a selected mention.
+- Status matches the sidebar exactly by reusing its status grouping and unread, running and approval signals;
+  Today derives nothing on its own. Icon priority:
 
-  | Session status                                     | Node display                           |
-  | -------------------------------------------------- | -------------------------------------- |
-  | Waiting for approval / question                    | Prominent status dot, highest priority |
-  | Running                                            | Spinning status dot                    |
-  | Unread (not shown for agent-managed conversations) | Unread dot                             |
-  | Later                                              | The sidebar's countdown pill           |
-  | Settled, archived                                  | Check mark + strikethrough + dimmed    |
+  | Conversation status                       | Leading icon                                       |
+  | ----------------------------------------- | -------------------------------------------------- |
+  | Waiting for approval / question           | Prominent status dot                               |
+  | Running                                   | Spinning status dot                                |
+  | Later                                     | Alarm + countdown (the sidebar's muted small text) |
+  | Done (settled), archived                  | Check; title struck through and dimmed             |
+  | Unread (not shown for agent-managed ones) | Unread dot                                         |
+  | Idle                                      | Small yellow dashed hollow circle                  |
 
-  Settled and related states depend on the sidebar status view (PR #2948) landing. v1 has no `Cmd+Enter` settle.
-
-- Clicking the title opens the conversation (in the main area on the right when pinned, otherwise by
-  navigating); clicking the row's blank area or bullet block-selects it. Reaching a session node with the keyboard
-  block-selects it; Enter then opens the conversation and Backspace/Delete removes the node. The context menu
-  reuses the sidebar's session menu.
-- When the conversation was deleted or the current user cannot access it, the node shows "Conversation deleted /
-  No access" without a title; the node stays until the user removes it. Removing a session node does not affect
-  the conversation.
+- Clicking the status icon opens a status menu that changes the conversation's status (writing the same session
+  metadata as the sidebar): Mark as unread / Mark as read (whichever applies), Later (presets and custom, reusing
+  the sidebar's), Done, Move to Focus (only when Later or Done).
+- When the conversation was deleted or the current user cannot access it, the mention shows "Conversation deleted
+  / No access" without a title; it stays until the user removes it. Removing a mention does not affect the
+  conversation.
+- In plain text (copy, the Convert to task prompt) each mention is written as
+  `[@Title](lody://session/<id>?workspace=<id>)`.
 
 ### Convert to task
 
@@ -128,8 +135,10 @@ any time; when off it changes none of the app's existing behavior.
   - Machine, project, agent config and other defaults match the new-conversation page (the last choice); nothing
     is inherited from the outline context.
   - The dialog uses its own draft and leaves the page's draft untouched. Enter sends (not during IME composition).
-- On success the node turns into a session node in place and its original children stay under it, folded; on
-  failure the original node is unchanged. When pinned, the new conversation also opens in the main area on the
+- Opening a node's bullet menu shows the node and its subtree as selected: what Convert to task will take.
+- On success, if the node's text is unchanged, the line becomes a line holding only the new conversation's
+  mention, its original children kept under it, folded; if the text was edited meanwhile, the mention is inserted
+  at the line start without overwriting the edit. On failure the original node is unchanged. When pinned, the new conversation also opens in the main area on the
   right; otherwise Today stays.
 - The new conversation is an ordinary conversation, listed in the sidebar with no extra marking.
 
@@ -145,7 +154,7 @@ any time; when off it changes none of the app's existing behavior.
 - On a page's first write, `repo.upsertDocMeta` registers `{ userId, date }` in the meta flock. A member's dates
   are listed by docId prefix; the meta holds no content or summary.
 - Page content: a `LoroTree` holds the outline structure (fractional-index ordering); each node's data holds a
-  `LoroText` for its text, a session node stores `sessionId`, and fold state is stored alongside.
+  `LoroText` for its text (conversation mentions are marked characters in it), and fold state is stored alongside.
 - Data is workspace-shared: every member can read and write every member's Today; neither the UI nor the sync
   layer distinguishes the page owner.
 - Encrypted workspaces: document rooms are encrypted by docId automatically and the meta flock is protected too,
@@ -174,7 +183,7 @@ any time; when off it changes none of the app's existing behavior.
 
 ## Out of scope
 
-- `Cmd+Enter` settle, inline mentions, inline formatting, images.
+- `Cmd+Enter` done, inline formatting, images.
 - Dragging across dates, a "move to date" action.
 - Remote cursors and presence, restricting edits to the page owner.
 - Agents reading or writing Today, mobile and native clients.
