@@ -475,7 +475,7 @@ Foreground workspace runtimes default to HTTP. An explicit
 opts in only with `true` or `1`. Durable and ephemeral transports then forward
 `webSocket: { enabled: true, url: streamsBaseUrl, authPoolKey: workspaceId }`.
 Presence retains its sharded HTTP URL for fallback. Disposable eager-sync workers
-receive no WS option. The pinned `loro-repo` 0.26.0, `@loro-dev/streams-crdt` 0.22.0,
+receive no WS option. The pinned `loro-repo` 0.26.0, `@loro-dev/streams-crdt` 0.22.1,
 and `@loro-dev/streams-client` 0.14.0 packages implement URL override and Repo
 forwarding while keeping WS default off. Physical connection reuse is not proven by
 HTTP compatibility tests.
