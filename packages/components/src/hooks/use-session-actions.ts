@@ -309,7 +309,10 @@ export type SessionActions = {
   /** Snooze a session until `snoozedUntil` (epoch ms) in the Status view's Later section. */
   snoozeSession: (sessionId: SessionId, snoozedUntil: number) => Promise<void>;
   /** Mark a session as settled in the Status view's Settled section. */
-  settleSession: (sessionId: SessionId) => Promise<void>;
+  settleSession: (
+    sessionId: SessionId,
+    options?: { includeOpenedSessions?: boolean }
+  ) => Promise<void>;
   /** Restore a snoozed or settled session back to Focus. */
   moveSessionToFocus: (sessionId: SessionId) => Promise<void>;
 };
@@ -1185,26 +1188,42 @@ export function useSessionActions(): SessionActions {
   );
 
   const settleSession = useCallback(
-    async (sessionId: SessionId) => {
+    async (sessionId: SessionId, options?: { includeOpenedSessions?: boolean }) => {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const roomId = getSessionRoomId(sessionId);
-      const existing = await runtime.repo.getDocMeta(roomId);
-      const repoMeta = !isLoroRepoDocDeleted(existing)
-        ? (existing?.meta as SessionMeta | undefined)
-        : undefined;
-      const cachedMeta = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
-      const lastMessageAt =
-        getFiniteTimestamp(repoMeta?.lastMessageAt) ??
-        getFiniteTimestamp(cachedMeta?.lastMessageAt) ??
-        0;
-      await updateSessionMetadata(sessionId, {
-        settledAt: Math.max(getServerNow(), lastMessageAt),
-        snoozedUntil: undefined,
-      });
+      // Settle covers only first-class Sessions: contained Tabs share the
+      // owner's bucket and never render their own status row.
+      const settleTargets =
+        options?.includeOpenedSessions === true
+          ? (await runtime.readSessionOperationTargets(sessionId, 'archive-tree')).filter(
+              (session) => session.parentSessionId === undefined
+            )
+          : undefined;
+      if (settleTargets) {
+        await assertCanManageSessions(settleTargets.map((target) => target.id));
+        if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
+          throw new Error('Workspace changed before settling');
+        }
+      }
+      for (const target of settleTargets?.map((session) => session.id) ?? [sessionId]) {
+        const roomId = getSessionRoomId(target);
+        const existing = await runtime.repo.getDocMeta(roomId);
+        const repoMeta = !isLoroRepoDocDeleted(existing)
+          ? (existing?.meta as SessionMeta | undefined)
+          : undefined;
+        const cachedMeta = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
+        const lastMessageAt =
+          getFiniteTimestamp(repoMeta?.lastMessageAt) ??
+          getFiniteTimestamp(cachedMeta?.lastMessageAt) ??
+          0;
+        await updateSessionMetadata(target, {
+          settledAt: Math.max(getServerNow(), lastMessageAt),
+          snoozedUntil: undefined,
+        });
+      }
     },
-    [runtime, store, updateSessionMetadata]
+    [runtime, store, assertCanManageSessions, updateSessionMetadata]
   );
 
   const moveSessionToFocus = useCallback(

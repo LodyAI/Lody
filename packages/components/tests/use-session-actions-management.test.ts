@@ -145,6 +145,10 @@ import {
   SessionArchiveConfirmationDialog,
   useArchiveSessionWithConfirmation,
 } from '../src/components/sessions/session-archive-confirmation';
+import {
+  SessionSettleConfirmationDialog,
+  useSettleSessionWithConfirmation,
+} from '../src/components/sessions/session-settle-confirmation';
 import { initI18n } from '../src/i18n';
 import { docMetaCacheReadyAtom, sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import {
@@ -190,6 +194,16 @@ function ConfirmedArchiveProbe({ onReady }: { onReady: (archive: ConfirmedArchiv
     onReady(archive);
   }, [archive, onReady]);
   return createElement(SessionArchiveConfirmationDialog);
+}
+
+type ConfirmedSettle = (sessionId: SessionId) => Promise<boolean>;
+
+function ConfirmedSettleProbe({ onReady }: { onReady: (settle: ConfirmedSettle) => void }) {
+  const settle = useSettleSessionWithConfirmation(useSessionActions().settleSession);
+  useEffect(() => {
+    onReady(settle);
+  }, [settle, onReady]);
+  return createElement(SessionSettleConfirmationDialog);
 }
 
 function ActionsProbe({ onReady }: { onReady: (actions: SessionActions) => void }) {
@@ -1113,6 +1127,35 @@ describe('useSessionActions', () => {
     expect(metaRepo.getSession(rootSession.id)).toEqual({ ...rootSession, isTabClosed: false });
   });
 
+  it('settles opened sub-conversations only when included, never contained tabs', async () => {
+    const tree = createContainmentSessions('settle', false);
+    const snoozedOpened = {
+      ...tree.openedSession,
+      snoozedUntil: Date.now() + 60_000,
+    } as SessionMeta;
+    const metaRepo = createSessionMetaRepo([
+      tree.rootSession,
+      tree.tabSession,
+      snoozedOpened,
+      tree.openedFromTabSession,
+    ]);
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }));
+
+    await actions.settleSession(tree.rootSession.id);
+    expect(metaRepo.getSession(tree.rootSession.id)?.settledAt).toBeGreaterThan(0);
+    for (const session of [snoozedOpened, tree.openedFromTabSession]) {
+      expect(metaRepo.getSession(session.id)?.settledAt).toBeUndefined();
+    }
+
+    await actions.settleSession(tree.rootSession.id, { includeOpenedSessions: true });
+    for (const session of [snoozedOpened, tree.openedFromTabSession]) {
+      expect(metaRepo.getSession(session.id)?.settledAt).toBeGreaterThan(0);
+      expect(metaRepo.getSession(session.id)?.snoozedUntil).toBeUndefined();
+    }
+    // Contained Tabs share the owner's bucket; settle never writes them.
+    expect(metaRepo.getSession(tree.tabSession.id)?.settledAt).toBeUndefined();
+  });
+
   it('reopens a closed tab of an archived workspace without restoring it', async () => {
     const tree = createContainmentSessions('archived-reopen', true);
     const archivedRoot = { ...tree.rootSession, isTabClosed: true };
@@ -1507,6 +1550,157 @@ describe('useSessionActions', () => {
       await answer('Archive all');
       await expect(treeArchive).resolves.toBe(true);
       expect(tree.metaRepo.getSession(tree.openedSession.id)?.isArchived).toBe(true);
+    });
+  });
+
+  describe('settle confirmation for opened sub-conversations', () => {
+    const renderConfirmedSettle = async (runtime: WorkspaceRuntime, workingIds: SessionId[]) => {
+      await initI18n('en');
+      const jotaiStore = createStore();
+      jotaiStore.set(runtimeAtom, runtime);
+      jotaiStore.set(docMetaCacheReadyAtom, true);
+      jotaiStore.set(currentWorkspaceIdAtom, 'workspace-1' as WorkspaceId);
+      jotaiStore.set(currentWorkspaceSlugAtom, 'workspace-slug');
+      const nowMs = 1_000_000;
+      jotaiStore.set(lodyPresenceNowMsAtom, nowMs);
+      jotaiStore.set(
+        lodyPresenceStatesAtom,
+        Object.fromEntries(
+          workingIds.map((sessionId) => [
+            `presence-${sessionId}`,
+            {
+              kind: 'session',
+              sessionId,
+              machineId: 'machine' as MachineId,
+              instanceId: 'instance',
+              status: { type: 'running' },
+              updatedAt: nowMs,
+            },
+          ])
+        ) as never
+      );
+      let settle: ConfirmedSettle | null = null;
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => {
+        root?.render(
+          createElement(
+            PlatformContext.Provider,
+            { value: { ...testPlatform, kind: 'local' } },
+            createElement(
+              Provider,
+              { store: jotaiStore },
+              createElement(ConfirmedSettleProbe, {
+                onReady: (next) => {
+                  settle = next;
+                },
+              })
+            )
+          )
+        );
+      });
+      if (!settle) throw new Error('Confirmed settle was not initialized');
+      return settle as ConfirmedSettle;
+    };
+
+    const dialog = () => document.querySelector<HTMLElement>('[role="alertdialog"]');
+    // Wrapped: returning the pending promise would make the caller await the answer.
+    const startSettle = async (settle: ConfirmedSettle, sessionId: SessionId) => {
+      let result!: Promise<boolean>;
+      await act(async () => {
+        result = settle(sessionId);
+      });
+      await vi.waitFor(() => expect(dialog()).not.toBeNull());
+      return { result };
+    };
+    const answer = async (label: string) => {
+      const button = Array.from(dialog()!.querySelectorAll('button')).find(
+        (candidate) => candidate.textContent?.trim() === label
+      );
+      expect(button).toBeInstanceOf(HTMLButtonElement);
+      await act(async () => button!.click());
+    };
+
+    const createTree = (prefix: string) => {
+      const tree = createContainmentSessions(prefix, false);
+      const openedTab = {
+        ...tree.tabSession,
+        id: `${prefix}-opened-tab` as SessionId,
+        parentSessionId: tree.openedSession.id,
+        openedBySessionId: tree.openedSession.id,
+      };
+      const archivedOpened = {
+        ...tree.openedSession,
+        id: `${prefix}-archived-opened` as SessionId,
+        isArchived: true,
+      };
+      const metaRepo = createSessionMetaRepo([...tree.sessions, openedTab, archivedOpened]);
+      return { ...tree, openedTab, archivedOpened, metaRepo };
+    };
+
+    it('asks, then settles every opened sub-conversation on "all"', async () => {
+      const tree = createTree('settle-all');
+      const runtime = createRuntime({ repo: tree.metaRepo.repo });
+      // Work in an opened Session's own Tab makes that sub-conversation working.
+      const settle = await renderConfirmedSettle(runtime, [tree.openedTab.id]);
+
+      const { result } = await startSettle(settle, tree.rootSession.id);
+      expect(dialog()?.textContent).toContain(
+        'This conversation opened 2 active sub-conversations.'
+      );
+      expect(dialog()?.textContent).toContain('1 is still working.');
+      // Nothing is written while the user decides.
+      expect(tree.metaRepo.getSession(tree.rootSession.id)?.settledAt).toBeUndefined();
+
+      await answer('Mark all as completed');
+      await expect(result).resolves.toBe(true);
+      // Opened Sessions settle; contained Tabs keep no status fields of their own.
+      for (const session of [
+        tree.rootSession,
+        tree.openedSession,
+        tree.openedFromTabSession,
+      ]) {
+        expect(tree.metaRepo.getSession(session.id)?.settledAt).toBeGreaterThan(0);
+      }
+      for (const session of [tree.tabSession, tree.openedTab]) {
+        expect(tree.metaRepo.getSession(session.id)?.settledAt).toBeUndefined();
+      }
+      expect(dialog()).toBeNull();
+    });
+
+    it('settles only the conversation, or nothing on cancel', async () => {
+      const tree = createTree('settle-only');
+      const runtime = createRuntime({ repo: tree.metaRepo.repo });
+      const settle = await renderConfirmedSettle(runtime, []);
+
+      const { result: cancelled } = await startSettle(settle, tree.rootSession.id);
+      expect(dialog()?.textContent).toContain('None of them is working right now.');
+      await answer('Cancel');
+      await expect(cancelled).resolves.toBe(false);
+      for (const session of [tree.rootSession, tree.openedSession]) {
+        expect(tree.metaRepo.getSession(session.id)?.settledAt).toBeUndefined();
+      }
+
+      const { result: onlyThis } = await startSettle(settle, tree.rootSession.id);
+      await answer('Mark this only');
+      await expect(onlyThis).resolves.toBe(true);
+      expect(tree.metaRepo.getSession(tree.rootSession.id)?.settledAt).toBeGreaterThan(0);
+      for (const session of [tree.openedSession, tree.openedFromTabSession]) {
+        expect(tree.metaRepo.getSession(session.id)?.settledAt).toBeUndefined();
+      }
+    });
+
+    it('settles directly when there are no active sub-conversations', async () => {
+      const tree = createTree('settle-none');
+      const runtime = createRuntime({ repo: tree.metaRepo.repo });
+      const settle = await renderConfirmedSettle(runtime, []);
+
+      await act(async () => {
+        await expect(settle(tree.archivedOpened.id)).resolves.toBe(true);
+      });
+      expect(dialog()).toBeNull();
+      expect(tree.metaRepo.getSession(tree.archivedOpened.id)?.settledAt).toBeGreaterThan(0);
     });
   });
 

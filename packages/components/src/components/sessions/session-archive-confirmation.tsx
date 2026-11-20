@@ -62,7 +62,7 @@ export function summarizeOpenedSubConversations(
   };
 }
 
-function isSessionWorking(states: LodyPresenceStateMap, nowMs: number) {
+export function isSessionWorking(states: LodyPresenceStateMap, nowMs: number) {
   return (sessionId: SessionId) =>
     findFreshSessionPresenceState(states, sessionId, nowMs)?.status != null;
 }

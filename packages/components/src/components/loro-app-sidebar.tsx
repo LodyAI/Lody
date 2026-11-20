@@ -117,6 +117,7 @@ import { selectAndWriteLocalProject } from '@/lib/local-project-import';
 import { importSidebarLocalProject } from '@/components/sidebar-local-project-import';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
 import { useArchiveSessionWithConfirmation } from '@/components/sessions/session-archive-confirmation';
+import { useSettleSessionWithConfirmation } from '@/components/sessions/session-settle-confirmation';
 import {
   chatScopeAtom,
   chatsCollapsedAtom,
@@ -1869,6 +1870,7 @@ export function LoroAppSidebar({
   const presenceNowMs = useAtomValue(lodyPresenceNowMsAtom);
 
   const archiveSessionWithConfirmation = useArchiveSessionWithConfirmation(archiveSession);
+  const settleSessionWithConfirmation = useSettleSessionWithConfirmation(settleSession);
   const rejectHistoryWrite = useCallback(
     (ids: string[]) => {
       if (!ids.some((id) => historyOnlySessionIds.has(id))) return false;
@@ -3917,11 +3919,11 @@ export function LoroAppSidebar({
 
   const handleSettleSession = useCallback(
     (sessionId: string) => {
-      void settleSession(sessionId as SessionId).catch((error) => {
+      void settleSessionWithConfirmation(sessionId as SessionId).catch((error) => {
         toast.error(error instanceof Error ? error.message : String(error));
       });
     },
-    [settleSession]
+    [settleSessionWithConfirmation]
   );
 
   const handleMoveSessionToFocus = useCallback(
