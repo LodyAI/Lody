@@ -44,7 +44,9 @@ flowchart LR
 
 ## One observation lifecycle
 
-`observeFlock` is the only subscription state machine. It subscribes to changed
+`observe` in [`native-repo.ts`](../../packages/shared/src/node/native-repo.ts) is
+the only subscription state machine; `observeFlock`, `observeFlockRegisters` and
+`observeLoroDoc` differ only in their subscription and initial load. `observeFlock` subscribes to changed
 keys from the current head with no snapshot (`snapshot: false`), so no frame grows
 with the room. It then reads initial state as bounded `flockScanPage` pages, each a
 fresh `start`-bounded query at its own head. A change that arrives while pages are
@@ -57,6 +59,10 @@ load runs again, so every view recovers from a new snapshot.
 subscription also carries each change's clock (`registers: true`), the initial
 state is the room's complete raw export, and buffered or repeated changes merge
 in any order because they are Flock records with clocks.
+
+`observeLoroDoc` subscribes to a `loro_doc` room's binary updates and loads its raw
+snapshot. Updates that arrive during the load import in any order because Loro
+merges idempotently.
 
 ## Named Flock documents
 
@@ -85,6 +91,30 @@ Real sizes from a long-lived local workspace on the development machine (1,296
 documents, 106k Meta registers) bound the in-memory trade-off: `wf` 24 rows / 8 KB
 file, the largest of ten `mf` rooms 524 rows / 100 KB, `sr` 97 rows / 12 KB. Each
 replica is the whole room, as with the legacy storage-backed replica.
+
+## Session documents
+
+Session Loro documents (`session-*`, `isNativeDocId`) are owned natively by the same
+switch. Their roughly 170 call sites keep using `repo.openPersistedDoc` and the
+in-memory `LoroDoc`: the repo is given loro-repo's external document owner
+([`native-docs.ts`](../../packages/shared/src/node/native-docs.ts)). On open the
+replica loads the room's raw snapshot (`exportLoroRaw`) and then receives binary
+updates from an update subscription (`observeLoroDoc`, the third load on the one
+observation lifecycle). Local changes commit as Loro updates with
+`importRoomState` on the existing persistence barriers. A reload after reconnect
+delivers the snapshot again, which imports as an update. The renderer opens and
+commits through main (`openDoc`/`commitDoc`), which admits only Session ids.
+
+Writers merge as Loro CRDT updates: concurrent appends from the daemon and a
+renderer are both kept in every replica. A failed commit stays pending in the
+replica and is retried by the next barrier, as for named Flock documents.
+
+Migration is lazy and per document: the first open from a source imports that
+source's complete legacy snapshot (a lossless Loro merge), checks with
+`inspectDocCausal` that the room's version covers the legacy oplog version, and
+then publishes `['loro_doc', <id>, <source>]`. A native write marks
+`['loro_doc', <id>, 'native']`. Write-back walks those markers and merges each
+room's export into the legacy CLI store before removing its markers.
 
 ## Workspace Meta
 
@@ -147,7 +177,10 @@ handling; a failed write-back is logged and retried on the next start.
 | 3        | Workspace catalog (`wf`) on the same lifecycle                                                        | 600 (actual ≈390 net) |
 | —        | Switch to the released SDK packages when loro-repo #290/#308 ship                                     | manifests only        |
 | 4        | Machine Flock (`mf`) and schedule registry (`sr`)                                                     | 800 (actual ≈40)      |
-| 5        | Cloud replication of native rooms (needs remote Meta design)                                          | separate proposal     |
+| 5        | Session Loro documents through the external document owner                                            | 700 (actual ≈490)     |
+| 6        | Windowed Session directory and on-demand document loading (see Performance)                           | to be sized           |
+| —        | Remaining Loro documents (`schedule-*`, Preview comments) on the same owner                           | small per type        |
+| —        | Cloud replication of native rooms (needs remote Meta design)                                          | separate proposal     |
 
 ## Performance
 
@@ -192,13 +225,47 @@ update = write until the other connection's replica shows it):
 |         5,000 | write     | 0.94 | 1.22 | 76.0 |
 |         5,000 | update    | 0.93 | 1.58 | 84.1 |
 
+Session documents: synthetic histories written with the real `HistoryWriter`
+(alternating 200-character user turns and 1,500-character assistant turns);
+milliseconds. _Open_ is a second connection's new repo loading the document
+through the owner; _directory_ is the Session reader's initial projection; _append
+visible_ is `appendTurn` plus the committed barrier until the other replica shows
+the turn (50 samples after 10 warm-ups). Reproduce with
+`LODY_SESSION_LOAD_BENCH=1000,10000,100000` on
+[`session-doc-load.benchmark.test.ts`](../../packages/shared/tests/session-doc-load.benchmark.test.ts).
+
+|   Turns | Snapshot | Raw export | Open | Last 50 | Directory | Append visible p50 / p95 / p99 |
+| ------: | -------: | ---------: | ---: | ------: | --------: | -----------------------------: |
+|   1,000 |   0.4 MB |        8.4 |  9.5 |     3.8 |      14.5 |               2.2 / 3.4 / 10.0 |
+|  10,000 |   3.8 MB |       78.6 | 99.7 |     5.5 |     130.9 |                2.0 / 3.6 / 4.1 |
+| 100,000 |  38.5 MB |        877 | 1329 |     9.5 |      2258 |               2.0 / 4.4 / 10.1 |
+
+Appending is within the 50 ms target at every size. The first screen (open, last
+50, directory; target 200 ms) holds at 1,000 turns, misses at 10,000 (236 ms) and
+fails at 100,000 for two separate O(history) costs:
+
+- **Directory.** The Session reader projects a row for every turn on open
+  (`session-data/loro.ts`). The legacy path pays the same cost (2.3 s at 100k
+  after a 71 ms in-process import), so this is a Lody change: a windowed directory
+  that projects the tail first.
+- **Whole-document transfer.** The engine re-encodes and sends the full snapshot
+  as base64 JSON on each open. Before the SDK framer fix (branch
+  `lody/framer-chunks`) the client also recopied its receive buffer per socket chunk,
+  making a 38.5 MB open take 10–12 s. With it, the remaining cost is still
+  proportional to history, so 100k needs on-demand or segmented loading in the SDK.
+
+Memory with one 100k-turn Session open: the replica adds about 65–90 MB to the
+opening process (in-process measurement 87.5 MB), and the engine host 10–15 MB
+for a loaded room; RSS deltas below 20 MB are within measurement noise.
+
 ## Limits
 
-- Requires unreleased SDK changes: loro-repo #301–#307 (#306 adds changes
-  subscriptions without a snapshot, #307 the incremental external metadata
-  contract) plus register-bearing changes and the external named Flock owner
-  (branches `lody/flock-changes-registers`, `lody/external-flock-docs`). Local
+- Session documents require unreleased SDK branches: binary Loro update
+  subscriptions (`lody/loro-doc-updates`), the external Loro document owner
+  (`lody/external-docs`) and the client framer fix (`lody/framer-chunks`). Local
   builds are used only through an uncommitted override.
+- Session first screens at 10,000 turns and above miss the 200 ms target (see
+  Performance).
 - A commit already sent when the host dies is an unknown outcome. Per the SDK
   contract this latches that repo's metadata writes until it is recreated; reads
   continue. Commits attempted while disconnected are certain non-commits.

@@ -10,6 +10,7 @@ import type {
   FlockKey,
   FlockRegisterEntry,
   FlockStateEntry,
+  LoroUpdates,
   RepoClient,
   RoomKey,
 } from '@loro-dev/loro-repo-client';
@@ -151,11 +152,15 @@ export interface FlockObservation {
 }
 
 const PAGE_BUDGET = { maxRows: 4096, maxBytes: 1024 * 1024 };
-type Opening = ReturnType<RepoClient['beginFlockChangesSubscription']>;
-type Loader = (
-  update: FlockChangesUpdate,
+type Update = { kind: 'snapshot' | 'changes' | 'gap' };
+type Opening = {
+  handle: { release(): Promise<{ status: string }>; whenVisible(txId: number): Promise<void> };
+  ready: Promise<unknown>;
+};
+type Loader<U> = (
+  update: U,
   isCurrent: () => boolean
-) => { buffer(update: FlockChangesUpdate): void; run(): Promise<boolean> };
+) => { buffer(update: U): void; run(): Promise<boolean> };
 
 /**
  * The single observation lifecycle. The engine subscription starts at the head
@@ -165,19 +170,16 @@ type Loader = (
  * SDK resubscribes after reconnect (and a gap is resubscribed here), and both
  * reload. Domains own no retry, release or reconnect state.
  */
-function observe(
+function observe<U extends Update>(
   client: RepoClient,
-  namespace: string,
-  room: RoomKey,
-  prefix: FlockKey,
-  registers: boolean,
-  load: Loader,
-  onChanges: (update: FlockChangesUpdate) => void,
+  subscribe: (onUpdate: (update: U) => void) => Opening,
+  load: Loader<U>,
+  onChanges: (update: U) => void,
   onInvalidated: () => void
 ): FlockObservation {
   let active = true;
   let current: Opening | undefined;
-  let loading: ReturnType<Loader> | undefined;
+  let loading: ReturnType<Loader<U>> | undefined;
   let resolveReady!: () => void;
   let rejectReady!: (error: unknown) => void;
   const ready = new Promise<void>((resolve, reject) => {
@@ -189,42 +191,36 @@ function observe(
     if (active && state !== 'connected') onInvalidated();
   });
   const begin = () => {
-    const opening: Opening = client.beginFlockChangesSubscription(
-      namespace,
-      room,
-      prefix,
-      (update) => {
-        if (!active || current !== opening) return;
-        if (update.kind === 'gap') {
+    const opening: Opening = subscribe((update) => {
+      if (!active || current !== opening) return;
+      if (update.kind === 'gap') {
+        onInvalidated();
+        void opening.handle.release().catch(() => {});
+        begin();
+      } else if (update.kind === 'snapshot') {
+        // Initial subscribe or SDK resubscription after reconnect: reload.
+        const isCurrent = () => active && current === opening && loading === pending;
+        const pending = load(update, isCurrent);
+        loading = pending;
+        void (async () => {
+          // A resubscription snapshot arrives during the SDK's reconnect
+          // resync, before ordinary reads are admitted.
+          if (client.connectionState !== 'connected') await client.whenConnected();
+          if (await pending.run()) {
+            if (loading === pending) loading = undefined;
+            resolveReady();
+          }
+        })().catch((error: unknown) => {
+          if (!isCurrent()) return;
+          rejectReady(error);
           onInvalidated();
-          void opening.handle.release().catch(() => {});
-          begin();
-        } else if (update.kind === 'snapshot') {
-          // Initial subscribe or SDK resubscription after reconnect: reload.
-          const isCurrent = () => active && current === opening && loading === pending;
-          const pending = load(update, isCurrent);
-          loading = pending;
-          void (async () => {
-            // A resubscription snapshot arrives during the SDK's reconnect
-            // resync, before ordinary reads are admitted.
-            if (client.connectionState !== 'connected') await client.whenConnected();
-            if (await pending.run()) {
-              if (loading === pending) loading = undefined;
-              resolveReady();
-            }
-          })().catch((error: unknown) => {
-            if (!isCurrent()) return;
-            rejectReady(error);
-            onInvalidated();
-          });
-        } else if (loading) {
-          loading.buffer(update);
-        } else {
-          onChanges(update);
-        }
-      },
-      { snapshot: false, registers }
-    );
+        });
+      } else if (loading) {
+        loading.buffer(update);
+      } else {
+        onChanges(update);
+      }
+    });
     current = opening;
     opening.ready.catch((error: unknown) => {
       if (current === opening) rejectReady(error);
@@ -262,12 +258,10 @@ export function observeFlock(
   prefix: FlockKey,
   listener: (event: FlockObservationEvent) => void
 ): FlockObservation {
-  return observe(
+  return observe<FlockChangesUpdate>(
     client,
-    namespace,
-    room,
-    prefix,
-    false,
+    (onUpdate) =>
+      client.beginFlockChangesSubscription(namespace, room, prefix, onUpdate, { snapshot: false }),
     (_update, isCurrent) => {
       const buffered: { entries: FlockStateEntry[]; txId: number }[] = [];
       return {
@@ -325,12 +319,13 @@ export function observeFlockRegisters(
   room: RoomKey,
   listener: (event: FlockRegisterObservationEvent) => void
 ): FlockObservation {
-  return observe(
+  return observe<FlockChangesUpdate>(
     client,
-    namespace,
-    room,
-    [],
-    true,
+    (onUpdate) =>
+      client.beginFlockChangesSubscription(namespace, room, [], onUpdate, {
+        snapshot: false,
+        registers: true,
+      }),
     (_update, isCurrent) => {
       const buffered: FlockChangesUpdate[] = [];
       return {
@@ -345,8 +340,44 @@ export function observeFlockRegisters(
         },
       };
     },
-    (update) =>
-      listener({ kind: 'changes', registers: update.registers ?? [], txId: update.txId }),
+    (update) => listener({ kind: 'changes', registers: update.registers ?? [], txId: update.txId }),
+    () => listener({ kind: 'invalidated' })
+  );
+}
+
+/** Loro document mode: the room's raw snapshot, then binary updates. */
+export type LoroDocObservationEvent =
+  | { kind: 'snapshot'; file: Uint8Array; txId: number }
+  | { kind: 'changes'; updates: Uint8Array[]; txId: number }
+  | { kind: 'invalidated' };
+
+/**
+ * Update view for an in-memory Loro replica. Initial state is the room's raw
+ * export; buffered or repeated updates import in any order.
+ */
+export function observeLoroDoc(
+  client: RepoClient,
+  namespace: string,
+  room: RoomKey,
+  listener: (event: LoroDocObservationEvent) => void
+): FlockObservation {
+  return observe<LoroUpdates>(
+    client,
+    (onUpdate) => client.beginLoroUpdatesSubscription(namespace, room, onUpdate),
+    (_update, isCurrent) => {
+      const buffered: Uint8Array[] = [];
+      return {
+        buffer: (update) => buffered.push(...update.updates),
+        async run() {
+          const { bytes, roomTxId } = await client.exportLoroRaw(namespace, room);
+          if (!isCurrent()) return false;
+          listener({ kind: 'snapshot', file: bytes, txId: roomTxId });
+          if (buffered.length) listener({ kind: 'changes', updates: buffered, txId: roomTxId });
+          return true;
+        },
+      };
+    },
+    (update) => listener({ kind: 'changes', updates: update.updates, txId: update.txId }),
     () => listener({ kind: 'invalidated' })
   );
 }
@@ -360,7 +391,7 @@ export interface LegacyFlockBundle {
   readonly entries: Readonly<Record<string, { readonly c: string; readonly d?: unknown }>>;
 }
 
-const MIGRATIONS_ROOM: RoomKey = { kind: 'flock', id: 'lody-migrations' };
+export const MIGRATIONS_ROOM: RoomKey = { kind: 'flock', id: 'lody-migrations' };
 
 const PAGE = { maxRows: 4096, maxBytes: 1024 * 1024 };
 const READ_CHUNK = 1024;

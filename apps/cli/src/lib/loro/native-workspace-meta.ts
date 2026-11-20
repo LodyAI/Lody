@@ -6,11 +6,16 @@ import { META_ROOM } from '@loro-dev/loro-repo-client';
 import { Flock } from '@loro-dev/flock-wasm';
 import {
   ExternalMetadataNotCommittedError,
+  type ExternalDocsAdapter,
   type ExternalFlockDocsAdapter,
   type LoroRepo,
   type StorageAdapter,
 } from 'loro-repo';
-import { isNativeFlockDocId, ownedLegacyFlockDocIds } from '@lody/shared/native-workspace-meta-ipc';
+import {
+  isNativeDocId,
+  isNativeFlockDocId,
+  ownedLegacyFlockDocIds,
+} from '@lody/shared/native-workspace-meta-ipc';
 import {
   connectNativeRepo,
   importLegacyRoom,
@@ -20,6 +25,11 @@ import {
   type NativeRepoHostLauncher,
 } from '@lody/shared/node/native-repo';
 import { createNativeFlockDocs } from '@lody/shared/node/native-flock-docs';
+import {
+  createNativeDocs,
+  listNativeDocIds,
+  unpublishLegacyDoc,
+} from '@lody/shared/node/native-docs';
 import {
   createNativeWorkspaceMeta,
   type NativeWorkspaceMeta,
@@ -62,7 +72,11 @@ export async function openNativeWorkspaceMeta(
   legacyStorage: StorageAdapter,
   legacyDbPath: string,
   logger: Logger
-): Promise<{ meta: NativeWorkspaceMeta; flockDocs: ExternalFlockDocsAdapter }> {
+): Promise<{
+  meta: NativeWorkspaceMeta;
+  flockDocs: ExternalFlockDocsAdapter;
+  docs: ExternalDocsAdapter;
+}> {
   const { client } = await connectNativeRepo({ launcher: cliNativeRepoHostLauncher });
   const stored = (await legacyStorage.inventory?.())?.flockDocIds ?? [];
   const results = [
@@ -92,6 +106,18 @@ export async function openNativeWorkspaceMeta(
       (id) => isNativeFlockDocId(workspaceId, id),
       (file) => Flock.fromFile(file).exportJson()
     ),
+    // Session bodies migrate lazily, per document, on first native open.
+    docs: createNativeDocs(client, workspaceId, isNativeDocId, {
+      source: CLI_SOURCE,
+      async load(docId) {
+        const legacy = await legacyStorage.loadDoc(docId);
+        if (!legacy) return undefined;
+        return {
+          snapshot: legacy.export({ mode: 'snapshot' }),
+          version: Object.fromEntries(legacy.oplogVersion().toJSON()),
+        };
+      },
+    }),
   };
 }
 
@@ -105,6 +131,7 @@ export async function openNativeWorkspaceMeta(
 export async function writeBackNativeWorkspaceMeta(
   workspaceId: string,
   legacyRepo: LoroRepo,
+  legacyStorage: StorageAdapter,
   legacyDbPath: string,
   logger: Logger
 ): Promise<void> {
@@ -124,6 +151,16 @@ export async function writeBackNativeWorkspaceMeta(
       handle.flock.importFile((await client.exportFlockRaw(workspaceId, flockRoom(id))).bytes);
       await legacyRepo.persistFlockDocNow(id, handle.flock);
       await unpublishLegacyRoom(client, workspaceId, flockRoom(id), CLI_SOURCE);
+    }
+    // Session bodies with native state: migrated from any replica or written natively.
+    // This runs before the repo opens any document, so the native export is
+    // journaled as a Loro update (an idempotent merge) without loading every body.
+    for (const docId of await listNativeDocIds(client, workspaceId)) {
+      if (!isNativeDocId(docId)) continue;
+      const room = { kind: 'loro_doc' as const, id: docId };
+      const { bytes } = await client.exportLoroRaw(workspaceId, room);
+      await legacyStorage.save({ type: 'doc-update', docId, update: bytes });
+      await unpublishLegacyDoc(client, workspaceId, docId, CLI_SOURCE);
     }
     await unpublishLegacyRoom(client, workspaceId, META_ROOM, CLI_SOURCE);
     await rm(marker, { force: true });

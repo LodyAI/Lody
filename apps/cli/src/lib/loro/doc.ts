@@ -688,7 +688,7 @@ export class LoroDocumentManager {
         // loro-repo's default 5 s trailing debounce let a crash drop new Sessions.
         metaPersistDebounceMs: 0,
         flockDocRetentionMs: getFlockDocRetentionMs,
-        ...(native ? { externalFlockDocs: native.flockDocs } : {}),
+        ...(native ? { externalFlockDocs: native.flockDocs, externalDocs: native.docs } : {}),
       };
       const externalMeta = nativeMeta;
       repo = await traceAsync(
@@ -709,6 +709,7 @@ export class LoroDocumentManager {
         await writeBackNativeWorkspaceMeta(
           workspaceId,
           createdRepo,
+          cliSqliteRepoStore.storageAdapter,
           cliSqliteRepoStore.dbPath,
           logger
         ).catch((error: unknown) =>

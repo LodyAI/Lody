@@ -1,6 +1,9 @@
 import { Flock } from '@loro-dev/flock-wasm';
+import { LoroDoc } from 'loro-crdt';
 import {
+  EXTERNAL_DOCS_CAPABILITY,
   EXTERNAL_FLOCK_DOCS_CAPABILITY,
+  type ExternalDocsAdapter,
   ExternalMetadataNotCommittedError,
   INCREMENTAL_EXTERNAL_METADATA_CAPABILITY,
   type ExternalFlockDocsAdapter,
@@ -9,7 +12,9 @@ import {
   type StorageAdapter,
 } from 'loro-repo';
 import {
+  NATIVE_DOC_CHANNEL,
   NATIVE_FLOCK_CHANNEL,
+  isNativeDocId,
   NATIVE_META_CHANNEL,
   isNativeFlockDocId,
   ownedLegacyFlockDocIds,
@@ -142,6 +147,71 @@ export function createRendererNativeFlockDocs(workspaceId: string): ExternalFloc
         },
       };
     },
-    commit: (flockDocId, payloads) => api.commitFlockDoc({ workspaceId, flockDocId, payloads: [...payloads] }),
+    commit: (flockDocId, payloads) =>
+      api.commitFlockDoc({ workspaceId, flockDocId, payloads: [...payloads] }),
+  };
+}
+
+/**
+ * Owned Loro documents (Sessions) for this renderer, through main. This
+ * window's own IndexedDB replica of a document is imported once, on first open.
+ */
+export function createRendererNativeDocs(
+  workspaceId: string,
+  legacyStorage: StorageAdapter,
+  replicaName: string
+): ExternalDocsAdapter {
+  const api = getIpcServices()?.nativeWorkspaceMeta;
+  if (!api) throw new Error('native_meta_ipc_unavailable');
+  const source = `renderer:${replicaName.replace(/[^\w.-]/g, '_').slice(0, 128)}`;
+  const migrate = async (docId: string) => {
+    if (!(await api.needsLegacyDoc({ workspaceId, docId, source }))) return;
+    const legacy = (await legacyStorage.loadDoc(docId)) ?? new LoroDoc();
+    await api.importLegacyDoc({
+      workspaceId,
+      docId,
+      source,
+      snapshot: legacy.export({ mode: 'snapshot' }),
+      version: Object.fromEntries(legacy.oplogVersion().toJSON()),
+    });
+  };
+  return {
+    capability: EXTERNAL_DOCS_CAPABILITY,
+    owns: isNativeDocId,
+    async open(docId, onUpdate) {
+      await migrate(docId);
+      const observationId = crypto.randomUUID();
+      let snapshot: Uint8Array | undefined;
+      let loaded!: () => void;
+      const firstSnapshot = new Promise<void>((resolve) => (loaded = resolve));
+      const stop = onIpcEvent(NATIVE_DOC_CHANNEL, ({ observationId: id, event }) => {
+        if (id !== observationId) return;
+        if (event.kind === 'snapshot') {
+          // A later snapshot is a reload after reconnect: it imports as an update.
+          if (snapshot === undefined) {
+            snapshot = event.file;
+            loaded();
+          } else onUpdate(event.file);
+        } else if (event.kind === 'changes') {
+          for (const update of event.updates) onUpdate(update);
+        }
+      });
+      try {
+        // Main sends the snapshot before its reply; both share one ordered channel.
+        await api.openDoc({ workspaceId, docId, observationId });
+        await firstSnapshot;
+      } catch (error) {
+        stop();
+        throw error;
+      }
+      return {
+        snapshot,
+        close: async () => {
+          stop();
+          await api.release({ observationId });
+        },
+      };
+    },
+    commit: (docId, updates) => api.commitDoc({ workspaceId, docId, updates: [...updates] }),
   };
 }
