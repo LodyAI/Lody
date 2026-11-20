@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { $getRoot, $getSelection, $isRangeSelection, createEditor } from 'lexical';
+import {
+  $getRoot,
+  $getSelection,
+  $isRangeSelection,
+  $setCompositionKey,
+  createEditor,
+} from 'lexical';
 import { registerPlainText } from '@lexical/plain-text';
 import { LoroDoc } from 'loro-crdt';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -175,6 +181,18 @@ describe('Today session picker', () => {
       { discrete: true }
     );
     expect(store.getSnapshot().visible.map((n) => n.text)).toEqual(['@fix']);
+    // While an IME composes (a full-width ＠ typed through it), the menu waits.
+    controller.editor.update(() => $setCompositionKey($getRoot().getFirstDescendant()!.getKey()), {
+      discrete: true,
+    });
+    controller.editor.update(() => $getRoot().getFirstDescendant()!.markDirty(), {
+      discrete: true,
+    });
+    expect(controller.getPicker()).toBeNull();
+    controller.editor.update(() => $setCompositionKey(null), { discrete: true });
+    controller.editor.update(() => $getRoot().getFirstDescendant()!.markDirty(), {
+      discrete: true,
+    });
     expect(controller.getPicker()?.query).toBe('fix');
     controller.pickerItems = ['sess-1'];
     controller.acceptPicker('sess-1');
@@ -182,6 +200,99 @@ describe('Today session picker', () => {
     expect(node).toMatchObject({ kind: 'session', sessionId: 'sess-1' });
     store.undo.undo();
     expect(store.getSnapshot().visible[0]).toMatchObject({ kind: 'text', text: '@fix' });
+    controller.dispose();
+    root.remove();
+  });
+});
+
+describe('Today LoroText binding under IME', () => {
+  it('shows a peer edit made during a composition that ends without change, and later typing lands where typed', async () => {
+    const doc = new LoroDoc();
+    const outline = openTodayOutline(doc);
+    const focus = outline.insertFirst('abc') as { nodeId: never };
+    const text = outline.getText(focus.nodeId)!;
+    const undo = createTodayPageUndo(doc, { setTimer: () => () => {} });
+    const root = document.createElement('div');
+    root.contentEditable = 'true';
+    document.body.append(root);
+    const editor = createEditor({
+      namespace: 'today-ime',
+      onError: (error) => {
+        throw error;
+      },
+    });
+    editor.setRootElement(root);
+    const stopPlain = registerPlainText(editor);
+    let composing = false;
+    const binding = bindLoroText({ editor, text, undo, isComposing: () => composing });
+    const peer = new LoroDoc();
+    peer.import(doc.export({ mode: 'snapshot' }));
+    const peerText = peer.getContainerById(text.id) as typeof text;
+    const sync = () => doc.import(peer.export({ mode: 'update', from: doc.oplogVersion() }));
+
+    composing = true;
+    peerText.insert(0, 'X');
+    peer.commit();
+    sync();
+    composing = false;
+    root.dispatchEvent(new Event('compositionend'));
+    await Promise.resolve();
+    expect(editor.getEditorState().read(() => $getRoot().getTextContent())).toBe('Xabc');
+
+    peerText.insert(4, 'Y');
+    peer.commit();
+    sync();
+    editor.update(() => $setSelectionOffsets(1), { discrete: true });
+    editor.update(
+      () => {
+        const selection = $getSelection();
+        if ($isRangeSelection(selection)) selection.insertText('!');
+      },
+      { discrete: true }
+    );
+    expect(text.toString()).toBe('X!abcY');
+    binding.dispose();
+    stopPlain();
+    root.remove();
+  });
+});
+
+describe('Today outline keys read the live caret', () => {
+  it('merges on Backspace right after the caret moved to the start, before Lexical saw it', async () => {
+    const { createTodayPageStoreCache } = await import('../src/providers/today-page-store-cache');
+    const { TodayEditorController } =
+      await import('../src/components/today/editor/today-editor-controller');
+    const { getTodayDocId, parseTodayPasteText } = await import('@lody/shared');
+    const cache = createTodayPageStoreCache({
+      releaseDelayMs: 1000,
+      idleCap: 2,
+      setTimer: () => () => {},
+      repo: {
+        openDoc: async () => ({ doc: new LoroDoc(), joinRoom: async () => null }),
+        isRegistered: async () => true,
+        upsertDocMeta: async () => {},
+        unloadDoc: async () => {},
+        observeDocs: () => ({ docIds: [], unsubscribe: () => {} }),
+      },
+    });
+    const store = await cache.acquire(getTodayDocId('me', '2026-11-21' as never));
+    store.outline.paste({ kind: 'page-start' }, parseTodayPasteText('one\ntwo'));
+    const [, second] = store.getSnapshot().visible;
+    const controller = new TodayEditorController(cache);
+    const root = document.createElement('div');
+    root.contentEditable = 'true';
+    document.body.append(root);
+    controller.activate(store, second!.id, 'end');
+    controller.attachRoot(root);
+    // The browser moved the caret (Home) but Lexical has not synced it yet.
+    const textNode = root.querySelector('span')?.firstChild ?? root.firstChild!;
+    window.getSelection()!.collapse(textNode, 0);
+    root.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true })
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(store.getSnapshot().visible.map((node) => node.text)).toEqual(['onetwo']);
     controller.dispose();
     root.remove();
   });

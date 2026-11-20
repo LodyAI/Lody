@@ -66,6 +66,33 @@ describe('Today page store', () => {
     expect(calls.registrations).toHaveLength(1);
   });
 
+  it('an empty line from clicking the placeholder does not create the page until something is typed', async () => {
+    const { store, calls } = harness();
+    const focus = store.outline.insertFirst('') as { nodeId: never };
+    await flush();
+    expect(calls).toEqual({ joins: 0, registrations: [] });
+    store.undo.editText(store.outline.getText(focus.nodeId)!, (text) => text.insert(0, 'a'));
+    await flush();
+    expect(calls.registrations).toHaveLength(1);
+  });
+
+  it('releasing a page cancels its pending room join', async () => {
+    const signals: AbortSignal[] = [];
+    const store = createTodayPageStore({
+      docId,
+      doc: new LoroDoc(),
+      registered: true,
+      join: (signal) => {
+        signals.push(signal);
+        return new Promise(() => {});
+      },
+      register: async () => {},
+      setTimer: () => () => {},
+    });
+    store.dispose();
+    expect(signals.map((signal) => signal.aborted)).toEqual([true]);
+  });
+
   it('remote content arriving after a peer registered the page shows up in the snapshot', async () => {
     const { doc, store } = harness({ registered: true });
     const peer = new LoroDoc();

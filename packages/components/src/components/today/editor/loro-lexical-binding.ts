@@ -40,6 +40,7 @@ export function bindLoroText(options: {
   const realign = (deltas: readonly (readonly TextDeltaStep[])[]) => {
     const target = text.toString();
     base = target;
+    buffered = [];
     if (editorText() === target) return;
     editor.update(
       () => {
@@ -63,8 +64,12 @@ export function bindLoroText(options: {
     if (tags.has(COLLABORATION_TAG) || composing()) return;
     const next = editorState.read(() => $readComposerValue().text);
     let splice = safeTextDiff(base, next);
-    if (!splice) return;
     const pending = buffered;
+    if (!splice) {
+      // A composition ended without a change: show what peers wrote meanwhile.
+      if (pending.length > 0) realign(pending);
+      return;
+    }
     buffered = [];
     if (pending.length > 0) {
       // A peer changed the text during the composition: rebase the local edit.
@@ -81,8 +86,21 @@ export function bindLoroText(options: {
       if (deleteCount > 0) target.delete(start, deleteCount);
       if (insert) target.insert(start, insert);
     });
-    if (pending.length > 0) realign([]);
+    // Peer edits were held during the composition: show them, moving the caret past them.
+    if (pending.length > 0) realign(pending);
     else base = next;
+  });
+
+  // A composition can end with no editor change (cancelled, or the same text):
+  // no update fires then, so flush peer edits held during it explicitly.
+  const onCompositionEnd = () =>
+    queueMicrotask(() => {
+      if (composing() || buffered.length === 0) return;
+      if (safeTextDiff(base, editorText()) === null) realign(buffered);
+    });
+  const stopRoot = editor.registerRootListener((root, previous) => {
+    previous?.removeEventListener('compositionend', onCompositionEnd);
+    root?.addEventListener('compositionend', onCompositionEnd);
   });
 
   const stopText = text.subscribe((batch) => {
@@ -102,6 +120,7 @@ export function bindLoroText(options: {
   return {
     dispose: () => {
       stopEditor();
+      stopRoot();
       stopText();
     },
   };

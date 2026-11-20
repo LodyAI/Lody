@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { useAtom, useSetAtom } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -9,6 +9,7 @@ import {
   TODAY_FOCUS_EVENT,
   todayColumnWidthAtom,
   todayPinnedAtom,
+  todayPinnedTargetAtom,
 } from '@/atoms/sidebar-state';
 import { TodayView, type TodayViewTarget } from './today-view';
 
@@ -45,6 +46,13 @@ export function TodayPinnedColumn() {
   const setPinned = useSetAtom(todayPinnedAtom);
   const [target, setTarget] = useState<TodayViewTarget>({});
   const drag = useRef<{ startX: number; startWidth: number } | null>(null);
+  const linked = useAtomValue(todayPinnedTargetAtom);
+  const clearLinked = useSetAtom(todayPinnedTargetAtom);
+  useEffect(() => {
+    if (!linked) return;
+    setTarget(linked);
+    clearLinked(null);
+  }, [clearLinked, linked]);
   useEffect(() => {
     const backToToday = () => setTarget({});
     window.addEventListener(TODAY_FOCUS_EVENT, backToToday);

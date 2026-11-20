@@ -153,7 +153,7 @@ import { SidebarUpdateBanner } from '@/components/sidebar-update-banner';
 import { UpdateChangelogDialog } from '@/components/update-changelog-dialog';
 import { pickLocalizedReleaseNotes, readUpdateBannerState } from '@/lib/electron-update-banner';
 import { useElectronUpdaterState } from '@/hooks/use-electron-updater-state';
-import { useIsMobile } from '@/hooks/use-mobile';
+import { useIsCompactDesktop, useIsMobile } from '@/hooks/use-mobile';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import { canManageWorkspaceProject, useWorkspaceProjects } from '@/hooks/use-workspace-projects';
 import { useOrganization } from '@/hooks/useOrganization';
@@ -1761,6 +1761,7 @@ export function LoroAppSidebar({
 
   const todayEnabled = useAtomValue(todayFeatureEnabledAtom);
   const todayPinned = useAtomValue(todayPinnedAtom);
+  const isCompactDesktop = useIsCompactDesktop();
   const activeNav = useMemo(() => {
     if (isArchiveRoute(location.pathname, workspaceSlug)) return 'archive';
     if (workspaceSlug && location.pathname.startsWith(`/${workspaceSlug}/schedules`))
@@ -4313,7 +4314,7 @@ export function LoroAppSidebar({
             ? () => {
                 if (!workspaceSlug) return;
                 // Pinned: Today is already beside the sidebar; bring it back to today.
-                if (todayPinned) {
+                if (todayPinned && !isCompactDesktop) {
                   window.dispatchEvent(new Event(TODAY_FOCUS_EVENT));
                   return;
                 }

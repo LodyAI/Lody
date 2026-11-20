@@ -14,7 +14,7 @@ import { createManagedStoreCache } from './store-ref-tracker';
 export type TodayRepoPort = {
   openDoc(docId: string): Promise<{
     doc: LoroDoc;
-    joinRoom(): Promise<{ unsubscribe(): void } | null | undefined>;
+    joinRoom(signal: AbortSignal): Promise<{ unsubscribe(): void } | null | undefined>;
   }>;
   isRegistered(docId: string): Promise<boolean>;
   upsertDocMeta(docId: string, meta: { userId: string; date: TodayDate }): Promise<void>;
@@ -56,7 +56,7 @@ export function createTodayPageStoreCache(options: {
         docId,
         doc: handle.doc,
         registered,
-        join: () => handle.joinRoom(),
+        join: (signal) => handle.joinRoom(signal),
         register: (meta) => repo.upsertDocMeta(docId, meta),
         setTimer: options.setTimer,
         onBackgroundError: (stage, error) => options.onBackgroundError?.(docId, stage, error),

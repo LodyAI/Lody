@@ -38,7 +38,8 @@ export function createTodayPageStore(options: {
   docId: string;
   doc: LoroDoc;
   registered: boolean;
-  join: () => Promise<RoomSubscription | null | undefined>;
+  /** Join the page's room; `signal` aborts when the page is released. */
+  join: (signal: AbortSignal) => Promise<RoomSubscription | null | undefined>;
   register: (meta: { userId: string; date: TodayDate }) => Promise<void>;
   setTimer: (callback: () => void, ms: number) => () => void;
   onBackgroundError?: (stage: 'register' | 'join', error: unknown) => void;
@@ -51,6 +52,7 @@ export function createTodayPageStore(options: {
   const listeners = new Set<() => void>();
   let snapshot = outline.getSnapshot();
   let disposed = false;
+  const releaseSignal = new AbortController();
   let registered = options.registered;
   let registering: Promise<void> | undefined;
   let joining: Promise<void> | undefined;
@@ -63,7 +65,7 @@ export function createTodayPageStore(options: {
   const ensureJoined = () => {
     if (disposed || room || joining) return;
     joining = options
-      .join()
+      .join(releaseSignal.signal)
       .then((subscription) => {
         if (!subscription) return;
         if (disposed) subscription.unsubscribe();
@@ -98,7 +100,9 @@ export function createTodayPageStore(options: {
   });
   const unsubscribeLocal = doc.subscribeLocalUpdates(() => {
     if (registered) ensureJoined();
-    else ensureRegistered();
+    // An empty line (a click on the empty day) is not yet input: the page is
+    // created on its first content.
+    else if (!outline.getSnapshot().isEmpty) ensureRegistered();
   });
   if (registered) ensureJoined();
 
@@ -120,6 +124,7 @@ export function createTodayPageStore(options: {
     },
     dispose: () => {
       disposed = true;
+      releaseSignal.abort();
       unsubscribeDoc();
       unsubscribeLocal();
       undo.dispose();

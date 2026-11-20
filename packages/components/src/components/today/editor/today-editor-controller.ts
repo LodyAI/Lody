@@ -13,6 +13,7 @@ import type { FocusIntent, TodayDate, TodayNodeId, TodayNodeView } from '@lody/s
 import type { TodayPageStore } from '@/lib/today/today-page-store';
 import type { TodayPageStoreCache } from '../../../providers/today-page-store-cache';
 import {
+  $domPointToOffset,
   $readComposerValue,
   $readSelectionOffsets,
   $setSelectionOffsets,
@@ -127,6 +128,14 @@ export class TodayEditorController {
       this.editor.registerUpdateListener(({ editorState }) => {
         const active = this.active;
         if (!active) return;
+        // The `@` menu waits while an IME composes (e.g. a full-width ＠).
+        if (this.editor.isComposing()) {
+          if (this.picker) {
+            this.picker = null;
+            this.notify();
+          }
+          return;
+        }
         const text = editorState.read(() => $readComposerValue().text);
         const match = PICKER_TRIGGER.exec(text);
         if (match && this.pickerDismissedFor !== active.nodeId) {
@@ -751,10 +760,23 @@ export class TodayEditorController {
     const active = this.active;
     const root = this.root;
     if (!active || !root) return false;
-    const state = this.editor.getEditorState().read(() => ({
-      offsets: $readSelectionOffsets(),
-      length: $readComposerValue().text.length,
-    }));
+    // The browser moves the DOM caret before Lexical hears `selectionchange`
+    // (e.g. Home then Backspace): read the live DOM selection when it is ours.
+    const dom = window.getSelection();
+    const state = this.editor.read(() => {
+      const length = $readComposerValue().text.length;
+      if (dom?.anchorNode && dom.focusNode && root.contains(dom.anchorNode)) {
+        const anchor = $domPointToOffset(this.editor, dom.anchorNode, dom.anchorOffset);
+        const focus = $domPointToOffset(this.editor, dom.focusNode, dom.focusOffset);
+        if (anchor !== null && focus !== null) {
+          return {
+            offsets: { start: Math.min(anchor, focus), end: Math.max(anchor, focus) },
+            length,
+          };
+        }
+      }
+      return { offsets: $readSelectionOffsets(), length };
+    });
     const offsets = state.offsets ?? { start: state.length, end: state.length };
     const lines = caretEdgeLines(root);
     const intent = resolveOutlineKey(

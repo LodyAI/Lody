@@ -1,9 +1,11 @@
 import { Navigate, createFileRoute } from '@tanstack/react-router';
-import { useAtomValue } from 'jotai';
-import { lazy } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { lazy, useEffect } from 'react';
 import { parseTodayDate } from '@lody/shared';
 import { todayFeatureEnabledAtom } from '@/atoms/settings';
-import { todayPinnedAtom } from '@/atoms/sidebar-state';
+import { todayPinnedAtom, todayPinnedTargetAtom } from '@/atoms/sidebar-state';
+import { todayRouteOutcome } from '@/components/today/today-stream';
+import { useIsCompactDesktop } from '@/hooks/use-mobile';
 import { RouteSuspense } from '@/components/route-suspense';
 
 const LazyTodayPage = lazy(async () => {
@@ -28,8 +30,14 @@ function TodayRoute() {
   const pinned = useAtomValue(todayPinnedAtom);
   const { workspaceName } = Route.useParams();
   const search = Route.useSearch();
-  // Pinned: Today already shows beside the sidebar; never show it twice.
-  if (!enabled || pinned) {
+  const compact = useIsCompactDesktop();
+  const setPinnedTarget = useSetAtom(todayPinnedTargetAtom);
+  const outcome = todayRouteOutcome({ enabled, pinned, compact });
+  useEffect(() => {
+    // Pinned beside the sidebar: the column shows the requested day instead.
+    if (outcome === 'to-column') setPinnedTarget({ member: search.member, date: search.date });
+  }, [outcome, search.date, search.member, setPinnedTarget]);
+  if (outcome !== 'page') {
     return <Navigate to="/$workspaceName/chat" params={{ workspaceName }} replace />;
   }
   return (

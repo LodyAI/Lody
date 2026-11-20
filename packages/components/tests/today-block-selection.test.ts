@@ -29,12 +29,23 @@ describe('Today block selection', () => {
   });
 
   it('maps block keys: Backspace deletes, Enter edits, plain characters do nothing', () => {
-    const key = (k: string, mods: Partial<KeyboardEvent> = {}) =>
-      ({ key: k, shiftKey: false, altKey: false, metaKey: false, ctrlKey: false, isComposing: false, keyCode: 0, ...mods });
+    const key = (k: string, mods: Partial<KeyboardEvent> = {}) => ({
+      key: k,
+      shiftKey: false,
+      altKey: false,
+      metaKey: false,
+      ctrlKey: false,
+      isComposing: false,
+      keyCode: 0,
+      ...mods,
+    });
     expect(resolveBlockKey(key('Backspace'), 'mac')).toEqual({ type: 'delete' });
     expect(resolveBlockKey(key('Enter'), 'mac')).toEqual({ type: 'edit' });
     expect(resolveBlockKey(key('x'), 'mac')).toBeNull();
-    expect(resolveBlockKey(key('ArrowDown', { shiftKey: true }), 'mac')).toEqual({ type: 'extend', step: 1 });
+    expect(resolveBlockKey(key('ArrowDown', { shiftKey: true }), 'mac')).toEqual({
+      type: 'extend',
+      step: 1,
+    });
     expect(resolveBlockKey(key('c', { metaKey: true }), 'mac')).toBeNull();
     expect(resolveBlockKey(key('Escape'), 'mac')).toEqual({ type: 'clear' });
   });
@@ -47,7 +58,10 @@ describe('Today block selection', () => {
     expect(plain).toBe('- a\n  - b\n- lody://session/sess-1');
     const parsed = parseTodayClipboard({ json: JSON.stringify({ v: 1, fragments }), text: plain });
     expect(parsed).toEqual(fragments);
-    expect(parseTodayClipboard({ text: plain })?.map((f) => f.text)).toEqual(['a', 'lody://session/sess-1']);
+    expect(parseTodayClipboard({ text: plain })?.map((f) => f.text)).toEqual([
+      'a',
+      'lody://session/sess-1',
+    ]);
   });
 });
 
@@ -57,6 +71,8 @@ describe('Today convert-to-task prompt', () => {
     const { model, id } = outline('Refactor sync\n  keep it deterministic\n    no sleeps\nother');
     model.setCollapsed(id('Refactor sync'), true);
     const [fragment] = model.extract([id('Refactor sync')]);
-    expect(buildConvertPrompt(fragment!)).toBe('Refactor sync\n- keep it deterministic\n  - no sleeps');
+    expect(buildConvertPrompt(fragment!)).toBe(
+      'Refactor sync\n- keep it deterministic\n  - no sleeps'
+    );
   });
 });

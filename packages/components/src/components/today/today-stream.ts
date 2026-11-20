@@ -45,3 +45,17 @@ export function todayDateToLocalDate(date: TodayDate): Date {
   const [year, month, day] = date.split('-').map(Number) as [number, number, number];
   return new Date(year, month - 1, day);
 }
+
+/**
+ * What the full-page route does. While Today is pinned beside the sidebar the
+ * route hands its member/date to the column instead of showing Today twice;
+ * where the column cannot appear (compact layout) the page shows as usual.
+ */
+export function todayRouteOutcome(input: {
+  enabled: boolean;
+  pinned: boolean;
+  compact: boolean;
+}): 'redirect' | 'to-column' | 'page' {
+  if (!input.enabled) return 'redirect';
+  return input.pinned && !input.compact ? 'to-column' : 'page';
+}

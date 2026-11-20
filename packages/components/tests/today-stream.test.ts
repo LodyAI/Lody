@@ -47,3 +47,13 @@ describe('Today day stream', () => {
     expect(msUntilNextLocalMidnight(now)).toBe(30_000);
   });
 });
+
+describe('Today route while pinned', () => {
+  it('hands the link to the pinned column, but shows the page where the column cannot appear', async () => {
+    const { todayRouteOutcome } = await import('../src/components/today/today-stream');
+    expect(todayRouteOutcome({ enabled: false, pinned: false, compact: false })).toBe('redirect');
+    expect(todayRouteOutcome({ enabled: true, pinned: true, compact: false })).toBe('to-column');
+    expect(todayRouteOutcome({ enabled: true, pinned: true, compact: true })).toBe('page');
+    expect(todayRouteOutcome({ enabled: true, pinned: false, compact: false })).toBe('page');
+  });
+});

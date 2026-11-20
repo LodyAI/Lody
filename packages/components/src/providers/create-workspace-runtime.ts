@@ -5661,13 +5661,27 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         const handle = await repo.openPersistedDoc(docId);
         return {
           doc: handle.doc as LoroDoc,
-          joinRoom: async () => {
-            await transportReady.promise;
-            return waitForRoomToSync(() => handle.joinRoom(), {
+          joinRoom: async (signal) => {
+            // Same release contract as schedule stores: a released page stops waiting
+            // and never keeps a room it no longer owns.
+            await waitForPromiseOrAbort(transportReady.promise, signal);
+            let joined: RepoRoomSubscription | null = null;
+            const subscription = await waitForRoomToSync(() => handle.joinRoom(), {
               roomId: docId,
               initialDelayMs: 0,
+              signal,
+              isCancelled: () => signal.aborted,
               firstSynced: (sub) => readinessBindingForDocRoom(sub, docId).firstSyncedWithRemote,
+              onSubscription: (sub) => {
+                if (signal.aborted) sub.unsubscribe();
+                else joined = sub;
+              },
             });
+            if (signal.aborted) {
+              (subscription ?? joined)?.unsubscribe();
+              return null;
+            }
+            return subscription;
           },
         };
       },
