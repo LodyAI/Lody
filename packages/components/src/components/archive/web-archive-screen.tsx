@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { Archive, ChevronDown, PanelLeft, Trash2, Undo2, X } from 'lucide-react';
+import { Archive, ChevronDown, Trash2, Undo2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -9,6 +9,7 @@ import { withClassName } from '@/lib/stylex';
 import { navigationSidebarVisibleAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import {
+  WINDOW_DRAG_EXEMPT_CLASS,
   useMacTrafficLightRowPadClass,
   useWindowDragRegionClass,
   useWindowsCaptionPadClass,
@@ -18,6 +19,8 @@ import { isNativeAppShell } from '@/lib/native-platform';
 import { Button } from '@lody/ui/button';
 import { Menu } from '@/ui/menu';
 import { Tooltip } from '@lody/ui/tooltip';
+import { cn } from '@/lib/utils';
+import { SidebarHistoryControls } from '../sidebar-history-controls';
 
 type ArchiveScope = 'my' | 'team';
 
@@ -159,17 +162,13 @@ export function WebArchiveScreen({
           )}
         >
           {isLeftSidebarHidden ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="small"
-              icon
-              onClick={() => showNavigationSidebar()}
-              aria-label={t('sessions.leftSidebar.show', 'Show navigation sidebar')}
-              className={stylex.props(styles.sidebarToggle).className}
-            >
-              <PanelLeft {...stylex.props(styles.glyph)} />
-            </Button>
+            <SidebarHistoryControls
+              onToggleSidebar={() => showNavigationSidebar()}
+              className={cn(
+                stylex.props(styles.sidebarToggle).className,
+                windowDragClass && WINDOW_DRAG_EXEMPT_CLASS
+              )}
+            />
           ) : null}
           {isMultiSelectMode ? (
             <>
