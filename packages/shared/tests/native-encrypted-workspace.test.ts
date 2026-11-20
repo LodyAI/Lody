@@ -19,7 +19,12 @@ import {
 import { createLoroStreamUrl, getLoroStreamIdForDocId, type WorkspaceId } from '../src';
 
 const hostScript = fileURLToPath(new URL('./fixtures/native-repo-host.mjs', import.meta.url));
-const launcher = () => ({ command: process.execPath, args: [hostScript] });
+/** While set, a relaunch starts nothing: the host stays down. */
+let hostBlocked = false;
+const launcher = () =>
+  hostBlocked
+    ? { command: process.execPath, args: ['-e', 'process.exit(1)'] }
+    : { command: process.execPath, args: [hostScript] };
 const ws = 'ws-e2ee-native';
 const bucketId = 'lody-e2ee-test';
 const genesis = new Uint8Array(32).fill(0x42);
@@ -44,6 +49,7 @@ const admitted = [publicKey(seeds.a), publicKey(seeds.b)];
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
+  hostBlocked = false;
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup().catch(() => {});
 });
 
@@ -170,6 +176,27 @@ describe('native encrypted workspace', () => {
     await b.client.syncRooms(ws, [room], NATIVE_CONTENT_REMOTE_ID);
     expect(JSON.stringify((await b.client.readDoc(ws, room)).value)).toContain('written-offline');
   }, 60_000);
+
+  it('a removal while the host is down finishes once the host is back', async () => {
+    const baseUrl = await streamsServer();
+    const a = await device('a', baseUrl);
+    const marker = nativePendingWipeMarker(a.dataDir, ws);
+    const wa = await a.attach(marker);
+    await createDocRoom(a.client, ws, room.id);
+    await write(a.client, 'before-removal');
+    const nsFile = join(a.dataDir, 'namespaces', `ns_${Buffer.from(ws).toString('hex')}.sqlite3`);
+    expect(existsSync(nsFile)).toBe(true);
+
+    hostBlocked = true;
+    process.kill(await hostPid(a.dataDir), 'SIGKILL');
+    await expect.poll(() => a.client.connectionState, { timeout: 30_000 }).not.toBe('connected');
+    await expect(wa.wipe()).rejects.toThrow();
+    expect(await marker.read()).toBe(true);
+
+    hostBlocked = false;
+    await expect.poll(() => marker.read(), { timeout: 60_000 }).toBe(false);
+    expect(existsSync(nsFile)).toBe(false);
+  }, 90_000);
 
   it('reinstalls keys after the host restarts, and finishes a pending wipe before reopening', async () => {
     const baseUrl = await streamsServer();

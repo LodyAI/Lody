@@ -94,6 +94,30 @@ export function nativePendingWipeMarker(dataDir: string, workspaceId: string): N
 }
 
 /**
+ * Removes the namespace now, or, when the host is unreachable (removal while it is
+ * down), as soon as the connection is back. The marker is durable first, so a
+ * process exit meanwhile leaves it to the next start's sweep.
+ */
+export async function wipeNativeNamespace(
+  options: Pick<NativeEncryptedWorkspaceOptions, 'client' | 'workspaceId' | 'pendingWipe'>
+) {
+  await options.pendingWipe.write();
+  try {
+    await finishNativeWipe(options);
+  } catch (error) {
+    let finishing = false;
+    const off = options.client.onConnectionStateChange((state) => {
+      if (state !== 'connected' || finishing) return;
+      finishing = true;
+      finishNativeWipe(options).then(off, () => {
+        finishing = false;
+      });
+    });
+    throw error;
+  }
+}
+
+/**
  * Finishes every pending wipe recorded in `dataDir` (a removal while the host was
  * down or the drop failed): the first connection after it finishes the drop.
  */
@@ -118,7 +142,7 @@ export interface NativeEncryptedWorkspace {
    * Removes this workspace's content from the device after credential-confirmed
    * member removal: writes the pending-wipe marker, clears the keyring,
    * removes the remote and drops the namespace. Only a successful drop clears the
-   * marker; a failure leaves it for the next attach to finish.
+   * marker; with the host unreachable it finishes once the connection is back.
    */
   wipe(): Promise<void>;
   /**
@@ -246,8 +270,7 @@ export async function attachNativeEncryptedWorkspace(
     wipe: () =>
       run(async () => {
         stopServing();
-        await options.pendingWipe.write();
-        await finishNativeWipe(options);
+        await wipeNativeNamespace(options);
       }),
     retireWriter: () =>
       run(async () => {
