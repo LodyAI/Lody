@@ -12,6 +12,16 @@ import { useTodayEditor } from './editor/today-editor-context';
 import { todaySessionDisplay, type TodaySessionDisplay } from './today-session-status';
 import { useTodayNow } from './use-today-clock';
 
+// Inline-reference chip rules (Notion, Linear, Slack, AFFiNE, Outline): the chip
+// stays inline text so it never grows the line; it carries its own inline
+// padding so a selection fill clears the icon and title; the icon is a fixed
+// slot centred on the text's x-height with its own hover, apart from the title's
+// underline; selection only tints the fill, so the title keeps its state colour
+// (a Done title stays dim and struck through).
+const CHIP_PAD = space[1];
+const ICON_HIT = '20px';
+const ICON_BLEED = '3px';
+
 const styles = stylex.create({
   // Inline so a long title wraps like text; each line fragment keeps its own padding.
   mention: {
@@ -19,27 +29,43 @@ const styles = stylex.create({
     boxDecorationBreak: 'clone',
     WebkitBoxDecorationBreak: 'clone',
     borderRadius: radius.mini,
-    paddingInline: 1,
+    paddingInline: CHIP_PAD,
     userSelect: 'none',
   },
-  selected: { backgroundColor: 'Highlight', color: 'HighlightText' },
+  // A chip that opens its line hangs its padding into the gutter, so its icon
+  // starts on the same column as a line that opens with text.
+  leading: { marginInlineStart: `calc(-1 * ${CHIP_PAD})` },
+  // The editor's text selection tint (`::selection`), so a selected chip reads as
+  // part of the selected run and keeps every state colour.
+  selected: { backgroundColor: `color-mix(in srgb, ${colors.accent} 25%, transparent)` },
+  // The status icon is its own small icon button (Linear's issue-row status): a
+  // 20px hit area whose hover fill sits behind the glyph alone. `vertical-align:
+  // middle` centres it on the parent's baseline plus half its x-height, the
+  // optical centre of the title, for every glyph alike; the negative margins
+  // give back the 3px it adds on each side, so the line box and the title's
+  // place are those of a 14px glyph slot.
   icon: {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 2,
-    minWidth: 14,
-    height: 14,
-    marginInlineEnd: space[1],
-    verticalAlign: '-2px',
-    padding: 0,
+    boxSizing: 'border-box',
+    minWidth: ICON_HIT,
+    height: ICON_HIT,
+    paddingInline: ICON_BLEED,
+    marginBlock: `calc(-1 * ${ICON_BLEED})`,
+    marginInlineStart: `calc(-1 * ${ICON_BLEED})`,
+    marginInlineEnd: `calc(${space[1]} - ${ICON_BLEED})`,
+    verticalAlign: 'middle',
+    paddingBlock: 0,
     borderWidth: 0,
-    background: 'none',
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
     color: 'inherit',
     font: 'inherit',
+    lineHeight: 1,
     cursor: 'pointer',
     borderRadius: radius.mini,
-    ':hover': { backgroundColor: colors.hoverFill },
+    outline: { default: 'none', ':focus-visible': `2px solid ${colors.accent}` },
   },
   countdown: {
     fontSize: text.captionSize,
@@ -87,7 +113,6 @@ const styles = stylex.create({
     textDecorationLine: 'line-through',
     textDecorationColor: 'currentColor',
   },
-  titleSelected: { color: 'inherit' },
   muted: { color: colors.tertiaryLabel, fontStyle: 'italic' },
 });
 
@@ -128,13 +153,23 @@ function StatusIcon(props: { display: Extract<TodaySessionDisplay, { state: 'ok'
  * Pointer presses never reach the row, so they never activate the editor.
  * Behavior: specs/today-outline.md (Conversation mentions).
  */
-export function TodayMention(props: { mention: TodayMentionTarget; selected?: boolean }) {
+export function TodayMention(props: {
+  mention: TodayMentionTarget;
+  selected?: boolean;
+  /** The mention opens a line of its node (offset 0 or after a newline). */
+  leading?: boolean;
+}) {
   const { t } = useTranslation();
-  const { mention, selected = false } = props;
+  const { mention, selected = false, leading = false } = props;
   if (mention.kind !== 'session' || !mention.id) {
     return (
       <span
-        {...stylex.props(styles.mention, styles.muted, selected && styles.selected)}
+        {...stylex.props(
+          styles.mention,
+          leading && styles.leading,
+          styles.muted,
+          selected && styles.selected
+        )}
         data-today-mention=""
         contentEditable={false}
       >
@@ -142,7 +177,7 @@ export function TodayMention(props: { mention: TodayMentionTarget; selected?: bo
       </span>
     );
   }
-  return <TodaySessionMention sessionId={mention.id} selected={selected} />;
+  return <TodaySessionMention sessionId={mention.id} selected={selected} leading={leading} />;
 }
 
 /** A conversation's mention display from the sidebar's signals and the surface clock. */
@@ -154,7 +189,7 @@ export function useTodaySessionDisplay(sessionId: SessionId): TodaySessionDispla
   return todaySessionDisplay({ meta, metaSettled, live, nowMs });
 }
 
-function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
+function TodaySessionMention(props: { sessionId: string; selected: boolean; leading: boolean }) {
   const { t } = useTranslation();
   const controller = useTodayEditor();
   const sessionId = props.sessionId as SessionId;
@@ -168,7 +203,12 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
   if (display.state !== 'ok') {
     return (
       <span
-        {...stylex.props(styles.mention, styles.muted, props.selected && styles.selected)}
+        {...stylex.props(
+          styles.mention,
+          props.leading && styles.leading,
+          styles.muted,
+          props.selected && styles.selected
+        )}
         {...rootProps}
       >
         {display.state === 'missing'
@@ -188,7 +228,11 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
   }[display.status];
   return (
     <span
-      {...stylex.props(styles.mention, props.selected && styles.selected)}
+      {...stylex.props(
+        styles.mention,
+        props.leading && styles.leading,
+        props.selected && styles.selected
+      )}
       {...rootProps}
       data-today-status={display.status}
     >
@@ -218,8 +262,7 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
         {...stylex.props(
           styles.title,
           display.status === 'unread' && styles.titleUnread,
-          display.status === 'done' && styles.titleDone,
-          props.selected && styles.titleSelected
+          display.status === 'done' && styles.titleDone
         )}
         aria-label={t('today.mentionLabel', 'Conversation: {{title}}, {{status}}', {
           title,

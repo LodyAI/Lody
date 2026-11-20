@@ -231,7 +231,13 @@ function TodayStaticText(props: { node: TodayNodeView }) {
   let cursor = 0;
   for (const mention of mentions) {
     if (mention.start > cursor) parts.push(text.slice(cursor, mention.start));
-    parts.push(<TodayMention key={mention.start} mention={mention} />);
+    parts.push(
+      <TodayMention
+        key={mention.start}
+        mention={mention}
+        leading={mention.start === 0 || text[mention.start - 1] === '\n'}
+      />
+    );
     cursor = mention.start + 1;
   }
   if (cursor < text.length) parts.push(text.slice(cursor));
