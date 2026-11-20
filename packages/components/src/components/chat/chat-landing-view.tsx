@@ -181,7 +181,7 @@ export interface ChatLandingViewProps {
  */
 function useSessionMentionDrop(enabled: boolean) {
   const mentionActionsRef = useRef<CombinedMentionTextareaHandle | null>(null);
-  const { dropZone, overlayActive } = useSessionMentionDropZone({
+  const { dropZone, pointerDropRef, overlayActive } = useSessionMentionDropZone({
     enabled,
     onDropSessionId: useCallback((sessionId: string) => {
       mentionActionsRef.current?.insertSessionMention(sessionId);
@@ -190,6 +190,7 @@ function useSessionMentionDrop(enabled: boolean) {
   return {
     mentionActionsRef,
     dropZone,
+    pointerDropRef,
     overlayActive,
   };
 }
@@ -258,7 +259,7 @@ export function ChatLandingView({
   errorLabels = {},
 }: ChatLandingViewProps) {
   const postHog = usePostHog();
-  const { mentionActionsRef, dropZone, overlayActive } = useSessionMentionDrop(
+  const { mentionActionsRef, dropZone, pointerDropRef, overlayActive } = useSessionMentionDrop(
     !isMobile && !submissionPending
   );
   // A folder is not an attachment — it becomes a `@path` mention, through the
@@ -502,6 +503,7 @@ export function ChatLandingView({
       dropActive={overlayActive}
       dropKind="session-mention"
       dropHandlers={dropZone.handlers}
+      dropRef={pointerDropRef}
       navRootRef={navRootRef}
       contextSwitch={contextSwitch}
       ambient={

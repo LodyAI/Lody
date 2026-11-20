@@ -5,7 +5,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SessionMentionDropLayer } from '../src/components/sessions/session-mention-drop-layer';
 import { initI18n } from '../src/i18n';
-import { clearSessionMentionDrag, startSessionMentionDrag } from '../src/lib/session-mention-drag';
+import {
+  clearSessionMentionDrag,
+  dropSessionMentionAtPoint,
+  startSessionMentionDrag,
+} from '../src/lib/session-mention-drag';
 import { createSessionMentionTransfer } from './helpers/session-mention-transfer';
 import { useAcceptableSessionMentionDrag } from '../src/hooks/use-session-mention-drag';
 
@@ -55,6 +59,34 @@ describe('session-mention-drop-layer', () => {
       const overlay = container.querySelector('[data-testid="conversation-drop-overlay"]');
       expect(overlay).not.toBeNull();
       expect(overlay?.getAttribute('data-drop-kind')).toBe('session-mention');
+    });
+
+    it('accepts a pointer drag released over it, like a native drop', () => {
+      const dropped: string[] = [];
+      act(() => {
+        root.render(
+          <SessionMentionDropLayer
+            enabled
+            excludeSessionId="sess_open"
+            onDropSessionId={(sessionId) => dropped.push(sessionId)}
+          >
+            <div data-testid="inside">active tab</div>
+          </SessionMentionDropLayer>
+        );
+      });
+      const inside = container.querySelector('[data-testid="inside"]');
+      const elementFromPoint = document.elementFromPoint;
+      document.elementFromPoint = () => inside;
+      try {
+        // The open conversation never mentions itself.
+        expect(dropSessionMentionAtPoint(10, 10, 'sess_open')).toBe(false);
+        expect(dropSessionMentionAtPoint(10, 10, 'sess_other')).toBe(true);
+        document.elementFromPoint = () => document.body;
+        expect(dropSessionMentionAtPoint(10, 10, 'sess_third')).toBe(false);
+      } finally {
+        document.elementFromPoint = elementFromPoint;
+      }
+      expect(dropped).toEqual(['sess_other']);
     });
 
     it('does not light up when the active tab is the dragged session', () => {

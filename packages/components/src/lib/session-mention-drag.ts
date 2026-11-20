@@ -126,7 +126,8 @@ export function startSessionMentionDrag(
 ): void {
   const dataTransfer = event.dataTransfer;
   if (!dataTransfer) return;
-  dataTransfer.effectAllowed = 'copy';
+  // Mention drops copy a reference; reordering pinned rows in the sidebar moves one.
+  dataTransfer.effectAllowed = 'copyMove';
   dataTransfer.setData(SESSION_MENTION_DRAG_TYPE, payload.sessionId);
   dataTransfer.setData(`${SESSION_MENTION_DRAG_ID_PREFIX}${payload.sessionId.toLowerCase()}`, '');
   // A drop outside any of our surfaces still leaves something readable behind.
@@ -180,4 +181,50 @@ export function readSessionMentionDragSessionId(
   dataTransfer: Pick<DataTransfer, 'getData'>
 ): string | null {
   return dataTransfer.getData(SESSION_MENTION_DRAG_TYPE) || null;
+}
+
+// ---------------------------------------------------------------------------
+// Pointer drops. Pointer-driven drags (dnd-kit: pinned sidebar rows) carry no
+// `dataTransfer`, so a mention surface also registers its element here and a
+// release over it is delivered like a native drop.
+
+type PointerMentionTarget = {
+  accepts: (sessionId: string) => boolean;
+  drop: (sessionId: string) => void;
+};
+
+const pointerTargets = new Map<Element, PointerMentionTarget>();
+
+/** Register `element` as a pointer-drop mention surface; returns the release. */
+export function registerSessionMentionPointerTarget(
+  element: Element,
+  target: PointerMentionTarget
+): () => void {
+  pointerTargets.set(element, target);
+  return () => {
+    if (pointerTargets.get(element) === target) pointerTargets.delete(element);
+  };
+}
+
+/**
+ * Deliver a pointer drag released at (x, y) to the innermost mention surface
+ * under it. Returns whether a surface took the mention.
+ */
+export function dropSessionMentionAtPoint(x: number, y: number, sessionId: string): boolean {
+  if (typeof document === 'undefined') return false;
+  // The dragged copy follows the pointer and sits on top: look through it.
+  const stack =
+    typeof document.elementsFromPoint === 'function'
+      ? document.elementsFromPoint(x, y)
+      : [document.elementFromPoint(x, y)];
+  for (const top of stack) {
+    for (let node: Element | null = top; node; node = node.parentElement) {
+      const target = pointerTargets.get(node);
+      if (!target) continue;
+      if (!target.accepts(sessionId)) return false;
+      target.drop(sessionId);
+      return true;
+    }
+  }
+  return false;
 }

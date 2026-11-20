@@ -1,6 +1,10 @@
 import type { LoroRepo, RepoFlockDocLease } from 'loro-repo';
 import { z } from 'zod';
-import { getShortcutBodyStreamId } from './access';
+import {
+  getLocalShortcutWorkingDocId,
+  getShortcutBodyStreamId,
+  getWorkspaceShortcutBodyStreamId,
+} from './access';
 import { parsePromptShortcut } from './compiler';
 import { PromptShortcutDocument } from './document';
 import {
@@ -24,7 +28,7 @@ const directoryEntrySchema = z.object({
   shortcutId: z.string(),
   bodyDocId: z.string(),
   ownerUserId: z.string(),
-  visibility: z.enum(['private', 'workspace']),
+  visibility: z.enum(['private', 'workspace']).optional(),
   revision: z.string().nullable(),
   deleted: z.boolean().optional(),
 });
@@ -32,7 +36,10 @@ export type ShortcutDirectoryEntry = z.infer<typeof directoryEntrySchema>;
 const discoverySchema = z.object({
   directory: z.array(directoryEntrySchema),
   entries: z.array(PromptShortcutIndexSchema),
+  workspaceEntries: z.array(PromptShortcutIndexSchema).optional(),
+  workspaceDeletedIds: z.array(z.string()).optional(),
 });
+export type ShortcutDiscoverySnapshot = z.infer<typeof discoverySchema>;
 const intentSchema = z.object({ record: recordSchema, baseRevision: z.string().nullable() });
 
 /** User/workspace-local working catalog. Its pointer-only outbox NEVER joins Streams. */
@@ -101,18 +108,29 @@ export class LocalShortcutStore {
     });
   }
 
-  discovery(): z.infer<typeof discoverySchema> {
+  discovery(): ShortcutDiscoverySnapshot {
     return discoverySchema.parse(
-      this.ledger.flock.get(['discovery']) ?? { directory: [], entries: [] }
+      this.ledger.flock.get(['discovery']) ?? {
+        directory: [],
+        entries: [],
+        workspaceEntries: [],
+        workspaceDeletedIds: [],
+      }
     );
   }
 
-  applyRemoteDeletions(rows: readonly ShortcutDirectoryEntry[]): Promise<void> {
+  applyRemoteDeletions(
+    rows: readonly ShortcutDirectoryEntry[],
+    workspaceDeletedIds: ReadonlySet<string> = new Set()
+  ): Promise<void> {
     return this.serialized(async () => {
       await this.recover();
+      const deletedIds = new Set<string>(workspaceDeletedIds);
       for (const row of rows) {
-        if (!row.deleted || row.ownerUserId !== this.userId) continue;
-        const current = this.get(row.shortcutId);
+        if (row.deleted && row.ownerUserId === this.userId) deletedIds.add(row.shortcutId);
+      }
+      for (const shortcutId of deletedIds) {
+        const current = this.get(shortcutId);
         // Never erase offline edits because a different device deleted the source.
         if (!current || current.operation || current.deleted) continue;
         await this.put({ ...current, deleted: true, published: null });
@@ -120,10 +138,13 @@ export class LocalShortcutStore {
     });
   }
 
-  cacheDiscovery(discovery: z.infer<typeof discoverySchema>): Promise<void> {
+  cacheDiscovery(discovery: ShortcutDiscoverySnapshot): Promise<void> {
     return this.serialized(async () => {
       const value = discoverySchema.parse(discovery);
-      if (value.entries.some((entry) => entry.workspaceId !== this.workspaceId))
+      if (
+        value.entries.some((entry) => entry.workspaceId !== this.workspaceId) ||
+        (value.workspaceEntries ?? []).some((entry) => entry.workspaceId !== this.workspaceId)
+      )
         throw new PromptShortcutError('forbidden', 'Wrong workspace');
       this.ledger.flock.set(['discovery'], JSON.parse(JSON.stringify(value)));
       this.ledger.flock.commit();
@@ -140,33 +161,26 @@ export class LocalShortcutStore {
     return record;
   }
 
-  /** Freeze a separate, current-state-only body BEFORE any remote call. Working
-   * documents never enter Streams, even while an older shared job is in flight. */
+  /**
+   * Snapshot the current pending outbox record for upload without rotating `bodyDocId`.
+   * Owned working edits live in `shortcut-working:{id}`; the synced body stream
+   * `{workspaceId}:shortcut:{bodyDocId}` is updated in-place during publication.
+   */
   preparePublication(id: string): Promise<ShortcutLocalRecord | null> {
     return this.serialized(async () => {
       await this.recover();
       const existing = this.publication(id);
       const current = this.get(id);
-      if (existing && !current?.deleted) return existing;
+      if (existing && !current?.deleted && existing.entry.revision === current?.entry.revision)
+        return existing;
       if (!current?.operation) return null;
-      let record = current;
       if (current.operation === 'save') {
-        const value = await this.read(current.entry);
-        const bodyDocId = crypto.randomUUID();
-        const docId = getShortcutBodyStreamId(bodyDocId);
-        const lease = await this.repo.acquireDoc(docId);
-        try {
-          new PromptShortcutDocument(lease.doc).save(value, []);
-          await this.repo.persistDocNow(docId, lease.doc);
-        } finally {
-          await lease.release();
-        }
-        record = { ...current, entry: projectShortcutIndex(value, bodyDocId) };
+        await this.read(current.entry);
       }
-      this.ledger.flock.set(['publication', id], JSON.parse(JSON.stringify(record)));
+      this.ledger.flock.set(['publication', id], JSON.parse(JSON.stringify(current)));
       this.ledger.flock.commit();
       await this.repo.persistFlockDocNow(this.ledgerId, this.ledger.flock);
-      return record;
+      return current;
     });
   }
 
@@ -185,41 +199,57 @@ export class LocalShortcutStore {
     await this.repo.persistFlockDocNow(this.ledgerId, this.ledger.flock);
   }
 
-  /** One-time development-schema upgrade. Preserve an ambiguous v1 job's exact
-   * remote identity, but fork its working copy before allowing further edits.
-   * Each row transition is atomic; interruption can safely replay the upgrade. */
+  /**
+   * Upgrade earlier local ledgers (v1/v2 stored working copies at `shortcut-body:{bodyDocId}`)
+   * so owned working copies live under `shortcut-working:{id}` with stable `bodyDocId`.
+   */
   private async upgradePublicationProtocol() {
     const version = this.ledger.flock.get(['publicationProtocol']);
-    if (version === 2) return;
-    if (version != null) throw new Error('Unsupported Shortcut publication protocol');
+    if (version === 3) return;
+    if (version != null && version !== 2)
+      throw new Error('Unsupported Shortcut publication protocol');
     for (const record of this.list()) {
-      if (record.operation !== 'save' || this.publication(record.entry.id)) continue;
-      const value = await this.read(record.entry);
-      const bodyDocId = crypto.randomUUID();
-      const docId = getShortcutBodyStreamId(bodyDocId);
+      if (!record.deleted) {
+        const workingDocId = getLocalShortcutWorkingDocId(record.entry.id);
+        const workingLease = await this.repo.acquireDoc(workingDocId);
+        try {
+          const workingDoc = new PromptShortcutDocument(workingLease.doc);
+          if (!workingDoc.read()) {
+            const migrated = await this.readFromCandidates([
+              getWorkspaceShortcutBodyStreamId(this.workspaceId, record.entry.bodyDocId),
+              getShortcutBodyStreamId(record.entry.bodyDocId),
+            ]);
+            if (migrated) {
+              workingDoc.save(migrated, []);
+              await this.repo.persistDocNow(workingDocId, workingLease.doc);
+            }
+          }
+        } finally {
+          await workingLease.release();
+        }
+      }
+      this.ledger.flock.set(['shortcut', record.entry.id], JSON.parse(JSON.stringify(record)));
+      const pub = this.publication(record.entry.id);
+      if (pub) {
+        this.ledger.flock.set(['publication', record.entry.id], JSON.parse(JSON.stringify(pub)));
+      }
+    }
+    this.ledger.flock.set(['publicationProtocol'], 3);
+    this.ledger.flock.commit();
+    await this.repo.persistFlockDocNow(this.ledgerId, this.ledger.flock);
+  }
+
+  private async readFromCandidates(docIds: readonly string[]): Promise<PromptShortcut | null> {
+    for (const docId of docIds) {
       const lease = await this.repo.acquireDoc(docId);
       try {
-        new PromptShortcutDocument(lease.doc).save(value, []);
-        await this.repo.persistDocNow(docId, lease.doc);
+        const saved = new PromptShortcutDocument(lease.doc).read();
+        if (saved) return saved;
       } finally {
         await lease.release();
       }
-      this.ledger.flock.set(['publication', record.entry.id], JSON.parse(JSON.stringify(record)));
-      this.ledger.flock.set(
-        ['shortcut', record.entry.id],
-        JSON.parse(
-          JSON.stringify({
-            ...record,
-            entry: projectShortcutIndex(value, bodyDocId),
-          })
-        )
-      );
-      this.ledger.flock.commit();
-      await this.repo.persistFlockDocNow(this.ledgerId, this.ledger.flock);
     }
-    this.ledger.flock.set(['publicationProtocol'], 2);
-    this.ledger.flock.commit();
-    await this.repo.persistFlockDocNow(this.ledgerId, this.ledger.flock);
+    return null;
   }
 
   /** Repair only explicitly journaled bodies. A pre-body crash discards the
@@ -228,8 +258,6 @@ export class LocalShortcutStore {
     for (const row of this.ledger.flock.scan({ prefix: ['writeIntent'] })) {
       if (row.value === undefined) continue;
       const parsed = intentSchema.safeParse(row.value);
-      // v1 used the published entry as its local save base and disallowed edits
-      // while pending. Read that shape only for crash recovery during the upgrade.
       const legacy = parsed.success ? null : recordSchema.parse(row.value);
       const { record, baseRevision } = parsed.success
         ? parsed.data
@@ -240,9 +268,20 @@ export class LocalShortcutStore {
       this.assertOwner(record.entry);
       if (row.key[1] !== record.entry.id)
         throw new PromptShortcutError('invalid_template', 'Intent identity mismatch');
-      const lease = await this.repo.acquireDoc(getShortcutBodyStreamId(record.entry.bodyDocId));
+      const workingId = getLocalShortcutWorkingDocId(record.entry.id);
+      const workingLease = await this.repo.acquireDoc(workingId);
       try {
-        const saved = new PromptShortcutDocument(lease.doc).read();
+        let saved = new PromptShortcutDocument(workingLease.doc).read();
+        if (!saved) {
+          const legacyLease = await this.repo.acquireDoc(
+            getShortcutBodyStreamId(record.entry.bodyDocId)
+          );
+          try {
+            saved = new PromptShortcutDocument(legacyLease.doc).read();
+          } finally {
+            await legacyLease.release();
+          }
+        }
         if (saved?.revision === record.entry.revision) {
           if (
             JSON.stringify(projectShortcutIndex(saved, record.entry.bodyDocId)) !==
@@ -255,7 +294,7 @@ export class LocalShortcutStore {
         }
         await this.clearIntent(record.entry.id);
       } finally {
-        await lease.release();
+        await workingLease.release();
       }
     }
   }
@@ -264,21 +303,35 @@ export class LocalShortcutStore {
   async read(entry: PromptShortcutIndexEntry): Promise<PromptShortcut> {
     if (entry.workspaceId !== this.workspaceId)
       throw new PromptShortcutError('forbidden', 'Wrong workspace');
-    const lease = await this.repo.acquireDoc(getShortcutBodyStreamId(entry.bodyDocId));
-    try {
-      const content = new PromptShortcutDocument(lease.doc).read();
-      if (!content) throw new PromptShortcutError('not_found', 'Shortcut body is not available');
-      if (JSON.stringify(projectShortcutIndex(content, entry.bodyDocId)) !== JSON.stringify(entry))
-        throw new PromptShortcutError('revision_pending', 'Index and body have not converged');
-      return content;
-    } finally {
-      await lease.release();
+    const candidates = [
+      ...(entry.ownerUserId === this.userId ? [getLocalShortcutWorkingDocId(entry.id)] : []),
+      getWorkspaceShortcutBodyStreamId(this.workspaceId, entry.bodyDocId),
+      getShortcutBodyStreamId(entry.bodyDocId),
+    ];
+    let sawRevisionMismatch = false;
+    for (const docId of candidates) {
+      const lease = await this.repo.acquireDoc(docId);
+      try {
+        const content = new PromptShortcutDocument(lease.doc).read();
+        if (!content) continue;
+        if (
+          JSON.stringify(projectShortcutIndex(content, entry.bodyDocId)) === JSON.stringify(entry)
+        ) {
+          return content;
+        }
+        sawRevisionMismatch = true;
+      } finally {
+        await lease.release();
+      }
     }
+    if (sawRevisionMismatch)
+      throw new PromptShortcutError('revision_pending', 'Index and body have not converged');
+    throw new PromptShortcutError('not_found', 'Shortcut body is not available');
   }
 
   save(input: {
     value: unknown;
-    bodyDocId: string;
+    bodyDocId?: string;
     base: PromptShortcutIndexEntry | null;
   }): Promise<ShortcutLocalRecord> {
     return this.serialized(async () => {
@@ -293,6 +346,8 @@ export class LocalShortcutStore {
         this.assertOwner(input.base);
         if (input.base.id !== value.id || input.base.createdAt !== value.createdAt)
           throw new PromptShortcutError('conflict', 'Shortcut identity changed');
+        if (input.bodyDocId !== undefined && input.bodyDocId !== input.base.bodyDocId)
+          throw new PromptShortcutError('conflict', 'Shortcut body document id cannot change');
       }
       const adoptsRemote =
         !!current &&
@@ -301,24 +356,12 @@ export class LocalShortcutStore {
         JSON.stringify(current.entry) !== JSON.stringify(input.base);
       if (current && !adoptsRemote && JSON.stringify(current.entry) !== JSON.stringify(input.base))
         throw new PromptShortcutError('conflict', 'Shortcut changed since editing started');
-      const rotates = input.base !== null && input.base.visibility !== value.visibility;
-      if (input.base && rotates === (input.base.bodyDocId === input.bodyDocId))
-        throw new PromptShortcutError('conflict', 'Visibility changes require a fresh body');
-      if (rotates || adoptsRemote) {
-        // The selected source must still match before copying it to a fresh history.
+      if (adoptsRemote) {
         await this.read(input.base!);
       }
-      // Editing an owned remote publication first forks it into local-only storage.
-      // Never append local edits (or their history) to a granted body resource.
-      const forkPublished =
-        input.base &&
-        (!current || adoptsRemote || current.entry.bodyDocId === current.published?.bodyDocId);
-      const bodyDocId = forkPublished ? crypto.randomUUID() : input.bodyDocId;
+      const bodyDocId = input.base ? input.base.bodyDocId : (input.bodyDocId ?? value.id);
       const entry = projectShortcutIndex(value, bodyDocId);
-      const siblings = this.list().filter(
-        (row) =>
-          !row.deleted && row.entry.id !== value.id && row.entry.visibility === value.visibility
-      );
+      const siblings = this.list().filter((row) => !row.deleted && row.entry.id !== value.id);
       if (siblings.some((row) => row.entry.slug === value.slug))
         throw new PromptShortcutError('conflict', 'Shortcut slug is already in use');
       if (
@@ -327,7 +370,7 @@ export class LocalShortcutStore {
           512 * 1024
       )
         throw new PromptShortcutError('size_limit', 'Shortcut catalog exceeds its quota');
-      const docId = getShortcutBodyStreamId(bodyDocId);
+      const docId = getLocalShortcutWorkingDocId(value.id);
       const lease = await this.repo.acquireDoc(docId);
       const record: ShortcutLocalRecord = {
         entry,
@@ -339,7 +382,7 @@ export class LocalShortcutStore {
       };
       try {
         const document = new PromptShortcutDocument(lease.doc);
-        const parents = !current || rotates || forkPublished ? [] : [current.entry.revision];
+        const parents = document.heads().map((head) => head.revision);
         document.validateSave(value, parents);
         this.ledger.flock.set(
           ['writeIntent', value.id],

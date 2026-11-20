@@ -14,6 +14,8 @@ const UPLOAD_PROBE_TIMEOUT_MS = 10_000;
 
 export type SessionDocStaleSignal = {
   docReady: boolean;
+  /** False on mounted inactive tabs whose sync lease has been released. */
+  syncEnabled: boolean;
   machineOnlineStatus: MachineOnlineStatus;
   /** Live presence, a pending dispatch or an active goal. */
   agentBusy: boolean;
@@ -26,7 +28,10 @@ export type SessionDocStaleSignal = {
  * also leaves an unfinished turn.
  */
 export const resolveStaleCandidateTurnId = (signal: SessionDocStaleSignal): string | null =>
-  signal.docReady && signal.machineOnlineStatus === 'online' && !signal.agentBusy
+  signal.docReady &&
+  signal.syncEnabled &&
+  signal.machineOnlineStatus === 'online' &&
+  !signal.agentBusy
     ? signal.activeAssistantTurnId
     : null;
 
@@ -80,6 +85,9 @@ export function useSessionDocStaleReport(
           transportId: inspection?.transportId ?? null,
           bindingStatus: inspection?.bindingStatus ?? null,
           syncState: inspection?.syncState ?? null,
+          leaseCount: inspection?.leaseCount ?? null,
+          joinInFlight: inspection?.joinInFlight ?? null,
+          roomSubPresent: inspection?.roomSubPresent ?? null,
           pendingUploadProbe: inspection?.pendingUploadProbe ?? null,
           pendingUploadProbeMs: inspection ? Date.now() - reportedAt : null,
           staleForMs: reportedAt - staleSince,

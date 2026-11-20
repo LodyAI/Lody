@@ -1479,7 +1479,7 @@
   "composer.messageQuoteSeparatePassages": "Select one passage at a time; you can add several quotes.",
   "composer.messageQuoteTitle": "Quoted message",
   "composer.messageQuoteOriginal": "Original quote",
-  "composer.messageQuoteInlineLabel": "[Quote: {{text}}]",
+  "composer.messageQuoteInlineLabel": "[{{text}}]",
   "composer.collapseMessageQuote": "Collapse quote",
   "composer.removeMessageQuote": "Remove quote",
   "composer.messageQuoteTooLong": "Select up to 50,000 characters to quote.",
@@ -6862,5 +6862,13 @@
   "e2ee.lostAll.password.title": "Use recovery password",
   "e2ee.lostAll.password.help": "Enter the recovery password you set up earlier.",
   "settings.general.suppressMobilePushWhenFocused.label": "Pause phone notifications while using this computer",
-  "settings.general.suppressMobilePushWhenFocused.helper": "While Lody is focused on this computer, finished tasks skip your phone. Permission requests and questions still notify."
+  "settings.general.suppressMobilePushWhenFocused.helper": "While Lody is focused on this computer, finished tasks skip your phone. Permission requests and questions still notify.",
+  "sidebar.pinSections.createTitle": "New Section",
+  "sidebar.pinSections.delete": "Delete Section",
+  "sidebar.pinSections.moveToSection": "Move to Section",
+  "sidebar.pinSections.namePlaceholder": "Section name",
+  "sidebar.pinSections.newSection": "New Section…",
+  "sidebar.pinSections.rename": "Rename Section",
+  "sidebar.pinSections.renameTitle": "Rename Section",
+  "sidebar.pinSections.sectionActions": "Section actions"
 }

@@ -863,6 +863,328 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     }
   });
 
+  it('re-joins and syncs a session room after a pending initial sync outlives the release delay', async () => {
+    const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
+    const sessionId = 'wedge-variant-a' as SessionId;
+    const roomId = getSessionRoomId(sessionId);
+    const joinAttempts: Array<{
+      resolveFirstSync: () => void;
+      unsubscribed: boolean;
+    }> = [];
+    const repo = await RealRepo.create({
+      metaDebounceCommitMs: 0,
+      resolveRoomTransports: () => ({ transportIds: ['local'] }),
+    });
+    const adapter: TransportAdapter = {
+      connect: async () => {},
+      close: async () => {},
+      isConnected: () => true,
+      getStatus: () => 'connected',
+      onStatusChange: () => () => {},
+      reconnect: async () => {},
+      syncMeta: async () => ({ ok: true }),
+      syncDoc: async () => ({ ok: true }),
+      joinMetaRoom: () => ({
+        status: 'joined',
+        firstSyncedWithRemote: Promise.resolve(),
+        onStatusChange: () => () => {},
+        unsubscribe: () => {},
+        waitUntilSynced: async () => {},
+        rejoin: async () => {},
+      }),
+      joinDocRoom: (docId) => {
+        let resolveFirstSync!: () => void;
+        const firstSyncedWithRemote = new Promise<void>((resolve) => {
+          resolveFirstSync = resolve;
+        });
+        const record = { resolveFirstSync, unsubscribed: false };
+        if (docId === roomId) {
+          joinAttempts.push(record);
+        } else {
+          resolveFirstSync();
+        }
+        let status: 'connecting' | 'joined' | 'disconnected' =
+          docId === roomId ? 'connecting' : 'joined';
+        const listeners = new Set<(next: typeof status) => void>();
+        return {
+          get status() {
+            return status;
+          },
+          firstSyncedWithRemote: firstSyncedWithRemote.then(() => {
+            if (!record.unsubscribed) {
+              status = 'joined';
+              for (const listener of listeners) listener(status);
+            }
+          }),
+          onStatusChange: (listener) => {
+            listeners.add(listener);
+            listener(status);
+            return () => listeners.delete(listener);
+          },
+          unsubscribe: () => {
+            // Mirrors LocalLoroTransportAdapter.closeRoom: tearing down a room
+            // marks status disconnected without resolving firstSyncedWithRemote.
+            record.unsubscribed = true;
+            status = 'disconnected';
+            for (const listener of listeners) listener(status);
+          },
+          waitUntilSynced: async () => {},
+          rejoin: async () => {},
+        };
+      },
+    };
+    const add = repo.addTransport.bind(repo);
+    vi.spyOn(repo, 'addTransport').mockImplementation((id, _adapter, options) =>
+      add(id, adapter, options)
+    );
+    mocks.repoOverride = repo;
+    enableElectronLocalDataPlane();
+    await repo.upsertDocMeta(roomId, { id: sessionId, machineId: 'local-machine' });
+
+    const runtime = await createWorkspaceRuntime({
+      content: { mode: 'plaintext' },
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+    });
+    runtime.setLocalMachineId('local-machine' as MachineId);
+    const store = await runtime.acquireSessionStore(sessionId);
+    let releaseSecondLease: (() => void) | null = null;
+    try {
+      const releaseFirstLease = store.acquireSync();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(joinAttempts).toHaveLength(1);
+      expect(store.getSyncState()).toBe('connecting');
+
+      // User navigates away for >2s while the first join is still waiting on
+      // firstSyncedWithRemote; stopSyncNow tears the first subscription down.
+      releaseFirstLease();
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(joinAttempts[0]?.unsubscribed).toBe(true);
+      expect(store.getSyncState()).toBe('idle');
+
+      // User switches back: the store must start a fresh join instead of
+      // hanging forever on the first attempt's unsettled firstSyncedWithRemote.
+      releaseSecondLease = store.acquireSync();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(joinAttempts).toHaveLength(2);
+
+      joinAttempts[1]!.resolveFirstSync();
+      await flushPromises();
+      expect(store.getSyncState()).toBe('synced');
+      await expect(store.firstSynced).resolves.toBeUndefined();
+      const inspection = await store.inspectSync({ uploadProbeTimeoutMs: 50 });
+      expect(inspection).toMatchObject({
+        transportId: 'local',
+        bindingStatus: 'joined',
+        syncState: 'synced',
+        leaseCount: 1,
+        joinInFlight: false,
+        roomSubPresent: true,
+      });
+    } finally {
+      releaseSecondLease?.();
+      runtime.releaseSessionStoreRef(sessionId);
+      await runtime.dispose();
+    }
+  });
+
+  it('retains a live synced session room when first sync finishes during the 2s release grace period and a lease returns', async () => {
+    const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
+    const sessionId = 'wedge-variant-b' as SessionId;
+    const roomId = getSessionRoomId(sessionId);
+    let resolveFirstSync!: () => void;
+    let unsubscribedCount = 0;
+    const repo = await RealRepo.create({
+      metaDebounceCommitMs: 0,
+      resolveRoomTransports: () => ({ transportIds: ['local'] }),
+    });
+    const adapter: TransportAdapter = {
+      connect: async () => {},
+      close: async () => {},
+      isConnected: () => true,
+      getStatus: () => 'connected',
+      onStatusChange: () => () => {},
+      reconnect: async () => {},
+      syncMeta: async () => ({ ok: true }),
+      syncDoc: async () => ({ ok: true }),
+      joinMetaRoom: () => ({
+        status: 'joined',
+        firstSyncedWithRemote: Promise.resolve(),
+        onStatusChange: () => () => {},
+        unsubscribe: () => {},
+        waitUntilSynced: async () => {},
+        rejoin: async () => {},
+      }),
+      joinDocRoom: (docId) => {
+        const firstSyncedWithRemote =
+          docId === roomId
+            ? new Promise<void>((resolve) => {
+                resolveFirstSync = resolve;
+              })
+            : Promise.resolve();
+        let status: 'joined' | 'disconnected' = 'joined';
+        const listeners = new Set<(next: typeof status) => void>();
+        return {
+          get status() {
+            return status;
+          },
+          firstSyncedWithRemote,
+          onStatusChange: (listener) => {
+            listeners.add(listener);
+            listener(status);
+            return () => listeners.delete(listener);
+          },
+          unsubscribe: () => {
+            if (docId === roomId) unsubscribedCount += 1;
+            status = 'disconnected';
+            for (const listener of listeners) listener(status);
+          },
+          waitUntilSynced: async () => {},
+          rejoin: async () => {},
+        };
+      },
+    };
+    const add = repo.addTransport.bind(repo);
+    vi.spyOn(repo, 'addTransport').mockImplementation((id, _adapter, options) =>
+      add(id, adapter, options)
+    );
+    mocks.repoOverride = repo;
+    enableElectronLocalDataPlane();
+    await repo.upsertDocMeta(roomId, { id: sessionId, machineId: 'local-machine' });
+
+    const runtime = await createWorkspaceRuntime({
+      content: { mode: 'plaintext' },
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+    });
+    runtime.setLocalMachineId('local-machine' as MachineId);
+    const store = await runtime.acquireSessionStore(sessionId);
+    let releaseReturnedLease: (() => void) | null = null;
+    try {
+      const releaseFirstLease = store.acquireSync();
+      await vi.advanceTimersByTimeAsync(10);
+
+      // User briefly switches tabs (<2s): lease count drops to 0 and the 2s
+      // debounce timer starts, then firstSyncedWithRemote lands inside that
+      // window before the user switches back.
+      releaseFirstLease();
+      await vi.advanceTimersByTimeAsync(100);
+      resolveFirstSync();
+      await flushPromises();
+
+      releaseReturnedLease = store.acquireSync();
+      await vi.advanceTimersByTimeAsync(2_500);
+
+      expect(unsubscribedCount).toBe(0);
+      expect(store.getSyncState()).toBe('synced');
+      const inspection = await store.inspectSync({ uploadProbeTimeoutMs: 50 });
+      expect(inspection).toMatchObject({
+        bindingStatus: 'joined',
+        syncState: 'synced',
+        leaseCount: 1,
+        roomSubPresent: true,
+      });
+    } finally {
+      releaseReturnedLease?.();
+      runtime.releaseSessionStoreRef(sessionId);
+      await runtime.dispose();
+    }
+  });
+
+  it('fences a superseded join attempt when another lease keeps the Repo room alive across stopSyncNow', async () => {
+    const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
+    const sessionId = 'wedge-variant-c' as SessionId;
+    const roomId = getSessionRoomId(sessionId);
+    let resolveSharedSync!: () => void;
+    const repo = await RealRepo.create({
+      metaDebounceCommitMs: 0,
+      resolveRoomTransports: () => ({ transportIds: ['local'] }),
+    });
+    const adapter: TransportAdapter = {
+      connect: async () => {},
+      close: async () => {},
+      isConnected: () => true,
+      getStatus: () => 'connected',
+      onStatusChange: () => () => {},
+      reconnect: async () => {},
+      syncMeta: async () => ({ ok: true }),
+      syncDoc: async () => ({ ok: true }),
+      joinMetaRoom: () => ({
+        status: 'joined',
+        firstSyncedWithRemote: Promise.resolve(),
+        onStatusChange: () => () => {},
+        unsubscribe: () => {},
+        waitUntilSynced: async () => {},
+        rejoin: async () => {},
+      }),
+      joinDocRoom: (docId) => ({
+        status: 'joined',
+        firstSyncedWithRemote:
+          docId === roomId
+            ? new Promise<void>((resolve) => {
+                resolveSharedSync = resolve;
+              })
+            : Promise.resolve(),
+        onStatusChange: (listener) => {
+          listener('joined');
+          return () => {};
+        },
+        unsubscribe: () => {},
+        waitUntilSynced: async () => {},
+        rejoin: async () => {},
+      }),
+    };
+    const add = repo.addTransport.bind(repo);
+    vi.spyOn(repo, 'addTransport').mockImplementation((id, _adapter, options) =>
+      add(id, adapter, options)
+    );
+    mocks.repoOverride = repo;
+    enableElectronLocalDataPlane();
+    await repo.upsertDocMeta(roomId, { id: sessionId, machineId: 'local-machine' });
+
+    // External caller holds a lease on the same Repo room so stopSyncNow's
+    // unsubscribe only decrements refCount without tearing down the room.
+    const externalSub = await repo.joinDocRoom(roomId);
+    const runtime = await createWorkspaceRuntime({
+      content: { mode: 'plaintext' },
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+    });
+    runtime.setLocalMachineId('local-machine' as MachineId);
+    const store = await runtime.acquireSessionStore(sessionId);
+    let releaseSecondLease: (() => void) | null = null;
+    try {
+      const releaseFirstLease = store.acquireSync();
+      await vi.advanceTimersByTimeAsync(10);
+
+      releaseFirstLease();
+      await vi.advanceTimersByTimeAsync(2_500);
+
+      // Re-acquire BEFORE the shared firstSyncedWithRemote resolves, then drop
+      // the external lease after sync completes: if the store's first attempt
+      // resurrected its already-unsubscribed handle into roomSub, releasing
+      // externalSub would drop refCount to 0 and detach the room!
+      releaseSecondLease = store.acquireSync();
+      await vi.advanceTimersByTimeAsync(10);
+      resolveSharedSync();
+      await flushPromises();
+      externalSub.unsubscribe();
+      await flushPromises();
+
+      expect(store.getSyncState()).toBe('synced');
+      const inspection = await store.inspectSync({ uploadProbeTimeoutMs: 50 });
+      expect(inspection.bindingStatus).toBe('joined');
+    } finally {
+      externalSub.unsubscribe();
+      releaseSecondLease?.();
+      runtime.releaseSessionStoreRef(sessionId);
+      await runtime.dispose();
+    }
+  });
+
   it('rebinds the eager-sync auth callback when the token provider is replaced', async () => {
     mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
     const runtime = await createWorkspaceRuntime({

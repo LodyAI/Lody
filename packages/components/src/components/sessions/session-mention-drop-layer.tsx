@@ -24,7 +24,7 @@ export function SessionMentionDropLayer({
   className?: string;
   children: ReactNode;
 }) {
-  const { dropZone, overlayActive } = useSessionMentionDropZone({
+  const { dropZone, pointerDropRef, overlayActive } = useSessionMentionDropZone({
     enabled,
     excludeSessionId,
     onDropSessionId,
@@ -34,6 +34,7 @@ export function SessionMentionDropLayer({
     <div
       className={cn('relative h-full min-h-0 overflow-hidden', className)}
       data-session-mention-drop-layer=""
+      ref={pointerDropRef}
       {...dropZone.handlers}
     >
       <ConversationDropOverlay active={overlayActive} kind="session-mention" />

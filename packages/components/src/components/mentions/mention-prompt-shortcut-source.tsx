@@ -69,12 +69,8 @@ export function selectPromptShortcutCandidates(
   const query = term.trim().toLowerCase();
   return input.entries
     .flatMap((entry): MentionCandidate[] => {
-      // Never turn a private/foreign entry into a diagnostic disclosure.
-      if (
-        entry.workspaceId !== context.workspaceId ||
-        (entry.visibility === 'private' && entry.ownerUserId !== context.userId)
-      )
-        return [];
+      // Never turn a foreign workspace entry into a diagnostic disclosure.
+      if (entry.workspaceId !== context.workspaceId) return [];
       const exact = query !== '' && (entry.slug === query || entry.name.toLowerCase() === query);
       const slashRank = rankSlashMatch(
         { token: entry.slug, name: entry.name, description: entry.description ?? undefined },
@@ -91,10 +87,6 @@ export function selectPromptShortcutCandidates(
             resolveDependency: input.resolveDependency ?? unverifiedShortcutDependency,
           });
       if (availability.kind !== 'available' && !exact) return [];
-      const visibility =
-        entry.visibility === 'private'
-          ? t('promptShortcut.private', 'Private')
-          : t('promptShortcut.shared', 'Shared');
       return [
         {
           value: `prompt-shortcut:${entry.id}`,
@@ -108,7 +100,6 @@ export function selectPromptShortcutCandidates(
           title: `/${entry.slug}`,
           hint: entry.description,
           slashRank,
-          trailing: visibility,
           disabled: availability.kind !== 'available',
           disabledReason: shortcutAvailabilityMessage(availability, t) || undefined,
         },

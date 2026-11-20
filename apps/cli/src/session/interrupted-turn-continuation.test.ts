@@ -71,7 +71,6 @@ describe('continuing a Turn interrupted by a process end', () => {
       items: [{ type: 'text', text: 'continue' }],
       inputConfig: {
         prompt: 'continue',
-        inputBlocks: [{ type: 'text', text: 'continue' }],
         cliType: 'builtin',
         agentType: 'codex',
         modelId: 'model-a',
@@ -81,6 +80,7 @@ describe('continuing a Turn interrupted by a process end', () => {
         resume: 'acp-1',
       },
     });
+    expect(result.entry.inputConfig?.inputBlocks).toBeUndefined();
     expect(JSON.stringify(result.entry)).not.toContain('Refactor the parser');
   });
 

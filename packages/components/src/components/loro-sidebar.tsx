@@ -78,6 +78,11 @@ import {
   type SidebarUpdatedItem,
   type SidebarUpdatedSessionListLabels,
 } from './sidebar-updated-session-list';
+import {
+  SidebarPinnedSections,
+  type SidebarPinSectionActions,
+  type SidebarPinnedSection,
+} from './sidebar-pinned-sections';
 import { SidebarFilterPopover, type SidebarFilterLabels } from './sidebar-filter-popover';
 import { WorkspaceAvatar } from './workspace-avatar';
 import { AuthRecoveryEntrySlot } from './auth-recovery-entry';
@@ -229,6 +234,16 @@ export interface LoroSidebarProps {
   pinnedItems?: SidebarUpdatedItem[];
   /** Whether the dedicated pinned section is collapsed. */
   pinnedSectionCollapsed?: boolean;
+  /**
+   * Pinned sessions split into pin sections, default section first. When
+   * omitted, {@link pinnedItems} renders as the single default section.
+   */
+  pinnedSections?: SidebarPinnedSection[];
+  /** Folded user pin sections, by section id (the default uses `pinnedSectionCollapsed`). */
+  collapsedPinSectionIds?: Readonly<Record<string, boolean>>;
+  onTogglePinSection?: (sectionId: string) => void;
+  /** Create, rename, delete and move between pin sections; absent hides those controls. */
+  pinSectionActions?: SidebarPinSectionActions;
   /** Selected item id used to highlight a row in 'updated' mode. */
   updatedSelectedItemId?: string | null;
   /** Per-bucket collapse state for the 'updated' organize mode. */
@@ -438,10 +453,6 @@ const defaultLabels: LoroSidebarLabels = {
     emptyTitle: 'Nothing yet',
     emptyDescription: 'Start a chat or open a worktree to see it here.',
   },
-};
-
-const PINNED_BUCKETS_COLLAPSED: Partial<Record<SidebarUpdatedBucketKey, boolean>> = {
-  all: true,
 };
 
 const defaultRepoSections: LoroSidebarRepoSection[] = [
@@ -896,6 +907,10 @@ export const LoroSidebar = memo(function LoroSidebar({
   updatedItems,
   pinnedItems,
   pinnedSectionCollapsed = false,
+  pinnedSections,
+  collapsedPinSectionIds,
+  onTogglePinSection,
+  pinSectionActions,
   updatedSelectedItemId,
   updatedBucketsCollapsed,
   updatedShowFullBuckets,
@@ -1115,7 +1130,47 @@ export const LoroSidebar = memo(function LoroSidebar({
         />
       ))
     : null;
-  const hasPinnedItems = Boolean(pinnedItems?.length);
+  const resolvedPinnedSections = useMemo<SidebarPinnedSection[]>(
+    () => pinnedSections ?? [{ id: null, name: '', items: pinnedItems ?? [] }],
+    [pinnedItems, pinnedSections]
+  );
+  const pinnedListProps = useMemo(
+    () => ({
+      now,
+      isMobile,
+      showProjectContext: organizeMode !== 'workspace' && showUpdatedProjectNames,
+      selectedItemId: updatedSelectedItemId ?? null,
+      onSelectItem: onSelectUpdatedItem,
+      onArchiveItem: onArchiveUpdatedItem,
+      onMarkItemUnread: onMarkUpdatedItemUnread,
+      onRenameItem: onRenameUpdatedItem,
+      onTogglePinItem: onToggleUpdatedItemPinned,
+      onCopyItemUrl: onCopyUpdatedItemUrl,
+      onShareItemWithTeam: onShareUpdatedItemWithTeam,
+      onOpenPullRequest: onOpenUpdatedItemPullRequest,
+      getItemHref: getUpdatedItemHref,
+    }),
+    [
+      now,
+      isMobile,
+      organizeMode,
+      showUpdatedProjectNames,
+      updatedSelectedItemId,
+      onSelectUpdatedItem,
+      onArchiveUpdatedItem,
+      onMarkUpdatedItemUnread,
+      onRenameUpdatedItem,
+      onToggleUpdatedItemPinned,
+      onCopyUpdatedItemUrl,
+      onShareUpdatedItemWithTeam,
+      onOpenUpdatedItemPullRequest,
+      getUpdatedItemHref,
+    ]
+  );
+  // An empty user section still renders: it is where conversations get dragged to.
+  const hasPinnedItems = resolvedPinnedSections.some(
+    (section) => section.id !== null || section.items.length > 0
+  );
   const isWorkspaceEmpty =
     organizeMode === 'workspace' &&
     !topContent &&
@@ -1648,31 +1703,18 @@ export const LoroSidebar = memo(function LoroSidebar({
           <div className="relative">
             {hasPinnedItems ? (
               <div className={cn('pt-1', pinnedSectionCollapsed ? 'pb-1' : 'pb-3')}>
-                <SidebarUpdatedSessionList
-                  items={pinnedItems ?? []}
-                  now={now}
-                  isMobile={isMobile}
-                  showPinnedIcon={false}
-                  showProjectContext={organizeMode !== 'workspace' && showUpdatedProjectNames}
-                  selectedItemId={updatedSelectedItemId ?? null}
-                  collapsedBuckets={pinnedSectionCollapsed ? PINNED_BUCKETS_COLLAPSED : undefined}
-                  labels={{
-                    heading: mergedLabels.pinned,
-                    emptyTitle: mergedLabels.updated.emptyTitle,
-                    emptyDescription: mergedLabels.updated.emptyDescription,
-                  }}
-                  onSelectItem={onSelectUpdatedItem}
-                  onToggleBucket={onTogglePinnedSection}
-                  toggleBucketLabel={mergedLabels.pinned}
-                  onArchiveItem={onArchiveUpdatedItem}
-                  onMarkItemUnread={onMarkUpdatedItemUnread}
-                  onRenameItem={onRenameUpdatedItem}
-                  onTogglePinItem={onToggleUpdatedItemPinned}
-                  onCopyItemUrl={onCopyUpdatedItemUrl}
-                  onShareItemWithTeam={onShareUpdatedItemWithTeam}
-                  onOpenPullRequest={onOpenUpdatedItemPullRequest}
-                  getItemHref={getUpdatedItemHref}
+                <SidebarPinnedSections
+                  sections={resolvedPinnedSections}
+                  defaultLabel={mergedLabels.pinned}
+                  defaultCollapsed={pinnedSectionCollapsed}
+                  onToggleDefault={onTogglePinnedSection}
+                  collapsedSectionIds={collapsedPinSectionIds}
+                  onToggleSection={onTogglePinSection}
                   headerAction={sectionHeaderFilterAction ?? undefined}
+                  actions={pinSectionActions}
+                  emptyTitle={mergedLabels.updated.emptyTitle}
+                  emptyDescription={mergedLabels.updated.emptyDescription}
+                  listProps={pinnedListProps}
                 />
               </div>
             ) : null}

@@ -6,6 +6,13 @@ import { createRoot, type Root } from 'react-dom/client';
 
 import { LoroSidebar, type LoroSidebarProps } from '../src/components/loro-sidebar';
 import { initI18n } from '../src/i18n';
+import { moveRowIntoSection } from '../src/components/pinned-rows-dnd';
+import {
+  armSessionMentionDrag,
+  clearSessionMentionDrag,
+  getInFlightSessionMentionDragId,
+} from '../src/lib/session-mention-drag';
+import { endPinnedDropSettle } from '../src/lib/pinned-drop-settle';
 
 const pinnedItem = {
   id: 'pinned-session',
@@ -457,5 +464,418 @@ describe('LoroSidebar pinned section', () => {
 
     header?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(onTogglePinnedSection).toHaveBeenCalledOnce();
+  });
+
+  it('renders user pin sections after the default one, keeping the manual order of their rows', () => {
+    const chat = (id: string, minutesAgo: number) => ({
+      id,
+      kind: 'chat' as const,
+      title: id,
+      sectionLabel: 'Chats',
+      latestMessageAt: new Date(Date.UTC(2026, 6, 14, 9, 60 - minutesAgo)),
+      isPinned: true,
+    });
+    renderSidebar({
+      pinnedItems: [chat('loose', 1), chat('weekly-mirror', 50), chat('deps-bump', 2)],
+      pinnedSections: [
+        { id: null, name: 'Pinned', items: [chat('loose', 1)] },
+        {
+          id: 'maintenance',
+          name: 'Maintenance',
+          // Manual order: the older conversation stays first.
+          items: [chat('weekly-mirror', 50), chat('deps-bump', 2)],
+        },
+        { id: 'empty', name: 'Empty section', items: [] },
+      ],
+    });
+
+    const sections = Array.from(
+      container?.querySelectorAll<HTMLElement>('[data-pin-section]') ?? []
+    ).map((section) => [
+      section.getAttribute('data-pin-section'),
+      Array.from(section.querySelectorAll('[data-sidebar-updated-id]')).map((row) =>
+        row.getAttribute('data-sidebar-updated-id')
+      ),
+    ]);
+    expect(sections).toEqual([
+      ['default', ['loose']],
+      ['maintenance', ['weekly-mirror', 'deps-bump']],
+      ['empty', []],
+    ]);
+    expect(container?.textContent).toContain('Maintenance');
+    expect(container?.textContent).toContain('Empty section');
+  });
+
+  it('collapses one user section without folding the others', () => {
+    const onTogglePinSection = vi.fn();
+    renderSidebar({
+      pinnedSections: [
+        { id: null, name: 'Pinned', items: [pinnedItem] },
+        { id: 'maintenance', name: 'Maintenance', items: [] },
+      ],
+      collapsedPinSectionIds: { maintenance: true },
+      onTogglePinSection,
+    });
+    expect(container?.querySelector('[data-sidebar-updated-id="pinned-session"]')).not.toBeNull();
+    const header = container?.querySelector(
+      '[data-pin-section="maintenance"] [role="button"][aria-expanded="false"]'
+    );
+    header?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(onTogglePinSection).toHaveBeenCalledWith('maintenance');
+  });
+
+  it('moves a pinned conversation to another section from its context menu', async () => {
+    const onDropItem = vi.fn();
+    renderSidebar({
+      pinnedSections: [
+        { id: null, name: 'Pinned', items: [pinnedItem] },
+        { id: 'maintenance', name: 'Maintenance', items: [] },
+      ],
+      onToggleUpdatedItemPinned: () => {},
+      pinSectionActions: {
+        onDropItem,
+        onMoveSection: () => {},
+        onCreateSection: () => {},
+        onRenameSection: () => {},
+        onDeleteSection: () => {},
+      },
+    });
+    const row = container?.querySelector('[data-sidebar-updated-id="pinned-session"]');
+    flushSync(() => {
+      row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 }));
+    });
+    await flushFrame();
+    const trigger = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+      (item) => item.textContent === 'Move to Section'
+    );
+    expect(trigger).toBeDefined();
+    flushSync(() => trigger?.click());
+    await flushFrame();
+    const target = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+      (item) => item.textContent === 'Maintenance'
+    );
+    expect(target).toBeDefined();
+    flushSync(() => target?.click());
+    // "Move to Section" puts it at the top of that section.
+    expect(onDropItem).toHaveBeenCalledWith('pinned-session', 'maintenance', 0);
+  });
+
+  describe('dragging a conversation into a pin section', () => {
+    const chat = (id: string) => ({
+      id,
+      kind: 'chat' as const,
+      title: id,
+      sectionLabel: 'Chats',
+      latestMessageAt: new Date('2026-07-14T08:00:00.000Z'),
+      isPinned: true,
+    });
+    const actions = () => ({
+      onDropItem: vi.fn(),
+      onMoveSection: vi.fn(),
+      onCreateSection: () => {},
+      onRenameSection: () => {},
+      onDeleteSection: () => {},
+    });
+    const drag = (
+      target: Element | null | undefined,
+      type: 'dragover' | 'drop' | 'dragleave',
+      clientY = 0
+    ) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(event, {
+        clientX: 20,
+        clientY,
+        relatedTarget: null,
+        dataTransfer: { dropEffect: 'none', types: [] },
+      });
+      flushSync(() => target?.dispatchEvent(event));
+      return event as Event & { dataTransfer: { dropEffect: string } };
+    };
+
+    afterEach(() => {
+      clearSessionMentionDrag();
+      endPinnedDropSettle();
+    });
+
+    /** jsdom has no layout: give each row slot of a section a 40px height on a 41px pitch. */
+    const layoutRows = (sectionId: string) => {
+      const nodes = container?.querySelectorAll<HTMLElement>(
+        `[data-pin-section="${sectionId}"] [data-pin-node]`
+      );
+      nodes?.forEach((node, index) => {
+        Object.defineProperty(node, 'offsetTop', { configurable: true, value: index * 41 });
+        Object.defineProperty(node, 'offsetHeight', { configurable: true, value: 40 });
+      });
+    };
+    const node = (id: string) =>
+      container?.querySelector<HTMLElement>(`[data-pin-node="${id}"]`) ?? null;
+    const shiftOf = (id: string) => {
+      const match = /translateY\((-?\d+)px\)/.exec(node(id)?.style.transform ?? '');
+      return match ? Number(match[1]) : 0;
+    };
+
+    it('opens a gap under the pointer in another section and drops into it', () => {
+      const pinSectionActions = actions();
+      renderSidebar({
+        pinnedSections: [
+          { id: null, name: 'Pinned', items: [chat('mover')] },
+          { id: 'maintenance', name: 'Maintenance', items: [chat('m1'), chat('m2')] },
+        ],
+        pinSectionActions,
+      });
+      layoutRows('maintenance');
+      armSessionMentionDrag('mover');
+      const target = container?.querySelector('[data-sidebar-updated-id="m2"]');
+      // Below m1's middle (20px), above m2's (61px).
+      expect(drag(target, 'dragover', 50).defaultPrevented).toBe(true);
+      expect(shiftOf('m1')).toBe(0);
+      expect(shiftOf('m2')).toBeGreaterThan(0);
+      // The section the row left gives back its slot as the target opens one.
+      const rowsOf = (sectionId: string) =>
+        container?.querySelector<HTMLElement>(`[data-pin-section="${sectionId}"] [data-pin-node]`)
+          ?.parentElement;
+      expect(Number.parseFloat(rowsOf('default')?.style.marginBottom ?? '0')).toBeLessThan(0);
+      expect(Number.parseFloat(rowsOf('maintenance')?.style.paddingBottom ?? '0')).toBeGreaterThan(
+        0
+      );
+      const drop = drag(target, 'drop', 50);
+      expect(drop.defaultPrevented).toBe(true);
+      expect(pinSectionActions.onDropItem).toHaveBeenCalledWith('mover', 'maintenance', 1);
+    });
+
+    it('keeps the gap and a move cursor while the pointer crosses rows inside the section', () => {
+      renderSidebar({
+        pinnedSections: [
+          { id: null, name: 'Pinned', items: [chat('mover')] },
+          { id: 'maintenance', name: 'Maintenance', items: [chat('m1'), chat('m2')] },
+        ],
+        pinSectionActions: actions(),
+      });
+      layoutRows('maintenance');
+      const section = container?.querySelector<HTMLElement>('[data-pin-section="maintenance"]');
+      if (section) {
+        section.getBoundingClientRect = () => new DOMRect(0, -30, 280, 140);
+      }
+      armSessionMentionDrag('mover');
+      const target = container?.querySelector('[data-sidebar-updated-id="m2"]');
+      expect(drag(target, 'dragover', 50).dataTransfer.dropEffect).toBe('move');
+      // Chrome reports no relatedTarget when the pointer moves onto a child row.
+      drag(target, 'dragleave', 50);
+      expect(shiftOf('m2')).toBeGreaterThan(0);
+    });
+
+    it('holds the gap until the moved row arrives, then flies it into its slot', () => {
+      const props = (ids: string[]): Partial<LoroSidebarProps> => ({
+        pinnedSections: [{ id: null, name: 'Pinned', items: ids.map(chat) }],
+        pinSectionActions: actions(),
+      });
+      renderSidebar(props(['a', 'b', 'c']));
+      layoutRows('default');
+      armSessionMentionDrag('a');
+      const target = container?.querySelector('[data-sidebar-updated-id="c"]');
+      drag(target, 'dragover', 110);
+      drag(target, 'drop', 110);
+      // No dragend may follow: the source row can unmount when the drop moves it.
+      expect(getInFlightSessionMentionDragId()).toBeNull();
+      // The move has not been written yet, so nothing may snap back.
+      expect(shiftOf('b')).toBeLessThan(0);
+      expect(document.querySelector('[data-pin-drop-flight]')).toBeNull();
+
+      flushSync(() => {
+        root?.render(<LoroSidebar {...baseProps} {...props(['b', 'c', 'a'])} />);
+      });
+      expect(shiftOf('b')).toBe(0);
+      expect(shiftOf('c')).toBe(0);
+      // The row waits under its flying copy, then takes its place.
+      expect(node('a')?.style.opacity).toBe('0');
+      const flight = document.querySelector('[data-pin-drop-flight]');
+      expect(flight).not.toBeNull();
+      flushSync(() => flight?.dispatchEvent(new Event('transitionend', { bubbles: true })));
+      expect(document.querySelector('[data-pin-drop-flight]')).toBeNull();
+      expect(node('a')?.style.opacity ?? '').toBe('');
+    });
+
+    it('gives up waiting for a move that never lands', async () => {
+      renderSidebar({
+        pinnedSections: [{ id: null, name: 'Pinned', items: [chat('a'), chat('b')] }],
+        pinSectionActions: actions(),
+      });
+      layoutRows('default');
+      armSessionMentionDrag('a');
+      const target = container?.querySelector('[data-sidebar-updated-id="b"]');
+      drag(target, 'dragover', 70);
+      drag(target, 'drop', 70);
+      expect(node('a')?.style.opacity).toBe('0');
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(node('a')?.style.opacity ?? '').toBe('');
+      expect(shiftOf('b')).toBe(0);
+    });
+
+    it('closes the dragged row’s slot and lets the rows it passes move up', () => {
+      const pinSectionActions = actions();
+      renderSidebar({
+        pinnedSections: [{ id: null, name: 'Pinned', items: [chat('a'), chat('b'), chat('c')] }],
+        pinSectionActions,
+      });
+      layoutRows('default');
+      armSessionMentionDrag('a');
+      const target = container?.querySelector('[data-sidebar-updated-id="c"]');
+      // Past c's middle (102px): the end of the list.
+      drag(target, 'dragover', 110);
+      expect(node('a')?.style.opacity).toBe('0');
+      expect(shiftOf('b')).toBeLessThan(0);
+      expect(shiftOf('c')).toBeLessThan(0);
+      drag(target, 'drop', 110);
+      expect(pinSectionActions.onDropItem).toHaveBeenCalledWith('a', null, 2);
+    });
+
+    it('drops at the top of an empty section through its header', () => {
+      const pinSectionActions = actions();
+      renderSidebar({
+        pinnedSections: [
+          { id: null, name: 'Pinned', items: [chat('mover')] },
+          { id: 'empty', name: 'Empty', items: [] },
+        ],
+        onTogglePinSection: () => {},
+        pinSectionActions,
+      });
+      armSessionMentionDrag('mover');
+      const header = container?.querySelector('[data-pin-section="empty"] [role="button"]');
+      drag(header, 'dragover');
+      drag(header, 'drop');
+      expect(pinSectionActions.onDropItem).toHaveBeenCalledWith('mover', 'empty', 0);
+    });
+
+    it('leaves drags that are not conversations alone', () => {
+      const pinSectionActions = actions();
+      renderSidebar({
+        pinnedSections: [{ id: null, name: 'Pinned', items: [chat('a')] }],
+        pinSectionActions,
+      });
+      const row = container?.querySelector('[data-sidebar-updated-id="a"]');
+      expect(drag(row, 'dragover').defaultPrevented).toBe(false);
+      drag(row, 'drop');
+      expect(pinSectionActions.onDropItem).not.toHaveBeenCalled();
+    });
+  });
+
+  it('folds a draggable section from the keyboard', () => {
+    const onTogglePinSection = vi.fn();
+    renderSidebar({
+      pinnedSections: [
+        { id: null, name: 'Pinned', items: [pinnedItem] },
+        { id: 'maintenance', name: 'Maintenance', items: [] },
+      ],
+      onTogglePinSection,
+      pinSectionActions: {
+        onDropItem: () => {},
+        onMoveSection: () => {},
+        onCreateSection: () => {},
+        onRenameSection: () => {},
+        onDeleteSection: () => {},
+      },
+    });
+    const header = container?.querySelector<HTMLElement>(
+      '[data-pin-section="maintenance"] [role="button"][aria-expanded]'
+    );
+    // The drag handle wraps the header but must not add a second button role.
+    expect(header?.closest('[data-pin-section-handle]')?.getAttribute('role')).toBeNull();
+    flushSync(() =>
+      header?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      )
+    );
+    expect(onTogglePinSection).toHaveBeenCalledWith('maintenance');
+  });
+
+  it('drags pinned rows with the pointer and leaves other rows on native drag', () => {
+    renderSidebar({
+      organizeMode: 'updated',
+      pinnedSections: [{ id: null, name: 'Pinned', items: [pinnedItem] }],
+      updatedItems: [
+        {
+          id: 'updated-session',
+          kind: 'chat',
+          title: 'Recently updated conversation',
+          sectionLabel: 'Chats',
+          latestMessageAt: new Date('2026-07-14T09:00:00.000Z'),
+        },
+      ],
+      pinSectionActions: {
+        onDropItem: () => {},
+        onMoveSection: () => {},
+        onCreateSection: () => {},
+        onRenameSection: () => {},
+        onDeleteSection: () => {},
+      },
+    });
+    const pinned = container?.querySelector('[data-sidebar-updated-id="pinned-session"]');
+    const updated = container?.querySelector('[data-sidebar-updated-id="updated-session"]');
+    expect(pinned?.getAttribute('draggable')).toBe('false');
+    expect(pinned?.closest('[data-pin-sortable]')).not.toBeNull();
+    expect(updated?.getAttribute('draggable')).toBe('true');
+  });
+
+  it('creates an empty section from the Pinned header menu', async () => {
+    const onCreateSection = vi.fn();
+    renderSidebar({
+      pinnedSections: [{ id: null, name: 'Pinned', items: [pinnedItem] }],
+      pinSectionActions: {
+        onDropItem: () => {},
+        onMoveSection: () => {},
+        onCreateSection,
+        onRenameSection: () => {},
+        onDeleteSection: () => {},
+      },
+    });
+    const trigger = container?.querySelector<HTMLElement>(
+      '[data-pin-section="default"] button[aria-label="Section actions"]'
+    );
+    expect(trigger).not.toBeNull();
+    flushSync(() => {
+      trigger?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      trigger?.click();
+    });
+    await flushFrame();
+    const item = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+      (entry) => entry.textContent === 'New Section…'
+    );
+    expect(item).toBeDefined();
+    flushSync(() => item?.click());
+    await flushFrame();
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="Section name"]');
+    expect(input).not.toBeNull();
+    flushSync(() => {
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setValue?.call(input, 'Routine');
+      input?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    flushSync(() => {
+      input?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    await flushFrame();
+    expect(onCreateSection).toHaveBeenCalledWith('Routine', undefined);
+  });
+});
+
+describe('pinned row drag planning', () => {
+  const order = () => ({ default: ['a', 'b'], maintenance: ['m1', 'm2', 'm3'] });
+
+  it('moves a row into another section at the dropped index', () => {
+    expect(moveRowIntoSection(order(), 'a', 'maintenance', 1)).toEqual({
+      default: ['b'],
+      maintenance: ['m1', 'a', 'm2', 'm3'],
+    });
+    expect(moveRowIntoSection(order(), 'a', 'maintenance', 3)).toEqual({
+      default: ['b'],
+      maintenance: ['m1', 'm2', 'm3', 'a'],
+    });
+  });
+
+  it('reorders within a section, counting the index among the other rows', () => {
+    expect(moveRowIntoSection(order(), 'm1', 'maintenance', 2)).toEqual({
+      default: ['a', 'b'],
+      maintenance: ['m2', 'm3', 'm1'],
+    });
   });
 });

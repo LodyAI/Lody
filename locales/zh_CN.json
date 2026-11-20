@@ -1479,7 +1479,7 @@
   "composer.messageQuoteSeparatePassages": "每次请选择一段连续正文，可以分别添加多处引用。",
   "composer.messageQuoteTitle": "消息引用",
   "composer.messageQuoteOriginal": "引用原文",
-  "composer.messageQuoteInlineLabel": "[引用：{{text}}]",
+  "composer.messageQuoteInlineLabel": "[{{text}}]",
   "composer.collapseMessageQuote": "收起引用",
   "composer.removeMessageQuote": "移除引用",
   "composer.messageQuoteTooLong": "请选择不超过 50,000 字符的内容进行引用。",
@@ -6849,5 +6849,13 @@
   "e2ee.lostAll.password.title": "用恢复密码",
   "e2ee.lostAll.password.help": "输入你之前设置的恢复密码。",
   "settings.general.suppressMobilePushWhenFocused.label": "使用这台电脑时暂停手机通知",
-  "settings.general.suppressMobilePushWhenFocused.helper": "Lody 在这台电脑上处于焦点时，任务完成不再推送到手机。授权请求和提问仍会通知。"
+  "settings.general.suppressMobilePushWhenFocused.helper": "Lody 在这台电脑上处于焦点时，任务完成不再推送到手机。授权请求和提问仍会通知。",
+  "sidebar.pinSections.createTitle": "新建分组",
+  "sidebar.pinSections.delete": "删除分组",
+  "sidebar.pinSections.moveToSection": "移动到分组",
+  "sidebar.pinSections.namePlaceholder": "分组名称",
+  "sidebar.pinSections.newSection": "新建分组…",
+  "sidebar.pinSections.rename": "重命名分组",
+  "sidebar.pinSections.renameTitle": "重命名分组",
+  "sidebar.pinSections.sectionActions": "分组操作"
 }

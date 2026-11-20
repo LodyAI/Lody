@@ -2366,3 +2366,15 @@ html:active-view-transition-type(home-board-fold)::view-transition-old(home-boar
     opacity: 1;
   }
 }
+
+/* Pinned sidebar drags (`lib/pinned-drop-settle.ts`): while a pin row or section is
+   held the cursor is grabbing everywhere; from the drop until the pointer next moves,
+   pin sections take no hover, so a landed row does not light up under a still pointer. */
+body[data-pin-dragging],
+body[data-pin-dragging] * {
+  cursor: grabbing !important;
+}
+
+body[data-pin-hover-suppressed] [data-pin-section] {
+  pointer-events: none;
+}

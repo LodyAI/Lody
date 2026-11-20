@@ -165,6 +165,15 @@ export const pinnedSectionCollapsedAtom = atomWithStorage<boolean>(
   false
 );
 
+/**
+ * Folded user pin sections on this device, by section id (ids are unique
+ * across workspaces). The default section keeps `pinnedSectionCollapsedAtom`.
+ */
+export const pinSectionsCollapsedAtom = atomWithStorage<Record<string, boolean>>(
+  'lody-sidebar-pin-sections-collapsed',
+  {}
+);
+
 // ============================================================================
 // Local Project Collapse State (folders under Local Projects / <Machine> project)
 // ============================================================================

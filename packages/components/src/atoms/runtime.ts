@@ -162,6 +162,9 @@ export type SessionSyncInspection = {
    * applies are flowing; `timeout` means local changes stayed unsent.
    */
   readonly pendingUploadProbe: string | null;
+  readonly leaseCount: number;
+  readonly joinInFlight: boolean;
+  readonly roomSubPresent: boolean;
 };
 
 export type PreviewVisualCommentDocUpdater =
@@ -226,6 +229,11 @@ export type WorkspaceRuntime = {
     subscribe(listener: () => void): () => void;
   };
   readonly attachmentToken?: () => Promise<string>;
+  readonly cloudStreamsEnabled?: boolean;
+  readonly getWorkspaceStreamsGrant?: (options?: {
+    forceRefresh?: boolean;
+    signal?: AbortSignal;
+  }) => Promise<{ token: string; gatewayBaseUrl: string }>;
   readonly sendResources: SessionSendResources;
   /** In-memory sends whose attachments are still preparing; lost with the page. */
   readonly pendingSends: PendingSessionSends | null;
