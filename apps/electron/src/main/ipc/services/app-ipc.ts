@@ -3,7 +3,7 @@ import { assertProductWindowSender } from '../assert-sender'
 import {
   isAppResourceLink,
   parseSessionLink,
-  INSTALLATION_LINK_SCHEMES,
+  INSTALLATION_LINK_SCHEMES
 } from '@lody/shared/session-link'
 import { desktopInstallationProfile, mainPlatformKind } from '../../platform'
 import { getDesktopCallbackProtocol } from '../../desktop-channel'
