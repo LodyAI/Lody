@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import {
   connectEngine,
   connectSocketTransport,
+  engineIsOlder,
   engineSatisfies,
   readEngineEndpoint,
 } from '@loro-dev/loro-repo-client/node';
@@ -123,6 +124,8 @@ export function connectNativeRepo(options: {
     };
     const clientOptions = { reconnect, queueWhileReconnecting: false };
     await connectOrLaunch(dataDir, options.launcher).then((transport) => transport.close());
+    const running = await readEngineEndpoint(dataDir).catch(() => undefined);
+    if (running && engineIsOlder(running)) launchHost(dataDir, options.launcher);
     const client = await connectEngine(dataDir, clientOptions).catch(() => {
       launchHost(dataDir, options.launcher);
       return connectEngine(dataDir, { ...clientOptions, waitForEndpointMs: START_WAIT_MS });

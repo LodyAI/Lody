@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { META_ROOM, type RepoClient } from '@loro-dev/loro-repo-client';
 import {
   connectEngine,
+  engineIsOlder,
   engineSatisfies,
   readEngineEndpoint,
 } from '@loro-dev/loro-repo-client/node';
@@ -234,6 +235,49 @@ describe('native Workspace Meta', () => {
     await earlierMeta.commit({ kind: 'upsert-doc', docId: 'session-2', patch: { title: 'after' } });
     await seen;
     expect((await current.repo.getDocMeta('session-2'))?.meta).toEqual({ title: 'after' });
+  });
+
+  it('moves to its own release when an earlier release with the same capabilities still runs', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'lody-native-fix-'));
+    cleanups.push(() => rm(dataDir, { recursive: true, force: true }));
+    cleanups.push(() => killHost(dataDir, 'SIGTERM'));
+    const earlierHost = startProcessLegacy({
+      command: process.execPath,
+      args: [earlierHostScript, dataDir],
+      options: { stdio: 'ignore', env: { ...process.env, LODY_TEST_EARLIER_VERSION: '0.0.9' } },
+    });
+    earlierHost.child.once('error', () => {});
+    const earlier = await connectEngine(dataDir, { waitForEndpointMs: 10_000 });
+    cleanups.push(() => earlier.close());
+    const earlierEndpoint = await readEngineEndpoint(dataDir);
+    expect(engineSatisfies(earlierEndpoint)).toBe(true);
+    expect(engineIsOlder(earlierEndpoint)).toBe(true);
+    const earlierMeta = createNativeWorkspaceMeta(earlier, ns, notCommitted);
+    cleanups.push(() => earlierMeta.close());
+    await earlierMeta.open(() => {});
+    await earlierMeta.commit({
+      kind: 'upsert-doc',
+      docId: 'session-1',
+      patch: { title: 'before' },
+    });
+
+    const connection = await connectNativeRepo({ launcher, dataDir });
+    cleanups.push(() => connection.close());
+    await untilGone(earlierEndpoint.pid);
+    await connection.client.whenConnected();
+    const current = await readEngineEndpoint(dataDir);
+    expect(engineIsOlder(current)).toBe(false);
+    expect(current.pid).not.toBe(earlierEndpoint.pid);
+    const repo = await nativeRepo(connection.client);
+    expect((await repo.repo.getDocMeta('session-1'))?.meta).toEqual({ title: 'before' });
+    await earlier.whenConnected();
+    const seen = nextEvent(
+      repo.events,
+      (e) => e.kind === 'doc-metadata' && e.docId === 'session-2'
+    );
+    await earlierMeta.commit({ kind: 'upsert-doc', docId: 'session-2', patch: { title: 'after' } });
+    await seen;
+    expect((await repo.repo.getDocMeta('session-2'))?.meta).toEqual({ title: 'after' });
   });
 
   it('recovers every view from a new snapshot after the host crashes', async () => {
