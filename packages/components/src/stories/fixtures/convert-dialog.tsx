@@ -195,7 +195,7 @@ export function ConvertDialogPreview({
           data-testid="today-convert-dialog"
         >
           <TodayConvertDialogHeader
-            parent={t('today.title', 'Today')}
+            parent={t('today.nav', 'Today')}
             title={t('today.convertTitle', 'Convert to task')}
           />
           {open ? (

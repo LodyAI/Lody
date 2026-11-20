@@ -20,6 +20,9 @@ any time; when off it changes none of the app's existing behavior.
 - Settings → "Experimental features" has its own "Today" row, stored on this device only. When on, a "Today"
   entry appears in the sidebar's top navigation; when off, the entry, the page and every subscription unmount
   immediately. The switch controls only the UI: data still syncs, exports and migrates.
+- In the Chinese UI the feature is named 每日笔记 ("daily notes"; Obsidian likewise renders its "Today" short name
+  as 日记), since 今天 reads oddly as a noun and 日志 suggests logs; the current day's heading stays 今天 and the
+  return button 回到今天.
 - The "Open Today" shortcut defaults to `⌘⇧D` (`Ctrl+Shift+D` on Windows/Linux; D for Daily, as Roam and Tana
   bind their daily page), the same on desktop and Web, and can be rebound or unbound in Settings → Keyboard
   shortcuts. It acts, and is listed in the shortcuts list and the command palette, only while the experiment is
