@@ -1682,6 +1682,7 @@
   "login.desktopHandoff.switchFailed": "无法退出当前浏览器账号，它仍以上方账号登录，请重试。",
   "login.desktopHandoff.switching": "正在退出当前浏览器账号…",
   "login.desktopHandoff.title": "继续登录 Lody 桌面版",
+  "login.desktopHandoff.useWeb": "在 Web 浏览器中使用",
   "login.desktopRedirect.browser.description": "正在完成登录并打开 Lody 桌面应用...",
   "login.desktopRedirect.browser.title": "正在跳转到桌面应用",
   "login.desktopRedirect.electron.description": "正在加载你的工作区...",

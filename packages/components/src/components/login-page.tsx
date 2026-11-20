@@ -1377,6 +1377,29 @@ export function LoginPage({
     }
   }, [authClient, isElectronRenderer, loginSurface, postHog, t]);
 
+  // The third way out of the handoff: keep the session in this browser instead
+  // of transferring it to the desktop app. The bail-out is the same as an
+  // account switch — a transfer already in flight must not mint a handoff link
+  // (or its automatic `lody://` open) after the user chose the web — then the
+  // page's ordinary authenticated redirect carries the existing session into
+  // the app: the validated `redirect` target, or the app root.
+  const handleUseInWebBrowser = useCallback(async () => {
+    electronAccountGenerationRef.current += 1;
+    autoOpenedElectronHandoffRef.current = null;
+    setElectronHandoffUrl(null);
+    setIsPreparingElectronHandoff(false);
+    setError('');
+    clearElectronAuthorizationCode();
+    capturePostHogEvent(postHog, 'auth/electron_handoff_use_web', {
+      login_surface: loginSurface,
+      launch_mode: detectAppLaunchMode(isElectronRenderer),
+      device_class: detectAppDeviceClass(),
+    });
+    if (await prepareAuthenticatedRedirect()) {
+      replaceLocation(getRedirectTarget());
+    }
+  }, [isElectronRenderer, loginSurface, postHog, prepareAuthenticatedRedirect, replaceLocation]);
+
   const handleLegalLinkClick = useCallback(
     async (event: React.MouseEvent<HTMLAnchorElement>, url: string) => {
       if (!isNativeApp) {
@@ -1805,6 +1828,19 @@ export function LoginPage({
           )}
         </Button>
       )}
+
+      {/* Not gated on `isButtonsDisabled` either: during an in-flight transfer
+          this is the exit that cancels it. Disabled only while signing out,
+          when the session this path relies on is being torn down. */}
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={() => void handleUseInWebBrowser()}
+        className="h-10 w-full"
+        disabled={isSwitchingElectronAccount}
+      >
+        {t('login.desktopHandoff.useWeb', 'Continue in browser')}
+      </Button>
 
       {/* Deliberately not gated on `isButtonsDisabled`: a transfer in flight for
           the wrong account is exactly when the user needs this way out, and its

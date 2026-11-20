@@ -1682,6 +1682,7 @@
   "login.desktopHandoff.switchFailed": "Could not sign out of this browser. It is still signed in as the account above — try again.",
   "login.desktopHandoff.switching": "Signing out of this browser...",
   "login.desktopHandoff.title": "Continue to Lody Desktop",
+  "login.desktopHandoff.useWeb": "Continue in browser",
   "login.desktopRedirect.browser.description": "Completing sign-in and opening Lody desktop.",
   "login.desktopRedirect.browser.title": "Redirecting to desktop app",
   "login.desktopRedirect.electron.description": "Loading your workspace...",
