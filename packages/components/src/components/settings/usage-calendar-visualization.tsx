@@ -61,6 +61,7 @@ import {
   groupUsageWeekBuckets,
   usageTimelineHourLabels,
 } from './usage-timeline-bucket-label';
+import { copyTextToClipboard } from '@/lib/clipboard';
 // Export generation remains available in code while the settings UI focuses on the active views.
 const SHOW_SKYLINE_EXPORTS = false;
 
@@ -2820,7 +2821,7 @@ export function UsageCalendarVisualization({
 
   const copyAscii = async () => {
     try {
-      await navigator.clipboard.writeText(ascii);
+      await copyTextToClipboard(ascii);
       toast.success(t('workspace.usage.skyline.asciiCopied'));
     } catch {
       toast.error(t('workspace.usage.skyline.copyFailed'));

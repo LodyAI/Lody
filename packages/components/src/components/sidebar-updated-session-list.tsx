@@ -134,6 +134,7 @@ import {
   RenameSessionDialogView,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type SidebarUpdatedItemKind = SidebarRowKind;
 
@@ -1699,7 +1700,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           <ContextMenu.Item
             icon={GitBranch}
             onClick={() => {
-              void navigator.clipboard.writeText(branchName).catch(() => {});
+              void copyTextToClipboard(branchName).catch(() => {});
             }}
           >
             {contextMenuLabels.copyBranch}

@@ -53,6 +53,7 @@ import {
   resolveShareAppOrigin,
   type ShareViewer,
 } from './session-share-identity';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 /** Wide enough for the tree to sit beside the transcript rather than over it. */
 const WIDE = '@media (min-width: 640px)';
@@ -367,7 +368,7 @@ function ShareConversationPane({
               )
             : undefined,
       });
-      await navigator.clipboard.writeText(markdown);
+      await copyTextToClipboard(markdown);
       toast.success(describeCopiedConversation(stats, t));
     } catch {
       toast.error(

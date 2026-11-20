@@ -27,6 +27,7 @@ import { Select } from '@lody/ui/select';
 import { CompactSection } from './compact-layout';
 import { settingsSurface as surface } from './surface';
 import { settingsType as type } from './type.stylex';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const WIDE = '@media (min-width: 640px)';
 
@@ -271,9 +272,9 @@ export function WorkspaceJoinRequestsSettings({
             size="small"
             icon
             onClick={() => {
-              void navigator.clipboard
-                .writeText(joinUrl)
-                .then(() => toast.success(t('joinRequest.admin.copied', 'Link copied.')));
+              void copyTextToClipboard(joinUrl).then(() =>
+                toast.success(t('joinRequest.admin.copied', 'Link copied.'))
+              );
             }}
           >
             <Copy {...stylex.props(styles.glyph)} />
