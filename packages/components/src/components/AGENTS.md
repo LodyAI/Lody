@@ -14,6 +14,8 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
   `startSessionMentionDrag` / `armSessionMentionDrag` must light
   `ConversationDropOverlay` before `dragenter`. Navigation overlays use
   `draggable={false}`; rows own `draggable`.
+  Sidebar `DndContext`s stay `autoScroll={false}`;
+  `hooks/use-session-drag-auto-scroll.ts` owns drag edge scrolling.
 - Workspace selection navigates in place and preserves the current workspace's route
   on reselection. Browser `/chat` links retain native modified-click, middle-click and
   context-menu actions without switching the source page. Electron Cmd-click

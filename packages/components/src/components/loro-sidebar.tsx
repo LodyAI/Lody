@@ -88,6 +88,7 @@ import { WorkspaceAvatar } from './workspace-avatar';
 import { AuthRecoveryEntrySlot } from './auth-recovery-entry';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useSessionDragAutoScroll } from '@/hooks/use-session-drag-auto-scroll';
 import { useStableNow } from '@/hooks/use-stable-now';
 import {
   SIDEBAR_ROW_TEXT_CLASS,
@@ -976,6 +977,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   const { t } = useTranslation();
   const store = useStore();
   const scrollViewportRef = useRef<HTMLDivElement>(null);
+  useSessionDragAutoScroll(scrollViewportRef);
   useLayoutEffect(() => {
     const viewport = scrollViewportRef.current;
     if (!viewport || !scrollStateKey) return undefined;
