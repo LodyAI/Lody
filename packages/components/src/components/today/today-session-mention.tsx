@@ -32,18 +32,19 @@ const styles = stylex.create({
     paddingInline: CHIP_PAD,
     userSelect: 'none',
   },
-  // A chip that opens its line hangs its padding into the gutter, so its icon
-  // starts on the same column as a line that opens with text.
-  leading: { marginInlineStart: `calc(-1 * ${CHIP_PAD})` },
+  // A chip that opens its line keeps its padding: pulling it into the gutter put
+  // the caret before the chip inside the icon's hover fill.
+  leading: {},
   // The editor's text selection tint (`::selection`), so a selected chip reads as
   // part of the selected run and keeps every state colour.
   selected: { backgroundColor: `color-mix(in srgb, ${colors.accent} 25%, transparent)` },
-  // The status icon is its own small icon button (Linear's issue-row status): a
-  // 20px hit area whose hover fill sits behind the glyph alone. `vertical-align:
-  // middle` centres it on the parent's baseline plus half its x-height, the
-  // optical centre of the title, for every glyph alike; the negative margins
-  // give back the 3px it adds on each side, so the line box and the title's
-  // place are those of a 14px glyph slot.
+  // The status icon is its own small icon button (Linear's issue-row status).
+  // It is exactly one line box tall and aligned to the line's top, with its
+  // glyph centred inside (`align-items: center`): the glyph sits on the centre
+  // of the line, where the title's capitals and CJK glyphs sit, instead of
+  // `vertical-align: middle`'s baseline-plus-half-x-height, which reads low.
+  // The 3px bleed stays inside the chip's 4px padding, so the caret before the
+  // chip is never under the hover fill.
   icon: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -51,12 +52,11 @@ const styles = stylex.create({
     gap: 2,
     boxSizing: 'border-box',
     minWidth: ICON_HIT,
-    height: ICON_HIT,
+    height: text.bodyLeading,
     paddingInline: ICON_BLEED,
-    marginBlock: `calc(-1 * ${ICON_BLEED})`,
     marginInlineStart: `calc(-1 * ${ICON_BLEED})`,
     marginInlineEnd: `calc(${space[1]} - ${ICON_BLEED})`,
-    verticalAlign: 'middle',
+    verticalAlign: 'top',
     paddingBlock: 0,
     borderWidth: 0,
     backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
@@ -67,9 +67,14 @@ const styles = stylex.create({
     borderRadius: radius.mini,
     outline: { default: 'none', ':focus-visible': `2px solid ${colors.accent}` },
   },
+  // Small text sits on the shared baseline, not on the line's centre (centred,
+  // it reads like a superscript). Centred in the same line box, a smaller font's
+  // baseline lands higher by about 0.6× the size difference; shift it back down.
   countdown: {
     fontSize: text.captionSize,
-    lineHeight: 1,
+    lineHeight: text.bodyLeading,
+    position: 'relative',
+    top: `calc((${text.bodySize} - ${text.captionSize}) * 0.6)`,
     color: colors.tertiaryLabel,
     fontVariantNumeric: 'tabular-nums',
   },
