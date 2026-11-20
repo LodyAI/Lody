@@ -393,18 +393,16 @@ export function TodayToolbar(props: { pinned: boolean; title: ReactNode; childre
     insideWorkspaceFrame: true,
     includeDesktopWeb: true,
   });
-  // The pinned column sits on the window, beside the sidebar, outside the card.
-  const columnTrafficLightRowPadClass = useMacTrafficLightRowPadClass({ includeDesktopWeb: true });
   const page = !props.pinned;
-  // Both forms sit in the window-top row and line up with its controls; only
-  // the page is window chrome (drag region, caption buttons).
+  // Both forms sit in a page card's window-top row and line up with its
+  // controls; only the page is window chrome (drag region, caption buttons).
   const exemptClassName = page && dragClass ? WINDOW_DRAG_EXEMPT_CLASS : undefined;
   const besideTrafficLights =
     !sidebarVisible && !isNativeAppShell() && isMacOSElectronRenderer() && !fullscreen;
   const chromeClassName = (
     page
       ? [dragClass, captionPadClass, captionRowPadClass, trafficLightRowPadClass]
-      : [captionRowPadClass, columnTrafficLightRowPadClass]
+      : [captionRowPadClass, trafficLightRowPadClass]
   )
     .filter(Boolean)
     .join(' ');
