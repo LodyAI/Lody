@@ -13,6 +13,7 @@ import {
   type SessionMeta,
   type TodayDate,
   type TodayFragment,
+  type TodayMention,
 } from '@lody/shared';
 import { Button } from '@lody/ui/button';
 import { docMetaCacheReadyAtom, sessionMetaCacheAtom } from '@/atoms/doc-meta';
@@ -28,11 +29,16 @@ import {
   TodaySessionPicker,
   type TodayConvertDialogComponent,
 } from '@/components/today/today-view';
+import {
+  TodayMentionStatusMenu,
+  type TodayMentionStatusActions,
+} from '@/components/today/today-mention-status-menu';
 import { createTodayPageStoreCache } from '@/providers/today-page-store-cache';
 
 /**
- * Today with conversations, entirely synthetic: session nodes show live status,
- * `@` on an empty line offers these conversations, and the bullet menu's
+ * Today with conversations, entirely synthetic: mentions sit inline in
+ * sentences and show every status, the status icon's menu changes the seeded
+ * metadata, `@` anywhere offers these conversations, and the bullet menu's
  * "Convert to task" opens a stand-in dialog (the product uses the full
  * new-conversation surface, which needs a workspace runtime).
  */
@@ -63,6 +69,16 @@ const SESSIONS: DemoSession[] = [
     meta: { lastMessageAt: NOW - 2 * MINUTE, lastReadAt: NOW - 30 * MINUTE },
   },
   {
+    id: 'demo-read',
+    title: 'Answer the plugin question',
+    meta: { lastMessageAt: NOW - 20 * MINUTE, lastReadAt: NOW - 10 * MINUTE },
+  },
+  {
+    id: 'demo-later',
+    title: 'Benchmark the new store',
+    meta: { lastMessageAt: NOW - 40 * MINUTE, lastReadAt: NOW, snoozedUntil: NOW + 125 * MINUTE },
+  },
+  {
     id: 'demo-settled',
     title: 'Rename the CLI flag',
     meta: { lastMessageAt: NOW - 60 * MINUTE, settledAt: NOW - 30 * MINUTE },
@@ -79,19 +95,26 @@ const SESSIONS: DemoSession[] = [
   },
 ];
 
-const session = (id: string): TodayFragment => ({
-  text: TODAY_MENTION_CHAR,
-  mentions: [{ start: 0, kind: 'session', id }],
-  children: [],
-});
+/** One node: strings are text, `{ m: id }` a mention of that conversation. */
+const line = (...parts: Array<string | { m: string }>): TodayFragment => {
+  let text = '';
+  const mentions: TodayMention[] = [];
+  for (const part of parts) {
+    if (typeof part === 'string') text += part;
+    else {
+      mentions.push({ start: text.length, kind: 'session', id: part.m });
+      text += TODAY_MENTION_CHAR;
+    }
+  }
+  return { text, mentions, children: [] };
+};
 const PAGE: TodayFragment[] = [
-  ...parseTodayPasteText('In flight'),
-  session('demo-running'),
-  session('demo-waiting'),
-  session('demo-unread'),
-  ...parseTodayPasteText('Done'),
-  session('demo-settled'),
-  session('demo-archived'),
+  line('Morning: ', { m: 'demo-running' }, ' should land before standup'),
+  line('Approve ', { m: 'demo-waiting' }, ' once CI is green'),
+  line({ m: 'demo-unread' }, ' has news, and ', { m: 'demo-read' }, ' is answered'),
+  line('Back on ', { m: 'demo-later' }, ' after lunch'),
+  line('Done: ', { m: 'demo-settled' }, ', ', { m: 'demo-archived' }),
+  line({ m: 'demo-idle' }),
   ...parseTodayPasteText(
     'Prompt for later\n  Make Today remember the last calendar month\n  Keep the change small'
   ),
@@ -249,10 +272,29 @@ function Surface() {
       }),
     []
   );
+  const jotai = useStore();
+  // The product writes session metadata through useSessionActions; here the
+  // same edits land in the seeded metadata cache.
+  const actions = useMemo<TodayMentionStatusActions>(() => {
+    const patch = (id: SessionId, change: Record<string, unknown>) =>
+      jotai.set(sessionMetaCacheAtom, (previous) => {
+        const key = getSessionRoomId(id);
+        return { ...previous, [key]: { ...previous[key], ...change } as SessionMeta };
+      });
+    return {
+      markRead: (id, lastMessageAt) => patch(id, { lastReadAt: lastMessageAt ?? Date.now() }),
+      markUnread: (id) => patch(id, { lastReadAt: 0 }),
+      snooze: (id, until) => patch(id, { snoozedUntil: until, settledAt: undefined }),
+      settle: (id) => patch(id, { settledAt: Date.now(), snoozedUntil: undefined }),
+      moveToFocus: (id) =>
+        patch(id, { snoozedUntil: undefined, settledAt: undefined, focusRestoredAt: Date.now() }),
+    };
+  }, [jotai]);
   const [controller, setController] = useState<TodayEditorController | null>(null);
   useEffect(() => {
     const created = new TodayEditorController(cache);
     created.onOpenSession = (sessionId) => window.alert(`Open conversation ${sessionId}`);
+    created.workspaceId = 'demo-workspace';
     created.mentionText = (mention) =>
       todayMentionMarkdown(mention, {
         workspaceId: 'demo-workspace',
@@ -285,6 +327,7 @@ function Surface() {
         </TodayOutlineSurface>
         <TodaySessionPicker items={items} />
         <TodayNodeActions pinned={false} ConvertDialog={DemoConvertDialog} />
+        <TodayMentionStatusMenu actions={actions} />
       </div>
     </TodayEditorContext.Provider>
   );
