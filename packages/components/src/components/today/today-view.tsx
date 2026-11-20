@@ -91,12 +91,15 @@ const styles = stylex.create({
     gap: space[1],
     paddingInline: space[4],
   },
-  columnToolbar: { paddingBlock: space[2] },
-  /* The full page's toolbar is the window-top row: the session tab bar's 44px,
-     so the sidebar controls sit where every other page puts them. */
-  pageToolbar: { boxSizing: 'border-box', height: '2.75rem' },
+  /* Page or pinned column, the toolbar is the window-top row: the session tab
+     bar's 44px, so its controls line up with every other page's header. */
+  windowRowToolbar: { boxSizing: 'border-box', height: '2.75rem' },
   // Clears the macOS traffic lights while the navigation sidebar is hidden.
-  pageToolbarBesideTrafficLights: { paddingLeft: '96px' },
+  toolbarBesideTrafficLights: { paddingLeft: '96px' },
+  // The card's rim puts the row 1px below the 4px frame step the macOS row
+  // padding assumes; without this the controls centre at y=24, a pixel under
+  // the traffic lights and the sidebar header's controls at y=23.
+  toolbarOnTrafficLightLine: { marginTop: -1 },
   controls: { display: 'flex', alignItems: 'center', gap: space[1] },
   title: {
     flex: 1,
@@ -115,6 +118,17 @@ const styles = stylex.create({
     paddingInlineStart: `calc(${space[6]} + ${todayOutline.foldOverhang})`,
     paddingInlineEnd: space[6],
     paddingBottom: space[8],
+  },
+  // The pinned column is narrow: a tighter end gutter.
+  scrollerPinned: { paddingInlineEnd: space[4] },
+  // Pinned with the sidebar hidden, the column is the window's leftmost
+  // surface and lines up with the macOS close button (x 16–30): the bullet
+  // dots centre on its right edge (x=30), which puts the fold toggles' centre
+  // on its left edge (x=16). The text column starts at the dot's left edge
+  // (30 - 3); the card's content edge starts 5px in (4px of window ground plus
+  // the rim, as laid out).
+  scrollerAtWindowEdge: {
+    paddingInlineStart: 'calc(30px - 3px - 5px)',
   },
   // The readable column (Obsidian 700px, Notion ~708px, AFFiNE ~752px of
   // text): centred, shrinking with the window inside the scroller's gutters.
@@ -192,6 +206,7 @@ export function TodayView(props: {
   const self = useAtomValue(userAtom)?.id ?? null;
   const userId = props.target.member ?? self;
   const today = useTodayClock();
+  const sidebarVisible = useAtomValue(navigationSidebarVisibleAtom);
   const anchor = props.target.date ? (parseTodayDate(props.target.date) ?? undefined) : undefined;
   const [registered, setRegistered] = useState<readonly TodayDate[]>([]);
   const [fullWidth, setFullWidth] = useAtom(todayFullWidthAtom);
@@ -280,14 +295,18 @@ export function TodayView(props: {
               }
               onClick={props.onTogglePin}
             >
-              {props.pinned ? <PinOff size={16} /> : <Pin size={16} />}
+              {props.pinned ? (
+                <PinOff size={16} strokeWidth={1.5} />
+              ) : (
+                <Pin size={16} strokeWidth={1.5} />
+              )}
             </Button>
           ) : null}
           <Menu.Root>
             <Menu.Trigger
               render={
                 <Button variant="ghost" size="small" icon aria-label={t('today.more', 'More')}>
-                  <MoreHorizontal size={16} />
+                  <MoreHorizontal size={16} strokeWidth={1.5} />
                 </Button>
               }
             />
@@ -337,7 +356,11 @@ export function TodayView(props: {
             </Menu.Content>
           </Menu.Root>
         </TodayToolbar>
-        <TodayOutlineSurface controller={controller} fullWidth={props.pinned || fullWidth}>
+        <TodayOutlineSurface
+          controller={controller}
+          fullWidth={props.pinned || fullWidth}
+          placement={props.pinned ? (sidebarVisible ? 'pinned' : 'pinnedAtWindowEdge') : 'page'}
+        >
           {days.map((date, index) => (
             <TodayDaySection
               key={`${userId}:${date}`}
@@ -391,27 +414,34 @@ export function TodayToolbar(props: { pinned: boolean; title: ReactNode; childre
     includeDesktopWeb: true,
   });
   const page = !props.pinned;
+  // Both forms sit in a page card's window-top row and line up with its
+  // controls; only the page is window chrome (drag region, caption buttons).
   const exemptClassName = page && dragClass ? WINDOW_DRAG_EXEMPT_CLASS : undefined;
   const besideTrafficLights =
-    page && !sidebarVisible && !isNativeAppShell() && isMacOSElectronRenderer() && !fullscreen;
-  const chromeClassName = page
-    ? [dragClass, captionPadClass, captionRowPadClass, trafficLightRowPadClass]
-        .filter(Boolean)
-        .join(' ')
-    : undefined;
+    !sidebarVisible && !isNativeAppShell() && isMacOSElectronRenderer() && !fullscreen;
+  const chromeClassName = (
+    page
+      ? [dragClass, captionPadClass, captionRowPadClass, trafficLightRowPadClass]
+      : [captionRowPadClass, trafficLightRowPadClass]
+  )
+    .filter(Boolean)
+    .join(' ');
   return (
     <div
       {...withClassName(
         stylex.props(
           styles.toolbar,
-          page ? styles.pageToolbar : styles.columnToolbar,
-          besideTrafficLights && styles.pageToolbarBesideTrafficLights
+          styles.windowRowToolbar,
+          besideTrafficLights && styles.toolbarBesideTrafficLights,
+          trafficLightRowPadClass !== undefined && styles.toolbarOnTrafficLightLine
         ),
         chromeClassName
       )}
       data-testid="today-toolbar"
     >
-      {page && !sidebarVisible ? (
+      {/* With the sidebar hidden, Today (page or pinned column) is the window's
+          leftmost surface and carries the sidebar toggle and Back/Forward. */}
+      {!sidebarVisible ? (
         <SidebarHistoryControls onToggleSidebar={showSidebar} className={exemptClassName} />
       ) : null}
       <span {...stylex.props(styles.title)}>{props.title}</span>
@@ -425,6 +455,8 @@ export function TodayOutlineSurface(props: {
   controller: TodayEditorController | null;
   /** Span the whole width instead of the readable column (the pinned column is narrow anyway). */
   fullWidth?: boolean;
+  /** Where the surface sits: its gutters follow (default `page`). */
+  placement?: 'page' | 'pinned' | 'pinnedAtWindowEdge';
   children: React.ReactNode;
 }) {
   const { controller } = props;
@@ -444,7 +476,11 @@ export function TodayOutlineSurface(props: {
   }, [controller]);
   return (
     <div
-      {...stylex.props(styles.scroller)}
+      {...stylex.props(
+        styles.scroller,
+        props.placement !== undefined && props.placement !== 'page' && styles.scrollerPinned,
+        props.placement === 'pinnedAtWindowEdge' && styles.scrollerAtWindowEdge
+      )}
       ref={(element) => {
         surfaceRef.current = element;
         controller?.attachSurface(element);
@@ -864,7 +900,7 @@ function TodayCalendar(props: {
       <Popover.Trigger
         render={
           <Button variant="ghost" size="small" icon aria-label={t('today.calendar', 'Pick a date')}>
-            <CalendarDays size={16} />
+            <CalendarDays size={16} strokeWidth={1.5} />
           </Button>
         }
       />
