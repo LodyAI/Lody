@@ -71,11 +71,12 @@ and what can wait or has settled.
   hover in the slot other organize modes give to Archive; Settled rows keep
   Archive there. A Later row's wake-up countdown parks at the row's right
   edge in neutral ink.
-- Settling a conversation that has active opened sub-conversations first asks
-  whether they should be marked completed too — settle only this conversation,
-  or the whole opened-session tree. Contained Tabs follow their owner's bucket
-  and are never settled separately, matching the sub-conversation summary the
-  Archive confirmation already shows.
+- Snoozing, settling, or moving a conversation back to Focus when it has
+  active opened sub-conversations first asks whether they should follow —
+  apply to this conversation only, or to the whole opened-session tree.
+  Contained Tabs follow their owner's bucket and are never written separately,
+  matching the sub-conversation summary the Archive confirmation already
+  shows. Explicitly dragging a single row into Focus stays a per-row gesture.
 - Sending a message in a snoozed or settled conversation clears its
   `snoozedUntil` / `settledAt` state so it returns to Focus.
 - Dragging a row in Focus materializes real `orderKey`s for any expired-snooze

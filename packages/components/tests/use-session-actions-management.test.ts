@@ -144,7 +144,10 @@ import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '../src/atoms/pres
 import {
   SessionSubConversationConfirmationDialog,
   useArchiveSessionWithConfirmation,
+  useMoveToFocusWithConfirmation,
   useSettleSessionWithConfirmation,
+  useSnoozeSessionWithConfirmation,
+  type SubConversationAction,
 } from '../src/components/sessions/session-sub-conversation-confirmation';
 import { initI18n } from '../src/i18n';
 import { docMetaCacheReadyAtom, sessionMetaCacheAtom } from '../src/atoms/doc-meta';
@@ -185,17 +188,28 @@ import {
 
 type ConfirmedAction = (sessionId: SessionId, options?: { confirm?: boolean }) => Promise<boolean>;
 
+const SNOOZE_UNTIL = 1_800_000_000_000;
+
 function ConfirmedActionProbe({
   action,
   onReady,
 }: {
-  action: 'archive' | 'settle';
+  action: SubConversationAction;
   onReady: (confirmed: ConfirmedAction) => void;
 }) {
-  const { archiveSession, settleSession } = useSessionActions();
+  const { archiveSession, settleSession, snoozeSession, moveSessionToFocus } = useSessionActions();
   const archive = useArchiveSessionWithConfirmation(archiveSession);
   const settle = useSettleSessionWithConfirmation(settleSession);
-  const confirmed = action === 'archive' ? archive : settle;
+  const snooze = useSnoozeSessionWithConfirmation(snoozeSession);
+  const focus = useMoveToFocusWithConfirmation(moveSessionToFocus);
+  const confirmed: ConfirmedAction =
+    action === 'archive'
+      ? archive
+      : action === 'settle'
+        ? settle
+        : action === 'snooze'
+          ? (sessionId) => snooze(sessionId, SNOOZE_UNTIL)
+          : focus;
   useEffect(() => {
     onReady(confirmed);
   }, [confirmed, onReady]);
@@ -1344,7 +1358,7 @@ describe('useSessionActions', () => {
   const confirmationDialog = () => document.querySelector<HTMLElement>('[role="alertdialog"]');
 
   const renderConfirmedAction = async (
-    action: 'archive' | 'settle',
+    action: SubConversationAction,
     runtime: WorkspaceRuntime,
     workingIds: SessionId[]
   ) => {
@@ -1594,6 +1608,86 @@ describe('useSessionActions', () => {
       });
       expect(confirmationDialog()).toBeNull();
       expect(tree.metaRepo.getSession(tree.archivedOpened.id)?.settledAt).toBeGreaterThan(0);
+    });
+  });
+
+  describe.each([
+    {
+      action: 'snooze' as const,
+      labels: {
+        title: 'Snooze sub-conversations too?',
+        only: 'Snooze this only',
+        all: 'Snooze all',
+      },
+      applied: (meta: SessionMeta | undefined) => meta?.snoozedUntil === SNOOZE_UNTIL,
+    },
+    {
+      action: 'focus' as const,
+      labels: {
+        title: 'Move sub-conversations to Focus too?',
+        only: 'Move this only',
+        all: 'Move all to Focus',
+      },
+      applied: (meta: SessionMeta | undefined) => meta?.focusRestoredAt !== undefined,
+    },
+  ])('$action confirmation for opened sub-conversations', ({ action, labels, applied }) => {
+    it('asks, then applies to every opened sub-conversation on "all"', async () => {
+      const tree = createOpenedSubTree(`${action}-all`);
+      const runtime = createRuntime({ repo: tree.metaRepo.repo });
+      const confirmed = await renderConfirmedAction(action, runtime, []);
+
+      const { result } = await startConfirmation(confirmed, tree.rootSession.id);
+      expect(confirmationDialog()?.textContent).toContain(labels.title);
+      // Nothing is written while the user decides.
+      expect(applied(tree.metaRepo.getSession(tree.rootSession.id))).toBe(false);
+
+      await answerConfirmation(labels.all);
+      await expect(result).resolves.toBe(true);
+      // Opened Sessions follow; contained Tabs keep no status fields of their own.
+      for (const session of [
+        tree.rootSession,
+        tree.openedSession,
+        tree.openedFromTabSession,
+      ]) {
+        expect(applied(tree.metaRepo.getSession(session.id))).toBe(true);
+      }
+      for (const session of [tree.tabSession, tree.openedTab]) {
+        expect(applied(tree.metaRepo.getSession(session.id))).toBe(false);
+      }
+      expect(confirmationDialog()).toBeNull();
+    });
+
+    it('applies only to the conversation, or nothing on cancel', async () => {
+      const tree = createOpenedSubTree(`${action}-only`);
+      const runtime = createRuntime({ repo: tree.metaRepo.repo });
+      const confirmed = await renderConfirmedAction(action, runtime, []);
+
+      const { result: cancelled } = await startConfirmation(confirmed, tree.rootSession.id);
+      await answerConfirmation('Cancel');
+      await expect(cancelled).resolves.toBe(false);
+      for (const session of [tree.rootSession, tree.openedSession]) {
+        expect(applied(tree.metaRepo.getSession(session.id))).toBe(false);
+      }
+
+      const { result: onlyThis } = await startConfirmation(confirmed, tree.rootSession.id);
+      await answerConfirmation(labels.only);
+      await expect(onlyThis).resolves.toBe(true);
+      expect(applied(tree.metaRepo.getSession(tree.rootSession.id))).toBe(true);
+      for (const session of [tree.openedSession, tree.openedFromTabSession]) {
+        expect(applied(tree.metaRepo.getSession(session.id))).toBe(false);
+      }
+    });
+
+    it('applies directly when there are no active sub-conversations', async () => {
+      const tree = createOpenedSubTree(`${action}-none`);
+      const runtime = createRuntime({ repo: tree.metaRepo.repo });
+      const confirmed = await renderConfirmedAction(action, runtime, []);
+
+      await act(async () => {
+        await expect(confirmed(tree.archivedOpened.id)).resolves.toBe(true);
+      });
+      expect(confirmationDialog()).toBeNull();
+      expect(applied(tree.metaRepo.getSession(tree.archivedOpened.id))).toBe(true);
     });
   });
 

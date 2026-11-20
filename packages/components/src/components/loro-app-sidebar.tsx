@@ -118,7 +118,9 @@ import { importSidebarLocalProject } from '@/components/sidebar-local-project-im
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
 import {
   useArchiveSessionWithConfirmation,
+  useMoveToFocusWithConfirmation,
   useSettleSessionWithConfirmation,
+  useSnoozeSessionWithConfirmation,
 } from '@/components/sessions/session-sub-conversation-confirmation';
 import {
   chatScopeAtom,
@@ -1874,6 +1876,8 @@ export function LoroAppSidebar({
 
   const archiveSessionWithConfirmation = useArchiveSessionWithConfirmation(archiveSession);
   const settleSessionWithConfirmation = useSettleSessionWithConfirmation(settleSession);
+  const snoozeSessionWithConfirmation = useSnoozeSessionWithConfirmation(snoozeSession);
+  const moveToFocusWithConfirmation = useMoveToFocusWithConfirmation(moveSessionToFocus);
   const rejectHistoryWrite = useCallback(
     (ids: string[]) => {
       if (!ids.some((id) => historyOnlySessionIds.has(id))) return false;
@@ -3913,11 +3917,11 @@ export function LoroAppSidebar({
 
   const handleSnoozeSession = useCallback(
     (sessionId: string, snoozedUntil: number) => {
-      void snoozeSession(sessionId as SessionId, snoozedUntil).catch((error) => {
+      void snoozeSessionWithConfirmation(sessionId as SessionId, snoozedUntil).catch((error) => {
         toast.error(error instanceof Error ? error.message : String(error));
       });
     },
-    [snoozeSession]
+    [snoozeSessionWithConfirmation]
   );
 
   const handleSettleSession = useCallback(
@@ -3931,11 +3935,11 @@ export function LoroAppSidebar({
 
   const handleMoveSessionToFocus = useCallback(
     (sessionId: string) => {
-      void moveSessionToFocus(sessionId as SessionId).catch((error) => {
+      void moveToFocusWithConfirmation(sessionId as SessionId).catch((error) => {
         toast.error(error instanceof Error ? error.message : String(error));
       });
     },
-    [moveSessionToFocus]
+    [moveToFocusWithConfirmation]
   );
 
   const handleDropFocusItem = useCallback(

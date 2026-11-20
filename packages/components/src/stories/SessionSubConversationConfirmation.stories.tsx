@@ -36,3 +36,11 @@ export const SettleSomeWorking: Story = {
 export const SettleNoneWorking: Story = {
   args: { pending: { action: 'settle', count: 2, workingCount: 0 } },
 };
+
+export const SnoozeSomeWorking: Story = {
+  args: { pending: { action: 'snooze', count: 3, workingCount: 1 } },
+};
+
+export const MoveToFocus: Story = {
+  args: { pending: { action: 'focus', count: 2, workingCount: 0 } },
+};

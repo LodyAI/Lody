@@ -283,7 +283,11 @@ import { SessionInfoBar } from './session-info-bar';
 import { SessionPreviewPreload } from './session-preview-preload';
 import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
 import { SessionProjectMembersChip } from './session-project-members-chip';
-import { useSettleSessionWithConfirmation } from './session-sub-conversation-confirmation';
+import {
+  useMoveToFocusWithConfirmation,
+  useSettleSessionWithConfirmation,
+  useSnoozeSessionWithConfirmation,
+} from './session-sub-conversation-confirmation';
 import {
   buildSessionProjectMemberRows,
   resolveSessionProjectMemberRow,
@@ -3230,6 +3234,8 @@ export const SessionChatInterface = memo(
       moveSessionToFocus,
     } = useSessionActions();
     const settleSessionWithConfirmation = useSettleSessionWithConfirmation(settleSession);
+    const snoozeSessionWithConfirmation = useSnoozeSessionWithConfirmation(snoozeSession);
+    const moveToFocusWithConfirmation = useMoveToFocusWithConfirmation(moveSessionToFocus);
     const [renameDialogTarget, setRenameDialogTarget] = useState<RenameSessionDialogTarget | null>(
       null
     );
@@ -7330,7 +7336,8 @@ export const SessionChatInterface = memo(
         }
         onSnooze={
           headerSharing?.access !== 'read'
-            ? (snoozedUntil) => snoozeSession(session.id, snoozedUntil)
+            ? (snoozedUntil) =>
+                snoozeSessionWithConfirmation(session.id, snoozedUntil).then(() => undefined)
             : undefined
         }
         onSettle={
@@ -7339,7 +7346,9 @@ export const SessionChatInterface = memo(
             : undefined
         }
         onMoveToFocus={
-          headerSharing?.access !== 'read' ? () => moveSessionToFocus(session.id) : undefined
+          headerSharing?.access !== 'read'
+            ? () => moveToFocusWithConfirmation(session.id).then(() => undefined)
+            : undefined
         }
         owner={ownerMenuState}
         openedByRelations={openedByRelations}
