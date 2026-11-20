@@ -177,7 +177,10 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
     '../product-window-ipc-service': service,
     '../../platform': {
       isLocalPlatform: () => true,
-      readLocalPlatformSnapshot: async () => ({ workspace: { workspaceId: 'lw_test' } })
+      readLocalPlatformSnapshot: async () => ({
+        userId: 'local:me',
+        workspace: { workspaceId: 'lw_test' }
+      })
     },
     '../../services/cli-service': {
       bundledNativeRepoHostLauncher: () => ({ command: process.execPath, args: [hostScript] })
@@ -335,6 +338,61 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
     assert.ok(reopened[0].file.byteLength < later.export({ mode: 'snapshot' }).byteLength)
     replica.import(reopened[0].file)
     assert.deepEqual(replica.getList('history').toJSON(), ['turn', 'later'])
+    // Remote Session documents: reads, changed paths and checked patches, no replica.
+    const remote = { ...scope, docId: 'session-remote' }
+    const pathEvents = []
+    auxiliary.sender.on(nativeIpc.NATIVE_DOC_PATHS_CHANNEL, (event) => pathEvents.push(event))
+    await handlers.get('nativeWorkspaceMeta.observeDocPaths')(auxiliary, {
+      ...remote,
+      observationId: '00000000-0000-4000-8000-000000000008'
+    })
+    const queued = { task: 'next', userId: 'local:me', timestamp: 't' }
+    const { roomTxId } = await handlers.get('nativeWorkspaceMeta.readDocPath')(primary, {
+      ...remote,
+      path: ['mq']
+    })
+    await handlers.get('nativeWorkspaceMeta.applyDocPatch')(primary, {
+      ...remote,
+      ops: [
+        { op: 'arr_splice', path: ['mq'], at: 0, del: 0, items: [queued] },
+        { op: 'set', path: ['humanInputReceipts', 'u-1'], value: { userId: 'local:me' } }
+      ],
+      precondition: { mode: 'rebase', base_room_tx_id: roomTxId }
+    })
+    while (!pathEvents.some((e) => e.event.kind === 'changes'))
+      await new Promise((resolve) => setImmediate(resolve))
+    assert.ok(
+      pathEvents.some(
+        (e) => e.event.kind === 'changes' && e.event.changes.some((c) => c.path[0] === 'mq')
+      )
+    )
+    const mq = await handlers.get('nativeWorkspaceMeta.readDocPath')(auxiliary, {
+      ...remote,
+      path: ['mq']
+    })
+    assert.equal(mq.value.length, 1)
+    assert.equal(mq.value[0].task, 'next')
+    assert.equal(typeof mq.value[0].$cid, 'string')
+    // A receipt for another user, or a write outside the input roots, is refused.
+    for (const ops of [
+      [{ op: 'set', path: ['humanInputReceipts', 'u-2'], value: { userId: 'local:other' } }],
+      [{ op: 'unset', path: ['humanInputReceipts', 'u-1'] }],
+      [{ op: 'set', path: ['session', 'title'], value: 'x' }]
+    ])
+      await assert.rejects(
+        handlers.get('nativeWorkspaceMeta.applyDocPatch')(primary, {
+          ...remote,
+          ops,
+          precondition: { mode: 'rebase', base_room_tx_id: roomTxId }
+        }),
+        /native_doc_patch_denied/
+      )
+    const page = await handlers.get('nativeWorkspaceMeta.readDocListFields')(primary, {
+      ...remote,
+      start: 0,
+      fields: [{ path: ['id'] }]
+    })
+    assert.equal(page.len, 0)
   } finally {
     const connection = await nativeRepo.connectNativeRepo({
       dataDir: nativeDir,

@@ -158,3 +158,98 @@ export type NativeDocEvent = {
     | { kind: 'invalidated' };
 };
 export const NATIVE_DOC_CHANNEL = 'nativeWorkspaceMeta.doc' as const;
+
+// ---------------------------------------------------------------------------
+// Remote Session documents: the renderer holds no replica. It reads bounded
+// paths and list fields, observes changed paths, and commits JSON patches that
+// main checks before the engine applies them.
+
+const PathSeg = z.union([z.string().max(256), z.number().int().nonnegative()]);
+const DocPath = z.array(PathSeg).max(32);
+export const NativeDocReadSchema = DocTarget.extend({ path: DocPath }).strict();
+export const NativeDocListFieldsSchema = DocTarget.extend({
+  start: z.number().int(),
+  end: z.number().int().optional(),
+  fields: z.array(z.object({ path: DocPath, shape: z.boolean().optional() }).strict()).max(64),
+}).strict();
+export const NativeDocObservePathsSchema = DocTarget.extend({
+  observationId: Observation,
+}).strict();
+const PatchOp = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('set'), path: DocPath, value: z.unknown() }).strict(),
+  z.object({ op: z.literal('unset'), path: DocPath }).strict(),
+  z
+    .object({
+      op: z.literal('arr_splice'),
+      path: DocPath,
+      at: z.number().int().nonnegative(),
+      del: z.number().int().nonnegative(),
+      items: z.array(z.unknown()).max(64),
+    })
+    .strict(),
+  z.object({ op: z.literal('move'), from: DocPath, to: DocPath }).strict(),
+]);
+export const NativeDocPatchSchema = DocTarget.extend({
+  ops: z.array(PatchOp).min(1).max(256),
+  precondition: z.union([
+    z
+      .object({ mode: z.literal('rebase'), base_room_tx_id: z.number().int().nonnegative() })
+      .strict(),
+    z
+      .object({ mode: z.literal('cas'), expected_room_tx_id: z.number().int().nonnegative() })
+      .strict(),
+  ]),
+}).strict();
+export type NativeDocPatchOp = z.infer<typeof PatchOp>;
+
+/** Changed paths of one remote Session document (`reset`: re-read what is held). */
+export type NativeDocPathsEvent = {
+  observationId: string;
+  event:
+    | { kind: 'reset' }
+    | {
+        kind: 'changes';
+        changes: {
+          path: (string | number)[];
+          kind: string;
+          ops?: ({ retain: number } | { insert: number } | { delete: number })[];
+          keys?: string[];
+        }[];
+      };
+};
+export const NATIVE_DOC_PATHS_CHANNEL = 'nativeWorkspaceMeta.docPaths' as const;
+
+/** Roots a renderer may write: user input history and the queue/receipt/stop roots. */
+const WRITABLE_ROOTS = new Set(['history', 'mq', 'humanInputReceipts', 'cancelRequest']);
+
+/**
+ * Checks a renderer patch before it reaches the engine: only writable roots,
+ * and a human-input receipt only for the current user, never removed or
+ * reassigned (receipts authorize execution of human input).
+ */
+export function authorizeSessionPatch(ops: readonly NativeDocPatchOp[], userId: string): void {
+  const deny = (reason: string): never => {
+    throw new Error(`native_doc_patch_denied:${reason}`);
+  };
+  const isMine = (value: unknown) =>
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    (value as { userId?: unknown }).userId === userId &&
+    Object.keys(value).length === 1;
+  for (const op of ops) {
+    const paths = op.op === 'move' ? [op.from, op.to] : [op.path];
+    for (const path of paths) if (!WRITABLE_ROOTS.has(String(path[0]))) deny('root');
+    if (paths.some((path) => path[0] !== 'humanInputReceipts')) continue;
+    if (op.op !== 'set') deny('receipt_op');
+    const { path, value } = op as { path: (string | number)[]; value: unknown };
+    if (path.length === 1) {
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) deny('receipt');
+      if (!Object.values(value as object).every(isMine)) deny('receipt_user');
+    } else if (path.length === 2) {
+      if (!isMine(value)) deny('receipt_user');
+    } else if (path.length === 3 && path[2] === 'userId') {
+      if (value !== userId) deny('receipt_user');
+    } else deny('receipt_path');
+  }
+}

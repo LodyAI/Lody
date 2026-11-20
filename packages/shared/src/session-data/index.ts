@@ -30,6 +30,20 @@ export {
   type RemotePathEvent,
 } from './remote-loro';
 export {
+  createRemoteControlState,
+  createRemoteHistoryCommands,
+  diffJson,
+  RemoteWriteConflictError,
+  RemoteWriteIndeterminateError,
+  RemoteWriteRejectedError,
+  shareObservation,
+  type RemoteControlState,
+  type RemotePatchOp,
+  type RemotePatchPrecondition,
+  type RemoteSessionDocPort,
+} from './remote-document';
+export { engineDocSchemaFromMirror } from './engine-doc-schema';
+export {
   createRoostHistoryReader,
   createRoostSessionData,
   projectRoostSegments,

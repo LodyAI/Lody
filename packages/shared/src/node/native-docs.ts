@@ -1,6 +1,12 @@
-import type { RepoClient, RoomKey } from '@loro-dev/loro-repo-client';
+import { RepoRpcError, type RepoClient, type RoomKey } from '@loro-dev/loro-repo-client';
 import type { ExternalDocFeed, ExternalDocsAdapter } from 'loro-repo';
-import type { RemoteLoroHistoryPort } from '../session-data/remote-loro';
+import {
+  RemoteWriteConflictError,
+  RemoteWriteIndeterminateError,
+  type RemoteSessionDocPort,
+} from '../session-data/remote-document';
+import { engineDocSchemaFromMirror } from '../session-data/engine-doc-schema';
+import { sessionDocSchema } from '../schema';
 import { MIGRATIONS_ROOM, observeLoroDoc, observeLoroPaths } from './native-repo';
 
 /** Type-only loro-repo use keeps its WASM out of the Electron main bundle. */
@@ -9,16 +15,34 @@ const CAPABILITY = 'loro-external-docs-v1' as const;
 const docRoom = (docId: string): RoomKey => ({ kind: 'loro_doc', id: docId });
 
 /**
- * Creates (or re-declares) a Session document room. Declaring the `history`
- * root lets the engine read below it by type: an undeclared root is found
- * through the document's shallow value, which a freshly loaded 100k-turn room
- * answers in about 240 ms.
+ * Creates (or re-declares) a Session document room. Declaring every root lets
+ * the engine read below it by type: an undeclared root is found through the
+ * document's shallow value, which a freshly loaded 100k-turn room answers in
+ * about 240 ms. The schema makes remote patches create Mirror-shaped containers.
  */
 export function createDocRoom(client: RepoClient, namespace: string, docId: string) {
-  return client.createRoom(namespace, docRoom(docId), 'plaintext', {
-    rootContainers: { history: 'list' },
-  });
+  // Declared once per connection: re-declaring a schema reloads and revalidates
+  // the document in the engine.
+  let declared = declaredRooms.get(client);
+  if (!declared) declaredRooms.set(client, (declared = new Map()));
+  const key = `${namespace}\0${docId}`;
+  let pending = declared.get(key);
+  if (!pending) {
+    pending = client
+      .createRoom(namespace, docRoom(docId), 'plaintext', {
+        rootContainers: SESSION_ENGINE_DOC_SCHEMA.roots,
+        docSchema: SESSION_ENGINE_DOC_SCHEMA,
+      })
+      .then(() => {});
+    pending.catch(() => declared.delete(key));
+    declared.set(key, pending);
+  }
+  return pending;
 }
+const declaredRooms = new WeakMap<RepoClient, Map<string, Promise<void>>>();
+
+/** Remote writes create the containers the Mirror and HistoryWriter would. */
+export const SESSION_ENGINE_DOC_SCHEMA = engineDocSchemaFromMirror(sessionDocSchema);
 /** Migration and native-write markers share one prefix per document. */
 const marker = (docId: string, source: string) => ['loro_doc', docId, source];
 export const NATIVE_WRITE_SOURCE = 'native';
@@ -187,13 +211,32 @@ export function createNativeDocs(
 }
 
 /** Bounded reads and changed-path observation of one native Session document. */
+/**
+ * Bounded reads, changed-path observation and schema-checked patch writes of
+ * one native Session document, on the process's shared connection.
+ */
 export function createNativeRemoteHistoryPort(
   client: RepoClient,
   namespace: string,
   docId: string
-): RemoteLoroHistoryPort {
+): RemoteSessionDocPort {
   const room = docRoom(docId);
   const created = createDocRoom(client, namespace, docId);
+  const readPathAt = async (path: readonly (string | number)[]) => {
+    await created;
+    try {
+      const read = await client.readDoc(namespace, room, [...path]);
+      return { value: read.value as unknown, roomTxId: read.roomTxId };
+    } catch (error) {
+      if (!/path not found/.test(String(error))) throw error;
+      const { roomTxId } = await client.readDocListFields(namespace, room, ['history'], {
+        start: 0,
+        end: 0,
+        fields: [],
+      });
+      return { value: undefined, roomTxId };
+    }
+  };
   return {
     async readListFields(start, end, fields) {
       await created;
@@ -205,16 +248,23 @@ export function createNativeRemoteHistoryPort(
           ...(field.shape ? { shape: true } : {}),
         })),
       });
-      return { len: page.len, start: page.start, rows: page.rows };
+      return { len: page.len, start: page.start, rows: page.rows, roomTxId: page.roomTxId };
     },
-    async readPath(path) {
+    readPathAt,
+    readPath: async (path) => (await readPathAt(path)).value,
+    async applyPatch(ops, precondition) {
       await created;
       try {
-        return (await client.readDoc(namespace, room, [...path])).value;
+        await client.applyDocPatch(namespace, room, ops as never, { precondition });
       } catch (error) {
-        if (/path not found/.test(String(error))) return undefined;
-        throw error;
+        if (error instanceof RepoRpcError) {
+          if (error.code === 'precondition_failed') throw new RemoteWriteConflictError();
+          throw error;
+        }
+        // Sent, but the reply never came: the write may have landed.
+        throw new RemoteWriteIndeterminateError(error);
       }
+      return { frontiers: (await client.inspectDocCausal(namespace, room)).frontiers };
     },
     observePaths(listener) {
       const observation = (async () => {

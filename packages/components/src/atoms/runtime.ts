@@ -117,13 +117,20 @@ export type SessionDocStore = {
   readonly roomId: string;
   /** Immutable history ownership selected from the session catalog. */
   readonly historyBackend: SessionHistoryBackendKind;
-  readonly doc: LoroDoc;
+  /** The local replica; absent for a remote document, which only main and the engine hold. */
+  readonly doc?: LoroDoc;
   readonly firstSynced: Promise<void>;
   acquireSync: () => () => void;
   getSyncState: () => RoomSyncState;
   subscribeSyncState: (listener: (state: RoomSyncState) => void) => () => void;
   getState: () => SessionDocState;
   setState: (updater: SessionDocUpdater) => void;
+  /**
+   * Commits a control-plane change and resolves with the document's frontiers
+   * after it. Present on remote documents, whose `setState` only schedules the
+   * commit; use `commitSessionState`, which also covers a local replica.
+   */
+  commitState?: (updater: SessionDocUpdater) => Promise<{ frontiers: unknown }>;
   subscribe: (listener: (state: SessionDocState) => void) => () => void;
   /** Windowed read access to the session's turns; see `lib/conversation-view`. */
   readonly history: ConversationView;

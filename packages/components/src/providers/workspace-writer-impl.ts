@@ -1,3 +1,5 @@
+import { commitSessionState } from '@/lib/session-store-commit';
+import { RemoteWriteRejectedError } from '@lody/shared/session-data';
 import {
   applyPreviewVisualCommentMutation,
   getServerNow,
@@ -192,7 +194,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
     async enqueueSessionMessage(sessionId, item) {
       let written = false;
       const row = withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocDraft) => {
+        const commit = commitSessionState(store, (draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           const userTurnId = item.userTurnId;
           const operationId =
@@ -209,14 +211,16 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
           ];
         });
         written = true;
-        // Capture before releasing the store or yielding to another queue edit.
-        return store.doc.frontiers();
+        // Captured in the commit, before releasing the store or yielding to another queue edit.
+        return commit.then(({ frontiers }) => frontiers as ReturnType<LoroDoc['frontiers']>);
       });
       let frontiers: ReturnType<LoroDoc['frontiers']>;
       try {
         frontiers = await row;
       } catch (cause) {
-        if (written) throw new QueueSignalError(QUEUE_SIGNAL_FAILURE, { cause });
+        // A refused remote write wrote nothing; an unknown outcome may have written the row.
+        if (written && !(cause instanceof RemoteWriteRejectedError))
+          throw new QueueSignalError(QUEUE_SIGNAL_FAILURE, { cause });
         throw cause;
       }
       await signalQueuedRow(sessionId, frontiers);
@@ -224,19 +228,19 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
     async removeSessionMessage(sessionId, itemId) {
       const frontiers = await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocDraft) => {
+        const commit = commitSessionState(store, (draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           draft.mq = mq.filter((item) => item.$cid !== itemId);
         });
-        // Capture before releasing the store or yielding to another queue edit.
-        return store.doc.frontiers();
+        // Captured in the commit, before releasing the store or yielding to another queue edit.
+        return commit.then(({ frontiers }) => frontiers as ReturnType<LoroDoc['frontiers']>);
       });
       await bumpMessageQueueWatermark(sessionId, frontiers);
     },
 
     async updateSessionMessage(sessionId, itemId, patch) {
       const frontiers = await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocDraft) => {
+        const commit = commitSessionState(store, (draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           draft.mq = mq.map((item) =>
             item.$cid === itemId
@@ -244,15 +248,15 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
               : item
           );
         });
-        // Capture before releasing the store or yielding to another queue edit.
-        return store.doc.frontiers();
+        // Captured in the commit, before releasing the store or yielding to another queue edit.
+        return commit.then(({ frontiers }) => frontiers as ReturnType<LoroDoc['frontiers']>);
       });
       await bumpMessageQueueWatermark(sessionId, frontiers);
     },
 
     async reorderSessionMessages(sessionId, orderedItemIds) {
       const frontiers = await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocDraft) => {
+        const commit = commitSessionState(store, (draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           const byCid = new Map(mq.map((item) => [item.$cid, item] as const));
           const ordered: MessageQueueItem[] = [];
@@ -270,8 +274,8 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
           }
           draft.mq = ordered;
         });
-        // Capture before releasing the store or yielding to another queue edit.
-        return store.doc.frontiers();
+        // Captured in the commit, before releasing the store or yielding to another queue edit.
+        return commit.then(({ frontiers }) => frontiers as ReturnType<LoroDoc['frontiers']>);
       });
       await bumpMessageQueueWatermark(sessionId, frontiers);
     },

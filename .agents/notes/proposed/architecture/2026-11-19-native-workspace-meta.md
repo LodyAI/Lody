@@ -58,13 +58,17 @@ owns the long-term directory contract, and both stay active.
   existing document subscription re-projects and JSON-diffs the whole document per
   commit. Migration is lazy per document and source, so opening a workspace never
   imports every Session.
-- **Session reads from the engine instead of a renderer replica (in progress).**
-  Directed by the owner: a remote reader uses bounded list-field reads and
-  changed-path subscriptions, added to the SDK as generic primitives. JSONPath was
-  measured and rejected for the batch read (unaligned projections, about 150 ms
-  first query at 100k items, unbounded results), and per-commit `diff` for changed
-  paths (160–1,150 ms at 100k); document events cost 0.01–0.1 ms. The control-plane
-  roots in the same document are an open owner decision.
+- **Session documents stay in the engine; the renderer holds no replica.** The
+  owner chose this over keeping a renderer replica or splitting the document: Loro
+  imports lazily, so the cost was transferring and holding the whole bytes, not
+  partial loading. Reads use bounded list-field reads and changed-path
+  subscriptions (generic SDK primitives); JSONPath was measured and rejected for
+  them (unaligned projections, ~150 ms first query at 100k items, unbounded
+  results), and so was per-commit `diff` (160–1,150 ms at 100k). Writes are JSON
+  patches main checks and the engine applies under a Mirror-derived schema, with
+  the HistoryWriter's planners. A write replica in main was rejected because
+  `loro-crdt` ships only with the embedded CLI, and daemon-side writes because the
+  CLI forbids proxy authoring.
 - **One host process, launched by either side.** The daemon owning the engine (#2895)
   would couple Meta availability to the daemon; a host per side would race
   `files.lock`. The host idles out after its last connection.
@@ -79,9 +83,8 @@ owns the long-term directory contract, and both stay active.
   reopened the stale replica was rejected because the merge reuses the same LWW
   import and needs no compatibility handling. A commit already sent when the host dies latches that repo's
   Meta writes until it is recreated (SDK contract).
-- The Session reader now pages its directory, as Roost's does, so first screens
-  hold the 200 ms target up to 10,000 turns and on reopen. A cold open of a
-  100,000-turn Session still loads the whole document (1.6 s native, 0.33 s
-  legacy). Closing that gap needs either segmented history, a storage format
-  change, or SDK transfer work, and is an open owner decision.
+- With no renderer replica, a 100,000-turn Session's first screen takes about
+  11 ms warm and 305 ms after a host restart (including host launch); renderer
+  memory does not grow with history. The daemon still holds replicas of the
+  Sessions it touches.
 - Cloud and encrypted workspaces are out of scope: the OSS desktop is local-only.
