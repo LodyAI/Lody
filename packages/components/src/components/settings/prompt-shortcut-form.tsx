@@ -341,7 +341,7 @@ export function PromptShortcutForm({
 
         <Section
           title={t('settings.promptShortcuts.prompt', 'Prompt')}
-          hint={t(
+          info={t(
             'settings.promptShortcuts.promptHelp',
             'One message. @ mentions a file or Role, $ a skill, # an issue. The selectors below say where this Shortcut can be called and what @ completes against — None on every axis means anywhere in this workspace.'
           )}

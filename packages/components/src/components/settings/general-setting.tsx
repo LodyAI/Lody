@@ -666,10 +666,7 @@ export function GeneralSettingsComponent() {
       <div className={settingContainerClass}>
         {showMobileInputSettings ? (
           <CompactSection title={t('settings.input.title')}>
-            <CompactRow
-              label={t('settings.input.mobileKeyboardAction.label')}
-              helper={t('settings.input.mobileKeyboardAction.helper')}
-            >
+            <CompactRow label={t('settings.input.mobileKeyboardAction.label')}>
               <Select.Root
                 items={mobileKeyboardActionOptions}
                 value={selectedMobileKeyboardAction}
@@ -773,7 +770,7 @@ export function GeneralSettingsComponent() {
             <div id="cli-auto-start" {...stylex.props(styles.anchor)}>
               <CompactRow
                 label={t('settings.general.cliAutoStart.label', 'Run local agent')}
-                helper={t(
+                info={t(
                   'settings.general.cliAutoStart.helper',
                   'Turn off to use Lody only to control agents on other machines.'
                 )}
@@ -801,7 +798,7 @@ export function GeneralSettingsComponent() {
                   'settings.general.suppressMobilePushWhenFocused.label',
                   'Pause phone notifications while using this computer'
                 )}
-                helper={t(
+                info={t(
                   'settings.general.suppressMobilePushWhenFocused.helper',
                   'While Lody is focused on this computer, finished tasks skip your phone. Permission requests and questions still notify.'
                 )}
@@ -814,13 +811,7 @@ export function GeneralSettingsComponent() {
               </CompactRow>
             )}
             <div id="prevent-sleep" {...stylex.props(styles.anchor)}>
-              <CompactRow
-                label={t('settings.general.preventSleep.label', 'Prevent sleep')}
-                helper={t(
-                  'settings.general.preventSleep.helper',
-                  'Keep this computer awake while Lody runs, so agents are not cut off.'
-                )}
-              >
+              <CompactRow label={t('settings.general.preventSleep.label', 'Prevent sleep')}>
                 <Switch
                   id="prevent-sleep-toggle"
                   checked={preventSleepEnabled}
@@ -860,7 +851,7 @@ export function GeneralSettingsComponent() {
           <ExperimentalFeatureRows />
           <CompactRow
             label={t('settings.cache.clearCache.label')}
-            helper={t('settings.cache.clearCache.description')}
+            info={t('settings.cache.clearCache.description')}
           >
             <Button variant="secondary" size="small" onClick={() => clearCache.setDialogOpen(true)}>
               <Trash2 {...stylex.props(styles.icon)} />

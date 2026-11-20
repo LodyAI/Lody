@@ -41,10 +41,7 @@ export function BetaFeaturesSection() {
 
   return (
     <CompactSection title={t('settings.beta.title', 'Beta features')}>
-      <CompactRow
-        label={t('settings.beta.lodyAgent', 'Lody Agent')}
-        helper={t('settings.beta.lodyAgentHelper', 'Show Lody Agent in Settings.')}
-      >
+      <CompactRow label={t('settings.beta.lodyAgent', 'Lody Agent')}>
         <Switch
           checked={lodyAgentEnabled}
           onCheckedChange={setLodyAgentEnabled}
@@ -53,7 +50,7 @@ export function BetaFeaturesSection() {
       </CompactRow>
       <CompactRow
         label={t('settings.beta.e2eeWorkspace', 'Encrypted workspace creation')}
-        helper={t(
+        info={t(
           'settings.beta.e2eeWorkspaceHelper',
           'Create a workspace with a device identity and signed permission history. Conversation sync and execution are not available yet. Existing workspaces are unchanged.'
         )}
@@ -66,7 +63,7 @@ export function BetaFeaturesSection() {
       </CompactRow>
       <CompactRow
         label={t('settings.beta.inbox', 'Inbox')}
-        helper={t(
+        info={t(
           'settings.beta.inboxHelper',
           'Show the unfinished mobile Inbox tab. In development — expect rough edges.'
         )}
@@ -80,7 +77,7 @@ export function BetaFeaturesSection() {
 
       <CompactRow
         label={t('settings.beta.semanticShortcuts', 'Pointer-aware close shortcut')}
-        helper={t(
+        info={t(
           'settings.beta.semanticShortcutsHelper',
           'On desktop, close the tab where you last opened content, clicked, typed, or scrolled. Moving the pointer keeps that target; hover selects a region only before an explicit interaction.'
         )}
@@ -94,7 +91,7 @@ export function BetaFeaturesSection() {
 
       <CompactRow
         label={t('settings.experimental.roostHistory', 'Roost history')}
-        helper={t(
+        info={t(
           'settings.experimental.roostHistoryHelper',
           'Use Roost for new conversations. Existing conversations keep their current history backend.'
         )}

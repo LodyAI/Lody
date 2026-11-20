@@ -162,13 +162,11 @@ function DefaultLinkHandlerSetting() {
   return (
     <CompactRow
       label={t('deepLink.defaultHandler', 'Open Lody links with this app')}
-      helper={
-        message ??
-        t(
-          'deepLink.defaultHandlerHelp',
-          'Choose which installed version opens links from other apps.'
-        )
-      }
+      helper={message ?? undefined}
+      info={t(
+        'deepLink.defaultHandlerHelp',
+        'Choose which installed version opens links from other apps.'
+      )}
     >
       <Button
         size="small"
@@ -303,7 +301,7 @@ function DevbarSettingsControls() {
     <>
       <CompactRow
         label={t('settings.about.devbar', 'Lody Devbar')}
-        helper={t(
+        info={t(
           'settings.about.devbarHelper',
           'Starts local performance diagnostics for this Lody session.'
         )}
@@ -322,7 +320,7 @@ function DevbarSettingsControls() {
       </CompactRow>
       <CompactRow
         label={t('settings.about.devbarWarmup', 'Auxiliary window warmup')}
-        helper={t(
+        info={t(
           'settings.about.devbarWarmupHelper',
           'Developer-only experiment: keep one hidden renderer ready for auxiliary windows.'
         )}
@@ -334,13 +332,7 @@ function DevbarSettingsControls() {
           aria-label={t('settings.about.devbarWarmup', 'Auxiliary window warmup')}
         />
       </CompactRow>
-      <CompactRow
-        label={t('settings.about.restartOnboarding', 'Restart onboarding')}
-        helper={t(
-          'settings.about.restartOnboardingHelper',
-          'Clear onboarding progress and reopen the setup flow.'
-        )}
-      >
+      <CompactRow label={t('settings.about.restartOnboarding', 'Restart onboarding')}>
         <Button
           variant="secondary"
           size="small"
@@ -362,7 +354,7 @@ function DevbarSettingsControls() {
       {config?.enabled && config.devframe && (
         <CompactRow
           label={t('settings.about.devbarAgentConnect', 'Agent connection')}
-          helper={t(
+          info={t(
             'settings.about.devbarAgentConnectHelper',
             'Run `devframe connect` to proxy this Hub to coding agents over stdio MCP, or use the endpoints below directly.'
           )}
@@ -558,7 +550,7 @@ export function AboutSettingsComponent() {
         {showDeveloperModeSwitch && (
           <CompactRow
             label={t('settings.about.developerMode', 'Developer mode')}
-            helper={t(
+            info={t(
               'settings.about.developerModeHelper',
               'Shows local diagnostic controls in settings.'
             )}

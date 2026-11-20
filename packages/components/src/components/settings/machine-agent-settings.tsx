@@ -286,12 +286,6 @@ const styles = stylex.create({
     fontVariantNumeric: 'tabular-nums',
     color: colors.secondaryLabel,
   },
-  privateHint: {
-    margin: 0,
-    marginTop: '2px',
-    fontSize: uiText.footnoteSize,
-    color: colors.secondaryLabel,
-  },
   selectPrompt: {
     paddingInline: space[1],
     paddingBlock: space[8],
@@ -1923,12 +1917,6 @@ export function MachineAgentSettings({
                 </h3>
                 <span {...stylex.props(styles.count)}>{ownPrivateItems.length}</span>
               </div>
-              <p {...stylex.props(styles.privateHint)}>
-                {t(
-                  'settings.machines.privateMachinesHint',
-                  'These machines are not available to other workspace members. Select one here to manage sharing.'
-                )}
-              </p>
             </div>
             <div {...stylex.props(styles.stack)}>
               {ownPrivateItems.map(renderDesktopMachineSection)}

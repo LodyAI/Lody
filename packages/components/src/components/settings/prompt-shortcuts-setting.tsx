@@ -212,10 +212,7 @@ function PromptShortcutsSettingContent({
   return (
     <div {...stylex.props(surface.container)}>
       <SettingsPageLead>
-        {t(
-          'settings.promptShortcuts.intro',
-          'Saved Prompts you can call with a slash command. Each one says where it applies; a Shortcut with nothing set works anywhere in this workspace.'
-        )}
+        {t('settings.promptShortcuts.intro', 'Saved Prompts you can call with a slash command.')}
       </SettingsPageLead>
 
       <PromptShortcutsList
@@ -410,10 +407,6 @@ export function PromptShortcutsList({
         showEmpty ? (
           <SettingsEmptyState
             title={t('settings.promptShortcuts.empty', 'No Prompt Shortcuts yet')}
-            description={t(
-              'settings.promptShortcuts.emptyHint',
-              'Save a Prompt you retype often and call it with /.'
-            )}
             action={addButton}
           />
         ) : null

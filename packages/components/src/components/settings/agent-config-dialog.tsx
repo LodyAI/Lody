@@ -2900,14 +2900,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
           // `hidden` alone loses to a stylesheet's `display`.
           {...stylex.props(styles.groups, waitingForBuiltinSetup && styles.hidden)}
         >
-          <Field
-            htmlFor="agent-config-name"
-            label={t('agents.configName', 'Name')}
-            hint={t(
-              'settings.agent.dialog.nameHint',
-              'Shown in the provider list and session menus.'
-            )}
-          >
+          <Field htmlFor="agent-config-name" label={t('agents.configName', 'Name')}>
             <Input
               id="agent-config-name"
               value={formData.name}
@@ -2942,7 +2935,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
           {managedCodexForm && codexAuth ? (
             <Field
               label={t('settings.agent.codex.authentication', 'Authentication')}
-              hint={t(
+              info={t(
                 'settings.agent.codex.storage',
                 'Credentials stay on the selected machine. Each provider has its own account.'
               )}
@@ -2983,7 +2976,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                 <Field
                   htmlFor="codex-base-url"
                   label={t('settings.agent.codex.baseUrl', 'Base URL')}
-                  hint={t(
+                  info={t(
                     'settings.agent.codex.keyNext',
                     'Enter the API Key securely during sign-in. To change the destination, add a new provider.'
                   )}
@@ -3027,7 +3020,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
               <Field
                 htmlFor="custom-acp-command"
                 label={t('settings.agent.dialog.custom.commandLabel', 'Launch command')}
-                hint={t(
+                info={t(
                   'settings.agent.dialog.custom.commandHint',
                   'The full command that starts an ACP-compatible agent over stdio, e.g. "npx -y my-acp-agent --flag". Quotes are supported for arguments with spaces; shell features like pipes or $VARS are not.'
                 )}
@@ -3071,7 +3064,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
               <Field
                 htmlFor="builtin-runtime-path"
                 label={t('settings.agent.dialog.runtimeOverride.label', 'Runtime binary path')}
-                hint={t(
+                info={t(
                   'settings.agent.dialog.runtimeOverride.hint',
                   'Advanced: leave empty to let Lody install and verify the managed runtime. Filling this is not recommended unless you need a local enterprise mirror or are debugging runtime startup.'
                 )}
@@ -3878,7 +3871,7 @@ function DeepSeekApiKeyField({
     <Field
       htmlFor="deepseek-api-key"
       label={label ?? t('settings.agent.dialog.deepseek.apiKeyLabel', 'DeepSeek API Key')}
-      hint={t(
+      info={t(
         'settings.agent.dialog.deepseek.apiKeyHelp',
         'Saved with this provider and injected as DEEPSEEK_API_KEY when DSH starts.'
       )}
@@ -3938,7 +3931,7 @@ function DeepSeekHarnessPanel({
           <Field
             htmlFor="deepseek-endpoint"
             label={t('settings.agent.dialog.deepseek.endpointLabel', 'API Endpoint')}
-            hint={t(
+            info={t(
               'settings.agent.dialog.deepseek.endpointHelp',
               'Required HTTP or HTTPS URL. Saved as DEEPSEEK_BASE_URL without adding or removing /v1.'
             )}

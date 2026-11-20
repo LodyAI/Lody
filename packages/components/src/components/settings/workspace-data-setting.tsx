@@ -267,6 +267,7 @@ export function WorkspaceDataSettingContent({
           <CompactRow
             label={t('settings.workspaceData.export.label')}
             helper={t('settings.workspaceData.export.helper')}
+            info={t('settings.workspaceData.export.contents')}
           >
             <Button
               variant="secondary"
@@ -281,7 +282,7 @@ export function WorkspaceDataSettingContent({
           </CompactRow>
           <CompactRow
             label={t('settings.workspaceData.import.label')}
-            helper={t('settings.workspaceData.import.helper')}
+            info={t('settings.workspaceData.import.helper')}
           >
             <Button
               variant="secondary"
