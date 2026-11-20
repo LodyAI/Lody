@@ -120,8 +120,10 @@ const styles = stylex.create({
 
 /* Option-only submenus hug the longest label instead of inheriting the
    200px surface floor. 108px is the floor so a short name is not a sliver;
-   `max-w-80` still caps a long provider list. */
-const COMPACT_OPTION_SUBMENU_CLASS = 'w-max min-w-[108px] max-w-80';
+   20rem still caps a long provider list, and Base UI's `--available-width`
+   caps it to the window when a narrow one shifts the submenu over its parent. */
+const COMPACT_OPTION_SUBMENU_CLASS =
+  'w-max min-w-[108px] max-w-[min(20rem,var(--available-width,20rem))]';
 
 /* Option row with a trailing check. Title only — no description — so submenus
    stay as compact as the parent. Selecting keeps the menu OPEN. */
@@ -805,7 +807,7 @@ export function DesktopRunConfigMenu({
                 />
                 <Menu.Content
                   {...submenuPlacement}
-                  className="max-w-[min(29.5rem,var(--radix-popper-available-width,29.5rem))] overflow-x-hidden"
+                  className="max-w-[min(29.5rem,var(--available-width,29.5rem))] overflow-x-hidden"
                 >
                   <ComposerAgentRolePanel
                     items={agentRoles.items}
