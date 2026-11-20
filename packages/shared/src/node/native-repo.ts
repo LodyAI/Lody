@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import {
   connectEngine,
   connectSocketTransport,
+  engineIsOlder,
+  engineSatisfies,
   readEngineEndpoint,
 } from '@loro-dev/loro-repo-client/node';
 import type {
@@ -35,9 +37,21 @@ export interface NativeRepoHostLauncher {
 
 const RECONNECT_MAX_DELAY_MS = 2_000;
 const START_WAIT_MS = 10_000;
+/** A takeover waits for the older host to drain its requests in flight (up to 10 s). */
+const TAKEOVER_WAIT_MS = 30_000;
+
+/** The running host serves less than this build's engine: an earlier Lody started it. */
+class OutdatedHostError extends Error {
+  constructor(build: string | undefined) {
+    super(
+      `native_repo_host_outdated: build ${build ?? '(unknown)'} lacks this build's capabilities`
+    );
+  }
+}
 
 async function openTransport(dataDir: string) {
   const endpoint = await readEngineEndpoint(dataDir);
+  if (!engineSatisfies(endpoint)) throw new OutdatedHostError(endpoint.build);
   return connectSocketTransport(endpoint.socket);
 }
 
@@ -60,9 +74,11 @@ async function connectOrLaunch(dataDir: string, launcher: () => NativeRepoHostLa
   try {
     return await openTransport(dataDir);
   } catch {
-    // Missing or stale endpoint: start a host and wait for its publication.
+    // Missing, stale or outdated endpoint: start this build's host and wait for
+    // its publication. Against an earlier Lody's host, the new host takes the
+    // directory over (handoff, or waiting out one that predates it).
     launchHost(dataDir, launcher);
-    const deadline = Date.now() + START_WAIT_MS;
+    const deadline = Date.now() + TAKEOVER_WAIT_MS;
     for (let delay = 25; ; delay = Math.min(delay * 2, 500)) {
       try {
         return await openTransport(dataDir);
@@ -111,6 +127,14 @@ export function connectNativeRepo(options: {
       }
     };
     const clientOptions = { reconnect, queueWhileReconnecting: false };
+    // The first connection goes through the same check as every reconnection:
+    // an earlier Lody's host is taken over, never used.
+    await connectOrLaunch(dataDir, options.launcher).then((transport) => transport.close());
+    // A host of an earlier release that serves what this build needs is used,
+    // and this build's host is started to take it over (a fixed release):
+    // the connection moves to the successor when the handoff completes.
+    const running = await readEngineEndpoint(dataDir).catch(() => undefined);
+    if (running && engineIsOlder(running)) launchHost(dataDir, options.launcher);
     const client = await connectEngine(dataDir, clientOptions).catch(() => {
       launchHost(dataDir, options.launcher);
       return connectEngine(dataDir, { ...clientOptions, waitForEndpointMs: START_WAIT_MS });

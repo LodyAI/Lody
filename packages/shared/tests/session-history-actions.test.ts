@@ -386,6 +386,61 @@ describe('user status on duplicate turn copies', () => {
     ]);
   });
 
+  it('reaches copies stored after its first lookup, wherever and however they arrive', async () => {
+    const doc = new LoroDoc();
+    const data = createLoroSessionData({ sessionId: sid, doc });
+    await data.commands.appendTurn({ ...row('u', 'user'), status: 'pending' });
+    await data.commands.appendTurn({ ...row('other', 'user'), status: 'pending' });
+    const status = async (next: SessionTurnStatus) =>
+      data.commands.applyHistoryAction({ kind: 'user-status', turnId: 'u', status: next });
+    const copies = async () =>
+      (await data.history.readAll()).filter((turn) => turn.id === 'u').map((turn) => turn.status);
+    await status('seen');
+    expect(await copies()).toEqual(['seen']);
+
+    // A peer renames another turn to the same id, then stores a copy at the head.
+    const peerEdit = (edit: (history: LoroList) => void) => {
+      const peer = new LoroDoc();
+      peer.import(doc.export({ mode: 'snapshot' }));
+      edit(peer.getList('history'));
+      peer.commit();
+      doc.import(peer.export({ mode: 'update', from: doc.oplogVersion() }));
+    };
+    peerEdit((history) => (history.get(1) as LoroMap).set('id', 'u'));
+    await status('processing');
+    expect(await copies()).toEqual(['processing', 'processing']);
+    peerEdit((history) => {
+      const head = history.insertContainer(0, new LoroMap());
+      for (const [key, value] of Object.entries({ ...row('u', 'user'), status: 'pending' }))
+        if (typeof value !== 'object') head.set(key, value as never);
+    });
+    await status('processing');
+    expect(await copies()).toEqual(['processing', 'processing', 'processing']);
+
+    // A local append, and a copy inserted while a transaction is still open.
+    await data.commands.appendTurn({ ...row('u', 'user'), status: 'pending' });
+    const open = doc.getList('history').insertContainer(1, new LoroMap());
+    for (const [key, value] of Object.entries({ ...row('u', 'user'), status: 'pending' }))
+      if (typeof value !== 'object') open.set(key, value as never);
+    await status('handled');
+    expect(await copies()).toEqual(['handled', 'handled', 'handled', 'handled', 'handled']);
+  });
+
+  it('still finds a turn the directory cannot describe after a complete directory read', async () => {
+    const doc = new LoroDoc();
+    const data = createLoroSessionData({ sessionId: sid, doc });
+    await data.commands.appendTurn({ ...row('a', 'user'), status: 'pending' });
+    // A stored row with an id but no role: invalid as a directory row.
+    doc.getList('history').insertContainer(1, new LoroMap()).set('id', 'unreadable');
+    doc.commit();
+    expect(data.history.readDirectory(0, 10).map((entry) => entry.state)).toEqual([
+      'ready',
+      'invalid',
+    ]);
+    expect(data.history.readTurn('unreadable').state).not.toBe('missing');
+    expect(data.history.readTurn('absent').state).toBe('missing');
+  });
+
   it('projects a steer verdict from the last copy onto steer-state copies only', async () => {
     const projection = {
       kind: 'user-status',

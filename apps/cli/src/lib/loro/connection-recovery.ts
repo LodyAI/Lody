@@ -114,6 +114,12 @@ type LoroConnectionRecoveryControllerOptions = {
   initialMetaSyncPromise: Promise<boolean>;
   initialMetaSyncCompleted: boolean;
   onMetaRoomReady: () => void;
+  /**
+   * Meta is the native engine's (native Workspace Meta): local, authoritative,
+   * with no legacy Meta room to join or catch up on. It counts as joined and
+   * synced from the start, and recovery never tries to join a room.
+   */
+  externalMetadata?: boolean;
 };
 
 const isRecoverableMetaRoomStatus = isRecoverableStreamsRoomStatus;
@@ -154,6 +160,7 @@ export class LoroConnectionRecoveryController {
   private readonly workspaceId: WorkspaceId;
   private readonly logger: Logger;
   private readonly onMetaRoomReady: () => void;
+  private readonly externalMetadata: boolean;
 
   private transportStatus: TransportConnectionStatus;
   private metaRoomStatus: RepoTransportRoomStatus | null = null;
@@ -204,7 +211,15 @@ export class LoroConnectionRecoveryController {
     this.onMetaRoomReady = options.onMetaRoomReady;
     this.transportStatus = options.initialTransportStatus;
     this.initialMetaSyncCompleted = options.initialMetaSyncCompleted;
+    this.externalMetadata = options.externalMetadata === true;
     this.eventFiber = Effect.runFork(this.createEventLoop());
+    if (this.externalMetadata) {
+      this.metaRoomStatus = 'joined';
+      this.initialMetaSyncCompleted = true;
+      this.onMetaRoomReady();
+      // Native mode is local-only: no Streams transport exists to watch.
+      return;
+    }
 
     void options.initialMetaSyncPromise
       .then((completed) => {
@@ -373,6 +388,8 @@ export class LoroConnectionRecoveryController {
       return false;
     }
 
+    // Native Meta is the local engine's: nothing remote to catch up on.
+    if (this.externalMetadata) return true;
     const reason = options.reason ?? 'explicit-wait';
     try {
       await this.ensureMetaRoomJoined(`wait-until-synced:${reason}`);
@@ -1111,7 +1128,7 @@ export class LoroConnectionRecoveryController {
   }
 
   private async ensureMetaRoomJoined(reason: string): Promise<void> {
-    if (this.metaSub) {
+    if (this.metaSub || this.externalMetadata) {
       return;
     }
 

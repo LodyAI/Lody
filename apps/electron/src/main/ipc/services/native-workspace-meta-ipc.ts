@@ -73,21 +73,32 @@ function workspaceMeta(workspaceId: string) {
 
 /** Window-owned view registrations; a closed or navigated window drops its own. */
 const views = new Map<WebContents, Map<string, () => void>>()
+const watchedSenders = new WeakSet<WebContents>()
+
+/** Releases a window's views when its document goes away. */
+function dropViews(sender: WebContents) {
+  const owned = views.get(sender)
+  if (!owned) return
+  views.delete(sender)
+  for (const unsubscribe of owned.values()) unsubscribe()
+  owned.clear()
+}
+
 function windowViews(sender: WebContents) {
   let owned = views.get(sender)
   if (owned) return owned
-  const created = new Map<string, () => void>()
-  views.set(sender, created)
-  const drop = () => {
-    views.delete(sender)
-    for (const unsubscribe of created.values()) unsubscribe()
-    created.clear()
+  owned = new Map<string, () => void>()
+  views.set(sender, owned)
+  if (!watchedSenders.has(sender)) {
+    watchedSenders.add(sender)
+    sender.once('destroyed', () => dropViews(sender))
+    // Route changes are same-document navigations: the renderer and its views live on.
+    sender.on('did-start-navigation', (event, _url, inPlace, isMainFrame) => {
+      const sameDocument = (event as { isSameDocument?: boolean }).isSameDocument ?? inPlace
+      if (isMainFrame && !sameDocument) dropViews(sender)
+    })
   }
-  sender.once('destroyed', drop)
-  sender.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
-    if (isMainFrame) drop()
-  })
-  return (owned = created)
+  return owned
 }
 
 /** Finite domain IPC: approved views and Meta commands only. */

@@ -234,6 +234,20 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
     assert.equal(delivered.observationId, second)
     assert.equal(delivered.update.changes.revision, receipt.revision)
     assert.deepEqual(delivered.update.changes.docs[0].meta, { title: 'Synthetic' })
+    // A route change is a same-document navigation: the window's view keeps receiving.
+    primary.sender.emit(
+      'did-start-navigation',
+      { isSameDocument: true },
+      'file:///app/out/renderer/index.html#/local/sessions/a',
+      true,
+      true
+    )
+    const beforeRouteChange = primaryUpdates.length
+    await handlers.get('nativeWorkspaceMeta.commit')(auxiliary, {
+      ...scope,
+      command: { kind: 'upsert-doc', docId: 'session-a', patch: { title: 'Routed' } }
+    })
+    assert.equal(primaryUpdates.length, beforeRouteChange + 1)
     // A navigating window drops only its own view.
     primary.sender.emit('did-start-navigation', {}, 'file:///other', false, true)
     const seen = primaryUpdates.length

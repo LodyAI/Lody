@@ -55,6 +55,14 @@
   Structure updates prune deleted ids and restart incomplete coverage. Search
   refreshes membership/positions after structure changes. Directory leases and
   retry timers stop on release/dispose; a page failure is never complete coverage.
+- Every whole-conversation consumer re-renders per view change, so work over a long
+  history must not announce per chunk. A structure event starts where membership
+  moved or the caller reported, never at 0 by default: consumers drop what they
+  derived inside it. A content flush that finds the length changed re-keys from its
+  lowest reported turn. Directory leases double their page size. The fact table's
+  background pass reads bodies through `readDetached`, which never hydrates, retains
+  or announces them; a fenced read is omitted and the pass reruns. Its background
+  notifications are throttled; foreground changes and completion notify at once.
 - Roost's renderer bridge retains a durable read projection scoped by account,
   workspace, machine and session. Persist page bodies, positions and owner revision
   together with an owner-issued checkpoint. Negotiate `sessionHistoryIncremental`

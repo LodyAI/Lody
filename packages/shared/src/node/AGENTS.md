@@ -146,6 +146,10 @@ Control, probe and Loro data-plane requests require the private daemon token bef
 - The engine runs only in the separate host process. Daemon and desktop main each
   hold one `connectNativeRepo` connection for every observation and command; they
   never stop the host, and a missing host is relaunched by whichever side reconnects.
+- A host lacking this build's engine capabilities is never used, and one of an
+  earlier release is replaced: `connectNativeRepo` launches this build's host,
+  which takes it over through the SDK handoff. Never signal or kill a host to
+  upgrade it; the host process exits once its engine has stopped.
 - `observe` is the only subscription lifecycle. Domains add projection and
   authorization, never their own retry, release or reconnect state.
 - Ordinary paths use key/prefix reads, read-set conditional writes and changed-key

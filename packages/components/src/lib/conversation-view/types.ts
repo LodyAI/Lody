@@ -159,6 +159,18 @@ export interface ConversationView {
   isHydrated(i: number): boolean;
   /** Captures `[from, to)` now. Release the returned handle when done. */
   acquireRange(from: number, to: number): ConversationRange;
+  /**
+   * Bodies at `positions` for a one-off reader (a fact derivation), read
+   * without hydrating, retaining or announcing them: hydrated turns are
+   * returned as held, the rest are read once. With `itemTypes` and a reader
+   * that can select items, a read turn holds only those items. A read that a
+   * membership or content change invalidated while pending is omitted and
+   * `stale` is set.
+   */
+  readDetached?(
+    positions: readonly number[],
+    options?: { readonly itemTypes?: readonly string[] }
+  ): Promise<{ bodies: ReadonlyMap<string, SessionHistory>; stale: boolean }>;
   /** Prepends one older directory page when the backend supports paging. */
   loadOlder?(): Promise<boolean>;
   /** Load the complete directory, or stop once a requested turn is found.

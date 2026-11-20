@@ -174,7 +174,27 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
   }
 
   async connect(): Promise<void> {
+    this.subscribeWorkspace();
     notify(this.statusListeners, this.getStatus());
+  }
+
+  /**
+   * Receive this workspace's presence and other workspace-level pushes on the
+   * current socket, whether or not any room is joined (a native renderer joins
+   * no Meta room). Sent again after every reconnect.
+   */
+  private subscribeWorkspace(): void {
+    if (!this.connection.isConnected()) return;
+    try {
+      this.connection.send({
+        type: 'subscribe',
+        protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+        workspaceId: this.workspaceId,
+        peerId: this.peerId,
+      });
+    } catch {
+      // The status listener resends once the socket is back.
+    }
   }
 
   async close(): Promise<void> {
@@ -889,6 +909,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       }
       return;
     }
+    this.subscribeWorkspace();
     for (const state of this.rooms.values()) {
       if (state.terminalError) {
         continue;

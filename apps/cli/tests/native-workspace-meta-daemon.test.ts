@@ -15,6 +15,9 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { connectNativeRepo, nativeRepoDataDir } from '@lody/shared/node/native-repo';
+import { createNativeRemoteHistoryPort } from '@lody/shared/node/native-docs';
+import { createRemoteHistoryCommands } from '@lody/shared/session-data';
+import { connectEngine } from '@loro-dev/loro-repo-client/node';
 import { bindTestPresenceApplication } from './presence-application-fixture';
 import {
   applyLocalPlatformEnv,
@@ -246,6 +249,74 @@ describe('native Workspace Meta in the CLI daemon', () => {
       );
     } finally {
       await nativeAgain.close();
+      await connection.close();
+    }
+  });
+
+  it("commits the daemon's reply after a renderer's follow-up turn it reacts to", async () => {
+    const identity = await loadOrCreateLocalIdentity(logger());
+    const workspace = await ensureImplicitLocalWorkspace({
+      catalog: makeLocalWorkspaceCatalog({
+        filePath: path.join(tempDir, '.lody-oss', 'workspace-catalog.json'),
+        lockName: `native-meta-reply-${process.pid}`,
+        cacheTtlMs: Number.POSITIVE_INFINITY,
+      }),
+      identity,
+      machineId: 'local-machine',
+      machineName: 'local-host',
+      logger: logger(),
+    });
+    process.env.LODY_NATIVE_WORKSPACE_META = '1';
+    const connection = await connectNativeRepo({
+      launcher: () => ({ command: process.execPath, args: [hostScript] }),
+    });
+    const renderer = await connectEngine(nativeRepoDataDir(), { queueWhileReconnecting: false });
+    const daemon = await open(workspace, identity.userId);
+    try {
+      const sessionId = await daemon.manager.createSession('local-machine', 'builtin', 'claude');
+      const roomId = getSessionRoomId(sessionId);
+      // The execution replica: auto-seen reacts to each arriving user turn.
+      const sessionDoc = await daemon.manager.getOrCreateSessionDoc(sessionId);
+      const port = createNativeRemoteHistoryPort(renderer, workspace.id, roomId);
+      const userTurn = (id: string) =>
+        ({
+          id,
+          role: 'user',
+          timestamp: '2026-01-01T00:00:00Z',
+          status: 'pending',
+          userId: identity.userId,
+          items: [{ type: 'text', text: id }],
+          fileDiff: [],
+        }) as never;
+      const reply = async (userTurnId: string) => {
+        while (sessionDoc.sessionData.history.readDirectory(0, 99).at(-1)?.turnId !== userTurnId)
+          await new Promise((resolve) => setImmediate(resolve));
+        await sessionDoc.sessionData.commands.appendTurn({
+          id: `assistant:${userTurnId}`,
+          role: 'assistant',
+          userTurnId,
+          timestamp: '2026-01-01T00:00:01Z',
+          finished: true,
+          items: [{ type: 'text', text: `reply to ${userTurnId}` }],
+          fileDiff: [],
+        } as never);
+        await daemon.manager.repo.flush();
+      };
+      for (const id of ['first', 'follow-up']) {
+        await createRemoteHistoryCommands(port).appendTurn(userTurn(id));
+        await reply(id);
+      }
+      // The engine holds every reply, not only the first one.
+      const stored = (await port.readPath(['history'])) as { id: string }[];
+      expect(stored.map((turn) => turn.id)).toEqual([
+        'first',
+        'assistant:first',
+        'follow-up',
+        'assistant:follow-up',
+      ]);
+    } finally {
+      await daemon.close();
+      await renderer.close();
       await connection.close();
     }
   });

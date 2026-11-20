@@ -34,6 +34,12 @@ receipt. Windows uses a random per-process pipe suffix separate from the secret.
 See the [security decision](../notes/implemented/bug-fix/2026-11-12-local-ipc-and-native-preview-security.md)
 for compatibility and filesystem limits.
 
+A connection receives a workspace's presence and other workspace-level pushes once it
+has sent that workspace any message. The transport adapter sends `subscribe` (workspace
+and peer, no room) on connect and after every reconnect, so a renderer that joins no room
+(native Workspace Meta joins no Meta room) still receives them. A peer that predates
+`subscribe` rejects it as an invalid request and simply pushes nothing until a join.
+
 Every message carries `workspaceId` + `peerId` (a per-adapter uuid), and the server
 keys sync state per PEER (`lastSentVV`, flock bundle hash), so multiple windows
 multiplexed over the one relay socket sync independently and a sender's own ops are

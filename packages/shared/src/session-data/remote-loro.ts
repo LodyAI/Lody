@@ -17,7 +17,9 @@ import type {
   SessionHistoryDirectoryPage,
   SessionHistoryReader,
   SessionObservation,
+  SessionSubagentRun,
 } from './types';
+import { jsonRunPreviewAccess, latestRunStepPreview } from './run-preview';
 
 // # Remote Loro history reader
 //
@@ -28,10 +30,20 @@ import type {
 
 type PathSegment = string | number;
 
-/** One projected field of each history item; `shape` returns a container's kind and length. */
+/**
+ * One projected field of each history item; `shape` returns a container's kind
+ * and length. With `where` the field must be a list and its cell is the
+ * `[index, item]` pairs the filter selects; `omit` leaves sub-paths unread.
+ */
 export interface RemoteListField {
   readonly path: readonly PathSegment[];
   readonly shape?: boolean;
+  readonly where?: {
+    readonly key: string;
+    readonly in?: readonly string[];
+    readonly notIn?: readonly string[];
+  };
+  readonly omit?: readonly (readonly PathSegment[])[];
 }
 
 /** One container a commit changed; no values. */
@@ -70,6 +82,8 @@ export interface RemoteLoroHistoryPort {
 }
 
 const HISTORY = 'history';
+const ITEMS = 'items';
+const SUBAGENT_TASK = 'subagent_task';
 const ID_FIELD: RemoteListField = { path: ['id'] };
 const DIRECTORY_FIELDS: readonly RemoteListField[] = [
   ...SESSION_DIRECTORY_SCALAR_KEYS.map((key) => ({ path: [key] })),
@@ -193,6 +207,21 @@ export function createRemoteLoroHistoryReader(port: RemoteLoroHistoryPort): Sess
       remember(row.position, row.turnId);
       return row;
     });
+    // The engine bounds a page by bytes, ending it early: read on to the
+    // requested end so the page stays contiguous with the newer one.
+    const pageEnd = Math.min(end ?? page.len, page.len);
+    let at = page.start + rows.length;
+    while (rows.length > 0 && at < pageEnd) {
+      const next = await port.readListFields(at, pageEnd, DIRECTORY_FIELDS);
+      if (next.len !== page.len || next.start !== at || next.rows.length === 0)
+        throw new Error('remote_history_changed_during_read');
+      for (const [offset, cells] of next.rows.entries()) {
+        const row = directoryRow(next.start + offset, cells);
+        remember(row.position, row.turnId);
+        rows.push(row);
+      }
+      at = next.start + next.rows.length;
+    }
     return {
       startPosition: page.start,
       totalCount: page.len,
@@ -223,29 +252,170 @@ export function createRemoteLoroHistoryReader(port: RemoteLoroHistoryPort): Sess
   /** A position seen in a read, else a scan; callers verify the id they read there. */
   const locate = async (turnId: string) => positions.get(turnId) ?? scanFor(turnId);
 
+  /**
+   * Reads of one projection requested in the same task, served together: one
+   * page per contiguous run of positions instead of one round trip per turn.
+   * A view hydrates a window as many concurrent reads, so this is where they
+   * meet. `assemble` turns a row's cells into the value, undefined when absent.
+   */
+  type Waiter = { resolve: (value: unknown) => void; reject: (error: unknown) => void };
+  const projection = (
+    fields: readonly RemoteListField[],
+    assemble: (cells: readonly unknown[]) => unknown
+  ) => {
+    let batch: Map<number, Waiter[]> | undefined;
+    const serveRun = async (lo: number, hi: number, waiters: Map<number, Waiter[]>) => {
+      const settle = (position: number, value: unknown) => {
+        for (const waiter of waiters.get(position) ?? []) waiter.resolve(value);
+        waiters.delete(position);
+      };
+      try {
+        let at = lo;
+        while (at < hi) {
+          const page = await port.readListFields(at, hi, fields);
+          page.rows.forEach((cells, offset) => settle(page.start + offset, assemble(cells)));
+          if (page.rows.length === 0) break;
+          at = page.start + page.rows.length;
+        }
+        // Past the end of the list: absent, as a path read reports it.
+        for (let position = lo; position < hi; position += 1) settle(position, undefined);
+      } catch (error) {
+        for (let position = lo; position < hi; position += 1) {
+          for (const waiter of waiters.get(position) ?? []) waiter.reject(error);
+          waiters.delete(position);
+        }
+      }
+    };
+    const flush = () => {
+      const waiters = batch ?? new Map<number, Waiter[]>();
+      batch = undefined;
+      const sorted = [...waiters.keys()].sort((a, b) => a - b);
+      for (let index = 0; index < sorted.length;) {
+        const lo = sorted[index] ?? 0;
+        let hi = lo + 1;
+        while (sorted[index + 1] === hi) {
+          index += 1;
+          hi += 1;
+        }
+        index += 1;
+        void serveRun(lo, hi, waiters);
+      }
+    };
+    return (position: number) =>
+      new Promise<unknown>((resolve, reject) => {
+        if (!batch) {
+          batch = new Map();
+          queueMicrotask(flush);
+        }
+        const waiters = batch.get(position);
+        if (waiters) waiters.push({ resolve, reject });
+        else batch.set(position, [{ resolve, reject }]);
+      });
+  };
+  const readBodyAt = projection(WHOLE_TURN, (cells) => cells[0]);
+
+  /** A turn without `items`, plus selected `[index, item]` pairs, reassembled in order. */
+  const withSelectedItems = (cells: readonly unknown[]) => {
+    const [turn, ...selections] = cells;
+    if (!turn || typeof turn !== 'object' || Array.isArray(turn)) return undefined;
+    const pairs = selections.flatMap((selected) =>
+      Array.isArray(selected) ? (selected as [number, unknown][]) : []
+    );
+    pairs.sort((left, right) => left[0] - right[0]);
+    return { ...(turn as Record<string, unknown>), items: pairs.map(([, item]) => item) };
+  };
+  const TURN_WITHOUT_ITEMS: RemoteListField = { path: [], omit: [[ITEMS]] };
+  // Display bodies: every item except child-run transcripts, as the in-process
+  // display reader; each run's latest step is read after, from its end.
+  const readDisplayAt = projection(
+    [
+      TURN_WITHOUT_ITEMS,
+      { path: [ITEMS], where: { key: 'type', notIn: [SUBAGENT_TASK] } },
+      { path: [ITEMS], where: { key: 'type', in: [SUBAGENT_TASK] }, omit: [['run', ITEMS]] },
+    ],
+    (cells) => {
+      const turn = withSelectedItems(cells);
+      if (!turn) return undefined;
+      // The same item objects the turn holds, with their stored positions.
+      const tasks = Array.isArray(cells[2]) ? (cells[2] as [number, unknown][]) : [];
+      return { turn, tasks };
+    }
+  );
+  const readSelectedAt = new Map<string, (position: number) => Promise<unknown>>();
+  const selectedItemsAt = (itemTypes: readonly string[]) => {
+    const key = JSON.stringify(itemTypes);
+    let read = readSelectedAt.get(key);
+    if (!read)
+      readSelectedAt.set(
+        key,
+        (read = projection(
+          [TURN_WITHOUT_ITEMS, { path: [ITEMS], where: { key: 'type', in: itemTypes } }],
+          withSelectedItems
+        ))
+      );
+    return read;
+  };
+
+  /** Each child run's items replaced by its latest step, read from the end. */
+  const previewRuns = async (position: number, tasks: readonly [number, unknown][]) => {
+    if (tasks.length === 0) return;
+    const page = await port.readListFields(
+      position,
+      position + 1,
+      tasks.map(([index]) => ({ path: [ITEMS, index, 'run', ITEMS], shape: true }))
+    );
+    const shapes = page.rows[0] ?? [];
+    await Promise.all(
+      tasks.map(async ([index, item], at) => {
+        const run = (item as { run?: unknown } | null)?.run;
+        if (!run || typeof run !== 'object' || Array.isArray(run)) return;
+        const shape = shapes[at] as { len?: unknown } | undefined;
+        const length = typeof shape?.len === 'number' ? shape.len : 0;
+        (run as Record<string, unknown>)[ITEMS] = await latestRunStepPreview(
+          length,
+          (step) => port.readPath([HISTORY, position, ITEMS, index, 'run', ITEMS, step]),
+          jsonRunPreviewAccess
+        );
+      })
+    );
+  };
+
   const readAt = async (position: number): Promise<SessionTurnRead> => {
     if (position < 0) return { state: 'missing' };
-    const value = await port.readPath([HISTORY, position]);
+    const value = await readBodyAt(position);
     return value === undefined ? { state: 'missing' } : asTurnRead(value);
   };
 
-  const readTurn = async (turnId: string): Promise<SessionTurnRead> => {
+  /** `turnId` read through `at`, from a remembered position or a scan; a moved turn is found again. */
+  const byTurnId = async (
+    turnId: string,
+    at: (position: number) => Promise<SessionTurnRead>
+  ): Promise<SessionTurnRead> => {
     const known = positions.get(turnId);
     if (known !== undefined) {
-      const read = await readAt(known);
+      const read = await at(known);
       if (read.state === 'ready' && read.turn.id === turnId) return read;
       // The turn moved since it was seen there.
       positions.delete(turnId);
     }
     const position = await scanFor(turnId);
     if (position === undefined) return { state: 'missing' };
-    const read = await readAt(position);
+    const read = await at(position);
     if (read.state === 'ready' && read.turn.id !== turnId) {
       positions.delete(turnId);
       const again = await scanFor(turnId);
-      return again === undefined ? { state: 'missing' } : readAt(again);
+      return again === undefined ? { state: 'missing' } : at(again);
     }
     return read;
+  };
+  const readTurn = (turnId: string) => byTurnId(turnId, readAt);
+  const displayAt = async (position: number): Promise<SessionTurnRead> => {
+    const value = (await readDisplayAt(position)) as
+      | { turn: SessionEntry; tasks: [number, unknown][] }
+      | undefined;
+    if (!value) return { state: 'missing' };
+    await previewRuns(position, value.tasks);
+    return asTurnRead(value.turn);
   };
 
   const count = async () => (await port.readListFields(0, 0, [])).len;
@@ -254,11 +424,39 @@ export function createRemoteLoroHistoryReader(port: RemoteLoroHistoryPort): Sess
     count,
     readAt,
     readTurn,
+    readTurnForDisplay: (turnId) => byTurnId(turnId, displayAt),
+    async readSubagentRun(turnId, rootSessionId, runId) {
+      const read = await byTurnId(turnId, async (position) => {
+        const page = await port.readListFields(position, position + 1, [
+          ID_FIELD,
+          { path: [ITEMS], where: { key: 'taskId', in: [runId] } },
+        ]);
+        const [id, selected] = page.rows[0] ?? [];
+        if (typeof id !== 'string') return { state: 'missing' };
+        return { state: 'ready', turn: { id, items: selected } as unknown as SessionEntry };
+      });
+      if (read.state !== 'ready') return undefined;
+      for (const [, item] of read.turn.items as unknown as [number, unknown][]) {
+        const { type, run } = (item ?? {}) as { type?: unknown; run?: unknown };
+        if (type !== SUBAGENT_TASK || !run || typeof run !== 'object') continue;
+        if ((run as { sessionId?: unknown }).sessionId === rootSessionId)
+          return run as SessionSubagentRun;
+      }
+      return undefined;
+    },
+    readTurnSelectingItems: (turnId, itemTypes) =>
+      byTurnId(turnId, async (position) => {
+        const value = await selectedItemsAt(itemTypes)(position);
+        return value === undefined ? { state: 'missing' } : asTurnRead(value);
+      }),
     async readRange(from, to) {
-      const out: SessionTurnRead[] = [];
-      for (let position = Math.max(0, from); position < to; position += 1)
-        out.push(await readAt(position));
-      return out;
+      const positions: number[] = [];
+      for (let position = Math.max(0, from); position < to; position += 1) positions.push(position);
+      const reads = await Promise.all(positions.map(readAt));
+      // As the in-process reader: the range ends at the end of the list.
+      let end = reads.length;
+      while (end > 0 && reads[end - 1]?.state === 'missing') end -= 1;
+      return reads.slice(0, end);
     },
     readDirectory: (from, to) => readDirectory(from, to),
     readLatestDirectoryPage: (limit) => readPage(undefined, limit),

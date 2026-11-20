@@ -956,6 +956,102 @@ describe('createConversationViewFromReader audit regressions', () => {
     }
   });
 
+  it('an append racing a tail edit re-keys from the edit, keeping the earlier paged rows', async () => {
+    // A streamed reply appends while its content edits are in flight: the
+    // content flush sees the length move. Re-keying a long paged history from 0
+    // re-read every page and replaced every row.
+    const original = buildFixtureHistory(150);
+    const doc = buildSessionDoc(original);
+    const data = createLoroSessionData({ sessionId: FIXTURE_SESSION_ID, doc });
+    let block = false;
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const started = new Promise<void>((resolve) => (entered = resolve));
+    const reader: SessionHistoryReader = {
+      ...data.history,
+      count: async () => {
+        if (block) {
+          block = false;
+          entered();
+          await gate;
+        }
+        return data.history.count();
+      },
+    };
+    const idle = createManualIdle();
+    const view = createConversationViewFromReader(reader, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 0,
+      scheduleIdle: idle.scheduleIdle,
+      yieldToEventLoop: () => Promise.resolve(),
+    });
+    try {
+      await settle(idle, view);
+      const directory = view.acquireDirectory!();
+      await directory.ready;
+      expect(view.loadedFrom).toBe(0);
+      const early = Array.from({ length: 200 }, (_, i) => view.index(i));
+      const tailId = original[original.length - 1]!.id;
+      block = true;
+      await writeStoredField(data, tailId, 'finished', setFieldTo(false));
+      await started;
+      doc.getList('history').push({ ...original[0], id: 'appended' } as never);
+      doc.commit();
+      await flushReaderChanges();
+      release();
+      await checkpoint();
+      await checkpoint();
+      expect(view.turnCount).toBe(original.length + 1);
+      expect(view.index(original.length)?.id).toBe('appended');
+      // Rows before the edited turn keep their objects.
+      expect(Array.from({ length: 200 }, (_, i) => view.index(i))).toEqual(early);
+      expect(Array.from({ length: 200 }, (_, i) => view.index(i) === early[i])).not.toContain(
+        false
+      );
+      directory.release();
+    } finally {
+      release();
+      view.dispose();
+      doc.free();
+    }
+  });
+
+  it('announces an append on a loaded paged history from the append, not from the start', async () => {
+    // Consumers drop what they derived inside an announced range: a whole-range
+    // announcement made a fact table re-read every body on every append.
+    const original = buildFixtureHistory(150);
+    const doc = buildSessionDoc(original);
+    const data = createLoroSessionData({ sessionId: FIXTURE_SESSION_ID, doc });
+    const idle = createManualIdle();
+    const view = createConversationViewFromReader(data.history, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 0,
+      scheduleIdle: idle.scheduleIdle,
+      yieldToEventLoop: () => Promise.resolve(),
+    });
+    try {
+      await settle(idle, view);
+      const directory = view.acquireDirectory!();
+      await directory.ready;
+      expect(view.loadedFrom).toBe(0);
+      const structures: { from?: number; to?: number }[] = [];
+      view.subscribe((change) => {
+        if (change.kind === 'structure') structures.push({ from: change.from, to: change.to });
+      });
+      doc.getList('history').push({ ...original[0], id: 'appended' } as never);
+      doc.commit();
+      await flushReaderChanges();
+      await vi.waitFor(() => expect(view.turnCount).toBe(original.length + 1));
+      expect(structures.length).toBeGreaterThan(0);
+      for (const change of structures) expect(change.from).toBe(original.length);
+      directory.release();
+    } finally {
+      view.dispose();
+      doc.free();
+    }
+  });
+
   it('a leased body read is invalidated by a streaming text update with unchanged index scalars', async () => {
     // 71 neighbor: a body-only edit (same item count, same scalars) must
     // invalidate the pending read by the event's identity, not by comparing the

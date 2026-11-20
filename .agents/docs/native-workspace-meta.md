@@ -42,6 +42,40 @@ flowchart LR
   ([`native-workspace-meta-ipc.ts`](../../apps/electron/src/main/ipc/services/native-workspace-meta-ipc.ts)).
   Views are owned per window and dropped on navigation or destruction.
 
+## Host upgrades
+
+The host outlives the desktop and the daemon that started it, so after an
+upgrade the new Lody can find an earlier build's host still serving the data
+directory. The engine reports its protocol, release (`version`, SemVer) and
+capabilities in `engine.json` and `engine_info`. A newer protocol, else a newer
+release, supersedes an older engine; at the same release a strict capability
+superset does (development builds). Capabilities are never removed within a
+protocol version and stay the runtime check of what a host serves.
+
+`connectNativeRepo` (daemon and desktop main alike) never uses a host that lacks
+a capability of the engine this Lody ships: it launches its own host and
+connects once that host has taken the directory over. A host of an earlier
+release that serves everything (a bug-fix upgrade) is used at once, and this
+Lody's host is started beside it to take over; connections move to the
+successor when the handoff completes. The takeover is the SDK's
+`ensureEngineHost`: it asks the older engine to hand off (`engine_handoff`).
+That engine refuses new requests and lets those in flight finish; if they do
+not within its drain limit it keeps serving and refuses (`HANDOFF_TIMEOUT`), and
+the request is repeated. Drained, it stops completely (runtime and its blocking
+work joined, engine and storage dropped) before it removes `engine.json` and
+releases `files.lock`, so the successor never shares the directory with a live
+writer. An engine that predates handoff is waited out until it idles. An earlier
+Lody meeting a newer host attaches to it; a newer protocol stays
+`ENGINE_PROTOCOL_MISMATCH`.
+
+The host entry exits once its engine has stopped. Launched as Electron-as-Node
+(the desktop's launch), the process otherwise stayed alive after an idle stop,
+one leaked process per host lifetime; it held no lock.
+
+Covered by `native-workspace-meta.test.ts` (an earlier build's host, and an
+earlier release with the same capabilities, still running) and the SDK's
+handoff tests (loro-repo `lody/engine-handshake-handoff`).
+
 ## One observation lifecycle
 
 `observe` in [`native-repo.ts`](../../packages/shared/src/node/native-repo.ts) is
@@ -134,8 +168,16 @@ in it is read from the engine, which loads rooms lazily, and written through mai
 ids instead of opening a replica.
 
 - **Reads.** [`remote-loro.ts`](../../packages/shared/src/session-data/remote-loro.ts)
-  pages the history (`readDocListFields`, one subpath read per turn body) for the
-  windowed ConversationView. [`remote-document.ts`](../../packages/shared/src/session-data/remote-document.ts)
+  pages the history (`readDocListFields`) for the windowed ConversationView. Body
+  reads issued in the same task are served together, one page per contiguous run,
+  and a directory page reads on past the engine's byte bound so it stays
+  contiguous. Display reads match the in-process display reader: the engine's
+  item filter (`where`/`omit`, loro-repo `lody/list-field-item-filter`) returns
+  every item but child-run transcripts, and each run's latest step is read from
+  its end; `readSubagentRun` selects one task by `taskId`. The fact table asks
+  only for the item types its derivation declares (`goal`, `tool_call`,
+  `proposed_plan`), which cut its sweep's reads from 50 MB to 14 MB at 50,000
+  prose turns; renderer peak memory did not change measurably. [`remote-document.ts`](../../packages/shared/src/session-data/remote-document.ts)
   keeps every control root (`session`, `mq`, `humanInputReceipts`, `cancelRequest`,
   `forkOperation`, `notification`, `preview`, `externalHistoryCursor`,
   `acpRuntimeConfig`) as small JSON. One `doc_subscribe_paths` observation
@@ -496,6 +538,87 @@ for a loaded room; RSS deltas below 20 MB are within measurement noise.
 - No signed installer, real-window acceptance or platforms other than Linux x64
   have been exercised (see Pending acceptance).
 
+## Desktop acceptance (Linux x64)
+
+The built desktop with native Workspace Meta, run through the E2E harness
+(`LODY_NATIVE_WORKSPACE_META=1` passes its allowlist; data stays under the run's
+`LODY_DATA_DIR`), found faults unit tests could not reach:
+
+- The CLI's and the renderer's connection state both counted health from a
+  joined legacy Meta room. With external metadata they now count Meta as joined
+  and synced, never join a room, and the renderer runs the first-sync duties
+  (capability refresh, first-synced latch) without background eager-sync.
+- The renderer's first metadata scan read the legacy Meta Flock outside its
+  `try`; it now falls back to `listDoc`.
+- Main dropped a window's native views on in-place route changes; only a
+  cross-document navigation drops them now.
+- Presence reached a renderer only after it joined a room; the data plane now
+  has an explicit `subscribe`.
+- The host kept the desktop's inherited descriptors open after quit; it closes
+  them on start (loro-repo #327).
+- After a renderer's follow-up turn, the daemon's replies stayed uncommitted:
+  auto-seen writes inside the import of that turn, and loro-repo counted those
+  local ops as committed. The baseline now advances by the import's own spans
+  (`lody/external-import-baseline`), covered by a daemon test.
+
+### Large Session streaming
+
+Measured on a seeded workspace (3,000 Sessions, one of 50,000 turns), reopening
+the desktop from the same copied profile each run: 20 s idle after the large
+Session's first screen, then a 64 KB reply streamed as 200 chunks.
+
+| Large Session                  | Before (`d150201c4`) |            After |
+| ------------------------------ | -------------------: | ---------------: |
+| Idle: renderer long tasks      |         155 / 11.0 s |       22 / 2.3 s |
+| Streaming: renderer long tasks |         403 / 55.3 s |       54 / 6.5 s |
+| Streaming: renderer read IPC   |  13,507 calls, 29 MB | 69 calls, 0.1 MB |
+| Streaming: main event-loop max |               159 ms |            32 ms |
+| Renderer RSS after GC          |               600 MB |           659 MB |
+
+Streaming chunks were not the cost: each chunk re-reads only its turn, and those
+reads coalesce behind the one in flight. Opening the Session started whole-history
+work that re-rendered every whole-conversation consumer (outline, fact table,
+configuration sources) per page and per 32-turn chunk, and every append on a
+paged view announced a structure change from position 0, which dropped every
+derived fact and re-read all bodies. A send also read the whole directory to
+order two turns. The fixes and their invariants are in the
+[ConversationView rules](../../packages/components/src/lib/conversation-view/AGENTS.md).
+Renderer RSS before GC still peaks above 1 GB: the completed fact sweep reads
+every body once, and the heap after GC stays near 250 MB.
+
+Memory attribution: idle after startup, before the large Session is opened, the
+daemon holds 640–690 MB in every run, its baseline with or without the large data.
+The host holds about 123 MB after a fresh start and 240–270 MB once the large
+Session has been read and streamed; a host that had also performed the seeding
+import held 497 MB. After the large stream the daemon holds 720
+MB to 1 GB, from its 50,000-turn replica and the replay below.
+
+The large Session's reply still appeared about 36 s after sending, with the
+renderer idle; the rest was the daemon. Measured on its own (the daemon's
+`LoroDocumentManager`, 50,000 turns, a cold reopen, legacy and native side by side):
+
+| Daemon, 50,000 turns              |   Legacy | Native |
+| --------------------------------- | -------: | -----: |
+| Open the Session replica          | 4,241 ms | 781 ms |
+| `user-status` write, before       |   145 ms | 650 ms |
+| Write plus flush, after the index |     1 ms |   2 ms |
+| First id lookup after open        |   158 ms |  1.1 s |
+
+Opening is not slower in native mode. Every `user-status` write scanned the whole
+history for copies of the turn, and an assistant entry's first open scanned it for
+an id that did not exist yet. Native multiplied that cost: loro-crdt 1.17 serves
+every container read about five times slower on a replica loaded with
+`LoroDoc.fromSnapshot` (the native feed's form, and legacy's after compaction) than
+on one built from updates, and reading the whole state does not warm it. The
+writer and the Loro reader now look ids up in one per-document index, so only
+its one-time build pays that cost; in the desktop the assistant entry's open went
+from 837 ms to 13 ms. Dispatch reads the whole directory on every check; the Loro
+reader now caches its rows and seeds the index from a complete read, so only the
+first check after opening pays the cold read (862 ms native) and later checks take
+about 40 ms instead of about 800 ms. The remaining wait is the scripted agent's: it does not advertise
+resume, so the daemon rebuilds the prompt by replaying the whole history (about
+18 s); agents that resume skip it.
+
 ## Pending acceptance
 
 These checks wait for the real desktop acceptance run:
@@ -504,3 +627,95 @@ These checks wait for the real desktop acceptance run:
   repeatedly, so the byte budget unloads rooms) and record the host RSS per
   cycle. The trim fix applies only to glibc; macOS uses its own allocator.
 - A packaged desktop with its main-process IPC hop, on each shipped platform.
+- Packaging: the bundled `@loro-dev/loro-repo-engine-linux-x64-gnu` platform
+  package carries an older addon. Local runs load the main package's own binary
+  first, so they are unaffected; switching to the released packages replaces both.
+
+## Appendix: loro-crdt reads after `fromSnapshot`
+
+For the Loro team. A `LoroDoc` loaded from a snapshot (`LoroDoc.fromSnapshot`
+or `import` of snapshot bytes) serves container reads about 5.7 times slower
+than the same document built from update bytes, and it stays slower: repeated
+passes and a full `toJSON()` do not warm it. Lody meets it because a native
+replica, and a legacy replica after compaction, load from a snapshot; before
+the history id index, a 50,000-turn status write took about 700 ms instead of
+130 ms.
+
+loro-crdt 1.17.0, Node 26.13.1, Linux x64; 50,000 rows, each a map with three
+strings and a text (snapshot 8.4 MB, updates 39.7 MB). One pass reads every
+row's `id`:
+
+| Load                             |    Load | Pass 1 | Pass 2 | Pass 3 |
+| -------------------------------- | ------: | -----: | -----: | -----: |
+| `LoroDoc.fromSnapshot(snapshot)` |   10 ms | 439 ms | 430 ms | 431 ms |
+| `new LoroDoc().import(snapshot)` |   12 ms | 451 ms | 459 ms | 474 ms |
+| `new LoroDoc().import(updates)`  | 1045 ms |  78 ms |  76 ms | 117 ms |
+| snapshot, then `toJSON()` once   |  833 ms | 433 ms | 411 ms | 457 ms |
+
+Getting a row's handle (`list.get`) costs the same either way (30 ms against
+35 ms for 50,000 rows); the slowdown is in reading the map's values: one `get`
+per row 430 ms against 78 ms in the script below, and on a Lody-shaped history
+sixteen `get`s 1,046 ms against 403 ms, `getShallowValue` 1,151 ms against 447 ms. Reproduce
+with `node snapshot-read.mjs [rows]` wherever `loro-crdt` resolves:
+
+```js
+// Minimal repro: container reads on a LoroDoc loaded from a snapshot are slower
+// than on the same document built from updates, and stay slower.
+// Usage: node snapshot-read.mjs [rows]   (run where `loro-crdt` resolves)
+import { LoroDoc, LoroMap, LoroText } from 'loro-crdt';
+
+const rows = Number(process.argv[2] ?? 50000);
+const source = new LoroDoc();
+const list = source.getList('history');
+for (let i = 0; i < rows; i++) {
+  const row = list.insertContainer(i, new LoroMap());
+  row.set('id', `row-${i}`);
+  row.set('role', i % 2 ? 'assistant' : 'user');
+  row.set('status', 'handled');
+  row.setContainer('body', new LoroText()).insert(0, 'x'.repeat(i % 2 ? 1200 : 200));
+}
+source.commit();
+const snapshot = source.export({ mode: 'snapshot' });
+const updates = source.export({ mode: 'update' });
+
+const time = (label, run) => {
+  const started = performance.now();
+  run();
+  return `${label} ${(performance.now() - started).toFixed(0)} ms`;
+};
+const readIds = (doc) => {
+  const history = doc.getList('history');
+  for (let i = 0; i < history.length; i++) history.get(i).get('id');
+};
+const loads = {
+  'LoroDoc.fromSnapshot(snapshot)': () => LoroDoc.fromSnapshot(snapshot),
+  'new LoroDoc().import(snapshot)': () => {
+    const d = new LoroDoc();
+    d.import(snapshot);
+    return d;
+  },
+  'new LoroDoc().import(updates)': () => {
+    const d = new LoroDoc();
+    d.import(updates);
+    return d;
+  },
+  'snapshot, then toJSON() once': () => {
+    const d = LoroDoc.fromSnapshot(snapshot);
+    d.toJSON();
+    return d;
+  },
+};
+console.log(
+  `loro-crdt rows=${rows} snapshot=${snapshot.byteLength}B updates=${updates.byteLength}B`
+);
+for (const [label, load] of Object.entries(loads)) {
+  let doc;
+  const opened = time('load', () => {
+    doc = load();
+  });
+  const first = time('ids pass 1', () => readIds(doc));
+  const second = time('ids pass 2', () => readIds(doc));
+  const third = time('ids pass 3', () => readIds(doc));
+  console.log(`${label.padEnd(32)} ${opened} | ${first} | ${second} | ${third}`);
+}
+```

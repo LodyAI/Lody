@@ -2,7 +2,11 @@ import { writeStoredField } from './conversation-view-fixtures';
 import { openReaderView } from './conversation-view-fixtures';
 import { describe, expect, it } from 'vitest';
 import { LoroMap, type ContainerID, type LoroList } from 'loro-crdt';
-import { resolveLatestSessionGoalFromHistory, type SessionGoalMessage } from '@lody/shared';
+import {
+  resolveLatestSessionGoalFromHistory,
+  type SessionGoalMessage,
+  type SessionHistory,
+} from '@lody/shared';
 import { createLoroSessionData, type LoroSessionData } from '@lody/shared/session-data';
 import {
   createConversationDerivation,
@@ -135,4 +139,128 @@ describe('createConversationDerivation', () => {
       view.dispose();
     }
   );
+
+  it('derives from detached reads that announce nothing and rereads one an edit fenced', async () => {
+    const history = buildFixtureHistory(60);
+    const doc = buildSessionDoc(history);
+    const data = createLoroSessionData({ sessionId: FIXTURE_SESSION_ID, doc });
+    const target = 'a-3';
+    let entered: () => void = () => {};
+    const reached = new Promise<void>((resolve) => (entered = resolve));
+    let release: () => void = () => {};
+    const released = new Promise<void>((resolve) => (release = resolve));
+    // The first body read of the target is taken, then answers only after its
+    // turn has been edited: the reply carries the old body.
+    const readForDisplay = data.history.readTurnForDisplay!.bind(data.history);
+    let gated = true;
+    data.history.readTurnForDisplay = async (turnId) => {
+      const read = structuredClone(await readForDisplay(turnId));
+      if (turnId === target && gated) {
+        gated = false;
+        entered();
+        await released;
+      }
+      return read;
+    };
+    const idle = createManualIdle();
+    const view = createConversationViewFromReader(data.history, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 2,
+      maxHydrated: 4,
+      scheduleIdle: idle.scheduleIdle,
+      yieldToEventLoop: immediate,
+    });
+    await drain(() => view.turnCount === history.length, 1000);
+    const announced = new Set<string>();
+    view.subscribe((change) => {
+      if (change.kind === 'changed') for (const id of change.ids) announced.add(id);
+    });
+    const derivation = createConversationDerivation(view, deriveDiffCount, {
+      chunkSize: 8,
+      yieldToEventLoop: immediate,
+      backgroundNotifyMs: 0,
+    });
+    let atTarget = false;
+    void reached.then(() => (atTarget = true));
+    await drain(() => {
+      idle.runAll();
+      return atTarget;
+    }, 10000);
+    expect(atTarget).toBe(true);
+    const edit = await writeStoredField(data, target, 'fileDiff', {
+      kind: 'set',
+      value: [{ filePath: 'src/edited.ts', add: 1, del: 0 }],
+    });
+    expect(edit.status).toBe('accepted');
+    release();
+    await drain(() => {
+      idle.runAll();
+      return derivation.complete;
+    }, 10000);
+    expect(derivation.complete).toBe(true);
+    expect(derivation.facts.size).toBe(history.length);
+    // The read that started before the edit never became the target's fact.
+    expect(derivation.facts.get(target)?.diffs).toBe(1);
+    expect(view.isHydrated(view.indexOf(target))).toBe(false);
+    // Only the hydrated tail and the edited turn were ever announced.
+    const tail = [history.length - 2, history.length - 1].map((i) => history[i]!.id);
+    expect([...announced].filter((id) => id !== target && !tail.includes(id))).toEqual([]);
+    derivation.dispose();
+    view.dispose();
+  });
+
+  it('reads only the item types a fact declares for turns it reads alone', async () => {
+    const history = buildFixtureHistory(40);
+    const goal: SessionGoalMessage = {
+      type: 'goal',
+      threadId: 'goal-thread',
+      objective: 'Finish the task',
+      status: 'active',
+    };
+    history[3]!.items.push(goal);
+    const doc = buildSessionDoc(history);
+    const data = createLoroSessionData({ sessionId: FIXTURE_SESSION_ID, doc });
+    // The real reader, plus item selection as a remote reader serves it.
+    data.history.readTurnSelectingItems = (turnId, itemTypes) => {
+      const read = data.history.readTurn(turnId);
+      if (read.state !== 'ready') return read;
+      const items = (read.turn.items as { type: string }[]).filter((item) =>
+        itemTypes.includes(item.type)
+      );
+      return { state: 'ready', turn: { ...read.turn, items } as never };
+    };
+    const idle = createManualIdle();
+    const view = createConversationViewFromReader(data.history, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 2,
+      maxHydrated: 4,
+      scheduleIdle: idle.scheduleIdle,
+      yieldToEventLoop: immediate,
+    });
+    await drain(() => view.turnCount === history.length, 1000);
+    const seenTypes = new Set<string>();
+    const derive = Object.assign(
+      (turn: SessionHistory, row: { id: string }) => {
+        if (view.indexOf(row.id) < view.turnCount - 2)
+          for (const item of turn.items as { type: string }[]) seenTypes.add(item.type);
+        return { goal: resolveLatestSessionGoalFromHistory([turn])?.status ?? null };
+      },
+      { itemTypes: ['goal'] as const }
+    );
+    const derivation = createConversationDerivation(view, derive, {
+      chunkSize: 8,
+      yieldToEventLoop: immediate,
+      backgroundNotifyMs: 0,
+    });
+    await drain(() => {
+      idle.runAll();
+      return derivation.complete;
+    }, 10000);
+    expect(derivation.complete).toBe(true);
+    expect(derivation.facts.get(history[3]!.id)?.goal).toBe('active');
+    // Turns read only for this fact never carried their prose.
+    expect([...seenTypes]).toEqual(['goal']);
+    derivation.dispose();
+    view.dispose();
+  });
 });

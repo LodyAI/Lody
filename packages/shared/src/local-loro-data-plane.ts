@@ -174,6 +174,16 @@ const LocalLoroDetachMessageSchema = z.object({
   peerId: z.string().min(1),
 });
 
+// The peer wants this workspace's workspace-level pushes (presence, prompt
+// suggestions) without joining a room. A renderer with native Workspace Meta
+// joins no Meta room, which would otherwise be its first message.
+const LocalLoroSubscribeMessageSchema = z.object({
+  type: z.literal('subscribe'),
+  protocolVersion: z.literal(LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION),
+  workspaceId: z.string().min(1),
+  peerId: z.string().min(1),
+});
+
 // Bidirectional local machine-monitor state. The renderer sends its observer
 // EphemeralStore bundle; the CLI replies with the merged observer/snapshot store.
 // This keeps local device sampling independent from the cloud remote bridge.
@@ -197,6 +207,7 @@ export const LocalLoroDataPlaneClientMessageSchema = z.discriminatedUnion('type'
   LocalLoroUpdateMessageSchema,
   LocalLoroLeaveMessageSchema,
   LocalLoroDetachMessageSchema,
+  LocalLoroSubscribeMessageSchema,
   LocalLoroMachineMonitorMessageSchema,
   LocalLoroPingMessageSchema,
 ]);

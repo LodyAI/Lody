@@ -4,6 +4,7 @@ import type { SubagentRunItem } from '../ai';
 import { resolveLatestSessionGoalFromHistory, type SessionGoalMessage } from '../goal';
 import type { SessionSubagentRun } from './types';
 import { selectTurnOutput } from './read';
+import { runStepPreview, type RunPreviewAccess } from './run-preview';
 import { applyHistoryAction, historyActionTarget } from './history-actions';
 import {
   HistoryImportCursorSchema,
@@ -23,6 +24,7 @@ import {
   type LoroMap,
   type LoroText,
 } from 'loro-crdt';
+import { historyIdIndex, historyStateStamp } from '../history-id-index';
 import type { SessionId } from '../ids';
 import type { SessionHistory, SessionHistoryInput } from '../schema';
 import {
@@ -173,29 +175,16 @@ const displayTextTail = (value: unknown): string | undefined =>
 
 /** The inline task row only needs a latest-action line. Never read tool content,
  * raw output or an entire child text just to derive that line. */
+const loroRunPreviewAccess: RunPreviewAccess = {
+  field: (value, key) => readField(value, key),
+  string: (value) => readString(value),
+  textTail: (value) => displayTextTail(value),
+};
+
 const latestRunStep = (items: unknown): SubagentRunItem[] => {
   for (let index = readLength(items) - 1; index >= 0; index--) {
-    const item = listValueAt(items, index);
-    const type = readString(readField(item, 'type'));
-    if (type === 'tool_call')
-      return [
-        {
-          type,
-          toolCallId: readString(readField(item, 'toolCallId')) ?? '',
-          status: (readString(readField(item, 'status')) ?? 'pending') as Extract<
-            SubagentRunItem,
-            { type: 'tool_call' }
-          >['status'],
-          title: displayTextTail(readField(item, 'title')),
-          toolName: displayTextTail(readField(item, 'toolName')),
-        },
-      ];
-    if (type === 'thought') return [{ type, text: '' }];
-    if (type === 'plan') return [{ type, entries: [] }];
-    if (type === 'text') {
-      const tail = displayTextTail(readField(item, 'text')) ?? '';
-      if (tail.trim()) return [{ type, text: tail }];
-    }
+    const preview = runStepPreview(listValueAt(items, index), loroRunPreviewAccess);
+    if (preview) return [preview];
   }
   return [];
 };
@@ -349,14 +338,63 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
     return { position, state: 'invalid' };
   };
 
+  // Directory rows by position, reused until their turn changes. Dispatch reads
+  // the whole directory on every check, and building a row reads its turn
+  // through wasm (much slower on a snapshot-loaded replica), so a long history
+  // rebuilt every row each time. Document events are synchronous: an edit under
+  // `history[i]` drops row i, a tail append keeps the rest, any other list edit
+  // drops all; a pending transaction (no events yet) bypasses the cache.
+  const ids = historyIdIndex(doc);
+  let directoryRows: (SessionDirectoryRow | undefined)[] = [];
+  let directorySynced = '';
   const directory = (from: number, to: number): readonly SessionDirectoryRow[] => {
     const lo = Math.max(0, Math.min(from, list.length));
     const hi = Math.max(lo, Math.min(to, list.length));
+    const stamp = doc.getPendingTxnLength() === 0 ? historyStateStamp(doc) : undefined;
+    // An earlier subscriber can read before this reader has seen the batch.
+    const cached = stamp !== undefined && (directorySynced === stamp || directoryRows.length === 0);
+    if (cached && directoryRows.length !== list.length) directoryRows = [];
+    if (cached) directorySynced = stamp;
     const rows: SessionDirectoryRow[] = [];
     for (let position = lo; position < hi; position += 1) {
-      rows.push(readDirectoryRow(position));
+      let row = cached ? directoryRows[position] : undefined;
+      if (!row) {
+        row = readDirectoryRow(position);
+        if (cached) {
+          if (directoryRows.length < list.length) directoryRows.length = list.length;
+          directoryRows[position] = row;
+        }
+      }
+      rows.push(row);
     }
+    // A complete read already holds every id: the index needs no scan of its own.
+    if (cached && lo === 0 && hi === list.length)
+      ids.seed(stamp, (position) => {
+        const row = rows[position];
+        return row?.state === 'ready' ? row.turnId : readIdentity(list.get(position))?.turnId;
+      });
     return rows;
+  };
+  const invalidateDirectoryRows = (events: LoroEventBatch['events']) => {
+    for (const event of events) {
+      const path = event.path;
+      if (path[0] !== HISTORY_ROOT_KEY) continue;
+      if (path.length === 1) {
+        const ops = event.diff.type === 'list' ? event.diff.diff : undefined;
+        const [first, second, ...rest] = ops ?? [];
+        const tailAppend =
+          ops !== undefined &&
+          rest.length === 0 &&
+          ((first?.insert !== undefined && second === undefined && directoryRows.length === 0) ||
+            (first?.retain === directoryRows.length && second?.insert !== undefined));
+        if (tailAppend) directoryRows.length = list.length;
+        else directoryRows = [];
+        continue;
+      }
+      const position = path[1];
+      if (typeof position === 'number') directoryRows[position] = undefined;
+      else directoryRows = [];
+    }
   };
 
   const isTurnIdentityEdit = (event: LoroEventBatch['events'][number]) =>
@@ -452,6 +490,10 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
   let identityDirty = true;
   let indexedLength = -1;
   let indexedOpCount = -1;
+  const unsubscribeDirectoryRows = doc.subscribe((batch) => {
+    invalidateDirectoryRows(batch.events);
+    directorySynced = historyStateStamp(doc);
+  });
   const unsubscribeIdentity = doc.subscribe((batch) => {
     if (
       batch.events.some(
@@ -462,6 +504,15 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
       identityDirty = true;
   });
   const locate = (turnId: string): number | undefined => {
+    // The document's id index answers committed state, including an id that is
+    // absent; a miss no longer scans the whole list after every append.
+    const indexed = ids.positionsOf(turnId);
+    if (indexed) {
+      const last = indexed.at(-1);
+      if (last === undefined) return undefined;
+      if (readIdentity(list.get(last))?.turnId === turnId) return last;
+      ids.invalidate();
+    }
     // Pending writes are readable before subscription delivery. Reuse the scan
     // until another op arrives; merely having a pending transaction is not a change.
     // opCount includes pending ops and does not restart at commit, unlike pending length.
@@ -787,6 +838,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
 
   const dispose = () => {
     unsubscribeIdentity();
+    unsubscribeDirectoryRows();
     positions.clear();
     identityDirty = true;
   };

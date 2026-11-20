@@ -1546,6 +1546,63 @@ describe('useSessionActions', () => {
     expect(requestSessionDispatchTurn).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps a later activation watermark and advances an older one across a long history', async () => {
+    const sessionId = 'session-dispatch-watermark' as SessionId;
+    const machineId = 'machine-1' as MachineId;
+    // Far more turns than one tail page, so the two turns sit pages apart.
+    const history = Array.from({ length: 300 }, (_, index) => ({
+      id: `turn-${index}`,
+      role: index % 2 === 0 ? 'user' : 'assistant',
+      userId: 'user-1',
+      timestamp: '2026-07-03T00:00:00.000Z',
+      status: 'pending',
+      read: false,
+      inputConfig: {
+        prompt: 'hello',
+        inputBlocks: [{ type: 'text', text: 'hello' }],
+        cliType: 'builtin',
+        agentType: 'codex',
+      },
+    }));
+    const meta: { machineId: MachineId; latestUserMsgId?: string } = { machineId };
+    const runtime = createRuntime({
+      repo: {
+        getDocMeta: vi.fn(async () => ({ meta: { ...meta } })),
+        upsertDocMeta: vi.fn(async (_roomId: string, patch: { latestUserMsgId?: string }) => {
+          Object.assign(meta, patch);
+        }),
+      } as unknown as WorkspaceRuntime['repo'],
+    }) as WorkspaceRuntime & {
+      withSessionStore: WorkspaceRuntime['withSessionStore'];
+      requestSessionDispatchTurn: WorkspaceRuntime['requestSessionDispatchTurn'];
+    };
+    const control: { humanInputReceipts?: Record<string, { userId: string }> } = {};
+    runtime.withSessionStore = vi.fn(async (_sessionId: unknown, fn: (store: unknown) => unknown) =>
+      fn({
+        getState: vi.fn(() => ({ history })),
+        sessionData: sessionDataOver(history),
+        setState: (update: (draft: typeof control) => void) => update(control),
+        waitUntilSynced: vi.fn(async () => undefined),
+      })
+    ) as unknown as WorkspaceRuntime['withSessionStore'];
+    runtime.requestSessionDispatchTurn = vi.fn(async (_sessionId, userTurnId) => ({
+      type: 'session/dispatch-turn_response' as const,
+      sessionId,
+      userTurnId,
+      accepted: true,
+      disposition: 'accepted' as const,
+    })) as unknown as WorkspaceRuntime['requestSessionDispatchTurn'];
+    const actions = await renderActions(runtime);
+
+    meta.latestUserMsgId = 'turn-298';
+    await actions.requestSessionDispatch(sessionId, 'turn-0', { machineId });
+    expect(meta.latestUserMsgId).toBe('turn-298');
+
+    meta.latestUserMsgId = 'turn-0';
+    await actions.requestSessionDispatch(sessionId, 'turn-298', { machineId });
+    expect(meta.latestUserMsgId).toBe('turn-298');
+  });
+
   it('resolves when the metadata write fails after RPC fast-path delivery', async () => {
     const sessionId = 'session-dispatch-meta-fail-delivered' as SessionId;
     const userTurnId = 'user-turn-meta-fail-delivered';
