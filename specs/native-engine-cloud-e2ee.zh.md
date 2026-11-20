@@ -17,6 +17,13 @@ Translation: current
 
 本 Spec 决定 native 引擎如何接入这些工作区。它只是设计，不改产品代码。
 
+## Owner 决定
+
+owner 于 2026-11-20 给出以下决定，本文不重新讨论：
+
+1. native 引擎用 SDK keyring 封装和解封加密内容。core 只能通过一条专用、窄口径的路径把密钥安装进该 keyring，不提供通用导出。
+2. 加密工作区先于普通云工作区上线。
+
 ## 决定
 
 ### 1. 同一组 stream、同样的字节；云上数据不迁移
@@ -45,18 +52,18 @@ native 自身的本地存储没有已发布的数据，不为它自己的旧格�
 
 native 宿主仍然是每个平台数据目录一个进程，由 `files.lock` 保证唯一。daemon 和 Electron main 各持一条连接。因此每台设备上每个房间只有一份副本，native 房间不再需要 renderer↔daemon 的本地数据面。
 
-以下三样只由云端组合注册，而且要在工作区准入之后：
+以下三样只由云端组合安装，而且要在工作区准入之后：
 
 - remote；
 - token provider；
-- protector。
+- keyring 材料。
 
 OSS 桌面从不配置 remote，也不发任何云请求。
 
 remote 配置可以持久化，token 只放在内存里。宿主重启后：
 
 - 没有 token provider，就停在 `auth_required`；
-- 没有 protector，就停在 `protection_blocked`。
+- 没有已安装的密钥，就停在 `protection_blocked`。
 
 两种状态下都不会发出任何数据。
 
@@ -97,62 +104,134 @@ daemon 仍然像现在一样，通过它已经在监听的 Meta 和机器房间�
 - 已上传的内容都在云上，旧存储从云端追上即可。
 - 尚未上传的行，由现有的回写交给旧存储，再由旧路径上传。
 
-### 5. 加密工作区：加解密留在密钥托管方
+### 5. 加密工作区：加解密放在引擎 keyring 里
 
-引擎只负责存储和复制，从不持有 epoch 密钥、设备密钥或账本权威。
+按 owner 决定 1，native 引擎用 SDK 的 keyring（`LodyKeyringProtector`：LSCE v2、`[3]`/`[4]` header、content-v0）自己完成封装和解封，不再为每一帧经反向 RPC 调用 core。
 
-**谁来加解密：** 加密和解密都在 `@lody/e2ee-core` 里运行，经 SDK 的 protector 反向 RPC 调用：
+其余职责仍留在 core：
 
-- Electron main 通过[桌面托管](e2ee/desktop-custody.zh.md)为个人设备注册；
-- daemon 为它的机器身份注册；
-- 各自只注册**精确的 writer id**。每条 outbox 行都带有写入者，只有该写入者的 protector 能封装它。
+- 账本验证与 pin；
+- 从 mailbox 接收密钥、安装和分发；
+- 轮换与发布；
+- 恢复；
+- 机器共享检查。
 
-renderer 的写入经过 main，因此归属个人设备并由它封装；daemon 自己的写入由机器封装。
+**引擎与 core 的分工：**
 
-**检查全部沿用：** core 里现有的检查一项不变：
+| 事项 | 引擎 keyring | Lody core（main 或 daemon） |
+| ---- | ------------ | --------------------------- |
+| 封装和解封时的 AEAD、签名、AAD、快照 offset 检查 | 是 | — |
+| 哪些公钥可以作为内容作者 | 使用已准入集合 | 从已验证账本提供所有历史上准入过的设备公钥 |
+| 本设备现在能否写 | 没有 signer 或封装被暂停时拒绝 | 按角色和访问权安装、暂停或移除 signer |
+| 新内容用哪个 epoch | 使用给定的封装 epoch | 设为已验证的当前 epoch；15 分钟预算期间设为保留 epoch，预算用尽后暂停 |
+| epoch 密钥 | 只放在内存里 | 持有持久副本，决定安装什么 |
 
-- 加密前检查当前写权限，签名后再查一次；
-- 使用当前 epoch，并沿用 15 分钟的保留 epoch 预算；
-- 作者必须在历史上被准入过；
-- 快照由产生者在其 continuation offset 处签名；
-- 不回退到明文。
+上表把"当前写权限"和"历史作者准入"分开了：
 
-SDK 里引擎内置的 `ContentKeyring` 只用于测试。
+- 被吊销或被移除成员的设备公钥仍然保留准入，用于解封，所以他们的历史帧仍然可读，这是 core 的要求。
+- `revokeWriterPubkey` 只用于本设备自己的公钥，而且只在它也必须停止解封时使用。
+- 失去写权限时（成为 Guest、恢复设备、角色变更、epoch 预算用尽），只暂停封装，不动准入。这需要 SDK 原语 K2。
 
-**封装时机：** 封装发生在上传时，而不是提交时。离线编辑在重新联网时封装，使用的是当时的当前 epoch，并按当时的写权限检查。
+#### 安装路径（密钥离开 core 的唯一途径）
 
-因此，离线期间被移除的设备，之后的编辑不会上传。它的本地数据按现有的失去访问权流程处理。
+core 新增一个窄口径操作 `installIntoEngineKeyring`。它是密钥离开 core 的唯一途径，只把材料交给本机引擎。
 
-**引擎不感知的部分：** 以下内容都不变，引擎也不感知：
+**每个加密命名空间安装的材料：**
 
-- 密钥仍然来自已验证的账本和 mailbox；
-- 轮换和移除遵循[原子移除](e2ee/atomic-removal.zh.md)；
-- [恢复](e2ee/recovery-vault.zh.md)通过 core 安装密钥；
-- [机器共享](e2ee/machine-sharing.zh.md)仍在 daemon 里检查执行权限。
+- 已 pin 的 genesis；
+- 已验证的 epoch 密钥，不含已废弃的 epoch；
+- 封装 epoch；
+- 所有历史上准入过的设备公钥；
+- 设备有写权限时，本进程自己的写入者 signer。
 
-**轮换：** 不需要暂停引擎。下一次封装就使用新 epoch，已封装的帧仍然有效。
+signer 具体交什么，见开放问题 2。
 
-**移除与吊销：** 凭据确认的成员移除或设备吊销后，依次：
+**由谁安装：**
 
-1. 注销 protector；
-2. 删除 remote；
-3. 通过新的持久化 SDK 原语（E1）删除整个命名空间；
-4. 按白皮书要求清除该工作区的本地明文。
+- Electron main 从[桌面托管](e2ee/desktop-custody.zh.md)为个人设备安装；
+- daemon 为它的机器身份安装；
+- 各自绑定自己的 writer id；
+- renderer 从不安装，也拿不到任何密钥材料。
 
-**模式准入：** 现有的[模式准入](../packages/platform/AGENTS.md#e2ee-workspace-control)同样作用于引擎命名空间：
+**何时安装：**
 
-- 在经过认证的模式判定之前，不配置 remote。
-- 有加密证据的工作区，在内容打开准入之前什么也不打开。
-- 如果判定结果是加密或互相矛盾，临时的明文命名空间就退役，永不上传。这和现在临时 Repo 的处理相同。
-- 引擎房间的加密策略在创建时固定，与 remote 不匹配的房间会被拒绝，所以不一致时会失败关闭。
+- 内容打开准入之后，并且 core 里已有可用密钥时；
+- 新 epoch 在 core 里真正提交并安装后，补装它；
+- 已验证账本前进时，补充新准入的设备公钥；
+- 每次重连后重装。keyring 不落盘，所以宿主重启或 build 交接后都是空的。
 
-**快照上传：** 沿用现在的加密策略：
+装上之前，房间报告 `protection_blocked`：保留 checkpoint 和本地数据，不回退到任何其他方式。
 
-- 只有可写设备上传；
-- 空闲 30 秒且新增至少 1 MiB 时上传，达到 4 MiB 时强制上传；
-- 设备关闭、失去访问权或处于 epoch 阶段时不上传。
+**core 在这条路径上必须守住：**
 
-这需要一个 SDK 钩子（S3）。
+- **只交给已验证的本机连接。** 只发给 engine endpoint 与本安装的数据目录和协议都匹配的连接，并且只走专用的二进制安装请求（K0）。密钥绝不经过 JSON、日志、发给 renderer 的 IPC 或磁盘。
+- **来源唯一。** 材料通过 `InstalledEpochKeys` 现有的借用方式取得。引擎确认、拒绝或连接失败后，用 `acquireUseRelease` 擦除每一份副本。
+- **不能挪作他用。** 这不是通用导出。它只接受引擎连接这一种能力，产品 RPC、MCP 和 renderer 都调不到。
+
+#### 轮换、移除与清理
+
+**轮换：** core 先安装新 epoch，再把封装 epoch 切过去。已封装的帧仍然有效，旧 epoch 保留安装，用于读历史。不需要暂停 remote。
+
+**epoch 废弃：** 已废弃的 epoch（tag 11）不安装；如果已经装了，就把它从封装中撤下。
+
+**本设备失去访问权：** 凭据确认的成员移除或本设备被吊销时，Lody 依次：
+
+1. 在该工作区的身份记录旁写一个持久的"待清除"标记；
+2. 调用 `clearNamespace`，清掉密钥和准入；
+3. 删除 remote；
+4. 通过 E1 删除命名空间，包括数据库和 outbox。
+
+`dropNamespace` 成功返回即为清理完成的确认，只有它能清掉标记。
+
+**移除时宿主不在线或连不上：**
+
+- keyring 从不落盘，所以本来就没有要清的密钥；
+- 待清除标记保留；
+- 下次连接时，Lody 先执行第 2–4 步，再处理该命名空间的任何其他请求；
+- 标记存在期间，内容打开准入拒绝该命名空间；
+- 清理失败时报告错误，每次连接都重试，不阻塞其他工作。
+
+**移除其他成员：** 只影响被移除成员自己设备在封装时的写权限检查，他们的历史帧仍然可读。
+
+#### 不变的规则
+
+以下规则不变：
+
+- 在上传时封装，使用当时的封装 epoch；离线期间被移除的设备，之后的编辑不会上传。
+- 经过认证的模式判定之前不配置 remote；判定结果矛盾时，临时明文命名空间退役且永不发送。
+- 房间加密策略在创建时固定，不一致时失败关闭。
+- 快照上传沿用现在的加密策略（S3）。
+- 密钥仍来自已验证账本和 mailbox。账本、成员、设备、[恢复](e2ee/recovery-vault.zh.md)和[机器共享](e2ee/machine-sharing.zh.md)都不变。
+
+#### 代价与缓解
+
+| 代价 | 缓解 |
+| ---- | ---- |
+| 密钥多了一个持有进程：宿主，在 main 和 daemon 之外。 | 只装进已验证的本机连接；最小化安装（不装已废弃 epoch，只读设备不装 signer）；清除、删除命名空间和退出时清零。 |
+| 宿主运行期间密钥一直驻留内存，而宿主比窗口活得长。 | 工作区关闭或失去访问权时调用 `clearNamespace`；宿主空闲时本来就会退出；build 交接时先排空并清零，再释放 `files.lock`。 |
+| 宿主崩溃转储或 swap 里可能有密钥。 | 宿主进程关闭 core dump，不接崩溃上报，不上传 minidump；系统允许时用 `mlock`，明确说明这只是尽力而为。 |
+| 走 JSON 传输时，Node 堆里会留下无法擦除的 base64 副本。 | 使用二进制安装帧（K0）；Node 侧只保留 `Uint8Array` 副本，用完擦除。 |
+| 同一 OS 用户下的进程可以把 socket 当作封装预言机，以本设备身份伪造内容。 | 写入者绑定连接（K1，见开放问题 1）。 |
+| 内容加解密有了第二份实现。 | 阶段 0 对真实的 `@lody/e2ee-core` 做双向字节一致性测试。 |
+
+#### 不变量修订（草案，在实现阶段落地）
+
+core 的规则写着"epoch 密钥没有公开的字节导出"，keys 的 AGENTS.md 写着"绝不增加通用的秘密导出"。owner 决定 1 批准了一个窄口径例外，实现 PR 按下面修改两份文件。
+
+`packages/e2ee-core/INVARIANTS.md`，在 "Epoch keys have no public byte export" 之后加：
+
+> The single exception is `installIntoEngineKeyring`. It copies verified epoch
+> keys, and the caller's own writer signer where permitted, only into the local
+> native engine keyring connection of the same installation, through its binary
+> install request. It wipes every copy on every exit. It never writes, logs or
+> returns material to callers, and it is not reachable from product RPC, MCP or
+> renderers. The engine never becomes ledger authority. See
+> `specs/native-engine-cloud-e2ee.md`.
+
+`packages/e2ee-core/src/internal/keys/AGENTS.md`，在 "Never add a generic secret export …" 后补：
+
+> except `installIntoEngineKeyring`, which borrows through
+> `InstalledEpochKeys` like every other workflow.
 
 ### 6. 明文只在本地；新增的泄露面
 
@@ -171,9 +250,21 @@ SDK 里引擎内置的 `ContentKeyring` 只用于测试。
 
 renderer 持有的明文比现在少，但它不能随意指定房间来读。
 
-**二、引擎 socket。** socket 的权限是 0600，但每条连接都拥有完整 API，包括注册 protector 和配置 remote。同一 OS 用户下的任何进程本来就能读明文存储，所以本设计把 OS 用户当作边界，和现在一样。
+**二、引擎 socket。** socket 的权限是 0600，每条连接都拥有完整 API，而且宿主现在会在运行期间一直持有密钥。
 
-差别在于，socket 是一个活的 API，而不只是文件。是否接受这一点，见开放问题 1。
+只以 OS 用户为边界时，同一用户下的进程经 API 能做两件事：
+
+- 读明文：这一点它本来就能从本地存储读到；
+- 以本设备身份封装任意内容：现在它做不到，除非先从托管方把密钥取出来。
+
+它读不到密钥字节，因为没有任何请求会返回密钥。
+
+比较了两种缓解方式：
+
+- **写入者绑定连接（K1）：** 归属某个写入者的行，只接受安装了该写入者 signer 的那条连接。它在所有系统上都能堵住伪造预言机，SDK 改动也小。
+- **连接认证：** `engine.json` 里放 token 对同一用户毫无作用；真正的对端验证要靠代码签名或对端凭据，必须按平台分别实现。
+
+要求哪一种，见开放问题 1。
 
 **日志与诊断：** 引擎的错误和诊断信息不得携带明文。
 
@@ -204,57 +295,63 @@ Roost 与 native 云同步**共存**。本设计里，两者都不迁移进对�
 
 | 编号 | 阻塞 | 原语（草案） |
 | ---- | ---- | ------------ |
+| K0 | E2EE | **宿主内的 keyring，经 socket 配置。** 现在 `ContentKeyring` 跑在 napi 客户端进程里，宿主协议也没有安装请求。草案为 `keyringConfigure(ns, genesis)`、`keyringInstallEpoch(ns, epoch, key)`、`keyringSetSigner(ns, writer, seed)`、`keyringAdmit(ns, pubkeys)`、`keyringClear(ns)`。密钥字节走二进制帧，绝不走 JSON；宿主在清除、删除命名空间、交接和退出时清零；没有任何请求会返回密钥。 |
+| K1 | E2EE | **写入者绑定连接。** 归属写入者 W 的写入，只接受安装了 W 的 signer 的那条连接。该连接断开后，W 未封装的行等待重新安装。 |
+| K2 | E2EE | **封装策略与准入分离。** 用 `keyringSetSealEpoch(ns, epoch)` 取代"最高已安装 epoch"。另加 `keyringHoldSealing(ns, writer)` 和对应的 `release`，以及 `keyringRemoveSigner(ns, writer)`；移除 signer 后，该写入者的公钥仍保留准入，用于解封。 |
 | S1 | 云同步 | 按房间的实时订阅与拉取：`setRoomInterest(ns, rooms, {live})`、`syncRooms(ns, rooms)`。修正二进制 Loro-update 订阅，使它也计入订阅。 |
 | S2 | 云同步 | token 回复携带 `{token, expiresAt?, baseUrl?, bucket?, shardUrls?}`，并在过期前刷新。加密内容 token 有效期 8 分钟，且自带 bucket。 |
-| S3 | 云同步、E2EE | 每个 remote 的快照上传策略：`{debounceMs, minBytes, maxBytes}`，加上 `canUploadSnapshot(ns, room)` 反向 RPC，以及响应修复请求的 `uploadSnapshotNow(ns, room)`。快照字节必须与旧编码一致。 |
+| S3 | 云同步、E2EE | 每个 remote 的快照上传策略：`{debounceMs, minBytes, maxBytes}`，`canUploadSnapshot(ns, room)` 反向 RPC，以及响应修复请求的 `uploadSnapshotNow(ns, room)`。快照字节必须与旧编码一致。 |
 | S4 | 云同步 | 远端导入永远不被本地 `docSchema` 拒绝，schema 只约束本地 patch。先验证；验证不通过才补原语。 |
-| E1 | E2EE | `dropNamespace(ns)`：排空、关闭，并持久删除命名空间的数据库和 outbox。 |
-| E2 | E2EE | protector 按 writer 精确路由：带写入者的行永不回退到 `*` protector。需要验证并补测试；API 已有 `writers` 字段。 |
-| N1 | — | socket 的按连接权限范围（限定命名空间、只读）。只有开放问题 1 选"加固"时才需要。 |
+| E1 | E2EE | `dropNamespace(ns)`：排空、关闭，并持久删除命名空间的数据库和 outbox。持久完成后的回复即为完成确认。 |
+| K3 | E2EE，开放问题 2 选 (b) 或 (c) 时需要 | 外部签名：引擎内完成加密和验证，但每个封装帧都请安装它的连接来签名。 |
+| N1 | — | socket 的对端验证（代码签名或对端凭据），见开放问题 1。 |
 | N2 | — | 用流式实时传输（SSE 或 WebSocket）代替 long-poll。 |
 
 npm 发布版必须包含发布构建用到的全部原语。0.1.0 早于其中大部分原语。
 
 ## 分阶段计划
 
-行数是 Lody 产品代码的粗略估计，不含 SDK。
+行数是 Lody 产品代码的粗略估计，不含 SDK。按 owner 决定 2，先上加密工作区。
 
 | 阶段 | 范围 | 验收 | 回滚 | 行数 |
 | ---- | ---- | ---- | ---- | ---- |
-| 0 | 证明格式一致；S1–S4、E1、E2 合入并发版。 | 双向互通向量，覆盖明文和加密的 update、快照、Flock bundle，以及服务端写入的帧。 | 不涉及。 | 约 300（测试） |
-| 1 | 云端组合里的同步核心：准入后配置 remote、token provider、实时订阅、接管旧存储、终止时排空。先用于**加密**工作区（见开放问题 2），用独立开关控制。 | 私有仓库 E2E 加入 native 设备：persistence、snapshots、recovery、collaboration、canary 明文外泄审计；layer-B 的 `skew-convex-slow`、`transient-503`；native 桌面与 JS Web 设备混合。 | 关闭开关：旧存储从云端重新同步，未上传的行回写。 | 约 1800 |
+| 0 | 证明格式一致；K0–K2、S1–S4、E1 合入并发版。 | **keyring 与 core 的一致性**，对真实的 `@lody/e2ee-core` 双向测试：keyring 封装的帧能在 core 里解封，反之亦然；覆盖 Loro 和 Flock 的 update、带 continuation offset 的快照；轮换（新的封装 epoch，旧 epoch 的帧仍能解封）；保留 epoch 预算用尽后暂停；已废弃 epoch；事后被吊销的作者仍能解封；篡改 AAD、文档或 epoch 时失败。**录制帧**：当前产品客户端和服务端写入方产生的明文帧和加密帧。 | 不涉及。 | 约 500（测试） |
+| 1 | 桌面和 daemon 上的**加密**工作区，用独立开关控制。包括同步核心（准入后配置 remote、token provider、实时订阅、接管旧存储、终止时排空）、安装路径、写入者绑定连接、待清除标记的清理，以及 renderer 读取检查。 | 私有仓库 E2E 加入 native 设备：persistence、snapshots、recovery、collaboration、canary 明文外泄审计；layer-B 的 `skew-convex-slow`（在线轮换）和 `transient-503`；native 桌面与 JS Web 设备混合；杀掉宿主和 build 交接后密钥重装；宿主不在线时移除成员，下次连接时完成清除。 | 关闭开关：旧存储从云端重新同步，未上传的行回写。 | 约 2200 |
 | 2 | 普通云工作区复用同一核心。 | 打开 native 跑 CLOUDSYNC-001 和 cloud journey；layer-B 的 WAN 配置；W6 时钟偏差；关闭后再打开开关。 | 同阶段 1。 | 约 600 |
 | 3 | 观察期后默认打开，再删除桌面和 daemon 的旧路径。Web 和手机不变。 | 完整的 `verify:release`。 | 回退发布。 | 净减少 |
 
-阶段 1 和 2 的先后顺序见开放问题 2。私有仓库的测试工具目前还没有 native 设备角色，阶段 1 需要补上。
+私有仓库的测试工具目前还没有 native 设备角色，阶段 1 需要补上。
 
 ## 待 owner 决定的问题
 
-1. **加密工作区里的引擎 socket。**
-   - **背景：** 同一 OS 用户下的任何进程都能调用宿主的完整 API，包括注册一个更高优先级的 protector 来查看明文。不过它本来就能读明文文件。
+1. **宿主持有密钥之后，引擎 socket 怎么加固。**
+   - **背景：** 同一 OS 用户下的进程可以调用完整 API。它本来就能读本地明文，也读不到密钥字节。新增的风险是，它能以本设备的签名封装内容。
    - **选项：**
-     - (a) 和现在一样，以 OS 用户为边界，零成本；
-     - (b) 增加按连接的权限范围（N1）和连接认证，需要 SDK 工作，会推迟阶段 1。
-   - **推荐：** 本设计选 (a)，等处理白皮书里"本地连接保护"那一项时再重新评估。
-2. **上线顺序。**
-   - **背景：** 加密工作区没有生产数据，并且将成为默认；普通云工作区有现有用户。
+     - (a) 只以 OS 用户为边界：零成本，但伪造预言机仍在。
+     - (b) 写入者绑定连接（K1）：SDK 小改动，在所有系统上都能堵住伪造预言机，不需要按平台做工作；明文读取仍以 OS 用户为边界。
+     - (c) 在 (b) 的基础上再加对端验证（N1）：需要按系统分别实现，macOS 和 Windows 上有效，Linux 上较弱。
+   - **推荐：** (b)，作为阶段 1 的阻塞项；(c) 之后再做，不阻塞。
+2. **设备签名种子是否交给引擎。**
+   - **背景：** 内容签名用的是设备的 Ed25519 身份密钥。在 Owner/Admin 设备上，同一把密钥还签账本的治理记录。签名域分离保证引擎 API 签不出账本签名；但如果种子泄露（例如从崩溃转储或内存里），攻击者就能以该设备身份伪造治理记录。只交 epoch 密钥时，泄露的只是内容。
    - **选项：**
-     - (a) 先上加密工作区：影响面最小，也直接验证 E2EE 优先的设计；
-     - (b) 先上普通云工作区：更简单，但新路径的第一批用户就是生产用户。
-   - **推荐：** (a)。
-3. **内容加解密在哪里运行。**
-   - **背景：** SDK 提供引擎内置的 Rust keyring，可以省掉反向 RPC 这一跳。代价是托管方要把 epoch 密钥导出到引擎进程，而 core 禁止这种导出；core 的每项检查也都要再实现一遍。
-   - **选项：**
-     - (a) core 留在托管进程里（决定 5）；
-     - (b) 使用 Rust keyring。
-   - **推荐：** (a)。阶段 0 实测反向 RPC 的开销。
+     - (a) 交出种子：全部在引擎里完成，没有反向 RPC。
+     - (b) 签名留在托管方（K3）：只有封装时需要一次签名往返；解封是追赶时的热路径，完全在引擎里完成。
+     - (c) 只为机器身份交出种子（机器不签治理记录），个人设备用 (b)。
+   - **推荐：** (c)。本地写入是批量的，每次封装一次签名往返的开销很小，个人身份密钥也因此留在托管方。
 
 ## 依据
 
-- **意图：** 协调会话于 2026-11-20 转达的 owner 方向：E2EE 优先、Roost 将成默认、权限本地验证、不改格式、可用性优先。本修订尚未批准。
+- **意图：**
+  - 2026-11-20 转达的 owner 方向：E2EE 优先、Roost 将成默认、权限本地验证、不改格式、可用性优先。
+  - owner 决定 1（加解密放进引擎 keyring，core 开一个窄口径的安装例外）和决定 2（先上加密工作区）：owner 于 2026-11-20 在主控会话中给出，记录在 [#2955](https://github.com/LodyAI/Lody/pull/2955)。
+  - 本修订尚未批准。
 - **已检查：**
-  - native 实现栈：draft PR #2902–#2942（顶层 `native-desktop-acceptance-fixes` @ `840f6d05`），及其设计文档 `.agents/docs/native-workspace-meta.md`；
-  - loro-dev/loro-repo `main` @ `ad97aa3`：`rust/packages/client` 中的 remote、protector、auth、status 类型，`rust/docs/architecture.md`，以及 `lody-routes` 路由表；
-  - [Workspace Streams 内容边界](workspace-streams-content.zh.md)、[E2EE 基础](e2ee-foundations.zh.md)、[白皮书](e2ee/whitepaper.zh.md)、[平台 E2EE 规则](../packages/platform/AGENTS.md#e2ee-workspace-control)、[core 不变量](../packages/e2ee-core/INVARIANTS.md)、[客户端规则](../packages/e2ee-client/AGENTS.md)、[bootstrap 指南](../.agents/docs/e2ee-workspace-bootstrap.zh.md)。
-- **未执行：** 尚未运行任何验证。SDK 内部只用它自己重新实现的 content-v0 测过字节一致，没有对 `@lody/e2ee-core` 测过。阶段 0 补上这个缺口。
+  - native 实现栈：draft PR #2902–#2942（顶层 `native-desktop-acceptance-fixes` @ `840f6d05`），及其设计文档 `.agents/docs/native-workspace-meta.md`。
+  - loro-dev/loro-repo `main` @ `ad97aa3`：
+    - `rust/packages/client`：remote、protector、auth、status 类型；
+    - `rust/npm/engine`：`ContentKeyring`；
+    - `rust/crates/loro-repo-types`：没有 keyring 请求；
+    - `rust/docs/architecture.md` 和 `lody-routes` 路由表。
+  - Lody：[Workspace Streams 内容边界](workspace-streams-content.zh.md)、[E2EE 基础](e2ee-foundations.zh.md)、[白皮书](e2ee/whitepaper.zh.md)、[平台 E2EE 规则](../packages/platform/AGENTS.md#e2ee-workspace-control)、[core 不变量](../packages/e2ee-core/INVARIANTS.md)、[密钥规则](../packages/e2ee-core/src/internal/keys/AGENTS.md)、[客户端规则](../packages/e2ee-client/AGENTS.md)、[bootstrap 指南](../.agents/docs/e2ee-workspace-bootstrap.zh.md)。
+- **未执行：** 尚未运行任何验证。SDK 内部只用它自己重新实现的 content-v0 测过 keyring 与 core 一致，阶段 0 改用真实的 core 包测试。
 - **后端：** 只属于后端的细节放在私有仓库的设计文档里。
