@@ -71,12 +71,22 @@ export async function createNativeRemoteSessionStore(options: {
   };
   const history = createConversationViewFromReader(reader, { sessionId, ...options.view });
   const openedAt = Date.now();
+  let leaseCount = 0;
+  let observing = true;
   return {
     sessionId,
     roomId,
     historyBackend: 'loro',
     firstSynced: Promise.resolve(),
-    acquireSync: () => () => {},
+    acquireSync: () => {
+      leaseCount += 1;
+      let held = true;
+      return () => {
+        if (!held) return;
+        held = false;
+        leaseCount -= 1;
+      };
+    },
     getSyncState: () => 'synced',
     subscribeSyncState: (listener) => {
       listener('synced');
@@ -93,6 +103,7 @@ export async function createNativeRemoteSessionStore(options: {
     history,
     sessionData,
     dispose: () => {
+      observing = false;
       history.dispose();
       control.close();
     },
@@ -104,6 +115,9 @@ export async function createNativeRemoteSessionStore(options: {
       openedAt,
       lastRemoteImportAt: null,
       pendingUploadProbe: null,
+      leaseCount,
+      joinInFlight: false,
+      roomSubPresent: observing,
     }),
   };
 }
