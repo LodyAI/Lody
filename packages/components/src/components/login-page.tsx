@@ -1839,7 +1839,7 @@ export function LoginPage({
         className="h-10 w-full"
         disabled={isSwitchingElectronAccount}
       >
-        {t('login.desktopHandoff.useWeb', 'Use in web browser')}
+        {t('login.desktopHandoff.useWeb', 'Continue in browser')}
       </Button>
 
       {/* Deliberately not gated on `isButtonsDisabled`: a transfer in flight for

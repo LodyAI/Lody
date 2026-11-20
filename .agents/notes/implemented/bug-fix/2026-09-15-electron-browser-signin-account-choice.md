@@ -51,7 +51,7 @@ The page now renders a handoff panel in the ordinary login card:
   the switch makes a transfer that resolves afterwards discard its code instead of
   producing a handoff, and the short-lived `better-auth.electron` cookie is cleared
   around each transfer so a stale code cannot be read back as this attempt's.
-- "Use in web browser" is a third exit: the session stays in this browser instead of
+- "Continue in browser" is a third exit: the session stays in this browser instead of
   being handed to the desktop app. It bumps the same generation counter, so a
   transfer in flight is discarded rather than opening the desktop app after the
   choice, then follows the page's ordinary authenticated redirect (the validated

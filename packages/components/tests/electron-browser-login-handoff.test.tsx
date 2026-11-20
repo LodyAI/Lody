@@ -119,10 +119,7 @@ describe('electron browser sign-in handoff', () => {
               {standaloneClient ? (
                 <ConvexProvider client={standaloneClient}>
                   <CloudPlatformProvider>
-                    <LoginPage
-                      replaceLocation={replaceLocation}
-                      isElectronRenderer={desktop}
-                    />
+                    <LoginPage replaceLocation={replaceLocation} isElectronRenderer={desktop} />
                   </CloudPlatformProvider>
                 </ConvexProvider>
               ) : (
@@ -262,7 +259,7 @@ describe('electron browser sign-in handoff', () => {
       replaceLocation
     );
 
-    await clickButton(/Use in web browser/i);
+    await clickButton(/Continue in browser/i);
 
     // The browser session is already good for the web app, so nothing is
     // transferred and the page's normal authenticated target is used.
@@ -285,7 +282,7 @@ describe('electron browser sign-in handoff', () => {
     await clickButton(/Continue with this account/i);
     expect(handoffLink()).not.toBeNull();
 
-    await clickButton(/Use in web browser/i);
+    await clickButton(/Continue in browser/i);
 
     expect(replaceLocation).toHaveBeenCalledWith('/');
     // The mock leaves the page mounted; the panel must no longer offer the
@@ -313,7 +310,7 @@ describe('electron browser sign-in handoff', () => {
     await clickButton(/Continue with this account/i);
     expect(transferUser).toHaveBeenCalledTimes(1);
 
-    await clickButton(/Use in web browser/i);
+    await clickButton(/Continue in browser/i);
     expect(replaceLocation).toHaveBeenCalledWith('/');
 
     await act(async () => {
