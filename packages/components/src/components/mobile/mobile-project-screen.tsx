@@ -35,6 +35,7 @@ import {
   type SessionRowOpenedByTreeSlot,
 } from '@/components/sidebar-row-shared';
 import { MobileEdgeBackSwipeZone } from './mobile-edge-back-swipe';
+import { MOBILE_DRILL_EXIT_MS, playMobileDrillExit } from './mobile-drill-page-layout';
 import { MobileFilterPillBar, type FilterPill } from './mobile-filter-pill-bar';
 import {
   MobileChatList,
@@ -769,15 +770,30 @@ export function MobileProjectScreen({
      forward navigation to this page still gets its enter slide. */
   const [skipEnterAnimation] = useState(() => consumeMobileBackNavigation());
 
+  /* Leaving the project pops it like every other drill page: the page
+     slides off to the right over home instead of unmounting and letting
+     home pop into view. */
+  const rootRef = useRef<HTMLDivElement>(null);
+  const exitingRef = useRef(false);
+  const animatedBack = useCallback(() => {
+    if (exitingRef.current) return;
+    if (!playMobileDrillExit(rootRef.current, onBack)) return;
+    exitingRef.current = true;
+    window.setTimeout(() => {
+      exitingRef.current = false;
+    }, MOBILE_DRILL_EXIT_MS);
+  }, [onBack]);
+
   return (
-    <div className="mobile-home-app safe-areas relative h-full min-h-0 w-full overflow-hidden text-foreground">
+    <div
+      ref={rootRef}
+      className="mobile-home-app safe-areas relative h-full min-h-0 w-full overflow-hidden text-foreground"
+    >
       {/* iOS-style push enter: slide in from the right on mount, unless
          we're a back-navigation destination (see `skipEnterAnimation`
-         above). The back navigation has no exit animation — see
-         `mobile-settings-layout.tsx` for the rationale (the brief
-         frame between exit-animation end and route unmount flashes the
-         html bg). */}
+         above). Back slides this panel off via `animatedBack`. */}
       <motion.div
+        data-mobile-drill-panel=""
         initial={skipEnterAnimation ? false : { x: '100%' }}
         animate={{ x: 0 }}
         transition={PROJECT_TRANSITION}
@@ -790,14 +806,18 @@ export function MobileProjectScreen({
         className="mobile-home-shell relative flex h-full w-full flex-col bg-background"
       >
         {filesTabNested ? null : (
-          <MobileEdgeBackSwipeZone isNativeApp={isNativeAppShell()} onBack={onBack} zIndex={20} />
+          <MobileEdgeBackSwipeZone
+            isNativeApp={isNativeAppShell()}
+            onBack={animatedBack}
+            zIndex={20}
+          />
         )}
         {selectedProjectTab === 'chat' ? (
           <ProjectChatTopBar
             project={project}
             displayName={displayName}
             labels={labels}
-            onBack={onBack}
+            onBack={animatedBack}
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
             showArchived={showArchived}
@@ -814,7 +834,7 @@ export function MobileProjectScreen({
             onBack={
               selectedProjectTab === 'files' && (fileNavSegments?.length ?? 0) > 0 && onFileNavBack
                 ? onFileNavBack
-                : onBack
+                : animatedBack
             }
           />
         )}

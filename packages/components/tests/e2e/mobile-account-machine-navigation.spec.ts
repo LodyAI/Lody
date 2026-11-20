@@ -62,3 +62,51 @@ for (const locale of ['zh_CN', 'en']) {
     await cdp.detach();
   });
 }
+
+test('project Back slides the project page off over the page underneath', async ({ page }) => {
+  await page.goto(
+    '/iframe.html?id=mobile-mobileprojectscreen--ios-local&viewMode=story&globals=locale:zh_CN;theme:light'
+  );
+  const back = page.getByRole('button', { name: '返回', exact: true });
+  await expect(back).toBeVisible({ timeout: 60_000 });
+  await page.evaluate(async () => {
+    await Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getTiming().iterations !== Infinity)
+        .map((a) => a.finished.catch(() => undefined))
+    );
+  });
+  const underlay = back.locator('xpath=ancestor::*[@data-mobile-drill-panel]/../..');
+  await underlay.evaluate((el) => el.setAttribute('data-test-underlay', ''));
+  await back.tap();
+  // The pop is visible: a body-level copy of the page slides off to the right while
+  // the page underneath eases in from a dimmed, left-shifted position.
+  const frame = await page.evaluate(() => {
+    const panel = document.querySelector<HTMLElement>('body > * .mobile-drill-out');
+    const under = document.querySelector<HTMLElement>('[data-test-underlay]');
+    const exit = panel?.getAnimations()[0] as CSSAnimation | undefined;
+    const settle = under?.getAnimations()[0];
+    if (!panel || !under || !exit || !settle) return null;
+    for (const animation of [exit, settle]) {
+      animation.pause();
+      animation.currentTime = 100;
+    }
+    const style = getComputedStyle(under);
+    const result = {
+      name: exit.animationName,
+      exitX: new DOMMatrix(getComputedStyle(panel).transform).m41,
+      underX: new DOMMatrix(style.transform).m41,
+      underOpacity: Number(style.opacity),
+    };
+    for (const animation of [exit, settle]) animation.play();
+    return result;
+  });
+  expect(frame).not.toBeNull();
+  expect(frame!.name).toBe('mobile-drill-out');
+  expect(frame!.exitX).toBeGreaterThan(0);
+  expect(frame!.underX).toBeLessThan(0);
+  expect(frame!.underOpacity).toBeLessThan(1);
+  // The overlay is removed once the slide has finished.
+  await expect(page.locator('.mobile-drill-out')).toHaveCount(0);
+});
