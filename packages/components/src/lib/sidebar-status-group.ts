@@ -132,7 +132,7 @@ export function formatSnoozeCountdown(snoozedUntilMs: number, nowMs: number): st
   return `${Math.max(1, Math.round(remainingMs / dayMs))}d`;
 }
 
-export type SnoozePresetId = 'laterToday' | 'tomorrowMorning' | 'nextWeek';
+export type SnoozePresetId = 'oneHour' | 'laterToday' | 'tomorrowMorning' | 'nextWeek';
 
 export type SnoozePreset = {
   id: SnoozePresetId;
@@ -143,6 +143,7 @@ export type SnoozePreset = {
 /** Quick snooze targets relative to `now` (local wall clock for morning anchors, deduplicated). */
 export function buildSnoozePresets(now: Date): SnoozePreset[] {
   const nowMs = now.getTime();
+  const oneHour = nowMs + 60 * 60 * 1000;
   const laterToday = nowMs + 3 * 60 * 60 * 1000;
 
   const tomorrow = new Date(now);
@@ -159,6 +160,11 @@ export function buildSnoozePresets(now: Date): SnoozePreset[] {
   const nextWeek = nextMonday.getTime();
 
   return [
+    {
+      id: 'oneHour',
+      timestamp: oneHour,
+      countdown: formatSnoozeCountdown(oneHour, nowMs) ?? '1h',
+    },
     {
       id: 'laterToday',
       timestamp: laterToday,

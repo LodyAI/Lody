@@ -2239,6 +2239,7 @@
   "sessions.contextMenu.openPr": "Open Pull Request",
   "sessions.contextMenu.pin": "Pin Session",
   "sessions.contextMenu.snooze": "Later",
+  "sessions.contextMenu.snoozeOneHour": "In 1 hour",
   "sessions.contextMenu.snoozeLaterToday": "Later today",
   "sessions.contextMenu.snoozeTomorrowMorning": "Tomorrow morning",
   "sessions.contextMenu.snoozeNextWeek": "Next week",
