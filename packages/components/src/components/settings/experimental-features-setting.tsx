@@ -1,7 +1,7 @@
 import { useAtom, useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { Switch } from '@lody/ui/switch';
-import { experimentalFeaturesEnabledAtom } from '@/atoms/settings';
+import { experimentalFeaturesEnabledAtom, todayExperimentEnabledAtom } from '@/atoms/settings';
 import { CompactRow, CompactSection } from './compact-layout';
 
 /**
@@ -23,15 +23,33 @@ export function ExperimentalFeaturesSection() {
 export function ExperimentalFeatureRows() {
   const { t } = useTranslation();
   const [experimentalEnabled, setExperimentalEnabled] = useAtom(experimentalFeaturesEnabledAtom);
+  const [todayEnabled, setTodayEnabled] = useAtom(todayExperimentEnabledAtom);
 
   return (
-    <CompactRow label={t('settings.experimental.enable', 'Enable experimental features')}>
-      <Switch
-        checked={experimentalEnabled}
-        onCheckedChange={setExperimentalEnabled}
-        aria-label={t('settings.experimental.enable', 'Enable experimental features')}
-      />
-    </CompactRow>
+    <>
+      <CompactRow label={t('settings.experimental.enable', 'Enable experimental features')}>
+        <Switch
+          checked={experimentalEnabled}
+          onCheckedChange={setExperimentalEnabled}
+          aria-label={t('settings.experimental.enable', 'Enable experimental features')}
+        />
+      </CompactRow>
+      {experimentalEnabled ? (
+        <CompactRow
+          label={t('settings.experimental.today', 'Today')}
+          helper={t(
+            'settings.experimental.todayHelper',
+            'A daily outline for notes, prompts and conversations. Turning it off only hides it; your notes keep syncing.'
+          )}
+        >
+          <Switch
+            checked={todayEnabled}
+            onCheckedChange={setTodayEnabled}
+            aria-label={t('settings.experimental.today', 'Today')}
+          />
+        </CompactRow>
+      ) : null}
+    </>
   );
 }
 

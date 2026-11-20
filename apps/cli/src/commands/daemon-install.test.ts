@@ -23,6 +23,15 @@ vi.mock('./daemon-autostart', async (original) => ({
   ...(await original<typeof import('./daemon-autostart')>()),
   registerDaemonAutostart: ports.autostart,
 }));
+vi.mock('@/lib/command-shim', () => ({
+  installCommandShim: vi.fn(async () => ({
+    status: 'installed',
+    path: '/tmp/lody-managed-test-shim',
+    binDir: '/tmp',
+    pathOnPath: true,
+    pathModified: false,
+  })),
+}));
 import {
   InstallActionRequiredError,
   installManagedDaemon,

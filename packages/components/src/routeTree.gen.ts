@@ -33,6 +33,7 @@ import { Route as WorkspaceNameAuthArchiveRouteImport } from './routes/$workspac
 import { Route as WorkspaceNameAuthChatRouteImport } from './routes/$workspaceName/_auth/chat';
 import { Route as WorkspaceNameAuthSessionsRouteImport } from './routes/$workspaceName/_auth/sessions';
 import { Route as WorkspaceNameAuthSettingsRouteImport } from './routes/$workspaceName/_auth/settings';
+import { Route as WorkspaceNameAuthTodayRouteImport } from './routes/$workspaceName/_auth/today';
 import { Route as WorkspaceE2eeWorkspaceIdRouteImport } from './routes/workspace/e2ee/$workspaceId';
 import { Route as WorkspaceNameAuthSchedulesIndexRouteImport } from './routes/$workspaceName/_auth/schedules.index';
 import { Route as WorkspaceNameAuthSchedulesScheduleIdRouteImport } from './routes/$workspaceName/_auth/schedules.$scheduleId';
@@ -231,6 +232,11 @@ const WorkspaceNameAuthSessionsRoute = WorkspaceNameAuthSessionsRouteImport.upda
 const WorkspaceNameAuthSettingsRoute = WorkspaceNameAuthSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => WorkspaceNameAuthRoute,
+} as any);
+const WorkspaceNameAuthTodayRoute = WorkspaceNameAuthTodayRouteImport.update({
+  id: '/today',
+  path: '/today',
   getParentRoute: () => WorkspaceNameAuthRoute,
 } as any);
 const WorkspaceE2eeWorkspaceIdRoute = WorkspaceE2eeWorkspaceIdRouteImport.update({
@@ -473,6 +479,7 @@ export interface FileRoutesByFullPath {
   '/$workspaceName/chat': typeof WorkspaceNameAuthChatRoute;
   '/$workspaceName/sessions': typeof WorkspaceNameAuthSessionsRouteWithChildren;
   '/$workspaceName/settings': typeof WorkspaceNameAuthSettingsRouteWithChildren;
+  '/$workspaceName/today': typeof WorkspaceNameAuthTodayRoute;
   '/workspace/e2ee/$workspaceId': typeof WorkspaceE2eeWorkspaceIdRoute;
   '/$workspaceName/schedules': typeof WorkspaceNameAuthSchedulesLazyRouteWithChildren;
   '/$workspaceName/schedules/$scheduleId': typeof WorkspaceNameAuthSchedulesScheduleIdRoute;
@@ -528,6 +535,7 @@ export interface FileRoutesByTo {
   '/$workspaceName/archive': typeof WorkspaceNameAuthArchiveRoute;
   '/$workspaceName/chat': typeof WorkspaceNameAuthChatRoute;
   '/$workspaceName/sessions': typeof WorkspaceNameAuthSessionsRouteWithChildren;
+  '/$workspaceName/today': typeof WorkspaceNameAuthTodayRoute;
   '/workspace/e2ee/$workspaceId': typeof WorkspaceE2eeWorkspaceIdRoute;
   '/$workspaceName/schedules/$scheduleId': typeof WorkspaceNameAuthSchedulesScheduleIdRoute;
   '/$workspaceName/sessions/$sessionId': typeof WorkspaceNameAuthSessionsSessionIdRoute;
@@ -586,6 +594,7 @@ export interface FileRoutesById {
   '/$workspaceName/_auth/chat': typeof WorkspaceNameAuthChatRoute;
   '/$workspaceName/_auth/sessions': typeof WorkspaceNameAuthSessionsRouteWithChildren;
   '/$workspaceName/_auth/settings': typeof WorkspaceNameAuthSettingsRouteWithChildren;
+  '/$workspaceName/_auth/today': typeof WorkspaceNameAuthTodayRoute;
   '/workspace/e2ee/$workspaceId': typeof WorkspaceE2eeWorkspaceIdRoute;
   '/$workspaceName/_auth/schedules': typeof WorkspaceNameAuthSchedulesLazyRouteWithChildren;
   '/$workspaceName/_auth/schedules/$scheduleId': typeof WorkspaceNameAuthSchedulesScheduleIdRoute;
@@ -645,6 +654,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/chat'
     | '/$workspaceName/sessions'
     | '/$workspaceName/settings'
+    | '/$workspaceName/today'
     | '/workspace/e2ee/$workspaceId'
     | '/$workspaceName/schedules'
     | '/$workspaceName/schedules/$scheduleId'
@@ -700,6 +710,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/archive'
     | '/$workspaceName/chat'
     | '/$workspaceName/sessions'
+    | '/$workspaceName/today'
     | '/workspace/e2ee/$workspaceId'
     | '/$workspaceName/schedules/$scheduleId'
     | '/$workspaceName/sessions/$sessionId'
@@ -757,6 +768,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/_auth/chat'
     | '/$workspaceName/_auth/sessions'
     | '/$workspaceName/_auth/settings'
+    | '/$workspaceName/_auth/today'
     | '/workspace/e2ee/$workspaceId'
     | '/$workspaceName/_auth/schedules'
     | '/$workspaceName/_auth/schedules/$scheduleId'
@@ -988,6 +1000,13 @@ declare module '@tanstack/react-router' {
       path: '/settings';
       fullPath: '/$workspaceName/settings';
       preLoaderRoute: typeof WorkspaceNameAuthSettingsRouteImport;
+      parentRoute: typeof WorkspaceNameAuthRoute;
+    };
+    '/$workspaceName/_auth/today': {
+      id: '/$workspaceName/_auth/today';
+      path: '/today';
+      fullPath: '/$workspaceName/today';
+      preLoaderRoute: typeof WorkspaceNameAuthTodayRouteImport;
       parentRoute: typeof WorkspaceNameAuthRoute;
     };
     '/workspace/e2ee/$workspaceId': {
@@ -1304,6 +1323,7 @@ interface WorkspaceNameAuthRouteChildren {
   WorkspaceNameAuthChatRoute: typeof WorkspaceNameAuthChatRoute;
   WorkspaceNameAuthSessionsRoute: typeof WorkspaceNameAuthSessionsRouteWithChildren;
   WorkspaceNameAuthSettingsRoute: typeof WorkspaceNameAuthSettingsRouteWithChildren;
+  WorkspaceNameAuthTodayRoute: typeof WorkspaceNameAuthTodayRoute;
   WorkspaceNameAuthSchedulesLazyRoute: typeof WorkspaceNameAuthSchedulesLazyRouteWithChildren;
   WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute: typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
 }
@@ -1313,6 +1333,7 @@ const WorkspaceNameAuthRouteChildren: WorkspaceNameAuthRouteChildren = {
   WorkspaceNameAuthChatRoute: WorkspaceNameAuthChatRoute,
   WorkspaceNameAuthSessionsRoute: WorkspaceNameAuthSessionsRouteWithChildren,
   WorkspaceNameAuthSettingsRoute: WorkspaceNameAuthSettingsRouteWithChildren,
+  WorkspaceNameAuthTodayRoute: WorkspaceNameAuthTodayRoute,
   WorkspaceNameAuthSchedulesLazyRoute: WorkspaceNameAuthSchedulesLazyRouteWithChildren,
   WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute:
     WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute,

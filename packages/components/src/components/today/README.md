@@ -1,0 +1,21 @@
+# Today
+
+Experimental daily outline notes ([Spec](../../../../../specs/today-outline.md)).
+
+| File                                                          | Role                                                                                                                        |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `today-page.tsx`                                              | Full-page route surface                                                                                                     |
+| `today-pinned-column.tsx`, `use-open-today.ts`                | Column pinned beside the sidebar; `use-open-today.ts` opens a day in it or as the page                                      |
+| `today-view.tsx`                                              | Day stream shell: calendar, member menu, surface, picker, drag layer                                                        |
+| `today-day-section.tsx`                                       | One day: lazy page store, rows with inline mentions                                                                         |
+| `today-stream.ts`                                             | Which days show, local date and midnight math                                                                               |
+| `today-session-mention.tsx`, `today-session-status.ts`        | Inline conversation mention and its sidebar-derived status                                                                  |
+| `today-mention-status-menu.tsx`                               | Status menu a mention's icon opens (`useSessionActions`)                                                                    |
+| `today-dnd.ts`                                                | Drop projection for node and sidebar drags                                                                                  |
+| `today-convert-dialog.tsx`, `today-convert-dialog-header.tsx` | Convert to task: the new-conversation surface in the landing's dialog layout, under a breadcrumb header                     |
+| `editor/`                                                     | Single Lexical editor, rich LoroText binding, outline and mention keys, mention decorators, block selection, caret geometry |
+
+Data model and undo: `packages/shared/src/today-outline.ts` (a mention is one marked U+FFFC;
+[decision](../../../../../.agents/notes/implemented/architecture/2026-11-20-today-inline-mentions.md)); identity and links:
+`packages/shared/src/today-types.ts`, `packages/shared/src/session-link.ts`; page stores:
+`src/lib/today/today-page-store.ts`, `src/providers/today-page-store-cache.ts`.

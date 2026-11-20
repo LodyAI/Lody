@@ -14,6 +14,7 @@ export * from './session-control-plane';
 import type { AgentConfigId, MachineId, SessionId, TaskId, WorkspaceId } from './ids';
 import { PREVIEW_COMMENT_DOC_PREFIX, getLoroPreviewCommentStreamId } from './preview-comment-types';
 import { TASK_DOC_PREFIX, getLoroTaskStreamId } from './task-types';
+import { getLoroTodayStreamId, parseTodayDocId } from './today-types';
 import { SCHEDULE_DOC_PREFIX, getLoroScheduleStreamId } from './schedule-registry';
 import type { StreamsCrdtShardUrlsOptions } from '@loro-dev/streams-crdt';
 
@@ -112,6 +113,8 @@ export * from './session-comment-types';
 export * from './preview-comment-types';
 export * from './preview-comment-schema';
 export * from './task-types';
+export * from './today-types';
+export * from './today-outline';
 export * from './task-index';
 export * from './pr-prompts';
 export * from './preview-comment-mutation';
@@ -452,6 +455,10 @@ export const getLoroStreamIdForDocId = (workspaceId: WorkspaceId, docId: string)
   }
   if (docId.startsWith(TASK_DOC_PREFIX)) {
     return getLoroTaskStreamId(workspaceId, docId.slice(TASK_DOC_PREFIX.length) as TaskId);
+  }
+  const todayPage = parseTodayDocId(docId);
+  if (todayPage) {
+    return getLoroTodayStreamId(workspaceId, todayPage.userId, todayPage.date);
   }
   return docId;
 };

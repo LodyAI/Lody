@@ -29,6 +29,9 @@ async function repoWithData(): Promise<TestRepo> {
   await writeDoc(repo, 'schedule-x', { kind: 'schedule' }, (doc) =>
     doc.getText('prompt').insert(0, 'p')
   );
+  await writeDoc(repo, 'today-u-2026-11-20', { userId: 'u', date: '2026-11-20' }, (doc) =>
+    doc.getTree('outline').createNode()
+  );
   await writeDoc(repo, 'mystery-1', {}, (doc) => doc.getMap('m').set('a', 1));
   // Machine records keep all fields in Meta and have no document body.
   await repo.upsertDocMeta('machine-m1', { name: 'M' });
@@ -69,6 +72,7 @@ describe('exportWorkspaceBundle', () => {
         'meta',
         'schedule-x',
         'session-r1',
+        'today-u-2026-11-20',
         'session-s1',
         `${WS}:mf:m1`,
         `${WS}:sr`,
