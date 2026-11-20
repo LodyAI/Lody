@@ -208,11 +208,15 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     run: () => Promise<T>,
     duringWait?: () => Promise<void>
   ): Promise<T> {
-    const started = testSignal();
+    let started = testSignal();
+    let waiterTimeout = 0;
     const ready = manager.catalogBaselineReady.bind(manager);
     const observer = vi.spyOn(manager, 'catalogBaselineReady').mockImplementation((id, timeout) => {
       const result = ready(id, timeout);
-      if (timeout > 0) started.resolve();
+      if (timeout > 0) {
+        waiterTimeout = timeout;
+        started.resolve();
+      }
       return result;
     });
     const outcome = run().then(
@@ -222,14 +226,14 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       }
     );
     try {
-      const waiting = await Promise.race([
-        started.promise.then(() => true),
-        outcome.then(() => false),
-      ]);
-      // A batch validates its items sequentially; each owns a one-second waiter.
-      if (waiting) {
-        await duringWait?.();
-        await vi.advanceTimersByTimeAsync(duringWait ? 0 : 3_000);
+      let onWait = duringWait;
+      while (await Promise.race([started.promise.then(() => true), outcome.then(() => false)])) {
+        started = testSignal();
+        // Each batch item starts its own waiter, potentially after real storage I/O.
+        // Advance that waiter's deadline only after it starts.
+        await onWait?.();
+        onWait = undefined;
+        await vi.advanceTimersByTimeAsync(duringWait ? 0 : waiterTimeout);
       }
       return (await outcome)();
     } finally {
