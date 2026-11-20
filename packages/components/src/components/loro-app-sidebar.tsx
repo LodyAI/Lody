@@ -35,7 +35,7 @@ import { useSidebarKeyboardNav } from '@/hooks/use-sidebar-keyboard-nav';
 import { useLocation, useRouter } from '@tanstack/react-router';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { todayFeatureEnabledAtom } from '@/atoms/settings';
-import { TODAY_FOCUS_EVENT, todayPinnedAtom } from '@/atoms/sidebar-state';
+import { useOpenToday } from '@/components/today/use-open-today';
 import {
   findFreshSessionPresenceState,
   machineSupportsLocalProjectRemovalProtocol,
@@ -153,7 +153,7 @@ import { SidebarUpdateBanner } from '@/components/sidebar-update-banner';
 import { UpdateChangelogDialog } from '@/components/update-changelog-dialog';
 import { pickLocalizedReleaseNotes, readUpdateBannerState } from '@/lib/electron-update-banner';
 import { useElectronUpdaterState } from '@/hooks/use-electron-updater-state';
-import { useIsCompactDesktop, useIsMobile } from '@/hooks/use-mobile';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import { canManageWorkspaceProject, useWorkspaceProjects } from '@/hooks/use-workspace-projects';
 import { useOrganization } from '@/hooks/useOrganization';
@@ -1760,8 +1760,7 @@ export function LoroAppSidebar({
   }, [location.pathname, location.search, selectedSessionId, workspaceSlug]);
 
   const todayEnabled = useAtomValue(todayFeatureEnabledAtom);
-  const todayPinned = useAtomValue(todayPinnedAtom);
-  const isCompactDesktop = useIsCompactDesktop();
+  const openToday = useOpenToday();
   const activeNav = useMemo(() => {
     if (isArchiveRoute(location.pathname, workspaceSlug)) return 'archive';
     if (workspaceSlug && location.pathname.startsWith(`/${workspaceSlug}/schedules`))
@@ -4312,16 +4311,7 @@ export function LoroAppSidebar({
         onTodayClicked={
           todayEnabled
             ? () => {
-                if (!workspaceSlug) return;
-                // Pinned: Today is already beside the sidebar; bring it back to today.
-                if (todayPinned && !isCompactDesktop) {
-                  window.dispatchEvent(new Event(TODAY_FOCUS_EVENT));
-                  return;
-                }
-                void router.navigate({
-                  to: '/$workspaceName/today',
-                  params: { workspaceName: workspaceSlug },
-                });
+                if (workspaceSlug) openToday({ workspaceSlug, sameWorkspace: true });
               }
             : undefined
         }

@@ -88,6 +88,7 @@ import { isLocalAppPlatform, useAppCapability } from '@/lib/app-platform';
 import { getLocalPlatformProvider } from '../providers/local-platform-provider';
 import { LocalPlatformAuthProvider } from '../providers/local-platform-auth-provider';
 import { CloudPlatformProvider } from '../providers/cloud-platform-provider';
+import { useOpenToday } from '@/components/today/use-open-today';
 
 const PENDING_MACHINE_PAIRING_KEY = 'lody:pending-machine-pairing-request';
 
@@ -481,6 +482,7 @@ function SessionDeepLinkRouter() {
     };
   }, [setNavigationTarget]);
   const [pendingToday, setPendingToday] = useState<TodayLink | null>(null);
+  const openToday = useOpenToday();
   useEffect(() => {
     // A Today page link (specs/today-outline.md): open that member's day in its workspace.
     if (!pendingToday) return;
@@ -500,12 +502,14 @@ function SessionDeepLinkRouter() {
       );
       return;
     }
-    void navigate({
-      to: '/$workspaceName/today',
-      params: { workspaceName: resolution.slug },
-      search: { member: pendingToday.userId, date: pendingToday.date },
+    // Pinned beside this workspace's sidebar, the column opens the day in place.
+    openToday({
+      workspaceSlug: resolution.slug,
+      sameWorkspace: resolution.workspaceId === currentWorkspaceId,
+      member: pendingToday.userId,
+      date: pendingToday.date,
     });
-  }, [currentWorkspaceId, navigate, pendingToday, workspaces]);
+  }, [currentWorkspaceId, openToday, pendingToday, workspaces]);
   useEffect(() => {
     // Let auth/provisioning and the default landing settle before applying the explicit target.
     if (!pending) return;

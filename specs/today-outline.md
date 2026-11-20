@@ -25,6 +25,8 @@ any time; when off it changes none of the app's existing behavior.
   sidebar (layout: left sidebar | Today | main area). Pinned state and column width are stored on this device
   only; the width is resizable. The pinned column sits directly on the sidebar background, continuous with the
   left sidebar, not as a floating card. Unpinning keeps the main area's current content and only hides the column.
+  While pinned, a Today link to this workspace or the sidebar's Today entry only moves the column to that day; the
+  main area likewise keeps its content.
 
 ### Page stream and dates
 

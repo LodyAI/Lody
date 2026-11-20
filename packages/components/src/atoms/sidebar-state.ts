@@ -309,11 +309,11 @@ export const todayPinnedAtom: ReturnType<typeof atomWithStorage<boolean>> =
     getOnInit: true,
   });
 
-/** A Today link opened while pinned: the column shows this member/date (in memory only). */
+/**
+ * A day opened while pinned (a Today link, or the sidebar entry with `{}` for
+ * today): the column shows this member/date and clears it (in memory only).
+ */
 export const todayPinnedTargetAtom = atom<{ member?: string; date?: string } | null>(null);
-
-/** Sidebar Today entry clicked while pinned: the column returns to today. */
-export const TODAY_FOCUS_EVENT = 'lody:today-focus';
 
 export const TODAY_COLUMN_DEFAULT_WIDTH = 360;
 export const TODAY_COLUMN_MIN_WIDTH = 280;

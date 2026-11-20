@@ -6,7 +6,6 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import {
   TODAY_COLUMN_MAX_WIDTH,
   TODAY_COLUMN_MIN_WIDTH,
-  TODAY_FOCUS_EVENT,
   todayColumnWidthAtom,
   todayPinnedAtom,
   todayPinnedTargetAtom,
@@ -53,11 +52,6 @@ export function TodayPinnedColumn() {
     setTarget(linked);
     clearLinked(null);
   }, [clearLinked, linked]);
-  useEffect(() => {
-    const backToToday = () => setTarget({});
-    window.addEventListener(TODAY_FOCUS_EVENT, backToToday);
-    return () => window.removeEventListener(TODAY_FOCUS_EVENT, backToToday);
-  }, []);
   const clamp = (value: number) =>
     Math.min(Math.max(Math.round(value), TODAY_COLUMN_MIN_WIDTH), TODAY_COLUMN_MAX_WIDTH);
   return (
