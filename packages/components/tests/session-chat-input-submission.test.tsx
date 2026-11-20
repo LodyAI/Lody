@@ -55,7 +55,7 @@ const sessionAgentRoleState = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('@posthog/react', () => ({ usePostHog: () => null }));
+vi.mock('@/lib/posthog-context', () => ({ usePostHog: () => null }));
 vi.mock('../src/lib/electron-session-file-sender', () => ({
   canUseElectronLocalFileSend: vi.fn(() => false),
   sendSessionFileToLocalRuntime: vi.fn(async () => null),

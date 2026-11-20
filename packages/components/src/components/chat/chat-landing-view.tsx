@@ -3,7 +3,7 @@ import { useAtomValue } from 'jotai';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { readPastedSessionLink } from '@/lib/session-deep-link';
 import type { ClipboardEvent, KeyboardEvent, ReactNode, Ref } from 'react';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import type { Mention as MentionRange } from '@/ui/mention/index';
 import type { CombinedMentionTextareaHandle } from '@/components/mentions/combined-mention-textarea';
 import type { PersistedMentionRange } from '@/components/mentions/mention-persistence';

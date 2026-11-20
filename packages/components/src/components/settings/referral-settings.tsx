@@ -1,7 +1,7 @@
 import { useReferralPolicyRefresh } from '@/hooks/use-referral-policy-refresh';
 import { ReferralDetailsDialog, ReferralSettingsView } from './referral-settings-pure';
 import { useEffect, useRef, useState } from 'react';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { hashAnalyticsId } from '@lody/shared';
 import { useAppCapability } from '@/lib/app-platform';
 import { captureReferralEvent } from '@/lib/referral-analytics';

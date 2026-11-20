@@ -8,7 +8,7 @@ import {
   useNavigate,
   useRouter,
 } from '@tanstack/react-router';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import AppInitializer from '@/components/AppInitializer';
 import { ThemeProvider } from '../theme-provider';
 import { LanguageProvider } from '../i18n';

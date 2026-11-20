@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import {
   captureShortcutUsage,
   commands,

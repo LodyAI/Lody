@@ -1,7 +1,7 @@
 import { useCallback, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import type { SupportedLanguage } from '@lody/shared';
 import { Check, ChevronDown, Monitor, Moon, Sun } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -24,7 +24,7 @@ import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mo
 import { MobileSettingsFoldPanels } from './mobile-settings-fold-panels';
 import { MobileAppIconSettings } from '@/components/mobile/mobile-app-icon-settings';
 import { buildConversationFontSizeChoices } from '@/components/settings/conversation-font-size-options';
-import { currentSupportedLanguages, languageCodeToName } from '../../i18n';
+import { currentSupportedLanguages, languageCodeToName, setAppLanguage } from '../../i18n';
 import { cn } from '@/lib/utils';
 import { Switch } from '@lody/ui/switch';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
@@ -32,7 +32,7 @@ import { withPush } from '@/lib/push-notifications';
 import { useTheme, type Theme } from '../../theme-provider';
 
 export function MobileAppearanceSettings() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { theme, setTheme } = useTheme();
   const [language, setLanguage] = useAtom(languageAtom);
   const [conversationFontSize, setConversationFontSize] = useAtom(conversationFontSizeAtom);
@@ -88,7 +88,7 @@ export function MobileAppearanceSettings() {
   const handleLanguageChange = useCallback(
     (next: SupportedLanguage) => {
       setLanguage(next);
-      void i18n.changeLanguage(next);
+      void setAppLanguage(next);
       if (typeof window === 'undefined' || window.__LODY_ELECTRON__ === true) {
         return;
       }
@@ -98,7 +98,7 @@ export function MobileAppearanceSettings() {
         console.error('Failed to sync Push language', error);
       });
     },
-    [i18n, setLanguage]
+    [setLanguage]
   );
 
   return (

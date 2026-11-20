@@ -8,7 +8,7 @@ import { SettingsPageActions, SettingsPageLead, useSettingsPane } from './settin
 import { SettingsEmptyState, settingsRecordsCard } from './compact-layout';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { usePlatformCapability } from '@lody/platform/react';
 import { getServerNow, type LocalProjectId, type MachineId, type WorkspaceId } from '@lody/shared';
 import {

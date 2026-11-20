@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Plus } from 'lucide-react';
 import { useAtomValue } from 'jotai';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { useTranslation } from 'react-i18next';
 import {
   getServerNow,

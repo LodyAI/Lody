@@ -1,7 +1,7 @@
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { formatDistanceToNow, type Locale } from 'date-fns';
 import { enUS } from 'date-fns/locale/en-US';
 import { zhCN } from 'date-fns/locale/zh-CN';

@@ -61,7 +61,7 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('@/lib/toast', () => ({ toast: { error: vi.fn() } }));
 
-vi.mock('@posthog/react', () => ({ usePostHog: () => null }));
+vi.mock('@/lib/posthog-context', () => ({ usePostHog: () => null }));
 
 vi.mock('../src/lib/posthog-analytics', () => ({ capturePostHogEvent: vi.fn() }));
 
