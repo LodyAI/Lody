@@ -271,7 +271,11 @@ and capability cache key, and takes effect when the next agy process starts.
 Older daemons reject the field in their strict session schema, so the dialog
 offers it only when the machine advertises `antigravitySkipPermissions` v1.
 Authentication
-uses methods returned by ACP initialize, not a native terminal login command.
+uses the official `agy acp --login --disable-telemetry` command. Lody opens
+the Google authorization link and forwards the returned code or callback URL to
+that command through the existing encrypted remote authentication-input channel.
+The command uses the selected managed runtime or `antigravityPath`, keeps its
+normal credential store, and disables auto-update.
 
 New Provider discovery omits `registry/antigravity-acp`. Persisted Providers retain
 the old fixed binary launch definition and show a Legacy label; neither Provider
@@ -379,7 +383,10 @@ Which authentication path runs is decided by the provider, not the caller: a man
 runs its pinned login command; registry, custom ACP, and builtin Devin and Sorbet open a
 temporary standard ACP connection in the same bounded lifecycle. The authentication connection
 advertises credential form version 1; forms support text, secret and single-select fields.
-Kimi runs `acp --login`;
+Kimi runs `acp --login`; Antigravity runs `acp --login --disable-telemetry`
+and accepts a Google authorization code or callback URL through stdin. Its raw
+terminal output is not forwarded to progress; only its Google authorization URL
+is exposed.
 Grok runs the official `login --device-auth`; Claude Code runs the official
 `auth login --claudeai` subscription flow. Codex ChatGPT runs official
 `login --device-auth`; managed API profiles use the existing secret-input interaction
