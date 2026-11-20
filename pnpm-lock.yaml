@@ -365,6 +365,9 @@ importers:
       '@loro-dev/roost':
         specifier: 'catalog:'
         version: 0.3.1
+      '@loro-dev/sqlite-riverrun':
+        specifier: 0.3.0
+        version: 0.3.0(patch_hash=9e80924ae904a7643f397cefaef1e404070b0dae3bac55cd525ae97e6a975536)
       '@loro-dev/streams-client':
         specifier: 'catalog:'
         version: 0.14.0(effect@4.0.2)

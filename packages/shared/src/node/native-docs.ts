@@ -12,7 +12,9 @@ import { isNativePreviewCommentDocId, isNativeScheduleDocId } from '../native-wo
 import { previewVisualCommentDocSchema } from '../preview-comment-schema';
 import {
   MIGRATIONS_ROOM,
+  nativeLocalImportOptions,
   nativeRoomEncryption,
+  nativeWriteOptions,
   observeLoroDoc,
   observeLoroPaths,
 } from './native-repo';
@@ -159,8 +161,9 @@ export async function commitDocUpdates(
   docId: string,
   updates: readonly Uint8Array[]
 ) {
+  const local = nativeLocalImportOptions(client, namespace);
   for (const update of updates)
-    await client.importRoomState(namespace, docRoom(docId), { updates: [update] });
+    await client.importRoomState(namespace, docRoom(docId), { updates: [update], ...local });
 }
 
 /** Register view of one Loro document room (creates the room if needed). */
@@ -289,7 +292,10 @@ export function createNativeRemoteHistoryPort(
     async applyPatch(ops, precondition) {
       await created;
       try {
-        await client.applyDocPatch(namespace, room, ops as never, { precondition });
+        await client.applyDocPatch(namespace, room, ops as never, {
+          precondition,
+          ...nativeWriteOptions(client, namespace),
+        });
       } catch (error) {
         if (error instanceof RepoRpcError) {
           if (error.code === 'precondition_failed') throw new RemoteWriteConflictError();

@@ -441,6 +441,7 @@ export interface LoroDocumentManagerOptions {
     | 'signScheduleDeclaration'
     | 'authorizeMachineTarget'
     | 'authorizeSessionTarget'
+    | 'attachNativeEngine'
   >;
   streamsTokens?: CloudStreamsTokenPort | null;
   cloudBilling?: CloudBillingPort | null;
@@ -632,6 +633,7 @@ export class LoroDocumentManager {
         | 'signScheduleDeclaration'
         | 'authorizeMachineTarget'
         | 'authorizeSessionTarget'
+        | 'attachNativeEngine'
       >;
       streamsTokens?: CloudStreamsTokenPort | null;
       cloudBilling?: CloudBillingPort | null;
@@ -682,7 +684,8 @@ export class LoroDocumentManager {
             workspaceId,
             cliSqliteRepoStore.storageAdapter,
             cliSqliteRepoStore.dbPath,
-            logger
+            logger,
+            options.encryptedWorkspace
           )
         : undefined;
       nativeMeta = native?.meta ?? null;

@@ -8,7 +8,8 @@ import { startDevServer } from '@loro-dev/sqlite-riverrun';
 import type { RepoClient } from '@loro-dev/loro-repo-client';
 import { afterEach, describe, expect, it } from 'vitest';
 import { connectNativeRepo } from '../src/node/native-repo';
-import { createDocRoom } from '../src/node/native-docs';
+import { LoroDoc } from 'loro-crdt';
+import { commitDocUpdates, createDocRoom } from '../src/node/native-docs';
 import {
   attachNativeEncryptedWorkspace,
   NATIVE_CONTENT_REMOTE_ID,
@@ -90,6 +91,7 @@ async function device(name: 'a' | 'b', baseUrl: string) {
       client,
       workspaceId: ws,
       genesisHash,
+      writer,
       contentToken: async () => {
         tokens += 1;
         return { token: `token-${tokens}`, bucketId, gatewayBaseUrl: baseUrl, expiresIn: 480 };
@@ -109,8 +111,16 @@ async function device(name: 'a' | 'b', baseUrl: string) {
   return { dataDir, client, writer, attach, syncs: () => syncs };
 }
 
-const write = (client: RepoClient, writer: string, note: string) =>
-  client.applyDocPatch(ws, room, [{ op: 'set', path: ['history'], value: [{ id: note }] }], writer);
+/** A replica's local edit, committed as the daemon and desktop commit theirs. */
+const replicas = new WeakMap<RepoClient, LoroDoc>();
+const write = (client: RepoClient, note: string) => {
+  let doc = replicas.get(client);
+  if (!doc) replicas.set(client, (doc = new LoroDoc()));
+  const from = doc.oplogVersion();
+  doc.getMap('session').set('note', note);
+  doc.commit();
+  return commitDocUpdates(client, ws, room.id, [doc.export({ mode: 'update', from })]);
+};
 
 describe('native encrypted workspace', () => {
   it('replicates encrypted rooms through the legacy stream URL, and the server sees only ciphertext', async () => {
@@ -123,7 +133,7 @@ describe('native encrypted workspace', () => {
     cleanups.push(async () => wb.close());
     for (const d of [a, b]) await createDocRoom(d.client, ws, room.id);
 
-    await write(a.client, a.writer, 'sealed-in-a');
+    await write(a.client, 'sealed-in-a');
     expect((await a.client.syncNamespace(ws, NATIVE_CONTENT_REMOTE_ID)).blockedRooms).toBe(0);
     await b.client.syncRooms(ws, [room], NATIVE_CONTENT_REMOTE_ID);
     expect(JSON.stringify((await b.client.readDoc(ws, room)).value)).toContain('sealed-in-a');
@@ -146,14 +156,14 @@ describe('native encrypted workspace', () => {
     const wa = await a.attach();
     cleanups.push(async () => wa.close());
     await createDocRoom(a.client, ws, room.id);
-    await write(a.client, a.writer, 'before-crash');
+    await write(a.client, 'before-crash');
     await a.client.syncNamespace(ws, NATIVE_CONTENT_REMOTE_ID);
     const before = a.syncs();
 
     // The keyring lives in host memory: a crashed host comes back empty.
     process.kill(await hostPid(a.dataDir), 'SIGKILL');
     await expect.poll(() => a.syncs() > before, { timeout: 30_000 }).toBe(true);
-    await write(a.client, a.writer, 'after-crash');
+    await write(a.client, 'after-crash');
     await expect
       .poll(async () => (await a.client.syncNamespace(ws, NATIVE_CONTENT_REMOTE_ID)).blockedRooms, {
         timeout: 30_000,

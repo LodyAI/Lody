@@ -61,6 +61,7 @@
     "@lody/turn-diff-store": "workspace:*",
     "@loro-dev/flock-wasm": "catalog:",
     "@loro-dev/roost": "catalog:",
+    "@loro-dev/sqlite-riverrun": "0.3.0",
     "@loro-dev/streams-client": "catalog:",
     "@loro-dev/streams-crdt": "catalog:",
     "@modelcontextprotocol/client": "2.0.0",

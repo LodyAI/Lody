@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { createLodyWorkspaceRoutes, type RepoClient } from '@loro-dev/loro-repo-client';
 import { encryptedWorkspaceNamespace } from '../workspace-streams-content';
 import { forgetDeclaredDocRooms } from './native-docs';
-import { setNativeNamespaceEncryption } from './native-repo';
+import { setNativeNamespaceEncryption, setNativeNamespaceWriter } from './native-repo';
 
 /**
  * Connects one encrypted workspace's native namespace to its encrypted content
@@ -35,6 +35,8 @@ export interface NativeEncryptedWorkspaceOptions {
   readonly workspaceId: string;
   /** Pinned genesis hash (hex), which names the content AAD domain. */
   readonly genesisHash: string;
+  /** This process's keyring writer (its seed is installed by `syncKeyring`); every local write names it. */
+  readonly writer: string;
   /** This device's content token. Called for the first configuration and every refresh. */
   readonly contentToken: (rejectedToken?: string) => Promise<NativeContentToken>;
   /** Runs core's EngineKeyringSync for this device; idempotent. */
@@ -109,13 +111,18 @@ export interface NativeEncryptedWorkspace {
    * leaves the keyring (its rows wait unsealed). Another device of the member on
    * this installation keeps using the namespace, so nothing is dropped.
    */
-  retireWriter(writer: string): Promise<void>;
+  retireWriter(): Promise<void>;
   /** Stops reinstalling on reconnect. Keys stay: another process may share the namespace. */
   close(): void;
 }
 
-/** Finishes an interrupted wipe. Every step is idempotent. */
-async function finishWipe(options: NativeEncryptedWorkspaceOptions) {
+/**
+ * Finishes an interrupted wipe: also for a removed workspace that never attaches
+ * again. Every step is idempotent; only a completed drop clears the marker.
+ */
+export async function finishNativeWipe(
+  options: Pick<NativeEncryptedWorkspaceOptions, 'client' | 'workspaceId' | 'pendingWipe'>
+) {
   const { client, workspaceId } = options;
   await client.keyringClear(workspaceId);
   await client.removeRemote(workspaceId, NATIVE_CONTENT_REMOTE_ID).catch(() => {});
@@ -133,8 +140,9 @@ export async function attachNativeEncryptedWorkspace(
   options: NativeEncryptedWorkspaceOptions
 ): Promise<NativeEncryptedWorkspace> {
   const { client, workspaceId } = options;
-  if (await options.pendingWipe.read()) await finishWipe(options);
+  if (await options.pendingWipe.read()) await finishNativeWipe(options);
   setNativeNamespaceEncryption(client, workspaceId, 'encrypted');
+  setNativeNamespaceWriter(client, workspaceId, options.writer);
 
   let serial: Promise<unknown> = Promise.resolve();
   let closed = false;
@@ -196,12 +204,12 @@ export async function attachNativeEncryptedWorkspace(
         closed = true;
         offState();
         await options.pendingWipe.write();
-        await finishWipe(options);
+        await finishNativeWipe(options);
       }),
-    retireWriter: (writer) =>
+    retireWriter: () =>
       run(async () => {
-        await client.keyringHoldSealing(workspaceId, writer);
-        await client.keyringRemoveSigner(workspaceId, writer);
+        await client.keyringHoldSealing(workspaceId, options.writer);
+        await client.keyringRemoveSigner(workspaceId, options.writer);
       }),
     close() {
       closed = true;

@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { META_ROOM } from '@loro-dev/loro-repo-client';
+import { META_ROOM, type RepoClient } from '@loro-dev/loro-repo-client';
 import { Flock } from '@loro-dev/flock-wasm';
 import {
   ExternalMetadataNotCommittedError,
@@ -20,12 +20,18 @@ import {
 import {
   connectNativeRepo,
   importLegacyRoom,
+  isNativeEncryptedWorkspaceEnabled,
   isNativeWorkspaceMetaEnabled,
+  nativeRepoDataDir,
   unpublishLegacyRoom,
   type LegacyFlockBundle,
   type NativeRepoHostLauncher,
 } from '@lody/shared/node/native-repo';
 import { createNativeFlockDocs } from '@lody/shared/node/native-flock-docs';
+import {
+  finishNativeWipe,
+  nativePendingWipeMarker,
+} from '@lody/shared/node/native-encrypted-workspace';
 import {
   createNativeDocs,
   createNativeRemoteHistoryPort,
@@ -66,9 +72,35 @@ function cliNativeRepoHostLauncher(): NativeRepoHostLauncher {
   return { command: getCliNodeExecutable(), args: [entry] };
 }
 
-/** Local, unencrypted workspaces only; the OSS desktop has no cloud Meta. */
+/**
+ * Local unencrypted workspaces, or (phase 1 of specs/native-engine-cloud-e2ee.md)
+ * cloud encrypted workspaces with both switches on. Cloud plaintext workspaces
+ * stay legacy; the OSS desktop has no cloud Meta.
+ */
 export const usesNativeWorkspaceMeta = (encrypted: boolean) =>
-  !encrypted && getCliPlatformKind() === 'local' && isNativeWorkspaceMetaEnabled();
+  isNativeWorkspaceMetaEnabled() &&
+  (encrypted
+    ? getCliPlatformKind() === 'cloud' && isNativeEncryptedWorkspaceEnabled()
+    : getCliPlatformKind() === 'local');
+
+/** This installation's engine: one per platform, shared with the desktop. */
+const connectCliNativeRepo = () =>
+  connectNativeRepo({
+    launcher: cliNativeRepoHostLauncher,
+    dataDir: nativeRepoDataDir(getCliPlatformKind()),
+  });
+
+/**
+ * Finishes the native wipe of a member-removed workspace, which never attaches
+ * again. Connects only when this workspace's pending-wipe marker exists.
+ */
+export async function finishPendingNativeWipe(workspaceId: string) {
+  const dataDir = nativeRepoDataDir(getCliPlatformKind());
+  const pendingWipe = nativePendingWipeMarker(dataDir, workspaceId);
+  if (!(await pendingWipe.read())) return;
+  const { client } = await connectCliNativeRepo();
+  await finishNativeWipe({ client, workspaceId, pendingWipe });
+}
 
 const flockRoom = (id: string) => ({ kind: 'flock' as const, id });
 
@@ -82,13 +114,26 @@ export async function openNativeWorkspaceMeta(
   workspaceId: string,
   legacyStorage: StorageAdapter,
   legacyDbPath: string,
-  logger: Logger
+  logger: Logger,
+  /**
+   * An encrypted workspace's verified runtime, attached before any room exists.
+   * Its rooms are encrypted and arrive from the content bucket, never imported:
+   * the legacy replica's copies are the same cloud rooms.
+   */
+  encrypted?: { attachNativeEngine(client: RepoClient, dataDir: string): Promise<void> }
 ): Promise<{
   meta: NativeWorkspaceMeta;
   flockDocs: ExternalFlockDocsAdapter;
   docs: ExternalDocsAdapter;
 }> {
-  const { client } = await connectNativeRepo({ launcher: cliNativeRepoHostLauncher });
+  const { client, dataDir } = await connectCliNativeRepo();
+  if (encrypted) {
+    await encrypted.attachNativeEngine(client, dataDir);
+    logger.info(
+      `[${workspaceId}] Native Workspace Meta: encrypted, synced from the content bucket`
+    );
+    return nativeAdapters(client, workspaceId);
+  }
   const inventory = await legacyStorage.inventory?.();
   const stored = inventory?.flockDocIds ?? [];
   const loadLegacyDoc = async (docId: string) => {
@@ -128,6 +173,15 @@ export async function openNativeWorkspaceMeta(
     `[${workspaceId}] Native Workspace Meta: legacy CLI sources ${results.join(', ')}; ` +
       `${rendererDocsImported} renderer-only documents imported`
   );
+  // Session bodies migrate lazily, per document, on first native open.
+  return nativeAdapters(client, workspaceId, { source: CLI_SOURCE, load: loadLegacyDoc });
+}
+
+function nativeAdapters(
+  client: RepoClient,
+  workspaceId: string,
+  legacy?: Parameters<typeof createNativeDocs>[3]
+) {
   return {
     meta: createNativeWorkspaceMeta(
       client,
@@ -140,11 +194,7 @@ export async function openNativeWorkspaceMeta(
       (id) => isNativeFlockDocId(workspaceId, id),
       (file) => Flock.fromFile(file).exportJson()
     ),
-    // Session bodies migrate lazily, per document, on first native open.
-    docs: createNativeDocs(client, workspaceId, isNativeDocId, {
-      source: CLI_SOURCE,
-      load: loadLegacyDoc,
-    }),
+    docs: createNativeDocs(client, workspaceId, isNativeDocId, legacy),
   };
 }
 
@@ -164,7 +214,7 @@ export async function writeBackNativeWorkspaceMeta(
 ): Promise<void> {
   const marker = publishedMarker(legacyDbPath);
   if (getCliPlatformKind() !== 'local' || !existsSync(marker)) return;
-  const connection = await connectNativeRepo({ launcher: cliNativeRepoHostLauncher });
+  const connection = await connectCliNativeRepo();
   try {
     const { client } = connection;
     legacyRepo.getMeta().importFile((await client.exportFlockRaw(workspaceId, META_ROOM)).bytes);
@@ -203,7 +253,7 @@ export async function writeBackNativeWorkspaceMeta(
  * Nothing here writes, arms auto-seen or enters the session cache.
  */
 export async function openNativeSessionReader(workspaceId: string, roomId: string) {
-  const { client } = await connectNativeRepo({ launcher: cliNativeRepoHostLauncher });
+  const { client } = await connectCliNativeRepo();
   const port = shareObservation(createNativeRemoteHistoryPort(client, workspaceId, roomId));
   const history = createRemoteLoroHistoryReader(port);
   return {
