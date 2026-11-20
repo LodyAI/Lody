@@ -120,6 +120,7 @@ export const OpenInIde: Story = {
       onOpen: fn(),
       onSelect: fn(),
     },
+    openInFileManager: { label: 'Open in Finder', onOpen: fn() },
   },
 };
 

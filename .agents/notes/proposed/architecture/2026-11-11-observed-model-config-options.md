@@ -53,10 +53,13 @@ before.
    unanswered after `ACP_MODEL_OPTIONS_SWITCH_TIMEOUT_MS` (60 s), keeping what it
    read. There is no overall deadline: a person is watching the progress. The daemon
    reads models only for built-in agents.
-3. **Who reads models.** Only `useRefreshMachineAcpCapabilities` sets the flag:
-   Settings refresh, the Agent config dialog's probe, Test and Retry, and
-   onboarding's dialog. Startup refresh, post-login verification, provider setup
-   and the CLI command refresh as before.
+3. **Who reads models.** Only explicit Provider refreshes in Settings › Agents
+   (`ProviderRow`, calling `useRefreshMachineAcpCapabilities` with
+   `readModelOptions: true`) set the flag. The Agent config dialog's Create,
+   Test, and Retry probes, Lody Agent connection discovery, onboarding, startup
+   refresh, post-login verification, provider setup, and the CLI command omit it
+   so creating or verifying a Provider with a large catalog (such as Devin's
+   169-model list) stays fast and does not block the modal.
 4. **Progress.** Each model is reported as a `machine/acp-binary-progress` frame with
    status `reading-model-options` and `configId`, `modelId`, `modelName`,
    `modelIndex`, `modelCount`, so it rides the existing local IPC and Machine RPC
