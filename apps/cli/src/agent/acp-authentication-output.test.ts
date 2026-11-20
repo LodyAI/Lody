@@ -64,6 +64,25 @@ describe('BuiltinAuthenticationOutputParser', () => {
     });
   });
 
+  it('offers Google sign-in with manual authorization input for Antigravity', () => {
+    const parser = new BuiltinAuthenticationOutputParser('antigravity');
+    const url = 'https://accounts.google.com/o/oauth2/auth?client_id=test&state=test';
+    expect(parser.push(`Open this link in a browser to log in with Google:\n${url}\n`)).toEqual({
+      authorizationUrl: url,
+      acceptsAuthorizationCode: true,
+    });
+  });
+
+  it.each([
+    'https://accounts.google.com.attacker.example/o/oauth2/auth',
+    'https://accounts.google.com/help',
+    'https://www.kimi.com/code/authorize_device',
+    'http://accounts.google.com/o/oauth2/auth',
+  ])('rejects unrelated Antigravity authorization URL %s', (url) => {
+    const parser = new BuiltinAuthenticationOutputParser('antigravity');
+    expect(parser.push(`${url}\n`)).toBeUndefined();
+  });
+
   it('does not expose URLs outside the provider allowlist', () => {
     const parser = new BuiltinAuthenticationOutputParser('codex');
 

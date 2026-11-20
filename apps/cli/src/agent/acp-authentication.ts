@@ -118,7 +118,15 @@ const STATUS_PROBE_KILL_WAIT_MS = 2_000;
 
 const BUILTIN_AUTH_METHODS = {
   // Pi credentials are configured through the official Pi CLI on the host.
-  antigravity: [],
+  antigravity: [
+    {
+      id: 'google-login',
+      name: 'Google',
+      description: 'Sign in with a Google account',
+      type: 'terminal',
+      args: ['--login'],
+    },
+  ],
   pi: [],
   devin: [],
   kimi: [
@@ -785,6 +793,7 @@ export class AcpAuthenticationManager {
         }
         // Retained temporarily for older renderer versions. Current UI consumes
         // the structured authorization event and does not render terminal text.
+        if (agentType === 'antigravity') return;
         options.onProgress?.({
           status: 'output',
           stream,

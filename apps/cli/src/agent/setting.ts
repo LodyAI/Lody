@@ -864,7 +864,7 @@ export async function resolveBuiltinAuthenticationProcessLaunch(
     throw new Error(`Unsupported builtin authentication type: ${input.agentType}`);
   }
 
-  if (input.agentType === 'devin' || input.agentType === 'antigravity') {
+  if (input.agentType === 'devin') {
     if (input.action === 'status') return null;
     throw new Error(`${input.agentType} authentication uses the ACP authentication flow.`);
   }
@@ -873,6 +873,19 @@ export async function resolveBuiltinAuthenticationProcessLaunch(
     throw new Error(
       'Configure Pi credentials through provider environment variables or Pi settings.'
     );
+  }
+
+  if (input.agentType === 'antigravity') {
+    if (input.action === 'status') return null;
+    const overridePath = trimRuntimeOverride(input.runtimeOverrides?.antigravityPath);
+    const runtime = overridePath
+      ? { command: overridePath }
+      : await resolveManagedRuntimeForLaunch('antigravity', input);
+    return {
+      command: runtime.command,
+      args: ['acp', '--login', '--disable-telemetry'],
+      env: { AGY_CLI_DISABLE_AUTO_UPDATE: 'true' },
+    };
   }
 
   if (input.agentType === 'kimi') {
