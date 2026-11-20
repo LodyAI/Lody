@@ -213,6 +213,7 @@ module.exports = {
           '-apple-system',
           'BlinkMacSystemFont',
           'Hiragino Sans GB',
+          'Segoe UI',
           'Microsoft YaHei',
           'Helvetica Neue',
           'Arial',
