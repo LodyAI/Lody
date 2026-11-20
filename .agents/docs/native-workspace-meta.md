@@ -596,3 +596,92 @@ These checks wait for the real desktop acceptance run:
 - Packaging: the bundled `@loro-dev/loro-repo-engine-linux-x64-gnu` platform
   package carries an older addon. Local runs load the main package's own binary
   first, so they are unaffected; switching to the released packages replaces both.
+
+## Appendix: loro-crdt reads after `fromSnapshot`
+
+For the Loro team. A `LoroDoc` loaded from a snapshot (`LoroDoc.fromSnapshot`
+or `import` of snapshot bytes) serves container reads about 5.7 times slower
+than the same document built from update bytes, and it stays slower: repeated
+passes and a full `toJSON()` do not warm it. Lody meets it because a native
+replica, and a legacy replica after compaction, load from a snapshot; before
+the history id index, a 50,000-turn status write took about 700 ms instead of
+130 ms.
+
+loro-crdt 1.17.0, Node 26.13.1, Linux x64; 50,000 rows, each a map with three
+strings and a text (snapshot 8.4 MB, updates 39.7 MB). One pass reads every
+row's `id`:
+
+| Load                             |    Load | Pass 1 | Pass 2 | Pass 3 |
+| -------------------------------- | ------: | -----: | -----: | -----: |
+| `LoroDoc.fromSnapshot(snapshot)` |   10 ms | 439 ms | 430 ms | 431 ms |
+| `new LoroDoc().import(snapshot)` |   12 ms | 451 ms | 459 ms | 474 ms |
+| `new LoroDoc().import(updates)`  | 1045 ms |  78 ms |  76 ms | 117 ms |
+| snapshot, then `toJSON()` once   |  833 ms | 433 ms | 411 ms | 457 ms |
+
+Getting a row's handle (`list.get`) costs the same either way (30 ms against
+35 ms for 50,000 rows); the slowdown is in reading the map's values. On a
+Lody-shaped history: one `get` per row 430 ms against 78 ms, sixteen `get`s
+1,046 ms against 403 ms, `getShallowValue` 1,151 ms against 447 ms. Reproduce
+with `node snapshot-read.mjs [rows]` wherever `loro-crdt` resolves:
+
+```js
+// Minimal repro: container reads on a LoroDoc loaded from a snapshot are slower
+// than on the same document built from updates, and stay slower.
+// Usage: node snapshot-read.mjs [rows]   (run where `loro-crdt` resolves)
+import { LoroDoc, LoroMap, LoroText } from 'loro-crdt';
+
+const rows = Number(process.argv[2] ?? 50000);
+const source = new LoroDoc();
+const list = source.getList('history');
+for (let i = 0; i < rows; i++) {
+  const row = list.insertContainer(i, new LoroMap());
+  row.set('id', `row-${i}`);
+  row.set('role', i % 2 ? 'assistant' : 'user');
+  row.set('status', 'handled');
+  row.setContainer('body', new LoroText()).insert(0, 'x'.repeat(i % 2 ? 1200 : 200));
+}
+source.commit();
+const snapshot = source.export({ mode: 'snapshot' });
+const updates = source.export({ mode: 'update' });
+
+const time = (label, run) => {
+  const started = performance.now();
+  run();
+  return `${label} ${(performance.now() - started).toFixed(0)} ms`;
+};
+const readIds = (doc) => {
+  const history = doc.getList('history');
+  for (let i = 0; i < history.length; i++) history.get(i).get('id');
+};
+const loads = {
+  'LoroDoc.fromSnapshot(snapshot)': () => LoroDoc.fromSnapshot(snapshot),
+  'new LoroDoc().import(snapshot)': () => {
+    const d = new LoroDoc();
+    d.import(snapshot);
+    return d;
+  },
+  'new LoroDoc().import(updates)': () => {
+    const d = new LoroDoc();
+    d.import(updates);
+    return d;
+  },
+  'snapshot, then toJSON() once': () => {
+    const d = LoroDoc.fromSnapshot(snapshot);
+    d.toJSON();
+    return d;
+  },
+};
+console.log(
+  `loro-crdt rows=${rows} snapshot=${snapshot.byteLength}B updates=${updates.byteLength}B`
+);
+for (const [label, load] of Object.entries(loads)) {
+  let doc;
+  const opened = time('load', () => {
+    doc = load();
+  });
+  const first = time('ids pass 1', () => readIds(doc));
+  const second = time('ids pass 2', () => readIds(doc));
+  const third = time('ids pass 3', () => readIds(doc));
+  console.log(`${label.padEnd(32)} ${opened} | ${first} | ${second} | ${third}`);
+}
+```
