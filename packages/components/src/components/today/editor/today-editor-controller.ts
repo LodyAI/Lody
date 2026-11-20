@@ -68,8 +68,8 @@ export type TodayDragGhost = {
 };
 /** Indentation per outline level; matches the rows' padding. */
 export const TODAY_INDENT_PX = 22;
-/** Distance from a row's start to its bullet's centre (fold toggle + gap + half bullet). */
-const TODAY_BULLET_CENTER_PX = 28;
+/** Distance from a row's start to its bullet's centre (12px fold toggle + half the 16px bullet box). */
+const TODAY_BULLET_CENTER_PX = 20;
 const DRAG_THRESHOLD_PX = 5;
 /** Hovering where a drop would go into a folded node unfolds it after this long. */
 const DRAG_UNFOLD_DELAY_MS = 500;

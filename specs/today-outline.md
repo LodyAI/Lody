@@ -37,7 +37,11 @@ any time; when off it changes none of the app's existing behavior.
   card, so the two read as separate pages rather than one fused panel (user decision). With the sidebar hidden the
   pinned column is the window's leftmost surface: the sidebar toggle and Back/Forward move to its toolbar (right of
   the traffic lights) and leave the main page, which no longer clears the traffic lights; its content tightens so the
-  fold toggles' centre lines up with the close button's (x=23), with a 16px end gutter (user decision). Unpinning keeps the main area's current content and only hides the column.
+  content lines up with the leftmost traffic light (x 16–30): bullet dots centre on its right edge (x=30), fold
+  toggles centre on its left edge (x=16), the date heading stays aligned with the dots' left edge, and the end
+  gutter is 16px (user decision).
+- A fold toggle sits flush against its bullet (centres 14px apart) and shows only while its line is hovered, focused
+  from the keyboard or being edited; at rest a folded node is marked by its ringed dot. Unpinning keeps the main area's current content and only hides the column.
 - Filling the main area, the stream sits in a centred readable column of at most 720px (compare Obsidian's 700px,
   Notion's ~708px and AFFiNE's ~752px of text) that narrows with the window and keeps side gutters; nesting
   indents within it. "Full width" in the More menu spans the whole main area instead, a global preference stored on

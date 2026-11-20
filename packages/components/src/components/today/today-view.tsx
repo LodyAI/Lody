@@ -122,11 +122,13 @@ const styles = stylex.create({
   // The pinned column is narrow: a tighter end gutter.
   scrollerPinned: { paddingInlineEnd: space[4] },
   // Pinned with the sidebar hidden, the column is the window's leftmost
-  // surface: the fold toggles' centre (8px into the 16px toggle) lines up with
-  // the macOS close button's centre at x=23. The card's content edge starts 5px
-  // in (4px of window ground plus the rim, as laid out).
+  // surface and lines up with the macOS close button (x 16–30): the bullet
+  // dots centre on its right edge (x=30), which puts the fold toggles' centre
+  // on its left edge (x=16). The text column starts at the dot's left edge
+  // (30 - 3); the card's content edge starts 5px in (4px of window ground plus
+  // the rim, as laid out).
   scrollerAtWindowEdge: {
-    paddingInlineStart: `calc(23px - 8px + ${todayOutline.foldOverhang} - 5px)`,
+    paddingInlineStart: 'calc(30px - 3px - 5px)',
   },
   // The readable column (Obsidian 700px, Notion ~708px, AFFiNE ~752px of
   // text): centred, shrinking with the window inside the scroller's gutters.
