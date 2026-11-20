@@ -98,10 +98,8 @@ import { usePostHog } from '@posthog/react';
 import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { useCodeCollabLiveText } from '@/hooks/use-code-collab-live-text';
 import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
-import {
-  SessionMonacoTextViewer,
-  type SessionMonacoExternalTextUpdate,
-} from './session-monaco-text-viewer';
+import { LazySessionMonacoTextViewer } from './lazy-session-monaco-text-viewer';
+import type { SessionMonacoExternalTextUpdate } from './session-monaco-text-viewer';
 import {
   useCodeCollabSaveText,
   type SessionFileLiveSyncStatus,
@@ -114,7 +112,7 @@ import { useLatestRef } from '@/hooks/use-latest-ref';
 import {
   buildCodeCollabMonacoUri,
   registerCodeCollabMonacoModelProvider,
-} from '@/lib/session-monaco-language-providers';
+} from '@/lib/code-collab-monaco-model-provider';
 import {
   normalizeSessionMonacoSelectedLines,
   type SessionMonacoSelectedLines,
@@ -1499,6 +1497,8 @@ function SessionFileContentViewImpl({
   // so Cmd-click / F12 reach the right provider when multiple files are
   // open. Unregisters on unmount or when the active fileId / provider
   // changes so a stale entry can't intercept a different mount.
+  // The URI is a serialized `code-collab://` string built without
+  // `monaco-editor`; the lazy viewer parses it once its chunk loads.
   const lspModelUri = useMemo(
     () =>
       isLspEnabled && lspFileId ? buildCodeCollabMonacoUri(lspFileId, normalizedPath) : undefined,
@@ -1788,7 +1788,7 @@ function SessionFileContentViewImpl({
               />
             ) : (
               <LazyProviderTextMonacoViewer
-                key={lspModelUri?.toString() ?? liveFileId ?? normalizedPath}
+                key={lspModelUri ?? liveFileId ?? normalizedPath}
                 text={resolveProviderEditorMountText(data.snapshot)}
                 language={getSessionFileMonacoLanguageId(
                   normalizedPath,
@@ -2776,11 +2776,11 @@ function SessionFileLspPanel({
 }
 
 function LazyProviderTextMonacoViewer(props: SessionTextMonacoViewerProps) {
-  return <LazyTextMonacoViewer {...props} />;
+  return <LazySessionMonacoTextViewer {...props} />;
 }
 
 function LazyTextMonacoViewer(props: SessionTextMonacoViewerProps) {
-  return <SessionMonacoTextViewer {...props} />;
+  return <LazySessionMonacoTextViewer {...props} />;
 }
 
 type SessionTextMonacoViewerProps = {
@@ -2807,5 +2807,7 @@ type SessionTextMonacoViewerProps = {
   readonly externalTextUpdate?: SessionMonacoExternalTextUpdate;
   readonly onExternalTextUpdateApplied?: (result: 'applied' | 'no-op') => void;
   readonly findRequestSeq?: number;
-  readonly modelUri?: import('monaco-editor/esm/vs/editor/editor.api.js').Uri;
+  // Serialized `code-collab://` model URI; kept as a string so this module
+  // never needs the `monaco-editor` import.
+  readonly modelUri?: string;
 };
