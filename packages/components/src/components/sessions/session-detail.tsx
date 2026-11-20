@@ -2,7 +2,7 @@ import { useMySessionScope } from '@/hooks/use-visible-session-metas';
 import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
 import { machineSupportsAndroidEmulatorProtocol } from '@lody/shared';
-import { writeTextToClipboard } from '@/lib/clipboard';
+import { copyTextToClipboard, writeTextToClipboard } from '@/lib/clipboard';
 import { SessionHistoryAccessBoundary } from './session-history-access-boundary';
 import { useSessionForkCapabilities } from '@/hooks/use-session-fork-capabilities';
 import { requireWorkspaceFeature } from '@/lib/workspace-feature';
@@ -3265,7 +3265,7 @@ const SessionDetail = ({
         if (!currentWorkspaceId || !workspaceSlug || !activeSessionTabId) {
           throw new Error('Session is not ready');
         }
-        await navigator.clipboard.writeText(
+        await copyTextToClipboard(
           linkFormat === 'deeplink'
             ? buildSessionLink({ sessionId: activeSessionTabId, workspaceId: currentWorkspaceId })
             : buildAppSessionUrl(workspaceSlug, activeSessionTabId)
@@ -3329,8 +3329,7 @@ const SessionDetail = ({
 
   const handleCopyText = useCallback(
     (text: string, successMessage?: string) => {
-      void navigator.clipboard
-        .writeText(text)
+      void copyTextToClipboard(text)
         .then(() => {
           if (successMessage) toast.success(successMessage);
         })

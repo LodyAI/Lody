@@ -832,6 +832,7 @@ import { shouldShowCodexProposedPlanDecision } from '@/lib/codex-plan-decision';
 import { buildExecutionTurnConfigOverrides } from '@/lib/execution-turn-config';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 // ── Path launcher options for "Open in" split button ──
 
@@ -1580,8 +1581,7 @@ export function SessionHeaderMenu({
     // branch name copied to clipboard") — no raw value echo, which reads
     // noisy for long paths/URLs.
     (text: string, successMessage: string) => {
-      void navigator.clipboard
-        .writeText(text)
+      void copyTextToClipboard(text)
         .then(() => toast.success(successMessage))
         .catch(() => toast.error(t('sessions.copyFailed', 'Unable to copy')));
     },
@@ -4377,7 +4377,7 @@ export const SessionChatInterface = memo(
             });
             await admitOutput();
             assertCurrent();
-            await navigator.clipboard.writeText(markdown);
+            await copyTextToClipboard(markdown);
             assertCurrent();
             captureSessionEvent('session/history_copy_succeeded', {
               history_count: turnCount,
@@ -7103,7 +7103,7 @@ export const SessionChatInterface = memo(
         return;
       }
       try {
-        await navigator.clipboard.writeText(path);
+        await copyTextToClipboard(path);
         captureSessionEvent('session/path_copied', {
           path_source: openInIdePathSource,
         });
@@ -7124,7 +7124,7 @@ export const SessionChatInterface = memo(
       async (linkFormat: 'https' | 'deeplink' = 'https') => {
         try {
           if (!workspaceId || !workspaceSlug) throw new Error('Workspace is not ready');
-          await navigator.clipboard.writeText(
+          await copyTextToClipboard(
             linkFormat === 'deeplink'
               ? buildSessionLink({ sessionId: session.id, workspaceId })
               : buildAppSessionUrl(workspaceSlug, session.id)

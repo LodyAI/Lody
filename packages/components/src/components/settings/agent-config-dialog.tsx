@@ -137,6 +137,7 @@ import {
   deleteProviderSetupAtom,
 } from '@/atoms/agents';
 import { settingsType as type } from './type.stylex';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 type Translate = ReturnType<typeof useTranslation>['t'];
 
@@ -4316,7 +4317,7 @@ function InlineCopyButton({ value, ariaLabel }: { value: string; ariaLabel: stri
       onClick={(event) => {
         event.stopPropagation();
         if (!value) return;
-        void navigator.clipboard.writeText(value).catch(() => {});
+        void copyTextToClipboard(value).catch(() => {});
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}
