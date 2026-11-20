@@ -697,10 +697,11 @@ describe('queued message images', () => {
     expect(scroller!.parentElement?.style.overflow).toBe('hidden');
     expect(scroller!.parentElement?.style.maxHeight).toBe('min(25vh, 240px)');
 
+    // The row wrapper has the same text. The clamp lives on the preview itself.
     const preview = [...container!.querySelectorAll('div')].find(
-      (node) => node.textContent === long
+      (node) => node.textContent === long && node.style.whiteSpace === 'nowrap'
     );
-    expect(preview?.style.whiteSpace).toBe('nowrap');
+    expect(preview).toBeTruthy();
     expect(preview?.style.display).not.toBe('-webkit-box');
   });
 });
