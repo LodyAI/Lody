@@ -120,22 +120,41 @@ describe('native engine keyring and core content binding', () => {
     await expect(coreOpen(f, room, kind, sealed)).rejects.toBeDefined();
   });
 
-  // Owner decision: the engine keyring must not seal at a superseded epoch once the
-  // retained-epoch budget is exhausted, and never at an abandoned epoch. With today's
-  // "highest installed epoch seals" rule only Lody can stop it, so these stay failing
-  // until the seal-policy primitive (K2) lands; then they become ordinary tests.
-  it.fails('K2: the keyring holds sealing for a writer without revoking its admission', () => {
+  // Seal policy (K2): Lody keeps sealing at a retained epoch during the 15-minute budget,
+  // never seals at an abandoned one, and holds sealing on lost write permission, all
+  // without dropping the admission that opens existing frames.
+  it('seals at an explicit retained epoch after rotation, and core opens it', async () => {
     const f = workspace();
-    const k = f.keyring() as ContentKeyring & {
-      holdSealing?: (namespace: string, writer: string) => void;
-    };
-    expect(typeof k.holdSealing).toBe('function');
+    const room: Room = { kind: 'doc', docId: 'session-0001' };
+    const kind: Kind = { kind: 'update_batch' };
+    f.rotate();
+    const k = f.keyring(f.owner, [EPOCH0, EPOCH1]);
+    k.setSealEpoch(ENGINE_NAMESPACE, 0);
+    const retained = engineSeal(k, f, room, kind);
+    expect(epochOf(retained.sealed)).toBe(0);
+    expect(await coreOpen(f, room, kind, retained)).toEqual(plaintext);
+    k.setSealEpoch(ENGINE_NAMESPACE, 1);
+    const current = engineSeal(k, f, room, kind);
+    expect(epochOf(current.sealed)).toBe(1);
+    expect(await coreOpen(f, room, kind, current)).toEqual(plaintext);
+    expect(() => k.setSealEpoch(ENGINE_NAMESPACE, 2)).toThrow(/CONTENT_KEYRING:unknown_key/);
   });
-  it.fails('K2: the keyring seals at an explicit seal epoch, not the highest installed one', () => {
+
+  it('holds sealing and removes a signer without revoking admission', async () => {
     const f = workspace();
-    const k = f.keyring(f.owner, [EPOCH0, EPOCH1]) as ContentKeyring & {
-      setSealEpoch?: (namespace: string, epoch: number) => void;
-    };
-    expect(typeof k.setSealEpoch).toBe('function');
+    const room: Room = { kind: 'doc', docId: 'session-0001' };
+    const kind: Kind = { kind: 'update_batch' };
+    const k = f.keyring();
+    const before = engineSeal(k, f, room, kind);
+    k.holdSealing(ENGINE_NAMESPACE, 'self');
+    expect(() => engineSeal(k, f, room, kind)).toThrow(/CONTENT_KEYRING:unauthorized/);
+    expect(engineOpen(k, f, room, kind, before)).toEqual(plaintext);
+    k.releaseSealing(ENGINE_NAMESPACE, 'self');
+    const resumed = engineSeal(k, f, room, kind);
+    expect(await coreOpen(f, room, kind, resumed)).toEqual(plaintext);
+    k.removeWriterSigner(ENGINE_NAMESPACE, 'self');
+    expect(() => engineSeal(k, f, room, kind)).toThrow(/CONTENT_KEYRING:missing_provider/);
+    for (const sealed of [before, resumed])
+      expect(engineOpen(k, f, room, kind, sealed)).toEqual(plaintext);
   });
 });
