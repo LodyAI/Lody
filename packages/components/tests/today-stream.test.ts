@@ -57,3 +57,20 @@ describe('Today route while pinned', () => {
     expect(todayRouteOutcome({ enabled: true, pinned: false, compact: false })).toBe('page');
   });
 });
+
+describe('Today date heading', () => {
+  it('formats in the product language, including zh_CN, without throwing', async () => {
+    const { formatTodayHeading } = await import('../src/components/today/today-stream');
+    const today = '2026-11-20' as never;
+    expect(formatTodayHeading('2026-11-21' as never, today, 'zh_CN')).toEqual({
+      date: '11月21日',
+      meta: '星期六',
+      isToday: false,
+    });
+    expect(formatTodayHeading(today, today, 'en')).toEqual({
+      date: 'November 20',
+      meta: 'Friday, November 20',
+      isToday: true,
+    });
+  });
+});

@@ -1,4 +1,5 @@
 import type { TodayDate } from '@lody/shared';
+import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 
 /**
  * Which days the Today stream shows, top to bottom.
@@ -58,4 +59,27 @@ export function todayRouteOutcome(input: {
 }): 'redirect' | 'to-column' | 'page' {
   if (!input.enabled) return 'redirect';
   return input.pinned && !input.compact ? 'to-column' : 'page';
+}
+
+/**
+ * A day heading in the product language (`zh_CN` etc. go through
+ * `toIntlLocaleOrEn`; raw i18n codes are not valid Intl tags). Today reads
+ * "Today" with the full date beside it; other days read the date with the
+ * weekday beside it.
+ */
+export function formatTodayHeading(
+  date: TodayDate,
+  today: TodayDate,
+  language: string | null | undefined
+): { date: string; meta: string; isToday: boolean } {
+  const locale = toIntlLocaleOrEn(language);
+  const value = todayDateToLocalDate(date);
+  const isToday = date === today;
+  const day = new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric' }).format(value);
+  const meta = isToday
+    ? new Intl.DateTimeFormat(locale, { weekday: 'long', month: 'long', day: 'numeric' }).format(
+        value
+      )
+    : new Intl.DateTimeFormat(locale, { weekday: 'long' }).format(value);
+  return { date: day, meta, isToday };
 }

@@ -9,7 +9,7 @@ import { useTodayEditor } from './editor/today-editor-context';
 import { TodaySessionLabel } from './today-session-node';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
 import type { TodayPageStoreCache } from '../../providers/today-page-store-cache';
-import { todayDateToLocalDate } from './today-stream';
+import { formatTodayHeading } from './today-stream';
 
 /** Indentation per outline level. */
 const TODAY_INDENT_PX = 22;
@@ -25,7 +25,8 @@ const styles = stylex.create({
     fontWeight: 600,
     color: colors.label,
   },
-  headerMeta: { fontSize: text.footnoteSize, fontWeight: 400, color: colors.secondaryLabel },
+  // Same size as the date: weight and colour carry the hierarchy, not a smaller font.
+  headerMeta: { fontWeight: 400, color: colors.secondaryLabel },
   outline: { display: 'flex', flexDirection: 'column', minHeight: 28 },
   row: {
     display: 'flex',
@@ -33,6 +34,9 @@ const styles = stylex.create({
     gap: space[1],
     minHeight: 28,
     borderRadius: radius.mini,
+    // Hang the fold toggle in the margin so the bullet dot lines up with the
+    // date heading: toggle 16 + gap 4 + the dot's inset in its 16px box (5).
+    marginInlineStart: -25,
   },
   fold: {
     width: 16,
@@ -91,18 +95,12 @@ export function TodayDaySection(props: {
   const { t, i18n } = useTranslation();
   const ref = useRef<HTMLElement | null>(null);
   const store = useNearViewportPage(ref, props.cache, getTodayDocId(props.userId, props.date));
-  const date = todayDateToLocalDate(props.date);
-  const label = new Intl.DateTimeFormat(i18n.language, { month: 'long', day: 'numeric' }).format(
-    date
-  );
-  const weekday = new Intl.DateTimeFormat(i18n.language, { weekday: 'long' }).format(date);
+  const heading = formatTodayHeading(props.date, props.today, i18n.language);
   return (
     <section ref={ref} {...stylex.props(styles.section)} data-today-date={props.date}>
       <h2 {...stylex.props(styles.header)}>
-        {props.date === props.today ? t('today.title', 'Today') : label}
-        <span {...stylex.props(styles.headerMeta)}>
-          {props.date === props.today ? `${label} · ${weekday}` : weekday}
-        </span>
+        {heading.isToday ? t('today.title', 'Today') : heading.date}
+        <span {...stylex.props(styles.headerMeta)}>{heading.meta}</span>
       </h2>
       {store ? (
         <TodayStaticOutline store={store} isTop={props.isTop} onEmpty={props.onEmpty} />

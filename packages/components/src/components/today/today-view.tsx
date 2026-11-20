@@ -16,6 +16,7 @@ import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope'
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { toast } from '@/lib/toast';
+import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { openSessionDeepLink } from '@/lib/session-deep-link';
 import {
   hasAcceptableSessionMentionTransfer,
@@ -638,8 +639,13 @@ function TodayCalendar(props: {
   const [month, setMonth] = useState(() => todayDateToLocalDate(props.selected));
   const marked = useMemo(() => new Set(props.registered), [props.registered]);
   const cells = useMemo(() => monthCells(month), [month]);
-  const weekdayFormat = new Intl.DateTimeFormat(props.language, { weekday: 'narrow' });
-  const monthFormat = new Intl.DateTimeFormat(props.language, { year: 'numeric', month: 'long' });
+  const weekdayFormat = new Intl.DateTimeFormat(toIntlLocaleOrEn(props.language), {
+    weekday: 'narrow',
+  });
+  const monthFormat = new Intl.DateTimeFormat(toIntlLocaleOrEn(props.language), {
+    year: 'numeric',
+    month: 'long',
+  });
   return (
     <Popover.Root
       open={open}
