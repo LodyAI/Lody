@@ -52,7 +52,7 @@ export function BetaFeaturesSection() {
         label={t('settings.beta.e2eeWorkspace', 'Encrypted workspace creation')}
         info={t(
           'settings.beta.e2eeWorkspaceHelper',
-          'Create a workspace with a device identity and signed permission history. Conversation sync and execution are not available yet. Existing workspaces are unchanged.'
+          'Create a workspace with a device identity and signed permission history. Existing workspaces are unchanged.'
         )}
       >
         <Switch

@@ -20,10 +20,7 @@ import { openExternalUrl } from '@/lib/native-browser';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { getDownloadPageUrl, getNightlyDownloadPageUrl, getWebsiteUrl } from '@/lib/lody-urls';
 import { developerModeEnabledAtom } from '@/atoms/settings';
-import {
-  desktopOnboardingDraftAtom,
-  desktopOnboardingPhaseAtom
-} from '@/atoms/onboarding';
+import { desktopOnboardingDraftAtom, desktopOnboardingPhaseAtom } from '@/atoms/onboarding';
 import { clearDesktopOnboardingFlowId } from '@/components/onboarding/onboarding-analytics';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { MobileAboutSettings } from '@/components/mobile/mobile-about-settings';
@@ -356,7 +353,7 @@ function DevbarSettingsControls() {
           label={t('settings.about.devbarAgentConnect', 'Agent connection')}
           info={t(
             'settings.about.devbarAgentConnectHelper',
-            'Run `devframe connect` to proxy this Hub to coding agents over stdio MCP, or use the endpoints below directly.'
+            'Run `devframe connect` to proxy this Hub to coding agents over stdio MCP, or use the endpoints on this row directly.'
           )}
         >
           <div {...stylex.props(styles.endpoints)}>

@@ -394,7 +394,7 @@ export function AppearanceSettingsView({
           label={t('settings.extendedCodeLanguages.label', 'Extended code languages')}
           info={t(
             'settings.extendedCodeLanguages.helper',
-            'Adds more syntax grammars, including Lean and Rocq. Each grammar loads when first used and can slow that render.'
+            'Adds syntax grammars for more code languages. Each grammar loads when first used and can slow that render.'
           )}
         >
           <Switch

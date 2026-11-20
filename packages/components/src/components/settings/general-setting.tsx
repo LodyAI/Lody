@@ -649,11 +649,15 @@ export function GeneralSettingsComponent() {
         setCliAutoStartEnabled(result.enabled);
       } else {
         setCliAutoStartEnabled(previous);
-        toast.error(t('settings.general.cliAutoStart.toggleFailed', 'Failed to update auto start'));
+        toast.error(
+          t('settings.general.cliAutoStart.toggleFailed', 'Failed to update local agent setting')
+        );
       }
     } catch {
       setCliAutoStartEnabled(previous);
-      toast.error(t('settings.general.cliAutoStart.toggleFailed', 'Failed to update auto start'));
+      toast.error(
+        t('settings.general.cliAutoStart.toggleFailed', 'Failed to update local agent setting')
+      );
     } finally {
       setCliAutoStartLoading(false);
     }
@@ -701,7 +705,7 @@ export function GeneralSettingsComponent() {
               'settings.general.sessions.queuedMessageBehavior.label',
               'Queued message behavior'
             )}
-            helper={t(
+            info={t(
               'settings.general.sessions.queuedMessageBehavior.helper',
               'For messages you send while the agent is working.'
             )}

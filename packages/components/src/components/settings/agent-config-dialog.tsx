@@ -2001,8 +2001,8 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
           'settings.agent.dialog.nodeVersionRequired',
           'Kimi Code requires Node ≥{{required}}; this machine is using {{current}}.',
           {
-            required: effectiveBinaryState?.required ?? t('common.unknown', 'unknown'),
-            current: effectiveBinaryState?.current ?? t('common.unknown', 'unknown'),
+            required: effectiveBinaryState?.required ?? t('common.unknown', 'Unknown'),
+            current: effectiveBinaryState?.current ?? t('common.unknown', 'Unknown'),
           }
         )
       : null;
@@ -2760,7 +2760,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
         )}
         {filteredOptions.length === 0 && (
           <div {...stylex.props(styles.railEmpty)}>
-            {t('settings.agent.dialog.noResults', 'No agents match that search')}
+            {t('settings.agent.dialog.noResults', 'No providers match that search')}
           </div>
         )}
       </nav>
@@ -2886,7 +2886,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                   setTestingBuiltinSetup(false);
                 } catch (error) {
                   toast.error(
-                    t('settings.agent.setup.deleteFailed', 'Could not delete provider setup')
+                    t('settings.agent.setup.deleteFailed', 'Could not cancel provider setup')
                   );
                   throw error;
                 }
@@ -3022,7 +3022,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                 label={t('settings.agent.dialog.custom.commandLabel', 'Launch command')}
                 info={t(
                   'settings.agent.dialog.custom.commandHint',
-                  'The full command that starts an ACP-compatible agent over stdio, e.g. "npx -y my-acp-agent --flag". Quotes are supported for arguments with spaces; shell features like pipes or $VARS are not.'
+                  'The full command that starts an ACP-compatible agent over stdio, e.g. "npx -y my-acp-agent --flag". Quotes are supported for arguments with spaces; shell features like pipes or $VARS are not. Custom providers are only probed when you click Test, so re-test after changing the command.'
                 )}
                 icon={<SquareTerminal aria-hidden="true" {...stylex.props(catalog.icon)} />}
               >
@@ -3050,12 +3050,6 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                   />
                 </div>
               </Field>
-              <p {...stylex.props(styles.hint)}>
-                {t(
-                  'settings.agent.dialog.custom.testHint',
-                  'Custom providers are only probed when you click Test — re-test after changing the command.'
-                )}
-              </p>
             </div>
           )}
 
@@ -3391,7 +3385,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                   disabled={!capabilitiesReady}
                   disabledHint={
                     probing
-                      ? t('settings.agent.dialog.probing', 'Probing…')
+                      ? t('settings.agent.dialog.probing', 'Probing capabilities…')
                       : t(
                           'settings.agent.dialog.testToRefreshCapabilities',
                           'Click Test to refresh available options.'
@@ -3460,7 +3454,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                 <p {...stylex.props(styles.note)}>
                   {t(
                     'settings.agent.dialog.presetEnvHint',
-                    'Preset variables (shown above) are injected automatically and cannot be overridden here.'
+                    'Preset variables are injected automatically and cannot be overridden here.'
                   )}
                 </p>
               ) : null}
@@ -3785,7 +3779,7 @@ function ProbeStatus({
     return (
       <span {...stylex.props(styles.probing)}>
         <Spinner size="small" aria-hidden="true" />
-        {t('settings.agent.dialog.probing', 'Probing…')}
+        {t('settings.agent.dialog.probing', 'Probing capabilities…')}
       </span>
     );
   }
@@ -3920,7 +3914,7 @@ function DeepSeekHarnessPanel({
           {t('settings.agent.dialog.deepseek.officialTab', 'DeepSeek official')}
         </Tabs.Tab>
         <Tabs.Tab value="custom">
-          {t('settings.agent.dialog.deepseek.customTab', 'Custom Endpoint')}
+          {t('settings.agent.dialog.deepseek.customTab', 'Custom endpoint')}
         </Tabs.Tab>
       </Tabs.List>
       <Tabs.Panel value="official">
@@ -3930,7 +3924,7 @@ function DeepSeekHarnessPanel({
         <div {...stylex.props(styles.stack)}>
           <Field
             htmlFor="deepseek-endpoint"
-            label={t('settings.agent.dialog.deepseek.endpointLabel', 'API Endpoint')}
+            label={t('settings.agent.dialog.deepseek.endpointLabel', 'API endpoint')}
             info={t(
               'settings.agent.dialog.deepseek.endpointHelp',
               'Required HTTP or HTTPS URL. Saved as DEEPSEEK_BASE_URL without adding or removing /v1.'

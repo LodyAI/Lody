@@ -866,9 +866,9 @@ export function MemoryEditor({
               <Dialog.Title>
                 {t(entry ? 'settings.memory.edit' : 'settings.memory.add')}
               </Dialog.Title>
-              <Dialog.Description>
-                {t(entry ? 'settings.memory.editHint' : 'settings.memory.editorHint')}
-              </Dialog.Description>
+              {entry ? (
+                <Dialog.Description>{t('settings.memory.editHint')}</Dialog.Description>
+              ) : null}
             </Dialog.Header>
             {!entry ? (
               <Tabs.Root

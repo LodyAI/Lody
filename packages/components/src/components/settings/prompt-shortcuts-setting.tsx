@@ -255,7 +255,7 @@ function PromptShortcutsSettingContent({
                   )
                 : t(
                     'settings.promptShortcuts.readOnlyHelp',
-                    'Created by another member. Only its author can change it.'
+                    'Shared by another member. Only its author can change it.'
                   )}
             </Dialog.Description>
           </Dialog.Header>
@@ -397,7 +397,7 @@ export function PromptShortcutsList({
         {loading ? (
           <span role="status" {...stylex.props(catalog.syncing)}>
             <Spinner size="small" aria-hidden="true" />
-            {t('common.loading', 'Loading…')}
+            {t('common.loading', 'Loading...')}
           </span>
         ) : null}
         {showEmpty ? null : addButton}
