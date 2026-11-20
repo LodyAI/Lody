@@ -22,6 +22,7 @@ import {
   publishManagedInstallation,
   readManagedOperation,
 } from '@/lib/managed-daemon-release';
+import { installCommandShim } from '@/lib/command-shim';
 
 /** An expected installer outcome the owner can act on; printed without a stack or crash report. */
 export class InstallActionRequiredError extends Error {
@@ -35,9 +36,13 @@ export const daemonInstallCommand = new Command('install')
   .option('--start', 'Start the installed fixed entry and wait for daemon readiness')
   .option('--autostart', 'Register this fixed entry for the next login or boot')
   .option('--replace', 'Stop a running Lody (daemon, desktop app or terminal) without asking')
-  .action(async (options: InstallOptions) => {
+  .option('--no-modify-path', 'Install the lody command without changing PATH or shell profiles')
+  .action(async (options: InstallOptions & { modifyPath?: boolean }) => {
     try {
-      await installManagedDaemon(options);
+      await installManagedDaemon({
+        ...options,
+        noModifyPath: options.modifyPath === false,
+      });
     } catch (error) {
       if (!(error instanceof InstallActionRequiredError)) throw error;
       console.error(error.message);
@@ -50,6 +55,7 @@ type InstallOptions = {
   start?: boolean;
   autostart?: boolean;
   replace?: boolean;
+  noModifyPath?: boolean;
 };
 
 /** Owner interaction and process control; replaceable in tests. */
@@ -185,6 +191,24 @@ export async function installManagedDaemon(
     const service = await installFixedServiceEntry(context.capsulePath);
     await publishManagedInstallation(context.metadata.product, service);
     console.log(`Installed Lody ${context.metadata.version}: ${service}`);
+    try {
+      const shim = await installCommandShim(service, { noModifyPath: options.noModifyPath });
+      if (shim.status === 'installed') {
+        console.log(`Installed command shim: ${shim.path}`);
+        if (shim.pathOnPath) console.log("Run 'lody --help' to get started.");
+        else if (shim.pathModified)
+          console.log(
+            process.platform === 'win32'
+              ? 'Open a new terminal to use `lody`.'
+              : 'Open a new terminal (or run `exec $SHELL`) to use `lody`.'
+          );
+        else if (process.platform === 'win32')
+          console.log(`Manually add ${shim.binDir} to your user PATH.`);
+        else console.log(`Add this line to your shell profile: export PATH="${shim.binDir}:$PATH"`);
+      }
+    } catch (error) {
+      console.warn(`Could not install the lody command shim or update PATH: ${String(error)}`);
+    }
     if (options.auth || (options.start && getCliPlatformKind() === 'cloud')) {
       const logger = getLogger('daemon-install');
       const authClient = new AuthClient(logger);

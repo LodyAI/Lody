@@ -251,11 +251,7 @@ export function McpSetting() {
       </SettingsPageActions>
 
       {servers.length === 0 ? (
-        <SettingsEmptyState
-          title={t('settings.mcp.empty')}
-          description={t('settings.mcp.emptyHint')}
-          action={addButton}
-        />
+        <SettingsEmptyState title={t('settings.mcp.empty')} action={addButton} />
       ) : (
         <div {...stylex.props(settingsRecordsCard)}>
           {servers.map((server, index) => (

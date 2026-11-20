@@ -1,6 +1,10 @@
 import { ProductWindowIpcService } from '../product-window-ipc-service'
 import { assertProductWindowSender } from '../assert-sender'
-import { parseSessionLink, INSTALLATION_LINK_SCHEMES } from '@lody/shared/session-link'
+import {
+  isAppResourceLink,
+  parseSessionLink,
+  INSTALLATION_LINK_SCHEMES
+} from '@lody/shared/session-link'
 import { desktopInstallationProfile, mainPlatformKind } from '../../platform'
 import { getDesktopCallbackProtocol } from '../../desktop-channel'
 import { isDefaultLodyProtocolClient, setDefaultLodyProtocolClient } from '../../protocol-client'
@@ -505,7 +509,7 @@ export class AppIpc extends ProductWindowIpcService {
 
   @IpcMethod()
   async openExternalUrl(urlRaw: string) {
-    if (typeof urlRaw === 'string' && parseSessionLink(urlRaw)) {
+    if (typeof urlRaw === 'string' && isAppResourceLink(urlRaw)) {
       const { event } = getIpcContext()
       assertProductWindowSender(event)
       event.sender.send('app.deepLink', urlRaw)

@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { userInfo, homedir } from 'node:os';
 import { runCommandTextLegacy, type CommandSpec } from '@lody/shared/node/process';
 import { toShared } from '@/platform/process-options';
+import { ps } from '@/lib/powershell';
 
 type Run = (command: string, args: readonly string[]) => Promise<void>;
 export async function runInstallCommand(
@@ -32,7 +33,6 @@ const xml = (value: string) =>
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&apos;');
-const ps = (value: string) => "'" + value.replaceAll("'", "''") + "'";
 const unit = (value: string) => JSON.stringify(value.replaceAll('%', '%%'));
 
 /** Refuse foreign or modified registrations; never replace a user-owned service. */

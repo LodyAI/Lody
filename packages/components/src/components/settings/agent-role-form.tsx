@@ -222,7 +222,7 @@ export function AgentRoleForm({
 
             <Section
               title={t('settings.agentRoles.form.sectionTarget')}
-              hint={t('settings.agentRoles.form.sectionTargetHint')}
+              info={t('settings.agentRoles.form.sectionTargetHint')}
             >
               {machines.length > 0 ? (
                 <div {...withClassName(stylex.props(styles.machineTabs), 'scrollbar-pro')}>
@@ -314,7 +314,7 @@ export function AgentRoleForm({
                   {multiTarget ? (
                     <Field
                       label={t('settings.agentRoles.form.alias')}
-                      hint={t('settings.agentRoles.form.aliasHint')}
+                      info={t('settings.agentRoles.form.aliasHint')}
                     >
                       <Input
                         autoComplete="off"
@@ -341,7 +341,7 @@ export function AgentRoleForm({
             {target?.agentConfigId ? (
               <Section
                 title={t('settings.agentRoles.form.sectionRunConfig')}
-                hint={t('settings.agentRoles.form.sectionRunConfigHint')}
+                info={t('settings.agentRoles.form.sectionRunConfigHint')}
               >
                 {capabilitiesUnavailable || !selectorOptions ? (
                   <FormMessage tone="warning">
@@ -406,7 +406,7 @@ export function AgentRoleForm({
             {target ? (
               <Section
                 title={t('settings.agentRoles.form.memory')}
-                hint={t('settings.agentRoles.form.memoryHint')}
+                info={t('settings.agentRoles.form.memoryHint')}
               >
                 {memoryPicker}
               </Section>

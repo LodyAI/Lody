@@ -73,3 +73,23 @@ describe('session resource links', () => {
     );
   });
 });
+
+describe('Today page links', () => {
+  it('reads a member page link, including an encoded local user id', async () => {
+    const { parseTodayLink } = await import('../src/session-link');
+    expect(parseTodayLink('lody://today/local%3Aabc/2026-11-20?workspace=lw_1')).toEqual({
+      userId: 'local:abc',
+      date: '2026-11-20',
+      workspaceId: 'lw_1',
+    });
+  });
+
+  it('rejects non-canonical encodings, impossible dates, extra parameters and traversal', async () => {
+    const { parseTodayLink } = await import('../src/session-link');
+    expect(parseTodayLink('lody://today/local%3aabc/2026-11-20?workspace=w')).toBeNull();
+    expect(parseTodayLink('lody://today/u1/2026-02-30?workspace=w')).toBeNull();
+    expect(parseTodayLink('lody://today/u1/2026-11-20?workspace=w&x=1')).toBeNull();
+    expect(parseTodayLink('lody://today/../2026-11-20?workspace=w')).toBeNull();
+    expect(parseTodayLink('lody://session/abc?workspace=w')).toBeNull();
+  });
+});

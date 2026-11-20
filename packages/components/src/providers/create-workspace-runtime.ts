@@ -149,6 +149,7 @@ import {
 } from '@/atoms/runtime';
 import type { LodyControlConnectionState } from '@/atoms/control-connection';
 import { createManagedStoreCache } from './store-ref-tracker';
+import { createTodayPageStoreCache } from './today-page-store-cache';
 import { waitForRoomToSync } from './room-sync';
 import {
   computeLocalReconnectDelayMs,
@@ -821,6 +822,21 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // Grace period before disposing an idle session store (and leaving its room).
   // Long enough to survive session switching without reconnecting.
   const STORE_RELEASE_DELAY_MS = 600_000;
+  // Idle Today pages kept warm while scrolling the day stream.
+  const TODAY_IDLE_PAGE_CAP = 12;
+  // A Today page's failed registration or join backs off to 5 minutes: many open
+  // pages retrying every 30s added up to real backend load.
+  const TODAY_RETRY_BASE_DELAY_MS = 1_000;
+  const TODAY_RETRY_MAX_DELAY_MS = 300_000;
+  const todayPageRetryDelayMs = (attempt: number) => {
+    const exponential = Math.min(
+      TODAY_RETRY_MAX_DELAY_MS,
+      TODAY_RETRY_BASE_DELAY_MS * 2 ** Math.min(attempt, 20)
+    );
+    // ±20% jitter so pages that failed together do not retry together.
+    const jittered = exponential * (0.8 + Math.random() * 0.4);
+    return Math.min(TODAY_RETRY_MAX_DELAY_MS, Math.round(jittered));
+  };
   // Short grace period before leaving an inactive session room. This avoids
   // reconnect churn during quick tab switches while keeping SSE fan-out bounded.
   const SESSION_ROOM_SYNC_RELEASE_DELAY_MS = 2_000;
@@ -5639,6 +5655,124 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     },
   });
 
+  // Today pages (specs/today-outline.md): opened locally, joined only once
+  // registered, so viewing a day never creates a server stream.
+  /**
+   * Resolves once `binding` has restored from the remote, waiting again on
+   * each status change after a wait that ended without it (the room healing
+   * inside the SDK). Never settles once `signal` aborts.
+   */
+  const waitUntilRoomRestored = (
+    binding: ReturnType<typeof readinessBindingForDocRoom>,
+    signal: AbortSignal
+  ): Promise<void> =>
+    new Promise((resolve) => {
+      let stopWatching: (() => void) | undefined;
+      const attempt = () => {
+        stopWatching?.();
+        stopWatching = undefined;
+        if (signal.aborted) return;
+        void binding.waitFor({ phase: 'restored', signal }).then(
+          (result) => {
+            if (result.status === 'complete') resolve();
+            else if (!signal.aborted) stopWatching = binding.onStatusChange(attempt);
+          },
+          () => {
+            if (!signal.aborted) stopWatching = binding.onStatusChange(attempt);
+          }
+        );
+      };
+      signal.addEventListener('abort', () => stopWatching?.(), { once: true });
+      attempt();
+    });
+
+  const todayPageStoreCache = createTodayPageStoreCache({
+    releaseDelayMs: STORE_RELEASE_DELAY_MS,
+    idleCap: TODAY_IDLE_PAGE_CAP,
+    retryDelayMs: todayPageRetryDelayMs,
+    setTimer: (callback, ms) => {
+      const timer = setTimeout(callback, ms);
+      return () => clearTimeout(timer);
+    },
+    onBackgroundError: (docId, stage, error) => {
+      console.warn('Today page background step failed', { docId, stage, error });
+    },
+    repo: {
+      openDoc: async (docId) => {
+        const handle = await repo.openPersistedDoc(docId);
+        return {
+          doc: handle.doc as LoroDoc,
+          joinRoom: async (signal) => {
+            // Same release contract as schedule stores: a released page stops waiting
+            // and never keeps a room it no longer owns.
+            await waitForPromiseOrAbort(transportReady.promise, signal);
+            // Assigned in a callback: widen it so control flow keeps the type.
+            let joined = null as RepoRoomSubscription | null;
+            let subscription: RepoRoomSubscription | null;
+            try {
+              subscription = await waitForRoomToSync(() => handle.joinRoom(), {
+                roomId: docId,
+                initialDelayMs: 0,
+                signal,
+                isCancelled: () => signal.aborted,
+                firstSynced: (sub) => readinessBindingForDocRoom(sub, docId).firstSyncedWithRemote,
+                onSubscription: (sub) => {
+                  if (signal.aborted) sub.unsubscribe();
+                  else joined = sub;
+                },
+              });
+            } catch (error) {
+              // As for session rooms: a subscription that exists heals inside the
+              // SDK, so the page keeps it; only a join that produced none fails.
+              if (signal.aborted) {
+                joined?.unsubscribe();
+                return null;
+              }
+              if (!joined) throw error;
+              return {
+                room: joined,
+                synced: waitUntilRoomRestored(readinessBindingForDocRoom(joined, docId), signal),
+              };
+            }
+            if (signal.aborted) {
+              (subscription ?? joined)?.unsubscribe();
+              return null;
+            }
+            return subscription ? { room: subscription, synced: Promise.resolve() } : null;
+          },
+        };
+      },
+      isRegistered: async (docId) => {
+        const entry = await repo.getDocMeta(docId);
+        return Boolean(entry && !isLoroRepoDocDeleted(entry));
+      },
+      upsertDocMeta: (docId, meta) => repo.upsertDocMeta(docId, meta),
+      unloadDoc: (docId) => repo.unloadDoc(docId),
+      observeDocs: (onEvent, query) => {
+        const observation = repo.observeDocs(
+          (event) => {
+            // A deleted page leaves the date index; metadata alone never resurrects it.
+            if (event.kind === 'doc-existence-changed') {
+              onEvent({ docId: event.docId, exists: event.to === 'active' });
+            } else if (event.kind === 'doc-metadata') {
+              onEvent({ docId: event.docId, exists: true });
+            }
+          },
+          {
+            query,
+            filter: { kinds: ['doc-existence-changed', 'doc-metadata'] },
+          }
+        );
+        return {
+          docIds: observation.snapshot
+            .filter((entry) => !isLoroRepoDocDeleted(entry))
+            .map((entry) => entry.docId),
+          unsubscribe: observation.unsubscribe,
+        };
+      },
+    },
+  });
+
   // Dual-author: every client direct-authors its own durable writes and uploads
   // them over its own cloud connection; local targets additionally converge with
   // the CLI over the local plane (specs/local-first-two-plane.md 作者规则).
@@ -5658,6 +5792,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       sessionStoreCache.releaseIdle(),
       previewVisualCommentStoreCache.releaseIdle(),
       scheduleStoreCache.releaseIdle(),
+      todayPageStoreCache.releaseIdle(),
     ]);
   };
 
@@ -6062,6 +6197,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         await sessionStoreCache.disposeAll();
         await previewVisualCommentStoreCache.disposeAll();
         await scheduleStoreCache.disposeAll();
+        await todayPageStoreCache.disposeAll();
       });
       let codeCollabFileIndexCacheDisposeError: unknown = null;
       try {
@@ -6391,6 +6527,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       );
     },
     acquireScheduleStore: scheduleStoreCache.acquire,
+    todayPages: todayPageStoreCache,
     releaseScheduleStoreRef: scheduleStoreCache.releaseRef,
     sendControl,
     waitForSessionCreateResponse,

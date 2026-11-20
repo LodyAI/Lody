@@ -42,6 +42,8 @@ place them in named pin sections, such as "Maintenance".
   again places it at the top of the default section with a fresh `orderKey`.
 - Each section can be collapsed. The collapsed state is stored only on this
   device.
+- A view scope that hides a section's conversations leaves the section in
+  place; while expanded, it names the hidden row count under its rows.
 - Opener child conversations stay under their root conversation and move with
   it; they are not ordered independently.
 - The mobile layout shows non-empty sections and their order but offers no

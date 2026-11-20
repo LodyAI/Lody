@@ -1280,10 +1280,12 @@ function ProjectSettingsDesktop({
         {isAnyLoading && totalCount === 0 ? (
           <div {...stylex.props(styles.loading)}>
             <Spinner size="small" />
-            {t('workspace.projects.loading', 'Loading projects')}
+            {t('workspace.projects.loading', 'Loading local projects')}
           </div>
         ) : totalCount === 0 && machineEntries.length === 0 ? (
-          <SettingsEmptyList>{t('workspace.projects.empty', 'No projects yet')}</SettingsEmptyList>
+          <SettingsEmptyList>
+            {t('workspace.projects.empty', 'No local projects yet')}
+          </SettingsEmptyList>
         ) : (
           /* Every source at once, each a section: its name above, its projects
              as the ruled rows of one card. Nothing is hidden behind a picked
@@ -1349,7 +1351,7 @@ function ProjectSettingsDesktop({
                 title={t('workspace.projects.anyMachineTitle', 'Any machine')}
                 description={t(
                   'workspace.projects.anyMachineHint',
-                  'Projects of several repositories, run wherever a copy is'
+                  'Projects of several repositories; conversations run wherever a copy is available.'
                 )}
                 boxed
               >
@@ -2603,7 +2605,7 @@ function revealProjectPath(path: string, t: TFunction) {
   }
   void services.app.revealLocalPath(path).then((result) => {
     if (!result.revealed) {
-      toast.error(t('sessions.fileActions.revealFailed', 'Unable to show this folder'));
+      toast.error(t('sessions.fileActions.revealFailed', 'Could not reveal that file.'));
     }
   });
 }
@@ -2632,7 +2634,7 @@ function ProjectShareControl({
       : t('workspace.projects.private', 'Private to you');
   const scopeDescription = t(
     'workspace.projects.shareScopeDescription',
-    'Sharing a project also shares its device, which teammates need to open and continue conversations.'
+    'Sharing a project also shares its machine, which teammates need to open and continue conversations.'
   );
 
   if (!teamSharingAvailable) {

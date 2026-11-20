@@ -230,10 +230,7 @@ export function PathLaunchersSettings({
   const row = (
     <CompactRow
       label={t('settings.pathLaunchers.title', 'Open with')}
-      helper={t(
-        'settings.pathLaunchers.description',
-        "The app a session header's Open button uses."
-      )}
+      info={t('settings.pathLaunchers.description', "The app a session header's Open button uses.")}
     >
       <Select.Root
         open={selectOpen}

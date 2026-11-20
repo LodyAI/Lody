@@ -70,6 +70,7 @@ import {
   Ellipsis,
   FileText,
   Folder,
+  FolderOpen,
   GitBranch,
   GitBranchPlus,
   GitFork,
@@ -236,6 +237,10 @@ import { buildAppSessionUrl } from '@/lib/session-app-url';
 import { openSessionDeepLink } from '@/lib/session-deep-link';
 import { resolveSessionOpenInIdePathTarget } from '@/lib/session-open-in-ide-path';
 import {
+  normalizeSessionFileActionPlatform,
+  resolveOpenFolderInFileManagerLabel,
+} from '@/lib/session-file-actions';
+import {
   buildPathLauncherLaunchInput,
   executePathLauncher,
   buildPathLauncherProbes,
@@ -284,7 +289,11 @@ import { SessionInfoBar } from './session-info-bar';
 import { SessionPreviewPreload } from './session-preview-preload';
 import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
 import { SessionProjectMembersChip } from './session-project-members-chip';
-import { useSettleSessionWithConfirmation } from './session-sub-conversation-confirmation';
+import {
+  useMoveToFocusWithConfirmation,
+  useSettleSessionWithConfirmation,
+  useSnoozeSessionWithConfirmation,
+} from './session-sub-conversation-confirmation';
 import {
   buildSessionProjectMemberRows,
   resolveSessionProjectMemberRow,
@@ -1344,6 +1353,7 @@ export function SessionHeaderMenu({
   onDelete,
   compact = false,
   openInIde,
+  openInFileManager,
   isLauncherPillVisible,
   pullRequest,
   continuationTweaks,
@@ -1388,6 +1398,15 @@ export function SessionHeaderMenu({
     selected: PathLauncherOption;
     onOpen: () => void;
     onSelect: (launcher: PathLauncherOption) => void;
+  };
+  /**
+   * Opens this session's directory in Finder, File Explorer, or the host file
+   * manager. Stays in `⋯` even when the editor pill is on screen — it is not
+   * one of the editor choices.
+   */
+  openInFileManager?: {
+    label: string;
+    onOpen: () => void;
   };
   /** Whether the header's launcher pill is on screen; read when the menu opens. */
   isLauncherPillVisible?: () => boolean;
@@ -1730,8 +1749,14 @@ export function SessionHeaderMenu({
           {openedByRelationRows}
 
           {/* The header pill is the primary launcher; the menu lists it only
-              while the narrow-page container query hides that pill. */}
+              while the narrow-page container query hides that pill. Opening the
+              folder in Finder / Explorer stays here either way. */}
           {launcherPillVisible ? null : openInIdeMenu}
+          {openInFileManager ? (
+            <Menu.Item icon={FolderOpen} onClick={() => void openInFileManager.onOpen()}>
+              {openInFileManager.label}
+            </Menu.Item>
+          ) : null}
 
           <Menu.Separator />
 
@@ -1749,11 +1774,16 @@ export function SessionHeaderMenu({
                     <Menu.Content className="min-w-[200px]">
                       {buildSnoozePresets(statusNow).map((preset) => {
                         const label =
-                          preset.id === 'laterToday'
-                            ? t('sessions.contextMenu.snoozeLaterToday', 'Later today')
-                            : preset.id === 'tomorrowMorning'
-                              ? t('sessions.contextMenu.snoozeTomorrowMorning', 'Tomorrow morning')
-                              : t('sessions.contextMenu.snoozeNextWeek', 'Next week');
+                          preset.id === 'oneHour'
+                            ? t('sessions.contextMenu.snoozeOneHour', 'In 1 hour')
+                            : preset.id === 'laterToday'
+                              ? t('sessions.contextMenu.snoozeLaterToday', 'Later today')
+                              : preset.id === 'tomorrowMorning'
+                                ? t(
+                                    'sessions.contextMenu.snoozeTomorrowMorning',
+                                    'Tomorrow morning'
+                                  )
+                                : t('sessions.contextMenu.snoozeNextWeek', 'Next week');
                         return (
                           <Menu.Item
                             key={preset.id}
@@ -3059,6 +3089,8 @@ export const SessionChatInterface = memo(
       moveSessionToFocus,
     } = useSessionActions();
     const settleSessionWithConfirmation = useSettleSessionWithConfirmation(settleSession);
+    const snoozeSessionWithConfirmation = useSnoozeSessionWithConfirmation(snoozeSession);
+    const moveToFocusWithConfirmation = useMoveToFocusWithConfirmation(moveSessionToFocus);
     const [renameDialogTarget, setRenameDialogTarget] = useState<RenameSessionDialogTarget | null>(
       null
     );
@@ -6926,6 +6958,48 @@ export const SessionChatInterface = memo(
       void launchPathWithLauncher(selectedPathLauncher, 'session/open_in_ide_clicked');
     }, [launchPathWithLauncher, selectedPathLauncher]);
 
+    const openInFileManagerLabel = resolveOpenFolderInFileManagerLabel(
+      normalizeSessionFileActionPlatform(electronPathLauncherPlatform),
+      t
+    );
+    const canOpenInFileManager = Boolean(openInIdePath) && isElectronRendererForPathLaunch;
+    const handleOpenInFileManager = useCallback(async () => {
+      const path = await resolveOpenInIdePath();
+      if (!path) {
+        toast.error(t('sessions.openFolder.failed', 'Could not open that folder'));
+        return;
+      }
+      const analyticsProperties = { path_source: openInIdePathSource };
+      captureSessionEvent('session/open_in_file_manager_clicked', analyticsProperties);
+      const services = getIpcServices();
+      if (!services) {
+        captureSessionEvent('session/open_in_file_manager_failed', {
+          ...analyticsProperties,
+          reason: 'native_bridge_unavailable',
+        });
+        toast.error(
+          t('sessions.pathLaunchUnsupported', 'This launcher is only available in the desktop app')
+        );
+        return;
+      }
+      try {
+        const result = await services.app.openLocalPath(path);
+        if (!result.opened) {
+          captureSessionEvent('session/open_in_file_manager_failed', {
+            ...analyticsProperties,
+            reason: result.error,
+          });
+          toast.error(t('sessions.openFolder.failed', 'Could not open that folder'));
+        }
+      } catch (error) {
+        captureSessionEvent('session/open_in_file_manager_failed', {
+          ...analyticsProperties,
+          reason: getErrorMessage(error),
+        });
+        toast.error(t('sessions.openFolder.failed', 'Could not open that folder'));
+      }
+    }, [captureSessionEvent, openInIdePathSource, resolveOpenInIdePath, t]);
+
     const handleCopyPath = useCallback(async () => {
       const path = await resolveOpenInIdePath();
       if (!path) {
@@ -7034,6 +7108,9 @@ export const SessionChatInterface = memo(
                   })}
                 </Menu.RadioGroup>
                 <Menu.Separator />
+                <Menu.Item icon={FolderOpen} onClick={() => void handleOpenInFileManager()}>
+                  {openInFileManagerLabel}
+                </Menu.Item>
                 {ACTION_OPTIONS.map((action) => (
                   <Menu.Item
                     key={action.id}
@@ -7164,7 +7241,8 @@ export const SessionChatInterface = memo(
         }
         onSnooze={
           headerSharing?.access !== 'read'
-            ? (snoozedUntil) => snoozeSession(session.id, snoozedUntil)
+            ? (snoozedUntil) =>
+                snoozeSessionWithConfirmation(session.id, snoozedUntil).then(() => undefined)
             : undefined
         }
         onSettle={
@@ -7173,7 +7251,9 @@ export const SessionChatInterface = memo(
             : undefined
         }
         onMoveToFocus={
-          headerSharing?.access !== 'read' ? () => moveSessionToFocus(session.id) : undefined
+          headerSharing?.access !== 'read'
+            ? () => moveToFocusWithConfirmation(session.id).then(() => undefined)
+            : undefined
         }
         owner={ownerMenuState}
         openedByRelations={openedByRelations}
@@ -7194,6 +7274,16 @@ export const SessionChatInterface = memo(
                 onOpen: handleOpenInIde,
                 onSelect: (launcher) => {
                   void handleSelectPathLauncher(launcher);
+                },
+              }
+            : undefined
+        }
+        openInFileManager={
+          canOpenInFileManager
+            ? {
+                label: openInFileManagerLabel,
+                onOpen: () => {
+                  void handleOpenInFileManager();
                 },
               }
             : undefined

@@ -94,8 +94,6 @@ import { AgentIcon } from '@/components/icons/agent-icon';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
-import type { AcpModelOptionsRefreshProgress } from '@/hooks/use-refresh-machine-acp-capabilities';
-import { formatModelOptionsProgressText } from './model-options-progress';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { Button } from '@lody/ui/button';
 import { Dialog } from '@/ui/dialog';
@@ -1184,7 +1182,6 @@ export type AgentConfigDialogMode =
 type RefreshArgs = {
   machineId: MachineId;
   configId: AgentConfigId;
-  onModelOptionsProgress?: (progress: AcpModelOptionsRefreshProgress) => void;
 };
 
 /** Whether a registry agent's platform binary is present on the target machine. */
@@ -1610,7 +1607,6 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
   const [submitting, setSubmitting] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
   const [probing, setProbing] = useState(false);
-  const [modelProgress, setModelProgress] = useState<AcpModelOptionsRefreshProgress | null>(null);
   const [probeError, setProbeError] = useState<string | null>(null);
   const [manuallyTested, setManuallyTested] = useState(false);
   const [authRequired, setAuthRequired] = useState(false);
@@ -2005,8 +2001,8 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
           'settings.agent.dialog.nodeVersionRequired',
           'Kimi Code requires Node ≥{{required}}; this machine is using {{current}}.',
           {
-            required: effectiveBinaryState?.required ?? t('common.unknown', 'unknown'),
-            current: effectiveBinaryState?.current ?? t('common.unknown', 'unknown'),
+            required: effectiveBinaryState?.required ?? t('common.unknown', 'Unknown'),
+            current: effectiveBinaryState?.current ?? t('common.unknown', 'Unknown'),
           }
         )
       : null;
@@ -2119,9 +2115,6 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
         const response = await onRefreshCapabilities({
           machineId: machine.id,
           configId: agentConfigId,
-          onModelOptionsProgress: (progress) => {
-            if (!cancelled) setModelProgress(progress);
-          },
         });
         if (cancelled) return;
         if (response.authRequired) {
@@ -2165,16 +2158,12 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
         setVerifiedBuiltinContext(null);
         setProbeError(error instanceof Error ? error.message : String(error));
       } finally {
-        if (!cancelled) {
-          setProbing(false);
-          setModelProgress(null);
-        }
+        if (!cancelled) setProbing(false);
       }
     })();
     return () => {
       cancelled = true;
       setProbing(false);
-      setModelProgress(null);
     };
   }, [
     open,
@@ -2207,7 +2196,6 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
       const response = await onRefreshCapabilities({
         machineId: machine.id,
         configId: agentConfigId,
-        onModelOptionsProgress: setModelProgress,
       });
       if (response.authRequired) {
         setAuthRequired(true);
@@ -2236,7 +2224,6 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
       setProbeError(error instanceof Error ? error.message : String(error));
     } finally {
       setProbing(false);
-      setModelProgress(null);
     }
   };
 
@@ -2773,7 +2760,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
         )}
         {filteredOptions.length === 0 && (
           <div {...stylex.props(styles.railEmpty)}>
-            {t('settings.agent.dialog.noResults', 'No agents match that search')}
+            {t('settings.agent.dialog.noResults', 'No providers match that search')}
           </div>
         )}
       </nav>
@@ -2823,9 +2810,6 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
               <ProbeStatus
                 isPreset={isPreset}
                 probing={probing}
-                probingText={
-                  modelProgress ? formatModelOptionsProgressText(t, modelProgress) : undefined
-                }
                 probeError={probeError}
                 ready={capabilitiesReady && !builtinNeedsCredentialCheck && !authRequired}
                 showIdleAction={!isCustom}
@@ -2902,7 +2886,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                   setTestingBuiltinSetup(false);
                 } catch (error) {
                   toast.error(
-                    t('settings.agent.setup.deleteFailed', 'Could not delete provider setup')
+                    t('settings.agent.setup.deleteFailed', 'Could not cancel provider setup')
                   );
                   throw error;
                 }
@@ -2916,14 +2900,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
           // `hidden` alone loses to a stylesheet's `display`.
           {...stylex.props(styles.groups, waitingForBuiltinSetup && styles.hidden)}
         >
-          <Field
-            htmlFor="agent-config-name"
-            label={t('agents.configName', 'Name')}
-            hint={t(
-              'settings.agent.dialog.nameHint',
-              'Shown in the provider list and session menus.'
-            )}
-          >
+          <Field htmlFor="agent-config-name" label={t('agents.configName', 'Name')}>
             <Input
               id="agent-config-name"
               value={formData.name}
@@ -2958,7 +2935,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
           {managedCodexForm && codexAuth ? (
             <Field
               label={t('settings.agent.codex.authentication', 'Authentication')}
-              hint={t(
+              info={t(
                 'settings.agent.codex.storage',
                 'Credentials stay on the selected machine. Each provider has its own account.'
               )}
@@ -2999,7 +2976,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                 <Field
                   htmlFor="codex-base-url"
                   label={t('settings.agent.codex.baseUrl', 'Base URL')}
-                  hint={t(
+                  info={t(
                     'settings.agent.codex.keyNext',
                     'Enter the API Key securely during sign-in. To change the destination, add a new provider.'
                   )}
@@ -3043,9 +3020,9 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
               <Field
                 htmlFor="custom-acp-command"
                 label={t('settings.agent.dialog.custom.commandLabel', 'Launch command')}
-                hint={t(
+                info={t(
                   'settings.agent.dialog.custom.commandHint',
-                  'The full command that starts an ACP-compatible agent over stdio, e.g. "npx -y my-acp-agent --flag". Quotes are supported for arguments with spaces; shell features like pipes or $VARS are not.'
+                  'The full command that starts an ACP-compatible agent over stdio, e.g. "npx -y my-acp-agent --flag". Quotes are supported for arguments with spaces; shell features like pipes or $VARS are not. Custom providers are only probed when you click Test, so re-test after changing the command.'
                 )}
                 icon={<SquareTerminal aria-hidden="true" {...stylex.props(catalog.icon)} />}
               >
@@ -3073,12 +3050,6 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                   />
                 </div>
               </Field>
-              <p {...stylex.props(styles.hint)}>
-                {t(
-                  'settings.agent.dialog.custom.testHint',
-                  'Custom providers are only probed when you click Test — re-test after changing the command.'
-                )}
-              </p>
             </div>
           )}
 
@@ -3087,7 +3058,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
               <Field
                 htmlFor="builtin-runtime-path"
                 label={t('settings.agent.dialog.runtimeOverride.label', 'Runtime binary path')}
-                hint={t(
+                info={t(
                   'settings.agent.dialog.runtimeOverride.hint',
                   'Advanced: leave empty to let Lody install and verify the managed runtime. Filling this is not recommended unless you need a local enterprise mirror or are debugging runtime startup.'
                 )}
@@ -3414,7 +3385,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                   disabled={!capabilitiesReady}
                   disabledHint={
                     probing
-                      ? t('settings.agent.dialog.probing', 'Probing…')
+                      ? t('settings.agent.dialog.probing', 'Probing capabilities…')
                       : t(
                           'settings.agent.dialog.testToRefreshCapabilities',
                           'Click Test to refresh available options.'
@@ -3483,7 +3454,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                 <p {...stylex.props(styles.note)}>
                   {t(
                     'settings.agent.dialog.presetEnvHint',
-                    'Preset variables (shown above) are injected automatically and cannot be overridden here.'
+                    'Preset variables are injected automatically and cannot be overridden here.'
                   )}
                 </p>
               ) : null}
@@ -3782,7 +3753,6 @@ function formatBinaryStatusText(
 function ProbeStatus({
   isPreset,
   probing,
-  probingText,
   probeError,
   ready,
   showIdleAction,
@@ -3791,8 +3761,6 @@ function ProbeStatus({
 }: {
   isPreset: boolean;
   probing: boolean;
-  /** Replaces the generic label while a refresh names the model it is reading. */
-  probingText?: string;
   probeError: string | null;
   ready: boolean;
   showIdleAction: boolean;
@@ -3811,7 +3779,7 @@ function ProbeStatus({
     return (
       <span {...stylex.props(styles.probing)}>
         <Spinner size="small" aria-hidden="true" />
-        {probingText ?? t('settings.agent.dialog.probing', 'Probing…')}
+        {t('settings.agent.dialog.probing', 'Probing capabilities…')}
       </span>
     );
   }
@@ -3897,7 +3865,7 @@ function DeepSeekApiKeyField({
     <Field
       htmlFor="deepseek-api-key"
       label={label ?? t('settings.agent.dialog.deepseek.apiKeyLabel', 'DeepSeek API Key')}
-      hint={t(
+      info={t(
         'settings.agent.dialog.deepseek.apiKeyHelp',
         'Saved with this provider and injected as DEEPSEEK_API_KEY when DSH starts.'
       )}
@@ -3946,7 +3914,7 @@ function DeepSeekHarnessPanel({
           {t('settings.agent.dialog.deepseek.officialTab', 'DeepSeek official')}
         </Tabs.Tab>
         <Tabs.Tab value="custom">
-          {t('settings.agent.dialog.deepseek.customTab', 'Custom Endpoint')}
+          {t('settings.agent.dialog.deepseek.customTab', 'Custom endpoint')}
         </Tabs.Tab>
       </Tabs.List>
       <Tabs.Panel value="official">
@@ -3956,8 +3924,8 @@ function DeepSeekHarnessPanel({
         <div {...stylex.props(styles.stack)}>
           <Field
             htmlFor="deepseek-endpoint"
-            label={t('settings.agent.dialog.deepseek.endpointLabel', 'API Endpoint')}
-            hint={t(
+            label={t('settings.agent.dialog.deepseek.endpointLabel', 'API endpoint')}
+            info={t(
               'settings.agent.dialog.deepseek.endpointHelp',
               'Required HTTP or HTTPS URL. Saved as DEEPSEEK_BASE_URL without adding or removing /v1.'
             )}

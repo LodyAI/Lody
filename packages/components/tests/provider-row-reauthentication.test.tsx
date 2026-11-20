@@ -3,10 +3,25 @@ import { getRateLimitEntryKey } from '@lody/shared';
 
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentConfigId, AgentConfigMeta, MachineId, MachineViewMeta } from '@lody/shared';
+import type {
+  AgentConfigId,
+  AgentConfigMeta,
+  ClientToServer,
+  MachineAcpBinaryProgressMessage,
+  MachineId,
+  MachineViewMeta,
+  WorkspaceId,
+} from '@lody/shared';
 
+import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
 import { ProviderRow } from '../src/components/settings/provider-row';
+import {
+  useRefreshMachineAcpCapabilities,
+  type AcpModelOptionsRefreshProgress,
+} from '../src/hooks/use-refresh-machine-acp-capabilities';
 import { initI18n } from '../src/i18n';
 import {
   createCodexResetForecastStore,
@@ -247,5 +262,85 @@ describe('ProviderRow model option refresh', () => {
 
     await act(async () => finish());
     expect(statusText()).not.toContain('Reading options');
+  });
+
+  it('omits readModelOptions by default and opts in only when explicitly requested', async () => {
+    type RefreshMessage = Extract<ClientToServer, { type: 'machine/acp-capabilities-refresh' }>;
+    const sent: RefreshMessage[] = [];
+    const requestMachineAcpCapabilitiesRefresh = vi.fn(
+      async (
+        message: RefreshMessage,
+        options?: { onProgress?: (progress: MachineAcpBinaryProgressMessage) => void }
+      ) => {
+        sent.push(message);
+        options?.onProgress?.({
+          type: 'machine/acp-binary-progress',
+          machineId,
+          agentType: 'devin',
+          status: 'reading-model-options',
+          configId: message.configId,
+          modelId: 'fusion-1',
+          modelName: 'Fusion 1',
+          modelIndex: 1,
+          modelCount: 169,
+        });
+        return {
+          type: 'machine/acp-capabilities-refresh_response' as const,
+          machineId,
+          configId: message.configId,
+          cliType: 'builtin' as const,
+          agentType: 'devin',
+          success: false,
+          authRequired: true,
+        };
+      }
+    );
+
+    const store = createStore();
+    store.set(currentWorkspaceIdAtom, 'ws-test' as WorkspaceId);
+    store.set(runtimeAtom, {
+      workspaceId: 'ws-test' as WorkspaceId,
+      requestMachineAcpCapabilitiesRefresh,
+    } as unknown as WorkspaceRuntime);
+
+    let refresh!: ReturnType<typeof useRefreshMachineAcpCapabilities>;
+    function Harness() {
+      refresh = useRefreshMachineAcpCapabilities();
+      return null;
+    }
+
+    await act(async () => {
+      root.render(
+        <Provider store={store}>
+          <Harness />
+        </Provider>
+      );
+    });
+
+    const configId = 'config-devin' as AgentConfigId;
+    await act(async () => {
+      await refresh({ machineId, configId });
+    });
+    expect(sent[0]).toMatchObject({
+      type: 'machine/acp-capabilities-refresh',
+      machineId,
+      configId,
+      force: true,
+    });
+    expect(sent[0]?.readModelOptions).toBeUndefined();
+
+    const observedProgress: AcpModelOptionsRefreshProgress[] = [];
+    await act(async () => {
+      await refresh({
+        machineId,
+        configId,
+        readModelOptions: true,
+        onModelOptionsProgress: (progress) => observedProgress.push(progress),
+      });
+    });
+    expect(sent[1]?.readModelOptions).toBe(true);
+    expect(observedProgress).toEqual([
+      { modelId: 'fusion-1', modelName: 'Fusion 1', index: 1, total: 169 },
+    ]);
   });
 });

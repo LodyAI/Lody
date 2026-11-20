@@ -5,17 +5,29 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createStore, Provider, useSetAtom } from 'jotai';
 
-import { sidebarCollapsedAtom, sidebarLastWidthAtom } from '../src/atoms/sidebar-state';
+import {
+  sidebarCollapsedAtom,
+  sidebarLastWidthAtom,
+  todayPinnedAtom,
+  todayPinnedTargetAtom,
+} from '../src/atoms/sidebar-state';
+import { experimentalFeaturesEnabledAtom, todayExperimentEnabledAtom } from '../src/atoms/settings';
 import { WORKSPACE_FOCUS_SCOPES } from '../src/atoms/focus-layer';
 import { WebWorkspaceLayout } from '../src/components/web-workspace-layout';
 import { COMPACT_NAVIGATION_CLOSE_SETTLE_MS } from '../src/components/compact-navigation-dialog';
 import { compactDesktopLayoutAtom, syncCompactDesktopLayoutAtom } from '../src/atoms/layout-state';
+import { useOpenToday } from '../src/components/today/use-open-today';
 
 const layout = vi.hoisted(() => ({ compact: false }));
+const navigations = vi.hoisted((): unknown[] => []);
 
 vi.mock('@tanstack/react-router', () => ({
   useLocation: ({ select }: { select: (location: { pathname: string }) => string }) =>
     select({ pathname: '/workspace/chat' }),
+  useNavigate: () => (options: unknown) => {
+    navigations.push(options);
+    return Promise.resolve();
+  },
 }));
 vi.mock('../src/hooks/use-keyboard-navigation', () => ({ useKeyboardNavigation: () => {} }));
 vi.mock('../src/hooks/use-mobile', () => ({ useIsCompactDesktop: () => layout.compact }));
@@ -30,6 +42,10 @@ vi.mock('../src/components/loro-app-sidebar', () => ({
   ),
 }));
 
+vi.mock('../src/components/today/today-pinned-column', () => ({
+  TodayPinnedColumn: () => <section data-testid="today-column" />,
+}));
+
 describe('desktop sidebar toggle', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
@@ -40,6 +56,7 @@ describe('desktop sidebar toggle', () => {
     container?.remove();
     container = undefined;
     layout.compact = false;
+    navigations.length = 0;
     delete window.__LODY_VERTICAL_DIVISION__;
   });
 
@@ -49,6 +66,70 @@ describe('desktop sidebar toggle', () => {
     root = createRoot(container);
     flushSync(() => root?.render(node));
   }
+
+  it('shows the pinned Today column beside the sidebar, never in compact navigation', async () => {
+    const store = createStore();
+    store.set(experimentalFeaturesEnabledAtom, true);
+    store.set(todayExperimentEnabledAtom, true);
+    store.set(todayPinnedAtom, true);
+    store.set(sidebarCollapsedAtom, false);
+    await act(async () =>
+      render(
+        <Provider store={store}>
+          <WebWorkspaceLayout>
+            <button>Content</button>
+          </WebWorkspaceLayout>
+        </Provider>
+      )
+    );
+    expect(container!.querySelector('[data-testid="today-column"]')).not.toBeNull();
+    await act(async () => store.set(todayPinnedAtom, false));
+    expect(container!.querySelector('[data-testid="today-column"]')).toBeNull();
+    await act(async () => store.set(todayPinnedAtom, true));
+    await act(async () => store.set(todayExperimentEnabledAtom, false));
+    expect(container!.querySelector('[data-testid="today-column"]')).toBeNull();
+  });
+
+  it('opens a Today day in the pinned column without navigating the main area', async () => {
+    const store = createStore();
+    store.set(experimentalFeaturesEnabledAtom, true);
+    store.set(todayExperimentEnabledAtom, true);
+    store.set(todayPinnedAtom, true);
+    let openToday: ReturnType<typeof useOpenToday> = () => undefined;
+    function Opener() {
+      openToday = useOpenToday();
+      return null;
+    }
+    await act(async () =>
+      render(
+        <Provider store={store}>
+          <Opener />
+        </Provider>
+      )
+    );
+    const day = { member: 'u1', date: '2026-11-19' };
+    act(() => openToday({ workspaceSlug: 'acme', sameWorkspace: true, ...day }));
+    expect(store.get(todayPinnedTargetAtom)).toEqual(day);
+    expect(navigations).toEqual([]);
+
+    // Another workspace's day, or no room for the column: the Today page opens.
+    store.set(todayPinnedTargetAtom, null);
+    act(() => openToday({ workspaceSlug: 'other', sameWorkspace: false, ...day }));
+    layout.compact = true;
+    await act(async () =>
+      root?.render(
+        <Provider store={store}>
+          <Opener />
+        </Provider>
+      )
+    );
+    act(() => openToday({ workspaceSlug: 'acme', sameWorkspace: true }));
+    expect(store.get(todayPinnedTargetAtom)).toBeNull();
+    expect(navigations).toEqual([
+      { to: '/$workspaceName/today', params: { workspaceName: 'other' }, search: day },
+      { to: '/$workspaceName/today', params: { workspaceName: 'acme' }, search: {} },
+    ]);
+  });
 
   it('isolates compact navigation from the background content', async () => {
     layout.compact = true;

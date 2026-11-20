@@ -211,6 +211,8 @@ export type WorkspaceRuntime = {
     options?: { create?: boolean }
   ) => Promise<T>;
   acquireScheduleStore: (scheduleId: string) => Promise<ScheduleDocStore>;
+  /** Today outline pages and member date indexes (specs/today-outline.md). */
+  todayPages: import('../providers/today-page-store-cache').TodayPageStoreCache;
   releaseScheduleStoreRef: (scheduleId: string) => void;
   /**
    * The workspace id used for IndexedDB/WebSocket connections.
