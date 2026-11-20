@@ -42,6 +42,25 @@ flowchart LR
   ([`native-workspace-meta-ipc.ts`](../../apps/electron/src/main/ipc/services/native-workspace-meta-ipc.ts)).
   Views are owned per window and dropped on navigation or destruction.
 
+## Host upgrades
+
+The host outlives the desktop and the daemon that started it, so after an
+upgrade the new Lody can find an earlier build's host still serving the data
+directory. The engine reports its protocol, build and capabilities (in
+`engine.json` and `engine_info`); a capability names a request or option and is
+never removed within a protocol version, so a newer build supersedes an older
+one. `connectNativeRepo` (daemon and desktop main alike) uses a host only when
+it serves every capability of the engine this Lody ships (`engineSatisfies`);
+otherwise it launches its own host, whose `ensureEngineHost` asks the older
+engine to hand off (`engine_handoff`: refuse new requests, finish those in
+flight, remove `engine.json`, release `files.lock`) and takes the directory.
+Committed data is already durable. An engine that predates handoff is waited out
+until it idles; clients of the earlier build reconnect to the successor, which
+serves them because it supersedes their build. An earlier Lody meeting a newer
+host attaches to it; a newer protocol stays `ENGINE_PROTOCOL_MISMATCH`. Covered
+by `native-workspace-meta.test.ts` (an earlier build's host still running) and
+the SDK's handoff tests (loro-repo `lody/engine-handshake-handoff`).
+
 ## One observation lifecycle
 
 `observe` in [`native-repo.ts`](../../packages/shared/src/node/native-repo.ts) is
