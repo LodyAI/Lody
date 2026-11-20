@@ -7,7 +7,7 @@ import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import type { PendingSessionSend } from '@/lib/session-pending-sends';
 import { deriveSessionSendProgress } from '@/lib/session-send-status';
 import { cn } from '@/lib/utils';
-import { QUEUE_LINE, queueSurface } from './surface';
+import { QUEUE_LINE, queuePreviewStyle, queueSurface } from './surface';
 import { IconAction, TextAction } from './message-queue-row';
 
 const MAX_INLINE_ATTACHMENTS = 3;
@@ -127,7 +127,7 @@ export function PendingQueueRow({
               'overflow-hidden',
               stylex.props(queueSurface.text, !instant && queueSurface.preparingText).className
             )}
-            style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}
+            style={queuePreviewStyle(false)}
           >
             {queuedText(record)}
           </div>

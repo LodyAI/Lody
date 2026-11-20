@@ -33,6 +33,8 @@ import {
   getMachineRoomId,
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   getSessionRoomId,
+  isPinOrderKey,
+  FractionalIndex,
   getSessionCancelRequestMarker,
   createSessionControlPlaneMirror,
   isLoroRepoDocDeleted,
@@ -142,9 +144,10 @@ vi.mock('../src/hooks/use-authenticated-convex', () => ({
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '../src/atoms/presence';
 import {
-  SessionArchiveConfirmationDialog,
+  SessionSubConversationConfirmationDialog,
   useArchiveSessionWithConfirmation,
-} from '../src/components/sessions/session-archive-confirmation';
+  useSettleSessionWithConfirmation,
+} from '../src/components/sessions/session-sub-conversation-confirmation';
 import { initI18n } from '../src/i18n';
 import { docMetaCacheReadyAtom, sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import {
@@ -182,14 +185,23 @@ import {
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
-type ConfirmedArchive = (sessionId: SessionId, options?: { confirm?: boolean }) => Promise<boolean>;
+type ConfirmedAction = (sessionId: SessionId, options?: { confirm?: boolean }) => Promise<boolean>;
 
-function ConfirmedArchiveProbe({ onReady }: { onReady: (archive: ConfirmedArchive) => void }) {
-  const archive = useArchiveSessionWithConfirmation(useSessionActions().archiveSession);
+function ConfirmedActionProbe({
+  action,
+  onReady,
+}: {
+  action: 'archive' | 'settle';
+  onReady: (confirmed: ConfirmedAction) => void;
+}) {
+  const { archiveSession, settleSession } = useSessionActions();
+  const archive = useArchiveSessionWithConfirmation(archiveSession);
+  const settle = useSettleSessionWithConfirmation(settleSession);
+  const confirmed = action === 'archive' ? archive : settle;
   useEffect(() => {
-    onReady(archive);
-  }, [archive, onReady]);
-  return createElement(SessionArchiveConfirmationDialog);
+    onReady(confirmed);
+  }, [confirmed, onReady]);
+  return createElement(SessionSubConversationConfirmationDialog);
 }
 
 function ActionsProbe({ onReady }: { onReady: (actions: SessionActions) => void }) {
@@ -718,6 +730,55 @@ describe('useSessionActions', () => {
     expect(metaRepo.getSession(ordinaryId)).not.toHaveProperty('coordinator');
   });
 
+  it('writes a Focus orderKey below every existing key so a new top-level session leads 进行中', async () => {
+    const sessionId = 'session-focus-order' as SessionId;
+    const metaRepo = createSessionMetaRepo([]);
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const keyed = {
+      ...createSessionPayload('keyed-a' as SessionId),
+      id: 'keyed-a',
+      orderKey: 'a0',
+    };
+    const actions = await renderActions(runtime, {
+      sessionMetaCache: { [getSessionRoomId('keyed-a' as SessionId)]: keyed as SessionMeta },
+    });
+
+    const result = await actions.createSession(createSessionPayload(sessionId));
+
+    expect(isPinOrderKey(result.sessionMeta.orderKey)).toBe(true);
+    expect(FractionalIndex.compare(result.sessionMeta.orderKey!, 'a0')).toBeLessThan(0);
+    expect(metaRepo.getSession(sessionId)).toMatchObject({
+      orderKey: result.sessionMeta.orderKey,
+    });
+  });
+
+  it.each(['parentSessionId', 'openedBySessionId'] as const)(
+    'leaves a session without orderKey when it is created under an opener (%s)',
+    async (field) => {
+      const openerId = 'opener-session' as SessionId;
+      const sessionId = `child-via-${field}` as SessionId;
+      const metaRepo = createSessionMetaRepo([existingSession(openerId)]);
+      const runtime = createRuntime({ repo: metaRepo.repo });
+      const openerMeta = {
+        ...createSessionPayload(openerId),
+        id: openerId,
+        orderKey: 'a0',
+      } as SessionMeta;
+      const actions = await renderActions(runtime, {
+        sessionMetaCache: { [getSessionRoomId(openerId)]: openerMeta },
+      });
+
+      const result = await actions.createSession({
+        ...createSessionPayload(sessionId),
+        [field]: openerId,
+      } as SessionToCreate);
+
+      expect(result.sessionMeta.orderKey).toBeUndefined();
+      expect(metaRepo.getSession(sessionId)).not.toMatchObject({
+        orderKey: expect.anything(),
+      });
+    }
+  );
   const userInput = (text: string) =>
     ({
       role: 'user',
@@ -1303,111 +1364,120 @@ describe('useSessionActions', () => {
       expect(metaRepo.getSession(session.id)).toEqual(session);
   });
 
-  describe('archive confirmation for opened sub-conversations', () => {
-    const renderConfirmedArchive = async (runtime: WorkspaceRuntime, workingIds: SessionId[]) => {
-      await initI18n('en');
-      const jotaiStore = createStore();
-      jotaiStore.set(runtimeAtom, runtime);
-      jotaiStore.set(docMetaCacheReadyAtom, true);
-      jotaiStore.set(currentWorkspaceIdAtom, 'workspace-1' as WorkspaceId);
-      jotaiStore.set(currentWorkspaceSlugAtom, 'workspace-slug');
-      const nowMs = 1_000_000;
-      jotaiStore.set(lodyPresenceNowMsAtom, nowMs);
-      jotaiStore.set(
-        lodyPresenceStatesAtom,
-        Object.fromEntries(
-          workingIds.map((sessionId) => [
-            `presence-${sessionId}`,
-            {
-              kind: 'session',
-              sessionId,
-              machineId: 'machine' as MachineId,
-              instanceId: 'instance',
-              status: { type: 'running' },
-              updatedAt: nowMs,
-            },
-          ])
-        ) as never
-      );
-      let archive: ConfirmedArchive | null = null;
-      container = document.createElement('div');
-      document.body.appendChild(container);
-      root = createRoot(container);
-      await act(async () => {
-        root?.render(
+  const confirmationDialog = () => document.querySelector<HTMLElement>('[role="alertdialog"]');
+
+  const renderConfirmedAction = async (
+    action: 'archive' | 'settle',
+    runtime: WorkspaceRuntime,
+    workingIds: SessionId[]
+  ) => {
+    await initI18n('en');
+    const jotaiStore = createStore();
+    jotaiStore.set(runtimeAtom, runtime);
+    jotaiStore.set(docMetaCacheReadyAtom, true);
+    jotaiStore.set(currentWorkspaceIdAtom, 'workspace-1' as WorkspaceId);
+    jotaiStore.set(currentWorkspaceSlugAtom, 'workspace-slug');
+    const nowMs = 1_000_000;
+    jotaiStore.set(lodyPresenceNowMsAtom, nowMs);
+    jotaiStore.set(
+      lodyPresenceStatesAtom,
+      Object.fromEntries(
+        workingIds.map((sessionId) => [
+          `presence-${sessionId}`,
+          {
+            kind: 'session',
+            sessionId,
+            machineId: 'machine' as MachineId,
+            instanceId: 'instance',
+            status: { type: 'running' },
+            updatedAt: nowMs,
+          },
+        ])
+      ) as never
+    );
+    let confirmed: ConfirmedAction | null = null;
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        createElement(
+          PlatformContext.Provider,
+          { value: { ...testPlatform, kind: 'local' } },
           createElement(
-            PlatformContext.Provider,
-            { value: { ...testPlatform, kind: 'local' } },
-            createElement(
-              Provider,
-              { store: jotaiStore },
-              createElement(ConfirmedArchiveProbe, {
-                onReady: (next) => {
-                  archive = next;
-                },
-              })
-            )
+            Provider,
+            { store: jotaiStore },
+            createElement(ConfirmedActionProbe, {
+              action,
+              onReady: (next) => {
+                confirmed = next;
+              },
+            })
           )
-        );
-      });
-      if (!archive) throw new Error('Confirmed archive was not initialized');
-      return archive as ConfirmedArchive;
-    };
-
-    const dialog = () => document.querySelector<HTMLElement>('[role="alertdialog"]');
-    // Wrapped: returning the pending promise would make the caller await the answer.
-    const startArchive = async (
-      archive: ConfirmedArchive,
-      sessionId: SessionId,
-      options?: { confirm?: boolean }
-    ) => {
-      let result!: Promise<boolean>;
-      await act(async () => {
-        result = archive(sessionId, options);
-      });
-      await vi.waitFor(() => expect(dialog()).not.toBeNull());
-      return { result };
-    };
-    const answer = async (label: string) => {
-      const button = Array.from(dialog()!.querySelectorAll('button')).find(
-        (candidate) => candidate.textContent?.trim() === label
+        )
       );
-      expect(button).toBeInstanceOf(HTMLButtonElement);
-      await act(async () => button!.click());
-    };
+    });
+    if (!confirmed) throw new Error('Confirmed action was not initialized');
+    return confirmed;
+  };
 
-    const createTree = (prefix: string) => {
-      const tree = createContainmentSessions(prefix, false);
-      const openedTab = {
-        ...tree.tabSession,
-        id: `${prefix}-opened-tab` as SessionId,
-        parentSessionId: tree.openedSession.id,
-        openedBySessionId: tree.openedSession.id,
-      };
-      const archivedOpened = {
-        ...tree.openedSession,
-        id: `${prefix}-archived-opened` as SessionId,
-        isArchived: true,
-      };
-      const metaRepo = createSessionMetaRepo([...tree.sessions, openedTab, archivedOpened]);
-      return { ...tree, openedTab, archivedOpened, metaRepo };
-    };
+  // Wrapped: returning the pending promise would make the caller await the answer.
+  const startConfirmation = async (
+    confirmed: ConfirmedAction,
+    sessionId: SessionId,
+    options?: { confirm?: boolean }
+  ) => {
+    let result!: Promise<boolean>;
+    await act(async () => {
+      result = confirmed(sessionId, options);
+    });
+    await vi.waitFor(() => expect(confirmationDialog()).not.toBeNull());
+    return { result };
+  };
 
+  const answerConfirmation = async (label: string) => {
+    const button = Array.from(confirmationDialog()!.querySelectorAll('button')).find(
+      (candidate) => candidate.textContent?.trim() === label
+    );
+    expect(button).toBeInstanceOf(HTMLButtonElement);
+    await act(async () => button!.click());
+  };
+
+  const createOpenedSubTree = (prefix: string) => {
+    const tree = createContainmentSessions(prefix, false);
+    const openedTab = {
+      ...tree.tabSession,
+      id: `${prefix}-opened-tab` as SessionId,
+      parentSessionId: tree.openedSession.id,
+      openedBySessionId: tree.openedSession.id,
+    };
+    const archivedOpened = {
+      ...tree.openedSession,
+      id: `${prefix}-archived-opened` as SessionId,
+      isArchived: true,
+    };
+    const metaRepo = createSessionMetaRepo([...tree.sessions, openedTab, archivedOpened]);
+    return { ...tree, openedTab, archivedOpened, metaRepo };
+  };
+
+  describe('archive confirmation for opened sub-conversations', () => {
     it('counts active and working sub-conversations, then archives the whole tree', async () => {
-      const tree = createTree('confirm-all');
+      const tree = createOpenedSubTree('confirm-all');
       const runtime = createRuntime({ repo: tree.metaRepo.repo });
       // Work in an opened Session's own Tab makes that sub-conversation working.
-      const archive = await renderConfirmedArchive(runtime, [tree.openedTab.id]);
+      const archive = await renderConfirmedAction('archive', runtime, [tree.openedTab.id]);
 
-      const { result } = await startArchive(archive, tree.rootSession.id);
-      expect(dialog()?.textContent).toContain(
+      const { result } = await startConfirmation(archive, tree.rootSession.id);
+      expect(confirmationDialog()?.textContent).toContain(
         'This conversation opened 2 active sub-conversations.'
       );
-      expect(dialog()?.textContent).toContain('1 is still working; archiving it stops that work.');
+      expect(confirmationDialog()?.textContent).toContain(
+        '1 is still working; archiving it stops that work.'
+      );
       // Nothing is written while the user decides.
       expect(tree.metaRepo.getSession(tree.rootSession.id)?.isArchived).toBe(false);
 
-      await answer('Archive all');
+      await answerConfirmation('Archive all');
       await expect(result).resolves.toBe(true);
       for (const session of [
         tree.rootSession,
@@ -1418,22 +1488,22 @@ describe('useSessionActions', () => {
       ]) {
         expect(tree.metaRepo.getSession(session.id)?.isArchived).toBe(true);
       }
-      expect(dialog()).toBeNull();
+      expect(confirmationDialog()).toBeNull();
     });
 
     it('archives only the conversation and its Tabs, or nothing on cancel', async () => {
-      const tree = createTree('confirm-only');
+      const tree = createOpenedSubTree('confirm-only');
       const runtime = createRuntime({ repo: tree.metaRepo.repo });
-      const archive = await renderConfirmedArchive(runtime, []);
+      const archive = await renderConfirmedAction('archive', runtime, []);
 
-      const { result: cancelled } = await startArchive(archive, tree.rootSession.id);
-      expect(dialog()?.textContent).toContain('None of them is working right now.');
-      await answer('Cancel');
+      const { result: cancelled } = await startConfirmation(archive, tree.rootSession.id);
+      expect(confirmationDialog()?.textContent).toContain('None of them is working right now.');
+      await answerConfirmation('Cancel');
       await expect(cancelled).resolves.toBe(false);
       expect(tree.metaRepo.getSession(tree.rootSession.id)?.isArchived).toBe(false);
 
-      const { result: onlyThis } = await startArchive(archive, tree.rootSession.id);
-      await answer('Archive this only');
+      const { result: onlyThis } = await startConfirmation(archive, tree.rootSession.id);
+      await answerConfirmation('Archive this only');
       await expect(onlyThis).resolves.toBe(true);
       for (const session of [tree.rootSession, tree.tabSession]) {
         expect(tree.metaRepo.getSession(session.id)?.isArchived).toBe(true);
@@ -1444,41 +1514,109 @@ describe('useSessionActions', () => {
     });
 
     it('archives directly when every opened sub-conversation is already archived', async () => {
-      const tree = createTree('confirm-none');
+      const tree = createOpenedSubTree('confirm-none');
       const runtime = createRuntime({ repo: tree.metaRepo.repo });
-      const archive = await renderConfirmedArchive(runtime, []);
+      const archive = await renderConfirmedAction('archive', runtime, []);
 
       await act(async () => {
         await expect(archive(tree.archivedOpened.id)).resolves.toBe(true);
       });
-      expect(dialog()).toBeNull();
+      expect(confirmationDialog()).toBeNull();
       expect(tree.metaRepo.getSession(tree.archivedOpened.id)?.isArchived).toBe(true);
     });
 
     it('asks one question when confirmation is always required', async () => {
-      const tree = createTree('confirm-always');
+      const tree = createOpenedSubTree('confirm-always');
       const runtime = createRuntime({ repo: tree.metaRepo.repo });
-      const archive = await renderConfirmedArchive(runtime, []);
+      const archive = await renderConfirmedAction('archive', runtime, []);
 
       // Without sub-conversations, the shared dialog asks the plain question.
-      const { result: plain } = await startArchive(archive, tree.archivedOpened.id, {
+      const { result: plain } = await startConfirmation(archive, tree.archivedOpened.id, {
         confirm: true,
       });
-      expect(dialog()?.textContent).toContain('Archive chat?');
-      expect(dialog()?.textContent).not.toContain('sub-conversation');
-      await answer('Archive');
+      expect(confirmationDialog()?.textContent).toContain('Archive chat?');
+      expect(confirmationDialog()?.textContent).not.toContain('sub-conversation');
+      await answerConfirmation('Archive');
       await expect(plain).resolves.toBe(true);
       expect(tree.metaRepo.getSession(tree.archivedOpened.id)?.isArchived).toBe(true);
 
       // With them, the sub-conversation choice is the only dialog.
-      const { result: treeArchive } = await startArchive(archive, tree.rootSession.id, {
+      const { result: treeArchive } = await startConfirmation(archive, tree.rootSession.id, {
         confirm: true,
       });
       expect(document.querySelectorAll('[role="alertdialog"]')).toHaveLength(1);
-      expect(dialog()?.textContent).toContain('Archive sub-conversations too?');
-      await answer('Archive all');
+      expect(confirmationDialog()?.textContent).toContain('Archive sub-conversations too?');
+      await answerConfirmation('Archive all');
       await expect(treeArchive).resolves.toBe(true);
       expect(tree.metaRepo.getSession(tree.openedSession.id)?.isArchived).toBe(true);
+    });
+  });
+
+  describe('settle confirmation for opened sub-conversations', () => {
+    it('asks, then settles every opened sub-conversation on "all"', async () => {
+      const tree = createOpenedSubTree('settle-all');
+      // A snoozed sub-conversation wakes by settling, not by keeping its timer.
+      tree.metaRepo.setMeta(getSessionRoomId(tree.openedSession.id), {
+        ...tree.openedSession,
+        snoozedUntil: Date.now() + 60_000,
+      });
+      const runtime = createRuntime({ repo: tree.metaRepo.repo });
+      // Work in an opened Session's own Tab makes that sub-conversation working.
+      const settle = await renderConfirmedAction('settle', runtime, [tree.openedTab.id]);
+
+      const { result } = await startConfirmation(settle, tree.rootSession.id);
+      expect(confirmationDialog()?.textContent).toContain(
+        'This conversation opened 2 active sub-conversations.'
+      );
+      expect(confirmationDialog()?.textContent).toContain('1 is still working.');
+      // Nothing is written while the user decides.
+      expect(tree.metaRepo.getSession(tree.rootSession.id)?.settledAt).toBeUndefined();
+
+      await answerConfirmation('Mark all as completed');
+      await expect(result).resolves.toBe(true);
+      // Opened Sessions settle; contained Tabs keep no status fields of their own.
+      for (const session of [tree.rootSession, tree.openedSession, tree.openedFromTabSession]) {
+        expect(tree.metaRepo.getSession(session.id)?.settledAt).toBeGreaterThan(0);
+        expect(tree.metaRepo.getSession(session.id)?.snoozedUntil).toBeUndefined();
+      }
+      for (const session of [tree.tabSession, tree.openedTab]) {
+        expect(tree.metaRepo.getSession(session.id)?.settledAt).toBeUndefined();
+      }
+      expect(confirmationDialog()).toBeNull();
+    });
+
+    it('settles only the conversation, or nothing on cancel', async () => {
+      const tree = createOpenedSubTree('settle-only');
+      const runtime = createRuntime({ repo: tree.metaRepo.repo });
+      const settle = await renderConfirmedAction('settle', runtime, []);
+
+      const { result: cancelled } = await startConfirmation(settle, tree.rootSession.id);
+      expect(confirmationDialog()?.textContent).toContain('None of them is working right now.');
+      await answerConfirmation('Cancel');
+      await expect(cancelled).resolves.toBe(false);
+      for (const session of [tree.rootSession, tree.openedSession]) {
+        expect(tree.metaRepo.getSession(session.id)?.settledAt).toBeUndefined();
+      }
+
+      const { result: onlyThis } = await startConfirmation(settle, tree.rootSession.id);
+      await answerConfirmation('Mark this only');
+      await expect(onlyThis).resolves.toBe(true);
+      expect(tree.metaRepo.getSession(tree.rootSession.id)?.settledAt).toBeGreaterThan(0);
+      for (const session of [tree.openedSession, tree.openedFromTabSession]) {
+        expect(tree.metaRepo.getSession(session.id)?.settledAt).toBeUndefined();
+      }
+    });
+
+    it('settles directly when there are no active sub-conversations', async () => {
+      const tree = createOpenedSubTree('settle-none');
+      const runtime = createRuntime({ repo: tree.metaRepo.repo });
+      const settle = await renderConfirmedAction('settle', runtime, []);
+
+      await act(async () => {
+        await expect(settle(tree.archivedOpened.id)).resolves.toBe(true);
+      });
+      expect(confirmationDialog()).toBeNull();
+      expect(tree.metaRepo.getSession(tree.archivedOpened.id)?.settledAt).toBeGreaterThan(0);
     });
   });
 

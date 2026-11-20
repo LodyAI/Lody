@@ -60,6 +60,11 @@ export type AcpModelOptionsReadProgress = {
  * answers from holding the refresh forever.
  */
 export const ACP_MODEL_OPTIONS_SWITCH_TIMEOUT_MS = 60_000;
+/**
+ * Standard ACP agents advertise slash commands in a notification after `session/new`.
+ * The probe waits this long for it; an agent that never advertises keeps an empty preview.
+ */
+export const ACP_PROBE_COMMANDS_WAIT_MS = 2_000;
 
 export type FetchedAcpCapabilities = AcpCapabilitiesResult & {
   capabilitySourceVersion?: string;
@@ -225,6 +230,11 @@ export async function fetchAcpCapabilities(
       });
 
     try {
+      // Started before verification and model reads so the wait overlaps them.
+      const advertisedCommands = client.waitForAvailableCommands(
+        ACP_PROBE_COMMANDS_WAIT_MS,
+        options.signal
+      );
       if (
         options.verifyCodexCredential &&
         options.codexProfile?.profile.profile.mode === 'api-key'
@@ -317,8 +327,12 @@ export async function fetchAcpCapabilities(
             signal: options.signal,
           })
         : undefined;
+      // AgentClient already holds response commands, so this resolves at once for them.
+      const availableCommands = (await advertisedCommands) ?? capabilities.availableCommands;
+      options.signal?.throwIfAborted();
       return {
         ...capabilities,
+        availableCommands,
         capabilitySourceVersion,
         authMethods: client.getAuthMethods(),
         ...(modelConfigOptions ? { modelConfigOptions } : {}),

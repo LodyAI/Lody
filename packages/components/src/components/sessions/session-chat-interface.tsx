@@ -59,11 +59,14 @@ import { createPortal } from 'react-dom';
 import { useOpenSettings } from '../../hooks/use-open-settings';
 import { v4 as uuidv4 } from 'uuid';
 import {
+  AlarmClock,
   Network,
   ArrowDown,
   ArrowUp,
+  ArrowUpCircle,
   Archive,
   ArchiveRestore,
+  CheckCircle2,
   ChevronDown,
   Copy,
   CornerLeftUp,
@@ -87,12 +90,15 @@ import {
   Search,
   Share2,
   SquareArrowOutUpRight,
+  Timer,
   Trash2,
   UserRoundCog,
   Users,
   X,
 } from 'lucide-react';
 import { useChangeCoordinatorAction } from '@/components/project-mode/use-change-coordinator';
+import { buildSnoozePresets, sidebarStatusGroup } from '@/lib/sidebar-status-group';
+import { CustomSnoozeDialog, type CustomSnoozeDialogTarget } from '../sidebar-status-snooze-dialog';
 import { useRouter } from '@tanstack/react-router';
 import { Spinner } from '@lody/ui/spinner';
 import { Switch } from '@lody/ui/switch';
@@ -281,6 +287,7 @@ import { SessionInfoBar } from './session-info-bar';
 import { SessionPreviewPreload } from './session-preview-preload';
 import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
 import { SessionProjectMembersChip } from './session-project-members-chip';
+import { useSettleSessionWithConfirmation } from './session-sub-conversation-confirmation';
 import {
   buildSessionProjectMemberRows,
   resolveSessionProjectMemberRow,
@@ -1373,6 +1380,9 @@ export function SessionHeaderMenu({
   onForkMenuOpen,
   onRename,
   onChangeCoordinator,
+  onSnooze,
+  onSettle,
+  onMoveToFocus,
   owner,
   openedByRelations,
   onArchive,
@@ -1406,6 +1416,9 @@ export function SessionHeaderMenu({
   onRename?: () => void | Promise<void>;
   /** Project mode (Developer mode): leave this coordinator and start a new one for the project. */
   onChangeCoordinator?: () => void;
+  onSnooze?: (snoozedUntil: number) => void | Promise<void>;
+  onSettle?: () => void | Promise<void>;
+  onMoveToFocus?: () => void | Promise<void>;
   /** Multi-member workspaces only; omitted elsewhere. */
   owner?: SessionOwnerMenuState;
   /** Omitted when this Session neither opened nor was opened by another. */
@@ -1430,6 +1443,21 @@ export function SessionHeaderMenu({
   const sharingReason = useWorkspaceFeatureReason('sharing');
   const previewReason = useWorkspaceFeatureReason('remote-preview');
   const isArchived = !!session.isArchived;
+  const [customSnoozeTarget, setCustomSnoozeTarget] = useState<CustomSnoozeDialogTarget | null>(
+    null
+  );
+  const statusNow = new Date();
+  const statusGroup = sidebarStatusGroup(
+    {
+      latestMessageAt: session.lastMessageAt ?? session.createdAt,
+      isWorking: session.status?.type === 'running' || session.status?.type === 'initializing',
+      isWaitingPermission: session.status?.type === 'requestPermission',
+      snoozedUntil: session.snoozedUntil,
+      settledAt: session.settledAt,
+      focusRestoredAt: session.focusRestoredAt,
+    },
+    statusNow.getTime()
+  );
   const project = session.project as
     | { kind: 'github'; repoFullName?: string; branch?: string }
     | { kind: 'local'; localProjectId?: string; branch?: string; githubRepoFullName?: string }
@@ -1873,6 +1901,60 @@ export function SessionHeaderMenu({
             </Menu.Item>
           ) : null}
 
+          {!isArchived && (onSnooze || onSettle || onMoveToFocus) ? (
+            <>
+              {onSnooze ? (
+                <Menu.Submenu>
+                  <Menu.SubmenuTrigger icon={AlarmClock}>
+                    {t('sessions.contextMenu.snooze', 'Later')}
+                  </Menu.SubmenuTrigger>
+                  <Menu.Content className="min-w-[200px]">
+                    {buildSnoozePresets(statusNow).map((preset) => {
+                      const label =
+                        preset.id === 'laterToday'
+                          ? t('sessions.contextMenu.snoozeLaterToday', 'Later today')
+                          : preset.id === 'tomorrowMorning'
+                            ? t('sessions.contextMenu.snoozeTomorrowMorning', 'Tomorrow morning')
+                            : t('sessions.contextMenu.snoozeNextWeek', 'Next week');
+                      return (
+                        <Menu.Item key={preset.id} onClick={() => void onSnooze(preset.timestamp)}>
+                          <span className="flex w-full items-center justify-between gap-4">
+                            <span>{label}</span>
+                            <span className="text-[11px] tabular-nums text-muted-foreground">
+                              {preset.countdown}
+                            </span>
+                          </span>
+                        </Menu.Item>
+                      );
+                    })}
+                    <Menu.Separator />
+                    <Menu.Item
+                      icon={Timer}
+                      onClick={() =>
+                        setCustomSnoozeTarget({
+                          sessionId: session.id,
+                          title: session.title ?? '',
+                        })
+                      }
+                    >
+                      {t('sessions.contextMenu.snoozeCustom', 'Custom time…')}
+                    </Menu.Item>
+                  </Menu.Content>
+                </Menu.Submenu>
+              ) : null}
+              {statusGroup !== 'settled' && onSettle ? (
+                <Menu.Item icon={CheckCircle2} onClick={() => void onSettle()}>
+                  {t('sessions.contextMenu.settle', 'Settle')}
+                </Menu.Item>
+              ) : null}
+              {statusGroup !== 'focus' && onMoveToFocus ? (
+                <Menu.Item icon={ArrowUpCircle} onClick={() => void onMoveToFocus()}>
+                  {t('sessions.contextMenu.moveToFocus', 'Move to Focus')}
+                </Menu.Item>
+              ) : null}
+            </>
+          ) : null}
+
           {owner && !isArchived ? (
             <Menu.Submenu>
               <Menu.SubmenuTrigger icon={UserRoundCog}>
@@ -2101,6 +2183,14 @@ export function SessionHeaderMenu({
               )}
         </Menu.Content>
       </Menu.Root>
+      {onSnooze ? (
+        <CustomSnoozeDialog
+          target={customSnoozeTarget}
+          now={statusNow}
+          onClose={() => setCustomSnoozeTarget(null)}
+          onConfirm={(_sessionId, snoozedUntil) => void onSnooze(snoozedUntil)}
+        />
+      ) : null}
     </>
   );
 }
@@ -3143,7 +3233,11 @@ export const SessionChatInterface = memo(
       transferSessionOwner,
       setTreeCollaborationStopped,
       updateSessionMetadata,
+      snoozeSession,
+      settleSession,
+      moveSessionToFocus,
     } = useSessionActions();
+    const settleSessionWithConfirmation = useSettleSessionWithConfirmation(settleSession);
     const [renameDialogTarget, setRenameDialogTarget] = useState<RenameSessionDialogTarget | null>(
       null
     );
@@ -4388,6 +4482,7 @@ export const SessionChatInterface = memo(
     useSessionDocStaleReport({
       sessionId: session.id,
       docReady: sessionDocReady && !hideMessageArea,
+      syncEnabled: !hideMessageArea && syncEnabled,
       machineOnlineStatus: sessionMachineOnlineStatus,
       agentBusy: isAgentBusy,
       activeAssistantTurnId: activeAssistantTurnId ?? null,
@@ -6496,113 +6591,69 @@ export const SessionChatInterface = memo(
       workspaceId,
     ]);
 
-    const handleInterruptAndSend = useCallback(
+    const handleSteerQueuedMessage = useCallback(
       async (item: MessageQueueItem) => {
-        if (isExternalHistoryRefreshing) {
-          captureSessionEvent('session/queue_interrupt_blocked', {
-            reason: 'external_history_syncing',
-            queue_item_id: item.$cid,
-          });
-          return;
-        }
-        if (!workspaceId || !activeAssistantTurnId) {
-          captureSessionEvent('session/queue_interrupt_blocked', {
-            reason: !workspaceId ? 'missing_workspace' : 'missing_active_turn',
-            queue_item_id: item.$cid,
-          });
-          toast.error(t('sessions.interruptFailed', 'Failed to interrupt current task'));
-          return;
-        }
-        setInputActionState('ready');
-        pendingUserInterruptRef.current = true;
-        try {
-          // Not a Stop: the queued item must stay eligible to run next.
-          await requestSessionCancel(session.id, activeAssistantTurnId, { interrupt: true });
-          captureSessionEvent('session/queue_interrupt_succeeded', {
-            queue_item_id: item.$cid,
-            active_assistant_turn_id: activeAssistantTurnId,
-          });
-        } catch (error) {
-          console.error('Failed to interrupt for queued message', error);
-          pendingUserInterruptRef.current = false;
-          captureSessionEvent('session/queue_interrupt_failed', {
-            queue_item_id: item.$cid,
-            active_assistant_turn_id: activeAssistantTurnId,
-            error_name: error instanceof Error ? error.name : typeof error,
-            error_message: getErrorMessage(error),
-          });
-          toast.error(t('sessions.interruptFailed', 'Failed to interrupt current task'), {
-            description: getErrorMessage(error),
-          });
-        }
-      },
-      [
-        activeAssistantTurnId,
-        captureSessionEvent,
-        isExternalHistoryRefreshing,
-        requestSessionCancel,
-        session.id,
-        t,
-        workspaceId,
-      ]
-    );
-
-    const handleNativeSteerQueuedMessage = useCallback(
-      async (item: MessageQueueItem) => {
-        if (isExternalHistoryRefreshing || !activeAssistantTurnId) {
-          return;
-        }
-        if (steeringQueueItemIdsRef.current.has(item.$cid)) {
-          return;
-        }
+        if (isExternalHistoryRefreshing || steeringQueueItemIdsRef.current.has(item.$cid)) return;
+        const targetTurnId = activeAssistantTurnId;
+        const guide = Boolean(isSessionActive && targetTurnId && nativeSteerAvailable);
+        if (targetTurnId && !guide && !item.paused && messageQueue[0]?.$cid !== item.$cid) return;
         steeringQueueItemIdsRef.current.add(item.$cid);
         try {
-          const inputConfig = normalizeSessionTurnInputConfig(item.acpSessionConfig);
-          if (!inputConfig) {
-            throw new Error('Queued message input config is invalid');
+          if (runtime) {
+            const current = await runtime.sendResources.withSessionStore(session.id, (store) =>
+              store.getState().mq?.find((row) => row.$cid === item.$cid)
+            );
+            if (!current) return;
+            item = current as MessageQueueItem;
           }
+          const inputConfig = normalizeSessionTurnInputConfig(item.acpSessionConfig);
+          if (!inputConfig) throw new Error('Queued message input config is invalid');
           const inputBlocks = normalizeSessionInputBlocks(
             inputConfig.inputBlocks,
             inputConfig.prompt ?? item.task
           );
           const pendingHistoryEntry = buildDraftUserHistoryEntry({
-            userId: item.userId,
+            userId: item.paused
+              ? ((runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+                currentUser?.id ??
+                session.userId)
+              : item.userId,
             inputBlocks,
-            timestamp: item.timestamp,
+            timestamp: item.paused ? new Date().toISOString() : item.timestamp,
             inputConfig,
-            status: 'pending_apply',
+            status: guide ? 'pending_apply' : 'pending',
           });
-          if (!pendingHistoryEntry) {
-            throw new Error('Queued message is empty');
-          }
-          const queuedUserTurnId = item.userTurnId?.trim() || `queued-${item.$cid}`;
-          // History first, then the queue row: the input is never absent from both.
-          const { entry: historyEntry } = await addSessionHistory(
-            { ...pendingHistoryEntry, id: queuedUserTurnId },
-            { guideExpectedTurnId: activeAssistantTurnId }
+          if (!pendingHistoryEntry) throw new Error('Queued message is empty');
+          const originalTurnId = item.userTurnId?.trim() || `queued-${item.$cid}`;
+          // Stop's cancellation receipt stays final. An explicit resend owns a
+          // distinct, stable id so retries cannot revive or duplicate the old input.
+          const userTurnId = item.paused ? `queue-resend:${originalTurnId}` : originalTurnId;
+          const { entry } = await addSessionHistory(
+            { ...pendingHistoryEntry, id: userTurnId },
+            guide && targetTurnId ? { guideExpectedTurnId: targetTurnId } : { dispatch: true }
           );
           await removeMessageQueueItem(item.$cid);
-          trackMessageSend(historyEntry.id);
-          touchSessionActivity(session.id).catch((error: unknown) => {
-            console.warn('Failed to update session activity for steer', error);
+          trackMessageSend(entry.id);
+          void touchSessionActivity(session.id).catch((error: unknown) => {
+            console.warn('Failed to update session activity for queued send', error);
           });
-          const applied = await guideHistoryEntry(historyEntry.id, activeAssistantTurnId);
-          captureSessionEvent('session/queue_guide_result', {
-            queue_item_id: item.$cid,
-            active_assistant_turn_id: activeAssistantTurnId,
-            applied,
-          });
+          if (guide && targetTurnId) {
+            await guideHistoryEntry(entry.id, targetTurnId);
+          } else {
+            if (targetTurnId) {
+              pendingUserInterruptRef.current = true;
+              await requestSessionCancel(session.id, targetTurnId, { interrupt: true });
+            }
+            await requestSessionDispatch(session.id, entry.id, {
+              inputConfig,
+              machineId: session.machineId,
+            });
+            anchorChatToMessage(entry.id);
+          }
         } catch (error) {
-          console.error('Failed to guide with queued message', error);
-          captureSessionEvent('session/queue_guide_failed', {
-            queue_item_id: item.$cid,
-            active_assistant_turn_id: activeAssistantTurnId,
-            error_name: error instanceof Error ? error.name : typeof error,
-            error_message: getErrorMessage(error),
-          });
-          toast.error(t('sessions.sendError'), {
-            description: getErrorMessage(error),
-          });
+          pendingUserInterruptRef.current = false;
+          console.error('Failed to send queued message', error);
+          toast.error(t('sessions.sendError'), { description: getErrorMessage(error) });
         } finally {
           steeringQueueItemIdsRef.current.delete(item.$cid);
         }
@@ -6610,32 +6661,24 @@ export const SessionChatInterface = memo(
       [
         activeAssistantTurnId,
         addSessionHistory,
-        captureSessionEvent,
+        anchorChatToMessage,
+        currentUser?.id,
         guideHistoryEntry,
         isExternalHistoryRefreshing,
+        isSessionActive,
+        messageQueue,
+        nativeSteerAvailable,
         removeMessageQueueItem,
+        requestSessionCancel,
+        requestSessionDispatch,
+        runtime,
         session.id,
+        session.machineId,
+        session.userId,
         t,
-        touchSessionActivity,
         trackMessageSend,
+        touchSessionActivity,
       ]
-    );
-
-    const handleSteerQueuedMessage = useCallback(
-      async (item: MessageQueueItem) => {
-        // Interrupt-and-send always runs the queue head next, so it is only a
-        // valid steer substitute for the first item. Later items are steerable
-        // exclusively through native acknowledged steering.
-        if (messageQueue[0]?.$cid !== item.$cid && !nativeSteerAvailable) {
-          return;
-        }
-        if (nativeSteerAvailable) {
-          await handleNativeSteerQueuedMessage(item);
-          return;
-        }
-        await handleInterruptAndSend(item);
-      },
-      [handleInterruptAndSend, handleNativeSteerQueuedMessage, messageQueue, nativeSteerAvailable]
     );
 
     const handleReorderQueueItem = useCallback(
@@ -7298,6 +7341,19 @@ export const SessionChatInterface = memo(
                 }
         }
         onChangeCoordinator={changeCoordinator}
+        onSnooze={
+          headerSharing?.access !== 'read'
+            ? (snoozedUntil) => snoozeSession(session.id, snoozedUntil)
+            : undefined
+        }
+        onSettle={
+          headerSharing?.access !== 'read'
+            ? () => settleSessionWithConfirmation(session.id).then(() => undefined)
+            : undefined
+        }
+        onMoveToFocus={
+          headerSharing?.access !== 'read' ? () => moveSessionToFocus(session.id) : undefined
+        }
         owner={ownerMenuState}
         openedByRelations={openedByRelations}
         onArchive={toolbarActions ? toolbarActions.onArchiveSession : onArchiveSession}
@@ -7821,12 +7877,9 @@ export const SessionChatInterface = memo(
                               onEditCancel={handleCancelQueueItemEdit}
                               onEditSave={handleSaveQueueItemEdit}
                               onSteer={handleSteerQueuedMessage}
-                              showSteerAction={
-                                isSessionActive &&
-                                !!activeAssistantTurnId &&
-                                !isExternalHistoryRefreshing
-                              }
+                              showSteerAction={!isExternalHistoryRefreshing}
                               nativeSteerAvailable={nativeSteerAvailable}
+                              sendWhileIdle={!activeAssistantTurnId}
                               roomy={isMobile}
                               footerPosition={isMobile ? 'inline' : 'below'}
                             />

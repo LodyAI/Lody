@@ -37,6 +37,16 @@ const REJOIN_SWEEP_CONCURRENCY = 4;
 // rooms are errored. Leftovers wait for the next watchdog pass.
 const REJOIN_SWEEP_MAX_BATCHES = 3;
 /**
+ * Ceiling for the watchdog's per-room retry of a room that STAYS errored.
+ * Rejoining a room whose initial sync never completed has no saved cursor, so
+ * every attempt re-downloads the whole stream (a 24 MiB cold session stream was
+ * fetched on every 30 s tick in production). Each room's retry interval doubles
+ * while that room stays errored, up to this cap; other rooms are unaffected.
+ */
+const WATCHDOG_ERRORED_ROOM_MAX_DELAY_MS = 5 * 60_000;
+const streamsRoomKey = (entry: RepoTransportRoomEntry): string =>
+  `${entry.room.kind}:${entry.room.id}`;
+/**
  * Floor on how often the EXPENSIVE `meta-room-synced` fan-out may run.
  *
  * Its listeners do O(rooms) rescans, so the trigger rate is what decides
@@ -156,6 +166,8 @@ export class LoroConnectionRecoveryController {
   private roomSweepTimer: NodeJS.Timeout | null = null;
   private roomSweepAttempt = 0;
   private lastRoomSweepScheduledMs: number | null = null;
+  /** Per-room watchdog retry state for rooms that stayed `error` after a rejoin. */
+  private readonly erroredRoomBackoff = new Map<string, { attempt: number; nextAtMs: number }>();
   private reconnectInterval: NodeJS.Timeout | null = null;
   private activeOperation: Promise<void> | null = null;
   private streamsRecoveryGeneration = 0;
@@ -900,6 +912,10 @@ export class LoroConnectionRecoveryController {
       // streams-crdt exits that room's loops permanently and nothing else
       // supervises it, so CLI-authored ops for the room never reach the cloud
       // until a daemon restart. Sweep instead of returning early.
+      if (reason === 'watchdog') {
+        await this.watchdogRoomSweep(reason);
+        return;
+      }
       await this.sweepRooms(reason);
       return;
     }
@@ -967,6 +983,64 @@ export class LoroConnectionRecoveryController {
   }
 
   /**
+   * Healthy watchdog tick with per-room backoff. `repo.reconnect()` and
+   * {@link rejoinFailedStreamsBindings} rejoin every errored room with no
+   * per-room backoff, and a cursor-less rejoin re-reads the full stream, so a
+   * permanently failing room would otherwise cost one full download per tick.
+   *
+   * When no errored room is backing off, run the ordinary sweep. Otherwise skip
+   * `repo.reconnect()` (it would rejoin the backed-off rooms too) and rejoin only
+   * the rooms that are due: a room never attempted, or whose backoff expired.
+   * A room the time-budgeted batch did not reach is not recorded, so it stays
+   * due on the next tick. Rooms that leave `error` lose their backoff.
+   */
+  private async watchdogRoomSweep(reason: string): Promise<void> {
+    const errored = this.listErroredStreamsRooms();
+    if (errored === null) {
+      // Enumeration failure keeps the previous, unthrottled sweep behavior.
+      await this.sweepRooms(reason);
+      return;
+    }
+    const erroredKeys = new Set(errored.map(streamsRoomKey));
+    for (const key of this.erroredRoomBackoff.keys()) {
+      if (!erroredKeys.has(key)) this.erroredRoomBackoff.delete(key);
+    }
+    const now = Date.now();
+    const due = errored.filter(
+      (entry) => (this.erroredRoomBackoff.get(streamsRoomKey(entry))?.nextAtMs ?? 0) <= now
+    );
+    if (due.length === errored.length) {
+      // `repo.reconnect()` rejoins every errored room, so all of them are attempted.
+      for (const entry of errored) this.noteErroredRoomAttempt(streamsRoomKey(entry), now);
+      await this.sweepRooms(reason);
+      return;
+    }
+    if (due.length === 0) return;
+    const attempted = await this.rejoinFailedStreamsBindings(reason, due);
+    for (const entry of attempted) this.noteErroredRoomAttempt(streamsRoomKey(entry), now);
+  }
+
+  private noteErroredRoomAttempt(key: string, now: number): void {
+    const previous = this.erroredRoomBackoff.get(key)?.attempt ?? 0;
+    const intervalMs = readTimeoutEnv('LODY_LORO_AUTO_RECONNECT_INTERVAL_MS', 30_000);
+    const delayMs = Math.min(intervalMs * 2 ** previous, WATCHDOG_ERRORED_ROOM_MAX_DELAY_MS);
+    this.erroredRoomBackoff.set(key, {
+      attempt: Math.min(previous + 1, MAX_RECONNECT_ATTEMPT),
+      nextAtMs: now + delayMs,
+    });
+  }
+
+  private listErroredStreamsRooms(): RepoTransportRoomEntry[] | null {
+    try {
+      return this.repo
+        .transportRooms(STREAMS_TRANSPORT_ID)
+        .filter((entry) => entry.subscription.status === 'error');
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Repair owner for loro-repo-level failed attaches. `repo.addTransport`
    * resolves even when some rooms fail to attach (their 'streams' bindings sit
    * in 'error'), and `repo.reconnect()` only drives transport-level recovery —
@@ -975,22 +1049,27 @@ export class LoroConnectionRecoveryController {
    * path. 'detached' bindings are skipped: they mean the transport is absent
    * (deliberately offline), and rejoin cannot change that.
    */
-  private async rejoinFailedStreamsBindings(reason: string): Promise<void> {
-    let entries: RepoTransportRoomEntry[];
+  /** Returns the bindings it attempted; `only` restricts the sweep to those rooms. */
+  private async rejoinFailedStreamsBindings(
+    reason: string,
+    only?: readonly RepoTransportRoomEntry[]
+  ): Promise<RepoTransportRoomEntry[]> {
+    let entries: readonly RepoTransportRoomEntry[];
     try {
-      entries = this.repo.transportRooms(STREAMS_TRANSPORT_ID);
+      entries = only ?? this.repo.transportRooms(STREAMS_TRANSPORT_ID);
     } catch (error) {
       this.logger.debug(
         `[${this.workspaceId}] Failed to enumerate Streams transport rooms (reason=${reason}): ${formatErrorMessage(
           error
         )}`
       );
-      return;
+      return [];
     }
 
     const failed = entries.filter((entry) => entry.subscription.status === 'error');
+    const attempted: RepoTransportRoomEntry[] = [];
     if (failed.length === 0) {
-      return;
+      return attempted;
     }
 
     this.logger.debug(
@@ -1024,8 +1103,11 @@ export class LoroConnectionRecoveryController {
         );
         break;
       }
-      await Promise.all(failed.slice(index, index + REJOIN_SWEEP_CONCURRENCY).map(rejoinOne));
+      const batch = failed.slice(index, index + REJOIN_SWEEP_CONCURRENCY);
+      attempted.push(...batch);
+      await Promise.all(batch.map(rejoinOne));
     }
+    return attempted;
   }
 
   private async ensureMetaRoomJoined(reason: string): Promise<void> {

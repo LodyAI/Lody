@@ -13,14 +13,14 @@ import { Button } from '@lody/ui/button';
 import { AlertDialog } from '@/ui/dialog';
 
 /**
- * Archive with an explicit choice about opened sub-conversations.
+ * Confirmation for actions that optionally include opened sub-conversations.
  *
- * Archive itself takes only contained Tabs (`collectSessionArchiveTargets`): an
+ * Archive takes only contained Tabs and Settle only the target Session: an
  * opened Session is independent work. When the conversation has opened active
  * sub-conversations, the user decides whether they go too; the dialog says how
  * many there are and how many are still working, because archiving stops them.
- * Callers that always confirm (the easy-to-fire keyboard shortcut) use the same
- * dialog, which then asks the plain "Archive chat?" question, so no flow stacks
+ * Archive's always-confirm callers (the easy-to-fire keyboard shortcut) reuse
+ * the same dialog for the plain "Archive chat?" question, so no flow stacks
  * two confirmations.
  */
 
@@ -31,15 +31,18 @@ export type OpenedSubConversationSummary = {
   workingCount: number;
 };
 
-export type ArchiveChoice = 'tree' | 'session' | null;
+export type SubConversationAction = 'archive' | 'settle';
+
+export type SubConversationChoice = 'tree' | 'session' | null;
 
 const NO_SUB_CONVERSATIONS: OpenedSubConversationSummary = { count: 0, workingCount: 0 };
 
-type PendingArchiveConfirmation = OpenedSubConversationSummary & {
-  resolve: (choice: ArchiveChoice) => void;
+type PendingConfirmation = OpenedSubConversationSummary & {
+  action: SubConversationAction;
+  resolve: (choice: SubConversationChoice) => void;
 };
 
-const pendingArchiveConfirmationAtom = atom<PendingArchiveConfirmation | null>(null);
+const pendingConfirmationAtom = atom<PendingConfirmation | null>(null);
 
 /** `targets` is an `archive-tree` read: the root first, then its descendants. */
 export function summarizeOpenedSubConversations(
@@ -62,27 +65,68 @@ export function summarizeOpenedSubConversations(
   };
 }
 
-function isSessionWorking(states: LodyPresenceStateMap, nowMs: number) {
+export function isSessionWorking(states: LodyPresenceStateMap, nowMs: number) {
   return (sessionId: SessionId) =>
     findFreshSessionPresenceState(states, sessionId, nowMs)?.status != null;
 }
 
+function useConfirmationRequest(action: SubConversationAction) {
+  const store = useStore();
+  return useCallback(
+    (summary: OpenedSubConversationSummary) =>
+      new Promise<SubConversationChoice>((resolve) => {
+        // A newer request supersedes an unanswered one.
+        store.get(pendingConfirmationAtom)?.resolve(null);
+        store.set(pendingConfirmationAtom, { action, ...summary, resolve });
+      }),
+    [action, store]
+  );
+}
+
 /**
- * Opens the shared dialog. A zero summary asks the plain archive question,
- * answered with `'session'`; `null` means cancelled.
+ * Opens the shared dialog for an explicit archive confirmation. A zero summary
+ * asks the plain archive question, answered with `'session'`; `null` means
+ * cancelled.
  */
 export function useArchiveConfirmationRequest(): (
   summary?: OpenedSubConversationSummary
-) => Promise<ArchiveChoice> {
+) => Promise<SubConversationChoice> {
+  const request = useConfirmationRequest('archive');
+  return useCallback((summary = NO_SUB_CONVERSATIONS) => request(summary), [request]);
+}
+
+/**
+ * Reads the opened-sub-conversation summary from one Repo snapshot and runs
+ * `run` directly when there is nothing to ask about, unless `confirm` forces
+ * the question anyway.
+ */
+function useConfirmedSessionAction(
+  action: SubConversationAction,
+  run: (sessionId: SessionId, includeOpenedSessions: boolean) => Promise<void>
+): (sessionId: SessionId, confirm?: boolean) => Promise<boolean> {
   const store = useStore();
+  const requestConfirmation = useConfirmationRequest(action);
   return useCallback(
-    (summary = NO_SUB_CONVERSATIONS) =>
-      new Promise<ArchiveChoice>((resolve) => {
-        // A newer request supersedes an unanswered one.
-        store.get(pendingArchiveConfirmationAtom)?.resolve(null);
-        store.set(pendingArchiveConfirmationAtom, { ...summary, resolve });
-      }),
-    [store]
+    async (sessionId: SessionId, confirm = false) => {
+      const runtime = store.get(activeWorkspaceRuntimeAtom);
+      // A held creation has no metadata yet, so nothing can have been opened from it.
+      const summary =
+        !runtime || runtime.pendingSends?.hasPendingCreation(sessionId)
+          ? NO_SUB_CONVERSATIONS
+          : summarizeOpenedSubConversations(
+              await runtime.readSessionOperationTargets(sessionId, 'archive-tree'),
+              isSessionWorking(store.get(lodyPresenceStatesAtom), store.get(lodyPresenceNowMsAtom))
+            );
+      if (summary.count === 0 && !confirm) {
+        await run(sessionId, false);
+        return true;
+      }
+      const choice = await requestConfirmation(summary);
+      if (choice === null) return false;
+      await run(sessionId, choice === 'tree');
+      return true;
+    },
+    [run, requestConfirmation, store]
   );
 }
 
@@ -97,61 +141,75 @@ export function useArchiveSessionWithConfirmation(
     options?: { includeOpenedSessions?: boolean }
   ) => Promise<void>
 ): (sessionId: SessionId, options?: { confirm?: boolean }) => Promise<boolean> {
-  const store = useStore();
-  const requestConfirmation = useArchiveConfirmationRequest();
+  const confirmed = useConfirmedSessionAction('archive', (sessionId, includeOpenedSessions) =>
+    archiveSession(sessionId, { includeOpenedSessions })
+  );
   return useCallback(
-    async (sessionId: SessionId, options?: { confirm?: boolean }) => {
-      const runtime = store.get(activeWorkspaceRuntimeAtom);
-      // A held creation has no metadata yet, so nothing can have been opened from it.
-      const summary =
-        !runtime || runtime.pendingSends?.hasPendingCreation(sessionId)
-          ? NO_SUB_CONVERSATIONS
-          : summarizeOpenedSubConversations(
-              await runtime.readSessionOperationTargets(sessionId, 'archive-tree'),
-              isSessionWorking(store.get(lodyPresenceStatesAtom), store.get(lodyPresenceNowMsAtom))
-            );
-      if (summary.count === 0 && options?.confirm !== true) {
-        await archiveSession(sessionId);
-        return true;
-      }
-      const choice = await requestConfirmation(summary);
-      if (choice === null) return false;
-      await archiveSession(sessionId, { includeOpenedSessions: choice === 'tree' });
-      return true;
-    },
-    [archiveSession, requestConfirmation, store]
+    (sessionId, options) => confirmed(sessionId, options?.confirm === true),
+    [confirmed]
   );
 }
 
+/** Resolves `true` once settled, `false` when the user cancelled. */
+export function useSettleSessionWithConfirmation(
+  settleSession: (
+    sessionId: SessionId,
+    options?: { includeOpenedSessions?: boolean }
+  ) => Promise<void>
+): (sessionId: SessionId) => Promise<boolean> {
+  const confirmed = useConfirmedSessionAction('settle', (sessionId, includeOpenedSessions) =>
+    settleSession(sessionId, { includeOpenedSessions })
+  );
+  return useCallback((sessionId) => confirmed(sessionId), [confirmed]);
+}
+
 /** Mounted once per workspace; renders only while a request is pending. */
-export function SessionArchiveConfirmationDialog() {
-  const pending = useAtomValue(pendingArchiveConfirmationAtom);
+export function SessionSubConversationConfirmationDialog() {
+  const pending = useAtomValue(pendingConfirmationAtom);
   const store = useStore();
   const answer = useCallback(
-    (choice: ArchiveChoice) => {
-      const current = store.get(pendingArchiveConfirmationAtom);
+    (choice: SubConversationChoice) => {
+      const current = store.get(pendingConfirmationAtom);
       if (!current) return;
-      store.set(pendingArchiveConfirmationAtom, null);
+      store.set(pendingConfirmationAtom, null);
       current.resolve(choice);
     },
     [store]
   );
-  return <SessionArchiveConfirmationView summary={pending} onAnswer={answer} />;
+  return <SessionSubConversationConfirmationView pending={pending} onAnswer={answer} />;
 }
 
-export function SessionArchiveConfirmationView({
-  summary,
+const DIALOG_COPY = {
+  archive: {
+    title: 'Archive sub-conversations too?',
+    working: '{{count}} are still working; archiving them stops that work.',
+    onlyThis: 'Archive this only',
+    all: 'Archive all',
+  },
+  settle: {
+    title: 'Mark sub-conversations as completed too?',
+    working: '{{count}} are still working.',
+    onlyThis: 'Mark this only',
+    all: 'Mark all as completed',
+  },
+} as const;
+
+export function SessionSubConversationConfirmationView({
+  pending,
   onAnswer,
 }: {
-  summary: OpenedSubConversationSummary | null;
-  onAnswer: (choice: ArchiveChoice) => void;
+  pending: (OpenedSubConversationSummary & { action: SubConversationAction }) | null;
+  onAnswer: (choice: SubConversationChoice) => void;
 }) {
   const { t } = useTranslation();
   // Keep the last counts while the dialog animates out.
-  const shown = useRef(summary);
-  if (summary) shown.current = summary;
+  const shown = useRef(pending);
+  if (pending) shown.current = pending;
   const count = shown.current?.count ?? 0;
   const workingCount = shown.current?.workingCount ?? 0;
+  const action = shown.current?.action ?? 'archive';
+  const copy = DIALOG_COPY[action];
+  const keyPrefix = `sessions.${action}SubConversations`;
   const plainConfirmRef = useRef<HTMLButtonElement>(null);
   const footer =
     count === 0 ? (
@@ -169,16 +227,14 @@ export function SessionArchiveConfirmationView({
           {t('common.cancel', 'Cancel')}
         </Button>
         <Button variant="secondary" onClick={() => onAnswer('session')}>
-          {t('sessions.archiveSubConversations.onlyThis', 'Archive this only')}
+          {t(`${keyPrefix}.onlyThis`, copy.onlyThis)}
         </Button>
-        <Button onClick={() => onAnswer('tree')}>
-          {t('sessions.archiveSubConversations.all', 'Archive all')}
-        </Button>
+        <Button onClick={() => onAnswer('tree')}>{t(`${keyPrefix}.all`, copy.all)}</Button>
       </>
     );
   return (
     <AlertDialog.Root
-      open={summary !== null}
+      open={pending !== null}
       onOpenChange={(open) => {
         if (!open) onAnswer(null);
       }}
@@ -200,24 +256,18 @@ export function SessionArchiveConfirmationView({
             </>
           ) : (
             <>
-              <AlertDialog.Title>
-                {t('sessions.archiveSubConversations.title', 'Archive sub-conversations too?')}
-              </AlertDialog.Title>
+              <AlertDialog.Title>{t(`${keyPrefix}.title`, copy.title)}</AlertDialog.Title>
               <AlertDialog.Description>
-                {t('sessions.archiveSubConversations.description', {
+                {t(`${keyPrefix}.description`, {
                   count,
                   // The status sentence is interpolated so each language owns its spacing.
                   status:
                     workingCount > 0
-                      ? t('sessions.archiveSubConversations.working', {
+                      ? t(`${keyPrefix}.working`, {
                           count: workingCount,
-                          defaultValue:
-                            '{{count}} are still working; archiving them stops that work.',
+                          defaultValue: copy.working,
                         })
-                      : t(
-                          'sessions.archiveSubConversations.idle',
-                          'None of them is working right now.'
-                        ),
+                      : t(`${keyPrefix}.idle`, 'None of them is working right now.'),
                   defaultValue:
                     'This conversation opened {{count}} active sub-conversations. {{status}}',
                 })}

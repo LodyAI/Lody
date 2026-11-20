@@ -1664,6 +1664,7 @@ function inboxExecutionFixture(
       });
     },
   });
+  deps.workspaceDocument.sessions = new Map([[sessionId, doc]]);
   const service = new SessionExecutionService(deps);
   store.inbox.activate('workspace-1', 'owner');
   const bridge = operationInboxLegacy({

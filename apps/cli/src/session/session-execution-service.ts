@@ -8757,6 +8757,35 @@ export class SessionExecutionService {
     ];
   }
 
+  private async pauseQueuedDrafts(sessionId: SessionId): Promise<void> {
+    // Stop must not wait for a document join or a stalled preparation read.
+    // The renderer also pauses its drafts before publishing the durable Stop marker.
+    const doc = this.deps.workspaceDocument.sessions?.get(sessionId);
+    if (!doc) return;
+    const queue = await doc.getMessageQueue();
+    const cids = queue.filter((item) => !item.paused).map((item) => item.$cid);
+    if (cids.length) await doc.pauseMessageQueueItems(cids);
+  }
+
+  private async retainStoppedQueue(sessionId: SessionId): Promise<void> {
+    try {
+      const doc = this.deps.workspaceDocument.sessions?.get(sessionId);
+      if (!doc) return;
+      const queue = await doc.getMessageQueue();
+      const stopped = queue.filter(
+        (item) =>
+          !item.paused &&
+          this.isInboxInputCanceled(sessionId, item.userTurnId?.trim() || `queued-${item.$cid}`)
+      );
+      if (stopped.length) await doc.pauseMessageQueueItems(stopped.map((item) => item.$cid));
+    } catch (error) {
+      // SQLite already prevents dispatch; the watcher repairs the display marker.
+      this.deps.logger.warn(
+        `[${sessionId}] Could not retain stopped queue: ${formatErrorMessage(error)}`
+      );
+    }
+  }
+
   private liveTurnId(sessionId: SessionId): string | undefined {
     return (
       this.deps.getActiveTurnId(sessionId) ??
@@ -8884,6 +8913,7 @@ export class SessionExecutionService {
           message.cancelId
         );
         if (paused) {
+          await this.retainStoppedQueue(sessionId);
           const successor = this.turnRuntimeBySession.get(sessionId);
           if (successor?.inboxOwner?.input?.inputId === `inbox:${target.executionId}`)
             return this.cancelSession({ ...message, turnId: successor.turnId }, options);
@@ -8893,6 +8923,8 @@ export class SessionExecutionService {
       // Stop always ends the turn the user sees: with no execution here, the
       // unfinished entry is closed instead of ignored.
       if (await this.closeDeadAssistantTurn(sessionId, { turnId, requireSettledUserTurn: false })) {
+        if (options.pauseInbox !== false && message.pauseInbox !== false)
+          await this.pauseQueuedDrafts(sessionId);
         this.refreshCodeCollabSharedStateAfterTurn(sessionId);
       } else {
         this.deps.logger.debug(
@@ -8905,6 +8937,15 @@ export class SessionExecutionService {
     }
 
     const stoppedRuntime = this.turnRuntimeBySession.get(sessionId);
+    // Legacy and degraded hosts still retain ordinary queued drafts on Stop.
+    // Interrupt-and-send and Edit & Resend opt out explicitly.
+    if (
+      (!this.operationInbox || !pauseInbox) &&
+      options.pauseInbox !== false &&
+      message.pauseInbox !== false
+    ) {
+      await this.pauseQueuedDrafts(sessionId);
+    }
     if (this.operationInbox && stoppedRuntime?.invocation?.requesterUserId && pauseInbox) {
       const scope = {
         workspaceId: this.deps.workspaceId,
@@ -8920,6 +8961,7 @@ export class SessionExecutionService {
           message.cancelId
         );
         if (!paused) return { success: false, error: 'Execution changed before Stop.' };
+        await this.retainStoppedQueue(sessionId);
         const successor = this.turnRuntimeBySession.get(sessionId);
         if (
           successor &&

@@ -67,6 +67,8 @@ explains size selection and cursor-only timeout recovery.
 Missing-history acknowledgements are exact-ID receipts; only the serialized host watcher adds them. `isMissingHistoryUserTurn`
 reads the retained map and legacy scalar; new activation must not clear old acknowledgements.
 
+Stopped queue rows retain paused drafts; explicit resends use new input identities.
+
 ## Machine protocol negotiation
 
 - Sorbet credential metadata and per-provider logout use local Machine RPC or signed E2EE owned execution, gated remotely by `sorbetCredentialsRemote`. The target verifies the signing device belongs to its owner's membership; shared members and plaintext fallback are forbidden. Metadata does not imply credential validity or account identity.

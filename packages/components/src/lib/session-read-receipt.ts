@@ -1,3 +1,5 @@
+import { getServerNow } from '@lody/shared';
+
 /**
  * Decides whether a mounted conversation surface may clear a session's unread
  * state.
@@ -34,28 +36,47 @@ export function shouldMarkSessionRead({
 type SessionUnreadInput = {
   lastMessageAt?: number;
   lastReadAt?: number;
+  snoozedUntil?: number;
   isTabClosed?: boolean;
   isArchived?: boolean;
 };
 
-/** Closed conversations suppress unread indicators without changing read receipts. */
-export function sessionHasUnreadMessages(session: SessionUnreadInput): boolean {
-  if (session.isTabClosed === true || session.isArchived === true) return false;
-  return hasUnreadOutput(session);
+/** Closed and archived conversations suppress unread indicators without changing read receipts. */
+export function sessionHasUnreadMessages(
+  session: SessionUnreadInput,
+  nowMs: number = getServerNow()
+): boolean {
+  if (session.isTabClosed === true || session.isArchived === true) {
+    return false;
+  }
+  return hasUnreadOutput(session, nowMs);
 }
 
 /**
  * Unread output in a closed or archived conversation. Only the closed-conversations
  * list surfaces it; tabs, sidebar summaries, and badges stay quiet.
  */
-export function closedSessionHasUnreadMessages(session: SessionUnreadInput): boolean {
+export function closedSessionHasUnreadMessages(
+  session: SessionUnreadInput,
+  nowMs: number = getServerNow()
+): boolean {
   if (session.isTabClosed !== true && session.isArchived !== true) return false;
-  return hasUnreadOutput(session);
+  return hasUnreadOutput(session, nowMs);
 }
 
-function hasUnreadOutput(session: SessionUnreadInput): boolean {
+function hasUnreadOutput(session: SessionUnreadInput, nowMs: number): boolean {
   const lastMessageAt = typeof session.lastMessageAt === 'number' ? session.lastMessageAt : null;
-  if (lastMessageAt === null) return false;
+  const expiredSnoozeAt =
+    typeof session.snoozedUntil === 'number' &&
+    Number.isFinite(session.snoozedUntil) &&
+    session.snoozedUntil <= nowMs
+      ? session.snoozedUntil
+      : null;
+  const effectiveLastMessageAt =
+    lastMessageAt !== null && expiredSnoozeAt !== null
+      ? Math.max(lastMessageAt, expiredSnoozeAt)
+      : (lastMessageAt ?? expiredSnoozeAt);
+  if (effectiveLastMessageAt === null) return false;
   const lastReadAt = typeof session.lastReadAt === 'number' ? session.lastReadAt : null;
-  return lastReadAt === null || lastMessageAt > lastReadAt;
+  return lastReadAt === null || effectiveLastMessageAt > lastReadAt;
 }

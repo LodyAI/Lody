@@ -17,6 +17,7 @@ import {
   loadConversationQuoteDraft,
   saveConversationQuoteDraft,
 } from '@/lib/conversation-quote-draft';
+import { formatMessageQuoteExcerpt } from '@/components/ai-gui/message-quote-markdown';
 import { useSessionMentionSource } from '@/hooks/use-session-mention-source';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -1793,10 +1794,10 @@ export const SessionChatInputArea = memo(
             );
             return false;
           }
-          const excerpt = Array.from(text.replace(/\s+/g, ' ').trim()).slice(0, 32).join('');
+          const excerpt = formatMessageQuoteExcerpt(text);
           return insertLargePastedTextAtSelection(text, {
             kind: 'message_quote',
-            label: t('composer.messageQuoteInlineLabel', '[Quote: {{text}}]', { text: excerpt }),
+            label: t('composer.messageQuoteInlineLabel', '[{{text}}]', { text: excerpt }),
           });
         },
         addDocumentSelection,

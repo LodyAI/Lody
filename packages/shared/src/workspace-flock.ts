@@ -13,6 +13,7 @@ import {
   type WorkspaceMcpServerMeta,
 } from './workspace-mcp';
 import { assertPublicMcpServer, publicMcpServer } from './mcp-authentication';
+import { comparePinSections, normalizePinSection, type PinSection } from './pinned-sections';
 
 export const WORKSPACE_FLOCK_DOC_STREAM_SEGMENT = 'wf';
 const WORKSPACE_FLOCK_DOC_NAME = 'workspace';
@@ -24,7 +25,9 @@ export type WorkspaceFlockMcpServerKey = ['mcpServer', McpServerId];
 export type WorkspaceFlockAgentRoleKey = ['agentRole', AgentRoleId];
 export type WorkspaceFlockProjectKey = ['project', ProjectId];
 export type WorkspaceFlockProjectMcpDefaultKey = ['projectMcpDefault', string];
+export type WorkspaceFlockPinSectionKey = ['pinSection', string];
 export type WorkspaceFlockKey =
+  | WorkspaceFlockPinSectionKey
   | WorkspaceFlockProjectKey
   | WorkspaceFlockMcpServerKey
   | WorkspaceFlockAgentRoleKey
@@ -44,6 +47,7 @@ export const WORKSPACE_FLOCK_ROW_FAMILIES = [
   'agentRole',
   'project',
   'projectMcpDefault',
+  'pinSection',
 ] as const;
 
 export const workspaceFlockKeys = {
@@ -54,9 +58,11 @@ export const workspaceFlockKeys = {
   ],
   mcpServer: (id: McpServerId): WorkspaceFlockMcpServerKey => ['mcpServer', id],
   agentRole: (id: AgentRoleId): WorkspaceFlockAgentRoleKey => ['agentRole', id],
+  pinSection: (id: string): WorkspaceFlockPinSectionKey => ['pinSection', id],
 } as const;
 
 export type ParsedWorkspaceFlockKey =
+  | { kind: 'pinSection'; key: WorkspaceFlockPinSectionKey; sectionId: string }
   | { kind: 'project'; key: WorkspaceFlockProjectKey; projectId: ProjectId }
   | { kind: 'projectMcpDefault'; key: WorkspaceFlockProjectMcpDefaultKey; projectKey: string }
   | {
@@ -79,6 +85,9 @@ export const parseWorkspaceFlockKey = (
   const id = key[1].trim();
   if (!id) {
     return undefined;
+  }
+  if (key[0] === 'pinSection') {
+    return { kind: 'pinSection', key: workspaceFlockKeys.pinSection(id), sectionId: id };
   }
   if (key[0] === 'project') {
     const projectId = id as ProjectId;
@@ -115,7 +124,9 @@ export type WorkspaceFlockProjectMcpDefaultRow = {
   key: WorkspaceFlockProjectMcpDefaultKey;
   value: ProjectMcpDefault;
 };
+export type WorkspaceFlockPinSectionRow = { key: WorkspaceFlockPinSectionKey; value: PinSection };
 export type WorkspaceFlockRow =
+  | WorkspaceFlockPinSectionRow
   | WorkspaceFlockProjectRow
   | WorkspaceFlockMcpServerRow
   | WorkspaceFlockAgentRoleRow
@@ -148,6 +159,10 @@ export const parseWorkspaceFlockRow = (
   const parsedKey = parseWorkspaceFlockKey(key);
   if (!parsedKey) {
     return undefined;
+  }
+  if (parsedKey.kind === 'pinSection') {
+    const section = normalizePinSection(value);
+    return section?.id === parsedKey.sectionId ? { key: parsedKey.key, value: section } : undefined;
   }
   if (parsedKey.kind === 'project') {
     const project = normalizeWorkspaceProject(value);
@@ -356,3 +371,13 @@ export const getProjectMcpDefaults = (
 const isProjectMcpDefaultRow = (
   row: WorkspaceFlockRow
 ): row is WorkspaceFlockProjectMcpDefaultRow => row.key[0] === 'projectMcpDefault';
+
+const isPinSectionRow = (row: WorkspaceFlockRow): row is WorkspaceFlockPinSectionRow =>
+  row.key[0] === 'pinSection';
+
+/** User pin sections in display order. */
+export const listWorkspacePinSections = (rows: WorkspaceFlockRowMap): PinSection[] =>
+  Object.values(rows)
+    .filter(isPinSectionRow)
+    .map((row) => row.value)
+    .sort(comparePinSections);

@@ -35,6 +35,7 @@ token。
 就是与普通发送相同的展开文本 + span，并写入替换后的 text block。没有 mention
 来源的表面（分享页、tour）不传 `editMentionContext`，编辑器退化为普通
 textarea。
+Prompt Shortcuts 使用与主输入框相同的 `useWorkspaceFeature('shortcuts')` 判断。
 
 编辑器的菜单使用 `anchor="caret"`（`MentionTwoLevelMenu` /
 `CombinedMentionTextarea` 新增 prop）而非 Composer 的 frame 停靠——会话内编辑器

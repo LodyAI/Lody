@@ -443,9 +443,14 @@ Codex only — other agents use the same brackets for unrelated variants (Claude
 is a context window). Vendor model `_meta` never enters the CLI.
 
 Commands have separate ownership: only independent probes replace the Provider's
-startup command preview. Real sessions retain their commands in `AgentClient` and
+startup command preview. Standard ACP agents (Antigravity among them) advertise commands
+with `available_commands_update` after `session/new` returns, so a probe without a
+response list waits up to `ACP_PROBE_COMMANDS_WAIT_MS` (2 s), overlapped with its other
+reads, for that notification. Real sessions retain their commands in `AgentClient` and
 publish them through the existing Session runtime-config path; an explicit empty
-list clears that Session's menu. Session capability writes preserve the latest
+list clears that Session's menu. The run-config snapshot reads the client's commands at
+write time, and a command notification arriving before any assistant entry patches the
+snapshot of the same ACP session instead of being dropped. Session capability writes preserve the latest
 same-runtime preview without copying project commands into it. A capability entry
 without a confirmed probe list is re-probed; an empty probed list is confirmed.
 

@@ -1114,6 +1114,16 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   origin?: 'lody' | 'external-acp';
   /** When true, this session is pinned to the top of the sidebar list. */
   isPinned?: boolean;
+  /** Pin section this pinned session belongs to; missing or unknown means the default section. Read only while `isPinned`. */
+  pinSectionId?: string;
+  /** Fractional index ordering this session manually (shared by Pinned sections and Status Focus). */
+  orderKey?: string;
+  /** Epoch ms until which this session is snoozed in the Status view's Later section. */
+  snoozedUntil?: number;
+  /** Epoch ms when the user explicitly settled this session in the Status view's Settled section. */
+  settledAt?: number;
+  /** Epoch ms when the user explicitly moved an inactive session back to Focus (overrides 7d auto-settle for 7d). */
+  focusRestoredAt?: number;
   cliType: AgentConfigCliType;
   agentType: AgentType;
   /** Backend selected when this session was created. Missing means legacy Loro. */
@@ -1385,6 +1395,8 @@ export const messageQueueItemSchema = schema.LoroMap({
   operationId: schema.String({ required: false }),
   timestamp: schema.String(),
   isEditing: schema.Boolean({ required: false }),
+  /** Stop retains this row for an explicit send, without automatic promotion. */
+  paused: schema.Boolean({ required: false }),
   // Calibrated server time (`getServerNow()`) when the current editor entered the row.
   // Used as a lease so the CLI dispatcher does not block the queue forever if the
   // editing client never gets a chance to clear `isEditing` (hard close / crash /
@@ -1400,9 +1412,10 @@ export type MessageQueueItem = Omit<InferType<typeof messageQueueItemSchema>, 'p
 };
 export type MessageQueueItemInput = Omit<
   InferInputType<typeof messageQueueItemSchema>,
-  'project' | 'acpSessionConfig'
+  'project' | 'acpSessionConfig' | 'paused'
 > & {
   project: ProjectRef | undefined;
+  paused?: boolean;
   acpSessionConfig?: import('./ai').ACPSessionConfig &
     Pick<import('./ai').SessionTurnInputConfig, '_lodyAutomation'>;
 };

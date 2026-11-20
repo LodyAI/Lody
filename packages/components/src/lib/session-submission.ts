@@ -39,6 +39,12 @@ export type SessionSubmissionPorts = {
   recordWorkspaceActivity: (workspaceId: string | undefined) => void;
   publishSessionMeta: (roomId: string, meta: SessionMeta) => void;
   readSessionMeta: (sessionId: SessionId) => SessionMeta | undefined;
+  /**
+   * Focus `orderKey` for a brand-new top-level Session so it lands at the top
+   * of 进行中. Not consulted for Sessions opened by another conversation or
+   * child Tabs: they render nested under their opener and must never reorder it.
+   */
+  planNewSessionOrderKey?: () => string | undefined;
   recordChat: (
     meta: SessionMeta | undefined,
     sessionId: SessionId,
@@ -130,6 +136,7 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     recordWorkspaceActivity,
     publishSessionMeta,
     readSessionMeta,
+    planNewSessionOrderKey,
     recordChat,
     onRpcDelivered,
   } = ports;
@@ -151,7 +158,15 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
           requested: payload.historyBackend,
           preferred: defaultHistoryBackend,
         });
-    return buildSessionCreateResult({ ...payload, historyBackend: backend }, backend);
+    const result = buildSessionCreateResult({ ...payload, historyBackend: backend }, backend);
+    // A new top-level conversation lands at the top of Status Focus. Sessions
+    // opened by another conversation and child Tabs render nested under their
+    // opener, so they keep no key and never reorder the root row.
+    if (!payload.parentSessionId && !payload.openedBySessionId && !payload.openedByRootSessionId) {
+      const orderKey = payload.orderKey ?? planNewSessionOrderKey?.();
+      if (orderKey) result.sessionMeta.orderKey = orderKey;
+    }
+    return result;
   };
 
   const createSession = async (payload: SessionToCreate): Promise<CreateSessionResult> => {

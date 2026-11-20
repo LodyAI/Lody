@@ -100,9 +100,10 @@ Work, wait, unread and send status is still the end slot's alone; +/- totals sta
 
 The opener and unrelated top-level rows keep the exact flat-list alignment; only a child
 widens the shared leading slot from 14px to 26px, which produces the 12px title indent
-without shifting the row background. The node and its hover menu share a 7px centre:
-replacing a disclosure or connector with ⋯ therefore leaves the title in place. The
-context-menu expand/collapse action uses the disclosure's callback, so either route
+without shifting the row background. The slot used to lend that same centre to the row's
+⋯ on hover; the menu now reveals in the end slot immediately before Archive, so a
+disclosure or connector keeps the 7px centre to itself and stays drawn while hovering.
+The context-menu expand/collapse action uses the disclosure's callback, so either route
 changes the same tree state.
 
 The connector is drawn from the slot, but its length encodes the ROW, and it reads the

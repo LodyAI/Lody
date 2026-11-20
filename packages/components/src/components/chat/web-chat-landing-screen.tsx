@@ -68,6 +68,8 @@ export type WebChatLandingScreenProps = {
   dropActive?: boolean;
   dropKind?: ConversationDropKind;
   dropHandlers?: DropZone['handlers'];
+  /** The same drop surface for pointer drags (pinned sidebar rows). */
+  dropRef?: Ref<HTMLDivElement>;
   /** Scope root for keyboard navigation — wraps the title, context switch and composer
    *  so arrow/Esc nav covers the config controls but not the surrounding page chrome. */
   navRootRef?: Ref<HTMLDivElement>;
@@ -85,6 +87,7 @@ export function WebChatLandingScreen({
   dropActive = false,
   dropKind = 'session-mention',
   dropHandlers,
+  dropRef,
 }: WebChatLandingScreenProps) {
   const isElectron = isElectronRenderer();
   const isElectronFullscreen = useElectronFullscreen();
@@ -104,6 +107,7 @@ export function WebChatLandingScreen({
         isElectron &&
           'select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text'
       )}
+      ref={dropRef}
       {...dropHandlers}
     >
       <WindowDragStrip />

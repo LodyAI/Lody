@@ -24,6 +24,7 @@ import {
   deriveLocationsFromRawInput,
   deriveLocationsFromToolCallContent,
   stripToolCallContentForHistory,
+  truncateToolTextForHistory,
 } from './tool-call-history';
 import {
   parseLodyTaskMeta,
@@ -85,6 +86,51 @@ const asRecordOrUndefined = (value: unknown): Record<string, unknown> | undefine
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+
+const boundJsonValueForHistory = (value: unknown, seen = new WeakSet<object>()): unknown => {
+  if (typeof value === 'string') return truncateToolTextForHistory(value);
+  if (!value || typeof value !== 'object') return value;
+  if (seen.has(value)) return value;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    let changed = false;
+    const next = value.map((item) => {
+      const bounded = boundJsonValueForHistory(item, seen);
+      if (bounded !== item) changed = true;
+      return bounded;
+    });
+    return changed ? next : value;
+  }
+  let changed = false;
+  const next: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value)) {
+    const bounded = boundJsonValueForHistory(v, seen);
+    if (bounded !== v) changed = true;
+    next[k] = bounded;
+  }
+  return changed ? next : value;
+};
+
+const arePlanEntriesEqual = (
+  a: readonly SessionPlanEntry[] | undefined,
+  b: readonly SessionPlanEntry[]
+): boolean => {
+  if (!a || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const left = a[i];
+    const right = b[i];
+    if (
+      !left ||
+      !right ||
+      left.status !== right.status ||
+      left.content !== right.content ||
+      left.priority !== right.priority
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
 
 /**
  * IANA timezone of THIS machine — the one processing the ACP notification, i.e. the machine
@@ -1151,7 +1197,7 @@ const parseCodexProposedPlanTags = (text: string, turnId: string): MessageConten
     result.splice(insertIndex, 0, {
       type: 'proposed_plan',
       turnId,
-      markdown,
+      markdown: truncateToolTextForHistory(markdown),
       status: 'completed',
       isLatest: true,
     });
@@ -1410,11 +1456,15 @@ const buildToolCallMessageForHistory = (
     // Generic ACP rawInput/rawOutput is excluded because it is unstructured by spec;
     // scheduling tools keep theirs, and mode switches retain only the displayed plan.
     rawInput: isSchedulingTool
-      ? input
+      ? (boundJsonValueForHistory(input) as Record<string, unknown> | undefined)
       : kind === 'switch_mode' && typeof input?.plan === 'string'
-        ? { plan: input.plan }
+        ? { plan: truncateToolTextForHistory(input.plan) }
         : undefined,
-    rawOutput: isSchedulingTool ? asRecordOrUndefined(update.rawOutput) : undefined,
+    rawOutput: isSchedulingTool
+      ? (boundJsonValueForHistory(asRecordOrUndefined(update.rawOutput)) as
+          | Record<string, unknown>
+          | undefined)
+      : undefined,
     // Cron is local-time to this machine — record its zone so the panel resolves the
     // fire time in the right timezone regardless of where it is later viewed.
     schedulingTimeZone: isSchedulingTool ? resolveMachineTimeZone() : undefined,
@@ -1480,7 +1530,7 @@ export const buildMessageContentFromNotification = (
             {
               type: 'proposed_plan',
               turnId: update.plan.planId,
-              markdown: update.plan.content,
+              markdown: truncateToolTextForHistory(update.plan.content),
               status: 'delta',
               isLatest: true,
             },
@@ -2058,6 +2108,7 @@ class NotificationOnHistoryApplier {
     const entryIndex = this.ensureActiveAssistantEntry();
     const entry = this.history[entryIndex];
     if (!entry) return;
+    if (arePlanEntriesEqual(entry.plan, entries)) return;
 
     entry.plan = entries;
     this.changed = true;
@@ -2144,6 +2195,14 @@ class NotificationOnHistoryApplier {
       (item) => item.type === 'proposed_plan' && item.turnId === next.turnId
     );
     if (existingIndex >= 0) {
+      const existing = items[existingIndex] as ProposedPlanMessage;
+      if (
+        existing.markdown === next.markdown &&
+        existing.status === next.status &&
+        existing.isLatest === next.isLatest
+      ) {
+        return;
+      }
       items[existingIndex] = next;
       this.changed = true;
       return;
@@ -2542,6 +2601,14 @@ export const applyMessageContentsBatch = (
       (item) => item.type === 'proposed_plan' && item.turnId === next.turnId
     );
     if (existingIndex >= 0) {
+      const existing = state.items[existingIndex] as ProposedPlanMessage;
+      if (
+        existing.markdown === next.markdown &&
+        existing.status === next.status &&
+        existing.isLatest === next.isLatest
+      ) {
+        return;
+      }
       state.items[existingIndex] = next;
       state.dirty = true;
       return;

@@ -564,7 +564,6 @@ export function SessionShareSurface(props: {
         return (
           <div key={node.id} {...stylex.props(styles.treeRow)}>
             <SessionRowLeadingSlot
-              menuLabel=""
               openedByTree={buildSessionRowOpenedByTreeSlot(node, t, () =>
                 setCollapsed((previous) => {
                   const next = new Set(previous);
