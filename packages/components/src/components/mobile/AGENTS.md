@@ -33,8 +33,9 @@ before touching gestures.
   precede, whose width survives an unknown duration.
 - Full-screen right drawers need `border-l-0!`; plain `border-0` loses to Vaul.
 - Every back affordance that leaves a drill page (header chip, edge swipe) goes
-  through `playMobileDrillExit`, so the page slides off over its destination;
+  through `useMobileDrillExit`, so the page slides off over its destination;
   calling the route `onBack` directly unmounts it and the destination pops in.
+  A page reachable by that Back calls `useMobileBackRevealClass` on mount.
 
 ## Home and chat lists
 

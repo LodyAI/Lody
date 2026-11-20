@@ -1,4 +1,12 @@
-import { createContext, useCallback, useContext, useRef, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import { isNativeAppShell } from '@/lib/native-platform';
 import {
   consumeMobileBackNavigation,
@@ -14,16 +22,18 @@ export type MobileDrillPageLayoutProps = {
   onBack?: () => void;
 };
 
-/* Duration of the exit slide animation. Keep in sync with the
-   `.mobile-drill-out` keyframe in `tailwind/index.css`. */
-export const MOBILE_DRILL_EXIT_MS = 280;
-/* Same curve as `.mobile-drill-out`. */
+/* Exit slide and reveal duration. Keep in sync with `.mobile-drill-reveal`
+   in `tailwind/index.css`. */
+const MOBILE_DRILL_EXIT_MS = 280;
+/* Same curve as `.mobile-drill-in` / `.mobile-drill-reveal`. */
 const MOBILE_DRILL_EASING = 'cubic-bezier(0.32, 0.72, 0, 1)';
 
 /* Context lets descendants (e.g. a header's chevron back button)
    share the same animated-back trigger as the edge-swipe zone, so
    *every* back affordance runs the same exit transition instead of
    only the one wired in this layout. */
+const noop = () => {};
+
 const MobileDrillAnimatedBackContext = createContext<(() => void) | null>(null);
 
 export function useMobileDrillAnimatedBack(): (() => void) | null {
@@ -33,13 +43,18 @@ export function useMobileDrillAnimatedBack(): (() => void) | null {
 /**
  * Pop a mobile "drill" page with the iOS-style exit slide, then run
  * `onBack`. `source` is the page root; its `[data-mobile-drill-panel]`
- * descendant (or the root itself) is the part that slides off, while the
- * page underneath eases in from a dimmed, left-shifted position.
+ * descendant (or the root itself) is the part that slides off.
  *
  * Clone-overlay strategy: snapshot the live page into a fixed overlay on
- * `document.body`, slide that off with `.mobile-drill-out`, and fire the
- * route change *immediately* so the destination paints behind the clone.
- * Without it the page simply unmounts and the destination pops into view.
+ * `document.body`, slide that off from wherever the panel currently sits
+ * (it may still be mid-enter), and fire the route change *immediately* so
+ * the destination paints behind the clone. Without it the page simply
+ * unmounts and the destination pops into view.
+ *
+ * The destination plays the matching parallax itself: the flag set here
+ * makes it mount with `useMobileBackRevealClass()`. Animating some ancestor
+ * of the source instead would depend on DOM shape: it can unmount with the
+ * route, still hold the old page, or be a shared container.
  *
  * Returns `true` when the exit slide plays, `false` when `onBack` ran
  * directly (reduced motion, no DOM).
@@ -54,6 +69,15 @@ export function playMobileDrillExit(source: HTMLElement | null, onBack: () => vo
     return false;
   }
 
+  const findPanel = (root: HTMLElement) =>
+    root.matches('[data-mobile-drill-panel]')
+      ? root
+      : root.querySelector<HTMLElement>('[data-mobile-drill-panel]');
+  const livePanel = findPanel(source);
+  /* Read before cloning: a Back during the enter slide must leave from the
+     panel's current offset rather than jump back to fully open. */
+  const startTransform = livePanel ? getComputedStyle(livePanel).transform : 'none';
+
   /* cloneNode preserves classes (so Tailwind utilities still resolve)
      but is a *static* visual — fine for a 280ms slide. */
   const clone = source.cloneNode(true) as HTMLElement;
@@ -65,44 +89,64 @@ export function playMobileDrillExit(source: HTMLElement | null, onBack: () => vo
   /* Strip the root's opaque background so the *real* destination shows
      through as the panel slides away instead of a blank sheet. */
   clone.style.backgroundColor = 'transparent';
-  const panel = clone.matches('[data-mobile-drill-panel]')
-    ? clone
-    : clone.querySelector<HTMLElement>('[data-mobile-drill-panel]');
+  const panel = findPanel(clone);
   if (panel) {
     panel.classList.remove('mobile-drill-in');
     panel.classList.add('mobile-drill-out');
+    panel.style.animation = 'none';
   }
   document.body.appendChild(clone);
+  panel?.animate(
+    [
+      { transform: startTransform === 'none' ? 'translate3d(0, 0, 0)' : startTransform },
+      { transform: 'translate3d(100%, 0, 0)' },
+    ],
+    { duration: MOBILE_DRILL_EXIT_MS, easing: MOBILE_DRILL_EASING, fill: 'forwards' }
+  );
 
-  /* iOS-style parallax: the page underneath starts shifted left and dimmed,
-     then settles into place as the clone slides off. The source's parent
-     survives the route change (it is the slot the destination renders into,
-     or the still-mounted layout for in-surface pops), so animating it moves
-     whatever page appears there. WAAPI with no fill leaves no inline style. */
-  const underlay = source.parentElement;
-  if (underlay && underlay !== document.body && typeof underlay.animate === 'function') {
-    underlay.animate(
-      [
-        { transform: 'translate3d(-28%, 0, 0)', opacity: 0.72 },
-        { transform: 'translate3d(0, 0, 0)', opacity: 1 },
-      ],
-      { duration: MOBILE_DRILL_EXIT_MS, easing: MOBILE_DRILL_EASING }
-    );
-  }
-
-  /* Tell a destination that replays a forward-push slide on mount
-     (project screen, settings body) that this mount is a *back*
-     navigation; the clone already covers it. */
+  /* The destination (home, project screen, settings body) consumes this on
+     mount: it skips its forward-push slide and plays the reveal instead. */
   markMobileBackNavigation();
   onBack();
 
   window.setTimeout(() => {
     clone.remove();
-    /* Destinations without an enter slide (home) never consume the flag;
-       clear it so the next forward push still animates. */
-    consumeMobileBackNavigation();
   }, MOBILE_DRILL_EXIT_MS);
   return true;
+}
+
+/**
+ * Back affordance for a drill page rooted at `sourceRef`: plays
+ * `playMobileDrillExit` once and ignores repeat taps until the slide ends,
+ * so a double tap cannot spawn two clones or navigate twice.
+ */
+export function useMobileDrillExit(
+  sourceRef: RefObject<HTMLElement | null>,
+  onBack: (() => void) | undefined
+): (() => void) | null {
+  const exitingRef = useRef(false);
+  const animatedBack = useCallback(() => {
+    if (!onBack || exitingRef.current) return;
+    if (!playMobileDrillExit(sourceRef.current, onBack)) return;
+    exitingRef.current = true;
+    /* Reset in case the page stays mounted (router error, redirect back to
+       the same route), so later taps still work. */
+    window.setTimeout(() => {
+      exitingRef.current = false;
+    }, MOBILE_DRILL_EXIT_MS);
+  }, [onBack, sourceRef]);
+  return onBack ? animatedBack : null;
+}
+
+/**
+ * For a page that can be the destination of a drill Back: consumes the
+ * back-navigation flag once on mount. Returns the class that plays the
+ * iOS-style parallax (in from a dimmed, left-shifted position) when this
+ * mount is a back destination, else `null`.
+ */
+export function useMobileBackRevealClass(): string | null {
+  const [reveal] = useState(() => consumeMobileBackNavigation());
+  return reveal ? 'mobile-drill-reveal' : null;
 }
 
 /**
@@ -112,8 +156,8 @@ export function playMobileDrillExit(source: HTMLElement | null, onBack: () => vo
  *   - Entry: `.mobile-drill-in` CSS keyframe on the inner div (right
  *     → left on mount). Pure CSS so the compositor handles it
  *     regardless of how busy the React tree is during mount.
- *   - Exit: `playMobileDrillExit` (clone overlay slid off with
- *     `.mobile-drill-out` while the destination paints behind it).
+ *   - Exit: `playMobileDrillExit` (clone overlay slid off while the
+ *     destination paints behind it and plays its reveal).
  *   - Edge-swipe-back zone (native iOS only) wired to the same
  *     animatedBack as the rest.
  *
@@ -126,22 +170,8 @@ export function MobileDrillPageLayout({ children, onBack }: MobileDrillPageLayou
      View Transitions API on iOS WebKit 18. The clone keeps the
      destination visible underneath with no white flash. */
   const layoutRef = useRef<HTMLDivElement>(null);
-  const exitingRef = useRef(false);
-
-  const animatedBack = useCallback(() => {
-    if (!onBack || exitingRef.current) return;
-    if (playMobileDrillExit(layoutRef.current, onBack)) {
-      exitingRef.current = true;
-      /* `exitingRef` belongs to the unmounted instance once the route
-         changes; resetting it keeps back working if the layout stays
-         mounted (router error, redirect back to the same route). */
-      window.setTimeout(() => {
-        exitingRef.current = false;
-      }, MOBILE_DRILL_EXIT_MS);
-    }
-  }, [onBack]);
-
-  const contextValue = onBack ? animatedBack : null;
+  const contextValue = useMobileDrillExit(layoutRef, onBack);
+  const animatedBack = contextValue ?? noop;
 
   return (
     /* Outer wrapper carries `overflow-hidden` so the entry slide

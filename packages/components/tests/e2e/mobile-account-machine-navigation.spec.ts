@@ -63,12 +63,15 @@ for (const locale of ['zh_CN', 'en']) {
   });
 }
 
-test('project Back slides the project page off over the page underneath', async ({ page }) => {
+test('project Back slides the project page off over home settling in underneath', async ({
+  page,
+}) => {
   await page.goto(
-    '/iframe.html?id=mobile-mobileprojectscreen--ios-local&viewMode=story&globals=locale:zh_CN;theme:light'
+    '/iframe.html?id=mobile-mobileprojectscreen--back-to-home&viewMode=story&globals=locale:zh_CN;theme:light'
   );
+  await page.getByRole('button', { name: /lody/ }).first().tap({ timeout: 60_000 });
   const back = page.getByRole('button', { name: '返回', exact: true });
-  await expect(back).toBeVisible({ timeout: 60_000 });
+  await expect(back).toBeVisible();
   await page.evaluate(async () => {
     await Promise.all(
       document
@@ -77,36 +80,38 @@ test('project Back slides the project page off over the page underneath', async 
         .map((a) => a.finished.catch(() => undefined))
     );
   });
-  const underlay = back.locator('xpath=ancestor::*[@data-mobile-drill-panel]/../..');
-  await underlay.evaluate((el) => el.setAttribute('data-test-underlay', ''));
+  // Freeze the page's timers so the exit overlay stays until the test advances time.
+  await page.clock.install();
   await back.tap();
-  // The pop is visible: a body-level copy of the page slides off to the right while
-  // the page underneath eases in from a dimmed, left-shifted position.
+  await expect(page.getByTestId('stand-in-home')).toBeVisible();
+  // Sample both animations at the same point of their timeline.
   const frame = await page.evaluate(() => {
-    const panel = document.querySelector<HTMLElement>('body > * .mobile-drill-out');
-    const under = document.querySelector<HTMLElement>('[data-test-underlay]');
-    const exit = panel?.getAnimations()[0] as CSSAnimation | undefined;
-    const settle = under?.getAnimations()[0];
-    if (!panel || !under || !exit || !settle) return null;
-    for (const animation of [exit, settle]) {
+    const exitPanel = document.querySelector<HTMLElement>('body > * .mobile-drill-out');
+    const home = document.querySelector<HTMLElement>('[data-testid="stand-in-home"]');
+    const exit = exitPanel?.getAnimations()[0];
+    const reveal = home?.getAnimations()[0] as CSSAnimation | undefined;
+    if (!exitPanel || !home || !exit || !reveal) return null;
+    for (const animation of [exit, reveal]) {
       animation.pause();
-      animation.currentTime = 100;
+      animation.currentTime = 60;
     }
-    const style = getComputedStyle(under);
-    const result = {
-      name: exit.animationName,
-      exitX: new DOMMatrix(getComputedStyle(panel).transform).m41,
-      underX: new DOMMatrix(style.transform).m41,
-      underOpacity: Number(style.opacity),
+    const homeStyle = getComputedStyle(home);
+    return {
+      reveal: reveal.animationName,
+      exitX: new DOMMatrix(getComputedStyle(exitPanel).transform).m41,
+      homeX: new DOMMatrix(homeStyle.transform).m41,
+      homeOpacity: Number(homeStyle.opacity),
     };
-    for (const animation of [exit, settle]) animation.play();
-    return result;
   });
   expect(frame).not.toBeNull();
-  expect(frame!.name).toBe('mobile-drill-out');
+  expect(frame!.reveal).toBe('mobile-drill-reveal');
   expect(frame!.exitX).toBeGreaterThan(0);
-  expect(frame!.underX).toBeLessThan(0);
-  expect(frame!.underOpacity).toBeLessThan(1);
-  // The overlay is removed once the slide has finished.
+  expect(frame!.homeX).toBeLessThan(0);
+  expect(frame!.homeOpacity).toBeLessThan(1);
+  await page.clock.runFor(300);
   await expect(page.locator('.mobile-drill-out')).toHaveCount(0);
+  // Home consumed the back flag: opening a project again is a forward push, not a reveal.
+  await page.getByRole('button', { name: /lody/ }).first().tap();
+  await expect(page.locator('[data-mobile-drill-panel]')).toHaveCount(1);
+  await expect(page.locator('[data-mobile-drill-panel]')).not.toHaveClass(/mobile-drill-reveal/);
 });

@@ -152,9 +152,15 @@ const preview: Preview = {
         /* zh_CN is lazy-loaded; switching before its bundle arrives falls
            back to English (see `setAppLanguage`). */
         let cancelled = false;
-        void ensureLanguageResources(locale).then(() => {
-          if (!cancelled) void i18next.changeLanguage(locale);
-        });
+        ensureLanguageResources(locale).then(
+          () => {
+            if (!cancelled) void i18next.changeLanguage(locale);
+          },
+          (error: unknown) => {
+            /* Surface the failed bundle instead of silently staying in English. */
+            console.error(`Storybook could not load the ${locale} locale bundle`, error);
+          }
+        );
         return () => {
           cancelled = true;
         };
