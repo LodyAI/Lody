@@ -202,6 +202,55 @@ function readFragment(value: unknown, version: number): TodayFragment | null {
   };
 }
 
+/** A Markdown link (`[label](url)`) or a bare `<scheme>://session/…` link. */
+const SESSION_LINK_PATTERN =
+  /\[(?:[^\]\\\n]|\\.)*\]\(([^)\s]+)\)|([a-zA-Z][a-zA-Z.+-]*:\/\/session\/[^\s)\]]+)/g;
+
+/**
+ * Pasted text with every conversation link `resolve` accepts (a same-workspace
+ * `lody://session` link, bare or Markdown) turned into a mention in place.
+ * Other links stay text; a stray U+FFFC (no mark can come with plain text) drops.
+ */
+export function linkifyTodayText(
+  input: string,
+  resolve: (link: string) => string | null
+): { text: string; mentions: TodayMention[] } {
+  const source = input.replaceAll(TODAY_MENTION_CHAR, '');
+  let text = '';
+  const mentions: TodayMention[] = [];
+  let cursor = 0;
+  for (const match of source.matchAll(SESSION_LINK_PATTERN)) {
+    let raw = match[0];
+    let link = match[1] ?? match[2] ?? '';
+    if (match[2]) {
+      // A bare link's trailing punctuation belongs to the sentence.
+      const trimmed = link.replace(/[.,;:!?'"]+$/u, '');
+      raw = raw.slice(0, raw.length - (link.length - trimmed.length));
+      link = trimmed;
+    }
+    const id = resolve(link);
+    if (!id) continue;
+    text += source.slice(cursor, match.index);
+    mentions.push({ start: text.length, kind: 'session', id });
+    text += TODAY_MENTION_CHAR;
+    cursor = match.index + raw.length;
+  }
+  text += source.slice(cursor);
+  return { text, mentions };
+}
+
+/** Fragments with their conversation links turned into mentions (see `linkifyTodayText`). */
+export function linkifyTodayFragments(
+  fragments: readonly TodayFragment[],
+  resolve: (link: string) => string | null
+): TodayFragment[] {
+  return fragments.map((fragment) => ({
+    ...fragment,
+    ...(fragment.mentions?.length ? {} : linkifyTodayText(fragment.text, resolve)),
+    children: linkifyTodayFragments(fragment.children, resolve),
+  }));
+}
+
 /** Our structured payload when present and valid, else outline-parsed text. */
 export function parseTodayClipboard(data: {
   json?: string;

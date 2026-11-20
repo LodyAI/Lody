@@ -73,6 +73,24 @@ describe('Today block selection', () => {
     ]);
   });
 
+  it('turns pasted same-workspace conversation links into mentions, bare or Markdown', async () => {
+    const { linkifyTodayText } = await import('../src/components/today/editor/block-selection');
+    const { readPastedSessionLink } = await import('../src/lib/session-deep-link');
+    const resolve = (link: string) => readPastedSessionLink(link, 'ws1')?.sessionId ?? null;
+    expect(
+      linkifyTodayText(
+        'see [@Fix \\[x\\]](lody://session/s1?workspace=ws1) and lody://session/s2. Not lody://session/s3?workspace=other',
+        resolve
+      )
+    ).toEqual({
+      text: `see ${TODAY_MENTION_CHAR} and ${TODAY_MENTION_CHAR}. Not lody://session/s3?workspace=other`,
+      mentions: [
+        { start: 4, kind: 'session', id: 's1' },
+        { start: 10, kind: 'session', id: 's2' },
+      ],
+    });
+  });
+
   it('still reads v1 payloads, turning a session row into a line holding its mention', () => {
     const json = JSON.stringify({
       v: 1,

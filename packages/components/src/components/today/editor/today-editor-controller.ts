@@ -16,6 +16,7 @@ import {
 import {
   sliceTodayRich,
   type FocusIntent,
+  type TodayFragment,
   type TodayDate,
   type TodayNodeId,
   type TodayNodeView,
@@ -39,6 +40,8 @@ import {
   resolveBlockKey,
   extendFocus,
   selectionCovers,
+  linkifyTodayFragments,
+  linkifyTodayText,
   serializeTodayFragments,
   todayRichToPlain,
   topLevelSelection,
@@ -67,8 +70,25 @@ export type TodaySessionPickerState = {
   nodeId: TodayNodeId;
   query: string;
   index: number;
+  /** Offset of the `@`; the mention replaces `start..start + 1 + query.length`. */
+  start: number;
 };
-const PICKER_TRIGGER = /^[@＠]([^\n]*)$/;
+/**
+ * An `@` (or full-width `＠`) at the line start or after whitespace, then the
+ * query up to the caret: no newline and no other mention inside it.
+ */
+const PICKER_TRIGGER = /(?:^|[\s\uFFFC])([@＠])([^\n\uFFFC]*)$/;
+
+/** The open picker, if the caret ends an `@query`. */
+export function findPickerTrigger(
+  text: string,
+  caret: number
+): { start: number; query: string } | null {
+  const match = PICKER_TRIGGER.exec(text.slice(0, caret));
+  if (!match) return null;
+  const query = match[2] ?? '';
+  return { start: caret - query.length - 1, query };
+}
 type CaretTarget =
   | number
   | 'start'
@@ -109,7 +129,8 @@ export class TodayEditorController {
   private surface: HTMLElement | null = null;
   private stopPointer: (() => void) | null = null;
   private picker: TodaySessionPickerState | null = null;
-  private pickerDismissedFor: TodayNodeId | null = null;
+  /** The `@` the user dismissed with Esc (`nodeId:offset`): it stays closed. */
+  private pickerDismissedFor: string | null = null;
   /** Candidates the picker currently shows, set by its view. */
   pickerItems: readonly string[] = [];
   private dropIndicator: TodayDropIndicator | null = null;
@@ -194,12 +215,19 @@ export class TodayEditorController {
           }
           return;
         }
-        const text = editorState.read(() => $readComposerValue().text);
-        const match = PICKER_TRIGGER.exec(text);
-        if (match && this.pickerDismissedFor !== active.nodeId) {
-          const query = match[1] ?? '';
-          if (this.picker?.nodeId === active.nodeId && this.picker.query === query) return;
-          this.picker = { store: active.store, nodeId: active.nodeId, query, index: 0 };
+        const trigger = editorState.read(() => {
+          const offsets = $readSelectionOffsets();
+          if (!offsets || offsets.start !== offsets.end) return null;
+          return findPickerTrigger($readComposerValue().text, offsets.start);
+        });
+        if (trigger && this.pickerDismissedFor !== `${active.nodeId}:${trigger.start}`) {
+          const { query, start } = trigger;
+          const same =
+            this.picker?.nodeId === active.nodeId &&
+            this.picker.start === start &&
+            this.picker.query === query;
+          if (same) return;
+          this.picker = { store: active.store, nodeId: active.nodeId, query, index: 0, start };
           this.notify();
         } else if (this.picker) {
           this.picker = null;
@@ -480,7 +508,7 @@ export class TodayEditorController {
         return true;
       }
       case 'Escape':
-        this.pickerDismissedFor = picker.nodeId;
+        this.pickerDismissedFor = `${picker.nodeId}:${picker.start}`;
         this.picker = null;
         break;
       default:
@@ -497,10 +525,12 @@ export class TodayEditorController {
     const picker = this.picker;
     if (!picker) return;
     this.picker = null;
-    const { store, nodeId } = picker;
-    const length = store.outline.getNode(nodeId)?.text.length ?? 0;
+    const { store, nodeId, start, query } = picker;
     const focus = store.undo.structural(() =>
-      store.outline.insertMention(nodeId, 0, length, { kind: 'session', id: sessionId })
+      store.outline.insertMention(nodeId, start, query.length + 1, {
+        kind: 'session',
+        id: sessionId,
+      })
     );
     this.apply(store, focus);
   }
@@ -524,7 +554,7 @@ export class TodayEditorController {
     }
     this.pin(store.docId);
     this.active = { store, nodeId };
-    if (this.pickerDismissedFor !== nodeId) this.pickerDismissedFor = null;
+    if (!this.pickerDismissedFor?.startsWith(`${nodeId}:`)) this.pickerDismissedFor = null;
     this.notify();
   }
 
@@ -708,27 +738,18 @@ export class TodayEditorController {
     const data = event.clipboardData;
     const structured = data.getData(TODAY_CLIPBOARD_MIME);
     const text = data.getData('text/plain');
-    const link = !structured ? readPastedSessionLink(text, this.workspaceId) : null;
-    if (link) {
-      event.preventDefault();
-      const { store, nodeId } = active;
-      const range = this.editor.getEditorState().read(() => $readSelectionOffsets());
-      const start = range?.start ?? 0;
-      queueMicrotask(() =>
-        this.apply(
-          store,
-          store.undo.structural(() =>
-            store.outline.insertMention(nodeId, start, (range?.end ?? start) - start, {
-              kind: 'session',
-              id: link.sessionId,
-            })
-          )
-        )
-      );
-      return true;
+    const resolve = (link: string) =>
+      readPastedSessionLink(link, this.workspaceId)?.sessionId ?? null;
+    let fragments: TodayFragment[] | null;
+    if (structured || text.includes('\n')) {
+      fragments = readClipboard(data);
+      if (fragments && !structured) fragments = linkifyTodayFragments(fragments, resolve);
+    } else {
+      // One line: keep it verbatim, only turning conversation links into mentions.
+      const rich = linkifyTodayText(text, resolve);
+      if (rich.mentions.length === 0 && rich.text === text) return false;
+      fragments = [{ ...rich, children: [] }];
     }
-    if (!structured && !text.includes('\n')) return false;
-    const fragments = readClipboard(data);
     if (!fragments) return false;
     event.preventDefault();
     const range = this.editor.getEditorState().read(() => $readSelectionOffsets());
@@ -933,9 +954,14 @@ export class TodayEditorController {
     if (!intent) return false;
     event.preventDefault();
     event.stopPropagation();
-    // Commands run inside an editor update: select directly.
-    if (intent.type === 'select') $setSelectionOffsets(intent.anchor, intent.focus);
-    else if (intent.type === 'collapse') $setSelectionOffsets(intent.offset);
+    // A selection set inside the key command does not reach the DOM selection;
+    // apply it as its own update right after, as the outline intents do.
+    const select = (anchor: number, focus: number) =>
+      queueMicrotask(() =>
+        this.editor.update(() => $setSelectionOffsets(anchor, focus), { discrete: true })
+      );
+    if (intent.type === 'select') select(intent.anchor, intent.focus);
+    else if (intent.type === 'collapse') select(intent.offset, intent.offset);
     else {
       const mention = mentions.find((candidate) => candidate.start === intent.start);
       if (!mention || mention.kind !== 'session') return true;

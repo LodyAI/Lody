@@ -498,7 +498,7 @@ const pickerStyles = stylex.create({
   empty: { padding: space[2], fontSize: text.footnoteSize, color: colors.tertiaryLabel },
 });
 
-/** The `@` session picker of an empty node, below the editing caret. Items come from the host. */
+/** The `@` conversation picker, below the editing caret. Items come from the host. */
 export function TodaySessionPicker(props: { items: readonly SessionMentionItem[] }) {
   const { t } = useTranslation();
   const controller = useTodayEditor();
@@ -513,7 +513,13 @@ export function TodaySessionPicker(props: { items: readonly SessionMentionItem[]
   }, [items, picker]);
   if (controller) controller.pickerItems = candidates.map((item) => item.sessionId);
   if (!controller || !picker || !root) return null;
-  const rect = root.getBoundingClientRect();
+  // Under the `@`: the caret's line when the browser can measure it, else the node.
+  const selection = window.getSelection();
+  const caret =
+    selection?.rangeCount && root.contains(selection.anchorNode)
+      ? selection.getRangeAt(0).getBoundingClientRect()
+      : null;
+  const rect = caret && caret.height > 0 ? caret : root.getBoundingClientRect();
   return (
     <div
       {...stylex.props(pickerStyles.menu)}

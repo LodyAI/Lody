@@ -227,7 +227,7 @@ describe('Today LoroText binding', () => {
 });
 
 describe('Today session picker', () => {
-  it('replaces the `@query` with a mention, and one undo brings the text back', async () => {
+  it('replaces an `@query` mid-sentence with a mention in place, and one undo brings it back', async () => {
     const { createTodayPageStoreCache } = await import('../src/providers/today-page-store-cache');
     const { TodayEditorController } =
       await import('../src/components/today/editor/today-editor-controller');
@@ -254,11 +254,13 @@ describe('Today session picker', () => {
     controller.editor.update(
       () => {
         const selection = $getSelection();
-        if ($isRangeSelection(selection)) selection.insertText('@fix');
+        if ($isRangeSelection(selection)) selection.insertText('ask @fix later');
       },
       { discrete: true }
     );
-    expect(store.getSnapshot().visible.map((n) => n.text)).toEqual(['@fix']);
+    expect(store.getSnapshot().visible.map((n) => n.text)).toEqual(['ask @fix later']);
+    // The caret right after `@fix`, mid-sentence.
+    controller.editor.update(() => $setSelectionOffsets(8), { discrete: true });
     // While an IME composes (a full-width ＠ typed through it), the menu waits.
     controller.editor.update(() => $setCompositionKey($getRoot().getFirstDescendant()!.getKey()), {
       discrete: true,
@@ -271,13 +273,16 @@ describe('Today session picker', () => {
     controller.editor.update(() => $getRoot().getFirstDescendant()!.markDirty(), {
       discrete: true,
     });
-    expect(controller.getPicker()?.query).toBe('fix');
+    expect(controller.getPicker()).toMatchObject({ query: 'fix', start: 4 });
     controller.pickerItems = ['sess-1'];
     controller.acceptPicker('sess-1');
     const [node] = store.getSnapshot().visible;
-    expect(node?.mentions).toEqual([{ start: 0, kind: 'session', id: 'sess-1' }]);
+    expect(node).toMatchObject({
+      text: `ask ${M} later`,
+      mentions: [{ start: 4, kind: 'session', id: 'sess-1' }],
+    });
     store.undo.undo();
-    expect(store.getSnapshot().visible[0]).toMatchObject({ text: '@fix', mentions: [] });
+    expect(store.getSnapshot().visible[0]).toMatchObject({ text: 'ask @fix later', mentions: [] });
     controller.dispose();
     root.remove();
   });
@@ -494,6 +499,19 @@ describe('Today Shift+Up/Down while editing', () => {
     expect(controller.editor.read(() => $readSelectionOffsets())).toEqual({ start: 0, end: 3 });
     controller.dispose();
     root.remove();
+  });
+});
+
+describe('Today @ trigger', () => {
+  it('opens at a line start or after a space or mention, never inside a word or across lines', async () => {
+    const { findPickerTrigger } =
+      await import('../src/components/today/editor/today-editor-controller');
+    expect(findPickerTrigger('@fi', 3)).toEqual({ start: 0, query: 'fi' });
+    expect(findPickerTrigger('see ＠fix the bug', 16)).toEqual({ start: 4, query: 'fix the bug' });
+    expect(findPickerTrigger(`${M}@x`, 3)).toEqual({ start: 1, query: 'x' });
+    expect(findPickerTrigger('mail a@b', 8)).toBeNull();
+    expect(findPickerTrigger('@a\nb', 4)).toBeNull();
+    expect(findPickerTrigger('@fix later', 4)).toEqual({ start: 0, query: 'fix' });
   });
 });
 

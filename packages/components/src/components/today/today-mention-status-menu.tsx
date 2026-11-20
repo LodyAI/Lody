@@ -102,7 +102,14 @@ function TodayMentionStatusMenuContent(props: {
     nextWeek: t('sessions.contextMenu.snoozeNextWeek', 'Next week'),
   };
   return (
-    <Menu.Root open onOpenChange={(open) => (open ? undefined : props.onClose())}>
+    <Menu.Root
+      open
+      onOpenChange={(open, details) => {
+        // Anchored without a trigger, Base UI reads its own Later submenu
+        // opening as a sibling menu opening; that must not close it.
+        if (!open && details.reason !== 'sibling-open') props.onClose();
+      }}
+    >
       <Menu.Content anchor={props.anchor} align="start" finalFocus={false}>
         {display.unread ? (
           <Menu.Item
