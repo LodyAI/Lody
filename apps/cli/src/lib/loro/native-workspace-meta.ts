@@ -10,7 +10,7 @@ import {
   type LoroRepo,
   type StorageAdapter,
 } from 'loro-repo';
-import { nativeFlockDocIds } from '@lody/shared/native-workspace-meta-ipc';
+import { isNativeFlockDocId, ownedLegacyFlockDocIds } from '@lody/shared/native-workspace-meta-ipc';
 import {
   connectNativeRepo,
   importLegacyRoom,
@@ -64,14 +64,14 @@ export async function openNativeWorkspaceMeta(
   logger: Logger
 ): Promise<{ meta: NativeWorkspaceMeta; flockDocs: ExternalFlockDocsAdapter }> {
   const { client } = await connectNativeRepo({ launcher: cliNativeRepoHostLauncher });
-  const owned = nativeFlockDocIds(workspaceId);
+  const stored = (await legacyStorage.inventory?.())?.flockDocIds ?? [];
   const results = [
     await importLegacyRoom(client, workspaceId, META_ROOM, CLI_SOURCE, async () => {
       const legacy = await legacyStorage.loadMeta();
       return legacy?.exportJson() as LegacyFlockBundle | undefined;
     }),
   ];
-  for (const id of owned)
+  for (const id of ownedLegacyFlockDocIds(workspaceId, stored))
     results.push(
       await importLegacyRoom(client, workspaceId, flockRoom(id), CLI_SOURCE, async () => {
         const legacy = await legacyStorage.loadFlockDoc?.(id);
@@ -89,7 +89,7 @@ export async function openNativeWorkspaceMeta(
     flockDocs: createNativeFlockDocs(
       client,
       workspaceId,
-      (id) => owned.includes(id),
+      (id) => isNativeFlockDocId(workspaceId, id),
       (file) => Flock.fromFile(file).exportJson()
     ),
   };
@@ -115,8 +115,12 @@ export async function writeBackNativeWorkspaceMeta(
     const { client } = connection;
     legacyRepo.getMeta().importFile((await client.exportFlockRaw(workspaceId, META_ROOM)).bytes);
     await legacyRepo.persistMetaNow();
-    for (const id of nativeFlockDocIds(workspaceId)) {
+    // The Meta Flock registry (now written back) lists documents created natively too.
+    const registered = (await legacyRepo.listFlockDoc()).map((row) => row.flockDocId);
+    for (const id of ownedLegacyFlockDocIds(workspaceId, registered)) {
       const handle = await legacyRepo.openFlockDoc(id);
+      // Idempotent: a registered document without a native room exports empty.
+      await client.createRoom(workspaceId, flockRoom(id), 'plaintext');
       handle.flock.importFile((await client.exportFlockRaw(workspaceId, flockRoom(id))).bytes);
       await legacyRepo.persistFlockDocNow(id, handle.flock);
       await unpublishLegacyRoom(client, workspaceId, flockRoom(id), CLI_SOURCE);

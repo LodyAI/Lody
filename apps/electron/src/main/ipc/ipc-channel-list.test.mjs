@@ -245,7 +245,7 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
     await assert.rejects(
       handlers.get('nativeWorkspaceMeta.openFlockDoc')(auxiliary, {
         ...scope,
-        flockDocId: 'lw_test:mf:other',
+        flockDocId: 'lw_foreign:mf:other',
         observationId: '00000000-0000-4000-8000-000000000003'
       }),
       /scope_denied/
