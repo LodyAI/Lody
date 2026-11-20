@@ -1,6 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
-import { AlarmClock, CircleCheck } from 'lucide-react';
 import type React from 'react';
 import { useTranslation } from 'react-i18next';
 import { getSessionRoomId, type SessionId, type TodayMentionTarget } from '@lody/shared';
@@ -8,7 +7,6 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { sessionMetaAtomFamily, sessionMetaCacheSettledAtomFamily } from '@/atoms/doc-meta';
 import { sessionLiveStatusAtomFamily } from '@/atoms/presence';
-import { SessionRowStatusIndicator } from '@/components/sidebar-row-shared';
 import { useTodayEditor } from './editor/today-editor-context';
 import { todaySessionDisplay, type TodaySessionDisplay } from './today-session-status';
 import { useTodayNow } from './use-today-clock';
@@ -20,7 +18,7 @@ import { useTodayNow } from './use-today-clock';
 // underline; selection only tints the fill, so the title keeps its state colour
 // (a Done title stays dim and struck through).
 const CHIP_PAD = space[1];
-const ICON_HIT = '20px';
+const ICON_HIT = '18px';
 const ICON_BLEED = '3px';
 
 const styles = stylex.create({
@@ -60,7 +58,7 @@ const styles = stylex.create({
     lineHeight: text.bodyLeading,
     verticalAlign: 'baseline',
     marginInlineStart: '1px',
-    paddingInlineStart: '1px',
+    paddingInlineStart: 0,
     paddingInlineEnd: ICON_BLEED,
     marginInlineEnd: `calc(${space[1]} - ${ICON_BLEED})`,
     paddingBlock: 0,
@@ -80,12 +78,15 @@ const styles = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    width: 14,
+    width: 12,
     height: text.bodyLeading,
     verticalAlign: 'top',
   },
-  // Later and Done read as quiet, secondary marks next to the link-coloured title.
-  quietGlyph: { color: colors.secondaryLabel },
+  // Mark colours: accent for live work and unread, warning for idle and
+  // waiting on you, quiet grey for Later and Done.
+  markAccent: { color: colors.accent, display: 'block' },
+  markWarning: { color: colors.warning, display: 'block' },
+  markQuiet: { color: colors.secondaryLabel, display: 'block' },
 
   // Plain inline text: it sits on the line's baseline like the title.
   countdown: {
@@ -98,16 +99,6 @@ const styles = stylex.create({
     fontVariantNumeric: 'tabular-nums',
   },
 
-  // Linear's backlog circle: small, hollow, dashed, in the warning colour.
-  idle: {
-    width: 10,
-    height: 10,
-    boxSizing: 'border-box',
-    borderRadius: radius.full,
-    borderWidth: 1.5,
-    borderStyle: 'dashed',
-    borderColor: colors.warning,
-  },
   title: {
     display: 'inline',
     padding: 0,
@@ -122,7 +113,6 @@ const styles = stylex.create({
     textUnderlineOffset: '3px',
     ':hover': { textDecorationColor: 'currentColor' },
   },
-  titleUnread: { fontWeight: 500 },
   titleDone: {
     color: colors.tertiaryLabel,
     textDecorationLine: 'line-through',
@@ -131,32 +121,123 @@ const styles = stylex.create({
   muted: { color: colors.tertiaryLabel, fontStyle: 'italic' },
 });
 
-function StatusIcon(props: { display: Extract<TodaySessionDisplay, { state: 'ok' }> }) {
-  const { status, snoozeCountdown } = props.display;
-  const slot = (glyph: React.ReactNode, quiet = false) => (
-    <span {...stylex.props(styles.glyph, quiet && styles.quietGlyph)}>{glyph}</span>
-  );
-  switch (status) {
-    case 'waiting':
-      return slot(<SessionRowStatusIndicator isWaitingPermission />);
+/**
+ * One family of 12px status marks (Linear's status circles): the same circle,
+ * stroke and weight for every state, told apart by fill and a small mark.
+ * Static on purpose: motion inside running text is noise (the sidebar keeps
+ * its animated working mark).
+ */
+function StatusGlyph(props: { status: Extract<TodaySessionDisplay, { state: 'ok' }>['status'] }) {
+  const ring = { cx: 6, cy: 6, r: 5, fill: 'none', strokeWidth: 1.5 } as const;
+  switch (props.status) {
+    case 'idle':
+      return (
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          aria-hidden
+          {...stylex.props(styles.markWarning)}
+        >
+          <circle {...ring} stroke="currentColor" strokeDasharray="2.2 1.8" />
+        </svg>
+      );
     case 'running':
-      return slot(<SessionRowStatusIndicator isWorking />);
+      return (
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          aria-hidden
+          {...stylex.props(styles.markAccent)}
+        >
+          <circle {...ring} stroke="currentColor" />
+          <path d="M6 2.5 A3.5 3.5 0 0 1 6 9.5 Z" fill="currentColor" />
+        </svg>
+      );
+    case 'waiting':
+      return (
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          aria-hidden
+          {...stylex.props(styles.markWarning)}
+        >
+          <circle cx="6" cy="6" r="5.75" fill="currentColor" />
+          <rect x="5.25" y="2.75" width="1.5" height="4" rx="0.75" fill="white" />
+          <circle cx="6" cy="8.6" r="0.85" fill="white" />
+        </svg>
+      );
     case 'unread':
-      return slot(<SessionRowStatusIndicator hasUnreadMessages />);
+      return (
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          aria-hidden
+          {...stylex.props(styles.markAccent)}
+        >
+          <circle cx="6" cy="6" r="3.5" fill="currentColor" />
+        </svg>
+      );
     case 'later':
       return (
-        <>
-          {slot(<AlarmClock size={13} strokeWidth={2} aria-hidden />, true)}
-          {snoozeCountdown ? (
-            <span {...stylex.props(styles.countdown)}>{snoozeCountdown}</span>
-          ) : null}
-        </>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          aria-hidden
+          {...stylex.props(styles.markQuiet)}
+        >
+          <circle {...ring} stroke="currentColor" />
+          <path
+            d="M6 3.5 V6 L7.75 7.1"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
       );
     case 'done':
-      return slot(<CircleCheck size={13} strokeWidth={2} aria-hidden />, true);
-    case 'idle':
-      return slot(<span {...stylex.props(styles.idle)} aria-hidden />);
+      return (
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          aria-hidden
+          {...stylex.props(styles.markQuiet)}
+        >
+          <circle {...ring} stroke="currentColor" />
+          <path
+            d="M3.9 6.1 L5.4 7.5 L8.1 4.7"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
+    default:
+      return null;
   }
+}
+
+function StatusIcon(props: { display: Extract<TodaySessionDisplay, { state: 'ok' }> }) {
+  const { status, snoozeCountdown } = props.display;
+  return (
+    <>
+      <span {...stylex.props(styles.glyph)}>
+        <StatusGlyph status={status} />
+      </span>
+      {status === 'later' && snoozeCountdown ? (
+        <span {...stylex.props(styles.countdown)}>{snoozeCountdown}</span>
+      ) : null}
+    </>
+  );
 }
 
 /**
@@ -273,11 +354,7 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean; lead
       </button>
       <button
         type="button"
-        {...stylex.props(
-          styles.title,
-          display.status === 'unread' && styles.titleUnread,
-          display.status === 'done' && styles.titleDone
-        )}
+        {...stylex.props(styles.title, display.status === 'done' && styles.titleDone)}
         aria-label={t('today.mentionLabel', 'Conversation: {{title}}, {{status}}', {
           title,
           status: statusLabel,

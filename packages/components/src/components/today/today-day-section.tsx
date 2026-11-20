@@ -78,6 +78,8 @@ const styles = stylex.create({
   editable: { outline: 'none', cursor: 'text' },
   handle: { cursor: 'grab', touchAction: 'none' },
   blockSelected: { backgroundColor: `color-mix(in srgb, ${colors.accent} 14%, transparent)` },
+  joinTop: { borderTopLeftRadius: 0, borderTopRightRadius: 0 },
+  joinBottom: { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
 });
 
 /**
@@ -141,14 +143,31 @@ function TodayStaticOutline(props: {
   }
   return (
     <div {...stylex.props(styles.outline)} role="tree">
-      {snapshot.visible.map((node) => (
-        <TodayRow key={node.id} node={node} store={store} />
+      {snapshot.visible.map((node, index) => (
+        <TodayRow
+          key={node.id}
+          node={node}
+          store={store}
+          // A run of selected rows reads as one block: only its ends are rounded.
+          joinsPrevious={
+            index > 0 && !!controller?.isBlockSelected(store, snapshot.visible[index - 1]!.id)
+          }
+          joinsNext={
+            index < snapshot.visible.length - 1 &&
+            !!controller?.isBlockSelected(store, snapshot.visible[index + 1]!.id)
+          }
+        />
       ))}
     </div>
   );
 }
 
-function TodayRow(props: { node: TodayNodeView | null; store: TodayPageStore }) {
+function TodayRow(props: {
+  node: TodayNodeView | null;
+  store: TodayPageStore;
+  joinsPrevious?: boolean;
+  joinsNext?: boolean;
+}) {
   const { t } = useTranslation();
   const { node, store } = props;
   const controller = useTodayEditor();
@@ -156,7 +175,12 @@ function TodayRow(props: { node: TodayNodeView | null; store: TodayPageStore }) 
   const selected = !!node && !!controller?.isBlockSelected(store, node.id);
   return (
     <div
-      {...stylex.props(styles.row, selected && styles.blockSelected)}
+      {...stylex.props(
+        styles.row,
+        selected && styles.blockSelected,
+        selected && props.joinsPrevious && styles.joinTop,
+        selected && props.joinsNext && styles.joinBottom
+      )}
       style={{ paddingInlineStart: (node?.depth ?? 0) * TODAY_INDENT_PX }}
       role="treeitem"
       aria-selected={selected || undefined}
