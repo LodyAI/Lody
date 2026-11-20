@@ -1,71 +1,18 @@
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
 import { isRecord } from '@lody/shared';
 import { parseCodeCollabLspLocations, type CodeCollabLspLocation } from './code-collab-lsp-result';
-import { hasSessionFileLspProvider, type SessionFileProvider } from './session-file-provider';
+import { hasSessionFileLspProvider } from './session-file-provider';
+import {
+  CODE_COLLAB_MONACO_URI_SCHEME,
+  findCodeCollabMonacoModelProvider,
+  readFileIdFromCodeCollabMonacoUri,
+} from './code-collab-monaco-model-provider';
 
-// Code Collab Monaco models use this URI scheme so a single global
-// `registerDefinitionProvider` / `registerReferenceProvider` can pick
-// them out from other Monaco models in the page. The authority carries
-// the fileId; the path carries the workspace path so Monaco can infer
-// extension-specific language behavior for TSX/JSX while LSP lookup still
-// keys only by fileId.
-export const CODE_COLLAB_MONACO_URI_SCHEME = 'code-collab';
-
-export function buildCodeCollabMonacoUri(fileId: string, filePath?: string): monaco.Uri {
-  const normalizedPath = filePath?.replace(/\\/g, '/').replace(/^\/+/, '');
-  return monaco.Uri.from({
-    scheme: CODE_COLLAB_MONACO_URI_SCHEME,
-    authority: fileId,
-    path: normalizedPath && normalizedPath.length > 0 ? `/${normalizedPath}` : '/',
-  });
-}
-
-export function readFileIdFromCodeCollabMonacoUri(uri: monaco.Uri): string | undefined {
-  if (uri.scheme !== CODE_COLLAB_MONACO_URI_SCHEME) return undefined;
-  return uri.authority || undefined;
-}
-
-// Registry mapping fileId → stack of SessionFileProviders. Each
-// `SessionFileContentView` mount pushes its provider; the unmount
-// removes that specific entry. Two concurrent mounts (e.g. diff
-// viewer + editor on the same file) are common, so single-slot
-// storage would let either unmount delete the entry the other still
-// depends on. The stack lets the most-recently-mounted viewer drive
-// the language providers while every mount safely owns one entry's
-// worth of lifecycle.
-const providerRegistry = new Map<string, SessionFileProvider[]>();
-
-export function registerCodeCollabMonacoModelProvider(
-  fileId: string,
-  provider: SessionFileProvider
-): () => void {
-  let stack = providerRegistry.get(fileId);
-  if (!stack) {
-    stack = [];
-    providerRegistry.set(fileId, stack);
-  }
-  stack.push(provider);
-  return () => {
-    const current = providerRegistry.get(fileId);
-    if (!current) return;
-    // `lastIndexOf` so a re-mount that happens to reuse the same
-    // provider instance still removes its own most-recent entry.
-    const index = current.lastIndexOf(provider);
-    if (index >= 0) {
-      current.splice(index, 1);
-    }
-    if (current.length === 0) {
-      providerRegistry.delete(fileId);
-    }
-  };
-}
-
-function findProviderForUri(uri: monaco.Uri): SessionFileProvider | undefined {
-  const fileId = readFileIdFromCodeCollabMonacoUri(uri);
-  if (!fileId) return undefined;
-  const stack = providerRegistry.get(fileId);
-  return stack && stack.length > 0 ? stack[stack.length - 1] : undefined;
-}
+export {
+  buildCodeCollabMonacoUri,
+  readFileIdFromCodeCollabMonacoUri,
+  registerCodeCollabMonacoModelProvider,
+} from './code-collab-monaco-model-provider';
 
 // Helper for parsing the host response: walks `locations` only when
 // status is `'ready'`. Everything else (`'unsupported'` / malformed)
@@ -112,8 +59,9 @@ export function ensureCodeCollabMonacoLanguageProviders(): void {
     { scheme: CODE_COLLAB_MONACO_URI_SCHEME },
     {
       async provideDefinition(model, position) {
-        const provider = findProviderForUri(model.uri);
-        const fileId = readFileIdFromCodeCollabMonacoUri(model.uri);
+        const modelUri = model.uri.toString();
+        const provider = findCodeCollabMonacoModelProvider(modelUri);
+        const fileId = readFileIdFromCodeCollabMonacoUri(modelUri);
         if (!hasSessionFileLspProvider(provider) || !fileId) {
           return null;
         }
@@ -144,8 +92,9 @@ export function ensureCodeCollabMonacoLanguageProviders(): void {
     { scheme: CODE_COLLAB_MONACO_URI_SCHEME },
     {
       async provideReferences(model, position) {
-        const provider = findProviderForUri(model.uri);
-        const fileId = readFileIdFromCodeCollabMonacoUri(model.uri);
+        const modelUri = model.uri.toString();
+        const provider = findCodeCollabMonacoModelProvider(modelUri);
+        const fileId = readFileIdFromCodeCollabMonacoUri(modelUri);
         if (!hasSessionFileLspProvider(provider) || !fileId) {
           return null;
         }
