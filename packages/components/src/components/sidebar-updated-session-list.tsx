@@ -80,6 +80,7 @@ import {
   SessionRowLeadingSlot,
   SessionRowMenuButton,
   SessionRowWorktreeIndicator,
+  SidebarRowActionButton,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
   SidebarListSkeleton,
@@ -975,6 +976,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                               effectiveShowStatusActions ? beginCustomSnooze : undefined
                             }
                             showSnoozeCountdown={effectiveShowStatusActions}
+                            showStatusActions={effectiveShowStatusActions}
                             onCopyUrl={onCopyItemUrl}
                             onShareWithTeam={onShareItemWithTeam}
                             onOpenPullRequest={onOpenPullRequest}
@@ -1133,6 +1135,11 @@ type UpdatedItemRowProps = {
   onMoveToFocus?: (id: string) => void;
   onBeginCustomSnooze?: (id: string, title: string) => void;
   showSnoozeCountdown?: boolean;
+  /**
+   * Status view: Focus and Later rows replace the hover Archive button with a
+   * one-click Settle ("mark as completed") action; Settled rows keep Archive.
+   */
+  showStatusActions?: boolean;
   onCopyUrl?: (id: string) => void;
   onShareWithTeam?: (id: string) => void;
   onOpenPullRequest?: (request: SessionListPullRequestOpen) => void;
@@ -1166,6 +1173,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   onMoveToFocus,
   onBeginCustomSnooze,
   showSnoozeCountdown = false,
+  showStatusActions = false,
   onCopyUrl,
   onShareWithTeam,
   onOpenPullRequest,
@@ -1234,7 +1242,6 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   const readOnly = item.sharing?.access === 'read';
   const canArchive = !readOnly && typeof onArchive === 'function';
   const canMarkUnread = typeof onMarkUnread === 'function' && !item.hasUnreadMessages;
-  const showInlineArchive = canArchive && !isMobile;
   const canRename = !readOnly && typeof onRename === 'function';
   const canTogglePin = typeof onTogglePin === 'function';
   const nowMs = now instanceof Date ? now.getTime() : Date.now();
@@ -1244,7 +1251,12 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       ? formatSnoozeCountdown(item.snoozedUntil, nowMs)
       : null;
   const canSnooze = !readOnly && typeof onSnooze === 'function';
-  const canSettle = !readOnly && typeof onSettle === 'function' && statusGroup === 'focus';
+  const canSettle = !readOnly && typeof onSettle === 'function' && statusGroup !== 'settled';
+  // The Status view trades Archive's two-step destructive action for a
+  // one-click Settle on rows that are still open; only a Settled row keeps
+  // Archive in the hover slot. Other organize modes always show Archive.
+  const showInlineSettle = canSettle && !isMobile && showStatusActions;
+  const showInlineArchive = canArchive && !isMobile && !showInlineSettle;
   const canMoveToFocus =
     !readOnly && typeof onMoveToFocus === 'function' && statusGroup !== 'focus';
   const canCopyUrl = typeof onCopyUrl === 'function';
@@ -1486,6 +1498,17 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                     useAnchor && 'z-20'
                   )}
                 >
+                  {isMobile && !snoozeCountdown ? <span>{relativeTime}</span> : null}
+                  {showMergeablePill ? <SessionMergeablePill /> : null}
+                  <SessionRowWorktreeIndicator
+                    isWorktree={item.kind === 'local' && item.isWorktree}
+                  />
+                  {showPr ? (
+                    <SessionPrIcon compact prStatus={prStatus} prCiState={item.prCiState} />
+                  ) : null}
+                  {/* The wake-up countdown sits at the far right in a neutral
+                      chip: it is recurring meta, not an alert, so it keeps the
+                      row's own ink instead of a status colour. */}
                   {snoozeCountdown ? (
                     <span
                       data-snooze-countdown=""
@@ -1494,19 +1517,11 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                           ? new Date(item.snoozedUntil).toLocaleString()
                           : undefined
                       }
-                      className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium leading-none tabular-nums text-amber-700 dark:bg-amber-400/12 dark:text-amber-300"
+                      className="inline-flex items-center gap-1 rounded-full bg-sidebar-foreground/10 px-1.5 py-0.5 text-[11px] font-medium leading-none tabular-nums text-sidebar-foreground-muted"
                     >
                       <Timer className="h-3 w-3 shrink-0" aria-hidden="true" />
                       <span>{snoozeCountdown}</span>
                     </span>
-                  ) : null}
-                  {isMobile && !snoozeCountdown ? <span>{relativeTime}</span> : null}
-                  {showMergeablePill ? <SessionMergeablePill /> : null}
-                  <SessionRowWorktreeIndicator
-                    isWorktree={item.kind === 'local' && item.isWorktree}
-                  />
-                  {showPr ? (
-                    <SessionPrIcon compact prStatus={prStatus} prCiState={item.prCiState} />
                   ) : null}
                 </span>
               ) : undefined
@@ -1520,7 +1535,14 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
               ) : undefined
             }
             archive={
-              showInlineArchive ? (
+              showInlineSettle ? (
+                <SidebarRowActionButton
+                  label={contextMenuLabels.settle}
+                  icon={<CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />}
+                  onConfirm={() => onSettle?.(item.id)}
+                  revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
+                />
+              ) : showInlineArchive ? (
                 <SidebarRowArchiveButton
                   label={archiveTooltipLabel}
                   confirmLabel={archiveConfirmLabel}

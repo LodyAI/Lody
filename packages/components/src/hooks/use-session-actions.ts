@@ -44,6 +44,9 @@ import {
   OPERATION_INBOX_PROTOCOL_VERSION,
   buildPinnedSectionLayout,
   planNewPinPlacement,
+  planTopOrderKey,
+  isPinOrderKey,
+  FractionalIndex,
   type ManualOrderWrite,
   type PinPlacementWrite,
   type PinnedSessionPlacement,
@@ -492,6 +495,19 @@ export function useSessionActions(): SessionActions {
         publishSessionMeta: setDocMetaByRoomId,
         readSessionMeta: (sessionId) =>
           store.get(sessionMetaCacheAtom)[getSessionRoomId(sessionId)],
+        // Key below every existing orderKey so a new top-level conversation
+        // lands at the top of Status Focus; child Sessions get none (they
+        // render nested under their opener row).
+        planNewSessionOrderKey: () => {
+          let topKey: string | null = null;
+          for (const meta of Object.values(store.get(sessionMetaCacheAtom))) {
+            if (!isPinOrderKey(meta.orderKey)) continue;
+            if (topKey === null || FractionalIndex.compare(meta.orderKey, topKey) < 0) {
+              topKey = meta.orderKey;
+            }
+          }
+          return planTopOrderKey([{ id: '', orderKey: topKey }]);
+        },
         onRpcDelivered: (sessionId, turnId) =>
           store.set(rpcDeliveredTurnsAtom, (previous) =>
             addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, turnId))
