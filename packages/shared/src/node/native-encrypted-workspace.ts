@@ -204,6 +204,7 @@ export async function attachNativeEncryptedWorkspace(
       enabled: mayWrite,
     });
     if (!closed) slot ??= await serveTokens(client, workspaceId, options.contentToken, mayWrite);
+    if (!closed && !remoteConfigured) await configureContentRemote().catch(() => {});
   };
   const stopServing = () => {
     closed = true;
@@ -216,20 +217,24 @@ export async function attachNativeEncryptedWorkspace(
     return next;
   };
 
-  const first = await options.contentToken();
+  let remoteConfigured = false;
+  const configureContentRemote = async () => {
+    const grant = await options.contentToken();
+    await client.configureRemote(workspaceId, {
+      remote_id: NATIVE_CONTENT_REMOTE_ID,
+      base_url: grant.gatewayBaseUrl,
+      bucket: grant.bucketId,
+      encrypted: true,
+      snapshot_zstd: true,
+      aadDomain: encryptedWorkspaceNamespace(options.genesisHash),
+      routes: createLodyWorkspaceRoutes(workspaceId, {
+        excludePrefixes: ['session-comment-'],
+        excludeFlockPrefixes: ['lody-migrations'],
+      }),
+    });
+    remoteConfigured = true;
+  };
   await run(install);
-  await client.configureRemote(workspaceId, {
-    remote_id: NATIVE_CONTENT_REMOTE_ID,
-    base_url: first.gatewayBaseUrl,
-    bucket: first.bucketId,
-    encrypted: true,
-    snapshot_zstd: true,
-    aadDomain: encryptedWorkspaceNamespace(options.genesisHash),
-    routes: createLodyWorkspaceRoutes(workspaceId, {
-      excludePrefixes: ['session-comment-'],
-      excludeFlockPrefixes: ['lody-migrations'],
-    }),
-  });
 
   const offState = client.onConnectionStateChange((state) => {
     if (state !== 'connected' || closed) return;
