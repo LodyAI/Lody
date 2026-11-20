@@ -15,7 +15,6 @@ import {
   type TodayFragment,
   type TodayMention,
 } from '@lody/shared';
-import { Button } from '@lody/ui/button';
 import { docMetaCacheReadyAtom, sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
 import type { SessionMentionItem } from '@/components/mentions/mention-session-source';
@@ -34,13 +33,14 @@ import {
   type TodayMentionStatusActions,
 } from '@/components/today/today-mention-status-menu';
 import { createTodayPageStoreCache } from '@/providers/today-page-store-cache';
+import { ConvertDialogPreview } from './fixtures/convert-dialog';
 
 /**
  * Today with conversations, entirely synthetic: mentions sit inline in
  * sentences and show every status, the status icon's menu changes the seeded
  * metadata, `@` anywhere offers these conversations, and the bullet menu's
- * "Convert to task" opens a stand-in dialog (the product uses the full
- * new-conversation surface, which needs a workspace runtime).
+ * "Convert to task" opens the dialog's real layout over fixture selectors (the
+ * product wraps the stateful landing, which needs a workspace runtime).
  */
 const USER = 'demo-user';
 const TODAY = '2026-11-20' as TodayDate;
@@ -156,7 +156,11 @@ function seedStore() {
   return store;
 }
 
-/** Stand-in for the new-conversation dialog: "Send" creates a demo conversation. */
+/**
+ * The real dialog layout (header, `ChatLandingView` dialog layout, desktop
+ * selectors) over fixtures; "Start task" creates a demo conversation, which
+ * the node then mentions.
+ */
 const DemoConvertDialog: TodayConvertDialogComponent = ({
   open,
   prompt,
@@ -164,78 +168,39 @@ const DemoConvertDialog: TodayConvertDialogComponent = ({
   onOpenChange,
 }) => {
   const store = useStore();
-  const [text, setText] = useState(prompt);
-  useEffect(() => setText(prompt), [prompt]);
-  if (!open) return null;
   return (
-    <div
-      role="dialog"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        display: 'grid',
-        placeItems: 'center',
-        background: 'rgb(0 0 0 / 0.3)',
-        zIndex: 60,
+    <ConvertDialogPreview
+      open={open}
+      prompt={prompt}
+      onOpenChange={onOpenChange}
+      onStart={(text) => {
+        const id = `demo-new-${Date.now()}` as SessionId;
+        store.set(sessionMetaCacheAtom, (previous) => ({
+          ...previous,
+          [getSessionRoomId(id)]: {
+            id,
+            title: text.trim().split('\n')[0] || 'New task',
+            createdAt: Date.now(),
+            lastMessageAt: Date.now(),
+            lastReadAt: Date.now(),
+          } as unknown as SessionMeta,
+        }));
+        store.set(lodyPresenceStatesAtom, (previous) => ({
+          ...previous,
+          [id]: {
+            kind: 'session',
+            sessionId: id,
+            machineId: 'm' as never,
+            instanceId: 'i' as never,
+            status: { type: 'running' },
+            updatedAt: Date.now(),
+          },
+        }));
+        store.set(lodyPresenceNowMsAtom, Date.now());
+        onAccepted(id);
+        onOpenChange(false);
       }}
-    >
-      <div
-        style={{
-          width: 460,
-          padding: 16,
-          borderRadius: 12,
-          background: 'white',
-          display: 'grid',
-          gap: 12,
-        }}
-      >
-        <strong>Convert to task (Storybook stand-in)</strong>
-        <textarea
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          rows={6}
-          style={{ font: 'inherit', padding: 8 }}
-        />
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <Button variant="ghost" size="small" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            size="small"
-            onClick={() => {
-              const id = `demo-new-${Date.now()}` as SessionId;
-              store.set(sessionMetaCacheAtom, (previous) => ({
-                ...previous,
-                [getSessionRoomId(id)]: {
-                  id,
-                  title: text.split('\n')[0] || 'New task',
-                  createdAt: Date.now(),
-                  lastMessageAt: Date.now(),
-                  lastReadAt: Date.now(),
-                } as unknown as SessionMeta,
-              }));
-              store.set(lodyPresenceStatesAtom, (previous) => ({
-                ...previous,
-                [id]: {
-                  kind: 'session',
-                  sessionId: id,
-                  machineId: 'm' as never,
-                  instanceId: 'i' as never,
-                  status: { type: 'running' },
-                  updatedAt: Date.now(),
-                },
-              }));
-              store.set(lodyPresenceNowMsAtom, Date.now());
-              onAccepted(id);
-              onOpenChange(false);
-            }}
-          >
-            Send
-          </Button>
-        </div>
-      </div>
-    </div>
+    />
   );
 };
 
@@ -340,3 +305,31 @@ const meta: Meta<typeof TodayWithConversations> = {
 export default meta;
 
 export const Default: StoryObj<typeof TodayWithConversations> = {};
+
+/** The "Convert to task" dialog on its own, opened over a node's text. */
+function ConvertDialogAlone() {
+  const [open, setOpen] = useState(true);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        Open
+      </button>
+      <ConvertDialogPreview
+        open={open}
+        prompt={'Plan the launch\n  Draft the release notes\n  Ping design about the hero image'}
+        onOpenChange={setOpen}
+        onStart={() => setOpen(false)}
+      />
+    </>
+  );
+}
+
+export const ConvertDialogLight: StoryObj<typeof TodayWithConversations> = {
+  render: () => <ConvertDialogAlone />,
+  globals: { theme: 'light' },
+};
+
+export const ConvertDialogDark: StoryObj<typeof TodayWithConversations> = {
+  render: () => <ConvertDialogAlone />,
+  globals: { theme: 'dark' },
+};

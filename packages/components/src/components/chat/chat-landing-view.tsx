@@ -31,6 +31,14 @@ import { NoMachineHint, type NoMachineHintVariant } from './no-machine-hint';
 import { WebChatLandingScreen } from './web-chat-landing-screen';
 import { DialogChatLandingScreen } from './dialog-chat-landing-screen';
 import { type ComposerInputElement, getComposerSelection } from '@/ui/mention/composer-input';
+import { formatKeyBinding } from '@/lib/commands';
+import * as stylex from '@stylexjs/stylex';
+
+const styles = stylex.create({
+  // The send chord inside the dialog's submit button: part of the label,
+  // one step quieter than the word.
+  chord: { opacity: 0.6, fontWeight: 400 },
+});
 
 export type ChatLandingTone = 'light' | 'dark';
 
@@ -128,6 +136,12 @@ export interface ChatLandingViewProps {
   submitLabel?: string;
   /** Label for submit button when idle */
   submittingLabel?: string;
+  /**
+   * The dialog layout's dismiss action, beside its labelled submit button.
+   * Absent: no Cancel button (the panel's own close still dismisses).
+   */
+  onCancel?: () => void;
+  cancelLabel?: string;
   /** Hint type to display around the composer area */
   hintType?: ChatLandingHintType;
   /**
@@ -249,6 +263,8 @@ export function ChatLandingView({
   onSubmit,
   submitLabel = 'Send',
   submittingLabel = 'Sending...',
+  onCancel,
+  cancelLabel = 'Cancel',
   hintType = null,
   noMachineVariant = 'download-client',
   hintDownloadClientTitle = "Nothing's plugged in yet",
@@ -393,6 +409,41 @@ export function ChatLandingView({
     </ErrorBoundary>
   );
 
+  // A create dialog states its action in words, with the chord that sends it.
+  // Enter sends too (the prompt's own keydown); the chord is what a person
+  // who has learned to press it for a newline-friendly editor expects.
+  const dialogActionsNode = (
+    <ErrorBoundary name="ChatLandingPrimaryAction" variant="inline" resetKeys={resetKeys}>
+      {onCancel ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="small"
+          data-testid="composer-cancel"
+          onClick={onCancel}
+          disabled={submissionPending}
+        >
+          {cancelLabel}
+        </Button>
+      ) : null}
+      <Button
+        type="button"
+        variant="primary"
+        size="small"
+        data-testid="composer-send"
+        onClick={onSubmit}
+        disabled={submitDisabled}
+        aria-label={submissionPending ? submittingLabel : submitLabel}
+      >
+        {submissionPending ? <Spinner className="h-3.5 w-3.5" /> : null}
+        <span>{submitLabel}</span>
+        <span aria-hidden="true" {...stylex.props(styles.chord)}>
+          {formatKeyBinding('Mod+Enter')}
+        </span>
+      </Button>
+    </ErrorBoundary>
+  );
+
   const fallbackRender = ({ resetErrorBoundary }: { resetErrorBoundary: () => void }) => (
     <div className="w-full rounded-xl border border-border/60 bg-background/80 p-4">
       <div className="text-sm font-semibold text-foreground">{somethingWentWrong}</div>
@@ -454,7 +505,7 @@ export function ChatLandingView({
       {composerNotice}
       <ChatComposer
         tone={tone}
-        variant={isMobile ? 'landing' : 'session'}
+        variant={isMobile ? 'landing' : isDialogLayout ? 'modal' : 'session'}
         mentionSource={mentionSource}
         availableCommands={availableCommands}
         skillAgent={skillAgent}
@@ -491,9 +542,9 @@ export function ChatLandingView({
         bottomBar={bottomBar}
         statusMessage={composerStatusMessage}
         statusTone={composerStatusTone}
-        primaryAction={primaryActionNode}
+        primaryAction={isDialogLayout ? dialogActionsNode : primaryActionNode}
         autoResize
-        maxRows={isMobile ? 10 : 11}
+        maxRows={isMobile ? 10 : isDialogLayout ? 14 : 11}
       />
     </ErrorBoundary>
   );

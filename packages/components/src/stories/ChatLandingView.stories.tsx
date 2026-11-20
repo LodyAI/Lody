@@ -8,7 +8,6 @@ import { PlatformContext } from '@lody/platform/react';
 import type { WorkspaceId } from '@lody/shared';
 
 import { ChatLandingView } from '@/components/chat/chat-landing-view';
-import { Dialog } from '@/ui/dialog';
 import { HomeDashboard } from '@/components/chat/home/home-dashboard';
 import { useChatLandingKeyboardNav } from '@/hooks/use-chat-landing-keyboard-nav';
 import { ContextSwitch } from '@/components/chat/context-switch';
@@ -31,6 +30,7 @@ import {
   homeWeekAgentLabel,
   homeWeekUsageFixture,
 } from './fixtures/home-week';
+import { ConvertDialogPreview } from './fixtures/convert-dialog';
 
 const samplePromptPlaceholder = "Press '/' for commands, '@' for mentions.";
 const sampleZhCnPromptPlaceholder = "按 '/' 使用命令，'@' 添加提及。";
@@ -268,8 +268,6 @@ interface DemoLandingProps {
   initialPastedTextDrafts?: PastedTextDraft[];
   /** Mount the desktop keyboard-nav controller (arrows/Esc over the config controls). */
   enableKeyboardNav?: boolean;
-  /** The compact layout Today's "Convert to task" dialog embeds. */
-  dialog?: boolean;
 }
 
 function DemoLandingContent({
@@ -284,7 +282,6 @@ function DemoLandingContent({
   initialPrompt = 'Write a quick plan for the CRDT metadata cleanup.',
   initialPastedTextDrafts = [],
   enableKeyboardNav = false,
-  dialog = false,
 }: DemoLandingProps) {
   const navRef = useRef<HTMLDivElement>(null);
   // Landing mode: scoped to navRef, native Tab so focus can leave.
@@ -387,37 +384,6 @@ function DemoLandingContent({
       </div>
     </div>
   );
-
-  if (dialog) {
-    return (
-      <Dialog.Root open>
-        <Dialog.Content width="42rem" closeButton={false}>
-          <Dialog.Header>
-            <Dialog.Title>Convert to task</Dialog.Title>
-          </Dialog.Header>
-          <ChatLandingView
-            tone={tone}
-            layout="dialog"
-            promptId="today-convert-prompt"
-            navRootRef={navRef}
-            title={title}
-            promptValue={prompt}
-            onPromptChange={setPrompt}
-            promptPlaceholder={promptPlaceholder}
-            topSelector={topSelectorNode}
-            footerSelector={footerSelectorNode}
-            bottomBar={bottomBarNode}
-            onSubmit={handleSubmit}
-            hintType={hintType}
-            noMachineVariant={noMachineVariant}
-            onDownloadClient={handleDownloadClient}
-            onReportBug={handleReportBug}
-            onGoToAgentSettings={handleGoToAgentSettings}
-          />
-        </Dialog.Content>
-      </Dialog.Root>
-    );
-  }
 
   if (enableKeyboardNav) {
     return (
@@ -524,20 +490,33 @@ export const DesktopKeyboardNav: Story = {
   render: () => <DemoLanding tone="dark" initialPrompt="" enableKeyboardNav />,
 };
 
-/** Today's "Convert to task": the same landing, hints and composer only, in a dialog. */
+/**
+ * Today's "Convert to task": the dialog layout — breadcrumb header, the prompt
+ * as the page, the desktop selectors as one pill row, and a footer with "+",
+ * Cancel and Start task. Shared with the Today stories.
+ */
 export const DialogLayout: Story = {
   render: () => (
-    <DemoLanding
-      tone="dark"
-      dialog
-      enableKeyboardNav
-      initialPrompt={'Plan the launch\n  Draft the release notes\n  Ping design'}
+    <ConvertDialogPreview
+      open
+      prompt={'Plan the launch\n  Draft the release notes\n  Ping design'}
+      onOpenChange={() => {}}
+      onStart={() => {}}
     />
   ),
 };
 
 export const DialogLayoutNoMachine: Story = {
-  render: () => <DemoLanding tone="light" dialog hintType="no-machine" />,
+  render: () => (
+    <ConvertDialogPreview
+      open
+      prompt="Plan the launch"
+      hintType="no-machine"
+      onOpenChange={() => {}}
+      onStart={() => {}}
+    />
+  ),
+  globals: { theme: 'light' },
 };
 
 export const DesktopLight: Story = {

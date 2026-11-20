@@ -6905,6 +6905,7 @@
   "today.unpin": "取消固定 Today",
   "today.resize": "调整 Today 宽度",
   "today.convertTitle": "转换为任务",
+  "today.convertSubmit": "开始任务",
   "today.convertToTask": "转换为任务",
   "today.mentionUnsupported": "不支持的引用",
   "today.mentionLabel": "对话：{{title}}，{{status}}",

@@ -494,6 +494,10 @@ export type ChatLandingEmbedding = {
   onSessionAccepted: (result: { sessionId: SessionId }) => void;
   /** Reports a send in flight, so the host can refuse to close meanwhile. */
   onPendingChange?: (pending: boolean) => void;
+  /** The host's words for the submit button, which the dialog layout labels. */
+  submitLabel?: string;
+  /** Dismisses the host; the dialog layout shows Cancel only when given. */
+  onCancel?: () => void;
 };
 
 /** Everything an embedded landing does differently, derived in one place. */
@@ -4222,7 +4226,14 @@ function WorkspaceChatLanding({
         </Button>
       )}
     >
-      <div className="flex w-full min-w-0 items-center gap-2">
+      {/* Embedded, the scope pills share one wrapping row with the run config. */}
+      <div
+        className={
+          isEmbedded
+            ? 'flex min-w-0 flex-wrap items-center gap-1.5'
+            : 'flex w-full min-w-0 items-center gap-2'
+        }
+      >
         <DesktopMachineMenu
           value={desktopSelectedMachineId}
           visibleLocalMachineId={visibleLocalMachineId}
@@ -4297,6 +4308,7 @@ function WorkspaceChatLanding({
             onEdit: handleAgentRoleEdit,
             machine: scopedMachineId ? (machines.get(scopedMachineId) ?? null) : null,
           }}
+          menuSide={isEmbedded ? 'top' : undefined}
         />
         {/* Permission is part of what a Role pins, so behind one it stops being
             a separate control and is stated in the Role's own face instead. It
@@ -4311,6 +4323,7 @@ function WorkspaceChatLanding({
             configOptionSelectors={configOptionSelectors}
             configOptionValues={configOptionValues}
             onConfigOptionChange={handleConfigOptionChange}
+            menuSide={isEmbedded ? 'top' : undefined}
           />
         )}
         <SessionUsagePopover
@@ -7224,7 +7237,9 @@ function WorkspaceChatLanding({
         onFileRemove={handleRemoveFile}
         onFileRetry={handleRetryFile}
         mcp={mcpSelection.menu}
-        topSelector={<div className="w-full min-w-0">{topSelectorNode}</div>}
+        topSelector={
+          isEmbedded ? topSelectorNode : <div className="w-full min-w-0">{topSelectorNode}</div>
+        }
         footerSelector={footerSelectorNode}
         bottomBar={bottomBarNode}
         composerNotice={composerNoticeNode}
@@ -7235,8 +7250,10 @@ function WorkspaceChatLanding({
         onSubmit={() => {
           void handleSubmit();
         }}
-        submitLabel={t('chat.send')}
+        submitLabel={embedding?.submitLabel ?? t('chat.send')}
         submittingLabel={t('chat.submitting')}
+        onCancel={embedding?.onCancel}
+        cancelLabel={t('common.cancel', 'Cancel')}
         hintType={hintType}
         noMachineVariant={isElectron ? 'daemon-starting' : 'download-client'}
         hintDownloadClientTitle={t('chat.cliHint.downloadClientTitle')}

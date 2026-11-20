@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useStore } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import type { SessionId } from '@lody/shared';
@@ -9,6 +9,10 @@ import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { ChatLanding, type ChatLandingEmbedding } from '@/components/chat/chat-landing';
 import { isImeComposingNativeKeyboardEvent } from '@/lib/ime';
 import { Dialog } from '@/ui/dialog';
+import {
+  TODAY_CONVERT_DIALOG_WIDTH,
+  TodayConvertDialogHeader,
+} from './today-convert-dialog-header';
 
 export type TodayConvertDialogProps = {
   open: boolean;
@@ -22,7 +26,9 @@ export type TodayConvertDialogProps = {
 const SURFACE = 'today-convert' as const;
 
 /**
- * "Convert to task": the new-chat page's own landing, in a dialog. The
+ * "Convert to task": the new-chat page's own landing, in a dialog laid out
+ * like a create form — a breadcrumb header, the prompt as the page, the
+ * selectors as a pill row and a footer with Cancel and Start task. The
  * landing runs on its own surface draft, so the page's draft is untouched,
  * and it releases that draft when it unmounts; each open starts from
  * `prompt`. Closing is refused while a send is in flight.
@@ -74,7 +80,7 @@ export function TodayConvertDialog({
   onAcceptedRef.current = onAccepted;
   const onOpenChangeRef = useRef(onOpenChange);
   onOpenChangeRef.current = onOpenChange;
-  const [embedding] = useState<ChatLandingEmbedding>(() => ({
+  const [baseEmbedding] = useState<ChatLandingEmbedding>(() => ({
     surface: SURFACE,
     onSessionAccepted: ({ sessionId }) => {
       onAcceptedRef.current(sessionId);
@@ -84,7 +90,16 @@ export function TodayConvertDialog({
       pendingRef.current = next;
       setPending(next);
     },
+    // Cancel is disabled while a send is in flight; the guard repeats it.
+    onCancel: () => {
+      if (!pendingRef.current) onOpenChangeRef.current(false);
+    },
   }));
+  const submitLabel = t('today.convertSubmit', 'Start task');
+  const embedding = useMemo<ChatLandingEmbedding>(
+    () => ({ ...baseEmbedding, submitLabel }),
+    [baseEmbedding, submitLabel]
+  );
 
   const handleOpenChange = useCallback(
     (nextOpen: boolean, details?: { reason?: string; event?: Event }) => {
@@ -120,10 +135,16 @@ export function TodayConvertDialog({
         if (!nextOpen) setLandingMounted(false);
       }}
     >
-      <Dialog.Content width="42rem" closeButton={!pending} data-testid="today-convert-dialog">
-        <Dialog.Header>
-          <Dialog.Title>{t('today.convertTitle', 'Convert to task')}</Dialog.Title>
-        </Dialog.Header>
+      <Dialog.Content
+        width={TODAY_CONVERT_DIALOG_WIDTH}
+        closeButton={!pending}
+        closeLabel={t('common.close', 'Close')}
+        data-testid="today-convert-dialog"
+      >
+        <TodayConvertDialogHeader
+          parent={t('today.title', 'Today')}
+          title={t('today.convertTitle', 'Convert to task')}
+        />
         {landingMounted && workspaceSlug ? (
           <ChatLanding workspaceSlug={workspaceSlug} embedding={embedding} />
         ) : null}

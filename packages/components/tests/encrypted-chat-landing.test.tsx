@@ -76,7 +76,7 @@ vi.mock('../src/providers/convex-provider', async (original) => ({
   ...(await original<object>()),
   useAuthClient: () => ({ useActiveOrganization: () => ({ data: null }) }),
 }));
-// The view leaf is replaced by its controlled contract: the prompt and Send.
+// The view leaf is replaced by its controlled contract: the prompt, submit and Cancel.
 vi.mock('../src/components/chat/chat-landing-view', () => ({
   ChatLandingView: (props: ChatLandingViewProps) => (
     <div data-layout={props.layout ?? 'page'}>
@@ -86,9 +86,24 @@ vi.mock('../src/components/chat/chat-landing-view', () => ({
         value={props.submissionPending ? '' : props.promptValue}
         onChange={(event) => props.onPromptChange(event.target.value)}
       />
-      <button type="button" disabled={props.submitDisabled} onClick={props.onSubmit}>
-        Send
+      <button
+        type="button"
+        data-testid="composer-send"
+        disabled={props.submitDisabled}
+        onClick={props.onSubmit}
+      >
+        {props.submitLabel}
       </button>
+      {props.onCancel ? (
+        <button
+          type="button"
+          data-testid="composer-cancel"
+          disabled={props.submissionPending}
+          onClick={props.onCancel}
+        >
+          {props.cancelLabel}
+        </button>
+      ) : null}
       <p data-composer-status>{props.composerStatusMessage}</p>
     </div>
   ),
@@ -518,9 +533,7 @@ async function renderEmbeddedLanding(
     )
   );
   const send = async () => {
-    const button = [...document.querySelectorAll('button')].find(
-      (candidate) => candidate.textContent === 'Send'
-    )!;
+    const button = document.querySelector<HTMLButtonElement>('[data-testid="composer-send"]')!;
     expect(button.disabled).toBe(false);
     await act(async () => button.click());
   };
@@ -673,15 +686,25 @@ it('the Convert-to-task dialog seeds its draft, holds while sending and closes o
     // The node's text replaces whatever the dialog last held; the page draft is not it.
     expect(prompt.value).toBe('Plan the launch\n  Draft the notes');
 
+    // The dialog names its action and offers Cancel beside it.
+    const cancel = dialog.querySelector<HTMLButtonElement>('[data-testid="composer-cancel"]')!;
+    expect(dialog.querySelector('[data-testid="composer-send"]')?.textContent).toBe('Start task');
+
     await escape(true);
     expect(openChanges).toEqual([]);
     await escape(false);
+    expect(openChanges).toEqual([false]);
+    openChanges.length = 0;
+    await act(async () => cancel.click());
     expect(openChanges).toEqual([false]);
     openChanges.length = 0;
 
     await landing.send();
     expect(written).toHaveLength(1);
     await escape(false);
+    expect(cancel.disabled).toBe(true);
+    // Even a Cancel that reaches the host mid-send cannot release the draft.
+    await act(async () => cancel.click());
     expect(openChanges).toEqual([]);
 
     await act(async () => releaseWrite());

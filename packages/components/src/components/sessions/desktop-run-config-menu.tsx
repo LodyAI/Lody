@@ -344,6 +344,16 @@ export function DesktopMachineMenu({
   );
 }
 
+/** Placement for a `menuSide` caller; nothing for the default placement. */
+function menuSideProps(menuSide: 'top' | undefined) {
+  return menuSide === 'top'
+    ? ({
+        side: 'top',
+        collisionAvoidance: { side: 'none', align: 'shift', fallbackAxisSide: 'none' },
+      } as const)
+    : {};
+}
+
 /* ── Run config (agent + model + reasoning + plan/fast) ──────────────── */
 
 export type DesktopRunConfigMenuProps = {
@@ -407,6 +417,12 @@ export type DesktopRunConfigMenuProps = {
     /** The machine those Roles are bound to, for resolving their stored ids. */
     machine?: MachineViewMeta | null;
   };
+  /**
+   * `top` opens the menu upward and keeps it there, for a control placed
+   * above content it must not cover (a create dialog's footer actions).
+   * Omitted, it opens below and flips when there is no room.
+   */
+  menuSide?: 'top';
 };
 
 export function DesktopRunConfigMenu({
@@ -430,6 +446,7 @@ export function DesktopRunConfigMenu({
   recentRunConfigs,
   onRecentRunConfigSelect,
   agentRoles,
+  menuSide,
 }: DesktopRunConfigMenuProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -726,7 +743,7 @@ export function DesktopRunConfigMenu({
           {triggerFace}
         </Menu.Trigger>
       )}
-      <Menu.Content align="start" className="min-w-60">
+      <Menu.Content align="start" className="min-w-60" {...menuSideProps(menuSide)}>
         <div {...stylex.props(surface.menuList)}>
           {onRecentRunConfigSelect ? (
             <RecentRunConfigMenuGroup
@@ -1090,6 +1107,8 @@ export type DesktopPermissionModeButtonProps = {
   configOptionSelectors?: AcpConfigOptionSelector[];
   configOptionValues?: Record<string, AcpConfigOptionValue>;
   onConfigOptionChange?: (configId: string, value: AcpConfigOptionValue) => void;
+  /** See `DesktopRunConfigMenuProps.menuSide`. */
+  menuSide?: 'top';
 };
 
 export function DesktopPermissionModeButton({
@@ -1100,6 +1119,7 @@ export function DesktopPermissionModeButton({
   configOptionValues,
   onConfigOptionChange,
   disabled = false,
+  menuSide,
 }: DesktopPermissionModeButtonProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -1141,7 +1161,7 @@ export function DesktopPermissionModeButton({
       >
         <span {...stylex.props(surface.glyph)}>{permissionModeIcon(value ?? null)}</span>
       </Menu.Trigger>
-      <Menu.Content align="start" className="w-max min-w-44 max-w-64">
+      <Menu.Content align="start" className="w-max min-w-44 max-w-64" {...menuSideProps(menuSide)}>
         <div {...stylex.props(surface.menuList)}>
           {options.map((opt) => (
             <PermissionModeItem
