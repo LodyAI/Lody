@@ -66,18 +66,21 @@ describe('TurnPostProcessingService', () => {
   it('detects a PR for a GitHub-capable direct local project', async () => {
     const logger = createLogger();
     const service = createService({ logger });
-    const exec = vi.fn(async () =>
-      JSON.stringify([
-        {
-          number: 42,
-          url: 'https://github.com/owner/repo/pull/42',
-          state: 'OPEN',
-          isDraft: false,
-          headRefName: 'feature/local',
-          baseRefName: 'main',
-        },
-      ])
-    );
+    const exec = vi
+      .fn(async () =>
+        JSON.stringify([
+          {
+            number: 42,
+            url: 'https://github.com/owner/repo/pull/42',
+            state: 'OPEN',
+            isDraft: false,
+            headRefName: 'feature/local',
+            baseRefName: 'main',
+            isCrossRepository: false,
+          },
+        ])
+      )
+      .mockResolvedValueOnce(JSON.stringify({ defaultBranchRef: { name: 'main' } }));
     const session = {
       getWorkdir: () => '/repo',
       exec,
@@ -91,25 +94,34 @@ describe('TurnPostProcessingService', () => {
       branchName: 'feature/local',
     });
 
-    expect(detected?.prNumber).toBe(42);
-    expect(exec).toHaveBeenCalledTimes(1);
+    expect(detected).toEqual({
+      repoFullName: 'owner/repo',
+      prNumber: 42,
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      branch: 'feature/local',
+      baseBranch: 'main',
+      status: 'open',
+    });
   });
 
   it('still detects a PR for a local-project worktree', async () => {
     const logger = createLogger();
     const service = createService({ logger });
-    const exec = vi.fn(async () =>
-      JSON.stringify([
-        {
-          number: 42,
-          url: 'https://github.com/owner/repo/pull/42',
-          state: 'OPEN',
-          isDraft: false,
-          headRefName: 'feature/worktree',
-          baseRefName: 'main',
-        },
-      ])
-    );
+    const exec = vi
+      .fn(async () =>
+        JSON.stringify([
+          {
+            number: 42,
+            url: 'https://github.com/owner/repo/pull/42',
+            state: 'OPEN',
+            isDraft: false,
+            headRefName: 'feature/worktree',
+            baseRefName: 'main',
+            isCrossRepository: false,
+          },
+        ])
+      )
+      .mockResolvedValueOnce(JSON.stringify({ defaultBranchRef: { name: 'main' } }));
     const session = {
       getWorkdir: () => '/repo',
       exec,
@@ -123,8 +135,14 @@ describe('TurnPostProcessingService', () => {
       branchName: 'feature/worktree',
     });
 
-    expect(detected?.prNumber).toBe(42);
-    expect(exec).toHaveBeenCalledTimes(1);
+    expect(detected).toEqual({
+      repoFullName: 'owner/repo',
+      prNumber: 42,
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      branch: 'feature/worktree',
+      baseBranch: 'main',
+      status: 'open',
+    });
   });
 
   it('publishes a child session\u2019s dirty worktree onto the owning parent meta', async () => {
