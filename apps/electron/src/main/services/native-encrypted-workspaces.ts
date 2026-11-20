@@ -51,6 +51,16 @@ export async function takeNativeWorkspace(workspaceId: string) {
   return entry?.handle.catch(() => undefined)
 }
 
+let catchUp: ((workspaceId: string) => void) | undefined
+/** E2EE IPC owns main's ledger ingest and key receive; it installs this once. */
+export function setNativeCatchUp(run: (workspaceId: string) => void) {
+  catchUp = run
+}
+/** The engine holds a room it cannot open yet: one spaced ledger and key catch-up. */
+export function catchUpNativeWorkspace(workspaceId: string) {
+  catchUp?.(workspaceId)
+}
+
 export function onNativeAccessLost(listener: (workspaceId: string) => void) {
   accessLost.add(listener)
   return () => accessLost.delete(listener)

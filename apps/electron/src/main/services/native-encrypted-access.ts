@@ -15,6 +15,7 @@ import {
 import type { DesktopEngineKeyringSink } from './e2ee-runtime.mjs'
 import {
   attachedNativeWorkspace,
+  catchUpNativeWorkspace,
   rememberNativeWorkspace,
   takeNativeWorkspace
 } from './native-encrypted-workspaces'
@@ -136,7 +137,9 @@ function attach(
         accountId,
         await leased((owner) => Effect.succeed(owner.host.syncEngineKeyring(workspaceId, sink)))
       ),
-    pendingWipe: nativePendingWipeMarker(dataDir, workspaceId)
+    pendingWipe: nativePendingWipeMarker(dataDir, workspaceId),
+    // A successful catch-up reaches the host's verified-change hook, which reinstalls.
+    onOpenPending: () => catchUpNativeWorkspace(workspaceId)
   })
 }
 

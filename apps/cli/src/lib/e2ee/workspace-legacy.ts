@@ -1212,6 +1212,8 @@ async function openWorkspaceOwned(
       },
       syncKeyring: () => run(opened.runtime.syncEngineKeyring(sink)),
       pendingWipe: nativePendingWipeMarker(dataDir, ws),
+      // Same spaced catch-up as a key-pending JS frame; it ends in a reinstall.
+      onOpenPending: () => contentCatchUp.pending(),
     });
     if (closed) {
       attached.close();

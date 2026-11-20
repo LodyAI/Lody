@@ -42,7 +42,21 @@ export interface NativeEncryptedWorkspaceOptions {
   /** Runs core's EngineKeyringSync for this device; idempotent. */
   readonly syncKeyring: () => Promise<{ readonly mayWrite: boolean }>;
   readonly pendingWipe: NativePendingWipe;
+  /**
+   * The engine holds a room it cannot open yet: an unknown key or a writer the
+   * installed ledger does not admit (a rotation or admission the Streams data
+   * reached first). The caller runs its spaced ledger and key catch-up, after
+   * which the notification table reinstalls; forged frames never trigger it.
+   */
+  readonly onOpenPending?: () => void;
 }
+
+/** Open holds a ledger or key catch-up can clear (not `invalid_frame`). */
+const OPEN_PENDING_KINDS: ReadonlySet<string> = new Set([
+  'unknown_key',
+  'unauthorized',
+  'missing_provider',
+]);
 
 /** The remote every encrypted workspace's native namespace uses. */
 export const NATIVE_CONTENT_REMOTE_ID = 'e2ee-content';
@@ -235,6 +249,7 @@ export async function attachNativeEncryptedWorkspace(
   const stopServing = () => {
     closed = true;
     offState();
+    void pendingWatch?.unsubscribe().catch(() => {});
     if (slot?.source === options.contentToken) slot.source = undefined;
   };
   const run = <A>(work: () => Promise<A>): Promise<A> => {
@@ -264,6 +279,24 @@ export async function attachNativeEncryptedWorkspace(
     remoteConfigured = true;
   };
   await run(install);
+
+  const pendingWatch = options.onOpenPending
+    ? await client
+        .subscribeRemoteStatus(
+          workspaceId,
+          (statuses) => {
+            if (closed) return;
+            const pending = statuses.some((status) =>
+              status.blockedRooms.some(
+                (room) => room.direction === 'open' && OPEN_PENDING_KINDS.has(room.kind)
+              )
+            );
+            if (pending) options.onOpenPending?.();
+          },
+          NATIVE_CONTENT_REMOTE_ID
+        )
+        .catch(() => undefined)
+    : undefined;
 
   // The keyring and snapshot policy live in engine memory: a host restart,
   // reconnect or build handoff starts empty, so reinstall on every reconnect.

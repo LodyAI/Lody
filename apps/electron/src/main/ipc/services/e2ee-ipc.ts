@@ -86,6 +86,9 @@ import { assertProductWindowSender } from '../assert-sender'
 import { observeClientLossOperation } from '../../services/e2ee-client-loss-probe'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 import { removeNativeWorkspace } from './native-workspace-meta-ipc'
+import { setNativeCatchUp } from '../../services/native-encrypted-workspaces'
+/** Same spacing as the JS content catch-up (RECEIVE_KEY_COOLDOWN_MS). */
+const NATIVE_CATCH_UP_SPACING_MS = 3_000
 import { PersonalPairingOfferSchema } from '../../services/e2ee-personal-pairing.mjs'
 import { IPC_PUSH_CHANNELS } from '@lody/shared/electron-ipc'
 import type { E2eeJoinSession, E2eePersonalPairingOffer } from '@lody/cloud-api'
@@ -486,6 +489,56 @@ export class E2eeIpc extends ProductWindowIpcService {
         loss = accessLoss(checked)
       }
     if (loss) await this.removeLocalWorkspace(access, loss)
+  }
+  /** Per workspace: the native engine catch-up in flight and when the last one ended. */
+  private readonly nativeCatchUps = new Map<string, { flight?: Promise<void>; last?: number }>()
+  // Registered once per IPC service; main has exactly one.
+  protected readonly nativeCatchUpRegistered = setNativeCatchUp((workspaceId) =>
+    this.nativeCatchUp(workspaceId)
+  )
+  /**
+   * The native engine holds a room it cannot open yet (a rotation or admission the
+   * Streams data reached first): main ingests the ledger and receives this device's
+   * key, spaced and single-flight like the JS content catch-up. The host's
+   * verified-change hook then reinstalls the engine keyring.
+   */
+  private nativeCatchUp(workspaceId: string) {
+    let slot = this.nativeCatchUps.get(workspaceId)
+    if (!slot) this.nativeCatchUps.set(workspaceId, (slot = {}))
+    if (slot.flight) return
+    const current = slot
+    const wait =
+      current.last === undefined
+        ? 0
+        : Math.min(
+            NATIVE_CATCH_UP_SPACING_MS,
+            current.last + NATIVE_CATCH_UP_SPACING_MS - Date.now()
+          )
+    current.flight = (async () => {
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait))
+      const cloud = await desktopE2eeCloudClient()
+      const scope = this.memberScope(workspaceId)
+      await this.keyDelivery.ingest(cloud.accountId, workspaceId, scope, cloud)
+      const work = await scope((owner) =>
+        owner.readers.get(workspaceId)?.size
+          ? Effect.map(owner.bootstrap.deviceCredential(workspaceId), (credential) =>
+              owner.host.receiveKeys(
+                workspaceId,
+                (signal) => cloud.client.mailbox({ workspaceId, credential }, signal),
+                (signal) => cloud.client.staging({ workspaceId, credential }, signal)
+              )
+            )
+          : Effect.fail(new Error('e2ee_not_open'))
+      )
+      await runDesktopE2eeOperation(cloud.accountId, work)
+    })()
+      .catch(() => {
+        /* Best effort: the renderer's own refresh and key rounds still converge. */
+      })
+      .finally(() => {
+        current.flight = undefined
+        current.last = Date.now()
+      })
   }
   private readonly settling = new Map<string, Promise<void>>()
   /** Synchronization point for the owning tests; claims never await settlement. */

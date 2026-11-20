@@ -161,8 +161,9 @@ function loadSync(relative, dependencies, console = globalThis.console, env = {}
         : // The native engine is off in these suites (its own switch).
           id === './native-workspace-meta-ipc'
           ? { removeNativeWorkspace: async () => {} }
-          : id === './native-encrypted-workspaces'
-            ? { detachNativeWorkspace() {}, refreshNativeWorkspace() {} }
+          : id === './native-encrypted-workspaces' ||
+              id === '../../services/native-encrypted-workspaces'
+            ? { detachNativeWorkspace() {}, refreshNativeWorkspace() {}, setNativeCatchUp() {} }
             : id === '../../services/e2ee-recovery-history.mjs'
               ? recoveryHistory
               : id === './e2ee-diagnostics.mjs'
