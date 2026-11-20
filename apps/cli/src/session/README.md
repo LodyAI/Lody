@@ -668,6 +668,11 @@ body read can add up to 128 newer events to the verified interval. A larger adva
 triggers another scan outside the queue.
 
 For a larger repair, the owner retains the needed bodies at the verified checkpoint.
+It releases the writer queue between body pages. A final receipt scan identifies any
+changed IDs and structural suffix that need to be reread at the new published head.
+The final serialized repair batches the remaining body reads within one page's limit.
+When more changed bodies need repair, the verified interval still supports current-head
+paging. Inline-only subscription reads never reserve catch-up pages.
 Requests for that exact checkpoint page through the retained bodies while the Agent
 commits later updates. A capture holds at most 4,000 bodies and 16 MiB of encoded data
 and expires after two minutes or owner disposal. The daemon budgets 16 concurrent

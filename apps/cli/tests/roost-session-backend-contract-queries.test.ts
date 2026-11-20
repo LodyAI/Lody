@@ -884,6 +884,37 @@ describe('Production Roost dispatch projection', () => {
           })
         ).toMatchObject({ success: true });
       };
+      let writeDuringPage: Promise<unknown> | undefined;
+      const hydrate = NodeLodyHistory.prototype.readActiveBranchMessages;
+      vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchMessages').mockImplementation(
+        async function (view, ids) {
+          if (!writeDuringPage && ids.length === 500 && ids[0] === 'missing-0') {
+            writeDuringPage = Promise.all([
+              backend.applyHistoryAction({
+                kind: 'user-status',
+                turnId: 'missing-0',
+                status: 'handled',
+              }),
+              backend.applyAgentBatch({
+                targetAssistantEntryId: active.id,
+                operationIds: ['publication-during-hydration'],
+                notifications: [
+                  {
+                    sessionId,
+                    update: {
+                      sessionUpdate: 'agent_message_chunk',
+                      content: { type: 'text', text: ' and capture' },
+                    },
+                  },
+                ],
+              }),
+              backend.appendHistoryTurn(nativeUser('appended-during-hydration')),
+            ]);
+            void writeDuringPage.catch(() => {});
+          }
+          return hydrate.call(this, view, ids);
+        }
+      );
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       const reading = fixture.rpc.readSessionHistoryForRpc(sessionId, {
         kind: 'readChanges',
@@ -897,12 +928,14 @@ describe('Production Roost dispatch projection', () => {
         }),
       ]);
       await edit('captured during scan');
-      const published = await backend.history.getPublication?.();
       paused.release();
       const plan = await reading;
+      if (!writeDuringPage) throw new Error('Expected a write during body capture');
+      await writeDuringPage;
+      const published = await backend.history.getPublication?.();
       expect(plan).toMatchObject({
         success: true,
-        historyCount: 502,
+        historyCount: 503,
         historyRevision: published?.historyRevision,
       });
       const changes = SessionHistoryChangesSchema.parse(plan.result);
@@ -924,13 +957,21 @@ describe('Production Roost dispatch projection', () => {
       const first = await fixture.rpc.readSessionHistoryForRpc(sessionId, range(1, 501));
       expect(first).toMatchObject({ success: true, historyRevision: plan.historyRevision });
       expect(first.result).toHaveLength(500);
+      expect((first.result as unknown[])[0]).toMatchObject({
+        state: 'ready',
+        turn: { id: 'missing-0', status: 'handled' },
+      });
       await edit('new before last page');
-      const last = await fixture.rpc.readSessionHistoryForRpc(sessionId, range(501, 502));
+      const last = await fixture.rpc.readSessionHistoryForRpc(sessionId, range(501, 503));
       expect(last).toMatchObject({
         success: true,
         historyRevision: plan.historyRevision,
         result: [
-          { state: 'ready', turn: { id: active.id, items: [{ text: 'captured during scan' }] } },
+          {
+            state: 'ready',
+            turn: { id: active.id, items: [{ text: 'captured during scan and capture' }] },
+          },
+          { state: 'ready', turn: { id: 'appended-during-hydration' } },
         ],
       });
       expect(
@@ -951,6 +992,23 @@ describe('Production Roost dispatch projection', () => {
         success: false,
         retryReason: 'superseded',
       });
+      const observe = {
+        kind: 'readChanges' as const,
+        checkpoint: baseCheckpoint,
+        includeBodiesFrom: 0,
+        inlineOnly: true as const,
+      };
+      const advertised = await fixture.rpc.readSessionHistoryForRpc(sessionId, observe);
+      expect(advertised.success).toBe(true);
+      const advertisedChanges = SessionHistoryChangesSchema.parse(advertised.result);
+      expect(advertisedChanges.state).toBe('ready');
+      await edit('after the observation');
+      expect(
+        await fixture.rpc.readSessionHistoryForRpc(sessionId, {
+          ...range(1, 501),
+          atCheckpoint: advertisedChanges.checkpoint,
+        })
+      ).toMatchObject({ success: false, retryReason: 'superseded' });
       await vi.advanceTimersByTimeAsync(120_000);
       expect(await fixture.rpc.readSessionHistoryForRpc(sessionId, range(501, 502))).toMatchObject({
         success: false,

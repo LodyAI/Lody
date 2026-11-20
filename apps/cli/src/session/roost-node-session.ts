@@ -93,7 +93,11 @@ import {
   type RoostSessionBackendServices,
 } from './roost-session-backend';
 import { adaptRoostProjectedMessage, encodeRoostContent } from './roost-history-port';
-import { RoostHistoryCatchup, type RoostCatchupQuery } from './roost-history-catchup';
+import {
+  readInlineRoostHistory,
+  RoostHistoryCatchup,
+  type RoostCatchupQuery,
+} from './roost-history-catchup';
 import { registerSessionBackendFactory } from './session-backend';
 import { RoostHistoryGeneration } from './roost-history-generation';
 import { RoostHistoryHead } from './roost-history-head';
@@ -1063,7 +1067,7 @@ const createNodeServicesForLease = async (
     );
   };
 
-  const readyTurn = (turn: SessionEntry): SessionTurnRead => ({
+  const readyTurn = (turn: SessionEntry): Extract<SessionTurnRead, { state: 'ready' }> => ({
     state: 'ready',
     turn: clone(turn) as SessionTurn,
   });
@@ -1351,6 +1355,37 @@ const createNodeServicesForLease = async (
     return patches ? { ...changes, patches } : changes;
   };
 
+  const readBodyTurns = (turnIds: readonly string[]) =>
+    readStable(async () => {
+      const result = new Map<string, ReturnType<typeof readyTurn>>();
+      if (!turnIds.length) return result;
+      const source = roostHistory,
+        host = historyHost,
+        generation = readGeneration;
+      const cursor = await source.observedEventCursor();
+      const uncached: string[] = [];
+      for (const turnId of turnIds) {
+        const position = positionById.get(turnId);
+        const cached = position === undefined ? pageEntries.get(turnId)?.turn : entries[position];
+        if (cached && cursor === knownCursor) result.set(turnId, readyTurn(cached));
+        else uncached.push(turnId);
+      }
+      if (!uncached.length) return result;
+      const messages = await source.readActiveBranchMessages(viewId, uncached);
+      for (const entry of await projectMessages(messages)) result.set(entry.id, readyTurn(entry));
+      await historyGeneration.resolve();
+      if (
+        source !== historyGeneration.history ||
+        host !== historyGeneration.host ||
+        generation !== readGeneration ||
+        cursor !== (await source.observedEventCursor())
+      ) {
+        needsRefresh = true;
+        throw staleRead();
+      }
+      return result;
+    });
+
   const history: SessionHistoryReader = {
     waitForChanges: async (checkpoint, waitMs, signal) => {
       if (closing || disposed || signal?.aborted) throw new Error('History observer closed');
@@ -1384,29 +1419,7 @@ const createNodeServicesForLease = async (
       const [entry] = await readBodyRange(position, position + 1);
       return entry ? readyTurn(entry) : { state: 'missing' };
     },
-    readTurn: (turnId) =>
-      readStable(async () => {
-        const source = roostHistory,
-          host = historyHost,
-          generation = readGeneration;
-        const cursor = await source.observedEventCursor();
-        const position = positionById.get(turnId);
-        const cached = position === undefined ? pageEntries.get(turnId)?.turn : entries[position];
-        if (cached && cursor === knownCursor) return readyTurn(cached);
-        const messages = await source.readActiveBranchMessages(viewId, [turnId]);
-        const [entry] = await projectMessages(messages);
-        await historyGeneration.resolve();
-        if (
-          source !== historyGeneration.history ||
-          host !== historyGeneration.host ||
-          generation !== readGeneration ||
-          cursor !== (await source.observedEventCursor())
-        ) {
-          needsRefresh = true;
-          throw staleRead();
-        }
-        return entry ? readyTurn(entry) : { state: 'missing' as const };
-      }),
+    readTurn: async (turnId) => (await readBodyTurns([turnId])).get(turnId) ?? { state: 'missing' },
     readRange: async (from, to) => (await readBodyRange(from, to)).map(readyTurn),
     readDirectory: (from, to) =>
       inspectHistory(async (index, checkpoint) => {
@@ -3659,59 +3672,119 @@ const createNodeServicesForLease = async (
     };
     assertAvailable();
     if (query.kind !== 'readChanges') return historyCatchup.read(catchupOwner, query);
+    const scan = async (checkpoint: string) => {
+      const before = await getHistoryPublication(signal);
+      const through = roostCheckpointCursor(before.checkpoint);
+      const changes = await historyChanges.read(checkpoint, through, signal);
+      assertAvailable();
+      if (changes.checkpoint !== before.checkpoint) throw staleRead();
+      return { through, changes };
+    };
+    const extend = async (interval: Awaited<ReturnType<typeof scan>>) => {
+      assertAvailable();
+      const published = await getHistoryPublication(signal);
+      const through = roostCheckpointCursor(published.checkpoint);
+      if (published.checkpoint === interval.changes.checkpoint)
+        return { published, through, changes: interval.changes };
+      // A longer gap requires another receipt scan outside the writer queue.
+      if (
+        interval.changes.state !== 'ready' ||
+        through <= interval.through ||
+        through - interval.through > ROOST_HISTORY_RECEIPT_PAGE_SIZE
+      )
+        throw staleRead();
+      const changes = await historyChanges.read(interval.changes, through, signal);
+      if (changes.state !== 'ready' || changes.checkpoint !== published.checkpoint)
+        throw staleRead();
+      return { published, through, changes };
+    };
+    const reply = (
+      published: Awaited<ReturnType<typeof getHistoryPublication>>,
+      result: SessionHistoryChanges
+    ) => ({
+      type: 'session/history-read_response' as const,
+      sessionId: sessionDoc.sessionId,
+      success: true,
+      result,
+      historyRevision: published.historyRevision,
+      historyCount: published.historyCount,
+      historyChange: published.historyChange,
+    });
+    const validate = async (expected: { result: SessionHistoryChanges }) => {
+      if ((await getHistoryPublication(signal)).checkpoint !== expected.result.checkpoint)
+        throw staleRead();
+      assertAvailable();
+    };
+    const bodies = {
+      query,
+      readRange: async (from: number, to: number) =>
+        (await readBodyRangeOnOwner(from, to)).map(readyTurn),
+      readTurns: readBodyTurns,
+      validate,
+      signal,
+    };
     for (let attempt = 0; ; attempt++) {
       try {
-        const before = await getHistoryPublication(signal);
-        const scannedThrough = roostCheckpointCursor(before.checkpoint);
         // The receipts describe a fixed range. Scanning them does not need the writer.
-        const interval = await historyChanges.read(query.checkpoint, scannedThrough, signal);
-        assertAvailable();
-        if (interval.checkpoint !== before.checkpoint) throw staleRead();
+        const interval = await scan(query.checkpoint);
         const finish = async () => {
-          assertAvailable();
-          const published = await getHistoryPublication(signal);
-          const through = roostCheckpointCursor(published.checkpoint);
-          let changes = interval;
-          if (published.checkpoint !== interval.checkpoint) {
-            // A small number of new writes can join the verified interval. A
-            // longer gap or a new generation requires another unlocked scan.
-            if (
-              interval.state !== 'ready' ||
-              through <= scannedThrough ||
-              through - scannedThrough > ROOST_HISTORY_RECEIPT_PAGE_SIZE
-            )
-              throw staleRead();
-            changes = await historyChanges.read(interval, through, signal);
-            if (changes.state !== 'ready' || changes.checkpoint !== published.checkpoint)
-              throw staleRead();
-          }
+          const { published, through, changes: verified } = await extend(interval);
+          let changes = verified;
           if (query.withPatches)
             changes = await withHistoryPatches(changes, query.checkpoint, through, signal);
-          return historyCatchup.prepare({
-            owner: catchupOwner,
-            query,
-            response: {
-              type: 'session/history-read_response',
-              sessionId: sessionDoc.sessionId,
-              success: true,
-              result: changes,
-              historyRevision: published.historyRevision,
-              historyCount: published.historyCount,
-              historyChange: published.historyChange,
-            },
-            readRange: async (from, to) => (await readBodyRangeOnOwner(from, to)).map(readyTurn),
-            readTurn: history.readTurn,
-            validate: async () => {
-              if ((await getHistoryPublication(signal)).checkpoint !== published.checkpoint)
-                throw staleRead();
-              assertAvailable();
-            },
-            signal,
-          });
+          const response = reply(published, changes);
+          const inline = await readInlineRoostHistory({ ...bodies, response });
+          if (inline) return inline;
+          await validate(response);
+          return response;
         };
-        return await (interval.state === 'ready' && query.includeBodiesFrom !== undefined
+        const response = await (interval.changes.state === 'ready' &&
+        query.includeBodiesFrom !== undefined
           ? onOwner(finish)
           : finish());
+        const initial = response.result;
+        if (
+          initial.state !== 'ready' ||
+          initial.bodies ||
+          query.includeBodiesFrom === undefined ||
+          query.inlineOnly
+        )
+          return response;
+        const source = roostHistory;
+        const scope = historyScope;
+        return await historyCatchup.prepare({
+          ...bodies,
+          response,
+          owner: catchupOwner,
+          assertAvailable,
+          onOwner: (read) =>
+            onOwner(async () => {
+              assertAvailable();
+              const result = await read();
+              assertAvailable();
+              if (roostHistory !== source || historyScope !== scope) throw staleRead();
+              return result;
+            }),
+          finish: async (capture) => {
+            const scanned = await scan(initial.checkpoint);
+            return onOwner(async () => {
+              const { published, changes: tail } = await extend(scanned);
+              if (tail.state !== 'ready' || roostHistory !== source || historyScope !== scope)
+                throw staleRead();
+              if (tail.checkpoint === initial.checkpoint) return capture(response, tail);
+              const from = Math.min(initial.from ?? Infinity, tail.from ?? Infinity);
+              return capture(
+                reply(published, {
+                  state: 'ready',
+                  checkpoint: tail.checkpoint,
+                  ids: [...new Set([...initial.ids, ...tail.ids])],
+                  ...(from < Infinity ? { from } : {}),
+                }),
+                tail
+              );
+            });
+          },
+        });
       } catch (error) {
         assertAvailable();
         if (attempt >= 2 || !(error instanceof Error && 'code' in error && error.code === 'stale'))
