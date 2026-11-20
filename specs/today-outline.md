@@ -105,11 +105,11 @@ any time; when off it changes none of the app's existing behavior.
   the second press deletes; `Alt/⌘+Backspace` deletes at once. Enter on a selected mention opens the conversation,
   like clicking its title (in the main area when pinned, otherwise by navigating). Typing replaces a selected mention.
 - Status matches the sidebar exactly by reusing its status grouping and unread, running and approval signals;
-  Today derives nothing on its own. Icon priority (one family of static 12px circles):
+  Today derives nothing on its own. Icon priority (static 12px icons, circles except the hand):
 
   | Conversation status                       | Leading icon                                     |
   | ----------------------------------------- | ------------------------------------------------ |
-  | Waiting for approval / question           | Filled amber circle with an exclamation mark     |
+  | Waiting for approval / question           | Blue raised-hand icon                            |
   | Running                                   | Blue ring, right half filled (static, no motion) |
   | Later                                     | Grey clock ring + countdown (muted, on baseline) |
   | Done (settled), archived                  | Grey check ring; title struck through and dimmed |

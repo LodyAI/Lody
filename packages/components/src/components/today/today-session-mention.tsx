@@ -1,6 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import type React from 'react';
+import { Hand } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getSessionRoomId, type SessionId, type TodayMentionTarget } from '@lody/shared';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -27,10 +28,9 @@ const styles = stylex.create({
     display: 'inline',
     boxDecorationBreak: 'clone',
     WebkitBoxDecorationBreak: 'clone',
-    borderRadius: radius.mini,
-    // No left padding: the icon's own box already insets its glyph, and a chip
-    // that opens a line would otherwise start visibly right of the text column.
-    paddingInlineStart: 0,
+    // Square: a selection running through text and chips reads as one band.
+    // 1px start padding only — the icon box insets its glyph already.
+    paddingInlineStart: '1px',
     paddingInlineEnd: CHIP_PAD,
     userSelect: 'none',
   },
@@ -156,19 +156,8 @@ function StatusGlyph(props: { status: Extract<TodaySessionDisplay, { state: 'ok'
         </svg>
       );
     case 'waiting':
-      return (
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 12 12"
-          aria-hidden
-          {...stylex.props(styles.markWarning)}
-        >
-          <circle cx="6" cy="6" r="5.75" fill="currentColor" />
-          <rect x="5.25" y="2.75" width="1.5" height="4" rx="0.75" fill="white" />
-          <circle cx="6" cy="8.6" r="0.85" fill="white" />
-        </svg>
-      );
+      // Waiting for you: the sidebar's hand, at the family's size and stroke.
+      return <Hand size={12} strokeWidth={1.75} aria-hidden {...stylex.props(styles.markAccent)} />;
     case 'unread':
       return (
         <svg
