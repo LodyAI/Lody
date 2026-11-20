@@ -399,8 +399,10 @@ Removal follows the whitepaper's split. Device revocation calls `retireWriter()`
 it holds and removes only this device's writer, because another device of the
 member on this installation keeps using the namespace. Credential-confirmed
 member removal calls `wipe()`, which clears the keyring, removes the remote and
-drops the namespace. The pending-wipe marker (`nativePendingWipeMarker`) lives in
-the engine data directory, beside the namespace. The daemon writes it as soon as
+drops the namespace. With the host unreachable (removal while it is down),
+`wipeNativeNamespace` finishes the drop as soon as the connection is back. The
+pending-wipe marker (`nativePendingWipeMarker`) lives in the engine data
+directory, beside the namespace. The daemon writes it as soon as
 the removal is recorded. A removed workspace never attaches again, so the
 daemon's start-up refusal (`finishPendingNativeWipe`) finishes an interrupted
 wipe; only a completed drop clears the marker.

@@ -3,8 +3,8 @@ import { EngineKeyringSinkError } from '@lody/e2ee-core/services'
 import type { NativeEncryptedAccess } from './native-session-read'
 import {
   attachNativeEncryptedWorkspace,
-  finishNativeWipe,
-  nativePendingWipeMarker
+  nativePendingWipeMarker,
+  wipeNativeNamespace
 } from '@lody/shared/node/native-encrypted-workspace'
 import type { NativeRepoConnection } from '@lody/shared/node/native-repo'
 import {
@@ -158,7 +158,9 @@ export async function removeNativeEncryptedWorkspace(
   }
   if (handle) return handle.wipe()
   const { client, dataDir } = await connect()
-  const pendingWipe = nativePendingWipeMarker(dataDir, workspaceId)
-  await pendingWipe.write()
-  await finishNativeWipe({ client, workspaceId, pendingWipe })
+  await wipeNativeNamespace({
+    client,
+    workspaceId,
+    pendingWipe: nativePendingWipeMarker(dataDir, workspaceId)
+  })
 }
