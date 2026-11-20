@@ -46,6 +46,13 @@ export function createDocRoom(client: RepoClient, namespace: string, docId: stri
   return pending;
 }
 const declaredRooms = new WeakMap<RepoClient, Map<string, Promise<void>>>();
+/** After `dropNamespace`, rooms of `namespace` must be declared again. */
+export function forgetDeclaredDocRooms(client: RepoClient, namespace: string) {
+  const declared = declaredRooms.get(client);
+  if (!declared) return;
+  for (const key of [...declared.keys()])
+    if (key.startsWith(`${namespace}\0`)) declared.delete(key);
+}
 
 /** Remote writes create the containers the Mirror and HistoryWriter would. */
 export const SESSION_ENGINE_DOC_SCHEMA = engineDocSchemaFromMirror(sessionDocSchema);
