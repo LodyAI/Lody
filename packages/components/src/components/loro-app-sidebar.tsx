@@ -1850,6 +1850,7 @@ export function LoroAppSidebar({
     snoozeSession,
     settleSession,
     moveSessionToFocus,
+    wakeSnoozedSession,
     setSessionAgentManaged,
     updateSessionTitle,
   } = useSessionActions();
@@ -3920,11 +3921,15 @@ export function LoroAppSidebar({
     [setSessionAgentManaged]
   );
 
+  const statusNow = useStableNow(SIDEBAR_RELATIVE_TIME_REFRESH_MS);
+
   const handleDropFocusItem = useCallback(
     (sessionId: string, toIndex: number) => {
-      const focusBucket = buildSidebarUpdatedBuckets(updatedItems, 'status').find(
-        (bucket) => bucket.key === 'focus'
-      );
+      const focusBucket = buildSidebarUpdatedBuckets(
+        updatedItems,
+        'status',
+        statusNow.getTime()
+      ).find((bucket) => bucket.key === 'focus');
       // `toIndex` counts top-level `[data-pin-node]` root groups, so plan moves over roots only.
       const focusRoots = buildOpenedBySessionTree(
         focusBucket?.items ?? [],
@@ -3935,10 +3940,6 @@ export function LoroAppSidebar({
       const placements = focusRoots.map((item) => ({
         id: item.id,
         orderKey: item.orderKey ?? null,
-        recency:
-          item.latestMessageAt instanceof Date
-            ? item.latestMessageAt.getTime()
-            : Date.parse(String(item.latestMessageAt ?? '')) || 0,
       }));
       const writes = planManualOrderMove(placements, { sessionId, toIndex });
       const wasInFocus = focusRoots.some((item) => item.id === sessionId);
@@ -3949,8 +3950,43 @@ export function LoroAppSidebar({
         toast.error(error instanceof Error ? error.message : String(error));
       });
     },
-    [applySessionFocusOrder, updatedItems]
+    [applySessionFocusOrder, statusNow, updatedItems]
   );
+
+  // One-shot wake-up reconciler for expired snoozes: lifts the session to the top
+  // of Focus (below Pinned), refreshes lastMessageAt so it becomes unread, and
+  // clears snoozedUntil so the same wake-up never repeats across devices or reopens.
+  const wokenSnoozeKeysRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!runtime || sessionsListLoading) return;
+    const nowMs = statusNow.getTime();
+    const expired = updatedItems.filter(
+      (item) =>
+        item.sharing?.access !== 'read' &&
+        typeof item.snoozedUntil === 'number' &&
+        item.snoozedUntil <= nowMs
+    );
+    if (expired.length === 0) return;
+    const focusBucket = buildSidebarUpdatedBuckets(updatedItems, 'status', nowMs).find(
+      (bucket) => bucket.key === 'focus'
+    );
+    const focusRootPlacements = buildOpenedBySessionTree(
+      focusBucket?.items ?? [],
+      SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS
+    )
+      .filter((node) => node.depth === 0)
+      .map((node) => ({ id: node.item.id, orderKey: node.item.orderKey ?? null }));
+
+    for (const item of expired) {
+      const snoozedUntil = item.snoozedUntil!;
+      const key = `${item.id}:${snoozedUntil}`;
+      if (wokenSnoozeKeysRef.current.has(key)) continue;
+      wokenSnoozeKeysRef.current.add(key);
+      void wakeSnoozedSession(item.id as SessionId, snoozedUntil, focusRootPlacements).catch(() => {
+        wokenSnoozeKeysRef.current.delete(key);
+      });
+    }
+  }, [runtime, sessionsListLoading, statusNow, updatedItems, wakeSnoozedSession]);
   const [updatedBucketShowFullState, setUpdatedBucketShowFullState] = useAtom(
     sidebarUpdatedBucketShowFullStateAtom
   );

@@ -228,7 +228,7 @@ export function planNewPinSectionOrderKey(
 export type ManualOrderPlacement = {
   id: string;
   orderKey?: string | null;
-  recency: number;
+  recency?: number;
 };
 
 /** One manual-order metadata write. */
@@ -239,7 +239,8 @@ export type ManualOrderWrite = {
 
 /**
  * Sort items by fractional `orderKey` first (deterministic id tie-break),
- * with unkeyed items trailing by latest activity descending.
+ * with unkeyed items trailing by stable ascending `id` so ordinary new replies
+ * never cause Focus rows to jump around.
  */
 export function sortByManualOrder<T>(
   items: readonly T[],
@@ -258,10 +259,7 @@ export function sortByManualOrder<T>(
       }
       if (leftKey) return -1;
       if (rightKey) return 1;
-      return (
-        right.placement.recency - left.placement.recency ||
-        left.placement.id.localeCompare(right.placement.id)
-      );
+      return left.placement.id.localeCompare(right.placement.id);
     })
     .map((entry) => entry.item);
 }

@@ -6,7 +6,10 @@ import {
   SIDEBAR_SETTLED_INACTIVITY_MS,
   sidebarStatusGroup,
 } from '@/lib/sidebar-status-group';
-import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
+import {
+  closedSessionHasUnreadMessages,
+  sessionHasUnreadMessages,
+} from '@/lib/session-read-receipt';
 import {
   buildSidebarUpdatedBuckets,
   SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS,
@@ -141,7 +144,7 @@ describe('formatSnoozeCountdown & buildSnoozePresets', () => {
 });
 
 describe('agentManaged unread suppression', () => {
-  it('suppresses unread indicators when agentManaged is true without altering read receipts', () => {
+  it('suppresses unread indicators on open and closed tabs when agentManaged is true', () => {
     expect(
       sessionHasUnreadMessages({
         lastMessageAt: NOW,
@@ -156,18 +159,27 @@ describe('agentManaged unread suppression', () => {
         agentManaged: true,
       })
     ).toBe(false);
+    expect(
+      closedSessionHasUnreadMessages({
+        lastMessageAt: NOW,
+        lastReadAt: NOW - 10_000,
+        isTabClosed: true,
+        agentManaged: true,
+      })
+    ).toBe(false);
   });
 });
 
 describe('Focus manual fractional-index ordering', () => {
-  it('sorts keyed items first and plans single-write reorders cleanly', () => {
+  it('sorts keyed items first and unkeyed items by stable ascending id (never recency)', () => {
     const items = [
+      { id: 'z', orderKey: null, recency: 999 },
       { id: 'c', orderKey: null, recency: 300 },
       { id: 'b', orderKey: '82', recency: 100 },
       { id: 'a', orderKey: '80', recency: 200 },
     ];
     const sorted = sortByManualOrder(items, (item) => item);
-    expect(sorted.map((item) => item.id)).toEqual(['a', 'b', 'c']);
+    expect(sorted.map((item) => item.id)).toEqual(['a', 'b', 'c', 'z']);
 
     const writes = planManualOrderMove(sorted, { sessionId: 'c', toIndex: 1 });
     expect(writes).toHaveLength(1);
@@ -180,6 +192,7 @@ describe('Focus manual fractional-index ordering', () => {
       'a',
       'c',
       'b',
+      'z',
     ]);
   });
 });

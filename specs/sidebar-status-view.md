@@ -24,20 +24,28 @@ actively tracking today and what can wait or has settled.
   marks conversations currently managed by an Agent rather than awaiting
   direct human reading.
 - When `agentManaged` is `true`, the conversation suppresses human unread
-  indicators (sidebar/tab unread dots, window badge, desktop notifications,
-  and live-activity unread counts). Live running/permission indicators remain
-  visible so blocked approvals are never silently hidden.
+  indicators (sidebar/tab unread dots, closed-tab unread indicators, window
+  badge, desktop notifications, and live-activity unread counts). Live
+  running/permission indicators remain visible so blocked approvals are never
+  silently hidden.
 - When an Agent creates a session through MCP (`lody_session_create`,
-  `lody_session_create_many`), it may pass `agentManaged: boolean`. When
-  omitted, the new session inherits the calling session's `agentManaged` value
-  (defaulting to `false`).
+  `lody_session_create_many`), it may pass `agentManaged: boolean` and
+  `ownerUserId: string` (discovered via `lody_member_list`). When omitted,
+  they inherit the calling session's `agentManaged` and `userId`. Both
+  resolved values are frozen into the canonical command at acceptance time so
+  daemon restart recovery preserves the exact same settings (explicit
+  `agentManaged: false` overrides an agent-managed parent while omitting the
+  persisted field).
 - `lody_session_list` exposes `agentManaged` alongside the existing
-  `ownerUserId` field.
-- When a human sends a message into an `agentManaged` session, `agentManaged`
-  is cleared (`false`) so the human receives unread notifications for the
-  Agent's reply (and any active `snoozedUntil` / `settledAt` state is also
-  cleared so the conversation returns to Focus). Users with write permission
-  can also toggle `agentManaged` explicitly from the session context menu.
+  `ownerUserId` field; `lody_member_list` lists known human members in the
+  current workspace for owner selection.
+- When a human sends input that is accepted (direct send, queued send, or
+  steer), `agentManaged` is **deleted** (`undefined`) so the human receives
+  unread notifications for the Agent's reply (and any active `snoozedUntil` /
+  `settledAt` state is cleared so the conversation returns to Focus). Users
+  with write permission can also toggle `agentManaged` explicitly from the
+  sidebar context menu or the conversation header menu (`…`); manual takeover
+  likewise deletes the `agentManaged` field.
 
 ### Sidebar Status view
 
@@ -51,15 +59,18 @@ actively tracking today and what can wait or has settled.
      `SessionMeta.orderKey` (fractional index, shared with Pinned). Users
      reorder Focus rows via pointer drag-and-drop (reusing Pinned's drag
      interaction and settle animation). Conversations without an `orderKey`
-     sort after keyed rows by latest activity. Keyboard reordering is out of
-     scope.
+     sort after keyed rows by stable ascending `session.id` so ordinary new
+     replies never cause them to jump. Keyboard reordering is out of scope.
   2. **Later** (`稍后`): Collapsed by default (showing its count). Contains
      conversations with `snoozedUntil > now`. Sorted by `snoozedUntil`
      ascending (soonest wake-up first) when expanded. Each row displays a
      compact countdown indicator (countdown icon + `3d`, `2h`, `45m`, `<1m`)
-     showing when it returns to Focus. Once `now >= snoozedUntil`, the
-     conversation automatically returns to Focus without requiring a metadata
-     write.
+     showing when it returns to Focus. Once `now >= snoozedUntil`, a one-shot
+     wake-up updates `lastMessageAt` so the conversation becomes unread,
+     assigns a top Focus `orderKey` (still below Pinned), records
+     `focusRestoredAt` (so older sessions also surface), and clears
+     `snoozedUntil` so the same wake-up never repeats across devices or
+     reopens.
   3. **Settled** (`已收尾`): Collapsed by default (showing its count).
      Contains conversations explicitly settled (`settledAt` with no newer
      message) or inactive for at least 7 days (`now - lastMessageAt >= 7d`,

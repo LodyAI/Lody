@@ -3234,6 +3234,12 @@ export class MessageHandler {
       if (typeof command.useCurrentSessionAsParent === 'boolean') {
         options.useCurrentSessionAsParent = command.useCurrentSessionAsParent;
       }
+      if (typeof command.agentManaged === 'boolean') {
+        options.agentManaged = command.agentManaged;
+      }
+      if (typeof command.ownerUserId === 'string' && command.ownerUserId.trim()) {
+        options.sessionOwnerUserId = command.ownerUserId.trim();
+      }
       const workContext = command.workContext;
       if (workContext && typeof workContext === 'object' && !Array.isArray(workContext)) {
         const context = workContext as Record<string, unknown>;

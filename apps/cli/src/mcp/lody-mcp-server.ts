@@ -218,6 +218,7 @@ const SESSION_CREATE_TOOL_NAME = 'lody_session_create';
 const SESSION_CHAT_TOOL_NAME = 'lody_session_chat';
 const SESSION_CANCEL_TOOL_NAME = 'lody_session_cancel';
 const SESSION_LIST_TOOL_NAME = 'lody_session_list';
+const MEMBER_LIST_TOOL_NAME = 'lody_member_list';
 const SESSION_STATUS_MANY_TOOL_NAME = 'lody_session_status_many';
 const SESSION_HISTORY_TOOL_NAME = 'lody_session_history';
 const SESSION_CREATE_MANY_TOOL_NAME = 'lody_session_create_many';
@@ -526,6 +527,14 @@ const SessionCreateCommandInputShape = {
     .describe(
       'Suppress human unread indicators for this session. Omit to inherit the calling session value.'
     ),
+  ownerUserId: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe(
+      'Human workspace member userId who owns this session (from lody_member_list). Omit to inherit the calling session owner.'
+    ),
   ...SessionRunConfigInputShape,
 };
 
@@ -771,6 +780,7 @@ const SessionCreateBatchItemShape = {
   machineId: SessionCreateCommandInputShape.machineId,
   agentConfigId: SessionCreateCommandInputShape.agentConfigId,
   agentManaged: SessionCreateCommandInputShape.agentManaged,
+  ownerUserId: SessionCreateCommandInputShape.ownerUserId,
   ...SessionRunConfigInputShape,
   label: z
     .string()
@@ -1486,17 +1496,38 @@ type ResolvedMcpSessionCreate = {
 const resolveMcpSessionCreate = (
   input: SessionCreateCommandInput,
   invoking: InvokingTurnContext | undefined,
-  requester: Pick<SessionMeta, 'machineId' | 'project'>,
+  requester: Pick<SessionMeta, 'machineId' | 'project' | 'agentManaged' | 'userId'>,
   catalogRole: AgentRole | undefined,
   /**
    * The requester Local Project's linked GitHub repository, present only when
    * it is enabled in this workspace (`resolveRoleCloneableRepo`).
    */
-  cloneableRepo?: string
+  cloneableRepo?: string,
+  knownMemberIds?: ReadonlySet<string>
 ): ResolvedMcpSessionCreate => {
+  const resolvedAgentManaged =
+    input.agentManaged !== undefined ? input.agentManaged : requester.agentManaged === true;
+  const resolvedOwnerUserId = input.ownerUserId ?? requester.userId;
+  if (
+    input.ownerUserId &&
+    input.ownerUserId !== requester.userId &&
+    input.ownerUserId !== invoking?.identity.userId &&
+    knownMemberIds &&
+    !knownMemberIds.has(input.ownerUserId)
+  ) {
+    throw new LodyOperationStoreError(
+      'INVALID_OWNER',
+      `Target ownerUserId ${input.ownerUserId} is not a known member of this workspace.`,
+      false
+    );
+  }
   if (!input.agentRoleId) {
     return {
-      input,
+      input: {
+        ...input,
+        agentManaged: resolvedAgentManaged,
+        ...(resolvedOwnerUserId ? { ownerUserId: resolvedOwnerUserId } : {}),
+      },
       prompt: input.prompt,
       dispatchConfig: buildMcpTurnDispatchConfig(input),
     };
@@ -1575,6 +1606,8 @@ const resolveMcpSessionCreate = (
     ...withoutTarget,
     machineId: role.machineId,
     agentConfigId: role.agentConfigId,
+    agentManaged: resolvedAgentManaged,
+    ...(resolvedOwnerUserId ? { ownerUserId: resolvedOwnerUserId } : {}),
     ...(useCurrentSessionAsParent !== undefined ? { useCurrentSessionAsParent } : {}),
     ...(workContext !== undefined ? { workContext } : {}),
   } as SessionCreateCommandInput;
@@ -1647,6 +1680,7 @@ const buildResolvedMcpCreateCanonicalCommand = (
   ...(resolved.input.agentManaged !== undefined
     ? { agentManaged: resolved.input.agentManaged }
     : {}),
+  ...(resolved.input.ownerUserId ? { ownerUserId: resolved.input.ownerUserId } : {}),
   ...(resolved.input.workContext ? { workContext: resolved.input.workContext } : {}),
   ...(deadlineSeconds !== undefined ? { deadlineSeconds } : {}),
 });
@@ -1671,6 +1705,9 @@ const buildMcpCreateOptions = (
   }
   if (input.agentManaged !== undefined) {
     options.agentManaged = input.agentManaged;
+  }
+  if (input.ownerUserId !== undefined) {
+    options.sessionOwnerUserId = input.ownerUserId;
   }
   if (input.wait !== undefined) {
     options.wait = input.wait;
@@ -2164,6 +2201,97 @@ const matchesSessionListFilters = (
     }
   }
   return true;
+};
+
+const MemberListToolInputSchema = z
+  .object({
+    query: z
+      .string()
+      .trim()
+      .min(1)
+      .max(128)
+      .optional()
+      .describe('Optional case-insensitive filter matching userId, name, or email.'),
+    limit: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_MCP_SESSION_LIST_LIMIT)
+      .optional()
+      .describe('Maximum members to return. Defaults to 20.'),
+  })
+  .strict();
+
+type MemberListToolInput = z.infer<typeof MemberListToolInputSchema>;
+
+const collectKnownWorkspaceMemberIds = async (
+  manager: LoroDocumentManager,
+  currentUserId: string
+): Promise<Set<string>> => {
+  const memberIds = new Set<string>();
+  if (currentUserId.trim()) memberIds.add(currentUserId.trim());
+  const [sessions, machines] = await Promise.all([
+    listAliveSessionMetas(manager),
+    listAliveDocMetas<MachineMeta>(manager, isMachineDocRoomId),
+  ]);
+  for (const { meta } of sessions) {
+    if (typeof meta.userId === 'string' && meta.userId.trim()) {
+      memberIds.add(meta.userId.trim());
+    }
+  }
+  for (const { meta } of machines) {
+    if (typeof meta.ownerUserId === 'string' && meta.ownerUserId.trim()) {
+      memberIds.add(meta.ownerUserId.trim());
+    }
+  }
+  return memberIds;
+};
+
+const buildMemberList = async (input: MemberListToolInput): Promise<unknown> => {
+  const ctx = getSessionContext();
+  const auth = getCliAuthContextOrThrow('mcp');
+  const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
+  return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
+    const currentSessionRecord = await manager.repo.getDocMeta(
+      getSessionRoomId(ctx.sessionId as SessionId)
+    );
+    const currentSessionOwnerId =
+      !isLoroRepoDocDeleted(currentSessionRecord) &&
+      typeof (currentSessionRecord?.meta as SessionMeta | undefined)?.userId === 'string'
+        ? (currentSessionRecord?.meta as SessionMeta).userId
+        : auth.userId;
+
+    const memberIds = await collectKnownWorkspaceMemberIds(manager, auth.userId);
+    const queryLower = input.query?.toLowerCase();
+    const limit = input.limit ?? DEFAULT_MCP_SESSION_LIST_LIMIT;
+
+    const members = Array.from(memberIds)
+      .sort((a, b) => a.localeCompare(b))
+      .map((userId) => {
+        const isSelf = userId === auth.userId;
+        return {
+          userId,
+          ...(isSelf && auth.userName ? { name: auth.userName } : {}),
+          ...(isSelf && auth.userEmail ? { email: auth.userEmail } : {}),
+          isCurrentUser: isSelf,
+          isCurrentSessionOwner: userId === currentSessionOwnerId,
+        };
+      })
+      .filter((member) => {
+        if (!queryLower) return true;
+        return (
+          member.userId.toLowerCase().includes(queryLower) ||
+          Boolean(member.name?.toLowerCase().includes(queryLower)) ||
+          Boolean(member.email?.toLowerCase().includes(queryLower))
+        );
+      });
+
+    return {
+      workspaceId: workspace.id,
+      items: members.slice(0, limit),
+      total: members.length,
+    };
+  });
 };
 
 const buildSessionList = async (input: SessionListToolInput): Promise<unknown> => {
@@ -3301,6 +3429,9 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
       ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
       : undefined;
     const catalogRole = args.agentRoleId ? roleCatalog?.get(args.agentRoleId) : undefined;
+    const knownMemberIds = args.ownerUserId
+      ? await collectKnownWorkspaceMemberIds(manager, auth.userId)
+      : undefined;
     const resolved = resolveMcpSessionCreate(
       args,
       invoking,
@@ -3312,7 +3443,8 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
         currentSession,
         invoking.identity.userId,
         roleRunsElsewhere(catalogRole, currentSession.machineId)
-      )
+      ),
+      knownMemberIds
     );
     const canonicalCommand = buildResolvedMcpCreateCanonicalCommand(resolved, args.deadlineSeconds);
     const retry = await withOperationStore((store) =>
@@ -4120,6 +4252,10 @@ const startSessionCreateManyOperation = async (
         )
       )
     );
+    const hasExplicitOwner = expanded.some((item) => Boolean(item.ownerUserId));
+    const knownMemberIds = hasExplicitOwner
+      ? await collectKnownWorkspaceMemberIds(manager, auth.userId)
+      : undefined;
     const resolvedItems = expanded.map((item) => {
       if (!item.prompt) return { resolved: undefined, error: undefined };
       try {
@@ -4136,6 +4272,7 @@ const startSessionCreateManyOperation = async (
             ? { useCurrentSessionAsParent: item.useCurrentSessionAsParent }
             : {}),
           ...(item.agentManaged !== undefined ? { agentManaged: item.agentManaged } : {}),
+          ...(item.ownerUserId ? { ownerUserId: item.ownerUserId } : {}),
           ...(item.workContext ? { workContext: item.workContext } : {}),
         } as SessionCreateCommandInput;
         return {
@@ -4144,7 +4281,8 @@ const startSessionCreateManyOperation = async (
             invoking,
             requester,
             item.agentRoleId ? roleCatalog?.get(item.agentRoleId) : undefined,
-            cloneableRepo
+            cloneableRepo,
+            knownMemberIds
           ),
           error: undefined,
         };
@@ -5213,6 +5351,9 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
             ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
             : undefined;
           const catalogRole = args.agentRoleId ? roleCatalog?.get(args.agentRoleId) : undefined;
+          const knownMemberIds = args.ownerUserId
+            ? await collectKnownWorkspaceMemberIds(manager, auth.userId)
+            : undefined;
           const resolved = resolveMcpSessionCreate(
             args,
             invoking,
@@ -5224,7 +5365,8 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
               currentSession,
               invoking.identity.userId,
               roleRunsElsewhere(catalogRole, currentSession.machineId)
-            )
+            ),
+            knownMemberIds
           );
           await freezeInvokingAuthor(manager, currentSession, invoking);
           const options = buildMcpCreateOptions(resolved.input, ctx);
@@ -5748,6 +5890,25 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     async (args: SessionListToolInput) => {
       try {
         return jsonTextResult(await buildSessionList(args));
+      } catch (error) {
+        return mcpErrorResult(error);
+      }
+    }
+  );
+
+  registerSessionTool(
+    MEMBER_LIST_TOOL_NAME,
+    {
+      summary: 'List known human members in the current workspace for session owner selection.',
+      title: 'List workspace members',
+      description:
+        'List known human member userIds in the current workspace (default 20, maximum 100) so lody_session_create can assign an explicit ownerUserId. Directory entries are for owner selection only and never grant machine or workspace execution permissions.',
+      inputSchema: MemberListToolInputSchema,
+      annotations: { readOnlyHint: true },
+    },
+    async (args: MemberListToolInput) => {
+      try {
+        return jsonTextResult(await buildMemberList(args));
       } catch (error) {
         return mcpErrorResult(error);
       }

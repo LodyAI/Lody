@@ -15,18 +15,18 @@ Translation: current
 
 - `SessionMeta.userId` 保持为全仓唯一的人类归属与权限标识。
 - 在 `SessionMeta` 上新增可选布尔字段 `agentManaged?: boolean`，标记该对话当前由 Agent 托管、无需主动提醒人类读取。
-- 当 `agentManaged` 为 `true` 时，抑制该对话的人类未读提示（侧栏/标签页未读圆点、窗口角标、桌面通知与未读汇总计数）。运行中与等待权限审批等实时阻塞标识仍保持可见，避免审批卡死被静默吞掉。
-- Agent 通过 MCP 创建对话（`lody_session_create`、`lody_session_create_many`）时可传入 `agentManaged: boolean`；省略时默认继承当前父对话的 `agentManaged` 值（默认为 `false`）。
-- `lody_session_list` 在原有 `ownerUserId` 旁同步返回 `agentManaged`。
-- 当人类向一个 `agentManaged` 对话发送消息时，自动清除 `agentManaged`（置为 `false`），恢复后续回复的未读提醒（同时清除暂缓/收尾状态使其回到进行中）；有写权限的用户也可在对话更多菜单中手动切换。
+- 当 `agentManaged` 为 `true` 时，抑制该对话的人类未读提示（侧栏/标签页未读圆点、已关闭对话未读提示、窗口角标、桌面通知与未读汇总计数）。运行中与等待权限审批等实时阻塞标识仍保持可见，避免审批卡死被静默吞掉。
+- Agent 通过 MCP 创建对话（`lody_session_create`、`lody_session_create_many`）时可传入 `agentManaged: boolean` 与 `ownerUserId: string`（可通过 `lody_member_list` 列出工作区成员）；省略时默认继承当前调用会话的 `agentManaged` 与 `userId`。两者在受理时即冻结进规范命令，确保后台重启恢复与首次执行保持一致（显式 `agentManaged: false` 可覆盖父会话托管，持久化字段保持缺省）。
+- `lody_session_list` 在原有 `ownerUserId` 旁同步返回 `agentManaged`；`lody_member_list` 列出当前工作区已知人类成员。
+- 当人类参与并发送输入被接受（直发、排队、引导均计入）时，**删除 `agentManaged` 字段**（`undefined`），恢复后续回复的未读提醒（同时清除暂缓/收尾状态使其回到进行中）；有写权限的用户也可在侧栏右键菜单或对话页顶部「…」菜单中手动切换（手动接管同样删除 `agentManaged` 字段）。
 
 ### 侧栏「状态」视图
 
 - 侧栏视图选项“按状态”统一更名为 **状态**（`Status`）。
 - 顶部 **Pinned** 区保持独立，继续享受特殊待遇；Pinned 分组不混入下方的状态区。
 - Pinned 区下方，状态视图将未归档、未固定的对话分为三层：
-  1. **进行中（Focus）**：默认展开。按 `SessionMeta.orderKey`（与 Pinned 共用的 fractional index）手动固定排序，支持指针拖拽重排（复用 Pinned 的拖拽交互与落位动画）。尚无 `orderKey` 的对话排在有键对话之后并按最近活动时间排序。不做键盘移动。
-  2. **稍后（Later）**：默认折叠（显示条目数）。包含 `snoozedUntil > now` 的对话。展开后按 `snoozedUntil` 升序排列（最快唤醒的在前）。每行展示紧凑的倒计时提示（倒计时图标 + `3d`、`2h`、`45m`、`<1m`）。一旦 `now >= snoozedUntil`，无需额外写入即可自动回到「进行中」。
+  1. **进行中（Focus）**：默认展开。按 `SessionMeta.orderKey`（与 Pinned 共用的 fractional index）手动固定排序，支持指针拖拽重排（复用 Pinned 的拖拽交互与落位动画）。尚无 `orderKey` 的对话排在有键对话之后并按 `session.id` 稳定升序排列，普通新回复不会导致跳位。不做键盘移动。
+  2. **稍后（Later）**：默认折叠（显示条目数）。包含 `snoozedUntil > now` 的对话。展开后按 `snoozedUntil` 升序排列（最快唤醒的在前）。每行展示紧凑的倒计时提示（倒计时图标 + `3d`、`2h`、`45m`、`<1m`）。一旦 `now >= snoozedUntil`，触发一次性唤醒：更新 `lastMessageAt` 使其成为未读、写入顶部的 `orderKey` 顶到「进行中」最前面（仍位于 Pinned 下方）、写入 `focusRestoredAt`（确保旧会话也会浮上来）并清除 `snoozedUntil`，避免多端和重开后反复冒出。
   3. **已收尾（Settled）**：默认折叠（显示条目数）。包含手动收尾（存在 `settledAt` 且之后无新消息）或最近 7 天无新消息（`now - lastMessageAt >= 7d`、非运行中、非等待审批，且 7 天内未被手动移回进行中）的对话。展开后按最近活动时间降序排列。收到更新消息（`lastMessageAt > settledAt`）时自动回到「进行中」。
 
 ### 入口与交互

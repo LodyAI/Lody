@@ -53,9 +53,11 @@ export function sessionHasUnreadMessages(session: SessionUnreadInput): boolean {
 
 /**
  * Unread output in a closed or archived conversation. Only the closed-conversations
- * list surfaces it; tabs, sidebar summaries, and badges stay quiet.
+ * list surfaces it; tabs, sidebar summaries, and badges stay quiet. Agent-managed
+ * conversations stay quiet here too.
  */
 export function closedSessionHasUnreadMessages(session: SessionUnreadInput): boolean {
+  if (session.agentManaged === true) return false;
   if (session.isTabClosed !== true && session.isArchived !== true) return false;
   return hasUnreadOutput(session);
 }
