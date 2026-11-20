@@ -70,6 +70,11 @@ export function bindLoroText(options: {
   const composing = () => options.isComposing() || editor.isComposing();
   let base = readTodayText(text);
   let buffered: TextDeltaStep[][] = [];
+  // The binding's own commit echoes back through `text.subscribe` at once;
+  // the editor already shows it, and moving the caret through that local
+  // delta would misplace it (peer edits held during a composition are
+  // applied right after, through their own deltas).
+  let writing = false;
 
   const editorRich = () => editor.getEditorState().read($readTodayEditorRich);
 
@@ -121,10 +126,15 @@ export function bindLoroText(options: {
       splice = { ...splice, start, deleteCount: Math.max(0, end - start) };
     }
     const { start, deleteCount, insert } = splice;
-    undo.editText(text, (target) => {
-      if (deleteCount > 0) target.delete(start, deleteCount);
-      insertTodayRich(target, start, insert);
-    });
+    writing = true;
+    try {
+      undo.editText(text, (target) => {
+        if (deleteCount > 0) target.delete(start, deleteCount);
+        insertTodayRich(target, start, insert);
+      });
+    } finally {
+      writing = false;
+    }
     // Peer edits were held during the composition: show them, moving the caret past them.
     if (pending.length > 0) realign(pending);
     else base = next;
@@ -143,6 +153,7 @@ export function bindLoroText(options: {
   });
 
   const stopText = text.subscribe((batch) => {
+    if (writing) return;
     const deltas: TextDeltaStep[][] = [];
     for (const event of batch.events) {
       if (event.target === text.id && event.diff.type === 'text') {

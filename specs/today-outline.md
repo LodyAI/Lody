@@ -64,6 +64,10 @@ any time; when off it changes none of the app's existing behavior.
     (user decision).
 - Block selection: Esc, or a drag-selection leaving a node, selects whole nodes; selected nodes can be copied,
   cut, deleted, dragged and indented. Selecting a node includes its whole subtree, and the highlight shows it.
+  A selection spanning levels indents and outdents each run of adjacent siblings on its own, as one-by-one
+  would; moving up or down applies only to one run of adjacent siblings under one parent, and does nothing
+  otherwise. In block selection (also after it emptied the page) `Mod+Z` / `Mod+Shift+Z` undo and redo as
+  usual, plus `Ctrl+Y` on Windows/Linux.
 - Shift+↑/↓ while editing: away from the first/last line the browser extends the selection by a line inside the
   node; on the first/last line the selection first extends to the node's start/end; once it is already at that
   edge, the next press selects the current node only. Further Shift+↑/↓ extend or shrink from that anchor node,
@@ -73,7 +77,9 @@ any time; when off it changes none of the app's existing behavior.
   Today.
 - Pasting multi-line text splits lines into sibling nodes, inferring hierarchy from indentation; a code block
   stays one node.
-- Fold state is stored in the page document (synced with content).
+- Fold state is stored in the page document and synced with it, and a page opens with its stored folds; but a
+  peer folding or unfolding a node does not change the view of someone already looking at the page until they
+  fold or unfold that node themselves (user decision). Folding is not an undo step.
 - While an IME composition is active, Enter, Tab, Backspace and the `@` menu do not react.
 
 ### Node drag and drop

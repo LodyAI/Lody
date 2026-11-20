@@ -230,7 +230,10 @@ function Surface() {
             openTodayOutline(doc).paste({ kind: 'page-start' }, PAGE);
             return {
               doc,
-              joinRoom: async () => ({ room: { unsubscribe: () => {} }, synced: true }),
+              joinRoom: async () => ({
+                room: { unsubscribe: () => {} },
+                synced: Promise.resolve(),
+              }),
             };
           },
           isRegistered: async () => true,
@@ -291,7 +294,7 @@ function Surface() {
             date={TODAY}
             today={TODAY}
             isTop
-            onEmpty={() => {}}
+            onEmptyChange={() => {}}
           />
         </TodayOutlineSurface>
         <TodaySessionPicker items={items} />

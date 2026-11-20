@@ -54,6 +54,12 @@ describe('Today block selection', () => {
     });
     expect(resolveBlockKey(key('c', { metaKey: true }), 'mac')).toBeNull();
     expect(resolveBlockKey(key('Escape'), 'mac')).toEqual({ type: 'clear' });
+    expect(resolveBlockKey(key('z', { metaKey: true }), 'mac')).toEqual({ type: 'undo' });
+    expect(resolveBlockKey(key('z', { metaKey: true, shiftKey: true }), 'mac')).toEqual({
+      type: 'redo',
+    });
+    expect(resolveBlockKey(key('y', { ctrlKey: true }), 'other')).toEqual({ type: 'redo' });
+    expect(resolveBlockKey(key('y', { metaKey: true }), 'mac')).toBeNull();
   });
 
   it('copies blocks as indented text with mention links plus a payload that pastes back exactly', () => {

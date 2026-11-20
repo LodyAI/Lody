@@ -32,6 +32,8 @@ function harness(
     failRegisterOnce?: boolean;
     /** Join outcomes in order; afterwards joins succeed and sync. */
     joins?: Array<'fail' | 'unsynced'>;
+    /** Resolves the `synced` of an `unsynced` join (the room healed). */
+    heal?: { promise: Promise<void> };
     doc?: LoroDoc;
   } = {}
 ) {
@@ -50,7 +52,10 @@ function harness(
       if (outcome === 'fail') throw new Error('join failed');
       return {
         room: { unsubscribe: () => void (calls.unsubscribed += 1) },
-        synced: outcome !== 'unsynced',
+        synced:
+          outcome === 'unsynced'
+            ? (options.heal?.promise ?? new Promise<void>(() => {}))
+            : Promise.resolve(),
       };
     },
     register: async (meta) => {
@@ -183,6 +188,19 @@ describe('Today page store', () => {
     expect(calls.joins).toBe(2);
   });
 
+  it('marks a room whose first sync failed as synced once it heals', async () => {
+    let healed = () => {};
+    const heal = { promise: new Promise<void>((resolve) => (healed = resolve)) };
+    const { store } = harness({ registered: true, joins: ['unsynced'], heal });
+    let synced = false;
+    void store.synced.then(() => (synced = true));
+    await flush();
+    expect(synced).toBe(false);
+    healed();
+    await flush();
+    expect(synced).toBe(true);
+  });
+
   it('keeps a room whose first sync failed instead of joining again, and releases it on dispose', async () => {
     const { store, calls, timers } = harness({ registered: true, joins: ['unsynced'] });
     let synced = false;
@@ -225,14 +243,14 @@ describe('Today page store cache', () => {
     const opened: string[] = [];
     const unloaded: string[] = [];
     const meta = new Map<string, unknown>(registeredIds.map((id) => [id, {}]));
-    let listener: ((event: { kind: string; docId: string }) => void) | undefined;
+    let listener: ((event: { docId: string; exists: boolean }) => void) | undefined;
     const cache = createTodayPageStoreCache({
       repo: {
         openDoc: async (id) => {
           opened.push(id);
           return {
             doc: new LoroDoc(),
-            joinRoom: async () => ({ room: { unsubscribe: () => {} }, synced: true }),
+            joinRoom: async () => ({ room: { unsubscribe: () => {} }, synced: Promise.resolve() }),
           };
         },
         isRegistered: async (id) => {
@@ -264,7 +282,7 @@ describe('Today page store cache', () => {
       cache,
       opened,
       unloaded,
-      emit: (docId: string) => listener?.({ kind: 'doc-existence-changed', docId }),
+      emit: (docId: string, exists = true) => listener?.({ docId, exists }),
     };
   }
 
@@ -277,6 +295,9 @@ describe('Today page store cache', () => {
     expect(seen.at(-1)).toEqual(['2026-11-20', '2026-11-18']);
     h.emit(day('2026-11-19'));
     expect(seen.at(-1)).toEqual(['2026-11-20', '2026-11-19', '2026-11-18']);
+    // A deleted page leaves the index.
+    h.emit(day('2026-11-20'), false);
+    expect(seen.at(-1)).toEqual(['2026-11-19', '2026-11-18']);
     stop();
   });
 
@@ -284,6 +305,22 @@ describe('Today page store cache', () => {
     const h = cacheHarness([], { failRegisteredCheck: true });
     const page = await h.cache.acquire(day('2026-11-20'));
     expect(page.getSnapshot().isEmpty).toBe(true);
+  });
+
+  it('queues a page for eviction only when its last holder releases it', async () => {
+    const h = cacheHarness();
+    const held = day('2026-11-18');
+    await h.cache.acquire(held);
+    await h.cache.acquire(held);
+    await h.cache.acquire(day('2026-11-19'));
+    await h.cache.acquire(day('2026-11-20'));
+    // One of two holders lets go: still in use, so it takes no idle slot.
+    h.cache.releaseRef(held);
+    h.cache.releaseRef(day('2026-11-19'));
+    h.cache.releaseRef(day('2026-11-20'));
+    await flush();
+    expect(h.unloaded).toEqual([day('2026-11-19')]);
+    expect(h.cache.peek(held)).toBeDefined();
   });
 
   it('evicts the oldest idle page beyond the cap and keeps pages still held', async () => {

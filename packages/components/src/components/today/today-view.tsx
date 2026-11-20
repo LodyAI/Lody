@@ -165,8 +165,14 @@ export function TodayView(props: {
     return runtime.todayPages.observeDates(userId, setRegistered);
   }, [runtime, userId]);
 
-  const onEmpty = useCallback((date: TodayDate) => {
-    setEmpty((previous) => (previous.has(date) ? previous : new Set(previous).add(date)));
+  const onEmptyChange = useCallback((date: TodayDate, isEmpty: boolean) => {
+    setEmpty((previous) => {
+      if (previous.has(date) === isEmpty) return previous;
+      const next = new Set(previous);
+      if (isEmpty) next.add(date);
+      else next.delete(date);
+      return next;
+    });
   }, []);
   const days = useMemo(
     () => buildDayStream({ today, anchor, registered, empty }),
@@ -289,7 +295,7 @@ export function TodayView(props: {
               date={date}
               today={today}
               isTop={index === 0}
-              onEmpty={onEmpty}
+              onEmptyChange={onEmptyChange}
             />
           ))}
         </TodayOutlineSurface>
@@ -428,6 +434,16 @@ const dragStyles = stylex.create({
     pointerEvents: 'none',
     zIndex: 42,
   },
+  // Released: glide to the landing line (or back home) and fade.
+  ghostSettling: {
+    opacity: 0,
+    transitionProperty: {
+      default: 'top, left, opacity',
+      '@media (prefers-reduced-motion: reduce)': 'none',
+    },
+    transitionDuration: '120ms',
+    transitionTimingFunction: 'ease-out',
+  },
 });
 
 /** The drop line, the "can't move here" note, and the dragged card. */
@@ -455,7 +471,10 @@ function TodayDragLayer() {
         </div>
       ) : null}
       {ghost ? (
-        <div {...stylex.props(dragStyles.ghost)} style={{ top: ghost.y + 8, left: ghost.x + 12 }}>
+        <div
+          {...stylex.props(dragStyles.ghost, ghost.settling && dragStyles.ghostSettling)}
+          style={{ top: ghost.y + 8, left: ghost.x + 12 }}
+        >
           {ghost.count > 1
             ? t('today.movingNodes', 'Moving {{count}} nodes', { count: ghost.count })
             : ghost.label || '\u00a0'}

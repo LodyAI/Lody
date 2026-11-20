@@ -5659,6 +5659,35 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
   // Today pages (specs/today-outline.md): opened locally, joined only once
   // registered, so viewing a day never creates a server stream.
+  /**
+   * Resolves once `binding` has restored from the remote, waiting again on
+   * each status change after a wait that ended without it (the room healing
+   * inside the SDK). Never settles once `signal` aborts.
+   */
+  const waitUntilRoomRestored = (
+    binding: ReturnType<typeof readinessBindingForDocRoom>,
+    signal: AbortSignal
+  ): Promise<void> =>
+    new Promise((resolve) => {
+      let stopWatching: (() => void) | undefined;
+      const attempt = () => {
+        stopWatching?.();
+        stopWatching = undefined;
+        if (signal.aborted) return;
+        void binding.waitFor({ phase: 'restored', signal }).then(
+          (result) => {
+            if (result.status === 'complete') resolve();
+            else if (!signal.aborted) stopWatching = binding.onStatusChange(attempt);
+          },
+          () => {
+            if (!signal.aborted) stopWatching = binding.onStatusChange(attempt);
+          }
+        );
+      };
+      signal.addEventListener('abort', () => stopWatching?.(), { once: true });
+      attempt();
+    });
+
   const todayPageStoreCache = createTodayPageStoreCache({
     releaseDelayMs: STORE_RELEASE_DELAY_MS,
     idleCap: TODAY_IDLE_PAGE_CAP,
@@ -5702,13 +5731,16 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
                 return null;
               }
               if (!joined) throw error;
-              return { room: joined, synced: false };
+              return {
+                room: joined,
+                synced: waitUntilRoomRestored(readinessBindingForDocRoom(joined, docId), signal),
+              };
             }
             if (signal.aborted) {
               (subscription ?? joined)?.unsubscribe();
               return null;
             }
-            return subscription ? { room: subscription, synced: true } : null;
+            return subscription ? { room: subscription, synced: Promise.resolve() } : null;
           },
         };
       },
@@ -5721,7 +5753,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       observeDocs: (onEvent, query) => {
         const observation = repo.observeDocs(
           (event) => {
-            if ('docId' in event) onEvent({ kind: event.kind, docId: event.docId });
+            // A deleted page leaves the date index; metadata alone never resurrects it.
+            if (event.kind === 'doc-existence-changed') {
+              onEvent({ docId: event.docId, exists: event.to === 'active' });
+            } else if (event.kind === 'doc-metadata') {
+              onEvent({ docId: event.docId, exists: true });
+            }
           },
           {
             query,
@@ -5729,7 +5766,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           }
         );
         return {
-          docIds: observation.snapshot.map((entry) => entry.docId),
+          docIds: observation.snapshot
+            .filter((entry) => !isLoroRepoDocDeleted(entry))
+            .map((entry) => entry.docId),
           unsubscribe: observation.unsubscribe,
         };
       },

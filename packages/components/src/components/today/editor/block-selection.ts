@@ -60,7 +60,9 @@ export type BlockIntent =
   | { type: 'outdent' }
   | { type: 'move-up' }
   | { type: 'move-down' }
-  | { type: 'select-all' };
+  | { type: 'select-all' }
+  | { type: 'undo' }
+  | { type: 'redo' };
 
 /** Keys on a block selection. Plain characters are ignored, never replacing a subtree. */
 export function resolveBlockKey(
@@ -91,6 +93,15 @@ export function resolveBlockKey(
     case 'a':
     case 'A':
       return mod ? { type: 'select-all' } : null;
+    case 'z':
+    case 'Z':
+      if (!mod || event.altKey) return null;
+      return { type: event.shiftKey ? 'redo' : 'undo' };
+    case 'y':
+    case 'Y':
+      return platform === 'other' && mod && !event.shiftKey && !event.altKey
+        ? { type: 'redo' }
+        : null;
     default:
       return null;
   }

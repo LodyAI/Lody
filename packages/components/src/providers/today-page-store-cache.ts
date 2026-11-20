@@ -24,9 +24,12 @@ export type TodayRepoPort = {
   isRegistered(docId: string): Promise<boolean>;
   upsertDocMeta(docId: string, meta: { userId: string; date: TodayDate }): Promise<void>;
   unloadDoc(docId: string): Promise<void>;
-  /** Snapshot of doc ids under `prefix` plus a tail of existence/metadata events. */
+  /**
+   * Live (not deleted) doc ids under `prefix`, plus a tail of changes:
+   * `exists` turns false when a page is deleted.
+   */
   observeDocs(
-    onEvent: (event: { kind: string; docId: string }) => void,
+    onEvent: (event: { docId: string; exists: boolean }) => void,
     query: { prefix: string }
   ): { docIds: readonly string[]; unsubscribe(): void };
 };
@@ -78,6 +81,9 @@ export function createTodayPageStoreCache(options: {
     },
   });
 
+  // This cache's own references per page, so a page joins the idle queue only
+  // when its last holder lets go.
+  const held = new Map<string, number>();
   // Idle pages in release order (oldest first) for bounded eviction.
   const idle: string[] = [];
   const forgetIdle = (docId: string) => {
@@ -88,12 +94,24 @@ export function createTodayPageStoreCache(options: {
   return {
     acquire: async (docId) => {
       forgetIdle(docId);
-      return stores.acquire(docId);
+      const store = await stores.acquire(docId);
+      held.set(docId, (held.get(docId) ?? 0) + 1);
+      return store;
     },
     releaseRef: (docId) => {
       stores.releaseRef(docId);
+      const count = (held.get(docId) ?? 0) - 1;
+      if (count > 0) {
+        held.set(docId, count);
+        return;
+      }
+      held.delete(docId);
       forgetIdle(docId);
       idle.push(docId);
+      // Pages the delayed release already closed no longer take a slot.
+      for (let index = idle.length - 1; index >= 0; index -= 1) {
+        if (!stores.peek(idle[index]!)) idle.splice(index, 1);
+      }
       while (idle.length > options.idleCap) {
         const oldest = idle.shift();
         if (oldest) void stores.releaseIfIdle(oldest);
@@ -111,9 +129,13 @@ export function createTodayPageStoreCache(options: {
         stores.peek(docId)?.markRegistered();
         return true;
       };
+      const remove = (docId: string) => {
+        const page = parseTodayDocId(docId);
+        return Boolean(page && page.userId === userId && dates.delete(page.date));
+      };
       const observation = repo.observeDocs(
         (event) => {
-          if (add(event.docId)) emit();
+          if (event.exists ? add(event.docId) : remove(event.docId)) emit();
         },
         { prefix: getTodayDocIdPrefix(userId) }
       );
@@ -121,7 +143,14 @@ export function createTodayPageStoreCache(options: {
       emit();
       return () => observation.unsubscribe();
     },
-    releaseIdle: () => stores.releaseIdle(),
-    disposeAll: () => stores.disposeAll(),
+    releaseIdle: async () => {
+      idle.length = 0;
+      await stores.releaseIdle();
+    },
+    disposeAll: async () => {
+      idle.length = 0;
+      held.clear();
+      await stores.disposeAll();
+    },
   };
 }

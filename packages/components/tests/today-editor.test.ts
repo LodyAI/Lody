@@ -242,6 +242,7 @@ describe('Today session picker', () => {
       releaseDelayMs: 1000,
       idleCap: 2,
       setTimer: () => () => {},
+      retryDelayMs: () => 1000,
       repo: {
         openDoc: async () => ({ doc: new LoroDoc(), joinRoom: async () => null }),
         isRegistered: async () => true,
@@ -344,6 +345,55 @@ describe('Today LoroText binding under IME', () => {
     stopPlain();
     root.remove();
   });
+  it('a composition committed after a peer edit keeps the caret right after the composed text', () => {
+    const doc = new LoroDoc();
+    const outline = openTodayOutline(doc);
+    const focus = outline.insertFirst('abc') as { nodeId: never };
+    const text = outline.getText(focus.nodeId)!;
+    const undo = createTodayPageUndo(doc, { setTimer: () => () => {} });
+    const root = document.createElement('div');
+    root.contentEditable = 'true';
+    document.body.append(root);
+    const editor = createEditor({
+      namespace: 'today-ime-commit',
+      onError: (error) => {
+        throw error;
+      },
+    });
+    editor.setRootElement(root);
+    const stopPlain = registerPlainText(editor);
+    let composing = false;
+    const binding = bindLoroText({ editor, text, undo, isComposing: () => composing });
+    const peer = new LoroDoc();
+    peer.import(doc.export({ mode: 'snapshot' }));
+    const peerText = peer.getContainerById(text.id) as typeof text;
+
+    // The IME composes `Z` after `a` while a peer appends `X`.
+    composing = true;
+    editor.update(() => $setSelectionOffsets(1), { discrete: true });
+    editor.update(
+      () => {
+        const selection = $getSelection();
+        if ($isRangeSelection(selection)) selection.insertText('Z');
+      },
+      { discrete: true }
+    );
+    peerText.insert(3, 'X');
+    peer.commit();
+    doc.import(peer.export({ mode: 'update', from: doc.oplogVersion() }));
+    // The composition commits.
+    composing = false;
+    editor.update(() => $getRoot().getFirstDescendant()?.markDirty(), { discrete: true });
+    expect(text.toString()).toBe('aZbcX');
+    expect(editor.getEditorState().read(() => $getRoot().getTextContent())).toBe('aZbcX');
+    expect(editor.getEditorState().read(() => $readSelectionOffsets())).toEqual({
+      start: 2,
+      end: 2,
+    });
+    binding.dispose();
+    stopPlain();
+    root.remove();
+  });
 });
 
 describe('Today outline keys read the live caret', () => {
@@ -356,6 +406,7 @@ describe('Today outline keys read the live caret', () => {
       releaseDelayMs: 1000,
       idleCap: 2,
       setTimer: () => () => {},
+      retryDelayMs: () => 1000,
       repo: {
         openDoc: async () => ({ doc: new LoroDoc(), joinRoom: async () => null }),
         isRegistered: async () => true,
@@ -382,6 +433,45 @@ describe('Today outline keys read the live caret', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(store.getSnapshot().visible.map((node) => node.text)).toEqual(['onetwo']);
+    controller.dispose();
+    root.remove();
+  });
+
+  it('Enter over a selected range replaces it with the line break', async () => {
+    const { createTodayPageStoreCache } = await import('../src/providers/today-page-store-cache');
+    const { TodayEditorController } =
+      await import('../src/components/today/editor/today-editor-controller');
+    const { getTodayDocId, parseTodayPasteText } = await import('@lody/shared');
+    const cache = createTodayPageStoreCache({
+      releaseDelayMs: 1000,
+      idleCap: 2,
+      setTimer: () => () => {},
+      retryDelayMs: () => 1000,
+      repo: {
+        openDoc: async () => ({ doc: new LoroDoc(), joinRoom: async () => null }),
+        isRegistered: async () => true,
+        upsertDocMeta: async () => {},
+        unloadDoc: async () => {},
+        observeDocs: () => ({ docIds: [], unsubscribe: () => {} }),
+      },
+    });
+    const store = await cache.acquire(getTodayDocId('me', '2026-11-22' as never));
+    store.outline.paste({ kind: 'page-start' }, parseTodayPasteText('abcdef'));
+    const [only] = store.getSnapshot().visible;
+    const controller = new TodayEditorController(cache);
+    const root = document.createElement('div');
+    root.contentEditable = 'true';
+    document.body.append(root);
+    controller.activate(store, only!.id, 'end');
+    controller.attachRoot(root);
+    const textNode = root.querySelector('span')?.firstChild ?? root.firstChild!;
+    window.getSelection()!.setBaseAndExtent(textNode, 2, textNode, 4);
+    root.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(store.getSnapshot().visible.map((node) => node.text)).toEqual(['ab', 'ef']);
     controller.dispose();
     root.remove();
   });
@@ -461,6 +551,7 @@ describe('Today Shift+Up/Down while editing', () => {
       releaseDelayMs: 1000,
       idleCap: 2,
       setTimer: () => () => {},
+      retryDelayMs: () => 1000,
       repo: {
         openDoc: async () => ({ doc: new LoroDoc(), joinRoom: async () => null }),
         isRegistered: async () => true,
@@ -595,6 +686,7 @@ describe('Today editor around mentions', () => {
       releaseDelayMs: 1000,
       idleCap: 2,
       setTimer: () => () => {},
+      retryDelayMs: () => 1000,
       repo: {
         openDoc: async () => ({ doc: new LoroDoc(), joinRoom: async () => null }),
         isRegistered: async () => true,
@@ -662,6 +754,50 @@ describe('Today editor around mentions', () => {
 });
 
 describe('Today day section opening', () => {
+  it('reports a day found empty after syncing, and reports it again once it holds content', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const date = '2026-11-19' as never;
+    const store = createTodayPageStore({
+      docId: 'today-u1-2026-11-19',
+      doc: new LoroDoc(),
+      registered: true,
+      join: async () => ({ room: { unsubscribe: () => {} }, synced: Promise.resolve() }),
+      register: async () => {},
+      setTimer: () => () => {},
+      retryDelayMs: () => 1000,
+    });
+    const cache = {
+      peek: () => store,
+      acquire: async () => store,
+      releaseRef: () => {},
+    } as unknown as TodayPageStoreCache;
+    const reports: Array<[string, boolean]> = [];
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(
+        withTestI18n(
+          createElement(TodayDaySection, {
+            cache,
+            userId: 'u1',
+            date,
+            today: '2026-11-20' as never,
+            isTop: false,
+            onEmptyChange: (day: string, empty: boolean) => reports.push([day, empty]),
+          }),
+          createTestI18n()
+        )
+      )
+    );
+    expect(reports).toEqual([['2026-11-19', true]]);
+    await act(async () => void store.outline.insertFirst('written later'));
+    expect(reports.at(-1)).toEqual(['2026-11-19', false]);
+    act(() => root.unmount());
+    container.remove();
+    store.dispose();
+  });
+
   it('shows a failed open with Retry, and Retry opens the day', async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const date = '2026-11-20' as never;
@@ -700,7 +836,7 @@ describe('Today day section opening', () => {
             date,
             today: date,
             isTop: true,
-            onEmpty: () => {},
+            onEmptyChange: () => {},
           }),
           i18n
         )
@@ -714,5 +850,87 @@ describe('Today day section opening', () => {
     act(() => root.unmount());
     container.remove();
     store.dispose();
+  });
+});
+
+describe('Today block selection on the surface', () => {
+  async function setup() {
+    const { createTodayPageStoreCache } = await import('../src/providers/today-page-store-cache');
+    const { TodayEditorController } =
+      await import('../src/components/today/editor/today-editor-controller');
+    const { getTodayDocId, parseTodayPasteText } = await import('@lody/shared');
+    const unloaded: string[] = [];
+    const cache = createTodayPageStoreCache({
+      releaseDelayMs: 1000,
+      idleCap: 2,
+      setTimer: () => () => {},
+      retryDelayMs: () => 1000,
+      repo: {
+        openDoc: async () => ({ doc: new LoroDoc(), joinRoom: async () => null }),
+        isRegistered: async () => true,
+        upsertDocMeta: async () => {},
+        unloadDoc: async (docId) => void unloaded.push(docId),
+        observeDocs: () => ({ docIds: [], unsubscribe: () => {} }),
+      },
+    });
+    const docId = getTodayDocId('me', '2026-11-20' as never);
+    const store = await cache.acquire(docId);
+    store.outline.paste({ kind: 'page-start' }, parseTodayPasteText('a\nb'));
+    const controller = new TodayEditorController(cache);
+    const surface = document.createElement('div');
+    document.body.append(surface);
+    controller.attachSurface(surface);
+    const ids = store.getSnapshot().visible.map((node) => node.id);
+    const press = (key: string, mods: KeyboardEventInit = {}) =>
+      controller.onBlockKey(new KeyboardEvent('keydown', { key, ...mods }));
+    const texts = () => store.getSnapshot().visible.map((node) => node.text);
+    return { cache, controller, docId, store, surface, ids, press, texts, unloaded };
+  }
+
+  it('undoes and redoes a deleted selection with the keyboard, even though nothing is selected after', async () => {
+    const ctx = await setup();
+    ctx.controller.selectBlocks(ctx.store, ctx.ids);
+    ctx.press('Backspace');
+    expect(ctx.texts()).toEqual([]);
+    const mod = navigator.platform.includes('Mac') ? { metaKey: true } : { ctrlKey: true };
+    expect(ctx.press('z', mod)).toBe(true);
+    await Promise.resolve();
+    expect(ctx.texts()).toEqual(['a', 'b']);
+    expect(ctx.press('z', { ...mod, shiftKey: true })).toBe(true);
+    await Promise.resolve();
+    expect(ctx.texts()).toEqual([]);
+    ctx.controller.dispose();
+    ctx.surface.remove();
+  });
+
+  it('pasting lines over a block selection turns this workspace’s conversation links into mentions', async () => {
+    const ctx = await setup();
+    ctx.controller.workspaceId = 'ws1';
+    ctx.controller.selectBlocks(ctx.store, [ctx.ids[0]!]);
+    // jsdom has no DataTransfer: a minimal clipboard with only plain text.
+    const items: Record<string, string> = {
+      'text/plain': 'see lody://session/s1?workspace=ws1\nplain',
+    };
+    const event = new Event('paste', { cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(event, 'clipboardData', {
+      value: { getData: (type: string) => items[type] ?? '' },
+    });
+    expect(ctx.controller.onBlockPaste(event)).toBe(true);
+    const pasted = ctx.store.getSnapshot().visible[1]!;
+    expect(pasted.mentions).toEqual([{ start: 4, kind: 'session', id: 's1' }]);
+    ctx.controller.dispose();
+    ctx.surface.remove();
+  });
+
+  it('a page pinned and released before its acquire lands is not left held', async () => {
+    const ctx = await setup();
+    ctx.controller.selectBlocks(ctx.store, [ctx.ids[0]!]);
+    // Disposed in the same tick, before the pin's acquire resolved.
+    ctx.controller.dispose();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    ctx.cache.releaseRef(ctx.docId);
+    await ctx.cache.releaseIdle();
+    expect(ctx.unloaded).toEqual([ctx.docId]);
+    ctx.surface.remove();
   });
 });

@@ -24,6 +24,8 @@ import {
  */
 export const TODAY_OUTLINE_TREE = 'outline';
 export const TODAY_OUTLINE_EDIT_ORIGIN = 'today:edit';
+/** Fold toggles: synced with the page but never undo steps. */
+export const TODAY_OUTLINE_FOLD_ORIGIN = 'sys:today-fold';
 /** Fractional-index jitter: fewer rearranges when peers insert at the same spot. */
 const TODAY_FRACTIONAL_INDEX_JITTER = 4;
 
@@ -95,7 +97,17 @@ export type TodayOutline = {
   moveUp(ids: readonly TodayNodeId[]): boolean;
   moveDown(ids: readonly TodayNodeId[]): boolean;
   moveTo(ids: readonly TodayNodeId[], target: TodayMoveTarget): boolean;
+  /**
+   * Fold or unfold a node for this viewer and in the document. Not an undo
+   * step (its commit uses a `sys:` origin).
+   */
   setCollapsed(id: TodayNodeId, collapsed: boolean): void;
+  /**
+   * The view changed without a document change (a fold this viewer kept while
+   * a peer changed it in the document was rewritten to the same value).
+   */
+  onViewChange(listener: () => void): () => void;
+  dispose(): void;
   deleteNodes(ids: readonly TodayNodeId[]): FocusIntent;
   /** Replace `deleteCount` characters at `offset` with one mention; the caret lands after it. */
   insertMention(
@@ -223,6 +235,59 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
   configureTodayTextStyles(doc);
 
   const commit = () => doc.commit({ origin });
+
+  // Folds are stored in the page so it opens as it was left, but a peer's fold
+  // change does not reach a viewer already looking at the page: `viewFolds`
+  // keeps this viewer's fold for nodes a peer refolded, until this viewer
+  // folds or unfolds them. Specs/today-outline.md (Data ownership).
+  const viewFolds = new Map<string, boolean>();
+  const docFolds = new Map<string, boolean>();
+  const viewListeners = new Set<() => void>();
+  const docFold = (node: Node) => node.data.get('collapsed') === true;
+  const recordDocFolds = (remote: boolean) => {
+    const seen = new Set<string>();
+    const visit = (nodes: Node[]) => {
+      for (const node of nodes) {
+        const id = node.id as string;
+        seen.add(id);
+        const now = docFold(node);
+        const before = docFolds.get(id);
+        if (remote && before !== undefined && before !== now && !viewFolds.has(id)) {
+          viewFolds.set(id, before);
+        }
+        if (viewFolds.get(id) === now) viewFolds.delete(id);
+        docFolds.set(id, now);
+        visit(node.children() ?? []);
+      }
+    };
+    visit(tree.roots());
+    for (const id of docFolds.keys()) {
+      if (!seen.has(id)) {
+        docFolds.delete(id);
+        viewFolds.delete(id);
+      }
+    }
+  };
+  recordDocFolds(false);
+  // Registered before any page store subscribes, so the view is settled first.
+  // Typing changes only text: skip those batches.
+  const stopFoldWatch = doc.subscribe((batch) => {
+    if (batch.events.some((event) => event.diff.type !== 'text')) {
+      recordDocFolds(batch.by === 'import');
+    }
+  });
+  /** Write a fold through the document and drop this viewer's kept fold. */
+  const writeFold = (node: Node, collapsed: boolean) => {
+    const kept = viewFolds.delete(node.id as string);
+    if (docFold(node) === collapsed) {
+      if (kept) for (const listener of viewListeners) listener();
+      return false;
+    }
+    if (collapsed) node.data.set('collapsed', true);
+    else node.data.delete('collapsed');
+    return true;
+  };
+
   const live = (id: TodayNodeId): Node | undefined => {
     const node = tree.getNodeByID(id);
     return node && !node.isDeleted() ? node : undefined;
@@ -235,13 +300,13 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
     const text = textOf(node);
     return text ? readTodayText(text) : { text: '', mentions: [] };
   };
-  const isCollapsed = (node: Node) => node.data.get('collapsed') === true;
+  const isCollapsed = (node: Node) => viewFolds.get(node.id as string) ?? docFold(node);
   const childrenOf = (parent: Node | undefined): Node[] =>
     parent ? (parent.children() ?? []) : tree.roots();
   const siblingsOf = (node: Node) => childrenOf(node.parent());
   const indexOf = (node: Node) => node.index() ?? 0;
 
-  const view = (node: Node, depth: number): TodayNodeView => {
+  const view = (node: Node, depth: number, children = childrenOf(node)): TodayNodeView => {
     const rich = readRich(node);
     return {
       id: node.id,
@@ -250,7 +315,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       text: rich.text,
       mentions: rich.mentions,
       collapsed: isCollapsed(node),
-      hasChildren: childrenOf(node).length > 0,
+      hasChildren: children.length > 0,
     };
   };
 
@@ -322,6 +387,63 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       : undefined;
   };
 
+  /**
+   * Live nodes split into runs of adjacent siblings (same parent, consecutive
+   * indexes), in the given order. A block selection's top-level nodes can span
+   * parents; structural moves apply to one run at a time.
+   */
+  const siblingRuns = (ids: readonly TodayNodeId[]): Node[][] | undefined => {
+    const nodes = liveAll(ids);
+    if (!nodes) return undefined;
+    const runs: Node[][] = [];
+    for (const node of nodes) {
+      const run = runs.at(-1);
+      const last = run?.at(-1);
+      if (
+        run &&
+        last &&
+        last.parent()?.id === node.parent()?.id &&
+        indexOf(last) + 1 === indexOf(node)
+      ) {
+        run.push(node);
+      } else {
+        runs.push([node]);
+      }
+    }
+    return runs;
+  };
+
+  const indentRun = (nodes: Node[]): boolean => {
+    const first = nodes[0]!;
+    const index = indexOf(first);
+    if (index === 0) return false;
+    const target = siblingsOf(first)[index - 1];
+    if (!target) return false;
+    if (isCollapsed(target)) writeFold(target, false);
+    for (const node of nodes) node.move(target);
+    return true;
+  };
+
+  const outdentRun = (nodes: Node[]): boolean => {
+    const parent = nodes[0]!.parent();
+    if (!parent) return false;
+    const last = nodes.at(-1)!;
+    const followers = siblingsOf(last).slice(indexOf(last) + 1);
+    let anchor = parent;
+    for (const node of nodes) {
+      node.moveAfter(anchor);
+      anchor = node;
+    }
+    for (const follower of followers) follower.move(last);
+    return true;
+  };
+
+  /** One run of adjacent siblings, or nothing: moving blocks of several levels together is ambiguous. */
+  const singleRun = (ids: readonly TodayNodeId[]): Node[] | undefined => {
+    const runs = siblingRuns(ids);
+    return runs?.length === 1 ? runs[0] : undefined;
+  };
+
   const toFragment = (node: Node): TodayFragment => {
     const rich = readRich(node);
     return {
@@ -334,12 +456,22 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
 
   const outline: TodayOutline = {
     getAllNodes: () => walk(false),
+    // One pass: every node is read once, whether or not a fold hides it
+    // (hidden nodes still count for `isEmpty`).
     getSnapshot: () => {
-      const all = walk(false);
-      return {
-        visible: walk(true),
-        isEmpty: !all.some((node) => node.text.trim()),
+      const visible: TodayNodeView[] = [];
+      let isEmpty = true;
+      const visit = (nodes: Node[], depth: number, hidden: boolean) => {
+        for (const node of nodes) {
+          const children = childrenOf(node);
+          const nodeView = view(node, depth, children);
+          if (isEmpty && nodeView.text.trim()) isEmpty = false;
+          if (!hidden) visible.push(nodeView);
+          visit(children, depth + 1, hidden || nodeView.collapsed);
+        }
       };
+      visit(tree.roots(), 0, false);
+      return { visible, isEmpty };
     },
     getNode: (id) => {
       const node = live(id);
@@ -405,6 +537,9 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       }
       const offset = previousText.length;
       insertTodayRich(previousText, offset, readRich(node));
+      // Merging into a folded node would hide the merged line's children under
+      // it: unfold it, as indenting under it does.
+      if (isCollapsed(previous) && childrenOf(previous).length > 0) writeFold(previous, false);
       if (isWithin(node, previous.id)) {
         // Merging a first child into its parent: its children take its place.
         for (const child of childrenOf(node)) child.moveBefore(node);
@@ -436,39 +571,29 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       return { nodeId: id, offset };
     },
 
+    // Each run as if indented on its own, in document order.
     indent: (ids) => {
-      const nodes = liveAll(ids);
-      if (!nodes) return false;
-      const first = nodes[0]!;
-      const index = indexOf(first);
-      if (index === 0) return false;
-      const target = siblingsOf(first)[index - 1];
-      if (!target) return false;
-      if (isCollapsed(target)) target.data.delete('collapsed');
-      for (const node of nodes) node.move(target);
-      commit();
-      return true;
+      const runs = siblingRuns(ids);
+      if (!runs) return false;
+      let changed = false;
+      for (const run of runs) changed = indentRun(run) || changed;
+      if (changed) commit();
+      return changed;
     },
 
+    // Each run as if outdented on its own, last first, so an earlier run's
+    // followers (its later siblings) are taken as they stand.
     outdent: (ids) => {
-      const nodes = liveAll(ids);
-      if (!nodes) return false;
-      const parent = nodes[0]!.parent();
-      if (!parent) return false;
-      const last = nodes.at(-1)!;
-      const followers = siblingsOf(last).slice(indexOf(last) + 1);
-      let anchor = parent;
-      for (const node of nodes) {
-        node.moveAfter(anchor);
-        anchor = node;
-      }
-      for (const follower of followers) follower.move(last);
-      commit();
-      return true;
+      const runs = siblingRuns(ids);
+      if (!runs) return false;
+      let changed = false;
+      for (const run of [...runs].reverse()) changed = outdentRun(run) || changed;
+      if (changed) commit();
+      return changed;
     },
 
     moveUp: (ids) => {
-      const nodes = liveAll(ids);
+      const nodes = singleRun(ids);
       if (!nodes) return false;
       const first = nodes[0]!;
       const previous = siblingsOf(first)[indexOf(first) - 1];
@@ -479,7 +604,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
     },
 
     moveDown: (ids) => {
-      const nodes = liveAll(ids);
+      const nodes = singleRun(ids);
       if (!nodes) return false;
       const last = nodes.at(-1)!;
       const next = siblingsOf(last)[indexOf(last) + 1];
@@ -509,9 +634,17 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
     setCollapsed: (id, collapsed) => {
       const node = live(id);
       if (!node || isCollapsed(node) === collapsed) return;
-      if (collapsed) node.data.set('collapsed', true);
-      else node.data.delete('collapsed');
-      commit();
+      if (writeFold(node, collapsed)) doc.commit({ origin: TODAY_OUTLINE_FOLD_ORIGIN });
+    },
+
+    onViewChange: (listener) => {
+      viewListeners.add(listener);
+      return () => viewListeners.delete(listener);
+    },
+
+    dispose: () => {
+      stopFoldWatch();
+      viewListeners.clear();
     },
 
     deleteNodes: (ids) => {
@@ -565,7 +698,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       if (sameTodayRich(readTodayText(text), snapshot)) {
         if (text.length > 0) text.delete(0, text.length);
         insertTodayRich(text, 0, mentionRich(mention));
-        if (childrenOf(node).length > 0) node.data.set('collapsed', true);
+        if (childrenOf(node).length > 0) writeFold(node, true);
       } else {
         insertTodayRich(text, 0, mentionRich(mention, ' '));
       }

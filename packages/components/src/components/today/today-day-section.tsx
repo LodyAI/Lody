@@ -107,7 +107,8 @@ export function TodayDaySection(props: {
   date: TodayDate;
   today: TodayDate;
   isTop: boolean;
-  onEmpty: (date: TodayDate) => void;
+  /** A day's synced page is empty (skipped from the stream), or holds content again. */
+  onEmptyChange: (date: TodayDate, empty: boolean) => void;
 }) {
   const { t, i18n } = useTranslation();
   const ref = useRef<HTMLElement | null>(null);
@@ -120,7 +121,11 @@ export function TodayDaySection(props: {
         <span {...stylex.props(styles.headerMeta)}>{heading.meta}</span>
       </h2>
       {page.store ? (
-        <TodayStaticOutline store={page.store} isTop={props.isTop} onEmpty={props.onEmpty} />
+        <TodayStaticOutline
+          store={page.store}
+          isTop={props.isTop}
+          onEmptyChange={props.onEmptyChange}
+        />
       ) : page.failed ? (
         <div {...stylex.props(styles.outline, styles.failed)} role="alert">
           {t('today.pageOpenFailed', "Couldn't open this day.")}
@@ -138,9 +143,10 @@ export function TodayDaySection(props: {
 function TodayStaticOutline(props: {
   store: TodayPageStore;
   isTop: boolean;
-  onEmpty: (date: TodayDate) => void;
+  /** A day's synced page is empty (skipped from the stream), or holds content again. */
+  onEmptyChange: (date: TodayDate, empty: boolean) => void;
 }) {
-  const { store, isTop, onEmpty } = props;
+  const { store, isTop, onEmptyChange } = props;
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const controller = useTodayEditor();
   useEffect(() => controller?.registerDay(store.date, store), [controller, store]);
@@ -148,12 +154,17 @@ function TodayStaticOutline(props: {
     if (isTop) return undefined;
     let cancelled = false;
     void store.synced.then(() => {
-      if (!cancelled && store.getSnapshot().isEmpty) onEmpty(store.date);
+      if (!cancelled && store.getSnapshot().isEmpty) onEmptyChange(store.date, true);
     });
     return () => {
       cancelled = true;
     };
-  }, [isTop, onEmpty, store]);
+  }, [isTop, onEmptyChange, store]);
+  // A day once found empty and written again (e.g. opened from the calendar)
+  // must show in the stream again.
+  useEffect(() => {
+    if (!snapshot.isEmpty) onEmptyChange(store.date, false);
+  }, [onEmptyChange, snapshot.isEmpty, store.date]);
 
   if (snapshot.visible.length === 0) {
     return (
@@ -219,7 +230,8 @@ function TodayRow(props: {
         tabIndex={-1}
         onClick={() => {
           if (!node) return;
-          store.undo.structural(() => store.outline.setCollapsed(node.id, !node.collapsed));
+          // Folding is not an undo step.
+          store.outline.setCollapsed(node.id, !node.collapsed);
         }}
       >
         <ChevronRight size={12} />

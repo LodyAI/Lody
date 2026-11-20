@@ -59,12 +59,23 @@ export type TodayBlockSelection = { store: TodayPageStore; ids: TodayNodeId[] };
 export type TodayDropIndicator =
   | { kind: 'line'; top: number; left: number; width: number }
   | { kind: 'blocked'; x: number; y: number };
-export type TodayDragGhost = { x: number; y: number; label: string; count: number };
+export type TodayDragGhost = {
+  x: number;
+  y: number;
+  label: string;
+  count: number;
+  /** Released: gliding to where it landed, or back home (~100ms), then gone. */
+  settling?: boolean;
+};
 /** Indentation per outline level; matches the rows' padding. */
 export const TODAY_INDENT_PX = 22;
 /** Distance from a row's start to its bullet's centre (fold toggle + gap + half bullet). */
 const TODAY_BULLET_CENTER_PX = 28;
 const DRAG_THRESHOLD_PX = 5;
+/** Hovering where a drop would go into a folded node unfolds it after this long. */
+const DRAG_UNFOLD_DELAY_MS = 500;
+/** How long the released card glides before it disappears. */
+const DRAG_SETTLE_MS = 120;
 
 /** The structural moves the node editor and block selection share. */
 const OUTLINE_MOVES = {
@@ -140,6 +151,7 @@ export class TodayEditorController {
   pickerItems: readonly string[] = [];
   private dropIndicator: TodayDropIndicator | null = null;
   private dragGhost: TodayDragGhost | null = null;
+  private cancelSettle: (() => void) | null = null;
   /** Opens the node menu for a bullet clicked without dragging (wired by the host). */
   onNodeMenu: ((store: TodayPageStore, nodeId: TodayNodeId, anchor: HTMLElement) => void) | null =
     null;
@@ -150,7 +162,13 @@ export class TodayEditorController {
   private pendingCaret: CaretTarget = 'end';
   private root: HTMLElement | null = null;
   private binding: { dispose(): void } | null = null;
-  private pinnedDocId: string | null = null;
+  /**
+   * The page last edited or selected: kept open while the surface uses it, and
+   * the page undo/redo act on when no node or block is active (e.g. after a
+   * selection deleted every node). `held` turns true once the asynchronous
+   * acquire lands; a pin released before that releases on landing instead.
+   */
+  private pinned: { store: TodayPageStore; held: boolean; released: boolean } | null = null;
   private readonly days = new Map<TodayDate, TodayPageStore>();
   private readonly listeners = new Set<() => void>();
   private version = 0;
@@ -397,19 +415,42 @@ export class TodayEditorController {
       start.clientX - (store.outline.getNode(ids[0]!)?.depth ?? 0) * TODAY_INDENT_PX;
     let dragging = false;
     let target: TodayDropTarget | null = null;
+    // A drop into a folded node unfolds it once the pointer rests there.
+    let unfoldFor: string | null = null;
+    let unfoldTimer: ReturnType<typeof setTimeout> | undefined;
+    const aimUnfold = (parentId: string | null) => {
+      if (parentId === unfoldFor) return;
+      clearTimeout(unfoldTimer);
+      unfoldFor = parentId;
+      if (!parentId) return;
+      unfoldTimer = setTimeout(() => {
+        unfoldTimer = undefined;
+        store.outline.setCollapsed(parentId as TodayNodeId, false);
+      }, DRAG_UNFOLD_DELAY_MS);
+    };
     const finish = (commit: boolean) => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', cancel);
       window.removeEventListener('blur', cancel);
       window.removeEventListener('keydown', key, true);
+      clearTimeout(unfoldTimer);
       this.stopPointer = null;
       const wasDragging = dragging;
-      const drop = target;
+      const drop = commit ? target : null;
+      const line = this.dropIndicator?.kind === 'line' ? this.dropIndicator : null;
+      const ghost = this.dragGhost;
       this.dropIndicator = null;
       this.dragGhost = null;
-      if (wasDragging) this.notify();
-      if (commit && wasDragging && drop) this.dropAt(store, drop, ids);
+      if (wasDragging && ghost) {
+        // The card glides to the line it lands on, or flies back home.
+        this.settleGhost(
+          drop && line
+            ? { ...ghost, x: line.left - 12, y: line.top - 8, settling: true }
+            : { ...ghost, x: start.clientX, y: start.clientY, settling: true }
+        );
+      } else if (wasDragging) this.notify();
+      if (drop) this.dropAt(store, drop, ids);
       if (commit && !wasDragging) this.onNodeMenu?.(store, nodeId, bullet);
     };
     const move = (event: PointerEvent) => {
@@ -423,6 +464,7 @@ export class TodayEditorController {
         return;
       if (!dragging) {
         dragging = true;
+        this.cancelSettle?.();
         this.deactivate(false);
       }
       const rect = day.getBoundingClientRect();
@@ -439,6 +481,7 @@ export class TodayEditorController {
         target = null;
         this.dropIndicator = { kind: 'blocked', x: event.clientX, y: event.clientY };
       }
+      aimUnfold(target?.expandParent ? target.parentId : null);
       this.dragGhost = { x: event.clientX, y: event.clientY, label, count: ids.length };
       this.notify();
     };
@@ -457,6 +500,23 @@ export class TodayEditorController {
     window.addEventListener('blur', cancel);
     window.addEventListener('keydown', key, true);
     this.stopPointer = () => finish(false);
+  }
+
+  /** Show the released card gliding to `ghost`, then remove it. */
+  private settleGhost(ghost: TodayDragGhost) {
+    this.cancelSettle?.();
+    this.dragGhost = ghost;
+    this.notify();
+    const timer = setTimeout(() => {
+      this.cancelSettle = null;
+      this.dragGhost = null;
+      this.notify();
+    }, DRAG_SETTLE_MS);
+    this.cancelSettle = () => {
+      clearTimeout(timer);
+      this.cancelSettle = null;
+      this.dragGhost = null;
+    };
   }
 
   private closePicker() {
@@ -569,7 +629,7 @@ export class TodayEditorController {
       this.placeCaret();
       return;
     }
-    this.pin(store.docId);
+    this.pin(store);
     this.active = { store, nodeId };
     if (!this.pickerDismissedFor?.startsWith(`${nodeId}:`)) this.pickerDismissedFor = null;
     this.notify();
@@ -583,7 +643,7 @@ export class TodayEditorController {
     if (ids.length === 0) return;
     this.textOrigin = null;
     this.deactivate(false);
-    this.pin(store.docId);
+    this.pin(store);
     this.selection = { store, ids };
     this.blockAnchor = ends.anchor ?? ids[0]!;
     this.blockFocus = ends.focus ?? ids.at(-1)!;
@@ -614,10 +674,17 @@ export class TodayEditorController {
 
   /** Keys on the surface while blocks are selected. Returns true when handled. */
   onBlockKey(event: KeyboardEvent): boolean {
-    const selection = this.selection;
-    if (!selection) return false;
     const intent = resolveBlockKey(event, isMac() ? 'mac' : 'other');
     if (!intent) return false;
+    // Undo works on the surface whether or not blocks are still selected (a
+    // deleted selection leaves none, and an emptied page mounts no editor).
+    if (intent.type === 'undo' || intent.type === 'redo') {
+      if (!this.history(intent.type)) return false;
+      event.preventDefault();
+      return true;
+    }
+    const selection = this.selection;
+    if (!selection) return false;
     event.preventDefault();
     const { store } = selection;
     const outline = store.outline;
@@ -724,7 +791,7 @@ export class TodayEditorController {
   /** Paste after the selected blocks. */
   onBlockPaste(event: ClipboardEvent): boolean {
     const selection = this.selection;
-    const fragments = event.clipboardData && readClipboard(event.clipboardData);
+    const fragments = event.clipboardData && this.readPastedFragments(event.clipboardData);
     if (!selection || !fragments) return false;
     event.preventDefault();
     const { store } = selection;
@@ -738,6 +805,19 @@ export class TodayEditorController {
     return true;
   }
 
+  /**
+   * Clipboard blocks: our structured payload as is, or outline-parsed text
+   * with this workspace's conversation links turned into mentions.
+   */
+  private readPastedFragments(data: DataTransfer): TodayFragment[] | null {
+    const fragments = readClipboard(data);
+    if (!fragments || data.getData(TODAY_CLIPBOARD_MIME)) return fragments;
+    return linkifyTodayFragments(
+      fragments,
+      (link) => readPastedSessionLink(link, this.workspaceId)?.sessionId ?? null
+    );
+  }
+
   private onEditorPaste(event: ClipboardEvent | InputEvent | KeyboardEvent | null): boolean {
     const active = this.active;
     if (!active || !(event instanceof ClipboardEvent) || !event.clipboardData) return false;
@@ -748,8 +828,7 @@ export class TodayEditorController {
       readPastedSessionLink(link, this.workspaceId)?.sessionId ?? null;
     let fragments: TodayFragment[] | null;
     if (structured || text.includes('\n')) {
-      fragments = readClipboard(data);
-      if (fragments && !structured) fragments = linkifyTodayFragments(fragments, resolve);
+      fragments = this.readPastedFragments(data);
     } else {
       // One line: keep it verbatim, only turning conversation links into mentions.
       const rich = linkifyTodayText(text, resolve);
@@ -1045,6 +1124,10 @@ export class TodayEditorController {
     const goalX = lines.caretX;
     // Lexical commands run inside an update; outline writes happen right after.
     queueMicrotask(() => {
+      // Another node (or none) became active before this ran: the key no
+      // longer belongs to it.
+      const current = this.active;
+      if (current?.store !== active.store || current.nodeId !== active.nodeId) return;
       if (intent.type === 'select-from-text') {
         // Remember the text selection so Esc can return to it.
         const origin = {
@@ -1057,20 +1140,30 @@ export class TodayEditorController {
         this.textOrigin = origin;
         return;
       }
-      this.run(active, intent, offsets.start, goalX);
+      this.run(active, intent, offsets.start, goalX, offsets.end);
     });
     return true;
   }
 
-  private run(active: TodayActiveNode, intent: OutlineIntent, offset: number, goalX: number) {
+  private run(
+    active: TodayActiveNode,
+    intent: OutlineIntent,
+    offset: number,
+    goalX: number,
+    end = offset
+  ) {
     const { store, nodeId } = active;
     const outline = store.outline;
     const keepCaret = () => this.activate(store, nodeId, offset);
     switch (intent.type) {
       case 'split':
+        // Enter over a selection replaces it, as typing would: one undo step.
         return this.apply(
           store,
-          store.undo.structural(() => outline.split(nodeId, offset))
+          store.undo.structural(() => {
+            if (end > offset) outline.getText(nodeId)?.delete(offset, end - offset);
+            return outline.split(nodeId, offset);
+          })
         );
       case 'enter-empty':
         return this.apply(
@@ -1095,7 +1188,8 @@ export class TodayEditorController {
         return keepCaret();
       case 'collapse':
       case 'expand':
-        store.undo.structural(() => outline.setCollapsed(nodeId, intent.type === 'collapse'));
+        // Folding is not an undo step.
+        outline.setCollapsed(nodeId, intent.type === 'collapse');
         return keepCaret();
       case 'focus-previous':
         return this.focusNeighbour(store, nodeId, -1, { goalX, edge: 'bottom' });
@@ -1143,7 +1237,7 @@ export class TodayEditorController {
   }
 
   private history(direction: 'undo' | 'redo'): boolean {
-    const store = this.active?.store ?? this.selection?.store;
+    const store = this.active?.store ?? this.selection?.store ?? this.pinned?.store;
     if (!store) return false;
     queueMicrotask(() => {
       const stop = store.undo.onRestore((intent) => this.apply(store, intent));
@@ -1154,19 +1248,32 @@ export class TodayEditorController {
     return true;
   }
 
-  private pin(docId: string) {
-    if (this.pinnedDocId === docId) return;
-    const previous = this.pinnedDocId;
-    this.pinnedDocId = docId;
-    void this.cache.acquire(docId);
-    if (previous) this.cache.releaseRef(previous);
+  private pin(store: TodayPageStore) {
+    if (this.pinned?.store.docId === store.docId) return;
+    const previous = this.pinned;
+    const entry = { store, held: false, released: false };
+    this.pinned = entry;
+    this.cache.acquire(store.docId).then(
+      () => {
+        if (entry.released) this.cache.releaseRef(store.docId);
+        else entry.held = true;
+      },
+      (error: unknown) => console.warn('Today editor could not hold its page', error)
+    );
+    if (previous) this.unpin(previous);
+  }
+
+  private unpin(entry: { store: TodayPageStore; held: boolean; released: boolean }) {
+    entry.released = true;
+    if (entry.held) this.cache.releaseRef(entry.store.docId);
   }
 
   dispose() {
     this.stopPointer?.();
+    this.cancelSettle?.();
     this.deactivate(false);
-    if (this.pinnedDocId) this.cache.releaseRef(this.pinnedDocId);
-    this.pinnedDocId = null;
+    if (this.pinned) this.unpin(this.pinned);
+    this.pinned = null;
     for (const cleanup of this.cleanups.splice(0)) cleanup();
     this.listeners.clear();
   }

@@ -21,4 +21,6 @@ Behavior: [Today Spec](../../../../../specs/today-outline.md). Files: [README.md
   menu writes through `useSessionActions`; Today never derives or writes status its own way.
 - A mention is one caret position everywhere: static rows and editor decorators render the
   same `TodayMention`, and caret geometry counts `[data-today-mention]` as one character.
+- Folds go through `TodayOutline.setCollapsed` (a `sys:` commit, never an undo step); a peer's fold
+  change never refolds an open page's view (`viewFolds` in the outline).
 - Import `../../providers/*` relatively: the Electron web build maps `@/providers` elsewhere.

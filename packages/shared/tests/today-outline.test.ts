@@ -139,6 +139,38 @@ describe('Today outline structure', () => {
     expect(render(outline)).toBe('p\n  a\nb\n  c\nq');
   });
 
+  it('a selection spanning parents indents and outdents each run of siblings as if on its own', () => {
+    const tree = 'a\n  a1\n  a2\nb\nc';
+    const indented = build(tree);
+    indented.outline.indent([idOf(indented.ids, 'a2'), idOf(indented.ids, 'b')]);
+    expect(render(indented.outline)).toBe('a\n  a1\n    a2\n  b\nc');
+
+    const outdented = build(tree);
+    outdented.outline.outdent([idOf(outdented.ids, 'a2'), idOf(outdented.ids, 'b')]);
+    // a2 leaves a; the root b has nowhere to go; c is not pulled under b.
+    expect(render(outdented.outline)).toBe('a\n  a1\na2\nb\nc');
+
+    const gapped = build('p\n  a\n  b\n  c\n  d');
+    gapped.outline.outdent([idOf(gapped.ids, 'a'), idOf(gapped.ids, 'c')]);
+    expect(render(gapped.outline)).toBe('p\na\n  b\nc\n  d');
+  });
+
+  it('refuses to move a selection spanning parents up or down, leaving the tree as it was', () => {
+    const tree = 'a\n  a1\n  a2\nb\nc';
+    const { outline, ids } = build(tree);
+    const selection = [idOf(ids, 'a2'), idOf(ids, 'b')];
+    expect(outline.moveUp(selection)).toBe(false);
+    expect(outline.moveDown(selection)).toBe(false);
+    expect(render(outline)).toBe(tree);
+  });
+
+  it('merging into a folded node unfolds it, so the merged children stay visible', () => {
+    const { outline, ids } = build('a\n  a1\nb\n  b1');
+    outline.setCollapsed(idOf(ids, 'a'), true);
+    outline.mergeWithPrevious(idOf(ids, 'b'));
+    expect(render(outline)).toBe('ab\n  a1\n  b1');
+  });
+
   it('merges into the previous visible node and re-parents children', () => {
     const { outline, ids } = build('a\nb\n  b1');
     const focus = outline.mergeWithPrevious(idOf(ids, 'b'));
@@ -338,6 +370,43 @@ describe('Today outline structure', () => {
       ?.data.set('futureKey', 'v');
     doc.commit();
     expect(render(openTodayOutline(doc))).toBe('a');
+  });
+});
+
+describe('Today folds', () => {
+  const sync = (from: LoroDoc, to: LoroDoc) =>
+    to.import(from.export({ mode: 'update', from: to.oplogVersion() }));
+
+  it('a peer folding a node does not fold it for a viewer already on the page, who still folds it themselves', () => {
+    const mine = build('a\n  a1\nb');
+    const peerDoc = new LoroDoc();
+    peerDoc.import(mine.doc.export({ mode: 'snapshot' }));
+    const peer = openTodayOutline(peerDoc);
+    peer.setCollapsed(idOf(mine.ids, 'a'), true);
+    sync(peerDoc, mine.doc);
+    expect(render(mine.outline)).toBe('a\n  a1\nb');
+    expect(mine.outline.getSnapshot().visible.map((node) => node.text)).toEqual(['a', 'a1', 'b']);
+    // Opening the page afresh inherits the stored fold.
+    expect(render(openTodayOutline(mine.doc))).toBe('a [x]\n  a1\nb');
+    // This viewer's own fold applies (and is stored), although the document already says folded.
+    let viewChanges = 0;
+    mine.outline.onViewChange(() => (viewChanges += 1));
+    mine.outline.setCollapsed(idOf(mine.ids, 'a'), true);
+    expect(viewChanges).toBe(1);
+    expect(mine.outline.getSnapshot().visible.map((node) => node.text)).toEqual(['a', 'b']);
+  });
+
+  it('folding is not an undo step', () => {
+    const doc = new LoroDoc();
+    const outline = openTodayOutline(doc);
+    outline.paste({ kind: 'page-start' }, parseTodayPasteText('a\n  a1'));
+    const undo = createTodayPageUndo(doc, { setTimer: () => () => {} });
+    const a = outline.getAllNodes()[0]!.id;
+    undo.editText(outline.getText(a)!, (text) => text.insert(1, 'b'));
+    undo.endGroup();
+    outline.setCollapsed(a, true);
+    undo.undo();
+    expect(render(outline)).toBe('a [x]\n  a1');
   });
 });
 

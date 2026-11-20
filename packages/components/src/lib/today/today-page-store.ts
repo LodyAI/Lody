@@ -42,8 +42,12 @@ export type TodayPageStore = {
 
 type RoomSubscription = { unsubscribe(): void };
 
-/** A joined room; `synced` is false when the subscription exists but its first sync failed. */
-export type TodayRoomJoin = { room: RoomSubscription; synced: boolean };
+/**
+ * A joined room. `synced` resolves once the room has synced with a peer: at
+ * once for a normal join, later for a subscription whose first sync failed
+ * and that healed inside the SDK; never if it does not.
+ */
+export type TodayRoomJoin = { room: RoomSubscription; synced: Promise<void> };
 
 export function createTodayPageStore(options: {
   docId: string;
@@ -112,7 +116,9 @@ export function createTodayPageStore(options: {
         }
         room = joined.room;
         failures = 0;
-        if (joined.synced) markSynced();
+        void joined.synced.then(() => {
+          if (!disposed) markSynced();
+        });
       })
       .catch((error: unknown) => retryLater('join', error))
       .finally(() => {
@@ -145,10 +151,14 @@ export function createTodayPageStore(options: {
     else if (!outline.getSnapshot().isEmpty) ensureRegistered();
   }
 
-  const unsubscribeDoc = doc.subscribe(() => {
+  const refresh = () => {
     snapshot = outline.getSnapshot();
     for (const listener of listeners) listener();
-  });
+  };
+  const unsubscribeDoc = doc.subscribe(refresh);
+  // A fold this viewer kept while a peer changed it can be rewritten to the
+  // document's value without a document change.
+  const unsubscribeView = outline.onViewChange(refresh);
   const unsubscribeLocal = doc.subscribeLocalUpdates(() => {
     // A join waits out its backoff; a registration retries on the edit.
     if (retryStage === 'join') return;
@@ -179,6 +189,8 @@ export function createTodayPageStore(options: {
       clearRetry();
       releaseSignal.abort();
       unsubscribeDoc();
+      unsubscribeView();
+      outline.dispose();
       unsubscribeLocal();
       undo.dispose();
       room?.unsubscribe();

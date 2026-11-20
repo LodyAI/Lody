@@ -36,7 +36,10 @@ function useDemoCache() {
               openTodayOutline(doc).paste({ kind: 'page-start' }, parseTodayPasteText(seed));
             return {
               doc,
-              joinRoom: async () => ({ room: { unsubscribe: () => {} }, synced: true }),
+              joinRoom: async () => ({
+                room: { unsubscribe: () => {} },
+                synced: Promise.resolve(),
+              }),
             };
           },
           isRegistered: async (docId) => docId in PAGES,
@@ -69,7 +72,7 @@ function DayStream(props: { dates: TodayDate[] }) {
               date={date}
               today={TODAY}
               isTop={index === 0}
-              onEmpty={() => {}}
+              onEmptyChange={() => {}}
             />
           ))}
         </TodayOutlineSurface>
