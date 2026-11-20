@@ -3276,6 +3276,30 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     basedOnUserTurnId: string,
     patch: SessionAcpRuntimeConfigPatch
   ): Promise<boolean> {
+    return this.enqueueAcpRuntimeConfigPatch(() => basedOnUserTurnId, patch);
+  }
+
+  /**
+   * Applies a patch observed outside any turn to the snapshot of the same ACP session, at
+   * that snapshot's own user turn. Without such a snapshot the next turn's run-config
+   * capture carries the value, so nothing is written.
+   */
+  applyAcpRuntimeConfigPatchToCurrentSnapshot(
+    patch: SessionAcpRuntimeConfigPatch
+  ): Promise<boolean> {
+    return this.enqueueAcpRuntimeConfigPatch(
+      (current) =>
+        current?.acpSessionId === patch.acpSessionId ? current.basedOnUserTurnId : undefined,
+      patch
+    );
+  }
+
+  private enqueueAcpRuntimeConfigPatch(
+    resolveBasedOnUserTurnId: (
+      current: SessionAcpRuntimeConfigSnapshot | undefined
+    ) => string | undefined,
+    patch: SessionAcpRuntimeConfigPatch
+  ): Promise<boolean> {
     const next = this.acpRuntimeConfigPatchSerial.then(async () => {
       if (!this.mirror) {
         throw new Error('SessionDocument not initialized');
@@ -3309,12 +3333,14 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
 
       const state = this.mirror?.getState();
       if (!state) throw new Error('SessionDocument not initialized');
+      const current = state.acpRuntimeConfig as SessionAcpRuntimeConfigSnapshot | undefined;
+      const basedOnUserTurnId = resolveBasedOnUserTurnId(current);
+      if (basedOnUserTurnId === undefined) return false;
       const incomingTurnIndex = userTurnIndex.get(basedOnUserTurnId) ?? -1;
       if (incomingTurnIndex < 0 || incomingTurnIndex !== latestUserTurnIndex) {
         return false;
       }
 
-      const current = state.acpRuntimeConfig as SessionAcpRuntimeConfigSnapshot | undefined;
       const currentTurnIndex = current ? (userTurnIndex.get(current.basedOnUserTurnId) ?? -1) : -1;
       if (currentTurnIndex > incomingTurnIndex) {
         return false;
