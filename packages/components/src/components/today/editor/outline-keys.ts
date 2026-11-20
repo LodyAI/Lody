@@ -18,7 +18,11 @@ export type OutlineIntent =
   | { type: 'focus-next' }
   | { type: 'focus-previous-end' }
   | { type: 'focus-next-start' }
-  | { type: 'block-select' };
+  | { type: 'block-select' }
+  /** Shift+Up/Down reached the first/last line: select to the node edge. */
+  | { type: 'extend-text'; anchor: number; focus: number }
+  /** Shift+Up/Down with the selection already at the node edge: select the node. */
+  | { type: 'select-from-text' };
 
 export type OutlineKeyEvent = Pick<
   KeyboardEvent,
@@ -28,6 +32,9 @@ export type OutlineKeyEvent = Pick<
 export type OutlineCaretContext = {
   /** Selection collapsed caret offset (the selection start otherwise). */
   offset: number;
+  /** Unordered selection ends; `focus` is the end that moves. Default: `offset`. */
+  anchor?: number;
+  focus?: number;
   length: number;
   hasSelection: boolean;
   onFirstLine: boolean;
@@ -66,7 +73,18 @@ export function resolveOutlineKey(
     case 'ArrowUp':
     case 'ArrowDown': {
       const up = event.key === 'ArrowUp';
+      // Option+Shift+arrows select by paragraph on macOS: leave them to the system.
+      if (platform === 'mac' && event.altKey && event.shiftKey && !mod) return null;
       if ((mod || event.altKey) && event.shiftKey) return { type: up ? 'move-up' : 'move-down' };
+      if (event.shiftKey && !mod && !event.altKey) {
+        return resolveShiftVertical(up ? -1 : 1, {
+          anchor: caret.anchor ?? caret.offset,
+          focus: caret.focus ?? caret.offset,
+          length: caret.length,
+          focusOnFirstLine: caret.onFirstLine,
+          focusOnLastLine: caret.onLastLine,
+        });
+      }
       if (mod && !event.altKey) return { type: up ? 'collapse' : 'expand' };
       if (!plain || caret.hasSelection) return null;
       if (up && caret.onFirstLine) return { type: 'focus-previous' };
@@ -86,4 +104,28 @@ export function resolveOutlineKey(
     default:
       return null;
   }
+}
+
+/**
+ * Shift+Up/Down while editing (SiYuan's order): on the first/last line the
+ * selection first extends to the node's start/end; once its moving end is
+ * already there, the next press selects the whole node. Elsewhere the browser
+ * extends by a line. Behavior: specs/today-outline.md (Outline editing).
+ */
+export function resolveShiftVertical(
+  step: -1 | 1,
+  caret: {
+    anchor: number;
+    focus: number;
+    length: number;
+    focusOnFirstLine: boolean;
+    focusOnLastLine: boolean;
+  }
+): OutlineIntent | null {
+  const edge = step < 0 ? 0 : caret.length;
+  if (caret.focus === edge) return { type: 'select-from-text' };
+  if (step < 0 ? caret.focusOnFirstLine : caret.focusOnLastLine) {
+    return { type: 'extend-text', anchor: caret.anchor, focus: edge };
+  }
+  return null;
 }

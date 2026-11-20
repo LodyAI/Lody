@@ -61,8 +61,14 @@ any time; when off it changes none of the app's existing behavior.
     moving past a day's first/last node enters the adjacent date.
   - `Mod+Shift+↑/↓` moves a node with its children; `Mod+↑/↓` folds/unfolds; `Esc` enters block selection
     (user decision).
-- Block selection: Esc, or a drag-selection leaving a node, selects whole nodes; Shift+↑/↓ extends; selected
-  nodes can be copied, cut, deleted, dragged and indented. Cut and paste work across dates and across members'
+- Block selection: Esc, or a drag-selection leaving a node, selects whole nodes; selected nodes can be copied,
+  cut, deleted, dragged and indented. Selecting a node includes its whole subtree, and the highlight shows it.
+- Shift+↑/↓ while editing: away from the first/last line the browser extends the selection by a line inside the
+  node; on the first/last line the selection first extends to the node's start/end; once it is already at that
+  edge, the next press selects the current node only. Further Shift+↑/↓ extend or shrink from that anchor node,
+  keep a block selection when shrinking back to it, flip past it, and never cross days. Esc on a selection made
+  this way returns to the original text selection (user decision). On macOS ⌥⇧↑/↓ stay with the system's
+  paragraph selection; moving nodes uses `Mod+Shift+↑/↓`. Cut and paste work across dates and across members'
   Today.
 - Pasting multi-line text splits lines into sibling nodes, inferring hierarchy from indentation; a code block
   stays one node.
@@ -94,15 +100,16 @@ any time; when off it changes none of the app's existing behavior.
 - Status matches the sidebar exactly by reusing the sidebar's status grouping and its unread, running and
   approval signals; Today derives nothing on its own:
 
-  | Session status | Node display |
-  | --- | --- |
-  | Waiting for approval / question | Prominent status dot, highest priority |
-  | Running | Spinning status dot |
-  | Unread (not shown for agent-managed conversations) | Unread dot |
-  | Later | The sidebar's countdown pill |
-  | Settled, archived | Check mark + strikethrough + dimmed |
+  | Session status                                     | Node display                           |
+  | -------------------------------------------------- | -------------------------------------- |
+  | Waiting for approval / question                    | Prominent status dot, highest priority |
+  | Running                                            | Spinning status dot                    |
+  | Unread (not shown for agent-managed conversations) | Unread dot                             |
+  | Later                                              | The sidebar's countdown pill           |
+  | Settled, archived                                  | Check mark + strikethrough + dimmed    |
 
   Settled and related states depend on the sidebar status view (PR #2948) landing. v1 has no `Cmd+Enter` settle.
+
 - Clicking the title opens the conversation (in the main area on the right when pinned, otherwise by
   navigating); clicking the row's blank area or bullet block-selects it. Reaching a session node with the keyboard
   block-selects it; Enter then opens the conversation and Backspace/Delete removes the node. The context menu

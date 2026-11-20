@@ -88,3 +88,15 @@ describe('Today block selection covers subtrees', () => {
     expect(covered.has(id('q'))).toBe(false);
   });
 });
+
+describe('Today block selection keyboard extension', () => {
+  it('extends past the children a selected parent already covers, and stops at the day edge', async () => {
+    const { extendFocus } = await import('../src/components/today/editor/block-selection');
+    const { visible, id } = outline('p\n  c1\n  c2\ns');
+    expect(extendFocus(visible, id('p'), id('p'), 1)).toBe(id('s'));
+    expect(extendFocus(visible, id('c2'), id('c2'), -1)).toBe(id('c1'));
+    expect(extendFocus(visible, id('s'), id('p'), 1)).toBe(id('c1'));
+    expect(extendFocus(visible, id('s'), id('s'), 1)).toBeNull();
+    expect(extendFocus(visible, id('p'), id('p'), -1)).toBeNull();
+  });
+});

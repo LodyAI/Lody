@@ -75,16 +75,23 @@ export function offsetFromPoint(
   return snapToGrapheme(text, Math.min(offset, text.length));
 }
 
-/** Whether the caret in `root` is on its first/last visual line, and its x. */
+/**
+ * Whether the selection's moving end (its focus) is on the first/last visual
+ * line of `root`, and its x. Measuring the focus, not the selection's start and
+ * end, keeps "select down a few lines, then Shift+Up" from reading as the top.
+ */
 export function caretEdgeLines(root: HTMLElement): {
   first: boolean;
   last: boolean;
   caretX: number;
 } {
   const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0) return { first: true, last: true, caretX: 0 };
-  const range = selection.getRangeAt(0);
-  if (!root.contains(range.startContainer)) return { first: true, last: true, caretX: 0 };
+  if (!selection?.focusNode || !root.contains(selection.focusNode)) {
+    return { first: true, last: true, caretX: 0 };
+  }
+  const range = document.createRange();
+  range.setStart(selection.focusNode, selection.focusOffset);
+  range.collapse(true);
   const rects = range.getClientRects();
   const caret = rects[0] ?? range.getBoundingClientRect();
   if (!caret || (caret.width === 0 && caret.height === 0)) {

@@ -297,3 +297,94 @@ describe('Today outline keys read the live caret', () => {
     root.remove();
   });
 });
+
+describe('Today Shift+Up/Down while editing', () => {
+  const key = (k: string, mods: Partial<KeyboardEventInit> = {}) =>
+    ({ key: k, shiftKey: false, altKey: false, metaKey: false, ctrlKey: false, isComposing: false, keyCode: 0, ...mods });
+  const caret = (anchor: number, focus: number, length: number, first = true, last = true) => ({
+    offset: Math.min(anchor, focus),
+    anchor,
+    focus,
+    length,
+    hasSelection: anchor !== focus,
+    onFirstLine: first,
+    onLastLine: last,
+  });
+
+  it('first selects to the node edge, and only a further press selects the node', () => {
+    expect(resolveOutlineKey(key('ArrowUp', { shiftKey: true }), caret(4, 4, 9), 'mac')).toEqual({
+      type: 'extend-text',
+      anchor: 4,
+      focus: 0,
+    });
+    expect(resolveOutlineKey(key('ArrowUp', { shiftKey: true }), caret(4, 0, 9), 'mac')).toEqual({
+      type: 'select-from-text',
+    });
+    expect(resolveOutlineKey(key('ArrowDown', { shiftKey: true }), caret(2, 5, 9), 'mac')).toEqual({
+      type: 'extend-text',
+      anchor: 2,
+      focus: 9,
+    });
+    expect(resolveOutlineKey(key('ArrowDown', { shiftKey: true }), caret(0, 0, 0), 'mac')).toEqual({
+      type: 'select-from-text',
+    });
+  });
+
+  it('leaves Shift+arrows inside a node to the browser away from its first/last line', () => {
+    expect(resolveOutlineKey(key('ArrowUp', { shiftKey: true }), caret(20, 20, 40, false, false), 'mac')).toBeNull();
+    expect(resolveOutlineKey(key('ArrowUp', { shiftKey: true, isComposing: true }), caret(4, 0, 9), 'mac')).toBeNull();
+  });
+
+  it('keeps Mod+Shift for moving nodes and gives Option+Shift back to the Mac', () => {
+    expect(resolveOutlineKey(key('ArrowUp', { shiftKey: true, metaKey: true }), caret(0, 0, 3), 'mac')).toEqual({ type: 'move-up' });
+    expect(resolveOutlineKey(key('ArrowUp', { shiftKey: true, altKey: true }), caret(0, 0, 3), 'mac')).toBeNull();
+    expect(resolveOutlineKey(key('ArrowUp', { shiftKey: true, altKey: true }), caret(0, 0, 3), 'other')).toEqual({ type: 'move-up' });
+  });
+
+  it('Esc after a Shift+Up selection returns to the text selection it came from', async () => {
+    const { createTodayPageStoreCache } = await import('../src/providers/today-page-store-cache');
+    const { TodayEditorController } = await import('../src/components/today/editor/today-editor-controller');
+    const { getTodayDocId, parseTodayPasteText } = await import('@lody/shared');
+    const cache = createTodayPageStoreCache({
+      releaseDelayMs: 1000,
+      idleCap: 2,
+      setTimer: () => () => {},
+      repo: {
+        openDoc: async () => ({ doc: new LoroDoc(), joinRoom: async () => null }),
+        isRegistered: async () => true,
+        upsertDocMeta: async () => {},
+        unloadDoc: async () => {},
+        observeDocs: () => ({ docIds: [], unsubscribe: () => {} }),
+      },
+    });
+    const store = await cache.acquire(getTodayDocId('me', '2026-11-22' as never));
+    store.outline.paste({ kind: 'page-start' }, parseTodayPasteText('one\nhello'));
+    const [, second] = store.getSnapshot().visible;
+    const controller = new TodayEditorController(cache);
+    const root = document.createElement('div');
+    root.contentEditable = 'true';
+    document.body.append(root);
+    controller.activate(store, second!.id, 'end');
+    controller.attachRoot(root);
+    const textNode = () => root.querySelector('span')?.firstChild ?? root.firstChild!;
+    const press = async () => {
+      root.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', shiftKey: true, bubbles: true, cancelable: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    };
+    window.getSelection()!.setBaseAndExtent(textNode(), 3, textNode(), 1);
+    await press();
+    expect(controller.editor.read(() => $readSelectionOffsets())).toEqual({ start: 0, end: 3 });
+    expect(controller.getBlockSelection()).toBeNull();
+    window.getSelection()!.setBaseAndExtent(textNode(), 3, textNode(), 0);
+    await press();
+    expect(controller.getBlockSelection()?.ids).toEqual([second!.id]);
+    controller.onBlockKey(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(controller.getBlockSelection()).toBeNull();
+    expect(controller.isActive(store, second!.id)).toBe(true);
+    controller.attachRoot(root);
+    expect(controller.editor.read(() => $readSelectionOffsets())).toEqual({ start: 0, end: 3 });
+    controller.dispose();
+    root.remove();
+  });
+});

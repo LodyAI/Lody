@@ -24,6 +24,7 @@ import {
   blockRange,
   parseTodayClipboard,
   resolveBlockKey,
+  extendFocus,
   selectionCovers,
   serializeTodayFragments,
   topLevelSelection,
@@ -52,7 +53,12 @@ export type TodaySessionPickerState = {
   index: number;
 };
 const PICKER_TRIGGER = /^[@＠]([^\n]*)$/;
-type CaretTarget = number | 'start' | 'end' | { goalX: number; edge: 'top' | 'bottom' };
+type CaretTarget =
+  | number
+  | 'start'
+  | 'end'
+  | { goalX: number; edge: 'top' | 'bottom' }
+  | { anchor: number; focus: number };
 
 const isMac = () =>
   typeof navigator !== 'undefined' &&
@@ -71,6 +77,13 @@ export class TodayEditorController {
   private active: TodayActiveNode | null = null;
   private selection: TodayBlockSelection | null = null;
   private blockAnchor: TodayNodeId | null = null;
+  /** Text selection a Shift+Up/Down block selection came from; Esc restores it. */
+  private textOrigin: {
+    store: TodayPageStore;
+    nodeId: TodayNodeId;
+    anchor: number;
+    focus: number;
+  } | null = null;
   private coveredFor: {
     snapshot: unknown;
     ids: readonly TodayNodeId[];
@@ -485,6 +498,7 @@ export class TodayEditorController {
     ends: { anchor?: TodayNodeId; focus?: TodayNodeId } = {}
   ) {
     if (ids.length === 0) return;
+    this.textOrigin = null;
     this.deactivate(false);
     this.pin(store.docId);
     this.selection = { store, ids };
@@ -494,6 +508,14 @@ export class TodayEditorController {
     window.getSelection()?.removeAllRanges();
     this.surface?.focus({ preventScroll: true });
     this.notify();
+  }
+
+  /** Scroll a row into view after the keyboard moves a block selection to it. */
+  private revealRow(nodeId: TodayNodeId) {
+    const row = this.surface?.querySelector<HTMLElement>(
+      `[data-today-node="${CSS.escape(nodeId)}"]`
+    );
+    row?.scrollIntoView?.({ block: 'nearest' });
   }
 
   clearBlockSelection() {
@@ -518,16 +540,21 @@ export class TodayEditorController {
     const outline = store.outline;
     const visible = store.getSnapshot().visible;
     const roots = topLevelSelection(visible, selection.ids);
-    const focusIndex = visible.findIndex((node) => node.id === this.blockFocus);
     const keep = () =>
       this.selectBlocks(store, selection.ids, {
         anchor: this.blockAnchor ?? undefined,
         focus: this.blockFocus ?? undefined,
       });
     switch (intent.type) {
-      case 'clear':
+      case 'clear': {
+        // A Shift+Up/Down selection returns to the text selection it came from.
+        const origin = this.textOrigin;
         this.clearBlockSelection();
+        if (origin && origin.store === store && store.outline.getNode(origin.nodeId)) {
+          this.activate(store, origin.nodeId, { anchor: origin.anchor, focus: origin.focus });
+        }
         return true;
+      }
       case 'edit': {
         const node = visible.find((candidate) => candidate.id === this.blockFocus);
         if (!node) return true;
@@ -543,17 +570,36 @@ export class TodayEditorController {
         );
         return true;
       case 'step': {
-        const next = visible[focusIndex + intent.step];
-        if (next) this.selectBlocks(store, [next.id]);
+        // Leave the range from its top (Up) or bottom (Down) edge.
+        const range = blockRange(
+          visible,
+          this.blockAnchor ?? selection.ids[0]!,
+          this.blockFocus ?? selection.ids.at(-1)!
+        );
+        const edge = intent.step < 0 ? range[0] : range.at(-1);
+        const edgeIndex = visible.findIndex((node) => node.id === edge);
+        let nextIndex = edgeIndex + intent.step;
+        if (intent.step > 0) {
+          const covered = selectionCovers(visible, range);
+          while (nextIndex < visible.length && covered.has(visible[nextIndex]!.id)) nextIndex += 1;
+        }
+        const next = visible[nextIndex];
+        if (next) {
+          this.selectBlocks(store, [next.id]);
+          this.revealRow(next.id);
+        }
         return true;
       }
       case 'extend': {
-        const next = visible[focusIndex + intent.step];
-        if (!next || !this.blockAnchor) return true;
-        this.selectBlocks(store, blockRange(visible, this.blockAnchor, next.id), {
-          anchor: this.blockAnchor,
-          focus: next.id,
-        });
+        if (!this.blockAnchor || !this.blockFocus) return true;
+        const anchor = this.blockAnchor;
+        const next = extendFocus(visible, anchor, this.blockFocus, intent.step);
+        if (!next) return true;
+        const origin = this.textOrigin;
+        this.selectBlocks(store, blockRange(visible, anchor, next), { anchor, focus: next });
+        // Extending keeps the way back to the original text selection.
+        this.textOrigin = origin;
+        this.revealRow(next);
         return true;
       }
       case 'select-all':
@@ -767,6 +813,14 @@ export class TodayEditorController {
     const root = this.root;
     const caret = this.pendingCaret;
     const length = this.editor.getEditorState().read(() => $readComposerValue().text.length);
+    if (typeof caret === 'object' && 'anchor' in caret) {
+      this.editor.update(
+        () => $setSelectionOffsets(Math.min(caret.anchor, length), Math.min(caret.focus, length)),
+        { discrete: true }
+      );
+      root?.scrollIntoView?.({ block: 'nearest' });
+      return;
+    }
     let offset = 0;
     if (caret === 'end') offset = length;
     else if (typeof caret === 'number') offset = Math.min(caret, length);
@@ -806,21 +860,23 @@ export class TodayEditorController {
       if (dom?.anchorNode && dom.focusNode && root.contains(dom.anchorNode)) {
         const anchor = $domPointToOffset(this.editor, dom.anchorNode, dom.anchorOffset);
         const focus = $domPointToOffset(this.editor, dom.focusNode, dom.focusOffset);
-        if (anchor !== null && focus !== null) {
-          return {
-            offsets: { start: Math.min(anchor, focus), end: Math.max(anchor, focus) },
-            length,
-          };
-        }
+        if (anchor !== null && focus !== null) return { anchor, focus, length };
       }
-      return { offsets: $readSelectionOffsets(), length };
+      const offsets = $readSelectionOffsets();
+      return { anchor: offsets?.start ?? length, focus: offsets?.end ?? length, length };
     });
-    const offsets = state.offsets ?? { start: state.length, end: state.length };
+    const offsets = {
+      start: Math.min(state.anchor, state.focus),
+      end: Math.max(state.anchor, state.focus),
+    };
+    // Line edges are measured at the selection's moving end (its focus).
     const lines = caretEdgeLines(root);
     const intent = resolveOutlineKey(
       event,
       {
         offset: offsets.start,
+        anchor: state.anchor,
+        focus: state.focus,
         length: state.length,
         hasSelection: offsets.start !== offsets.end,
         onFirstLine: lines.first,
@@ -832,7 +888,21 @@ export class TodayEditorController {
     event.preventDefault();
     const goalX = lines.caretX;
     // Lexical commands run inside an update; outline writes happen right after.
-    queueMicrotask(() => this.run(active, intent, offsets.start, goalX));
+    queueMicrotask(() => {
+      if (intent.type === 'select-from-text') {
+        // Remember the text selection so Esc can return to it.
+        const origin = {
+          store: active.store,
+          nodeId: active.nodeId,
+          anchor: state.anchor,
+          focus: state.focus,
+        };
+        this.selectBlocks(active.store, [active.nodeId]);
+        this.textOrigin = origin;
+        return;
+      }
+      this.run(active, intent, offsets.start, goalX);
+    });
     return true;
   }
 
@@ -886,6 +956,13 @@ export class TodayEditorController {
       case 'focus-next-start':
         return this.focusNeighbour(store, nodeId, 1, 'start');
       case 'block-select':
+        return this.selectBlocks(store, [nodeId]);
+      case 'extend-text':
+        this.editor.update(() => $setSelectionOffsets(intent.anchor, intent.focus), {
+          discrete: true,
+        });
+        return;
+      case 'select-from-text':
         return this.selectBlocks(store, [nodeId]);
     }
   }

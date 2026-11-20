@@ -173,3 +173,26 @@ export function selectionCovers(
   }
   return covered;
 }
+
+/**
+ * The next focus row when Shift+Up/Down extends a block selection. Moving away
+ * from the anchor downwards skips rows a selected ancestor already covers;
+ * shrinking towards the anchor and flipping past it step one row. Null at the
+ * day's edge: a block selection never crosses days.
+ */
+export function extendFocus(
+  visible: readonly TodayNodeView[],
+  anchor: TodayNodeId,
+  focus: TodayNodeId,
+  step: -1 | 1
+): TodayNodeId | null {
+  const anchorIndex = visible.findIndex((node) => node.id === anchor);
+  const focusIndex = visible.findIndex((node) => node.id === focus);
+  if (anchorIndex < 0 || focusIndex < 0) return null;
+  let next = focusIndex + step;
+  if (step > 0 && focusIndex >= anchorIndex) {
+    const covered = selectionCovers(visible, blockRange(visible, anchor, focus));
+    while (next < visible.length && covered.has(visible[next]!.id)) next += 1;
+  }
+  return visible[next]?.id ?? null;
+}
