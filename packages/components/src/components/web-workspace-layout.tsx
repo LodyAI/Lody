@@ -1,4 +1,4 @@
-import { memo, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { Suspense, lazy, memo, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useReducedMotion } from 'framer-motion';
 import { useLocation } from '@tanstack/react-router';
@@ -21,6 +21,13 @@ import { getNavigationSidebarMinWidth } from '@/lib/boot-shell-script';
 import { cn } from '@/lib/utils';
 import { CompactNavigationDialog } from './compact-navigation-dialog';
 import { WorkspaceCard } from './workspace-frame';
+import { todayFeatureEnabledAtom } from '@/atoms/settings';
+import { todayPinnedAtom } from '@/atoms/sidebar-state';
+
+const TodayPinnedColumn = lazy(async () => {
+  const module = await import('./today/today-pinned-column');
+  return { default: module.TodayPinnedColumn };
+});
 import { useVerticalDivision } from './mobile/use-vertical-division';
 
 const DesktopSidebarContent = memo(function DesktopSidebarContent({
@@ -47,6 +54,8 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
   // whole workspace shell.
   const pathname = useLocation({ select: (l) => l.pathname });
   const compact = useIsCompactDesktop();
+  const todayEnabled = useAtomValue(todayFeatureEnabledAtom);
+  const todayPinned = useAtomValue(todayPinnedAtom);
   const division = useVerticalDivision();
   // Effective on-screen visibility: compact may auto-suppress the sidebar even
   // while the persisted preference says open — see atoms/layout-state.ts.
@@ -154,6 +163,14 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
           <DesktopSidebarContent pathname={pathname} fitDivision={fold !== null} />
         </div>
       )}
+      {!compact && todayEnabled && todayPinned ? (
+        // Outside the pathname-keyed boundary: navigating the main area keeps Today mounted.
+        <ErrorBoundary name="TodayColumn" variant="section">
+          <Suspense fallback={null}>
+            <TodayPinnedColumn />
+          </Suspense>
+        </ErrorBoundary>
+      ) : null}
       <FocusScope
         ref={contentRef}
         id={WORKSPACE_FOCUS_SCOPES.content}

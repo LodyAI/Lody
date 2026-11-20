@@ -1,5 +1,5 @@
 import { desktopInstallationProfile } from './platform'
-import { parseSessionLink, LODY_PROTOCOLS } from '@lody/shared/session-link'
+import { isAppResourceLink, parseSessionLink, LODY_PROTOCOLS } from '@lody/shared/session-link'
 import { getDesktopCallbackProtocol } from './desktop-channel'
 
 const DEEP_LINK_PROTOCOL = desktopInstallationProfile.desktopProtocol
@@ -59,7 +59,7 @@ export function parseDeepLinkArg(arg: string): string | null {
 export function resolveDesktopDeepLink(
   url: string
 ): { kind: 'local'; url: string } | { kind: 'forward'; url: string } | { kind: 'unsupported' } {
-  if (parseSessionLink(url)) return { kind: 'local', url }
+  if (isAppResourceLink(url)) return { kind: 'local', url }
   let parsed: URL
   try {
     parsed = new URL(url)

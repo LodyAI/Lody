@@ -1,5 +1,5 @@
 import { installRendererUnloadConfirmation } from './renderer-unload'
-import { parseSessionLink } from '@lody/shared/session-link'
+import { isAppResourceLink } from '@lody/shared/session-link'
 import { getWindowTargetPath, presentWindowTarget } from './window-target'
 import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
@@ -238,7 +238,7 @@ function installNavigationGuard(window: BrowserWindow, targets: readonly ReloadT
     if (isTrustedNavigation(event.url, targets)) return
 
     event.preventDefault()
-    if (parseSessionLink(event.url)) {
+    if (isAppResourceLink(event.url)) {
       window.webContents.send('app.deepLink', event.url)
       return
     }
@@ -480,7 +480,7 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   })
 
   window.webContents.setWindowOpenHandler((details) => {
-    if (parseSessionLink(details.url)) {
+    if (isAppResourceLink(details.url)) {
       window.webContents.send('app.deepLink', details.url)
       return { action: 'deny' }
     }
