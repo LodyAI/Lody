@@ -37,6 +37,7 @@ import {
   SquareArrowOutUpRight,
 } from 'lucide-react';
 import { CuidaSidebarExpandOutline } from '@lody/ui';
+import { SidebarHistoryControls } from '../sidebar-history-controls';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
@@ -7086,7 +7087,9 @@ const SessionDetail = ({
         >
           <SessionIosSimulatorPanel
             session={activeIosSimulatorSession}
-            active={showFixedSidePanelBody && iosSimulatorPlacement !== 'hidden' && isSidebarVisible}
+            active={
+              showFixedSidePanelBody && iosSimulatorPlacement !== 'hidden' && isSidebarVisible
+            }
             onAttachScreenshot={(file) =>
               handleAttachSimulatorScreenshot(activeIosSimulatorSession.id, file)
             }
@@ -7101,7 +7104,9 @@ const SessionDetail = ({
           <SessionDevicePreviewPanel
             platform="android"
             session={activeAndroidEmulatorSession}
-            active={showFixedSidePanelBody && androidEmulatorPlacement !== 'hidden' && isSidebarVisible}
+            active={
+              showFixedSidePanelBody && androidEmulatorPlacement !== 'hidden' && isSidebarVisible
+            }
             onAttachScreenshot={(file) =>
               handleAttachSimulatorScreenshot(activeAndroidEmulatorSession.id, file)
             }
@@ -7120,18 +7125,9 @@ const SessionDetail = ({
     ? { main: 75, sidebar: 25 }
     : { main: 60, sidebar: 40 };
 
+  // The hidden sidebar's own header controls: Toggle, Back and Forward.
   const leftSidebarExpandButton = isLeftSidebarHidden ? (
-    <Button
-      type="button"
-      variant="ghost"
-      size="small"
-      icon
-      onClick={() => showNavigationSidebar()}
-      aria-label={t('sessions.leftSidebar.show', 'Show navigation sidebar')}
-      className={stylex.props(detailStyles.shrink).className}
-    >
-      <CuidaSidebarExpandOutline {...stylex.props(detailStyles.icon16)} aria-hidden="true" />
-    </Button>
+    <SidebarHistoryControls onToggleSidebar={() => showNavigationSidebar()} />
   ) : null;
 
   const desktopHeaderToolbar = <div ref={setDesktopToolbarContainer} />;
