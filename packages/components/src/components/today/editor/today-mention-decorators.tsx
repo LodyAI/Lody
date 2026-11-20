@@ -1,11 +1,7 @@
 import { useLayoutEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { MentionDecoration } from '@/ui/mention/mention-node';
-import {
-  $readComposerValue,
-  $readMentionOffsets,
-  $readSelectionOffsets,
-} from '@/ui/mention/composer-document';
+import { $readMentionOffsets, $readSelectionOffsets } from '@/ui/mention/composer-document';
 import { TodayMention } from '../today-session-mention';
 import type { TodayEditorController } from './today-editor-controller';
 
@@ -13,8 +9,6 @@ type Painted = {
   decorators: Record<string, MentionDecoration>;
   /** Keys of mentions the selection covers. */
   selected: ReadonlySet<string>;
-  /** Keys of mentions that open a line (offset 0 or after a newline). */
-  leading: ReadonlySet<string>;
 };
 
 /**
@@ -27,19 +21,13 @@ export function TodayMentionDecorators(props: { controller: TodayEditorControlle
   const [painted, setPainted] = useState<Painted>({
     decorators: {},
     selected: new Set(),
-    leading: new Set(),
   });
   useLayoutEffect(() => {
     const read = () => {
-      const { offsets, selection, text } = editor.getEditorState().read(() => ({
+      const { offsets, selection } = editor.getEditorState().read(() => ({
         offsets: $readMentionOffsets(),
         selection: $readSelectionOffsets(),
-        text: $readComposerValue().text,
       }));
-      const leading = new Set<string>();
-      for (const [key, range] of Object.entries(offsets)) {
-        if (range.start === 0 || text[range.start - 1] === '\n') leading.add(key);
-      }
       const selected = new Set<string>();
       if (selection && selection.start !== selection.end) {
         for (const [key, range] of Object.entries(offsets)) {
@@ -48,14 +36,12 @@ export function TodayMentionDecorators(props: { controller: TodayEditorControlle
       }
       setPainted((previous) => {
         const decorators = editor.getDecorators<MentionDecoration>();
-        const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>) =>
-          a.size === b.size && [...a].every((key) => b.has(key));
         const same =
-          sameSet(previous.selected, selected) &&
-          sameSet(previous.leading, leading) &&
+          previous.selected.size === selected.size &&
+          [...selected].every((key) => previous.selected.has(key)) &&
           Object.keys(decorators).length === Object.keys(previous.decorators).length &&
           Object.entries(decorators).every(([key, value]) => previous.decorators[key] === value);
-        return same ? previous : { decorators: { ...decorators }, selected, leading };
+        return same ? previous : { decorators: { ...decorators }, selected };
       });
     };
     read();
@@ -78,7 +64,6 @@ export function TodayMentionDecorators(props: { controller: TodayEditorControlle
           <TodayMention
             mention={{ kind, id: kind ? value : '' }}
             selected={painted.selected.has(key)}
-            leading={painted.leading.has(key)}
           />,
           element,
           key

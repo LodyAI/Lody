@@ -7,13 +7,11 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { useTodayEditor } from './editor/today-editor-context';
 import { TodayMentionDecorators } from './editor/today-mention-decorators';
+import { TODAY_INDENT_PX } from './editor/today-editor-controller';
 import { TodayMention } from './today-session-mention';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
 import type { TodayPageStoreCache } from '../../providers/today-page-store-cache';
 import { formatTodayHeading } from './today-stream';
-
-/** Indentation per outline level. */
-const TODAY_INDENT_PX = 22;
 
 const styles = stylex.create({
   section: { display: 'flex', flexDirection: 'column', gap: space[1], paddingBlock: space[3] },
@@ -260,13 +258,7 @@ function TodayStaticText(props: { node: TodayNodeView }) {
   let cursor = 0;
   for (const mention of mentions) {
     if (mention.start > cursor) parts.push(text.slice(cursor, mention.start));
-    parts.push(
-      <TodayMention
-        key={mention.start}
-        mention={mention}
-        leading={mention.start === 0 || text[mention.start - 1] === '\n'}
-      />
-    );
+    parts.push(<TodayMention key={mention.start} mention={mention} />);
     cursor = mention.start + 1;
   }
   if (cursor < text.length) parts.push(text.slice(cursor));

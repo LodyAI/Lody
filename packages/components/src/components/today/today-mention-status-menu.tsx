@@ -125,7 +125,7 @@ function TodayMentionStatusMenuContent(props: {
         )}
         <Menu.Submenu>
           <Menu.SubmenuTrigger icon={AlarmClock}>
-            {display.status === 'later' && display.snoozeCountdown
+            {display.snoozeCountdown
               ? t('today.laterWithCountdown', '{{label}} · {{countdown}}', {
                   label: laterLabel,
                   countdown: display.snoozeCountdown,

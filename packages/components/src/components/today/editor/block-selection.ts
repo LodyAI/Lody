@@ -97,7 +97,7 @@ export function resolveBlockKey(
 }
 
 export const TODAY_CLIPBOARD_MIME = 'application/x-lody-today+json';
-/** Clipboard payload version; v1 (whole-row `sessionId` nodes) is still read. */
+/** Clipboard payload version. */
 export const TODAY_CLIPBOARD_VERSION = 2;
 
 /** Plain-text form of one mention, e.g. `[@Title](lody://session/<id>?workspace=<id>)`. */
@@ -167,29 +167,17 @@ function isMention(value: unknown): value is TodayMention {
   );
 }
 
-/** A v2 fragment, or a v1 one (a `sessionId` row becomes a line holding its mention). */
-function readFragment(value: unknown, version: number): TodayFragment | null {
+function readFragment(value: unknown): TodayFragment | null {
   if (!value || typeof value !== 'object') return null;
   const fragment = value as Record<string, unknown>;
   if (typeof fragment.text !== 'string' || !Array.isArray(fragment.children)) return null;
   const children: TodayFragment[] = [];
   for (const child of fragment.children) {
-    const read = readFragment(child, version);
+    const read = readFragment(child);
     if (!read) return null;
     children.push(read);
   }
   const collapsed = fragment.collapsed === true ? { collapsed: true } : {};
-  if (version === 1) {
-    if (typeof fragment.sessionId === 'string' && fragment.sessionId) {
-      return {
-        text: TODAY_MENTION_CHAR,
-        mentions: [{ start: 0, kind: 'session', id: fragment.sessionId }],
-        ...collapsed,
-        children,
-      };
-    }
-    return { text: fragment.text.replaceAll(TODAY_MENTION_CHAR, ''), ...collapsed, children };
-  }
   const mentions = fragment.mentions;
   if (mentions !== undefined && (!Array.isArray(mentions) || !mentions.every(isMention))) {
     return null;
@@ -259,9 +247,8 @@ export function parseTodayClipboard(data: {
   if (data.json) {
     try {
       const parsed = JSON.parse(data.json) as { v?: unknown; fragments?: unknown };
-      const version = parsed.v === 1 || parsed.v === 2 ? parsed.v : null;
-      if (version && Array.isArray(parsed.fragments)) {
-        const fragments = parsed.fragments.map((fragment) => readFragment(fragment, version));
+      if (parsed.v === TODAY_CLIPBOARD_VERSION && Array.isArray(parsed.fragments)) {
+        const fragments = parsed.fragments.map(readFragment);
         if (fragments.every((fragment): fragment is TodayFragment => fragment !== null)) {
           return fragments;
         }

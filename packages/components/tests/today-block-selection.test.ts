@@ -90,21 +90,6 @@ describe('Today block selection', () => {
       ],
     });
   });
-
-  it('still reads v1 payloads, turning a session row into a line holding its mention', () => {
-    const json = JSON.stringify({
-      v: 1,
-      fragments: [{ text: '', sessionId: 'old-1', collapsed: true, children: [] }],
-    });
-    expect(parseTodayClipboard({ json })).toEqual([
-      {
-        text: TODAY_MENTION_CHAR,
-        mentions: [{ start: 0, kind: 'session', id: 'old-1' }],
-        collapsed: true,
-        children: [],
-      },
-    ]);
-  });
 });
 
 describe('Today convert-to-task prompt', () => {

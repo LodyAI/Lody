@@ -18,6 +18,15 @@ export type MentionKeyIntent =
   | { type: 'open'; start: number }
   | { type: 'menu'; start: number };
 
+/** The only keys `resolveMentionKey` acts on; callers skip document reads for the rest. */
+export const MENTION_KEYS: ReadonlySet<string> = new Set([
+  'ArrowLeft',
+  'ArrowRight',
+  'Backspace',
+  'Delete',
+  'Enter',
+]);
+
 export function resolveMentionKey(
   event: OutlineKeyEvent,
   caret: { anchor: number; focus: number },

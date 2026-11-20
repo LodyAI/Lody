@@ -9,13 +9,17 @@ import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { sessionMetaAtomFamily, sessionMetaCacheSettledAtomFamily } from '@/atoms/doc-meta';
 import { sessionLiveStatusAtomFamily } from '@/atoms/presence';
 import { useTodayEditor } from './editor/today-editor-context';
-import { todaySessionDisplay, type TodaySessionDisplay } from './today-session-status';
+import {
+  todaySessionDisplay,
+  type TodaySessionDisplay,
+  type TodaySessionState,
+} from './today-session-status';
 import { useTodayNow } from './use-today-clock';
 
 // Inline-reference chip rules (Notion, Linear, Slack, AFFiNE, Outline): the chip
 // stays inline text so it never grows the line; it carries its own inline
 // padding so a selection fill clears the icon and title; the icon is a fixed
-// slot centred on the text's x-height with its own hover, apart from the title's
+// slot centred on the line with its own hover, apart from the title's
 // underline; selection only tints the fill, so the title keeps its state colour
 // (a Done title stays dim and struck through).
 const CHIP_PAD = space[1];
@@ -34,24 +38,16 @@ const styles = stylex.create({
     paddingInlineEnd: CHIP_PAD,
     userSelect: 'none',
   },
-  // A chip that opens its line keeps its padding: pulling it into the gutter put
-  // the caret before the chip inside the icon's hover fill.
-  leading: {},
   // The editor's text selection tint (`::selection`), so a selected chip reads as
   // part of the selected run and keeps every state colour.
   selected: { backgroundColor: `color-mix(in srgb, ${colors.accent} 25%, transparent)` },
-  // The status icon is its own small icon button (Linear's issue-row status).
-  // It is exactly one line box tall and aligned to the line's top, with its
-  // glyph centred inside (`align-items: center`): the glyph sits on the centre
-  // of the line, where the title's capitals and CJK glyphs sit, instead of
-  // `vertical-align: middle`'s baseline-plus-half-x-height, which reads low.
-  // The 3px bleed stays inside the chip's 4px padding, so the caret before the
-  // chip is never under the hover fill.
+  // The status icon is its own small icon button (Linear's issue-row status):
+  // an inline-block on the line's baseline, one line box tall. Its glyph sits
+  // in a line-height box centred on the line (not `vertical-align: middle`,
+  // which reads low), and a countdown inside is ordinary text on the shared
+  // baseline in every font. The 1px start margin keeps the caret before the
+  // chip clear of the hover fill.
   icon: {
-    // An inline-block on the line's baseline, one line box tall: its glyph sits
-    // in a line-height box centred on the line, and a countdown inside is
-    // ordinary text on the shared baseline in every font. The 1px start margin
-    // keeps the caret before the chip clear of the hover fill.
     display: 'inline-block',
     boxSizing: 'border-box',
     minWidth: ICON_HIT,
@@ -84,8 +80,8 @@ const styles = stylex.create({
   },
   // Mark colours follow the text beside them: link accent for running,
   // waiting, unread, Later and idle; Done takes its dimmed title's grey.
-  markAccent: { color: colors.accent, display: 'block' },
-  markQuiet: { color: colors.tertiaryLabel, display: 'block' },
+  mark: { display: 'block', color: colors.accent },
+  markDone: { color: colors.tertiaryLabel },
 
   // Plain inline text: it sits on the line's baseline like the title.
   countdown: {
@@ -126,93 +122,55 @@ const styles = stylex.create({
  * Static on purpose: motion inside running text is noise (the sidebar keeps
  * its animated working mark).
  */
-function StatusGlyph(props: { status: Extract<TodaySessionDisplay, { state: 'ok' }>['status'] }) {
-  const ring = { cx: 6, cy: 6, r: 5, fill: 'none', strokeWidth: 1.5 } as const;
-  switch (props.status) {
-    case 'idle':
-      return (
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 12 12"
-          aria-hidden
-          {...stylex.props(styles.markAccent)}
-        >
-          <circle {...ring} stroke="currentColor" strokeDasharray="2.2 1.8" />
-        </svg>
-      );
-    case 'running':
-      return (
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 12 12"
-          aria-hidden
-          {...stylex.props(styles.markAccent)}
-        >
-          <circle {...ring} stroke="currentColor" />
-          <path d="M6 2.5 A3.5 3.5 0 0 1 6 9.5 Z" fill="currentColor" />
-        </svg>
-      );
-    case 'waiting':
-      // Waiting for you: the sidebar's hand, at the family's size and stroke.
-      return <Hand size={12} strokeWidth={1.75} aria-hidden {...stylex.props(styles.markAccent)} />;
-    case 'unread':
-      return (
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 12 12"
-          aria-hidden
-          {...stylex.props(styles.markAccent)}
-        >
-          <circle cx="6" cy="6" r="3.5" fill="currentColor" />
-        </svg>
-      );
-    case 'later':
-      return (
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 12 12"
-          aria-hidden
-          {...stylex.props(styles.markAccent)}
-        >
-          <circle {...ring} stroke="currentColor" />
-          <path
-            d="M6 3.5 V6 L7.75 7.1"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      );
-    case 'done':
-      return (
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 12 12"
-          aria-hidden
-          {...stylex.props(styles.markQuiet)}
-        >
-          <circle {...ring} stroke="currentColor" />
-          <path
-            d="M3.9 6.1 L5.4 7.5 L8.1 4.7"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      );
-    default:
-      return null;
-  }
+function StatusGlyph(props: { status: TodaySessionState }) {
+  const { status } = props;
+  const style = stylex.props(styles.mark, status === 'done' && styles.markDone);
+  // Waiting for you: the sidebar's hand, at the family's size and stroke.
+  if (status === 'waiting') return <Hand size={12} strokeWidth={1.75} aria-hidden {...style} />;
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden {...style}>
+      {STATUS_SHAPES[status]}
+    </svg>
+  );
 }
+
+const RING = {
+  cx: 6,
+  cy: 6,
+  r: 5,
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.5,
+} as const;
+const STROKE = {
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.5,
+  strokeLinecap: 'round',
+  strokeLinejoin: 'round',
+} as const;
+const STATUS_SHAPES: Record<Exclude<TodaySessionState, 'waiting'>, React.ReactNode> = {
+  idle: <circle {...RING} strokeDasharray="2.2 1.8" />,
+  running: (
+    <>
+      <circle {...RING} />
+      <path d="M6 2.5 A3.5 3.5 0 0 1 6 9.5 Z" fill="currentColor" />
+    </>
+  ),
+  unread: <circle cx="6" cy="6" r="3.5" fill="currentColor" />,
+  later: (
+    <>
+      <circle {...RING} />
+      <path d="M6 3.5 V6 L7.75 7.1" {...STROKE} />
+    </>
+  ),
+  done: (
+    <>
+      <circle {...RING} />
+      <path d="M3.9 6.1 L5.4 7.5 L8.1 4.7" {...STROKE} />
+    </>
+  ),
+};
 
 function StatusIcon(props: { display: Extract<TodaySessionDisplay, { state: 'ok' }> }) {
   const { status, snoozeCountdown } = props.display;
@@ -221,9 +179,7 @@ function StatusIcon(props: { display: Extract<TodaySessionDisplay, { state: 'ok'
       <span {...stylex.props(styles.glyph)}>
         <StatusGlyph status={status} />
       </span>
-      {status === 'later' && snoozeCountdown ? (
-        <span {...stylex.props(styles.countdown)}>{snoozeCountdown}</span>
-      ) : null}
+      {snoozeCountdown ? <span {...stylex.props(styles.countdown)}>{snoozeCountdown}</span> : null}
     </>
   );
 }
@@ -236,23 +192,13 @@ function StatusIcon(props: { display: Extract<TodaySessionDisplay, { state: 'ok'
  * Pointer presses never reach the row, so they never activate the editor.
  * Behavior: specs/today-outline.md (Conversation mentions).
  */
-export function TodayMention(props: {
-  mention: TodayMentionTarget;
-  selected?: boolean;
-  /** The mention opens a line of its node (offset 0 or after a newline). */
-  leading?: boolean;
-}) {
+export function TodayMention(props: { mention: TodayMentionTarget; selected?: boolean }) {
   const { t } = useTranslation();
-  const { mention, selected = false, leading = false } = props;
+  const { mention, selected = false } = props;
   if (mention.kind !== 'session' || !mention.id) {
     return (
       <span
-        {...stylex.props(
-          styles.mention,
-          leading && styles.leading,
-          styles.muted,
-          selected && styles.selected
-        )}
+        {...stylex.props(styles.mention, styles.muted, selected && styles.selected)}
         data-today-mention=""
         contentEditable={false}
       >
@@ -260,7 +206,7 @@ export function TodayMention(props: {
       </span>
     );
   }
-  return <TodaySessionMention sessionId={mention.id} selected={selected} leading={leading} />;
+  return <TodaySessionMention sessionId={mention.id} selected={selected} />;
 }
 
 /** A conversation's mention display from the sidebar's signals and the surface clock. */
@@ -272,7 +218,7 @@ export function useTodaySessionDisplay(sessionId: SessionId): TodaySessionDispla
   return todaySessionDisplay({ meta, metaSettled, live, nowMs });
 }
 
-function TodaySessionMention(props: { sessionId: string; selected: boolean; leading: boolean }) {
+function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
   const { t } = useTranslation();
   const controller = useTodayEditor();
   const sessionId = props.sessionId as SessionId;
@@ -286,12 +232,7 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean; lead
   if (display.state !== 'ok') {
     return (
       <span
-        {...stylex.props(
-          styles.mention,
-          props.leading && styles.leading,
-          styles.muted,
-          props.selected && styles.selected
-        )}
+        {...stylex.props(styles.mention, styles.muted, props.selected && styles.selected)}
         {...rootProps}
       >
         {display.state === 'missing'
@@ -311,11 +252,7 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean; lead
   }[display.status];
   return (
     <span
-      {...stylex.props(
-        styles.mention,
-        props.leading && styles.leading,
-        props.selected && styles.selected
-      )}
+      {...stylex.props(styles.mention, props.selected && styles.selected)}
       {...rootProps}
       data-today-status={display.status}
     >

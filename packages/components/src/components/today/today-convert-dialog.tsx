@@ -80,25 +80,25 @@ export function TodayConvertDialog({
   onAcceptedRef.current = onAccepted;
   const onOpenChangeRef = useRef(onOpenChange);
   onOpenChangeRef.current = onOpenChange;
-  const [baseEmbedding] = useState<ChatLandingEmbedding>(() => ({
-    surface: SURFACE,
-    onSessionAccepted: ({ sessionId }) => {
-      onAcceptedRef.current(sessionId);
-      onOpenChangeRef.current(false);
-    },
-    onPendingChange: (next) => {
-      pendingRef.current = next;
-      setPending(next);
-    },
-    // Cancel is disabled while a send is in flight; the guard repeats it.
-    onCancel: () => {
-      if (!pendingRef.current) onOpenChangeRef.current(false);
-    },
-  }));
   const submitLabel = t('today.convertSubmit', 'Start task');
   const embedding = useMemo<ChatLandingEmbedding>(
-    () => ({ ...baseEmbedding, submitLabel }),
-    [baseEmbedding, submitLabel]
+    () => ({
+      surface: SURFACE,
+      submitLabel,
+      onSessionAccepted: ({ sessionId }) => {
+        onAcceptedRef.current(sessionId);
+        onOpenChangeRef.current(false);
+      },
+      onPendingChange: (next) => {
+        pendingRef.current = next;
+        setPending(next);
+      },
+      // Cancel is disabled while a send is in flight; the guard repeats it.
+      onCancel: () => {
+        if (!pendingRef.current) onOpenChangeRef.current(false);
+      },
+    }),
+    [submitLabel]
   );
 
   const handleOpenChange = useCallback(

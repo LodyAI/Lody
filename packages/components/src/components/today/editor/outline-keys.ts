@@ -1,3 +1,4 @@
+import { isImeComposingNativeKeyboardEvent } from '@/lib/ime';
 /**
  * Keyboard → outline intent, shared by the active node editor and block
  * selection. Behavior: specs/today-outline.md (Outline editing). Returns null
@@ -45,9 +46,7 @@ export type OutlineCaretContext = {
  * True while an IME composition owns the key. Safari reports the confirming
  * Enter after compositionend with keyCode 229, so `isComposing` alone misses it.
  */
-export function isImeKey(event: OutlineKeyEvent): boolean {
-  return event.isComposing || event.keyCode === 229 || event.key === 'Process';
-}
+export const isImeKey: (event: OutlineKeyEvent) => boolean = isImeComposingNativeKeyboardEvent;
 
 export function resolveOutlineKey(
   event: OutlineKeyEvent,

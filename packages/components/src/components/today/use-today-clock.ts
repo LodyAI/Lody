@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useStableNow } from '@/hooks/use-stable-now';
 import type { TodayDate } from '@lody/shared';
 import { localTodayDate, msUntilNextLocalMidnight } from './today-stream';
 
@@ -9,7 +10,9 @@ const TODAY_CLOCK_FALLBACK_MS = 60_000;
  * The viewer's local date, rolling over at local midnight and rechecked when
  * the window becomes visible or focused again (sleep, resume).
  */
-export function useTodayClock(now: () => Date = () => new Date()): TodayDate {
+const systemNow = () => new Date();
+
+export function useTodayClock(now: () => Date = systemNow): TodayDate {
   const [today, setToday] = useState(() => localTodayDate(now()));
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -36,25 +39,13 @@ export function useTodayClock(now: () => Date = () => new Date()): TodayDate {
   return today;
 }
 
-/** Minute tick shared by a whole Today surface (snooze countdowns, Later expiry). */
-export const TodayNowContext = createContext<number | null>(null);
-
-/** The surface's minute clock: one interval per surface, never one per mention. */
-export function useTodayMinuteClock(): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), TODAY_CLOCK_FALLBACK_MS);
-    return () => clearInterval(interval);
-  }, []);
-  return now;
-}
-
 /**
- * Now, read fresh on every render. The surface's minute tick only makes
- * mentions re-render; reading its (up to a minute old) value would round a
- * just-chosen "Later today" countdown up an extra hour.
+ * Now, read fresh on every render; the app's shared minute ticker (the
+ * sidebar's) only re-renders the subscribed mentions. Its snapshot can be up to
+ * a minute old, which would round a just-chosen "Later today" countdown up an
+ * extra hour.
  */
 export function useTodayNow(): number {
-  const tick = useContext(TodayNowContext);
-  return Math.max(tick ?? 0, Date.now());
+  useStableNow();
+  return Date.now();
 }

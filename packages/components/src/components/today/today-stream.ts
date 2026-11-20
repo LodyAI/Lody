@@ -36,12 +36,6 @@ export function msUntilNextLocalMidnight(now: Date): number {
   return next.getTime() - now.getTime();
 }
 
-/** `YYYY-MM-DD` of a local Date, shifted by whole days. */
-export function shiftTodayDate(date: TodayDate, days: number): TodayDate {
-  const [year, month, day] = date.split('-').map(Number) as [number, number, number];
-  return localTodayDate(new Date(year, month - 1, day + days));
-}
-
 export function todayDateToLocalDate(date: TodayDate): Date {
   const [year, month, day] = date.split('-').map(Number) as [number, number, number];
   return new Date(year, month - 1, day);

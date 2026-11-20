@@ -47,11 +47,12 @@ import {
   topLevelSelection,
   type TodayMentionText,
 } from './block-selection';
-import { resolveMentionKey } from './mention-keys';
+import { MENTION_KEYS, resolveMentionKey } from './mention-keys';
 import { readPastedSessionLink } from '@/lib/session-deep-link';
 import { projectTodayDrop, type TodayDropRow, type TodayDropTarget } from '../today-dnd';
 import { $readTodayEditorRich, bindLoroText } from './loro-lexical-binding';
-import { resolveOutlineKey, type OutlineIntent } from './outline-keys';
+import { isImeKey, resolveOutlineKey, type OutlineIntent } from './outline-keys';
+import { isMac } from '@/lib/commands/platform';
 
 export type TodayActiveNode = { store: TodayPageStore; nodeId: TodayNodeId };
 export type TodayBlockSelection = { store: TodayPageStore; ids: TodayNodeId[] };
@@ -64,6 +65,14 @@ export const TODAY_INDENT_PX = 22;
 /** Distance from a row's start to its bullet's centre (fold toggle + gap + half bullet). */
 const TODAY_BULLET_CENTER_PX = 28;
 const DRAG_THRESHOLD_PX = 5;
+
+/** The structural moves the node editor and block selection share. */
+const OUTLINE_MOVES = {
+  indent: (outline, ids) => outline.indent(ids),
+  outdent: (outline, ids) => outline.outdent(ids),
+  'move-up': (outline, ids) => outline.moveUp(ids),
+  'move-down': (outline, ids) => outline.moveDown(ids),
+} satisfies Record<string, (outline: TodayPageStore['outline'], ids: TodayNodeId[]) => unknown>;
 
 export type TodaySessionPickerState = {
   store: TodayPageStore;
@@ -95,10 +104,6 @@ type CaretTarget =
   | 'end'
   | { goalX: number; edge: 'top' | 'bottom' }
   | { anchor: number; focus: number };
-
-const isMac = () =>
-  typeof navigator !== 'undefined' &&
-  /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
 
 /**
  * One Lexical editor for a whole Today surface, mounted on whichever node is
@@ -208,36 +213,18 @@ export class TodayEditorController {
         const active = this.active;
         if (!active) return;
         // The `@` menu waits while an IME composes (e.g. a full-width ＠).
-        if (this.editor.isComposing()) {
-          if (this.picker) {
-            this.picker = null;
-            this.notify();
-          }
-          return;
-        }
-        const trigger = editorState.read(() => {
+        const composing = this.editor.isComposing();
+        const { offsets, trigger } = editorState.read(() => {
           const offsets = $readSelectionOffsets();
-          if (!offsets || offsets.start !== offsets.end) return null;
-          return findPickerTrigger($readComposerValue().text, offsets.start);
+          const caret = offsets && offsets.start === offsets.end ? offsets.start : null;
+          return {
+            offsets,
+            trigger:
+              composing || caret === null
+                ? null
+                : findPickerTrigger($readComposerValue().text, caret),
+          };
         });
-        if (trigger && this.pickerDismissedFor !== `${active.nodeId}:${trigger.start}`) {
-          const { query, start } = trigger;
-          const same =
-            this.picker?.nodeId === active.nodeId &&
-            this.picker.start === start &&
-            this.picker.query === query;
-          if (same) return;
-          this.picker = { store: active.store, nodeId: active.nodeId, query, index: 0, start };
-          this.notify();
-        } else if (this.picker) {
-          this.picker = null;
-          this.notify();
-        }
-      }),
-      this.editor.registerUpdateListener(({ editorState }) => {
-        const active = this.active;
-        if (!active) return;
-        const offsets = editorState.read(() => $readSelectionOffsets());
         if (offsets) {
           active.store.undo.setSelection({
             nodeId: active.nodeId,
@@ -245,6 +232,18 @@ export class TodayEditorController {
             focus: offsets.end,
           });
         }
+        if (!trigger || this.pickerDismissedFor === `${active.nodeId}:${trigger.start}`) {
+          this.closePicker();
+          return;
+        }
+        const { query, start } = trigger;
+        const same =
+          this.picker?.nodeId === active.nodeId &&
+          this.picker.start === start &&
+          this.picker.query === query;
+        if (same) return;
+        this.picker = { store: active.store, nodeId: active.nodeId, query, index: 0, start };
+        this.notify();
       })
     );
   }
@@ -452,10 +451,15 @@ export class TodayEditorController {
     this.stopPointer = () => finish(false);
   }
 
+  private closePicker() {
+    if (!this.picker) return;
+    this.picker = null;
+    this.notify();
+  }
+
   /** A conversation dragged from the sidebar hovers at (x, y). */
   hoverExternal(x: number, y: number): TodayDropTarget | null {
-    const located = this.dayAt(x, y);
-    const target = located ? this.project(located.store, located.day, { x, y }, new Set()) : null;
+    const { target } = this.projectExternal(x, y);
     if (!target) this.dropIndicator = null;
     this.notify();
     return target;
@@ -467,13 +471,18 @@ export class TodayEditorController {
     this.notify();
   }
 
-  /** A conversation dropped from the sidebar: a new session node at the line. */
+  /** A conversation dropped from the sidebar: a new mention node at the line. */
   dropExternal(sessionId: string, x: number, y: number) {
-    const located = this.dayAt(x, y);
-    const target = located ? this.project(located.store, located.day, { x, y }, new Set()) : null;
+    const { located, target } = this.projectExternal(x, y);
     this.dropIndicator = null;
     this.notify();
     if (located && target) this.dropAt(located.store, target, null, sessionId);
+  }
+
+  private projectExternal(x: number, y: number) {
+    const located = this.dayAt(x, y);
+    const target = located ? this.project(located.store, located.day, { x, y }, new Set()) : null;
+    return { located, target };
   }
 
   private dayAt(x: number, y: number) {
@@ -489,7 +498,7 @@ export class TodayEditorController {
 
   private onPickerKey(event: KeyboardEvent): boolean {
     const picker = this.picker;
-    if (!picker || event.isComposing || event.keyCode === 229) return false;
+    if (!picker || isImeKey(event)) return false;
     const count = this.pickerItems.length;
     switch (event.key) {
       case 'ArrowDown':
@@ -628,11 +637,7 @@ export class TodayEditorController {
         return true;
       }
       case 'delete':
-        this.clearBlockSelection();
-        this.apply(
-          store,
-          store.undo.structural(() => outline.deleteNodes(roots))
-        );
+        this.deleteBlocks(store, roots);
         return true;
       case 'step': {
         // Leave the range from its top (Up) or bottom (Down) edge.
@@ -674,19 +679,10 @@ export class TodayEditorController {
         );
         return true;
       case 'indent':
-        store.undo.structural(() => outline.indent(roots));
-        keep();
-        return true;
       case 'outdent':
-        store.undo.structural(() => outline.outdent(roots));
-        keep();
-        return true;
       case 'move-up':
-        store.undo.structural(() => outline.moveUp(roots));
-        keep();
-        return true;
       case 'move-down':
-        store.undo.structural(() => outline.moveDown(roots));
+        store.undo.structural(() => OUTLINE_MOVES[intent.type](outline, roots));
         keep();
         return true;
     }
@@ -705,14 +701,16 @@ export class TodayEditorController {
       TODAY_CLIPBOARD_MIME,
       JSON.stringify({ v: TODAY_CLIPBOARD_VERSION, fragments })
     );
-    if (cut) {
-      this.clearBlockSelection();
-      this.apply(
-        store,
-        store.undo.structural(() => store.outline.deleteNodes(roots))
-      );
-    }
+    if (cut) this.deleteBlocks(store, roots);
     return true;
+  }
+
+  private deleteBlocks(store: TodayPageStore, roots: TodayNodeId[]) {
+    this.clearBlockSelection();
+    this.apply(
+      store,
+      store.undo.structural(() => store.outline.deleteNodes(roots))
+    );
   }
 
   /** Paste after the selected blocks. */
@@ -834,10 +832,13 @@ export class TodayEditorController {
         null
       );
     };
+    let last: TodayNodeId | null = null;
     const move = (event: PointerEvent) => {
       if ((event.buttons & 1) === 0) return stop();
       const target = rowAt(event.clientY);
-      if (!target) return;
+      // Re-select only when the pointer crosses into another row.
+      if (!target || target === last) return;
+      last = target;
       if (target !== anchor) {
         const visible = store.getSnapshot().visible;
         this.selectBlocks(store, blockRange(visible, anchor, target), { anchor, focus: target });
@@ -952,7 +953,7 @@ export class TodayEditorController {
   /** Two-step caret and deletion around mentions; Enter opens a selected one. */
   private onMentionKey(event: KeyboardEvent): boolean {
     const root = this.root;
-    if (!this.active || !root || this.picker) return false;
+    if (!this.active || !root || this.picker || !MENTION_KEYS.has(event.key)) return false;
     const state = this.liveSelection(root);
     const mentions = this.editor.read(() => $readTodayEditorRich().mentions);
     const intent = resolveMentionKey(
@@ -1079,16 +1080,10 @@ export class TodayEditorController {
           store.undo.structural(() => outline.mergeWithNext(nodeId))
         );
       case 'indent':
-        store.undo.structural(() => outline.indent([nodeId]));
-        return keepCaret();
       case 'outdent':
-        store.undo.structural(() => outline.outdent([nodeId]));
-        return keepCaret();
       case 'move-up':
-        store.undo.structural(() => outline.moveUp([nodeId]));
-        return keepCaret();
       case 'move-down':
-        store.undo.structural(() => outline.moveDown([nodeId]));
+        store.undo.structural(() => OUTLINE_MOVES[intent.type](outline, [nodeId]));
         return keepCaret();
       case 'collapse':
       case 'expand':
@@ -1109,8 +1104,6 @@ export class TodayEditorController {
           discrete: true,
         });
         return;
-      case 'select-from-text':
-        return this.selectBlocks(store, [nodeId]);
     }
   }
 
@@ -1130,19 +1123,15 @@ export class TodayEditorController {
     const visible = store.getSnapshot().visible;
     const index = visible.findIndex((node) => node.id === nodeId);
     const inPage = index < 0 ? undefined : visible[index + step];
-    if (inPage) return this.focusNode(store, inPage, caret);
+    if (inPage) return this.activate(store, inPage.id, caret);
     const ordered = [...this.days.entries()].sort(([a], [b]) => (a < b ? 1 : -1));
     const dayIndex = ordered.findIndex(([, page]) => page === store);
     for (let next = dayIndex + step; next >= 0 && next < ordered.length; next += step) {
       const page = ordered[next]![1];
       const nodes = page.getSnapshot().visible;
       const target = step === 1 ? nodes[0] : nodes.at(-1);
-      if (target) return this.focusNode(page, target, caret);
+      if (target) return this.activate(page, target.id, caret);
     }
-  }
-
-  private focusNode(store: TodayPageStore, node: TodayNodeView, caret: CaretTarget) {
-    this.activate(store, node.id, caret);
   }
 
   private history(direction: 'undo' | 'redo'): boolean {

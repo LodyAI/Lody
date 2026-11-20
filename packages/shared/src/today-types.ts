@@ -1,4 +1,5 @@
 import type { WorkspaceId } from './ids';
+import { LODY_PROTOCOLS } from './session-link-schemes.mjs';
 
 /**
  * Today outline page identity: one Loro document per member per day.
@@ -61,8 +62,6 @@ export function parseTodayDocId(docId: string): { userId: string; date: TodayDat
   return { userId, date };
 }
 
-export const isTodayDocRoomId = (roomId: string): boolean => parseTodayDocId(roomId) !== null;
-
 /** Prefix scans also match longer user ids (`abc` vs `abc-def`); check exactly. */
 export function isTodayDocOfUser(docId: string, userId: string): boolean {
   return parseTodayDocId(docId)?.userId === userId;
@@ -78,5 +77,5 @@ export function getLoroTodayStreamId(
 
 /** `lody://today/<userId>/<date>?workspace=<id>`: a member's page for one day. */
 export function buildTodayLink(workspaceId: string, userId: string, date: TodayDate): string {
-  return `lody://today/${encodeTodayUserId(userId)}/${date}?workspace=${encodeURIComponent(workspaceId)}`;
+  return `${LODY_PROTOCOLS.resource}://today/${encodeTodayUserId(userId)}/${date}?workspace=${encodeURIComponent(workspaceId)}`;
 }

@@ -47,7 +47,7 @@ import { buildConvertPrompt, todayMentionMarkdown } from './editor/block-selecti
 import type { TodayPageStore } from '@/lib/today/today-page-store';
 import type { TodayNodeId } from '@lody/shared';
 import { buildDayStream, localTodayDate, todayDateToLocalDate } from './today-stream';
-import { TodayNowContext, useTodayClock, useTodayMinuteClock } from './use-today-clock';
+import { useTodayClock } from './use-today-clock';
 
 export type TodayViewTarget = { member?: string; date?: string };
 
@@ -173,7 +173,6 @@ export function TodayView(props: {
     [anchor, empty, registered, today]
   );
   const cache = runtime?.todayPages ?? null;
-  const sessionItems = useSessionMentionItems();
   const jotai = useStore();
   const [controller, setController] = useState<TodayEditorController | null>(null);
   useEffect(() => {
@@ -294,7 +293,7 @@ export function TodayView(props: {
             />
           ))}
         </TodayOutlineSurface>
-        <TodaySessionPicker items={sessionItems} />
+        <TodayLiveSessionPicker />
         <TodayNodeActions pinned={props.pinned ?? false} />
         <TodayMentionStatusMenuHost />
         {anchor && anchor !== today ? (
@@ -323,7 +322,6 @@ export function TodayOutlineSurface(props: {
 }) {
   const { controller } = props;
   const surfaceRef = useRef<HTMLDivElement | null>(null);
-  const nowMs = useTodayMinuteClock();
   useEffect(() => {
     const element = surfaceRef.current;
     if (!element || !controller) return undefined;
@@ -377,7 +375,7 @@ export function TodayOutlineSurface(props: {
         if (event.target === event.currentTarget) controller?.onBlockPaste(event.nativeEvent);
       }}
     >
-      <TodayNowContext.Provider value={nowMs}>{props.children}</TodayNowContext.Provider>
+      {props.children}
       <TodayDragLayer />
     </div>
   );
@@ -498,6 +496,20 @@ const pickerStyles = stylex.create({
   empty: { padding: space[2], fontSize: text.footnoteSize, color: colors.tertiaryLabel },
 });
 
+/**
+ * The live picker: the workspace's conversation list is subscribed only while
+ * `@` is open, so session-list ticks never re-render the whole Today surface.
+ */
+function TodayLiveSessionPicker() {
+  const controller = useTodayEditor();
+  if (!controller?.getPicker()) return null;
+  return <TodayWorkspaceSessionPicker />;
+}
+
+function TodayWorkspaceSessionPicker() {
+  return <TodaySessionPicker items={useSessionMentionItems()} />;
+}
+
 /** The `@` conversation picker, below the editing caret. Items come from the host. */
 export function TodaySessionPicker(props: { items: readonly SessionMentionItem[] }) {
   const { t } = useTranslation();
@@ -505,12 +517,14 @@ export function TodaySessionPicker(props: { items: readonly SessionMentionItem[]
   const { items } = props;
   const picker = controller?.getPicker() ?? null;
   const root = controller?.getEditorRoot() ?? null;
+  // Keyed on the query alone: arrowing through the list replaces `picker`.
+  const query = picker?.query ?? null;
   const candidates = useMemo(() => {
-    if (!picker) return [];
-    return picker.query
-      ? selectSessionMentionCandidates(items, picker.query, 8)
+    if (query === null) return [];
+    return query
+      ? selectSessionMentionCandidates(items, query, 8)
       : [...items].sort((a, b) => b.activityAt - a.activityAt).slice(0, 8);
-  }, [items, picker]);
+  }, [items, query]);
   if (controller) controller.pickerItems = candidates.map((item) => item.sessionId);
   if (!controller || !picker || !root) return null;
   // Under the `@`: the caret's line when the browser can measure it, else the node.
