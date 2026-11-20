@@ -206,7 +206,7 @@ Roost 与 native 云同步**共存**。本设计里，两者都不迁移进对�
 | ---- | ---- | ------------ |
 | S1 | 云同步 | 按房间的实时订阅与拉取：`setRoomInterest(ns, rooms, {live})`、`syncRooms(ns, rooms)`。修正二进制 Loro-update 订阅，使它也计入订阅。 |
 | S2 | 云同步 | token 回复携带 `{token, expiresAt?, baseUrl?, bucket?, shardUrls?}`，并在过期前刷新。加密内容 token 有效期 8 分钟，且自带 bucket。 |
-| S3 | 云同步、E2EE | 每个 remote 的快照上传策略：`{debounceMs, minBytes, maxBytes}`，加上 `canUploadSnapshot(ns, room)` 反向 RPC。快照字节必须与旧编码一致。 |
+| S3 | 云同步、E2EE | 每个 remote 的快照上传策略：`{debounceMs, minBytes, maxBytes}`，加上 `canUploadSnapshot(ns, room)` 反向 RPC，以及响应修复请求的 `uploadSnapshotNow(ns, room)`。快照字节必须与旧编码一致。 |
 | S4 | 云同步 | 远端导入永远不被本地 `docSchema` 拒绝，schema 只约束本地 patch。先验证；验证不通过才补原语。 |
 | E1 | E2EE | `dropNamespace(ns)`：排空、关闭，并持久删除命名空间的数据库和 outbox。 |
 | E2 | E2EE | protector 按 writer 精确路由：带写入者的行永不回退到 `*` protector。需要验证并补测试；API 已有 `writers` 字段。 |

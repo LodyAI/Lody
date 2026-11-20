@@ -273,7 +273,7 @@ of Lody domain concepts.
 | -- | ------ | ----------------- |
 | S1 | cloud | Per-room live interest and pull: `setRoomInterest(ns, rooms, {live})` and `syncRooms(ns, rooms)`. Fix the binary Loro-update subscription so that it counts as interest. |
 | S2 | cloud | The token reply carries `{token, expiresAt?, baseUrl?, bucket?, shardUrls?}`. Refresh the token before it expires. Encrypted content tokens last 8 minutes and carry their own bucket. |
-| S3 | cloud, E2EE | Snapshot upload policy per remote: `{debounceMs, minBytes, maxBytes}` plus a `canUploadSnapshot(ns, room)` reverse-RPC. Snapshot bytes must match the legacy codec. |
+| S3 | cloud, E2EE | Snapshot upload policy per remote: `{debounceMs, minBytes, maxBytes}` plus a `canUploadSnapshot(ns, room)` reverse-RPC and `uploadSnapshotNow(ns, room)` for repair requests. Snapshot bytes must match the legacy codec. |
 | S4 | cloud | Remote imports are never rejected by a local `docSchema`. The schema applies only to local patches. Verify this first, and add the primitive only if it fails. |
 | E1 | E2EE | `dropNamespace(ns)`: drain, close and durably delete a namespace's database and outbox. |
 | E2 | E2EE | Writer-exact protector routing: a row tagged with a writer never falls back to a `*` protector. Verify and test; the API already carries `writers`. |
