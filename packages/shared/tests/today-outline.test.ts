@@ -1,8 +1,11 @@
 import { LoroDoc } from 'loro-crdt';
 import { describe, expect, it } from 'vitest';
 import {
+  TODAY_MENTION_CHAR,
   createTodayPageUndo,
+  insertTodayRich,
   openTodayOutline,
+  readTodayText,
   parseTodayPasteText,
   type TodayOutline,
   getLoroStreamIdForDocId,
@@ -50,16 +53,26 @@ describe('Today page identity', () => {
   });
 });
 
-/** Outline as indented text: two spaces per level, `[x]` for collapsed, `@id` for sessions. */
+/** A node label with each mention written as `@id`. */
+function label(node: { text: string; mentions: readonly { start: number; id: string }[] }) {
+  let out = '';
+  let cursor = 0;
+  for (const mention of node.mentions) {
+    out += `${node.text.slice(cursor, mention.start)}@${mention.id}`;
+    cursor = mention.start + 1;
+  }
+  return out + node.text.slice(cursor);
+}
+
+/** Outline as indented text: two spaces per level, `[x]` for collapsed, `@id` for mentions. */
 function render(outline: TodayOutline): string {
   return outline
     .getAllNodes()
-    .map((node) => {
-      const label = node.sessionId ? `@${node.sessionId}` : node.text;
-      return `${'  '.repeat(node.depth)}${label}${node.collapsed ? ' [x]' : ''}`;
-    })
+    .map((node) => `${'  '.repeat(node.depth)}${label(node)}${node.collapsed ? ' [x]' : ''}`)
     .join('\n');
 }
+
+const session = (id: string) => ({ kind: 'session', id });
 
 function build(lines: string): { doc: LoroDoc; outline: TodayOutline; ids: Map<string, string> } {
   const doc = new LoroDoc();
@@ -133,12 +146,14 @@ describe('Today outline structure', () => {
     expect(focus).toEqual({ nodeId: idOf(ids, 'a'), offset: 1 });
   });
 
-  it('block-selects a previous session node instead of merging into it', () => {
-    const { outline, ids } = build('s\nb');
-    outline.convertToSession(idOf(ids, 's'), 'sess-1');
-    const focus = outline.mergeWithPrevious(idOf(ids, 'b'));
-    expect(focus).toEqual({ blockSelect: [idOf(ids, 's')] });
-    expect(render(outline)).toBe('@sess-1\nb');
+  it("merging carries the moved node's mentions to their new offsets", () => {
+    const { outline, ids } = build('ab\ncd');
+    outline.insertMention(idOf(ids, 'cd'), 1, 0, session('s1'));
+    outline.mergeWithPrevious(idOf(ids, 'cd'));
+    expect(render(outline)).toBe('abc@s1d');
+    expect(outline.getNode(idOf(ids, 'ab'))?.mentions).toEqual([
+      { start: 3, kind: 'session', id: 's1' },
+    ]);
   });
 
   it('moves a subtree among siblings and rejects a move into its own descendant', () => {
@@ -150,13 +165,94 @@ describe('Today outline structure', () => {
     expect(render(outline)).toBe(before);
   });
 
-  it('converting to a session keeps children folded under it', () => {
-    const { outline, ids } = build('prompt\n  detail');
-    outline.convertToSession(idOf(ids, 'prompt'), 'sess-9', { collapseChildren: true });
-    expect(render(outline)).toBe('@sess-9 [x]\n  detail');
-    expect(outline.getSnapshot().visible.map((node) => node.sessionId ?? node.text)).toEqual([
-      'sess-9',
+  it('splitting keeps a mention on whichever half holds it', () => {
+    const { outline, ids } = build('see  now');
+    outline.insertMention(idOf(ids, 'see  now'), 4, 0, session('s1'));
+    const id = outline.getAllNodes()[0]!.id;
+    outline.split(id, 4);
+    expect(render(outline)).toBe('see \n@s1 now');
+    expect(outline.getAllNodes()[1]!.mentions).toEqual([{ start: 0, kind: 'session', id: 's1' }]);
+  });
+
+  it('replaces the @query with a mention in place', () => {
+    const { outline, ids } = build('ask @fix later');
+    const id = idOf(ids, 'ask @fix later');
+    expect(outline.insertMention(id, 4, 4, session('s1'))).toEqual({ nodeId: id, offset: 5 });
+    expect(render(outline)).toBe('ask @s1 later');
+  });
+
+  it('reads two adjacent mentions of the same conversation as two', () => {
+    const { outline, ids } = build('x');
+    const id = idOf(ids, 'x');
+    outline.insertMention(id, 1, 0, session('s1'));
+    outline.insertMention(id, 2, 0, session('s1'));
+    expect(outline.getNode(id)?.mentions).toEqual([
+      { start: 1, kind: 'session', id: 's1' },
+      { start: 2, kind: 'session', id: 's1' },
     ]);
+  });
+
+  it('does not extend a mention to text typed next to it, even by a peer without the style config', () => {
+    const { doc, outline, ids } = build('ab');
+    const id = idOf(ids, 'ab');
+    outline.insertMention(id, 1, 0, session('s1'));
+    const peer = new LoroDoc();
+    peer.import(doc.export({ mode: 'snapshot' }));
+    const text = openTodayOutline(peer).getText(id)!;
+    text.insert(2, 'Z');
+    text.insert(1, 'W');
+    peer.commit();
+    expect(readTodayText(text)).toEqual({
+      text: `aW${TODAY_MENTION_CHAR}Zb`,
+      mentions: [{ start: 2, kind: 'session', id: 's1' }],
+    });
+  });
+
+  it('reads a bare U+FFFC as an unknown mention and ignores a mark on ordinary text', () => {
+    const { outline, ids } = build('ab');
+    const text = outline.getText(idOf(ids, 'ab'))!;
+    text.insert(1, TODAY_MENTION_CHAR);
+    text.mark({ start: 0, end: 1 }, 'mention', { kind: 'session', id: 'stray' });
+    expect(readTodayText(text).mentions).toEqual([{ start: 1, kind: '', id: '' }]);
+  });
+
+  it('leaves no residue when one peer deletes a mention while another types after it', () => {
+    const a = new LoroDoc();
+    const outline = openTodayOutline(a);
+    const focus = outline.insertFirst('hi ') as { nodeId: Parameters<TodayOutline['split']>[0] };
+    outline.insertMention(focus.nodeId, 3, 0, session('s9'));
+    const b = new LoroDoc();
+    b.import(a.export({ mode: 'snapshot' }));
+    outline.getText(focus.nodeId)!.delete(3, 1);
+    a.commit();
+    openTodayOutline(b).getText(focus.nodeId)!.insert(4, '!');
+    b.commit();
+    a.import(b.export({ mode: 'update' }));
+    expect(outline.getNode(focus.nodeId)).toMatchObject({ text: 'hi !', mentions: [] });
+  });
+
+  it('inserts a node holding just a mention', () => {
+    const { outline, ids } = build('a\n  b');
+    const focus = outline.insertMentionNode({ parentId: idOf(ids, 'a'), index: 9 }, session('s7'));
+    expect(render(outline)).toBe('a\n  b\n  @s7');
+    expect(focus).toMatchObject({ offset: 'end' });
+  });
+
+  it('converting an unchanged prompt makes the line just the mention, children folded', () => {
+    const { outline, ids } = build('prompt\n  detail');
+    const id = idOf(ids, 'prompt');
+    const snapshot = readTodayText(outline.getText(id)!);
+    expect(outline.convertToMention(id, session('s9'), snapshot)).toBe(true);
+    expect(render(outline)).toBe('@s9 [x]\n  detail');
+  });
+
+  it('converting a prompt edited meanwhile prefixes the mention and keeps the edit', () => {
+    const { outline, ids } = build('prompt');
+    const id = idOf(ids, 'prompt');
+    const snapshot = readTodayText(outline.getText(id)!);
+    outline.getText(id)!.insert(6, '!');
+    expect(outline.convertToMention(id, session('s9'), snapshot)).toBe(true);
+    expect(render(outline)).toBe('@s9 prompt!');
   });
 
   it('pastes multiple lines at the caret, joining the head and the tail', () => {
@@ -174,13 +270,34 @@ describe('Today outline structure', () => {
     ).toEqual(['intro', '```\nconst a = 1;\n  b\n```', 'after']);
   });
 
-  it('round-trips extracted fragments, including sessions', () => {
+  it('round-trips extracted fragments, including mentions', () => {
     const { outline, ids } = build('a\n  b\nc');
-    outline.convertToSession(idOf(ids, 'c'), 'sess-2');
-    const fragments = outline.extract([idOf(ids, 'a'), idOf(ids, 'c')]);
+    outline.insertMention(idOf(ids, 'c'), 0, 0, session('sess-2'));
+    const fragments = outline.extract([idOf(ids, 'a'), outline.getAllNodes()[2]!.id]);
     const target = openTodayOutline(new LoroDoc());
     target.paste({ kind: 'page-start' }, fragments);
-    expect(render(target)).toBe('a\n  b\n@sess-2');
+    expect(render(target)).toBe('a\n  b\n@sess-2c');
+  });
+
+  it('pasting at the caret keeps mentions in the head, the pasted lines and the moved tail', () => {
+    const { outline, ids } = build('AB');
+    const id = idOf(ids, 'AB');
+    outline.insertMention(id, 2, 0, session('tail'));
+    outline.paste({ kind: 'text', nodeId: id, offset: 1 }, [
+      {
+        text: `x${TODAY_MENTION_CHAR}`,
+        mentions: [{ start: 1, kind: 'session', id: 'p1' }],
+        children: [],
+      },
+      { text: 'y', children: [] },
+    ]);
+    expect(render(outline)).toBe('Ax@p1\nyB@tail');
+  });
+
+  it('strips U+FFFC from pasted plain text', () => {
+    expect(parseTodayPasteText(`a${TODAY_MENTION_CHAR}b`).map((fragment) => fragment.text)).toEqual(
+      ['ab']
+    );
   });
 
   it('merges two peers that created the same day offline into the union of roots', () => {
@@ -282,6 +399,29 @@ describe('Today page undo', () => {
     type(ctx, id, 5, '!');
     ctx.undo.undo();
     expect(ctx.restores.at(-1)).toEqual({ nodeId: id, offset: 5 });
+  });
+
+  it('undoing a deleted mention brings back the character and its mark', () => {
+    const ctx = setup('ab');
+    const id = ctx.outline.getAllNodes()[0]!.id;
+    ctx.outline.insertMention(id, 1, 0, session('s1'));
+    ctx.undo.clear();
+    ctx.undo.editText(ctx.outline.getText(id)!, (text) => text.delete(1, 1));
+    expect(ctx.outline.getNode(id)?.mentions).toEqual([]);
+    ctx.undo.undo();
+    expect(ctx.outline.getNode(id)?.mentions).toEqual([{ start: 1, kind: 'session', id: 's1' }]);
+  });
+
+  it('writes rich text with insertTodayRich as one splice', () => {
+    const ctx = setup('ab');
+    const id = ctx.outline.getAllNodes()[0]!.id;
+    ctx.undo.editText(ctx.outline.getText(id)!, (text) =>
+      insertTodayRich(text, 1, {
+        text: `-${TODAY_MENTION_CHAR}-`,
+        mentions: [{ start: 1, kind: 'session', id: 's2' }],
+      })
+    );
+    expect(label(ctx.outline.getNode(id)!)).toBe('a-@s2-b');
   });
 
   it('does not undo system commits', () => {

@@ -2,6 +2,7 @@ import {
   LoroText,
   UndoManager,
   type Cursor,
+  type Delta,
   type LoroDoc,
   type LoroTree,
   type LoroTreeNode,
@@ -10,11 +11,13 @@ import {
 
 /**
  * Today outline page model over one LoroDoc.
- * Behavior: specs/today-outline.md (Outline editing, Data ownership).
+ * Behavior: specs/today-outline.md (Outline editing, Conversation mentions,
+ * Data ownership).
  *
  * Structure lives in the `outline` LoroTree; each node's data map holds a
- * `text` LoroText created in the same commit as the node, an optional
- * `sessionId` (session node) and `collapsed: true` when folded. Unknown root
+ * `text` LoroText created in the same commit as the node and `collapsed: true`
+ * when folded. A conversation mention is one U+FFFC character of that text
+ * carrying the `mention = {kind, id}` mark (expand `none`). Unknown root
  * containers and data keys are ignored. Every structural operation validates
  * first, then mutates and commits once, because a Loro transaction cannot be
  * rolled back after a partial failure.
@@ -24,15 +27,28 @@ export const TODAY_OUTLINE_EDIT_ORIGIN = 'today:edit';
 /** Fractional-index jitter: fewer rearranges when peers insert at the same spot. */
 const TODAY_FRACTIONAL_INDEX_JITTER = 4;
 
+/** The one character a mention occupies in node text. */
+export const TODAY_MENTION_CHAR = '\uFFFC';
+/** The LoroText mark key carrying a mention's `{kind, id}`. */
+export const TODAY_MENTION_MARK = 'mention';
+
+/**
+ * A mention at `start` (always one character long). `kind: ''` is a bare
+ * U+FFFC without a mark: shown as a placeholder, never written back as a mark.
+ */
+export type TodayMention = { start: number; kind: string; id: string };
+export type TodayMentionTarget = { kind: string; id: string };
+/** Node text and the mentions inside it, ordered by `start`. */
+export type TodayRichText = { text: string; mentions: TodayMention[] };
+
 export type TodayNodeId = TreeID;
 
 export type TodayNodeView = {
   id: TodayNodeId;
   parentId: TodayNodeId | null;
   depth: number;
-  kind: 'text' | 'session';
   text: string;
-  sessionId?: string;
+  mentions: readonly TodayMention[];
   collapsed: boolean;
   hasChildren: boolean;
 };
@@ -40,13 +56,13 @@ export type TodayNodeView = {
 export type TodayPageSnapshot = {
   /** Nodes in document order, excluding children of folded nodes. */
   visible: readonly TodayNodeView[];
-  /** No node has text or a session reference. */
+  /** No node has text (a mention counts as text). */
   isEmpty: boolean;
 };
 
 export type TodayFragment = {
   text: string;
-  sessionId?: string;
+  mentions?: TodayMention[];
   collapsed?: boolean;
   children: TodayFragment[];
 };
@@ -81,15 +97,121 @@ export type TodayOutline = {
   moveTo(ids: readonly TodayNodeId[], target: TodayMoveTarget): boolean;
   setCollapsed(id: TodayNodeId, collapsed: boolean): void;
   deleteNodes(ids: readonly TodayNodeId[]): FocusIntent;
-  convertToSession(
+  /** Replace `deleteCount` characters at `offset` with one mention; the caret lands after it. */
+  insertMention(
     id: TodayNodeId,
-    sessionId: string,
-    options?: { collapseChildren?: boolean }
-  ): boolean;
-  insertSessionNode(target: TodayMoveTarget, sessionId: string): FocusIntent;
+    offset: number,
+    deleteCount: number,
+    mention: TodayMentionTarget
+  ): FocusIntent;
+  /** A new node holding just a mention. */
+  insertMentionNode(target: TodayMoveTarget, mention: TodayMentionTarget): FocusIntent;
+  /**
+   * Convert to task succeeded: when the node still reads `snapshot` the line
+   * becomes just the mention with its children folded; otherwise the mention
+   * and a space are prefixed. False when the node is gone.
+   */
+  convertToMention(id: TodayNodeId, mention: TodayMentionTarget, snapshot: TodayRichText): boolean;
   extract(ids: readonly TodayNodeId[]): TodayFragment[];
   paste(position: TodayPastePosition, fragments: readonly TodayFragment[]): FocusIntent;
 };
+
+/** Writers must configure the mention style before marking (Loro rejects unconfigured marks). */
+export function configureTodayTextStyles(doc: LoroDoc): void {
+  doc.configTextStyle({ [TODAY_MENTION_MARK]: { expand: 'none' } });
+}
+
+function readMentionMark(value: unknown): TodayMentionTarget | null {
+  if (!value || typeof value !== 'object') return null;
+  const { kind, id } = value as Record<string, unknown>;
+  return typeof kind === 'string' && kind && typeof id === 'string' ? { kind, id } : null;
+}
+
+/**
+ * The one reader of node text: plain text plus a mention for every U+FFFC.
+ * Adjacent mentions of one conversation merge into a single delta span, so
+ * spans are split per character; a mark on any other character is ignored.
+ */
+export function readTodayText(text: LoroText): TodayRichText {
+  let out = '';
+  const mentions: TodayMention[] = [];
+  for (const span of text.toDelta()) {
+    if (typeof span.insert !== 'string') continue;
+    const mark = readMentionMark(span.attributes?.[TODAY_MENTION_MARK]);
+    for (let index = 0; index < span.insert.length; index += 1) {
+      if (span.insert[index] !== TODAY_MENTION_CHAR) continue;
+      mentions.push({ start: out.length + index, kind: mark?.kind ?? '', id: mark?.id ?? '' });
+    }
+    out += span.insert;
+  }
+  return { text: out, mentions };
+}
+
+/** `[start, end)` of rich text, mentions rebased. */
+export function sliceTodayRich(rich: TodayRichText, start: number, end = rich.text.length) {
+  return {
+    text: rich.text.slice(start, end),
+    mentions: rich.mentions
+      .filter((mention) => mention.start >= start && mention.start < end)
+      .map((mention) => ({ ...mention, start: mention.start - start })),
+  };
+}
+
+/** Mentions that really sit on a U+FFFC of `text`, ordered. */
+function validMentions(rich: TodayFragment | TodayRichText): TodayMention[] {
+  return (rich.mentions ?? [])
+    .filter(
+      (mention) =>
+        Number.isInteger(mention.start) && rich.text[mention.start] === TODAY_MENTION_CHAR
+    )
+    .sort((a, b) => a.start - b.start);
+}
+
+/**
+ * Insert rich text at `at` with one delta. Every U+FFFC carries its mark (or
+ * none for an unknown placeholder); plain runs carry no attributes, so they
+ * never inherit a neighbouring mention.
+ */
+export function insertTodayRich(text: LoroText, at: number, rich: TodayRichText | TodayFragment) {
+  if (!rich.text) return;
+  const byStart = new Map(validMentions(rich).map((mention) => [mention.start, mention] as const));
+  const delta: Delta<string>[] = at > 0 ? [{ retain: at }] : [];
+  let run = '';
+  const flush = () => {
+    if (run) delta.push({ insert: run });
+    run = '';
+  };
+  for (let index = 0; index < rich.text.length; index += 1) {
+    const char = rich.text[index]!;
+    const mention = char === TODAY_MENTION_CHAR ? byStart.get(index) : undefined;
+    if (!mention?.kind) {
+      run += char;
+      continue;
+    }
+    flush();
+    delta.push({
+      insert: TODAY_MENTION_CHAR,
+      attributes: { [TODAY_MENTION_MARK]: { kind: mention.kind, id: mention.id } },
+    });
+  }
+  flush();
+  text.applyDelta(delta);
+}
+
+const sameRich = (a: TodayRichText, b: TodayRichText) =>
+  a.text === b.text &&
+  a.mentions.length === b.mentions.length &&
+  a.mentions.every(
+    (mention, index) =>
+      mention.start === b.mentions[index]!.start &&
+      mention.kind === b.mentions[index]!.kind &&
+      mention.id === b.mentions[index]!.id
+  );
+
+const mentionRich = (mention: TodayMentionTarget, suffix = ''): TodayRichText => ({
+  text: TODAY_MENTION_CHAR + suffix,
+  mentions: [{ start: 0, ...mention }],
+});
 
 type Node = LoroTreeNode;
 
@@ -97,6 +219,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
   const origin = options.origin ?? TODAY_OUTLINE_EDIT_ORIGIN;
   const tree: LoroTree = doc.getTree(TODAY_OUTLINE_TREE);
   tree.enableFractionalIndex(TODAY_FRACTIONAL_INDEX_JITTER);
+  configureTodayTextStyles(doc);
 
   const commit = () => doc.commit({ origin });
   const live = (id: TodayNodeId): Node | undefined => {
@@ -107,10 +230,9 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
     const value = node.data.get('text');
     return value instanceof LoroText ? value : undefined;
   };
-  const readText = (node: Node) => textOf(node)?.toString() ?? '';
-  const sessionOf = (node: Node): string | undefined => {
-    const value = node.data.get('sessionId');
-    return typeof value === 'string' && value ? value : undefined;
+  const readRich = (node: Node): TodayRichText => {
+    const text = textOf(node);
+    return text ? readTodayText(text) : { text: '', mentions: [] };
   };
   const isCollapsed = (node: Node) => node.data.get('collapsed') === true;
   const childrenOf = (parent: Node | undefined): Node[] =>
@@ -119,14 +241,13 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
   const indexOf = (node: Node) => node.index() ?? 0;
 
   const view = (node: Node, depth: number): TodayNodeView => {
-    const sessionId = sessionOf(node);
+    const rich = readRich(node);
     return {
       id: node.id,
       parentId: node.parent()?.id ?? null,
       depth,
-      kind: sessionId ? 'session' : 'text',
-      text: readText(node),
-      ...(sessionId ? { sessionId } : {}),
+      text: rich.text,
+      mentions: rich.mentions,
       collapsed: isCollapsed(node),
       hasChildren: childrenOf(node).length > 0,
     };
@@ -155,12 +276,12 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
   const create = (
     parent: Node | undefined,
     index: number | undefined,
-    content: { text?: string; sessionId?: string; collapsed?: boolean }
+    content: { text?: string; mentions?: TodayMention[]; collapsed?: boolean }
   ): Node => {
     const node = parent ? parent.createNode(index) : tree.createNode(undefined, index);
     const text = node.data.setContainer('text', new LoroText());
-    if (content.text) text.insert(0, content.text);
-    if (content.sessionId) node.data.set('sessionId', content.sessionId);
+    if (content.text)
+      insertTodayRich(text, 0, { text: content.text, mentions: content.mentions ?? [] });
     if (content.collapsed) node.data.set('collapsed', true);
     return node;
   };
@@ -201,10 +322,10 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
   };
 
   const toFragment = (node: Node): TodayFragment => {
-    const sessionId = sessionOf(node);
+    const rich = readRich(node);
     return {
-      text: readText(node),
-      ...(sessionId ? { sessionId } : {}),
+      text: rich.text,
+      ...(rich.mentions.length > 0 ? { mentions: rich.mentions } : {}),
       ...(isCollapsed(node) ? { collapsed: true } : {}),
       children: childrenOf(node).map(toFragment),
     };
@@ -216,7 +337,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       const all = walk(false);
       return {
         visible: walk(true),
-        isEmpty: !all.some((node) => node.sessionId || node.text.trim()),
+        isEmpty: !all.some((node) => node.text.trim()),
       };
     },
     getNode: (id) => {
@@ -244,12 +365,12 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
         commit();
         return { nodeId: id, offset: 0 };
       }
-      const right = text.toString().slice(offset);
-      if (right) text.delete(offset, length - offset);
+      const right = sliceTodayRich(readTodayText(text), offset);
+      if (right.text) text.delete(offset, length - offset);
       const intoChildren = childrenOf(node).length > 0 && !isCollapsed(node);
       const created = intoChildren
-        ? create(node, 0, { text: right })
-        : create(node.parent(), indexOf(node) + 1, { text: right });
+        ? create(node, 0, right)
+        : create(node.parent(), indexOf(node) + 1, right);
       commit();
       return { nodeId: created.id, offset: 0 };
     },
@@ -274,7 +395,6 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       const previousView = visibleNeighbour(id, -1);
       const previous = previousView && live(previousView.id);
       if (!node || !previous) return null;
-      if (sessionOf(previous)) return { blockSelect: [previous.id] };
       const previousText = textOf(previous);
       if (!previousText) return null;
       if (!previousText.length && childrenOf(previous).length === 0) {
@@ -283,8 +403,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
         return { nodeId: id, offset: 0 };
       }
       const offset = previousText.length;
-      const moved = readText(node);
-      if (moved) previousText.insert(offset, moved);
+      insertTodayRich(previousText, offset, readRich(node));
       if (isWithin(node, previous.id)) {
         // Merging a first child into its parent: its children take its place.
         for (const child of childrenOf(node)) child.moveBefore(node);
@@ -304,10 +423,8 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       const nextView = visibleNeighbour(id, 1);
       const next = nextView && live(nextView.id);
       if (!next) return null;
-      if (sessionOf(next)) return { blockSelect: [next.id] };
       const offset = text.length;
-      const moved = readText(next);
-      if (moved) text.insert(offset, moved);
+      insertTodayRich(text, offset, readRich(next));
       if (next.parent()?.id === node.id) {
         for (const child of childrenOf(next)) child.moveBefore(next);
       } else {
@@ -419,24 +536,40 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       return survivor ? { nodeId: survivor.id, offset: 'end' } : null;
     },
 
-    convertToSession: (id, sessionId, options = {}) => {
+    insertMention: (id, offset, deleteCount, mention) => {
       const node = live(id);
-      if (!node) return false;
-      node.data.set('sessionId', sessionId);
-      if (options.collapseChildren && childrenOf(node).length > 0) {
-        node.data.set('collapsed', true);
-      }
+      const text = node && textOf(node);
+      if (!node || !text) return null;
+      const start = Math.min(Math.max(offset, 0), text.length);
+      const removed = Math.min(Math.max(deleteCount, 0), text.length - start);
+      if (removed > 0) text.delete(start, removed);
+      insertTodayRich(text, start, mentionRich(mention));
       commit();
-      return true;
+      return { nodeId: id, offset: start + 1 };
     },
 
-    insertSessionNode: (target, sessionId) => {
+    insertMentionNode: (target, mention) => {
       const parent = target.parentId === null ? undefined : live(target.parentId);
       if (target.parentId !== null && !parent) return null;
       const index = Math.min(target.index, childrenOf(parent).length);
-      const node = create(parent, index, { sessionId });
+      const node = create(parent, index, mentionRich(mention));
       commit();
-      return { blockSelect: [node.id] };
+      return { nodeId: node.id, offset: 'end' };
+    },
+
+    convertToMention: (id, mention, snapshot) => {
+      const node = live(id);
+      const text = node && textOf(node);
+      if (!node || !text) return false;
+      if (sameRich(readTodayText(text), snapshot)) {
+        if (text.length > 0) text.delete(0, text.length);
+        insertTodayRich(text, 0, mentionRich(mention));
+        if (childrenOf(node).length > 0) node.data.set('collapsed', true);
+      } else {
+        insertTodayRich(text, 0, mentionRich(mention, ' '));
+      }
+      commit();
+      return true;
     },
 
     extract: (ids) => {
@@ -466,18 +599,15 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       const [head, ...rest] = fragments as [TodayFragment, ...TodayFragment[]];
       const offset = Math.min(Math.max(position.offset, 0), text.length);
 
-      if (fragments.length === 1 && head.children.length === 0 && !head.sessionId) {
-        if (head.text) text.insert(offset, head.text);
+      if (fragments.length === 1 && head.children.length === 0) {
+        insertTodayRich(text, offset, head);
         commit();
         return { nodeId: node.id, offset: offset + head.text.length };
       }
-      if (sessionOf(node) || head.sessionId) {
-        return insertAll(node.parent(), indexOf(node) + 1);
-      }
 
-      const tail = text.toString().slice(offset);
-      if (tail) text.delete(offset, tail.length);
-      if (head.text) text.insert(offset, head.text);
+      const tail = sliceTodayRich(readTodayText(text), offset);
+      if (tail.text) text.delete(offset, tail.text.length);
+      insertTodayRich(text, offset, head);
       head.children.forEach((child, index) => createFragment(node, index, child));
       let lastNode = node;
       let lastText = text;
@@ -486,7 +616,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
         lastText = textOf(lastNode)!;
       });
       const caret = lastText.length;
-      if (tail) lastText.insert(caret, tail);
+      insertTodayRich(lastText, caret, tail);
       commit();
       return { nodeId: lastNode.id, offset: caret };
     },
@@ -513,7 +643,8 @@ function indentWidth(line: string): number {
  * fenced code block kept as one multi-line node.
  */
 export function parseTodayPasteText(input: string): TodayFragment[] {
-  const lines = input.replace(/\r\n?/g, '\n').split('\n');
+  // U+FFFC only means a mention when it carries a mark; pasted text has none.
+  const lines = input.replace(/\r\n?/g, '\n').replaceAll(TODAY_MENTION_CHAR, '').split('\n');
   const roots: TodayFragment[] = [];
   const stack: { indent: number; fragment: TodayFragment }[] = [];
   const place = (indent: number, text: string) => {

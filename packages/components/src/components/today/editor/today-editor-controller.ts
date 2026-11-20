@@ -21,6 +21,7 @@ import {
 import { caretEdgeLines, offsetFromPoint } from './caret-geometry';
 import {
   TODAY_CLIPBOARD_MIME,
+  TODAY_CLIPBOARD_VERSION,
   blockRange,
   parseTodayClipboard,
   resolveBlockKey,
@@ -28,6 +29,7 @@ import {
   selectionCovers,
   serializeTodayFragments,
   topLevelSelection,
+  type TodayMentionText,
 } from './block-selection';
 import { readPastedSessionLink } from '@/lib/session-deep-link';
 import { projectTodayDrop, type TodayDropRow, type TodayDropTarget } from '../today-dnd';
@@ -103,8 +105,8 @@ export class TodayEditorController {
     null;
   /** Workspace whose session links may be pasted into a node. */
   workspaceId: string | null = null;
-  /** Builds the plain-text form of a copied session node. */
-  sessionLink: (sessionId: string) => string = (sessionId) => sessionId;
+  /** Plain-text form of a mention in copies and the Convert to task prompt (set by the host). */
+  mentionText: TodayMentionText = (mention) => `@${mention.id}`;
   private pendingCaret: CaretTarget = 'end';
   private root: HTMLElement | null = null;
   private binding: { dispose(): void } | null = null;
@@ -282,7 +284,7 @@ export class TodayEditorController {
     return target;
   }
 
-  /** Move nodes (or insert a session node) where a drop target points. */
+  /** Move nodes (or insert a node holding a mention) where a drop target points. */
   private dropAt(
     store: TodayPageStore,
     target: TodayDropTarget,
@@ -303,7 +305,9 @@ export class TodayEditorController {
     store.undo.structural(() => {
       if (target.expandParent && parentId) store.outline.setCollapsed(parentId, false);
       if (ids) store.outline.moveTo(ids, { parentId, index });
-      else if (sessionId) store.outline.insertSessionNode({ parentId, index }, sessionId);
+      else if (sessionId) {
+        store.outline.insertMentionNode({ parentId, index }, { kind: 'session', id: sessionId });
+      }
     });
   }
 
@@ -453,15 +457,17 @@ export class TodayEditorController {
     return true;
   }
 
-  /** Turn the `@query` node into a session node; one undo brings `@query` back. */
+  /** Replace the `@query` with a mention; one undo brings `@query` back. */
   acceptPicker(sessionId: string) {
     const picker = this.picker;
     if (!picker) return;
     this.picker = null;
     const { store, nodeId } = picker;
-    this.deactivate(false);
-    store.undo.structural(() => store.outline.convertToSession(nodeId, sessionId));
-    this.selectBlocks(store, [nodeId]);
+    const length = store.outline.getNode(nodeId)?.text.length ?? 0;
+    const focus = store.undo.structural(() =>
+      store.outline.insertMention(nodeId, 0, length, { kind: 'session', id: sessionId })
+    );
+    this.apply(store, focus);
   }
 
   /** Sections register their open page so the caret can cross days. */
@@ -474,12 +480,7 @@ export class TodayEditorController {
 
   // --- activation ---------------------------------------------------------
   activate(store: TodayPageStore, nodeId: TodayNodeId, caret: CaretTarget) {
-    const node = store.outline.getNode(nodeId);
-    if (!node) return;
-    if (node.kind === 'session') {
-      this.selectBlocks(store, [nodeId]);
-      return;
-    }
+    if (!store.outline.getNode(nodeId)) return;
     this.selection = null;
     this.pendingCaret = caret;
     if (this.isActive(store, nodeId) && this.root) {
@@ -558,8 +559,7 @@ export class TodayEditorController {
       case 'edit': {
         const node = visible.find((candidate) => candidate.id === this.blockFocus);
         if (!node) return true;
-        if (node.kind === 'session') this.onOpenSession?.(node.sessionId!, event);
-        else this.activate(store, node.id, 'end');
+        this.activate(store, node.id, 'end');
         return true;
       }
       case 'delete':
@@ -635,8 +635,11 @@ export class TodayEditorController {
     const roots = topLevelSelection(store.getSnapshot().visible, selection.ids);
     const fragments = store.outline.extract(roots);
     event.preventDefault();
-    event.clipboardData.setData('text/plain', serializeTodayFragments(fragments, this.sessionLink));
-    event.clipboardData.setData(TODAY_CLIPBOARD_MIME, JSON.stringify({ v: 1, fragments }));
+    event.clipboardData.setData('text/plain', serializeTodayFragments(fragments, this.mentionText));
+    event.clipboardData.setData(
+      TODAY_CLIPBOARD_MIME,
+      JSON.stringify({ v: TODAY_CLIPBOARD_VERSION, fragments })
+    );
     if (cut) {
       this.clearBlockSelection();
       this.apply(
@@ -670,16 +673,23 @@ export class TodayEditorController {
     const data = event.clipboardData;
     const structured = data.getData(TODAY_CLIPBOARD_MIME);
     const text = data.getData('text/plain');
-    const empty = this.editor.getEditorState().read(() => $readComposerValue().text) === '';
-    const link = empty && !structured ? readPastedSessionLink(text, this.workspaceId) : null;
+    const link = !structured ? readPastedSessionLink(text, this.workspaceId) : null;
     if (link) {
       event.preventDefault();
       const { store, nodeId } = active;
-      queueMicrotask(() => {
-        this.deactivate(false);
-        store.undo.structural(() => store.outline.convertToSession(nodeId, link.sessionId));
-        this.selectBlocks(store, [nodeId]);
-      });
+      const range = this.editor.getEditorState().read(() => $readSelectionOffsets());
+      const start = range?.start ?? 0;
+      queueMicrotask(() =>
+        this.apply(
+          store,
+          store.undo.structural(() =>
+            store.outline.insertMention(nodeId, start, (range?.end ?? start) - start, {
+              kind: 'session',
+              id: link.sessionId,
+            })
+          )
+        )
+      );
       return true;
     }
     if (!structured && !text.includes('\n')) return false;
@@ -995,8 +1005,7 @@ export class TodayEditorController {
   }
 
   private focusNode(store: TodayPageStore, node: TodayNodeView, caret: CaretTarget) {
-    if (node.kind === 'session') this.selectBlocks(store, [node.id]);
-    else this.activate(store, node.id, caret);
+    this.activate(store, node.id, caret);
   }
 
   private history(direction: 'undo' | 'redo'): boolean {

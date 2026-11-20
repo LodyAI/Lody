@@ -6,7 +6,6 @@ import { getTodayDocId, type TodayDate, type TodayNodeView } from '@lody/shared'
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { useTodayEditor } from './editor/today-editor-context';
-import { TodaySessionLabel } from './today-session-node';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
 import type { TodayPageStoreCache } from '../../providers/today-page-store-cache';
 import { formatTodayHeading } from './today-stream';
@@ -188,22 +187,7 @@ function TodayRow(props: { node: TodayNodeView | null; store: TodayPageStore }) 
       >
         <span {...stylex.props(styles.dot, node?.collapsed && styles.dotFolded)} />
       </span>
-      {node?.kind === 'session' && node.sessionId ? (
-        <div
-          key="session"
-          {...stylex.props(styles.text)}
-          onPointerDown={(event) => {
-            if (!controller || event.button !== 0) return;
-            event.preventDefault();
-            controller.pointerDown(store, node.id, event.currentTarget, event);
-          }}
-        >
-          <TodaySessionLabel
-            sessionId={node.sessionId}
-            onOpen={(event) => controller?.onOpenSession?.(node.sessionId!, event)}
-          />
-        </div>
-      ) : active && controller ? (
+      {active && controller ? (
         <div
           key="editor"
           ref={controller.attachRoot}

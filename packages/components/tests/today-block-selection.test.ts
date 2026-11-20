@@ -1,11 +1,17 @@
 import { LoroDoc } from 'loro-crdt';
 import { describe, expect, it } from 'vitest';
-import { openTodayOutline, parseTodayPasteText, type TodayNodeView } from '@lody/shared';
+import {
+  TODAY_MENTION_CHAR,
+  openTodayOutline,
+  parseTodayPasteText,
+  type TodayNodeView,
+} from '@lody/shared';
 import {
   blockRange,
   parseTodayClipboard,
   resolveBlockKey,
   serializeTodayFragments,
+  todayMentionMarkdown,
   topLevelSelection,
 } from '../src/components/today/editor/block-selection';
 
@@ -50,17 +56,35 @@ describe('Today block selection', () => {
     expect(resolveBlockKey(key('Escape'), 'mac')).toEqual({ type: 'clear' });
   });
 
-  it('copies blocks as indented text plus a structured payload that pastes back exactly', () => {
+  it('copies blocks as indented text with mention links plus a payload that pastes back exactly', () => {
     const { model, id } = outline('a\n  b\nc');
-    model.convertToSession(id('c'), 'sess-1');
+    model.insertMention(id('c'), 1, 0, { kind: 'session', id: 'sess-1' });
     const fragments = model.extract([id('a'), id('c')]);
-    const plain = serializeTodayFragments(fragments, (sessionId) => `lody://session/${sessionId}`);
-    expect(plain).toBe('- a\n  - b\n- lody://session/sess-1');
-    const parsed = parseTodayClipboard({ json: JSON.stringify({ v: 1, fragments }), text: plain });
+    const plain = serializeTodayFragments(fragments, (mention) =>
+      todayMentionMarkdown(mention, { workspaceId: 'ws1', title: 'Fix [login]' })
+    );
+    expect(plain).toBe('- a\n  - b\n- c[@Fix \\[login\\]](lody://session/sess-1?workspace=ws1)');
+    const parsed = parseTodayClipboard({ json: JSON.stringify({ v: 2, fragments }), text: plain });
     expect(parsed).toEqual(fragments);
-    expect(parseTodayClipboard({ text: plain })?.map((f) => f.text)).toEqual([
-      'a',
-      'lody://session/sess-1',
+    const target = openTodayOutline(new LoroDoc());
+    target.paste({ kind: 'page-start' }, parsed!);
+    expect(target.getAllNodes()[2]!.mentions).toEqual([
+      { start: 1, kind: 'session', id: 'sess-1' },
+    ]);
+  });
+
+  it('still reads v1 payloads, turning a session row into a line holding its mention', () => {
+    const json = JSON.stringify({
+      v: 1,
+      fragments: [{ text: '', sessionId: 'old-1', collapsed: true, children: [] }],
+    });
+    expect(parseTodayClipboard({ json })).toEqual([
+      {
+        text: TODAY_MENTION_CHAR,
+        mentions: [{ start: 0, kind: 'session', id: 'old-1' }],
+        collapsed: true,
+        children: [],
+      },
     ]);
   });
 });
@@ -70,10 +94,15 @@ describe('Today convert-to-task prompt', () => {
     const { buildConvertPrompt } = await import('../src/components/today/editor/block-selection');
     const { model, id } = outline('Refactor sync\n  keep it deterministic\n    no sleeps\nother');
     model.setCollapsed(id('Refactor sync'), true);
-    model.insertSessionNode({ parentId: id('Refactor sync'), index: 9 }, 'sess-7');
+    model.insertMentionNode(
+      { parentId: id('Refactor sync'), index: 9 },
+      { kind: 'session', id: 'sess-7' }
+    );
+    model.insertMention(id('Refactor sync'), 0, 0, { kind: 'session', id: 'sess-1' });
     const [fragment] = model.extract([id('Refactor sync')]);
-    expect(buildConvertPrompt(fragment!, (sessionId) => `lody://session/${sessionId}`)).toBe(
-      'Refactor sync\n- keep it deterministic\n  - no sleeps\n- lody://session/sess-7'
+    const link = (mention: { id: string }) => `[@${mention.id}](lody://session/${mention.id})`;
+    expect(buildConvertPrompt(fragment!, link)).toBe(
+      '[@sess-1](lody://session/sess-1)Refactor sync\n- keep it deterministic\n  - no sleeps\n- [@sess-7](lody://session/sess-7)'
     );
   });
 });

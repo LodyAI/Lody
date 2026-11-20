@@ -7,17 +7,18 @@ import {
   getTodayDocId,
   openTodayOutline,
   parseTodayPasteText,
+  TODAY_MENTION_CHAR,
   type LodyPresenceStateMap,
   type SessionId,
   type SessionMeta,
   type TodayDate,
   type TodayFragment,
 } from '@lody/shared';
-import { buildSessionLink } from '@lody/shared/session-link';
 import { Button } from '@lody/ui/button';
 import { docMetaCacheReadyAtom, sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
 import type { SessionMentionItem } from '@/components/mentions/mention-session-source';
+import { todayMentionMarkdown } from '@/components/today/editor/block-selection';
 import { TodayEditorContext } from '@/components/today/editor/today-editor-context';
 import { TodayEditorController } from '@/components/today/editor/today-editor-controller';
 import { TodayDaySection } from '@/components/today/today-day-section';
@@ -78,7 +79,11 @@ const SESSIONS: DemoSession[] = [
   },
 ];
 
-const session = (id: string): TodayFragment => ({ text: '', sessionId: id, children: [] });
+const session = (id: string): TodayFragment => ({
+  text: TODAY_MENTION_CHAR,
+  mentions: [{ start: 0, kind: 'session', id }],
+  children: [],
+});
 const PAGE: TodayFragment[] = [
   ...parseTodayPasteText('In flight'),
   session('demo-running'),
@@ -248,8 +253,11 @@ function Surface() {
   useEffect(() => {
     const created = new TodayEditorController(cache);
     created.onOpenSession = (sessionId) => window.alert(`Open conversation ${sessionId}`);
-    created.sessionLink = (sessionId) =>
-      buildSessionLink({ sessionId: sessionId as SessionId, workspaceId: 'demo-workspace' });
+    created.mentionText = (mention) =>
+      todayMentionMarkdown(mention, {
+        workspaceId: 'demo-workspace',
+        title: SESSIONS.find((demo) => demo.id === mention.id)?.title,
+      });
     setController(created);
     return () => created.dispose();
   }, [cache]);

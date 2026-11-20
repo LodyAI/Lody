@@ -1,16 +1,25 @@
 import * as stylex from '@stylexjs/stylex';
 import { CalendarDays, ChevronLeft, ChevronRight, MoreHorizontal, Pin, PinOff } from 'lucide-react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useStore } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { useTranslation } from 'react-i18next';
-import { buildTodayLink, parseTodayDate, type SessionId, type TodayDate } from '@lody/shared';
-import { buildSessionLink } from '@lody/shared/session-link';
+import {
+  buildTodayLink,
+  getSessionRoomId,
+  parseTodayDate,
+  readTodayText,
+  TODAY_MENTION_CHAR,
+  type SessionId,
+  type TodayDate,
+  type TodayRichText,
+} from '@lody/shared';
 import { Button } from '@lody/ui/button';
 import { Menu } from '@lody/ui/menu';
 import { Popover } from '@lody/ui/popover';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { userAtom } from '@/atoms';
+import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { runtimeAtom } from '@/atoms/runtime';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
@@ -33,7 +42,7 @@ import { TodayEditorContext } from './editor/today-editor-context';
 import { TodayEditorController } from './editor/today-editor-controller';
 import { TodayDaySection } from './today-day-section';
 import { TodayConvertDialog } from './today-convert-dialog';
-import { buildConvertPrompt } from './editor/block-selection';
+import { buildConvertPrompt, todayMentionMarkdown } from './editor/block-selection';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
 import type { TodayNodeId } from '@lody/shared';
 import { buildDayStream, localTodayDate, todayDateToLocalDate } from './today-stream';
@@ -164,16 +173,21 @@ export function TodayView(props: {
   );
   const cache = runtime?.todayPages ?? null;
   const sessionItems = useSessionMentionItems();
+  const jotai = useStore();
   const [controller, setController] = useState<TodayEditorController | null>(null);
   useEffect(() => {
     if (!cache) return undefined;
     const created = new TodayEditorController(cache);
     const workspaceId = runtime?.workspaceId ?? null;
     created.workspaceId = workspaceId;
-    created.sessionLink = (sessionId) =>
-      workspaceId
-        ? buildSessionLink({ sessionId: sessionId as SessionId, workspaceId })
-        : sessionId;
+    created.mentionText = (mention) =>
+      todayMentionMarkdown(mention, {
+        workspaceId,
+        title:
+          mention.kind === 'session'
+            ? jotai.get(sessionMetaAtomFamily(getSessionRoomId(mention.id as SessionId)))?.title
+            : null,
+      });
     created.onOpenSession = (sessionId) => {
       if (workspaceId) openSessionDeepLink({ sessionId: sessionId as SessionId, workspaceId });
     };
@@ -182,7 +196,7 @@ export function TodayView(props: {
       created.dispose();
       setController(null);
     };
-  }, [cache]);
+  }, [cache, jotai]);
   const memberName =
     userId && userId !== self
       ? members.find((member) => member.userId === userId)?.name
@@ -535,9 +549,10 @@ export type TodayConvertDialogComponent = ComponentType<{
 }>;
 
 /**
- * The bullet menu and "Convert to task". Only an accepted conversation
- * replaces the node (children stay, folded); a node deleted meanwhile gets its
- * session appended to the page instead. The dialog is replaceable so Storybook
+ * The bullet menu and "Convert to task". Only an accepted conversation changes
+ * the node: unchanged since the dialog opened, the line becomes the mention
+ * (children stay, folded); edited meanwhile, the mention is prefixed; a node
+ * deleted meanwhile gets a mention node appended to the page instead. The dialog is replaceable so Storybook
  * can stand in for the full new-conversation surface.
  */
 export function TodayNodeActions(props: {
@@ -556,6 +571,8 @@ export function TodayNodeActions(props: {
     store: TodayPageStore;
     nodeId: TodayNodeId;
     prompt: string;
+    /** The node's text when the dialog opened: unchanged, the line becomes the mention. */
+    snapshot: TodayRichText;
   } | null>(null);
   useEffect(() => {
     if (!controller) return undefined;
@@ -580,14 +597,17 @@ export function TodayNodeActions(props: {
             controller?.clearBlockSelection();
           }}
           onConvert={() => {
-            const [fragment] = nodeMenu.store.outline.extract([nodeMenu.nodeId]);
+            const { store, nodeId } = nodeMenu;
+            const [fragment] = store.outline.extract([nodeId]);
+            const text = store.outline.getText(nodeId);
             setNodeMenu(null);
-            if (!fragment || fragment.sessionId) return;
-            controller?.deactivate();
+            if (!fragment || !text || !controller) return;
+            controller.deactivate();
             setConverting({
-              store: nodeMenu.store,
-              nodeId: nodeMenu.nodeId,
-              prompt: buildConvertPrompt(fragment, controller?.sessionLink ?? ((id) => id)),
+              store,
+              nodeId,
+              prompt: buildConvertPrompt(fragment, controller.mentionText),
+              snapshot: readTodayText(text),
             });
           }}
         />
@@ -604,15 +624,16 @@ export function TodayNodeActions(props: {
         onAccepted={(sessionId) => {
           const target = converting;
           if (!target) return;
-          const { store, nodeId } = target;
+          const { store, nodeId, snapshot } = target;
+          const mention = { kind: 'session', id: sessionId };
           const converted = store.undo.structural(() =>
-            store.outline.convertToSession(nodeId, sessionId, { collapseChildren: true })
+            store.outline.convertToMention(nodeId, mention, snapshot)
           );
           if (!converted) {
             store.undo.structural(() =>
-              store.outline.insertSessionNode(
+              store.outline.insertMentionNode(
                 { parentId: null, index: Number.MAX_SAFE_INTEGER },
-                sessionId
+                mention
               )
             );
           }
@@ -648,7 +669,8 @@ function TodayNodeMenu(props: {
       window.removeEventListener('keydown', close, true);
     };
   }, [props]);
-  const canConvert = node?.kind === 'text' && node.text.trim().length > 0;
+  // Offered when the node says something besides its mentions.
+  const canConvert = !!node && node.text.replaceAll(TODAY_MENTION_CHAR, '').trim().length > 0;
   return (
     <div
       ref={ref}

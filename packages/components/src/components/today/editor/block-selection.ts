@@ -1,9 +1,13 @@
 import {
+  TODAY_MENTION_CHAR,
   parseTodayPasteText,
   type TodayFragment,
+  type TodayMention,
+  type TodayMentionTarget,
   type TodayNodeId,
   type TodayNodeView,
 } from '@lody/shared';
+import { buildSessionLink } from '@lody/shared/session-link';
 import { isImeKey, type OutlineKeyEvent } from './outline-keys';
 
 /**
@@ -93,33 +97,109 @@ export function resolveBlockKey(
 }
 
 export const TODAY_CLIPBOARD_MIME = 'application/x-lody-today+json';
+/** Clipboard payload version; v1 (whole-row `sessionId` nodes) is still read. */
+export const TODAY_CLIPBOARD_VERSION = 2;
 
-/** Plain-text form: `- ` bullets, two spaces per level, sessions as links. */
+/** Plain-text form of one mention, e.g. `[@Title](lody://session/<id>?workspace=<id>)`. */
+export type TodayMentionText = (mention: TodayMentionTarget) => string;
+
+/**
+ * `[@Title](lody://session/<id>?workspace=<id>)`, the MCP session reference
+ * form; the title falls back to the id. Other kinds have no link form.
+ */
+export function todayMentionMarkdown(
+  mention: TodayMentionTarget,
+  context: { workspaceId: string | null; title?: string | null }
+): string {
+  const title = (context.title?.trim() || mention.id).replace(/[[\]\\]/g, '\\$&');
+  if (mention.kind !== 'session' || !context.workspaceId) return `@${title}`;
+  try {
+    const link = buildSessionLink({ sessionId: mention.id, workspaceId: context.workspaceId });
+    return `[@${title}](${link})`;
+  } catch {
+    return `@${title}`;
+  }
+}
+
+/** Node text with every mention written out; placeholders (no kind) drop. */
+export function todayRichToPlain(
+  rich: { text: string; mentions?: readonly TodayMention[] },
+  mentionText: TodayMentionText
+): string {
+  const byStart = new Map((rich.mentions ?? []).map((mention) => [mention.start, mention]));
+  let out = '';
+  for (let index = 0; index < rich.text.length; index += 1) {
+    const char = rich.text[index]!;
+    if (char !== TODAY_MENTION_CHAR) {
+      out += char;
+      continue;
+    }
+    const mention = byStart.get(index);
+    if (mention?.kind) out += mentionText(mention);
+  }
+  return out;
+}
+
+/** Plain-text form: `- ` bullets, two spaces per level, mentions as links. */
 export function serializeTodayFragments(
   fragments: readonly TodayFragment[],
-  sessionLink: (sessionId: string) => string,
+  mentionText: TodayMentionText,
   depth = 0
 ): string {
   return fragments
     .map((fragment) => {
-      const label = fragment.sessionId ? sessionLink(fragment.sessionId) : fragment.text;
+      const label = todayRichToPlain(fragment, mentionText);
       const indent = '  '.repeat(depth);
       const line = `${indent}- ${label.replace(/\n/g, `\n${indent}  `)}`;
-      const children = serializeTodayFragments(fragment.children, sessionLink, depth + 1);
+      const children = serializeTodayFragments(fragment.children, mentionText, depth + 1);
       return children ? `${line}\n${children}` : line;
     })
     .join('\n');
 }
 
-function isFragment(value: unknown): value is TodayFragment {
+function isMention(value: unknown): value is TodayMention {
   if (!value || typeof value !== 'object') return false;
-  const fragment = value as Record<string, unknown>;
+  const mention = value as Record<string, unknown>;
   return (
-    typeof fragment.text === 'string' &&
-    (fragment.sessionId === undefined || typeof fragment.sessionId === 'string') &&
-    Array.isArray(fragment.children) &&
-    fragment.children.every(isFragment)
+    typeof mention.start === 'number' &&
+    typeof mention.kind === 'string' &&
+    typeof mention.id === 'string'
   );
+}
+
+/** A v2 fragment, or a v1 one (a `sessionId` row becomes a line holding its mention). */
+function readFragment(value: unknown, version: number): TodayFragment | null {
+  if (!value || typeof value !== 'object') return null;
+  const fragment = value as Record<string, unknown>;
+  if (typeof fragment.text !== 'string' || !Array.isArray(fragment.children)) return null;
+  const children: TodayFragment[] = [];
+  for (const child of fragment.children) {
+    const read = readFragment(child, version);
+    if (!read) return null;
+    children.push(read);
+  }
+  const collapsed = fragment.collapsed === true ? { collapsed: true } : {};
+  if (version === 1) {
+    if (typeof fragment.sessionId === 'string' && fragment.sessionId) {
+      return {
+        text: TODAY_MENTION_CHAR,
+        mentions: [{ start: 0, kind: 'session', id: fragment.sessionId }],
+        ...collapsed,
+        children,
+      };
+    }
+    return { text: fragment.text.replaceAll(TODAY_MENTION_CHAR, ''), ...collapsed, children };
+  }
+  const mentions = fragment.mentions;
+  if (mentions !== undefined && (!Array.isArray(mentions) || !mentions.every(isMention))) {
+    return null;
+  }
+  return {
+    text: fragment.text,
+    ...(mentions && mentions.length > 0 ? { mentions: mentions as TodayMention[] } : {}),
+    ...collapsed,
+    children,
+  };
 }
 
 /** Our structured payload when present and valid, else outline-parsed text. */
@@ -130,8 +210,12 @@ export function parseTodayClipboard(data: {
   if (data.json) {
     try {
       const parsed = JSON.parse(data.json) as { v?: unknown; fragments?: unknown };
-      if (parsed.v === 1 && Array.isArray(parsed.fragments) && parsed.fragments.every(isFragment)) {
-        return parsed.fragments;
+      const version = parsed.v === 1 || parsed.v === 2 ? parsed.v : null;
+      if (version && Array.isArray(parsed.fragments)) {
+        const fragments = parsed.fragments.map((fragment) => readFragment(fragment, version));
+        if (fragments.every((fragment): fragment is TodayFragment => fragment !== null)) {
+          return fragments;
+        }
       }
     } catch {
       // Fall through to the plain text.
@@ -143,13 +227,11 @@ export function parseTodayClipboard(data: {
 }
 
 /** "Convert to task" prompt: the node's text, then its subtree as an indented list. */
-export function buildConvertPrompt(
-  fragment: TodayFragment,
-  sessionLink: (sessionId: string) => string
-): string {
-  // Session nodes below the prompt reach the agent as conversation links.
-  const children = serializeTodayFragments(fragment.children, sessionLink);
-  return children ? `${fragment.text}\n${children}` : fragment.text;
+export function buildConvertPrompt(fragment: TodayFragment, mentionText: TodayMentionText): string {
+  // Mentions reach the agent as conversation links.
+  const head = todayRichToPlain(fragment, mentionText);
+  const children = serializeTodayFragments(fragment.children, mentionText);
+  return children ? `${head}\n${children}` : head;
 }
 
 /**

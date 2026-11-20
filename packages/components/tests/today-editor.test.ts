@@ -149,7 +149,7 @@ describe('Today LoroText binding', () => {
 });
 
 describe('Today session picker', () => {
-  it('turns an `@query` node into a session node, and one undo brings the text back', async () => {
+  it('replaces the `@query` with a mention, and one undo brings the text back', async () => {
     const { createTodayPageStoreCache } = await import('../src/providers/today-page-store-cache');
     const { TodayEditorController } =
       await import('../src/components/today/editor/today-editor-controller');
@@ -197,9 +197,9 @@ describe('Today session picker', () => {
     controller.pickerItems = ['sess-1'];
     controller.acceptPicker('sess-1');
     const [node] = store.getSnapshot().visible;
-    expect(node).toMatchObject({ kind: 'session', sessionId: 'sess-1' });
+    expect(node?.mentions).toEqual([{ start: 0, kind: 'session', id: 'sess-1' }]);
     store.undo.undo();
-    expect(store.getSnapshot().visible[0]).toMatchObject({ kind: 'text', text: '@fix' });
+    expect(store.getSnapshot().visible[0]).toMatchObject({ text: '@fix', mentions: [] });
     controller.dispose();
     root.remove();
   });
@@ -299,8 +299,16 @@ describe('Today outline keys read the live caret', () => {
 });
 
 describe('Today Shift+Up/Down while editing', () => {
-  const key = (k: string, mods: Partial<KeyboardEventInit> = {}) =>
-    ({ key: k, shiftKey: false, altKey: false, metaKey: false, ctrlKey: false, isComposing: false, keyCode: 0, ...mods });
+  const key = (k: string, mods: Partial<KeyboardEventInit> = {}) => ({
+    key: k,
+    shiftKey: false,
+    altKey: false,
+    metaKey: false,
+    ctrlKey: false,
+    isComposing: false,
+    keyCode: 0,
+    ...mods,
+  });
   const caret = (anchor: number, focus: number, length: number, first = true, last = true) => ({
     offset: Math.min(anchor, focus),
     anchor,
@@ -331,19 +339,34 @@ describe('Today Shift+Up/Down while editing', () => {
   });
 
   it('leaves Shift+arrows inside a node to the browser away from its first/last line', () => {
-    expect(resolveOutlineKey(key('ArrowUp', { shiftKey: true }), caret(20, 20, 40, false, false), 'mac')).toBeNull();
-    expect(resolveOutlineKey(key('ArrowUp', { shiftKey: true, isComposing: true }), caret(4, 0, 9), 'mac')).toBeNull();
+    expect(
+      resolveOutlineKey(key('ArrowUp', { shiftKey: true }), caret(20, 20, 40, false, false), 'mac')
+    ).toBeNull();
+    expect(
+      resolveOutlineKey(
+        key('ArrowUp', { shiftKey: true, isComposing: true }),
+        caret(4, 0, 9),
+        'mac'
+      )
+    ).toBeNull();
   });
 
   it('keeps Mod+Shift for moving nodes and gives Option+Shift back to the Mac', () => {
-    expect(resolveOutlineKey(key('ArrowUp', { shiftKey: true, metaKey: true }), caret(0, 0, 3), 'mac')).toEqual({ type: 'move-up' });
-    expect(resolveOutlineKey(key('ArrowUp', { shiftKey: true, altKey: true }), caret(0, 0, 3), 'mac')).toBeNull();
-    expect(resolveOutlineKey(key('ArrowUp', { shiftKey: true, altKey: true }), caret(0, 0, 3), 'other')).toEqual({ type: 'move-up' });
+    expect(
+      resolveOutlineKey(key('ArrowUp', { shiftKey: true, metaKey: true }), caret(0, 0, 3), 'mac')
+    ).toEqual({ type: 'move-up' });
+    expect(
+      resolveOutlineKey(key('ArrowUp', { shiftKey: true, altKey: true }), caret(0, 0, 3), 'mac')
+    ).toBeNull();
+    expect(
+      resolveOutlineKey(key('ArrowUp', { shiftKey: true, altKey: true }), caret(0, 0, 3), 'other')
+    ).toEqual({ type: 'move-up' });
   });
 
   it('Esc after a Shift+Up selection returns to the text selection it came from', async () => {
     const { createTodayPageStoreCache } = await import('../src/providers/today-page-store-cache');
-    const { TodayEditorController } = await import('../src/components/today/editor/today-editor-controller');
+    const { TodayEditorController } =
+      await import('../src/components/today/editor/today-editor-controller');
     const { getTodayDocId, parseTodayPasteText } = await import('@lody/shared');
     const cache = createTodayPageStoreCache({
       releaseDelayMs: 1000,
@@ -368,7 +391,14 @@ describe('Today Shift+Up/Down while editing', () => {
     controller.attachRoot(root);
     const textNode = () => root.querySelector('span')?.firstChild ?? root.firstChild!;
     const press = async () => {
-      root.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', shiftKey: true, bubbles: true, cancelable: true }));
+      root.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'ArrowUp',
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
       await Promise.resolve();
       await Promise.resolve();
     };
