@@ -10,7 +10,7 @@ import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import {
   useArchiveConfirmationRequest,
   useArchiveSessionWithConfirmation,
-} from './session-archive-confirmation';
+} from './session-sub-conversation-confirmation';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import { pendingSessionLinkAtom } from '@/lib/session-deep-link';
 import { windowPreparationAtom } from '@/lib/window-preparation';

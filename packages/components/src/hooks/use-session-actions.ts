@@ -1154,8 +1154,7 @@ export function useSessionActions(): SessionActions {
         const meta = !isLoroRepoDocDeleted(existing)
           ? (existing?.meta as SessionMeta | undefined)
           : undefined;
-        const hasExpiredSnooze =
-          typeof meta?.snoozedUntil === 'number' && meta.snoozedUntil <= now;
+        const hasExpiredSnooze = typeof meta?.snoozedUntil === 'number' && meta.snoozedUntil <= now;
         const existingRestored = getFiniteTimestamp(meta?.focusRestoredAt) ?? 0;
         await updateSessionMetadata(targetId, {
           orderKey: write.orderKey,
@@ -1192,21 +1191,20 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      // Settle covers only first-class Sessions: contained Tabs share the
-      // owner's bucket and never render their own status row.
-      const settleTargets =
-        options?.includeOpenedSessions === true
-          ? (await runtime.readSessionOperationTargets(sessionId, 'archive-tree')).filter(
-              (session) => session.parentSessionId === undefined
-            )
-          : undefined;
-      if (settleTargets) {
-        await assertCanManageSessions(settleTargets.map((target) => target.id));
+      const targetIds = [sessionId];
+      if (options?.includeOpenedSessions === true) {
+        // Settle covers only first-class Sessions: contained Tabs share the
+        // owner's bucket and never render their own status row.
+        const tree = await runtime.readSessionOperationTargets(sessionId, 'archive-tree');
         if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
           throw new Error('Workspace changed before settling');
         }
+        for (const session of tree.slice(1)) {
+          if (session.parentSessionId === undefined) targetIds.push(session.id);
+        }
       }
-      for (const target of settleTargets?.map((session) => session.id) ?? [sessionId]) {
+      await assertCanManageSessions(targetIds);
+      for (const target of targetIds) {
         const roomId = getSessionRoomId(target);
         const existing = await runtime.repo.getDocMeta(roomId);
         const repoMeta = !isLoroRepoDocDeleted(existing)

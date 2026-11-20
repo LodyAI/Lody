@@ -5,8 +5,7 @@ import { ElectronDesktopForegroundPresence } from '@/components/electron-desktop
 import { ElectronMenuHandler } from '@/components/electron-menu-handler';
 import { AppCommands } from '@/components/app-commands';
 import { CommandPalette } from '@/components/commands/command-palette';
-import { SessionArchiveConfirmationDialog } from '@/components/sessions/session-archive-confirmation';
-import { SessionSettleConfirmationDialog } from '@/components/sessions/session-settle-confirmation';
+import { SessionSubConversationConfirmationDialog } from '@/components/sessions/session-sub-conversation-confirmation';
 
 export function AuthenticatedWorkspaceContent({
   showWorkspaceCheckout = false,
@@ -21,8 +20,7 @@ export function AuthenticatedWorkspaceContent({
       <ElectronMenuHandler />
       <AppCommands />
       <CommandPalette />
-      <SessionArchiveConfirmationDialog />
-      <SessionSettleConfirmationDialog />
+      <SessionSubConversationConfirmationDialog />
       {showWorkspaceCheckout && <WorkspaceCheckoutPendingDialog />}
     </>
   );
