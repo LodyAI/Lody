@@ -91,12 +91,11 @@ const styles = stylex.create({
     gap: space[1],
     paddingInline: space[4],
   },
-  columnToolbar: { paddingBlock: space[2] },
-  /* The full page's toolbar is the window-top row: the session tab bar's 44px,
-     so the sidebar controls sit where every other page puts them. */
-  pageToolbar: { boxSizing: 'border-box', height: '2.75rem' },
+  /* Page or pinned column, the toolbar is the window-top row: the session tab
+     bar's 44px, so its controls line up with every other page's header. */
+  windowRowToolbar: { boxSizing: 'border-box', height: '2.75rem' },
   // Clears the macOS traffic lights while the navigation sidebar is hidden.
-  pageToolbarBesideTrafficLights: { paddingLeft: '96px' },
+  toolbarBesideTrafficLights: { paddingLeft: '96px' },
   controls: { display: 'flex', alignItems: 'center', gap: space[1] },
   title: {
     flex: 1,
@@ -280,14 +279,18 @@ export function TodayView(props: {
               }
               onClick={props.onTogglePin}
             >
-              {props.pinned ? <PinOff size={16} /> : <Pin size={16} />}
+              {props.pinned ? (
+                <PinOff size={16} strokeWidth={1.5} />
+              ) : (
+                <Pin size={16} strokeWidth={1.5} />
+              )}
             </Button>
           ) : null}
           <Menu.Root>
             <Menu.Trigger
               render={
                 <Button variant="ghost" size="small" icon aria-label={t('today.more', 'More')}>
-                  <MoreHorizontal size={16} />
+                  <MoreHorizontal size={16} strokeWidth={1.5} />
                 </Button>
               }
             />
@@ -390,22 +393,28 @@ export function TodayToolbar(props: { pinned: boolean; title: ReactNode; childre
     insideWorkspaceFrame: true,
     includeDesktopWeb: true,
   });
+  // The pinned column sits on the window, beside the sidebar, outside the card.
+  const columnTrafficLightRowPadClass = useMacTrafficLightRowPadClass({ includeDesktopWeb: true });
   const page = !props.pinned;
+  // Both forms sit in the window-top row and line up with its controls; only
+  // the page is window chrome (drag region, caption buttons).
   const exemptClassName = page && dragClass ? WINDOW_DRAG_EXEMPT_CLASS : undefined;
   const besideTrafficLights =
-    page && !sidebarVisible && !isNativeAppShell() && isMacOSElectronRenderer() && !fullscreen;
-  const chromeClassName = page
-    ? [dragClass, captionPadClass, captionRowPadClass, trafficLightRowPadClass]
-        .filter(Boolean)
-        .join(' ')
-    : undefined;
+    !sidebarVisible && !isNativeAppShell() && isMacOSElectronRenderer() && !fullscreen;
+  const chromeClassName = (
+    page
+      ? [dragClass, captionPadClass, captionRowPadClass, trafficLightRowPadClass]
+      : [captionRowPadClass, columnTrafficLightRowPadClass]
+  )
+    .filter(Boolean)
+    .join(' ');
   return (
     <div
       {...withClassName(
         stylex.props(
           styles.toolbar,
-          page ? styles.pageToolbar : styles.columnToolbar,
-          besideTrafficLights && styles.pageToolbarBesideTrafficLights
+          styles.windowRowToolbar,
+          besideTrafficLights && styles.toolbarBesideTrafficLights
         ),
         chromeClassName
       )}
@@ -864,7 +873,7 @@ function TodayCalendar(props: {
       <Popover.Trigger
         render={
           <Button variant="ghost" size="small" icon aria-label={t('today.calendar', 'Pick a date')}>
-            <CalendarDays size={16} />
+            <CalendarDays size={16} strokeWidth={1.5} />
           </Button>
         }
       />
