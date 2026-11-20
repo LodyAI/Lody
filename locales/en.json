@@ -6911,5 +6911,7 @@
   "today.sessionMissing": "Conversation deleted / No access",
   "today.untitledSession": "Untitled conversation",
   "today.pickSession": "Conversations",
-  "today.noSessions": "No matching conversations"
+  "today.noSessions": "No matching conversations",
+  "today.cannotMoveToOtherDay": "Can't move to another date",
+  "today.movingNodes": "Moving {{count}} nodes"
 }

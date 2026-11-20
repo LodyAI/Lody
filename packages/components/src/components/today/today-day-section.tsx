@@ -71,6 +71,7 @@ const styles = stylex.create({
   },
   placeholder: { color: colors.tertiaryLabel, cursor: 'text' },
   editable: { outline: 'none', cursor: 'text' },
+  handle: { cursor: 'grab', touchAction: 'none' },
   blockSelected: { backgroundColor: `color-mix(in srgb, ${colors.accent} 14%, transparent)` },
 });
 
@@ -179,7 +180,14 @@ function TodayRow(props: { node: TodayNodeView | null; store: TodayPageStore }) 
       >
         <ChevronRight size={12} />
       </button>
-      <span {...stylex.props(styles.bullet)}>
+      <span
+        {...stylex.props(styles.bullet, styles.handle)}
+        onPointerDown={(event) => {
+          if (!controller || !node || event.button !== 0) return;
+          event.preventDefault();
+          controller.beginNodeDrag(store, node.id, event.currentTarget, event);
+        }}
+      >
         <span {...stylex.props(styles.dot, node?.collapsed && styles.dotFolded)} />
       </span>
       {node?.kind === 'session' && node.sessionId ? (

@@ -54,6 +54,7 @@ import {
   armSessionMentionDrag,
   clearSessionMentionDrag,
   dropSessionMentionAtPoint,
+  hoverSessionMentionAtPoint,
 } from '@/lib/session-mention-drag';
 import {
   DEFAULT_PIN_SECTION_KEY,
@@ -319,6 +320,8 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
     if (dragged?.kind !== 'row') return;
     const point = pointerOf(event);
     setPinnedPointerTarget(point ? pinnedPointerTargetAt(point, dragged.id) : null);
+    // Surfaces that show a drop position (Today) follow pointer drags too.
+    if (point) hoverSessionMentionAtPoint(point.x, point.y, dragged.id);
   }, []);
 
   const handleDragEnd = useCallback(

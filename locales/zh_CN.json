@@ -6898,5 +6898,7 @@
   "today.sessionMissing": "对话已删除 / 无权访问",
   "today.untitledSession": "未命名对话",
   "today.pickSession": "对话",
-  "today.noSessions": "没有匹配的对话"
+  "today.noSessions": "没有匹配的对话",
+  "today.cannotMoveToOtherDay": "不能移动到其他日期",
+  "today.movingNodes": "移动 {{count}} 个节点"
 }

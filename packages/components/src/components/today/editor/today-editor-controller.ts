@@ -27,11 +27,20 @@ import {
   topLevelSelection,
 } from './block-selection';
 import { readPastedSessionLink } from '@/lib/session-deep-link';
+import { projectTodayDrop, type TodayDropRow, type TodayDropTarget } from '../today-dnd';
 import { bindLoroText } from './loro-lexical-binding';
 import { resolveOutlineKey, type OutlineIntent } from './outline-keys';
 
 export type TodayActiveNode = { store: TodayPageStore; nodeId: TodayNodeId };
 export type TodayBlockSelection = { store: TodayPageStore; ids: TodayNodeId[] };
+export type TodayDropIndicator =
+  | { kind: 'line'; top: number; left: number; width: number }
+  | { kind: 'blocked'; x: number; y: number };
+export type TodayDragGhost = { x: number; y: number; label: string; count: number };
+/** Indentation per outline level; matches the rows' padding. */
+export const TODAY_INDENT_PX = 22;
+const DRAG_THRESHOLD_PX = 5;
+
 export type TodaySessionPickerState = {
   store: TodayPageStore;
   nodeId: TodayNodeId;
@@ -65,6 +74,11 @@ export class TodayEditorController {
   private pickerDismissedFor: TodayNodeId | null = null;
   /** Candidates the picker currently shows, set by its view. */
   pickerItems: readonly string[] = [];
+  private dropIndicator: TodayDropIndicator | null = null;
+  private dragGhost: TodayDragGhost | null = null;
+  /** Opens the node menu for a bullet clicked without dragging (wired by the host). */
+  onNodeMenu: ((store: TodayPageStore, nodeId: TodayNodeId, anchor: HTMLElement) => void) | null =
+    null;
   /** Workspace whose session links may be pasted into a node. */
   workspaceId: string | null = null;
   /** Builds the plain-text form of a copied session node. */
@@ -164,6 +178,186 @@ export class TodayEditorController {
   }
   getEditorRoot() {
     return this.root;
+  }
+  getDropIndicator() {
+    return this.dropIndicator;
+  }
+  getDragGhost() {
+    return this.dragGhost;
+  }
+
+  // --- drag and drop ------------------------------------------------------
+  private dayRows(store: TodayPageStore, day: Element) {
+    const nodes = new Map(store.getSnapshot().visible.map((node) => [node.id, node] as const));
+    const rows: TodayDropRow[] = [];
+    let contentLeft = day.getBoundingClientRect().left;
+    let right = day.getBoundingClientRect().right;
+    for (const element of day.querySelectorAll<HTMLElement>('[data-today-node]')) {
+      const node = nodes.get(element.dataset.todayNode as TodayNodeId);
+      if (!node) continue;
+      const rect = element.getBoundingClientRect();
+      if (node.depth === 0) {
+        contentLeft = rect.left;
+        right = rect.right;
+      }
+      rows.push({
+        id: node.id,
+        parentId: node.parentId,
+        depth: node.depth,
+        top: rect.top,
+        bottom: rect.bottom,
+        collapsed: node.collapsed && node.hasChildren,
+      });
+    }
+    return { rows, contentLeft, right };
+  }
+
+  private project(
+    store: TodayPageStore,
+    day: Element,
+    point: { x: number; y: number },
+    excluded: ReadonlySet<string>
+  ): TodayDropTarget | null {
+    const { rows, contentLeft, right } = this.dayRows(store, day);
+    const target = projectTodayDrop(rows, point, contentLeft, TODAY_INDENT_PX, excluded);
+    this.dropIndicator = target
+      ? {
+          kind: 'line',
+          top: target.lineTop,
+          left: target.lineLeft,
+          width: Math.max(right - target.lineLeft, 40),
+        }
+      : null;
+    return target;
+  }
+
+  /** Move nodes (or insert a session node) where a drop target points. */
+  private dropAt(
+    store: TodayPageStore,
+    target: TodayDropTarget,
+    ids: readonly TodayNodeId[] | null,
+    sessionId?: string
+  ) {
+    const moving = new Set<string>(ids ?? []);
+    const siblings = store.outline
+      .getAllNodes()
+      .filter((node) => node.parentId === target.parentId && !moving.has(node.id));
+    const index =
+      target.after === null
+        ? 0
+        : target.after === 'end'
+          ? siblings.length
+          : siblings.findIndex((node) => node.id === target.after) + 1;
+    const parentId = target.parentId as TodayNodeId | null;
+    store.undo.structural(() => {
+      if (target.expandParent && parentId) store.outline.setCollapsed(parentId, false);
+      if (ids) store.outline.moveTo(ids, { parentId, index });
+      else if (sessionId) store.outline.insertSessionNode({ parentId, index }, sessionId);
+    });
+  }
+
+  /**
+   * Bullet pressed: after 5px it drags the node (or the whole block selection
+   * it belongs to) within its day; a press without movement opens the menu.
+   */
+  beginNodeDrag(
+    store: TodayPageStore,
+    nodeId: TodayNodeId,
+    bullet: HTMLElement,
+    start: { clientX: number; clientY: number }
+  ) {
+    const day = bullet.closest('[data-today-date]');
+    if (!day) return;
+    this.stopPointer?.();
+    const selection =
+      this.selection?.store === store && this.selection.ids.includes(nodeId)
+        ? this.selection.ids
+        : [nodeId];
+    const ids = topLevelSelection(store.getSnapshot().visible, selection);
+    const label = store.outline.getNode(ids[0]!)?.text ?? '';
+    let dragging = false;
+    let target: TodayDropTarget | null = null;
+    const finish = (commit: boolean) => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('keydown', key, true);
+      this.stopPointer = null;
+      const wasDragging = dragging;
+      const drop = target;
+      this.dropIndicator = null;
+      this.dragGhost = null;
+      if (wasDragging) this.notify();
+      if (commit && wasDragging && drop) this.dropAt(store, drop, ids);
+      if (commit && !wasDragging) this.onNodeMenu?.(store, nodeId, bullet);
+    };
+    const move = (event: PointerEvent) => {
+      if (
+        !dragging &&
+        Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY) < DRAG_THRESHOLD_PX
+      )
+        return;
+      if (!dragging) {
+        dragging = true;
+        this.deactivate(false);
+      }
+      const rect = day.getBoundingClientRect();
+      const inside = event.clientY >= rect.top && event.clientY <= rect.bottom;
+      if (inside) {
+        target = this.project(store, day, { x: event.clientX, y: event.clientY }, new Set(ids));
+      } else {
+        target = null;
+        this.dropIndicator = { kind: 'blocked', x: event.clientX, y: event.clientY };
+      }
+      this.dragGhost = { x: event.clientX, y: event.clientY, label, count: ids.length };
+      this.notify();
+    };
+    const up = () => finish(true);
+    const key = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || !dragging) return;
+      // Esc only cancels the drag; it must not also enter block selection.
+      event.preventDefault();
+      event.stopPropagation();
+      finish(false);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('keydown', key, true);
+    this.stopPointer = () => finish(false);
+  }
+
+  /** A conversation dragged from the sidebar hovers at (x, y). */
+  hoverExternal(x: number, y: number): TodayDropTarget | null {
+    const located = this.dayAt(x, y);
+    const target = located ? this.project(located.store, located.day, { x, y }, new Set()) : null;
+    if (!target) this.dropIndicator = null;
+    this.notify();
+    return target;
+  }
+
+  leaveExternal() {
+    if (!this.dropIndicator) return;
+    this.dropIndicator = null;
+    this.notify();
+  }
+
+  /** A conversation dropped from the sidebar: a new session node at the line. */
+  dropExternal(sessionId: string, x: number, y: number) {
+    const located = this.dayAt(x, y);
+    const target = located ? this.project(located.store, located.day, { x, y }, new Set()) : null;
+    this.dropIndicator = null;
+    this.notify();
+    if (located && target) this.dropAt(located.store, target, null, sessionId);
+  }
+
+  private dayAt(x: number, y: number) {
+    const stack =
+      typeof document.elementsFromPoint === 'function' ? document.elementsFromPoint(x, y) : [];
+    for (const element of stack) {
+      const day = element.closest('[data-today-date]');
+      const store = day && this.days.get(day.getAttribute('data-today-date') as TodayDate);
+      if (day && store) return { day, store };
+    }
+    return null;
   }
 
   private onPickerKey(event: KeyboardEvent): boolean {

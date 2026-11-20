@@ -1,7 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 import { CalendarDays, ChevronLeft, ChevronRight, MoreHorizontal } from 'lucide-react';
 import { useAtomValue } from 'jotai';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { buildTodayLink, parseTodayDate, type SessionId, type TodayDate } from '@lody/shared';
 import { buildSessionLink } from '@lody/shared/session-link';
@@ -17,6 +17,11 @@ import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { toast } from '@/lib/toast';
 import { openSessionDeepLink } from '@/lib/session-deep-link';
+import {
+  hasAcceptableSessionMentionTransfer,
+  readSessionMentionDragSessionId,
+  registerSessionMentionPointerTarget,
+} from '@/lib/session-mention-drag';
 import {
   selectSessionMentionCandidates,
   useSessionMentionItems,
@@ -274,10 +279,48 @@ export function TodayOutlineSurface(props: {
   children: React.ReactNode;
 }) {
   const { controller } = props;
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const element = surfaceRef.current;
+    if (!element || !controller) return undefined;
+    // Pinned sidebar rows drag by pointer, not HTML5: they report here.
+    return registerSessionMentionPointerTarget(element, {
+      accepts: () => true,
+      hover: (x, y) => controller.hoverExternal(x, y),
+      leave: () => controller.leaveExternal(),
+      drop: (sessionId, point) => {
+        if (point) controller.dropExternal(sessionId, point.x, point.y);
+      },
+    });
+  }, [controller]);
   return (
     <div
       {...stylex.props(styles.scroller)}
-      ref={controller?.attachSurface}
+      ref={(element) => {
+        surfaceRef.current = element;
+        controller?.attachSurface(element);
+      }}
+      onDragOverCapture={(event) => {
+        if (!controller || !hasAcceptableSessionMentionTransfer(event.dataTransfer)) return;
+        // Captured so the node editor never inserts the dragged title as text.
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = 'copy';
+        controller.hoverExternal(event.clientX, event.clientY);
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          controller?.leaveExternal();
+        }
+      }}
+      onDropCapture={(event) => {
+        if (!controller || !hasAcceptableSessionMentionTransfer(event.dataTransfer)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const sessionId = readSessionMentionDragSessionId(event.dataTransfer);
+        if (sessionId) controller.dropExternal(sessionId, event.clientX, event.clientY);
+        else controller.leaveExternal();
+      }}
       tabIndex={-1}
       role="tree"
       aria-multiselectable
@@ -291,7 +334,92 @@ export function TodayOutlineSurface(props: {
       }}
     >
       {props.children}
+      <TodayDragLayer />
     </div>
+  );
+}
+
+const dragStyles = stylex.create({
+  line: {
+    position: 'fixed',
+    height: 2,
+    borderRadius: radius.full,
+    backgroundColor: colors.accent,
+    pointerEvents: 'none',
+    zIndex: 40,
+  },
+  lineDot: {
+    position: 'absolute',
+    left: -4,
+    top: -3,
+    width: 8,
+    height: 8,
+    borderRadius: radius.full,
+    borderWidth: 2,
+    borderStyle: 'solid',
+    borderColor: colors.accent,
+    backgroundColor: colors.background,
+  },
+  blocked: {
+    position: 'fixed',
+    padding: `${space[1]} ${space[2]}`,
+    borderRadius: radius.small,
+    backgroundColor: colors.raisedBackground,
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    boxShadow: '0 4px 12px rgb(0 0 0 / 0.12)',
+    pointerEvents: 'none',
+    zIndex: 41,
+  },
+  ghost: {
+    position: 'fixed',
+    maxWidth: 280,
+    padding: `${space[1]} ${space[2]}`,
+    borderRadius: radius.small,
+    backgroundColor: colors.raisedBackground,
+    color: colors.label,
+    fontSize: text.subheadlineSize,
+    boxShadow: '0 8px 24px rgb(0 0 0 / 0.18)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    pointerEvents: 'none',
+    zIndex: 42,
+  },
+});
+
+/** The drop line, the "can't move here" note, and the dragged card. */
+function TodayDragLayer() {
+  const { t } = useTranslation();
+  const controller = useTodayEditor();
+  const indicator = controller?.getDropIndicator() ?? null;
+  const ghost = controller?.getDragGhost() ?? null;
+  return (
+    <>
+      {indicator?.kind === 'line' ? (
+        <div
+          {...stylex.props(dragStyles.line)}
+          style={{ top: indicator.top - 1, left: indicator.left, width: indicator.width }}
+        >
+          <span {...stylex.props(dragStyles.lineDot)} />
+        </div>
+      ) : null}
+      {indicator?.kind === 'blocked' ? (
+        <div
+          {...stylex.props(dragStyles.blocked)}
+          style={{ top: indicator.y + 16, left: indicator.x + 12 }}
+        >
+          {t('today.cannotMoveToOtherDay', "Can't move to another date")}
+        </div>
+      ) : null}
+      {ghost ? (
+        <div {...stylex.props(dragStyles.ghost)} style={{ top: ghost.y + 8, left: ghost.x + 12 }}>
+          {ghost.count > 1
+            ? t('today.movingNodes', 'Moving {{count}} nodes', { count: ghost.count })
+            : ghost.label || '\u00a0'}
+        </div>
+      ) : null}
+    </>
   );
 }
 
