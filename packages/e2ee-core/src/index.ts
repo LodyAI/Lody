@@ -20,6 +20,7 @@
  * @module
  */
 export { E2eeWorkflows } from './workflows';
+export { EngineKeyringSync, type EngineKeyringReport } from './internal/keys/engine-keyring';
 
 // Ledger
 export { VerifiedLedger, VerifiedLedgerError } from './internal/ledger/verified-ledger';
