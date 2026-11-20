@@ -7060,6 +7060,11 @@ const SessionDetail = ({
   const hasMacOSTitlebarInset =
     !isNativeAppShell() && isMacOSElectronRenderer() && !isElectronFullscreen;
 
+  // Viewers and side chats render their own absolutely positioned surfaces on
+  // top; the fixed-panel body only shows when neither owns the panel.
+  const showFixedSidePanelBody =
+    effectiveActiveViewerTabId === null && effectiveActiveSideSessionId === null;
+
   const nonBrowserSidebarContent =
     activeSidebarTab === 'files' ? (
       <FileTreeView
@@ -7085,7 +7090,7 @@ const SessionDetail = ({
         className={stylex.props(detailStyles.background).className}
         // The side panel stays mounted while collapsed, so GitHub polling has
         // to be paused explicitly — same signal SessionBrowserPanel takes.
-        visible={isSidebarVisible}
+        visible={showFixedSidePanelBody && isSidebarVisible}
       />
     ) : activeSidebarTab === 'changes' ? (
       <SessionChangesSidebar
@@ -7120,9 +7125,10 @@ const SessionDetail = ({
       placement === 'hidden' && detailStyles.invisibleFill
     ).className;
 
-  // Keep the browser mounted while another sidebar tab is selected. Managed
-  // pages retain DOM state and Electron's native view is only hidden, so tab
-  // switching behaves like a browser rather than rebuilding the page.
+  // Keep the browser and device previews mounted while another sidebar tab,
+  // file viewer, or side chat is selected. Managed pages and device streams
+  // stay alive in memory and Electron's native view is only hidden, so tab
+  // switching never reconnects an active preview.
   const sidebarContent = (
     <div
       {...stylex.props(detailStyles.sidebarContentRoot)}
@@ -7148,7 +7154,7 @@ const SessionDetail = ({
         >
           <SessionBrowserPanel
             session={activeBrowserSession}
-            active={activeSidebarTab === 'browser' && isSidebarVisible}
+            active={showFixedSidePanelBody && activeSidebarTab === 'browser' && isSidebarVisible}
             candidateNavigationRequestId={
               browserCandidateNavigationRequest?.sessionId === activeBrowserSession.id
                 ? browserCandidateNavigationRequest.id
@@ -7175,7 +7181,7 @@ const SessionDetail = ({
         >
           <SessionIosSimulatorPanel
             session={activeIosSimulatorSession}
-            active={iosSimulatorPlacement !== 'hidden' && isSidebarVisible}
+            active={showFixedSidePanelBody && iosSimulatorPlacement !== 'hidden' && isSidebarVisible}
             onAttachScreenshot={(file) =>
               handleAttachSimulatorScreenshot(activeIosSimulatorSession.id, file)
             }
@@ -7190,25 +7196,21 @@ const SessionDetail = ({
           <SessionDevicePreviewPanel
             platform="android"
             session={activeAndroidEmulatorSession}
-            active={androidEmulatorPlacement !== 'hidden' && isSidebarVisible}
+            active={showFixedSidePanelBody && androidEmulatorPlacement !== 'hidden' && isSidebarVisible}
             onAttachScreenshot={(file) =>
               handleAttachSimulatorScreenshot(activeAndroidEmulatorSession.id, file)
             }
           />
         </div>
       ) : null}
-      {activeSidebarTab !== 'browser' &&
+      {showFixedSidePanelBody &&
+      activeSidebarTab !== 'browser' &&
       activeSidebarTab !== 'ios-simulator' &&
       activeSidebarTab !== 'android-emulator' ? (
         <div {...stylex.props(detailStyles.absoluteFill)}>{nonBrowserSidebarContent}</div>
       ) : null}
     </div>
   );
-
-  // Viewers and side chats render their own absolutely positioned surfaces on
-  // top; the fixed-panel body only shows when neither owns the panel.
-  const showFixedSidePanelBody =
-    effectiveActiveViewerTabId === null && effectiveActiveSideSessionId === null;
   const defaultSizes = showFixedSidePanelBody
     ? { main: 75, sidebar: 25 }
     : { main: 60, sidebar: 40 };
@@ -7502,7 +7504,19 @@ const SessionDetail = ({
         )}
       />
       <div {...stylex.props(detailStyles.sidebarBody)}>
-        {showFixedSidePanelBody && activeSidebarTab !== null ? sidebarContent : null}
+        {openedSidebarTabs.length > 0 ? (
+          <div
+            className={
+              stylex.props(
+                detailStyles.absoluteFill,
+                (!showFixedSidePanelBody || activeSidebarTab === null) && detailStyles.invisibleFill
+              ).className
+            }
+            aria-hidden={!showFixedSidePanelBody || activeSidebarTab === null}
+          >
+            {sidebarContent}
+          </div>
+        ) : null}
         {showFixedSidePanelBody && activeSidebarTab === null && sidePanelTabs.length === 0 ? (
           <SessionSidePanelEmptyState
             panels={sidePanelOptions}

@@ -23,6 +23,9 @@ import {
 import { createE2eeContent } from './desktop-e2ee-content';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { SessionPendingSendsHost } from '../components/chat/session-pending-sends-host';
+import { clearAllDevicePreviewCaches } from '../components/sessions/ios-simulator/device-preview-cache';
+import { clearAllManagedPreviewFrames } from '../components/sessions/managed-preview-frame-cache';
+import { clearAllSessionBrowserResumeStates } from '../components/sessions/session-browser-resume-state';
 import {
   WorkspaceKeyReceptionNotice,
   type KeyReceptionWait,
@@ -254,7 +257,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     if (token && draftAccountId) setRunConfigDraftAccount(draftAccountId);
   }, [token, draftAccountId, setRunConfigDraftAccount]);
   useEffect(() => {
-    const unsubscribe = subscribeLocalAuthStateCleared(() => setRunConfigDraftAccount(null));
+    const unsubscribe = subscribeLocalAuthStateCleared(() => {
+      setRunConfigDraftAccount(null);
+      clearAllManagedPreviewFrames();
+      clearAllSessionBrowserResumeStates();
+      clearAllDevicePreviewCaches();
+    });
     return () => {
       unsubscribe();
       setRunConfigDraftAccount(null);

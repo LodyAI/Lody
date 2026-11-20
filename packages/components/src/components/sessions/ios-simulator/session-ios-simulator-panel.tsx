@@ -57,6 +57,12 @@ import type {
 import type { IosSimulatorPendingAction } from './ios-simulator-connection-status';
 import type { IosSimulatorScreenshotTarget, IosSimulatorViewMode } from './ios-simulator-controls';
 import { IosSimulatorInputDialog, type IosSimulatorInputKind } from './ios-simulator-input-dialog';
+import {
+  clearDevicePreviewFrame,
+  devicePreviewCacheKey,
+  readDevicePreviewSnapshot,
+  rememberDevicePreviewSnapshot,
+} from './device-preview-cache';
 import type { IosSimulatorViewerHandle } from './ios-simulator-viewer';
 import {
   IosSimulatorPanelView,
@@ -156,21 +162,39 @@ function SessionIosSimulatorPanelController({
     [platform, runtime, session.id, session.machineId, user?.id]
   );
 
+  const cacheKey = useMemo(
+    () =>
+      devicePreviewCacheKey({
+        platform,
+        userId: user?.id,
+        workspaceId: runtime?.workspaceId,
+        sessionId: session.id,
+        machineId: session.machineId,
+      }),
+    [platform, runtime?.workspaceId, session.id, session.machineId, user?.id]
+  );
+  const [initialSnapshot] = useState(() => readDevicePreviewSnapshot(cacheKey));
   const defaultQuality: AndroidEmulatorQuality = isLocalMachine ? 'clear' : 'balanced';
   const supportsQuality = platform === 'android' && machineSupportsAndroidEmulatorQuality(machine);
-  const [catalog, setCatalog] = useState<IosSimulatorCatalogState>({ phase: 'loading' });
+  const [catalog, setCatalog] = useState<IosSimulatorCatalogState>(
+    () => initialSnapshot?.catalog ?? { phase: 'loading' }
+  );
   const [refreshing, setRefreshing] = useState(false);
-  const [status, setStatus] = useState<IosSimulatorPanelStatus>(IDLE);
+  const [status, setStatus] = useState<IosSimulatorPanelStatus>(() => initialSnapshot?.status ?? IDLE);
   const statusRef = useRef(status);
   statusRef.current = status;
-  const [viewerState, setViewerState] = useState<IosSimulatorViewerState | null>(null);
+  const [viewerState, setViewerState] = useState<IosSimulatorViewerState | null>(
+    () => initialSnapshot?.viewerState ?? null
+  );
   const [viewerDiagnostics, setViewerDiagnostics] = useState<IosSimulatorViewerDiagnostics | null>(
-    null
+    () => initialSnapshot?.viewerDiagnostics ?? null
   );
   const [viewerReloadKey, setViewerReloadKey] = useState(0);
   const [pendingAction, setPendingAction] = useState<IosSimulatorPendingAction>(null);
   const [bootExpected, setBootExpected] = useState(false);
-  const [chosenUdid, setChosenUdid] = useState<string | null>(null);
+  const [chosenUdid, setChosenUdid] = useState<string | null>(
+    () => initialSnapshot?.chosenUdid ?? null
+  );
   const [preferredUdid] = useState(() => readIosSimulatorSelectedDevice(preferenceScope));
 
   // Every status read takes a ticket; an answer to an older ticket is stale.
@@ -273,7 +297,7 @@ function SessionIosSimulatorPanelController({
 
   const connected = Boolean(runtime && requesterUserId);
   const live = active && blocker === null && connected;
-  const loadedRef = useRef(false);
+  const loadedRef = useRef(initialSnapshot?.catalog.phase === 'ready');
   useEffect(() => {
     if (!live) return;
     if (!loadedRef.current) {
@@ -314,11 +338,26 @@ function SessionIosSimulatorPanelController({
     return () => clearTimeout(timer);
   }, [operationId, pollTick, polling, refreshStatus]);
 
-  // A new operation has a new viewer, which has not said anything yet.
+  // Only a genuinely new operation resets viewer state; resuming a cached
+  // operation keeps its live viewer state and orientation intact.
+  const previousOperationIdRef = useRef<string | null>(operationId);
   useEffect(() => {
+    if (previousOperationIdRef.current === operationId) return;
+    previousOperationIdRef.current = operationId;
     setViewerState(null);
     setViewerDiagnostics(null);
+    setTurns(0);
+    controlTicket.current = null;
+    setPendingControl(null);
   }, [operationId]);
+
+  // Any non-ready phase (explicit stop, close, failure, or idle) tears down a
+  // parked viewer frame so stopped previews never linger in memory.
+  useEffect(() => {
+    if (status.phase !== 'ready') {
+      clearDevicePreviewFrame(cacheKey);
+    }
+  }, [cacheKey, status.phase]);
 
   // A preview that settles changes what the list says (booted, held by us).
   const previousPhase = useRef(status.phase);
@@ -445,6 +484,7 @@ function SessionIosSimulatorPanelController({
   );
 
   const handleRestore = useCallback(() => {
+    clearDevicePreviewFrame(cacheKey);
     if (status.phase === 'ready') {
       // The stream dropped but the preview may still stand: reload the viewer
       // page and ask the machine where things are.
@@ -455,7 +495,7 @@ function SessionIosSimulatorPanelController({
       return;
     }
     if (statusUdid) startAgain(statusUdid);
-  }, [refreshStatus, startAgain, status.phase, statusUdid]);
+  }, [cacheKey, refreshStatus, startAgain, status.phase, statusUdid]);
 
   const handleRetry = useCallback(() => {
     if (statusUdid) {
@@ -488,9 +528,9 @@ function SessionIosSimulatorPanelController({
   // ready preview, through its exact operation.
 
   const viewerRef = useRef<IosSimulatorViewerHandle>(null);
-  const [turns, setTurns] = useState<IosSimulatorQuarterTurns>(0);
+  const [turns, setTurns] = useState<IosSimulatorQuarterTurns>(() => initialSnapshot?.turns ?? 0);
   const [viewMode, setViewMode] = useState<IosSimulatorViewMode>(
-    platform === 'android' ? 'screen' : 'device'
+    () => initialSnapshot?.viewMode ?? (platform === 'android' ? 'screen' : 'device')
   );
   const [fullscreen, setFullscreen] = useState(false);
   const controlTicket = useRef<object | null>(null);
@@ -499,15 +539,24 @@ function SessionIosSimulatorPanelController({
   const [inputKind, setInputKind] = useState<IosSimulatorInputKind | null>(null);
   const machineName = machine?.name ?? t('sessions.devicePreview.thisMachine', 'this machine');
 
-  // A new operation is a new stream in its own orientation.
-  useEffect(() => {
-    setTurns(0);
-    controlTicket.current = null;
-    setPendingControl(null);
-    return () => {
+  useEffect(
+    () => () => {
       controlTicket.current = null;
-    };
-  }, [operationId]);
+    },
+    []
+  );
+
+  useEffect(() => {
+    rememberDevicePreviewSnapshot(cacheKey, {
+      catalog,
+      status,
+      viewerState,
+      viewerDiagnostics,
+      chosenUdid,
+      turns,
+      viewMode,
+    });
+  }, [cacheKey, catalog, chosenUdid, status, turns, viewMode, viewerDiagnostics, viewerState]);
 
   const readyOperationId = status.phase === 'ready' ? status.operationId : null;
   const statusDevice = statusUdid
@@ -752,6 +801,7 @@ function SessionIosSimulatorPanelController({
         viewerReloadKey={viewerReloadKey}
         pendingAction={pendingAction}
         bootExpected={bootExpected}
+        cacheKey={cacheKey}
         active={active}
         leadingSlot={leadingSlot}
         onSelectDevice={handleSelectDevice}

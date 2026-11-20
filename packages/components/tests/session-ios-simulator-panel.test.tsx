@@ -23,6 +23,7 @@ import { writeTextToClipboard } from '../src/lib/clipboard';
 import { downloadBytesAsFile } from '../src/lib/download-file';
 import { toast } from '../src/lib/toast';
 import { writeIosSimulatorSelectedDevice } from '../src/lib/ios-simulator/ios-simulator-model';
+import { clearAllDevicePreviewCaches } from '../src/components/sessions/ios-simulator/device-preview-cache';
 import { SessionDevicePreviewPanel } from '../src/components/sessions/ios-simulator/session-ios-simulator-panel';
 
 vi.mock('react-i18next', () => ({
@@ -151,7 +152,9 @@ afterEach(() => {
   container?.remove();
   container = undefined;
   testDom.reconfigure({ url: initialTestUrl });
+  clearAllDevicePreviewCaches();
   window.localStorage.clear();
+  vi.restoreAllMocks();
   vi.clearAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -372,9 +375,17 @@ describe('SessionIosSimulatorPanel', () => {
     await flush();
     expect(text()).toContain('The viewer lost its connection.');
 
-    // Hiding the panel keeps the frame and tells the viewer instead.
+    // Hiding the panel keeps the frame and keeps the stream connected (no disconnect on tab switch).
+    const postedBeforeHide = posted.length;
     await render(false);
     expect(container?.querySelector('iframe')).toBe(frame);
+    expect(posted.length).toBe(postedBeforeHide);
+
+    // Hiding the browser tab itself still tells the viewer to pause.
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
     expect(posted.at(-1)).toEqual([
       { type: 'lody:ios-simulator:visibility', operationId: 'op-1', visible: false },
       VIEWER_ORIGIN,
@@ -912,7 +923,13 @@ it.each(['null', 'file://'])(
     expect(turns()).toBe('1');
     const fresh = ports[1]!;
     fresh.onmessage = (event) => requests.push(event.data);
+    const requestsBeforeHide = requests.length;
     await panel.render(false);
+    expect(requests.length).toBe(requestsBeforeHide);
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
     expect(requests.at(-1)).toMatchObject({
       type: 'lody:ios-simulator:visibility',
       visible: false,
@@ -1044,3 +1061,231 @@ it.each([
     }
   }
 );
+
+describe('SessionDevicePreviewPanel in-memory cache across conversation switches', () => {
+  const stubMoveBefore = () => {
+    const proto = HTMLElement.prototype as HTMLElement & {
+      moveBefore?: (node: Node, child: Node | null) => void;
+    };
+    const original = proto.moveBefore;
+    proto.moveBefore = function (node: Node, child: Node | null) {
+      this.insertBefore(node, child);
+    };
+    return () => {
+      if (original) proto.moveBefore = original;
+      else delete proto.moveBefore;
+    };
+  };
+
+  it.each(['ios', 'android'] as const)(
+    'keeps the live %s preview iframe and MessagePort alive across session switches until explicitly stopped',
+    async (platform) => {
+      testDom.reconfigure({ url: 'file:///app/index.html' });
+      const restoreMoveBefore = stubMoveBefore();
+      type Port = {
+        peer?: Port;
+        closed?: boolean;
+        onmessage: ((event: MessageEvent) => void) | null;
+        postMessage: (data: unknown) => void;
+        close: () => void;
+      };
+      const makePort = (): Port => ({
+        onmessage: null,
+        postMessage(data) {
+          this.peer?.onmessage?.(new MessageEvent('message', { data }));
+        },
+        close() {
+          this.closed = true;
+        },
+      });
+      vi.stubGlobal(
+        'MessageChannel',
+        class {
+          port1 = makePort();
+          port2 = makePort();
+          constructor() {
+            this.port1.peer = this.port2;
+            this.port2.peer = this.port1;
+          }
+        }
+      );
+
+      try {
+        const sessionA = { id: 'session-a' as SessionId, machineId: MACHINE };
+        const sessionB = { id: 'session-b' as SessionId, machineId: MACHINE };
+        let previewAActive = true;
+        const ports: Port[] = [];
+        const initCount = { value: 0 };
+
+        const store = createStore();
+        store.set(userAtom, { id: 'user-1', name: 'Sim User', email: 'sim@example.com' } as never);
+        store.set(machineMetaCacheAtom, {
+          [getMachineRoomId(MACHINE)]: macMeta({
+            iosSimulator: 1,
+            iosSimulatorControls: 2,
+            androidEmulator: 1,
+          }),
+        });
+        store.set(lodyPresenceSyncStateAtom, 'idle');
+
+        const makeIosControl: WorkspaceRuntime['requestIosSimulatorControl'] = async ({
+          sessionId,
+          command,
+        }) => {
+          if (command.action === 'stop' && sessionId === sessionA.id) {
+            previewAActive = false;
+            return { type: 'ios-simulator/control_response', sessionId, success: true };
+          }
+          if (command.action === 'list') {
+            return {
+              type: 'ios-simulator/control_response',
+              sessionId,
+              success: true,
+              devices: [device({ udid: 'phone', name: 'iPhone 16', state: 'Booted' })],
+            };
+          }
+          if (sessionId === sessionA.id && previewAActive) {
+            return {
+              type: 'ios-simulator/control_response',
+              sessionId,
+              success: true,
+              preview: preview({
+                operationId: 'op-a',
+                udid: 'phone',
+                phase: 'ready',
+                viewerUrl: VIEWER_URL,
+                transport: 'remote',
+              }),
+            };
+          }
+          return { type: 'ios-simulator/control_response', sessionId, success: true };
+        };
+
+        const makeAndroidControl: WorkspaceRuntime['requestAndroidEmulatorControl'] = async ({
+          sessionId,
+          command,
+        }) => {
+          if (command.action === 'stop' && sessionId === sessionA.id) {
+            previewAActive = false;
+            return { type: 'android-emulator/control_response', sessionId, success: true };
+          }
+          if (command.action === 'list') {
+            return {
+              type: 'android-emulator/control_response',
+              sessionId,
+              success: true,
+              devices: [
+                {
+                  id: 'Pixel_9',
+                  name: 'Pixel 9',
+                  runtime: 'Android',
+                  deviceType: 'AVD',
+                  state: 'Booted',
+                  available: true,
+                  occupancy: 'available',
+                },
+              ],
+            };
+          }
+          if (sessionId === sessionA.id && previewAActive) {
+            return {
+              type: 'android-emulator/control_response',
+              sessionId,
+              success: true,
+              preview: {
+                operationId: 'op-a',
+                id: 'Pixel_9',
+                phase: 'ready',
+                viewerUrl: VIEWER_URL,
+                transport: 'remote',
+              },
+            };
+          }
+          return { type: 'android-emulator/control_response', sessionId, success: true };
+        };
+
+        store.set(runtimeAtom, {
+          workspaceId: WORKSPACE,
+          workspaceSlug: 'sim',
+          requestIosSimulatorControl: makeIosControl,
+          requestAndroidEmulatorControl: makeAndroidControl,
+        } as unknown as WorkspaceRuntime);
+
+        container = document.createElement('div');
+        document.body.appendChild(container);
+        root = createRoot(container);
+
+        const renderSession = async (session: typeof sessionA) => {
+          await act(async () => {
+            root?.render(
+              createElement(
+                Provider,
+                { store },
+                createElement(SessionDevicePreviewPanel, {
+                  platform,
+                  session,
+                  active: true,
+                })
+              )
+            );
+          });
+          await flush();
+        };
+
+        // 1. Open Session A and complete viewer handshake
+        await renderSession(sessionA);
+        const frameA = container.querySelector('iframe') as HTMLIFrameElement;
+        expect(frameA).not.toBeNull();
+        vi.spyOn(frameA.contentWindow!, 'postMessage').mockImplementation(((
+          message: unknown,
+          _target: string,
+          transfer?: Port[]
+        ) => {
+          if ((message as { type?: string })?.type === 'lody:ios-simulator:init') {
+            initCount.value += 1;
+            if (transfer?.[0]) ports.push(transfer[0]);
+          }
+        }) as never);
+        await act(async () => frameA.dispatchEvent(new Event('load')));
+        const portA = ports[0]!;
+        expect(portA).toBeDefined();
+        await act(async () =>
+          portA.postMessage({
+            type: 'lody:ios-simulator:state',
+            operationId: 'op-a',
+            state: 'ready',
+            width: 1179,
+            height: 2556,
+            rotation: 90,
+          })
+        );
+        expect(
+          container.querySelector('[data-testid="ios-simulator-device"]')?.getAttribute('data-turns')
+        ).toBe('1');
+
+        // 2. Switch to Session B — Session A iframe is parked alive, port stays open
+        await renderSession(sessionB);
+        expect(container.querySelector('iframe')).toBeNull();
+        expect(frameA.isConnected).toBe(true);
+        expect(portA.peer?.closed).not.toBe(true);
+
+        // 3. Switch back to Session A — exact same iframe & live MessagePort reattach with zero re-init
+        await renderSession(sessionA);
+        expect(container.querySelector('iframe')).toBe(frameA);
+        expect(initCount.value).toBe(1);
+        expect(portA.peer?.closed).not.toBe(true);
+        expect(
+          container.querySelector('[data-testid="ios-simulator-device"]')?.getAttribute('data-turns')
+        ).toBe('1');
+
+        // 4. Explicit Stop preview destroys the cached iframe and closes the MessagePort
+        await click('Stop preview');
+        expect(container.querySelector('iframe')).toBeNull();
+        expect(frameA.isConnected).toBe(false);
+        expect(portA.peer?.closed).toBe(true);
+      } finally {
+        restoreMoveBefore();
+      }
+    }
+  );
+});

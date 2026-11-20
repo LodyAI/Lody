@@ -72,6 +72,8 @@ export type IosSimulatorPanelViewProps = {
   pendingAction?: IosSimulatorPendingAction;
   /** Whether this start has to boot the device, so the steps list it. */
   bootExpected?: boolean;
+  /** Cache key for keeping the live viewer iframe alive across session switches. */
+  cacheKey?: string;
   /** The panel is on screen; the viewer is told when it is not. */
   active?: boolean;
   leadingSlot?: ReactNode;
@@ -384,6 +386,7 @@ export function IosSimulatorPanelView({
   viewerReloadKey = 0,
   pendingAction = null,
   bootExpected = false,
+  cacheKey,
   active = true,
   leadingSlot,
   onSelectDevice,
@@ -531,6 +534,8 @@ export function IosSimulatorPanelView({
           <IosSimulatorViewer
             key={`${status.operationId}:${viewerReloadKey}:${controlsLayout}`}
             ref={viewerRef}
+            cacheKey={cacheKey}
+            alreadyReady={viewerState === 'ready'}
             viewerUrl={status.viewerUrl}
             viewerOrigin={status.viewerOrigin}
             operationId={status.operationId}
