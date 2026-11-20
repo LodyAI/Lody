@@ -66,6 +66,7 @@ import {
   type PinnedRowOrder,
 } from './pinned-rows-dnd';
 import { Menu } from '@/ui/menu';
+import { Tooltip } from '@lody/ui/tooltip';
 import { toast } from '@/lib/toast';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import {
@@ -106,10 +107,18 @@ type SharedListProps = Omit<
   | 'pinSectionId'
   | 'onDropPinnedSession'
   | 'renderHeader'
+  | 'footer'
 >;
 
 export type SidebarPinnedSectionsProps = {
   sections: readonly SidebarPinnedSection[];
+  /**
+   * Rows the current sidebar scope hides from each section, keyed by
+   * `pinSectionKey(section.id)`. An expanded section with hidden rows shows a
+   * quiet "N hidden in this view" line so a filtered-out section does not
+   * look like an empty one.
+   */
+  hiddenCounts?: Readonly<Record<string, number>>;
   defaultLabel: string;
   defaultCollapsed: boolean;
   onToggleDefault?: () => void;
@@ -135,6 +144,7 @@ type NameDialogTarget =
  */
 export const SidebarPinnedSections = memo(function SidebarPinnedSections({
   sections,
+  hiddenCounts,
   defaultLabel,
   defaultCollapsed,
   onToggleDefault,
@@ -457,6 +467,7 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
               ) : (
                 (sectionMenu ?? firstAction ?? undefined)
               );
+            const hiddenCount = collapsed ? 0 : (hiddenCounts?.[sectionKey] ?? 0);
             const list = (renderHeader?: (header: ReactElement) => ReactNode) => (
               <SidebarUpdatedSessionList
                 {...listProps}
@@ -484,6 +495,39 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
                 }
                 toggleBucketLabel={label}
                 headerAction={action}
+                footer={
+                  hiddenCount > 0 ? (
+                    <Tooltip.Root>
+                      <Tooltip.Trigger
+                        render={
+                          <div
+                            data-pin-section-hidden-count=""
+                            aria-label={t(
+                              'sidebar.pinSections.hiddenByScopeHint',
+                              'Filtered out by the current view — show all tasks to see them'
+                            )}
+                            // The row grid: px-2 padding + the 14px leading
+                            // slot + gap-2 puts this line on the title edge.
+                            className="flex cursor-default select-none items-center gap-2 px-2 pb-0.5 pt-1 text-xs text-sidebar-foreground-muted/70"
+                          >
+                            <span className="w-3.5 shrink-0" aria-hidden="true" />
+                            <span className="truncate">
+                              {t('sidebar.pinSections.hiddenByScope', '{{count}} sessions hidden', {
+                                count: hiddenCount,
+                              })}
+                            </span>
+                          </div>
+                        }
+                      />
+                      <Tooltip.Content>
+                        {t(
+                          'sidebar.pinSections.hiddenByScopeHint',
+                          'Filtered out by the current view — show all tasks to see them'
+                        )}
+                      </Tooltip.Content>
+                    </Tooltip.Root>
+                  ) : null
+                }
               />
             );
             return sectionId === null || !canSortSections ? (

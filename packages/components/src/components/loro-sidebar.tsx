@@ -242,6 +242,12 @@ export interface LoroSidebarProps {
   pinnedSections?: SidebarPinnedSection[];
   /** Folded user pin sections, by section id (the default uses `pinnedSectionCollapsed`). */
   collapsedPinSectionIds?: Readonly<Record<string, boolean>>;
+  /**
+   * Rows the current sidebar scope hides from each pin section, keyed by
+   * `pinSectionKey(section.id)` (`'default'` for the default section). An
+   * expanded section with hidden rows says so under its rows.
+   */
+  pinnedHiddenCounts?: Readonly<Record<string, number>>;
   onTogglePinSection?: (sectionId: string) => void;
   /** Create, rename, delete and move between pin sections; absent hides those controls. */
   pinSectionActions?: SidebarPinSectionActions;
@@ -918,6 +924,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   pinnedSectionCollapsed = false,
   pinnedSections,
   collapsedPinSectionIds,
+  pinnedHiddenCounts,
   onTogglePinSection,
   pinSectionActions,
   updatedSelectedItemId,
@@ -1723,6 +1730,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                   defaultCollapsed={pinnedSectionCollapsed}
                   onToggleDefault={onTogglePinnedSection}
                   collapsedSectionIds={collapsedPinSectionIds}
+                  hiddenCounts={pinnedHiddenCounts}
                   onToggleSection={onTogglePinSection}
                   headerAction={sectionHeaderFilterAction ?? undefined}
                   actions={pinSectionActions}

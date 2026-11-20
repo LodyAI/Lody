@@ -269,6 +269,7 @@ import {
   hasOpenedByTreeNesting,
   normalizeSessionRowId,
 } from '@/lib/session-opened-by-tree';
+import { pinSectionKey } from '@/components/pinned-rows-dnd';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import { SessionShareDialog } from '@/components/session-sharing';
 import type { SessionSharingState } from '@/lib/session-sharing';
@@ -2824,6 +2825,69 @@ export function LoroAppSidebar({
       })),
     [pinnedLayout]
   );
+  // The My-Tasks scope drops teammates' conversations before the pinned area
+  // is built, so a section holding only them would render as a bare header.
+  // Count what the scope hides per section so it can say so under its rows.
+  const pinnedHiddenCounts = useMemo(() => {
+    if (scope !== 'my' || sessionsListLoading || !pinSectionsLoaded) return undefined;
+    const listed = new Map<string, SessionMeta>();
+    for (const session of selectSidebarTaskSessions(
+      sessions,
+      visibleLocalProjectMap,
+      workspaceHistoryReadable
+    )) {
+      listed.set(session.id, session);
+    }
+    for (const session of sessions) {
+      const project = session.project;
+      if (project?.kind !== 'local' || session.projectRun) continue;
+      if (!visibleLocalProjectMap.has(`${session.machineId}:${project.localProjectId}`)) continue;
+      listed.set(session.id, session);
+    }
+    const getOpenedBySessionId = (session: SessionMeta) =>
+      session.openedByRootSessionId ??
+      resolveOpenerRowId(session.openedBySessionId) ??
+      session.openedBySessionId;
+    const unscopedPinnedIds = getPinnedSessionTreeIds([...listed.values()], {
+      getId: (session) => session.id,
+      getOpenedBySessionId,
+      isPinned: (session) => Boolean(session.isPinned),
+    });
+    const knownSectionIds = new Set(pinSections.map((section) => section.id));
+    const counts: Record<string, number> = {};
+    for (const id of unscopedPinnedIds) {
+      if (pinnedSessionIds.has(id)) continue;
+      // A hidden row counts under its pinned root's section, matching where
+      // the unscoped tree would place it.
+      let root = listed.get(id);
+      const seen = new Set<string>();
+      while (root && !root.isPinned) {
+        const opener = getOpenedBySessionId(root);
+        if (!opener || seen.has(opener)) {
+          root = undefined;
+          break;
+        }
+        seen.add(opener);
+        root = listed.get(opener);
+      }
+      const pinSectionId = root?.pinSectionId;
+      const sectionKey = pinSectionKey(
+        pinSectionId && knownSectionIds.has(pinSectionId) ? pinSectionId : null
+      );
+      counts[sectionKey] = (counts[sectionKey] ?? 0) + 1;
+    }
+    return Object.keys(counts).length > 0 ? counts : undefined;
+  }, [
+    scope,
+    sessionsListLoading,
+    pinSectionsLoaded,
+    sessions,
+    visibleLocalProjectMap,
+    workspaceHistoryReadable,
+    resolveOpenerRowId,
+    pinSections,
+    pinnedSessionIds,
+  ]);
   const pinnedLayoutRef = useRef(pinnedLayout);
   pinnedLayoutRef.current = pinnedLayout;
   const pinSectionsRef = useRef(pinSections);
@@ -4265,6 +4329,7 @@ export function LoroAppSidebar({
         pinnedSectionCollapsed={pinnedSectionCollapsed}
         pinnedSections={pinnedSections}
         collapsedPinSectionIds={pinSectionsCollapsed}
+        pinnedHiddenCounts={pinnedHiddenCounts}
         onTogglePinSection={handleTogglePinSection}
         pinSectionActions={pinSectionActions}
         updatedItems={updatedItems}

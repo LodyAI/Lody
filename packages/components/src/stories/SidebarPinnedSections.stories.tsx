@@ -293,6 +293,62 @@ function PinnedSectionsPlayground() {
   );
 }
 
+/**
+ * "My Tasks" scope: Maintenance holds only teammates' conversations, and the
+ * default section hides one more. Both say what the view hides instead of
+ * rendering a bare header.
+ */
+function HiddenByScopeDemo() {
+  const [selected, setSelected] = useState<string | null>('c1');
+  // What the scope leaves visible: c3/c4/c5 (maintenance) and one default row
+  // are filtered out before the pinned area is built.
+  const visiblePinned = useMemo(
+    () => INITIAL_CONVERSATIONS.filter((entry) => ['c1', 'c2', 'c6'].includes(entry.id)),
+    []
+  );
+  const layout = useMemo(
+    () => buildPinnedSectionLayout(visiblePinned, INITIAL_SECTIONS, toPlacement),
+    [visiblePinned]
+  );
+  const pinnedSections = useMemo(
+    () =>
+      layout.map((entry) => ({
+        id: entry.sectionId,
+        name: entry.section?.name ?? '',
+        items: entry.items.map(toItem),
+      })),
+    [layout]
+  );
+  const pinnedItems = useMemo(() => visiblePinned.map(toItem), [visiblePinned]);
+
+  return (
+    <div className="flex h-screen bg-sidebar">
+      <div className="h-full w-[280px] shrink-0">
+        <LoroSidebar
+          workspaceName="Loro"
+          userEmail="demo@example.com"
+          workspaces={[{ id: 'ws-1', name: 'Loro' }]}
+          currentWorkspaceId="ws-1"
+          repoSections={[]}
+          chats={[]}
+          organizeMode="updated"
+          pinnedItems={pinnedItems}
+          pinnedSections={pinnedSections}
+          pinnedHiddenCounts={{ default: 1, maintenance: 3 }}
+          updatedItems={[]}
+          updatedSelectedItemId={selected}
+          onSelectUpdatedItem={setSelected}
+        />
+      </div>
+      <div className="flex-1 p-6 text-sm text-muted-foreground">
+        <p>Maintenance renders its header and names the rows this view hides.</p>
+        <p>The default section keeps its visible rows and reports the rest.</p>
+        <p>A folded section hides the hint; its header already implies content.</p>
+      </div>
+    </div>
+  );
+}
+
 const meta = {
   title: 'Sidebar/Pinned Sections',
   component: PinnedSectionsPlayground,
@@ -303,3 +359,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Playground: Story = {};
+
+export const HiddenByScope: Story = {
+  render: () => <HiddenByScopeDemo />,
+};
