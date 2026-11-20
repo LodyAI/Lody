@@ -90,7 +90,14 @@ export type HistoryAction =
       kind: 'coordinator-output';
       turnId?: string;
       output:
-        | { kind: 'message'; id: string; body: string; createdAt: number }
+        | {
+            kind: 'message';
+            id: string;
+            body: string;
+            images?: import('../ai').SessionImagePayload[];
+            files?: import('../ai').SessionFilePayload[];
+            createdAt: number;
+          }
         | { kind: 'status'; status: string; updatedAt: number };
     };
 
@@ -395,6 +402,8 @@ export function applyHistoryAction(
             type: 'coordinator_message',
             id: action.output.id,
             body: action.output.body,
+            ...(action.output.images?.length ? { images: action.output.images } : {}),
+            ...(action.output.files?.length ? { files: action.output.files } : {}),
             createdAt: action.output.createdAt,
           },
         ];

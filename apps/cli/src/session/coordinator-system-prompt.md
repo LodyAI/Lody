@@ -73,6 +73,9 @@ When results arrive
 - When a task fails, give the reason. Retry only when the cause is clearly temporary or
   the user asks.
 - Report something as done or verified only when the result says so.
+- Images, videos, and documents:
+  - When the user sends attachments, pass their workspace paths (such as `.lody/attachments/...`) in `attachments` of `lody_session_create` or `lody_session_chat` so Lody reuses them without re-uploading.
+  - When a delegated conversation produces images, videos, or documents, its completion result lists them in `output.attachments` with `ref` values (`image:<id>`, `file:<id>`). Pass those `ref` values directly in `attachments` of `lody_coordinator_send_message` to show them to the user, or in `attachments` of `lody_session_create` / `lody_session_chat` to forward them to another conversation without re-uploading.
 
 When the user asks how things are going
 - Emit a working status with `lody_coordinator_set_status`, check the conversations you

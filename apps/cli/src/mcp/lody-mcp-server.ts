@@ -21,7 +21,10 @@ import {
   MACHINE_PROTOCOL_CAPABILITIES,
   parseGitHubPullRequestUrl,
 } from '@lody/shared';
-import { prepareSessionInputAttachments } from '@/lib/session-input-attachments';
+import {
+  resolveOrPrepareSessionAttachments,
+  type AttachmentHistoryTurn,
+} from '@/lib/session-attachment-reuse';
 import { createCommandAttachmentTransfer } from '@/lib/cloud-cli-port';
 import { snapshotAgentRole, readMessageAuthor, type AgentMessageAuthor } from '@lody/shared';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
@@ -90,7 +93,9 @@ import {
   type LodyOperationItemResult,
   type LodyOperationSnapshot,
   type SessionTurnInputConfig,
+  type SessionFilePayload,
   type SessionHistoryInput,
+  type SessionImagePayload,
   hasPendingUserTurnActivation,
   normalizeSessionTurnInputConfig,
   describeChatFailure,
@@ -237,11 +242,21 @@ const CoordinatorSendMessageInputSchema = z
     markdown: z
       .string()
       .trim()
-      .min(1)
       .max(MAX_COORDINATOR_MESSAGE_CHARS)
+      .optional()
       .describe('Markdown content to display to the user as a single chat bubble.'),
+    attachments: z
+      .array(z.string().trim().min(1))
+      .max(SESSION_FILE_MAX_COUNT)
+      .optional()
+      .describe(
+        'Optional images, videos, or documents to display in this bubble. Accepts zero-copy references from delegated results or this conversation ("image:<id>", "file:<id>") or file paths inside this workspace.'
+      ),
   })
-  .strict();
+  .strict()
+  .refine((value) => Boolean(value.markdown?.trim()) || Boolean(value.attachments?.length), {
+    message: 'Provide markdown text or at least one attachment',
+  });
 
 const CoordinatorSetStatusInputSchema = z
   .object({
@@ -502,7 +517,7 @@ const InputAttachmentPathsSchema = z
   .max(SESSION_FILE_MAX_COUNT)
   .optional()
   .describe(
-    'Caller-machine files inside its Session workspace; absolute/relative paths. Uploaded as target input.'
+    'Caller-machine files inside its Session workspace (absolute/relative paths) or zero-copy attachment references ("image:<id>", "file:<id>") from this conversation or its delegated results.'
   );
 const SessionCreateCommandInputShape = {
   attachments: InputAttachmentPathsSchema,
@@ -3390,12 +3405,13 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
         throw new Error('Update the calling machine daemon before sending input attachments');
       }
     }
-    const inputAttachments = await prepareSessionInputAttachments({
-      paths: args.attachments ?? [],
+    const inputAttachments = await resolveOrPrepareSessionAttachments({
+      inputs: args.attachments ?? [],
       cwd: ctx.workdir,
       containWithin: ctx.workdir,
       workspaceId: workspace.id as WorkspaceId,
-      sessionId: preallocatedSessionId,
+      callerSessionId: ctx.sessionId,
+      targetSessionId: preallocatedSessionId,
       sourceMachineId: ctx.machineId as MachineId,
       targetMachineId,
       ...(args.attachments?.length
@@ -3406,6 +3422,9 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
             ),
           }
         : {}),
+      readCallerHistory: () => readCallerAttachmentHistory(manager, ctx.sessionId, currentSession),
+      readDelegatedTurn: (sessionId, turnId) =>
+        readDelegatedAttachmentTurn(manager, sessionId, turnId, ctx.machineId as MachineId),
     });
     await freezeInvokingAuthor(manager, currentSession, invoking);
     const materializationClaimToken = randomUUID();
@@ -3692,12 +3711,13 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
         throw new Error('Update the calling machine daemon before sending input attachments');
       }
     }
-    const inputAttachments = await prepareSessionInputAttachments({
-      paths: args.attachments ?? [],
+    const inputAttachments = await resolveOrPrepareSessionAttachments({
+      inputs: args.attachments ?? [],
       cwd: ctx.workdir,
       containWithin: ctx.workdir,
       workspaceId: workspace.id as WorkspaceId,
-      sessionId: targetSession.id,
+      callerSessionId: ctx.sessionId,
+      targetSessionId: targetSession.id,
       sourceMachineId: ctx.machineId as MachineId,
       targetMachineId: targetSession.machineId,
       ...(args.attachments?.length
@@ -3708,6 +3728,9 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
             ),
           }
         : {}),
+      readCallerHistory: () => readCallerAttachmentHistory(manager, ctx.sessionId, currentSession),
+      readDelegatedTurn: (sessionId, turnId) =>
+        readDelegatedAttachmentTurn(manager, sessionId, turnId, ctx.machineId as MachineId),
     });
     await freezeInvokingAuthor(manager, currentSession, invoking);
     const materializationClaimToken = randomUUID();
@@ -3897,6 +3920,58 @@ const renameSessionItems = async (
       assertSessionManagementAccess({ auth, workspace, manager, sessionId, delegatedRequester })
     );
   });
+};
+
+const MAX_ATTACHMENT_REUSE_HISTORY_TURNS = 200;
+
+const readCallerAttachmentHistory = async (
+  manager: LoroDocumentManager,
+  sessionId: SessionId,
+  meta?: SessionMeta
+): Promise<AttachmentHistoryTurn[]> => {
+  const doc = await manager.getOrCreateSessionDoc(sessionId);
+  const history = (await createSessionBackend(doc, meta)).history;
+  const total = await history.count();
+  const rows = await history.readDirectory(
+    Math.max(0, total - MAX_ATTACHMENT_REUSE_HISTORY_TURNS),
+    total
+  );
+  const turns: AttachmentHistoryTurn[] = [];
+  for (const row of rows) {
+    const turnId = row.turnId ?? row.scalars?.id;
+    if (!turnId) continue;
+    const read = await history.readTurn(turnId);
+    if (read.state === 'ready') turns.push(read.turn);
+  }
+  return turns;
+};
+
+const readDelegatedAttachmentTurn = async (
+  manager: LoroDocumentManager,
+  targetSessionId: SessionId,
+  turnId: string,
+  callerMachineId: MachineId
+): Promise<AttachmentHistoryTurn | undefined> => {
+  const row = await manager.repo.getDocMeta(getSessionRoomId(targetSessionId));
+  const targetMeta =
+    row?.meta && !isLoroRepoDocDeleted(row) ? (row.meta as SessionMeta) : undefined;
+  if (targetMeta?.id && targetMeta.machineId) {
+    return await readSessionDocForMcp(
+      manager,
+      targetMeta,
+      callerMachineId,
+      async (sessionDoc) => {
+        const read = await (
+          await createSessionBackend(sessionDoc, targetMeta)
+        ).history.readTurn(turnId);
+        return read.state === 'ready' ? read.turn : undefined;
+      },
+      REMOTE_SESSION_HISTORY_SYNC_WAIT_MS
+    );
+  }
+  const doc = await manager.getOrCreateSessionDoc(targetSessionId);
+  const read = await (await createSessionBackend(doc)).history.readTurn(turnId);
+  return read.state === 'ready' ? read.turn : undefined;
 };
 
 /** Cancel through the daemon's workspace replica, never a child CLI with its own. */
@@ -4830,7 +4905,9 @@ export function buildSessionToolServer(
 
   if (options?.coordinator === true) {
     const applyCoordinatorTurnOutput = async (
-      output: { kind: 'message'; markdown: string } | { kind: 'status'; status: string }
+      output:
+        | { kind: 'message'; markdown?: string; attachments?: string[] }
+        | { kind: 'status'; status: string }
     ) => {
       const ctx = getSessionContext();
       const daemon = getDaemonWorkspace();
@@ -4847,12 +4924,65 @@ export function buildSessionToolServer(
       const messageId = output.kind === 'message' ? randomUUID() : undefined;
       const normalizedStatus =
         output.kind === 'status' ? output.status.replace(/\s+/g, ' ').trim() : '';
+
+      let images: SessionImagePayload[] | undefined;
+      let files: SessionFilePayload[] | undefined;
+      if (output.kind === 'message' && output.attachments?.length) {
+        let relay: ReturnType<typeof createCommandAttachmentTransfer>;
+        try {
+          const auth = getCliAuthContextOrThrow('mcp');
+          relay = createCommandAttachmentTransfer(
+            auth.token,
+            Boolean(getSessionCommandEnvironment())
+          );
+        } catch {
+          relay = undefined;
+        }
+        const resolvedAttachments = await resolveOrPrepareSessionAttachments({
+          inputs: output.attachments,
+          cwd: ctx.workdir,
+          containWithin: ctx.workdir,
+          workspaceId: getMcpWorkspaceId(ctx) as WorkspaceId,
+          callerSessionId: ctx.sessionId,
+          targetSessionId: ctx.sessionId,
+          sourceMachineId: ctx.machineId as MachineId,
+          relay,
+          readCallerHistory: () => readCallerAttachmentHistory(daemon.manager, ctx.sessionId, meta),
+          readDelegatedTurn: (sessionId, delegatedTurnId) =>
+            readDelegatedAttachmentTurn(
+              daemon.manager,
+              sessionId,
+              delegatedTurnId,
+              ctx.machineId as MachineId
+            ),
+        });
+        const nextImages: SessionImagePayload[] = [];
+        const nextFiles: SessionFilePayload[] = [];
+        for (const attachment of resolvedAttachments) {
+          if (attachment.type === 'image') {
+            const { type: _, ...imagePayload } = attachment;
+            nextImages.push(imagePayload);
+          } else {
+            nextFiles.push(attachment);
+          }
+        }
+        if (nextImages.length > 0) images = nextImages;
+        if (nextFiles.length > 0) files = nextFiles;
+      }
+
       const result = await backend.applyHistoryAction({
         kind: 'coordinator-output',
         ...(turnId ? { turnId } : {}),
         output:
           output.kind === 'message'
-            ? { kind: 'message', id: messageId!, body: output.markdown, createdAt: now }
+            ? {
+                kind: 'message',
+                id: messageId!,
+                body: output.markdown ?? '',
+                ...(images ? { images } : {}),
+                ...(files ? { files } : {}),
+                createdAt: now,
+              }
             : { kind: 'status', status: normalizedStatus, updatedAt: now },
       });
       if (!result.matched) {
@@ -4860,7 +4990,12 @@ export function buildSessionToolServer(
       }
       if (output.kind === 'message') {
         await sessionDoc.setLastMessageAt(now);
-        return jsonTextResult({ ok: true, messageId });
+        return jsonTextResult({
+          ok: true,
+          messageId,
+          ...(images ? { imageCount: images.length } : {}),
+          ...(files ? { fileCount: files.length } : {}),
+        });
       }
       return jsonTextResult({ ok: true, status: normalizedStatus });
     };
@@ -4868,16 +5003,20 @@ export function buildSessionToolServer(
     registerSessionTool(
       COORDINATOR_SEND_MESSAGE_TOOL_NAME,
       {
-        summary: 'Send one Markdown chat bubble to the user in a coordinator conversation.',
+        summary: 'Send one Markdown chat bubble (optionally with attachments) to the user.',
         title: 'Send message to user',
         description:
-          'Send one Markdown chat bubble to the user in this coordinator conversation. Plain assistant text and thoughts are hidden from the user; every message you want the user to read must be sent with this tool. Each call renders as an independent chat bubble—keep each bubble concise and natural, communicating your immediate intent first when starting work and following up with outcomes or questions. Ready to call directly without lody_help.',
+          'Send one Markdown chat bubble to the user in this coordinator conversation, optionally attaching images, videos, or documents via zero-copy references ("image:<id>", "file:<id>") from delegated results or this conversation, or workspace file paths. Plain assistant text and thoughts are hidden from the user; every message you want the user to read must be sent with this tool. Ready to call directly without lody_help.',
         inputSchema: CoordinatorSendMessageInputSchema,
         exemptFromHelp: true,
       },
       async (args) => {
         try {
-          return await applyCoordinatorTurnOutput({ kind: 'message', markdown: args.markdown });
+          return await applyCoordinatorTurnOutput({
+            kind: 'message',
+            markdown: args.markdown,
+            attachments: args.attachments,
+          });
         } catch (error) {
           return mcpErrorResult(error);
         }

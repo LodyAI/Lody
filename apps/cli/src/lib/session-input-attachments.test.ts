@@ -10,6 +10,10 @@ import {
   type SessionFilePayload,
 } from '@lody/shared';
 import { prepareSessionInputAttachments } from './session-input-attachments';
+import { resolveOrPrepareSessionAttachments } from './session-attachment-reuse';
+import { ATTACHMENTS_DIR_RELATIVE, buildAttachmentFileName } from './session-file-attachments';
+import { assistantOutputPreview } from '@/orchestration/coordinator-model';
+import crypto from 'node:crypto';
 import { buildCommandInputBlocks } from './session-input-content';
 import { SessionAttachmentTransfer } from './session-attachment-transfer';
 import { getSessionFileBlobPath } from './session-file-blob-store';
@@ -229,5 +233,181 @@ describe('session input attachment preparation', () => {
         cwd: root,
       })
     ).rejects.toThrow('relay');
+  });
+
+  it('reuses delegated operation completion attachments and materialized workspace files zero-copy', async () => {
+    const childSessionId = 'child-session-1' as SessionId;
+    const childTurnId = 'child-assistant-1';
+    const childImage = {
+      type: 'image' as const,
+      imageId: 'img-child-001',
+      mimeType: 'image/png',
+      fileName: 'result.png',
+      sizeBytes: 1234,
+      width: 800,
+      height: 600,
+      transport: 'r2' as const,
+    };
+    const childVideo = {
+      type: 'file' as const,
+      fileId: 'file-video-001',
+      fileName: 'demo.mp4',
+      mimeType: 'video/mp4',
+      sizeBytes: 2048,
+      sha256: 'a'.repeat(64),
+      textPreview: false,
+      transport: 'r2' as const,
+      uploadedAt: 1001,
+    };
+
+    const preview = assistantOutputPreview({
+      items: [
+        { type: 'text', text: 'Recorded demo' },
+        { type: 'image_group', images: [{ ...childImage }] },
+        childVideo,
+      ],
+    });
+    expect(preview).toEqual({
+      text: 'Recorded demo',
+      attachments: [
+        {
+          kind: 'image',
+          ref: 'image:img-child-001',
+          fileName: 'result.png',
+          mimeType: 'image/png',
+          sizeBytes: 1234,
+          width: 800,
+          height: 600,
+        },
+        {
+          kind: 'file',
+          ref: 'file:file-video-001',
+          fileName: 'demo.mp4',
+          mimeType: 'video/mp4',
+          sizeBytes: 2048,
+        },
+      ],
+    });
+
+    // Materialized user-uploaded file in caller workspace `.lody/attachments/`
+    const userDocBytes = Buffer.from('# Spec Document\n');
+    const userDocSha = crypto.createHash('sha256').update(userDocBytes).digest('hex');
+    const userFileId = 'file-spec-999';
+    const attachmentsDir = path.join(root, ATTACHMENTS_DIR_RELATIVE);
+    await fs.mkdir(attachmentsDir, { recursive: true });
+    const materializedName = buildAttachmentFileName(userFileId, 'spec.md');
+    await fs.writeFile(path.join(attachmentsDir, materializedName), userDocBytes);
+
+    const callerHistory = [
+      {
+        id: 'user-1',
+        role: 'user' as const,
+        timestamp: '2026-11-20T00:00:00.000Z',
+        items: [
+          {
+            type: 'file' as const,
+            fileId: userFileId,
+            fileName: 'spec.md',
+            mimeType: 'text/markdown',
+            sizeBytes: userDocBytes.length,
+            sha256: userDocSha,
+            textPreview: true,
+            transport: 'r2' as const,
+            uploadedAt: 900,
+          },
+        ],
+      },
+      {
+        id: 'sys-1',
+        role: 'system' as const,
+        timestamp: '2026-11-20T00:01:00.000Z',
+        items: [
+          {
+            type: 'operation_completion' as const,
+            deliveryId: 'delivery-1',
+            operationId: 'op-1',
+            operationKind: 'session_create' as const,
+            completion: {
+              type: 'result' as const,
+              value: {
+                items: [
+                  {
+                    status: 'succeeded' as const,
+                    target: { sessionId: childSessionId, userTurnId: 'child-user-1' },
+                    assistantTurnId: childTurnId,
+                    output: preview,
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    ];
+
+    const fetchSpy = vi.fn(async () => {
+      throw new Error('Zero-copy attachment reuse must not call fetch/upload');
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const reused = await resolveOrPrepareSessionAttachments({
+      inputs: [
+        'image:img-child-001',
+        'file:file-video-001',
+        path.join(ATTACHMENTS_DIR_RELATIVE, materializedName),
+      ],
+      cwd: root,
+      containWithin: root,
+      workspaceId: scope.workspaceId,
+      callerSessionId: scope.sessionId,
+      targetSessionId: 'target-session-2' as SessionId,
+      sourceMachineId: scope.sourceMachineId,
+      targetMachineId: 'remote-machine' as MachineId,
+      relay: new SessionAttachmentTransfer('token', 'https://relay.invalid'),
+      readCallerHistory: async () => callerHistory,
+      readDelegatedTurn: async (sid, tid) =>
+        sid === childSessionId && tid === childTurnId
+          ? {
+              id: childTurnId,
+              role: 'assistant',
+              timestamp: '2026-11-20T00:00:30.000Z',
+              items: [childImage, childVideo],
+            }
+          : undefined,
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(reused).toEqual([
+      { ...childImage, storageSessionId: childSessionId },
+      { ...childVideo, storageSessionId: childSessionId },
+      {
+        type: 'file',
+        fileId: userFileId,
+        fileName: 'spec.md',
+        mimeType: 'text/markdown',
+        sizeBytes: userDocBytes.length,
+        sha256: userDocSha,
+        textPreview: true,
+        transport: 'r2',
+        uploadedAt: 900,
+        storageSessionId: scope.sessionId,
+      },
+    ]);
+
+    // Unknown attachment references outside caller history / delegated receipts are rejected.
+    await expect(
+      resolveOrPrepareSessionAttachments({
+        inputs: ['image:unknown-session-image'],
+        cwd: root,
+        containWithin: root,
+        workspaceId: scope.workspaceId,
+        callerSessionId: scope.sessionId,
+        targetSessionId: 'target-session-2' as SessionId,
+        sourceMachineId: scope.sourceMachineId,
+        targetMachineId: scope.targetMachineId,
+        readCallerHistory: async () => callerHistory,
+        readDelegatedTurn: async () => undefined,
+      })
+    ).rejects.toThrow('Attachment reference not found');
   });
 });

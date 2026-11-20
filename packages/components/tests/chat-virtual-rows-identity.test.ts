@@ -240,6 +240,21 @@ describe('coordinator conversation bubbles and search', () => {
           { type: 'coordinator_message', id: 'b1', body: '我先查一下合适的 Role，马上派发。' },
           toolCall(),
           { type: 'coordinator_message', id: 'b2', body: '已经交给 **天才程序员** 处理。' },
+          {
+            type: 'coordinator_message',
+            id: 'b3',
+            body: '',
+            images: [
+              {
+                imageId: 'img-1',
+                mimeType: 'image/png',
+                fileName: 'shot.png',
+                sizeBytes: 512,
+                uploadedAt: 1000,
+                storageSessionId: 'child-s1' as SessionId,
+              },
+            ],
+          },
         ],
         true
       )
@@ -261,10 +276,11 @@ describe('coordinator conversation bubbles and search', () => {
     });
 
     // Turn without coordinator_message emits zero rows so Virtua never receives a null DOM row.
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     expect(rows.map((row) => row.key)).toEqual([
       'assistant:coord-turn-1:bubble:b1',
       'assistant:coord-turn-1:bubble:b2',
+      'assistant:coord-turn-1:bubble:b3',
     ]);
     expect(
       rows.map((row) =>
@@ -272,7 +288,7 @@ describe('coordinator conversation bubbles and search', () => {
           ? row.content.entry.body
           : null
       )
-    ).toEqual(['我先查一下合适的 Role，马上派发。', '已经交给 **天才程序员** 处理。']);
+    ).toEqual(['我先查一下合适的 Role，马上派发。', '已经交给 **天才程序员** 处理。', '']);
 
     const searchBlocks = extractSessionSearchBlocks(
       [

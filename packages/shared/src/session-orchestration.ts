@@ -12,6 +12,7 @@ export const LODY_OPERATION_MIN_DEADLINE_SECONDS = 60;
 export const LODY_OPERATION_MAX_DEADLINE_SECONDS = 604_800;
 export const LODY_OPERATION_COMMAND_MAX_BYTES = 256 * 1024;
 export const LODY_OPERATION_COMPLETION_MAX_BYTES = 64 * 1024;
+export const LODY_OPERATION_OUTPUT_MAX_ATTACHMENTS = 16;
 export const LODY_MAX_CHAIN_DEPTH = 16;
 
 export const LodyOperationIdSchema = z
@@ -39,9 +40,27 @@ export const LodyErrorSchema = z
 export type LodyError = z.infer<typeof LodyErrorSchema>;
 
 const OperationTargetSchema = z.object({ sessionId: z.string(), userTurnId: z.string() }).strict();
+export const LodyOperationOutputAttachmentSchema = z
+  .object({
+    kind: z.enum(['image', 'file']),
+    ref: z.string().trim().min(1).max(256),
+    fileName: z.string().max(255).optional(),
+    mimeType: z.string().max(255),
+    sizeBytes: z.number().int().nonnegative().optional(),
+    width: z.number().int().positive().optional(),
+    height: z.number().int().positive().optional(),
+  })
+  .strict();
+
+export type LodyOperationOutputAttachment = z.infer<typeof LodyOperationOutputAttachmentSchema>;
+
 const OperationOutputPreviewSchema = z
   .object({
     text: z.string(),
+    attachments: z
+      .array(LodyOperationOutputAttachmentSchema)
+      .max(LODY_OPERATION_OUTPUT_MAX_ATTACHMENTS)
+      .optional(),
     truncated: z.literal(true).optional(),
     omittedBytes: z.number().int().nonnegative().optional(),
   })
@@ -152,6 +171,7 @@ export type LodyOperationItemTarget = {
 
 export type LodyOperationOutputPreview = {
   text: string;
+  attachments?: LodyOperationOutputAttachment[];
   truncated?: true;
   omittedBytes?: number;
 };

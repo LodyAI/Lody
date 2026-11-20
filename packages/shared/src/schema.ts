@@ -447,6 +447,8 @@ const historyMessageItemSchema = schema
             return typeof v.id === 'string' &&
               v.id.length > 0 &&
               typeof v.body === 'string' &&
+              (v.images === undefined || Array.isArray(v.images)) &&
+              (v.files === undefined || Array.isArray(v.files)) &&
               (v.createdAt === undefined || typeof v.createdAt === 'number')
               ? true
               : 'Missing coordinator message metadata';

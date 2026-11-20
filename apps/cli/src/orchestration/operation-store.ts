@@ -263,6 +263,7 @@ const boundCompletionFreeText = (
           ...(label !== undefined ? { label } : {}),
           output: {
             text: boundedOutput.value,
+            ...(item.output.attachments?.length ? { attachments: item.output.attachments } : {}),
             ...(outputOmittedBytes > 0
               ? { truncated: true as const, omittedBytes: outputOmittedBytes }
               : {}),

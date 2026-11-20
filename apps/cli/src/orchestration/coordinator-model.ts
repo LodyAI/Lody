@@ -1,11 +1,18 @@
 import type {
   LodyError,
+  LodyOperationOutputAttachment,
+  LodyOperationOutputPreview,
   MessageContent,
   SessionHistoryInput,
+  SessionImagePayload,
   SessionMeta,
   StoredLodyOperation,
 } from '@lody/shared';
-import { describeChatFailure, readChatFailureNotice } from '@lody/shared';
+import {
+  LODY_OPERATION_OUTPUT_MAX_ATTACHMENTS,
+  describeChatFailure,
+  readChatFailureNotice,
+} from '@lody/shared';
 import {
   getOperationProgressTargetKey,
   type OperationProgressStatusByTarget,
@@ -49,15 +56,61 @@ const truncateTargetOutput = (
   };
 };
 
+const toOutputImageAttachment = (image: SessionImagePayload): LodyOperationOutputAttachment => ({
+  kind: 'image',
+  ref: `image:${image.imageId}`,
+  ...(image.fileName ? { fileName: image.fileName } : {}),
+  mimeType: image.mimeType,
+  ...(typeof image.sizeBytes === 'number' ? { sizeBytes: image.sizeBytes } : {}),
+  ...(typeof image.width === 'number' && image.width > 0 ? { width: image.width } : {}),
+  ...(typeof image.height === 'number' && image.height > 0 ? { height: image.height } : {}),
+});
+
+const assistantOutputAttachments = (
+  items: readonly MessageContent[]
+): LodyOperationOutputAttachment[] => {
+  const attachments: LodyOperationOutputAttachment[] = [];
+  const seen = new Set<string>();
+  const push = (attachment: LodyOperationOutputAttachment) => {
+    if (attachments.length >= LODY_OPERATION_OUTPUT_MAX_ATTACHMENTS) return;
+    if (seen.has(attachment.ref)) return;
+    seen.add(attachment.ref);
+    attachments.push(attachment);
+  };
+  for (const item of items) {
+    if (attachments.length >= LODY_OPERATION_OUTPUT_MAX_ATTACHMENTS) break;
+    if (item.type === 'image') {
+      push(toOutputImageAttachment(item));
+    } else if (item.type === 'image_group') {
+      for (const image of item.images) {
+        push(toOutputImageAttachment(image));
+      }
+    } else if (item.type === 'file') {
+      push({
+        kind: 'file',
+        ref: `file:${item.fileId}`,
+        ...(item.fileName ? { fileName: item.fileName } : {}),
+        mimeType: item.mimeType,
+        ...(typeof item.sizeBytes === 'number' ? { sizeBytes: item.sizeBytes } : {}),
+      });
+    }
+  }
+  return attachments;
+};
+
 export const assistantOutputPreview = (
   assistant: Pick<SessionHistoryInput, 'items'>
-): ReturnType<typeof truncateTargetOutput> | undefined => {
-  const text = (assistant.items ?? [])
+): LodyOperationOutputPreview | undefined => {
+  const items = assistant.items ?? [];
+  const text = items
     .filter((item): item is Extract<MessageContent, { type: 'text' }> => item.type === 'text')
     .map((item) => item.text)
     .filter((item) => item.length > 0)
     .join('\n\n');
-  return text.length > 0 ? truncateTargetOutput(text) : undefined;
+  const attachments = assistantOutputAttachments(items);
+  if (text.length === 0 && attachments.length === 0) return undefined;
+  const preview = text.length > 0 ? truncateTargetOutput(text) : { text: '' };
+  return attachments.length > 0 ? { ...preview, attachments } : preview;
 };
 
 const failureReferenceMs = (output: readonly SessionHistoryInput[], fallbackMs: number): number => {

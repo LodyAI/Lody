@@ -2366,5 +2366,104 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     );
     const afterClear = await backend.readTurn('coord-turn-1');
     expect(afterClear.state === 'ready' ? afterClear.turn.items : []).toHaveLength(2);
+
+    // Zero-copy forwarding of child-produced image & file via completion receipt.
+    const childSessionId = 'child-media-session' as SessionId;
+    const childDoc = await manager.getOrCreateSessionDoc(childSessionId);
+    const childBackend = await createSessionBackend(childDoc);
+    const childImage = {
+      imageId: 'img-child-9',
+      mimeType: 'image/png',
+      fileName: 'ui.png',
+      sizeBytes: 4096,
+      width: 640,
+      height: 480,
+      transport: 'r2' as const,
+    };
+    const childFile = {
+      type: 'file' as const,
+      fileId: 'file-child-9',
+      fileName: 'walkthrough.mp4',
+      mimeType: 'video/mp4',
+      sizeBytes: 8192,
+      sha256: 'b'.repeat(64),
+      textPreview: false,
+      transport: 'r2' as const,
+      uploadedAt: 1001,
+    };
+    await childBackend.appendHistoryTurn({
+      id: 'child-assistant-9',
+      role: 'assistant',
+      timestamp: '2026-11-20T00:00:00.000Z',
+      items: [{ type: 'image_group', images: [childImage] }, childFile],
+      finished: true,
+    });
+    await backend.appendHistoryTurn({
+      id: 'coord-completion-9',
+      role: 'system',
+      timestamp: '2026-11-20T00:00:05.000Z',
+      items: [
+        {
+          type: 'operation_completion',
+          deliveryId: 'delivery-media-9',
+          operationId: 'op-media-9',
+          operationKind: 'session_create',
+          completion: {
+            type: 'result',
+            value: {
+              items: [
+                {
+                  status: 'succeeded',
+                  target: { sessionId: childSessionId, userTurnId: 'child-user-9' },
+                  assistantTurnId: 'child-assistant-9',
+                  output: {
+                    text: 'Done',
+                    attachments: [
+                      {
+                        kind: 'image',
+                        ref: 'image:img-child-9',
+                        fileName: 'ui.png',
+                        mimeType: 'image/png',
+                        sizeBytes: 4096,
+                        width: 640,
+                        height: 480,
+                      },
+                      {
+                        kind: 'file',
+                        ref: 'file:file-child-9',
+                        fileName: 'walkthrough.mp4',
+                        mimeType: 'video/mp4',
+                        sizeBytes: 8192,
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      ],
+    });
+
+    const bubbleWithAttachments = await runWithDaemonWorkspace(coordinatorDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_send_message', {
+        markdown: '子任务已完成，附上截图和录屏：',
+        attachments: ['image:img-child-9', 'file:file-child-9'],
+      })
+    );
+    expect(bubbleWithAttachments.isError, JSON.stringify(bubbleWithAttachments.content)).not.toBe(
+      true
+    );
+    const afterAttachments = await backend.readTurn('coord-turn-1');
+    expect(afterAttachments.state).toBe('ready');
+    if (afterAttachments.state !== 'ready') throw new Error('Expected ready turn');
+    expect(afterAttachments.turn.items?.at(-1)).toEqual({
+      type: 'coordinator_message',
+      id: expect.any(String),
+      body: '子任务已完成，附上截图和录屏：',
+      images: [{ ...childImage, storageSessionId: childSessionId }],
+      files: [{ ...childFile, storageSessionId: childSessionId }],
+      createdAt: expect.any(Number),
+    });
   });
 });

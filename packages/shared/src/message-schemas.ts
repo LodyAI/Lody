@@ -3931,6 +3931,8 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
       type: z.literal('coordinator_message'),
       id: SharedTrimmedNonEmptyStringSchema.max(128),
       body: SharedStringSchema.max(64 * 1024),
+      images: z.array(SessionImagePayloadSchema).min(1).max(SESSION_FILE_MAX_COUNT).optional(),
+      files: z.array(SessionFileBlockSchema).min(1).max(SESSION_FILE_MAX_COUNT).optional(),
       createdAt: z.number().finite().optional(),
     })
     .strict(),

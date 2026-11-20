@@ -1304,7 +1304,12 @@ export const buildChatVirtualRows = ({
         >;
       }> = [];
       message.items.forEach((entry, itemIndex) => {
-        if (entry.type === 'coordinator_message' && entry.body.trim().length > 0) {
+        if (
+          entry.type === 'coordinator_message' &&
+          (entry.body.trim().length > 0 ||
+            (entry.images?.length ?? 0) > 0 ||
+            (entry.files?.length ?? 0) > 0)
+        ) {
           coordinatorEntries.push({
             key: `assistant:${message.id}:bubble:${entry.id}`,
             itemIndex,
@@ -6702,6 +6707,7 @@ function CoordinatorReplyBubble({
   messageId,
   entry,
   itemIndex,
+  sessionId,
   onFilePathClick,
   conversationFontSize,
 }: {
@@ -6712,16 +6718,36 @@ function CoordinatorReplyBubble({
   onFilePathClick?: (filePath: string) => void;
   conversationFontSize: ConversationFontSize;
 }) {
+  const hasBody = entry.body.trim().length > 0;
+  const hasImages = (entry.images?.length ?? 0) > 0;
+  const hasFiles = (entry.files?.length ?? 0) > 0;
+
   return (
     <div {...stylex.props(coordinatorBubbleStyles.row)} data-coordinator-reply-bubble="">
       <div {...stylex.props(conversationSurface.bubble, coordinatorBubbleStyles.bubble)}>
-        <MarkdownBlock
-          text={entry.body}
-          size={conversationFontSize}
-          isStreaming={false}
-          onFilePathClick={onFilePathClick}
-          searchBlockId={getCoordinatorMessageSearchBlockId(messageId, itemIndex)}
-        />
+        <div className="flex flex-col gap-2.5">
+          {hasBody ? (
+            <MarkdownBlock
+              text={entry.body}
+              size={conversationFontSize}
+              isStreaming={false}
+              onFilePathClick={onFilePathClick}
+              searchBlockId={getCoordinatorMessageSearchBlockId(messageId, itemIndex)}
+            />
+          ) : null}
+          {hasImages ? (
+            <ImageGroupBubble
+              content={{ type: 'image_group', images: entry.images! }}
+              sessionId={sessionId}
+              messageId={messageId}
+              itemIndex={itemIndex}
+              align="start"
+            />
+          ) : null}
+          {hasFiles ? (
+            <SessionFileGroup files={entry.files!} sessionId={sessionId} align="start" />
+          ) : null}
+        </div>
       </div>
     </div>
   );
@@ -6960,13 +6986,29 @@ const renderAssistantContent = (
       return null;
     case 'coordinator_message':
       return (
-        <MarkdownBlock
-          text={content.body}
-          size={conversationFontSize}
-          isStreaming={false}
-          onFilePathClick={options?.onFilePathClick}
-          searchBlockId={getCoordinatorMessageSearchBlockId(messageId, itemIndex)}
-        />
+        <div className="flex flex-col gap-2.5">
+          {content.body.trim().length > 0 ? (
+            <MarkdownBlock
+              text={content.body}
+              size={conversationFontSize}
+              isStreaming={false}
+              onFilePathClick={options?.onFilePathClick}
+              searchBlockId={getCoordinatorMessageSearchBlockId(messageId, itemIndex)}
+            />
+          ) : null}
+          {content.images?.length ? (
+            <ImageGroupBubble
+              content={{ type: 'image_group', images: content.images }}
+              sessionId={sessionId}
+              messageId={messageId}
+              itemIndex={itemIndex}
+              align="start"
+            />
+          ) : null}
+          {content.files?.length ? (
+            <SessionFileGroup files={content.files} sessionId={sessionId} align="start" />
+          ) : null}
+        </div>
       );
     // A warning/failure the stream folded back onto its emitting turn. Only the
     // agent's own notices arrive here; `buildChatStreamItems` leaves every other
@@ -7990,11 +8032,27 @@ const renderUserContent = (
       return null;
     case 'coordinator_message':
       return (
-        <MarkdownBlock
-          text={content.body}
-          size={options.conversationFontSize}
-          searchBlockId={getCoordinatorMessageSearchBlockId(options.messageId, options.itemIndex)}
-        />
+        <div className="flex flex-col gap-2.5">
+          {content.body.trim().length > 0 ? (
+            <MarkdownBlock
+              text={content.body}
+              size={options.conversationFontSize}
+              searchBlockId={getCoordinatorMessageSearchBlockId(options.messageId, options.itemIndex)}
+            />
+          ) : null}
+          {content.images?.length ? (
+            <ImageGroupBubble
+              content={{ type: 'image_group', images: content.images }}
+              sessionId={sessionId}
+              messageId={options.messageId}
+              itemIndex={options.itemIndex}
+              align="start"
+            />
+          ) : null}
+          {content.files?.length ? (
+            <SessionFileGroup files={content.files} sessionId={sessionId} align="start" />
+          ) : null}
+        </div>
       );
     default:
       return null;

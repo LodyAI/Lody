@@ -2023,6 +2023,8 @@ export type MessageContent =
       type: 'coordinator_message';
       id: string;
       body: string;
+      images?: SessionImagePayload[];
+      files?: SessionFilePayload[];
       createdAt?: number;
     }
   | {
