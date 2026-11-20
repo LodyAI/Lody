@@ -42,6 +42,7 @@ import { TodayEditorContext } from './editor/today-editor-context';
 import { TodayEditorController } from './editor/today-editor-controller';
 import { TodayDaySection } from './today-day-section';
 import { TodayConvertDialog } from './today-convert-dialog';
+import { TodayMentionStatusMenuHost } from './today-mention-status-menu';
 import { buildConvertPrompt, todayMentionMarkdown } from './editor/block-selection';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
 import type { TodayNodeId } from '@lody/shared';
@@ -295,6 +296,7 @@ export function TodayView(props: {
         </TodayOutlineSurface>
         <TodaySessionPicker items={sessionItems} />
         <TodayNodeActions pinned={props.pinned ?? false} />
+        <TodayMentionStatusMenuHost />
         {anchor && anchor !== today ? (
           <div {...stylex.props(styles.back)}>
             <span {...stylex.props(styles.backButton)}>

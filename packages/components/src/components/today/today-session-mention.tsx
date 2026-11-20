@@ -145,15 +145,20 @@ export function TodayMention(props: { mention: TodayMentionTarget; selected?: bo
   return <TodaySessionMention sessionId={mention.id} selected={selected} />;
 }
 
-function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
-  const { t } = useTranslation();
-  const controller = useTodayEditor();
+/** A conversation's mention display from the sidebar's signals and the surface clock. */
+export function useTodaySessionDisplay(sessionId: SessionId): TodaySessionDisplay {
   const nowMs = useTodayNow();
-  const sessionId = props.sessionId as SessionId;
   const meta = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
   const metaSettled = useAtomValue(sessionMetaCacheSettledAtomFamily(sessionId));
   const live = useAtomValue(sessionLiveStatusAtomFamily(sessionId));
-  const display = todaySessionDisplay({ meta, metaSettled, live, nowMs });
+  return todaySessionDisplay({ meta, metaSettled, live, nowMs });
+}
+
+function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
+  const { t } = useTranslation();
+  const controller = useTodayEditor();
+  const sessionId = props.sessionId as SessionId;
+  const display = useTodaySessionDisplay(sessionId);
   const rootProps = {
     'data-today-mention': '',
     'data-today-session': sessionId,
