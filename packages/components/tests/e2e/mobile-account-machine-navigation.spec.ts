@@ -62,3 +62,56 @@ for (const locale of ['zh_CN', 'en']) {
     await cdp.detach();
   });
 }
+
+test('project Back slides the project page off over home settling in underneath', async ({
+  page,
+}) => {
+  await page.goto(
+    '/iframe.html?id=mobile-mobileprojectscreen--back-to-home&viewMode=story&globals=locale:zh_CN;theme:light'
+  );
+  await page.getByRole('button', { name: /lody/ }).first().tap({ timeout: 60_000 });
+  const back = page.getByRole('button', { name: '返回', exact: true });
+  await expect(back).toBeVisible();
+  await page.evaluate(async () => {
+    await Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getTiming().iterations !== Infinity)
+        .map((a) => a.finished.catch(() => undefined))
+    );
+  });
+  // Freeze the page's timers so the exit overlay stays until the test advances time.
+  await page.clock.install();
+  await back.tap();
+  await expect(page.getByTestId('stand-in-home')).toBeVisible();
+  // Sample both animations at the same point of their timeline.
+  const frame = await page.evaluate(() => {
+    const exitPanel = document.querySelector<HTMLElement>('body > * .mobile-drill-out');
+    const home = document.querySelector<HTMLElement>('[data-testid="stand-in-home"]');
+    const exit = exitPanel?.getAnimations()[0];
+    const reveal = home?.getAnimations()[0] as CSSAnimation | undefined;
+    if (!exitPanel || !home || !exit || !reveal) return null;
+    for (const animation of [exit, reveal]) {
+      animation.pause();
+      animation.currentTime = 60;
+    }
+    const homeStyle = getComputedStyle(home);
+    return {
+      reveal: reveal.animationName,
+      exitX: new DOMMatrix(getComputedStyle(exitPanel).transform).m41,
+      homeX: new DOMMatrix(homeStyle.transform).m41,
+      homeOpacity: Number(homeStyle.opacity),
+    };
+  });
+  expect(frame).not.toBeNull();
+  expect(frame!.reveal).toBe('mobile-drill-reveal');
+  expect(frame!.exitX).toBeGreaterThan(0);
+  expect(frame!.homeX).toBeLessThan(0);
+  expect(frame!.homeOpacity).toBeLessThan(1);
+  await page.clock.runFor(300);
+  await expect(page.locator('.mobile-drill-out')).toHaveCount(0);
+  // Home consumed the back flag: opening a project again is a forward push, not a reveal.
+  await page.getByRole('button', { name: /lody/ }).first().tap();
+  await expect(page.locator('[data-mobile-drill-panel]')).toHaveCount(1);
+  await expect(page.locator('[data-mobile-drill-panel]')).not.toHaveClass(/mobile-drill-reveal/);
+});

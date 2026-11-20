@@ -282,7 +282,9 @@ Quota refresh runs the selected agy executable with `--print /usage
 --output-format json` and its launch environment. This command reports zero model
 turns; its model-group weekly and five-hour fractions become the existing Provider
 quota windows. The ACP `/usage` prompt belongs only to the legacy server reader:
-agy does not advertise it and would send that text to the model.
+agy does not advertise it and would send that text to the model. The legacy reader
+deletes its scratch `/usage` session when the server advertises `session/delete`, within
+three seconds and without affecting the reading.
 
 Capability probes and real new/load/resume session snapshots use the same
 normalizer to project the builtin and legacy Antigravity quota readers. Session
@@ -500,6 +502,13 @@ sending task text through native default credentials.
 Other isolated title sessions retain the Provider's current model unless a title model
 was explicitly saved. Catalog order does not define a model preference; inferred safe
 mode and reasoning options remain independent of the model choice.
+
+Isolated title sessions are never resumed. Shutdown sends ACP `session/delete` when the
+agent advertises `sessionCapabilities.delete`, so the scratch conversation leaves the
+agent's native history; otherwise it sends `session/close` as before. Delete failure only
+logs: the title and process termination proceed. What delete removes is agent-defined
+(builtin Codex archives the thread for a non-AIR client). Normal sessions never use this
+path, because Lody archive is reversible.
 
 Title output accepts normal assistant text with an absent message phase, as Codex
 providers do not all emit that optional field. Explicit `commentary` is excluded;

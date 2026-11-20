@@ -107,6 +107,8 @@ describe('Lody Skills MCP server contract', () => {
     const example = /```json\n([\s\S]*?)\n```/.exec(guide)?.[1];
     if (!example) throw new Error('Missing registration example');
     const args = z.object({ command: automationCommandSchema }).parse(JSON.parse(example));
+    for (const block of guide.matchAll(/```json\n([\s\S]*?)\n```/g))
+      z.object({ command: automationCommandSchema }).parse(JSON.parse(z.string().parse(block[1])));
     const registered = await client.callTool({ name: 'lody_automation', arguments: args });
     expect(JSON.parse(textContent(registered))).toEqual({
       id: 'wait-1',

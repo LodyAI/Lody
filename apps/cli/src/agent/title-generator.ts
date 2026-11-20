@@ -455,6 +455,7 @@ export const generateTitleIsolated = async (
         agentProcess,
         client,
         acpSessionId,
+        deleteSession: true,
         logger: options.logger,
         sessionLabel: `title-generator:${options.cliType}/${options.agentType}`,
       });

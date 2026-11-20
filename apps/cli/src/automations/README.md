@@ -109,6 +109,29 @@ program's result. Accepted continuations keep observation demand alive. A change
 HEAD or rerun supersedes old evidence; dispatch checks it again, and CI continuations also verify the referenced checkouts immediately before the native
 prompt, resolving Project members through their existing scoped worktree paths.
 
+## Run a long command
+
+`run` hands a long command to the Host instead of a check: `lody automation run --
+pnpm test`, or MCP `{command: {type: "run", command, args?, cwd?, env?, reason?}}`.
+It is a wait without a program, so it shares `list`, `show`, `cancel`, the
+Session group's unsettled state and the continuation path above. The
+[run owner](runtime/managed-runs.ts) starts the process on the first check, in the
+Session workdir or a `cwd` inside it, with no shell and an explicit environment:
+the login-shell and daemon `PATH`, home and temp variables, plus the caller's `env`.
+Output goes to `<data dir>/automations/runs/<workspace>/<wait>.log`, capped at
+16 MiB; logs older than seven days are removed when another run starts.
+
+The start is persisted before spawn. The exit, or a failure to start, is recorded
+with the bounded output tail and makes the wait due at once; the next check
+completes it with facts only: command, outcome, exit code or signal, duration,
+log path and tail. Cancel interrupts the owner, which terminates the process tree.
+Closing the owner terminates every run without recording an exit. A restarted owner
+reports each started, unfinished run as interrupted, with its pid, and never starts
+it again; a Host crash can leave that process running. Identical unfinished runs in
+one Session deduplicate. The [run decision](../../../../.agents/notes/implemented/feature/2026-11-16-managed-long-runs.md)
+records the ownership, no-restart and environment trade-offs, and the owner-approved
+one-sentence guidance that recommends `run` in prompts and MCP text.
+
 ## Completion and cancellation
 
 The Host commits the matched result, captured evidence and stable continuation identity atomically.

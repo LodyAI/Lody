@@ -1,8 +1,16 @@
 import * as stylex from '@stylexjs/stylex';
 import { CalendarDays, ChevronLeft, ChevronRight, MoreHorizontal, Pin, PinOff } from 'lucide-react';
-import { useAtom, useAtomValue, useStore } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
 import { todayFullWidthAtom } from '@/atoms/sidebar-state';
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   buildTodayLink,
@@ -20,6 +28,18 @@ import { Popover } from '@lody/ui/popover';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { userAtom } from '@/atoms';
+import { navigationSidebarVisibleAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
+import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
+import { isNativeAppShell } from '@/lib/native-platform';
+import { withClassName } from '@/lib/stylex';
+import {
+  WINDOW_DRAG_EXEMPT_CLASS,
+  useMacTrafficLightRowPadClass,
+  useWindowDragRegionClass,
+  useWindowsCaptionPadClass,
+  useWindowsCaptionRowPadClass,
+} from '@/ui/window-drag-region';
+import { SidebarHistoryControls } from '../sidebar-history-controls';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { runtimeAtom } from '@/atoms/runtime';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
@@ -66,11 +86,18 @@ const styles = stylex.create({
   },
   toolbar: {
     display: 'flex',
+    flexShrink: 0,
     alignItems: 'center',
     gap: space[1],
     paddingInline: space[4],
-    paddingBlock: space[2],
   },
+  columnToolbar: { paddingBlock: space[2] },
+  /* The full page's toolbar is the window-top row: the session tab bar's 44px,
+     so the sidebar controls sit where every other page puts them. */
+  pageToolbar: { boxSizing: 'border-box', height: '2.75rem' },
+  // Clears the macOS traffic lights while the navigation sidebar is hidden.
+  pageToolbarBesideTrafficLights: { paddingLeft: '96px' },
+  controls: { display: 'flex', alignItems: 'center', gap: space[1] },
   title: {
     flex: 1,
     minWidth: 0,
@@ -225,10 +252,12 @@ export function TodayView(props: {
   return (
     <TodayEditorContext.Provider value={controller}>
       <div {...stylex.props(styles.root)} data-testid="today-view">
-        <div {...stylex.props(styles.toolbar)}>
-          <span {...stylex.props(styles.title)}>
-            {memberName ? t('today.memberTitle', '{{name}}’s Today', { name: memberName }) : null}
-          </span>
+        <TodayToolbar
+          pinned={props.pinned ?? false}
+          title={
+            memberName ? t('today.memberTitle', '{{name}}’s Today', { name: memberName }) : null
+          }
+        >
           <TodayCalendar
             today={today}
             selected={anchor ?? today}
@@ -307,7 +336,7 @@ export function TodayView(props: {
               </Menu.Item>
             </Menu.Content>
           </Menu.Root>
-        </div>
+        </TodayToolbar>
         <TodayOutlineSurface controller={controller} fullWidth={props.pinned || fullWidth}>
           {days.map((date, index) => (
             <TodayDaySection
@@ -340,6 +369,54 @@ export function TodayView(props: {
         ) : null}
       </div>
     </TodayEditorContext.Provider>
+  );
+}
+
+/**
+ * The Today toolbar. The full page's row is the window top: it sits under the
+ * workspace's window drag strip, so its controls are drag-exempt or Electron
+ * swallows their clicks, and while the navigation sidebar is hidden it carries
+ * the sidebar's toggle and Back/Forward, which would otherwise be unreachable.
+ * The pinned column is not at the window top and needs none of this.
+ */
+export function TodayToolbar(props: { pinned: boolean; title: ReactNode; children: ReactNode }) {
+  const sidebarVisible = useAtomValue(navigationSidebarVisibleAtom);
+  const showSidebar = useSetAtom(showNavigationSidebarAtom);
+  const fullscreen = useElectronFullscreen();
+  const dragClass = useWindowDragRegionClass();
+  const captionPadClass = useWindowsCaptionPadClass();
+  const captionRowPadClass = useWindowsCaptionRowPadClass();
+  const trafficLightRowPadClass = useMacTrafficLightRowPadClass({
+    insideWorkspaceFrame: true,
+    includeDesktopWeb: true,
+  });
+  const page = !props.pinned;
+  const exemptClassName = page && dragClass ? WINDOW_DRAG_EXEMPT_CLASS : undefined;
+  const besideTrafficLights =
+    page && !sidebarVisible && !isNativeAppShell() && isMacOSElectronRenderer() && !fullscreen;
+  const chromeClassName = page
+    ? [dragClass, captionPadClass, captionRowPadClass, trafficLightRowPadClass]
+        .filter(Boolean)
+        .join(' ')
+    : undefined;
+  return (
+    <div
+      {...withClassName(
+        stylex.props(
+          styles.toolbar,
+          page ? styles.pageToolbar : styles.columnToolbar,
+          besideTrafficLights && styles.pageToolbarBesideTrafficLights
+        ),
+        chromeClassName
+      )}
+      data-testid="today-toolbar"
+    >
+      {page && !sidebarVisible ? (
+        <SidebarHistoryControls onToggleSidebar={showSidebar} className={exemptClassName} />
+      ) : null}
+      <span {...stylex.props(styles.title)}>{props.title}</span>
+      <div {...withClassName(stylex.props(styles.controls), exemptClassName)}>{props.children}</div>
+    </div>
   );
 }
 

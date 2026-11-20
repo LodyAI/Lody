@@ -821,10 +821,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
             return (
               <div
                 key={bucket.key}
-                className={cn(
-                  'group flex flex-col gap-0.5',
-                  collapsed ? 'mb-1 last:mb-0' : 'mb-4 last:mb-0'
-                )}
+                className={cn('group flex flex-col gap-0.5', collapsed && 'mb-1 last:mb-0')}
               >
                 <SidebarFocusDndContainer
                   items={bucket.items}
@@ -834,6 +831,12 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                 >
                   {(orderedFocusItems) => (
                     <SidebarUpdatedSessionList
+                      // The space down to the next bucket's label is padding of the
+                      // drop section, not a margin outside it: a release just below
+                      // the last row still lands at the end of Focus.
+                      className={
+                        !collapsed && bucketIndex < buckets.length - 1 ? 'pb-4' : undefined
+                      }
                       items={orderedFocusItems}
                       now={now}
                       selectedItemId={selectedItemId}
@@ -1482,6 +1485,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             isWorking={item.isWorking}
             hasUnreadMessages={item.hasUnreadMessages}
             fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
+            rowGroup="row"
             restIcon={
               snoozeCountdown ||
               showPr ||

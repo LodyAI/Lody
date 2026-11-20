@@ -44,6 +44,8 @@ results…” 开头；Fix CI 先在客户端拉取失败检查，再规定读�
 
 ## 影响
 
+之后唯一经 owner 批准的例外——推荐用 Lody 托管 run 执行长命令的一句话——记录在
+[托管长命令](../feature/2026-11-16-managed-long-runs.zh.md)。
 `lody_session_create` 的说明只陈述委派提示词相关的事实（历史不会被复制），不再规定其
 内容。原生 iOS 与 Android 客户端各自保存更长的快捷操作文案，不在本次范围内。
 

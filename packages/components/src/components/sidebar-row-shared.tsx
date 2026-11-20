@@ -771,6 +771,19 @@ export function SidebarRowActionButton({
   );
 }
 
+// Revealed end-slot fills, one per row group scope. Each set names only its
+// own scope so an unrelated ancestor `group` can never reveal the fill.
+const PLAIN_ROW_GROUP_FILL = cn(
+  'group-hover:bg-sidebar-hover group-data-[menu-open]:bg-sidebar-hover',
+  '[.group:hover[aria-current=page]_&]:bg-sidebar-selection',
+  '[.group[data-menu-open][aria-current=page]_&]:bg-sidebar-selection'
+);
+const NAMED_ROW_GROUP_FILL = cn(
+  'group-hover/row:bg-sidebar-hover group-data-[menu-open]/row:bg-sidebar-hover',
+  '[.group\\/row:hover[aria-current=page]_&]:bg-sidebar-selection',
+  '[.group\\/row[data-menu-open][aria-current=page]_&]:bg-sidebar-selection'
+);
+
 /**
  * ③ The final slot at the row's right edge, and the row's ONE status channel.
  *
@@ -799,6 +812,7 @@ export function SidebarRowEndSlot({
   archive,
   /** Fade the rest icon while hovering (match the row's group, e.g. 'group-hover/row:opacity-0'). */
   fadeClassName = 'group-hover:opacity-0 group-data-[menu-open]:opacity-0',
+  rowGroup = 'group',
 }: {
   /**
    * Reads this session's local send status here, in the leaf, so upload
@@ -815,6 +829,13 @@ export function SidebarRowEndSlot({
   menu?: ReactNode;
   archive?: ReactNode;
   fadeClassName?: string;
+  /**
+   * The row's own Tailwind group: plain `group`, or the named `group/row` used
+   * where the row sits inside an outer plain `group` (a section list). The
+   * revealed fill must key off the row only — matching any ancestor `group`
+   * would paint every row's slot whenever the pointer is over the list.
+   */
+  rowGroup?: 'group' | 'row';
 }) {
   // The end slot outlives the status mark, so the hand-over hold lives here.
   const drawWorking = useWorkingHandOver(isWorking === true, hasUnreadMessages === true);
@@ -862,15 +883,11 @@ export function SidebarRowEndSlot({
       className={cn(
         'relative flex h-5 shrink-0 items-center justify-end pointer-events-none',
         reserve ? (actionColumns > 1 ? 'min-w-10' : 'min-w-5') : 'w-0',
-        showActions && cn(
-          'transition-colors duration-100',
-          'group-hover:bg-sidebar-hover group-hover/row:bg-sidebar-hover',
-          'group-data-[menu-open]:bg-sidebar-hover group-data-[menu-open]/row:bg-sidebar-hover',
-          '[.group:hover[aria-current=page]_&]:bg-sidebar-selection',
-          '[.group\\/row:hover[aria-current=page]_&]:bg-sidebar-selection',
-          '[.group[data-menu-open][aria-current=page]_&]:bg-sidebar-selection',
-          '[.group\\/row[data-menu-open][aria-current=page]_&]:bg-sidebar-selection'
-        )
+        showActions &&
+          cn(
+            'transition-colors duration-100',
+            rowGroup === 'row' ? NAMED_ROW_GROUP_FILL : PLAIN_ROW_GROUP_FILL
+          )
       )}
     >
       {hasRest ? (

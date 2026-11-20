@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   __test__,
+  createAcpClient,
   prepareAcpProcessEnvironmentLegacy,
   shutdownLocalAcpAgent,
   spawnAcpProcess,
@@ -161,33 +162,100 @@ describe('shutdownLocalAcpAgent', () => {
   const spawnAgent = (table: FakeProcessTable): ChildProcess =>
     table.api.spawn('agent', [], { detached: true });
 
-  it('closes the ACP session before terminating the agent process group', async () => {
-    const table = new FakeProcessTable('linux');
-    const child = spawnAgent(table);
-    const leader = child.pid ?? -1;
-    const descendant = table.addDescendant(leader);
-    const signalsAtClose: unknown[] = [];
-    const client = {
-      closeSession: vi.fn(async () => {
-        signalsAtClose.push(...table.delivered);
-        return true;
+  /** A real AgentClient session against an in-memory agent that stores its sessions. */
+  const startStoredSession = async (deletion: 'none' | 'advertised' | 'failing') => {
+    const outbound = new TransformStream();
+    const inbound = new TransformStream();
+    const stored = new Set<string>();
+    const requests: string[] = [];
+    let onRequest = () => {};
+    const _agent = new AgentSideConnection(
+      () => ({
+        initialize: async () => ({
+          protocolVersion: PROTOCOL_VERSION,
+          agentCapabilities: {
+            sessionCapabilities: { close: {}, ...(deletion === 'none' ? {} : { delete: {} }) },
+          },
+        }),
+        newSession: async () => {
+          stored.add('scratch-session');
+          return { sessionId: 'scratch-session' };
+        },
+        closeSession: async () => {
+          requests.push('close');
+          onRequest();
+          return {};
+        },
+        deleteSession: async (params) => {
+          requests.push('delete');
+          onRequest();
+          if (deletion === 'failing') throw new Error('Synthetic delete failure');
+          stored.delete(params.sessionId);
+          return {};
+        },
+        authenticate: async () => ({}),
+        prompt: async () => ({ stopReason: 'end_turn' as const }),
+        cancel: async () => {},
       }),
-    };
-
-    await shutdownLocalAcpAgent({
-      agentProcess: child,
-      client: client as never,
-      acpSessionId: 'acp-1' as never,
+      { readable: outbound.readable, writable: inbound.writable } as Stream
+    );
+    const { client, acpSessionId } = await createAcpClient({
+      stream: { readable: inbound.readable, writable: outbound.writable } as Stream,
+      workdir: os.tmpdir(),
       logger: createSilentLogger(),
-      sessionLabel: 'test-local-agent',
-      nodeProcess: table.api,
+      terminalManager: {} as never,
+      onUpdateMessage: () => {},
+      onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
     });
+    return {
+      client,
+      acpSessionId,
+      stored,
+      requests,
+      observeRequests: (callback: () => void) => {
+        onRequest = callback;
+      },
+    };
+  };
 
-    expect(client.closeSession).toHaveBeenCalledWith('acp-1', 5000);
-    expect(signalsAtClose).toEqual([]);
-    expect(table.delivered).toEqual([{ target: -leader, signal: 'SIGTERM' }]);
-    expect(table.isAlive(descendant)).toBe(false);
-  });
+  it.each([
+    { deletion: 'advertised', deleteSession: true, requests: ['delete'], kept: [] },
+    { deletion: 'none', deleteSession: true, requests: ['close'], kept: ['scratch-session'] },
+    {
+      deletion: 'advertised',
+      deleteSession: false,
+      requests: ['close'],
+      kept: ['scratch-session'],
+    },
+    { deletion: 'failing', deleteSession: true, requests: ['delete'], kept: ['scratch-session'] },
+  ] as const)(
+    'ends a $deletion-delete session with $requests (deleteSession=$deleteSession) before terminating the process group',
+    async ({ deletion, deleteSession, requests, kept }) => {
+      const table = new FakeProcessTable('linux');
+      const child = spawnAgent(table);
+      const leader = child.pid ?? -1;
+      const descendant = table.addDescendant(leader);
+      const session = await startStoredSession(deletion);
+      const signalsAtRequest: unknown[] = [];
+      session.observeRequests(() => signalsAtRequest.push(...table.delivered));
+
+      await shutdownLocalAcpAgent({
+        agentProcess: child,
+        client: session.client,
+        acpSessionId: session.acpSessionId,
+        deleteSession,
+        logger: createSilentLogger(),
+        sessionLabel: 'test-local-agent',
+        nodeProcess: table.api,
+      });
+
+      expect(session.requests).toEqual(requests);
+      expect([...session.stored]).toEqual(kept);
+      expect(signalsAtRequest).toEqual([]);
+      expect(table.delivered).toEqual([{ target: -leader, signal: 'SIGTERM' }]);
+      expect(table.isAlive(descendant)).toBe(false);
+    }
+  );
 
   it('escalates to SIGKILL when the agent ignores SIGTERM', async () => {
     vi.useFakeTimers();
@@ -328,12 +396,14 @@ describe('Antigravity quota ACP compatibility', () => {
       serverName?: string;
       stopReason?: 'end_turn' | 'cancelled';
       beforeNewResponse?: boolean;
+      deletion?: 'advertised' | 'failing';
     } = {}
   ) {
     const outbound = new TransformStream();
     const inbound = new TransformStream();
     const prompts: unknown[] = [];
     const sessions: unknown[] = [];
+    const deleted: string[] = [];
     const advertise = async () =>
       server.sessionUpdate({
         sessionId: 'quota-session',
@@ -350,7 +420,15 @@ describe('Antigravity quota ACP compatibility', () => {
         initialize: async () => ({
           protocolVersion: PROTOCOL_VERSION,
           agentInfo: { name: options.serverName ?? 'antigravity-acp', version: '1.4.5' },
+          ...(options.deletion
+            ? { agentCapabilities: { sessionCapabilities: { delete: {} } } }
+            : {}),
         }),
+        deleteSession: async (params) => {
+          if (options.deletion === 'failing') throw new Error('Synthetic delete failure');
+          deleted.push(params.sessionId);
+          return {};
+        },
         newSession: async (params) => {
           sessions.push(params);
           if (options.beforeNewResponse) await advertise();
@@ -400,7 +478,7 @@ describe('Antigravity quota ACP compatibility', () => {
         workdir: '/quota-scratch',
       }
     );
-    return { outcome, prompts, sessions };
+    return { outcome, prompts, sessions, deleted };
   }
 
   it.each([false, true])(
@@ -461,6 +539,15 @@ describe('Antigravity quota ACP compatibility', () => {
       const { outcome, prompts } = await query(options);
       await expect(outcome).rejects.toThrow();
       if (options.cliType || options.serverName || options.commands) expect(prompts).toEqual([]);
+    }
+  );
+
+  it.each([undefined, 'advertised', 'failing'] as const)(
+    'returns the reading and deletes the scratch session only when advertised (%s)',
+    async (deletion) => {
+      const { outcome, deleted } = await query({ deletion });
+      expect((await outcome).rateLimits[0]?.windows).toHaveLength(4);
+      expect(deleted).toEqual(deletion === 'advertised' ? ['quota-session'] : []);
     }
   );
 

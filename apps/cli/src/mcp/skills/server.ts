@@ -12,7 +12,7 @@ const cacheSchema = z.object({
 });
 const metadata = z.record(z.string(), z.json()).optional();
 export const LODY_SKILL_INSTRUCTIONS =
-  'Automation guidance is available as a skill on this MCP server: skill://lody-automations/SKILL.md.';
+  'Automation guidance is available as a skill on this MCP server: skill://lody-automations/SKILL.md. Wait for long work with lody_automation instead of polling: `run` keeps a command alive after this Session is reclaimed for idling and resumes it on exit.';
 
 /** Skill manifests and resource reads share the same immutable bundle. */
 export function registerLodySkills(server: McpServer): void {

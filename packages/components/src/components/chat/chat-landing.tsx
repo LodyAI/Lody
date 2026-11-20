@@ -83,13 +83,13 @@ import {
   GitBranch,
   LockKeyhole,
   Monitor,
-  PanelLeft,
   RefreshCw,
   X,
 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
+import { SidebarHistoryControls } from '../sidebar-history-controls';
 import { PiProviderMigrationCard } from './pi-provider-migration-card';
 
 import {
@@ -7291,16 +7291,7 @@ function WorkspaceChatLanding({
         onOpenMobileDrawer={() => openMobileDrawer(true)}
         leftSidebarExpandSlot={
           !isMobile && isLeftSidebarHidden ? (
-            <Button
-              type="button"
-              variant="ghost"
-              icon
-              onClick={() => showNavigationSidebar()}
-              aria-label={t('chat.leftSidebar.show', 'Show navigation sidebar')}
-              className="h-7 w-7 shrink-0 text-muted-foreground"
-            >
-              <PanelLeft className="h-4 w-4" />
-            </Button>
+            <SidebarHistoryControls onToggleSidebar={() => showNavigationSidebar()} />
           ) : null
         }
         resetKeys={[workspaceId, workspaceSlug, contextType, isMobile]}
