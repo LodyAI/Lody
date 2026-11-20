@@ -96,6 +96,10 @@ const styles = stylex.create({
   windowRowToolbar: { boxSizing: 'border-box', height: '2.75rem' },
   // Clears the macOS traffic lights while the navigation sidebar is hidden.
   toolbarBesideTrafficLights: { paddingLeft: '96px' },
+  // The card's rim puts the row 1px below the 4px frame step the macOS row
+  // padding assumes; without this the controls centre at y=24, a pixel under
+  // the traffic lights and the sidebar header's controls at y=23.
+  toolbarOnTrafficLightLine: { marginTop: -1 },
   controls: { display: 'flex', alignItems: 'center', gap: space[1] },
   title: {
     flex: 1,
@@ -426,7 +430,8 @@ export function TodayToolbar(props: { pinned: boolean; title: ReactNode; childre
         stylex.props(
           styles.toolbar,
           styles.windowRowToolbar,
-          besideTrafficLights && styles.toolbarBesideTrafficLights
+          besideTrafficLights && styles.toolbarBesideTrafficLights,
+          trafficLightRowPadClass !== undefined && styles.toolbarOnTrafficLightLine
         ),
         chromeClassName
       )}
