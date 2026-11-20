@@ -160,6 +160,7 @@ afterEach(() => {
   sharedCodeCollabTextState = createCodeCollabSessionFileProviderTextState();
   delete window.__LODY_ELECTRON__;
   delete window.ipc;
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
@@ -167,6 +168,7 @@ type RenderOptions = {
   /** Machine liveness comes from ephemeral presence. Defaults to online. */
   readonly machineOnline?: boolean;
   readonly localMachine?: boolean;
+  readonly workspacePath?: string;
 };
 
 function createMachineMeta(): MachineMeta {
@@ -189,7 +191,10 @@ async function render(node: ReactNode, options: RenderOptions = {}): Promise<HTM
   const store = createStore();
   currentStore = store;
   store.set(machineMetaCacheAtom, {
-    [getMachineRoomId(session.machineId)]: createMachineMeta(),
+    [getMachineRoomId(session.machineId)]: {
+      ...createMachineMeta(),
+      workspacePaths: options.workspacePath ? { [session.id]: options.workspacePath } : {},
+    },
   });
   store.set(lodyPresenceSyncStateAtom, 'synced');
   if (options.localMachine === true) {
@@ -1411,6 +1416,67 @@ describe('SessionFileContentView', () => {
       userAgent.mockRestore();
       installCredentiallessIframeSupportForTest();
     }
+  });
+
+  it('opens paged local HTML from disk after consent and returns to paged source', async () => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+    );
+    const path = 'large.html';
+    const url = 'lody-html-preview://preview/large.html';
+    Object.defineProperty(window, '__LODY_ELECTRON__', { configurable: true, value: true });
+    Object.defineProperty(window, 'ipc', {
+      configurable: true,
+      value: {
+        invoke: async (channel: string) => {
+          if (channel === 'machineRpc.openHtmlPreview') return { status: 'ok', url };
+          throw new Error(`Unexpected invoke ${channel}`);
+        },
+        on: () => () => {},
+        send: () => {},
+      },
+    });
+    const provider = createFakeSessionFileProvider({
+      files: [{ path, kind: 'text', sourceState: 'live-readonly', readonly: true }],
+      snapshots: {
+        [path]: {
+          kind: 'paged-text',
+          source: { sizeBytes: 524289, pageBytes: 65536, readPage: async () => '<h1>Page' },
+        },
+      },
+    });
+    const view = await render(
+      createElement(SessionFileContentView, {
+        sessionId: session.id,
+        session,
+        filePath: path,
+        fileProvider: provider,
+        active: true,
+      }),
+      { localMachine: true, workspacePath: '/work' }
+    );
+    expect(view.textContent).toContain('Large file · read-only');
+    const preview = view.querySelector<HTMLButtonElement>('button[aria-label="Preview"]');
+    expect(preview).not.toBeNull();
+    await act(async () => preview!.click());
+    const dialog = document.querySelector('[role="alertdialog"]');
+    expect(dialog?.textContent).toContain('Allow JavaScript');
+    const confirm = Array.from(dialog!.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Preview'
+    );
+    await act(async () => confirm!.click());
+    expect(view.querySelector('iframe')?.getAttribute('src')).toBe(url);
+    expect(view.querySelector('iframe')?.getAttribute('sandbox')).toBe('');
+    await act(async () =>
+      view.querySelector<HTMLButtonElement>('button[aria-label="Hide preview"]')!.click()
+    );
+    expect(view.textContent).toContain('Large file · read-only');
+    expect(view.querySelector('iframe')).toBeNull();
   });
 
   it('does not preview a truncated HTML snapshot even with mobile default preview', async () => {
