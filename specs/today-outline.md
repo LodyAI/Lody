@@ -20,6 +20,11 @@ any time; when off it changes none of the app's existing behavior.
 - Settings → "Experimental features" has its own "Today" row, stored on this device only. When on, a "Today"
   entry appears in the sidebar's top navigation; when off, the entry, the page and every subscription unmount
   immediately. The switch controls only the UI: data still syncs, exports and migrates.
+- The "Open Today" shortcut defaults to `⌘⇧D` (`Ctrl+Shift+D` on Windows/Linux; D for Daily, as Roam and Tana
+  bind their daily page), the same on desktop and Web, and can be rebound or unbound in Settings → Keyboard
+  shortcuts. It acts only while the experiment is on and, when pinned, moves the column like the sidebar entry.
+  Hovering the sidebar's "New chat", "Today" and "Search" rows reveals their current binding as a pill at the row's
+  end (the style of the ⌘1–9 pills shown while ⌘ is held), and holding the modifier shows them too.
 - v1 covers desktop and Web; mobile does not show it.
 - Today can fill the main area, or be pinned with the pin button at its top as a column right of the left
   sidebar (layout: left sidebar | Today | main area). Pinned state and column width are stored on this device

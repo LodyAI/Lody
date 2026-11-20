@@ -1,3 +1,5 @@
+import { registerBuiltInCommands, unregisterBuiltInCommands } from '@/lib/commands';
+import { __resetPlatformCacheForTests } from '@/lib/commands/platform';
 import type { Meta, StoryObj } from '@storybook/react';
 import { E2eeOfflineSummaryText } from '@/components/e2ee-offline-window';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
@@ -710,6 +712,45 @@ export const ElectronMacOSCollapseToggle: Story = {
     // Pins the collapse toggle to the macOS traffic-light centerline (y=23,
     // see `trafficLightPosition` in apps/electron/src/main/window.ts).
     isElectronMacOS: true,
+  },
+};
+
+/**
+ * Desktop macOS with the registry's built-in commands, so navigation rows have
+ * live bindings: hover New chat, Today or Search to see the shortcut pill.
+ */
+function WithDesktopCommands(props: { children: ReactNode }) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const host = window as {
+      __LODY_ELECTRON__?: boolean;
+      __LODY_PLATFORM__?: { os?: string };
+    };
+    const previous = { electron: host.__LODY_ELECTRON__, platform: host.__LODY_PLATFORM__ };
+    host.__LODY_ELECTRON__ = true;
+    host.__LODY_PLATFORM__ = { os: 'darwin' };
+    __resetPlatformCacheForTests();
+    registerBuiltInCommands();
+    setReady(true);
+    return () => {
+      unregisterBuiltInCommands();
+      host.__LODY_ELECTRON__ = previous.electron;
+      host.__LODY_PLATFORM__ = previous.platform;
+      __resetPlatformCacheForTests();
+    };
+  }, []);
+  return ready ? props.children : null;
+}
+
+export const NavigationShortcuts: Story = {
+  render: (args) => (
+    <WithDesktopCommands>
+      <WithProjectsLayout {...args} />
+    </WithDesktopCommands>
+  ),
+  args: {
+    ...Default.args!,
+    onTodayClicked: () => {},
   },
 };
 

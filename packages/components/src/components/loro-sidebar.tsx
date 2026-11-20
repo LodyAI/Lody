@@ -20,7 +20,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import { useStore } from 'jotai';
+import { useAtomValue, useStore } from 'jotai';
 import { cn } from '@/lib/utils';
 import { BOOT_SHELL_SIDEBAR_WIDTH, isMobileSidebarDevice } from '@/lib/boot-shell-script';
 import { sidebarScrollTopByWorkspaceAtom } from '@/atoms/sidebar-state';
@@ -38,6 +38,8 @@ import { sidebarSurface } from './sidebar-surface';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space } from '@lody/ui/tokens/scales.stylex';
 import { Kbd } from '@lody/ui/kbd';
+import { SidebarBindingPill } from '@/components/sidebar-shortcut-pill';
+import { sidebarShortcutOverlayActiveAtom } from '@/atoms/sidebar-shortcuts';
 import { Tooltip } from '@lody/ui/tooltip';
 import { WorkingGrid } from '@/ui/working-grid';
 import { commands, formatKeyBinding, type ShortcutCommandId } from '@/lib/commands';
@@ -677,6 +679,12 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
  * `COMMAND_SHORTCUTS` so a rebound key is what the tooltip teaches.
  */
 function useCommandShortcutLabel(id: ShortcutCommandId): string | null {
+  const binding = useCommandBinding(id);
+  return binding ? formatKeyBinding(binding) : null;
+}
+
+/** The live binding for a command in registry syntax, or null when unbound. */
+function useCommandBinding(id: ShortcutCommandId): string | null {
   const binding = useSyncExternalStore(
     (onChange) => commands.subscribe(onChange),
     // A string, not the array: `getKeybindingsFor` allocates, and an unstable
@@ -684,7 +692,7 @@ function useCommandShortcutLabel(id: ShortcutCommandId): string | null {
     () => commands.getKeybindingsFor(id)[0] ?? '',
     () => ''
   );
-  return binding ? formatKeyBinding(binding) : null;
+  return binding || null;
 }
 
 type NavigationAvailability = {
@@ -804,12 +812,19 @@ function NavButton({
   onClick,
   badge,
   action,
+  shortcut,
 }: {
   active: boolean;
   isMobile: boolean;
   label: string;
   icon: ReactNode;
   onClick?: () => void;
+  /**
+   * The row's command binding (registry syntax), shown as key caps at the row's
+   * end while it is hovered or focused, so the resting sidebar stays quiet.
+   * Follows the live binding, so a rebound key is what it teaches.
+   */
+  shortcut?: string | null;
   /** Optional trailing count. Omitted (not zero-rendered) when there is nothing to report. */
   badge?: number;
   /**
@@ -872,9 +887,30 @@ function NavButton({
             {badge > 99 ? '99+' : badge}
           </span>
         ) : null}
+        {shortcut && !isMobile ? <NavShortcut binding={shortcut} selected={active} /> : null}
       </button>
       {action ? <span className="absolute right-1 flex items-center">{action}</span> : null}
     </div>
+  );
+}
+
+/**
+ * A navigation row's shortcut pill, at the row's end: it fades in on hover or
+ * keyboard focus, and shows with the session rows' ⌘1–9 pills while the
+ * modifier is held. A leaf, so holding the modifier re-renders only these.
+ */
+function NavShortcut({ binding, selected }: { binding: string; selected: boolean }) {
+  const held = useAtomValue(sidebarShortcutOverlayActiveAtom);
+  return (
+    <span
+      data-nav-shortcut=""
+      className={cn(
+        'ml-auto flex shrink-0 items-center pl-2 transition-opacity duration-150 motion-reduce:transition-none',
+        held ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100'
+      )}
+    >
+      <SidebarBindingPill binding={binding} selected={selected} />
+    </span>
   );
 }
 
@@ -1002,6 +1038,9 @@ export const LoroSidebar = memo(function LoroSidebar({
     };
   }, [collapsed, scrollStateKey, store]);
   const collapseShortcut = useCommandShortcutLabel('sidebar.toggle');
+  const newChatBinding = useCommandBinding('session.new');
+  const searchBinding = useCommandBinding('palette.toggle');
+  const todayBinding = useCommandBinding('today.open');
   const backShortcut = useCommandShortcutLabel('nav.back');
   const forwardShortcut = useCommandShortcutLabel('nav.forward');
   const { canGoBack, canGoForward } = useNavigationAvailability();
@@ -1681,6 +1720,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             label={mergedLabels.home}
             icon={<MynauiEditOne className="h-4 w-4" />}
             onClick={onHomeClicked}
+            shortcut={newChatBinding}
           />
           {onTodayClicked && !isMobile ? (
             <NavButton
@@ -1689,6 +1729,7 @@ export const LoroSidebar = memo(function LoroSidebar({
               label={t('today.nav', 'Today')}
               icon={<CalendarDays className="h-4 w-4" strokeWidth={1.5} />}
               onClick={onTodayClicked}
+              shortcut={todayBinding}
             />
           ) : null}
           {onSchedulesClicked && schedulesAllowed ? (
@@ -1706,6 +1747,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             label={t('common.search', 'Search')}
             icon={<Search className="h-4 w-4" strokeWidth={1.5} />}
             onClick={() => setCommandPaletteOpen(true)}
+            shortcut={searchBinding}
           />
         </div>
 

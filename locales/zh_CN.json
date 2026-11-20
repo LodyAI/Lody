@@ -5242,6 +5242,7 @@
   "schedules.saveError": "无法保存定时任务。",
   "schedules.upgrade": "请更新目标机器的 CLI，以管理定时任务。",
   "commands.schedules.pause": "暂停定时任务",
+  "commands.today.open": "打开今天",
   "schedules.notFound": "此定时任务不可用或已删除。",
   "schedules.enabled": "已启用",
   "schedules.runNow": "立即运行",

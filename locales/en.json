@@ -5242,6 +5242,7 @@
   "schedules.saveError": "The schedule could not be saved.",
   "schedules.upgrade": "Update the target machine’s CLI to edit schedules.",
   "commands.schedules.pause": "Pause Schedule",
+  "commands.today.open": "Open Today",
   "schedules.notFound": "This schedule is unavailable or deleted.",
   "schedules.enabled": "Enabled",
   "schedules.runNow": "Run now",
