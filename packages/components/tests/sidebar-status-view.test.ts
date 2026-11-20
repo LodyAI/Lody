@@ -7,10 +7,6 @@ import {
   sidebarStatusGroup,
 } from '@/lib/sidebar-status-group';
 import {
-  closedSessionHasUnreadMessages,
-  sessionHasUnreadMessages,
-} from '@/lib/session-read-receipt';
-import {
   buildSidebarUpdatedBuckets,
   SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS,
   type SidebarUpdatedItem,
@@ -68,7 +64,7 @@ describe('sidebarStatusGroup', () => {
     ).toBe('focus');
   });
 
-  it('keeps opened-by child sessions in their root Status bucket and indexes Focus moves over roots only', () => {
+  it('classifies opened-by child sessions independently, nests them when in the same group, and indexes Focus moves over roots only', () => {
     const mk = (id: string, extra: Partial<SidebarUpdatedItem> = {}): SidebarUpdatedItem => ({
       id,
       kind: 'chat',
@@ -80,27 +76,49 @@ describe('sidebarStatusGroup', () => {
     const items: SidebarUpdatedItem[] = [
       mk('root-a', { orderKey: '80' }),
       mk('child-a1', { openedBySessionId: 'root-a', openedByRowSessionId: 'root-a' }),
-      mk('root-b', { orderKey: '82' }),
-      mk('root-snoozed', { snoozedUntil: NOW + 7_200_000 }),
-      mk('child-snoozed', {
-        openedBySessionId: 'root-snoozed',
-        openedByRowSessionId: 'root-snoozed',
+      mk('child-a2-snoozed', {
+        openedBySessionId: 'root-a',
+        openedByRowSessionId: 'root-a',
+        snoozedUntil: NOW + 7_200_000,
       }),
+      mk('root-b', { orderKey: '82' }),
     ];
 
     const buckets = buildSidebarUpdatedBuckets(items, 'status', NOW);
     const focus = buckets.find((b) => b.key === 'focus')!;
     const later = buckets.find((b) => b.key === 'later')!;
-    // Child of snoozed root follows its root into Later instead of being orphaned in Focus.
-    expect(later.items.map((i) => i.id)).toEqual(['root-snoozed', 'child-snoozed']);
 
-    // Top-level roots in Focus are ['root-a', 'root-b']; moving 'root-b' to root index 0 lands before 'root-a'.
-    const focusRoots = buildOpenedBySessionTree(
-      focus.items,
+    // Snoozed child moves to Later on its own as a top-level row while its parent stays in Focus.
+    const laterTree = buildOpenedBySessionTree(later.items, SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS);
+    expect(laterTree.map((n) => ({ id: n.item.id, depth: n.depth }))).toEqual([
+      { id: 'child-a2-snoozed', depth: 0 },
+    ]);
+
+    // Child in the same group stays indented under root-a; Focus DnD indexes over roots only.
+    const focusTree = buildOpenedBySessionTree(focus.items, SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS);
+    expect(focusTree.map((n) => ({ id: n.item.id, depth: n.depth }))).toEqual([
+      { id: 'root-a', depth: 0 },
+      { id: 'child-a1', depth: 1 },
+      { id: 'root-b', depth: 0 },
+    ]);
+
+    // When child-a2 returns to Focus, indentation under root-a is restored automatically.
+    const restoredBuckets = buildSidebarUpdatedBuckets(
+      items.map((item) =>
+        item.id === 'child-a2-snoozed' ? { ...item, snoozedUntil: null } : item
+      ),
+      'status',
+      NOW
+    );
+    const restoredFocusTree = buildOpenedBySessionTree(
+      restoredBuckets.find((b) => b.key === 'focus')!.items,
       SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS
-    )
-      .filter((node) => node.depth === 0)
-      .map((node) => node.item);
+    );
+    expect(
+      restoredFocusTree.find((n) => n.item.id === 'child-a2-snoozed')?.depth
+    ).toBe(1);
+
+    const focusRoots = focusTree.filter((node) => node.depth === 0).map((node) => node.item);
     expect(focusRoots.map((r) => r.id)).toEqual(['root-a', 'root-b']);
     const writes = planManualOrderMove(
       focusRoots.map((r) => ({ id: r.id, orderKey: r.orderKey ?? null, recency: NOW })),
@@ -140,33 +158,6 @@ describe('formatSnoozeCountdown & buildSnoozePresets', () => {
       expect(preset.timestamp).toBeGreaterThan(NOW);
       expect(preset.countdown.length).toBeGreaterThan(0);
     }
-  });
-});
-
-describe('agentManaged unread suppression', () => {
-  it('suppresses unread indicators on open and closed tabs when agentManaged is true', () => {
-    expect(
-      sessionHasUnreadMessages({
-        lastMessageAt: NOW,
-        lastReadAt: NOW - 10_000,
-        agentManaged: false,
-      })
-    ).toBe(true);
-    expect(
-      sessionHasUnreadMessages({
-        lastMessageAt: NOW,
-        lastReadAt: NOW - 10_000,
-        agentManaged: true,
-      })
-    ).toBe(false);
-    expect(
-      closedSessionHasUnreadMessages({
-        lastMessageAt: NOW,
-        lastReadAt: NOW - 10_000,
-        isTabClosed: true,
-        agentManaged: true,
-      })
-    ).toBe(false);
   });
 });
 

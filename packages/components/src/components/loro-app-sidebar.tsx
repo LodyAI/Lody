@@ -1851,7 +1851,6 @@ export function LoroAppSidebar({
     settleSession,
     moveSessionToFocus,
     wakeSnoozedSession,
-    setSessionAgentManaged,
     updateSessionTitle,
   } = useSessionActions();
   const {
@@ -2722,7 +2721,6 @@ export function LoroAppSidebar({
         ? {
             ...item,
             orderKey: meta.orderKey ?? null,
-            agentManaged: meta.agentManaged === true,
             snoozedUntil: typeof meta.snoozedUntil === 'number' ? meta.snoozedUntil : null,
             settledAt: typeof meta.settledAt === 'number' ? meta.settledAt : null,
             focusRestoredAt: typeof meta.focusRestoredAt === 'number' ? meta.focusRestoredAt : null,
@@ -3912,15 +3910,6 @@ export function LoroAppSidebar({
     [moveSessionToFocus]
   );
 
-  const handleToggleSessionAgentManaged = useCallback(
-    (sessionId: string, agentManaged: boolean) => {
-      void setSessionAgentManaged(sessionId as SessionId, agentManaged).catch((error) => {
-        toast.error(error instanceof Error ? error.message : String(error));
-      });
-    },
-    [setSessionAgentManaged]
-  );
-
   const statusNow = useStableNow(SIDEBAR_RELATIVE_TIME_REFRESH_MS);
 
   const handleDropFocusItem = useCallback(
@@ -4287,7 +4276,6 @@ export function LoroAppSidebar({
         onSnoozeUpdatedItem={handleSnoozeSession}
         onSettleUpdatedItem={handleSettleSession}
         onMoveUpdatedItemToFocus={handleMoveSessionToFocus}
-        onToggleUpdatedItemAgentManaged={handleToggleSessionAgentManaged}
         onDropFocusItem={handleDropFocusItem}
         onCopyUpdatedItemUrl={handleCopySessionUrl}
         onShareUpdatedItemWithTeam={handleRequestShareSession}

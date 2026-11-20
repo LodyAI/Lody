@@ -44,7 +44,6 @@ import {
   AlarmClock,
   Archive,
   ArrowUpCircle,
-  Bot,
   CheckCircle2,
   Folders,
   Folder,
@@ -189,8 +188,6 @@ export type SidebarUpdatedItem = {
   isPinned?: boolean;
   /** Fractional index for manual ordering in Pinned and Status Focus. */
   orderKey?: string | null;
-  /** True when managed by an Agent (suppresses human unread indicators). */
-  agentManaged?: boolean;
   /** Epoch ms until which the session is snoozed in Status Later. */
   snoozedUntil?: number | null;
   /** Epoch ms when the session was explicitly settled in Status Settled. */
@@ -272,8 +269,6 @@ export type SidebarUpdatedContextMenuLabels = {
   snoozeCustom: string;
   settle: string;
   moveToFocus: string;
-  markAgentManaged: string;
-  takeOverFromAgent: string;
 };
 
 /**
@@ -326,28 +321,9 @@ export function buildSidebarUpdatedBuckets(
   if (grouping === 'manual') return [{ key: 'all', items: [...items] }];
   if (!items.length) return [];
   if (grouping === 'recency') return [{ key: 'all', items: sortUpdatedItems(items) }];
-  const itemById = new Map(items.map((item) => [item.id, item]));
-  const resolveVisibleRoot = (item: SidebarUpdatedItem): SidebarUpdatedItem => {
-    let current = item;
-    const seen = new Set<string>([current.id]);
-    while (true) {
-      const openerId = current.openedByRowSessionId ?? current.openedBySessionId ?? null;
-      if (!openerId || seen.has(openerId)) return current;
-      const opener = itemById.get(openerId);
-      if (!opener) return current;
-      seen.add(opener.id);
-      current = opener;
-    }
-  };
   const byGroup = new Map<SidebarStatusGroup, SidebarUpdatedItem[]>();
   for (const item of items) {
-    // Opened-by child sessions inherit their visible root's Status tier so
-    // snoozing or settling a root moves its subtasks with it.
-    const root = resolveVisibleRoot(item);
-    const group = sidebarStatusGroup(
-      item.isWaitingPermission ? { ...root, isWaitingPermission: true } : root,
-      nowMs
-    );
+    const group = sidebarStatusGroup(item, nowMs);
     const members = byGroup.get(group);
     if (members) members.push(item);
     else byGroup.set(group, [item]);
@@ -527,8 +503,6 @@ export type SidebarUpdatedSessionListProps = {
   onSettleItem?: (id: string) => void;
   /** Restore a snoozed or settled session back to Status Focus. */
   onMoveItemToFocus?: (id: string) => void;
-  /** Toggle agent-managed unread suppression for a session. */
-  onToggleAgentManagedItem?: (id: string, agentManaged: boolean) => void;
   /** Reorder (or restore via drag) a session to `toIndex` inside Status Focus. */
   onDropFocusSession?: (id: string, toIndex: number) => void;
   /** Pin a Focus session when dragged and dropped onto a Pinned section. */
@@ -629,7 +603,6 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   onSnoozeItem,
   onSettleItem,
   onMoveItemToFocus,
-  onToggleAgentManagedItem,
   onDropFocusSession,
   onDropFocusIntoPinSection,
   showStatusActions,
@@ -710,8 +683,6 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
       snoozeCustom: t('sessions.contextMenu.snoozeCustom', 'Custom time…'),
       settle: t('sessions.contextMenu.settle', 'Settle'),
       moveToFocus: t('sessions.contextMenu.moveToFocus', 'Move to Focus'),
-      markAgentManaged: t('sessions.contextMenu.markAgentManaged', 'Mark as agent-managed'),
-      takeOverFromAgent: t('sessions.contextMenu.takeOverFromAgent', 'Take over (enable unread)'),
     }),
     [t]
   );
@@ -879,7 +850,6 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                       onSnoozeItem={onSnoozeItem}
                       onSettleItem={onSettleItem}
                       onMoveItemToFocus={onMoveItemToFocus}
-                      onToggleAgentManagedItem={onToggleAgentManagedItem}
                       onCopyItemUrl={onCopyItemUrl}
                       onShareItemWithTeam={onShareItemWithTeam}
                       onOpenPullRequest={onOpenPullRequest}
@@ -990,7 +960,6 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                             onMoveToFocus={
                               effectiveShowStatusActions ? onMoveItemToFocus : undefined
                             }
-                            onToggleAgentManaged={onToggleAgentManagedItem}
                             onBeginCustomSnooze={
                               effectiveShowStatusActions ? beginCustomSnooze : undefined
                             }
@@ -1151,7 +1120,6 @@ type UpdatedItemRowProps = {
   onSnooze?: (id: string, snoozedUntil: number) => void;
   onSettle?: (id: string) => void;
   onMoveToFocus?: (id: string) => void;
-  onToggleAgentManaged?: (id: string, agentManaged: boolean) => void;
   onBeginCustomSnooze?: (id: string, title: string) => void;
   showSnoozeCountdown?: boolean;
   onCopyUrl?: (id: string) => void;
@@ -1185,7 +1153,6 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   onSnooze,
   onSettle,
   onMoveToFocus,
-  onToggleAgentManaged,
   onBeginCustomSnooze,
   showSnoozeCountdown = false,
   onCopyUrl,
@@ -1255,8 +1222,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
 
   const readOnly = item.sharing?.access === 'read';
   const canArchive = !readOnly && typeof onArchive === 'function';
-  const canMarkUnread =
-    typeof onMarkUnread === 'function' && !item.hasUnreadMessages && !item.agentManaged;
+  const canMarkUnread = typeof onMarkUnread === 'function' && !item.hasUnreadMessages;
   const showInlineArchive = canArchive && !isMobile;
   const canRename = !readOnly && typeof onRename === 'function';
   const canTogglePin = typeof onTogglePin === 'function';
@@ -1270,7 +1236,6 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   const canSettle = !readOnly && typeof onSettle === 'function' && statusGroup === 'focus';
   const canMoveToFocus =
     !readOnly && typeof onMoveToFocus === 'function' && statusGroup !== 'focus';
-  const canToggleAgentManaged = !readOnly && typeof onToggleAgentManaged === 'function';
   const canCopyUrl = typeof onCopyUrl === 'function';
   // Copy URL stays available for private sessions (the link still works for
   // the owner); sharing is a separate menu item shown only while the
@@ -1304,7 +1269,6 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       canSnooze ||
       canSettle ||
       canMoveToFocus ||
-      canToggleAgentManaged ||
       canArchive ||
       canMarkUnread ||
       canCopyUrl ||
@@ -1502,11 +1466,10 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             sessionId={item.id}
             isWaitingPermission={item.isWaitingPermission}
             isWorking={item.isWorking}
-            hasUnreadMessages={item.agentManaged ? false : item.hasUnreadMessages}
+            hasUnreadMessages={item.hasUnreadMessages}
             fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
             restIcon={
               snoozeCountdown ||
-              item.agentManaged ||
               showPr ||
               showMergeablePill ||
               isMobile ||
@@ -1531,15 +1494,6 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                     >
                       <Timer className="h-3 w-3 shrink-0" aria-hidden="true" />
                       <span>{snoozeCountdown}</span>
-                    </span>
-                  ) : null}
-                  {item.agentManaged ? (
-                    <span
-                      data-agent-managed=""
-                      title={contextMenuLabels.markAgentManaged}
-                      className="inline-flex items-center text-sidebar-foreground-muted/75"
-                    >
-                      <Bot className="h-3 w-3 shrink-0" aria-hidden="true" />
                     </span>
                   ) : null}
                   {isMobile && !snoozeCountdown ? <span>{relativeTime}</span> : null}
@@ -1683,16 +1637,6 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         {canMoveToFocus ? (
           <ContextMenu.Item icon={ArrowUpCircle} onClick={() => onMoveToFocus?.(item.id)}>
             {contextMenuLabels.moveToFocus}
-          </ContextMenu.Item>
-        ) : null}
-        {canToggleAgentManaged ? (
-          <ContextMenu.Item
-            icon={Bot}
-            onClick={() => onToggleAgentManaged?.(item.id, !item.agentManaged)}
-          >
-            {item.agentManaged
-              ? contextMenuLabels.takeOverFromAgent
-              : contextMenuLabels.markAgentManaged}
           </ContextMenu.Item>
         ) : null}
         {canMarkUnread ? (

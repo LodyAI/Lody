@@ -521,12 +521,6 @@ const SessionCreateCommandInputShape = {
     .describe(
       'Target agent config; required if ambiguous, ignored with agentRoleId. Defaults above.'
     ),
-  agentManaged: z
-    .boolean()
-    .optional()
-    .describe(
-      'Suppress human unread indicators for this session. Omit to inherit the calling session value.'
-    ),
   ownerUserId: z
     .string()
     .trim()
@@ -779,7 +773,6 @@ const SessionCreateBatchItemShape = {
     .describe('Role target machine; required for multi-machine Roles.'),
   machineId: SessionCreateCommandInputShape.machineId,
   agentConfigId: SessionCreateCommandInputShape.agentConfigId,
-  agentManaged: SessionCreateCommandInputShape.agentManaged,
   ownerUserId: SessionCreateCommandInputShape.ownerUserId,
   ...SessionRunConfigInputShape,
   label: z
@@ -1496,7 +1489,7 @@ type ResolvedMcpSessionCreate = {
 const resolveMcpSessionCreate = (
   input: SessionCreateCommandInput,
   invoking: InvokingTurnContext | undefined,
-  requester: Pick<SessionMeta, 'machineId' | 'project' | 'agentManaged' | 'userId'>,
+  requester: Pick<SessionMeta, 'machineId' | 'project' | 'userId'>,
   catalogRole: AgentRole | undefined,
   /**
    * The requester Local Project's linked GitHub repository, present only when
@@ -1505,8 +1498,6 @@ const resolveMcpSessionCreate = (
   cloneableRepo?: string,
   knownMemberIds?: ReadonlySet<string>
 ): ResolvedMcpSessionCreate => {
-  const resolvedAgentManaged =
-    input.agentManaged !== undefined ? input.agentManaged : requester.agentManaged === true;
   const resolvedOwnerUserId = input.ownerUserId ?? requester.userId;
   if (
     input.ownerUserId &&
@@ -1525,7 +1516,6 @@ const resolveMcpSessionCreate = (
     return {
       input: {
         ...input,
-        agentManaged: resolvedAgentManaged,
         ...(resolvedOwnerUserId ? { ownerUserId: resolvedOwnerUserId } : {}),
       },
       prompt: input.prompt,
@@ -1606,7 +1596,6 @@ const resolveMcpSessionCreate = (
     ...withoutTarget,
     machineId: role.machineId,
     agentConfigId: role.agentConfigId,
-    agentManaged: resolvedAgentManaged,
     ...(resolvedOwnerUserId ? { ownerUserId: resolvedOwnerUserId } : {}),
     ...(useCurrentSessionAsParent !== undefined ? { useCurrentSessionAsParent } : {}),
     ...(workContext !== undefined ? { workContext } : {}),
@@ -1677,9 +1666,6 @@ const buildResolvedMcpCreateCanonicalCommand = (
   ...(resolved.input.useCurrentSessionAsParent !== undefined
     ? { useCurrentSessionAsParent: resolved.input.useCurrentSessionAsParent }
     : {}),
-  ...(resolved.input.agentManaged !== undefined
-    ? { agentManaged: resolved.input.agentManaged }
-    : {}),
   ...(resolved.input.ownerUserId ? { ownerUserId: resolved.input.ownerUserId } : {}),
   ...(resolved.input.workContext ? { workContext: resolved.input.workContext } : {}),
   ...(deadlineSeconds !== undefined ? { deadlineSeconds } : {}),
@@ -1702,9 +1688,6 @@ const buildMcpCreateOptions = (
   }
   if (input.useCurrentSessionAsParent !== undefined) {
     options.useCurrentSessionAsParent = input.useCurrentSessionAsParent;
-  }
-  if (input.agentManaged !== undefined) {
-    options.agentManaged = input.agentManaged;
   }
   if (input.ownerUserId !== undefined) {
     options.sessionOwnerUserId = input.ownerUserId;
@@ -2043,7 +2026,6 @@ const sessionSummaryForMcp = (
   lastActivityAt: isoTimestamp(session.lastMessageAt ?? session.createdAt),
   archived: session.isArchived === true,
   ownerUserId: session.userId,
-  agentManaged: session.agentManaged === true,
   isMine: session.userId === opts.currentUserId,
   machineId: session.machineId,
   ...(session.agentConfigId ? { agentConfigId: session.agentConfigId } : {}),
@@ -4271,7 +4253,6 @@ const startSessionCreateManyOperation = async (
           ...(item.useCurrentSessionAsParent !== undefined
             ? { useCurrentSessionAsParent: item.useCurrentSessionAsParent }
             : {}),
-          ...(item.agentManaged !== undefined ? { agentManaged: item.agentManaged } : {}),
           ...(item.ownerUserId ? { ownerUserId: item.ownerUserId } : {}),
           ...(item.workContext ? { workContext: item.workContext } : {}),
         } as SessionCreateCommandInput;

@@ -321,10 +321,6 @@ export type SessionActions = {
     expectedSnoozedUntil: number,
     focusRootPlacements: readonly ManualOrderPlacement[]
   ) => Promise<void>;
-  /** Clear `agentManaged` (delete semantics) and wake snoozed/settled state when a human sends input. */
-  markHumanParticipation: (sessionId: SessionId) => Promise<void>;
-  /** Toggle whether this session is agent-managed (suppresses human unread indicators). */
-  setSessionAgentManaged: (sessionId: SessionId, agentManaged: boolean) => Promise<void>;
 };
 
 const toPinnedSessionPlacement = (meta: SessionMeta): PinnedSessionPlacement => ({
@@ -559,10 +555,6 @@ export function useSessionActions(): SessionActions {
         isPinned?: boolean;
         pinSectionId?: string | undefined;
         orderKey?: string | undefined;
-        agentManaged?: boolean | undefined;
-        snoozedUntil?: number | undefined;
-        settledAt?: number | undefined;
-        focusRestoredAt?: number | undefined;
         lastReadAt?: number;
       }
     ) => {
@@ -704,13 +696,8 @@ export function useSessionActions(): SessionActions {
         : undefined;
       const cached = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
       const meta = existingMeta ?? cached;
-      if (
-        meta?.agentManaged === true ||
-        meta?.snoozedUntil !== undefined ||
-        meta?.settledAt !== undefined
-      ) {
+      if (meta?.snoozedUntil !== undefined || meta?.settledAt !== undefined) {
         await updateSessionMetadata(sessionId, {
-          ...(meta.agentManaged === true ? { agentManaged: undefined } : {}),
           ...(meta.snoozedUntil !== undefined ? { snoozedUntil: undefined } : {}),
           ...(meta.settledAt !== undefined ? { settledAt: undefined } : {}),
         });
@@ -1224,42 +1211,6 @@ export function useSessionActions(): SessionActions {
     [runtime, updateSessionMetadata]
   );
 
-  const markHumanParticipation = useCallback(
-    async (sessionId: SessionId) => {
-      if (!runtime) return;
-      const roomId = getSessionRoomId(sessionId);
-      const existing = await runtime.repo.getDocMeta(roomId);
-      const existingMeta = !isLoroRepoDocDeleted(existing)
-        ? (existing?.meta as SessionMeta | undefined)
-        : undefined;
-      const cached = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
-      const meta = existingMeta ?? cached;
-      if (
-        meta?.agentManaged === true ||
-        meta?.snoozedUntil !== undefined ||
-        meta?.settledAt !== undefined
-      ) {
-        await updateSessionMetadata(sessionId, {
-          ...(meta.agentManaged === true ? { agentManaged: undefined } : {}),
-          ...(meta.snoozedUntil !== undefined ? { snoozedUntil: undefined } : {}),
-          ...(meta.settledAt !== undefined ? { settledAt: undefined } : {}),
-        });
-      }
-    },
-    [runtime, store, updateSessionMetadata]
-  );
-
-  const setSessionAgentManaged = useCallback(
-    async (sessionId: SessionId, agentManaged: boolean) => {
-      // Changing unread suppression affects the owner's notifications, so require write permission.
-      // Manual takeover deletes the field (`undefined`) rather than storing `false`.
-      await updateSessionMetadata(sessionId, {
-        agentManaged: agentManaged ? true : undefined,
-      });
-    },
-    [updateSessionMetadata]
-  );
-
   return {
     createSession,
     startSession,
@@ -1288,7 +1239,5 @@ export function useSessionActions(): SessionActions {
     settleSession,
     moveSessionToFocus,
     wakeSnoozedSession,
-    markHumanParticipation,
-    setSessionAgentManaged,
   };
 }

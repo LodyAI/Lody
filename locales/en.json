@@ -2245,8 +2245,6 @@
   "sessions.contextMenu.snoozeCustom": "Custom time…",
   "sessions.contextMenu.settle": "Settle",
   "sessions.contextMenu.moveToFocus": "Move to Focus",
-  "sessions.contextMenu.markAgentManaged": "Mark as agent-managed",
-  "sessions.contextMenu.takeOverFromAgent": "Take over (enable unread)",
   "sessions.contextMenu.rename": "Rename",
   "sessions.contextMenu.unpin": "Unpin Session",
   "sessions.contextMenu.goToOpenerSession": "Go to Opener Session",

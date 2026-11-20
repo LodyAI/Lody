@@ -2245,8 +2245,6 @@
   "sessions.contextMenu.snoozeCustom": "自定义时间…",
   "sessions.contextMenu.settle": "收尾",
   "sessions.contextMenu.moveToFocus": "移回进行中",
-  "sessions.contextMenu.markAgentManaged": "标记为 Agent 托管",
-  "sessions.contextMenu.takeOverFromAgent": "接管（开启未读）",
   "sessions.contextMenu.rename": "重命名",
   "sessions.contextMenu.unpin": "取消置顶",
   "sessions.contextMenu.goToOpenerSession": "跳转到发起会话",

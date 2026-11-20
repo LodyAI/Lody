@@ -292,8 +292,6 @@ export interface LoroSidebarProps {
   onSettleUpdatedItem?: (id: string) => void;
   /** Restore a snoozed or settled session back into Status Focus. */
   onMoveUpdatedItemToFocus?: (id: string) => void;
-  /** Toggle agent-managed unread suppression for a session. */
-  onToggleUpdatedItemAgentManaged?: (id: string, agentManaged: boolean) => void;
   /** Reorder (or restore via drag) a session into Status Focus at `toIndex`. */
   onDropFocusItem?: (id: string, toIndex: number) => void;
   /** Copy session URL for an Updated row. Mirrors `sessionListProps.onCopySessionUrl`. */
@@ -944,7 +942,6 @@ export const LoroSidebar = memo(function LoroSidebar({
   onSnoozeUpdatedItem,
   onSettleUpdatedItem,
   onMoveUpdatedItemToFocus,
-  onToggleUpdatedItemAgentManaged,
   onDropFocusItem,
   onCopyUpdatedItemUrl,
   onShareUpdatedItemWithTeam,
@@ -1769,7 +1766,6 @@ export const LoroSidebar = memo(function LoroSidebar({
                     onSnoozeItem={onSnoozeUpdatedItem}
                     onSettleItem={onSettleUpdatedItem}
                     onMoveItemToFocus={onMoveUpdatedItemToFocus}
-                    onToggleAgentManagedItem={onToggleUpdatedItemAgentManaged}
                     onDropFocusSession={onDropFocusItem}
                     onDropFocusIntoPinSection={pinSectionActions?.onDropItem}
                     onCopyItemUrl={onCopyUpdatedItemUrl}

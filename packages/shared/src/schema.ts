@@ -1101,8 +1101,6 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   pinSectionId?: string;
   /** Fractional index ordering this session manually (shared by Pinned sections and Status Focus). */
   orderKey?: string;
-  /** When true, this session is managed by an Agent and suppresses human unread indicators. */
-  agentManaged?: boolean;
   /** Epoch ms until which this session is snoozed in the Status view's Later section. */
   snoozedUntil?: number;
   /** Epoch ms when the user explicitly settled this session in the Status view's Settled section. */

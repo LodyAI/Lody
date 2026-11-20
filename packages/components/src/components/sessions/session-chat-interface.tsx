@@ -64,7 +64,6 @@ import {
   ArrowUpCircle,
   Archive,
   ArchiveRestore,
-  Bot,
   CheckCircle2,
   ChevronDown,
   Copy,
@@ -1381,7 +1380,6 @@ export function SessionHeaderMenu({
   onSnooze,
   onSettle,
   onMoveToFocus,
-  onToggleAgentManaged,
   owner,
   openedByRelations,
   onArchive,
@@ -1416,7 +1414,6 @@ export function SessionHeaderMenu({
   onSnooze?: (snoozedUntil: number) => void | Promise<void>;
   onSettle?: () => void | Promise<void>;
   onMoveToFocus?: () => void | Promise<void>;
-  onToggleAgentManaged?: (agentManaged: boolean) => void | Promise<void>;
   /** Multi-member workspaces only; omitted elsewhere. */
   owner?: SessionOwnerMenuState;
   /** Omitted when this Session neither opened nor was opened by another. */
@@ -1893,7 +1890,7 @@ export function SessionHeaderMenu({
             </Menu.Item>
           )}
 
-          {!isArchived && (onSnooze || onSettle || onMoveToFocus || onToggleAgentManaged) ? (
+          {!isArchived && (onSnooze || onSettle || onMoveToFocus) ? (
             <>
               {onSnooze ? (
                 <Menu.Submenu>
@@ -1942,16 +1939,6 @@ export function SessionHeaderMenu({
               {statusGroup !== 'focus' && onMoveToFocus ? (
                 <Menu.Item icon={ArrowUpCircle} onClick={() => void onMoveToFocus()}>
                   {t('sessions.contextMenu.moveToFocus', 'Move to Focus')}
-                </Menu.Item>
-              ) : null}
-              {onToggleAgentManaged ? (
-                <Menu.Item
-                  icon={Bot}
-                  onClick={() => void onToggleAgentManaged(!session.agentManaged)}
-                >
-                  {session.agentManaged
-                    ? t('sessions.contextMenu.takeOverFromAgent', 'Take over (enable unread)')
-                    : t('sessions.contextMenu.markAgentManaged', 'Mark as agent-managed')}
                 </Menu.Item>
               ) : null}
             </>
@@ -3238,8 +3225,6 @@ export const SessionChatInterface = memo(
       snoozeSession,
       settleSession,
       moveSessionToFocus,
-      setSessionAgentManaged,
-      markHumanParticipation,
     } = useSessionActions();
     const [renameDialogTarget, setRenameDialogTarget] = useState<RenameSessionDialogTarget | null>(
       null
@@ -4683,15 +4668,11 @@ export const SessionChatInterface = memo(
 
     const guideHistoryEntry = useCallback(
       async (userTurnId: string, expectedTurnId: string): Promise<boolean> => {
-        const accepted = await requestSessionSteer(session.id, expectedTurnId, userTurnId, {
+        return await requestSessionSteer(session.id, expectedTurnId, userTurnId, {
           machineId: session.machineId,
         });
-        if (accepted) {
-          void markHumanParticipation(session.id).catch(() => {});
-        }
-        return accepted;
       },
-      [markHumanParticipation, requestSessionSteer, session.id, session.machineId]
+      [requestSessionSteer, session.id, session.machineId]
     );
 
     const enqueueInputBlocks = useCallback(
@@ -4939,12 +4920,7 @@ export const SessionChatInterface = memo(
               acpSessionConfig: queuedInputConfig,
               attachments: options?.attachments,
             },
-            {
-              onAccepted: () => {
-                onAccepted?.();
-                void markHumanParticipation(session.id).catch(() => {});
-              },
-            }
+            { onAccepted }
           );
           return true;
         } catch (err) {
@@ -7382,11 +7358,6 @@ export const SessionChatInterface = memo(
         }
         onMoveToFocus={
           headerSharing?.access !== 'read' ? () => moveSessionToFocus(session.id) : undefined
-        }
-        onToggleAgentManaged={
-          headerSharing?.access !== 'read'
-            ? (next) => setSessionAgentManaged(session.id, next)
-            : undefined
         }
         owner={ownerMenuState}
         openedByRelations={openedByRelations}

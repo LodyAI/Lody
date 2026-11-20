@@ -36,16 +36,11 @@ type SessionUnreadInput = {
   lastReadAt?: number;
   isTabClosed?: boolean;
   isArchived?: boolean;
-  agentManaged?: boolean;
 };
 
-/** Closed, archived, and agent-managed conversations suppress unread indicators without changing read receipts. */
+/** Closed and archived conversations suppress unread indicators without changing read receipts. */
 export function sessionHasUnreadMessages(session: SessionUnreadInput): boolean {
-  if (
-    session.isTabClosed === true ||
-    session.isArchived === true ||
-    session.agentManaged === true
-  ) {
+  if (session.isTabClosed === true || session.isArchived === true) {
     return false;
   }
   return hasUnreadOutput(session);
@@ -53,11 +48,9 @@ export function sessionHasUnreadMessages(session: SessionUnreadInput): boolean {
 
 /**
  * Unread output in a closed or archived conversation. Only the closed-conversations
- * list surfaces it; tabs, sidebar summaries, and badges stay quiet. Agent-managed
- * conversations stay quiet here too.
+ * list surfaces it; tabs, sidebar summaries, and badges stay quiet.
  */
 export function closedSessionHasUnreadMessages(session: SessionUnreadInput): boolean {
-  if (session.agentManaged === true) return false;
   if (session.isTabClosed !== true && session.isArchived !== true) return false;
   return hasUnreadOutput(session);
 }

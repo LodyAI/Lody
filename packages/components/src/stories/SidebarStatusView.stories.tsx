@@ -36,7 +36,6 @@ type DemoSession = {
   isWorking?: boolean;
   isWaitingPermission?: boolean;
   hasUnreadMessages?: boolean;
-  agentManaged?: boolean;
   snoozedUntil?: number;
   settledAt?: number;
   focusRestoredAt?: number;
@@ -100,13 +99,12 @@ const INITIAL_SESSIONS: DemoSession[] = [
   },
   {
     id: 'focus-4',
-    title: 'Nightly benchmark sweep (sub-agent)',
+    title: 'Nightly benchmark sweep',
     subtitle: 'lodyai/lody',
     latestMessageAt: NOW - 15 * MINUTE,
     isPinned: false,
     orderKey: '83',
     hasUnreadMessages: true,
-    agentManaged: true,
   },
   {
     id: 'focus-5',
@@ -176,8 +174,7 @@ const toItem = (session: DemoSession): SidebarUpdatedItem => ({
   orderKey: session.orderKey ?? null,
   isWorking: session.isWorking,
   isWaitingPermission: session.isWaitingPermission,
-  hasUnreadMessages: session.agentManaged ? false : session.hasUnreadMessages,
-  agentManaged: session.agentManaged,
+  hasUnreadMessages: session.hasUnreadMessages,
   snoozedUntil: session.snoozedUntil ?? null,
   settledAt: session.settledAt ?? null,
   focusRestoredAt: session.focusRestoredAt ?? null,
@@ -415,9 +412,6 @@ function StatusViewPlayground({
             )
           )
         }
-        onToggleUpdatedItemAgentManaged={(id, agentManaged) =>
-          setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, agentManaged } : s)))
-        }
         onDropFocusItem={handleDropFocusItem}
         onRenameUpdatedItem={(id, nextTitle) =>
           setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title: nextTitle } : s)))
@@ -446,13 +440,8 @@ function StatusViewPlayground({
           </p>
           <p>
             <strong>Settled (已收尾)</strong>: collapsed by default; includes manually settled and
-            7+ day inactive sessions.
-          </p>
-          <p>
-            <strong>Agent-managed</strong>: look at <em>Nightly benchmark sweep (sub-agent)</em> —
-            it has unread output but shows a subtle Bot icon with no unread dot. Right-click any row
-            to test <strong>Later</strong>, <strong>Settle</strong>, <strong>Move to Focus</strong>,
-            and <strong>Agent-managed</strong>.
+            7+ day inactive sessions. Right-click any row to test <strong>Later</strong>,{' '}
+            <strong>Settle</strong>, and <strong>Move to Focus</strong>.
           </p>
         </div>
       </div>
