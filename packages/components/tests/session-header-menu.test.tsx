@@ -213,6 +213,31 @@ describe('SessionHeaderMenu', () => {
     expect(menuItem('Open in VS Code')).toBeDefined();
   });
 
+  it('keeps Open in Finder in the menu while the header pill is showing', async () => {
+    const onOpenFolder = vi.fn();
+    await act(async () =>
+      root?.render(
+        <SessionHeaderMenu
+          session={session}
+          onCopyUrl={() => {}}
+          openInIde={{
+            options: [vscodeLauncher],
+            selected: vscodeLauncher,
+            onOpen: () => {},
+            onSelect: () => {},
+          }}
+          openInFileManager={{ label: 'Open in Finder', onOpen: onOpenFolder }}
+          isLauncherPillVisible={() => true}
+          t={translate}
+        />
+      )
+    );
+    await openMenu();
+    expect(document.querySelector('[role="menu"]')?.textContent).not.toContain('Open in VS Code');
+    await act(async () => menuItem('Open in Finder').click());
+    expect(onOpenFolder).toHaveBeenCalledTimes(1);
+  });
+
   it('disables owner candidates without machine access and keeps an accessible candidate selectable', async () => {
     let assigned = 'a';
     await act(async () =>
