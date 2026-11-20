@@ -586,6 +586,11 @@ export type SidebarUpdatedSessionListProps = {
   onDropPinnedSession?: (sessionId: string, toIndex: number) => void;
   /** Pinned sections only: wraps the section header (the section drag handle). */
   renderHeader?: (header: ReactElement) => ReactNode;
+  /**
+   * Pinned sections only: a quiet line under the section's rows, rendered
+   * only while the section is expanded (e.g. "2 hidden in this view").
+   */
+  footer?: ReactNode;
 };
 
 const defaultLabels: SidebarUpdatedSessionListLabels = {
@@ -630,6 +635,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   pinSectionId,
   onDropPinnedSession,
   renderHeader,
+  footer,
 }: SidebarUpdatedSessionListProps) {
   const preserveOrder = grouping === 'manual';
   const effectiveShowStatusActions = showStatusActions ?? grouping === 'status';
@@ -1043,6 +1049,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                   ) : null}
                 </div>
               ) : null}
+              {!collapsed ? footer : null}
             </div>
           );
         })}
