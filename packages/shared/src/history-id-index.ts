@@ -20,11 +20,25 @@ export type HistoryIdIndex = {
   entries(): ReadonlyMap<string, readonly number[]> | undefined;
   /** Discard the index after a caller found a position that no longer holds its id. */
   invalidate(): void;
+  /**
+   * Adopt ids a caller has just read for every position at committed state
+   * `stamp` (a complete directory read), instead of scanning again. Ignored
+   * unless the document is still at that state with no pending transaction.
+   */
+  seed(stamp: string, idAt: (position: number) => string | undefined): void;
 };
 
 type State = { positions: Map<string, number[]>; length: number };
 
 const HISTORY = 'history';
+
+/**
+ * Committed-state identity: ops (imports and commits) plus state frontiers
+ * (checkout). A subscriber registered before an index can read during the same
+ * event dispatch, before the index has seen the batch; the stamp tells it so.
+ */
+export const historyStateStamp = (doc: LoroDoc) =>
+  `${doc.opCount()}:${JSON.stringify(doc.frontiers())}`;
 const indexes = new WeakMap<LoroDoc, HistoryIdIndex>();
 
 /** The row's stored id, read exactly as the writer matches it. */
@@ -54,7 +68,8 @@ export function historyIdIndex(doc: LoroDoc): HistoryIdIndex {
   if (existing) return existing;
   const list: LoroList = doc.getList(HISTORY);
   let state: State | undefined;
-  doc.subscribe((batch) => {
+  let synced = '';
+  const apply = (batch: Parameters<Parameters<LoroDoc['subscribe']>[0]>[0]) => {
     if (!state) return;
     let appendedFrom: number | undefined;
     for (const event of batch.events) {
@@ -93,15 +108,22 @@ export function historyIdIndex(doc: LoroDoc): HistoryIdIndex {
     for (let position = appendedFrom; position < length; position++)
       add(state.positions, storedHistoryRowId(list.get(position)), position);
     state.length = length;
+  };
+  doc.subscribe((batch) => {
+    apply(batch);
+    synced = historyStateStamp(doc);
   });
   const current = (): State | undefined => {
     if (doc.getPendingTxnLength() > 0) return undefined;
-    if (state && state.length === list.length) return state;
+    const stamp = historyStateStamp(doc);
+    if (state && synced === stamp && state.length === list.length) return state;
+    if (state && synced !== stamp) return undefined;
     const positions = new Map<string, number[]>();
     const length = list.length;
     for (let position = 0; position < length; position++)
       add(positions, storedHistoryRowId(list.get(position)), position);
     state = { positions, length };
+    synced = stamp;
     return state;
   };
   const index: HistoryIdIndex = {
@@ -112,6 +134,16 @@ export function historyIdIndex(doc: LoroDoc): HistoryIdIndex {
     entries: () => current()?.positions,
     invalidate: () => {
       state = undefined;
+    },
+    seed: (stamp, idAt) => {
+      if (doc.getPendingTxnLength() > 0 || historyStateStamp(doc) !== stamp) return;
+      if (state && synced === stamp && state.length === list.length) return;
+      const positions = new Map<string, number[]>();
+      const length = list.length;
+      for (let position = 0; position < length; position++)
+        add(positions, idAt(position), position);
+      state = { positions, length };
+      synced = stamp;
     },
   };
   indexes.set(doc, index);

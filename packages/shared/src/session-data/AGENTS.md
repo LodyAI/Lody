@@ -22,8 +22,10 @@
 - Repeated identity lookups reuse an unchanged pending transaction. Reads must not
   commit writes; uncommitted structural/ID edits and checkout still invalidate lookup.
 - Opening reads the latest directory page; the Loro adapter computes a whole
-  `initial` directory only for a consumer that reads it, and finds a turn id by
-  scanning back from the tail.
+  `initial` directory only for a consumer that reads it. It caches directory rows by
+  position and finds turn ids through the shared id index; synchronous document
+  events keep both exact, a stale committed-state stamp or pending transaction
+  bypasses them, and a complete directory read seeds the index.
 - Subscribe and capture the initial directory without a gap. Notifications carry
   structural ranges or changed turn ids. A content batch reports the EXACT
   positions it touched, never the span between the lowest and highest: one batch

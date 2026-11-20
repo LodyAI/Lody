@@ -424,6 +424,20 @@ describe('user status on duplicate turn copies', () => {
     expect(await copies()).toEqual(['handled', 'handled', 'handled', 'handled', 'handled']);
   });
 
+  it('still finds a turn the directory cannot describe after a complete directory read', async () => {
+    const doc = new LoroDoc();
+    const data = createLoroSessionData({ sessionId: sid, doc });
+    await data.commands.appendTurn({ ...row('a', 'user'), status: 'pending' });
+    doc.getList('history').insertContainer(1, new LoroMap()).set('id', 'unreadable');
+    doc.commit();
+    expect(data.history.readDirectory(0, 10).map((entry) => entry.state)).toEqual([
+      'ready',
+      'invalid',
+    ]);
+    expect(data.history.readTurn('unreadable').state).not.toBe('missing');
+    expect(data.history.readTurn('absent').state).toBe('missing');
+  });
+
   it('projects a steer verdict from the last copy onto steer-state copies only', async () => {
     const projection = {
       kind: 'user-status',

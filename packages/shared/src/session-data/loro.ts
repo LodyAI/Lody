@@ -23,7 +23,7 @@ import {
   type LoroMap,
   type LoroText,
 } from 'loro-crdt';
-import { historyIdIndex } from '../history-id-index';
+import { historyIdIndex, historyStateStamp } from '../history-id-index';
 import type { SessionId } from '../ids';
 import type { SessionHistory, SessionHistoryInput } from '../schema';
 import {
@@ -350,14 +350,55 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
     return { position, state: 'invalid' };
   };
 
+  const ids = historyIdIndex(doc);
+  let directoryRows: (SessionDirectoryRow | undefined)[] = [];
+  let directorySynced = '';
   const directory = (from: number, to: number): readonly SessionDirectoryRow[] => {
     const lo = Math.max(0, Math.min(from, list.length));
     const hi = Math.max(lo, Math.min(to, list.length));
+    const stamp = doc.getPendingTxnLength() === 0 ? historyStateStamp(doc) : undefined;
+    const cached = stamp !== undefined && (directorySynced === stamp || directoryRows.length === 0);
+    if (cached && directoryRows.length !== list.length) directoryRows = [];
+    if (cached) directorySynced = stamp;
     const rows: SessionDirectoryRow[] = [];
     for (let position = lo; position < hi; position += 1) {
-      rows.push(readDirectoryRow(position));
+      let row = cached ? directoryRows[position] : undefined;
+      if (!row) {
+        row = readDirectoryRow(position);
+        if (cached) {
+          if (directoryRows.length < list.length) directoryRows.length = list.length;
+          directoryRows[position] = row;
+        }
+      }
+      rows.push(row);
     }
+    if (cached && lo === 0 && hi === list.length)
+      ids.seed(stamp, (position) => {
+        const row = rows[position];
+        return row?.state === 'ready' ? row.turnId : readIdentity(list.get(position))?.turnId;
+      });
     return rows;
+  };
+  const invalidateDirectoryRows = (events: LoroEventBatch['events']) => {
+    for (const event of events) {
+      const path = event.path;
+      if (path[0] !== HISTORY_ROOT_KEY) continue;
+      if (path.length === 1) {
+        const ops = event.diff.type === 'list' ? event.diff.diff : undefined;
+        const [first, second, ...rest] = ops ?? [];
+        const tailAppend =
+          ops !== undefined &&
+          rest.length === 0 &&
+          ((first?.insert !== undefined && second === undefined && directoryRows.length === 0) ||
+            (first?.retain === directoryRows.length && second?.insert !== undefined));
+        if (tailAppend) directoryRows.length = list.length;
+        else directoryRows = [];
+        continue;
+      }
+      const position = path[1];
+      if (typeof position === 'number') directoryRows[position] = undefined;
+      else directoryRows = [];
+    }
   };
 
   const isTurnIdentityEdit = (event: LoroEventBatch['events'][number]) =>
@@ -450,6 +491,10 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
   let identityDirty = true;
   let indexedLength = -1;
   let indexedOpCount = -1;
+  const unsubscribeDirectoryRows = doc.subscribe((batch) => {
+    invalidateDirectoryRows(batch.events);
+    directorySynced = historyStateStamp(doc);
+  });
   const unsubscribeIdentity = doc.subscribe((batch) => {
     if (
       batch.events.some(
@@ -459,7 +504,6 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
     )
       identityDirty = true;
   });
-  const ids = historyIdIndex(doc);
   const locate = (turnId: string): number | undefined => {
     const indexed = ids.positionsOf(turnId);
     if (indexed) {
@@ -790,6 +834,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
 
   const dispose = () => {
     unsubscribeIdentity();
+    unsubscribeDirectoryRows();
     positions.clear();
     identityDirty = true;
   };
