@@ -4233,11 +4233,11 @@ function WorkspaceChatLanding({
         </Button>
       )}
     >
-      {/* Embedded, the scope pills share one wrapping row with the run config. */}
+      {/* Embedded, the scope pills share one row with the run config. */}
       <div
         className={
           isEmbedded
-            ? 'flex min-w-0 flex-wrap items-center gap-1.5'
+            ? 'flex min-w-0 shrink flex-nowrap items-center gap-1.5'
             : 'flex w-full min-w-0 items-center gap-2'
         }
       >

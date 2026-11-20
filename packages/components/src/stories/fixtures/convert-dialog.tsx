@@ -262,7 +262,7 @@ function ConvertDialogBody({
   };
 
   const topSelector = (
-    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+    <div className="flex min-w-0 shrink flex-nowrap items-center gap-1.5">
       <DesktopMachineMenu
         value={machineId}
         visibleLocalMachineId={MAC_STUDIO}

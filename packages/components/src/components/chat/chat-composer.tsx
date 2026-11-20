@@ -95,19 +95,19 @@ const modalStyles = stylex.create({
     flexDirection: 'column',
     gap: space[3],
   },
+  // One row, like a create dialog's property bar (Linear): it never wraps;
+  // when it runs short the pills' own labels truncate instead.
   pills: {
     display: 'flex',
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
     alignItems: 'center',
     columnGap: space[1.5],
-    rowGap: space[1.5],
     minWidth: 0,
     userSelect: 'none',
   },
-  // The run-config group sizes to its content, so it follows the scope pills
-  // on their line and wraps to its own as one piece. It is not the footer's
-  // `composer-face` container: a pill row is never the narrow footer whose
-  // labels that container hides, and a long model name truncates instead.
+  // The run-config group follows the scope pills on their line, sizing to its
+  // content and shrinking last (a long model name truncates). It is not the
+  // footer's `composer-face` container, whose narrow form hides labels.
   face: {
     display: 'flex',
     flexWrap: 'nowrap',
