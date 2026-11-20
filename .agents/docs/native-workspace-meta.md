@@ -619,9 +619,9 @@ row's `id`:
 | snapshot, then `toJSON()` once   |  833 ms | 433 ms | 411 ms | 457 ms |
 
 Getting a row's handle (`list.get`) costs the same either way (30 ms against
-35 ms for 50,000 rows); the slowdown is in reading the map's values. On a
-Lody-shaped history: one `get` per row 430 ms against 78 ms, sixteen `get`s
-1,046 ms against 403 ms, `getShallowValue` 1,151 ms against 447 ms. Reproduce
+35 ms for 50,000 rows); the slowdown is in reading the map's values: one `get`
+per row 430 ms against 78 ms in the script below, and on a Lody-shaped history
+sixteen `get`s 1,046 ms against 403 ms, `getShallowValue` 1,151 ms against 447 ms. Reproduce
 with `node snapshot-read.mjs [rows]` wherever `loro-crdt` resolves:
 
 ```js
