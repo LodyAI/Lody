@@ -138,6 +138,8 @@ export * from './mcp-authentication';
 export * from './agent-role';
 export * from './agent-role-proposal';
 export * from './workspace-flock';
+export * from './pinned-sections';
+export { FractionalIndex, type JitterOptions } from './vendor/loro-fractional-index';
 export * from './local-machine-rpc';
 export * from './local-loro-data-plane';
 export * from './json-guards';
@@ -537,3 +539,8 @@ export {
   sessionHistoryWriteIntentDigest,
   type SessionAccessRecord,
 } from './session-access';
+
+export {
+  getWorkspaceShortcutBodyStreamId,
+  getWorkspaceShortcutIndexStreamId,
+} from './prompt-shortcuts/access';

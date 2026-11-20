@@ -42,6 +42,10 @@ import {
   machineSupportsProtocolCapability,
   MACHINE_PROTOCOL_CAPABILITIES,
   OPERATION_INBOX_PROTOCOL_VERSION,
+  buildPinnedSectionLayout,
+  planNewPinPlacement,
+  type PinPlacementWrite,
+  type PinnedSessionPlacement,
 } from '@lody/shared';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { usePostHog } from '@posthog/react';
@@ -291,7 +295,18 @@ export type SessionActions = {
   restoreSession: (sessionId: SessionId) => Promise<void>;
   deleteArchivedSession: (sessionId: SessionId) => Promise<void>;
   setSessionPinned: (sessionId: SessionId, isPinned: boolean) => Promise<void>;
+  /** Write planned pin placements (section and order) for pinned conversations. */
+  applySessionPinPlacements: (writes: readonly PinPlacementWrite[]) => Promise<void>;
 };
+
+const toPinnedSessionPlacement = (meta: SessionMeta): PinnedSessionPlacement => ({
+  id: meta.id,
+  pinSectionId: meta.pinSectionId ?? null,
+  pinOrderKey: meta.pinOrderKey ?? null,
+  recency:
+    meta.lastMessageAt ??
+    (typeof meta.createdAt === 'number' ? meta.createdAt : Date.parse(meta.createdAt ?? '') || 0),
+});
 
 const extractSessionStatus = (value: unknown): Session['status'] | undefined => {
   if (!value || typeof value !== 'object') {
@@ -510,7 +525,15 @@ export function useSessionActions(): SessionActions {
     [assertCanManageSessions]
   );
   const updateSessionPreference = useCallback(
-    async (sessionId: SessionId, patch: { isPinned?: boolean; lastReadAt?: number }) => {
+    async (
+      sessionId: SessionId,
+      patch: {
+        isPinned?: boolean;
+        pinSectionId?: string | undefined;
+        pinOrderKey?: string | undefined;
+        lastReadAt?: number;
+      }
+    ) => {
       if (!runtime) throw new Error('Runtime not ready');
       await assertReadablePreferences([sessionId]);
       await runtime.writer.upsertDocMeta(getSessionRoomId(sessionId), patch);
@@ -1010,9 +1033,47 @@ export function useSessionActions(): SessionActions {
       const roomId = getSessionRoomId(sessionId);
       const existing = await runtime.repo.getDocMeta(roomId);
       if (isLoroRepoDocDeleted(existing)) return;
+      if (!isPinned) {
+        // Unpinning forgets the place; pinning again starts at the top of the default section.
+        await updateSessionPreference(sessionId, {
+          isPinned: false,
+          pinSectionId: undefined,
+          pinOrderKey: undefined,
+        });
+        return;
+      }
+      const defaultSectionPins = Object.values(store.get(sessionMetaCacheAtom)).filter(
+        (meta) =>
+          meta.isPinned === true && !meta.isArchived && !meta.pinSectionId && meta.id !== sessionId
+      );
+      const { pinOrderKey } = planNewPinPlacement(
+        buildPinnedSectionLayout(
+          defaultSectionPins.map(toPinnedSessionPlacement),
+          [],
+          (placement) => placement
+        )
+      );
       await updateSessionPreference(sessionId, {
-        isPinned,
-      } as Partial<SessionMeta>);
+        isPinned: true,
+        pinSectionId: undefined,
+        pinOrderKey,
+      });
+    },
+    [runtime, store, updateSessionPreference]
+  );
+
+  const applySessionPinPlacements = useCallback(
+    async (writes: readonly PinPlacementWrite[]) => {
+      if (!runtime) {
+        throw new Error('Runtime not ready');
+      }
+      for (const write of writes) {
+        await updateSessionPreference(write.sessionId as SessionId, {
+          isPinned: true,
+          pinSectionId: write.pinSectionId,
+          pinOrderKey: write.pinOrderKey,
+        });
+      }
     },
     [runtime, updateSessionPreference]
   );
@@ -1039,5 +1100,6 @@ export function useSessionActions(): SessionActions {
     restoreSession,
     deleteArchivedSession,
     setSessionPinned,
+    applySessionPinPlacements,
   };
 }

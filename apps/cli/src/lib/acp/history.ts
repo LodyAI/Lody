@@ -11,6 +11,7 @@ import type {
 import {
   getServerNow,
   sanitizeGoalObjective,
+  stripToolCallPayloadsForHistory,
   truncateTerminalOutputForHistory,
   ToolCallContentSchema,
   parseHistoryWrite,
@@ -429,6 +430,13 @@ export const handleACPUpdateMessage = async (
         ['completed', 'failed', 'cancelled'].includes(event.snapshot.state)
       ) {
         childStates.delete(JSON.stringify([event.sessionId, event.runId]));
+        const subagentScopePrefix = `${JSON.stringify(['subagent', event.sessionId, event.runId]).slice(0, -1)},`;
+        for (const key of terminalOutputState.keys()) {
+          if (key.startsWith(subagentScopePrefix)) terminalOutputState.delete(key);
+        }
+        for (const key of runningToolTextState.keys()) {
+          if (key.startsWith(subagentScopePrefix)) runningToolTextState.delete(key);
+        }
       }
     }
   } catch (error) {
@@ -998,9 +1006,63 @@ const terminalOutputFromNotification = (
   };
 };
 
-const withoutTerminalSources = (message: AcpSessionNotification): AcpSessionNotification => {
-  if (message.update.sessionUpdate !== 'tool_call_update') return message;
-  const update = message.update;
+type ToolCallOrUpdate = Extract<
+  AcpSessionNotification['update'],
+  { sessionUpdate: 'tool_call' | 'tool_call_update' }
+>;
+
+type ScopedToolNotification = {
+  scopeKey: string;
+  update: ToolCallOrUpdate;
+  asMessage: AcpSessionNotification;
+  isSubagent: boolean;
+  rewrite: (nextUpdate: ToolCallOrUpdate) => AcpSessionNotification;
+};
+
+const unwrapScopedToolNotification = (
+  message: AcpSessionNotification
+): ScopedToolNotification | undefined => {
+  const { update } = message;
+  if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
+    return {
+      scopeKey: JSON.stringify(['root', update.toolCallId]),
+      update,
+      asMessage: message,
+      isSubagent: false,
+      rewrite: (nextUpdate) => ({ ...message, update: nextUpdate }) as AcpSessionNotification,
+    };
+  }
+  if (update.sessionUpdate === 'subagent_event' && update.event.type === 'output') {
+    const event = update.event;
+    const childUpdate = event.update;
+    if (
+      childUpdate.sessionUpdate !== 'tool_call' &&
+      childUpdate.sessionUpdate !== 'tool_call_update'
+    ) {
+      return undefined;
+    }
+    return {
+      scopeKey: JSON.stringify(['subagent', event.sessionId, event.runId, childUpdate.toolCallId]),
+      update: childUpdate,
+      asMessage: { sessionId: event.sessionId, update: childUpdate } as AcpSessionNotification,
+      isSubagent: true,
+      rewrite: (nextUpdate) =>
+        ({
+          ...message,
+          update: {
+            ...update,
+            event: {
+              ...event,
+              update: nextUpdate,
+            },
+          },
+        }) as AcpSessionNotification,
+    };
+  }
+  return undefined;
+};
+
+const withoutTerminalSourcesFromToolUpdate = (update: ToolCallOrUpdate): ToolCallOrUpdate => {
   const meta = (update as Record<string, unknown>)._meta;
   const claudeCode =
     meta && typeof meta === 'object' && !Array.isArray(meta)
@@ -1015,17 +1077,14 @@ const withoutTerminalSources = (message: AcpSessionNotification): AcpSessionNoti
       : meta;
 
   return {
-    ...message,
-    update: {
-      ...update,
-      rawOutput: undefined,
-      // A provider may put the same terminal snapshot in a fenced `content`
-      // block. Keep only structured diffs here; the command is derived from
-      // rawInput/enrichment and the output is materialized on completion.
-      content: update.content?.filter((content) => content.type === 'diff'),
-      ...(nextMeta === undefined ? {} : { _meta: nextMeta }),
-    },
-  } as AcpSessionNotification;
+    ...update,
+    rawOutput: undefined,
+    // A provider may put the same terminal snapshot in a fenced `content`
+    // block. Keep only structured diffs here; the command is derived from
+    // rawInput/enrichment and the output is materialized on completion.
+    content: update.content?.filter((content) => content.type === 'diff'),
+    ...(nextMeta === undefined ? {} : { _meta: nextMeta }),
+  } as ToolCallOrUpdate;
 };
 
 /**
@@ -1038,13 +1097,16 @@ const compactTerminalNotificationsForHistory = (
   state: TerminalOutputState
 ): AcpSessionNotification[] =>
   batch.map((message) => {
-    if (message.update.sessionUpdate !== 'tool_call_update') return message;
+    const scoped = unwrapScopedToolNotification(message);
+    if (!scoped) return message;
 
-    const { toolCallId, status } = message.update;
-    const extracted = terminalOutputFromNotification(message) ?? runningExecuteTextOutput(message);
+    const { scopeKey, update, asMessage, isSubagent, rewrite } = scoped;
+    const { status } = update;
+    const extracted =
+      terminalOutputFromNotification(asMessage) ?? runningExecuteTextOutput(asMessage);
     if (extracted) {
-      const previous = state.get(toolCallId);
-      state.set(toolCallId, {
+      const previous = state.get(scopeKey);
+      state.set(scopeKey, {
         output: appendTerminalTail(previous?.output ?? '', extracted.output),
         truncated: previous?.truncated === true || extracted.truncated,
         exitStatus: extracted.exitStatus ?? previous?.exitStatus,
@@ -1053,31 +1115,42 @@ const compactTerminalNotificationsForHistory = (
 
     const isTerminalStatus = status === 'completed' || status === 'failed';
     if (!isTerminalStatus) {
-      return extracted ? withoutTerminalSources(message) : message;
+      return extracted ? rewrite(withoutTerminalSourcesFromToolUpdate(update)) : message;
     }
 
-    const terminal = state.get(toolCallId);
-    state.delete(toolCallId);
+    const terminal = state.get(scopeKey);
+    state.delete(scopeKey);
     if (!terminal) return message;
 
-    const stripped = withoutTerminalSources(message);
-    if (stripped.update.sessionUpdate !== 'tool_call_update') return stripped;
-    return {
+    const stripped = withoutTerminalSourcesFromToolUpdate(update);
+    if (isSubagent) {
+      return rewrite({
+        ...stripped,
+        // `isLodySubagentOutput` only accepts ACP wire `content` blocks, so pass the
+        // compacted 1 KiB tail through `rawOutput` for `buildToolCallMessageForHistory`.
+        rawOutput: {
+          output: terminal.output,
+          truncated: terminal.truncated,
+          ...(terminal.exitStatus?.exitCode != null
+            ? { exit_code: terminal.exitStatus.exitCode }
+            : {}),
+        },
+      } as ToolCallOrUpdate);
+    }
+
+    return rewrite({
       ...stripped,
-      update: {
-        ...stripped.update,
-        content: [
-          ...(stripped.update.content ?? []),
-          {
-            type: 'terminal_output',
-            output: terminal.output,
-            stream: 'combined',
-            truncated: terminal.truncated,
-            exitStatus: terminal.exitStatus,
-          },
-        ],
-      },
-    } as AcpSessionNotification;
+      content: [
+        ...(stripped.content ?? []),
+        {
+          type: 'terminal_output',
+          output: terminal.output,
+          stream: 'combined',
+          truncated: terminal.truncated,
+          exitStatus: terminal.exitStatus,
+        },
+      ],
+    } as ToolCallOrUpdate);
   });
 
 /**
@@ -1089,7 +1162,9 @@ const runningExecuteTextOutput = (
   message: AcpSessionNotification
 ): TerminalOutputAccumulator | undefined => {
   const update = message.update;
-  if (update.sessionUpdate !== 'tool_call_update') return undefined;
+  if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') {
+    return undefined;
+  }
   if (update.status === 'completed' || update.status === 'failed') return undefined;
   if (update.kind !== 'execute' || !Array.isArray(update.content)) return undefined;
   const texts = extractTextFromContentBlocks(update.content);
@@ -1099,6 +1174,17 @@ const runningExecuteTextOutput = (
 
 const toolTextLength = (content: AcpToolCallUpdateContent): number =>
   extractTextFromContentBlocks(content).reduce((total, text) => total + text.length, 0);
+
+const boundToolCallUpdateContentForMemory = (
+  content: AcpToolCallUpdateContent
+): AcpToolCallUpdateContent =>
+  content.flatMap((block) =>
+    block.type === 'terminal'
+      ? [block]
+      : (stripToolCallPayloadsForHistory([
+          block as unknown as Parameters<typeof stripToolCallPayloadsForHistory>[0][number],
+        ]) as unknown as AcpToolCallUpdateContent)
+  );
 
 /**
  * Bounds how much replaced running-tool text a call can leave in the CRDT
@@ -1110,30 +1196,30 @@ const boundRunningToolTextForHistory = (
   state: RunningToolTextState
 ): AcpSessionNotification[] =>
   batch.map((message) => {
-    const update = message.update;
-    if (update.sessionUpdate !== 'tool_call_update') return message;
-    const id = update.toolCallId;
+    const scoped = unwrapScopedToolNotification(message);
+    if (!scoped) return message;
+    const { scopeKey, update, rewrite } = scoped;
     if (update.status === 'completed' || update.status === 'failed') {
-      const running = state.get(id);
-      state.delete(id);
+      const running = state.get(scopeKey);
+      state.delete(scopeKey);
       if (!running?.deferred || update.content !== undefined) return message;
-      return { ...message, update: { ...update, content: running.deferred } };
+      return rewrite({ ...update, content: running.deferred } as ToolCallOrUpdate);
     }
     if (update.kind === 'read' || update.kind === 'edit' || !Array.isArray(update.content)) {
       return message;
     }
     const length = toolTextLength(update.content);
     if (length === 0) return message;
-    const running = state.get(id) ?? { written: 0 };
-    state.set(id, running);
+    const running = state.get(scopeKey) ?? { written: 0 };
+    state.set(scopeKey, running);
     if (!running.deferred && running.written + length <= RUNNING_TOOL_TEXT_HISTORY_BUDGET) {
       running.written += length;
       return message;
     }
-    running.deferred = update.content;
+    running.deferred = boundToolCallUpdateContentForMemory(update.content);
     const withoutContent = { ...update };
     delete withoutContent.content;
-    return { ...message, update: withoutContent };
+    return rewrite(withoutContent as ToolCallOrUpdate);
   });
 
 const filterNotificationsForHistory = (

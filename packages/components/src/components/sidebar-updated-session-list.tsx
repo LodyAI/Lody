@@ -4,17 +4,44 @@ import { SessionWindowMenuItem } from './session-window-menu-item';
 import {
   memo,
   useCallback,
+  useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
+  useSyncExternalStore,
+  type CSSProperties,
+  type DragEvent,
+  type RefObject,
   type MouseEvent as ReactMouseEvent,
+  type ReactElement,
   type ReactNode,
 } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { startSessionMentionDrag } from '@/lib/session-mention-drag';
+import {
+  clearSessionMentionDrag,
+  getInFlightSessionMentionDragId,
+  startSessionMentionDrag,
+  subscribeSessionMentionDrag,
+} from '@/lib/session-mention-drag';
+import { useDraggable } from '@dnd-kit/core';
+import { DEFAULT_PIN_SECTION_KEY, pinnedRowDndId } from './pinned-rows-dnd';
+import {
+  beginPinnedDropSettle,
+  flyPinnedDropSettle,
+  getPinnedDropSettle,
+  getPinnedPointerTarget,
+  subscribePinnedPointerTarget,
+  recordPinnedDragOrigin,
+  subscribePinnedDropSettle,
+  takePinnedDragOrigin,
+} from '@/lib/pinned-drop-settle';
 import {
   Archive,
   Folders,
   Folder,
+  FolderInput,
+  FolderPlus,
   GitBranch,
   GitPullRequest,
   Link2,
@@ -43,6 +70,7 @@ import {
   SessionMergeablePill,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
+  SessionRowMenuButton,
   SessionRowWorktreeIndicator,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
@@ -175,7 +203,18 @@ export type SidebarUpdatedItem = {
 export type SidebarUpdatedBucketKey = 'all' | SidebarStatusGroup;
 
 /** How the list splits its rows: one recency list, or the status groups. */
-export type SidebarUpdatedGrouping = 'recency' | 'status';
+/** `manual` keeps the caller's order (pinned sections); the others sort by activity. */
+export type SidebarUpdatedGrouping = 'recency' | 'status' | 'manual';
+
+/** Row menu entries for moving a pinned conversation between pin sections. */
+export type SidebarPinSectionMenu = {
+  /** Sections in display order; `null` is the default section. */
+  sections: readonly { id: string | null; name: string }[];
+  currentSectionId: string | null;
+  onMove: (itemId: string, sectionId: string | null) => void;
+  onCreate: (itemId: string) => void;
+  labels: { moveToSection: string; newSection: string };
+};
 
 export type SidebarUpdatedSessionListLabels = {
   /** Header of the single flat list section. */
@@ -246,6 +285,8 @@ export function buildSidebarUpdatedBuckets(
   items: SidebarUpdatedItem[],
   grouping: SidebarUpdatedGrouping
 ): SidebarUpdatedBucket[] {
+  // A pin section keeps its header while empty: it is still a drop target.
+  if (grouping === 'manual') return [{ key: 'all', items: [...items] }];
   if (!items.length) return [];
   if (grouping === 'recency') return [{ key: 'all', items: sortUpdatedItems(items) }];
   const byGroup = new Map<SidebarStatusGroup, SidebarUpdatedItem[]>();
@@ -336,7 +377,8 @@ export function getVisibleUpdatedItemTree(
   orderedItems: SidebarUpdatedItem[],
   canToggleFullList: boolean,
   showFull: boolean,
-  collapsedOpenedBySessionIds?: Record<string, boolean>
+  collapsedOpenedBySessionIds?: Record<string, boolean>,
+  preserveOrder = false
 ): OpenedBySessionTreeNode<SidebarUpdatedItem>[] {
   const capped = canToggleFullList && !showFull && updatedBucketOverflowsPreview(orderedItems);
   return buildOpenedBySessionTree(orderedItems, {
@@ -344,7 +386,8 @@ export function getVisibleUpdatedItemTree(
     isCollapsed: (openerId) => collapsedOpenedBySessionIds?.[openerId] === true,
     // Updated mode IS the recency list: rank each opener by its freshest opened
     // Session so nesting can never bury a just-updated row under a stale opener.
-    rootRank: updatedItemRootRank,
+    // A manually ordered pin section keeps its roots where the user put them.
+    ...(preserveOrder ? {} : { rootRank: updatedItemRootRank }),
     ...(capped ? { maxRoots: SHOW_FULL_BUCKET_THRESHOLD } : {}),
   });
 }
@@ -353,13 +396,15 @@ export function getVisibleUpdatedItems(
   orderedItems: SidebarUpdatedItem[],
   canToggleFullList: boolean,
   showFull: boolean,
-  collapsedOpenedBySessionIds?: Record<string, boolean>
+  collapsedOpenedBySessionIds?: Record<string, boolean>,
+  preserveOrder = false
 ): SidebarUpdatedItem[] {
   return getVisibleUpdatedItemTree(
     orderedItems,
     canToggleFullList,
     showFull,
-    collapsedOpenedBySessionIds
+    collapsedOpenedBySessionIds,
+    preserveOrder
   ).map((node) => node.item);
 }
 
@@ -448,6 +493,17 @@ export type SidebarUpdatedSessionListProps = {
    * status groups, each with its own header.
    */
   grouping?: SidebarUpdatedGrouping;
+  /** Pinned sections only: "Move to section" entries in each row's context menu. */
+  pinSectionMenu?: SidebarPinSectionMenu;
+  /** Pinned sections only: identifies this list's section for drag and tests. */
+  pinSectionId?: string | null;
+  /**
+   * Pinned sections only: accept a dragged conversation. `toIndex` counts this
+   * section's pinned rows without the dragged one.
+   */
+  onDropPinnedSession?: (sessionId: string, toIndex: number) => void;
+  /** Pinned sections only: wraps the section header (the section drag handle). */
+  renderHeader?: (header: ReactElement) => ReactNode;
 };
 
 const defaultLabels: SidebarUpdatedSessionListLabels = {
@@ -482,7 +538,13 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   headerAction,
   showProjectContext = false,
   grouping = 'recency',
+  pinSectionMenu,
+  pinSectionId,
+  onDropPinnedSession,
+  renderHeader,
 }: SidebarUpdatedSessionListProps) {
+  const preserveOrder = grouping === 'manual';
+  const pinDrag = usePinnedDropGap(items, onDropPinnedSession, pinSectionId ?? null);
   const { t } = useTranslation();
   const showBranchContext = useAtomValue(sidebarShowBranchNamesAtom);
   const merged: SidebarUpdatedSessionListLabels = useMemo(
@@ -579,7 +641,8 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
             bucket.items,
             canToggleFullBucket && updatedBucketCanFold(bucket.key),
             Boolean(showFullBuckets?.[bucket.key]),
-            collapsedOpenedBySessionIds
+            collapsedOpenedBySessionIds,
+            preserveOrder
           ),
         };
       }),
@@ -588,6 +651,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
       canToggleFullBucket,
       collapsedBuckets,
       collapsedOpenedBySessionIds,
+      preserveOrder,
       sendStates,
       showFullBuckets,
     ]
@@ -606,7 +670,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
     );
   }
 
-  if (!items.length) {
+  if (!items.length && !preserveOrder) {
     return (
       <div className="flex flex-col">
         {headerAction ? <HeaderActionRow action={headerAction} /> : null}
@@ -625,7 +689,15 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
 
   return (
     <Tooltip.Provider>
-      <div className={cn('flex flex-col', className)}>
+      <div
+        className={cn('flex flex-col', className)}
+        data-pin-section={
+          pinSectionId === undefined ? undefined : (pinSectionId ?? DEFAULT_PIN_SECTION_KEY)
+        }
+        onDragOver={pinDrag?.onDragOver}
+        onDragLeave={pinDrag?.onDragLeave}
+        onDrop={pinDrag?.onDrop}
+      >
         {buckets.map((bucket, bucketIndex) => {
           const bucketHeaderAction = bucketIndex === 0 ? headerAction : null;
           const collapsed = Boolean(collapsedBuckets?.[bucket.key]);
@@ -661,63 +733,104 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
             >
               {/* Same shared section header as Workspace mode, so section labels
                   read identically (13px medium) across organize modes. */}
-              <SidebarSectionHeader
-                label={bucketLabels[bucket.key]}
-                collapsed={collapsed}
-                activity={collapsedActivity}
-                action={bucketHeaderAction}
-                isMobile={isMobile}
-                toggleLabel={toggleBucketLabel}
-                onToggleCollapsed={canToggleBucket ? handleToggle : undefined}
-              />
+              {(renderHeader ?? identityHeader)(
+                <SidebarSectionHeader
+                  label={bucketLabels[bucket.key]}
+                  collapsed={collapsed}
+                  activity={collapsedActivity}
+                  action={bucketHeaderAction}
+                  isMobile={isMobile}
+                  toggleLabel={toggleBucketLabel}
+                  onToggleCollapsed={canToggleBucket ? handleToggle : undefined}
+                />
+              )}
               {!collapsed ? (
-                <div className={SIDEBAR_ROW_LIST_CLASS}>
-                  {visibleNodes.map((node, nodeIndex) => {
-                    const openedByTree = buildSessionRowOpenedByTreeSlot(node, t, () =>
-                      handleToggleOpenedBySessions(node.item.id)
-                    );
-                    const prevNode = visibleNodes[nodeIndex - 1];
-                    const treeSlot: SessionRowOpenedByTreeSlot | undefined =
-                      openedByTree?.kind === 'child' && (showProjectContext || showBranchContext)
-                        ? {
-                            ...openedByTree,
-                            isFirstChild: prevNode?.depth === 0,
-                            tallOpener: true,
-                          }
-                        : openedByTree;
-                    return (
-                      <SessionOpenedByTreeRow
-                        key={node.item.id}
-                        depth={node.depth}
-                        gutter={showTreeGutter}
-                      >
-                        <UpdatedItemRow
-                          item={node.item}
-                          now={now}
-                          selected={node.item.id === selectedItemId}
-                          isMobile={isMobile}
-                          showPinnedIcon={showPinnedIcon}
-                          showProjectContext={showProjectContext}
-                          showBranchContext={showBranchContext}
-                          href={getItemHref?.(node.item.id)}
-                          onSelect={onSelectItem}
-                          onArchive={onArchiveItem}
-                          onMarkUnread={onMarkItemUnread}
-                          onRename={onRenameItem}
-                          onTogglePin={onTogglePinItem}
-                          onCopyUrl={onCopyItemUrl}
-                          onShareWithTeam={onShareItemWithTeam}
-                          onOpenPullRequest={onOpenPullRequest}
-                          onBeginRename={beginRename}
-                          openedByTree={treeSlot}
-                          contextMenuLabels={contextMenuLabels}
-                          archiveTooltipLabel={archiveLabels.tooltip}
-                          archiveActionLabel={archiveLabels.action}
-                          archiveConfirmLabel={archiveLabels.confirm}
-                        />
-                      </SessionOpenedByTreeRow>
-                    );
-                  })}
+                <div
+                  ref={pinDrag?.rowsRef}
+                  data-pin-rows={pinDrag ? '' : undefined}
+                  className={cn(SIDEBAR_ROW_LIST_CLASS, pinDrag && 'relative')}
+                  style={pinDrag?.rowsStyle}
+                >
+                  {(() => {
+                    const renderNode = (
+                      node: OpenedBySessionTreeNode<SidebarUpdatedItem>,
+                      nodeIndex: number
+                    ) => {
+                      const openedByTree = buildSessionRowOpenedByTreeSlot(node, t, () =>
+                        handleToggleOpenedBySessions(node.item.id)
+                      );
+                      const prevNode = visibleNodes[nodeIndex - 1];
+                      const treeSlot: SessionRowOpenedByTreeSlot | undefined =
+                        openedByTree?.kind === 'child' && (showProjectContext || showBranchContext)
+                          ? {
+                              ...openedByTree,
+                              isFirstChild: prevNode?.depth === 0,
+                              tallOpener: true,
+                            }
+                          : openedByTree;
+                      return (
+                        <SessionOpenedByTreeRow
+                          key={node.item.id}
+                          depth={node.depth}
+                          gutter={showTreeGutter}
+                        >
+                          <UpdatedItemRow
+                            item={node.item}
+                            now={now}
+                            selected={node.item.id === selectedItemId}
+                            isMobile={isMobile}
+                            showPinnedIcon={showPinnedIcon}
+                            showProjectContext={showProjectContext}
+                            showBranchContext={showBranchContext}
+                            href={getItemHref?.(node.item.id)}
+                            onSelect={onSelectItem}
+                            onArchive={onArchiveItem}
+                            onMarkUnread={onMarkItemUnread}
+                            onRename={onRenameItem}
+                            onTogglePin={onTogglePinItem}
+                            onCopyUrl={onCopyItemUrl}
+                            onShareWithTeam={onShareItemWithTeam}
+                            onOpenPullRequest={onOpenPullRequest}
+                            onBeginRename={beginRename}
+                            pinSectionMenu={pinSectionMenu}
+                            nativeDrag={!pinDrag}
+                            openedByTree={treeSlot}
+                            contextMenuLabels={contextMenuLabels}
+                            archiveTooltipLabel={archiveLabels.tooltip}
+                            archiveActionLabel={archiveLabels.action}
+                            archiveConfirmLabel={archiveLabels.confirm}
+                          />
+                        </SessionOpenedByTreeRow>
+                      );
+                    };
+                    if (!pinDrag) return visibleNodes.map(renderNode);
+                    // A pin section moves an opener together with the Sessions it
+                    // opened: each top-level row and its children are one slot.
+                    const groups: {
+                      rootId: string;
+                      nodes: [number, (typeof visibleNodes)[number]][];
+                    }[] = [];
+                    visibleNodes.forEach((node, nodeIndex) => {
+                      const last = groups[groups.length - 1];
+                      if (node.depth === 0 || !last) {
+                        groups.push({ rootId: node.item.id, nodes: [[nodeIndex, node]] });
+                      } else {
+                        last.nodes.push([nodeIndex, node]);
+                      }
+                    });
+                    return groups.map((group) => {
+                      return (
+                        <DraggablePinnedRowSlot
+                          key={group.rootId}
+                          id={group.rootId}
+                          drag={pinDrag}
+                          gutter={showTreeGutter}
+                        >
+                          {group.nodes.map(([nodeIndex, node]) => renderNode(node, nodeIndex))}
+                        </DraggablePinnedRowSlot>
+                      );
+                    });
+                  })()}
                   {showToggleFullList ? (
                     <button
                       type="button"
@@ -815,6 +928,9 @@ type UpdatedItemRowProps = {
   onBeginRename: (id: string, currentTitle: string) => void;
   openedByTree?: SessionRowOpenedByTreeSlot;
   contextMenuLabels: SidebarUpdatedContextMenuLabels;
+  pinSectionMenu?: SidebarPinSectionMenu;
+  /** False in pin sections, whose rows are dragged by dnd-kit instead. */
+  nativeDrag?: boolean;
   archiveTooltipLabel: string;
   archiveActionLabel: string;
   archiveConfirmLabel: string;
@@ -838,6 +954,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   onShareWithTeam,
   onOpenPullRequest,
   onBeginRename,
+  pinSectionMenu,
+  nativeDrag = true,
   openedByTree,
   contextMenuLabels,
   archiveTooltipLabel,
@@ -940,7 +1058,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       Boolean(branchName) ||
       canGoToOpener ||
       (showPr && Boolean(onOpenPullRequest)) ||
-      Boolean(openedByOpener));
+      Boolean(openedByOpener) ||
+      Boolean(pinSectionMenu));
   const handlePrOpen =
     onOpenPullRequest && prUrl
       ? () =>
@@ -991,10 +1110,17 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       data-sidebar-updated-id={item.id}
       data-sidebar-updated-kind={item.kind}
       data-menu-open={rowMenuOpen ? '' : undefined}
-      // Drag a conversation onto a chat surface to mention it there.
-      draggable
-      onDragStart={(event) =>
-        startSessionMentionDrag(event, { sessionId: item.id, title: item.title })
+      // Drag a conversation onto a chat surface to mention it there. Pin
+      // sections drag with dnd-kit and mention through the pointer-drop bridge.
+      draggable={nativeDrag}
+      onDragStart={
+        nativeDrag
+          ? (event) => {
+              startSessionMentionDrag(event, { sessionId: item.id, title: item.title });
+              // A drop into a pin section lands from where this row was released.
+              recordPinnedDragOrigin(item.id, event.currentTarget, event);
+            }
+          : undefined
       }
       className={cn(
         // Named group ('row') so the archive hover-reveal scopes to the hovered row
@@ -1061,14 +1187,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         )}
       >
         <div className={cn('flex shrink-0 items-center', SIDEBAR_ROW_LINE_CLASS)}>
-          <SessionRowLeadingSlot
-            showMenuButton={hasMenuActions}
-            menuLabel={contextMenuLabels.moreActions}
-            openedByTree={openedByTree}
-            fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
-            restPointerClassName="group-hover/row:pointer-events-none group-data-[menu-open]/row:pointer-events-none"
-            revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
-          />
+          <SessionRowLeadingSlot openedByTree={openedByTree} />
         </div>
         {item.owner ? (
           <span className={cn('flex shrink-0 items-center', SIDEBAR_ROW_LINE_CLASS)}>
@@ -1148,6 +1267,14 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                 </span>
               ) : undefined
             }
+            menu={
+              hasMenuActions ? (
+                <SessionRowMenuButton
+                  label={contextMenuLabels.moreActions}
+                  revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
+                />
+              ) : undefined
+            }
             archive={
               showInlineArchive ? (
                 <SidebarRowArchiveButton
@@ -1210,6 +1337,28 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           >
             {item.isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
           </ContextMenu.Item>
+        ) : null}
+        {pinSectionMenu ? (
+          <ContextMenu.Submenu>
+            <ContextMenu.SubmenuTrigger icon={FolderInput}>
+              {pinSectionMenu.labels.moveToSection}
+            </ContextMenu.SubmenuTrigger>
+            <ContextMenu.SubmenuContent className="min-w-[180px]">
+              {pinSectionMenu.sections.map((section) => (
+                <ContextMenu.Item
+                  key={section.id ?? DEFAULT_PIN_SECTION_KEY}
+                  disabled={section.id === pinSectionMenu.currentSectionId}
+                  onClick={() => pinSectionMenu.onMove(item.id, section.id)}
+                >
+                  {section.name}
+                </ContextMenu.Item>
+              ))}
+              <ContextMenu.Separator />
+              <ContextMenu.Item icon={FolderPlus} onClick={() => pinSectionMenu.onCreate(item.id)}>
+                {pinSectionMenu.labels.newSection}
+              </ContextMenu.Item>
+            </ContextMenu.SubmenuContent>
+          </ContextMenu.Submenu>
         ) : null}
         {canMarkUnread ? (
           <ContextMenu.Item
@@ -1368,3 +1517,294 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
 });
 
 UpdatedItemRow.displayName = 'UpdatedItemRow';
+
+const identityHeader = (header: ReactElement): ReactNode => header;
+
+/**
+ * Drop index for a pointer at `clientY` over a pin section's rows element:
+ * how many of its other rows rest above the pointer. Resting layout
+ * (`offsetTop`, which the gap's transforms do not move), so the gap cannot
+ * chase the pointer. Above the rows (the header) is the top; below, the end.
+ */
+export function pinnedDropIndexAt(
+  rows: HTMLElement | null,
+  clientY: number,
+  draggedId: string
+): number {
+  if (!rows) return 0;
+  const y = clientY - rows.getBoundingClientRect().top;
+  let index = 0;
+  for (const node of Array.from(rows.children)) {
+    if (!(node instanceof HTMLElement)) continue;
+    const id = node.getAttribute('data-pin-node');
+    if (!id || id === draggedId) continue;
+    if (node.offsetTop + node.offsetHeight / 2 < y) index += 1;
+  }
+  return index;
+}
+
+const escapeAttributeValue = (value: string) =>
+  typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+    ? CSS.escape(value)
+    : value.replace(/["\\]/g, '\\$&');
+
+const PINNED_DROP_DEFAULT_GAP_PX = 29;
+const PINNED_DROP_TRANSITION = 'transform 160ms ease, opacity 120ms ease';
+const PINNED_DROP_ROWS_TRANSITION = 'padding-bottom 160ms ease, margin-bottom 160ms ease';
+
+type PinnedDropGap = {
+  rowsRef: RefObject<HTMLDivElement | null>;
+  rowsStyle: CSSProperties | undefined;
+  nodeStyle: (id: string) => CSSProperties | undefined;
+  onDragOver: (event: DragEvent<HTMLDivElement>) => void;
+  onDragLeave: (event: DragEvent<HTMLDivElement>) => void;
+  onDrop: (event: DragEvent<HTMLDivElement>) => void;
+};
+
+const noopSubscribe = () => () => {};
+const readNoDrag = () => null;
+
+/**
+ * Pin-section drop target. While a conversation is dragged, the dragged row's
+ * slot closes and the rows at the drop position slide down to open a gap of
+ * its height. The drop index is read against the rows' resting layout
+ * (`offsetTop`, which transforms do not move), so the gap cannot chase the pointer.
+ * `null` for lists that accept no drop.
+ */
+function usePinnedDropGap(
+  items: readonly SidebarUpdatedItem[],
+  onDropPinnedSession: ((sessionId: string, toIndex: number) => void) | undefined,
+  sectionId: string | null
+): PinnedDropGap | null {
+  const enabled = typeof onDropPinnedSession === 'function';
+  const inFlight = useSyncExternalStore(
+    enabled ? subscribeSessionMentionDrag : noopSubscribe,
+    enabled ? getInFlightSessionMentionDragId : readNoDrag,
+    readNoDrag
+  );
+  const settle = useSyncExternalStore(
+    enabled ? subscribePinnedDropSettle : noopSubscribe,
+    enabled ? getPinnedDropSettle : readNoDrag,
+    readNoDrag
+  );
+  // Only this section's index: moving the pointer elsewhere re-renders nothing here.
+  const readPointerIndex = useCallback(() => {
+    const target = getPinnedPointerTarget();
+    return target && target.sectionId === sectionId ? target.index : null;
+  }, [sectionId]);
+  const pointerIndex = useSyncExternalStore(
+    enabled ? subscribePinnedPointerTarget : noopSubscribe,
+    enabled ? readPointerIndex : readNoDrag,
+    readNoDrag
+  );
+  const rowsRef = useRef<HTMLDivElement | null>(null);
+  const [nativeDropIndex, setDropIndex] = useState<number | null>(null);
+  // A pointer (dnd-kit) drag of a pinned row aims here, or a native drag does.
+  const dropIndex = nativeDropIndex ?? pointerIndex;
+  const [gap, setGap] = useState(PINNED_DROP_DEFAULT_GAP_PX);
+  // A released row still owns the layout until it lands in its slot.
+  const dragged = enabled
+    ? (inFlight ?? (settle?.phase === 'waiting' ? settle.sessionId : null))
+    : null;
+  const flyingId = enabled && settle?.phase === 'flying' ? settle.sessionId : null;
+  // Only a live drag animates. After the release, the rows' new layout equals
+  // what is already on screen, so it must snap: the landing has one motion.
+  const animate = Boolean(enabled && inFlight);
+
+  useEffect(() => {
+    if (!dragged) {
+      setDropIndex(null);
+      return;
+    }
+    const row = document.querySelector<HTMLElement>(
+      `[data-sidebar-updated-id="${escapeAttributeValue(dragged)}"]`
+    );
+    // The list's 1px row gap travels with the slot.
+    if (row && row.offsetHeight > 0) setGap(row.offsetHeight + 1);
+  }, [dragged]);
+
+  const layout = useMemo(() => {
+    const rootOf = new Map<string, string>();
+    for (const item of items) {
+      rootOf.set(item.id, item.isPinned ? item.id : (item.openedByRowSessionId ?? item.id));
+    }
+    const rootIds = items.filter((item) => item.isPinned).map((item) => item.id);
+    const rowIndex = new Map(items.map((item, index) => [item.id, index]));
+    return { rootOf, rootIds, rowIndex };
+  }, [items]);
+  // Each root's position among the section's rows other than the dragged one.
+  const otherIndex = useMemo(
+    () =>
+      new Map(
+        layout.rootIds.filter((id) => id !== dragged).map((id, index) => [id, index] as const)
+      ),
+    [dragged, layout.rootIds]
+  );
+  // Events read the live drag: the first dragover can arrive before a re-render.
+  const liveDragged = useCallback(
+    () => (enabled ? getInFlightSessionMentionDragId() : null),
+    [enabled]
+  );
+  const sourceHere = Boolean(dragged && layout.rootOf.has(dragged));
+
+  // The write landed: the row now renders in this section at the dropped index.
+  // Measure its slot before paint and hand the landing to the flight.
+  useLayoutEffect(() => {
+    if (!enabled || settle?.phase !== 'waiting' || settle.toSectionId !== sectionId) return;
+    if (layout.rootIds.indexOf(settle.sessionId) !== settle.toIndex) return;
+    const node = Array.from(rowsRef.current?.children ?? []).find(
+      (child) => child.getAttribute('data-pin-node') === settle.sessionId
+    );
+    const row = node?.querySelector<HTMLElement>('[data-sidebar-updated-id]');
+    if (!row) return;
+    const rect = row.getBoundingClientRect();
+    flyPinnedDropSettle(
+      { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      getComputedStyle(row).backgroundColor,
+      row.cloneNode(true) as HTMLElement,
+      getComputedStyle(row).borderRadius
+    );
+  }, [enabled, layout.rootIds, sectionId, settle]);
+
+  const resolveIndex = useCallback(
+    (event: DragEvent<HTMLDivElement>): number | null => {
+      const current = liveDragged();
+      if (!current) return null;
+      return pinnedDropIndexAt(rowsRef.current, event.clientY, current);
+    },
+    [liveDragged]
+  );
+
+  const onDragOver = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      const index = resolveIndex(event);
+      if (index === null) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+      setDropIndex(index);
+    },
+    [resolveIndex]
+  );
+  const onDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
+    // Chrome often reports no relatedTarget when the pointer moves onto a child,
+    // so only a pointer outside the section's box closes the gap.
+    const box = event.currentTarget.getBoundingClientRect();
+    const inside =
+      event.clientX >= box.left &&
+      event.clientX < box.right &&
+      event.clientY >= box.top &&
+      event.clientY < box.bottom;
+    if (inside) return;
+    setDropIndex(null);
+  }, []);
+  const onDrop = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      const index = resolveIndex(event);
+      const current = liveDragged();
+      if (index === null || !current) {
+        setDropIndex(null);
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setDropIndex(index);
+      const origin = takePinnedDragOrigin(current);
+      beginPinnedDropSettle({
+        sessionId: current,
+        toSectionId: sectionId,
+        toIndex: index,
+        from: origin
+          ? {
+              left: event.clientX - origin.offsetX,
+              top: event.clientY - origin.offsetY,
+              width: origin.width,
+              height: origin.height,
+            }
+          : { left: event.clientX - 24, top: event.clientY - gap / 2, width: 0, height: gap },
+        ghost: origin?.ghost ?? null,
+        fromBackground: origin?.background ?? null,
+      });
+      // The drag ends here: when the move unmounts the source row, no dragend
+      // will arrive. The settle keeps the layout until the row lands.
+      clearSessionMentionDrag();
+      onDropPinnedSession?.(current, index);
+    },
+    [gap, liveDragged, onDropPinnedSession, resolveIndex, sectionId]
+  );
+
+  const nodeStyle = useCallback(
+    (id: string): CSSProperties | undefined => {
+      // Under its flying copy, the landed row waits invisible, without a fade.
+      if (flyingId && (layout.rootOf.get(id) ?? id) === flyingId) return { opacity: 0 };
+      if (!dragged) return undefined;
+      const root = layout.rootOf.get(id) ?? id;
+      if (root === dragged) {
+        return { opacity: 0, transition: animate ? PINNED_DROP_TRANSITION : undefined };
+      }
+      let shift = 0;
+      // Rows below the dragged one close its slot.
+      if (sourceHere && (layout.rowIndex.get(id) ?? 0) > (layout.rowIndex.get(dragged) ?? 0)) {
+        shift -= gap;
+      }
+      // Rows at and after the drop position open the gap.
+      const position = otherIndex.get(root) ?? -1;
+      if (dropIndex !== null && position >= dropIndex) shift += gap;
+      return {
+        transform: shift ? `translateY(${shift}px)` : undefined,
+        transition: animate ? PINNED_DROP_TRANSITION : undefined,
+      };
+    },
+    [animate, dragged, dropIndex, flyingId, gap, layout, otherIndex, sourceHere]
+  );
+
+  if (!enabled) return null;
+  return {
+    rowsRef,
+    // A gap opened in another section needs room below its last row, and the
+    // section the row left gives its slot back, so the sidebar keeps its height.
+    rowsStyle: !dragged
+      ? undefined
+      : {
+          transition: animate ? PINNED_DROP_ROWS_TRANSITION : undefined,
+          ...(dropIndex !== null && !sourceHere ? { paddingBottom: gap } : {}),
+          ...(dropIndex === null && sourceHere ? { marginBottom: -gap } : {}),
+        },
+    nodeStyle,
+    onDragOver,
+    onDragLeave,
+    onDrop,
+  };
+}
+
+type PinnedRowSlotProps = {
+  id: string;
+  drag: PinnedDropGap;
+  gutter: boolean;
+  children: ReactNode;
+};
+
+const slotClassName = (gutter: boolean) =>
+  // A nested trunk draws into the list's 1px gap; the slot keeps that pixel
+  // inside its own (paint-contained) box, as `SessionOpenedByTreeRow` does.
+  cn('flex min-w-0 flex-col gap-px', gutter && 'relative pb-px -mb-px');
+
+/**
+ * One row slot of a pin section (a top-level row and the Sessions it opened).
+ * dnd-kit picks it up (pin rows carry no native drag), and it carries the gap
+ * layout shared by pointer drags and native drops from other lists.
+ */
+function DraggablePinnedRowSlot({ id, drag, gutter, children }: PinnedRowSlotProps) {
+  const { setNodeRef, listeners } = useDraggable({ id: pinnedRowDndId(id) });
+  return (
+    <div
+      ref={setNodeRef}
+      data-pin-node={id}
+      data-pin-sortable=""
+      className={slotClassName(gutter)}
+      style={drag.nodeStyle(id)}
+      {...listeners}
+    >
+      {children}
+    </div>
+  );
+}

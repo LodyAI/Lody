@@ -278,3 +278,53 @@ describe('mobile chat list group preview cap', () => {
     }
   });
 });
+
+describe('mobile pin sections', () => {
+  it('splits pinned rows into their sections, keeping the manual order', () => {
+    render(
+      [
+        makeItem({ id: 'loose', title: 'loose', isPinned: true, latestMessageAt: NOW }),
+        makeItem({
+          id: 'deps-bump',
+          title: 'deps-bump',
+          isPinned: true,
+          pinSectionId: 'maintenance',
+          pinOrderKey: '81',
+          latestMessageAt: NOW,
+        }),
+        makeItem({
+          id: 'weekly-mirror',
+          title: 'weekly-mirror',
+          isPinned: true,
+          pinSectionId: 'maintenance',
+          pinOrderKey: '80',
+          latestMessageAt: NOW - 50 * HOUR,
+        }),
+        ...makeProjectItems(1),
+      ],
+      { pinSections: [{ id: 'maintenance', name: 'Maintenance', orderKey: '80' }] }
+    );
+    expect(titles().slice(0, 3)).toEqual(['loose', 'weekly-mirror', 'deps-bump']);
+    const text = container.textContent ?? '';
+    expect(text.indexOf('Pinned')).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf('Maintenance')).toBeGreaterThan(text.indexOf('Pinned'));
+  });
+});
+
+describe('mobile pin sections before the sections are read', () => {
+  it('holds back a sectioned pin instead of showing it unsectioned', () => {
+    // No workspace runtime: the section catalog has not been read.
+    render([
+      makeItem({ id: 'loose', title: 'loose', isPinned: true, latestMessageAt: NOW }),
+      makeItem({
+        id: 'weekly-mirror',
+        title: 'weekly-mirror',
+        isPinned: true,
+        pinSectionId: 'maintenance',
+        pinOrderKey: '80',
+        latestMessageAt: NOW,
+      }),
+    ]);
+    expect(titles()).toEqual(['loose']);
+  });
+});

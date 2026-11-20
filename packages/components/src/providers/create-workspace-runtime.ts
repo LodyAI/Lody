@@ -1909,6 +1909,31 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     return { provider, streamsBaseUrl };
   };
 
+  const getWorkspaceStreamsGrant = async (options?: {
+    forceRefresh?: boolean;
+    signal?: AbortSignal;
+  }): Promise<{ token: string; gatewayBaseUrl: string }> => {
+    await waitForContentAdmission(options?.signal);
+    if (!cloudPlaneEnabled) {
+      throw new Error('Streams access is disabled in local-only sync mode');
+    }
+    requirePlaintextWorkspaceStreamsContent(deps.content);
+    if (electronLocalDataPlane) {
+      await attachCloudPlaneTransport();
+    }
+    await transportReady.promise;
+    const provider = ensureStreamsTokenProvider();
+    if (options?.forceRefresh) {
+      provider.invalidate('unauthorized');
+    }
+    const token = await provider.getToken(options?.signal);
+    if (disposePromise || provider !== streamsTokenProvider) {
+      throw new SupersededAttachError();
+    }
+    const gatewayBaseUrl = transportStreamsBaseUrl ?? getStreamsBaseUrlForProvider(provider);
+    return { token, gatewayBaseUrl };
+  };
+
   const createMachineRpcJsonStreamClient = (
     provider: LoroStreamsTokenProviderLegacy,
     streamsBaseUrl: string
@@ -6281,6 +6306,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         }
       : {}),
     attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
+    cloudStreamsEnabled: cloudPlaneEnabled && !protectedContent,
+    ...(cloudPlaneEnabled && !protectedContent ? { getWorkspaceStreamsGrant } : {}),
     ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
     ...(protectedContent && deps.e2ee?.signScheduleDeclaration
       ? { signScheduleDeclaration: deps.e2ee.signScheduleDeclaration }

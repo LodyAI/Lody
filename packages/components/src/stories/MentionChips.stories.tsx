@@ -20,7 +20,7 @@ import type { Mention as MentionRange } from '@/ui/mention/index';
  */
 
 const PASTED_LABEL = wrapPastedTextChipLabel('[Pasted 4,182 chars]');
-const QUOTE_LABEL = wrapPastedTextChipLabel('[Quote: Keep the reading position]');
+const QUOTE_LABEL = wrapPastedTextChipLabel('[Keep the reading position]');
 
 type Fixture = {
   text: string;
