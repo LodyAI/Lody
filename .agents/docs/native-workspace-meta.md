@@ -135,9 +135,15 @@ ids instead of opening a replica.
 
 - **Reads.** [`remote-loro.ts`](../../packages/shared/src/session-data/remote-loro.ts)
   pages the history (`readDocListFields`) for the windowed ConversationView. Body
-  reads issued in the same task are served together, one whole-turn page per
-  contiguous run, and a directory page reads on past the engine's byte bound so
-  it stays contiguous. [`remote-document.ts`](../../packages/shared/src/session-data/remote-document.ts)
+  reads issued in the same task are served together, one page per contiguous run,
+  and a directory page reads on past the engine's byte bound so it stays
+  contiguous. Display reads match the in-process display reader: the engine's
+  item filter (`where`/`omit`, loro-repo `lody/list-field-item-filter`) returns
+  every item but child-run transcripts, and each run's latest step is read from
+  its end; `readSubagentRun` selects one task by `taskId`. The fact table asks
+  only for the item types its derivation declares (`goal`, `tool_call`,
+  `proposed_plan`), which cut its sweep's reads from 50 MB to 14 MB at 50,000
+  prose turns; renderer peak memory did not change measurably. [`remote-document.ts`](../../packages/shared/src/session-data/remote-document.ts)
   keeps every control root (`session`, `mq`, `humanInputReceipts`, `cancelRequest`,
   `forkOperation`, `notification`, `preview`, `externalHistoryCursor`,
   `acpRuntimeConfig`) as small JSON. One `doc_subscribe_paths` observation

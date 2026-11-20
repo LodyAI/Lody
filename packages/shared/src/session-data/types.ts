@@ -184,6 +184,15 @@ export interface SessionHistoryReader {
    * summary, not a transcript. Never use this for export, copy, hashes or writes.
    * Advertise only together with readSubagentRun. */
   readTurnForDisplay?(turnId: string): SessionTurnRead | Promise<SessionTurnRead>;
+  /**
+   * The turn with only its items of `itemTypes`, in order: for a business-fact
+   * derivation that reads nothing else of the body. Never use this for export,
+   * copy, hashes, writes or display.
+   */
+  readTurnSelectingItems?(
+    turnId: string,
+    itemTypes: readonly string[]
+  ): SessionTurnRead | Promise<SessionTurnRead>;
   /** Read exactly one run from its owning turn, preserving root ACP identity. */
   readSubagentRun?(
     turnId: string,
