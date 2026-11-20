@@ -1,4 +1,4 @@
-import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
+import { mkdir, open, readdir, readFile, rename, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { createLodyWorkspaceRoutes, type RepoClient } from '@loro-dev/loro-repo-client';
 import { encryptedWorkspaceNamespace } from '../workspace-streams-content';
@@ -42,7 +42,21 @@ export interface NativeEncryptedWorkspaceOptions {
   /** Runs core's EngineKeyringSync for this device; idempotent. */
   readonly syncKeyring: () => Promise<{ readonly mayWrite: boolean }>;
   readonly pendingWipe: NativePendingWipe;
+  /**
+   * The engine holds a room it cannot open yet: an unknown key or a writer the
+   * installed ledger does not admit (a rotation or admission the Streams data
+   * reached first). The caller runs its spaced ledger and key catch-up, after
+   * which the notification table reinstalls; forged frames never trigger it.
+   */
+  readonly onOpenPending?: () => void;
 }
+
+/** Open holds a ledger or key catch-up can clear (not `invalid_frame`). */
+const OPEN_PENDING_KINDS: ReadonlySet<string> = new Set([
+  'unknown_key',
+  'unauthorized',
+  'missing_provider',
+]);
 
 /** The remote every encrypted workspace's native namespace uses. */
 export const NATIVE_CONTENT_REMOTE_ID = 'e2ee-content';
@@ -93,6 +107,45 @@ export function nativePendingWipeMarker(dataDir: string, workspaceId: string): N
   };
 }
 
+/**
+ * Removes the namespace now, or, when the host is unreachable (removal while it is
+ * down), as soon as the connection is back. The marker is durable first, so a
+ * process exit meanwhile leaves it to the next start's sweep.
+ */
+export async function wipeNativeNamespace(
+  options: Pick<NativeEncryptedWorkspaceOptions, 'client' | 'workspaceId' | 'pendingWipe'>
+) {
+  await options.pendingWipe.write();
+  try {
+    await finishNativeWipe(options);
+  } catch (error) {
+    let finishing = false;
+    const off = options.client.onConnectionStateChange((state) => {
+      if (state !== 'connected' || finishing) return;
+      finishing = true;
+      finishNativeWipe(options).then(off, () => {
+        finishing = false;
+      });
+    });
+    throw error;
+  }
+}
+
+/**
+ * Finishes every pending wipe recorded in `dataDir` (a removal while the host was
+ * down or the drop failed): the first connection after it finishes the drop.
+ */
+export async function finishPendingNativeWipes(client: RepoClient, dataDir: string) {
+  const names = await readdir(join(dataDir, 'pending-wipes')).catch(() => [] as string[]);
+  for (const name of names) {
+    if (!name.endsWith('.json')) continue;
+    const workspaceId = Buffer.from(name.slice(0, -'.json'.length), 'hex').toString();
+    if (!workspaceId) continue;
+    const pendingWipe = nativePendingWipeMarker(dataDir, workspaceId);
+    await finishNativeWipe({ client, workspaceId, pendingWipe }).catch(() => {});
+  }
+}
+
 export interface NativeEncryptedWorkspace {
   /**
    * Re-installs keys and policy after any trigger of the notification table: a
@@ -103,7 +156,7 @@ export interface NativeEncryptedWorkspace {
    * Removes this workspace's content from the device after credential-confirmed
    * member removal: writes the pending-wipe marker, clears the keyring,
    * removes the remote and drops the namespace. Only a successful drop clears the
-   * marker; a failure leaves it for the next attach to finish.
+   * marker; with the host unreachable it finishes once the connection is back.
    */
   wipe(): Promise<void>;
   /**
@@ -114,6 +167,41 @@ export interface NativeEncryptedWorkspace {
   retireWriter(): Promise<void>;
   /** Stops reinstalling on reconnect. Keys stay: another process may share the namespace. */
   close(): void;
+}
+
+type TokenSource = NativeEncryptedWorkspaceOptions['contentToken'];
+/**
+ * The client replays a registration after every reconnect and cannot remove one,
+ * so each namespace registers once per client and serves the current attachment's
+ * tokens. A closed attachment (account switch, wipe) serves none.
+ */
+const tokenSlots = new WeakMap<RepoClient, Map<string, { source?: TokenSource }>>();
+async function serveTokens(
+  client: RepoClient,
+  workspaceId: string,
+  source: TokenSource,
+  mayWrite: boolean
+) {
+  let slots = tokenSlots.get(client);
+  if (!slots) tokenSlots.set(client, (slots = new Map()));
+  const known = slots.get(workspaceId);
+  if (known) {
+    known.source = source;
+    return known;
+  }
+  const slot: { source?: TokenSource } = { source };
+  slots.set(workspaceId, slot);
+  await client.registerAuthProvider({
+    domains: [workspaceId],
+    remoteIds: [NATIVE_CONTENT_REMOTE_ID],
+    priority: mayWrite ? WRITER_TOKEN_PRIORITY : READER_TOKEN_PRIORITY,
+    getToken: async ({ rejectedToken }) => {
+      if (!slot.source) throw new Error('native_content_token_unavailable');
+      const grant = await slot.source(rejectedToken ?? undefined);
+      return { token: grant.token, expiresInMs: grant.expiresIn * 1000 };
+    },
+  });
+  return slot;
 }
 
 /**
@@ -146,26 +234,23 @@ export async function attachNativeEncryptedWorkspace(
 
   let serial: Promise<unknown> = Promise.resolve();
   let closed = false;
-  let registered = false;
+  let slot: { source?: TokenSource } | undefined;
   const install = async () => {
     const { mayWrite } = await options.syncKeyring();
     await client.setSnapshotPolicy(workspaceId, {
       ...NATIVE_ENCRYPTED_SNAPSHOT_POLICY,
       enabled: mayWrite,
     });
-    // The client replays this registration after every reconnect.
-    if (!registered) {
-      await client.registerAuthProvider({
-        domains: [workspaceId],
-        remoteIds: [NATIVE_CONTENT_REMOTE_ID],
-        priority: mayWrite ? WRITER_TOKEN_PRIORITY : READER_TOKEN_PRIORITY,
-        getToken: async ({ rejectedToken }) => {
-          const grant = await options.contentToken(rejectedToken ?? undefined);
-          return { token: grant.token, expiresInMs: grant.expiresIn * 1000 };
-        },
-      });
-      registered = true;
-    }
+    if (!closed) slot ??= await serveTokens(client, workspaceId, options.contentToken, mayWrite);
+    // Best effort: offline, a persisted remote keeps its rows queued and the next
+    // install (refresh or reconnect) configures it.
+    if (!closed && !remoteConfigured) await configureContentRemote().catch(() => {});
+  };
+  const stopServing = () => {
+    closed = true;
+    offState();
+    void pendingWatch?.unsubscribe().catch(() => {});
+    if (slot?.source === options.contentToken) slot.source = undefined;
   };
   const run = <A>(work: () => Promise<A>): Promise<A> => {
     const next = serial.then(work, work);
@@ -174,21 +259,44 @@ export async function attachNativeEncryptedWorkspace(
   };
 
   // The bucket and gateway come from the token itself; they are fixed per workspace.
-  const first = await options.contentToken();
+  // The engine persists the remote, so opening never waits on the network.
+  let remoteConfigured = false;
+  const configureContentRemote = async () => {
+    const grant = await options.contentToken();
+    await client.configureRemote(workspaceId, {
+      remote_id: NATIVE_CONTENT_REMOTE_ID,
+      base_url: grant.gatewayBaseUrl,
+      bucket: grant.bucketId,
+      encrypted: true,
+      snapshot_zstd: true,
+      aadDomain: encryptedWorkspaceNamespace(options.genesisHash),
+      // Legacy session-comment documents and local migration markers stay off this remote.
+      routes: createLodyWorkspaceRoutes(workspaceId, {
+        excludePrefixes: ['session-comment-'],
+        excludeFlockPrefixes: ['lody-migrations'],
+      }),
+    });
+    remoteConfigured = true;
+  };
   await run(install);
-  await client.configureRemote(workspaceId, {
-    remote_id: NATIVE_CONTENT_REMOTE_ID,
-    base_url: first.gatewayBaseUrl,
-    bucket: first.bucketId,
-    encrypted: true,
-    snapshot_zstd: true,
-    aadDomain: encryptedWorkspaceNamespace(options.genesisHash),
-    // Legacy session-comment documents and local migration markers stay off this remote.
-    routes: createLodyWorkspaceRoutes(workspaceId, {
-      excludePrefixes: ['session-comment-'],
-      excludeFlockPrefixes: ['lody-migrations'],
-    }),
-  });
+
+  const pendingWatch = options.onOpenPending
+    ? await client
+        .subscribeRemoteStatus(
+          workspaceId,
+          (statuses) => {
+            if (closed) return;
+            const pending = statuses.some((status) =>
+              status.blockedRooms.some(
+                (room) => room.direction === 'open' && OPEN_PENDING_KINDS.has(room.kind)
+              )
+            );
+            if (pending) options.onOpenPending?.();
+          },
+          NATIVE_CONTENT_REMOTE_ID
+        )
+        .catch(() => undefined)
+    : undefined;
 
   // The keyring and snapshot policy live in engine memory: a host restart,
   // reconnect or build handoff starts empty, so reinstall on every reconnect.
@@ -201,19 +309,14 @@ export async function attachNativeEncryptedWorkspace(
     refresh: () => (closed ? Promise.resolve() : run(install)),
     wipe: () =>
       run(async () => {
-        closed = true;
-        offState();
-        await options.pendingWipe.write();
-        await finishNativeWipe(options);
+        stopServing();
+        await wipeNativeNamespace(options);
       }),
     retireWriter: () =>
       run(async () => {
         await client.keyringHoldSealing(workspaceId, options.writer);
         await client.keyringRemoveSigner(workspaceId, options.writer);
       }),
-    close() {
-      closed = true;
-      offState();
-    },
+    close: stopServing,
   };
 }

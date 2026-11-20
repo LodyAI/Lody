@@ -18,6 +18,7 @@ import type { makeDesktopE2eeRuntimeHost } from './e2ee-runtime.mjs'
 import { getIpcServiceDeps } from '../ipc/ipc-service-deps'
 import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import { E2eeDeviceRevokedError, E2eeMemberRemovedError } from './e2ee-cloud-errors.mjs'
+import { detachNativeWorkspace, refreshNativeWorkspace } from './native-encrypted-workspaces'
 
 // Lazy application boundary. Plain workspaces never create a Scope or touch custody.
 // Locking: a directory turn holds one shared account permit, then only its identity
@@ -397,6 +398,7 @@ function runAccountOperation<A>(
                   directory,
                   custody,
                   bootstrap,
+                  onVerifiedChange: refreshNativeWorkspace,
                   ...(iroh
                     ? {
                         iroh: {
@@ -576,6 +578,7 @@ export function releaseDesktopE2eeReader(senderId: number): void {
             for (const [workspaceId, readers] of current.readers) {
               readers.delete(senderId)
               if (readers.size === 0) {
+                detachNativeWorkspace(workspaceId)
                 cleanup.push(yield* current.host.beginCloseWorkspace(workspaceId))
                 current.readers.delete(workspaceId)
               }

@@ -1,5 +1,6 @@
 import type { LocalProjectId, LocalProjectMeta, MachineId, MachineViewMeta } from '@lody/shared';
 import type { MachineVisibilityAccess } from './visible-machine-index';
+import { getLocalProjectVisibilityKey } from '@lody/shared/session-visibility';
 
 export type { MachineVisibilityAccess };
 
@@ -38,12 +39,8 @@ export type VisibleLocalProjectIndex = {
   isLoading: boolean;
 };
 
-export function getLocalProjectVisibilityKey(
-  machineId: MachineId | string,
-  localProjectId: LocalProjectId | string
-): string {
-  return `${machineId}:${localProjectId}`;
-}
+// Shared with Electron main's per-request session read check.
+export { getLocalProjectVisibilityKey };
 
 function selectAccessRow(
   current: LocalProjectVisibilityAccess | undefined,
