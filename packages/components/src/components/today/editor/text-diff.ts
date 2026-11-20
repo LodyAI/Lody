@@ -1,3 +1,5 @@
+import { sliceTodayRich, TODAY_MENTION_CHAR, type TodayRichText } from '@lody/shared';
+
 /** One contiguous replacement in UTF-16 offsets, as LoroText and Lexical both count. */
 export type TextSplice = { start: number; deleteCount: number; insert: string };
 
@@ -33,6 +35,49 @@ export function safeTextDiff(previous: string, next: string): TextSplice | null 
     nextEnd += 1;
   }
   return { start, deleteCount: previousEnd - start, insert: next.slice(start, nextEnd) };
+}
+
+/** One contiguous replacement of rich text: the inserted part carries its mentions. */
+export type RichSplice = { start: number; deleteCount: number; insert: TodayRichText };
+
+/**
+ * `safeTextDiff` over rich text: a position matches only when its character
+ * and, for U+FFFC, its mention are the same. A plain diff cannot tell two
+ * adjacent mentions apart (deleting the first would delete the second) and
+ * misses a mention replaced in place (the text does not change).
+ */
+export function safeRichDiff(previous: TodayRichText, next: TodayRichText): RichSplice | null {
+  const keyed = (rich: TodayRichText) => {
+    const keys = new Map(rich.mentions.map((m) => [m.start, `${m.kind}\u0000${m.id}`]));
+    return (index: number) =>
+      rich.text[index] === TODAY_MENTION_CHAR
+        ? `${TODAY_MENTION_CHAR}${keys.get(index) ?? ''}`
+        : rich.text[index];
+  };
+  const a = keyed(previous);
+  const b = keyed(next);
+  const previousLength = previous.text.length;
+  const nextLength = next.text.length;
+  let start = 0;
+  const shortest = Math.min(previousLength, nextLength);
+  while (start < shortest && a(start) === b(start)) start += 1;
+  let previousEnd = previousLength;
+  let nextEnd = nextLength;
+  while (previousEnd > start && nextEnd > start && a(previousEnd - 1) === b(nextEnd - 1)) {
+    previousEnd -= 1;
+    nextEnd -= 1;
+  }
+  if (start === previousEnd && start === nextEnd) return null;
+  if (start > 0 && isHighSurrogate(previous.text.charCodeAt(start - 1))) start -= 1;
+  if (previousEnd < previousLength && isLowSurrogate(previous.text.charCodeAt(previousEnd))) {
+    previousEnd += 1;
+    nextEnd += 1;
+  }
+  return {
+    start,
+    deleteCount: previousEnd - start,
+    insert: sliceTodayRich(next, start, nextEnd),
+  };
 }
 
 /**

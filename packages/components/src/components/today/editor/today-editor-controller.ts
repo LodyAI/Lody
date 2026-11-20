@@ -12,8 +12,10 @@ import {
 import type { FocusIntent, TodayDate, TodayNodeId, TodayNodeView } from '@lody/shared';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
 import type { TodayPageStoreCache } from '../../../providers/today-page-store-cache';
+import { MentionDecoratorNode } from '@/ui/mention/mention-node';
 import {
   $domPointToOffset,
+  $ensureMentionCaretTarget,
   $readComposerValue,
   $readSelectionOffsets,
   $setSelectionOffsets,
@@ -119,10 +121,15 @@ export class TodayEditorController {
   constructor(private readonly cache: TodayPageStoreCache) {
     this.editor = createEditor({
       namespace: 'lody-today',
+      nodes: [MentionDecoratorNode],
       onError: (error) => console.error('Today editor error', error),
     });
     this.cleanups.push(
       registerPlainText(this.editor),
+      // Keep an editable caret target before every mention, as the composer does.
+      this.editor.registerNodeTransform(MentionDecoratorNode, (node) => {
+        $ensureMentionCaretTarget(node);
+      }),
       this.editor.registerCommand(
         KEY_DOWN_COMMAND,
         (event) => this.onKeyDown(event),

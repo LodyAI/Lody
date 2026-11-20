@@ -124,7 +124,7 @@ export function configureTodayTextStyles(doc: LoroDoc): void {
 function readMentionMark(value: unknown): TodayMentionTarget | null {
   if (!value || typeof value !== 'object') return null;
   const { kind, id } = value as Record<string, unknown>;
-  return typeof kind === 'string' && kind && typeof id === 'string' ? { kind, id } : null;
+  return typeof kind === 'string' && kind && typeof id === 'string' && id ? { kind, id } : null;
 }
 
 /**
@@ -198,7 +198,8 @@ export function insertTodayRich(text: LoroText, at: number, rich: TodayRichText 
   text.applyDelta(delta);
 }
 
-const sameRich = (a: TodayRichText, b: TodayRichText) =>
+/** Same text and the same mention at every position. */
+export const sameTodayRich = (a: TodayRichText, b: TodayRichText) =>
   a.text === b.text &&
   a.mentions.length === b.mentions.length &&
   a.mentions.every(
@@ -561,7 +562,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       const node = live(id);
       const text = node && textOf(node);
       if (!node || !text) return false;
-      if (sameRich(readTodayText(text), snapshot)) {
+      if (sameTodayRich(readTodayText(text), snapshot)) {
         if (text.length > 0) text.delete(0, text.length);
         insertTodayRich(text, 0, mentionRich(mention));
         if (childrenOf(node).length > 0) node.data.set('collapsed', true);

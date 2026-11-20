@@ -9,15 +9,51 @@ import {
 import { registerPlainText } from '@lexical/plain-text';
 import { LoroDoc } from 'loro-crdt';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createTodayPageUndo, openTodayOutline } from '@lody/shared';
+import {
+  TODAY_MENTION_CHAR as M,
+  createTodayPageUndo,
+  openTodayOutline,
+  readTodayText,
+} from '@lody/shared';
 import { bindLoroText } from '../src/components/today/editor/loro-lexical-binding';
 import { resolveOutlineKey } from '../src/components/today/editor/outline-keys';
-import { safeTextDiff, transformOffset } from '../src/components/today/editor/text-diff';
-import { $readSelectionOffsets, $setSelectionOffsets } from '../src/ui/mention/composer-document';
+import {
+  safeRichDiff,
+  safeTextDiff,
+  transformOffset,
+} from '../src/components/today/editor/text-diff';
+import {
+  $readComposerValue,
+  $readSelectionOffsets,
+  $setSelectionOffsets,
+  $writeComposerValue,
+} from '../src/ui/mention/composer-document';
+import { MentionDecoratorNode } from '../src/ui/mention/mention-node';
 
 describe('Today text diff', () => {
   it('never splits a surrogate pair', () => {
     expect(safeTextDiff('a😀b', 'a😁b')).toEqual({ start: 1, deleteCount: 2, insert: '😁' });
+  });
+
+  it('tells two adjacent mentions apart by their conversation, not just their character', () => {
+    const a = { start: 0, kind: 'session', id: 'A' };
+    const b = { start: 1, kind: 'session', id: 'B' };
+    expect(
+      safeRichDiff(
+        { text: `${M}${M}`, mentions: [a, b] },
+        { text: M, mentions: [{ ...b, start: 0 }] }
+      )
+    ).toEqual({ start: 0, deleteCount: 1, insert: { text: '', mentions: [] } });
+    expect(
+      safeRichDiff(
+        { text: `x${M}`, mentions: [{ ...a, start: 1 }] },
+        { text: `x${M}`, mentions: [{ ...b, start: 1 }] }
+      )
+    ).toEqual({
+      start: 1,
+      deleteCount: 1,
+      insert: { text: M, mentions: [{ start: 0, kind: 'session', id: 'B' }] },
+    });
   });
 
   it('keeps a caret before text a peer inserts at the caret, and after text inserted before it', () => {
@@ -104,6 +140,7 @@ describe('Today LoroText binding', () => {
     document.body.append(root);
     const editor = createEditor({
       namespace: 'today-test',
+      nodes: [MentionDecoratorNode],
       onError: (error) => {
         throw error;
       },
@@ -112,8 +149,48 @@ describe('Today LoroText binding', () => {
     cleanups.push(registerPlainText(editor), () => root.remove());
     const binding = bindLoroText({ editor, text, undo, isComposing: () => false });
     cleanups.push(binding.dispose);
-    return { doc, text, editor, undo };
+    return { doc, outline, nodeId: focus.nodeId, text, editor, undo };
   }
+
+  const editorMentions = (editor: ReturnType<typeof setup>['editor']) =>
+    editor
+      .getEditorState()
+      .read(() =>
+        $readComposerValue().mentions.map((mention) => [mention.start, mention.kind, mention.value])
+      );
+
+  it('shows mentions as chips and deletes exactly the one removed when two sit side by side', () => {
+    const { outline, nodeId, text, editor } = setup('x');
+    outline.insertMention(nodeId, 1, 0, { kind: 'session', id: 'A' });
+    outline.insertMention(nodeId, 2, 0, { kind: 'session', id: 'B' });
+    expect(editorMentions(editor)).toEqual([
+      [1, 'session', 'A'],
+      [2, 'session', 'B'],
+    ]);
+    editor.update(
+      () => {
+        $setSelectionOffsets(1, 2);
+        const selection = $getSelection();
+        if ($isRangeSelection(selection)) selection.removeText();
+      },
+      { discrete: true }
+    );
+    expect(readTodayText(text).mentions).toEqual([{ start: 1, kind: 'session', id: 'B' }]);
+  });
+
+  it('writes a mention replaced in place, although the text is unchanged', () => {
+    const { outline, nodeId, text, editor } = setup('x');
+    outline.insertMention(nodeId, 1, 0, { kind: 'session', id: 'A' });
+    editor.update(
+      () => $writeComposerValue(`x${M}`, [{ start: 1, end: 2, value: 'B', kind: 'session' }]),
+      { discrete: true }
+    );
+    expect(readTodayText(text)).toEqual({
+      text: `x${M}`,
+      mentions: [{ start: 1, kind: 'session', id: 'B' }],
+    });
+    expect(editorMentions(editor)).toEqual([[1, 'session', 'B']]);
+  });
 
   it('writes local typing into the node text as one undoable step', () => {
     const { text, editor, undo } = setup('ab');

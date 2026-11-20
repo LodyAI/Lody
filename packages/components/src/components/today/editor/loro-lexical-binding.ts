@@ -1,22 +1,58 @@
 import { COLLABORATION_TAG, SKIP_SCROLL_INTO_VIEW_TAG, type LexicalEditor } from 'lexical';
 import type { LoroText } from 'loro-crdt';
-import type { TodayPageUndo } from '@lody/shared';
+import {
+  insertTodayRich,
+  readTodayText,
+  sameTodayRich,
+  type TodayPageUndo,
+  type TodayRichText,
+} from '@lody/shared';
 import {
   $readComposerValue,
   $readSelectionOffsets,
   $setSelectionOffsets,
   $writeComposerValue,
+  type ComposerMentionRange,
 } from '@/ui/mention/composer-document';
-import { safeTextDiff, transformOffset, type TextDeltaStep } from './text-diff';
+import { safeRichDiff, transformOffset, type TextDeltaStep } from './text-diff';
 
 const INBOUND_TAGS = [COLLABORATION_TAG, SKIP_SCROLL_INTO_VIEW_TAG];
 
+/** Placeholder chip value for a U+FFFC without a mark (a range needs a non-empty value). */
+const PLACEHOLDER_VALUE = '?';
+
+/** Node rich text as the composer's ranges: one MentionDecoratorNode per mention. */
+export function todayRichToComposer(rich: TodayRichText): ComposerMentionRange[] {
+  return rich.mentions.map((mention) => ({
+    start: mention.start,
+    end: mention.start + 1,
+    value: mention.id || PLACEHOLDER_VALUE,
+    kind: mention.kind,
+  }));
+}
+
+/** The editor document as node rich text. */
+export function $readTodayEditorRich(): TodayRichText {
+  const value = $readComposerValue();
+  return {
+    text: value.text,
+    mentions: value.mentions
+      .filter((range) => range.end - range.start === 1)
+      .map((range) => {
+        const kind = range.kind ?? '';
+        return { start: range.start, kind, id: kind ? range.value : '' };
+      }),
+  };
+}
+
 /**
- * Two-way plain-text binding between one node's LoroText and the active
- * Lexical editor. Specs/today-outline.md (Implementation constraints).
+ * Two-way binding between one node's LoroText and the active Lexical editor:
+ * text plus mentions (a U+FFFC with its mark on the Loro side, a
+ * MentionDecoratorNode on the editor side). Specs/today-outline.md
+ * (Implementation constraints, Conversation mentions).
  *
- * Outbound: each committed editor change becomes one LoroText splice through
- * the page undo (so typing groups into undo steps). Nothing is written while an
+ * Outbound: each committed editor change becomes one rich LoroText splice
+ * (positions compare character and mention) through the page undo (so typing groups into undo steps). Nothing is written while an
  * IME composition is open.
  * Inbound: any LoroText change the editor does not already show (a peer, an
  * undo, a structural op on this node) realigns the editor to the text and
@@ -32,20 +68,20 @@ export function bindLoroText(options: {
 }): { dispose(): void } {
   const { editor, text, undo } = options;
   const composing = () => options.isComposing() || editor.isComposing();
-  let base = text.toString();
+  let base = readTodayText(text);
   let buffered: TextDeltaStep[][] = [];
 
-  const editorText = () => editor.getEditorState().read(() => $readComposerValue().text);
+  const editorRich = () => editor.getEditorState().read($readTodayEditorRich);
 
   const realign = (deltas: readonly (readonly TextDeltaStep[])[]) => {
-    const target = text.toString();
+    const target = readTodayText(text);
     base = target;
     buffered = [];
-    if (editorText() === target) return;
+    if (sameTodayRich(editorRich(), target)) return;
     editor.update(
       () => {
         const selection = $readSelectionOffsets();
-        $writeComposerValue(target, []);
+        $writeComposerValue(target.text, todayRichToComposer(target));
         if (!selection) return;
         let { start, end } = selection;
         for (const delta of deltas) {
@@ -58,12 +94,15 @@ export function bindLoroText(options: {
     );
   };
 
-  editor.update(() => $writeComposerValue(base, []), { discrete: true, tag: INBOUND_TAGS });
+  editor.update(() => $writeComposerValue(base.text, todayRichToComposer(base)), {
+    discrete: true,
+    tag: INBOUND_TAGS,
+  });
 
   const stopEditor = editor.registerUpdateListener(({ editorState, tags }) => {
     if (tags.has(COLLABORATION_TAG) || composing()) return;
-    const next = editorState.read(() => $readComposerValue().text);
-    let splice = safeTextDiff(base, next);
+    const next = editorState.read($readTodayEditorRich);
+    let splice = safeRichDiff(base, next);
     const pending = buffered;
     if (!splice) {
       // A composition ended without a change: show what peers wrote meanwhile.
@@ -84,7 +123,7 @@ export function bindLoroText(options: {
     const { start, deleteCount, insert } = splice;
     undo.editText(text, (target) => {
       if (deleteCount > 0) target.delete(start, deleteCount);
-      if (insert) target.insert(start, insert);
+      insertTodayRich(target, start, insert);
     });
     // Peer edits were held during the composition: show them, moving the caret past them.
     if (pending.length > 0) realign(pending);
@@ -96,7 +135,7 @@ export function bindLoroText(options: {
   const onCompositionEnd = () =>
     queueMicrotask(() => {
       if (composing() || buffered.length === 0) return;
-      if (safeTextDiff(base, editorText()) === null) realign(buffered);
+      if (safeRichDiff(base, editorRich()) === null) realign(buffered);
     });
   const stopRoot = editor.registerRootListener((root, previous) => {
     previous?.removeEventListener('compositionend', onCompositionEnd);
