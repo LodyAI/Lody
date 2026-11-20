@@ -31,7 +31,6 @@ import { NoMachineHint, type NoMachineHintVariant } from './no-machine-hint';
 import { WebChatLandingScreen } from './web-chat-landing-screen';
 import { DialogChatLandingScreen } from './dialog-chat-landing-screen';
 import { type ComposerInputElement, getComposerSelection } from '@/ui/mention/composer-input';
-import { formatKeyBinding } from '@/lib/commands';
 import * as stylex from '@stylexjs/stylex';
 
 const styles = stylex.create({
@@ -437,8 +436,9 @@ export function ChatLandingView({
       >
         {submissionPending ? <Spinner className="h-3.5 w-3.5" /> : null}
         <span>{submitLabel}</span>
+        {/* Return sends, as in the new-conversation composer. */}
         <span aria-hidden="true" {...stylex.props(styles.chord)}>
-          {formatKeyBinding('Mod+Enter')}
+          ↩
         </span>
       </Button>
     </ErrorBoundary>

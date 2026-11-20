@@ -90,14 +90,26 @@ export function isPointOverSessionMentionDropLayer(x: number, y: number): boolea
   return Boolean(node?.closest(`[${SESSION_MENTION_DROP_LAYER_ATTR}]`));
 }
 
+let stopPointerHover: (() => void) | null = null;
+
 /**
  * Lights up drop surfaces without an HTML5 transfer.
  *
- * Used by the tab strip's pointer drag (dnd-kit). The caller must clear
- * (`clearSessionMentionDrag`) on drag end/cancel — there is no `dragend`.
+ * Used by pointer drags (dnd-kit: tab strip, Pinned, Focus rows). Until the
+ * drag clears, pointer moves are reported to the surface under the pointer
+ * (`hoverSessionMentionAtPoint`), so every source shows Today's drop line. The
+ * caller must clear (`clearSessionMentionDrag`) on drag end/cancel — there is
+ * no `dragend`.
  */
 export function armSessionMentionDrag(sessionId: string): void {
   setInFlightSessionId(sessionId);
+  if (stopPointerHover || typeof window === 'undefined') return;
+  const move = (event: PointerEvent) => {
+    if (inFlightSessionId)
+      hoverSessionMentionAtPoint(event.clientX, event.clientY, inFlightSessionId);
+  };
+  window.addEventListener('pointermove', move, true);
+  stopPointerHover = () => window.removeEventListener('pointermove', move, true);
 }
 
 export function subscribeSessionMentionDrag(onStoreChange: () => void): () => void {
@@ -109,6 +121,8 @@ export function subscribeSessionMentionDrag(onStoreChange: () => void): () => vo
 
 /** Ends the in-flight drag. Tests call this between cases. */
 export function clearSessionMentionDrag(): void {
+  stopPointerHover?.();
+  stopPointerHover = null;
   hoveredPointerTarget?.leave?.();
   hoveredPointerTarget = null;
   unbindWindowDragEnd();
@@ -222,7 +236,7 @@ function pointerTargetAt(x: number, y: number): PointerMentionTarget | null {
  * Report a pointer drag's position to the surface under it (and `leave` to the
  * one it left), so a surface such as Today can draw where a drop would land.
  */
-export function hoverSessionMentionAtPoint(x: number, y: number, sessionId: string): void {
+function hoverSessionMentionAtPoint(x: number, y: number, sessionId: string): void {
   const target = pointerTargetAt(x, y);
   const hovered = target?.accepts(sessionId) ? target : null;
   if (hoveredPointerTarget && hoveredPointerTarget !== hovered) hoveredPointerTarget.leave?.();

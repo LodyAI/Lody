@@ -8,7 +8,7 @@ import { initI18n } from '../src/i18n';
 import {
   clearSessionMentionDrag,
   dropSessionMentionAtPoint,
-  hoverSessionMentionAtPoint,
+  armSessionMentionDrag,
   registerSessionMentionPointerTarget,
   startSessionMentionDrag,
 } from '../src/lib/session-mention-drag';
@@ -91,7 +91,7 @@ describe('session-mention-drop-layer', () => {
       expect(dropped).toEqual(['sess_other']);
     });
 
-    it('tells a pointer surface where a drag hovers, and that it left when the drag ends', () => {
+    it('tells a pointer surface where an armed drag hovers, and that it left when the drag ends', () => {
       const surface = document.createElement('div');
       document.body.append(surface);
       const seen: string[] = [];
@@ -103,11 +103,17 @@ describe('session-mention-drop-layer', () => {
       });
       const elementFromPoint = document.elementFromPoint;
       document.elementFromPoint = () => surface;
+      const pointerMove = (y: number) =>
+        window.dispatchEvent(new MouseEvent('pointermove', { clientX: 5, clientY: y }));
       try {
-        hoverSessionMentionAtPoint(5, 30, 'sess_a');
+        pointerMove(20);
+        // Any pointer drag source (tab strip, Pinned, Focus) reports moves once armed.
+        armSessionMentionDrag('sess_a');
+        pointerMove(30);
         dropSessionMentionAtPoint(5, 31, 'sess_a');
-        hoverSessionMentionAtPoint(5, 40, 'sess_a');
+        pointerMove(40);
         clearSessionMentionDrag();
+        pointerMove(50);
       } finally {
         document.elementFromPoint = elementFromPoint;
         release();
