@@ -72,13 +72,25 @@ export async function createNativeRemoteSessionStore(options: {
   };
   const history = createConversationViewFromReader(reader, { sessionId, ...options.view });
   const openedAt = Date.now();
+  // Sync leases change nothing here (no replica joins a room), but the stale
+  // report reads how many holders keep the Session open.
+  let leaseCount = 0;
+  let observing = true;
   return {
     sessionId,
     roomId,
     historyBackend: 'loro',
     // Reads are served by the engine on demand: there is no replica to sync.
     firstSynced: Promise.resolve(),
-    acquireSync: () => () => {},
+    acquireSync: () => {
+      leaseCount += 1;
+      let held = true;
+      return () => {
+        if (!held) return;
+        held = false;
+        leaseCount -= 1;
+      };
+    },
     getSyncState: () => 'synced',
     subscribeSyncState: (listener) => {
       listener('synced');
@@ -95,6 +107,7 @@ export async function createNativeRemoteSessionStore(options: {
     history,
     sessionData,
     dispose: () => {
+      observing = false;
       history.dispose();
       control.close();
     },
@@ -107,6 +120,10 @@ export async function createNativeRemoteSessionStore(options: {
       openedAt,
       lastRemoteImportAt: null,
       pendingUploadProbe: null,
+      leaseCount,
+      // Engine reads need no room join; the path observation is the subscription.
+      joinInFlight: false,
+      roomSubPresent: observing,
     }),
   };
 }
