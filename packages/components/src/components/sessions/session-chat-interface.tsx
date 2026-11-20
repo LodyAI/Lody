@@ -6582,9 +6582,6 @@ export const SessionChatInterface = memo(
               ? current
               : { ...current, isEditing: true, editingStartedAt: getServerNow() }
           );
-          if (isFirstItem) {
-            await waitUntilSynced();
-          }
         } catch (error) {
           console.error('Failed to start editing queued message', error);
           captureSessionEvent('session/queue_item_edit_start_failed', {
@@ -6599,7 +6596,7 @@ export const SessionChatInterface = memo(
           throw error;
         }
       },
-      [captureSessionEvent, messageQueue, t, updateMessageQueueItem, waitUntilSynced]
+      [captureSessionEvent, messageQueue, t, updateMessageQueueItem]
     );
 
     const handleCancelQueueItemEdit = useCallback(
@@ -6611,9 +6608,6 @@ export const SessionChatInterface = memo(
               ? { ...current, isEditing: false, editingStartedAt: undefined }
               : current
           );
-          if (isFirstItem) {
-            await waitUntilSynced();
-          }
           captureSessionEvent('session/queue_item_edit_cancelled', {
             queue_item_id: item.$cid,
             is_first_queue_item: isFirstItem,
@@ -6632,7 +6626,7 @@ export const SessionChatInterface = memo(
           throw error;
         }
       },
-      [captureSessionEvent, messageQueue, t, updateMessageQueueItem, waitUntilSynced]
+      [captureSessionEvent, messageQueue, t, updateMessageQueueItem]
     );
 
     const handleSaveQueueItemEdit = useCallback(
@@ -6642,9 +6636,6 @@ export const SessionChatInterface = memo(
           await updateMessageQueueItem(item.$cid, (current) =>
             buildEditedMessageQueueItem(current, task)
           );
-          if (isFirstItem) {
-            await waitUntilSynced();
-          }
           captureSessionEvent('session/queue_item_edit_saved', {
             queue_item_id: item.$cid,
             is_first_queue_item: isFirstItem,
@@ -6663,7 +6654,7 @@ export const SessionChatInterface = memo(
           throw error;
         }
       },
-      [captureSessionEvent, messageQueue, t, updateMessageQueueItem, waitUntilSynced]
+      [captureSessionEvent, messageQueue, t, updateMessageQueueItem]
     );
 
     const handleRemoveQueueItem = useCallback(
