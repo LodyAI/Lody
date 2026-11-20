@@ -1,6 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
-import { AlarmClock, Check } from 'lucide-react';
+import { AlarmClock, CircleCheck } from 'lucide-react';
+import type React from 'react';
 import { useTranslation } from 'react-i18next';
 import { getSessionRoomId, type SessionId, type TodayMentionTarget } from '@lody/shared';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -29,7 +30,10 @@ const styles = stylex.create({
     boxDecorationBreak: 'clone',
     WebkitBoxDecorationBreak: 'clone',
     borderRadius: radius.mini,
-    paddingInline: CHIP_PAD,
+    // No left padding: the icon's own box already insets its glyph, and a chip
+    // that opens a line would otherwise start visibly right of the text column.
+    paddingInlineStart: 0,
+    paddingInlineEnd: CHIP_PAD,
     userSelect: 'none',
   },
   // A chip that opens its line keeps its padding: pulling it into the gutter put
@@ -46,48 +50,54 @@ const styles = stylex.create({
   // The 3px bleed stays inside the chip's 4px padding, so the caret before the
   // chip is never under the hover fill.
   icon: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 2,
+    // An inline-block on the line's baseline, one line box tall: its glyph sits
+    // in a line-height box centred on the line, and a countdown inside is
+    // ordinary text on the shared baseline in every font. The 1px start margin
+    // keeps the caret before the chip clear of the hover fill.
+    display: 'inline-block',
     boxSizing: 'border-box',
     minWidth: ICON_HIT,
-    height: text.bodyLeading,
-    paddingInline: ICON_BLEED,
-    marginInlineStart: `calc(-1 * ${ICON_BLEED})`,
+    lineHeight: text.bodyLeading,
+    verticalAlign: 'baseline',
+    marginInlineStart: '1px',
+    paddingInlineStart: '1px',
+    paddingInlineEnd: ICON_BLEED,
     marginInlineEnd: `calc(${space[1]} - ${ICON_BLEED})`,
-    verticalAlign: 'top',
     paddingBlock: 0,
     borderWidth: 0,
     backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
     color: 'inherit',
-    font: 'inherit',
-    lineHeight: 1,
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    textAlign: 'start',
+    whiteSpace: 'nowrap',
     cursor: 'pointer',
     borderRadius: radius.mini,
     outline: { default: 'none', ':focus-visible': `2px solid ${colors.accent}` },
   },
-  // Small text sits on the shared baseline, not on the line's centre (centred,
-  // it reads like a superscript). Centred in the same line box, a smaller font's
-  // baseline lands higher by about 0.6× the size difference; shift it back down.
-  countdown: {
-    fontSize: text.captionSize,
-    lineHeight: text.bodyLeading,
-    position: 'relative',
-    top: `calc((${text.bodySize} - ${text.captionSize}) * 0.6)`,
-    color: colors.tertiaryLabel,
-    fontVariantNumeric: 'tabular-nums',
-  },
-  check: {
-    width: 14,
-    height: 14,
+  // The glyph slot: one line box tall, top-aligned, glyph centred inside.
+  glyph: {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: radius.full,
-    backgroundColor: colors.success,
-    color: colors.onAccent,
+    width: 14,
+    height: text.bodyLeading,
+    verticalAlign: 'top',
   },
+  // Later and Done read as quiet, secondary marks next to the link-coloured title.
+  quietGlyph: { color: colors.secondaryLabel },
+
+  // Plain inline text: it sits on the line's baseline like the title.
+  countdown: {
+    fontSize: text.captionSize,
+    // Its own line box no taller than its font, so baseline alignment never
+    // pushes the line taller.
+    lineHeight: 1,
+    marginInlineStart: 2,
+    color: colors.tertiaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
+
   // Linear's backlog circle: small, hollow, dashed, in the warning colour.
   idle: {
     width: 10,
@@ -123,30 +133,29 @@ const styles = stylex.create({
 
 function StatusIcon(props: { display: Extract<TodaySessionDisplay, { state: 'ok' }> }) {
   const { status, snoozeCountdown } = props.display;
+  const slot = (glyph: React.ReactNode, quiet = false) => (
+    <span {...stylex.props(styles.glyph, quiet && styles.quietGlyph)}>{glyph}</span>
+  );
   switch (status) {
     case 'waiting':
-      return <SessionRowStatusIndicator isWaitingPermission />;
+      return slot(<SessionRowStatusIndicator isWaitingPermission />);
     case 'running':
-      return <SessionRowStatusIndicator isWorking />;
+      return slot(<SessionRowStatusIndicator isWorking />);
     case 'unread':
-      return <SessionRowStatusIndicator hasUnreadMessages />;
+      return slot(<SessionRowStatusIndicator hasUnreadMessages />);
     case 'later':
       return (
         <>
-          <AlarmClock size={12} aria-hidden />
+          {slot(<AlarmClock size={13} strokeWidth={2} aria-hidden />, true)}
           {snoozeCountdown ? (
             <span {...stylex.props(styles.countdown)}>{snoozeCountdown}</span>
           ) : null}
         </>
       );
     case 'done':
-      return (
-        <span {...stylex.props(styles.check)} aria-hidden>
-          <Check size={10} strokeWidth={3} />
-        </span>
-      );
+      return slot(<CircleCheck size={13} strokeWidth={2} aria-hidden />, true);
     case 'idle':
-      return <span {...stylex.props(styles.idle)} aria-hidden />;
+      return slot(<span {...stylex.props(styles.idle)} aria-hidden />);
   }
 }
 
