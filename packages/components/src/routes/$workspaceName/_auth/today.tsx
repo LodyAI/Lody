@@ -3,6 +3,7 @@ import { useAtomValue } from 'jotai';
 import { lazy } from 'react';
 import { parseTodayDate } from '@lody/shared';
 import { todayFeatureEnabledAtom } from '@/atoms/settings';
+import { todayPinnedAtom } from '@/atoms/sidebar-state';
 import { RouteSuspense } from '@/components/route-suspense';
 
 const LazyTodayPage = lazy(async () => {
@@ -24,9 +25,11 @@ export const Route = createFileRoute('/$workspaceName/_auth/today')({
 
 function TodayRoute() {
   const enabled = useAtomValue(todayFeatureEnabledAtom);
+  const pinned = useAtomValue(todayPinnedAtom);
   const { workspaceName } = Route.useParams();
   const search = Route.useSearch();
-  if (!enabled) {
+  // Pinned: Today already shows beside the sidebar; never show it twice.
+  if (!enabled || pinned) {
     return <Navigate to="/$workspaceName/chat" params={{ workspaceName }} replace />;
   }
   return (

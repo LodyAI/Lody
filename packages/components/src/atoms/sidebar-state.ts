@@ -303,6 +303,27 @@ export const sidebarCollapsedAtom: ReturnType<typeof atomWithStorage<boolean>> =
     { getOnInit: true }
   );
 
+/** Today pinned as a column next to the sidebar (specs/today-outline.md); per window. */
+export const todayPinnedAtom: ReturnType<typeof atomWithStorage<boolean>> =
+  atomWithStorage<boolean>('lody-today-pinned', false, createJSONStorage<boolean>(windowStorage), {
+    getOnInit: true,
+  });
+
+/** Sidebar Today entry clicked while pinned: the column returns to today. */
+export const TODAY_FOCUS_EVENT = 'lody:today-focus';
+
+export const TODAY_COLUMN_DEFAULT_WIDTH = 360;
+export const TODAY_COLUMN_MIN_WIDTH = 280;
+export const TODAY_COLUMN_MAX_WIDTH = 560;
+
+/** Width of the pinned Today column in px; stored on this device. */
+export const todayColumnWidthAtom = atomWithStorage<number>(
+  'lody-today-column-width',
+  TODAY_COLUMN_DEFAULT_WIDTH,
+  undefined,
+  { getOnInit: true }
+);
+
 /**
  * Last expanded width in px. Restored when the user re-opens the sidebar so
  * width preference survives collapse/expand cycles. 0 means "use default".

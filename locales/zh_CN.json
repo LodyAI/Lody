@@ -6900,5 +6900,8 @@
   "today.pickSession": "对话",
   "today.noSessions": "没有匹配的对话",
   "today.cannotMoveToOtherDay": "不能移动到其他日期",
-  "today.movingNodes": "移动 {{count}} 个节点"
+  "today.movingNodes": "移动 {{count}} 个节点",
+  "today.pin": "把 Today 固定在侧栏旁",
+  "today.unpin": "取消固定 Today",
+  "today.resize": "调整 Today 宽度"
 }

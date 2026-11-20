@@ -6913,5 +6913,8 @@
   "today.pickSession": "Conversations",
   "today.noSessions": "No matching conversations",
   "today.cannotMoveToOtherDay": "Can't move to another date",
-  "today.movingNodes": "Moving {{count}} nodes"
+  "today.movingNodes": "Moving {{count}} nodes",
+  "today.pin": "Pin Today beside the sidebar",
+  "today.unpin": "Unpin Today",
+  "today.resize": "Resize Today"
 }

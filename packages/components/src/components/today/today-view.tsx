@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { CalendarDays, ChevronLeft, ChevronRight, MoreHorizontal } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, MoreHorizontal, Pin, PinOff } from 'lucide-react';
 import { useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -123,6 +123,9 @@ const styles = stylex.create({
 export function TodayView(props: {
   target: TodayViewTarget;
   onNavigate: (target: TodayViewTarget) => void;
+  /** Rendered as the pinned column (vs the full page). */
+  pinned?: boolean;
+  onTogglePin?: () => void;
 }) {
   const { t, i18n } = useTranslation();
   const scope = useResolvedWorkspaceScope();
@@ -195,6 +198,22 @@ export function TodayView(props: {
               props.onNavigate({ ...props.target, date: date === today ? undefined : date })
             }
           />
+          {props.onTogglePin ? (
+            <Button
+              variant="ghost"
+              size="small"
+              icon
+              aria-pressed={props.pinned ?? false}
+              aria-label={
+                props.pinned
+                  ? t('today.unpin', 'Unpin Today')
+                  : t('today.pin', 'Pin Today beside the sidebar')
+              }
+              onClick={props.onTogglePin}
+            >
+              {props.pinned ? <PinOff size={16} /> : <Pin size={16} />}
+            </Button>
+          ) : null}
           <Menu.Root>
             <Menu.Trigger
               render={

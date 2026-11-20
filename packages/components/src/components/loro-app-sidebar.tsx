@@ -35,6 +35,7 @@ import { useSidebarKeyboardNav } from '@/hooks/use-sidebar-keyboard-nav';
 import { useLocation, useRouter } from '@tanstack/react-router';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { todayFeatureEnabledAtom } from '@/atoms/settings';
+import { TODAY_FOCUS_EVENT, todayPinnedAtom } from '@/atoms/sidebar-state';
 import {
   findFreshSessionPresenceState,
   machineSupportsLocalProjectRemovalProtocol,
@@ -1759,6 +1760,7 @@ export function LoroAppSidebar({
   }, [location.pathname, location.search, selectedSessionId, workspaceSlug]);
 
   const todayEnabled = useAtomValue(todayFeatureEnabledAtom);
+  const todayPinned = useAtomValue(todayPinnedAtom);
   const activeNav = useMemo(() => {
     if (isArchiveRoute(location.pathname, workspaceSlug)) return 'archive';
     if (workspaceSlug && location.pathname.startsWith(`/${workspaceSlug}/schedules`))
@@ -4310,6 +4312,11 @@ export function LoroAppSidebar({
           todayEnabled
             ? () => {
                 if (!workspaceSlug) return;
+                // Pinned: Today is already beside the sidebar; bring it back to today.
+                if (todayPinned) {
+                  window.dispatchEvent(new Event(TODAY_FOCUS_EVENT));
+                  return;
+                }
                 void router.navigate({
                   to: '/$workspaceName/today',
                   params: { workspaceName: workspaceSlug },

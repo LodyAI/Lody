@@ -5,7 +5,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createStore, Provider, useSetAtom } from 'jotai';
 
-import { sidebarCollapsedAtom, sidebarLastWidthAtom } from '../src/atoms/sidebar-state';
+import {
+  sidebarCollapsedAtom,
+  sidebarLastWidthAtom,
+  todayPinnedAtom,
+} from '../src/atoms/sidebar-state';
+import { experimentalFeaturesEnabledAtom, todayExperimentEnabledAtom } from '../src/atoms/settings';
 import { WORKSPACE_FOCUS_SCOPES } from '../src/atoms/focus-layer';
 import { WebWorkspaceLayout } from '../src/components/web-workspace-layout';
 import { COMPACT_NAVIGATION_CLOSE_SETTLE_MS } from '../src/components/compact-navigation-dialog';
@@ -30,6 +35,10 @@ vi.mock('../src/components/loro-app-sidebar', () => ({
   ),
 }));
 
+vi.mock('../src/components/today/today-pinned-column', () => ({
+  TodayPinnedColumn: () => <section data-testid="today-column" />,
+}));
+
 describe('desktop sidebar toggle', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
@@ -49,6 +58,29 @@ describe('desktop sidebar toggle', () => {
     root = createRoot(container);
     flushSync(() => root?.render(node));
   }
+
+  it('shows the pinned Today column beside the sidebar, never in compact navigation', async () => {
+    const store = createStore();
+    store.set(experimentalFeaturesEnabledAtom, true);
+    store.set(todayExperimentEnabledAtom, true);
+    store.set(todayPinnedAtom, true);
+    store.set(sidebarCollapsedAtom, false);
+    await act(async () =>
+      render(
+        <Provider store={store}>
+          <WebWorkspaceLayout>
+            <button>Content</button>
+          </WebWorkspaceLayout>
+        </Provider>
+      )
+    );
+    expect(container!.querySelector('[data-testid="today-column"]')).not.toBeNull();
+    await act(async () => store.set(todayPinnedAtom, false));
+    expect(container!.querySelector('[data-testid="today-column"]')).toBeNull();
+    await act(async () => store.set(todayPinnedAtom, true));
+    await act(async () => store.set(todayExperimentEnabledAtom, false));
+    expect(container!.querySelector('[data-testid="today-column"]')).toBeNull();
+  });
 
   it('isolates compact navigation from the background content', async () => {
     layout.compact = true;

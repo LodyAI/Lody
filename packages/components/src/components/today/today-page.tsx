@@ -1,4 +1,6 @@
 import { useNavigate, useParams } from '@tanstack/react-router';
+import { useSetAtom } from 'jotai';
+import { todayPinnedAtom } from '@/atoms/sidebar-state';
 import { TodayView } from './today-view';
 
 /**
@@ -7,10 +9,16 @@ import { TodayView } from './today-view';
  */
 export function TodayPage(props: { memberId?: string; anchorDate?: string }) {
   const navigate = useNavigate();
+  const setPinned = useSetAtom(todayPinnedAtom);
   const { workspaceName } = useParams({ strict: false }) as { workspaceName: string };
   return (
     <TodayView
       target={{ member: props.memberId, date: props.anchorDate }}
+      onTogglePin={() => {
+        // Pinning moves Today beside the sidebar; the main area returns to chat.
+        setPinned(true);
+        void navigate({ to: '/$workspaceName/chat', params: { workspaceName }, replace: true });
+      }}
       onNavigate={(target) => {
         void navigate({
           to: '/$workspaceName/today',
