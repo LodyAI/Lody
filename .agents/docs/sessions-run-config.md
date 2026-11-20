@@ -60,7 +60,10 @@ this page is the full text of the rules summarised there.
   search header above the row so the option area starts beside it when space permits.
   The shared menu primitive opens toward inline-end
   (right in LTR); horizontal collisions may flip the side, and vertical collisions
-  shift the popup within the viewport. Searchable model menus use the same trigger
+  shift the popup within the viewport. When neither side fits, the product
+  `ui/menu.tsx` measures the submenu as it mounts and switches it to Base UI's
+  side-`shift` mode, so it covers part of the parent instead of being clipped;
+  option widths cap at `--available-width`. Searchable model menus use the same trigger
   anchor while filtering, with dimensions determined by the current results.
   Submenus do not center against the whole parent
   popup or clamp to its bottom. Intent:

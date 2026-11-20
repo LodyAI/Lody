@@ -81,6 +81,7 @@ lint pass. Component typecheck remains blocked by missing Electron dependencies
 and stale shared/ACP exports in borrowed dependencies. Full Storybook and
 packaged Electron validation are not established by this isolated fixture.
 
-Very narrow windows where neither side fits still need a separate navigation
-design; this change does not introduce drill-in navigation. Current implementation
+Very narrow windows where neither side fits were left open here; they are now
+handled by shifting the submenu over its parent (see the Spec), still without
+drill-in navigation. Current implementation
 documentation is [composer run config](../../../docs/sessions-run-config.md).
