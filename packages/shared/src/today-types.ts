@@ -75,3 +75,8 @@ export function getLoroTodayStreamId(
 ): string {
   return `${workspaceId}:${LORO_TODAY_STREAM_SEGMENT}:${encodeTodayUserId(userId)}:${date}`;
 }
+
+/** `lody://today/<userId>/<date>?workspace=<id>`: a member's page for one day. */
+export function buildTodayLink(workspaceId: string, userId: string, date: TodayDate): string {
+  return `lody://today/${encodeTodayUserId(userId)}/${date}?workspace=${encodeURIComponent(workspaceId)}`;
+}

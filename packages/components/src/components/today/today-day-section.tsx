@@ -1,0 +1,219 @@
+import * as stylex from '@stylexjs/stylex';
+import { ChevronRight } from 'lucide-react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useTranslation } from 'react-i18next';
+import { getTodayDocId, type TodayDate, type TodayNodeView } from '@lody/shared';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import type { TodayPageStore } from '@/lib/today/today-page-store';
+import type { TodayPageStoreCache } from '@/providers/today-page-store-cache';
+import { todayDateToLocalDate } from './today-stream';
+
+/** Indentation per outline level. */
+const TODAY_INDENT_PX = 22;
+
+const styles = stylex.create({
+  section: { display: 'flex', flexDirection: 'column', gap: space[1], paddingBlock: space[3] },
+  header: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: space[2],
+    fontSize: text.headlineSize,
+    lineHeight: text.headlineLeading,
+    fontWeight: 600,
+    color: colors.label,
+  },
+  headerMeta: { fontSize: text.footnoteSize, fontWeight: 400, color: colors.secondaryLabel },
+  outline: { display: 'flex', flexDirection: 'column', minHeight: 28 },
+  row: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[1],
+    minHeight: 28,
+    borderRadius: radius.mini,
+  },
+  fold: {
+    width: 16,
+    height: 28,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: colors.tertiaryLabel,
+    background: 'none',
+    borderWidth: 0,
+    padding: 0,
+    cursor: 'pointer',
+    flexShrink: 0,
+  },
+  foldHidden: { visibility: 'hidden' },
+  foldOpen: { transform: 'rotate(90deg)' },
+  bullet: {
+    width: 16,
+    height: 28,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  dot: { width: 6, height: 6, borderRadius: radius.full, backgroundColor: colors.secondaryLabel },
+  dotFolded: { boxShadow: `0 0 0 4px ${colors.selectedFill}` },
+  text: {
+    flex: 1,
+    minWidth: 0,
+    paddingBlock: 4,
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    color: colors.label,
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
+  },
+  placeholder: { color: colors.tertiaryLabel },
+});
+
+/**
+ * One day of the stream. The page document is opened while the section is near
+ * the viewport and released when it scrolls far away; a registered day found
+ * empty after syncing reports itself so the stream can skip it.
+ */
+export function TodayDaySection(props: {
+  cache: TodayPageStoreCache;
+  userId: string;
+  date: TodayDate;
+  today: TodayDate;
+  isTop: boolean;
+  onEmpty: (date: TodayDate) => void;
+}) {
+  const { t, i18n } = useTranslation();
+  const ref = useRef<HTMLElement | null>(null);
+  const store = useNearViewportPage(ref, props.cache, getTodayDocId(props.userId, props.date));
+  const date = todayDateToLocalDate(props.date);
+  const label = new Intl.DateTimeFormat(i18n.language, { month: 'long', day: 'numeric' }).format(
+    date
+  );
+  const weekday = new Intl.DateTimeFormat(i18n.language, { weekday: 'long' }).format(date);
+  return (
+    <section ref={ref} {...stylex.props(styles.section)} data-today-date={props.date}>
+      <h2 {...stylex.props(styles.header)}>
+        {props.date === props.today ? t('today.title', 'Today') : label}
+        <span {...stylex.props(styles.headerMeta)}>
+          {props.date === props.today ? `${label} · ${weekday}` : weekday}
+        </span>
+      </h2>
+      {store ? (
+        <TodayStaticOutline store={store} isTop={props.isTop} onEmpty={props.onEmpty} />
+      ) : (
+        <div {...stylex.props(styles.outline)} />
+      )}
+    </section>
+  );
+}
+
+function TodayStaticOutline(props: {
+  store: TodayPageStore;
+  isTop: boolean;
+  onEmpty: (date: TodayDate) => void;
+}) {
+  const { store, isTop, onEmpty } = props;
+  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  useEffect(() => {
+    if (isTop) return undefined;
+    let cancelled = false;
+    void store.synced.then(() => {
+      if (!cancelled && store.getSnapshot().isEmpty) onEmpty(store.date);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isTop, onEmpty, store]);
+
+  if (snapshot.visible.length === 0) {
+    return (
+      <div {...stylex.props(styles.outline)}>
+        <TodayRow node={null} store={store} />
+      </div>
+    );
+  }
+  return (
+    <div {...stylex.props(styles.outline)} role="tree">
+      {snapshot.visible.map((node) => (
+        <TodayRow key={node.id} node={node} store={store} />
+      ))}
+    </div>
+  );
+}
+
+function TodayRow(props: { node: TodayNodeView | null; store: TodayPageStore }) {
+  const { t } = useTranslation();
+  const { node, store } = props;
+  return (
+    <div
+      {...stylex.props(styles.row)}
+      style={{ paddingInlineStart: (node?.depth ?? 0) * TODAY_INDENT_PX }}
+      role="treeitem"
+      aria-expanded={node?.hasChildren ? !node.collapsed : undefined}
+      data-today-node={node?.id}
+    >
+      <button
+        type="button"
+        {...stylex.props(
+          styles.fold,
+          !node?.hasChildren && styles.foldHidden,
+          node?.hasChildren && !node.collapsed && styles.foldOpen
+        )}
+        aria-label={node?.collapsed ? t('today.expand', 'Expand') : t('today.collapse', 'Collapse')}
+        tabIndex={-1}
+        onClick={() => {
+          if (!node) return;
+          store.undo.structural(() => store.outline.setCollapsed(node.id, !node.collapsed));
+        }}
+      >
+        <ChevronRight size={12} />
+      </button>
+      <span {...stylex.props(styles.bullet)}>
+        <span {...stylex.props(styles.dot, node?.collapsed && styles.dotFolded)} />
+      </span>
+      <span {...stylex.props(styles.text, (!node || !node.text) && styles.placeholder)}>
+        {node ? node.text || '​' : t('today.empty', 'Write something…')}
+      </span>
+    </div>
+  );
+}
+
+/** Acquire the page while its section is within ~1.5 screens of the viewport. */
+function useNearViewportPage(
+  ref: React.RefObject<HTMLElement | null>,
+  cache: TodayPageStoreCache,
+  docId: string
+): TodayPageStore | undefined {
+  const [near, setNear] = useState(() => typeof IntersectionObserver === 'undefined');
+  const [store, setStore] = useState<TodayPageStore | undefined>(() => cache.peek(docId));
+  useEffect(() => {
+    const element = ref.current;
+    if (!element || typeof IntersectionObserver === 'undefined') return undefined;
+    const observer = new IntersectionObserver(
+      (entries) => setNear(entries.some((entry) => entry.isIntersecting)),
+      { rootMargin: '150% 0px' }
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref]);
+  useEffect(() => {
+    if (!near) return undefined;
+    let cancelled = false;
+    let held = false;
+    void cache.acquire(docId).then((acquired) => {
+      if (cancelled) {
+        cache.releaseRef(docId);
+        return;
+      }
+      held = true;
+      setStore(acquired);
+    });
+    return () => {
+      cancelled = true;
+      setStore(undefined);
+      if (held) cache.releaseRef(docId);
+    };
+  }, [cache, docId, near]);
+  return store;
+}

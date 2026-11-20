@@ -6881,5 +6881,18 @@
   "sidebar.pinSections.rename": "重命名分组",
   "sidebar.pinSections.renameTitle": "重命名分组",
   "sidebar.pinSections.sectionActions": "分组操作",
-  "today.nav": "Today"
+  "today.nav": "Today",
+  "today.title": "今天",
+  "today.empty": "记点什么…",
+  "today.expand": "展开",
+  "today.collapse": "折叠",
+  "today.memberTitle": "{{name}} 的 Today",
+  "today.more": "更多",
+  "today.viewMember": "查看成员的 Today",
+  "today.copyLink": "复制链接",
+  "today.linkCopied": "链接已复制",
+  "today.backToToday": "回到今天",
+  "today.calendar": "选择日期",
+  "today.previousMonth": "上个月",
+  "today.nextMonth": "下个月"
 }

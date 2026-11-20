@@ -6894,5 +6894,18 @@
   "sidebar.pinSections.rename": "Rename Section",
   "sidebar.pinSections.renameTitle": "Rename Section",
   "sidebar.pinSections.sectionActions": "Section actions",
-  "today.nav": "Today"
+  "today.nav": "Today",
+  "today.title": "Today",
+  "today.empty": "Write something…",
+  "today.expand": "Expand",
+  "today.collapse": "Collapse",
+  "today.memberTitle": "{{name}}’s Today",
+  "today.more": "More",
+  "today.viewMember": "View a member's Today",
+  "today.copyLink": "Copy link",
+  "today.linkCopied": "Link copied",
+  "today.backToToday": "Back to today",
+  "today.calendar": "Pick a date",
+  "today.previousMonth": "Previous month",
+  "today.nextMonth": "Next month"
 }

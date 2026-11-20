@@ -23,6 +23,8 @@ export type TodayPageStore = {
   readonly date: TodayDate;
   readonly outline: TodayOutline;
   readonly undo: TodayPageUndo;
+  /** Resolves once the page's room has synced with a peer; never while unregistered. */
+  readonly synced: Promise<void>;
   getSnapshot(): TodayPageSnapshot;
   subscribe(listener: () => void): () => void;
   /** A peer registered this page: join its room. */
@@ -53,6 +55,10 @@ export function createTodayPageStore(options: {
   let registering: Promise<void> | undefined;
   let joining: Promise<void> | undefined;
   let room: RoomSubscription | undefined;
+  let markSynced: () => void = () => {};
+  const synced = new Promise<void>((resolve) => {
+    markSynced = resolve;
+  });
 
   const ensureJoined = () => {
     if (disposed || room || joining) return;
@@ -61,7 +67,10 @@ export function createTodayPageStore(options: {
       .then((subscription) => {
         if (!subscription) return;
         if (disposed) subscription.unsubscribe();
-        else room = subscription;
+        else {
+          room = subscription;
+          markSynced();
+        }
       })
       .catch((error: unknown) => options.onBackgroundError?.('join', error))
       .finally(() => {
@@ -99,6 +108,7 @@ export function createTodayPageStore(options: {
     date: identity.date,
     outline,
     undo,
+    synced,
     getSnapshot: () => snapshot,
     subscribe: (listener) => {
       listeners.add(listener);
