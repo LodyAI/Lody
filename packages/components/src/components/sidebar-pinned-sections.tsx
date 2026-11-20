@@ -603,7 +603,7 @@ function PinnedRowGhost({ source }: { source: HTMLElement | null }) {
     <div
       ref={bodyRef}
       data-pin-drag-overlay=""
-      className="overflow-hidden rounded-md bg-sidebar"
+      className="overflow-hidden rounded-md border border-sidebar-border bg-sidebar"
       style={{ boxShadow: PINNED_ROW_LIFT_SHADOW, cursor: 'grabbing' }}
     />
   );

@@ -45,7 +45,7 @@ import {
   type SidebarUpdatedItem,
 } from './sidebar-updated-session-list';
 
-const FOCUS_ROW_LIFT_SHADOW = '0 10px 26px -10px rgb(0 0 0 / 0.28), 0 0 0 1px var(--sidebar-border)';
+const FOCUS_ROW_LIFT_SHADOW = '0 8px 20px -4px rgb(0 0 0 / 0.16), 0 2px 6px rgb(0 0 0 / 0.08)';
 
 const sameIds = (left: readonly string[], right: readonly string[]) =>
   left.length === right.length && left.every((id, index) => id === right[index]);
@@ -73,9 +73,9 @@ function focusOrPinPointerTargetAt(
   return null;
 }
 
-function liftedBackground(): string {
-  const sidebar = document.querySelector('[data-sidebar="sidebar"]') ?? document.body;
-  return getComputedStyle(sidebar).backgroundColor || 'var(--sidebar)';
+function liftedBackground(): string | null {
+  const overlay = document.querySelector('[data-pin-drag-overlay]');
+  return overlay ? getComputedStyle(overlay).backgroundColor : null;
 }
 
 function FocusRowGhost({ source }: { source: HTMLElement | null }) {
@@ -89,10 +89,10 @@ function FocusRowGhost({ source }: { source: HTMLElement | null }) {
   return (
     <div
       ref={hostRef}
+      data-pin-drag-overlay=""
+      className="overflow-hidden rounded-md border border-sidebar-border bg-sidebar"
       style={{
-        backgroundColor: 'var(--sidebar)',
         boxShadow: FOCUS_ROW_LIFT_SHADOW,
-        borderRadius: '0.375rem',
         cursor: 'grabbing',
         pointerEvents: 'none',
       }}
@@ -120,7 +120,9 @@ function FocusDropFlight() {
     host.style.transition = 'none';
     host.style.transform = `translate3d(${flight.from.left}px, ${flight.from.top}px, 0)`;
     host.style.width = `${flight.from.width}px`;
-    host.style.backgroundColor = flight.fromBackground ?? 'var(--sidebar)';
+    if (flight.fromBackground) {
+      host.style.backgroundColor = flight.fromBackground;
+    }
     host.style.boxShadow = flight.fromShadow ?? FOCUS_ROW_LIFT_SHADOW;
     // Force layout before animating to destination.
     void host.offsetHeight;
@@ -143,12 +145,12 @@ function FocusDropFlight() {
   return createPortal(
     <div
       ref={hostRef}
+      className="overflow-hidden rounded-md border border-sidebar-border bg-sidebar"
       style={{
         position: 'fixed',
         top: 0,
         left: 0,
         zIndex: 60,
-        borderRadius: '0.375rem',
         pointerEvents: 'none',
       }}
     />,
