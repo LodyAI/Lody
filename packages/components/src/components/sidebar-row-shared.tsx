@@ -434,11 +434,11 @@ export function SessionPrIcon({
       />
     );
 
-  // Sidebar rows park this mark in `SidebarRowEndSlot`, which centers anything
-  // narrower than its 20px reserve (`min-w-5`, the archive target). A Mergeable
-  // pill widens that cluster past 20px, the centering inset disappears, and the
-  // mark slides to the trailing edge. Hold the compact mark in a box the same
-  // size as the reserve so the pill grows to the left and the mark stays put.
+  // Sidebar rows park this mark in `SidebarRowEndSlot`, which right-aligns
+  // anything narrower than its reserve (the archive target). A Mergeable
+  // pill widens that cluster past the reserve and the mark keeps the trailing
+  // edge. Hold the compact mark in a box the same size as the reserve so the
+  // pill grows to the left and the mark stays put.
   if (!compact) return mark;
   return (
     <span
@@ -777,8 +777,9 @@ export function SidebarRowActionButton({
  * instead of a cluster that competes with it and eats the title.
  *
  * The hover actions (the ⋯ menu, then Archive) are absolutely overlaid on hover, so a
- * wide rest cluster never causes layout movement. When the rest content is absent but
- * an action is available, the slot still reserves its 20px hit target.
+ * wide rest cluster never causes layout movement. The slot reserves one 20px
+ * column per action even when no rest content shows, so the ⋯ stays inside the
+ * row's trailing edge instead of overlaying the title.
  */
 export function SidebarRowEndSlot({
   sessionId,
@@ -835,16 +836,21 @@ export function SidebarRowEndSlot({
   const hasRest = Boolean(restContent);
   const showActions = !shortcut && (Boolean(menu) || Boolean(archive));
   // Reserve the action hit target whenever something can occupy it; otherwise the
-  // slot sizes to its resting content (for example, a PR icon).
+  // slot sizes to its resting content (for example, a PR icon). Each revealed
+  // action owns one 20px column: ⋯ parks left of Archive, so a pair needs two —
+  // one column would leave the ⋯ absolutely positioned over the title's tail.
+  const actionColumns = showActions ? (menu ? 1 : 0) + (archive ? 1 : 0) : 0;
   const reserve = hasRest || showActions;
   return (
     // pointer-events-none so the resting PR icon area still passes clicks through to
     // the row's navigation; the hover action buttons re-enable pointer events on hover.
+    // justify-end keeps a narrower resting mark's right edge exactly where the
+    // revealed action lands, so the row's rightmost mark never shifts on hover.
     <div
       data-session-row-end-slot=""
       className={cn(
-        'relative flex h-5 shrink-0 items-center justify-center pointer-events-none',
-        reserve ? 'min-w-5' : 'w-0'
+        'relative flex h-5 shrink-0 items-center justify-end pointer-events-none',
+        reserve ? (actionColumns > 1 ? 'min-w-10' : 'min-w-5') : 'w-0'
       )}
     >
       {hasRest ? (
