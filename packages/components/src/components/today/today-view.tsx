@@ -42,6 +42,7 @@ import { useTodayEditor } from './editor/today-editor-context';
 import { TodayEditorContext } from './editor/today-editor-context';
 import { TodayEditorController } from './editor/today-editor-controller';
 import { TodayDaySection } from './today-day-section';
+import { todayOutline } from './outline.stylex';
 import { TodayConvertDialog } from './today-convert-dialog';
 import { TodayMentionStatusMenuHost } from './today-mention-status-menu';
 import { buildConvertPrompt, todayMentionMarkdown } from './editor/block-selection';
@@ -83,7 +84,9 @@ const styles = stylex.create({
     flex: 1,
     minHeight: 0,
     overflowY: 'auto',
-    paddingInline: space[6],
+    // The fold toggles hang left of the text: keep a full gutter beside them too.
+    paddingInlineStart: `calc(${space[6]} + ${todayOutline.foldOverhang})`,
+    paddingInlineEnd: space[6],
     paddingBottom: space[8],
   },
   // The readable column (Obsidian 700px, Notion ~708px, AFFiNE ~752px of
