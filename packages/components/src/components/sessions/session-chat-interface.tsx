@@ -1931,7 +1931,7 @@ export function SessionHeaderMenu({
                   </Menu.Content>
                 </Menu.Submenu>
               ) : null}
-              {statusGroup === 'focus' && onSettle ? (
+              {statusGroup !== 'settled' && onSettle ? (
                 <Menu.Item icon={CheckCircle2} onClick={() => void onSettle()}>
                   {t('sessions.contextMenu.settle', 'Settle')}
                 </Menu.Item>

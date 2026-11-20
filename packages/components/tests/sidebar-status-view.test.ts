@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment jsdom
+
+import React from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushSync } from 'react-dom';
+import { createRoot, type Root } from 'react-dom/client';
 import {
   buildSnoozePresets,
   formatSnoozeCountdown,
@@ -8,11 +13,13 @@ import {
 } from '@/lib/sidebar-status-group';
 import {
   buildSidebarUpdatedBuckets,
+  SidebarUpdatedSessionList,
   SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS,
   type SidebarUpdatedItem,
 } from '@/components/sidebar-updated-session-list';
 import { buildOpenedBySessionTree } from '@/lib/session-opened-by-tree';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
+import { initI18n } from '@/i18n';
 import { planManualOrderMove, sortByManualOrder } from '@lody/shared';
 
 const NOW = Date.parse('2026-11-20T10:00:00.000Z');
@@ -237,5 +244,137 @@ describe('Focus manual fractional-index ordering', () => {
         NOW + 60_000
       )
     ).toBe(true);
+  });
+});
+
+describe('Status view row actions', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+
+  beforeEach(async () => {
+    await initI18n('en');
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    if (root) {
+      flushSync(() => {
+        root?.unmount();
+      });
+    }
+    root = undefined;
+    container?.remove();
+    container = undefined;
+    vi.restoreAllMocks();
+  });
+
+  const statusItems: SidebarUpdatedItem[] = [
+    {
+      id: 'focus-row',
+      kind: 'chat',
+      title: 'Focus conversation',
+      sectionLabel: 'Chats',
+      latestMessageAt: NOW,
+      orderKey: '80',
+    },
+    {
+      id: 'later-row',
+      kind: 'github',
+      title: 'Snoozed conversation',
+      sectionLabel: 'loro-dev/lody',
+      latestMessageAt: NOW,
+      snoozedUntil: NOW + 3 * 86_400_000,
+      prUrl: 'https://github.com/loro-dev/lody/pull/42',
+      prStatus: 'open',
+    },
+    {
+      id: 'settled-row',
+      kind: 'chat',
+      title: 'Settled conversation',
+      sectionLabel: 'Chats',
+      latestMessageAt: NOW - 2_000,
+      settledAt: NOW - 1_000,
+    },
+  ];
+
+  function renderList(extraProps: Record<string, unknown> = {}) {
+    flushSync(() => {
+      root?.render(
+        React.createElement(SidebarUpdatedSessionList, {
+          items: statusItems,
+          now: new Date(NOW),
+          grouping: 'status',
+          collapsedBuckets: { later: false, settled: false },
+          onArchiveItem: vi.fn(),
+          onSettleItem: vi.fn(),
+          ...extraProps,
+        })
+      );
+    });
+  }
+
+  function rowOf(id: string): HTMLElement {
+    const row = container?.querySelector<HTMLElement>(`[data-sidebar-updated-id="${id}"]`);
+    expect(row).not.toBeNull();
+    return row!;
+  }
+
+  it('shows a one-click settle button on Focus and Later rows and keeps Archive on Settled rows', () => {
+    const onSettleItem = vi.fn();
+    const onArchiveItem = vi.fn();
+    renderList({ onSettleItem, onArchiveItem });
+
+    for (const id of ['focus-row', 'later-row']) {
+      const row = rowOf(id);
+      expect(row.querySelector('button[aria-label="Settle"]')).not.toBeNull();
+      expect(row.querySelector('button[aria-label="Archive session"]')).toBeNull();
+    }
+
+    const settledRow = rowOf('settled-row');
+    expect(settledRow.querySelector('button[aria-label="Archive session"]')).not.toBeNull();
+    expect(settledRow.querySelector('button[aria-label="Settle"]')).toBeNull();
+
+    flushSync(() => {
+      rowOf('focus-row')
+        .querySelector('button[aria-label="Settle"]')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(onSettleItem).toHaveBeenCalledTimes(1);
+    expect(onSettleItem).toHaveBeenCalledWith('focus-row');
+    expect(onArchiveItem).not.toHaveBeenCalled();
+  });
+
+  it('keeps the Archive hover button outside the Status view', () => {
+    renderList({ grouping: 'recency', collapsedBuckets: undefined });
+
+    const row = rowOf('focus-row');
+    expect(row.querySelector('button[aria-label="Archive session"]')).not.toBeNull();
+    expect(row.querySelector('button[aria-label="Settle"]')).toBeNull();
+  });
+
+  it('parks the snooze countdown last in the row trailing cluster', () => {
+    renderList();
+
+    const countdown = rowOf('later-row').querySelector('[data-snooze-countdown]');
+    expect(countdown).not.toBeNull();
+    // The PR icon must sit left of the countdown — the wake-up time owns the
+    // row's right edge.
+    expect(countdown?.parentElement?.lastElementChild).toBe(countdown);
   });
 });

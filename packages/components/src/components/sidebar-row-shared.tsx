@@ -718,6 +718,54 @@ export function SidebarRowArchiveButton({
 }
 
 /**
+ * A single-click counterpart to {@link SidebarRowArchiveButton} for a
+ * non-destructive row action (for example the Status view's "mark as
+ * completed"): same right-edge slot and hover reveal, but one press commits —
+ * nothing here needs the archive button's two-step confirm.
+ */
+export function SidebarRowActionButton({
+  label,
+  icon,
+  onConfirm,
+  /** Which group's hover reveals the button — e.g. 'group-hover/row:...' for named groups. */
+  revealClassName = 'group-hover:opacity-100 group-hover:pointer-events-auto group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto',
+}: {
+  label: string;
+  icon: ReactNode;
+  onConfirm: () => void;
+  revealClassName?: string;
+}) {
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        delay={500}
+        render={
+          <button
+            type="button"
+            aria-label={label}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onConfirm();
+            }}
+            className={cn(
+              'absolute right-0 top-0 z-20 inline-flex h-5 w-5 items-center justify-center rounded-sm',
+              'text-sidebar-foreground-muted/80 opacity-0 pointer-events-none transition-[opacity,color,background-color] duration-100',
+              'hover:text-sidebar-foreground',
+              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40',
+              revealClassName
+            )}
+          >
+            {icon}
+          </button>
+        }
+      />
+      <Tooltip.Content side="top">{label}</Tooltip.Content>
+    </Tooltip.Root>
+  );
+}
+
+/**
  * ③ The final slot at the row's right edge, and the row's ONE status channel.
  *
  * A working / waiting / unread session shows only its status mark here: the

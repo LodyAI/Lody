@@ -26,7 +26,11 @@ and what can wait or has settled.
   1. **Focus** (`进行中`): Expanded by default. Ordered manually by
      `SessionMeta.orderKey` (fractional index, shared with Pinned). Users
      reorder Focus rows via pointer drag-and-drop (reusing Pinned's drag
-     interaction and settle animation). Conversations without an `orderKey`
+     interaction and settle animation). A newly created conversation is
+     written an `orderKey` below every existing key so it opens at the top
+     of Focus; a conversation opened by another conversation (or a child
+     Tab) gets no key at creation, renders nested under its opener, and
+     never reorders that opener row. Conversations without an `orderKey`
      sort after keyed rows by stable ascending `session.id` so ordinary new
      replies never cause them to jump. Keyboard reordering is out of scope.
   2. **Later** (`稍后`): Collapsed by default (showing its count). Contains
@@ -62,7 +66,11 @@ and what can wait or has settled.
   - **Snooze / Later** submenu with quick presets (Later today +3h, Tomorrow
     morning 9:00, Next week Monday 9:00, Custom date/time) and **Move to
     Focus** when already snoozed.
-  - **Settle** when in Focus, or **Move to Focus** when in Settled.
+  - **Settle** when in Focus or Later, or **Move to Focus** when in Settled.
+- On desktop, Focus and Later rows reveal a one-click **Settle** action on
+  hover in the slot other organize modes give to Archive; Settled rows keep
+  Archive there. A Later row's wake-up countdown parks at the row's right
+  edge in neutral ink.
 - Sending a message in a snoozed or settled conversation clears its
   `snoozedUntil` / `settledAt` state so it returns to Focus.
 - Dragging a row in Focus materializes real `orderKey`s for any expired-snooze
