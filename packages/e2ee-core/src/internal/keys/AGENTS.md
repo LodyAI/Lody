@@ -6,7 +6,9 @@ Behavior: [workflows](../../../docs/workflows.md). Ports: [services](../../../do
 
 - Only `InstalledEpochKeys` touches installed key material; every other workflow
   borrows its `saveAndReload`/`read` and receives opaque keys. Never add a generic
-  secret export, per-call protection callback, or a second owner of the store.
+  secret export, per-call protection callback, or a second owner of the store,
+  except `EngineKeyringSync`, which borrows through `InstalledEpochHistory` and
+  copies key bytes only to `EngineKeyringSink`.
 - Protection authenticates the whole fixed purpose/genesis/device/epoch/commitment
   /key payload; epoch-zero's genesis-free commitment cannot let a blob move between
   workspaces. No plaintext fallback, new wire algorithm or recovery format.
