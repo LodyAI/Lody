@@ -560,6 +560,13 @@ export class TodayEditorController {
       const store = day && this.days.get(day.getAttribute('data-today-date') as TodayDate);
       if (day && store) return { day, store };
     }
+    // Beside the readable column (the surface's gutters): the day at that height.
+    if (!this.surface) return null;
+    for (const day of this.surface.querySelectorAll('[data-today-date]')) {
+      const rect = day.getBoundingClientRect();
+      const store = this.days.get(day.getAttribute('data-today-date') as TodayDate);
+      if (store && y >= rect.top && y <= rect.bottom) return { day, store };
+    }
     return null;
   }
 

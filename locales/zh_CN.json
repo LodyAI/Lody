@@ -6901,6 +6901,7 @@
   "today.markDone": "完成",
   "today.laterWithCountdown": "{{label}} · {{countdown}}",
   "today.pageOpenFailed": "无法打开这一天。",
+  "today.fullWidth": "全宽",
   "chat.embeddedHandoffFailed": "对话已创建，但当前视图未能更新。",
   "sessions.browser.stopPreview": "关闭预览",
   "sessions.browser.disconnectOptions": "断开预览选项",

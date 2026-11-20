@@ -6914,6 +6914,7 @@
   "today.markDone": "Done",
   "today.laterWithCountdown": "{{label}} · {{countdown}}",
   "today.pageOpenFailed": "Couldn't open this day.",
+  "today.fullWidth": "Full width",
   "chat.embeddedHandoffFailed": "The conversation was created, but this view could not be updated.",
   "sessions.browser.stopPreview": "Close preview",
   "sessions.browser.disconnectOptions": "Preview disconnect options",

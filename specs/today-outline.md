@@ -25,6 +25,11 @@ any time; when off it changes none of the app's existing behavior.
   sidebar (layout: left sidebar | Today | main area). Pinned state and column width are stored on this device
   only; the width is resizable. The pinned column sits directly on the sidebar background, continuous with the
   left sidebar, not as a floating card. Unpinning keeps the main area's current content and only hides the column.
+- Filling the main area, the stream sits in a centred readable column of at most 720px (compare Obsidian's 700px,
+  Notion's ~708px and AFFiNE's ~752px of text) that narrows with the window and keeps side gutters; nesting
+  indents within it. "Full width" in the More menu spans the whole main area instead, a global preference stored on
+  this device rather than per day. A conversation dropped in the gutter beside the column lands in the day at that
+  height.
   While pinned, a Today link to this workspace or the sidebar's Today entry only moves the column to that day; the
   main area likewise keeps its content.
 
