@@ -151,6 +151,7 @@ import {
 } from '@/atoms/runtime';
 import type { LodyControlConnectionState } from '@/atoms/control-connection';
 import { createManagedStoreCache } from './store-ref-tracker';
+import { createTodayPageStoreCache } from './today-page-store-cache';
 import { waitForRoomToSync } from './room-sync';
 import {
   computeLocalReconnectDelayMs,
@@ -823,6 +824,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // Grace period before disposing an idle session store (and leaving its room).
   // Long enough to survive session switching without reconnecting.
   const STORE_RELEASE_DELAY_MS = 600_000;
+  // Idle Today pages kept warm while scrolling the day stream.
+  const TODAY_IDLE_PAGE_CAP = 12;
   // Short grace period before leaving an inactive session room. This avoids
   // reconnect churn during quick tab switches while keeping SSE fan-out bounded.
   const SESSION_ROOM_SYNC_RELEASE_DELAY_MS = 2_000;
@@ -5641,6 +5644,57 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     },
   });
 
+  // Today pages (specs/today-outline.md): opened locally, joined only once
+  // registered, so viewing a day never creates a server stream.
+  const todayPageStoreCache = createTodayPageStoreCache({
+    releaseDelayMs: STORE_RELEASE_DELAY_MS,
+    idleCap: TODAY_IDLE_PAGE_CAP,
+    setTimer: (callback, ms) => {
+      const timer = setTimeout(callback, ms);
+      return () => clearTimeout(timer);
+    },
+    onBackgroundError: (docId, stage, error) => {
+      console.warn('Today page background step failed', { docId, stage, error });
+    },
+    repo: {
+      openDoc: async (docId) => {
+        const handle = await repo.openPersistedDoc(docId);
+        return {
+          doc: handle.doc as LoroDoc,
+          joinRoom: async () => {
+            await transportReady.promise;
+            return waitForRoomToSync(() => handle.joinRoom(), {
+              roomId: docId,
+              initialDelayMs: 0,
+              firstSynced: (sub) => readinessBindingForDocRoom(sub, docId).firstSyncedWithRemote,
+            });
+          },
+        };
+      },
+      isRegistered: async (docId) => {
+        const entry = await repo.getDocMeta(docId);
+        return Boolean(entry && !isLoroRepoDocDeleted(entry));
+      },
+      upsertDocMeta: (docId, meta) => repo.upsertDocMeta(docId, meta),
+      unloadDoc: (docId) => repo.unloadDoc(docId),
+      observeDocs: (onEvent, query) => {
+        const observation = repo.observeDocs(
+          (event) => {
+            if ('docId' in event) onEvent({ kind: event.kind, docId: event.docId });
+          },
+          {
+            query,
+            filter: { kinds: ['doc-existence-changed', 'doc-metadata'] },
+          }
+        );
+        return {
+          docIds: observation.snapshot.map((entry) => entry.docId),
+          unsubscribe: observation.unsubscribe,
+        };
+      },
+    },
+  });
+
   // Dual-author: every client direct-authors its own durable writes and uploads
   // them over its own cloud connection; local targets additionally converge with
   // the CLI over the local plane (specs/local-first-two-plane.md 作者规则).
@@ -5660,6 +5714,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       sessionStoreCache.releaseIdle(),
       previewVisualCommentStoreCache.releaseIdle(),
       scheduleStoreCache.releaseIdle(),
+      todayPageStoreCache.releaseIdle(),
     ]);
   };
 
@@ -6064,6 +6119,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         await sessionStoreCache.disposeAll();
         await previewVisualCommentStoreCache.disposeAll();
         await scheduleStoreCache.disposeAll();
+        await todayPageStoreCache.disposeAll();
       });
       let codeCollabFileIndexCacheDisposeError: unknown = null;
       try {
@@ -6393,6 +6449,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       );
     },
     acquireScheduleStore: scheduleStoreCache.acquire,
+    todayPages: todayPageStoreCache,
     releaseScheduleStoreRef: scheduleStoreCache.releaseRef,
     sendControl,
     waitForSessionCreateResponse,
