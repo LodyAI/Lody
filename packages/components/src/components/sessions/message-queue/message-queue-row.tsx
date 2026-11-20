@@ -30,7 +30,7 @@ import { text as type } from '@lody/ui/tokens/scales.stylex';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 import { QueuedImagePreview, type QueuedImageBlock } from './queued-image-preview';
-import { QUEUE_LINE, queueSurface } from './surface';
+import { QUEUE_LINE, queuePreviewStyle, queueSurface } from './surface';
 import { shouldShowQueuedItemSteer } from './queued-message-steer';
 import { getEditableTaskText } from './use-message-queue-editing';
 
@@ -43,6 +43,7 @@ export type MessageQueueRowProps = {
   isFirst: boolean;
   showSteerAction: boolean;
   nativeSteerAvailable: boolean;
+  sendWhileIdle?: boolean;
   canReorder: boolean;
   isEditing: boolean;
   editValue: string;
@@ -360,12 +361,7 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
       ) : null}
       <div
         className={cn('min-w-0 flex-1 overflow-hidden', stylex.props(queueSurface.text).className)}
-        style={{
-          display: '-webkit-box',
-          // A narrow sheet keeps every row to one line, like the phone layout.
-          WebkitLineClamp: props.footerPosition === 'inline' || props.compact ? 1 : 2,
-          WebkitBoxOrient: 'vertical',
-        }}
+        style={queuePreviewStyle(props.footerPosition === 'inline' || !!props.compact)}
       >
         {props.footerPosition === 'inline' && props.footer ? <>{props.footer} </> : null}
         {item.task}
@@ -401,9 +397,16 @@ function RowActions(props: MessageQueueRowProps) {
         <Menu.Root>
           <Menu.Trigger render={<MoreTrigger fine={!props.roomy} />} />
           <Menu.Content align="end" width="compact">
-            {shouldShowQueuedItemSteer({ showSteerAction, isFirst, nativeSteerAvailable }) ? (
+            {shouldShowQueuedItemSteer({
+              showSteerAction,
+              isFirst,
+              nativeSteerAvailable:
+                nativeSteerAvailable || props.sendWhileIdle === true || item.paused === true,
+            }) ? (
               <Menu.Item icon={Send} onClick={() => void onSteer(item)}>
-                {t('sessions.messageQueue.guideAction', 'Steer')}
+                {props.sendWhileIdle
+                  ? t('sessions.messageQueue.sendAction', 'Send')
+                  : t('sessions.messageQueue.guideAction', 'Steer')}
               </Menu.Item>
             ) : null}
             {props.onMoveToTop ? (
@@ -437,19 +440,27 @@ function RowActions(props: MessageQueueRowProps) {
 
   return (
     <div {...stylex.props(queueSurface.actions, props.roomy && queueSurface.roomyActions)}>
-      {shouldShowQueuedItemSteer({ showSteerAction, isFirst, nativeSteerAvailable }) ? (
+      {shouldShowQueuedItemSteer({
+        showSteerAction,
+        isFirst,
+        nativeSteerAvailable:
+          nativeSteerAvailable || props.sendWhileIdle === true || item.paused === true,
+      }) ? (
         <button
           type="button"
-          aria-label={t(
-            'sessions.messageQueue.guide',
-            'Steer the active response with this message'
-          )}
+          aria-label={
+            props.sendWhileIdle
+              ? t('sessions.messageQueue.sendAction', 'Send')
+              : t('sessions.messageQueue.guide', 'Steer the active response with this message')
+          }
           {...stylex.props(queueSurface.steer)}
           onClick={() => {
             void onSteer(item);
           }}
         >
-          {t('sessions.messageQueue.guideAction', 'Steer')}
+          {props.sendWhileIdle
+            ? t('sessions.messageQueue.sendAction', 'Send')
+            : t('sessions.messageQueue.guideAction', 'Steer')}
         </button>
       ) : null}
       <IconAction

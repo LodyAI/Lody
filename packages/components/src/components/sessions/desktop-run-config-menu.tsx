@@ -446,6 +446,7 @@ export function DesktopRunConfigMenu({
     modelSelectors,
     interactionModeSelectors,
     thoughtLevelSelectors,
+    speedTierSelectors,
     planModeSelectors,
     fastModeSelectors,
     otherSelectors,
@@ -542,6 +543,18 @@ export function DesktopRunConfigMenu({
   const thinkingLabel =
     thinkingSelector?.options.find((opt) => opt.value === thinkingValue)?.label ?? thinkingValue;
 
+  /* Speed tier dropdown (when model supports multiple speed tiers, e.g. Fast + Ultrafast). */
+  const speedTierSelector = speedTierSelectors[0];
+  const speedTierValue = speedTierSelector
+    ? ((resolveConfigOptionValue(
+        speedTierSelector,
+        configOptionValues?.[speedTierSelector.configId]
+      ) as string) ?? null)
+    : null;
+  const speedTierLabel =
+    speedTierSelector?.options.find((opt) => opt.value === speedTierValue)?.label ?? speedTierValue;
+  const speedTierActive = Boolean(speedTierValue && speedTierValue !== 'off');
+
   /* Plan / Fast. */
   const planSelector = planModeSelectors[0];
   const planOn = planSelector
@@ -588,6 +601,13 @@ export function DesktopRunConfigMenu({
   }
   if (fastOn) {
     configFaceParts.push(<Zap key="fast" {...stylex.props(surface.faceLive)} aria-hidden="true" />);
+  } else if (speedTierActive && speedTierLabel) {
+    configFaceParts.push(
+      <span key="speed" {...stylex.props(surface.faceGroup, surface.faceFixed)}>
+        <Zap {...stylex.props(surface.faceLive)} aria-hidden="true" />
+        {speedTierLabel}
+      </span>
+    );
   }
   /* Permission joins the face ONLY behind a Role, and only one the Role pins:
      otherwise the standalone permission button is showing the same value a step
@@ -643,6 +663,7 @@ export function DesktopRunConfigMenu({
     extraSelectSelectors.length > 0 ||
     interactionSelector != null ||
     thinkingSelector != null ||
+    speedTierSelector != null ||
     planSelector != null ||
     fastSelector != null;
   if (!hasAnyRow) return null;
@@ -954,6 +975,28 @@ export function DesktopRunConfigMenu({
                     onSelect={() =>
                       onConfigOptionChange?.(
                         thinkingSelector.configId,
+                        opt.value as AcpConfigOptionValue
+                      )
+                    }
+                  />
+                ))}
+              </Menu.Content>
+            </Menu.Submenu>
+          ) : null}
+
+          {speedTierSelector ? (
+            <Menu.Submenu>
+              <ValueSubTrigger label={speedTierSelector.label} value={speedTierLabel} />
+              <Menu.Content {...submenuPlacement} className={COMPACT_OPTION_SUBMENU_CLASS}>
+                {speedTierSelector.options.map((opt) => (
+                  <OptionItem
+                    key={opt.value}
+                    label={opt.label}
+                    selected={opt.value === speedTierValue}
+                    disabled={opt.disabled}
+                    onSelect={() =>
+                      onConfigOptionChange?.(
+                        speedTierSelector.configId,
                         opt.value as AcpConfigOptionValue
                       )
                     }

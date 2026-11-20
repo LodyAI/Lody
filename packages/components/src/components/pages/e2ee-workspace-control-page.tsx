@@ -40,6 +40,7 @@ import {
   E2eeConsoleSection,
   type E2eeConsoleTab,
 } from '@/components/pages/e2ee-console-section';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
@@ -482,7 +483,7 @@ function FailurePanel(props: {
     const text = props.diagnostics();
     setReport(text);
     try {
-      await navigator.clipboard.writeText(text);
+      await copyTextToClipboard(text);
       setCopied('copied');
     } catch {
       // Clipboard access can be denied; the report stays selectable below.

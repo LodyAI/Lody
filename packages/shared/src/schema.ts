@@ -1366,6 +1366,8 @@ export const messageQueueItemSchema = schema.LoroMap({
   operationId: schema.String({ required: false }),
   timestamp: schema.String(),
   isEditing: schema.Boolean({ required: false }),
+  /** Stop retains this row for an explicit send, without automatic promotion. */
+  paused: schema.Boolean({ required: false }),
   // Calibrated server time (`getServerNow()`) when the current editor entered the row.
   // Used as a lease so the CLI dispatcher does not block the queue forever if the
   // editing client never gets a chance to clear `isEditing` (hard close / crash /
@@ -1381,9 +1383,10 @@ export type MessageQueueItem = Omit<InferType<typeof messageQueueItemSchema>, 'p
 };
 export type MessageQueueItemInput = Omit<
   InferInputType<typeof messageQueueItemSchema>,
-  'project' | 'acpSessionConfig'
+  'project' | 'acpSessionConfig' | 'paused'
 > & {
   project: ProjectRef | undefined;
+  paused?: boolean;
   acpSessionConfig?: import('./ai').ACPSessionConfig &
     Pick<import('./ai').SessionTurnInputConfig, '_lodyAutomation'>;
 };

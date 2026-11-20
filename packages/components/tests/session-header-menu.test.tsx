@@ -216,6 +216,28 @@ describe('SessionHeaderMenu', () => {
     expect(onOpenSession).not.toHaveBeenCalled();
   });
 
+  it('offers Settle alongside Move to Focus for a snoozed (Later) session', async () => {
+    const onSettle = vi.fn();
+    const onMoveToFocus = vi.fn();
+    await act(async () => {
+      root?.render(
+        <SessionHeaderMenu
+          session={{ ...session, snoozedUntil: Date.now() + 60 * 60 * 1000 }}
+          onCopyUrl={() => {}}
+          onSettle={onSettle}
+          onMoveToFocus={onMoveToFocus}
+          t={translate}
+        />
+      );
+    });
+    await openMenu();
+    await act(async () => menuItem('Settle').click());
+    expect(onSettle).toHaveBeenCalledTimes(1);
+    await openMenu();
+    await act(async () => menuItem('Move to Focus').click());
+    expect(onMoveToFocus).toHaveBeenCalledTimes(1);
+  });
+
   it('omits retired review actions even with the old opt-in and session pointer', async () => {
     const store = createStore();
     store.set(experimentalFeaturesEnabledAtom, true);

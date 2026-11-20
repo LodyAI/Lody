@@ -48,6 +48,7 @@ import type {
 import type { TaskListPullRequestOpen, TaskListTaskOwner } from '@/components/task-list';
 import { SessionSharingIndicator } from '@/components/session-sharing';
 import type { SessionSharingState } from '@/lib/session-sharing';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type SidebarUpdatedItemKind = SidebarRowKind;
 
@@ -934,7 +935,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           <ContextMenu.Item
             icon={GitBranch}
             onClick={() => {
-              void navigator.clipboard.writeText(branchName).catch(() => {});
+              void copyTextToClipboard(branchName).catch(() => {});
             }}
           >
             {contextMenuLabels.copyBranch}

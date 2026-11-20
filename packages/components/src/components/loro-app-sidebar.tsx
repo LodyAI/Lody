@@ -116,7 +116,10 @@ import { getLocalProjectVisibilityKey } from '@/lib/visible-local-project-index'
 import { selectAndWriteLocalProject } from '@/lib/local-project-import';
 import { importSidebarLocalProject } from '@/components/sidebar-local-project-import';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
-import { useArchiveSessionWithConfirmation } from '@/components/sessions/session-archive-confirmation';
+import {
+  useArchiveSessionWithConfirmation,
+  useSettleSessionWithConfirmation,
+} from '@/components/sessions/session-sub-conversation-confirmation';
 import {
   chatScopeAtom,
   chatsCollapsedAtom,
@@ -277,6 +280,7 @@ import {
   RenameSessionDialogView,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 /** A machine's sidebar label: its name without the mDNS `.local` suffix. */
 const sidebarMachineLabel = (name: string): string => name.trim().replace(/\.local$/i, '');
@@ -667,6 +671,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         <div className={lineBoxClassName}>
           <SidebarRowEndSlot
             sessionId={session.id}
+            selected={showSelectedState}
             isWaitingPermission={isWaitingPermission}
             isWorking={isWorking}
             hasUnreadMessages={hasUnreadMessages}
@@ -1868,6 +1873,7 @@ export function LoroAppSidebar({
   const presenceNowMs = useAtomValue(lodyPresenceNowMsAtom);
 
   const archiveSessionWithConfirmation = useArchiveSessionWithConfirmation(archiveSession);
+  const settleSessionWithConfirmation = useSettleSessionWithConfirmation(settleSession);
   const rejectHistoryWrite = useCallback(
     (ids: string[]) => {
       if (!ids.some((id) => historyOnlySessionIds.has(id))) return false;
@@ -1933,7 +1939,7 @@ export function LoroAppSidebar({
       if (!workspaceId) return;
       if (typeof window === 'undefined') return;
       const url = buildSessionLink({ sessionId, workspaceId });
-      await navigator.clipboard.writeText(url);
+      await copyTextToClipboard(url);
       toast.success(successMessage);
     },
     [workspaceId]
@@ -3916,11 +3922,11 @@ export function LoroAppSidebar({
 
   const handleSettleSession = useCallback(
     (sessionId: string) => {
-      void settleSession(sessionId as SessionId).catch((error) => {
+      void settleSessionWithConfirmation(sessionId as SessionId).catch((error) => {
         toast.error(error instanceof Error ? error.message : String(error));
       });
     },
-    [settleSession]
+    [settleSessionWithConfirmation]
   );
 
   const handleMoveSessionToFocus = useCallback(
@@ -3973,12 +3979,11 @@ export function LoroAppSidebar({
         orderKey,
       }));
       const wasInFocus = focusRoots.some((item) => item.id === sessionId);
-      void applySessionFocusOrder(
-        writes,
-        wasInFocus ? undefined : (sessionId as SessionId)
-      ).catch((error) => {
-        toast.error(error instanceof Error ? error.message : String(error));
-      });
+      void applySessionFocusOrder(writes, wasInFocus ? undefined : (sessionId as SessionId)).catch(
+        (error) => {
+          toast.error(error instanceof Error ? error.message : String(error));
+        }
+      );
     },
     [applySessionFocusOrder, updatedItems]
   );

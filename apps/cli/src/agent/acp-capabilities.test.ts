@@ -6,6 +6,7 @@ import os from 'node:os';
 import type { CodexProfileExecution } from './codex-profile-runtime';
 import type { StartLocalAcpAgentOptions } from './acp-runner';
 
+import type { SessionId } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 
 const mocks = vi.hoisted(() => ({
@@ -28,8 +29,12 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   return { ...actual, mkdtemp: vi.fn(actual.mkdtemp), rm: vi.fn(actual.rm) };
 });
 
-import { ACP_MODEL_OPTIONS_SWITCH_TIMEOUT_MS, fetchAcpCapabilities } from './acp-capabilities';
-import { AcpAuthenticationRequiredError } from './agent-client';
+import {
+  ACP_MODEL_OPTIONS_SWITCH_TIMEOUT_MS,
+  ACP_PROBE_COMMANDS_WAIT_MS,
+  fetchAcpCapabilities,
+} from './acp-capabilities';
+import { AcpAuthenticationRequiredError, AgentClient } from './agent-client';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -56,6 +61,7 @@ function createSuccessfulStartupResult(
       supportsAcknowledgedSteer: () => false,
       getGoalCapability: () => undefined,
       getAuthMethods: () => authMethods,
+      waitForAvailableCommands: async () => undefined,
     } as never,
     acpSessionId: 'acp-session-1' as never,
     sessionResponse: sessionResponse ?? {
@@ -238,6 +244,7 @@ describe('fetchAcpCapabilities', () => {
         if (failure === 'startup') throw error;
         const startup = createSuccessfulStartupResult();
         startup.client = {
+          ...(startup.client as object),
           supportsSessionFork: () => {
             throw error;
           },
@@ -401,25 +408,87 @@ describe('fetchAcpCapabilities', () => {
     expect(existsSync(workdir)).toBe(false);
   });
 
-  it('uses commands from NewSessionResponse and ignores command update notifications', async () => {
-    mocks.startLocalAcpAgent.mockImplementation(async (options) => {
-      options.onUpdateMessage({
+  describe('slash command preview', () => {
+    const startRealClient = (response: Record<string, unknown>) => {
+      const client = new AgentClient({
+        sessionId: 'probe-session' as SessionId,
+        logger: createSilentLogger(),
+        terminalManager: {} as never,
+        onUpdateMessage: () => {},
+        onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+      });
+      Object.assign(client, { connection: {} });
+      client.adoptPreparedSession({
+        sessionId: 'acp-session-1',
+        ...response,
+      } as Parameters<AgentClient['adoptPreparedSession']>[0]);
+      let markStarted = () => {};
+      const started = new Promise<void>((resolve) => {
+        markStarted = resolve;
+      });
+      mocks.startLocalAcpAgent.mockImplementation(async () => {
+        markStarted();
+        return {
+          ...createSuccessfulStartupResult({ sessionId: 'acp-session-1', ...response }),
+          client,
+        };
+      });
+      return { client, started };
+    };
+    const advertise = (client: AgentClient, name: string) =>
+      client.sessionUpdate({
+        sessionId: 'acp-session-1',
         update: {
           sessionUpdate: 'available_commands_update',
-          availableCommands: [{ name: '/late', description: 'Late update' }],
+          availableCommands: [{ name, description: name }],
         },
-      } as never);
-      return createSuccessfulStartupResult({
-        sessionId: 'acp-session-1',
-        availableCommands: [{ name: '/initial', description: 'Initial response' }],
       });
+
+    afterEach(() => vi.useRealTimers());
+
+    it('uses commands returned by session/new without waiting', async () => {
+      vi.useFakeTimers();
+      startRealClient({ availableCommands: [{ name: 'help', description: 'Help' }] });
+
+      const result = await fetchAcpCapabilities('registry', 'response-agent', createSilentLogger());
+
+      expect(result.availableCommands).toEqual([{ name: 'help', description: 'Help' }]);
     });
 
-    const result = await fetchAcpCapabilities('registry', 'response-agent', createSilentLogger());
+    it('reads commands a standard agent advertises after session/new', async () => {
+      vi.useFakeTimers();
+      const { client, started } = startRealClient({});
+      let settled = false;
+      const probe = fetchAcpCapabilities('builtin', 'antigravity', createSilentLogger()).finally(
+        () => {
+          settled = true;
+        }
+      );
+      await started;
+      await vi.advanceTimersByTimeAsync(ACP_PROBE_COMMANDS_WAIT_MS - 1);
+      expect(settled).toBe(false);
+      await advertise(client, 'goal');
 
-    expect(result.availableCommands).toEqual([
-      { name: '/initial', description: 'Initial response' },
-    ]);
+      expect((await probe).availableCommands).toEqual([{ name: 'goal', description: 'goal' }]);
+      expect(mocks.shutdownLocalAcpAgent).toHaveBeenCalledTimes(1);
+    });
+
+    it('finishes with no commands when the agent never advertises any', async () => {
+      vi.useFakeTimers();
+      const { started } = startRealClient({});
+      let settled = false;
+      const probe = fetchAcpCapabilities('registry', 'quiet-agent', createSilentLogger()).finally(
+        () => {
+          settled = true;
+        }
+      );
+      await started;
+      await vi.advanceTimersByTimeAsync(ACP_PROBE_COMMANDS_WAIT_MS - 1);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect((await probe).availableCommands).toBeUndefined();
+    });
   });
 
   it('probes registry agents even when their agent type matches a builtin name', async () => {

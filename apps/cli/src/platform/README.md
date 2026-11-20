@@ -34,7 +34,7 @@ and `previousToken` survives for exact rejected-token eviction. The actual token
 callback has no `status` parameter. Provider failures reject the callback and an
 absent token is an error, never an anonymous connection.
 
-The pinned `@loro-dev/streams-client` 0.14.0, `@loro-dev/streams-crdt` 0.22.0,
+The pinned `@loro-dev/streams-client` 0.14.0, `@loro-dev/streams-crdt` 0.22.1,
 and `loro-repo` 0.26.0 packages implement `webSocket.url` and Repo forwarding;
 enabling the flag remains a separate rollout step. Physical connection reuse
 still needs acceptance against a live WS gateway.

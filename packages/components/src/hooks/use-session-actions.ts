@@ -44,6 +44,9 @@ import {
   OPERATION_INBOX_PROTOCOL_VERSION,
   buildPinnedSectionLayout,
   planNewPinPlacement,
+  planTopOrderKey,
+  isPinOrderKey,
+  FractionalIndex,
   type ManualOrderWrite,
   type PinPlacementWrite,
   type PinnedSessionPlacement,
@@ -306,7 +309,10 @@ export type SessionActions = {
   /** Snooze a session until `snoozedUntil` (epoch ms) in the Status view's Later section. */
   snoozeSession: (sessionId: SessionId, snoozedUntil: number) => Promise<void>;
   /** Mark a session as settled in the Status view's Settled section. */
-  settleSession: (sessionId: SessionId) => Promise<void>;
+  settleSession: (
+    sessionId: SessionId,
+    options?: { includeOpenedSessions?: boolean }
+  ) => Promise<void>;
   /** Restore a snoozed or settled session back to Focus. */
   moveSessionToFocus: (sessionId: SessionId) => Promise<void>;
 };
@@ -492,6 +498,19 @@ export function useSessionActions(): SessionActions {
         publishSessionMeta: setDocMetaByRoomId,
         readSessionMeta: (sessionId) =>
           store.get(sessionMetaCacheAtom)[getSessionRoomId(sessionId)],
+        // Key below every existing orderKey so a new top-level conversation
+        // lands at the top of Status Focus; child Sessions get none (they
+        // render nested under their opener row).
+        planNewSessionOrderKey: () => {
+          let topKey: string | null = null;
+          for (const meta of Object.values(store.get(sessionMetaCacheAtom))) {
+            if (!isPinOrderKey(meta.orderKey)) continue;
+            if (topKey === null || FractionalIndex.compare(meta.orderKey, topKey) < 0) {
+              topKey = meta.orderKey;
+            }
+          }
+          return planTopOrderKey([{ id: '', orderKey: topKey }]);
+        },
         onRpcDelivered: (sessionId, turnId) =>
           store.set(rpcDeliveredTurnsAtom, (previous) =>
             addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, turnId))
@@ -619,12 +638,17 @@ export function useSessionActions(): SessionActions {
             log('session cancel rpc threw for %s/%s: %o', sessionId, turnId, error);
           });
       }
-      if (cancelId) {
+      if (!interrupt) {
+        // Keep the observed drafts paused before publishing the durable Stop
+        // marker. The immediate RPC above must not wait for a store read.
         await runtime.sendResources.withSessionStore(sessionId, (sessionStore) => {
           sessionStore.setState((draft: SessionDocDraft) => {
-            draft.cancelRequest = { id: cancelId, turnId };
+            for (const item of draft.mq ?? []) item.paused = true;
+            if (cancelId) draft.cancelRequest = { id: cancelId, turnId };
           });
         });
+      }
+      if (cancelId) {
         await runtime.repo.flush();
       }
       await updateSessionMetadata(sessionId, {
@@ -1130,8 +1154,7 @@ export function useSessionActions(): SessionActions {
         const meta = !isLoroRepoDocDeleted(existing)
           ? (existing?.meta as SessionMeta | undefined)
           : undefined;
-        const hasExpiredSnooze =
-          typeof meta?.snoozedUntil === 'number' && meta.snoozedUntil <= now;
+        const hasExpiredSnooze = typeof meta?.snoozedUntil === 'number' && meta.snoozedUntil <= now;
         const existingRestored = getFiniteTimestamp(meta?.focusRestoredAt) ?? 0;
         await updateSessionMetadata(targetId, {
           orderKey: write.orderKey,
@@ -1164,26 +1187,41 @@ export function useSessionActions(): SessionActions {
   );
 
   const settleSession = useCallback(
-    async (sessionId: SessionId) => {
+    async (sessionId: SessionId, options?: { includeOpenedSessions?: boolean }) => {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const roomId = getSessionRoomId(sessionId);
-      const existing = await runtime.repo.getDocMeta(roomId);
-      const repoMeta = !isLoroRepoDocDeleted(existing)
-        ? (existing?.meta as SessionMeta | undefined)
-        : undefined;
-      const cachedMeta = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
-      const lastMessageAt =
-        getFiniteTimestamp(repoMeta?.lastMessageAt) ??
-        getFiniteTimestamp(cachedMeta?.lastMessageAt) ??
-        0;
-      await updateSessionMetadata(sessionId, {
-        settledAt: Math.max(getServerNow(), lastMessageAt),
-        snoozedUntil: undefined,
-      });
+      const targetIds = [sessionId];
+      if (options?.includeOpenedSessions === true) {
+        // Settle covers only first-class Sessions: contained Tabs share the
+        // owner's bucket and never render their own status row.
+        const tree = await runtime.readSessionOperationTargets(sessionId, 'archive-tree');
+        if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
+          throw new Error('Workspace changed before settling');
+        }
+        for (const session of tree.slice(1)) {
+          if (session.parentSessionId === undefined) targetIds.push(session.id);
+        }
+      }
+      await assertCanManageSessions(targetIds);
+      for (const target of targetIds) {
+        const roomId = getSessionRoomId(target);
+        const existing = await runtime.repo.getDocMeta(roomId);
+        const repoMeta = !isLoroRepoDocDeleted(existing)
+          ? (existing?.meta as SessionMeta | undefined)
+          : undefined;
+        const cachedMeta = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
+        const lastMessageAt =
+          getFiniteTimestamp(repoMeta?.lastMessageAt) ??
+          getFiniteTimestamp(cachedMeta?.lastMessageAt) ??
+          0;
+        await updateSessionMetadata(target, {
+          settledAt: Math.max(getServerNow(), lastMessageAt),
+          snoozedUntil: undefined,
+        });
+      }
     },
-    [runtime, store, updateSessionMetadata]
+    [runtime, store, assertCanManageSessions, updateSessionMetadata]
   );
 
   const moveSessionToFocus = useCallback(

@@ -51,6 +51,7 @@ import { WorktreeIcon } from '@/components/icons/worktree-icon';
 import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
 import { useStableNow } from '@/hooks/use-stable-now';
 import { formatCompactRelativeTime, type RelativeTimeValue } from '@/lib/format-relative-time';
+import { SidebarShortcutPill, useSidebarRowShortcut } from './sidebar-shortcut-pill';
 import { sidebarSurface } from './sidebar-surface';
 
 /**
@@ -718,6 +719,54 @@ export function SidebarRowArchiveButton({
 }
 
 /**
+ * A single-click counterpart to {@link SidebarRowArchiveButton} for a
+ * non-destructive row action (for example the Status view's "mark as
+ * completed"): same right-edge slot and hover reveal, but one press commits —
+ * nothing here needs the archive button's two-step confirm.
+ */
+export function SidebarRowActionButton({
+  label,
+  icon,
+  onConfirm,
+  /** Which group's hover reveals the button — e.g. 'group-hover/row:...' for named groups. */
+  revealClassName = 'group-hover:opacity-100 group-hover:pointer-events-auto group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto',
+}: {
+  label: string;
+  icon: ReactNode;
+  onConfirm: () => void;
+  revealClassName?: string;
+}) {
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        delay={500}
+        render={
+          <button
+            type="button"
+            aria-label={label}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onConfirm();
+            }}
+            className={cn(
+              'absolute right-0 top-0 z-20 inline-flex h-5 w-5 items-center justify-center rounded-sm',
+              'text-sidebar-foreground-muted/80 opacity-0 pointer-events-none transition-[opacity,color,background-color] duration-100',
+              'hover:text-sidebar-foreground',
+              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40',
+              revealClassName
+            )}
+          >
+            {icon}
+          </button>
+        }
+      />
+      <Tooltip.Content side="top">{label}</Tooltip.Content>
+    </Tooltip.Root>
+  );
+}
+
+/**
  * ③ The final slot at the row's right edge, and the row's ONE status channel.
  *
  * A working / waiting / unread session shows only its status mark here: the
@@ -733,6 +782,7 @@ export function SidebarRowArchiveButton({
  */
 export function SidebarRowEndSlot({
   sessionId,
+  selected = false,
   isWaitingPermission,
   isWorking,
   hasUnreadMessages,
@@ -747,6 +797,8 @@ export function SidebarRowEndSlot({
    * progress re-renders only the slot and never the memoized row around it.
    */
   sessionId?: string;
+  /** Whether the hosting row is currently selected, used to tune pill contrast. */
+  selected?: boolean;
   isWaitingPermission?: boolean;
   isWorking?: boolean;
   hasUnreadMessages?: boolean;
@@ -759,13 +811,16 @@ export function SidebarRowEndSlot({
   // The end slot outlives the status mark, so the hand-over hold lives here.
   const drawWorking = useWorkingHandOver(isWorking === true, hasUnreadMessages === true);
   const sendStatus = useAtomValue(sessionSendStatusAtomFamily(sessionId ?? ''));
+  const shortcut = useSidebarRowShortcut(sessionId);
   const sendLabel = useSessionSendLabel(sendStatus);
-  const restContent = hasSessionRowStatus({
-    isWaitingPermission,
-    isWorking: drawWorking,
-    hasUnreadMessages,
-    sendState: sendStatus?.state,
-  }) ? (
+  const restContent = shortcut ? (
+    <SidebarShortcutPill index={shortcut.index} platform={shortcut.platform} selected={selected} />
+  ) : hasSessionRowStatus({
+      isWaitingPermission,
+      isWorking: drawWorking,
+      hasUnreadMessages,
+      sendState: sendStatus?.state,
+    }) ? (
     <SessionRowStatusIndicator
       isWaitingPermission={isWaitingPermission}
       isWorking={drawWorking}
@@ -778,10 +833,10 @@ export function SidebarRowEndSlot({
     restIcon
   );
   const hasRest = Boolean(restContent);
-  const hasActions = Boolean(menu) || Boolean(archive);
+  const showActions = !shortcut && (Boolean(menu) || Boolean(archive));
   // Reserve the action hit target whenever something can occupy it; otherwise the
   // slot sizes to its resting content (for example, a PR icon).
-  const reserve = hasRest || hasActions;
+  const reserve = hasRest || showActions;
   return (
     // pointer-events-none so the resting PR icon area still passes clicks through to
     // the row's navigation; the hover action buttons re-enable pointer events on hover.
@@ -794,12 +849,15 @@ export function SidebarRowEndSlot({
     >
       {hasRest ? (
         <span
-          className={cn('flex', hasActions && cn('transition-opacity duration-100', fadeClassName))}
+          className={cn(
+            'flex',
+            showActions && cn('transition-opacity duration-100', fadeClassName)
+          )}
         >
           {restContent}
         </span>
       ) : null}
-      {menu ? (
+      {!shortcut && menu ? (
         // The ⋯ shares Archive's 20px column when Archive is absent, and parks one
         // column to its left when both reveal — the pair stays flush at the right edge.
         <span
@@ -812,7 +870,7 @@ export function SidebarRowEndSlot({
           {menu}
         </span>
       ) : null}
-      {archive}
+      {!shortcut ? archive : null}
     </div>
   );
 }

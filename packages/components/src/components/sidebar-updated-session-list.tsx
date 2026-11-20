@@ -25,11 +25,7 @@ import {
   subscribeSessionMentionDrag,
 } from '@/lib/session-mention-drag';
 import { useDraggable } from '@dnd-kit/core';
-import {
-  DEFAULT_PIN_SECTION_KEY,
-  FOCUS_SECTION_DND_KEY,
-  pinnedRowDndId,
-} from './pinned-rows-dnd';
+import { DEFAULT_PIN_SECTION_KEY, FOCUS_SECTION_DND_KEY, pinnedRowDndId } from './pinned-rows-dnd';
 import {
   beginPinnedDropSettle,
   flyPinnedDropSettle,
@@ -80,6 +76,7 @@ import {
   SessionRowLeadingSlot,
   SessionRowMenuButton,
   SessionRowWorktreeIndicator,
+  SidebarRowActionButton,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
   SidebarListSkeleton,
@@ -120,10 +117,7 @@ import {
   type SidebarStatusGroup,
 } from '@/lib/sidebar-status-group';
 import { sortByManualOrder } from '@lody/shared';
-import {
-  CustomSnoozeDialog,
-  type CustomSnoozeDialogTarget,
-} from './sidebar-status-snooze-dialog';
+import { CustomSnoozeDialog, type CustomSnoozeDialogTarget } from './sidebar-status-snooze-dialog';
 import { SidebarFocusDndContainer } from './sidebar-status-focus-dnd';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import type {
@@ -140,6 +134,7 @@ import {
   RenameSessionDialogView,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type SidebarUpdatedItemKind = SidebarRowKind;
 
@@ -362,8 +357,10 @@ export function buildSidebarUpdatedBuckets(
         {
           key,
           items: [...members].sort((a, b) => {
-            const aUntil = typeof a.snoozedUntil === 'number' ? a.snoozedUntil : Number.MAX_SAFE_INTEGER;
-            const bUntil = typeof b.snoozedUntil === 'number' ? b.snoozedUntil : Number.MAX_SAFE_INTEGER;
+            const aUntil =
+              typeof a.snoozedUntil === 'number' ? a.snoozedUntil : Number.MAX_SAFE_INTEGER;
+            const bUntil =
+              typeof b.snoozedUntil === 'number' ? b.snoozedUntil : Number.MAX_SAFE_INTEGER;
             if (aUntil !== bUntil) return aUntil - bUntil;
             return a.id.localeCompare(b.id);
           }),
@@ -812,12 +809,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
             if (!canToggleBucket) return;
             onToggleBucket?.(bucket.key);
           };
-          if (
-            grouping === 'status' &&
-            bucket.key === 'focus' &&
-            onDropFocusSession &&
-            !isMobile
-          ) {
+          if (grouping === 'status' && bucket.key === 'focus' && onDropFocusSession && !isMobile) {
             return (
               <div
                 key={bucket.key}
@@ -975,6 +967,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                               effectiveShowStatusActions ? beginCustomSnooze : undefined
                             }
                             showSnoozeCountdown={effectiveShowStatusActions}
+                            showStatusActions={effectiveShowStatusActions}
                             onCopyUrl={onCopyItemUrl}
                             onShareWithTeam={onShareItemWithTeam}
                             onOpenPullRequest={onOpenPullRequest}
@@ -997,10 +990,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                           data-status-focus-empty=""
                           className="flex min-h-10 items-center justify-center rounded-md border border-dashed border-sidebar-border/60 px-3 py-2 text-xs text-sidebar-foreground-muted/75"
                         >
-                          {t(
-                            'sidebar.status.focusEmptyDrop',
-                            'Drag a conversation here to focus'
-                          )}
+                          {t('sidebar.status.focusEmptyDrop', 'Drag a conversation here to focus')}
                         </div>
                       );
                     }
@@ -1133,6 +1123,11 @@ type UpdatedItemRowProps = {
   onMoveToFocus?: (id: string) => void;
   onBeginCustomSnooze?: (id: string, title: string) => void;
   showSnoozeCountdown?: boolean;
+  /**
+   * Status view: Focus and Later rows replace the hover Archive button with a
+   * one-click Settle ("mark as completed") action; Settled rows keep Archive.
+   */
+  showStatusActions?: boolean;
   onCopyUrl?: (id: string) => void;
   onShareWithTeam?: (id: string) => void;
   onOpenPullRequest?: (request: SessionListPullRequestOpen) => void;
@@ -1166,6 +1161,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   onMoveToFocus,
   onBeginCustomSnooze,
   showSnoozeCountdown = false,
+  showStatusActions = false,
   onCopyUrl,
   onShareWithTeam,
   onOpenPullRequest,
@@ -1234,7 +1230,6 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   const readOnly = item.sharing?.access === 'read';
   const canArchive = !readOnly && typeof onArchive === 'function';
   const canMarkUnread = typeof onMarkUnread === 'function' && !item.hasUnreadMessages;
-  const showInlineArchive = canArchive && !isMobile;
   const canRename = !readOnly && typeof onRename === 'function';
   const canTogglePin = typeof onTogglePin === 'function';
   const nowMs = now instanceof Date ? now.getTime() : Date.now();
@@ -1244,7 +1239,12 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       ? formatSnoozeCountdown(item.snoozedUntil, nowMs)
       : null;
   const canSnooze = !readOnly && typeof onSnooze === 'function';
-  const canSettle = !readOnly && typeof onSettle === 'function' && statusGroup === 'focus';
+  const canSettle = !readOnly && typeof onSettle === 'function' && statusGroup !== 'settled';
+  // The Status view trades Archive's two-step destructive action for a
+  // one-click Settle on rows that are still open; only a Settled row keeps
+  // Archive in the hover slot. Other organize modes always show Archive.
+  const showInlineSettle = canSettle && !isMobile && showStatusActions;
+  const showInlineArchive = canArchive && !isMobile && !showInlineSettle;
   const canMoveToFocus =
     !readOnly && typeof onMoveToFocus === 'function' && statusGroup !== 'focus';
   const canCopyUrl = typeof onCopyUrl === 'function';
@@ -1468,6 +1468,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         <div className={cn('flex shrink-0 items-center', SIDEBAR_ROW_LINE_CLASS)}>
           <SidebarRowEndSlot
             sessionId={item.id}
+            selected={showSelectedState}
             isWaitingPermission={item.isWaitingPermission}
             isWorking={item.isWorking}
             hasUnreadMessages={item.hasUnreadMessages}
@@ -1486,6 +1487,17 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                     useAnchor && 'z-20'
                   )}
                 >
+                  {isMobile && !snoozeCountdown ? <span>{relativeTime}</span> : null}
+                  {showMergeablePill ? <SessionMergeablePill /> : null}
+                  <SessionRowWorktreeIndicator
+                    isWorktree={item.kind === 'local' && item.isWorktree}
+                  />
+                  {showPr ? (
+                    <SessionPrIcon compact prStatus={prStatus} prCiState={item.prCiState} />
+                  ) : null}
+                  {/* The wake-up countdown sits at the far right in a neutral
+                      chip: it is recurring meta, not an alert, so it keeps the
+                      row's own ink instead of a status colour. */}
                   {snoozeCountdown ? (
                     <span
                       data-snooze-countdown=""
@@ -1494,19 +1506,11 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                           ? new Date(item.snoozedUntil).toLocaleString()
                           : undefined
                       }
-                      className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium leading-none tabular-nums text-amber-700 dark:bg-amber-400/12 dark:text-amber-300"
+                      className="inline-flex items-center gap-1 rounded-full bg-sidebar-foreground/10 px-1.5 py-0.5 text-[11px] font-medium leading-none tabular-nums text-sidebar-foreground-muted"
                     >
                       <Timer className="h-3 w-3 shrink-0" aria-hidden="true" />
                       <span>{snoozeCountdown}</span>
                     </span>
-                  ) : null}
-                  {isMobile && !snoozeCountdown ? <span>{relativeTime}</span> : null}
-                  {showMergeablePill ? <SessionMergeablePill /> : null}
-                  <SessionRowWorktreeIndicator
-                    isWorktree={item.kind === 'local' && item.isWorktree}
-                  />
-                  {showPr ? (
-                    <SessionPrIcon compact prStatus={prStatus} prCiState={item.prCiState} />
                   ) : null}
                 </span>
               ) : undefined
@@ -1520,7 +1524,14 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
               ) : undefined
             }
             archive={
-              showInlineArchive ? (
+              showInlineSettle ? (
+                <SidebarRowActionButton
+                  label={contextMenuLabels.settle}
+                  icon={<CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />}
+                  onConfirm={() => onSettle?.(item.id)}
+                  revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
+                />
+              ) : showInlineArchive ? (
                 <SidebarRowArchiveButton
                   label={archiveTooltipLabel}
                   confirmLabel={archiveConfirmLabel}
@@ -1689,7 +1700,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           <ContextMenu.Item
             icon={GitBranch}
             onClick={() => {
-              void navigator.clipboard.writeText(branchName).catch(() => {});
+              void copyTextToClipboard(branchName).catch(() => {});
             }}
           >
             {contextMenuLabels.copyBranch}

@@ -256,6 +256,7 @@ function MobileRunConfigSheetRows({
     modelSelectors,
     interactionModeSelectors,
     thoughtLevelSelectors,
+    speedTierSelectors,
     planModeSelectors,
     fastModeSelectors,
     otherSelectors,
@@ -442,6 +443,31 @@ function MobileRunConfigSheetRows({
   const thinkingLabel = useMemo(
     () => thinkingOptions.find((option) => option.value === thinkingValue)?.label ?? thinkingValue,
     [thinkingOptions, thinkingValue]
+  );
+
+  /* ── Speed tier (when model supports multiple speed tiers, e.g. Fast + Ultrafast) ── */
+  const speedTierSelector = speedTierSelectors[0];
+  const speedTierValue = speedTierSelector
+    ? ((resolveConfigOptionValue(
+        speedTierSelector,
+        configOptionValues?.[speedTierSelector.configId]
+      ) as string) ?? null)
+    : null;
+  const speedTierOptions = useMemo<MobileInlinePickerOption<string>[]>(
+    () =>
+      (speedTierSelector?.options ?? []).map((option) => ({
+        value: option.value,
+        label: option.label,
+        searchText: option.label,
+        description: option.description,
+        disabled: option.disabled,
+      })),
+    [speedTierSelector]
+  );
+  const speedTierLabel = useMemo(
+    () =>
+      speedTierOptions.find((option) => option.value === speedTierValue)?.label ?? speedTierValue,
+    [speedTierOptions, speedTierValue]
   );
 
   /* ── Permission / mode — resolved by the one shared rule, so the sheet, the
@@ -671,6 +697,25 @@ function MobileRunConfigSheetRows({
             triggerContent={
               <span {...stylex.props(composerSurface.truncate)}>
                 {thinkingLabel ?? reasoningLabel}
+              </span>
+            }
+          />
+        </RunConfigRow>
+      ) : null}
+
+      {speedTierSelector && speedTierOptions.length > 0 ? (
+        <RunConfigRow label={speedTierSelector.label}>
+          <MobileInlinePicker<string>
+            id="run-config-speed"
+            value={speedTierValue}
+            onChange={(value) =>
+              onConfigOptionChange?.(speedTierSelector.configId, value as AcpConfigOptionValue)
+            }
+            options={speedTierOptions}
+            ariaLabel={speedTierSelector.label}
+            triggerContent={
+              <span {...stylex.props(composerSurface.truncate)}>
+                {speedTierLabel ?? speedTierSelector.label}
               </span>
             }
           />

@@ -1,6 +1,7 @@
 # 用 ⌘1–⌘9 直接切换会话标签页
 
 Status: implemented
+Archived: 2026-11-20
 Translation: current
 
 [English](2026-09-22-session-tab-index-shortcuts.md)

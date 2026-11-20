@@ -30,15 +30,25 @@ unchanged. These client checks do not replace hosted metadata/body authorization
 
 - `session-chat-interface.tsx` — conversation surface (draft variant:
   `draft-session-chat-interface.tsx`).
-  **Read receipts are gated on VISIBILITY, not on being mounted.** A child tab
+  **Read receipts are gated on VISIBILITY, an active foreground window, and page
+  interaction, not on being mounted or merely open.** A child tab
   or side chat stays mounted after its first selection, so the mark-as-read
   effect takes an explicit `isVisible` prop (`../../lib/session-read-receipt.ts`)
   that `session-detail.tsx` derives per surface — top tabs `isActive`, side chats
   `isActive && isSidebarOpen` (a collapsed panel is only `invisible`). Dropping
   that prop silently marks every sub-session read the moment the parent opens.
-  A manual Mark as unread moves `lastReadAt` behind the latest message while a
-  surface may already be visible; that receipt gets no new opportunity until a
-  new message arrives or the user leaves and reopens the surface.
+  In addition, `useWindowReadEngagement` (`../../lib/window-read-engagement.ts`)
+  requires the host window to be visible, focused, and neither suspended nor
+  locked, and requires a page interaction (`pointerdown`, `keydown`, `wheel`,
+  `touchstart`, or `click`) within the active visit's idle window (mounted at
+  the workspace layout root via `useObserveWindowReadEngagement` so sidebar or
+  tab navigation clicks carry into the opened session). Window blur, hide, OS
+  sleep/lock, or idle expiry clears engagement so background, untouched, or
+  `Cmd+Tab`-only windows never mark sessions read until the user interacts with
+  the page. A manual Mark as unread moves `lastReadAt` behind the latest message
+  while a surface may already be visible; `resolveManualUnreadLatch` suppresses
+  subsequent interactions and focus changes on that visit until a new message
+  arrives or the user switches away and reopens the surface.
   "Copy as Markdown" renders through `@lody/shared`
   `buildConversationMarkdown` (`packages/shared/src/conversation-markdown.ts`),
   NOT `buildReplayPromptFromHistory` — that one is the agent-facing replay

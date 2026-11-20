@@ -95,10 +95,7 @@ import {
   X,
 } from 'lucide-react';
 import { buildSnoozePresets, sidebarStatusGroup } from '@/lib/sidebar-status-group';
-import {
-  CustomSnoozeDialog,
-  type CustomSnoozeDialogTarget,
-} from '../sidebar-status-snooze-dialog';
+import { CustomSnoozeDialog, type CustomSnoozeDialogTarget } from '../sidebar-status-snooze-dialog';
 import { useRouter } from '@tanstack/react-router';
 import { Spinner } from '@lody/ui/spinner';
 import { Switch } from '@lody/ui/switch';
@@ -286,6 +283,7 @@ import { SessionInfoBar } from './session-info-bar';
 import { SessionPreviewPreload } from './session-preview-preload';
 import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
 import { SessionProjectMembersChip } from './session-project-members-chip';
+import { useSettleSessionWithConfirmation } from './session-sub-conversation-confirmation';
 import {
   buildSessionProjectMemberRows,
   resolveSessionProjectMemberRow,
@@ -386,7 +384,12 @@ import {
   resolveUnstartedTrailingDispatchAtMs,
   UNSTARTED_TRAILING_USER_TURN_TIMEOUT_MS,
 } from '@/lib/session-dispatch-state';
-import { shouldMarkSessionRead } from '@/lib/session-read-receipt';
+import {
+  resolveManualUnreadLatch,
+  shouldMarkSessionRead,
+  type ReadReceiptSnapshot,
+} from '@/lib/session-read-receipt';
+import { useWindowReadEngagement } from '@/lib/window-read-engagement';
 import { recordSessionRenderTrace, shortTraceId } from '@/lib/session-render-trace';
 import { getPathLauncherIcon } from '@/components/icons/path-launcher-icon';
 import {
@@ -829,6 +832,7 @@ import { shouldShowCodexProposedPlanDecision } from '@/lib/codex-plan-decision';
 import { buildExecutionTurnConfigOverrides } from '@/lib/execution-turn-config';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 // ── Path launcher options for "Open in" split button ──
 
@@ -1577,8 +1581,7 @@ export function SessionHeaderMenu({
     // branch name copied to clipboard") — no raw value echo, which reads
     // noisy for long paths/URLs.
     (text: string, successMessage: string) => {
-      void navigator.clipboard
-        .writeText(text)
+      void copyTextToClipboard(text)
         .then(() => toast.success(successMessage))
         .catch(() => toast.error(t('sessions.copyFailed', 'Unable to copy')));
     },
@@ -1931,7 +1934,7 @@ export function SessionHeaderMenu({
                   </Menu.Content>
                 </Menu.Submenu>
               ) : null}
-              {statusGroup === 'focus' && onSettle ? (
+              {statusGroup !== 'settled' && onSettle ? (
                 <Menu.Item icon={CheckCircle2} onClick={() => void onSettle()}>
                   {t('sessions.contextMenu.settle', 'Settle')}
                 </Menu.Item>
@@ -3226,6 +3229,7 @@ export const SessionChatInterface = memo(
       settleSession,
       moveSessionToFocus,
     } = useSessionActions();
+    const settleSessionWithConfirmation = useSettleSessionWithConfirmation(settleSession);
     const [renameDialogTarget, setRenameDialogTarget] = useState<RenameSessionDialogTarget | null>(
       null
     );
@@ -4373,7 +4377,7 @@ export const SessionChatInterface = memo(
             });
             await admitOutput();
             assertCurrent();
-            await navigator.clipboard.writeText(markdown);
+            await copyTextToClipboard(markdown);
             assertCurrent();
             captureSessionEvent('session/history_copy_succeeded', {
               history_count: turnCount,
@@ -4420,20 +4424,48 @@ export const SessionChatInterface = memo(
     );
 
     // Inactive tabs and collapsed side chats stay mounted for fast switching, so
-    // being mounted is not evidence the user saw this conversation: only the
-    // visible surface may clear unread state. Otherwise opening a parent session
-    // marks every one of its sub-sessions read at once.
-    const lastReadAtForReceiptRef = useRef(parseTimestamp(session.lastReadAt));
-    lastReadAtForReceiptRef.current = parseTimestamp(session.lastReadAt);
+    // being mounted is not evidence the user saw this conversation: only a
+    // visible surface inside an active foreground window that has received page
+    // interaction may clear unread state.
+    const {
+      isWindowActive: isWindowReadActive,
+      hasPageInteraction: hasWindowReadInteraction,
+      getLatestState: getLatestWindowReadEngagement,
+    } = useWindowReadEngagement();
+    const prevReadReceiptSnapshotRef = useRef<ReadReceiptSnapshot | null>(null);
+    const manualUnreadAtMessageRef = useRef<number | null>(null);
 
     useEffect(() => {
+      const surfaceVisible = isVisible && !preparingWindow;
       const lastMessageAt = parseTimestamp(session.lastMessageAt);
+      const lastReadAt = parseTimestamp(session.lastReadAt);
+      const snapshot: ReadReceiptSnapshot = {
+        sessionId: session.id,
+        isVisible: surfaceVisible,
+        lastMessageAt,
+        lastReadAt,
+      };
+      const manualUnreadAt = resolveManualUnreadLatch(
+        prevReadReceiptSnapshotRef.current,
+        snapshot,
+        manualUnreadAtMessageRef.current
+      );
+      prevReadReceiptSnapshotRef.current = snapshot;
+      manualUnreadAtMessageRef.current = manualUnreadAt;
+
+      if (manualUnreadAt !== null && lastMessageAt !== null && lastMessageAt <= manualUnreadAt) {
+        return;
+      }
+
+      const liveEngagement = getLatestWindowReadEngagement();
       if (
         !shouldMarkSessionRead({
           rendersConversation: !hideMessageArea,
-          isVisible: isVisible && !preparingWindow,
+          isVisible: surfaceVisible,
+          isWindowActive: isWindowReadActive && liveEngagement.isWindowActive,
+          hasPageInteraction: hasWindowReadInteraction && liveEngagement.hasPageInteraction,
           lastMessageAt,
-          lastReadAt: lastReadAtForReceiptRef.current,
+          lastReadAt,
         })
       ) {
         return;
@@ -4441,17 +4473,17 @@ export const SessionChatInterface = memo(
       void markSessionRead(session.id, session.lastMessageAt ?? null).catch((error: unknown) => {
         console.warn('Failed to mark session as read', error);
       });
-      // A receipt gets a new opportunity when this surface becomes visible or
-      // a new message arrives. Deliberately do not depend on lastReadAt: moving
-      // that receipt backwards is the user's explicit "Mark as unread" action,
-      // which must remain visible until they leave and reopen the conversation.
     }, [
+      getLatestWindowReadEngagement,
+      hasWindowReadInteraction,
       hideMessageArea,
       isVisible,
-      preparingWindow,
+      isWindowReadActive,
       markSessionRead,
+      preparingWindow,
       session.id,
       session.lastMessageAt,
+      session.lastReadAt,
     ]);
 
     const isDispatching = inputActionState === 'dispatching';
@@ -6547,113 +6579,69 @@ export const SessionChatInterface = memo(
       workspaceId,
     ]);
 
-    const handleInterruptAndSend = useCallback(
+    const handleSteerQueuedMessage = useCallback(
       async (item: MessageQueueItem) => {
-        if (isExternalHistoryRefreshing) {
-          captureSessionEvent('session/queue_interrupt_blocked', {
-            reason: 'external_history_syncing',
-            queue_item_id: item.$cid,
-          });
-          return;
-        }
-        if (!workspaceId || !activeAssistantTurnId) {
-          captureSessionEvent('session/queue_interrupt_blocked', {
-            reason: !workspaceId ? 'missing_workspace' : 'missing_active_turn',
-            queue_item_id: item.$cid,
-          });
-          toast.error(t('sessions.interruptFailed', 'Failed to interrupt current task'));
-          return;
-        }
-        setInputActionState('ready');
-        pendingUserInterruptRef.current = true;
-        try {
-          // Not a Stop: the queued item must stay eligible to run next.
-          await requestSessionCancel(session.id, activeAssistantTurnId, { interrupt: true });
-          captureSessionEvent('session/queue_interrupt_succeeded', {
-            queue_item_id: item.$cid,
-            active_assistant_turn_id: activeAssistantTurnId,
-          });
-        } catch (error) {
-          console.error('Failed to interrupt for queued message', error);
-          pendingUserInterruptRef.current = false;
-          captureSessionEvent('session/queue_interrupt_failed', {
-            queue_item_id: item.$cid,
-            active_assistant_turn_id: activeAssistantTurnId,
-            error_name: error instanceof Error ? error.name : typeof error,
-            error_message: getErrorMessage(error),
-          });
-          toast.error(t('sessions.interruptFailed', 'Failed to interrupt current task'), {
-            description: getErrorMessage(error),
-          });
-        }
-      },
-      [
-        activeAssistantTurnId,
-        captureSessionEvent,
-        isExternalHistoryRefreshing,
-        requestSessionCancel,
-        session.id,
-        t,
-        workspaceId,
-      ]
-    );
-
-    const handleNativeSteerQueuedMessage = useCallback(
-      async (item: MessageQueueItem) => {
-        if (isExternalHistoryRefreshing || !activeAssistantTurnId) {
-          return;
-        }
-        if (steeringQueueItemIdsRef.current.has(item.$cid)) {
-          return;
-        }
+        if (isExternalHistoryRefreshing || steeringQueueItemIdsRef.current.has(item.$cid)) return;
+        const targetTurnId = activeAssistantTurnId;
+        const guide = Boolean(isSessionActive && targetTurnId && nativeSteerAvailable);
+        if (targetTurnId && !guide && !item.paused && messageQueue[0]?.$cid !== item.$cid) return;
         steeringQueueItemIdsRef.current.add(item.$cid);
         try {
-          const inputConfig = normalizeSessionTurnInputConfig(item.acpSessionConfig);
-          if (!inputConfig) {
-            throw new Error('Queued message input config is invalid');
+          if (runtime) {
+            const current = await runtime.sendResources.withSessionStore(session.id, (store) =>
+              store.getState().mq?.find((row) => row.$cid === item.$cid)
+            );
+            if (!current) return;
+            item = current as MessageQueueItem;
           }
+          const inputConfig = normalizeSessionTurnInputConfig(item.acpSessionConfig);
+          if (!inputConfig) throw new Error('Queued message input config is invalid');
           const inputBlocks = normalizeSessionInputBlocks(
             inputConfig.inputBlocks,
             inputConfig.prompt ?? item.task
           );
           const pendingHistoryEntry = buildDraftUserHistoryEntry({
-            userId: item.userId,
+            userId: item.paused
+              ? ((runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+                currentUser?.id ??
+                session.userId)
+              : item.userId,
             inputBlocks,
-            timestamp: item.timestamp,
+            timestamp: item.paused ? new Date().toISOString() : item.timestamp,
             inputConfig,
-            status: 'pending_apply',
+            status: guide ? 'pending_apply' : 'pending',
           });
-          if (!pendingHistoryEntry) {
-            throw new Error('Queued message is empty');
-          }
-          const queuedUserTurnId = item.userTurnId?.trim() || `queued-${item.$cid}`;
-          // History first, then the queue row: the input is never absent from both.
-          const { entry: historyEntry } = await addSessionHistory(
-            { ...pendingHistoryEntry, id: queuedUserTurnId },
-            { guideExpectedTurnId: activeAssistantTurnId }
+          if (!pendingHistoryEntry) throw new Error('Queued message is empty');
+          const originalTurnId = item.userTurnId?.trim() || `queued-${item.$cid}`;
+          // Stop's cancellation receipt stays final. An explicit resend owns a
+          // distinct, stable id so retries cannot revive or duplicate the old input.
+          const userTurnId = item.paused ? `queue-resend:${originalTurnId}` : originalTurnId;
+          const { entry } = await addSessionHistory(
+            { ...pendingHistoryEntry, id: userTurnId },
+            guide && targetTurnId ? { guideExpectedTurnId: targetTurnId } : { dispatch: true }
           );
           await removeMessageQueueItem(item.$cid);
-          trackMessageSend(historyEntry.id);
-          touchSessionActivity(session.id).catch((error: unknown) => {
-            console.warn('Failed to update session activity for steer', error);
+          trackMessageSend(entry.id);
+          void touchSessionActivity(session.id).catch((error: unknown) => {
+            console.warn('Failed to update session activity for queued send', error);
           });
-          const applied = await guideHistoryEntry(historyEntry.id, activeAssistantTurnId);
-          captureSessionEvent('session/queue_guide_result', {
-            queue_item_id: item.$cid,
-            active_assistant_turn_id: activeAssistantTurnId,
-            applied,
-          });
+          if (guide && targetTurnId) {
+            await guideHistoryEntry(entry.id, targetTurnId);
+          } else {
+            if (targetTurnId) {
+              pendingUserInterruptRef.current = true;
+              await requestSessionCancel(session.id, targetTurnId, { interrupt: true });
+            }
+            await requestSessionDispatch(session.id, entry.id, {
+              inputConfig,
+              machineId: session.machineId,
+            });
+            anchorChatToMessage(entry.id);
+          }
         } catch (error) {
-          console.error('Failed to guide with queued message', error);
-          captureSessionEvent('session/queue_guide_failed', {
-            queue_item_id: item.$cid,
-            active_assistant_turn_id: activeAssistantTurnId,
-            error_name: error instanceof Error ? error.name : typeof error,
-            error_message: getErrorMessage(error),
-          });
-          toast.error(t('sessions.sendError'), {
-            description: getErrorMessage(error),
-          });
+          pendingUserInterruptRef.current = false;
+          console.error('Failed to send queued message', error);
+          toast.error(t('sessions.sendError'), { description: getErrorMessage(error) });
         } finally {
           steeringQueueItemIdsRef.current.delete(item.$cid);
         }
@@ -6661,32 +6649,24 @@ export const SessionChatInterface = memo(
       [
         activeAssistantTurnId,
         addSessionHistory,
-        captureSessionEvent,
+        anchorChatToMessage,
+        currentUser?.id,
         guideHistoryEntry,
         isExternalHistoryRefreshing,
+        isSessionActive,
+        messageQueue,
+        nativeSteerAvailable,
         removeMessageQueueItem,
+        requestSessionCancel,
+        requestSessionDispatch,
+        runtime,
         session.id,
+        session.machineId,
+        session.userId,
         t,
-        touchSessionActivity,
         trackMessageSend,
+        touchSessionActivity,
       ]
-    );
-
-    const handleSteerQueuedMessage = useCallback(
-      async (item: MessageQueueItem) => {
-        // Interrupt-and-send always runs the queue head next, so it is only a
-        // valid steer substitute for the first item. Later items are steerable
-        // exclusively through native acknowledged steering.
-        if (messageQueue[0]?.$cid !== item.$cid && !nativeSteerAvailable) {
-          return;
-        }
-        if (nativeSteerAvailable) {
-          await handleNativeSteerQueuedMessage(item);
-          return;
-        }
-        await handleInterruptAndSend(item);
-      },
-      [handleInterruptAndSend, handleNativeSteerQueuedMessage, messageQueue, nativeSteerAvailable]
     );
 
     const handleReorderQueueItem = useCallback(
@@ -7123,7 +7103,7 @@ export const SessionChatInterface = memo(
         return;
       }
       try {
-        await navigator.clipboard.writeText(path);
+        await copyTextToClipboard(path);
         captureSessionEvent('session/path_copied', {
           path_source: openInIdePathSource,
         });
@@ -7144,7 +7124,7 @@ export const SessionChatInterface = memo(
       async (linkFormat: 'https' | 'deeplink' = 'https') => {
         try {
           if (!workspaceId || !workspaceSlug) throw new Error('Workspace is not ready');
-          await navigator.clipboard.writeText(
+          await copyTextToClipboard(
             linkFormat === 'deeplink'
               ? buildSessionLink({ sessionId: session.id, workspaceId })
               : buildAppSessionUrl(workspaceSlug, session.id)
@@ -7354,7 +7334,9 @@ export const SessionChatInterface = memo(
             : undefined
         }
         onSettle={
-          headerSharing?.access !== 'read' ? () => settleSession(session.id) : undefined
+          headerSharing?.access !== 'read'
+            ? () => settleSessionWithConfirmation(session.id).then(() => undefined)
+            : undefined
         }
         onMoveToFocus={
           headerSharing?.access !== 'read' ? () => moveSessionToFocus(session.id) : undefined
@@ -7879,12 +7861,9 @@ export const SessionChatInterface = memo(
                               onEditCancel={handleCancelQueueItemEdit}
                               onEditSave={handleSaveQueueItemEdit}
                               onSteer={handleSteerQueuedMessage}
-                              showSteerAction={
-                                isSessionActive &&
-                                !!activeAssistantTurnId &&
-                                !isExternalHistoryRefreshing
-                              }
+                              showSteerAction={!isExternalHistoryRefreshing}
                               nativeSteerAvailable={nativeSteerAvailable}
+                              sendWhileIdle={!activeAssistantTurnId}
                               roomy={isMobile}
                               footerPosition={isMobile ? 'inline' : 'below'}
                             />

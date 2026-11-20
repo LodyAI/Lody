@@ -14,6 +14,7 @@ import { Tabs } from '@lody/ui/tabs';
 import { ReadOnlyHtmlPreview } from '../sessions/read-only-html-preview';
 import { formatFileSize, isHtmlSessionFile } from '@/lib/session-file-presentation';
 import { MarkdownRenderer } from './markdown-renderer';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const isMarkdownFile = (fileName: string): boolean => {
   const ext = fileName.toLowerCase().split('.').pop() ?? '';
@@ -65,7 +66,7 @@ export function SessionFilePreviewPanel({
   const handleCopy = () => {
     if (!rawText) return;
     // Always copy the raw source, regardless of rendered/raw view.
-    void navigator.clipboard?.writeText(rawText).then(
+    void copyTextToClipboard(rawText).then(
       () => setCopied(true),
       () => toast.error(t('sessions.fileCopyFailed', 'Failed to copy file content'))
     );
