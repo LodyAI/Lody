@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import {
   installEmbeddedNodePtyBinding,
   installEmbeddedKeyringBinding,
+  installEmbeddedNativeRepoEngineBinding,
   installEmbeddedRoostBinding,
   installEmbeddedSqliteBinding,
   stageCliRuntimePackages
@@ -66,6 +67,7 @@ stageCliRuntimePackages()
 installEmbeddedSqliteBinding({ platform: process.platform, arch: process.arch })
 installEmbeddedNodePtyBinding({ platform: process.platform, arch: process.arch })
 installEmbeddedKeyringBinding({ platform: process.platform, arch: process.arch })
+installEmbeddedNativeRepoEngineBinding({ platform: process.platform, arch: process.arch })
 installEmbeddedRoostBinding({ platform: process.platform, arch: process.arch })
 
 console.log(`Synced CLI dist to ${destDir}`)

@@ -12,6 +12,7 @@ import { LocalPlatformIpc } from './services/local-platform-ipc'
 import { LocalProjectsIpc } from './services/local-projects-ipc'
 import { LoroIpc } from './services/loro-ipc'
 import { MachineRpcIpc } from './services/machine-rpc-ipc'
+import { NativeWorkspaceMetaIpc } from './services/native-workspace-meta-ipc'
 import { NotificationsIpc } from './services/notifications-ipc'
 import { PublicBrowserIpc } from './services/public-browser-ipc'
 import { SessionControlIpc } from './services/session-control-ipc'
@@ -35,6 +36,7 @@ export const IPC_SERVICE_CONSTRUCTORS = [
   LocalProjectsIpc,
   LoroIpc,
   MachineRpcIpc,
+  NativeWorkspaceMetaIpc,
   NotificationsIpc,
   PublicBrowserIpc,
   SessionControlIpc,

@@ -114,8 +114,12 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
     }
   })
   new cli.CliIpc()
+  const { EventEmitter } = await import('node:events')
   const window = () => {
-    const sender = { mainFrame: { url: 'file:///app/out/renderer/index.html' } }
+    const sender = new EventEmitter()
+    sender.mainFrame = { url: 'file:///app/out/renderer/index.html' }
+    sender.isDestroyed = () => false
+    sender.send = (channel, value) => sender.emit(channel, value)
     const owner = { webContents: sender, isDestroyed: () => false }
     windows.set(sender, owner)
     productWindows.add(owner)
@@ -148,6 +152,112 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
     running = true
     sends.get('terminal.input')(event, { data: 'synthetic' })
     assert.equal(running, false)
+  }
+  // Native Workspace Meta IPC through the same trusted-window guard and a real host.
+  const { mkdtemp, rm, readFile: readText } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
+  const nativeRepo = await import('@lody/shared/node/native-repo')
+  const nativeMeta = await import('@lody/shared/node/native-workspace-meta')
+  const nativeIpc = await import('@lody/shared/native-workspace-meta-ipc')
+  const nativeDir = await mkdtemp(join(tmpdir(), 'lody-native-meta-ipc-'))
+  const hostScript = fileURLToPath(
+    new URL('../../../../../packages/shared/tests/fixtures/native-repo-host.mjs', import.meta.url)
+  )
+  let nativeEnabled = false
+  const meta = await load('./services/native-workspace-meta-ipc.ts', {
+    'electron-ipc-decorator': decoratorExports,
+    '../product-window-ipc-service': service,
+    '../../platform': {
+      isLocalPlatform: () => true,
+      readLocalPlatformSnapshot: async () => ({ workspace: { workspaceId: 'lw_test' } })
+    },
+    '../../services/cli-service': {
+      bundledNativeRepoHostLauncher: () => ({ command: process.execPath, args: [hostScript] })
+    },
+    '@lody/shared/node/native-repo': {
+      ...nativeRepo,
+      isNativeWorkspaceMetaEnabled: () => nativeEnabled,
+      connectNativeRepo: (options) =>
+        nativeRepo.connectNativeRepo({ ...options, dataDir: nativeDir })
+    },
+    '@lody/shared/node/native-workspace-meta': nativeMeta,
+    '@lody/shared/native-workspace-meta-ipc': nativeIpc
+  })
+  new meta.NativeWorkspaceMetaIpc()
+  const scope = { workspaceId: 'lw_test' }
+  try {
+    assert.equal(await handlers.get('nativeWorkspaceMeta.available')(primary, scope), false)
+    nativeEnabled = true
+    await assert.rejects(
+      handlers.get('nativeWorkspaceMeta.available')(unknown, scope),
+      /untrusted renderer/
+    )
+    await assert.rejects(
+      handlers.get('nativeWorkspaceMeta.open')(primary, {
+        workspaceId: 'lw_foreign',
+        observationId: '00000000-0000-4000-8000-000000000001'
+      }),
+      /scope_denied/
+    )
+    const first = '00000000-0000-4000-8000-000000000001'
+    const second = '00000000-0000-4000-8000-000000000002'
+    const primaryUpdates = []
+    const auxiliaryUpdates = []
+    primary.sender.on(nativeIpc.NATIVE_META_CHANNEL, (event) => primaryUpdates.push(event))
+    auxiliary.sender.on(nativeIpc.NATIVE_META_CHANNEL, (event) => auxiliaryUpdates.push(event))
+    const snapshot = await handlers.get('nativeWorkspaceMeta.open')(primary, {
+      ...scope,
+      observationId: first
+    })
+    assert.deepEqual(snapshot.docs, [])
+    await handlers.get('nativeWorkspaceMeta.open')(auxiliary, { ...scope, observationId: second })
+    // A command from one window reaches the other window's view before its receipt.
+    const receipt = await handlers.get('nativeWorkspaceMeta.commit')(primary, {
+      ...scope,
+      command: { kind: 'upsert-doc', docId: 'session-a', patch: { title: 'Synthetic' } }
+    })
+    assert.equal(receipt.outcome, 'committed')
+    const delivered = auxiliaryUpdates.at(-1)
+    assert.equal(delivered.observationId, second)
+    assert.equal(delivered.update.changes.revision, receipt.revision)
+    assert.deepEqual(delivered.update.changes.docs[0].meta, { title: 'Synthetic' })
+    // A navigating window drops only its own view.
+    primary.sender.emit('did-start-navigation', {}, 'file:///other', false, true)
+    const seen = primaryUpdates.length
+    await handlers.get('nativeWorkspaceMeta.commit')(auxiliary, {
+      ...scope,
+      command: { kind: 'delete-doc', docId: 'session-a' }
+    })
+    assert.equal(primaryUpdates.length, seen)
+    assert.equal(auxiliaryUpdates.at(-1).update.changes.docs[0].deleted, true)
+    await assert.rejects(
+      handlers.get('nativeWorkspaceMeta.commit')(primary, {
+        ...scope,
+        command: { kind: 'upsert-doc', docId: 'x', patch: {}, extra: 1 }
+      })
+    )
+  } finally {
+    const connection = await nativeRepo.connectNativeRepo({
+      dataDir: nativeDir,
+      launcher: () => {}
+    })
+    const pid = JSON.parse(await readText(join(nativeDir, 'engine.json'), 'utf8')).pid
+    await connection.close()
+    process.kill(pid, 'SIGTERM')
+    while (
+      (() => {
+        try {
+          process.kill(pid, 0)
+          return true
+        } catch {
+          return false
+        }
+      })()
+    )
+      await new Promise((resolve) => setImmediate(resolve))
+    await rm(nativeDir, { recursive: true, force: true })
   }
   let recovered = false
   let reported = false

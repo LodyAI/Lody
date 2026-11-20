@@ -25,6 +25,7 @@ const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
 const workspacePackageNames = new Set();
 const requiredPublishedRuntimeDependencies = [
   '@loro-dev/roost-node',
+  '@loro-dev/loro-repo-engine',
   '@napi-rs/keyring',
   'better-sqlite3',
   'loro-crdt',

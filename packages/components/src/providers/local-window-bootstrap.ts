@@ -119,7 +119,8 @@ export function createLocalWindowBootstrap(
       }
     });
   };
-  void request('meta');
+  // Native Meta is shared through main; there is no per-window replica to seed.
+  if (repo.metadataMode !== 'external') void request('meta');
   return {
     async readDocument(room: string): Promise<Uint8Array | undefined> {
       const peers = await registry.peers().catch(() => []);
