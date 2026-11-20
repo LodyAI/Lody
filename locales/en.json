@@ -5073,6 +5073,8 @@
   "settings.experimental.enableHelper": "Show features that are still being built. They can change or break.",
   "settings.experimental.roostHistory": "Roost history",
   "settings.experimental.roostHistoryHelper": "Use Roost for new conversations. Existing conversations keep their current history backend.",
+  "settings.experimental.today": "Today",
+  "settings.experimental.todayHelper": "A daily outline for notes, prompts and conversations. Turning it off only hides it; your notes keep syncing.",
   "mention.category.file.label": "Files",
   "mention.category.issue.label": "Issues",
   "mention.category.pr.label": "Pull Requests",
@@ -6891,5 +6893,6 @@
   "sidebar.pinSections.newSection": "New Section…",
   "sidebar.pinSections.rename": "Rename Section",
   "sidebar.pinSections.renameTitle": "Rename Section",
-  "sidebar.pinSections.sectionActions": "Section actions"
+  "sidebar.pinSections.sectionActions": "Section actions",
+  "today.nav": "Today"
 }

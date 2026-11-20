@@ -34,6 +34,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { useSidebarKeyboardNav } from '@/hooks/use-sidebar-keyboard-nav';
 import { useLocation, useRouter } from '@tanstack/react-router';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { todayFeatureEnabledAtom } from '@/atoms/settings';
 import {
   findFreshSessionPresenceState,
   machineSupportsLocalProjectRemovalProtocol,
@@ -1757,10 +1758,12 @@ export function LoroAppSidebar({
     return null;
   }, [location.pathname, location.search, selectedSessionId, workspaceSlug]);
 
+  const todayEnabled = useAtomValue(todayFeatureEnabledAtom);
   const activeNav = useMemo(() => {
     if (isArchiveRoute(location.pathname, workspaceSlug)) return 'archive';
     if (workspaceSlug && location.pathname.startsWith(`/${workspaceSlug}/schedules`))
       return 'schedules';
+    if (workspaceSlug && location.pathname.startsWith(`/${workspaceSlug}/today`)) return 'today';
     if (
       isHomeRoute(location.pathname, workspaceSlug) &&
       !selectedSessionId &&
@@ -4303,6 +4306,17 @@ export function LoroAppSidebar({
             });
           }
         }}
+        onTodayClicked={
+          todayEnabled
+            ? () => {
+                if (!workspaceSlug) return;
+                void router.navigate({
+                  to: '/$workspaceName/today',
+                  params: { workspaceName: workspaceSlug },
+                });
+              }
+            : undefined
+        }
         onDocsClicked={handleDocsClicked}
         onGithubClicked={handleGithubClicked}
         onJoinCommunityClicked={handleJoinCommunityClicked}

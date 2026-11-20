@@ -5073,6 +5073,8 @@
   "settings.experimental.enableHelper": "显示仍在开发中的功能。它们可能变动或出问题。",
   "settings.experimental.roostHistory": "Roost 历史",
   "settings.experimental.roostHistoryHelper": "让新会话使用 Roost。已有会话继续使用创建时选定的历史存储。",
+  "settings.experimental.today": "Today",
+  "settings.experimental.todayHelper": "按天记录笔记、待发 prompt 和对话的大纲。关闭只会隐藏它，笔记照常同步。",
   "mention.category.file.label": "文件",
   "mention.category.issue.label": "Issues",
   "mention.category.pr.label": "Pull Requests",
@@ -6878,5 +6880,6 @@
   "sidebar.pinSections.newSection": "新建分组…",
   "sidebar.pinSections.rename": "重命名分组",
   "sidebar.pinSections.renameTitle": "重命名分组",
-  "sidebar.pinSections.sectionActions": "分组操作"
+  "sidebar.pinSections.sectionActions": "分组操作",
+  "today.nav": "Today"
 }

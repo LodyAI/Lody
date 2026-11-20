@@ -50,6 +50,7 @@ import {
   CircleHelp,
   BookOpen,
   Bug,
+  CalendarDays,
   ClipboardList,
   ListTodo,
   Github,
@@ -96,7 +97,7 @@ import {
   SIDEBAR_CONTROL_TEXT_CLASS,
 } from './sidebar-row-shared';
 
-export type LoroSidebarNavKey = 'home' | 'archive' | 'schedules';
+export type LoroSidebarNavKey = 'home' | 'archive' | 'schedules' | 'today';
 
 export type LoroSidebarChatScope = 'my' | 'team';
 export type LoroSidebarOrganizeMode = SidebarOrganizeMode;
@@ -312,6 +313,8 @@ export interface LoroSidebarProps {
   onArchiveClicked?: () => void;
   /** Shows the Schedules entry; absent where there is nowhere to go. */
   onSchedulesClicked?: () => void;
+  /** Shows the experimental Today entry (specs/today-outline.md); absent when switched off. */
+  onTodayClicked?: () => void;
   onSettingsClicked?: () => void;
   onSettingsIntent?: () => void;
   settingsIcon?: ReactNode;
@@ -955,6 +958,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   onHomeClicked,
   onArchiveClicked,
   onSchedulesClicked,
+  onTodayClicked,
   onSettingsClicked,
   onSettingsIntent,
   settingsIcon,
@@ -1669,6 +1673,15 @@ export const LoroSidebar = memo(function LoroSidebar({
             icon={<MynauiEditOne className="h-4 w-4" />}
             onClick={onHomeClicked}
           />
+          {onTodayClicked && !isMobile ? (
+            <NavButton
+              active={activeNav === 'today'}
+              isMobile={isMobile}
+              label={t('today.nav', 'Today')}
+              icon={<CalendarDays className="h-4 w-4" strokeWidth={1.5} />}
+              onClick={onTodayClicked}
+            />
+          ) : null}
           {onSchedulesClicked && schedulesAllowed ? (
             <NavButton
               active={activeNav === 'schedules'}
