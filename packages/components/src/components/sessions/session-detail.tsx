@@ -996,7 +996,7 @@ function AdaptiveMobileSessionHeader({
     <BaseHeader
       truncateTitle={false}
       hideMenuButton
-      className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/55 backdrop-blur-xl"
+      className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/90 backdrop-blur-xl"
       style={{ height: inset, paddingTop: 'var(--safe-area-top, 0px)' }}
       leading={sideRailVisible ? undefined : <MobileSessionHeaderBackButton onBack={onBack} />}
       title={title}
@@ -6435,6 +6435,8 @@ const SessionDetail = ({
 
     // Floating frosted header: absolutely positioned over the conversation so
     // content scrolls UNDER it and gets frosted by the backdrop blur. The
+    // scrim is 90% opaque: WKWebView often does not blur a sibling scroller,
+    // and at 55% the transcript stayed sharp under the title. The
     // conversation scroll + viewer panels read `--conversation-top-inset` so
     // their content clears the header at rest (see ai-gui/view.tsx VList).
     const mobileHeaderInset = isNativeAppShell()

@@ -78,7 +78,7 @@ function Prototype() {
 
       {/* Floating frosted header — same chrome as production session-detail. */}
       <header
-        className="absolute inset-x-0 top-0 z-30 flex items-center gap-1 bg-background/55 px-1 backdrop-blur-xl"
+        className="absolute inset-x-0 top-0 z-30 flex items-center gap-1 bg-background/90 px-1 backdrop-blur-xl"
         style={{ height: headerHeight }}
       >
         <GlassIconButton label="Back">
