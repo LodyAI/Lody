@@ -204,3 +204,57 @@ export const IOSLocal: Story = {
   },
   render: () => <StoryShell project={localProject} />,
 };
+
+/* Home ⇄ project in one persistent slot, as in `MobileWorkspaceLayout`: Back
+   slides the project off while the list underneath settles in from the left.
+   The list is a stand-in for the home Projects tab. */
+function BackToHomeShell() {
+  const [project, setProject] = useState<MobileProjectContext | null>(null);
+  return (
+    <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
+      <div className="relative h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]">
+        {project ? (
+          <MobileProjectScreen
+            key={project.kind}
+            project={project}
+            conversations={conversations}
+            labels={{ backAriaLabel: '返回', emptyConversations: '没有匹配的对话' }}
+            filesTabContent={<ProjectFilesStoryContent />}
+            onBack={() => setProject(null)}
+            onConversationSelect={fn()}
+          />
+        ) : (
+          <div className="safe-areas flex h-full flex-col bg-background">
+            <h1 className="pt-safe-4 px-4 pb-3 text-2xl font-semibold">项目</h1>
+            {[localProject, githubProject].map((item) => (
+              <button
+                key={item.kind}
+                type="button"
+                onClick={() => setProject(item)}
+                className="mx-3 mb-2 flex items-center justify-between rounded-xl bg-card px-4 py-3 text-left"
+              >
+                <span>
+                  <span className="block text-sm font-medium">{item.name}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {item.kind === 'local' ? item.path : item.fullName}
+                  </span>
+                </span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export const BackToHome: Story = {
+  args: {
+    project: localProject,
+    conversations,
+    filesTabContent: <ProjectFilesStoryContent />,
+    onBack: fn(),
+  },
+  render: () => <BackToHomeShell />,
+};
