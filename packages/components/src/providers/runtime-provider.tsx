@@ -68,7 +68,7 @@ import { API_BASE_URL } from '@/lib';
 import { getCachedWorkspaceId } from '@/lib/local-storage-cache';
 import { recordClientError } from '@/lib/client-log';
 import { usePostHog } from '@posthog/react';
-import { createWorkspaceRuntime } from './create-workspace-runtime';
+import type { createWorkspaceRuntime } from './create-workspace-runtime';
 import { reportWorkspaceCloseFailure } from './workspace-close-diagnostics';
 import { resolveCloudPlatformRuntimePolicy } from './cloud-platform-runtime-policy';
 import type { EagerSyncSurface } from './background-sync-coordinator';
@@ -1211,6 +1211,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           eagerSyncSurface,
         });
         repoResource = targetRepo;
+        // loro-repo/streams-crdt/flock stay out of the boot chunk: this provider
+        // module is statically reachable from the root route, so the workspace
+        // runtime stack loads only once a workspace runtime is actually needed.
+        const { createWorkspaceRuntime } = await import('./create-workspace-runtime');
         workspaceRuntime = await createWorkspaceRuntime({
           content: encryptedAccess?.content ?? { mode: 'plaintext' },
           ...(!isLocalPlatform && !encryptedAccess && !storedDescriptor

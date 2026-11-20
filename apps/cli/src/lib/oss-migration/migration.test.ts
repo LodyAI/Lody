@@ -1,3 +1,4 @@
+import { createSessionMirror } from '@lody/shared/session-mirror';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,7 +10,6 @@ import { Flock } from '@loro-dev/flock-wasm';
 import { LoroRepo } from 'loro-repo';
 import { SqliteRepoStore } from 'loro-repo/storage/sqlite';
 import {
-  createSessionMirror,
   getLoroMetaStreamId,
   getLoroStreamIdForDocId,
   type SessionId,

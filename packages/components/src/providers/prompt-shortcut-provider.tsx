@@ -17,13 +17,10 @@ import {
   type ReactNode,
 } from 'react';
 import { useAtomValue } from 'jotai';
-import { LoroRepo } from 'loro-repo';
-import { IndexedDBStorageAdaptor } from 'loro-repo/storage/indexeddb';
-import {
-  LocalShortcutStore,
+import type { LoroRepo } from 'loro-repo';
+import type {
   PromptShortcutRuntime,
-  PromptShortcutSync,
-  type ShortcutRuntimeSnapshot,
+  ShortcutRuntimeSnapshot,
 } from '@lody/shared/prompt-shortcuts';
 import { getShortcutResourceStreamId } from '@lody/shared/prompt-shortcuts/access';
 import { usePlatform, usePlatformSession } from '@lody/platform/react';
@@ -216,6 +213,17 @@ export function PromptShortcutProvider({
     });
     const opening = (async () => {
       await previousClose;
+      check();
+      // This provider file is statically reachable from the boot chunk (the
+      // mention textarea imports usePromptShortcuts), so loro-repo and the
+      // shortcut Streams stack load only once a workspace/user pair actually
+      // needs the shortcut store.
+      const [{ LoroRepo }, { IndexedDBStorageAdaptor }, shortcuts] = await Promise.all([
+        import('loro-repo'),
+        import('loro-repo/storage/indexeddb'),
+        import('@lody/shared/prompt-shortcuts'),
+      ]);
+      const { LocalShortcutStore, PromptShortcutRuntime, PromptShortcutSync } = shortcuts;
       check();
       repo = await LoroRepo.create({
         storageAdapter: new IndexedDBStorageAdaptor({

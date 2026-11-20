@@ -19,7 +19,6 @@ import type { DocumentSelection } from '@/lib/document-selection';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import { getAutomationProofIssuer } from '@/lib/cloud-http-port';
-import { RepoSyncError, RepoTransportError } from 'loro-repo';
 import { useSessionPendingMessages } from '@/components/chat/session-pending-messages';
 import {
   buildDraftUserHistoryEntry,
@@ -177,7 +176,6 @@ import {
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
   decodeProjectPreparationProgress,
-  ScheduleRepository,
   type McpServerId,
   type ScheduleDocument,
   type SessionPullRequestView,
@@ -428,7 +426,16 @@ import {
 import { AlertDialog } from '@/ui/dialog';
 import { resolveSessionHtmlAttachmentAction } from './session-html-attachment-action';
 
-const { formatLoroSyncError } = createLoroSyncErrorTools({ RepoSyncError, RepoTransportError });
+// loro-repo stays out of the session route chunk: its error classes resolve in
+// the background and start formatting once loaded. Errors that arrive before
+// the chunk resolves fall through to the generic Error formatting, matching
+// what non-repo failures already produced.
+let loroSyncErrorTools: ReturnType<typeof createLoroSyncErrorTools> | null = null;
+void import('loro-repo')
+  .then(({ RepoSyncError, RepoTransportError }) => {
+    loroSyncErrorTools = createLoroSyncErrorTools({ RepoSyncError, RepoTransportError });
+  })
+  .catch(() => {});
 
 const styles = stylex.create({
   historyTriggerIcon: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
@@ -763,7 +770,7 @@ const styles = stylex.create({
 });
 
 function getErrorMessage(err: unknown): string {
-  const syncError = formatLoroSyncError(err);
+  const syncError = loroSyncErrorTools?.formatLoroSyncError(err);
   if (syncError) return syncError;
   if (err instanceof Error) return err.message;
   if (typeof err === 'string') return err;
@@ -1735,118 +1742,126 @@ export function SessionHeaderMenu({
               </Menu.SubmenuTrigger>
               <Menu.Content className="min-w-[200px]">
                 {onSnooze ? (
-                <Menu.Submenu>
-                  <Menu.SubmenuTrigger icon={AlarmClock}>
-                    {t('sessions.contextMenu.snooze', 'Later')}
-                  </Menu.SubmenuTrigger>
-                  <Menu.Content className="min-w-[200px]">
-                    {buildSnoozePresets(statusNow).map((preset) => {
-                      const label =
-                        preset.id === 'laterToday'
-                          ? t('sessions.contextMenu.snoozeLaterToday', 'Later today')
-                          : preset.id === 'tomorrowMorning'
-                            ? t('sessions.contextMenu.snoozeTomorrowMorning', 'Tomorrow morning')
-                            : t('sessions.contextMenu.snoozeNextWeek', 'Next week');
-                      return (
-                        <Menu.Item key={preset.id} onClick={() => void onSnooze(preset.timestamp)}>
-                          <span className="flex w-full items-center justify-between gap-4">
-                            <span>{label}</span>
-                            <span className="text-[11px] tabular-nums text-muted-foreground">
-                              {preset.countdown}
+                  <Menu.Submenu>
+                    <Menu.SubmenuTrigger icon={AlarmClock}>
+                      {t('sessions.contextMenu.snooze', 'Later')}
+                    </Menu.SubmenuTrigger>
+                    <Menu.Content className="min-w-[200px]">
+                      {buildSnoozePresets(statusNow).map((preset) => {
+                        const label =
+                          preset.id === 'laterToday'
+                            ? t('sessions.contextMenu.snoozeLaterToday', 'Later today')
+                            : preset.id === 'tomorrowMorning'
+                              ? t('sessions.contextMenu.snoozeTomorrowMorning', 'Tomorrow morning')
+                              : t('sessions.contextMenu.snoozeNextWeek', 'Next week');
+                        return (
+                          <Menu.Item
+                            key={preset.id}
+                            onClick={() => void onSnooze(preset.timestamp)}
+                          >
+                            <span className="flex w-full items-center justify-between gap-4">
+                              <span>{label}</span>
+                              <span className="text-[11px] tabular-nums text-muted-foreground">
+                                {preset.countdown}
+                              </span>
                             </span>
-                          </span>
-                        </Menu.Item>
-                      );
-                    })}
-                    <Menu.Separator />
-                    <Menu.Item
-                      icon={Timer}
-                      onClick={() =>
-                        setCustomSnoozeTarget({
-                          sessionId: session.id,
-                          title: session.title ?? '',
-                        })
-                      }
-                    >
-                      {t('sessions.contextMenu.snoozeCustom', 'Custom time…')}
-                    </Menu.Item>
-                  </Menu.Content>
-                </Menu.Submenu>
+                          </Menu.Item>
+                        );
+                      })}
+                      <Menu.Separator />
+                      <Menu.Item
+                        icon={Timer}
+                        onClick={() =>
+                          setCustomSnoozeTarget({
+                            sessionId: session.id,
+                            title: session.title ?? '',
+                          })
+                        }
+                      >
+                        {t('sessions.contextMenu.snoozeCustom', 'Custom time…')}
+                      </Menu.Item>
+                    </Menu.Content>
+                  </Menu.Submenu>
                 ) : null}
-              {statusGroup !== 'settled' && onSettle ? (
-                <Menu.Item icon={CheckCircle2} onClick={() => void onSettle()}>
-                  {t('sessions.contextMenu.settle', 'Settle')}
-                </Menu.Item>
-              ) : null}
-              {statusGroup !== 'focus' && onMoveToFocus ? (
-                <Menu.Item icon={ArrowUpCircle} onClick={() => void onMoveToFocus()}>
-                  {t('sessions.contextMenu.moveToFocus', 'Move to Focus')}
-                </Menu.Item>
-              ) : null}
+                {statusGroup !== 'settled' && onSettle ? (
+                  <Menu.Item icon={CheckCircle2} onClick={() => void onSettle()}>
+                    {t('sessions.contextMenu.settle', 'Settle')}
+                  </Menu.Item>
+                ) : null}
+                {statusGroup !== 'focus' && onMoveToFocus ? (
+                  <Menu.Item icon={ArrowUpCircle} onClick={() => void onMoveToFocus()}>
+                    {t('sessions.contextMenu.moveToFocus', 'Move to Focus')}
+                  </Menu.Item>
+                ) : null}
               </Menu.Content>
             </Menu.Submenu>
           ) : null}
 
           <Menu.Submenu>
-            <Menu.SubmenuTrigger icon={Share2}>{t('sharing.manager.title', 'Share')}</Menu.SubmenuTrigger>
+            <Menu.SubmenuTrigger icon={Share2}>
+              {t('sharing.manager.title', 'Share')}
+            </Menu.SubmenuTrigger>
             <Menu.Content className="min-w-[200px]">
               {onOpenPublicShare && !sharingReason && (
                 <Menu.Item icon={Link} onClick={onOpenPublicShare}>
                   {t('sessions.share.publicLink', 'Public link…')}
                 </Menu.Item>
               )}
-          {/* Copy URL stays in the Copy submenu even for private sessions (the
+              {/* Copy URL stays in the Copy submenu even for private sessions (the
               link still works for the owner); sharing is a separate action that
               only appears while the conversation isn't team-visible. */}
-          {sharing && !sharingReason && sharing.visibility !== 'team' ? (
-            <Menu.Item
-              disabled={shareActionDisabled}
-              onClick={() => {
-                void onShareWithTeam?.();
-              }}
-              icon={
-                sharing.visibility === 'unknown' ? (
-                  <Spinner size="small" label={null} />
-                ) : sharing.privateReason === 'machine-not-registered' ? (
-                  <Monitor size="100%" />
-                ) : sharing.canManage ? (
-                  Users
-                ) : (
-                  LockKeyhole
-                )
-              }
-            >
-              {sharing.visibility === 'unknown'
-                ? t('sessions.sharing.loadingAction', 'Checking sharing…')
-                : sharing.privateReason === 'machine-not-registered'
-                  ? t(
-                      'sessions.sharing.registerDeviceToShare',
-                      'Register this device before sharing'
+              {sharing && !sharingReason && sharing.visibility !== 'team' ? (
+                <Menu.Item
+                  disabled={shareActionDisabled}
+                  onClick={() => {
+                    void onShareWithTeam?.();
+                  }}
+                  icon={
+                    sharing.visibility === 'unknown' ? (
+                      <Spinner size="small" label={null} />
+                    ) : sharing.privateReason === 'machine-not-registered' ? (
+                      <Monitor size="100%" />
+                    ) : sharing.canManage ? (
+                      Users
+                    ) : (
+                      LockKeyhole
                     )
-                  : sharing.canManage
-                    ? t('sessions.sharing.shareWithTeam', 'Share with team…')
-                    : t('sessions.sharing.onlyOwnerCanShare', 'Only the device owner can share')}
-            </Menu.Item>
-          ) : null}
-          {sharingReason ? (
-            <Menu.Item disabled icon={Share2}>
-              <WorkspaceFeatureReasonText reason={sharingReason} />
-            </Menu.Item>
-          ) : null}
-          <Menu.Item
-            disabled={!!exportReason || !onShareAsImage}
-            title={exportReason}
-            onClick={() => {
-              onShareAsImage?.();
-            }}
-            icon={Image}
-          >
-            {exportReason ? (
-              <WorkspaceFeatureReasonText reason={exportReason} />
-            ) : (
-              t('sessions.shareAsImage', 'Share as image…')
-            )}
-          </Menu.Item>
+                  }
+                >
+                  {sharing.visibility === 'unknown'
+                    ? t('sessions.sharing.loadingAction', 'Checking sharing…')
+                    : sharing.privateReason === 'machine-not-registered'
+                      ? t(
+                          'sessions.sharing.registerDeviceToShare',
+                          'Register this device before sharing'
+                        )
+                      : sharing.canManage
+                        ? t('sessions.sharing.shareWithTeam', 'Share with team…')
+                        : t(
+                            'sessions.sharing.onlyOwnerCanShare',
+                            'Only the device owner can share'
+                          )}
+                </Menu.Item>
+              ) : null}
+              {sharingReason ? (
+                <Menu.Item disabled icon={Share2}>
+                  <WorkspaceFeatureReasonText reason={sharingReason} />
+                </Menu.Item>
+              ) : null}
+              <Menu.Item
+                disabled={!!exportReason || !onShareAsImage}
+                title={exportReason}
+                onClick={() => {
+                  onShareAsImage?.();
+                }}
+                icon={Image}
+              >
+                {exportReason ? (
+                  <WorkspaceFeatureReasonText reason={exportReason} />
+                ) : (
+                  t('sessions.shareAsImage', 'Share as image…')
+                )}
+              </Menu.Item>
             </Menu.Content>
           </Menu.Submenu>
 
@@ -5702,6 +5717,9 @@ export const SessionChatInterface = memo(
     const readScheduledMessage = useCallback(
       async (scheduleId: string) => {
         if (!runtime) return null;
+        // loro-mirror keeps loro-crdt (WASM) in whichever chunk imports it;
+        // this route file is on the boot path, so construct lazily.
+        const { ScheduleRepository } = await import('@lody/shared/schedule-repository');
         return new ScheduleRepository(runtime.repo, runtime.workspaceId, {
           protectedContent: runtime.contentMode === 'e2ee',
           signDeclaration: runtime.signScheduleDeclaration,
@@ -5778,6 +5796,7 @@ export const SessionChatInterface = memo(
       async (item: ScheduledQueueItem) => {
         if (!runtime || !currentUser) return false;
         try {
+          const { ScheduleRepository } = await import('@lody/shared/schedule-repository');
           await runtime.withScheduleStore(item.scheduleId, () =>
             new ScheduleRepository(runtime.repo, runtime.workspaceId, {
               protectedContent: runtime.contentMode === 'e2ee',
@@ -6961,8 +6980,7 @@ export const SessionChatInterface = memo(
     );
 
     /* Shared header pieces used by both header variants. */
-    const isLauncherPillVisible = () =>
-      (launcherPillRef.current?.getClientRects().length ?? 0) > 0;
+    const isLauncherPillVisible = () => (launcherPillRef.current?.getClientRects().length ?? 0) > 0;
     const headerLauncherActions = (
       <>
         {shouldShowOpenInIdeButton && isElectronRendererForPathLaunch && (

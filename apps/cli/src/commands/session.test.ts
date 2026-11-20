@@ -1,3 +1,4 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 import {
   runWithDaemonWorkspace,
   runWithEncryptedCommandAccess,
@@ -13,7 +14,6 @@ import { z } from 'zod';
 import { getSessionCancelProtocolFields } from './session';
 import { CURRENT_MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
-import { createHistoryWriter } from '@lody/shared';
 import { createLoroSessionData } from '@lody/shared/session-data';
 import { appendUserPromptHistory } from './session';
 import { prepareSessionInput } from './session';

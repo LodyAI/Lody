@@ -24,11 +24,6 @@ import { createWorkspacePendingSends } from './workspace-pending-sends';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
 import { createSessionSendResources } from '@/lib/session-send-resources';
 import { waitForScheduleWriteSync, withScheduleWrite } from './schedule-write-sync';
-import {
-  getScheduleRoomId,
-  scheduleDocSchema,
-  scheduleDocumentFromMirrorState,
-} from '@lody/shared';
 import type { ScheduleDocStore } from '@/atoms/runtime';
 import {
   createLocalWindowBootstrap,
@@ -118,7 +113,6 @@ import {
   type MachineAcpBinaryProgressMessage,
   getServerNow,
   collectOnlineMachineIdsFromPresence,
-  previewVisualCommentDocSchema,
   base64ToBytes,
   parseLodyPresenceStates,
   LODY_PRESENCE_TTL_MS,
@@ -126,6 +120,10 @@ import {
   type SyncReason,
   ACP_CAPABILITIES_REFRESH_CLIENT_BACKSTOP_MS,
 } from '@lody/shared';
+import { getScheduleRoomId } from '@lody/shared';
+import { previewVisualCommentDocSchema } from '@lody/shared/preview-comment-schema';
+import { scheduleDocSchema } from '@lody/shared/schedule-schema';
+import { scheduleDocumentFromMirrorState } from '@lody/shared/schedule-repository';
 import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
 import { clientLossEffects } from '@/lib/e2ee-client-loss-effects';
 import type { WorkspaceId } from '@lody/shared';

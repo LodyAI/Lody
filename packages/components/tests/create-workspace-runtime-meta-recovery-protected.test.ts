@@ -1,12 +1,11 @@
+import { ScheduleRepository } from '@lody/shared/schedule-repository';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createLoroStreamsTokenProviderLegacy,
-  ScheduleRepository,
   getSessionRoomId,
   type MachineId,
   type SessionId,
-  type WorkspaceId,
-} from '@lody/shared';
+  type WorkspaceId} from '@lody/shared';
 import type { LoroRepo, TransportAdapter, TransportSubscription } from 'loro-repo';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { createE2eeContent } from '../src/providers/desktop-e2ee-content';

@@ -1,3 +1,4 @@
+import { createSessionControlPlaneMirror } from '@lody/shared/session-control-plane';
 // @vitest-environment jsdom
 import { cloudOperations } from '../src/lib/cloud-api-operations';
 import { buildVisibleMachineIndex } from '../src/lib/visible-machine-index';
@@ -36,7 +37,6 @@ import {
   isPinOrderKey,
   FractionalIndex,
   getSessionCancelRequestMarker,
-  createSessionControlPlaneMirror,
   isLoroRepoDocDeleted,
   machineFlockKeys,
   type LocalProjectId,
@@ -47,8 +47,7 @@ import {
   type SessionId,
   type SessionMeta,
   type SessionToCreate,
-  type WorkspaceId,
-} from '@lody/shared';
+  type WorkspaceId} from '@lody/shared';
 import {
   CLOUD_PLATFORM_CAPABILITIES,
   createStaticStore,

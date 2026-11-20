@@ -1,3 +1,9 @@
+import {
+  captureStoredHistory,
+  matchesRollbackReceipt,
+  prepareReplacement,
+  prepareStoredHistoryCopy,
+} from '@lody/shared/history-writer';
 import { isMissingHistoryUserTurn } from '@lody/shared';
 import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
@@ -16,10 +22,6 @@ import {
   type SessionPlanEntry,
   type SessionHistoryInput,
   type SessionGoalMessage,
-  captureStoredHistory,
-  prepareStoredHistoryCopy,
-  matchesRollbackReceipt,
-  prepareReplacement,
   HistoryEntryWriteSchema,
   HistoryWriteError,
   parseHistoryWrite,

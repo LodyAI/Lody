@@ -2,13 +2,13 @@ import { Immer, type Draft } from 'immer';
 import { Mirror } from 'loro-mirror';
 import type { LoroDoc } from 'loro-crdt';
 import {
-  sessionDocSchema,
   type SessionDocMeta,
   type SessionHistory,
   type SessionPreviewDocState,
   type SessionExternalHistoryCursorDocState,
   type SessionAcpRuntimeConfigSnapshot,
 } from './schema';
+import { sessionDocSchema } from './session-doc-schemas';
 import { createHistoryWriter, historyValuesEqual, type HistoryWriter } from './history-writer';
 import { HistoryEntryWriteSchema, parseHistoryWrite } from './history-write-schema';
 import type { SessionForkOperation } from './message-schemas';

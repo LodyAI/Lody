@@ -104,6 +104,14 @@
       "types": "./src/browser-url.ts",
       "import": "./src/browser-url.ts"
     },
+    "./schedule-repository": {
+      "types": "./src/schedule-repository.ts",
+      "import": "./src/schedule-repository.ts"
+    },
+    "./session-doc-schemas": {
+      "types": "./src/session-doc-schemas.ts",
+      "import": "./src/session-doc-schemas.ts"
+    },
     "./local-loro-data-plane": {
       "types": "./src/local-loro-data-plane.ts",
       "import": "./src/local-loro-data-plane.ts"
@@ -199,7 +207,35 @@
     },
     "./e2ee-remote-pairing": "./src/e2ee-remote-pairing.ts",
     "./e2ee-rpc": "./src/e2ee-rpc.ts",
-    "./e2ee-execution-intent": "./src/e2ee-execution-intent.ts"
+    "./e2ee-execution-intent": "./src/e2ee-execution-intent.ts",
+    "./session-mirror": {
+      "types": "./src/session-mirror.ts",
+      "import": "./src/session-mirror.ts"
+    },
+    "./session-control-plane": {
+      "types": "./src/session-control-plane.ts",
+      "import": "./src/session-control-plane.ts"
+    },
+    "./history-writer": {
+      "types": "./src/history-writer.ts",
+      "import": "./src/history-writer.ts"
+    },
+    "./schedule-schema": {
+      "types": "./src/schedule-schema.ts",
+      "import": "./src/schedule-schema.ts"
+    },
+    "./schedule-authorization": {
+      "types": "./src/schedule-authorization.ts",
+      "import": "./src/schedule-authorization.ts"
+    },
+    "./preview-comment-schema": {
+      "types": "./src/preview-comment-schema.ts",
+      "import": "./src/preview-comment-schema.ts"
+    },
+    "./prompt-suggestions": {
+      "types": "./src/prompt-suggestions.ts",
+      "import": "./src/prompt-suggestions.ts"
+    }
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",

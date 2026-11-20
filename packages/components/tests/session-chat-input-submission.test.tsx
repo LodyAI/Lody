@@ -1,6 +1,7 @@
+import { ScheduleRepository } from '@lody/shared/schedule-repository';
 // @vitest-environment jsdom
 import { LoroDoc } from 'loro-crdt';
-import { ScheduleRepository, type MachineMeta, type ScheduleRepositoryPort } from '@lody/shared';
+import { type MachineMeta, type ScheduleRepositoryPort } from '@lody/shared';
 import { userAtom } from '../src/atoms';
 
 import {
@@ -35,8 +36,7 @@ import type {
   McpServerId,
   SessionMeta,
   SessionInputBlock,
-  WorkspaceMcpServerMeta,
-} from '@lody/shared';
+  WorkspaceMcpServerMeta} from '@lody/shared';
 
 const scheduleMachine = vi.hoisted(() => ({ value: null as MachineMeta | null }));
 vi.mock('../src/hooks/use-resolved-machine-meta', () => ({

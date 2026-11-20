@@ -26,7 +26,6 @@ import {
   getMachineFlockDeleteLocalProjectIds,
   getMachineFlockLocalProjects,
   getSessionRoomId,
-  getSessionCancelRequestMarker,
   machineFlockKeys,
   SessionStatusFactory,
   getLocalProjectHistoryProviderKey,
@@ -50,6 +49,7 @@ import {
   type ManualOrderWrite,
   type PinPlacementWrite,
   type PinnedSessionPlacement,
+  getSessionCancelRequestMarker,
 } from '@lody/shared';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { usePostHog } from '@posthog/react';

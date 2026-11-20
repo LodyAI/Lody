@@ -1,3 +1,5 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
+import { createSessionControlPlaneMirror } from '@lody/shared/session-control-plane';
 import { Cause, Effect } from 'effect';
 import { isDeepStrictEqual } from 'node:util';
 import type { CliE2eeWorkspaceLegacy } from '../e2ee/workspace-legacy';
@@ -16,8 +18,6 @@ import {
   AgentType,
   CliType,
   collectOnlineMachineIdsFromPresence,
-  createHistoryWriter,
-  createSessionControlPlaneMirror,
   SessionControlPlaneMirror,
   SessionControlPlaneState,
   SessionStatusFactory,

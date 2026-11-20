@@ -1,10 +1,10 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 import { LoroRepo } from 'loro-repo';
 import {
   runWithSessionCommandEnvironment,
   type SessionCommandEnvironment,
 } from '@/lib/session-command-environment';
 import { LoroDoc, LoroMap } from 'loro-crdt';
-import { createHistoryWriter } from '@lody/shared';
 import { createLoroSessionData } from '@lody/shared/session-data';
 import path from 'path';
 import os from 'node:os';

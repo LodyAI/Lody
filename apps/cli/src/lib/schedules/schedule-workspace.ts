@@ -1,3 +1,4 @@
+import { ScheduleRepository } from '@lody/shared/schedule-repository';
 import { notificationLabel } from '@lody/shared/notifications';
 import type { RepoRoomSubscription } from 'loro-repo';
 import {
@@ -8,7 +9,6 @@ import {
   getSessionRoomId,
   isLoroRepoDocDeleted,
   isScheduleImportFenced,
-  ScheduleRepository,
   ScheduledMessageSchema,
   scheduleDefinitionFingerprint,
   scheduleRegistryKeys,
