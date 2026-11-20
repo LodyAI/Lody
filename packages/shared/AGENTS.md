@@ -22,8 +22,9 @@ explains size selection and cursor-only timeout recovery.
 - Writer and Loro reader id lookups (`locate`, every copy for `updateCopies`, progress
   cards, `readTurn`) use the per-document index in `history-id-index.ts`. One scan
   builds it and synchronous Loro events keep it exact; it answers nothing inside a
-  pending transaction, and callers verify each position against its row. Never add a per-write scan of the whole list:
-  at 50,000 turns one costs about 130 ms, five times that on a snapshot-loaded replica.
+  pending transaction, and callers verify each position against its row. Never add a
+  per-write scan of the whole list: at 50,000 turns one costs about 130 ms, five times
+  that on a snapshot-loaded replica.
 - Validate new turns and changed known fields/items before applying a command, never
   unchanged history. Invalid commands preserve the old values and throw content-free
   diagnostics; they must not leave partial history writes. Keep stored unknown fields
