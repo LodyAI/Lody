@@ -30,6 +30,10 @@ import { useTodayEditor } from './editor/today-editor-context';
 import { TodayEditorContext } from './editor/today-editor-context';
 import { TodayEditorController } from './editor/today-editor-controller';
 import { TodayDaySection } from './today-day-section';
+import { TodayConvertDialog } from './today-convert-dialog';
+import { buildConvertPrompt } from './editor/block-selection';
+import type { TodayPageStore } from '@/lib/today/today-page-store';
+import type { TodayNodeId } from '@lody/shared';
 import { buildDayStream, localTodayDate, todayDateToLocalDate } from './today-stream';
 import { useTodayClock } from './use-today-clock';
 
@@ -157,6 +161,17 @@ export function TodayView(props: {
     [anchor, empty, registered, today]
   );
   const cache = runtime?.todayPages ?? null;
+  const [nodeMenu, setNodeMenu] = useState<{
+    store: TodayPageStore;
+    nodeId: TodayNodeId;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [converting, setConverting] = useState<{
+    store: TodayPageStore;
+    nodeId: TodayNodeId;
+    prompt: string;
+  } | null>(null);
   const [controller, setController] = useState<TodayEditorController | null>(null);
   useEffect(() => {
     if (!cache) return undefined;
@@ -169,6 +184,10 @@ export function TodayView(props: {
         : sessionId;
     created.onOpenSession = (sessionId) => {
       if (workspaceId) openSessionDeepLink({ sessionId: sessionId as SessionId, workspaceId });
+    };
+    created.onNodeMenu = (store, nodeId, anchor) => {
+      const rect = anchor.getBoundingClientRect();
+      setNodeMenu({ store, nodeId, x: rect.left, y: rect.bottom + 4 });
     };
     setController(created);
     return () => {
@@ -273,6 +292,48 @@ export function TodayView(props: {
           ))}
         </TodayOutlineSurface>
         <TodaySessionPicker />
+        {nodeMenu ? (
+          <TodayNodeMenu
+            {...nodeMenu}
+            onClose={() => setNodeMenu(null)}
+            onConvert={() => {
+              const [fragment] = nodeMenu.store.outline.extract([nodeMenu.nodeId]);
+              setNodeMenu(null);
+              if (!fragment || fragment.sessionId) return;
+              controller?.deactivate();
+              setConverting({
+                store: nodeMenu.store,
+                nodeId: nodeMenu.nodeId,
+                prompt: buildConvertPrompt(fragment),
+              });
+            }}
+          />
+        ) : null}
+        <TodayConvertDialog
+          open={converting !== null}
+          prompt={converting?.prompt ?? ''}
+          onOpenChange={(open) => {
+            if (!open) setConverting(null);
+          }}
+          onAccepted={(sessionId) => {
+            const target = converting;
+            if (!target) return;
+            const { store, nodeId } = target;
+            // Only an accepted conversation replaces the node; children stay, folded.
+            const converted = store.undo.structural(() =>
+              store.outline.convertToSession(nodeId, sessionId, { collapseChildren: true })
+            );
+            if (!converted) {
+              store.undo.structural(() =>
+                store.outline.insertSessionNode(
+                  { parentId: null, index: Number.MAX_SAFE_INTEGER },
+                  sessionId
+                )
+              );
+            }
+            if (props.pinned) controller?.onOpenSession?.(sessionId);
+          }}
+        />
         {anchor && anchor !== today ? (
           <div {...stylex.props(styles.back)}>
             <span {...stylex.props(styles.backButton)}>
@@ -469,6 +530,7 @@ const pickerStyles = stylex.create({
     cursor: 'pointer',
   },
   highlighted: { backgroundColor: colors.hoverFill },
+  disabled: { color: colors.tertiaryLabel, cursor: 'default' },
   empty: { padding: space[2], fontSize: text.footnoteSize, color: colors.tertiaryLabel },
 });
 
@@ -514,6 +576,52 @@ function TodaySessionPicker() {
           </button>
         ))
       )}
+    </div>
+  );
+}
+
+/** The bullet menu: actions on one node. */
+function TodayNodeMenu(props: {
+  store: TodayPageStore;
+  nodeId: TodayNodeId;
+  x: number;
+  y: number;
+  onClose: () => void;
+  onConvert: () => void;
+}) {
+  const { t } = useTranslation();
+  const node = props.store.outline.getNode(props.nodeId);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const close = (event: Event) => {
+      if (event instanceof KeyboardEvent && event.key !== 'Escape') return;
+      if (event instanceof PointerEvent && ref.current?.contains(event.target as Node)) return;
+      props.onClose();
+    };
+    window.addEventListener('pointerdown', close, true);
+    window.addEventListener('keydown', close, true);
+    return () => {
+      window.removeEventListener('pointerdown', close, true);
+      window.removeEventListener('keydown', close, true);
+    };
+  }, [props]);
+  const canConvert = node?.kind === 'text' && node.text.trim().length > 0;
+  return (
+    <div
+      ref={ref}
+      role="menu"
+      {...stylex.props(pickerStyles.menu)}
+      style={{ left: props.x, top: props.y }}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        disabled={!canConvert}
+        {...stylex.props(pickerStyles.item, !canConvert && pickerStyles.disabled)}
+        onClick={props.onConvert}
+      >
+        {t('today.convertToTask', 'Convert to task')}
+      </button>
     </div>
   );
 }

@@ -50,3 +50,13 @@ describe('Today block selection', () => {
     expect(parseTodayClipboard({ text: plain })?.map((f) => f.text)).toEqual(['a', 'lody://session/sess-1']);
   });
 });
+
+describe('Today convert-to-task prompt', () => {
+  it('is the node text followed by its children as an indented list, folded ones included', async () => {
+    const { buildConvertPrompt } = await import('../src/components/today/editor/block-selection');
+    const { model, id } = outline('Refactor sync\n  keep it deterministic\n    no sleeps\nother');
+    model.setCollapsed(id('Refactor sync'), true);
+    const [fragment] = model.extract([id('Refactor sync')]);
+    expect(buildConvertPrompt(fragment!)).toBe('Refactor sync\n- keep it deterministic\n  - no sleeps');
+  });
+});

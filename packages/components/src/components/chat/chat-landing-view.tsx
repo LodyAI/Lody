@@ -29,6 +29,7 @@ import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { MobileChatLandingScreen } from '@/components/mobile/mobile-chat-landing-screen';
 import { NoMachineHint, type NoMachineHintVariant } from './no-machine-hint';
 import { WebChatLandingScreen } from './web-chat-landing-screen';
+import { DialogChatLandingScreen } from './dialog-chat-landing-screen';
 import { type ComposerInputElement, getComposerSelection } from '@/ui/mention/composer-input';
 
 export type ChatLandingTone = 'light' | 'dark';
@@ -40,6 +41,14 @@ export interface ChatLandingViewProps {
   tone: ChatLandingTone;
   /** Whether the view is in mobile mode */
   isMobile?: boolean;
+  /**
+   * `page` is the new-chat route; `dialog` is the compact layout of a landing
+   * embedded in a dialog: hints and composer only, no greeting, ambient boards,
+   * page chrome or sidebar session drop target. Ignored on mobile.
+   */
+  layout?: 'page' | 'dialog';
+  /** DOM id of the prompt; an embedded landing needs its own beside the page's. */
+  promptId?: string;
   /** Scope root for desktop keyboard navigation (web layout only) — wraps the config
    *  controls + composer so arrow/Esc nav stays out of the sidebar and page chrome. */
   navRootRef?: Ref<HTMLDivElement>;
@@ -198,6 +207,8 @@ function useSessionMentionDrop(enabled: boolean) {
 export function ChatLandingView({
   tone,
   isMobile = false,
+  layout = 'page',
+  promptId: promptIdProp,
   navRootRef,
   mentionSource,
   availableCommands,
@@ -259,8 +270,11 @@ export function ChatLandingView({
   errorLabels = {},
 }: ChatLandingViewProps) {
   const postHog = usePostHog();
+  const isDialogLayout = !isMobile && layout === 'dialog';
+  const promptId = promptIdProp ?? (isMobile ? 'chat-prompt-mobile' : 'chat-prompt');
+  // A dialog's backdrop covers the sidebar, so no session can be dragged in.
   const { mentionActionsRef, dropZone, pointerDropRef, overlayActive } = useSessionMentionDrop(
-    !isMobile && !submissionPending
+    !isMobile && !submissionPending && !isDialogLayout
   );
   // A folder is not an attachment — it becomes a `@path` mention, through the
   // same handle the session drop uses, so it lands in this composer's draft.
@@ -384,7 +398,7 @@ export function ChatLandingView({
       <div className="text-sm font-semibold text-foreground">{somethingWentWrong}</div>
       <div className="mt-1 text-xs text-muted-foreground">{composerCrashed}</div>
       <textarea
-        id={isMobile ? 'chat-prompt-mobile' : 'chat-prompt'}
+        id={promptId}
         ref={promptRef as Ref<HTMLTextAreaElement>}
         value={submissionPending ? '' : promptValue}
         onChange={(event) => onPromptChange(event.target.value)}
@@ -444,7 +458,7 @@ export function ChatLandingView({
         mentionSource={mentionSource}
         availableCommands={availableCommands}
         skillAgent={skillAgent}
-        promptId={isMobile ? 'chat-prompt-mobile' : 'chat-prompt'}
+        promptId={promptId}
         promptRef={promptRef}
         promptValue={submissionPending ? '' : promptValue}
         onPromptChange={onPromptChange}
@@ -493,6 +507,17 @@ export function ChatLandingView({
         noMachineHint={noMachineHintNode}
         agentConfigHint={agentConfigHintNode}
         onOpenMobileDrawer={onOpenMobileDrawer}
+      />
+    );
+  }
+
+  if (isDialogLayout) {
+    return (
+      <DialogChatLandingScreen
+        navRootRef={navRootRef}
+        composer={composerNode}
+        noMachineHint={noMachineHintNode}
+        agentConfigHint={agentConfigHintNode}
       />
     );
   }

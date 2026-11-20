@@ -141,3 +141,9 @@ export function parseTodayClipboard(data: {
   const fragments = parseTodayPasteText(data.text);
   return fragments.length > 0 ? fragments : null;
 }
+
+/** "Convert to task" prompt: the node's text, then its subtree as an indented list. */
+export function buildConvertPrompt(fragment: TodayFragment): string {
+  const children = serializeTodayFragments(fragment.children, (sessionId) => sessionId);
+  return children ? `${fragment.text}\n${children}` : fragment.text;
+}

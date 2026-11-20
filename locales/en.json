@@ -6916,5 +6916,8 @@
   "today.movingNodes": "Moving {{count}} nodes",
   "today.pin": "Pin Today beside the sidebar",
   "today.unpin": "Unpin Today",
-  "today.resize": "Resize Today"
+  "today.resize": "Resize Today",
+  "today.convertTitle": "Convert to task",
+  "today.convertToTask": "Convert to task",
+  "chat.embeddedHandoffFailed": "The conversation was created, but this view could not be updated."
 }

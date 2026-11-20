@@ -6903,5 +6903,8 @@
   "today.movingNodes": "移动 {{count}} 个节点",
   "today.pin": "把 Today 固定在侧栏旁",
   "today.unpin": "取消固定 Today",
-  "today.resize": "调整 Today 宽度"
+  "today.resize": "调整 Today 宽度",
+  "today.convertTitle": "转换为任务",
+  "today.convertToTask": "转换为任务",
+  "chat.embeddedHandoffFailed": "对话已创建，但当前视图未能更新。"
 }
