@@ -14,6 +14,11 @@
   Never scan history for plausible work or replay a transcript for native continuation.
   Scan pending outcomes by due time; hashes identify duplicates, never recovery progress.
   Retain unconfirmed release and failed observations until a later successful check.
+- A run is a wait without a program, owned by the Host's run Scope, never by the check
+  that starts it. Persist the start before spawn; a started run without a live owner
+  is reported interrupted, never started again. Runs receive an explicit environment,
+  not Agent credentials. Prompt and MCP guidance recommending `run` is owner-approved;
+  keep it one sentence per surface. [Decision](../../../../.agents/notes/implemented/feature/2026-11-16-managed-long-runs.md).
 - External JavaScript checks conditions and returns false or a resume result. Keep
   event-to-action mapping internal; registration binds the same Session once.
 - Commit a matched result and its continuation identity together. Never rerun a matched

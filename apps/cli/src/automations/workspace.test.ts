@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -731,4 +731,129 @@ it('registers a condition with implicit Session identity and rejects invalid pro
     )
   ).toMatchObject({ id: host.ledger.waits('user')[0]?.id });
   expect(host.ledger.waits('user')).toHaveLength(1);
+});
+
+describe('Managed runs', () => {
+  // The child exits only once the test creates its release file, so no timing assumption is needed.
+  const gated = (release: string, exitCode: number) => ({
+    command: process.execPath,
+    args: [
+      '-e',
+      `const fs = require('node:fs'); process.stdout.write('started\\n'); const timer = setInterval(() => { if (fs.existsSync(process.argv[1])) { clearInterval(timer); process.stdout.write('finished\\n'); process.exit(${exitCode}); } }, 10);`,
+      release,
+    ],
+  });
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  it('keeps the Session unsettled while the command runs and resumes it with the exit facts', async () => {
+    const meta = {
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+      cliType: 'builtin',
+      agentType: 'synthetic',
+    };
+    const host = await workspaceFixture(meta);
+    const release = path.join(host.testRoot, 'release');
+    const run = (await host.command(
+      { type: 'run', ...gated(release, 3), reason: 'Run the slow suite' },
+      'session-a'
+    )) as { id: string; run: { logPath: string } };
+    expect(await host.command({ type: 'run', ...gated(release, 3) }, 'session-a')).toMatchObject({
+      id: run.id,
+    });
+    await vi.waitFor(() => expect(host.ledger.wait(run.id)?.run?.pid).toBeTypeOf('number'));
+    expect(host.ledger.wait(run.id)?.state).toMatch(/waiting|checking/);
+    expect(host.ledger.hasSessionWork('session-a')).toBe(true);
+
+    writeFileSync(release, '');
+    await vi.waitFor(() => expect(host.ledger.wait(run.id)?.state).toBe('matched'));
+    const matched = host.ledger.wait(run.id);
+    expect(matched?.result?.resumeText).toContain('exited with code 3');
+    expect(matched?.result?.resumeText).toContain(run.run.logPath);
+    expect(matched?.result?.payload).toMatchObject({
+      outcome: 'exited',
+      exitCode: 3,
+      signal: null,
+      logPath: run.run.logPath,
+      logTruncated: false,
+      outputTail: 'started\nfinished\n',
+    });
+    expect(readFileSync(run.run.logPath, 'utf8')).toBe('started\nfinished\n');
+    const invocationId = matched?.invocationId;
+    if (!invocationId) throw new Error('missing continuation');
+    await vi.waitFor(() =>
+      expect(host.ledger.receipt(invocationId)?.state).toMatch(/queued|running|settled/)
+    );
+    const queue = await (await createSessionBackend(host.testDocument)).getMessageQueue();
+    expect(queue[0]?.task).toContain('exited with code 3');
+  });
+
+  it('terminates the command on cancel', async () => {
+    const host = await workspaceFixture();
+    const run = (await host.command(
+      { type: 'run', ...gated(path.join(host.testRoot, 'never'), 0) },
+      'session-a'
+    )) as { id: string };
+    await vi.waitFor(() => expect(host.ledger.wait(run.id)?.run?.pid).toBeTypeOf('number'));
+    const pid = host.ledger.wait(run.id)?.run?.pid ?? 0;
+    expect(alive(pid)).toBe(true);
+    await host.command({ type: 'cancel', id: run.id }, 'session-a');
+    expect(host.ledger.wait(run.id)?.state).toBe('cancelled');
+    expect(alive(pid)).toBe(false);
+    expect(host.ledger.hasSessionWork('session-a')).toBe(false);
+  });
+
+  it('reports a run whose owner stopped as interrupted and never starts it again', async () => {
+    const meta = {
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+    };
+    const host = await workspaceFixture(meta);
+    const run = (await host.command(
+      { type: 'run', ...gated(path.join(host.testRoot, 'never'), 0) },
+      'session-a'
+    )) as { id: string; run: { logPath: string } };
+    await vi.waitFor(() => expect(host.ledger.wait(run.id)?.run?.pid).toBeTypeOf('number'));
+    await vi.waitFor(() => expect(readFileSync(run.run.logPath, 'utf8')).toBe('started\n'));
+    const pid = host.ledger.wait(run.id)?.run?.pid ?? 0;
+    await host.dispose();
+    owners.splice(owners.indexOf(host), 1);
+    expect(alive(pid)).toBe(false);
+
+    const restarted = await workspaceFixture(meta, host.testRoot);
+    await restarted.wake();
+    await vi.waitFor(() => expect(restarted.ledger.wait(run.id)?.state).toBe('matched'));
+    const matched = restarted.ledger.wait(run.id);
+    expect(matched?.result?.resumeText).toContain('Lody did not run it again');
+    expect(matched?.result?.payload).toMatchObject({ outcome: 'interrupted' });
+    expect(readFileSync(run.run.logPath, 'utf8')).toBe('started\n');
+  });
+
+  it('reports a command that cannot start and rejects a working directory outside the Session', async () => {
+    const host = await workspaceFixture();
+    await expect(
+      host.command({ type: 'run', command: process.execPath, cwd: '..' }, 'session-a')
+    ).rejects.toThrow('AUTOMATION_EXEC_INVALID_CWD');
+    const run = (await host.command(
+      { type: 'run', command: path.join(host.testRoot, 'missing-binary') },
+      'session-a'
+    )) as { id: string };
+    await vi.waitFor(() => expect(host.ledger.wait(run.id)?.state).toBe('matched'));
+    expect(host.ledger.wait(run.id)?.result?.payload).toMatchObject({
+      outcome: 'spawn_failed',
+      exitCode: null,
+    });
+    expect(host.ledger.wait(run.id)?.result?.resumeText).toContain('could not start');
+  });
 });
