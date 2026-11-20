@@ -28,6 +28,9 @@ Parent rules apply; see [Session rules](../session/AGENTS.md).
   preserve foreign definitions and report unavailable registration independently.
   Never persist pairing credentials in download URLs or service definitions.
   See [upgrade contract](../../../../specs/daemon-upgrade-installation.md).
+- The official installer writes a marked `lody` shim beside the user's local binaries;
+  non-daemon commands from that shim forward to the selected managed release, while
+  daemon and internal commands remain on the fixed service entry.
 - `lody daemon start` resolves cloud authentication in the FOREGROUND process before spawning the
   detached runner (`daemon-auth-preflight.ts`): validate the cached credential, and on a
   missing/rejected one run the interactive device-authorization flow there. An unreachable backend

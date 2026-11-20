@@ -3,6 +3,10 @@
 // the SQLite binding cannot load — Node-API < 10 segfaults rather than throwing, and
 // 32-bit ARM has no prebuild. See utils/sqlite-runtime-support.ts.
 import './utils/sqlite-runtime-support';
+
+const { forwardToSelectedManagedInstallation } = await import('./lib/managed-daemon-forwarding');
+if (await forwardToSelectedManagedInstallation()) process.exit(process.exitCode ?? 0);
+
 import './instrument';
 import {
   configureManagedProcessObservation,
