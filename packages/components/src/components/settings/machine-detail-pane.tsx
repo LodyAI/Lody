@@ -550,7 +550,7 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
 
   const metaBadges = (
     <>
-      {isLocal && <Badge>{t('workspace.machines.thisDevice', 'This device')}</Badge>}
+      {isLocal && <Badge>{t('workspace.machines.thisDevice', 'This machine')}</Badge>}
       {ownerName && !isOwn && (
         <Badge icon={<UserRound {...stylex.props(styles.iconFill)} />}>{ownerName}</Badge>
       )}
@@ -977,7 +977,7 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
                 <div {...stylex.props(styles.updateVersion)}>
                   {t(
                     'settings.agent.machineLifecycle.updateVersion',
-                    'v{{current}} -> v{{latest}}',
+                    'v{{current}} → v{{latest}}',
                     {
                       current: daemonUpdate.currentVersion,
                       latest: daemonUpdate.latestVersion,
@@ -1005,7 +1005,7 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
               >
                 {t(
                   'settings.agent.machineLifecycle.upgradeImmediatelyButton',
-                  'Update now (interrupt tasks)'
+                  'Update now (interrupt conversations)'
                 )}
               </Button>
             </div>
