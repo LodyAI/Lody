@@ -22,7 +22,8 @@ any time; when off it changes none of the app's existing behavior.
   immediately. The switch controls only the UI: data still syncs, exports and migrates.
 - The "Open Today" shortcut defaults to `⌘⇧D` (`Ctrl+Shift+D` on Windows/Linux; D for Daily, as Roam and Tana
   bind their daily page), the same on desktop and Web, and can be rebound or unbound in Settings → Keyboard
-  shortcuts. It acts only while the experiment is on and, when pinned, moves the column like the sidebar entry.
+  shortcuts. It acts, and is listed in the shortcuts list and the command palette, only while the experiment is
+  on; when pinned it moves the column like the sidebar entry.
   Hovering the sidebar's "New chat", "Today" and "Search" rows reveals their current binding as a pill at the row's
   end (the style of the ⌘1–9 pills shown while ⌘ is held), and holding the modifier shows them too.
 - v1 covers desktop and Web; mobile does not show it.

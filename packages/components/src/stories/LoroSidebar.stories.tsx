@@ -1,4 +1,9 @@
-import { registerBuiltInCommands, unregisterBuiltInCommands } from '@/lib/commands';
+import {
+  commands,
+  getCommandKeybindings,
+  registerBuiltInCommands,
+  unregisterBuiltInCommands,
+} from '@/lib/commands';
 import { __resetPlatformCacheForTests } from '@/lib/commands/platform';
 import type { Meta, StoryObj } from '@storybook/react';
 import { E2eeOfflineSummaryText } from '@/components/e2ee-offline-window';
@@ -731,8 +736,18 @@ function WithDesktopCommands(props: { children: ReactNode }) {
     host.__LODY_PLATFORM__ = { os: 'darwin' };
     __resetPlatformCacheForTests();
     registerBuiltInCommands();
+    // As TodayCommandPlaceholder does with the experiment on.
+    const releaseToday = commands.register({
+      id: 'today.open',
+      title: 'Open Today',
+      category: 'Navigation',
+      keybindings: getCommandKeybindings('today.open'),
+      when: () => false,
+      run: () => {},
+    });
     setReady(true);
     return () => {
+      releaseToday();
       unregisterBuiltInCommands();
       host.__LODY_ELECTRON__ = previous.electron;
       host.__LODY_PLATFORM__ = previous.platform;

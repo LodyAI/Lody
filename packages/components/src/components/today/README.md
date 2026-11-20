@@ -9,6 +9,7 @@ Experimental daily outline notes ([Spec](../../../../../specs/today-outline.md))
 | `today-view.tsx`                                              | Day stream shell: calendar, member menu, surface, picker, drag layer                                                        |
 | `today-day-section.tsx`                                       | One day: lazy page store, rows with inline mentions                                                                         |
 | `outline.stylex.ts`                                           | Outline geometry shared by rows and the surface (the fold toggle's overhang)                                                |
+| `today-command.tsx`                                           | "Open Today" command placeholder, listed only while the experiment is on                                                    |
 | `today-stream.ts`                                             | Which days show, local date and midnight math                                                                               |
 | `today-session-mention.tsx`, `today-session-status.ts`        | Inline conversation mention and its sidebar-derived status                                                                  |
 | `today-mention-status-menu.tsx`                               | Status menu a mention's icon opens (`useSessionActions`)                                                                    |

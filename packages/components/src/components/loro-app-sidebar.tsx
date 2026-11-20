@@ -1770,7 +1770,7 @@ export function LoroAppSidebar({
   const todayEnabled = useAtomValue(todayFeatureEnabledAtom);
   const openToday = useOpenToday();
   // Open Today from anywhere; rebindable in Settings > Keyboard shortcuts.
-  // Registered only while the experiment is on (the placeholder lists it otherwise).
+  // Registered only while the experiment is on, over `TodayCommandPlaceholder`.
   useCommand(
     {
       id: 'today.open',

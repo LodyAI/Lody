@@ -58,12 +58,6 @@ const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
     category: 'Session',
   },
   {
-    id: 'today.open',
-    titleKey: 'commands.today.open',
-    title: 'Open Today',
-    category: 'Navigation',
-  },
-  {
     id: 'session.archiveCurrent',
     titleKey: 'commands.session.archiveCurrent',
     title: 'Archive Current Chat',

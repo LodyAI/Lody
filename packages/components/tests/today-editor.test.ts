@@ -973,3 +973,58 @@ describe('Today block selection on the surface', () => {
     ctx.surface.remove();
   });
 });
+
+describe('Open Today command', () => {
+  it('is listed only while the Today experiment is on, and never masks the mounted command', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const { createStore, Provider } = await import('jotai');
+    const { experimentalFeaturesEnabledAtom, todayExperimentEnabledAtom, todayFeatureEnabledAtom } =
+      await import('../src/atoms/settings');
+    const { TodayCommandPlaceholder } = await import('../src/components/today/today-command');
+    const { commands, getCommandKeybindings, useCommand } = await import('../src/lib/commands');
+    const { useAtomValue } = await import('jotai');
+    let opened = 0;
+    // Stands in for the sidebar: the real command, mounted after the placeholder.
+    function RealTodayCommand() {
+      const enabled = useAtomValue(todayFeatureEnabledAtom);
+      useCommand(
+        {
+          id: 'today.open',
+          title: 'Open Today',
+          category: 'Navigation',
+          keybindings: getCommandKeybindings('today.open'),
+          run: () => {
+            opened += 1;
+          },
+        },
+        enabled
+      );
+      return null;
+    }
+    const store = createStore();
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(
+        createElement(
+          Provider,
+          { store },
+          createElement(TodayCommandPlaceholder),
+          createElement(RealTodayCommand)
+        )
+      )
+    );
+    expect(commands.list().some((command) => command.id === 'today.open')).toBe(false);
+    await act(async () => {
+      store.set(experimentalFeaturesEnabledAtom, true);
+      store.set(todayExperimentEnabledAtom, true);
+    });
+    expect(commands.get('today.open')?.title).toBe('Open Today');
+    expect(commands.getDefaultKeybindingsFor('today.open')).toEqual(['Mod+Shift+d']);
+    expect(commands.execute('today.open')).toBe(true);
+    expect(opened).toBe(1);
+    await act(async () => store.set(todayExperimentEnabledAtom, false));
+    expect(commands.list().some((command) => command.id === 'today.open')).toBe(false);
+    act(() => root.unmount());
+  });
+});
