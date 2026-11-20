@@ -228,6 +228,7 @@ import {
   SessionPrIcon,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
+  SessionRowMenuButton,
   SessionRowWorktreeIndicator,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
@@ -608,11 +609,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         {/* On a two-line row the leading and end slots sit in a box one title line
             tall, so they stay on the title line; otherwise the box disappears. */}
         <div className={lineBoxClassName}>
-          <SessionRowLeadingSlot
-            showMenuButton={hasContextMenuActions}
-            menuLabel={moreActionsLabel}
-            openedByTree={openedByTree}
-          />
+          <SessionRowLeadingSlot openedByTree={openedByTree} />
         </div>
         <div className={showMetaLine ? 'flex min-w-0 flex-1 flex-col gap-1' : 'contents'}>
           <div
@@ -658,8 +655,8 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           </span>
         ) : null}
         {/* ④ Fixed end slot: the PR status sits here at rest when the session
-            has one, with a faint worktree glyph just to its left; the Archive
-            button replaces it on desktop hover. */}
+            has one, with a faint worktree glyph just to its left; the ⋯ menu and
+            Archive buttons replace it on desktop hover. */}
         <div className={lineBoxClassName}>
           <SidebarRowEndSlot
             sessionId={session.id}
@@ -675,6 +672,9 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
                   ) : null}
                 </span>
               ) : undefined
+            }
+            menu={
+              hasContextMenuActions ? <SessionRowMenuButton label={moreActionsLabel} /> : undefined
             }
             archive={
               showInlineArchive ? (

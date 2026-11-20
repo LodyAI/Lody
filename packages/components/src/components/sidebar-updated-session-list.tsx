@@ -70,6 +70,7 @@ import {
   SessionMergeablePill,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
+  SessionRowMenuButton,
   SessionRowWorktreeIndicator,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
@@ -1186,14 +1187,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         )}
       >
         <div className={cn('flex shrink-0 items-center', SIDEBAR_ROW_LINE_CLASS)}>
-          <SessionRowLeadingSlot
-            showMenuButton={hasMenuActions}
-            menuLabel={contextMenuLabels.moreActions}
-            openedByTree={openedByTree}
-            fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
-            restPointerClassName="group-hover/row:pointer-events-none group-data-[menu-open]/row:pointer-events-none"
-            revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
-          />
+          <SessionRowLeadingSlot openedByTree={openedByTree} />
         </div>
         {item.owner ? (
           <span className={cn('flex shrink-0 items-center', SIDEBAR_ROW_LINE_CLASS)}>
@@ -1271,6 +1265,14 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                     <SessionPrIcon compact prStatus={prStatus} prCiState={item.prCiState} />
                   ) : null}
                 </span>
+              ) : undefined
+            }
+            menu={
+              hasMenuActions ? (
+                <SessionRowMenuButton
+                  label={contextMenuLabels.moreActions}
+                  revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
+                />
               ) : undefined
             }
             archive={

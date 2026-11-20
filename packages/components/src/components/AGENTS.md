@@ -31,11 +31,11 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
   Preserve the precise opener and independent child workspace. `parentSessionId`
   children stay out of `sessionListAtom` rows.
 - Opener and unrelated top-level rows retain flat-list alignment. In the leading slot,
-  an opener shows disclosure and a child shows ├/└; hover swaps either for ⋯ at the same
-  7px centre. Draw nesting regardless of working/unread/waiting status. Only children
-  widen the slot from 14px to 26px for a 12px title indent without shifting the background.
-  Keep geometry in `session-row-leading-slot.tsx`; context-menu expand/collapse uses
-  the same toggle.
+  an opener shows disclosure, a child ├/└, nothing else — the ⋯ menu reveals in the
+  end slot before Archive. Draw nesting regardless of hover or working/unread/waiting
+  status. Children alone widen the slot 14px→26px, a 12px title indent that never
+  shifts the background. Keep geometry in `session-row-leading-slot.tsx`; context-menu
+  expand/collapse uses the same toggle.
 - Conversation titles stay `font-normal`; pin with the glyph, never weight.
 - Sidebar row radius, inset, ink, hover/selected fill and title clipping use
   `sidebar-surface.ts` / `sidebar.tokens.stylex.ts` on conversation, repo and nav rows.
