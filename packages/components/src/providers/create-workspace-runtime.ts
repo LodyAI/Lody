@@ -623,13 +623,17 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     resolveRoomTransports: (room: WorkspaceTransportRoom) =>
       resolveRoomTransportsImpl?.(room) ?? { transportIds: ['cloud' as const] },
   };
-  // Local platform only: main decides whether native Workspace Meta is enabled.
+  // Local workspaces, and encrypted ones (specs/native-engine-cloud-e2ee.md, phase 1):
+  // main decides whether native Workspace Meta is enabled and admits this window.
+  // Native rooms then never join the protected transport; loro-repo routes them
+  // to their external owners.
   const nativeMeta =
-    !protectedContent && deps.syncMode === 'local'
+    protectedContent || deps.syncMode === 'local'
       ? await openRendererNativeWorkspaceMeta(
           deps.workspaceId,
           repoStorage,
-          cacheIdentity.repoDbName
+          cacheIdentity.repoDbName,
+          protectedContent
         )
       : null;
   const repo = nativeMeta

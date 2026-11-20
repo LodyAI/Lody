@@ -194,7 +194,13 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
     '@lody/shared/node/native-workspace-meta': nativeMeta,
     '@lody/shared/node/native-flock-docs': nativeFlockDocs,
     '@lody/shared/node/native-docs': nativeDocs,
-    '@lody/shared/native-workspace-meta-ipc': nativeIpc
+    '@lody/shared/native-workspace-meta-ipc': nativeIpc,
+    '@lody/shared/node/native-encrypted-workspace':
+      await import('@lody/shared/node/native-encrypted-workspace'),
+    // The local platform never reaches the encrypted path.
+    '../../services/native-encrypted-access': {},
+    '../../services/native-session-read': {},
+    '../../services/native-encrypted-workspaces': { onNativeAccessLost: () => () => {} }
   })
   new meta.NativeWorkspaceMetaIpc()
   const scope = { workspaceId: 'lw_test' }

@@ -2,6 +2,7 @@ import type { SessionAccessPort, SessionAccessView, E2eeWorkspaceRuntime } from 
 import type { CloudQuery, CloudMutation } from '@lody/platform';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { subscribeE2eeLedgerChanges } from './e2ee-runtime-notifications';
+import { sessionReadGrantsFromSharing } from '@lody/shared/session-visibility';
 
 type Scope = { encrypted: boolean; accountId: string; token: object };
 type Client = {
@@ -59,18 +60,7 @@ export function createCloudSessionAccess(input: {
             },
           }
         : {}),
-      readSharedSessionIds:
-        view.removed || view.unavailable
-          ? []
-          : view.sessions.filter((row) => row.audience === 'team').map((row) => row.sessionId),
-      memberReadSharedSessions:
-        view.removed || view.unavailable
-          ? []
-          : view.sessions.flatMap((row) =>
-              row.audience === 'team'
-                ? []
-                : [{ sessionId: row.sessionId, userId: row.audience.userId }]
-            ),
+      ...sessionReadGrantsFromSharing(view),
     };
   };
   return {

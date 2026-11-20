@@ -85,6 +85,7 @@ import { desktopPasskeyPort } from '../../services/e2ee-passkey-macos.mjs'
 import { assertProductWindowSender } from '../assert-sender'
 import { observeClientLossOperation } from '../../services/e2ee-client-loss-probe'
 import { getIpcServiceDeps } from '../ipc-service-deps'
+import { removeNativeWorkspace } from './native-workspace-meta-ipc'
 import { PersonalPairingOfferSchema } from '../../services/e2ee-personal-pairing.mjs'
 import { IPC_PUSH_CHANNELS } from '@lody/shared/electron-ipc'
 import type { E2eeJoinSession, E2eePersonalPairingOffer } from '@lody/cloud-api'
@@ -2024,6 +2025,11 @@ export class E2eeIpc extends ProductWindowIpcService {
         workspaceId,
         false,
         retiring
+      )
+      // Receipt is durable: native views close, then the engine namespace is
+      // retired (revocation) or dropped (removal); a failed drop keeps its marker.
+      await removeNativeWorkspace(workspaceId, reason).catch(() =>
+        this.cleanupDiagnostic('e2ee_cleanup_pending')
       )
       // Receipt is durable. Notify now; terminal erase may be indefinitely slow.
       for (const reader of hinted) {

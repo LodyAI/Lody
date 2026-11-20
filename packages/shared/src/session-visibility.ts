@@ -1,0 +1,303 @@
+import { isContainedSession } from './session-access';
+import type { LocalProjectId, MachineId, SessionId, SessionMeta } from './index';
+
+/**
+ * Session read and edit visibility (specs/session-access.md). One rule set for the
+ * renderer and Electron main: main checks every native read with these functions.
+ */
+export { isContainedSession };
+
+/** The read grants of one machine (the renderer's `SessionAccessView` carries them). */
+export type SessionReadGrants = {
+  readonly machineId: string;
+  readonly readSharedSessionIds: readonly string[];
+  readonly memberReadSharedSessions?: readonly {
+    readonly sessionId: string;
+    readonly userId: string;
+  }[];
+};
+
+export function getLocalProjectVisibilityKey(
+  machineId: MachineId | string,
+  localProjectId: LocalProjectId | string
+): string {
+  return `${machineId}:${localProjectId}`;
+}
+
+export type SessionListEntry = SessionMeta & { id: SessionId };
+
+export type SessionMachineRecord = {
+  id?: string;
+  parentSessionId?: string | null;
+  childSessionPlacement?: unknown;
+  openedBySessionId?: string | null;
+  machineId?: string | null;
+  userId?: string | null;
+  project?: { kind?: string; localProjectId?: string | null } | null;
+  /** Set by a workspace bundle import; see `isImportedIntoWorkspace`. */
+  importFence?: { workspaceId?: string } | null;
+};
+
+type LocalProjectSessionMachineRecord = SessionMachineRecord & {
+  project: { kind: 'local'; localProjectId: string };
+};
+
+export type SessionVisibilityState = 'loading' | 'visible' | 'hidden';
+
+type SessionVisibilityOptions = {
+  machineVisibilityLoading?: boolean;
+  localProjectVisibilityLoading?: boolean;
+  currentUserId?: string | null;
+  workspaceHistoryReadable?: boolean;
+  readSharedSessions?: ReadonlyMap<string, SessionReadGrants>;
+  sessionsById?: ReadonlyMap<string, SessionMachineRecord>;
+  ownedMachineIds?: ReadonlySet<MachineId>;
+  /** The workspace being shown; scopes import fences to the import that set them. */
+  workspaceId?: string | null;
+};
+
+/** Imported into this workspace from a bundle: every member reads it, nobody edits it. */
+export function isImportedIntoWorkspace(
+  session: SessionMachineRecord,
+  workspaceId: string | null | undefined,
+  currentUserId: string | null | undefined
+): boolean {
+  return !!workspaceId && !!currentUserId && session.importFence?.workspaceId === workspaceId;
+}
+
+export function isLocalProjectSession(
+  session: SessionMachineRecord
+): session is LocalProjectSessionMachineRecord {
+  const project = session.project;
+  return project?.kind === 'local' && typeof project.localProjectId === 'string';
+}
+
+/** UI availability only; the receiver still authorizes every execution. No author fallback. */
+export function isSessionMachineAvailable(
+  session: SessionMachineRecord | null | undefined,
+  visibleMachineIds: ReadonlySet<MachineId>,
+  visibleLocalProjectKeys: ReadonlySet<string>
+): boolean {
+  if (!session?.machineId || !visibleMachineIds.has(session.machineId as MachineId)) return false;
+  return (
+    !isLocalProjectSession(session) ||
+    visibleLocalProjectKeys.has(
+      getLocalProjectVisibilityKey(session.machineId, session.project.localProjectId)
+    )
+  );
+}
+
+/** Metadata presentation must not turn unreadable/unusable machines into catalog readers. */
+export function availableLocalHistoryMachineIds(
+  sessions: readonly (SessionMachineRecord & { id: string })[],
+  visibleMachineIds: ReadonlySet<MachineId>,
+  visibleLocalProjectKeys: ReadonlySet<string>
+): MachineId[] {
+  return [
+    ...new Set(
+      sessions
+        .filter(
+          (session) =>
+            isLocalProjectSession(session) &&
+            isSessionMachineAvailable(session, visibleMachineIds, visibleLocalProjectKeys)
+        )
+        .map((session) => session.machineId as MachineId)
+    ),
+  ];
+}
+
+export function isSessionEditableToUser(
+  session: SessionMachineRecord,
+  visibleMachineIds: ReadonlySet<MachineId>,
+  visibleLocalProjectKeys: ReadonlySet<string>,
+  _currentUserId?: string | null,
+  ownedMachineIds?: ReadonlySet<MachineId>
+): boolean {
+  if (typeof session.machineId !== 'string') {
+    return false;
+  }
+  if (ownedMachineIds?.has(session.machineId as MachineId)) return true;
+  if (!visibleMachineIds.has(session.machineId as MachineId)) return false;
+  if (isLocalProjectSession(session)) {
+    return visibleLocalProjectKeys.has(
+      getLocalProjectVisibilityKey(
+        session.machineId as MachineId,
+        session.project.localProjectId as LocalProjectId
+      )
+    );
+  }
+  return visibleMachineIds.has(session.machineId as MachineId);
+}
+
+/** Assignment is an owner-approved UI read fallback, never execution authority. */
+export function isSessionVisibleToUser(
+  session: SessionMachineRecord,
+  visibleMachineIds: ReadonlySet<MachineId>,
+  visibleLocalProjectKeys: ReadonlySet<string>,
+  currentUserId?: string | null,
+  ownedMachineIds?: ReadonlySet<MachineId>
+): boolean {
+  return (
+    (!!currentUserId && session.userId === currentUserId) ||
+    isSessionEditableToUser(
+      session,
+      visibleMachineIds,
+      visibleLocalProjectKeys,
+      currentUserId,
+      ownedMachineIds
+    )
+  );
+}
+
+export function resolveSessionVisibilityState(
+  session: SessionMachineRecord,
+  visibleMachineIds: ReadonlySet<MachineId>,
+  visibleLocalProjectKeys: ReadonlySet<string>,
+  options: SessionVisibilityOptions = {}
+): SessionVisibilityState {
+  if (
+    isSessionReadShared(
+      session,
+      options.readSharedSessions,
+      options.sessionsById,
+      options.currentUserId
+    )
+  )
+    return 'visible';
+  if (isImportedIntoWorkspace(session, options.workspaceId, options.currentUserId))
+    return 'visible';
+  if (
+    isSessionVisibleToUser(
+      session,
+      visibleMachineIds,
+      visibleLocalProjectKeys,
+      options.currentUserId,
+      options.ownedMachineIds
+    )
+  ) {
+    return 'visible';
+  }
+  if (typeof session.machineId !== 'string') {
+    return 'hidden';
+  }
+
+  const visibilityLoading = isLocalProjectSession(session)
+    ? options.machineVisibilityLoading || options.localProjectVisibilityLoading
+    : options.machineVisibilityLoading;
+  return visibilityLoading ? 'loading' : 'hidden';
+}
+
+// Lists fail closed while access is loading: only owner fallback or access
+// already present in the current visibility indices may render. Detail views
+// use `resolveSessionVisibilityState` to distinguish pending access from a
+// settled denial.
+export function filterSessionsByVisibility<T extends SessionMachineRecord>(
+  sessions: readonly T[],
+  visibleMachineIds: ReadonlySet<MachineId>,
+  visibleLocalProjectKeys: ReadonlySet<string>,
+  machineVisibilityLoading = false,
+  currentUserId?: string | null,
+  workspaceHistoryReadable = false,
+  ownedMachineIds?: ReadonlySet<MachineId>,
+  readSharedSessions?: ReadonlyMap<string, SessionReadGrants>,
+  sessionsById?: ReadonlyMap<string, SessionMachineRecord>,
+  workspaceId?: string | null
+): T[] {
+  if (sessions.length === 0) return [];
+  if (
+    !workspaceHistoryReadable &&
+    visibleMachineIds.size === 0 &&
+    visibleLocalProjectKeys.size === 0 &&
+    !currentUserId &&
+    !readSharedSessions?.size
+  ) {
+    return [];
+  }
+  return sessions.filter(
+    (session) =>
+      resolveSessionVisibilityState(session, visibleMachineIds, visibleLocalProjectKeys, {
+        machineVisibilityLoading,
+        currentUserId,
+        workspaceHistoryReadable,
+        ownedMachineIds,
+        readSharedSessions,
+        sessionsById,
+        workspaceId,
+      }) === 'visible'
+  );
+}
+
+/** My scope is assignment only; machine ownership controls access separately. */
+export function isSessionInMyScope(
+  session: SessionMachineRecord,
+  currentUserId: string | null | undefined
+): boolean {
+  return !!currentUserId && session.userId === currentUserId;
+}
+
+export function resolveSessionReadRoot<T extends SessionMachineRecord>(
+  session: T,
+  sessionsById?: ReadonlyMap<string, T>
+): T {
+  const parent = session.parentSessionId ? sessionsById?.get(session.parentSessionId) : undefined;
+  return parent && isContainedSession(session, parent) ? parent : session;
+}
+
+/** Child tabs and Side Chats inherit only a root grant bound to their actual machine. */
+export function isSessionReadShared(
+  session: SessionMachineRecord,
+  views?: ReadonlyMap<string, SessionReadGrants>,
+  sessionsById?: ReadonlyMap<string, SessionMachineRecord>,
+  currentUserId?: string | null
+): boolean {
+  if (!session.machineId || !session.id) return false;
+  const root = resolveSessionReadRoot(session, sessionsById);
+  const view = views?.get(session.machineId);
+  return (
+    view?.machineId === session.machineId &&
+    !!root.id &&
+    (view.readSharedSessionIds.includes(root.id) ||
+      (!!currentUserId &&
+        !!view.memberReadSharedSessions?.some(
+          (row) => row.sessionId === root.id && row.userId === currentUserId
+        )))
+  );
+}
+
+/** The verified machine-sharing view of an encrypted workspace, as the host returns it. */
+export type EncryptedMachineSharingGrants = {
+  readonly machineId: string;
+  readonly sharedWithTeam: boolean;
+  readonly projects: readonly string[];
+  readonly sessions: readonly {
+    readonly sessionId: string;
+    readonly audience: 'team' | { readonly userId: string };
+  }[];
+  readonly deniedReason?: string;
+  readonly removed?: boolean;
+  readonly unavailable?: true;
+};
+
+/** Only a current, verified, permitted view shares its machine; Guest and denial come from core. */
+export function isUsableSharedMachineView(machineId: string, view: EncryptedMachineSharingGrants) {
+  return (
+    view.machineId === machineId &&
+    view.sharedWithTeam &&
+    !view.deniedReason &&
+    !view.removed &&
+    !view.unavailable
+  );
+}
+
+/** A view's conversation grants; a removed or unverified view grants none. */
+export function sessionReadGrantsFromSharing(view: EncryptedMachineSharingGrants) {
+  const sessions = view.removed || view.unavailable ? [] : view.sessions;
+  return {
+    readSharedSessionIds: sessions
+      .filter((row) => row.audience === 'team')
+      .map((row) => row.sessionId),
+    memberReadSharedSessions: sessions.flatMap((row) =>
+      row.audience === 'team' ? [] : [{ sessionId: row.sessionId, userId: row.audience.userId }]
+    ),
+  };
+}

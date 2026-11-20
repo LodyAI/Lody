@@ -24,6 +24,8 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { Context, Data, Deferred, Effect, Exit, Layer, Result, Scope, Semaphore } from 'effect'
 import {
+  EngineKeyringSync,
+  type EngineKeyringReport,
   KeyDistributor,
   KeyReceiver,
   KeyRepair,
@@ -56,6 +58,9 @@ import {
   type RetainedLedgerState
 } from '@lody/e2ee-core/protocol'
 import {
+  DeviceIdentity,
+  EngineKeyringSink,
+  EngineKeyringSinkError,
   EpochPublicationSource,
   EpochStagingStore,
   KeyMailbox,
@@ -264,6 +269,11 @@ export type DesktopWorkspaceRecoveryPorts = Pick<
   'vault' | 'local' | 'submitOriginal' | 'fetchCurrentEnvelope'
 >
 
+/** Engine keyring requests of one namespace; `installSeed` receives the custody seed briefly. */
+export type DesktopEngineKeyringSink = Omit<EngineKeyringSink['Service'], 'installSigner'> & {
+  installSeed(seed: Uint8Array): Promise<unknown>
+}
+
 export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open')(
   function* (options: {
     readonly directory: string
@@ -276,8 +286,14 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       readonly relays: import('@lody/platform').E2eeIrohRelays
       readonly proxyUrl?: string
     }
+    /** A key round or ledger ingest succeeded: the native engine keyring reinstalls. */
+    readonly onVerifiedChange?: (workspaceId: string) => void
   }) {
     const serial = yield* Semaphore.make(1)
+    const verifiedChange =
+      (workspaceId: string) =>
+      <A, E, R>(self: Effect.Effect<A, E, R>) =>
+        Effect.tap(self, () => Effect.sync(() => options.onVerifiedChange?.(workspaceId)))
     let stopping = false
     const entries = new Map<
       string,
@@ -349,6 +365,9 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           input: E2eeContentSeal
         ) => Effect.Effect<{ header: Uint8Array; sealed: Uint8Array }, unknown>
         openContent: (input: E2eeContentOpen) => Effect.Effect<Uint8Array, unknown>
+        syncEngineKeyring: (
+          sink: DesktopEngineKeyringSink
+        ) => Effect.Effect<EngineKeyringReport, unknown>
         refreshSharingLedger: (
           readHistory: DesktopE2eeManagementRemote['history']
         ) => Effect.Effect<void, unknown>
@@ -1946,6 +1965,48 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               return { genesis: hex(genesis.toBytes()), epoch, signal: networkAbort.signal }
             }),
           keyRound,
+          /**
+           * Installs this device's verified state into the native engine keyring
+           * (core EngineKeyringSync). The personal seed reaches `installSeed` only
+           * through custody's purpose-limited `withEngineSeed` and is wiped after it.
+           */
+          syncEngineKeyring: (sink: DesktopEngineKeyringSink) =>
+            Effect.scoped(
+              Effect.flatMap(
+                Layer.build(
+                  EngineKeyringSync.layer.pipe(
+                    Layer.provide(
+                      Layer.mergeAll(
+                        Layer.succeed(WorkspaceScope, { genesis }),
+                        Layer.succeed(DeviceIdentity, {
+                          signer: device,
+                          encryptionKeyPair: device.encryption
+                        }),
+                        Layer.succeed(VerifiedLedger, verified),
+                        Layer.succeed(InstalledEpochHistory, history),
+                        Layer.succeed(EngineKeyringSink, {
+                          ...sink,
+                          installSigner: () =>
+                            options.custody
+                              .withEngineSeed(genesis, device.publicKey, sink.installSeed)
+                              .pipe(
+                                Effect.asVoid,
+                                Effect.mapError(
+                                  (cause) =>
+                                    new EngineKeyringSinkError({
+                                      operation: 'installSigner',
+                                      cause
+                                    })
+                                )
+                              )
+                        })
+                      )
+                    )
+                  )
+                ),
+                (built) => Context.get(built, EngineKeyringSync).sync()
+              )
+            ),
           prepareKeyDelivery,
           stop,
           isClosing: () => closing,
@@ -2270,7 +2331,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             )
           ),
           (entry) => entry.keyRound(mailbox, staging, refreshLedger, mode, recipients)
-        ),
+        ).pipe(verifiedChange(workspaceId)),
       /** Fetch and install this device's current key only (no report flush, distribution or
        * repair), under the same single-flight as keyRound. A joining member uses it to reach
        * ready, then hands the remaining work to a full round. */
@@ -2288,7 +2349,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             )
           ),
           (entry) => entry.keyRound(mailbox, staging, undefined, 'receive')
-        ),
+        ).pipe(verifiedChange(workspaceId)),
       /** Reconcile and send this device's deliveries only, under the keyRound single-flight. */
       distributeKeys: (
         workspaceId: string,
@@ -2304,6 +2365,18 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             )
           ),
           (entry) => entry.keyRound(mailbox, undefined, undefined, 'distribute', recipients)
+        ),
+      /** An open entry only; the engine requests run outside the host lock, like keyRound. */
+      syncEngineKeyring: (workspaceId: string, sink: DesktopEngineKeyringSink) =>
+        Effect.flatMap(
+          run(
+            Effect.suspend(() =>
+              entries.has(workspaceId)
+                ? Effect.succeed(entries.get(workspaceId)!)
+                : Effect.fail(fail('closed'))
+            )
+          ),
+          (entry) => entry.syncEngineKeyring(sink)
         ),
       seal: (workspaceId: string, input: E2eeContentSeal) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.seal(input))),
@@ -2576,6 +2649,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             return entry && !entry.isClosing() ? entry.ingest(page) : Effect.fail(fail('closed'))
           })
         ).pipe(
+          verifiedChange(workspaceId),
           Effect.onError((cause) =>
             cause.reasons.every(
               (reason) =>

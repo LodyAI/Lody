@@ -1,4 +1,4 @@
-import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
+import { mkdir, open, readdir, readFile, rename, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { createLodyWorkspaceRoutes, type RepoClient } from '@loro-dev/loro-repo-client';
 import { encryptedWorkspaceNamespace } from '../workspace-streams-content';
@@ -93,6 +93,21 @@ export function nativePendingWipeMarker(dataDir: string, workspaceId: string): N
   };
 }
 
+/**
+ * Finishes every pending wipe recorded in `dataDir` (a removal while the host was
+ * down or the drop failed): the first connection after it finishes the drop.
+ */
+export async function finishPendingNativeWipes(client: RepoClient, dataDir: string) {
+  const names = await readdir(join(dataDir, 'pending-wipes')).catch(() => [] as string[]);
+  for (const name of names) {
+    if (!name.endsWith('.json')) continue;
+    const workspaceId = Buffer.from(name.slice(0, -'.json'.length), 'hex').toString();
+    if (!workspaceId) continue;
+    const pendingWipe = nativePendingWipeMarker(dataDir, workspaceId);
+    await finishNativeWipe({ client, workspaceId, pendingWipe }).catch(() => {});
+  }
+}
+
 export interface NativeEncryptedWorkspace {
   /**
    * Re-installs keys and policy after any trigger of the notification table: a
@@ -114,6 +129,41 @@ export interface NativeEncryptedWorkspace {
   retireWriter(): Promise<void>;
   /** Stops reinstalling on reconnect. Keys stay: another process may share the namespace. */
   close(): void;
+}
+
+type TokenSource = NativeEncryptedWorkspaceOptions['contentToken'];
+/**
+ * The client replays a registration after every reconnect and cannot remove one,
+ * so each namespace registers once per client and serves the current attachment's
+ * tokens. A closed attachment (account switch, wipe) serves none.
+ */
+const tokenSlots = new WeakMap<RepoClient, Map<string, { source?: TokenSource }>>();
+async function serveTokens(
+  client: RepoClient,
+  workspaceId: string,
+  source: TokenSource,
+  mayWrite: boolean
+) {
+  let slots = tokenSlots.get(client);
+  if (!slots) tokenSlots.set(client, (slots = new Map()));
+  const known = slots.get(workspaceId);
+  if (known) {
+    known.source = source;
+    return known;
+  }
+  const slot: { source?: TokenSource } = { source };
+  slots.set(workspaceId, slot);
+  await client.registerAuthProvider({
+    domains: [workspaceId],
+    remoteIds: [NATIVE_CONTENT_REMOTE_ID],
+    priority: mayWrite ? WRITER_TOKEN_PRIORITY : READER_TOKEN_PRIORITY,
+    getToken: async ({ rejectedToken }) => {
+      if (!slot.source) throw new Error('native_content_token_unavailable');
+      const grant = await slot.source(rejectedToken ?? undefined);
+      return { token: grant.token, expiresInMs: grant.expiresIn * 1000 };
+    },
+  });
+  return slot;
 }
 
 /**
@@ -146,26 +196,19 @@ export async function attachNativeEncryptedWorkspace(
 
   let serial: Promise<unknown> = Promise.resolve();
   let closed = false;
-  let registered = false;
+  let slot: { source?: TokenSource } | undefined;
   const install = async () => {
     const { mayWrite } = await options.syncKeyring();
     await client.setSnapshotPolicy(workspaceId, {
       ...NATIVE_ENCRYPTED_SNAPSHOT_POLICY,
       enabled: mayWrite,
     });
-    // The client replays this registration after every reconnect.
-    if (!registered) {
-      await client.registerAuthProvider({
-        domains: [workspaceId],
-        remoteIds: [NATIVE_CONTENT_REMOTE_ID],
-        priority: mayWrite ? WRITER_TOKEN_PRIORITY : READER_TOKEN_PRIORITY,
-        getToken: async ({ rejectedToken }) => {
-          const grant = await options.contentToken(rejectedToken ?? undefined);
-          return { token: grant.token, expiresInMs: grant.expiresIn * 1000 };
-        },
-      });
-      registered = true;
-    }
+    if (!closed) slot ??= await serveTokens(client, workspaceId, options.contentToken, mayWrite);
+  };
+  const stopServing = () => {
+    closed = true;
+    offState();
+    if (slot?.source === options.contentToken) slot.source = undefined;
   };
   const run = <A>(work: () => Promise<A>): Promise<A> => {
     const next = serial.then(work, work);
@@ -201,8 +244,7 @@ export async function attachNativeEncryptedWorkspace(
     refresh: () => (closed ? Promise.resolve() : run(install)),
     wipe: () =>
       run(async () => {
-        closed = true;
-        offState();
+        stopServing();
         await options.pendingWipe.write();
         await finishNativeWipe(options);
       }),
@@ -211,9 +253,6 @@ export async function attachNativeEncryptedWorkspace(
         await client.keyringHoldSealing(workspaceId, options.writer);
         await client.keyringRemoveSigner(workspaceId, options.writer);
       }),
-    close() {
-      closed = true;
-      offState();
-    },
+    close: stopServing,
   };
 }

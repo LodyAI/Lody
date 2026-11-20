@@ -39,14 +39,16 @@ const RECEIPT_VISIBILITY_MS = 10_000;
 export async function openRendererNativeWorkspaceMeta(
   workspaceId: string,
   legacyStorage: StorageAdapter,
-  replicaName: string
+  replicaName: string,
+  /** Encrypted rooms bootstrap from the content bucket; nothing local is imported. */
+  encrypted = false
 ): Promise<IncrementalExternalMetadataAdapter<JsonObject> | null> {
   const api = getIpcServices()?.nativeWorkspaceMeta;
   if (!api || !(await api.available({ workspaceId }))) return null;
 
   const source = `renderer:${replicaName.replace(/[^\w.-]/g, '_').slice(0, 128)}`;
   const importedKey = `lody.nativeWorkspaceMeta.imported.v3.${workspaceId}.${source}`;
-  if (localStorage.getItem(importedKey) !== '1') {
+  if (!encrypted && localStorage.getItem(importedKey) !== '1') {
     const empty = { version: 0, entries: {} };
     const legacy = await legacyStorage.loadMeta();
     await api.importLegacy({ workspaceId, source, bundle: legacy ? legacy.exportJson() : empty });
