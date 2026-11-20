@@ -21,6 +21,27 @@ and durable state/cursor retention. This [P10 preparation](../notes/implemented/
 does not supply historical-author authorization, a production signer, host snapshot
 admission or client recovery from an unusable remote snapshot.
 
+## Cloud room recovery
+
+The dual-plane renderer enumerates every `cloud` binding, including rooms whose
+readiness comes from cloud. `cloud-room-recovery.ts` selects room-local repairs
+when errors exist: even an SDK reconnect with `resetBackoff: false` revives every
+failed adapter session, bypassing a backed-off room's deadline. Each continuously
+errored `kind:id` waits 30s, 60s, 120s, 240s, then at most five minutes between
+attempts. Leaving error or losing the room clears its record. Disconnected and
+newly failing rooms remain eligible independently; untouched sweep leftovers
+retain eligibility. Batch width and total sweep time stay bounded.
+
+The existing Effect-based reconnect loop waits until the earliest room deadline
+when all problem rooms are backing off. Status updates can shorten that wait for
+a new problem; visibility, online and token edges force immediate recovery while
+preserving retry history. Periodic reconnects in both cloud-only and dual-plane
+runtimes pass `resetBackoff: false`. The workspace runtime retains raw SDK rejoin
+promises after waiter timeouts and joins them before Repo destruction. This fix
+keeps the published Promise Repo boundary described in the
+[Effect selection guide](cli-effect-ts.md#small-migrations-during-feature-and-fix-work);
+it changes retry selection rather than migrating the Repo owner.
+
 ## Encrypted-workspace feature availability
 
 `workspaceSupports` owns ordinary-channel capability verdicts. UI reads the existing admission-mode

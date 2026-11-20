@@ -51,6 +51,9 @@
  * `createRoomSyncRegistry` -> the exact predicate the loop gates on.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RepoTransportRoomEntry } from 'loro-repo';
+import { createCloudRoomRecovery } from '../src/providers/cloud-room-recovery';
+import { createLocalReconnectLoop } from '../src/providers/local-reconnect-loop';
 import { Effect, Layer } from 'effect';
 import { LocalLoroWriterTurn } from '@lody/shared/local-loro-writer';
 import { makeLocalLoroWriterLegacy } from '@lody/shared/local-loro-writer/legacy';
@@ -243,4 +246,174 @@ describe('invalidateDocRoom recovery is room-scoped', () => {
     tracked.untrack();
     tracked.tracker.dispose();
   });
+});
+
+describe('renderer cloud room recovery', () => {
+  const createFixture = () => {
+    const transfers: Array<{ room: string; at: number }> = [];
+    const globalResets: boolean[] = [];
+    const rooms: RepoTransportRoomEntry[] = [];
+    const addRoom = (id: string, kind: 'doc' | 'flock' = 'doc') => {
+      const state = { status: 'error' as 'error' | 'joined' | 'disconnected', fail: true };
+      const entry = {
+        room: { kind, id },
+        subscription: {
+          get status() {
+            return state.status;
+          },
+          async rejoin() {
+            transfers.push({ room: `${kind}:${id}`, at: Date.now() });
+            if (!state.fail) state.status = 'joined';
+          },
+        },
+      } as RepoTransportRoomEntry;
+      rooms.push(entry);
+      return state;
+    };
+    const recovery = createCloudRoomRecovery({
+      listRooms: () => rooms,
+      reconnect: async (force) => {
+        globalResets.push(force);
+        // Adapter reconnect would revive ALL broken sessions, even when false.
+        for (const entry of rooms) {
+          if (entry.subscription.status === 'error') await entry.subscription.rejoin();
+        }
+      },
+      rejoin: (entry) => entry.subscription.rejoin(),
+      isClosing: () => false,
+    });
+    return { addRoom, recovery, transfers, globalResets, rooms };
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('backs off persistent full-stream reads to five minutes and isolates kind:id', async () => {
+    const f = createFixture();
+    f.addRoom('large');
+    const intervals = [30_000, 60_000, 120_000, 240_000, 300_000, 300_000];
+    for (const interval of intervals) {
+      await f.recovery.recover(false);
+      const before = f.transfers.length;
+      expect(f.recovery.getRetryDelayMs(30_000)).toBe(interval);
+      vi.setSystemTime(Date.now() + interval - 1);
+      await f.recovery.recover(false);
+      expect(f.transfers.length).toBe(before);
+      vi.setSystemTime(Date.now() + 1);
+    }
+    vi.setSystemTime(Date.now() - 1);
+    f.addRoom('large', 'flock');
+    await f.recovery.recover(false);
+    expect(f.transfers.at(-1)?.room).toBe('flock:large');
+    expect(f.globalResets).toEqual([]);
+  });
+
+  it('clears recovered and removed rooms while letting new failures and disconnected rooms recover', async () => {
+    const f = createFixture();
+    const old = f.addRoom('old');
+    await f.recovery.recover(false);
+    vi.setSystemTime(30_000);
+    await f.recovery.recover(false);
+    f.addRoom('new').fail = false;
+    const disconnected = f.addRoom('disconnected');
+    disconnected.status = 'disconnected';
+    disconnected.fail = false;
+    await f.recovery.recover(false);
+    expect(f.transfers.map((entry) => entry.room)).toEqual([
+      'doc:old',
+      'doc:old',
+      'doc:new',
+      'doc:disconnected',
+    ]);
+    expect(f.rooms.slice(1).map((entry) => entry.subscription.status)).toEqual([
+      'joined',
+      'joined',
+    ]);
+    old.status = 'joined';
+    f.recovery.update();
+    old.status = 'error';
+    await f.recovery.recover(false);
+    expect(f.recovery.getRetryDelayMs(30_000)).toBe(30_000);
+    f.rooms.splice(0, 1);
+    f.recovery.update();
+    f.addRoom('old');
+    await f.recovery.recover(false);
+    expect(f.transfers.at(-1)).toEqual({ room: 'doc:old', at: 30_000 });
+  });
+
+  it('does not charge untouched rooms when the sweep exhausts its time budget', async () => {
+    const f = createFixture();
+    for (let i = 0; i < 9; i++) f.addRoom(String(i));
+    for (const entry of f.rooms.slice(0, 4)) {
+      const rejoin = entry.subscription.rejoin;
+      entry.subscription.rejoin = async () => {
+        await rejoin();
+        vi.setSystemTime(Date.now() + 7_500);
+      };
+    }
+    await f.recovery.recover(false);
+    expect(f.transfers.map((entry) => entry.room)).toEqual(['doc:0', 'doc:1', 'doc:2', 'doc:3']);
+    expect(f.recovery.getRetryDelayMs(0)).toBe(0);
+    await f.recovery.recover(false);
+    expect(f.transfers.slice(4, 9).map((entry) => entry.room)).toEqual([
+      'doc:4',
+      'doc:5',
+      'doc:6',
+      'doc:7',
+      'doc:8',
+    ]);
+  });
+
+  it.each(['visibility-wake', 'network-online', 'token-refresh'] as const)(
+    'sleeps to the room deadline, admits a new room early, and honors %s',
+    async (reason) => {
+      const f = createFixture();
+      f.addRoom('stuck');
+      let runs = 0;
+      const loop = createLocalReconnectLoop({
+        canRun: () => true,
+        hasProblem: () => {
+          f.recovery.update();
+          return f.rooms.some((entry) => entry.subscription.status === 'error');
+        },
+        reconnect: async ({ force }) => {
+          runs++;
+          await f.recovery.recover(force);
+        },
+        getRetryDelayMs: (delay) => f.recovery.getRetryDelayMs(delay),
+        computeDelayMs: () => 30_000,
+        onStateChange: () => {},
+      });
+      try {
+        loop.update();
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(f.transfers.map((entry) => entry.at)).toEqual([0, 30_000]);
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(runs).toBe(2); // No empty sweep at the old 30s cadence.
+        await vi.advanceTimersByTimeAsync(30_000); // third attempt; next due at 210s
+        await vi.advanceTimersByTimeAsync(30_000); // 120s: a new failure arrives
+        f.addRoom('new').fail = false;
+        loop.update();
+        await vi.advanceTimersByTimeAsync(30_000); // 150s, before the old 210s wait
+        expect(f.transfers.at(-1)).toEqual({ room: 'doc:new', at: 150_000 });
+        expect(f.rooms[1].subscription.status).toBe('joined');
+        const before = f.transfers.length;
+        loop.trigger(reason);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(f.transfers.length).toBeGreaterThan(before);
+        expect(f.globalResets).toEqual([true]);
+        expect(f.recovery.getRetryDelayMs(30_000)).toBeGreaterThan(30_000);
+      } finally {
+        await loop.close();
+      }
+      const before = f.transfers.length;
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(f.transfers.length).toBe(before);
+    }
+  );
 });
