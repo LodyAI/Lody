@@ -874,7 +874,13 @@ export function createConversationViewFromReader(
     for (let index = 0; index < nextRows.length; index += 1) {
       const row = nextRows[index]!;
       const old = previousById.get(row.id);
-      if (rowChanged(old, row) || (pageOptions.refreshSurvivors === true && old !== undefined)) {
+      // Rows before the reported structural range are unaffected by it: they keep
+      // their bodies and object identity unless their directory row changed.
+      const refresh =
+        pageOptions.refreshSurvivors === true &&
+        old !== undefined &&
+        index >= (pageOptions.clearFrom ?? 0);
+      if (rowChanged(old, row) || refresh) {
         bumpTurn(row.id);
         if (hydrated.has(row.id)) touchedSurvivors.push(row.id);
         else row.summary = undefined;

@@ -94,7 +94,11 @@ describe('createConversationDerivation', () => {
         }),
         { chunkSize: 8, yieldToEventLoop: immediate }
       );
-      await drain(() => derivation.complete, 10000);
+      // Older directory pages load once the view is ready (its idle tail pass).
+      await drain(() => {
+        idle.runAll();
+        return derivation.complete;
+      }, 10000);
       expect(derivation.complete).toBe(true);
       const target = view.indexOf('a-0');
       expect(view.isHydrated(target)).toBe(false);

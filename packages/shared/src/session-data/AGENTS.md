@@ -17,6 +17,9 @@
   one observation instead of serializing the transcript on every token.
 - Repeated identity lookups reuse an unchanged pending transaction. Reads must not
   commit writes; uncommitted structural/ID edits and checkout still invalidate lookup.
+- Opening reads the latest directory page; the Loro adapter computes a whole
+  `initial` directory only for a consumer that reads it, and finds a turn id by
+  scanning back from the tail.
 - Subscribe and capture the initial directory without a gap. Notifications carry
   structural ranges or changed turn ids. A content batch reports the EXACT
   positions it touched, never the span between the lowest and highest: one batch

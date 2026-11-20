@@ -116,6 +116,16 @@ then publishes `['loro_doc', <id>, <source>]`. A native write marks
 `['loro_doc', <id>, 'native']`. Write-back walks those markers and merges each
 room's export into the legacy CLI store before removing its markers.
 
+Opening does not project the whole history. The Loro Session reader serves the
+latest directory page and older pages on request
+(`readLatestDirectoryPage`/`readOlderDirectoryPage`), so the conversation view
+uses the same windowed path as Roost; turn ids are found by scanning back from the
+tail. The document itself is still loaded whole. A repo that unloads a document
+whose changes were all committed keeps its bytes (loro-repo
+`externalDocsRetainBytes`, default 64 MiB): reopening imports them locally and
+asks the owner only for the ops past that version (`exportLoroSince`; through
+main, `openDoc` with `since`).
+
 ## Workspace Meta
 
 [`native-workspace-meta.ts`](../../packages/shared/src/node/native-workspace-meta.ts)
@@ -178,7 +188,8 @@ handling; a failed write-back is logged and retried on the next start.
 | —        | Switch to the released SDK packages when loro-repo #290/#308 ship                                     | manifests only        |
 | 4        | Machine Flock (`mf`) and schedule registry (`sr`)                                                     | 800 (actual ≈40)      |
 | 5        | Session Loro documents through the external document owner                                            | 700 (actual ≈490)     |
-| 6        | Windowed Session directory and on-demand document loading (see Performance)                           | to be sized           |
+| 6        | Paged Session directory; reopen from retained bytes plus ops since its version                        | 400 (actual ≈140)     |
+| —        | Cold 100k-turn opens: owner decision pending (segmented history or SDK transfer work)                 | to be sized           |
 | —        | Remaining Loro documents (`schedule-*`, Preview comments) on the same owner                           | small per type        |
 | —        | Cloud replication of native rooms (needs remote Meta design)                                          | separate proposal     |
 
@@ -227,32 +238,42 @@ update = write until the other connection's replica shows it):
 
 Session documents: synthetic histories written with the real `HistoryWriter`
 (alternating 200-character user turns and 1,500-character assistant turns);
-milliseconds. _Open_ is a second connection's new repo loading the document
-through the owner; _directory_ is the Session reader's initial projection; _append
-visible_ is `appendTurn` plus the committed barrier until the other replica shows
-the turn (50 samples after 10 warm-ups). Reproduce with
+milliseconds. _Raw export_ is one `exportLoroRaw` through a second connection;
+_append visible_ is `appendTurn` plus the committed barrier until the other
+replica shows the turn (50 samples after 10 warm-ups). Reproduce with
 `LODY_SESSION_LOAD_BENCH=1000,10000,100000` on
 [`session-doc-load.benchmark.test.ts`](../../packages/shared/tests/session-doc-load.benchmark.test.ts).
 
-|   Turns | Snapshot | Raw export | Open | Last 50 | Directory | Append visible p50 / p95 / p99 |
-| ------: | -------: | ---------: | ---: | ------: | --------: | -----------------------------: |
-|   1,000 |   0.4 MB |        8.4 |  9.5 |     3.8 |      14.5 |               2.2 / 3.4 / 10.0 |
-|  10,000 |   3.8 MB |       78.6 | 99.7 |     5.5 |     130.9 |                2.0 / 3.6 / 4.1 |
-| 100,000 |  38.5 MB |        877 | 1329 |     9.5 |      2258 |               2.0 / 4.4 / 10.1 |
+|   Turns | Snapshot | Raw export | Append visible p50 / p95 / p99 |
+| ------: | -------: | ---------: | -----------------------------: |
+|   1,000 |   0.4 MB |        8.4 |               2.2 / 3.4 / 10.0 |
+|  10,000 |   3.8 MB |       78.6 |                2.0 / 3.6 / 4.1 |
+| 100,000 |  38.5 MB |        877 |               2.0 / 4.4 / 10.1 |
 
-Appending is within the 50 ms target at every size. The first screen (open, last
-50, directory; target 200 ms) holds at 1,000 turns, misses at 10,000 (236 ms) and
-fails at 100,000 for two separate O(history) costs:
+Appending is within the 50 ms target at every size.
 
-- **Directory.** The Session reader projects a row for every turn on open
-  (`session-data/loro.ts`). The legacy path pays the same cost (2.3 s at 100k
-  after a 71 ms in-process import), so this is a Lody change: a windowed directory
-  that projects the tail first.
-- **Whole-document transfer.** The engine re-encodes and sends the full snapshot
-  as base64 JSON on each open. Before the SDK framer fix (branch
-  `lody/framer-chunks`) the client also recopied its receive buffer per socket chunk,
-  making a 38.5 MB open take 10–12 s. With it, the remaining cost is still
-  proportional to history, so 100k needs on-demand or segmented loading in the SDK.
+First screen: the renderer's real composition (`createConversationSession`) until
+the view is ready with its tail hydrated, then a lease on the latest 50 turns,
+with idle passes run as soon as they are scheduled. _Load_ is the in-process
+import (legacy) or `openPersistedDoc` through the native owner on one host
+connection; _reopen_ is the same repo after `unloadDoc`. Milliseconds, total
+(load + view + last 50). Reproduce with `LODY_SESSION_FIRST_SCREEN_BENCH=1000,10000,100000`
+on [`session-first-screen.benchmark.test.ts`](../../packages/components/tests/session-first-screen.benchmark.test.ts).
+
+|   Turns | Legacy, whole directory | Legacy, paged | Native cold, whole | Native cold, paged | Native reopen, paged |
+| ------: | ----------------------: | ------------: | -----------------: | -----------------: | -------------------: |
+|   1,000 |                      82 |            33 |                 86 |                 35 |                   20 |
+|  10,000 |                     246 |            23 |                480 |                167 |                   35 |
+| 100,000 |                   4,793 |           331 |              5,654 |              1,579 |                  197 |
+
+The paged directory meets the 200 ms target everywhere except the 100k cold
+opens. Their cost is loading the whole document: a 104 ms import plus about
+220 ms of first reads for legacy; for native, 1.5 s, of which the engine
+re-encodes the snapshot (about 600 ms), base64 JSON transfer and decoding take
+about 250 ms, and the import the rest. A reopen in the same process asks only for
+newer ops. The SDK framer fix (`lody/framer-chunks`) is required: without it the
+client recopied its receive buffer per socket chunk, and a 38.5 MB open took
+10–12 s.
 
 Memory with one 100k-turn Session open: the replica adds about 65–90 MB to the
 opening process (in-process measurement 87.5 MB), and the engine host 10–15 MB
@@ -262,10 +283,13 @@ for a loaded room; RSS deltas below 20 MB are within measurement noise.
 
 - Session documents require unreleased SDK branches: binary Loro update
   subscriptions (`lody/loro-doc-updates`), the external Loro document owner
-  (`lody/external-docs`) and the client framer fix (`lody/framer-chunks`). Local
-  builds are used only through an uncommitted override.
-- Session first screens at 10,000 turns and above miss the 200 ms target (see
-  Performance).
+  (`lody/external-docs`), the client framer fix (`lody/framer-chunks`), exports
+  since a version (`lody/loro-export-since`) and retained reopen
+  (`lody/external-docs-reuse`). Local builds are used only through an uncommitted
+  override.
+- A cold open of a 100,000-turn Session misses the 200 ms target (see
+  Performance). The renderer path adds main-to-renderer IPC of the snapshot, which
+  the benchmark does not measure.
 - A commit already sent when the host dies is an unknown outcome. Per the SDK
   contract this latches that repo's metadata writes until it is recreated; reads
   continue. Commits attempted while disconnected are certain non-commits.
