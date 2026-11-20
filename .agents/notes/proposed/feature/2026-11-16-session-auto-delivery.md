@@ -36,7 +36,7 @@ instead of retrying.
 - **Bounded and honest.** Three requests per repair kind per enablement and one
   merge per head. A request that pushed no new commit, a review requirement, a
   behind branch, a closed or draft PR, or a merge that did not land stop delivery
-  and put the conversation in the sidebar's attention group. This prevents the
+  and mark the conversation's sidebar row. This prevents the
   unattended chains that motivated the 2026-11-11 decision.
 - **Same automation machinery.** Auto delivery is a fourth Session policy beside
   archive-after-merge. A pass reads PR checkpoints (now including CI and merge
@@ -64,7 +64,9 @@ instead of retrying.
 - Encrypted workspaces reject the setting because their PR poller is not
   registered; the menu explains why.
 - Sessions with PRs in several repositories stop with `multiple_prs`.
-- The folded sidebar group summary does not count stalled delivery; the row and
-  the attention group do.
+- Only the row's own mark shows stalled delivery. The sidebar's Focus / Later /
+  Settled grouping ([sidebar status view](../../../../specs/sidebar-status-view.md))
+  deliberately does not re-sort by live state, so a stalled conversation is not
+  moved, and a snoozed or settled one shows the mark only where the row is visible.
 - Validation is synthetic: ledger tests drive the request sequence, limits, guard
   and request text. No real repository, GitHub account or desktop run was made.

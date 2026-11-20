@@ -3,7 +3,6 @@ import {
   mapSessionMetaToTaskListTask,
 } from '../src/components/sessions/session-tasklist-mapping';
 import { getSessionGitHubState } from '../src/lib/session-github-state';
-import { sidebarStatusGroup } from '../src/lib/sidebar-status-group';
 import { describe, expect, test } from 'vitest';
 
 import type { MachineId, SessionId, SessionMeta, SessionStatus } from '@lody/shared';
@@ -210,7 +209,7 @@ describe('getEffectiveSessionActivitySummary child-status aggregation', () => {
   });
 });
 
-test('lists a conversation whose Auto delivery stopped under attention until it works again', () => {
+test('marks only the row whose Auto delivery stopped', () => {
   const at = { updatedAt: 1, prUrl: 'https://github.com/example/api/pull/7' };
   const stalled = makeSession({
     id: 'stalled',
@@ -222,12 +221,10 @@ test('lists a conversation whose Auto delivery stopped under attention until it 
     currentUserId: 'user-1',
     defaultTitle: 'Untitled',
   });
-  expect(Object.fromEntries(rows.map((row) => [row.sessionId, sidebarStatusGroup(row)]))).toEqual({
-    stalled: 'attention',
-    waiting: 'idle',
+  expect(Object.fromEntries(rows.map((row) => [row.sessionId, row.deliveryStalled]))).toEqual({
+    stalled: true,
+    waiting: false,
   });
-  const [row] = rows;
-  expect(row && sidebarStatusGroup({ ...row, isWorking: true })).toBe('running');
 });
 
 describe('buildSessionListRows repo + PR mapping', () => {

@@ -41,7 +41,8 @@ merge, with its own `gh` access; the daemon only observes.
   at most once per head commit. Exhausted limits, a review or up-to-date branch
   requirement, a closed or draft pull request, a request that pushed no new commit,
   or a merge request that did not merge stop delivery with a visible reason in the
-  conversation and the sidebar's attention group. Stopping never retries by itself.
+  conversation and a mark on the conversation's sidebar row. Stopping never retries
+  by itself.
 - Session Stop blocks pending requests under the existing rule; only the user
   restores it.
 - A Session with pull requests in several repositories, and encrypted workspaces
