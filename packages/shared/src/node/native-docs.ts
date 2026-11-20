@@ -256,6 +256,16 @@ export function createNativeRemoteHistoryPort(
         fields: fields.map((field) => ({
           path: [...field.path],
           ...(field.shape ? { shape: true } : {}),
+          ...(field.where
+            ? {
+                where: {
+                  key: field.where.key,
+                  ...(field.where.in ? { in: [...field.where.in] } : {}),
+                  ...(field.where.notIn ? { notIn: [...field.where.notIn] } : {}),
+                },
+              }
+            : {}),
+          ...(field.omit?.length ? { omit: field.omit.map((path) => [...path]) } : {}),
         })),
       });
       return { len: page.len, start: page.start, rows: page.rows, roomTxId: page.roomTxId };

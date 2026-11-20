@@ -27,12 +27,18 @@ export type ConversationDerivation<F> = {
   dispose(): void;
 };
 
-export type DeriveTurnFact<F> = (
+export type DeriveTurnFact<F> = ((
   turn: SessionHistory,
   row: TurnIndexRow,
   index: number,
   previous?: F
-) => F;
+) => F) & {
+  /**
+   * The item types the fact reads, when it reads no others: turns read only
+   * for this fact then carry just those items. Absent means the whole body.
+   */
+  readonly itemTypes?: readonly string[];
+};
 
 export type CreateConversationDerivationOptions = {
   /** Turns hydrated per background chunk. */
@@ -190,7 +196,10 @@ export function createConversationDerivation<F>(
       const lo = pending[pending.length - 1]!;
       const hi = pending[0]! + 1;
       if (view.readDetached) {
-        const { bodies, stale } = await view.readDetached(pending);
+        const { bodies, stale } = await view.readDetached(
+          pending,
+          derive.itemTypes ? { itemTypes: derive.itemTypes } : {}
+        );
         if (disposed) return;
         if (stale) passRequested = true;
         let derived = false;

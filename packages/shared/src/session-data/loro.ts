@@ -4,6 +4,7 @@ import type { SubagentRunItem } from '../ai';
 import { resolveLatestSessionGoalFromHistory, type SessionGoalMessage } from '../goal';
 import type { SessionSubagentRun } from './types';
 import { selectTurnOutput } from './read';
+import { runStepPreview, type RunPreviewAccess } from './run-preview';
 import { applyHistoryAction, historyActionTarget } from './history-actions';
 import {
   HistoryImportCursorSchema,
@@ -174,29 +175,16 @@ const displayTextTail = (value: unknown): string | undefined =>
 
 /** The inline task row only needs a latest-action line. Never read tool content,
  * raw output or an entire child text just to derive that line. */
+const loroRunPreviewAccess: RunPreviewAccess = {
+  field: (value, key) => readField(value, key),
+  string: (value) => readString(value),
+  textTail: (value) => displayTextTail(value),
+};
+
 const latestRunStep = (items: unknown): SubagentRunItem[] => {
   for (let index = readLength(items) - 1; index >= 0; index--) {
-    const item = listValueAt(items, index);
-    const type = readString(readField(item, 'type'));
-    if (type === 'tool_call')
-      return [
-        {
-          type,
-          toolCallId: readString(readField(item, 'toolCallId')) ?? '',
-          status: (readString(readField(item, 'status')) ?? 'pending') as Extract<
-            SubagentRunItem,
-            { type: 'tool_call' }
-          >['status'],
-          title: displayTextTail(readField(item, 'title')),
-          toolName: displayTextTail(readField(item, 'toolName')),
-        },
-      ];
-    if (type === 'thought') return [{ type, text: '' }];
-    if (type === 'plan') return [{ type, entries: [] }];
-    if (type === 'text') {
-      const tail = displayTextTail(readField(item, 'text')) ?? '';
-      if (tail.trim()) return [{ type, text: tail }];
-    }
+    const preview = runStepPreview(listValueAt(items, index), loroRunPreviewAccess);
+    if (preview) return [preview];
   }
   return [];
 };

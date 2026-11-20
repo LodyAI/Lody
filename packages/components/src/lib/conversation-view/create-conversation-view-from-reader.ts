@@ -1240,7 +1240,14 @@ export function createConversationViewFromReader(
     return wrapped;
   };
 
-  const readDetached = async (positions: readonly number[]) => {
+  const readDetached = async (
+    positions: readonly number[],
+    options: { readonly itemTypes?: readonly string[] } = {}
+  ) => {
+    const itemTypes = options.itemTypes;
+    const selectItems = reader.readTurnSelectingItems?.bind(reader);
+    const read = (id: string) =>
+      itemTypes && selectItems ? selectItems(id, itemTypes) : readBody(id);
     await ready;
     const bodies = new Map<string, SessionHistory>();
     const pending: { id: string; token: { structure: number; turn: number } }[] = [];
@@ -1252,11 +1259,17 @@ export function createConversationViewFromReader(
       else pending.push({ id, token: turnToken(id) });
     }
     let stale = false;
-    const reads = await Promise.all(pending.map(({ id }) => readBody(id)));
-    reads.forEach((read, index) => {
+    const reads = await Promise.all(pending.map(({ id }) => read(id)));
+    reads.forEach((result, index) => {
       const { id, token } = pending[index]!;
       if (!acceptsToken(id, token)) stale = true;
-      else if (read.state === 'ready') bodies.set(id, displayBody(read));
+      else if (result.state === 'ready')
+        bodies.set(
+          id,
+          itemTypes && selectItems
+            ? (result.turn as unknown as SessionHistory)
+            : displayBody(result)
+        );
     });
     return { bodies, stale };
   };

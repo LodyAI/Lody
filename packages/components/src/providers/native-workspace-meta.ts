@@ -258,6 +258,16 @@ export function createRendererRemoteSessionPort(
         fields: fields.map((field) => ({
           path: [...field.path],
           ...(field.shape ? { shape: true } : {}),
+          ...(field.where
+            ? {
+                where: {
+                  key: field.where.key,
+                  ...(field.where.in ? { in: [...field.where.in] } : {}),
+                  ...(field.where.notIn ? { notIn: [...field.where.notIn] } : {}),
+                },
+              }
+            : {}),
+          ...(field.omit?.length ? { omit: field.omit.map((path) => [...path]) } : {}),
         })),
       }),
     readPathAt,

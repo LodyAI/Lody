@@ -421,6 +421,77 @@ describe('remote Session history reader', () => {
     expect(range).toEqual(data.history.readRange(55, 62));
   });
 
+  it('reads display turns, one child run and selected items as the in-process reader does', async () => {
+    const { data, commit, remote } = await open();
+    const body = 'transcript '.repeat(2000);
+    const task = (taskId: string) => ({
+      type: 'subagent_task',
+      taskId,
+      status: 'in_progress',
+      run: {
+        sessionId: 'root',
+        snapshot: {
+          state: 'running',
+          support: { stream: ['text', 'tool'], progress: false, cancel: false, outputRead: 'none' },
+        },
+        items: [
+          { type: 'tool_call', toolCallId: taskId, status: 'completed', kind: 'edit' },
+          { type: 'text', text: `${body}\nLatest action ${taskId}` },
+          { type: 'text', text: '   ' },
+        ],
+      },
+    });
+    const goal = {
+      type: 'goal',
+      threadId: 'thread-1',
+      turnId: null,
+      objective: 'ship',
+      status: 'active',
+      tokenBudget: null,
+      tokensUsed: 1,
+      timeUsedSeconds: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    await data.commands.appendTurn(turn(0));
+    data.writer.append(
+      turn(1, {
+        items: [
+          { type: 'text', text: 'prose' },
+          task('a'),
+          goal,
+          {
+            type: 'tool_call',
+            toolCallId: 'top',
+            status: 'completed',
+            kind: 'read',
+            title: 'Read',
+          },
+          task('b'),
+        ],
+      } as never)
+    );
+    await commit();
+    await remote.readDirectory(0, 2);
+    const display = await remote.readTurnForDisplay!('turn-1');
+    expect(display).toEqual(data.history.readTurnForDisplay!('turn-1'));
+    expect(JSON.stringify(display)).not.toContain(body);
+    expect(JSON.stringify(display)).toContain('Latest action b');
+    expect(await remote.readSubagentRun!('turn-1', 'root', 'a')).toEqual(
+      data.history.readSubagentRun!('turn-1', 'root', 'a')
+    );
+    expect(await remote.readSubagentRun!('turn-1', 'other-root', 'a')).toBeUndefined();
+    const selected = await remote.readTurnSelectingItems!('turn-1', ['goal', 'tool_call']);
+    const whole = data.history.readTurn('turn-1');
+    if (selected.state !== 'ready' || whole.state !== 'ready') throw new Error('turn missing');
+    expect(selected.turn).toEqual({
+      ...whole.turn,
+      items: (whole.turn.items as { type: string }[]).filter((item) =>
+        ['goal', 'tool_call'].includes(item.type)
+      ),
+    });
+  });
+
   it('reads a whole directory past the page byte limit and the newest goal as the in-process reader does', async () => {
     const { data, commit, remote, port } = await open();
     const goal = (status: string) => ({
