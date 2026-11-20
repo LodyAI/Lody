@@ -49,6 +49,12 @@ export function useTodayMinuteClock(): number {
   return now;
 }
 
+/**
+ * Now, read fresh on every render. The surface's minute tick only makes
+ * mentions re-render; reading its (up to a minute old) value would round a
+ * just-chosen "Later today" countdown up an extra hour.
+ */
 export function useTodayNow(): number {
-  return useContext(TodayNowContext) ?? Date.now();
+  const tick = useContext(TodayNowContext);
+  return Math.max(tick ?? 0, Date.now());
 }
