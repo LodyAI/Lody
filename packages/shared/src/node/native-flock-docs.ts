@@ -1,6 +1,6 @@
 import type { RepoClient } from '@loro-dev/loro-repo-client';
 import type { ExternalFlockDocFeed, ExternalFlockDocsAdapter } from 'loro-repo';
-import { observeFlockRegisters } from './native-repo';
+import { nativeRoomEncryption, observeFlockRegisters } from './native-repo';
 import { registersToBundle, type FlockExportBundle } from '../native-flock-bundle';
 
 /** Type-only loro-repo use keeps its WASM out of the Electron main bundle. */
@@ -30,7 +30,7 @@ export async function observeNativeFlockDoc(
   listener: Parameters<typeof observeFlockRegisters>[3]
 ) {
   const room = { kind: 'flock' as const, id: flockDocId };
-  await client.createRoom(namespace, room, 'plaintext');
+  await client.createRoom(namespace, room, nativeRoomEncryption(client, namespace));
   return observeFlockRegisters(client, namespace, room, listener);
 }
 

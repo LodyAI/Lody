@@ -238,6 +238,7 @@
     "loro-repo": "catalog:"
   },
   "devDependencies": {
+    "@loro-dev/sqlite-riverrun": "0.3.0",
     "@effect/vitest": "catalog:",
     "esbuild": "0.27.0",
     "@types/cross-spawn": "^6.0.6",
