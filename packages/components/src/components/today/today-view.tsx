@@ -561,6 +561,9 @@ export function TodayNodeActions(props: {
     if (!controller) return undefined;
     controller.onNodeMenu = (store, nodeId, anchor) => {
       const rect = anchor.getBoundingClientRect();
+      // Select the node (its subtree shows selected) so the menu's actions,
+      // such as Convert to task, visibly cover everything they will take.
+      controller.selectBlocks(store, [nodeId]);
       setNodeMenu({ store, nodeId, x: rect.left, y: rect.bottom + 4 });
     };
     return () => {
@@ -572,7 +575,10 @@ export function TodayNodeActions(props: {
       {nodeMenu ? (
         <TodayNodeMenu
           {...nodeMenu}
-          onClose={() => setNodeMenu(null)}
+          onClose={() => {
+            setNodeMenu(null);
+            controller?.clearBlockSelection();
+          }}
           onConvert={() => {
             const [fragment] = nodeMenu.store.outline.extract([nodeMenu.nodeId]);
             setNodeMenu(null);
@@ -590,7 +596,10 @@ export function TodayNodeActions(props: {
         open={converting !== null}
         prompt={converting?.prompt ?? ''}
         onOpenChange={(open) => {
-          if (!open) setConverting(null);
+          if (!open) {
+            setConverting(null);
+            controller?.clearBlockSelection();
+          }
         }}
         onAccepted={(sessionId) => {
           const target = converting;
