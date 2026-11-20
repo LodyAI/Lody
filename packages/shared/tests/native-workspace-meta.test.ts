@@ -473,11 +473,45 @@ describe('remote Session history reader', () => {
         options
       );
       const remote = await readRemoteHistoryTranscript(port, options);
-      expect({ total: remote.total, positions: remote.positions }).toEqual(local);
+      expect(remote.positions).toEqual(local.positions);
+      expect(remote.hasMore).toBe(local.total > local.positions.length);
       expect(remote.entries).toEqual(
         data.writer.readSelected(() => local.positions, { transcriptVisibility: true })
       );
     }
+  });
+
+  it('reads the same rows for the latest transcript turns whatever the history length', async () => {
+    const { data, commit, port } = await open();
+    let rowsRead = 0;
+    const counting: typeof port = {
+      ...port,
+      readListFields: async (start, end, fields) => {
+        const page = await port.readListFields(start, end, fields);
+        rowsRead += page.rows.length;
+        return page;
+      },
+    };
+    const readTail = async () => {
+      rowsRead = 0;
+      const result = await readRemoteHistoryTranscript(counting, { limit: 50 });
+      return { result, rowsRead };
+    };
+    for (let i = 0; i < 300; i++) await data.commands.appendTurn(turn(i));
+    await commit();
+    const short = await readTail();
+    for (let i = 300; i < 3000; i++) await data.commands.appendTurn(turn(i));
+    await commit();
+    const long = await readTail();
+    // One page of projections plus the 50 selected turns, at 300 turns and at 3,000.
+    expect(long.rowsRead).toBe(short.rowsRead);
+    expect(long.rowsRead).toBeLessThanOrEqual(64 + 50);
+    expect(long.result.hasMore).toBe(true);
+    expect(long.result.positions).toEqual(Array.from({ length: 50 }, (_, i) => 2950 + i));
+    // A history with no more visible turns than the limit has nothing earlier.
+    const all = await readRemoteHistoryTranscript(port, { limit: 3000 });
+    expect(all.hasMore).toBe(false);
+    expect((await readRemoteHistoryTranscript(port, { limit: 2999 })).hasMore).toBe(true);
   });
 
   it('notifies appends structurally and field edits by turn id, never by content', async () => {

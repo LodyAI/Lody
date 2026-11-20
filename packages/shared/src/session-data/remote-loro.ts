@@ -1,7 +1,7 @@
 import { resolveLatestSessionGoalFromHistory, type SessionGoalMessage } from '../goal';
 import {
   historyQueryRow,
-  selectTranscriptHistoryPositions,
+  selectTranscriptTail,
   type HistoryQueryAccess,
   type HistoryQueryRow,
 } from './history-selection';
@@ -458,35 +458,41 @@ const jsonQueryAccess: HistoryQueryAccess = {
 
 /**
  * The visible transcript tail of a remote history, as the in-process
- * `readHistoryTranscript`: every turn's role and items are projected page by
- * page (bodies are not kept), then only the selected turns are read whole.
- * A selected turn whose id moved is a concurrent structural edit and the read
- * starts again.
+ * `readHistoryTranscript`: turns are projected back from the tail in bounded
+ * pages (bodies are not kept) until the limit and one more visible turn are
+ * found, then only the selected turns are read whole. A selected turn whose id
+ * moved is a concurrent structural edit and the read starts again.
  */
 export async function readRemoteHistoryTranscript(
   port: Pick<RemoteLoroHistoryPort, 'readListFields'>,
   options: { limit?: number; reverse?: boolean }
-): Promise<{ total: number; positions: number[]; entries: SessionEntry[] }> {
+): Promise<{ hasMore: boolean; positions: number[]; entries: SessionEntry[] }> {
   for (let attempt = 0; ; attempt++) {
-    const rows: HistoryQueryRow[] = [];
-    const ids: unknown[] = [];
-    let at = 0;
-    for (;;) {
-      const page = await port.readListFields(at, undefined, TRANSCRIPT_FIELDS);
-      for (const [id, role, items] of page.rows) {
-        ids.push(id);
-        rows.push(historyQueryRow({ role, items }, jsonQueryAccess, true));
-      }
-      at = page.start + page.rows.length;
-      if (page.rows.length === 0 || at >= page.len) break;
-    }
-    const selected = selectTranscriptHistoryPositions(rows, options);
+    const ids = new Map<number, unknown>();
+    const { len } = await port.readListFields(0, 0, []);
+    const selected = await selectTranscriptTail(
+      len,
+      async (from, to) => {
+        const rows: HistoryQueryRow[] = [];
+        for (let at = from; at < to;) {
+          const page = await port.readListFields(at, to, TRANSCRIPT_FIELDS);
+          for (const [offset, [id, role, items]] of page.rows.entries()) {
+            ids.set(page.start + offset, id);
+            rows.push(historyQueryRow({ role, items }, jsonQueryAccess, true));
+          }
+          if (page.rows.length === 0) break;
+          at = page.start + page.rows.length;
+        }
+        return rows;
+      },
+      options
+    );
     const entries: SessionEntry[] = [];
     let moved = false;
     for (const position of selected.positions) {
       const page = await port.readListFields(position, position + 1, WHOLE_TURN);
       const turn = page.rows[0]?.[0] as SessionEntry | undefined;
-      if (!turn || turn.id !== ids[position]) {
+      if (!turn || turn.id !== ids.get(position)) {
         moved = true;
         break;
       }

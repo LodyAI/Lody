@@ -231,12 +231,17 @@ history is not in the document). Writes outside a turn (rename, archive, queue
 edits from the CLI) and the dispatch-default reads that precede a send still open
 a replica.
 
-`lody session history` counts every visible turn, and visibility depends on each
-item's type and whether its text is blank, so the remote read projects every
-turn's items page by page and keeps only the projection, then reads the selected
-turns whole. With 50k turns that is about 4.3 s, against 10.4 s for the same
-selection on an open replica (after a 0.7–1.1 s open). Neither is bounded; a
-bounded count needs a visibility index or a nested-field projection primitive.
+`lody session history` reads only as far back as its limit needs. Visibility
+depends on each item's type and whether its text is blank, so the read projects
+turns back from the tail in pages of 64 (`selectTranscriptTail`) until it has the
+limit plus one more visible turn, which sets `hasMore`; then it reads the selected
+turns whole. The local replica does the same through the writer's ranged query.
+With the owner's agreement the JSON output reports `hasMore` instead of a total;
+only `--all`, which reads everything anyway, still reports `total`. Default 50
+turns: 16–33 ms through the engine and 6–10 ms on a replica, the same at 5k and
+50k turns (it was 4.1–4.4 s and 10.1–11.3 s). Roost Sessions keep their owner's
+whole-history transcript reply, which is a wire format; `hasMore` is derived from
+its count.
 
 ## Schedule and Preview comment documents
 
@@ -477,13 +482,25 @@ for a loaded room; RSS deltas below 20 MB are within measurement noise.
   packaged desktop run exists yet. The daemon reads idle Sessions from the engine
   for the paths listed above; the others still open a replica.
 - The engine host unloads least recently used idle rooms past 16 per namespace
-  and, with `lody/idle-room-byte-budget`, past 64 MiB of their encoded size.
+  and past 64 MiB of their encoded size (loro-repo #325).
   Twenty idle 20k-turn Sessions read once: host +275 MB with the count alone,
-  +140 MB with the budget. Freed memory is not always returned to the system:
-  after whole-history transcript reads the host stayed about 330 MB above its
-  start.
+  +140 MB with the budget. A loaded room costs about 4.5 times its encoded size,
+  so the default budget can keep about 300 MB of idle rooms resident.
+- On Linux glibc the host kept memory freed by unloaded rooms mapped: six 50k-turn
+  Sessions read in cycles reached 412–699 MB against a live set of about 312 MB.
+  The engine now trims after unloading rooms (loro-repo #326): 337–375 MB, flat
+  across cycles. Other allocators were not measured.
 - A commit already sent when the host dies is an unknown outcome. Per the SDK
   contract this latches that repo's metadata writes until it is recreated; reads
   continue. Commits attempted while disconnected are certain non-commits.
 - No signed installer, real-window acceptance or platforms other than Linux x64
-  have been exercised.
+  have been exercised (see Pending acceptance).
+
+## Pending acceptance
+
+These checks wait for the real desktop acceptance run:
+
+- macOS: repeat the load/unload cycle above (six large idle Sessions read
+  repeatedly, so the byte budget unloads rooms) and record the host RSS per
+  cycle. The trim fix applies only to glibc; macOS uses its own allocator.
+- A packaged desktop with its main-process IPC hop, on each shipped platform.

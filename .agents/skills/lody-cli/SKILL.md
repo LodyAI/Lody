@@ -66,13 +66,13 @@ prerequisites, shared conventions, business rules and the actions to confirm fir
 
 ## Choose the command from the request
 
-| User intent | First action and next step |
-| ----------- | -------------------------- |
-| Give a named Role a new task | Find it with `agent-role list --json`, inspect it with `agent-role get <id>`, then use `session create --agent-role <id>`. |
-| Start a new task with a particular agent | Resolve the workspace, machine and agent config, then use `session create`. |
-| Continue earlier work | Find the existing session with `session list --query <text> --json`, check `show`/`history`, then use `session chat <id>`. |
-| Check progress or read a result | Use `session status`, `observe` or `history`; reading does not require sending another prompt. |
-| Run later or repeatedly | Resolve the target and time zone, then use `schedule create --file <draft.json>`. |
+| User intent                              | First action and next step                                                                                                 |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Give a named Role a new task             | Find it with `agent-role list --json`, inspect it with `agent-role get <id>`, then use `session create --agent-role <id>`. |
+| Start a new task with a particular agent | Resolve the workspace, machine and agent config, then use `session create`.                                                |
+| Continue earlier work                    | Find the existing session with `session list --query <text> --json`, check `show`/`history`, then use `session chat <id>`. |
+| Check progress or read a result          | Use `session status`, `observe` or `history`; reading does not require sending another prompt.                             |
+| Run later or repeatedly                  | Resolve the target and time zone, then use `schedule create --file <draft.json>`.                                          |
 
 Reuse IDs returned by discovery commands. If several candidates still fit the request,
 ask which one the user means before dispatching. For repository work, resolve the repo
@@ -124,19 +124,19 @@ stdout is not a terminal, it can sit with no visible output. Have the user run i
 their terminal, or have them provide a CLI API key and run `lody login --auth <key>`
 through an approved secret channel. Do not paste the key into the conversation.
 
-| Symptom | Next step |
-| ------- | --------- |
-| Missing or rejected Lody credentials | Have the user sign in from their terminal, or use `lody login --auth <key>` with a key the user provides. An existing valid login is reused. |
-| Browser does not open (when the user runs it) | Give the user the authorization URL printed by the CLI to open manually; keep the pending login running. Browser authorization requires the user's action. |
-| Authorization code expired or authorization timed out | In the user's terminal, start a new `lody login` and use its new authorization URL; do not keep a stale login running. |
-| Authorization denied | Report the denial and stop automatic retries. |
-| Network error, auth service unreachable or validation unavailable | Preserve saved credentials, check connectivity and retry after recovery. Do not use logout or cache reset as a network repair. |
-| Non-interactive daemon start requires login | Have the user run `lody login` in a terminal, or use an already available CLI API key or machine connection token through an approved secret channel. Do not ask them to paste secrets into the conversation. |
-| Lody commands work, but the selected agent/provider reports an authentication error | Inspect the selected agent config without `--show-secrets`; follow that agent/provider's authentication instructions on its target machine. Repeating Lody login does not repair provider credentials. |
+| Symptom                                                                             | Next step                                                                                                                                                                                                     |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Missing or rejected Lody credentials                                                | Have the user sign in from their terminal, or use `lody login --auth <key>` with a key the user provides. An existing valid login is reused.                                                                  |
+| Browser does not open (when the user runs it)                                       | Give the user the authorization URL printed by the CLI to open manually; keep the pending login running. Browser authorization requires the user's action.                                                    |
+| Authorization code expired or authorization timed out                               | In the user's terminal, start a new `lody login` and use its new authorization URL; do not keep a stale login running.                                                                                        |
+| Authorization denied                                                                | Report the denial and stop automatic retries.                                                                                                                                                                 |
+| Network error, auth service unreachable or validation unavailable                   | Preserve saved credentials, check connectivity and retry after recovery. Do not use logout or cache reset as a network repair.                                                                                |
+| Non-interactive daemon start requires login                                         | Have the user run `lody login` in a terminal, or use an already available CLI API key or machine connection token through an approved secret channel. Do not ask them to paste secrets into the conversation. |
+| Lody commands work, but the selected agent/provider reports an authentication error | Inspect the selected agent config without `--show-secrets`; follow that agent/provider's authentication instructions on its target machine. Repeating Lody login does not repair provider credentials.        |
 
 Common CLI auth errors are ``Not logged in. Run `lody login` first.``,
 ``CLI token is invalid or expired. Run `lody login` again.``, and
-``Invalid API key. Generate a new key and retry.`` Use a read-only command such as
+`Invalid API key. Generate a new key and retry.` Use a read-only command such as
 `lody workspace list --json` to probe authentication: success means the Lody session is
 authenticated, while failure exits non-zero with `{"ok":false,"error":"…"}`.
 
@@ -192,12 +192,12 @@ needed.
 
 ## What each command needs
 
-| Also needs the Lody runtime on this machine | Needs only sign-in |
-| ------------------------------------------- | ------------------ |
+| Also needs the Lody runtime on this machine                                   | Needs only sign-in                                                                                                                                      |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `session create`, `session chat`, `session cancel` **targeting this machine** | The same commands **targeting another machine** (that machine must be online); `session list/history/show/status/observe/rename/archive/restore/delete` |
-| `agent-config refresh-capabilities` (this machine only) | `workspace list`, `github list`, `machine list` |
-| `project add/delete`, plain `project list` | `project list --workspace/--machine/--catalog`, `schedule *` |
-| `operation list` (operations recorded on this machine) | `agent-config` CRUD, `agent-role list/get`, `mcp *`, `sync`, `export` |
+| `agent-config refresh-capabilities` (this machine only)                       | `workspace list`, `github list`, `machine list`                                                                                                         |
+| `project add/delete`, plain `project list`                                    | `project list --workspace/--machine/--catalog`, `schedule *`                                                                                            |
+| `operation list` (operations recorded on this machine)                        | `agent-config` CRUD, `agent-role list/get`, `mcp *`, `sync`, `export`                                                                                   |
 
 `app reset-cache`, `review` and `review prompt` need neither sign-in nor the runtime.
 Targeting another machine for `session create`, `session chat` or `session cancel` still
@@ -260,6 +260,7 @@ requires that machine online; it does not require a local runtime.
   - `--limit` caps the count.
 - `history [id]` shows the visible conversation only, without reasoning or tool calls.
   Options: `--limit` (default 50), `--all`, `--reverse`, `--json`/`--jsonl`.
+  `--json` reports `hasMore` when earlier turns exist; only `--all` reports `total`.
 - `show [id]` prints session details. `status [id]` prints whether it is running now.
 - `observe [id]` watches a session without marking it read.
   - By default it prints a snapshot. `--jsonl --follow` streams the events `snapshot`,

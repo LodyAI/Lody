@@ -73,7 +73,7 @@ it('keeps rooted directory cursors, metadata selection and bounded replay equiva
     try {
       const transcript = toSessionTranscriptEntries(expected);
       expect(await readSessionTranscript(fixture.backend, { limit: 3 })).toEqual({
-        total: transcript.length,
+        hasMore: transcript.length > 3,
         entries: selectSessionTranscriptEntries(transcript, { limit: 3 }),
       });
       const query = await fixture.backend.readHistoryQuery();
@@ -177,7 +177,7 @@ it.each([undefined, 1, 2])(
         const transcript = await readSessionTranscript(client, options);
         const afterTranscript = toSessionTranscriptEntries(await owner.readHistory());
         expect(transcript).toEqual({
-          total: afterTranscript.length,
+          hasMore: afterTranscript.length > options.limit,
           entries: selectSessionTranscriptEntries(afterTranscript, options),
         });
       }

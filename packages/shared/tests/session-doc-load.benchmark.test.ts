@@ -14,7 +14,7 @@ import {
   createRemoteLoroHistoryReader,
   readRemoteHistoryTranscript,
 } from '../src/session-data/remote-loro';
-import { selectTranscriptHistoryPositions } from '../src/session-data/history-selection';
+import { selectTranscriptTail } from '../src/session-data/history-selection';
 import type { SessionHistory, SessionId } from '../src';
 
 // Opt-in: LODY_SESSION_LOAD_BENCH=<turns>[,<turns>...]. Measures the
@@ -322,11 +322,12 @@ describe.skipIf(!idleBench)('Daemon reads of idle Sessions', () => {
         data.history.readTurn(directory.at(-1)!.turnId);
         const latestTurnMs = ms(at);
         at = performance.now();
-        const visible = selectTranscriptHistoryPositions(
-          data.writer.readQuery({ transcriptVisibility: true }),
+        const visible = await selectTranscriptTail(
+          await data.history.count(),
+          (from, to) => data.writer.readQuery({ transcriptVisibility: true, from, to }),
           { limit: 50 }
         );
-        data.writer.readSelected(() => visible.positions, { transcriptVisibility: true });
+        data.writer.readAt(visible.positions);
         const transcriptMs = ms(at);
         replicaReads.push({ openMs, statusMs, latestTurnMs, transcriptMs });
         retained.push(data);
