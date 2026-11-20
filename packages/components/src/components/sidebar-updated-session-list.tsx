@@ -190,6 +190,8 @@ export type SidebarUpdatedItem = {
   orderKey?: string | null;
   /** Epoch ms until which the session is snoozed in Status Later. */
   snoozedUntil?: number | null;
+  /** Monotonic watermark of the latest snoozedUntil already woken. */
+  snoozeWokenUntil?: number | null;
   /** Epoch ms when the session was explicitly settled in Status Settled. */
   settledAt?: number | null;
   /** Epoch ms when the user explicitly restored an inactive session to Focus. */

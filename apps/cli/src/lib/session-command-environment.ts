@@ -10,6 +10,7 @@ import {
   type SessionSteerResponse,
   type SessionTurnInputConfig,
 } from '@lody/shared';
+import type { WorkspaceDirectoryMember } from '@lody/cloud-api';
 import type { AuthContext } from './command-runtime';
 import type { LoroDocumentManager } from './loro/doc';
 import type { MachineAccessCheckResult, WorkspaceSummary } from './workspace';
@@ -63,6 +64,7 @@ export interface SessionCommandEnvironment {
     requesterUserId: string;
     localProjectId?: string;
   }): Promise<MachineAccessCheckResult>;
+  listWorkspaceMembers?(args: { workspaceId: WorkspaceId }): Promise<WorkspaceDirectoryMember[]>;
 }
 
 const environments = new AsyncLocalStorage<SessionCommandEnvironment>();

@@ -3855,6 +3855,25 @@ export async function prepareSessionInput(
     openedBySessionId,
     openedByRootSessionId,
   } = resolved;
+  // Assigning a human owner grants session visibility to that user, so verify
+  // the target owner already has access to the resolved machine and local project.
+  if (
+    sessionOwnerUserId !== requesterUserId ||
+    (ownerTarget !== undefined && sessionOwnerUserId !== auth.userId)
+  ) {
+    const ownerAccess = await readResolvedSessionMachineAccess({
+      auth,
+      workspaceId: workspace.id as WorkspaceId,
+      machineId: targetMachine.id,
+      requester: { userId: sessionOwnerUserId, isDelegated: true },
+      localProjectId: project?.kind === 'local' ? project.localProjectId : undefined,
+    });
+    if (!ownerAccess.allowed) {
+      throw new Error(
+        `Session owner ${sessionOwnerUserId} does not have access to ${targetMachine.id}: ${ownerAccess.reason}`
+      );
+    }
+  }
   const authoredDispatchOverrides: Pick<
     ResolvedTurnDispatchConfig,
     'modeId' | 'modelId' | 'configOptionValues'

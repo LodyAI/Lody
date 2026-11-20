@@ -21,15 +21,18 @@ creating conversations.
 
 - `SessionMeta.userId` remains the single human owner and authorization
   identity for a conversation.
-- `lody_member_list` lists known human members in the current workspace for
-  owner selection (read-only; directory entries never grant execution
-  permissions).
+- `lody_member_list` lists current workspace members from the authoritative
+  workspace directory (`workspaceMembers.listForCliToken`, matching the UI's
+  `workspaceMembers.list`); on shared machines `isCurrentUser` reflects the
+  human driving the turn. Directory entries never grant execution permissions.
 - When an Agent creates a session through MCP (`lody_session_create`,
-  `lody_session_create_many`), it may pass `ownerUserId: string` (validated
-  against known workspace members). When omitted, it inherits the calling
-  session's `userId`. The resolved owner is frozen into the canonical command
-  at acceptance time so daemon restart recovery preserves it, while turn
-  authorization remains bound to the driving human requester.
+  `lody_session_create_many`), it may pass `ownerUserId: string`. When
+  omitted, it inherits the calling session's `userId`. The resolved owner is
+  frozen into the canonical command at acceptance time so daemon restart
+  recovery preserves it. After resolving the target machine and local
+  project, creation verifies that the target owner already has access to that
+  machine and local project (mirroring UI owner transfer), while turn
+  authorization remains independently bound to the driving human requester.
 
 ### Sidebar Status view
 
@@ -50,11 +53,13 @@ creating conversations.
      ascending (soonest wake-up first) when expanded. Each row displays a
      compact countdown indicator (countdown icon + `3d`, `2h`, `45m`, `<1m`)
      showing when it returns to Focus. Once `now >= snoozedUntil`, a one-shot
-     wake-up updates `lastMessageAt` so the conversation becomes unread,
-     assigns a top Focus `orderKey` (still below Pinned), records
-     `focusRestoredAt` (so older sessions also surface), and clears
-     `snoozedUntil` so the same wake-up never repeats across devices or
-     reopens.
+     wake-up anchored to `snoozedUntil` (gated on online sync) advances
+     `snoozeWokenUntil` (without deleting `snoozedUntil`, so a newer re-snooze
+     is never clobbered), updates `lastMessageAt` to `max(lastMessageAt,
+     snoozedUntil)` so the conversation becomes unread without re-marking
+     already-read sessions unread on late-syncing devices, assigns a top Focus
+     `orderKey` (still below Pinned) when unread, and records
+     `focusRestoredAt` (so older sessions also surface).
   3. **Settled** (`已收尾`): Collapsed by default (showing its count).
      Contains conversations explicitly settled (`settledAt` with no newer
      message) or inactive for at least 7 days (`now - lastMessageAt >= 7d`,
@@ -90,11 +95,13 @@ creating conversations.
   uppercase hex fractional index via `@loro-dev/fractional-index`). Both
   Pinned and Focus use `orderKey`; unpinning clears `pinSectionId` while
   retaining `orderKey`.
-- Three optional fields are added to `SessionMeta` in Meta Flock (shared
+- Four optional fields are added to `SessionMeta` in Meta Flock (shared
   across workspace members; modifying shared status or Focus order requires
   write permission; per-user private status sorting is out of scope for this
   phase):
   - `snoozedUntil?: number` (epoch ms)
+  - `snoozeWokenUntil?: number` (epoch ms; monotonic watermark of the latest
+    expired `snoozedUntil` already woken)
   - `settledAt?: number` (epoch ms; written as `max(serverNow, lastMessageAt)`
     to tolerate clock skew)
   - `focusRestoredAt?: number` (epoch ms; overrides the 7-day inactivity rule

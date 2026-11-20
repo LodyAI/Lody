@@ -698,6 +698,7 @@ export type CloudApi = {
   };
   workspaceMembers: {
     list: Query<{ workspaceId: string; accountId: string }, WorkspaceDirectoryMember[]>;
+    listForCliToken: Query<{ cliToken: string; workspaceId: string }, WorkspaceDirectoryMember[]>;
   };
   auth: {
     transferWorkspaceOwnership: Mutation<{ workspaceId: string; targetMemberId: string }, null>;

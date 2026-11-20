@@ -123,7 +123,10 @@ import {
 } from '@/lib/agent-role-create';
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
 import { readMachineLocalProjects } from '@/lib/local-project-meta';
-import { listWorkspaceGitHubRepositoriesForCliToken } from '@/lib/workspace';
+import {
+  listWorkspaceGitHubRepositoriesForCliToken,
+  listWorkspaceMembersForCliToken,
+} from '@/lib/workspace';
 import {
   cancelSessionTurn,
   createSessionResult,
@@ -1488,30 +1491,16 @@ type ResolvedMcpSessionCreate = {
 
 const resolveMcpSessionCreate = (
   input: SessionCreateCommandInput,
-  invoking: InvokingTurnContext | undefined,
+  _invoking: InvokingTurnContext | undefined,
   requester: Pick<SessionMeta, 'machineId' | 'project' | 'userId'>,
   catalogRole: AgentRole | undefined,
   /**
    * The requester Local Project's linked GitHub repository, present only when
    * it is enabled in this workspace (`resolveRoleCloneableRepo`).
    */
-  cloneableRepo?: string,
-  knownMemberIds?: ReadonlySet<string>
+  cloneableRepo?: string
 ): ResolvedMcpSessionCreate => {
   const resolvedOwnerUserId = input.ownerUserId ?? requester.userId;
-  if (
-    input.ownerUserId &&
-    input.ownerUserId !== requester.userId &&
-    input.ownerUserId !== invoking?.identity.userId &&
-    knownMemberIds &&
-    !knownMemberIds.has(input.ownerUserId)
-  ) {
-    throw new LodyOperationStoreError(
-      'INVALID_OWNER',
-      `Target ownerUserId ${input.ownerUserId} is not a known member of this workspace.`,
-      false
-    );
-  }
   if (!input.agentRoleId) {
     return {
       input: {
@@ -2206,33 +2195,13 @@ const MemberListToolInputSchema = z
 
 type MemberListToolInput = z.infer<typeof MemberListToolInputSchema>;
 
-const collectKnownWorkspaceMemberIds = async (
-  manager: LoroDocumentManager,
-  currentUserId: string
-): Promise<Set<string>> => {
-  const memberIds = new Set<string>();
-  if (currentUserId.trim()) memberIds.add(currentUserId.trim());
-  const [sessions, machines] = await Promise.all([
-    listAliveSessionMetas(manager),
-    listAliveDocMetas<MachineMeta>(manager, isMachineDocRoomId),
-  ]);
-  for (const { meta } of sessions) {
-    if (typeof meta.userId === 'string' && meta.userId.trim()) {
-      memberIds.add(meta.userId.trim());
-    }
-  }
-  for (const { meta } of machines) {
-    if (typeof meta.ownerUserId === 'string' && meta.ownerUserId.trim()) {
-      memberIds.add(meta.ownerUserId.trim());
-    }
-  }
-  return memberIds;
-};
-
 const buildMemberList = async (input: MemberListToolInput): Promise<unknown> => {
   const ctx = getSessionContext();
   const auth = getCliAuthContextOrThrow('mcp');
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
+  const invokingIdentity = buildInvocationIdentity(await resolveInvokingTurnSource());
+  const currentUserId = invokingIdentity.userId ?? auth.userId;
+
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
     const currentSessionRecord = await manager.repo.getDocMeta(
       getSessionRoomId(ctx.sessionId as SessionId)
@@ -2241,30 +2210,40 @@ const buildMemberList = async (input: MemberListToolInput): Promise<unknown> => 
       !isLoroRepoDocDeleted(currentSessionRecord) &&
       typeof (currentSessionRecord?.meta as SessionMeta | undefined)?.userId === 'string'
         ? (currentSessionRecord?.meta as SessionMeta).userId
-        : auth.userId;
+        : currentUserId;
 
-    const memberIds = await collectKnownWorkspaceMemberIds(manager, auth.userId);
+    const env = getSessionCommandEnvironment();
+    const directoryMembers = env?.listWorkspaceMembers
+      ? await env.listWorkspaceMembers({ workspaceId: workspace.id as WorkspaceId })
+      : !auth.token
+        ? [
+            {
+              userId: currentUserId,
+              name: currentUserId === auth.userId ? (auth.userName ?? null) : null,
+              image: null,
+            },
+          ]
+        : await listWorkspaceMembersForCliToken({
+            token: auth.token,
+            workspaceId: workspace.id,
+          });
+
     const queryLower = input.query?.toLowerCase();
     const limit = input.limit ?? DEFAULT_MCP_SESSION_LIST_LIMIT;
 
-    const members = Array.from(memberIds)
-      .sort((a, b) => a.localeCompare(b))
-      .map((userId) => {
-        const isSelf = userId === auth.userId;
-        return {
-          userId,
-          ...(isSelf && auth.userName ? { name: auth.userName } : {}),
-          ...(isSelf && auth.userEmail ? { email: auth.userEmail } : {}),
-          isCurrentUser: isSelf,
-          isCurrentSessionOwner: userId === currentSessionOwnerId,
-        };
-      })
+    const members = [...directoryMembers]
+      .sort((a, b) => a.userId.localeCompare(b.userId))
+      .map((member) => ({
+        userId: member.userId,
+        ...(member.name ? { name: member.name } : {}),
+        isCurrentUser: member.userId === currentUserId,
+        isCurrentSessionOwner: member.userId === currentSessionOwnerId,
+      }))
       .filter((member) => {
         if (!queryLower) return true;
         return (
           member.userId.toLowerCase().includes(queryLower) ||
-          Boolean(member.name?.toLowerCase().includes(queryLower)) ||
-          Boolean(member.email?.toLowerCase().includes(queryLower))
+          Boolean(member.name?.toLowerCase().includes(queryLower))
         );
       });
 
@@ -3411,9 +3390,6 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
       ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
       : undefined;
     const catalogRole = args.agentRoleId ? roleCatalog?.get(args.agentRoleId) : undefined;
-    const knownMemberIds = args.ownerUserId
-      ? await collectKnownWorkspaceMemberIds(manager, auth.userId)
-      : undefined;
     const resolved = resolveMcpSessionCreate(
       args,
       invoking,
@@ -3425,8 +3401,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
         currentSession,
         invoking.identity.userId,
         roleRunsElsewhere(catalogRole, currentSession.machineId)
-      ),
-      knownMemberIds
+      )
     );
     const canonicalCommand = buildResolvedMcpCreateCanonicalCommand(resolved, args.deadlineSeconds);
     const retry = await withOperationStore((store) =>
@@ -4234,10 +4209,6 @@ const startSessionCreateManyOperation = async (
         )
       )
     );
-    const hasExplicitOwner = expanded.some((item) => Boolean(item.ownerUserId));
-    const knownMemberIds = hasExplicitOwner
-      ? await collectKnownWorkspaceMemberIds(manager, auth.userId)
-      : undefined;
     const resolvedItems = expanded.map((item) => {
       if (!item.prompt) return { resolved: undefined, error: undefined };
       try {
@@ -4262,8 +4233,7 @@ const startSessionCreateManyOperation = async (
             invoking,
             requester,
             item.agentRoleId ? roleCatalog?.get(item.agentRoleId) : undefined,
-            cloneableRepo,
-            knownMemberIds
+            cloneableRepo
           ),
           error: undefined,
         };
@@ -5332,9 +5302,6 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
             ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
             : undefined;
           const catalogRole = args.agentRoleId ? roleCatalog?.get(args.agentRoleId) : undefined;
-          const knownMemberIds = args.ownerUserId
-            ? await collectKnownWorkspaceMemberIds(manager, auth.userId)
-            : undefined;
           const resolved = resolveMcpSessionCreate(
             args,
             invoking,
@@ -5346,8 +5313,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
               currentSession,
               invoking.identity.userId,
               roleRunsElsewhere(catalogRole, currentSession.machineId)
-            ),
-            knownMemberIds
+            )
           );
           await freezeInvokingAuthor(manager, currentSession, invoking);
           const options = buildMcpCreateOptions(resolved.input, ctx);

@@ -1,7 +1,7 @@
 import { ConvexHttpClient } from 'convex/browser';
 import { CloudE2eeDeviceRevoked } from './cloud-e2ee-errors';
 import { z } from 'zod';
-import { api } from '@lody/cloud-api';
+import { api, type WorkspaceDirectoryMember } from '@lody/cloud-api';
 import { BILLING_PLAN_TIERS } from '@lody/shared';
 import { LODY_AUTH_URL } from '@/utils/const';
 
@@ -289,6 +289,31 @@ export async function canDelegateMachineUseForCliToken(input: {
   } catch (error) {
     if (error instanceof Error && MISSING_PUBLIC_FUNCTION_ERROR.test(error.message)) {
       return null;
+    }
+    throw error;
+  }
+}
+
+const WorkspaceDirectoryMemberSchema = z.object({
+  userId: z.string(),
+  name: z.string().nullable(),
+  image: z.string().nullable(),
+});
+
+export async function listWorkspaceMembersForCliToken(input: {
+  token: string;
+  workspaceId: string;
+}): Promise<WorkspaceDirectoryMember[]> {
+  const client = createAuthConvexClient();
+  try {
+    const raw = await client.query(api.workspaceMembers.listForCliToken, {
+      cliToken: input.token,
+      workspaceId: input.workspaceId,
+    });
+    return z.array(WorkspaceDirectoryMemberSchema).parse(raw);
+  } catch (error) {
+    if (error instanceof Error && MISSING_PUBLIC_FUNCTION_ERROR.test(error.message)) {
+      throw new Error('Workspace member listing is not available on this backend yet.');
     }
     throw error;
   }

@@ -1192,20 +1192,30 @@ export function useSessionActions(): SessionActions {
       const existing = await runtime.repo.getDocMeta(roomId);
       if (isLoroRepoDocDeleted(existing)) return;
       const meta = existing?.meta as SessionMeta | undefined;
-      // One-shot guard across devices and reopens: only fire if this exact snooze is still set.
+      // One-shot guard across devices and reopens: only fire if this exact snooze
+      // is still active, has elapsed, and has not already been woken.
       if (!meta || meta.snoozedUntil !== expectedSnoozedUntil) return;
+      if (getServerNow() < expectedSnoozedUntil) return;
+      const existingWokenUntil = getFiniteTimestamp(meta.snoozeWokenUntil) ?? 0;
+      if (existingWokenUntil >= expectedSnoozedUntil) return;
 
-      const lastMessageAt = getFiniteTimestamp(meta.lastMessageAt) ?? 0;
-      const lastReadAt = getFiniteTimestamp(meta.lastReadAt) ?? 0;
-      const wakeAt = Math.max(getServerNow(), expectedSnoozedUntil, lastMessageAt, lastReadAt + 1);
+      // Anchor wake-up timestamps strictly to `expectedSnoozedUntil` (never Date.now())
+      // and advance `snoozeWokenUntil` instead of deleting `snoozedUntil`:
+      // - Once read after `expectedSnoozedUntil`, a concurrent/late wake for the same
+      //   event can never push `lastMessageAt` past `lastReadAt` or re-top the row.
+      // - A newer user-set `snoozedUntil` on another device is never clobbered.
+      const wakeAt = expectedSnoozedUntil;
+      const existingLastMessageAt = getFiniteTimestamp(meta.lastMessageAt) ?? 0;
+      const existingLastReadAt = getFiniteTimestamp(meta.lastReadAt) ?? 0;
+      const existingFocusRestoredAt = getFiniteTimestamp(meta.focusRestoredAt) ?? 0;
       const otherRoots = focusRootPlacements.filter((p) => p.id !== sessionId);
-      const topOrderKey = planTopOrderKey(otherRoots);
+      const topOrderKey = existingLastReadAt < wakeAt ? planTopOrderKey(otherRoots) : undefined;
       await updateSessionMetadata(sessionId, {
-        orderKey: topOrderKey,
-        lastMessageAt: wakeAt,
-        snoozedUntil: undefined,
-        settledAt: undefined,
-        focusRestoredAt: wakeAt,
+        snoozeWokenUntil: expectedSnoozedUntil,
+        ...(topOrderKey ? { orderKey: topOrderKey } : {}),
+        ...(wakeAt > existingLastMessageAt ? { lastMessageAt: wakeAt } : {}),
+        ...(wakeAt > existingFocusRestoredAt ? { focusRestoredAt: wakeAt } : {}),
+        ...(meta.settledAt !== undefined ? { settledAt: undefined } : {}),
       });
     },
     [runtime, updateSessionMetadata]

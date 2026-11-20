@@ -122,6 +122,7 @@ const SESSION_LIST_VISIBLE_KEYS: readonly (keyof SessionMeta)[] = [
   'pinSectionId',
   'orderKey',
   'snoozedUntil',
+  'snoozeWokenUntil',
   'settledAt',
   'focusRestoredAt',
   'diffStats',

@@ -14,8 +14,8 @@ Translation: current
 ### MCP 成员查询与人类 Owner 指定
 
 - `SessionMeta.userId` 保持为全仓唯一的人类归属与权限标识。
-- 新增只读工具 `lody_member_list`，列出当前工作区已知人类成员供指定 Owner 使用（不赋予任何机器或工作区执行权限）。
-- Agent 通过 MCP 创建对话（`lody_session_create`、`lody_session_create_many`）时可传入 `ownerUserId: string`（校验为工作区已知成员）；省略时默认继承当前调用会话的 `userId`。受理时即冻结进规范命令，确保后台重启恢复与首次执行保持一致；执行权限仍按驱动该轮的真实人类用户判定。
+- 新增只读工具 `lody_member_list`，从工作区实际成员目录（`workspaceMembers.listForCliToken`，与 UI 的 `workspaceMembers.list` 同源）列出当前成员供指定 Owner 使用；共享机器上 `isCurrentUser` 对应驱动本轮的真人（目录条目不赋予任何机器或工作区执行权限）。
+- Agent 通过 MCP 创建对话（`lody_session_create`、`lody_session_create_many`）时可传入 `ownerUserId: string`；省略时默认继承当前调用会话的 `userId`。受理时即冻结进规范命令，确保后台重启恢复与首次执行保持一致。解析出目标机器与本地项目后，创建流程会校验目标 Owner 已拥有该机器与本地项目的访问权（与 UI 转交 Owner 一致），同时发起人的执行权限仍独立按现有规则判定。
 
 ### 侧栏「状态」视图
 
@@ -23,7 +23,7 @@ Translation: current
 - 顶部 **Pinned** 区保持独立，继续享受特殊待遇；Pinned 分组不混入下方的状态区。
 - Pinned 区下方，状态视图将未归档、未固定的对话分为三层：
   1. **进行中（Focus）**：默认展开。按 `SessionMeta.orderKey`（与 Pinned 共用的 fractional index）手动固定排序，支持指针拖拽重排（复用 Pinned 的拖拽交互与落位动画）。尚无 `orderKey` 的对话排在有键对话之后并按 `session.id` 稳定升序排列，普通新回复不会导致跳位。不做键盘移动。
-  2. **稍后（Later）**：默认折叠（显示条目数）。包含 `snoozedUntil > now` 的对话。展开后按 `snoozedUntil` 升序排列（最快唤醒的在前）。每行展示紧凑的倒计时提示（倒计时图标 + `3d`、`2h`、`45m`、`<1m`）。一旦 `now >= snoozedUntil`，触发一次性唤醒：更新 `lastMessageAt` 使其成为未读、写入顶部的 `orderKey` 顶到「进行中」最前面（仍位于 Pinned 下方）、写入 `focusRestoredAt`（确保旧会话也会浮上来）并清除 `snoozedUntil`，避免多端和重开后反复冒出。
+  2. **稍后（Later）**：默认折叠（显示条目数）。包含 `snoozedUntil > now` 的对话。展开后按 `snoozedUntil` 升序排列（最快唤醒的在前）。每行展示紧凑的倒计时提示（倒计时图标 + `3d`、`2h`、`45m`、`<1m`）。一旦 `now >= snoozedUntil` 且工作区同步在线，触发以 `snoozedUntil` 为锚点的一次性唤醒：推进 `snoozeWokenUntil`（不删除 `snoozedUntil`，避免覆盖他端重新设定的稍后）、将 `lastMessageAt` 推进至 `max(lastMessageAt, snoozedUntil)` 使其变为未读且不会在晚上线端把已读会话再次标未读、未读时写入顶部 `orderKey` 顶到「进行中」最前面（仍位于 Pinned 下方）并写入 `focusRestoredAt`（确保旧会话也会浮上来）。
   3. **已收尾（Settled）**：默认折叠（显示条目数）。包含手动收尾（存在 `settledAt` 且之后无新消息）或最近 7 天无新消息（`now - lastMessageAt >= 7d`、非运行中、非等待审批，且 7 天内未被手动移回进行中）的对话。展开后按最近活动时间降序排列。收到更新消息（`lastMessageAt > settledAt`）时自动回到「进行中」。
 - **opened-by 子对话交互**：每个对话均按自身元数据判定所属状态分组。当父对话 `A` 与子对话 `B` 位于同一状态分组时，`B` 缩进显示在 `A` 下方；在 `B` 的菜单中执行「稍后」「已收尾」或「移回进行中」仅修改 `B` 自身。`A`、`B` 位于不同分组时各自在所属分组中独立显示，回到同一分组后自动恢复缩进。菜单展示的状态与该行所在分组保持一致。
 
@@ -38,8 +38,9 @@ Translation: current
 ## 数据归属与排序
 
 - 将尚未上线的 `SessionMeta.pinOrderKey` 重命名为 `SessionMeta.orderKey`（使用 `@loro-dev/fractional-index` 规范大写十六进制键）。Pinned 与进行中共用 `orderKey`；取消固定时清除 `pinSectionId`，但保留 `orderKey`。
-- 在 Meta Flock 的 `SessionMeta` 上新增三个可选字段（在工作区成员间共享；修改共享状态与进行中顺序均需要编辑权；按用户私有的状态排序不在本期范围内）：
+- 在 Meta Flock 的 `SessionMeta` 上新增四个可选字段（在工作区成员间共享；修改共享状态与进行中顺序均需要编辑权；按用户私有的状态排序不在本期范围内）：
   - `snoozedUntil?: number`（毫秒时间戳）
+  - `snoozeWokenUntil?: number`（毫秒时间戳；已唤醒的最新到期水位，避免同一暂缓跨端重复唤醒）
   - `settledAt?: number`（毫秒时间戳；写入 `max(serverNow, lastMessageAt)` 避免时钟偏差）
   - `focusRestoredAt?: number`（毫秒时间戳；用于覆盖 7 天无消息自动沉降，自该时间起 7 天内保持在进行中）
 - 正在等待人类权限审批的对话无论是否处于暂缓或收尾，都会强制归入 **进行中（Focus）**。

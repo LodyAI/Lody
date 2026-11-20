@@ -102,6 +102,7 @@ import {
   setWorkspaceContextAtom,
 } from '@/atoms';
 import { docMetaCacheScopeAtom } from '@/atoms/doc-meta';
+import { lodyControlConnectionStateAtom } from '@/atoms/control-connection';
 import { useWorkspaceRouteTargetSlug } from '../providers/workspace-route-target';
 import { resolveWorkspaceDataScope } from '@/lib/workspace-data-scope';
 
@@ -2722,6 +2723,8 @@ export function LoroAppSidebar({
             ...item,
             orderKey: meta.orderKey ?? null,
             snoozedUntil: typeof meta.snoozedUntil === 'number' ? meta.snoozedUntil : null,
+            snoozeWokenUntil:
+              typeof meta.snoozeWokenUntil === 'number' ? meta.snoozeWokenUntil : null,
             settledAt: typeof meta.settledAt === 'number' ? meta.settledAt : null,
             focusRestoredAt: typeof meta.focusRestoredAt === 'number' ? meta.focusRestoredAt : null,
           }
@@ -3942,18 +3945,21 @@ export function LoroAppSidebar({
     [applySessionFocusOrder, statusNow, updatedItems]
   );
 
-  // One-shot wake-up reconciler for expired snoozes: lifts the session to the top
-  // of Focus (below Pinned), refreshes lastMessageAt so it becomes unread, and
-  // clears snoozedUntil so the same wake-up never repeats across devices or reopens.
+  // One-shot wake-up reconciler for expired snoozes: waits until workspace sync
+  // is online so a reconnecting device sees already-woken / re-snoozed state
+  // before deciding whether to lift the session to the top of Focus and mark it unread.
+  const controlConnectionState = useAtomValue(lodyControlConnectionStateAtom);
   const wokenSnoozeKeysRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!runtime || sessionsListLoading) return;
+    if (!runtime || sessionsListLoading || controlConnectionState !== 'online') return;
     const nowMs = statusNow.getTime();
     const expired = updatedItems.filter(
       (item) =>
+        !item.isPinned &&
         item.sharing?.access !== 'read' &&
         typeof item.snoozedUntil === 'number' &&
-        item.snoozedUntil <= nowMs
+        item.snoozedUntil <= nowMs &&
+        (typeof item.snoozeWokenUntil !== 'number' || item.snoozeWokenUntil < item.snoozedUntil)
     );
     if (expired.length === 0) return;
     const focusBucket = buildSidebarUpdatedBuckets(updatedItems, 'status', nowMs).find(
@@ -3975,7 +3981,14 @@ export function LoroAppSidebar({
         wokenSnoozeKeysRef.current.delete(key);
       });
     }
-  }, [runtime, sessionsListLoading, statusNow, updatedItems, wakeSnoozedSession]);
+  }, [
+    controlConnectionState,
+    runtime,
+    sessionsListLoading,
+    statusNow,
+    updatedItems,
+    wakeSnoozedSession,
+  ]);
   const [updatedBucketShowFullState, setUpdatedBucketShowFullState] = useAtom(
     sidebarUpdatedBucketShowFullStateAtom
   );
