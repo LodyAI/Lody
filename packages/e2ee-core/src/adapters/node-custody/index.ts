@@ -699,6 +699,39 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
       opened.body.fill(0);
     }
   };
+  /** The one place a retained seed is opened; its callers are purpose-limited handoffs. */
+  const withRetainedSeed = <A>(
+    inputGenesis: Bytes.GenesisHash,
+    key: Bytes.SigningPublicKey,
+    open: (seed: Uint8Array) => Promise<A>,
+    kind: 'personal' | 'machine'
+  ) =>
+    native(() =>
+      track(async () => {
+        if (!validKind(kind)) throw fail('invalid-input');
+        const genesis = ownGenesis(inputGenesis);
+        const opened = unseal(await readOwned(pathFor(genesis, kind), 32768));
+        const seed = new Uint8Array(32);
+        try {
+          const at = devicePurpose.length + 32;
+          const retainedKey = opened.aad.slice(at, at + 32);
+          const enc = opened.aad.slice(at + 32, at + 64);
+          if (
+            !equal(opened.aad, deviceContext(genesis, retainedKey, enc, kind)) ||
+            opened.body.length !== 96 ||
+            !equal(opened.body.subarray(0, 16), ed25519Pkcs8Prefix)
+          )
+            throw fail('corrupt');
+          if (!equal(retainedKey, key.toBytes())) throw fail('invalid-input');
+          seed.set(opened.body.subarray(16, 48));
+          return await open(seed);
+        } finally {
+          seed.fill(0);
+          opened.body.fill(0);
+        }
+      })
+    );
+
   return Object.freeze({
     protection,
     /** Explicit first preparation only. Publish encrypted original before returning;
@@ -785,32 +818,21 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
       key: Bytes.SigningPublicKey,
       open: (seed: Uint8Array) => Promise<A>,
       kind: 'personal' | 'machine' = 'personal'
-    ) =>
-      native(() =>
-        track(async () => {
-          if (!validKind(kind)) throw fail('invalid-input');
-          const genesis = ownGenesis(inputGenesis);
-          const opened = unseal(await readOwned(pathFor(genesis, kind), 32768));
-          const seed = new Uint8Array(32);
-          try {
-            const at = devicePurpose.length + 32;
-            const retainedKey = opened.aad.slice(at, at + 32);
-            const enc = opened.aad.slice(at + 32, at + 64);
-            if (
-              !equal(opened.aad, deviceContext(genesis, retainedKey, enc, kind)) ||
-              opened.body.length !== 96 ||
-              !equal(opened.body.subarray(0, 16), ed25519Pkcs8Prefix)
-            )
-              throw fail('corrupt');
-            if (!equal(retainedKey, key.toBytes())) throw fail('invalid-input');
-            seed.set(opened.body.subarray(16, 48));
-            return await open(seed);
-          } finally {
-            seed.fill(0);
-            opened.body.fill(0);
-          }
-        })
-      ),
+    ) => withRetainedSeed(inputGenesis, key, open, kind),
+    /**
+     * Hands this retained device's seed to the local native engine keyring as this
+     * process's content writer (`keyringSetSigner`, sent in a binary secret frame)
+     * and wipes it after `install` settles. Purpose-limited like
+     * {@link withTransportSeed}: the engine only seals content with it, never signs
+     * ledger records and never returns it; never expose it through IPC, return it
+     * or pass it to any other consumer.
+     */
+    withEngineSeed: <A>(
+      inputGenesis: Bytes.GenesisHash,
+      key: Bytes.SigningPublicKey,
+      install: (seed: Uint8Array) => Promise<A>,
+      kind: 'personal' | 'machine' = 'personal'
+    ) => withRetainedSeed(inputGenesis, key, install, kind),
     /** Terminal host-confirmed removal only, after all workspace users drain. Deletes
      * this exact incarnation; a different retained key is a later identity and is spared.
      * Missing originals make cleanup retryable, never recreate them. Shared KEK remains. */

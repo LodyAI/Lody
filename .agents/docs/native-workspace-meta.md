@@ -371,21 +371,42 @@ markers stay plaintext and are routed off the remote.
 [`attachNativeEncryptedWorkspace`](../../packages/shared/src/node/native-encrypted-workspace.ts)
 then, after the caller's content-open admission:
 
-1. finishes a pending wipe if one is recorded, and refuses to open;
-2. installs keys through core's `EngineKeyringSync` (the caller's `syncKeyring`),
-   sets the encrypted snapshot policy (writers only, 30 s quiet, 1 MiB minimum,
-   4 MiB forced) and registers the content token with its expiry;
+1. finishes a pending wipe if one is recorded, then opens a fresh namespace (the
+   caller passed admission again, which is a new pairing);
+2. registers this process's keyring writer for the namespace, installs keys through
+   core's `EngineKeyringSync` (the caller's `syncKeyring`), sets the encrypted
+   snapshot policy (writers only, 30 s quiet, 1 MiB minimum, 4 MiB forced) and
+   registers the content token with its expiry;
 3. configures the `e2ee-content` remote: the bucket and gateway from the content
    token, `aadDomain: lody-e2ee:<genesis>`, and the Lody route table, so rooms map to
    the same `<base>/ds/<bucket>/<ws>:s:<id>` streams legacy clients use.
 
 The keyring and snapshot policy live in engine memory, so they are reinstalled on
 every reconnect (host restart or build handoff). `refresh()` reruns the install
-for the Spec's notification table; `wipe()` records the marker, clears the
-keyring, removes the remote and drops the namespace, and only a successful drop
-clears the marker. Daemon and main share the namespace. Each installs its own
-writer; the one that may write registers its token at a higher priority, so an
-append never uses a read-only token.
+for the Spec's notification table. Daemon and main share the namespace, and each
+installs its own writer. The engine seals a writer's rows only for the connection
+that installed its seed (K1), so every local write names this process's writer
+(`nativeWriteOptions`). A replica's local edits are imported with
+`enqueueOutbox` (`nativeLocalImportOptions`); without it the engine marks them
+synced and never uploads them. The writer that may write registers its token at
+a higher priority, so an append never uses a read-only token.
+
+Removal follows the whitepaper's split. Device revocation calls `retireWriter()`:
+it holds and removes only this device's writer, because another device of the
+member on this installation keeps using the namespace. Credential-confirmed
+member removal calls `wipe()`, which clears the keyring, removes the remote and
+drops the namespace. The pending-wipe marker (`nativePendingWipeMarker`) lives in
+the engine data directory, beside the namespace. The daemon writes it as soon as
+the removal is recorded. A removed workspace never attaches again, so the
+daemon's start-up refusal (`finishPendingNativeWipe`) finishes an interrupted
+wipe; only a completed drop clears the marker.
+
+The daemon attaches through `CliE2eeWorkspaceLegacy.attachNativeEngine`. It runs
+only in the cloud composition, with `LODY_NATIVE_WORKSPACE_META=1` and
+`LODY_NATIVE_E2EE=1`. Its writer is `machine:<signing public key>`, and the seed
+reaches the engine only through custody's purpose-limited `withEngineSeed`.
+Content-token refusals go to the same credential-failure handler as Streams
+tokens, and the install reruns after every verified background refresh.
 
 Limits: an encrypted namespace does not import the legacy local store. It
 bootstraps from the cloud, because re-uploading imported state would sign

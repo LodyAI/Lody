@@ -50,7 +50,19 @@ import { Effect, Exit, Scope, Result, Fiber, Schedule } from 'effect';
 import { z } from 'zod';
 import type { PayloadProtectionProvider } from '@loro-dev/streams-crdt';
 import type { CloudE2eePort, CloudStreamsTokenPort } from '@lody/platform';
-import { BackendError, KeyMailbox } from '@lody/e2ee-core/services';
+import {
+  BackendError,
+  EngineKeyringSinkError,
+  KeyMailbox,
+  type EngineKeyringSink,
+} from '@lody/e2ee-core/services';
+import type { RepoClient } from '@loro-dev/loro-repo-client';
+import { finishPendingNativeWipe } from '../loro/native-workspace-meta';
+import {
+  attachNativeEncryptedWorkspace,
+  nativePendingWipeMarker,
+  type NativeEncryptedWorkspace,
+} from '@lody/shared/node/native-encrypted-workspace';
 import { decodeEpochStagedGroup } from '@lody/e2ee-core/host';
 import {
   encryptedWorkspaceNamespace,
@@ -659,7 +671,10 @@ async function openWorkspace(
   pairing?: PairingIntent,
   localLedger?: LocalLedgerHandoff
 ) {
-  if (await eraseRemovedWorkspace(options)) throw new Error('e2ee_member_removed');
+  if (await eraseRemovedWorkspace(options)) {
+    await finishPendingNativeWipe(options.workspaceId).catch(() => undefined);
+    throw new Error('e2ee_member_removed');
+  }
   const scope = Effect.runSync(Scope.make());
   try {
     await Effect.runPromise(
@@ -1137,6 +1152,72 @@ async function openWorkspaceOwned(
       throw new Error('e2ee_plaintext_channel_disabled');
     },
   };
+  /** This machine's writer in the native engine keyring (K1: bound to this connection). */
+  const nativeWriter = `machine:${opened.signingPublicKey}`;
+  let nativeEngine: { handle: NativeEncryptedWorkspace; dataDir: string } | undefined;
+  /**
+   * Native engine mode (specs/native-engine-cloud-e2ee.md, phase 1): the engine
+   * seals and opens this workspace's rooms with keys this verified runtime installs.
+   * Called once by the document owner after this workspace opened (admission done).
+   */
+  const attachNativeEngine = async (client: RepoClient, dataDir: string) => {
+    if (closed) throw new Error('e2ee_closed');
+    if (nativeEngine) throw new Error('e2ee_native_engine_attached');
+    const { Bytes } = await import('@lody/e2ee-core/protocol');
+    const genesis = Result.getOrThrow(Bytes.genesisHash(bytes(binding.genesisHash)));
+    const key = Result.getOrThrow(Bytes.signingPublicKey(bytes(opened.signingPublicKey)));
+    const ws = options.workspaceId;
+    const call =
+      (operation: string, request: () => Promise<unknown>) =>
+      (): Effect.Effect<void, EngineKeyringSinkError> =>
+        Effect.tryPromise({
+          try: request,
+          catch: (cause) => new EngineKeyringSinkError({ operation, cause }),
+        }).pipe(Effect.asVoid);
+    const sink: EngineKeyringSink['Service'] = {
+      configure: (value) => call('configure', () => client.keyringConfigure(ws, value))(),
+      admit: (keys) => call('admit', () => client.keyringAdmit(ws, keys))(),
+      installEpoch: (epoch, value) =>
+        call('installEpoch', () => client.keyringInstallEpoch(ws, epoch, value))(),
+      setSealEpoch: (epoch) => call('setSealEpoch', () => client.keyringSetSealEpoch(ws, epoch))(),
+      installSigner: () =>
+        opened.custody
+          .withEngineSeed(genesis, key, (seed) => client.keyringSetSigner(ws, nativeWriter, seed))
+          .pipe(
+            Effect.asVoid,
+            Effect.mapError(
+              (cause) => new EngineKeyringSinkError({ operation: 'installSigner', cause })
+            )
+          ),
+      holdSealing: call('holdSealing', () => client.keyringHoldSealing(ws, nativeWriter)),
+      releaseSealing: call('releaseSealing', () => client.keyringReleaseSealing(ws, nativeWriter)),
+    };
+    const attached = await attachNativeEncryptedWorkspace({
+      client,
+      workspaceId: ws,
+      genesisHash: binding.genesisHash,
+      writer: nativeWriter,
+      contentToken: async (rejectedToken) => {
+        try {
+          return await options.cloud.getContentToken({
+            workspaceId: ws,
+            credential: opened.credential,
+            ...(rejectedToken ? { rejectedToken } : {}),
+          });
+        } catch (cause) {
+          credentialFailureHandler(cause);
+          throw cause;
+        }
+      },
+      syncKeyring: () => run(opened.runtime.syncEngineKeyring(sink)),
+      pendingWipe: nativePendingWipeMarker(dataDir, ws),
+    });
+    if (closed) {
+      attached.close();
+      throw new Error('e2ee_closed');
+    }
+    nativeEngine = { handle: attached, dataDir };
+  };
   let memberRemoved = false;
   let deviceRevoked = false;
   let removalReceipt: Promise<void> | undefined;
@@ -1282,12 +1363,19 @@ async function openWorkspaceOwned(
     })();
     removalReceipt = (async () => {
       const failures: unknown[] = [];
+      const native = nativeEngine;
+      const retired = native?.handle.retireWriter().catch((cause: unknown) => {
+        failures.push(cause);
+      });
       let recorded = false;
       try {
         recorded = await removalRecorded;
+        if (recorded && memberRemoved && native)
+          await nativePendingWipeMarker(native.dataDir, options.workspaceId).write();
       } catch (cause) {
         failures.push(cause);
       }
+      await retired;
       try {
         // Even a local persistence failure must stop the execution owner.
         await hooks.onRemoved?.(reason, recorded);
@@ -1301,6 +1389,7 @@ async function openWorkspaceOwned(
       }
       if (failures.length === 1) throw failures[0];
       if (failures.length > 1) throw new AggregateError(failures, 'e2ee_removal_failed');
+      if (memberRemoved && recorded) await native?.handle.wipe();
       if (memberRemoved)
         await eraseRemovedWorkspace({
           ...options,
@@ -1460,6 +1549,7 @@ async function openWorkspaceOwned(
             await run(opened.runtime.receiveKeys());
           }
         }
+        if (!closed) await nativeEngine?.handle.refresh();
         refreshRetryAttempts = 0;
         clearRefreshRetry();
         // A confirmed read, and any key it installed, may admit a waiting turn.
@@ -1555,6 +1645,7 @@ async function openWorkspaceOwned(
     clearRefreshRetry();
     clearAuthorityCheck();
     contentCatchUp.close();
+    nativeEngine?.handle.close();
     return (closeReceipt ??= (async () => {
       await stopRpc();
       await epochTransition.close();
@@ -2046,6 +2137,7 @@ async function openWorkspaceOwned(
             epochPhase: epochTransition.phase(),
           })),
     refresh: () => refreshInBackground(),
+    attachNativeEngine,
     /** Actual terminal cleanup receipt; owner close itself never waits for its caller. */
     removalCleanup: () => removalReceipt ?? Promise.resolve(),
     close,

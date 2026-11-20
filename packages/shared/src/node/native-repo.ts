@@ -54,9 +54,42 @@ export function setNativeNamespaceEncryption(
 export const nativeRoomEncryption = (client: RepoClient, namespace: string): EncryptionPolicy =>
   namespaceEncryption.get(client)?.get(namespace) ?? 'plaintext';
 
+/**
+ * This process's keyring writer for each encrypted namespace (K1: the engine seals
+ * a writer's rows only for the connection that installed its seed). Daemon and
+ * desktop share a namespace with distinct writers, so every local write names it.
+ */
+const namespaceWriter = new WeakMap<RepoClient, Map<string, string>>();
+export function setNativeNamespaceWriter(client: RepoClient, namespace: string, writer: string) {
+  let byNamespace = namespaceWriter.get(client);
+  if (!byNamespace) namespaceWriter.set(client, (byNamespace = new Map()));
+  byNamespace.set(namespace, writer);
+}
+/** Write options for a local edit: this process's writer, when the namespace has one. */
+export const nativeWriteOptions = (client: RepoClient, namespace: string) => {
+  const writer = namespaceWriter.get(client)?.get(namespace);
+  return writer ? { writer } : {};
+};
+/**
+ * Import options for a replica's local edits. With a writer (encrypted), they are
+ * queued for upload under it; a plaintext namespace has no remote, so they import
+ * as synced state as before.
+ */
+export const nativeLocalImportOptions = (client: RepoClient, namespace: string) => {
+  const writer = namespaceWriter.get(client)?.get(namespace);
+  return writer ? { enqueueOutbox: true, writer } : {};
+};
+
 /** Explicit opt-in. Both daemon and desktop read the same variable. */
 export const isNativeWorkspaceMetaEnabled = (env: NodeJS.ProcessEnv = process.env) =>
   env.LODY_NATIVE_WORKSPACE_META === '1';
+
+/**
+ * Phase 1 of specs/native-engine-cloud-e2ee.md: encrypted workspaces on the
+ * native engine. Read together with {@link isNativeWorkspaceMetaEnabled}.
+ */
+export const isNativeEncryptedWorkspaceEnabled = (env: NodeJS.ProcessEnv = process.env) =>
+  env.LODY_NATIVE_E2EE === '1';
 
 /** How this process starts the separate host when none is running. */
 export interface NativeRepoHostLauncher {
