@@ -2000,6 +2000,9 @@ importers:
       '@loro-dev/loro-repo-engine':
         specifier: 'catalog:'
         version: 0.1.0
+      '@loro-dev/sqlite-riverrun':
+        specifier: 0.3.0
+        version: 0.3.0(patch_hash=9e80924ae904a7643f397cefaef1e404070b0dae3bac55cd525ae97e6a975536)
       '@types/cross-spawn':
         specifier: ^6.0.6
         version: 6.0.6
