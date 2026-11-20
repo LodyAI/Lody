@@ -109,6 +109,7 @@ export function useRunConfigFace({
     permissionModeSelectors,
     modeSelectors,
     thoughtLevelSelectors,
+    speedTierSelectors,
     planModeSelectors,
     fastModeSelectors,
   } = useMemo(() => orderAcpConfigOptionSelectors(configOptionSelectors), [configOptionSelectors]);
@@ -164,9 +165,16 @@ export function useRunConfigFace({
     ? resolvePlanModeSelectorEnabled(planSelector, configOptionValues?.[planSelector.configId])
     : false;
   const fastSelector = fastModeSelectors[0];
+  const speedTierSelector = speedTierSelectors[0];
+  const speedTierValue = speedTierSelector
+    ? ((resolveConfigOptionValue(
+        speedTierSelector,
+        configOptionValues?.[speedTierSelector.configId]
+      ) as string) ?? null)
+    : null;
   const fastOn = fastSelector
     ? resolveOnOffConfigOptionEnabled(fastSelector, configOptionValues?.[fastSelector.configId])
-    : false;
+    : Boolean(speedTierValue && speedTierValue !== 'off');
 
   return { modelLabel, thinkingLabel, modeId, planOn, fastOn };
 }
