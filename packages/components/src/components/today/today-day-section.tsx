@@ -200,6 +200,11 @@ function TodayRow(props: { node: TodayNodeView | null; store: TodayPageStore }) 
             role="textbox"
             aria-multiline
             {...stylex.props(styles.text, styles.editable)}
+            onPointerDown={(event) => {
+              if (!node || event.button !== 0 || event.metaKey || event.ctrlKey) return;
+              if (event.shiftKey || event.altKey || event.detail > 1) return;
+              controller.pointerDownInEditor(store, node.id, event.currentTarget);
+            }}
           />
           <TodayMentionDecorators controller={controller} />
         </>

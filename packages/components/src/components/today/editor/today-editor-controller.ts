@@ -808,6 +808,15 @@ export class TodayEditorController {
     this.trackDrag(store, nodeId, day);
   }
 
+  /**
+   * Pointer pressed inside the node being edited: the browser keeps the text
+   * selection within the node, and dragging onto another row of the same day
+   * turns it into a block selection, exactly as from a static row.
+   */
+  pointerDownInEditor(store: TodayPageStore, nodeId: TodayNodeId, element: HTMLElement) {
+    this.trackDrag(store, nodeId, element.closest('[data-today-date]'));
+  }
+
   private trackDrag(store: TodayPageStore, anchor: TodayNodeId, day: Element | null) {
     this.stopPointer?.();
     if (!day) return;
