@@ -23,17 +23,17 @@ export type ShortcutCommandId =
   | 'session.saveCurrentFile'
   | 'session.nextTab'
   | 'session.previousTab'
-  | 'session.switchToTab1'
-  | 'session.switchToTab2'
-  | 'session.switchToTab3'
-  | 'session.switchToTab4'
-  | 'session.switchToTab5'
-  | 'session.switchToTab6'
-  | 'session.switchToTab7'
-  | 'session.switchToTab8'
-  | 'session.switchToLastTab'
   | 'session.previousVisible'
   | 'session.nextVisible'
+  | 'session.switchToVisible1'
+  | 'session.switchToVisible2'
+  | 'session.switchToVisible3'
+  | 'session.switchToVisible4'
+  | 'session.switchToVisible5'
+  | 'session.switchToVisible6'
+  | 'session.switchToVisible7'
+  | 'session.switchToVisible8'
+  | 'session.switchToVisible9'
   | 'session.cycleMode'
   | 'session.cycleProvider'
   | 'session.cycleModel'
@@ -93,18 +93,18 @@ export const COMMAND_SHORTCUTS: Record<ShortcutCommandId, CommandKeybindings> = 
   'session.previousTab': [electron('Mod+Shift+,')],
   'session.previousVisible': [electron('Mod+Shift+[')],
   'session.nextVisible': [electron('Mod+Shift+]')],
-  // Direct tab jumps use the browser convention: ⌘1–⌘8 select that conversation tab
-  // and ⌘9 selects the last one. Desktop only — on web the browser claims ⌘<digit>
-  // for its own tab strip.
-  'session.switchToTab1': [electron('Mod+1')],
-  'session.switchToTab2': [electron('Mod+2')],
-  'session.switchToTab3': [electron('Mod+3')],
-  'session.switchToTab4': [electron('Mod+4')],
-  'session.switchToTab5': [electron('Mod+5')],
-  'session.switchToTab6': [electron('Mod+6')],
-  'session.switchToTab7': [electron('Mod+7')],
-  'session.switchToTab8': [electron('Mod+8')],
-  'session.switchToLastTab': [electron('Mod+9')],
+  // Direct sidebar jumps: ⌘1–⌘9 (Ctrl+1–Ctrl+9 on Windows/Linux) select the first
+  // 9 visible sessions across expanded sidebar sections. Desktop only — on web the
+  // browser claims ⌘<digit> for its own tab strip.
+  'session.switchToVisible1': [electron('Mod+1')],
+  'session.switchToVisible2': [electron('Mod+2')],
+  'session.switchToVisible3': [electron('Mod+3')],
+  'session.switchToVisible4': [electron('Mod+4')],
+  'session.switchToVisible5': [electron('Mod+5')],
+  'session.switchToVisible6': [electron('Mod+6')],
+  'session.switchToVisible7': [electron('Mod+7')],
+  'session.switchToVisible8': [electron('Mod+8')],
+  'session.switchToVisible9': [electron('Mod+9')],
   // ⇧Tab cycles the agent mode while the composer is focused. The other cyclers ship
   // WITHOUT a default binding — they're rebindable from the keyboard settings page.
   'session.cycleMode': [whileComposerFocused('Shift+Tab')],

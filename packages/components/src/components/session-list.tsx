@@ -1175,6 +1175,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         <div className={showMetaLine ? lineBoxClassName : 'contents'}>
           <SidebarRowEndSlot
             sessionId={session.sessionId}
+            selected={showSelectedState}
             isWaitingPermission={session.isWaitingPermission}
             isWorking={session.isWorking}
             hasUnreadMessages={session.hasUnreadMessages}

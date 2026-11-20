@@ -667,6 +667,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         <div className={lineBoxClassName}>
           <SidebarRowEndSlot
             sessionId={session.id}
+            selected={showSelectedState}
             isWaitingPermission={isWaitingPermission}
             isWorking={isWorking}
             hasUnreadMessages={hasUnreadMessages}
@@ -3973,12 +3974,11 @@ export function LoroAppSidebar({
         orderKey,
       }));
       const wasInFocus = focusRoots.some((item) => item.id === sessionId);
-      void applySessionFocusOrder(
-        writes,
-        wasInFocus ? undefined : (sessionId as SessionId)
-      ).catch((error) => {
-        toast.error(error instanceof Error ? error.message : String(error));
-      });
+      void applySessionFocusOrder(writes, wasInFocus ? undefined : (sessionId as SessionId)).catch(
+        (error) => {
+          toast.error(error instanceof Error ? error.message : String(error));
+        }
+      );
     },
     [applySessionFocusOrder, updatedItems]
   );
