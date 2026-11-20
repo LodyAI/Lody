@@ -46,20 +46,35 @@ flowchart LR
 
 The host outlives the desktop and the daemon that started it, so after an
 upgrade the new Lody can find an earlier build's host still serving the data
-directory. The engine reports its protocol, build and capabilities (in
-`engine.json` and `engine_info`); a capability names a request or option and is
-never removed within a protocol version, so a newer build supersedes an older
-one. `connectNativeRepo` (daemon and desktop main alike) uses a host only when
-it serves every capability of the engine this Lody ships (`engineSatisfies`);
-otherwise it launches its own host, whose `ensureEngineHost` asks the older
-engine to hand off (`engine_handoff`: refuse new requests, finish those in
-flight, remove `engine.json`, release `files.lock`) and takes the directory.
-Committed data is already durable. An engine that predates handoff is waited out
-until it idles; clients of the earlier build reconnect to the successor, which
-serves them because it supersedes their build. An earlier Lody meeting a newer
-host attaches to it; a newer protocol stays `ENGINE_PROTOCOL_MISMATCH`. Covered
-by `native-workspace-meta.test.ts` (an earlier build's host still running) and
-the SDK's handoff tests (loro-repo `lody/engine-handshake-handoff`).
+directory. The engine reports its protocol, release (`version`, SemVer) and
+capabilities in `engine.json` and `engine_info`. A newer protocol, else a newer
+release, supersedes an older engine; at the same release a strict capability
+superset does (development builds). Capabilities are never removed within a
+protocol version and stay the runtime check of what a host serves.
+
+`connectNativeRepo` (daemon and desktop main alike) never uses a host that lacks
+a capability of the engine this Lody ships: it launches its own host and
+connects once that host has taken the directory over. A host of an earlier
+release that serves everything (a bug-fix upgrade) is used at once, and this
+Lody's host is started beside it to take over; connections move to the
+successor when the handoff completes. The takeover is the SDK's
+`ensureEngineHost`: it asks the older engine to hand off (`engine_handoff`).
+That engine refuses new requests and lets those in flight finish; if they do
+not within its drain limit it keeps serving and refuses (`HANDOFF_TIMEOUT`), and
+the request is repeated. Drained, it stops completely (runtime and its blocking
+work joined, engine and storage dropped) before it removes `engine.json` and
+releases `files.lock`, so the successor never shares the directory with a live
+writer. An engine that predates handoff is waited out until it idles. An earlier
+Lody meeting a newer host attaches to it; a newer protocol stays
+`ENGINE_PROTOCOL_MISMATCH`.
+
+The host entry exits once its engine has stopped. Launched as Electron-as-Node
+(the desktop's launch), the process otherwise stayed alive after an idle stop,
+one leaked process per host lifetime; it held no lock.
+
+Covered by `native-workspace-meta.test.ts` (an earlier build's host, and an
+earlier release with the same capabilities, still running) and the SDK's
+handoff tests (loro-repo `lody/engine-handshake-handoff`).
 
 ## One observation lifecycle
 

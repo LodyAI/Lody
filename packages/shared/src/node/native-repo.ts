@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import {
   connectEngine,
   connectSocketTransport,
+  engineIsOlder,
   engineSatisfies,
   readEngineEndpoint,
 } from '@loro-dev/loro-repo-client/node';
@@ -129,6 +130,11 @@ export function connectNativeRepo(options: {
     // The first connection goes through the same check as every reconnection:
     // an earlier Lody's host is taken over, never used.
     await connectOrLaunch(dataDir, options.launcher).then((transport) => transport.close());
+    // A host of an earlier release that serves what this build needs is used,
+    // and this build's host is started to take it over (a fixed release):
+    // the connection moves to the successor when the handoff completes.
+    const running = await readEngineEndpoint(dataDir).catch(() => undefined);
+    if (running && engineIsOlder(running)) launchHost(dataDir, options.launcher);
     const client = await connectEngine(dataDir, clientOptions).catch(() => {
       launchHost(dataDir, options.launcher);
       return connectEngine(dataDir, { ...clientOptions, waitForEndpointMs: START_WAIT_MS });
