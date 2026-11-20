@@ -6893,5 +6893,15 @@
   "sidebar.pinSections.newSection": "New Section…",
   "sidebar.pinSections.rename": "Rename Section",
   "sidebar.pinSections.renameTitle": "Rename Section",
-  "sidebar.pinSections.sectionActions": "Section actions"
+  "sidebar.pinSections.sectionActions": "Section actions",
+  "sessions.browser.stopPreview": "Close preview",
+  "sessions.browser.disconnectOptions": "Preview disconnect options",
+  "sessions.browser.disconnectRemoteOnly": "Stop remote preview only",
+  "sessions.browser.disconnectPreviewOnly": "Close preview only",
+  "sessions.browser.disconnectAndStopProcess": "Close preview and stop server",
+  "sessions.browser.errors.stopProcessFailed": "Preview server could not be stopped.",
+  "sessions.iosSimulator.action.stopOptions": "Stop preview options",
+  "sessions.iosSimulator.action.stopPreviewOnly": "Stop preview only",
+  "sessions.iosSimulator.action.stopAndShutdown": "Stop preview and shut down simulator",
+  "sessions.androidEmulator.action.stopAndShutdown": "Stop preview and shut down emulator"
 }

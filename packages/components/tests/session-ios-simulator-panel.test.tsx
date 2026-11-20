@@ -1288,4 +1288,55 @@ describe('SessionDevicePreviewPanel in-memory cache across conversation switches
       }
     }
   );
+
+  it('offers split Stop preview options when machine advertises iosSimulatorShutdown and sends shutdownDevice only from menu', async () => {
+    const machine = createFakeMachine({
+      devices: [device({ udid: 'dev-1', name: 'iPhone 16', state: 'Booted' })],
+      preview: preview({ phase: 'ready', udid: 'dev-1', operationId: 'op-shutdown', viewerUrl: VIEWER_URL }),
+    });
+    await renderPanel({
+      machine,
+      meta: macMeta({ iosSimulator: 1, iosSimulatorShutdown: 1 }),
+    });
+
+    const menuTrigger = container.querySelector<HTMLButtonElement>(
+      '[data-testid="device-preview-disconnect-button-menu"]'
+    );
+    expect(menuTrigger).not.toBeNull();
+
+    await act(async () => {
+      menuTrigger?.click();
+      await Promise.resolve();
+    });
+
+    const shutdownItem = [...document.querySelectorAll('[role="menuitem"]')].find((node) =>
+      node.textContent?.includes('Stop preview and shut down simulator')
+    ) as HTMLElement | undefined;
+    expect(shutdownItem).toBeDefined();
+
+    await act(async () => {
+      shutdownItem?.click();
+      await Promise.resolve();
+    });
+
+    expect(machine.commands).toContainEqual({
+      action: 'stop',
+      operationId: 'op-shutdown',
+      shutdownDevice: true,
+    });
+  });
+
+  it('omits shutdown menu when machine does not advertise iosSimulatorShutdown', async () => {
+    const machine = createFakeMachine({
+      devices: [device({ udid: 'dev-1', name: 'iPhone 16', state: 'Booted' })],
+      preview: preview({ phase: 'ready', udid: 'dev-1', operationId: 'op-legacy', viewerUrl: VIEWER_URL }),
+    });
+    await renderPanel({
+      machine,
+      meta: macMeta({ iosSimulator: 1 }),
+    });
+
+    expect(container.querySelector('[data-testid="device-preview-disconnect-button"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="device-preview-disconnect-button-menu"]')).toBeNull();
+  });
 });

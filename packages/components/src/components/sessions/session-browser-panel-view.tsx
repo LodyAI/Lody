@@ -121,6 +121,7 @@ export function SessionBrowserPanelView({
           ...previewStatus,
           onRestore: undefined,
           onStopSharing: undefined,
+          onStopAndKillProcess: undefined,
           onRegenerate: previewStatus.onRegenerate ?? previewStatus.onRestore,
         };
   const previewDiagnostic =

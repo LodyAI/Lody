@@ -38,6 +38,7 @@ import {
 import { IosSimulatorControls, type IosSimulatorControlsProps } from './ios-simulator-controls';
 import { IosSimulatorDeviceFrame } from './ios-simulator-device-frame';
 import { IosSimulatorDevicePicker } from './ios-simulator-device-picker';
+import { PreviewDisconnectButton } from '../preview-disconnect-button';
 import { IosSimulatorViewer, type IosSimulatorViewerHandle } from './ios-simulator-viewer';
 import {
   getIosSimulatorHardware,
@@ -83,6 +84,7 @@ export type IosSimulatorPanelViewProps = {
   onStart: (device: IosSimulatorDeviceEntry) => void;
   onCancel: () => void;
   onStop: () => void;
+  onStopAndShutdown?: () => void;
   onRestore: () => void;
   onRetry: () => void;
   onCopyDiagnostics: () => void;
@@ -395,6 +397,7 @@ export function IosSimulatorPanelView({
   onStart,
   onCancel,
   onStop,
+  onStopAndShutdown,
   quality,
   onRestore,
   onRetry,
@@ -740,15 +743,37 @@ export function IosSimulatorPanelView({
               onRestore={onRestore}
               onCancel={onCancel}
               onStop={onStop}
+              onStopAndShutdown={onStopAndShutdown}
               hasError={catalog.phase === 'error'}
               onCopyDiagnostics={onCopyDiagnostics}
             />
           </div>
         ) : null}
         {status.phase === 'ready' && blocker === null ? (
-          <Button type="button" variant="secondary" size="small" disabled={busy} onClick={onStop}>
-            {t('sessions.iosSimulator.action.stop', 'Stop preview')}
-          </Button>
+          <PreviewDisconnectButton
+            size="small"
+            primaryLabel={t('sessions.iosSimulator.action.stop', 'Stop preview')}
+            menuAriaLabel={t('sessions.iosSimulator.action.stopOptions', 'Stop preview options')}
+            disconnectOnlyLabel={t(
+              'sessions.iosSimulator.action.stopPreviewOnly',
+              'Stop preview only'
+            )}
+            disconnectAndTerminateLabel={
+              platform === 'android'
+                ? t(
+                    'sessions.androidEmulator.action.stopAndShutdown',
+                    'Stop preview and shut down emulator'
+                  )
+                : t(
+                    'sessions.iosSimulator.action.stopAndShutdown',
+                    'Stop preview and shut down simulator'
+                  )
+            }
+            disabled={busy}
+            onDisconnectOnly={onStop}
+            onDisconnectAndTerminate={onStopAndShutdown}
+            testId="device-preview-disconnect-button"
+          />
         ) : null}
         {controlsWithQuality && controlsLayout === 'menu' ? (
           <IosSimulatorControls layout="menu" {...controlsWithQuality} />

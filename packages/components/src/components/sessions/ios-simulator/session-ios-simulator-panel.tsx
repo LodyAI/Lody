@@ -4,8 +4,10 @@ import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import {
   machineSupportsIosSimulatorControls,
+  machineSupportsIosSimulatorShutdown,
   machineSupportsAndroidEmulatorProtocol,
   machineSupportsAndroidEmulatorQuality,
+  machineSupportsAndroidEmulatorShutdown,
   type AndroidEmulatorQuality,
   machineSupportsIosSimulatorExterior,
   IosSimulatorExteriorAssetSchema,
@@ -381,6 +383,10 @@ function SessionIosSimulatorPanelController({
   }>();
   const exteriorUdid = selectedUdid;
   const supportsExterior = platform === 'ios' && machineSupportsIosSimulatorExterior(machine);
+  const supportsShutdown =
+    platform === 'android'
+      ? machineSupportsAndroidEmulatorShutdown(machine)
+      : machineSupportsIosSimulatorShutdown(machine);
   useEffect(() => {
     if (!live || !exteriorUdid || !supportsExterior) return undefined;
     let cancelled = false;
@@ -463,11 +469,16 @@ function SessionIosSimulatorPanelController({
   );
 
   const stopOperation = useCallback(
-    (kind: 'cancel' | 'stop') => {
+    (kind: 'cancel' | 'stop', options?: { shutdownDevice?: boolean }) => {
       if (!operationId) return;
-      void runAction(kind, statusUdid, { action: 'stop', operationId });
+      const shutdownDevice = options?.shutdownDevice === true && supportsShutdown;
+      void runAction(kind, statusUdid, {
+        action: 'stop',
+        operationId,
+        ...(shutdownDevice ? { shutdownDevice: true } : {}),
+      });
     },
-    [operationId, runAction, statusUdid]
+    [operationId, runAction, statusUdid, supportsShutdown]
   );
 
   const startAgain = useCallback(
@@ -813,6 +824,9 @@ function SessionIosSimulatorPanelController({
         onStart={startPreview}
         onCancel={() => stopOperation('cancel')}
         onStop={() => stopOperation('stop')}
+        onStopAndShutdown={
+          supportsShutdown ? () => stopOperation('stop', { shutdownDevice: true }) : undefined
+        }
         onRestore={handleRestore}
         onRetry={handleRetry}
         onCopyDiagnostics={() => void handleCopyDiagnostics()}

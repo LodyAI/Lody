@@ -41,6 +41,7 @@ import { formatErrorMessage } from '@/utils/format-error';
 import { LocalPreviewProxyManager } from './local-preview-proxy';
 import { QuickTunnelSession, type PreviewCloseReason } from './quick-tunnel-session';
 import { createPreviewTargetTransport, fetchPreviewTarget } from './preview-target-transport';
+import { stopPreviewTargetProcess } from './preview-process';
 
 const PreviewSessionOwner = z.object({
   userId: z.string(),
@@ -87,6 +88,7 @@ type PreviewServiceDeps = {
   runtimeBaseUrl: string | null;
   remotePreview: CloudRemotePreviewPort | null;
   now?: () => number;
+  stopTargetProcess?: (target: PreviewTarget) => Promise<unknown>;
 };
 
 type ValidationFailure = {
@@ -912,7 +914,35 @@ export class PreviewService {
     this.activeTunnels.get(request.sessionId)?.cancel('revoked');
     return this.serialize(request.sessionId, async () => {
       const current = session.meta.previewConnection;
+      const targetToStop =
+        this.localProxyManager.getSessionTarget(request.sessionId) ??
+        current?.target ??
+        (session.meta.previewCandidate?.status &&
+        session.meta.previewCandidate.status !== 'invalid' &&
+        session.meta.previewCandidate.status !== 'none'
+          ? session.meta.previewCandidate.target
+          : undefined);
       await this.closeActiveTunnel(request.sessionId, 'revoked');
+      let processStopError: string | undefined;
+      if (request.stopProcess) {
+        await this.localProxyManager.closeSession(request.sessionId, 'Preview closed');
+        if (targetToStop) {
+          const normalized = normalizeTarget(targetToStop);
+          if (isValidationFailure(normalized)) {
+            processStopError = normalized.message;
+          } else {
+            try {
+              if (this.deps.stopTargetProcess) {
+                await this.deps.stopTargetProcess(normalized);
+              } else {
+                await stopPreviewTargetProcess(normalized, { logger: this.deps.logger });
+              }
+            } catch (error) {
+              processStopError = formatErrorMessage(error);
+            }
+          }
+        }
+      }
       const revoked: PreviewConnection = {
         ...current,
         status: 'closed',
@@ -922,6 +952,16 @@ export class PreviewService {
         error: undefined,
       };
       await this.patchSessionPreview(request.sessionId, { previewConnection: revoked });
+      if (processStopError) {
+        return {
+          type: 'session/preview-revoke_response',
+          sessionId: request.sessionId,
+          success: false,
+          connection: revoked,
+          error: 'internal_error',
+          message: processStopError,
+        };
+      }
       return {
         type: 'session/preview-revoke_response',
         sessionId: request.sessionId,

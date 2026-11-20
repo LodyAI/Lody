@@ -5,6 +5,7 @@ import {
   BrowserAddressError,
   formatPreviewTargetUrl,
   getServerNow,
+  machineSupportsPreviewStopProcess,
   parseBrowserAddress,
   type BrowserAddress,
   type ElectronPublicBrowserState,
@@ -1396,6 +1397,70 @@ function SessionBrowserPanelController({
     }
   }, [localEndpoint, runtime, session.id, session.machineId, t, user?.id]);
 
+  const stopLocalPreview = useCallback(async () => {
+    setBusy(true);
+    previewObservationEpoch.current += 1;
+    previewControlInFlight.current = true;
+    try {
+      await releaseLocalEndpoint();
+      clearManagedPreviewFrame(session.id);
+      setViewerUrl(null);
+      setAnnotationEnabled(false);
+      setAnnotationAvailable(false);
+    } catch (releaseError) {
+      setError(errorMessage(releaseError));
+    } finally {
+      previewControlInFlight.current = false;
+      previewObservationEpoch.current += 1;
+      setBusy(false);
+    }
+  }, [releaseLocalEndpoint, session.id]);
+
+  const stopPreviewAndProcess = useCallback(async () => {
+    if (!runtime || !user?.id) {
+      setError(
+        t('sessions.browser.errors.runtimeUnavailable', 'The session runtime is unavailable.')
+      );
+      return;
+    }
+    setBusy(true);
+    previewObservationEpoch.current += 1;
+    previewControlInFlight.current = true;
+    try {
+      // Send revoke with stopProcess BEFORE releasing the local endpoint so the
+      // CLI can resolve the authoritative loopback port from the active proxy.
+      const response = await runtime.requestSessionPreviewRevoke(
+        session.machineId,
+        session.id,
+        user.id,
+        { reason: 'user_revoked', stopProcess: true }
+      );
+      if (!response?.success) {
+        setError(
+          response?.message ??
+            t('sessions.browser.errors.stopProcessFailed', 'Preview server could not be stopped.')
+        );
+      } else {
+        setRemoteConnection(response.connection);
+        setRemoteExpiresAt(null);
+        rememberSessionRemotePreview(session.id, undefined);
+        localEndpointRef.current = null;
+        setLocalEndpoint(null);
+        rememberSessionBrowserResumeState(session.id, { localEndpoint: undefined });
+        clearManagedPreviewFrame(session.id);
+        setViewerUrl(null);
+        setAnnotationEnabled(false);
+        setAnnotationAvailable(false);
+      }
+    } catch (revokeError) {
+      setError(errorMessage(revokeError));
+    } finally {
+      previewControlInFlight.current = false;
+      previewObservationEpoch.current += 1;
+      setBusy(false);
+    }
+  }, [runtime, session.id, session.machineId, t, user?.id]);
+
   const handlePublicState = useCallback(
     (state: ElectronPublicBrowserState) => {
       setPublicState(state);
@@ -1481,6 +1546,14 @@ function SessionBrowserPanelController({
   const remoteMachineName =
     machinePlane === 'cloud' ? sessionMachine?.name?.trim() || session.machineId : undefined;
   const hasShareUrl = currentAddress?.engine === 'managed-preview' && !!activeShareUrl;
+  const hasLocalPreview = currentAddress?.engine === 'managed-preview' && Boolean(localEndpoint);
+  const supportsStopProcess = machineSupportsPreviewStopProcess(sessionMachine);
+  const handleDisconnectOnly = hasShareUrl
+    ? () => void stopSharing()
+    : () => void stopLocalPreview();
+  const handleDisconnectAndStopProcess = supportsStopProcess
+    ? () => void stopPreviewAndProcess()
+    : undefined;
   const previewUnavailableReason = session.isArchived
     ? t(
         'sessions.browser.connection.sessionEnded',
@@ -1509,7 +1582,8 @@ function SessionBrowserPanelController({
     hasShareUrl,
     onRestore: () => void restorePreview(),
     onRegenerate: () => void restorePreview(),
-    onStopSharing: () => void stopSharing(),
+    onStopSharing: handleDisconnectOnly,
+    onStopAndKillProcess: handleDisconnectAndStopProcess,
   };
 
   return (
@@ -1527,7 +1601,8 @@ function SessionBrowserPanelController({
         annotationAvailable: annotationAvailable,
         sharing: sharing,
         shareAvailable: currentAddress !== null,
-        hasShareUrl: currentAddress?.engine === 'managed-preview' && !!activeShareUrl,
+        hasShareUrl,
+        hasLocalPreview,
         busy: navigationBusy,
         onAddressChange: setAddress,
         onRestoreAddress: () => setAddress(currentAddress?.logicalUrl ?? suggestedAddress),
@@ -1538,7 +1613,8 @@ function SessionBrowserPanelController({
         onStop: handleStop,
         onToggleAnnotation: () => setAnnotationEnabled((current) => !current),
         onShare: () => void handleShare(),
-        onStopSharing: () => void stopSharing(),
+        onStopSharing: handleDisconnectOnly,
+        onStopPreviewAndProcess: handleDisconnectAndStopProcess,
       }}
       previewStatus={currentAddress?.engine === 'managed-preview' ? previewStatusProps : undefined}
       error={error}

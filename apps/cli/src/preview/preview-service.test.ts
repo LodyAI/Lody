@@ -61,7 +61,8 @@ function fixture(
       requesterUserId: intent.requesterUserId,
       expiresAt: Date.now() + 120_000,
     }),
-  }
+  },
+  stopTargetProcess?: ConstructorParameters<typeof PreviewService>[0]['stopTargetProcess']
 ) {
   let preview: SessionPreviewDocState = {};
   let meta: SessionMeta = {
@@ -94,6 +95,7 @@ function fixture(
     now: () => Date.now(),
     runtimeBaseUrl: 'https://runtime.example.test',
     remotePreview,
+    stopTargetProcess,
     workspaceDocument: {
       getOrCreateSessionDoc: async () => sessionDoc,
       repo,
@@ -173,8 +175,12 @@ describe('PreviewService Quick Tunnel lifecycle', () => {
     vi.clearAllMocks();
   });
 
-  function setup(workspace = workspaceId, remotePreview?: Parameters<typeof fixture>[1]) {
-    const result = fixture(workspace, remotePreview);
+  function setup(
+    workspace = workspaceId,
+    remotePreview?: Parameters<typeof fixture>[1],
+    stopTargetProcess?: Parameters<typeof fixture>[2]
+  ) {
+    const result = fixture(workspace, remotePreview, stopTargetProcess);
     services.push(result.service);
     return result;
   }
@@ -685,4 +691,37 @@ describe('PreviewService Quick Tunnel lifecycle', () => {
       }
     }
   );
+
+  it('stops the target server process only when revoke explicitly requests stopProcess', async () => {
+    const stopTargetProcess = vi.fn(async () => {});
+    const { service, state } = setup(workspaceId, undefined, stopTargetProcess);
+    const request = createRequest();
+    const local = await service.acquireEndpoint(request);
+    expect(local.success).toBe(true);
+    const remote = await service.createPreview(request);
+    expect(remote.success).toBe(true);
+
+    // Normal revoke closes only the remote tunnel and keeps local proxy & server untouched.
+    const normalRevoke = await service.revokePreview({
+      ...request,
+      type: 'session/preview-revoke',
+    });
+    expect(normalRevoke.success).toBe(true);
+    expect(stopTargetProcess).not.toHaveBeenCalled();
+    expect(await (await fetch(local.endpoint?.viewerUrl ?? '')).text()).toBe('development server');
+
+    // Explicit stopProcess closes local proxy too and stops the exact validated loopback target.
+    const fullRevoke = await service.revokePreview({
+      ...request,
+      type: 'session/preview-revoke',
+      stopProcess: true,
+    });
+    expect(fullRevoke.success).toBe(true);
+    expect(state().connection?.status).toBe('closed');
+    expect(stopTargetProcess).toHaveBeenCalledTimes(1);
+    expect(stopTargetProcess).toHaveBeenCalledWith(
+      expect.objectContaining({ protocol: 'http', host: '127.0.0.1', port })
+    );
+    await expect(fetch(local.endpoint?.viewerUrl ?? '')).rejects.toThrow();
+  });
 });

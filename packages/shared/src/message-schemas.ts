@@ -2087,6 +2087,7 @@ export const SessionPreviewRevokeRequestSchema = z
     sessionId: SessionIdSchema,
     requestedByUserId: SharedTrimmedNonEmptyStringSchema,
     reason: z.string().trim().min(1).optional(),
+    stopProcess: z.boolean().optional(),
   })
   .strict();
 

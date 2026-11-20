@@ -17,6 +17,7 @@ import { Popover } from '@lody/ui/popover';
 import { Spinner } from '@lody/ui/spinner';
 import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { PreviewDisconnectButton } from './preview-disconnect-button';
 
 const styles = stylex.create({
   triggerGroup: { display: 'flex', alignItems: 'center', gap: '2px' },
@@ -130,6 +131,7 @@ export type PreviewConnectionStatusProps = {
   /** Direct one-click regenerate action shown in the address bar when expired/unavailable. */
   onRegenerate?: () => void;
   onStopSharing?: () => void;
+  onStopAndKillProcess?: () => void;
 };
 
 type PreviewStatusKind =
@@ -155,9 +157,12 @@ type PreviewStatusPresentation = {
   showRestore: boolean;
   showInlineRegenerate: boolean;
   showStopSharing: boolean;
+  hasShareUrl: boolean;
+  busy: boolean;
   onRestore?: () => void;
   onRegenerate?: () => void;
   onStopSharing?: () => void;
+  onStopAndKillProcess?: () => void;
 };
 
 function usePreviewStatusPresentation({
@@ -173,6 +178,7 @@ function usePreviewStatusPresentation({
   onRestore,
   onRegenerate,
   onStopSharing,
+  onStopAndKillProcess,
 }: PreviewConnectionStatusProps): PreviewStatusPresentation {
   const { t } = useTranslation();
   const expired = connection?.status === 'closed' && connection.closedReason === 'idle_timeout';
@@ -309,7 +315,9 @@ function usePreviewStatusPresentation({
   const showRestore =
     Boolean(onRestore) && (needsRebuild || kind === 'unavailable' || kind === 'unconfirmed');
   const showInlineRegenerate = !local && Boolean(onRegenerate) && needsRebuild;
-  const showStopSharing = Boolean(onStopSharing && hasShareUrl && kind === 'active');
+  const showStopSharing = Boolean(
+    onStopSharing && ((hasShareUrl && kind === 'active') || (local && kind === 'local'))
+  );
   const restoreLabel =
     connection?.closedReason === 'revoked'
       ? t('sessions.browser.connection.reopen', 'Reopen preview')
@@ -326,9 +334,12 @@ function usePreviewStatusPresentation({
     showRestore,
     showInlineRegenerate,
     showStopSharing,
+    hasShareUrl: Boolean(hasShareUrl),
+    busy: Boolean(busy),
     onRestore,
     onRegenerate,
     onStopSharing,
+    onStopAndKillProcess,
   };
 }
 
@@ -367,8 +378,11 @@ function PreviewStatusContent({
     restoreDisabled,
     showRestore,
     showStopSharing,
+    hasShareUrl,
+    busy,
     onRestore,
     onStopSharing,
+    onStopAndKillProcess,
   } = presentation;
 
   const contentStyle = stylex.props(styles.content, centered && styles.centeredContent);
@@ -405,10 +419,28 @@ function PreviewStatusContent({
       ) : null}
       {showRestore || showStopSharing ? (
         <div {...actionsStyle}>
-          {showStopSharing ? (
-            <Button type="button" variant="secondary" size="mini" onClick={onStopSharing}>
-              {t('sessions.browser.stopSharing', 'Stop sharing')}
-            </Button>
+          {showStopSharing && onStopSharing ? (
+            <PreviewDisconnectButton
+              size="mini"
+              primaryLabel={
+                hasShareUrl
+                  ? t('sessions.browser.stopSharing', 'Stop sharing')
+                  : t('sessions.browser.stopPreview', 'Close preview')
+              }
+              menuAriaLabel={t('sessions.browser.disconnectOptions', 'Preview disconnect options')}
+              disconnectOnlyLabel={
+                hasShareUrl
+                  ? t('sessions.browser.disconnectRemoteOnly', 'Stop remote preview only')
+                  : t('sessions.browser.disconnectPreviewOnly', 'Close preview only')
+              }
+              disconnectAndTerminateLabel={t(
+                'sessions.browser.disconnectAndStopProcess',
+                'Close preview and stop server'
+              )}
+              disabled={busy}
+              onDisconnectOnly={onStopSharing}
+              onDisconnectAndTerminate={onStopAndKillProcess}
+            />
           ) : null}
           {showRestore ? (
             <Button

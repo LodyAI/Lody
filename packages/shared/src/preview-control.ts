@@ -24,7 +24,7 @@ export const PreviewControlOperationSchema = z.discriminatedUnion('action', [
   z
     .object({ action: z.literal('create'), target: PreviewTargetSchema, restart: z.boolean() })
     .strict(),
-  z.object({ action: z.literal('revoke') }).strict(),
+  z.object({ action: z.literal('revoke'), stopProcess: z.boolean().optional() }).strict(),
   z.object({ action: z.literal('status'), renewEndpointId: identifier.optional() }).strict(),
 ]);
 

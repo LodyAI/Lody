@@ -4161,7 +4161,7 @@ export class MessageHandler {
           await this.previewService.authorizeRemoteControl(
             request.sessionId,
             request.requestedByUserId,
-            { action: 'revoke' },
+            { action: 'revoke', ...(request.stopProcess ? { stopProcess: true } : {}) },
             proof
           );
           return this.previewService.revokePreview({

@@ -6880,5 +6880,15 @@
   "sidebar.pinSections.newSection": "新建分组…",
   "sidebar.pinSections.rename": "重命名分组",
   "sidebar.pinSections.renameTitle": "重命名分组",
-  "sidebar.pinSections.sectionActions": "分组操作"
+  "sidebar.pinSections.sectionActions": "分组操作",
+  "sessions.browser.stopPreview": "关闭预览",
+  "sessions.browser.disconnectOptions": "断开预览选项",
+  "sessions.browser.disconnectRemoteOnly": "只关闭远程预览",
+  "sessions.browser.disconnectPreviewOnly": "仅关闭预览",
+  "sessions.browser.disconnectAndStopProcess": "关闭预览并结束进程",
+  "sessions.browser.errors.stopProcessFailed": "无法停止预览进程。",
+  "sessions.iosSimulator.action.stopOptions": "停止预览选项",
+  "sessions.iosSimulator.action.stopPreviewOnly": "只关闭预览",
+  "sessions.iosSimulator.action.stopAndShutdown": "关闭预览并关闭模拟器",
+  "sessions.androidEmulator.action.stopAndShutdown": "关闭预览并关闭模拟器"
 }
