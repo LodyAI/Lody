@@ -13,7 +13,9 @@ export type LodyClipboardBridge = {
 };
 
 const nativeClipboard = (): LodyClipboardBridge | undefined =>
-  typeof window === 'undefined' ? undefined : window.__LODY_CLIPBOARD__;
+  typeof window === 'undefined'
+    ? undefined
+    : (window as Window & { __LODY_CLIPBOARD__?: LodyClipboardBridge }).__LODY_CLIPBOARD__;
 
 const copyWithSelection = (text: string): boolean => {
   if (typeof document === 'undefined') {
