@@ -16,6 +16,7 @@ import {
   readTodayText,
 } from '@lody/shared';
 import { bindLoroText } from '../src/components/today/editor/loro-lexical-binding';
+import { resolveMentionKey } from '../src/components/today/editor/mention-keys';
 import { resolveOutlineKey } from '../src/components/today/editor/outline-keys';
 import {
   safeRichDiff,
@@ -493,5 +494,145 @@ describe('Today Shift+Up/Down while editing', () => {
     expect(controller.editor.read(() => $readSelectionOffsets())).toEqual({ start: 0, end: 3 });
     controller.dispose();
     root.remove();
+  });
+});
+
+describe('Today mention keys', () => {
+  const key = (k: string, mods: Partial<KeyboardEventInit> = {}) => ({
+    key: k,
+    shiftKey: false,
+    altKey: false,
+    metaKey: false,
+    ctrlKey: false,
+    isComposing: false,
+    keyCode: 0,
+    ...mods,
+  });
+  const at = (anchor: number, focus = anchor) => ({ anchor, focus });
+
+  it('← and Backspace after a mention select it first; ← again moves before it', () => {
+    expect(resolveMentionKey(key('ArrowLeft'), at(3), [2])).toEqual({
+      type: 'select',
+      anchor: 3,
+      focus: 2,
+    });
+    expect(resolveMentionKey(key('Backspace'), at(3), [2])).toEqual({
+      type: 'select',
+      anchor: 3,
+      focus: 2,
+    });
+    expect(resolveMentionKey(key('ArrowLeft'), at(3, 2), [2])).toEqual({
+      type: 'collapse',
+      offset: 2,
+    });
+    // A selected mention is deleted by the editor itself.
+    expect(resolveMentionKey(key('Backspace'), at(3, 2), [2])).toBeNull();
+    expect(resolveMentionKey(key('ArrowLeft'), at(4), [2])).toBeNull();
+  });
+
+  it('→ and Delete before a mention are symmetric', () => {
+    expect(resolveMentionKey(key('ArrowRight'), at(2), [2])).toEqual({
+      type: 'select',
+      anchor: 2,
+      focus: 3,
+    });
+    expect(resolveMentionKey(key('Delete'), at(2), [2])).toEqual({
+      type: 'select',
+      anchor: 2,
+      focus: 3,
+    });
+    expect(resolveMentionKey(key('ArrowRight'), at(2, 3), [2])).toEqual({
+      type: 'collapse',
+      offset: 3,
+    });
+  });
+
+  it('leaves word deletion, Shift extension and IME to the editor; Enter opens a selected mention', () => {
+    expect(resolveMentionKey(key('Backspace', { altKey: true }), at(3), [2])).toBeNull();
+    expect(resolveMentionKey(key('Backspace', { metaKey: true }), at(3), [2])).toBeNull();
+    expect(resolveMentionKey(key('ArrowLeft', { shiftKey: true }), at(3), [2])).toBeNull();
+    expect(resolveMentionKey(key('ArrowLeft', { keyCode: 229 }), at(3), [2])).toBeNull();
+    expect(resolveMentionKey(key('Enter'), at(2, 3), [2])).toEqual({ type: 'open', start: 2 });
+    expect(resolveMentionKey(key('Enter', { altKey: true }), at(3, 2), [2])).toEqual({
+      type: 'menu',
+      start: 2,
+    });
+    expect(resolveMentionKey(key('Enter'), at(3), [2])).toBeNull();
+  });
+});
+
+describe('Today editor around mentions', () => {
+  async function mount(lines: string) {
+    const { createTodayPageStoreCache } = await import('../src/providers/today-page-store-cache');
+    const { TodayEditorController } =
+      await import('../src/components/today/editor/today-editor-controller');
+    const { getTodayDocId, parseTodayPasteText } = await import('@lody/shared');
+    const cache = createTodayPageStoreCache({
+      releaseDelayMs: 1000,
+      idleCap: 2,
+      setTimer: () => () => {},
+      repo: {
+        openDoc: async () => ({ doc: new LoroDoc(), joinRoom: async () => null }),
+        isRegistered: async () => true,
+        upsertDocMeta: async () => {},
+        unloadDoc: async () => {},
+        observeDocs: () => ({ docIds: [], unsubscribe: () => {} }),
+      },
+    });
+    const store = await cache.acquire(getTodayDocId('me', '2026-11-23' as never));
+    store.outline.paste({ kind: 'page-start' }, parseTodayPasteText(lines));
+    const [node] = store.getSnapshot().visible;
+    const controller = new TodayEditorController(cache);
+    const root = document.createElement('div');
+    root.contentEditable = 'true';
+    document.body.append(root);
+    const opened: string[] = [];
+    controller.onOpenSession = (sessionId) => opened.push(sessionId);
+    const press = async (k: string) => {
+      // jsdom does not mirror Lexical's selection into the DOM as a browser
+      // does; without a DOM selection the controller reads Lexical's.
+      window.getSelection()?.removeAllRanges();
+      root.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    };
+    const selection = () => controller.editor.read(() => $readSelectionOffsets());
+    const done = () => {
+      controller.dispose();
+      root.remove();
+    };
+    return { store, nodeId: node!.id, controller, root, press, selection, opened, done };
+  }
+
+  it('walks past a mention in two steps each way, and Enter on it opens the conversation', async () => {
+    const ctx = await mount('ab');
+    ctx.store.outline.insertMention(ctx.nodeId, 1, 0, { kind: 'session', id: 's1' });
+    ctx.controller.activate(ctx.store, ctx.nodeId, 2);
+    ctx.controller.attachRoot(ctx.root);
+    await ctx.press('ArrowLeft');
+    expect(ctx.selection()).toEqual({ start: 1, end: 2 });
+    await ctx.press('Enter');
+    expect(ctx.opened).toEqual(['s1']);
+    expect(ctx.store.getSnapshot().visible).toHaveLength(1);
+    await ctx.press('ArrowLeft');
+    expect(ctx.selection()).toEqual({ start: 1, end: 1 });
+    await ctx.press('ArrowRight');
+    expect(ctx.selection()).toEqual({ start: 1, end: 2 });
+    await ctx.press('ArrowRight');
+    expect(ctx.selection()).toEqual({ start: 2, end: 2 });
+    ctx.done();
+  });
+
+  it('Backspace after a mention selects it, and only a second Backspace deletes it', async () => {
+    const ctx = await mount('ab');
+    ctx.store.outline.insertMention(ctx.nodeId, 1, 0, { kind: 'session', id: 's1' });
+    ctx.controller.activate(ctx.store, ctx.nodeId, 2);
+    ctx.controller.attachRoot(ctx.root);
+    await ctx.press('Backspace');
+    expect(ctx.store.outline.getNode(ctx.nodeId)?.mentions).toHaveLength(1);
+    expect(ctx.selection()).toEqual({ start: 1, end: 2 });
+    await ctx.press('Backspace');
+    expect(ctx.store.outline.getNode(ctx.nodeId)).toMatchObject({ text: 'ab', mentions: [] });
+    ctx.done();
   });
 });

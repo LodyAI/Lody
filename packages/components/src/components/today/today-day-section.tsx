@@ -1,11 +1,13 @@
 import * as stylex from '@stylexjs/stylex';
 import { ChevronRight } from 'lucide-react';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getTodayDocId, type TodayDate, type TodayNodeView } from '@lody/shared';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { useTodayEditor } from './editor/today-editor-context';
+import { TodayMentionDecorators } from './editor/today-mention-decorators';
+import { TodayMention } from './today-session-mention';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
 import type { TodayPageStoreCache } from '../../providers/today-page-store-cache';
 import { formatTodayHeading } from './today-stream';
@@ -188,16 +190,19 @@ function TodayRow(props: { node: TodayNodeView | null; store: TodayPageStore }) 
         <span {...stylex.props(styles.dot, node?.collapsed && styles.dotFolded)} />
       </span>
       {active && controller ? (
-        <div
-          key="editor"
-          ref={controller.attachRoot}
-          contentEditable
-          suppressContentEditableWarning
-          spellCheck={false}
-          role="textbox"
-          aria-multiline
-          {...stylex.props(styles.text, styles.editable)}
-        />
+        <>
+          <div
+            key="editor"
+            ref={controller.attachRoot}
+            contentEditable
+            suppressContentEditableWarning
+            spellCheck={false}
+            role="textbox"
+            aria-multiline
+            {...stylex.props(styles.text, styles.editable)}
+          />
+          <TodayMentionDecorators controller={controller} />
+        </>
       ) : (
         <div
           key="static"
@@ -210,12 +215,27 @@ function TodayRow(props: { node: TodayNodeView | null; store: TodayPageStore }) 
             else controller.pointerDown(store, node.id, event.currentTarget, event);
           }}
         >
-          {node ? node.text || '\u200b' : t('today.empty', 'Write something…')}
+          {node ? <TodayStaticText node={node} /> : t('today.empty', 'Write something…')}
           {node?.text.endsWith('\n') ? '\n' : null}
         </div>
       )}
     </div>
   );
+}
+
+/** A node's text as the editor would show it: text runs and mentions. */
+function TodayStaticText(props: { node: TodayNodeView }) {
+  const { text, mentions } = props.node;
+  if (!text) return '\u200b';
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  for (const mention of mentions) {
+    if (mention.start > cursor) parts.push(text.slice(cursor, mention.start));
+    parts.push(<TodayMention key={mention.start} mention={mention} />);
+    cursor = mention.start + 1;
+  }
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return parts.map((part, index) => <Fragment key={index}>{part}</Fragment>);
 }
 
 /** Acquire the page while its section is within ~1.5 screens of the viewport. */

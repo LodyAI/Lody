@@ -17,25 +17,88 @@ function caretFromPoint(x: number, y: number): CaretPoint {
   return range ? { node: range.startContainer, offset: range.startOffset } : null;
 }
 
-/** String offset of a DOM point inside `root`, counting `<br>` as one newline. */
-function stringOffset(root: HTMLElement, point: { node: Node; offset: number }): number | null {
-  if (!root.contains(point.node)) return null;
+const MENTION_SELECTOR = '[data-today-mention]';
+
+const isMention = (node: Node): node is Element =>
+  node.nodeType === Node.ELEMENT_NODE && (node as Element).matches(MENTION_SELECTOR);
+
+/** Model length of a DOM subtree: text, one per `<br>` with a follower, one per mention. */
+function modelLength(node: Node): number {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent?.length ?? 0;
+  if (isMention(node)) return 1;
+  if ((node as Element).tagName === 'BR') return node.nextSibling ? 1 : 0;
   let total = 0;
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
-  for (let current = walker.nextNode(); current; current = walker.nextNode()) {
-    if (current === point.node) {
-      if (current.nodeType === Node.TEXT_NODE) return total + point.offset;
+  node.childNodes.forEach((child) => {
+    total += modelLength(child);
+  });
+  return total;
+}
+
+/** The node text `root` shows, each mention read as U+FFFC. */
+export function modelText(root: Node): string {
+  if (root.nodeType === Node.TEXT_NODE) return root.textContent ?? '';
+  if (isMention(root)) return '\uFFFC';
+  if ((root as Element).tagName === 'BR') return root.nextSibling ? '\n' : '';
+  let out = '';
+  root.childNodes.forEach((child) => {
+    out += modelText(child);
+  });
+  return out;
+}
+
+/**
+ * String offset of a DOM point inside `root`: text counts per character, a
+ * `<br>` as one newline, a mention (`[data-today-mention]`) as one character
+ * whatever its title. A point inside a mention lands on the edge nearer `x`.
+ */
+function stringOffset(
+  root: HTMLElement,
+  point: { node: Node; offset: number },
+  x: number
+): number | null {
+  if (!root.contains(point.node)) return null;
+  // The outermost mention around the point (the editor nests the chip in its decorator).
+  let mention: Element | null = null;
+  for (
+    let element =
+      point.node.nodeType === Node.ELEMENT_NODE
+        ? (point.node as Element)
+        : point.node.parentElement;
+    element && element !== root;
+    element = element.parentElement
+  ) {
+    if (element.matches(MENTION_SELECTOR)) mention = element;
+  }
+  let total = 0;
+  let found: number | null = null;
+  const visit = (node: Node): boolean => {
+    if (mention && node === mention) {
+      const rect = mention.getBoundingClientRect();
+      found = total + (x > rect.left + rect.width / 2 ? 1 : 0);
+      return true;
+    }
+    if (node === point.node) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        found = total + point.offset;
+        return true;
+      }
       // Element point: offset counts children before the caret.
       let inside = 0;
-      current.childNodes.forEach((child, index) => {
-        if (index < point.offset) inside += child.textContent?.length ?? 0;
+      node.childNodes.forEach((child, index) => {
+        if (index < point.offset) inside += modelLength(child);
       });
-      return total + inside;
+      found = total + inside;
+      return true;
     }
-    if (current.nodeType === Node.TEXT_NODE) total += current.textContent?.length ?? 0;
-    else if ((current as Element).tagName === 'BR' && current.nextSibling) total += 1;
-  }
-  return total;
+    if (node.nodeType === Node.TEXT_NODE || isMention(node) || (node as Element).tagName === 'BR') {
+      total += modelLength(node);
+      return false;
+    }
+    for (const child of node.childNodes) if (visit(child)) return true;
+    return false;
+  };
+  for (const child of root.childNodes) if (visit(child)) break;
+  return found ?? total;
 }
 
 const segmenter =
@@ -66,11 +129,11 @@ export function offsetFromPoint(
   x: number,
   y: number | 'top' | 'bottom'
 ): number {
-  const text = element.textContent ?? '';
+  const text = modelText(element);
   const rect = element.getBoundingClientRect();
   const lineY = y === 'top' ? rect.top + 6 : y === 'bottom' ? rect.bottom - 6 : y;
   const point = caretFromPoint(x, Math.min(Math.max(lineY, rect.top + 1), rect.bottom - 1));
-  const offset = point ? stringOffset(element, point) : null;
+  const offset = point ? stringOffset(element, point, x) : null;
   if (offset === null) return y === 'top' ? 0 : text.length;
   return snapToGrapheme(text, Math.min(offset, text.length));
 }

@@ -1,5 +1,13 @@
 import type { SessionMeta, SessionStatus } from '@lody/shared';
+import {
+  formatSnoozeCountdown,
+  sidebarStatusGroup,
+  type SidebarStatusGroup,
+} from '@/lib/sidebar-status-group';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
+
+/** The one leading icon a mention shows, in priority order. */
+export type TodaySessionState = 'waiting' | 'running' | 'later' | 'done' | 'unread' | 'idle';
 
 export type TodaySessionDisplay =
   | { state: 'loading' }
@@ -7,36 +15,74 @@ export type TodaySessionDisplay =
   | {
       state: 'ok';
       title: string;
-      waiting: boolean;
-      working: boolean;
+      status: TodaySessionState;
+      /** The sidebar's status group: Move to Focus is offered from Later and Settled. */
+      group: SidebarStatusGroup;
+      /** Has unread output (agent-managed sessions never do): the menu offers Mark as read. */
       unread: boolean;
-      /** Settled or archived: drawn like a finished to-do. */
-      done: boolean;
+      lastMessageAt: number | null;
+      /** The sidebar's wake-up countdown while Later, e.g. `2h`. */
+      snoozeCountdown: string | null;
     };
 
+const finite = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null;
+
 /**
- * What a session node shows, from the same signals as the sidebar row: live
- * presence for running/waiting, read receipts for unread (hidden for
- * agent-managed sessions), archive and settle for done. Metadata absence means
- * deleted or no access only once the metadata projection has settled.
- * Behavior: specs/today-outline.md (Session nodes).
+ * What a conversation mention shows, from the same signals as the sidebar row:
+ * live presence for running/waiting, `sidebarStatusGroup` for Later and
+ * Settled, read receipts for unread (hidden for agent-managed sessions), and
+ * archive. Priority: waiting > running > later > done > unread > idle.
+ * Metadata absence means deleted or no access only once the metadata
+ * projection has settled.
+ * Behavior: specs/today-outline.md (Conversation mentions).
  */
 export function todaySessionDisplay(input: {
   meta: SessionMeta | undefined;
   metaSettled: boolean;
   live: SessionStatus | null;
+  nowMs: number;
 }): TodaySessionDisplay {
-  const { meta, live } = input;
+  const { meta, live, nowMs } = input;
   if (!meta) return { state: input.metaSettled ? 'missing' : 'loading' };
-  const extra = meta as SessionMeta & { settledAt?: unknown; agentManaged?: unknown };
-  const lastMessageAt = typeof meta.lastMessageAt === 'number' ? meta.lastMessageAt : 0;
-  const settled = typeof extra.settledAt === 'number' && extra.settledAt >= lastMessageAt;
+  const extra = meta as SessionMeta & { agentManaged?: unknown };
+  const waiting = live?.type === 'requestPermission';
+  const running = live != null;
+  const lastMessageAt = finite(meta.lastMessageAt);
+  const snoozedUntil = finite(meta.snoozedUntil);
+  const group = sidebarStatusGroup(
+    {
+      latestMessageAt: lastMessageAt,
+      isWorking: running,
+      isWaitingPermission: waiting,
+      snoozedUntil,
+      settledAt: finite(meta.settledAt),
+      focusRestoredAt: finite(meta.focusRestoredAt),
+    },
+    nowMs
+  );
+  const unread = extra.agentManaged !== true && sessionHasUnreadMessages(meta, nowMs);
+  const status: TodaySessionState = waiting
+    ? 'waiting'
+    : running
+      ? 'running'
+      : group === 'later'
+        ? 'later'
+        : meta.isArchived === true || group === 'settled'
+          ? 'done'
+          : unread
+            ? 'unread'
+            : 'idle';
   return {
     state: 'ok',
     title: meta.title?.trim() || '',
-    waiting: live?.type === 'requestPermission',
-    working: live != null,
-    unread: extra.agentManaged !== true && sessionHasUnreadMessages(meta),
-    done: meta.isArchived === true || settled,
+    status,
+    group,
+    unread,
+    lastMessageAt,
+    snoozeCountdown:
+      status === 'later' && snoozedUntil !== null
+        ? formatSnoozeCountdown(snoozedUntil, nowMs)
+        : null,
   };
 }

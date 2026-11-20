@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import type { TodayDate } from '@lody/shared';
 import { localTodayDate, msUntilNextLocalMidnight } from './today-stream';
 
@@ -34,4 +34,21 @@ export function useTodayClock(now: () => Date = () => new Date()): TodayDate {
     };
   }, [now]);
   return today;
+}
+
+/** Minute tick shared by a whole Today surface (snooze countdowns, Later expiry). */
+export const TodayNowContext = createContext<number | null>(null);
+
+/** The surface's minute clock: one interval per surface, never one per mention. */
+export function useTodayMinuteClock(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), TODAY_CLOCK_FALLBACK_MS);
+    return () => clearInterval(interval);
+  }, []);
+  return now;
+}
+
+export function useTodayNow(): number {
+  return useContext(TodayNowContext) ?? Date.now();
 }

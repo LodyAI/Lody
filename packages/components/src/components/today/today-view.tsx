@@ -46,7 +46,7 @@ import { buildConvertPrompt, todayMentionMarkdown } from './editor/block-selecti
 import type { TodayPageStore } from '@/lib/today/today-page-store';
 import type { TodayNodeId } from '@lody/shared';
 import { buildDayStream, localTodayDate, todayDateToLocalDate } from './today-stream';
-import { useTodayClock } from './use-today-clock';
+import { TodayNowContext, useTodayClock, useTodayMinuteClock } from './use-today-clock';
 
 export type TodayViewTarget = { member?: string; date?: string };
 
@@ -321,6 +321,7 @@ export function TodayOutlineSurface(props: {
 }) {
   const { controller } = props;
   const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const nowMs = useTodayMinuteClock();
   useEffect(() => {
     const element = surfaceRef.current;
     if (!element || !controller) return undefined;
@@ -374,7 +375,7 @@ export function TodayOutlineSurface(props: {
         if (event.target === event.currentTarget) controller?.onBlockPaste(event.nativeEvent);
       }}
     >
-      {props.children}
+      <TodayNowContext.Provider value={nowMs}>{props.children}</TodayNowContext.Provider>
       <TodayDragLayer />
     </div>
   );

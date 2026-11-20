@@ -1,7 +1,11 @@
 import { registerPlainText } from '@lexical/plain-text';
 import {
+  $getSelection,
+  $isRangeSelection,
   COMMAND_PRIORITY_CRITICAL,
   COMMAND_PRIORITY_HIGH,
+  COPY_COMMAND,
+  CUT_COMMAND,
   KEY_DOWN_COMMAND,
   PASTE_COMMAND,
   REDO_COMMAND,
@@ -9,7 +13,13 @@ import {
   createEditor,
   type LexicalEditor,
 } from 'lexical';
-import type { FocusIntent, TodayDate, TodayNodeId, TodayNodeView } from '@lody/shared';
+import {
+  sliceTodayRich,
+  type FocusIntent,
+  type TodayDate,
+  type TodayNodeId,
+  type TodayNodeView,
+} from '@lody/shared';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
 import type { TodayPageStoreCache } from '../../../providers/today-page-store-cache';
 import { MentionDecoratorNode } from '@/ui/mention/mention-node';
@@ -30,12 +40,14 @@ import {
   extendFocus,
   selectionCovers,
   serializeTodayFragments,
+  todayRichToPlain,
   topLevelSelection,
   type TodayMentionText,
 } from './block-selection';
+import { resolveMentionKey } from './mention-keys';
 import { readPastedSessionLink } from '@/lib/session-deep-link';
 import { projectTodayDrop, type TodayDropRow, type TodayDropTarget } from '../today-dnd';
-import { bindLoroText } from './loro-lexical-binding';
+import { $readTodayEditorRich, bindLoroText } from './loro-lexical-binding';
 import { resolveOutlineKey, type OutlineIntent } from './outline-keys';
 
 export type TodayActiveNode = { store: TodayPageStore; nodeId: TodayNodeId };
@@ -149,6 +161,22 @@ export class TodayEditorController {
         KEY_DOWN_COMMAND,
         (event) => this.onPickerKey(event),
         COMMAND_PRIORITY_CRITICAL
+      ),
+      // After the picker (same priority, registered later), before outline keys.
+      this.editor.registerCommand(
+        KEY_DOWN_COMMAND,
+        (event) => this.onMentionKey(event),
+        COMMAND_PRIORITY_CRITICAL
+      ),
+      this.editor.registerCommand(
+        COPY_COMMAND,
+        (event) => this.onEditorCopy(event, false),
+        COMMAND_PRIORITY_HIGH
+      ),
+      this.editor.registerCommand(
+        CUT_COMMAND,
+        (event) => this.onEditorCopy(event, true),
+        COMMAND_PRIORITY_HIGH
       ),
       this.editor.registerCommand(
         PASTE_COMMAND,
@@ -703,20 +731,27 @@ export class TodayEditorController {
     const fragments = readClipboard(data);
     if (!fragments) return false;
     event.preventDefault();
-    const offset = this.editor.getEditorState().read(() => $readSelectionOffsets())?.start ?? 0;
+    const range = this.editor.getEditorState().read(() => $readSelectionOffsets());
+    const offset = range?.start ?? 0;
     const { store, nodeId } = active;
     queueMicrotask(() =>
       this.apply(
         store,
-        store.undo.structural(() =>
-          store.outline.paste({ kind: 'text', nodeId, offset }, fragments)
-        )
+        store.undo.structural(() => {
+          // Pasting replaces the selection, in the same undo step.
+          const selected = (range?.end ?? offset) - offset;
+          if (selected > 0) store.outline.getText(nodeId)?.delete(offset, selected);
+          return store.outline.paste({ kind: 'text', nodeId, offset }, fragments);
+        })
       )
     );
     return true;
   }
 
-  /** Opens a session node (wired by the host). */
+  /** Opens a mention's status menu (wired by the host). */
+  onMentionMenu: ((sessionId: string, anchor: HTMLElement) => void) | null = null;
+
+  /** Opens a conversation (wired by the host). */
   onOpenSession:
     | ((sessionId: string, event?: { metaKey?: boolean; ctrlKey?: boolean }) => void)
     | null = null;
@@ -865,14 +900,14 @@ export class TodayEditorController {
   }
 
   // --- keys ---------------------------------------------------------------
-  private onKeyDown(event: KeyboardEvent): boolean {
-    const active = this.active;
-    const root = this.root;
-    if (!active || !root) return false;
-    // The browser moves the DOM caret before Lexical hears `selectionchange`
-    // (e.g. Home then Backspace): read the live DOM selection when it is ours.
+  /**
+   * The selection as offsets. The browser moves the DOM caret before Lexical
+   * hears `selectionchange` (e.g. Home then Backspace): read the live DOM
+   * selection when it is ours.
+   */
+  private liveSelection(root: HTMLElement) {
     const dom = window.getSelection();
-    const state = this.editor.read(() => {
+    return this.editor.read(() => {
       const length = $readComposerValue().text.length;
       if (dom?.anchorNode && dom.focusNode && root.contains(dom.anchorNode)) {
         const anchor = $domPointToOffset(this.editor, dom.anchorNode, dom.anchorOffset);
@@ -882,6 +917,66 @@ export class TodayEditorController {
       const offsets = $readSelectionOffsets();
       return { anchor: offsets?.start ?? length, focus: offsets?.end ?? length, length };
     });
+  }
+
+  /** Two-step caret and deletion around mentions; Enter opens a selected one. */
+  private onMentionKey(event: KeyboardEvent): boolean {
+    const root = this.root;
+    if (!this.active || !root || this.picker) return false;
+    const state = this.liveSelection(root);
+    const mentions = this.editor.read(() => $readTodayEditorRich().mentions);
+    const intent = resolveMentionKey(
+      event,
+      state,
+      mentions.map((mention) => mention.start)
+    );
+    if (!intent) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    // Commands run inside an editor update: select directly.
+    if (intent.type === 'select') $setSelectionOffsets(intent.anchor, intent.focus);
+    else if (intent.type === 'collapse') $setSelectionOffsets(intent.offset);
+    else {
+      const mention = mentions.find((candidate) => candidate.start === intent.start);
+      if (!mention || mention.kind !== 'session') return true;
+      if (intent.type === 'open') {
+        const modifiers = { metaKey: event.metaKey, ctrlKey: event.ctrlKey };
+        queueMicrotask(() => this.onOpenSession?.(mention.id, modifiers));
+      } else {
+        const chip = root.querySelector<HTMLElement>(
+          `[data-today-session="${CSS.escape(mention.id)}"] [data-today-mention-status]`
+        );
+        if (chip) queueMicrotask(() => this.onMentionMenu?.(mention.id, chip));
+      }
+    }
+    return true;
+  }
+
+  /** Copy or cut inside a node: mentions become links in text, and stay mentions in Today. */
+  private onEditorCopy(event: ClipboardEvent | KeyboardEvent | null, cut: boolean): boolean {
+    if (!this.active || !(event instanceof ClipboardEvent) || !event.clipboardData) return false;
+    const range = $readSelectionOffsets();
+    if (!range || range.start === range.end) return false;
+    const rich = sliceTodayRich($readTodayEditorRich(), range.start, range.end);
+    event.preventDefault();
+    event.clipboardData.setData('text/plain', todayRichToPlain(rich, this.mentionText));
+    event.clipboardData.setData(
+      TODAY_CLIPBOARD_MIME,
+      JSON.stringify({ v: TODAY_CLIPBOARD_VERSION, fragments: [{ ...rich, children: [] }] })
+    );
+    if (cut) {
+      const selection = $getSelection();
+      if ($isRangeSelection(selection)) selection.removeText();
+    }
+    return true;
+  }
+
+  // --- keys (outline) -----------------------------------------------------
+  private onKeyDown(event: KeyboardEvent): boolean {
+    const active = this.active;
+    const root = this.root;
+    if (!active || !root) return false;
+    const state = this.liveSelection(root);
     const offsets = {
       start: Math.min(state.anchor, state.focus),
       end: Math.max(state.anchor, state.focus),
