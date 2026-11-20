@@ -684,8 +684,9 @@ against the matching current head. Superseded pages preserve the cache and retry
 from the last applied checkpoint. A reset requires missing or invalid change coverage.
 The renderer atomically commits bodies, positions, revision and checkpoint against its original
 cache head. Exact-checkpoint pages are validated against the repair's revision and
-count. A newer observation schedules the next repair while this checkpoint can
-still be committed.
+count. If a body read times out, the reader can retry that request once at the
+same checkpoint and keep its verified pages. A newer observation schedules the
+next repair while this checkpoint can still be committed.
 Body-only edits retain cached directory cursor validity.
 A successful delta repair finishes even for a partial tail cache, without rereading
 the unchanged latest page.

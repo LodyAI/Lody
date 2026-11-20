@@ -2190,7 +2190,7 @@ it('rejects a late reset window after another tab advances the durable cache', a
   }
 });
 
-it('commits every page of an exact repair after a separate read observes a newer revision', async () => {
+it('retries only a timed-out page and commits the exact repair despite a newer read', async () => {
   const h = await cachedRecoveryFixture('paged-repair', 1);
   const timers = controlledRefreshTimers();
   const lastPageStarted = Promise.withResolvers<void>();
@@ -2200,19 +2200,18 @@ it('commits every page of an exact repair after a separate read observes a newer
     ...h.entries[0]!,
     id: `missed-${index}`,
   }));
+  const readPages: number[] = [];
   const tail = suffix.at(-1)!;
   const newTail = { ...tail, items: [{ type: 'text' as const, text: 'new revision' }] };
   const reply = (revision: number, result: unknown) => ({
-    ok: true as const,
-    responses: [{ ...h.reply(revision, result).responses[0]!, historyCount: 1 + suffix.length }],
+    ...h.reply(revision, result).responses[0]!,
+    historyCount: 1 + suffix.length,
   });
-  const data = createLocalRoostSessionDataFactory({
+  const data = createRemoteRoostSessionDataFactory({
     incremental: true,
     workspaceId: h.workspaceId,
     machineId: h.machineId,
-    sendControl: async (request) => {
-      if (request.type !== 'session/history-read') throw new Error('Unexpected write');
-      const query = request.query;
+    requestHistoryRead: async (_owner, _session, query) => {
       if (query.kind === 'readChanges') {
         if (query.checkpoint === 'checkpoint-1')
           return reply(2, { state: 'ready', checkpoint: 'checkpoint-2', ids: [], from: 1 });
@@ -2226,9 +2225,21 @@ it('commits every page of an exact repair after a separate read observes a newer
       }
       if (query.kind === 'readRange') {
         expect(query.atCheckpoint).toBe('checkpoint-2');
-        if (query.from === 501) {
+        readPages.push(query.from);
+        if (readPages.length === 2) {
           lastPageStarted.resolve();
           await releaseLastPage.promise;
+          return {
+            ...reply(2, undefined),
+            success: false,
+            error: 'History request timed out',
+            rpcFailure: {
+              source: 'transport',
+              code: 'response_timeout',
+              requestId: 'timed-out-page',
+              machineId: h.machineId,
+            },
+          };
         }
         return reply(
           2,
@@ -2238,6 +2249,9 @@ it('commits every page of an exact repair after a separate read observes a newer
       if (query.kind === 'readTurn' && query.turnId === tail.id && !query.atCheckpoint)
         return reply(3, { state: 'ready', turn: newTail });
       throw new Error(`Unexpected ${query.kind}`);
+    },
+    requestHistoryWrite: async () => {
+      throw new Error('Unexpected write');
     },
   })({ sessionId: h.sessionId, doc: h.doc, backendKind: 'roost' });
   const observation = data.history.observe(() => {
@@ -2255,6 +2269,7 @@ it('commits every page of an exact repair after a separate read observes a newer
     const followup = await timers.next();
     expect(await h.cache.getHead()).toMatchObject({ checkpoint: 'checkpoint-2', count: 502 });
     expect(await h.cache.readTurn(tail.id)).toEqual(tail);
+    expect(readPages).toEqual([1, 501, 501]);
     followup.callback();
     await nextCommitted.promise;
     expect(await h.cache.readTurn(tail.id)).toEqual(newTail);
