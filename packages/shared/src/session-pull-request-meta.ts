@@ -52,6 +52,47 @@ export function normalizeSessionPullRequestMeta(value: unknown): SessionPullRequ
   return { url, status };
 }
 
+/**
+ * Auto delivery progress. `pr`: waiting for the requested pull request; `ci`:
+ * waiting for checks; `fix`/`conflict`/`merge`: the matching request was sent;
+ * `ready`: checks passed and merge is left to the user; `stalled`: Lody stopped
+ * and needs the user, with `reason`.
+ */
+export type SessionAutoDeliveryState =
+  | 'pr'
+  | 'ci'
+  | 'fix'
+  | 'conflict'
+  | 'merge'
+  | 'ready'
+  | 'merged'
+  | 'stalled';
+
+export type SessionAutoDeliveryStallReason =
+  | 'ci_failed'
+  | 'ci_limit'
+  | 'conflicts'
+  | 'conflict_limit'
+  | 'no_new_commit'
+  | 'merge_blocked'
+  | 'merge_behind'
+  | 'merge_failed'
+  | 'pr_closed'
+  | 'pr_draft'
+  | 'pr_not_created'
+  | 'multiple_prs'
+  | 'stopped'
+  | 'request_failed';
+
+export type SessionAutoDelivery = {
+  state: SessionAutoDeliveryState;
+  /** 1-based count of the current kind of request (`fix` or `conflict`). */
+  attempt?: number;
+  reason?: SessionAutoDeliveryStallReason;
+  prUrl?: string;
+  updatedAt: number;
+};
+
 /** Rollup CI state of a PR's head commit: success/failure/pending/error/expected. */
 export type SessionPullRequestCiState = 's' | 'f' | 'p' | 'e' | 'x';
 

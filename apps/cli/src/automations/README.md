@@ -169,6 +169,7 @@ Lody code and is not a caller-authored rule graph.
 {
   "recoverCapacity": true,
   "archiveAfterMerge": true,
+  "autoDeliver": { "fixCi": true, "resolveConflicts": true, "merge": false },
   "compactWhenIdle": {
     "contextTokens": 300000,
     "cacheTtlMs": 600000,
@@ -197,6 +198,17 @@ to `false` to prevent new submissions. Use `cancel` for an already accepted inpu
   evidence. Archive waits for the entire Session group, including children, queues,
   Goals and native/automation work, then rechecks under existing admission barriers
   and commits the root last.
+- **Auto delivery:** the user's click or request turns it on for the Session's current
+  pull request ([Spec](../../../../specs/session-auto-delivery.md)). [`policies/delivery.ts`](policies/delivery.ts)
+  decides each step from PR poller checkpoints, which now record CI and merge state,
+  and keeps attempts per enablement in its own checkpoint. A step publishes one
+  `session.delivery.step` event with a deterministic id before progress is recorded,
+  so a crash repeats nothing. The policy turns the event into the existing Create PR,
+  Fix CI, Resolve Conflicts or a merge request, admitted only while the Session group
+  is settled and while the PR head still matches. Progress is written to
+  `SessionMeta.autoDelivery` at transitions only. The daemon never mutates GitHub;
+  the agent merges with `gh`. Encrypted workspaces refuse it because no PR poller runs
+  there.
 - **Idle compact:** context occupancy must reach the configured threshold. The same
   idle turn must still be current and the native adapter must advertise `/compact`.
   New input or the deadline invalidates maintenance. `cacheTtlMs` is an operator

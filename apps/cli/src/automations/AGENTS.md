@@ -43,6 +43,11 @@
   `actions/session-actions-legacy.ts`, and `sources/sessions-legacy.ts` are explicit
   bridges to unfinished Fleet/Repo/Session Promise APIs. Join raw adapter work;
   remove each bridge when its owner migrates, rather than add a parallel runtime.
+- Auto delivery requests only the existing quick-action text and facts the agent
+  cannot discover, admitted under Session group settlement and a current-head guard.
+  The daemon never mutates GitHub. Keep its per-kind repair limit and one merge
+  request per head; exhausted limits stop with a reason, never retry.
+  [Spec](../../../../specs/session-auto-delivery.md).
 - PR poller: active CI waits and undelivered continuations retain current-PR demand,
   including terminal PRs, under existing quota/fairness gates. Actions denial cools
   only Actions reads. Source data belongs in this ledger, not poller scheduling state.

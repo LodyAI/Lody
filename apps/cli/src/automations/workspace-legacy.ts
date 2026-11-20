@@ -14,6 +14,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import {
+  autoDeliverOptionsSchema,
   automationCommandSchema,
   remoteAutomationOperationSchema,
   remoteAutomationIntentSchema,
@@ -33,6 +34,7 @@ import {
 import {
   getSessionRoomId,
   isLoroRepoDocDeleted,
+  type SessionAutoDelivery,
   type SessionMeta,
   type SessionId,
   type AgentConfigId,
@@ -42,6 +44,7 @@ import {
   sessionPolicySettings,
   upgradeCapacityPolicies,
 } from './policies/session';
+import { advanceDelivery, deliveryStepCurrent, startDeliveryEpoch } from './policies/delivery';
 import type { Lody } from '@/lib/lody';
 import type { AuthContext } from '@/lib/command-runtime';
 import type { WorkspaceSummary } from '@/lib/workspace';
@@ -169,6 +172,10 @@ export async function createAutomationWorkspaceLegacy(options: {
           reason: 'turn_finalization',
         };
       }
+      case 'session.delivery.current':
+        if (typeof parameters.sessionId !== 'string' || typeof parameters.eventId !== 'string')
+          throw new Error('AUTOMATION_CONDITION_INVALID');
+        return deliveryStepCurrent(ledger, parameters.sessionId, parameters.eventId);
       case 'github.pr.is_merged':
         if (typeof parameters.prUrl !== 'string') throw new Error('AUTOMATION_CONDITION_INVALID');
         return actions.currentPr(receipt, parameters.prUrl);
@@ -385,6 +392,41 @@ export async function createAutomationWorkspaceLegacy(options: {
         )
       )
     );
+  const deliveryStatusKey = (status: Omit<SessionAutoDelivery, 'updatedAt'> | null | undefined) =>
+    status ? JSON.stringify([status.state, status.attempt, status.reason, status.prUrl]) : '';
+  /** Auto delivery reads observations already in this ledger and the Session metadata. */
+  const advanceDeliveries = async () => {
+    for (const rule of ledger.rules()) {
+      const sessionId = rule.scope.sessionId;
+      if (
+        !rule.enabled ||
+        !sessionId ||
+        rule.handler.kind !== 'policy' ||
+        rule.handler.policy !== 'auto-deliver' ||
+        rule.ownerUserId !== auth.userId ||
+        rule.ownerMachineId !== auth.machineId
+      )
+        continue;
+      try {
+        const options = autoDeliverOptionsSchema.parse(rule.handler.options);
+        const roomId = getSessionRoomId(sessionId as SessionId);
+        const record = await lody.documentManager.repo.getDocMeta(roomId);
+        const meta = record?.meta as SessionMeta | undefined;
+        if (!record || !meta || isLoroRepoDocDeleted(record) || meta.isArchived) continue;
+        const now = Date.now();
+        const decision = advanceDelivery({ ledger, meta, options, now });
+        if (decision.finished)
+          configureSessionPolicies(ledger, sessionId, auth.userId, { autoDeliver: false }, now);
+        if (deliveryStatusKey(meta.autoDelivery) !== deliveryStatusKey(decision.status))
+          await lody.documentManager.repo.upsertDocMeta(roomId, {
+            autoDelivery: { ...decision.status, updatedAt: now },
+          });
+      } catch (cause) {
+        // One Session's failure leaves the others' delivery running.
+        logger.warn(`Auto delivery pass failed for ${sessionId}`, cause);
+      }
+    }
+  };
   const host = Layer.effect(
     AutomationHost,
     Effect.gen(function* () {
@@ -414,6 +456,7 @@ export async function createAutomationWorkspaceLegacy(options: {
             (fact) => authority.executionRelease(fact.sessionId, fact.assistantTurnId, fact.userId),
             (cause) => logger.warn('Automation turn observation awaiting reconciliation', cause)
           );
+          await advanceDeliveries();
         }),
         authorize: (receipt) => sessionCall(() => actions.authorize(receipt)),
         condition: (spec, receipt) => sessionCall(() => condition(spec, receipt)),
@@ -658,16 +701,30 @@ export async function createAutomationWorkspaceLegacy(options: {
                   !isLoroRepoDocDeleted(record)
                     ? meta.latestUserMsgId
                     : undefined;
-                const wasEnabled =
-                  sessionPolicySettings(ledger, sessionId).recoverCapacity === true;
+                const previous = sessionPolicySettings(ledger, sessionId);
+                const wasEnabled = previous.recoverCapacity === true;
+                const enablesDelivery =
+                  typeof command.settings.autoDeliver === 'object' &&
+                  typeof previous.autoDeliver !== 'object';
+                // Encrypted workspaces do not run the PR poller that Auto delivery reads.
+                if (enablesDelivery && workspace.contentMode === 'e2ee')
+                  throw new Error('AUTOMATION_AUTO_DELIVER_UNAVAILABLE_ENCRYPTED');
                 ledger.configureSession(
-                  () =>
-                    configureSessionPolicies(ledger, sessionId, auth.userId, command.settings, now),
+                  () => {
+                    if (enablesDelivery) startDeliveryEpoch(ledger, sessionId, now);
+                    configureSessionPolicies(ledger, sessionId, auth.userId, command.settings, now);
+                  },
                   sessionId,
                   auth.userId,
                   !wasEnabled ? currentTurn : undefined,
                   now
                 );
+                // Turning it off, or dismissing a finished status, clears the shown status.
+                if (command.settings.autoDeliver === false)
+                  await lody.documentManager.repo.upsertDocMeta(
+                    getSessionRoomId(sessionId as SessionId),
+                    { autoDelivery: null }
+                  );
               }
               await runtime.runPromise(service.wake);
               return sessionPolicySettings(ledger, sessionId);

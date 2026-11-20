@@ -725,6 +725,24 @@ export class AutomationLedger {
   receipt(id: string): AutomationReceipt | undefined {
     return this.read('receipts', id);
   }
+  /** Receipts created for one published event, across rule revisions. */
+  eventReceipts(source: string, eventId: string): AutomationReceipt[] {
+    return (
+      this.connection.raw
+        .prepare(
+          "SELECT payload FROM receipts WHERE json_extract(payload,'$.event.source')=? AND json_extract(payload,'$.event.id')=?"
+        )
+        .all(source, eventId) as JsonRow[]
+    ).map((row) => JSON.parse(row.payload) as AutomationReceipt);
+  }
+  /** Whether a rule accepted the event and has not finished handling it. */
+  hasEventDelivery(source: string, eventId: string): boolean {
+    return !!this.connection.raw
+      .prepare(
+        "SELECT 1 FROM deliveries WHERE state='accepted' AND json_extract(payload,'$.event.source')=? AND json_extract(payload,'$.event.id')=? LIMIT 1"
+      )
+      .get(source, eventId);
+  }
   activities(limit = 50, before?: number): AutomationReceipt[] {
     return (
       this.connection.raw

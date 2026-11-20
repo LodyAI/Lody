@@ -197,6 +197,8 @@ export type SidebarUpdatedItem = {
   isWaitingPermission?: boolean;
   /** The latest turn ended in failure; the Status view files the row under Needs you. */
   hasFailedTurn?: boolean;
+  /** Auto delivery stopped for this conversation's PR and needs the person. */
+  deliveryStalled?: boolean;
   prStatus?: PrStatus | null;
   prCiState?: SessionPullRequestCiState | null;
   prReadiness?: SessionPullRequestReadiness | null;
@@ -1482,6 +1484,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             sessionId={item.id}
             selected={showSelectedState}
             isWaitingPermission={item.isWaitingPermission}
+            needsAttention={item.deliveryStalled}
             isWorking={item.isWorking}
             hasUnreadMessages={item.hasUnreadMessages}
             fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
