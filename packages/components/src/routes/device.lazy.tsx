@@ -2,7 +2,7 @@ import { createLazyFileRoute } from '@tanstack/react-router';
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from '@tanstack/react-router';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { RouteMessage } from '@/components/route-message';
 import { DeviceAuthPage as DeviceAuthPageView } from '@/components/pages/device-auth-page';
 import { useStableSession } from '@/hooks/useStableSession';

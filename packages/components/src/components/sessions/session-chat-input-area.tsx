@@ -85,7 +85,7 @@ import {
   type PersistedMentionRange,
 } from '@/components/mentions/mention-persistence';
 import { useTranslation } from 'react-i18next';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { captureAgentRoleMentionsApplied } from '@/lib/agent-role-analytics';
 import type {

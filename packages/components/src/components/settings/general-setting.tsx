@@ -32,7 +32,7 @@ import {
   initPush,
 } from '@/lib/push-notifications';
 import { isNativeAppShell } from '@/lib/native-platform';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { ClearCacheConfirmDialog, useClearCache } from './clear-cache';
 import { useIsMobile } from '@/hooks/use-mobile';

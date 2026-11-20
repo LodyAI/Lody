@@ -13,7 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from '@/lib/toast';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import {
   computeTitleGenerationDefaults,
   DEEPSEEK_HARNESS_API_KEY_ENV,

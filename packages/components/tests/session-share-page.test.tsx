@@ -18,6 +18,11 @@ const language = vi.hoisted(() => ({
     language.resolvedLanguage = next;
   }),
 }));
+vi.mock('@/i18n', () => ({
+  // The reader's language switch routes through `setAppLanguage` now; the test
+  // owns the resolved language, so delegate straight to its changeLanguage.
+  setAppLanguage: (next: string) => language.changeLanguage(next),
+}));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     i18n: language,

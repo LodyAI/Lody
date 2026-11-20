@@ -779,7 +779,7 @@ function getErrorMessage(err: unknown): string {
   return String(err);
 }
 
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import {
   capturePostHogEvent,
   capturePostHogOutcome,

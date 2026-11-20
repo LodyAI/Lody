@@ -94,7 +94,7 @@ import {
 } from '@/lib/session-file-language';
 import { getOfficePreviewKind } from '@/lib/session-file-office-source';
 import { downloadBytesAsFile } from '@/lib/download-file';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { useCodeCollabLiveText } from '@/hooks/use-code-collab-live-text';
 import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';

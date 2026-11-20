@@ -10,7 +10,7 @@ import { ReferralSettings } from './referral-settings';
 import type { BillingInvoiceDetail } from '@lody/cloud-api';
 import { BillingInvoiceDetails } from './billing-invoice-details';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { useCloudAction } from '@lody/platform/react';
 import { getBillingErrorCode } from './billing-errors';
