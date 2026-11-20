@@ -409,6 +409,9 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
       <DndContext
         sensors={sensors}
         collisionDetection={pinnedCollisionDetection}
+        // The sidebar viewport owns edge scrolling (`useSessionDragAutoScroll`);
+        // two scrollers on one container would double the speed.
+        autoScroll={false}
         onDragStart={handleDragStart}
         onDragMove={handleDragMove}
         onDragEnd={handleDragEnd}

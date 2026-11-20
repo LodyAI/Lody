@@ -79,6 +79,15 @@ const INITIAL_CONVERSATIONS: DemoConversation[] = [
     pinSectionId: 'releases',
     orderKey: '80',
   },
+  // Pinned extras so the pinned area itself overflows too.
+  ...Array.from({ length: 16 }, (_, index) => ({
+    id: `pinned-extra-${index + 1}`,
+    title: `Pinned thread ${index + 1}`,
+    latestMessageAt: NOW - (index + 1) * 40 * 60 * 1000,
+    isPinned: true,
+    pinSectionId: index % 2 === 0 ? 'maintenance' : 'releases',
+    orderKey: `${90 + index}`,
+  })),
   {
     id: 'c7',
     title: 'Investigate flaky CI job',
@@ -87,6 +96,14 @@ const INITIAL_CONVERSATIONS: DemoConversation[] = [
   },
   { id: 'c8', title: 'Review onboarding copy', latestMessageAt: NOW - 4 * HOUR, isPinned: false },
   { id: 'c9', title: 'Plan Q1 roadmap', latestMessageAt: NOW - 26 * HOUR, isPinned: false },
+  // Enough rows to overflow the viewport: drag one toward the top edge and the
+  // list auto-scrolls up to the pin sections.
+  ...Array.from({ length: 80 }, (_, index) => ({
+    id: `extra-${index + 1}`,
+    title: `Follow-up thread ${index + 1}`,
+    latestMessageAt: NOW - (30 + index) * HOUR,
+    isPinned: false,
+  })),
 ];
 
 const toItem = (conversation: DemoConversation): SidebarUpdatedItem => ({
@@ -260,6 +277,7 @@ function PinnedSectionsPlayground() {
       >
         <div className="p-6 text-sm text-muted-foreground" data-story-mention-target="">
           <p>Drag conversations between rows and onto section headers.</p>
+          <p>Hold a dragged conversation near the top or bottom edge to auto-scroll.</p>
           <p>Drag a section header to reorder sections.</p>
           <p>Right-click a pinned conversation for “Move to Section” and “New Section…”.</p>
           <p>Use a section header’s ⋯ menu to rename or delete it.</p>
