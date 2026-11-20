@@ -1022,3 +1022,87 @@ describe('observed per-model option lists', () => {
     });
   });
 });
+
+describe('multi-tier Codex speed selector normalization and legacy boolean compatibility', () => {
+  const machine = machineWithCapabilities({
+    [agentConfigId]: {
+      cliType: 'builtin',
+      agentType: 'codex',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      provenance: 'runtime',
+      modes: [],
+      models: [],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'gpt-6.2-astra',
+          options: [
+            { value: 'gpt-6.2-sol', name: '6.2 Sol' },
+            { value: 'gpt-6.2-astra', name: '6.2 Astra' },
+            { value: 'slow-model', name: 'Slow' },
+          ],
+        },
+        {
+          id: 'fast-mode',
+          name: 'Fast mode',
+          category: 'model_config',
+          type: 'boolean',
+          currentValue: false,
+          options: [],
+        },
+      ],
+      declaredModelControls: {
+        'gpt-6.2-sol': { fastMode: true, speedTiers: ['fast', 'ultrafast'] },
+        'gpt-6.2-astra': { fastMode: true },
+        'slow-model': { fastMode: false },
+      },
+      fetchedAt: 1,
+    },
+  });
+
+  const selectorsFor = (selectedModelId: string) =>
+    buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'codex',
+      selectedModelId,
+      machine,
+    }).configOptionSelectors;
+
+  it('shows a Standard/Fast/Ultrafast select for multi-tier models, a boolean toggle for Fast-only, and hides speed for unsupported models', () => {
+    const solOrder = orderAcpConfigOptionSelectors(selectorsFor('gpt-6.2-sol'));
+    expect(solOrder.fastModeSelectors).toEqual([]);
+    expect(solOrder.speedTierSelectors).toHaveLength(1);
+    expect(solOrder.speedTierSelectors[0]?.options.map((opt) => opt.value)).toEqual([
+      'off',
+      'fast',
+      'ultrafast',
+    ]);
+
+    const astraOrder = orderAcpConfigOptionSelectors(selectorsFor('gpt-6.2-astra'));
+    expect(astraOrder.speedTierSelectors).toEqual([]);
+    expect(astraOrder.fastModeSelectors).toHaveLength(1);
+    expect(astraOrder.fastModeSelectors[0]?.type).toBe('boolean');
+
+    const slowOrder = orderAcpConfigOptionSelectors(selectorsFor('slow-model'));
+    expect(slowOrder.speedTierSelectors).toEqual([]);
+    expect(slowOrder.fastModeSelectors).toEqual([]);
+  });
+
+  it('coerces legacy boolean values onto a multi-tier speed select and drops ultrafast on Fast-only models', () => {
+    const solSpeed = orderAcpConfigOptionSelectors(selectorsFor('gpt-6.2-sol'))
+      .speedTierSelectors[0]!;
+    expect(resolveConfigOptionValue(solSpeed, true)).toBe('fast');
+    expect(resolveConfigOptionValue(solSpeed, false)).toBe('off');
+    expect(resolveConfigOptionValue(solSpeed, 'ultrafast')).toBe('ultrafast');
+
+    const astraFast = orderAcpConfigOptionSelectors(selectorsFor('gpt-6.2-astra'))
+      .fastModeSelectors[0]!;
+    expect(resolveConfigOptionValue(astraFast, 'fast')).toBe(true);
+    expect(resolveConfigOptionValue(astraFast, 'off')).toBe(false);
+    expect(resolveConfigOptionValue(astraFast, 'ultrafast')).toBe(false);
+  });
+});
