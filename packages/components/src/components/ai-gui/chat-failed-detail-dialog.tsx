@@ -13,6 +13,7 @@ import {
   buildChatFailedErrorReport,
   type ChatFailedErrorReportInput,
 } from './chat-failed-error-report';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const MONO_FONT =
   'JetBrains Mono, SF Mono, Monaco, Inconsolata, Fira Code, Droid Sans Mono, Source Code Pro, monospace';
@@ -130,7 +131,7 @@ export function ChatFailedDetailDialog({
 
   const handleCopy = () => {
     if (!reportText) return;
-    void navigator.clipboard?.writeText(reportText).then(
+    void copyTextToClipboard(reportText).then(
       () => setCopied(true),
       () => toast.error(t('sessions.systemNotices.chatFailed.copyFailed', 'Failed to copy error'))
     );

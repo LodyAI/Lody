@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useAtomValue } from 'jotai';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { useTranslation } from 'react-i18next';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import {

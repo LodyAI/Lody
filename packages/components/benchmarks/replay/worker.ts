@@ -1,9 +1,10 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { Session } from 'node:inspector';
 import { LoroDoc, LoroList } from 'loro-crdt';
-import { createHistoryWriter, type SessionId } from '@lody/shared';
+import { type SessionId } from '@lody/shared';
 import { createConversationSession } from '../../src/lib/conversation-view/create-conversation-session';
 
 const config = JSON.parse(process.argv[2]!);

@@ -211,8 +211,13 @@ export function AcpFooterSelectorGroup({
   onConfigOptionChange,
   contentClassName,
 }: AcpFooterSelectorGroupProps) {
-  const { modelSelectors, thoughtLevelSelectors, booleanSelectors, otherSelectors } =
-    orderAcpConfigOptionSelectors(configOptionSelectors);
+  const {
+    modelSelectors,
+    thoughtLevelSelectors,
+    speedTierSelectors,
+    booleanSelectors,
+    otherSelectors,
+  } = orderAcpConfigOptionSelectors(configOptionSelectors);
 
   return (
     <>
@@ -253,6 +258,15 @@ export function AcpFooterSelectorGroup({
               values: configOptionValues,
               onChange: onConfigOptionChange,
             })
+      )}
+
+      {speedTierSelectors.map((selector) =>
+        renderConfigSelector(selector, {
+          tone,
+          values: configOptionValues,
+          onChange: onConfigOptionChange,
+          contentClassName,
+        })
       )}
 
       {booleanSelectors.map((selector) =>

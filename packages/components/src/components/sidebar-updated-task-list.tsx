@@ -282,6 +282,7 @@ import {
   SessionPrIcon,
   SessionMergeablePill,
   SessionRowLeadingSlot,
+  SessionRowMenuButton,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
   SidebarListSkeleton,
@@ -299,6 +300,7 @@ import type {
 import type { TaskListPullRequestOpen, TaskListTaskOwner } from '@/components/task-list';
 import { SessionSharingIndicator } from '@/components/session-sharing';
 import type { SessionSharingState } from '@/lib/session-sharing';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type SidebarUpdatedItemKind = SidebarRowKind;
 
@@ -1024,6 +1026,14 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
               </span>
             ) : undefined
           }
+          menu={
+            hasMenuActions ? (
+              <SessionRowMenuButton
+                label={contextMenuLabels.moreActions}
+                revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
+              />
+            ) : undefined
+          }
           archive={
             showInlineArchive ? (
               <SidebarRowArchiveButton
@@ -1157,7 +1167,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           <ContextMenu.Item
             icon={GitBranch}
             onClick={() => {
-              void navigator.clipboard.writeText(branchName).catch(() => {});
+              void copyTextToClipboard(branchName).catch(() => {});
             }}
           >
             {contextMenuLabels.copyBranch}

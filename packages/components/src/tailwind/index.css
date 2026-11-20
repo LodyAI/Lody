@@ -974,8 +974,8 @@ pre {
        too, with wide hyphens in file and repo names. */
     --font-sans-default:
       'SF Pro Display', 'Inter Variable', 'PingFang SC', -apple-system, BlinkMacSystemFont,
-      'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Arial, 'Apple Color Emoji',
-      'Segoe UI Emoji', sans-serif;
+      'Hiragino Sans GB', 'Segoe UI', 'Microsoft YaHei', 'Helvetica Neue', Arial,
+      'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
     --font-sans: var(--lody-interface-font-family, var(--font-sans-default));
     --font-serif: serif;
     --font-wordmark:
@@ -2219,4 +2219,16 @@ html:active-view-transition-type(home-board-fold)::view-transition-old(home-boar
     transform: none;
     opacity: 1;
   }
+}
+
+/* Pinned sidebar drags (`lib/pinned-drop-settle.ts`): while a pin row or section is
+   held the cursor is grabbing everywhere; from the drop until the pointer next moves,
+   pin sections take no hover, so a landed row does not light up under a still pointer. */
+body[data-pin-dragging],
+body[data-pin-dragging] * {
+  cursor: grabbing !important;
+}
+
+body[data-pin-hover-suppressed] [data-pin-section] {
+  pointer-events: none;
 }

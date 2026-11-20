@@ -51,7 +51,9 @@ export type SessionMonacoEditorControllerOptions = {
   readonly initialTheme: string;
   readonly initialReadOnly: boolean;
   readonly initialWordWrap: boolean;
-  readonly initialModelUri?: monaco.Uri;
+  // Serialized `monaco.Uri` (e.g. `code-collab://<fileId>/<path>`), kept as a
+  // string so callers can build it without importing the editor bundle.
+  readonly initialModelUri?: string;
   readonly callbacks: SessionMonacoEditorCallbacks;
 };
 
@@ -75,17 +77,14 @@ export class SessionMonacoEditorController {
     // `createModel` rejects duplicate URIs. If a peer mount already
     // built a model for our URI, reuse it — and remember not to
     // dispose it during teardown.
-    const existingModel = options.initialModelUri
-      ? monaco.editor.getModel(options.initialModelUri)
-      : null;
+    const modelUri = options.initialModelUri
+      ? monaco.Uri.parse(options.initialModelUri)
+      : undefined;
+    const existingModel = modelUri ? monaco.editor.getModel(modelUri) : null;
     this.ownsModel = !existingModel;
     this.model =
       existingModel ??
-      monaco.editor.createModel(
-        options.initialText,
-        options.initialLanguage,
-        options.initialModelUri
-      );
+      monaco.editor.createModel(options.initialText, options.initialLanguage, modelUri);
 
     this.editor = monaco.editor.create(options.container, {
       model: this.model,

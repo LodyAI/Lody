@@ -74,7 +74,13 @@ export function QueuedImagePreview({
   // The full-size image loads only once the preview opens (the row itself
   // needs just the thumbnail); the viewer shows its loading state until then.
   useEffect(() => {
-    if (!previewOpen || originalUrl || !workspaceId || (!authToken && image.transport !== 'local' && !image.localImageId)) return undefined;
+    if (
+      !previewOpen ||
+      originalUrl ||
+      !workspaceId ||
+      (!authToken && image.transport !== 'local' && !image.localImageId)
+    )
+      return undefined;
     let active = true;
     void getSessionImageBlobUrl({
       ...image,

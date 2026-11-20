@@ -292,7 +292,7 @@ async function attach(method: 'paste' | 'drop' | 'select', files: globalThis.Fil
       });
       (method === 'paste'
         ? container.querySelector('[data-composer-editor], textarea')!
-        : container.querySelector('[data-lody-composer-box]')!
+        : container.querySelector('.group.relative')!
       ).dispatchEvent(event);
     }
   });

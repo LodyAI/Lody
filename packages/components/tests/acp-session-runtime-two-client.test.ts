@@ -1,3 +1,4 @@
+import { sessionDocSchema } from '@lody/shared/session-doc-schemas';
 import { LoroDoc } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
 import { describe, expect, it } from 'vitest';
@@ -7,7 +8,6 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import {
   resolveSessionAcpRuntimeConfig,
   ACP_CAPABILITY_CACHE_VERSION,
-  sessionDocSchema,
   type SessionDoc,
   type SessionHistoryInput,
   type SessionId,

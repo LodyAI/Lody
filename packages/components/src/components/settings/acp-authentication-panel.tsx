@@ -47,6 +47,7 @@ import { openExternalUrl } from '@/lib/native-browser';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import { SorbetProviderIcon, sorbetAuthProviderId } from './sorbet-provider-icon';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const SM = '@media (min-width: 640px)';
 
@@ -884,7 +885,7 @@ export function AcpAuthenticationPanel({
   const handleCopyUserCode = async (): Promise<void> => {
     if (!authorization?.userCode) return;
     try {
-      await navigator.clipboard.writeText(authorization.userCode);
+      await copyTextToClipboard(authorization.userCode);
       setUserCodeCopied(true);
     } catch {
       setError(t('agents.authentication.copyCodeFailed', 'Could not copy the code.'));

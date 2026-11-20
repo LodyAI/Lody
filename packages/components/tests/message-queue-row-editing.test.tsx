@@ -75,6 +75,43 @@ describe('queued message editing commits', () => {
     container = undefined;
   });
 
+  it('offers Send for each retained row while idle and sends only the selected row', async () => {
+    const sent: string[] = [];
+    const items = ['B', 'C', 'D', 'E', 'F'].map((name) => ({
+      ...makeItem(),
+      $cid: `cid-${name}`,
+      task: name,
+      userTurnId: name,
+      paused: true,
+    }));
+    function StoppedQueue() {
+      const [queued, setQueued] = useState(items);
+      return createElement(MessageQueueDisplay, {
+        sessionId: 'session-test' as SessionId,
+        items: queued,
+        showSteerAction: true,
+        sendWhileIdle: true,
+        onRemove: () => {},
+        onReorder: () => {},
+        onEditStart: () => {},
+        onEditCancel: () => {},
+        onEditSave: () => {},
+        onSteer: (item) => {
+          sent.push(item.task);
+          setQueued((rows) => rows.filter((row) => row.$cid !== item.$cid));
+        },
+      });
+    }
+    await act(async () => root?.render(createElement(StoppedQueue)));
+    const sends = container!.querySelectorAll<HTMLButtonElement>('[aria-label="Send"]');
+    expect(sends).toHaveLength(5);
+    expect(sent).toEqual([]);
+    await act(async () => sends[1]!.click());
+    expect(sent).toEqual(['C']);
+    expect(container!.querySelectorAll('[aria-label="Send"]')).toHaveLength(4);
+    for (const name of ['B', 'D', 'E', 'F']) expect(container!.textContent).toContain(name);
+  });
+
   it('renders dedicated scheduled rows in a final section without queue affordances', async () => {
     const opened: string[] = [];
     const cancelledRows: string[] = [];
@@ -666,5 +703,42 @@ describe('queued message images', () => {
     expect(images).toContain('blob:original/image-1');
     expect(editsStarted).toEqual([]);
     expect(container!.querySelector('textarea')).toBeNull();
+  });
+
+  it('keeps the scroll fade off the scroller and clamps a phone row to one line', async () => {
+    const long =
+      '暂时只写代码，不需要改任何的约定或者是 agent 的提示，后面还有很多不会发出去的说明。';
+    await act(async () => {
+      root?.render(
+        createElement(MessageQueueDisplay, {
+          sessionId: 'session-test' as SessionId,
+          items: [{ ...makeItem(), $cid: 'cid-long', task: long }],
+          onRemove: () => undefined,
+          onReorder: () => undefined,
+          onEditStart: () => undefined,
+          onEditCancel: () => undefined,
+          onEditSave: () => undefined,
+          onSteer: () => undefined,
+          roomy: true,
+          footerPosition: 'inline',
+        })
+      );
+    });
+
+    const scroller = container!.querySelector<HTMLElement>('.overflow-y-auto');
+    expect(scroller).toBeTruthy();
+    expect(scroller!.style.maxHeight).toBe('min(25vh, 240px)');
+    // Unset mask properties are '' in some jsdom builds and undefined in others.
+    expect(scroller!.style.getPropertyValue('mask-image')).toBe('');
+    expect(scroller!.style.getPropertyValue('-webkit-mask-image')).toBe('');
+    expect(scroller!.parentElement?.style.overflow).toBe('hidden');
+    expect(scroller!.parentElement?.style.maxHeight).toBe('min(25vh, 240px)');
+
+    // The row wrapper has the same text. The clamp lives on the preview itself.
+    const preview = [...container!.querySelectorAll('div')].find(
+      (node) => node.textContent === long && node.style.whiteSpace === 'nowrap'
+    );
+    expect(preview).toBeTruthy();
+    expect(preview?.style.display).not.toBe('-webkit-box');
   });
 });

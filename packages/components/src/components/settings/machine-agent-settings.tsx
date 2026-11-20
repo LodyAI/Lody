@@ -287,12 +287,6 @@ const styles = stylex.create({
     fontVariantNumeric: 'tabular-nums',
     color: colors.secondaryLabel,
   },
-  privateHint: {
-    margin: 0,
-    marginTop: '2px',
-    fontSize: uiText.footnoteSize,
-    color: colors.secondaryLabel,
-  },
   selectPrompt: {
     paddingInline: space[1],
     paddingBlock: space[8],
@@ -1009,7 +1003,7 @@ export function MachineAgentSettings({
         timeoutMs: 15_000,
         timeoutMessage: t(
           'settings.devices.sessions.terminateStillPresent',
-          'The ACP process is still present in device monitoring'
+          'The ACP process is still present in machine monitoring'
         ),
       });
     },
@@ -1039,7 +1033,9 @@ export function MachineAgentSettings({
     (machineId: MachineId): Promise<number> => {
       if (!runtime || !workspaceId) {
         return Promise.reject(
-          new Error(t('chat.validation.missingContext', 'Missing workspace context'))
+          new Error(
+            t('chat.validation.missingContext', 'Workspace context is missing, please retry.')
+          )
         );
       }
 
@@ -1063,7 +1059,9 @@ export function MachineAgentSettings({
       restoreMachineId?: MachineId;
     }) => {
       if (!runtime || !workspaceId || !authToken) {
-        throw new Error(t('chat.validation.missingContext', 'Missing workspace context'));
+        throw new Error(
+          t('chat.validation.missingContext', 'Workspace context is missing, please retry.')
+        );
       }
 
       const requestId = createMachineRequestId();
@@ -1284,6 +1282,7 @@ export function MachineAgentSettings({
       await refreshCapabilities({
         machineId: config.machineId,
         configId: config.id,
+        readModelOptions: true,
         onModelOptionsProgress: options?.onModelOptionsProgress,
       });
     },
@@ -1489,7 +1488,7 @@ export function MachineAgentSettings({
                                 ? t('workspace.machines.online', 'Online')
                                 : t('workspace.machines.offline', 'Offline')}
                               {isLocal
-                                ? ` · ${t('workspace.machines.thisDevice', 'This device')}`
+                                ? ` · ${t('workspace.machines.thisDevice', 'This machine')}`
                                 : ''}
                             </span>
                           }
@@ -1559,7 +1558,7 @@ export function MachineAgentSettings({
                                 ? t('workspace.machines.online', 'Online')
                                 : t('workspace.machines.offline', 'Offline')}
                               {itemIsLocal
-                                ? ` · ${t('workspace.machines.thisDevice', 'This device')}`
+                                ? ` · ${t('workspace.machines.thisDevice', 'This machine')}`
                                 : ''}
                               {!item.sharedWithTeam
                                 ? ` · ${t('workspace.machines.private', 'Private')}`
@@ -1685,11 +1684,11 @@ export function MachineAgentSettings({
     mode === 'machines'
       ? t(
           'settings.categories.machines.description',
-          'View workspace machines and manage the machines you own.'
+          'View workspace machines and manage the machines you own'
         )
       : t(
           'settings.categories.agents.description',
-          'AI agent configurations available in this workspace.'
+          'Manage the AI agents available in this workspace'
         );
 
   const filterButton =
@@ -1923,12 +1922,6 @@ export function MachineAgentSettings({
                 </h3>
                 <span {...stylex.props(styles.count)}>{ownPrivateItems.length}</span>
               </div>
-              <p {...stylex.props(styles.privateHint)}>
-                {t(
-                  'settings.machines.privateMachinesHint',
-                  'These machines are not available to other workspace members. Select one here to manage sharing.'
-                )}
-              </p>
             </div>
             <div {...stylex.props(styles.stack)}>
               {ownPrivateItems.map(renderDesktopMachineSection)}

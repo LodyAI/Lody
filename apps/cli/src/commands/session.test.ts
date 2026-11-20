@@ -1,3 +1,4 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 import {
   runWithDaemonWorkspace,
   runWithEncryptedCommandAccess,
@@ -13,7 +14,6 @@ import { z } from 'zod';
 import { getSessionCancelProtocolFields } from './session';
 import { CURRENT_MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
-import { createHistoryWriter } from '@lody/shared';
 import { createLoroSessionData } from '@lody/shared/session-data';
 import { appendUserPromptHistory } from './session';
 import { prepareSessionInput } from './session';
@@ -598,6 +598,79 @@ describe('session command helpers', () => {
     // An inherited Fast value is dropped rather than sent to a model without it.
     expect(
       filterCompatibleTurnConfigOptionValues({ fast: true, effort: 'default' }, capability, 'haiku')
+    ).toBeUndefined();
+  });
+
+  it('validates and filters Codex ultrafast speed tiers per target model', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'builtin',
+      agentType: 'codex',
+      modes: [{ id: 'agent', name: 'Agent' }],
+      models: [
+        { modelId: 'gpt-6.2-sol', name: '6.2 Sol' },
+        { modelId: 'gpt-6.2-astra', name: '6.2 Astra' },
+      ],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'gpt-6.2-astra',
+          options: [
+            { value: 'gpt-6.2-sol', name: '6.2 Sol' },
+            { value: 'gpt-6.2-astra', name: '6.2 Astra' },
+          ],
+        },
+        {
+          id: 'fast-mode',
+          name: 'Fast mode',
+          category: 'model_config',
+          type: 'boolean',
+          currentValue: false,
+          options: [],
+        },
+      ],
+      declaredModelControls: {
+        'gpt-6.2-sol': { fastMode: true, speedTiers: ['fast', 'ultrafast'] },
+        'gpt-6.2-astra': { fastMode: true },
+      },
+      fetchedAt: 1,
+    };
+    const target = createSessionMeta({ agentType: 'codex' });
+    expect(() =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: {
+          modelId: 'gpt-6.2-sol',
+          configOptionValues: { 'fast-mode': 'ultrafast' },
+        },
+        target,
+        capability,
+      })
+    ).not.toThrow();
+    expect(() =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: {
+          modelId: 'gpt-6.2-astra',
+          configOptionValues: { 'fast-mode': 'ultrafast' },
+        },
+        target,
+        capability,
+      })
+    ).toThrow(/Invalid speed tier for model gpt-6.2-astra: ultrafast/);
+    expect(
+      filterCompatibleTurnConfigOptionValues(
+        { 'fast-mode': 'ultrafast' },
+        capability,
+        'gpt-6.2-sol'
+      )
+    ).toEqual({ 'fast-mode': 'ultrafast' });
+    expect(
+      filterCompatibleTurnConfigOptionValues(
+        { 'fast-mode': 'ultrafast' },
+        capability,
+        'gpt-6.2-astra'
+      )
     ).toBeUndefined();
   });
 

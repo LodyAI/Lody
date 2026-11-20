@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({ capture: vi.fn() }));
 
-vi.mock('@posthog/react', () => ({
+vi.mock('@/lib/posthog-context', () => ({
   usePostHog: () => ({ capture: mocks.capture }),
 }));
 

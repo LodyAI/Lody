@@ -41,7 +41,7 @@ import { SessionFileImagePreview } from '@/components/sessions/session-file-imag
 import { SessionFileVideoPreview } from '@/components/sessions/session-file-video-preview';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import { MarkdownFileResources } from '@/components/ai-gui/markdown-file-image';
-import { SessionMonacoTextViewer } from '@/components/sessions/session-monaco-text-viewer';
+import { LazySessionMonacoTextViewer } from '@/components/sessions/lazy-session-monaco-text-viewer';
 import { SessionShikiTextViewer } from '@/components/sessions/session-shiki-text-viewer';
 import { useFileWorkspaceTree } from '@/hooks/use-code-session';
 import { isNativeAppShell } from '@/lib/native-platform';
@@ -866,7 +866,7 @@ function MobileTextPreview({
         ) : showHtml ? (
           <ReadOnlyHtmlPreview text={text} />
         ) : (
-          <SessionMonacoTextViewer
+          <LazySessionMonacoTextViewer
             key={path}
             text={text}
             language="html"
@@ -911,7 +911,7 @@ function MobileTextPreview({
 
   return (
     <div className={clsx(stylex.props(styles.codePreview).className, bottomClearanceClassName)}>
-      <SessionMonacoTextViewer
+      <LazySessionMonacoTextViewer
         key={path}
         text={text}
         language={getSessionFileMonacoLanguageId(path, extendedCodeLanguagesEnabled)}

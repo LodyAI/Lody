@@ -1,3 +1,4 @@
+import { ScheduleRepository } from '@lody/shared/schedule-repository';
 import { reuseRuntimeKeyPairs } from './e2ee-runtime-key-pairs';
 import type { AuthorityStamp } from '../src/lib/e2ee/authority-clock';
 import { executeScheduleCommand } from '../src/lib/schedules/schedule-command-service';
@@ -9,7 +10,7 @@ import {
   scheduleDefinitionFingerprint,
   turnExecutionDigest,
 } from '@lody/shared';
-import { ScheduleRepository, getScheduleRoomId, type WorkspaceId } from '@lody/shared';
+import { getScheduleRoomId, type WorkspaceId } from '@lody/shared';
 import { LoroRepo } from 'loro-repo';
 import { LoroDocumentManager } from '../src/lib/loro/doc';
 import { CloudE2eeLedgerOutage } from '../src/lib/cloud-e2ee-errors';

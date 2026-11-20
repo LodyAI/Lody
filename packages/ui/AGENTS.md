@@ -3,6 +3,8 @@
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
 Base UI + StyleX primitives; compile with `@stylexjs/unplugin` and `stylex-options.ts`.
+StyleX rules must land in the initial renderer stylesheet: `index` for Web and
+`main` for Electron, including hashed filenames, never a lazy feature chunk.
 
 - Package styles use StyleX: no Tailwind, `cn`, `cva`, `tailwind-merge` or
   `@source` scanning here. Component props own visual variants, sizes, tones and

@@ -1,6 +1,7 @@
 # Direct session-tab switching with ⌘1–⌘9
 
 Status: implemented
+Archived: 2026-11-20
 Translation: current
 
 [中文](2026-09-22-session-tab-index-shortcuts.zh.md)

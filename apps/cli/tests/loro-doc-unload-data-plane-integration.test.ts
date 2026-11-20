@@ -1,3 +1,4 @@
+import { sessionDocSchema } from '@lody/shared/session-doc-schemas';
 import { bindTestPresenceApplication } from './presence-application-fixture';
 import { updateTestHistory } from './history-port-fixture';
 /**
@@ -43,7 +44,6 @@ import {
   bytesToBase64,
   getSessionRoomId,
   LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-  sessionDocSchema,
   type LocalLoroDataPlaneRoom,
   type LocalLoroDataPlaneServerLegacy,
   type LocalLoroDataPlaneServerMessage,

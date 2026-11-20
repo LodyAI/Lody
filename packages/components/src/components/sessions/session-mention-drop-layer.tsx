@@ -34,7 +34,7 @@ export function SessionMentionDropLayer({
   className?: string;
   children: ReactNode;
 }) {
-  const { dropZone, overlayActive } = useSessionMentionDropZone({
+  const { dropZone, pointerDropRef, overlayActive } = useSessionMentionDropZone({
     enabled,
     excludeSessionId,
     onDropSessionId,
@@ -44,6 +44,7 @@ export function SessionMentionDropLayer({
     <div
       className={clsx(stylex.props(styles.layer).className, className)}
       data-session-mention-drop-layer=""
+      ref={pointerDropRef}
       {...dropZone.handlers}
     >
       <ConversationDropOverlay active={overlayActive} kind="session-mention" />

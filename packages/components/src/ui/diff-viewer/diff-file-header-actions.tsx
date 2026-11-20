@@ -6,6 +6,7 @@ import * as stylex from '@stylexjs/stylex';
 import { withClassName } from '@/lib/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeSpace } from '../../style/theme-scale.stylex';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type DiffFileHeaderActionsProps = {
   readonly path: string;
@@ -59,7 +60,7 @@ export function DiffFileHeaderActions({
     if (!path) {
       return;
     }
-    void navigator.clipboard.writeText(path).then(
+    void copyTextToClipboard(path).then(
       () => {
         setCopied(true);
         window.setTimeout(() => {

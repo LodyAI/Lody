@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import { EncryptedWorkspaceMark } from '@/components/e2ee/encrypted-workspace-mark';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { useTranslation } from 'react-i18next';
@@ -21,7 +22,6 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { useStore } from 'jotai';
-import { clsx } from 'clsx';
 import { BOOT_SHELL_SIDEBAR_WIDTH, isMobileSidebarDevice } from '@/lib/boot-shell-script';
 import { sidebarScrollTopByWorkspaceAtom } from '@/atoms/sidebar-state';
 import {
@@ -59,6 +59,7 @@ import {
   CircleHelp,
   BookOpen,
   Bug,
+  CalendarDays,
   ClipboardList,
   ListTodo,
   Github,
@@ -87,12 +88,18 @@ import {
   type SidebarUpdatedItem,
   type SidebarUpdatedSessionListLabels,
 } from './sidebar-updated-session-list';
+import {
+  SidebarPinnedSections,
+  type SidebarPinSectionActions,
+  type SidebarPinnedSection,
+} from './sidebar-pinned-sections';
 import { SidebarFilterPopover, type SidebarFilterLabels } from './sidebar-filter-popover';
 import { WorkspaceAvatar } from './workspace-avatar';
 import { avatar as avatarTokens } from '@lody/ui/avatar/avatar.tokens.stylex';
 import { AuthRecoveryEntrySlot } from './auth-recovery-entry';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useSessionDragAutoScroll } from '@/hooks/use-session-drag-auto-scroll';
 import { useStableNow } from '@/hooks/use-stable-now';
 import {
   SIDEBAR_ROW_TEXT_CLASS,
@@ -549,7 +556,7 @@ const shellStyles = stylex.create({
   pinnedBottom: { paddingBottom: themeSpace[1] },
 });
 
-export type LoroSidebarNavKey = 'home' | 'archive' | 'schedules';
+export type LoroSidebarNavKey = 'home' | 'archive' | 'schedules' | 'today';
 
 export type LoroSidebarChatScope = 'my' | 'team';
 export type LoroSidebarOrganizeMode = SidebarOrganizeMode;
@@ -688,6 +695,22 @@ export interface LoroSidebarProps {
   pinnedItems?: SidebarUpdatedItem[];
   /** Whether the dedicated pinned section is collapsed. */
   pinnedSectionCollapsed?: boolean;
+  /**
+   * Pinned sessions split into pin sections, default section first. When
+   * omitted, {@link pinnedItems} renders as the single default section.
+   */
+  pinnedSections?: SidebarPinnedSection[];
+  /** Folded user pin sections, by section id (the default uses `pinnedSectionCollapsed`). */
+  collapsedPinSectionIds?: Readonly<Record<string, boolean>>;
+  /**
+   * Rows the current sidebar scope hides from each pin section, keyed by
+   * `pinSectionKey(section.id)` (`'default'` for the default section). An
+   * expanded section with hidden rows says so under its rows.
+   */
+  pinnedHiddenCounts?: Readonly<Record<string, number>>;
+  onTogglePinSection?: (sectionId: string) => void;
+  /** Create, rename, delete and move between pin sections; absent hides those controls. */
+  pinSectionActions?: SidebarPinSectionActions;
   /** Selected item id used to highlight a row in 'updated' mode. */
   updatedSelectedItemId?: string | null;
   /** Per-bucket collapse state for the 'updated' organize mode. */
@@ -730,6 +753,14 @@ export interface LoroSidebarProps {
   onRenameUpdatedItem?: (id: string, nextTitle: string) => void | Promise<void>;
   /** Toggle pin for an Updated row. Mirrors `sessionListProps.onTogglePinSession`. */
   onToggleUpdatedItemPinned?: (id: string, nextPinned: boolean) => void;
+  /** Snooze a session into Status Later until `snoozedUntil` (epoch ms). */
+  onSnoozeUpdatedItem?: (id: string, snoozedUntil: number) => void;
+  /** Mark a session as settled into Status Settled. */
+  onSettleUpdatedItem?: (id: string) => void;
+  /** Restore a snoozed or settled session back into Status Focus. */
+  onMoveUpdatedItemToFocus?: (id: string) => void;
+  /** Reorder (or restore via drag) a session into Status Focus at `toIndex`. */
+  onDropFocusItem?: (id: string, toIndex: number) => void;
   /** Copy session URL for an Updated row. Mirrors `sessionListProps.onCopySessionUrl`. */
   onCopyUpdatedItemUrl?: (id: string) => void;
   /** Share an Updated row with the team. Mirrors `sessionListProps.onShareSessionWithTeam`. */
@@ -748,6 +779,8 @@ export interface LoroSidebarProps {
   onArchiveClicked?: () => void;
   /** Shows the Schedules entry; absent where there is nowhere to go. */
   onSchedulesClicked?: () => void;
+  /** Shows the experimental Today entry (specs/today-outline.md); absent when switched off. */
+  onTodayClicked?: () => void;
   onSettingsClicked?: () => void;
   onSettingsIntent?: () => void;
   settingsIcon?: ReactNode;
@@ -908,10 +941,6 @@ const defaultLabels: LoroSidebarLabels = {
     emptyTitle: 'Nothing yet',
     emptyDescription: 'Start a chat or open a worktree to see it here.',
   },
-};
-
-const PINNED_BUCKETS_COLLAPSED: Partial<Record<SidebarUpdatedBucketKey, boolean>> = {
-  all: true,
 };
 
 const defaultRepoSections: LoroSidebarRepoSection[] = [
@@ -1360,6 +1389,11 @@ export const LoroSidebar = memo(function LoroSidebar({
   updatedItems,
   pinnedItems,
   pinnedSectionCollapsed = false,
+  pinnedSections,
+  collapsedPinSectionIds,
+  pinnedHiddenCounts,
+  onTogglePinSection,
+  pinSectionActions,
   updatedSelectedItemId,
   updatedBucketsCollapsed,
   updatedShowFullBuckets,
@@ -1380,6 +1414,10 @@ export const LoroSidebar = memo(function LoroSidebar({
   onMarkUpdatedItemUnread,
   onRenameUpdatedItem,
   onToggleUpdatedItemPinned,
+  onSnoozeUpdatedItem,
+  onSettleUpdatedItem,
+  onMoveUpdatedItemToFocus,
+  onDropFocusItem,
   onCopyUpdatedItemUrl,
   onShareUpdatedItemWithTeam,
   onOpenUpdatedItemPullRequest,
@@ -1392,6 +1430,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   onHomeClicked,
   onArchiveClicked,
   onSchedulesClicked,
+  onTodayClicked,
   onSettingsClicked,
   onSettingsIntent,
   settingsIcon,
@@ -1413,6 +1452,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   const { t } = useTranslation();
   const store = useStore();
   const scrollViewportRef = useRef<HTMLDivElement>(null);
+  useSessionDragAutoScroll(scrollViewportRef);
   useLayoutEffect(() => {
     const viewport = scrollViewportRef.current;
     if (!viewport || !scrollStateKey) return undefined;
@@ -1451,7 +1491,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   const [isResizing, setIsResizing] = useState(false);
   const resizeStateRef = useRef({ pointerId: -1, startX: 0, startWidth: 0 });
   const sidebarContentId = useId();
-  const canResize = !overlay && (!isMobile || mobileResize);
+  const canResize = !isMobile && !overlay;
 
   useEffect(() => {
     setSidebarWidth(clamp(defaultWidth, resolvedMinWidth, resolvedMaxWidth));
@@ -1579,7 +1619,47 @@ export const LoroSidebar = memo(function LoroSidebar({
         />
       ))
     : null;
-  const hasPinnedItems = Boolean(pinnedItems?.length);
+  const resolvedPinnedSections = useMemo<SidebarPinnedSection[]>(
+    () => pinnedSections ?? [{ id: null, name: '', items: pinnedItems ?? [] }],
+    [pinnedItems, pinnedSections]
+  );
+  const pinnedListProps = useMemo(
+    () => ({
+      now,
+      isMobile,
+      showProjectContext: organizeMode !== 'workspace' && showUpdatedProjectNames,
+      selectedItemId: updatedSelectedItemId ?? null,
+      onSelectItem: onSelectUpdatedItem,
+      onArchiveItem: onArchiveUpdatedItem,
+      onMarkItemUnread: onMarkUpdatedItemUnread,
+      onRenameItem: onRenameUpdatedItem,
+      onTogglePinItem: onToggleUpdatedItemPinned,
+      onCopyItemUrl: onCopyUpdatedItemUrl,
+      onShareItemWithTeam: onShareUpdatedItemWithTeam,
+      onOpenPullRequest: onOpenUpdatedItemPullRequest,
+      getItemHref: getUpdatedItemHref,
+    }),
+    [
+      now,
+      isMobile,
+      organizeMode,
+      showUpdatedProjectNames,
+      updatedSelectedItemId,
+      onSelectUpdatedItem,
+      onArchiveUpdatedItem,
+      onMarkUpdatedItemUnread,
+      onRenameUpdatedItem,
+      onToggleUpdatedItemPinned,
+      onCopyUpdatedItemUrl,
+      onShareUpdatedItemWithTeam,
+      onOpenUpdatedItemPullRequest,
+      getUpdatedItemHref,
+    ]
+  );
+  // An empty user section still renders: it is where conversations get dragged to.
+  const hasPinnedItems = resolvedPinnedSections.some(
+    (section) => section.id !== null || section.items.length > 0
+  );
   const isWorkspaceEmpty =
     organizeMode === 'workspace' &&
     !topContent &&
@@ -2001,10 +2081,7 @@ export const LoroSidebar = memo(function LoroSidebar({
         </div>
       )}
 
-      <div
-        id={mobileResize ? sidebarContentId : undefined}
-        {...stylex.props(shellStyles.column)}
-      >
+      <div id={mobileResize ? sidebarContentId : undefined} {...stylex.props(shellStyles.column)}>
         <div
           className={clsx(
             stylex.props(
@@ -2096,6 +2173,15 @@ export const LoroSidebar = memo(function LoroSidebar({
             icon={<MynauiEditOne {...stylex.props(shellStyles.glyph16)} />}
             onClick={onHomeClicked}
           />
+          {onTodayClicked && !isMobile ? (
+            <NavButton
+              active={activeNav === 'today'}
+              isMobile={isMobile}
+              label={t('today.nav', 'Today')}
+              icon={<CalendarDays className="h-4 w-4" strokeWidth={1.5} />}
+              onClick={onTodayClicked}
+            />
+          ) : null}
           {onSchedulesClicked && schedulesAllowed ? (
             <NavButton
               active={activeNav === 'schedules'}
@@ -2149,31 +2235,19 @@ export const LoroSidebar = memo(function LoroSidebar({
                   ).className
                 }
               >
-                <SidebarUpdatedSessionList
-                  items={pinnedItems ?? []}
-                  now={now}
-                  isMobile={isMobile}
-                  showPinnedIcon={false}
-                  showProjectContext={organizeMode !== 'workspace' && showUpdatedProjectNames}
-                  selectedItemId={updatedSelectedItemId ?? null}
-                  collapsedBuckets={pinnedSectionCollapsed ? PINNED_BUCKETS_COLLAPSED : undefined}
-                  labels={{
-                    heading: mergedLabels.pinned,
-                    emptyTitle: mergedLabels.updated.emptyTitle,
-                    emptyDescription: mergedLabels.updated.emptyDescription,
-                  }}
-                  onSelectItem={onSelectUpdatedItem}
-                  onToggleBucket={onTogglePinnedSection}
-                  toggleBucketLabel={mergedLabels.pinned}
-                  onArchiveItem={onArchiveUpdatedItem}
-                  onMarkItemUnread={onMarkUpdatedItemUnread}
-                  onRenameItem={onRenameUpdatedItem}
-                  onTogglePinItem={onToggleUpdatedItemPinned}
-                  onCopyItemUrl={onCopyUpdatedItemUrl}
-                  onShareItemWithTeam={onShareUpdatedItemWithTeam}
-                  onOpenPullRequest={onOpenUpdatedItemPullRequest}
-                  getItemHref={getUpdatedItemHref}
+                <SidebarPinnedSections
+                  sections={resolvedPinnedSections}
+                  defaultLabel={mergedLabels.pinned}
+                  defaultCollapsed={pinnedSectionCollapsed}
+                  onToggleDefault={onTogglePinnedSection}
+                  collapsedSectionIds={collapsedPinSectionIds}
+                  hiddenCounts={pinnedHiddenCounts}
+                  onToggleSection={onTogglePinSection}
                   headerAction={sectionHeaderFilterAction ?? undefined}
+                  actions={pinSectionActions}
+                  emptyTitle={mergedLabels.updated.emptyTitle}
+                  emptyDescription={mergedLabels.updated.emptyDescription}
+                  listProps={pinnedListProps}
                 />
               </div>
             ) : null}
@@ -2214,6 +2288,11 @@ export const LoroSidebar = memo(function LoroSidebar({
                     onMarkItemUnread={onMarkUpdatedItemUnread}
                     onRenameItem={onRenameUpdatedItem}
                     onTogglePinItem={onToggleUpdatedItemPinned}
+                    onSnoozeItem={onSnoozeUpdatedItem}
+                    onSettleItem={onSettleUpdatedItem}
+                    onMoveItemToFocus={onMoveUpdatedItemToFocus}
+                    onDropFocusSession={onDropFocusItem}
+                    onDropFocusIntoPinSection={pinSectionActions?.onDropItem}
                     onCopyItemUrl={onCopyUpdatedItemUrl}
                     onShareItemWithTeam={onShareUpdatedItemWithTeam}
                     onOpenPullRequest={onOpenUpdatedItemPullRequest}

@@ -1,9 +1,9 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
 import { LoroRepo } from 'loro-repo';
 import { createLoroSessionData } from '@lody/shared/session-data';
 import {
-  createHistoryWriter,
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   getMachineRoomId,
   getSessionRoomId,

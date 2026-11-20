@@ -1,9 +1,6 @@
+import { createSessionMirror } from '@lody/shared/session-mirror';
 import { LoroMap, type LoroDoc } from 'loro-crdt';
-import {
-  createSessionMirror,
-  type ScheduleImportFence,
-  type SessionImportFence,
-} from '@lody/shared';
+import { type ScheduleImportFence, type SessionImportFence } from '@lody/shared';
 
 /** Only room ids that embed the workspace id change; machine rooms never cross. */
 export function mapRoomId(

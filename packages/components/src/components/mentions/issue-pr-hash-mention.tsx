@@ -10,7 +10,7 @@ import {
 import * as React from 'react';
 import { useAtomValue } from 'jotai';
 import { CircleDot, Github, GitPullRequest } from 'lucide-react';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { useTranslation } from 'react-i18next';
 import { githubFetchIssuesAndPRs, type GitHubIssueOrPR } from '@lody/shared';
 import type { IssuePRMention } from '@lody/shared';

@@ -1,6 +1,6 @@
+import { sessionDocSchema } from '@lody/shared/session-doc-schemas';
 import {
   getSessionRoomId,
-  sessionDocSchema,
   type SessionHistoryInput,
   type SessionId,
   type StoredLodyOperation,

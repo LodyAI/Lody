@@ -1,6 +1,7 @@
+import { ScheduleRepository } from '@lody/shared/schedule-repository';
 // @vitest-environment jsdom
 import { LoroDoc } from 'loro-crdt';
-import { ScheduleRepository, type MachineMeta, type ScheduleRepositoryPort } from '@lody/shared';
+import { type MachineMeta, type ScheduleRepositoryPort } from '@lody/shared';
 import { userAtom } from '../src/atoms';
 
 import {
@@ -55,7 +56,7 @@ const sessionAgentRoleState = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('@posthog/react', () => ({ usePostHog: () => null }));
+vi.mock('@/lib/posthog-context', () => ({ usePostHog: () => null }));
 vi.mock('../src/lib/electron-session-file-sender', () => ({
   canUseElectronLocalFileSend: vi.fn(() => false),
   sendSessionFileToLocalRuntime: vi.fn(async () => null),

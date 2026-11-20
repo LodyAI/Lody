@@ -10,6 +10,7 @@ import {
   SessionHeaderMenu,
   type SessionOwnerMenuState,
 } from '@/components/sessions/session-chat-interface';
+import { SessionInfoDialog } from '@/components/sessions/session-info-dialog';
 const storyLayout = stylex.create({
   row: {
     display: 'flex',
@@ -85,6 +86,9 @@ const meta = {
     onFork: fn(),
     forkWorktreeAvailability: 'available',
     onRename: fn(),
+    onSnooze: fn(),
+    onSettle: fn(),
+    onMoveToFocus: fn(),
     onArchive: fn(),
     t: (_key, fallback, options) =>
       Object.entries(options ?? {}).reduce(
@@ -104,16 +108,16 @@ export const GitHubWorktree: Story = {
 export const GitHubWorktreeAmbient: Story = {};
 
 /**
- * Multi-member workspace: the "Change owner" submenu lists members with the
- * current owner checked. Single-member workspaces pass no `owner` at all, so
- * the submenu is absent — that is the `GitHubWorktree` story above.
+ * Multi-member workspace: "Session info…" lists the owner with a Change
+ * picker. Single-member workspaces pass no `owner` at all, so the owner row is
+ * absent — that is the `GitHubWorktree` story above.
  */
 export const MultiMemberOwnerTransfer: Story = {
   globals: { theme: 'dark' },
   args: { owner: ownerMenuState },
 };
 
-/** A transfer that is still writing: every row is inert and the target spins. */
+/** A transfer that is still writing: every picker row is inert and the target spins. */
 export const OwnerTransferPending: Story = {
   globals: { theme: 'dark' },
   args: { owner: { ...ownerMenuState, pendingUserId: 'user-teammate' } },
@@ -164,6 +168,7 @@ export const OpenInIde: Story = {
       onOpen: fn(),
       onSelect: fn(),
     },
+    openInFileManager: { label: 'Open in Finder', onOpen: fn() },
   },
 };
 
@@ -187,4 +192,24 @@ export const EncryptedWorkspace: Story = {
       );
     },
   ],
+};
+
+/** The dialog behind "Session info…", open on its own. */
+export const InfoDialog: Story = {
+  globals: { theme: 'dark' },
+  render: (args) => (
+    <SessionInfoDialog
+      open
+      onOpenChange={fn()}
+      repoFullName="zxch3n/test-readme"
+      currentBranch="docs/append-line-to-readmemd"
+      baseBranch="main"
+      pullRequest={{ number: 42, status: 'open', onOpen: fn() }}
+      machineName="Rems-MacBook-Pro.local"
+      workspacePath="/Users/developer/Code/test-readme"
+      sharing={args.sharing}
+      owner={ownerMenuState}
+      t={args.t}
+    />
+  ),
 };

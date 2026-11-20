@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { Loro } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
 import {
+  buildPendingUserHistoryEntry,
   buildSessionTurnInputConfig,
   historyItemsToInputBlocks,
   inputBlocksToHistoryItems,
@@ -13,8 +14,10 @@ import {
   resolveSessionConversationConfig,
 } from '../src/session-input';
 import { normalizeSessionTurnInputConfig, SessionFileBlockSchema } from '../src/message-schemas';
+import { turnExecutionDigest } from '../src/e2ee-execution-intent';
 import { buildInitialHistoryEntry, buildInitialSessionMetaPatch } from '../src/session-bootstrap';
-import { sessionDocSchema, type SessionDoc, type SessionHistoryInput } from '../src/schema';
+import { sessionDocSchema } from '../src/session-doc-schemas';
+import type { SessionDoc, SessionHistoryInput } from '../src/schema';
 import type {
   CommentReferencePayload,
   MachineId,
@@ -366,6 +369,82 @@ describe('session-input helpers', () => {
         { type: 'text', text: 'inspect this' },
       ],
     });
+  });
+  it('omits redundant plain single-text inputBlocks in pending user turns while preserving E2EE digests', () => {
+    const plainBlocks: SessionInputBlock[] = [{ type: 'text', text: 'Synthetic oversized prompt' }];
+    const plainConfig = buildSessionTurnInputConfig({
+      inputBlocks: plainBlocks,
+      cliType: 'builtin',
+      agentType: 'codex',
+    });
+    const compacted = buildPendingUserHistoryEntry({
+      userId: 'user-1',
+      inputBlocks: plainBlocks,
+      timestamp: '2026-08-12T00:00:00.000Z',
+      inputConfig: plainConfig,
+    });
+    expect(compacted?.inputConfig?.inputBlocks).toBeUndefined();
+    expect(compacted?.inputConfig?.prompt).toBe('Synthetic oversized prompt');
+    expect(turnExecutionDigest({ inputConfig: compacted?.inputConfig })).toBe(
+      turnExecutionDigest({ inputConfig: plainConfig })
+    );
+    expect(resolveSessionAuthoredText(compacted?.inputConfig ?? {})).toBe(
+      'Synthetic oversized prompt'
+    );
+    expect(resolveSessionExecutionInputBlocks(compacted?.inputConfig ?? {})).toEqual(
+      resolveSessionExecutionInputBlocks(plainConfig)
+    );
+
+    // Keep inputBlocks when Role/Config instructions make prompt differ from authored text.
+    const composedConfig = buildSessionTurnInputConfig({
+      inputBlocks: plainBlocks,
+      prompt: 'ROLE_INSTRUCTIONS\n\nSynthetic oversized prompt',
+      cliType: 'builtin',
+      agentType: 'codex',
+    });
+    expect(
+      buildPendingUserHistoryEntry({
+        userId: 'user-1',
+        inputBlocks: plainBlocks,
+        timestamp: '2026-08-12T00:00:00.000Z',
+        inputConfig: composedConfig,
+      })?.inputConfig?.inputBlocks
+    ).toEqual(plainBlocks);
+
+    // Keep inputBlocks when spans or attachments exist.
+    const spannedBlocks: SessionInputBlock[] = [
+      {
+        type: 'text',
+        text: 'Check @src/a.ts',
+        spans: [{ start: 6, end: 15, kind: 'file', label: '@src/a.ts', target: 'src/a.ts' }],
+      },
+    ];
+    expect(
+      buildPendingUserHistoryEntry({
+        userId: 'user-1',
+        inputBlocks: spannedBlocks,
+        timestamp: '2026-08-12T00:00:00.000Z',
+        inputConfig: buildSessionTurnInputConfig({
+          inputBlocks: spannedBlocks,
+          cliType: 'builtin',
+          agentType: 'codex',
+        }),
+      })?.inputConfig?.inputBlocks
+    ).toEqual(spannedBlocks);
+
+    const attachmentBlocks: SessionInputBlock[] = [r2FilePayload, { type: 'text', text: 'check' }];
+    expect(
+      buildPendingUserHistoryEntry({
+        userId: 'user-1',
+        inputBlocks: attachmentBlocks,
+        timestamp: '2026-08-12T00:00:00.000Z',
+        inputConfig: buildSessionTurnInputConfig({
+          inputBlocks: attachmentBlocks,
+          cliType: 'builtin',
+          agentType: 'codex',
+        }),
+      })?.inputConfig?.inputBlocks
+    ).toEqual(attachmentBlocks);
   });
 });
 

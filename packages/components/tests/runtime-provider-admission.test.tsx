@@ -163,7 +163,7 @@ vi.mock('@/lib', () => ({ API_BASE_URL: '' }));
 vi.mock('@/lib/local-storage-cache', () => ({
   getCachedWorkspaceId: () => environment.cachedWorkspaceId,
 }));
-vi.mock('@posthog/react', () => ({ usePostHog: () => null }));
+vi.mock('@/lib/posthog-context', () => ({ usePostHog: () => null }));
 vi.mock('@/lib/posthog-analytics', () => ({ capturePostHogEvent: () => {} }));
 vi.mock('@/lib/clear-local-cache', () => ({ maybeClearLodyCacheOnBoot: async () => {} }));
 vi.mock('@/lib/electron', () => ({ isElectronRenderer: () => environment.electron }));

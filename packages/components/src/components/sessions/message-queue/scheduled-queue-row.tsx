@@ -5,7 +5,7 @@ import { Menu } from '@lody/ui/menu';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { toIntlLocale } from '@/lib/intl-locale';
 import { formatUpcoming } from '../../schedules/schedule-format';
-import { queueSurface } from './surface';
+import { queuePreviewStyle, queueSurface } from './surface';
 import { IconAction, MoreTrigger } from './message-queue-row';
 
 const styles = stylex.create({ content: { minWidth: 0, flex: '1 1 0%', overflow: 'hidden' } });
@@ -71,9 +71,7 @@ export function ScheduledQueueRow({
       <div
         {...stylex.props(styles.content, queueSurface.text, roomy && queueSurface.roomyBody)}
         style={{
-          display: '-webkit-box',
-          WebkitLineClamp: roomy || compact ? 1 : 2,
-          WebkitBoxOrient: 'vertical',
+          ...queuePreviewStyle(!!(roomy || compact)),
         }}
       >
         <button

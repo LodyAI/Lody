@@ -258,7 +258,7 @@ export function McpConnectionForm({
 
         <Section
           title={t('settings.mcp.form.sectionConnection')}
-          hint={t('settings.mcp.form.envHint')}
+          info={t('settings.mcp.form.envHint')}
         >
           {isStdio ? (
             <>

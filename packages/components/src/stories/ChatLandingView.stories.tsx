@@ -10,6 +10,7 @@ import { PlatformContext } from '@lody/platform/react';
 import type { WorkspaceId } from '@lody/shared';
 
 import { ChatLandingView } from '@/components/chat/chat-landing-view';
+import { ConvertDialogPreview } from './fixtures/convert-dialog';
 import { HomeDashboard } from '@/components/chat/home/home-dashboard';
 import { useChatLandingKeyboardNav } from '@/hooks/use-chat-landing-keyboard-nav';
 import { ContextSwitch } from '@/components/chat/context-switch';
@@ -629,6 +630,35 @@ export const SubmissionPendingDark: Story = {
 
 export const DesktopKeyboardNav: Story = {
   render: () => <DemoLanding tone="dark" initialPrompt="" enableKeyboardNav />,
+};
+
+/**
+ * Today's "Convert to task": the dialog layout — breadcrumb header, the prompt
+ * as the page, the desktop selectors as one pill row, and a footer with "+",
+ * Cancel and Start task. Shared with the Today stories.
+ */
+export const DialogLayout: Story = {
+  render: () => (
+    <ConvertDialogPreview
+      open
+      prompt={'Plan the launch\n  Draft the release notes\n  Ping design'}
+      onOpenChange={() => {}}
+      onStart={() => {}}
+    />
+  ),
+};
+
+export const DialogLayoutNoMachine: Story = {
+  render: () => (
+    <ConvertDialogPreview
+      open
+      prompt="Plan the launch"
+      hintType="no-machine"
+      onOpenChange={() => {}}
+      onStart={() => {}}
+    />
+  ),
+  globals: { theme: 'light' },
 };
 
 export const DesktopLight: Story = {

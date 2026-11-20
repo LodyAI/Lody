@@ -19,6 +19,7 @@ import {
   parseVerificationCode,
   type VerificationResult,
 } from '@/lib/e2ee-ledger-verification';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const styles = stylex.create({
   card: {
@@ -218,7 +219,9 @@ export type CameraState = 'idle' | 'starting' | 'scanning' | 'unavailable';
 const SCAN_INTERVAL_MS = 70;
 /** jsQR reads a frame downscaled so its longer side is at most this. */
 const SCAN_MAX_SIDE = 640;
-type BarcodeDetectorLike = { detect: (source: CanvasImageSource) => Promise<{ rawValue: string }[]> };
+type BarcodeDetectorLike = {
+  detect: (source: CanvasImageSource) => Promise<{ rawValue: string }[]>;
+};
 type BarcodeDetectorClass = new (options: { formats: string[] }) => BarcodeDetectorLike;
 
 /** Opens the rear camera at a modest size. Only a constraint or device mismatch is
@@ -284,10 +287,7 @@ export function useQrCamera(active: boolean, onCode: (text: string) => void) {
       latest.current(text);
     };
     const readWithJsQr = (element: HTMLVideoElement) => {
-      const scale = Math.min(
-        1,
-        SCAN_MAX_SIDE / Math.max(element.videoWidth, element.videoHeight)
-      );
+      const scale = Math.min(1, SCAN_MAX_SIDE / Math.max(element.videoWidth, element.videoHeight));
       const width = Math.max(1, Math.round(element.videoWidth * scale));
       const height = Math.max(1, Math.round(element.videoHeight * scale));
       if (canvas.width !== width) canvas.width = width;
@@ -503,7 +503,7 @@ export function LedgerVerificationCard(props: { history: VerifiedLedgerHistory }
   const [verifying, setVerifying] = useState(false);
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(`${t('e2ee.verify.copyHeader')}\n${groups.join(' ')}`);
+      await copyTextToClipboard(`${t('e2ee.verify.copyHeader')}\n${groups.join(' ')}`);
       setCopied(true);
     } catch {
       // Denied clipboard: the code stays selectable on screen.

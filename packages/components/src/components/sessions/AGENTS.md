@@ -56,7 +56,7 @@ Read parent rules and linked context.
   navigation-stripped HTML with an empty sandbox.
   The only other executable frame is the consented desktop direct preview in
   `local-html-preview.tsx` (same doc).
-  Never preview truncated text; static frames die with their tab.
+  Paged HTML may open from disk after consent. Never render partial text; static frames die with their tab.
 - Encrypted remote preview controls require the existing protected feature host
   and verified write role; never fall back to ordinary preview proofs. Explain
   that page bytes pass through the tunnel service as plaintext.
@@ -68,7 +68,7 @@ Read parent rules and linked context.
   `nativeKeyboardInset`. Wide sessions inherit root padding once.
 - Message-list crash fallback preserves the composer and copies the shared report
   with the original error and React component stacks.
-- Read receipts require per-surface `isVisible`, never mere mounting.
+- Read receipts require per-surface `isVisible`, foreground and interaction; not mounting alone.
 - Every user management action uses `useSessionActions`; its shared guard checks current Repo metadata for every affected target before side effects, including contained/opened sessions.
 - Read-only sessions require authoritative root grants matching the current Meta machine. Mount only the independent reader, preserving preferences, Markdown and references. Never expose machine controls or management. [Boundary](../../../../../specs/session-access.md).
 - Window-top history headers reuse the shared drag-region helper and exempt interactive controls, so workspace drag strips cannot cover their buttons.
@@ -109,7 +109,7 @@ Read parent rules and linked context.
 - No presence: queue behind unfinished turns; never relight Working.
 - Busy composer without authoritative steer uses Queue.
 - Interrupt-and-send cancels with `{ interrupt: true }`, never the Stop identity:
-  an Inbox-aware Stop pauses and cancels every queued input, losing the guidance (#2050).
+  Stop retains paused drafts; only explicit queue actions reissue them.
 - Uploads: [contract](../../../../../specs/composer-send-during-upload.md).
 
 ## [Composer info bar](../../../../../.agents/docs/sessions-info-bar.md)

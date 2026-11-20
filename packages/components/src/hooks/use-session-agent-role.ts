@@ -1,7 +1,7 @@
 import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
 import { useCallback, useEffect, useMemo } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import type { AgentConfigId, AgentRoleId, MachineId, SessionId } from '@lody/shared';
 
 import { getAllAgentConfigAtom } from '@/atoms/agents';

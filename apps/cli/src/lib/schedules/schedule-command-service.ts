@@ -1,3 +1,4 @@
+import { ScheduleRepository } from '@lody/shared/schedule-repository';
 import {
   DEFAULT_SCHEDULE_DESTINATION,
   getMachineRoomId,
@@ -13,7 +14,6 @@ import {
   previewSchedule,
   readMachineFlockRowsFromFlock,
   ScheduleCommandSchema,
-  ScheduleRepository,
   scheduleProposalRuleToTrigger,
   validateSchedulePrompt,
   type AgentConfigId,

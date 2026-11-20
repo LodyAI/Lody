@@ -7,7 +7,6 @@ type ManagedPreviewFrameEntry = {
   iframe: HTMLIFrameElement;
   viewerUrl: string;
   loaded: boolean;
-  evictionTimer: ReturnType<typeof setTimeout> | null;
 };
 
 type StatePreservingParent = HTMLElement & {
@@ -15,7 +14,6 @@ type StatePreservingParent = HTMLElement & {
 };
 
 const MAX_MANAGED_PREVIEW_FRAMES = 5;
-const DORMANT_FRAME_TTL_MS = 30 * 60 * 1000;
 const PRELOAD_FRAME_TTL_MS = 2 * 60 * 1000;
 
 const styles = stylex.create({
@@ -84,14 +82,7 @@ export const getExecutableHtmlPreviewSupport = (): ExecutableHtmlPreviewSupport 
   return 'unsupported';
 };
 
-const cancelDormantEviction = (entry: ManagedPreviewFrameEntry): void => {
-  if (entry.evictionTimer === null) return;
-  clearTimeout(entry.evictionTimer);
-  entry.evictionTimer = null;
-};
-
 const destroyEntry = (entry: ManagedPreviewFrameEntry): void => {
-  cancelDormantEviction(entry);
   entry.iframe.remove();
 };
 
@@ -101,6 +92,14 @@ const frames = new LRUCache<SessionId, ManagedPreviewFrameEntry>(MAX_MANAGED_PRE
 
 export const canPrepareManagedPreviewFrame = (sessionId: SessionId): boolean =>
   supportsStatePreservingMove() && !frames.has(sessionId);
+
+export const getCachedManagedPreviewFrameUrl = (sessionId: SessionId): string | null => {
+  if (!supportsStatePreservingMove()) return null;
+  const cached = frames.get(sessionId);
+  if (cached) return cached.viewerUrl;
+  if (preload?.sessionId === sessionId) return preload.entry.viewerUrl;
+  return null;
+};
 
 let parkingLot: HTMLDivElement | null = null;
 
@@ -144,7 +143,6 @@ const createEntry = (
     iframe,
     viewerUrl,
     loaded: false,
-    evictionTimer: null,
   };
   iframe.className = stylex.props(styles.frame).className ?? '';
   iframe.title = title;
@@ -260,7 +258,6 @@ export const acquireManagedPreviewFrame = ({
   if (!entry) {
     entry = createEntry(viewerUrl, title, documentHtml);
   } else {
-    cancelDormantEviction(entry);
     entry.iframe.title = title;
     if (entry.viewerUrl !== viewerUrl) {
       entry.viewerUrl = viewerUrl;
@@ -297,11 +294,6 @@ export const releaseManagedPreviewFrame = (
     return;
   }
   moveFrame(getParkingLot(), entry);
-  entry.evictionTimer = setTimeout(() => {
-    entry.evictionTimer = null;
-    frames.delete(sessionId);
-    entry.iframe.remove();
-  }, DORMANT_FRAME_TTL_MS);
 };
 
 export const clearManagedPreviewFrame = (sessionId: SessionId): void => {
@@ -310,4 +302,12 @@ export const clearManagedPreviewFrame = (sessionId: SessionId): void => {
   if (!entry) return;
   frames.delete(sessionId);
   destroyEntry(entry);
+};
+
+export const clearAllManagedPreviewFrames = (): void => {
+  preload?.dispose();
+  for (const entry of frames.values()) {
+    destroyEntry(entry);
+  }
+  frames.clear();
 };

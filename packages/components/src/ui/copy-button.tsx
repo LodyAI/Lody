@@ -5,6 +5,7 @@ import React, { useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import * as stylex from '@stylexjs/stylex';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { themeDuration, themeEasing, themeSpace } from '../style/theme-scale.stylex';
 
 const styles = stylex.create({
@@ -49,7 +50,7 @@ export const CopyButton = ({
   const handleCopy = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (!value) return;
     e.stopPropagation();
-    void navigator.clipboard.writeText(value);
+    void copyTextToClipboard(value);
     setCopied(true);
     setTimeout(() => {
       setCopied(false);

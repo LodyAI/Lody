@@ -19,10 +19,13 @@ Parent/child scopes apply. `CLAUDE.md` symlinks here; edit `AGENTS.md` only.
   "Hide Empty Projects" switch is documented in the [README](README.md).
 - Desktop Workspace, Local Project, Updated and Pinned rows support mention drag
   and Mark as unread (hidden when unread). Use `lib/session-mention-drag.ts` for
-  conversation/landing drops; parent tabs use HTML5 drag, child tabs dnd-kit.
+  conversation/landing drops; parent tabs and unpinned rows use HTML5 drag, child
+  tabs and Pinned rows use dnd-kit via `dropSessionMentionAtPoint`.
   `startSessionMentionDrag` / `armSessionMentionDrag` must light
   `ConversationDropOverlay` before `dragenter`. Navigation overlays use
   `draggable={false}`; rows own `draggable`.
+  Sidebar `DndContext`s keep `autoScroll={false}`;
+  `use-session-drag-auto-scroll.ts` owns edge scrolling.
 - Workspace selection navigates in place and preserves the current workspace's route
   on reselection. Browser `/chat` links retain native modified-click, middle-click and
   context-menu actions without switching the source page. Electron Cmd-click
@@ -31,15 +34,18 @@ Parent/child scopes apply. `CLAUDE.md` symlinks here; edit `AGENTS.md` only.
   (zero under reduced motion); hidden eager-sync/keyboard-nav pauses. Compact/settings
   remounts restore scroll. Compact nav is modal: inert content, restore focus,
   nested Escape first. [Spec](../../../../specs/desktop-windows.md). It opens only once
-  the synced compact state agrees, and a close that never finishes is unmounted.
-- All lists use `lib/session-opened-by-tree.ts`; `sidebar-navigation-model.ts`
-  owns matching keyboard navigation.
-- Before changing opener identity or child workspace ownership, read
-  [session provenance rules](sessions/AGENTS.md#opener-provenance).
+  the synced compact state agrees; a close that never finishes is unmounted.
+- Every list uses `lib/session-opened-by-tree.ts`; keyboard navigation uses
+  `sidebar-navigation-model.ts`.
+- `openedBySessionId` is the precise opener; `openedByRowSessionId` its row.
+  `buildSidebarOpenerRowResolver` walks `parentSessionId` to root using sidebar
+  `allActiveSessions`, not visible rows. Preserve opener and child workspace;
+  parent children stay out of `sessionListAtom`. Read
+  [session provenance rules](sessions/AGENTS.md#opener-provenance) before changing ownership.
 - Opener and unrelated top-level rows retain flat-list alignment. In the leading slot,
-  an opener shows disclosure and a child shows ├/└; hover swaps either for ⋯ at the same
-  7px centre. Draw nesting regardless of working/unread/waiting status. Only children
-  widen the slot from 14px to 26px for a 12px title indent without shifting the background.
+  openers show disclosure and children ├/└; ⋯ reveals in the end slot before Archive,
+  painted with row fill. Draw nesting regardless of hover/status. Children alone
+  widen the slot 14→26px for a 12px title indent without shifting the background.
   Keep geometry in `session-row-leading-slot.tsx`; context-menu expand/collapse uses
   the same toggle.
 - Conversation titles stay `font-normal`; pin with the glyph, never weight.
@@ -76,7 +82,7 @@ Parent/child scopes apply. `CLAUDE.md` symlinks here; edit `AGENTS.md` only.
 - iOS divisions separate workspace panes; never save the temporary sidebar width. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-10-28-ios-vertical-division.md).
 - Keep the touch resize grip and narrower navigation sidebar minimum scoped to wide mobile Web layouts.
 - The window is `bg-sidebar`; pages use one inset `WorkspaceCard`. Keep the sidebar on the
-  window, never as a floating surface. See [layout docs](../../../../.agents/docs/components-package.md).
+  window, never floating. See [layout docs](../../../../.agents/docs/components-package.md).
 - Child-tab drafts send through the same accept unit as every other first message:
   `handleSendDraft` (`sessions/session-detail.tsx`) writes Session meta plus the first
   user turn together via `startSession` and only then promotes the draft tab;
@@ -92,7 +98,7 @@ Parent/child scopes apply. `CLAUDE.md` symlinks here; edit `AGENTS.md` only.
   `openExternalUrl`, never a hardcoded link.
 - The live agent status shimmer, `ZoomableImageViewer`, and Electron image preview
   copy/save keep their own rules in [shared/AGENTS.md](shared/AGENTS.md);
-  `ZoomableImageViewer` is the ONE image viewer, so never add a second one.
+  `ZoomableImageViewer` is the ONE image viewer; never add a second.
 - `web-workspace-layout.tsx` owns top/side safe-area insets for desktop surfaces,
   including the iPad native shell. The bottom inset belongs to the adjacent surface
   (the composer uses `env(safe-area-inset-bottom)`); mobile insets per surface.
@@ -115,14 +121,13 @@ Parent/child scopes apply. `CLAUDE.md` symlinks here; edit `AGENTS.md` only.
 
 ## Local projects
 
-- Teammates' visible shared projects navigate and offer New chat; only removal
-  is owner-only.
-- Adding folders is workspace-scoped: say Add folder, not Add a local project;
-  picker chooses the machine. Settings > Projects pills every
-  addable machine, even without projects, and passes `initialMachineId`.
-  `useAddLocalProjectMachines` owns the addable set/`canAddProjects`; never
-  rederive per surface. Onboarding alone uses the this-machine desktop
-  native picker.
+- Project rows follow visibility: shared projects navigate and offer New chat;
+  only removal is owner-only.
+- Adding folders is workspace-scoped: say "Add folder"; the picker chooses the
+  machine. Settings > Projects lists every addable machine, including empty ones,
+  and passes `initialMachineId`. `useAddLocalProjectMachines` owns the addable set
+  and `canAddProjects`; do not rederive them per surface. Onboarding alone uses
+  the this-machine desktop picker.
 - Local directory registration and standalone display are independent. Missing
   `standaloneVisible` means visible. Standalone lists filter hidden registrations;
   member resolution, repository-copy selection and session access retain them.

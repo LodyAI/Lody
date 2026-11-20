@@ -33,6 +33,7 @@ import {
   hasSessionRelations,
   type SessionRelationTreeNode,
 } from '@/lib/session-relation-tree';
+import { cn } from '@/lib/utils';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { useWorkingHandOver } from '@/ui/working-status-mark';
 import { PopoverActionChip } from './info-chip';
@@ -377,10 +378,7 @@ function RelationTreeRow({
         viewportStyle={fadeProps.style}
         scrollbarClassName={stylex.props(styles.hiddenTrack).className}
       >
-        <div
-          ref={contentRef}
-          {...stylex.props(styles.relationRow, styles.row)}
-        >
+        <div ref={contentRef} {...stylex.props(styles.relationRow, styles.row)}>
           <RelationPill
             session={node.session}
             target={{ sessionId: rootId }}

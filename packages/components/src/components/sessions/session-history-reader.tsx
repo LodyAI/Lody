@@ -44,6 +44,7 @@ import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
 import { isNativeAppShell } from '@/lib/native-platform';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const styles = stylex.create({
   page: {
@@ -293,8 +294,18 @@ export function SessionHistoryReader({
   const { t } = useTranslation();
   const store = useStore();
   const sessionAccess = useSessionAccess();
-  const { members, isLoading: membersLoading, error: membersError, retry: retryMembers } = useWorkspaceMembers();
-  const sharingResolver = useSessionSharing({ members, membersLoading, membersError, retryMembers });
+  const {
+    members,
+    isLoading: membersLoading,
+    error: membersError,
+    retry: retryMembers,
+  } = useWorkspaceMembers();
+  const sharingResolver = useSessionSharing({
+    members,
+    membersLoading,
+    membersError,
+    retryMembers,
+  });
   const accountId = useWorkspaceLocalAccountId();
   const router = useRouter();
   const fullscreen = useElectronFullscreen();
@@ -344,7 +355,7 @@ export function SessionHistoryReader({
       });
       await admitOutput();
       assertCurrent();
-      await navigator.clipboard.writeText(markdown);
+      await copyTextToClipboard(markdown);
       assertCurrent();
       toast.success(describeCopiedConversation(stats, t));
     }).catch(() => toast.error(t('sessions.copyConversationHistoryFailed')));

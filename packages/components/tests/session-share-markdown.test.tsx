@@ -11,6 +11,7 @@ import type { WorkspaceId } from '@lody/shared';
 import { SESSION_DEEP_LINK_EVENT } from '../src/lib/session-deep-link';
 import { MarkdownFileResources } from '../src/components/ai-gui/markdown-file-image';
 import { SessionCommentMarkdown } from '../src/ui/diff-viewer/session-comment-markdown';
+import { MessageTextWithChips } from '../src/components/mentions/message-text-chips';
 import { prRemoteImagesEnabledAtom } from '../src/atoms/settings';
 import {
   createFakeFileWorkspaceProvider,
@@ -567,5 +568,69 @@ describe('Markdown session links', () => {
     );
     expect(container.querySelector('button')).toBeNull();
     expect(container.querySelector('[data-session-link]')?.textContent).toBe('Independent review');
+  });
+
+  const mentionLink = '[@Review](lody://session/ses_target?workspace=ws_1)';
+  const mentionSpan = (target = 'ses_target') => ({
+    start: 4,
+    end: 4 + mentionLink.length,
+    kind: 'session' as const,
+    label: 'Review',
+    target,
+  });
+
+  it('navigates a transcript session mention to its conversation', async () => {
+    await act(async () =>
+      root.render(
+        withTestI18n(
+          <SessionLinkProvider enabled>
+            <MessageTextWithChips text={`See ${mentionLink} now`} spans={[mentionSpan()]} />
+          </SessionLinkProvider>,
+          testI18n
+        )
+      )
+    );
+    const chip = container.querySelector<HTMLElement>('[data-session-link="ses_target"]')!;
+    expect(chip.getAttribute('role')).toBe('link');
+    await act(async () => chip.click());
+    expect(opened).toEqual(['lody://session/ses_target']);
+    await act(async () =>
+      chip.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      )
+    );
+    expect(opened).toEqual(['lody://session/ses_target', 'lody://session/ses_target']);
+  });
+
+  it.each([
+    { name: 'no provider', provider: false },
+    { name: 'read-only', readonly: true },
+    { name: 'corrupt target', target: 'not an id' },
+  ])('keeps a transcript session chip inert: %j', async (test) => {
+    const body = (
+      <MessageTextWithChips text={`See ${mentionLink} now`} spans={[mentionSpan(test.target)]} />
+    );
+    await act(async () =>
+      root.render(
+        withTestI18n(
+          test.readonly ? (
+            <SessionReadonlyContext.Provider
+              value={{ renderImage: () => null, renderFiles: () => null }}
+            >
+              <SessionLinkProvider enabled>{body}</SessionLinkProvider>
+            </SessionReadonlyContext.Provider>
+          ) : test.provider === false ? (
+            body
+          ) : (
+            <SessionLinkProvider enabled>{body}</SessionLinkProvider>
+          ),
+          testI18n
+        )
+      )
+    );
+    expect(container.querySelector('[role="link"]')).toBeNull();
+    expect(container.querySelector('[data-session-link]')).toBeNull();
+    expect(container.textContent).toContain('Review');
+    expect(opened).toEqual([]);
   });
 });

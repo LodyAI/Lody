@@ -1,6 +1,7 @@
+import { readPromptSuggestion } from '@lody/shared/prompt-suggestions';
 import { describe, expect, it, vi } from 'vitest';
 import { EphemeralStore } from 'loro-crdt';
-import { readPromptSuggestion, type WorkspaceId } from '@lody/shared';
+import { type WorkspaceId } from '@lody/shared';
 
 const harness = vi.hoisted(() => ({
   transports: [] as Array<{

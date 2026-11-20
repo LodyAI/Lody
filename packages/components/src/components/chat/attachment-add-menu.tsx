@@ -13,6 +13,15 @@ import { MCP_TRANSPORT_LABELS } from '@/components/shared/mcp-transport';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontSize, themeSpace } from '../../style/theme-scale.stylex';
 
+/**
+ * Desktop flyout and the mobile pushed panel. A real length, not
+ * `w-[min(20rem,calc(100vw-2rem))]`: that calc is invalid CSS (the minus needs
+ * spaces), so the declaration was dropped and the panel grew out to
+ * `--available-width` — a one-line description then stretched across the
+ * composer and the footnote landed on the model row.
+ */
+const MCP_PANEL_CLASS = 'w-80 max-w-[calc(100vw_-_2rem)]';
+
 /** Per-turn MCP selection, surfaced as a second level of the "+" menu. */
 export interface AttachmentAddMenuMcp {
   servers: readonly WorkspaceMcpServerMeta[];

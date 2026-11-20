@@ -1,3 +1,4 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -5,7 +6,6 @@ import path from 'node:path';
 import { LoroDoc } from 'loro-crdt';
 import { createLoroSessionData } from '@lody/shared/session-data';
 import {
-  createHistoryWriter,
   getSessionRoomId,
   type LodyOperationCompletion,
   type LodyOperationItemResult,

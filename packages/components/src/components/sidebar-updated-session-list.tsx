@@ -1,30 +1,62 @@
 import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { isElectronRenderer } from '@/lib/electron';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { SessionWindowMenuItem } from './session-window-menu-item';
 import {
   memo,
   useCallback,
+  useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
+  useSyncExternalStore,
+  type CSSProperties,
+  type DragEvent,
+  type RefObject,
   type MouseEvent as ReactMouseEvent,
+  type ReactElement,
   type ReactNode,
 } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { startSessionMentionDrag } from '@/lib/session-mention-drag';
 import {
+  clearSessionMentionDrag,
+  getInFlightSessionMentionDragId,
+  startSessionMentionDrag,
+  subscribeSessionMentionDrag,
+} from '@/lib/session-mention-drag';
+import { useDraggable } from '@dnd-kit/core';
+import { DEFAULT_PIN_SECTION_KEY, FOCUS_SECTION_DND_KEY, pinnedRowDndId } from './pinned-rows-dnd';
+import {
+  beginPinnedDropSettle,
+  flyPinnedDropSettle,
+  getPinnedDropSettle,
+  getPinnedPointerTarget,
+  subscribePinnedPointerTarget,
+  recordPinnedDragOrigin,
+  subscribePinnedDropSettle,
+  takePinnedDragOrigin,
+} from '@/lib/pinned-drop-settle';
+import {
+  AlarmClock,
   Archive,
+  ArrowUpCircle,
+  CheckCircle2,
   Folders,
   Folder,
+  FolderInput,
+  FolderPlus,
   GitBranch,
   GitPullRequest,
   Link2,
   LockKeyhole,
-  Mail,
+  MailOpen,
   MessageCircle,
   Pencil,
   Pin,
   PinOff,
+  Timer,
   Users,
 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
@@ -51,7 +83,9 @@ import {
   SessionMergeablePill,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
+  SessionRowMenuButton,
   SessionRowWorktreeIndicator,
+  SidebarRowActionButton,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
   SidebarListSkeleton,
@@ -83,10 +117,17 @@ import {
   type OpenedBySessionTreeNode,
 } from '@/lib/session-opened-by-tree';
 import {
+  buildSnoozePresets,
+  expiredSnoozeTimestamp,
+  formatSnoozeCountdown,
+  isSidebarBucketCollapsed,
   SIDEBAR_STATUS_GROUPS,
   sidebarStatusGroup,
   type SidebarStatusGroup,
 } from '@/lib/sidebar-status-group';
+import { sortByManualOrder } from '@lody/shared';
+import { CustomSnoozeDialog, type CustomSnoozeDialogTarget } from './sidebar-status-snooze-dialog';
+import { SidebarFocusDndContainer } from './sidebar-status-focus-dnd';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import type {
   LocalProjectHistoryProvider,
@@ -102,6 +143,7 @@ import {
   RenameSessionDialogView,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type SidebarUpdatedItemKind = SidebarRowKind;
 
@@ -150,6 +192,14 @@ export type SidebarUpdatedItem = {
   historyBackend?: SessionHistoryBackendKind;
   latestMessageAt: Date | number | string;
   isPinned?: boolean;
+  /** Fractional index for manual ordering in Pinned and Status Focus. */
+  orderKey?: string | null;
+  /** Epoch ms until which the session is snoozed in Status Later. */
+  snoozedUntil?: number | null;
+  /** Epoch ms when the session was explicitly settled in Status Settled. */
+  settledAt?: number | null;
+  /** Epoch ms when the user explicitly restored an inactive session to Focus. */
+  focusRestoredAt?: number | null;
   isWorking?: boolean;
   hasUnreadMessages?: boolean;
   isOffline?: boolean;
@@ -183,7 +233,18 @@ export type SidebarUpdatedItem = {
 export type SidebarUpdatedBucketKey = 'all' | SidebarStatusGroup;
 
 /** How the list splits its rows: one recency list, or the status groups. */
-export type SidebarUpdatedGrouping = 'recency' | 'status';
+/** `manual` keeps the caller's order (pinned sections); the others sort by activity. */
+export type SidebarUpdatedGrouping = 'recency' | 'status' | 'manual';
+
+/** Row menu entries for moving a pinned conversation between pin sections. */
+export type SidebarPinSectionMenu = {
+  /** Sections in display order; `null` is the default section. */
+  sections: readonly { id: string | null; name: string }[];
+  currentSectionId: string | null;
+  onMove: (itemId: string, sectionId: string | null) => void;
+  onCreate: (itemId: string) => void;
+  labels: { moveToSection: string; newSection: string };
+};
 
 export type SidebarUpdatedSessionListLabels = {
   /** Header of the single flat list section. */
@@ -207,6 +268,14 @@ export type SidebarUpdatedContextMenuLabels = {
   loadingSharing: string;
   copyBranch: string;
   goToOpenerSession: string;
+  snooze: string;
+  snoozeOneHour: string;
+  snoozeLaterToday: string;
+  snoozeTomorrowMorning: string;
+  snoozeNextWeek: string;
+  snoozeCustom: string;
+  settle: string;
+  moveToFocus: string;
 };
 
 /**
@@ -252,30 +321,73 @@ type SidebarUpdatedBucket = {
  */
 export function buildSidebarUpdatedBuckets(
   items: SidebarUpdatedItem[],
-  grouping: SidebarUpdatedGrouping
+  grouping: SidebarUpdatedGrouping,
+  nowMs: number = Date.now()
 ): SidebarUpdatedBucket[] {
+  // A pin section keeps its header while empty: it is still a drop target.
+  if (grouping === 'manual') return [{ key: 'all', items: [...items] }];
   if (!items.length) return [];
   if (grouping === 'recency') return [{ key: 'all', items: sortUpdatedItems(items) }];
   const byGroup = new Map<SidebarStatusGroup, SidebarUpdatedItem[]>();
   for (const item of items) {
-    const group = sidebarStatusGroup(item);
+    const group = sidebarStatusGroup(item, nowMs);
     const members = byGroup.get(group);
     if (members) members.push(item);
     else byGroup.set(group, [item]);
   }
-  return SIDEBAR_STATUS_GROUPS.flatMap((key) => {
+  return SIDEBAR_STATUS_GROUPS.flatMap<SidebarUpdatedBucket>((key) => {
     const members = byGroup.get(key);
-    return members ? [{ key, items: sortUpdatedItems(members) }] : [];
+    if (!members?.length) {
+      // Keep Focus mounted even when empty so Later/Settled rows can be dragged back into it.
+      return key === 'focus' ? [{ key, items: [] }] : [];
+    }
+    if (key === 'focus') {
+      const woken: SidebarUpdatedItem[] = [];
+      const regular: SidebarUpdatedItem[] = [];
+      for (const item of members) {
+        if (expiredSnoozeTimestamp(item.snoozedUntil, nowMs) !== null) {
+          woken.push(item);
+        } else {
+          regular.push(item);
+        }
+      }
+      woken.sort((a, b) => {
+        const byWake = (b.snoozedUntil ?? 0) - (a.snoozedUntil ?? 0);
+        return byWake !== 0 ? byWake : a.id.localeCompare(b.id);
+      });
+      const orderedRegular = sortByManualOrder(regular, (item) => ({
+        id: item.id,
+        orderKey: item.orderKey ?? null,
+        recency: getSortKey(item),
+      }));
+      return [{ key, items: [...woken, ...orderedRegular] }];
+    }
+    if (key === 'later') {
+      return [
+        {
+          key,
+          items: [...members].sort((a, b) => {
+            const aUntil =
+              typeof a.snoozedUntil === 'number' ? a.snoozedUntil : Number.MAX_SAFE_INTEGER;
+            const bUntil =
+              typeof b.snoozedUntil === 'number' ? b.snoozedUntil : Number.MAX_SAFE_INTEGER;
+            if (aUntil !== bUntil) return aUntil - bUntil;
+            return a.id.localeCompare(b.id);
+          }),
+        },
+      ];
+    }
+    return [{ key, items: sortUpdatedItems(members) }];
   });
 }
 
 /**
  * Whether a section folds past {@link SHOW_FULL_BUCKET_THRESHOLD} rows behind
- * "Show all". Status groups other than idle are what needs a look, so they
- * always list in full, as on mobile Home.
+ * "Show all". Focus and Later list in full when expanded; Settled and Updated
+ * recency lists fold past the preview cap.
  */
 export function updatedBucketCanFold(key: SidebarUpdatedBucketKey): boolean {
-  return key === 'all' || key === 'idle';
+  return key === 'all' || key === 'settled';
 }
 
 export function sortUpdatedItems(items: SidebarUpdatedItem[]): SidebarUpdatedItem[] {
@@ -344,7 +456,8 @@ export function getVisibleUpdatedItemTree(
   orderedItems: SidebarUpdatedItem[],
   canToggleFullList: boolean,
   showFull: boolean,
-  collapsedOpenedBySessionIds?: Record<string, boolean>
+  collapsedOpenedBySessionIds?: Record<string, boolean>,
+  preserveOrder = false
 ): OpenedBySessionTreeNode<SidebarUpdatedItem>[] {
   const capped = canToggleFullList && !showFull && updatedBucketOverflowsPreview(orderedItems);
   return buildOpenedBySessionTree(orderedItems, {
@@ -352,7 +465,8 @@ export function getVisibleUpdatedItemTree(
     isCollapsed: (openerId) => collapsedOpenedBySessionIds?.[openerId] === true,
     // Updated mode IS the recency list: rank each opener by its freshest opened
     // Session so nesting can never bury a just-updated row under a stale opener.
-    rootRank: updatedItemRootRank,
+    // A manually ordered pin section keeps its roots where the user put them.
+    ...(preserveOrder ? {} : { rootRank: updatedItemRootRank }),
     ...(capped ? { maxRoots: SHOW_FULL_BUCKET_THRESHOLD } : {}),
   });
 }
@@ -361,13 +475,15 @@ export function getVisibleUpdatedItems(
   orderedItems: SidebarUpdatedItem[],
   canToggleFullList: boolean,
   showFull: boolean,
-  collapsedOpenedBySessionIds?: Record<string, boolean>
+  collapsedOpenedBySessionIds?: Record<string, boolean>,
+  preserveOrder = false
 ): SidebarUpdatedItem[] {
   return getVisibleUpdatedItemTree(
     orderedItems,
     canToggleFullList,
     showFull,
-    collapsedOpenedBySessionIds
+    collapsedOpenedBySessionIds,
+    preserveOrder
   ).map((node) => node.item);
 }
 
@@ -397,11 +513,24 @@ export type SidebarUpdatedSessionListProps = {
   onMarkItemUnread?: (id: string) => void;
   /** Rename an item through the shared Rename Chat dialog. */
   onRenameItem?: (id: string, nextTitle: string) => void | Promise<void>;
-  /**
-   * Toggle pin. Mirrors `SessionList.onTogglePinSession`: receives the next desired
-   * pin state.
-   */
+  /** Toggle pin. Mirrors `SessionList.onTogglePinSession`: receives the next desired pin state. */
   onTogglePinItem?: (id: string, nextPinned: boolean) => void;
+  /** Snooze a session until `snoozedUntil` (epoch ms) into Status Later. */
+  onSnoozeItem?: (id: string, snoozedUntil: number) => void;
+  /** Mark a session settled into Status Settled. */
+  onSettleItem?: (id: string) => void;
+  /** Restore a snoozed or settled session back to Status Focus. */
+  onMoveItemToFocus?: (id: string) => void;
+  /** Reorder (or restore via drag) a session to `toIndex` inside Status Focus. */
+  onDropFocusSession?: (id: string, toIndex: number) => void;
+  /** Pin a Focus session when dragged and dropped onto a Pinned section. */
+  onDropFocusIntoPinSection?: (
+    sessionId: string,
+    pinSectionId: string | null,
+    toIndex: number
+  ) => void;
+  /** Whether Status-specific menu entries and countdown pills are shown. Defaults to `grouping === 'status'`. */
+  showStatusActions?: boolean;
   /** Copy a shareable session URL for the item. */
   onCopyItemUrl?: (id: string) => void;
   /** Open the share-with-team confirmation for a private session. */
@@ -456,6 +585,22 @@ export type SidebarUpdatedSessionListProps = {
    * status groups, each with its own header.
    */
   grouping?: SidebarUpdatedGrouping;
+  /** Pinned sections only: "Move to section" entries in each row's context menu. */
+  pinSectionMenu?: SidebarPinSectionMenu;
+  /** Pinned sections only: identifies this list's section for drag and tests. */
+  pinSectionId?: string | null;
+  /**
+   * Pinned sections only: accept a dragged conversation. `toIndex` counts this
+   * section's pinned rows without the dragged one.
+   */
+  onDropPinnedSession?: (sessionId: string, toIndex: number) => void;
+  /** Pinned sections only: wraps the section header (the section drag handle). */
+  renderHeader?: (header: ReactElement) => ReactNode;
+  /**
+   * Pinned sections only: a quiet line under the section's rows, rendered
+   * only while the section is expanded (e.g. "2 hidden in this view").
+   */
+  footer?: ReactNode;
 };
 
 const defaultLabels: SidebarUpdatedSessionListLabels = {
@@ -478,6 +623,12 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   onMarkItemUnread,
   onRenameItem,
   onTogglePinItem,
+  onSnoozeItem,
+  onSettleItem,
+  onMoveItemToFocus,
+  onDropFocusSession,
+  onDropFocusIntoPinSection,
+  showStatusActions,
   onCopyItemUrl,
   onShareItemWithTeam,
   onOpenPullRequest,
@@ -490,7 +641,15 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   headerAction,
   showProjectContext = false,
   grouping = 'recency',
+  pinSectionMenu,
+  pinSectionId,
+  onDropPinnedSession,
+  renderHeader,
+  footer,
 }: SidebarUpdatedSessionListProps) {
+  const preserveOrder = grouping === 'manual';
+  const effectiveShowStatusActions = showStatusActions ?? grouping === 'status';
+  const pinDrag = usePinnedDropGap(items, onDropPinnedSession, pinSectionId ?? null);
   const { t } = useTranslation();
   const showBranchContext = useAtomValue(sidebarShowBranchNamesAtom);
   const merged: SidebarUpdatedSessionListLabels = useMemo(
@@ -506,11 +665,9 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   const bucketLabels = useMemo<Record<SidebarUpdatedBucketKey, string>>(
     () => ({
       all: merged.heading,
-      attention: t('sidebar.status.attention', 'Needs you'),
-      finished: t('sidebar.status.finished', 'Just finished'),
-      pullRequest: t('sidebar.status.pullRequest', 'Open pull requests'),
-      running: t('sidebar.status.running', 'Running'),
-      idle: t('sidebar.status.idle', 'Idle'),
+      focus: t('sidebar.status.focus', 'Focus'),
+      later: t('sidebar.status.later', 'Later'),
+      settled: t('sidebar.status.settled', 'Settled'),
     }),
     [merged.heading, t]
   );
@@ -543,13 +700,27 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
       loadingSharing: t('sessions.sharing.loadingAction', 'Checking sharing…'),
       copyBranch: t('sessions.contextMenu.copyBranch', 'Copy Current Branch'),
       goToOpenerSession: t('sessions.contextMenu.goToOpenerSession', 'Go to Opener Session'),
+      snooze: t('sessions.contextMenu.snooze', 'Later'),
+      snoozeOneHour: t('sessions.contextMenu.snoozeOneHour', 'In 1 hour'),
+      snoozeLaterToday: t('sessions.contextMenu.snoozeLaterToday', 'Later today'),
+      snoozeTomorrowMorning: t('sessions.contextMenu.snoozeTomorrowMorning', 'Tomorrow morning'),
+      snoozeNextWeek: t('sessions.contextMenu.snoozeNextWeek', 'Next week'),
+      snoozeCustom: t('sessions.contextMenu.snoozeCustom', 'Custom time…'),
+      settle: t('sessions.contextMenu.settle', 'Settle'),
+      moveToFocus: t('sessions.contextMenu.moveToFocus', 'Move to Focus'),
     }),
     [t]
   );
 
   const [renameTarget, setRenameTarget] = useState<RenameSessionDialogTarget | null>(null);
+  const [customSnoozeTarget, setCustomSnoozeTarget] = useState<CustomSnoozeDialogTarget | null>(
+    null
+  );
   const beginRename = useCallback((id: string, currentTitle: string) => {
     setRenameTarget({ sessionId: id as SessionId, initialTitle: currentTitle });
+  }, []);
+  const beginCustomSnooze = useCallback((id: string, title: string) => {
+    setCustomSnoozeTarget({ sessionId: id, title });
   }, []);
   // Same atom SessionList uses, so an opener folded in one organize mode stays
   // folded in the other. This component renders BOTH the Updated bucket and the
@@ -561,7 +732,11 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   const canToggleBucket = typeof onToggleBucket === 'function';
   const canToggleFullBucket = typeof onToggleFullBucket === 'function';
 
-  const buckets = useMemo(() => buildSidebarUpdatedBuckets(items, grouping), [items, grouping]);
+  const nowMs = now instanceof Date ? now.getTime() : Date.now();
+  const buckets = useMemo(
+    () => buildSidebarUpdatedBuckets(items, grouping, nowMs),
+    [items, grouping, nowMs]
+  );
 
   const sendStates = useAtomValue(sessionSendStatesAtom);
   // Updated mode is a flat firehose, so a bucket can hold the whole workspace
@@ -570,7 +745,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   const bucketTrees = useMemo(
     () =>
       buckets.map((bucket) => {
-        if (collapsedBuckets?.[bucket.key]) {
+        if (isSidebarBucketCollapsed(bucket.key, collapsedBuckets)) {
           return {
             overflows: updatedBucketOverflowsPreview(bucket.items),
             nodes: EMPTY_TREE_NODES,
@@ -587,7 +762,8 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
             bucket.items,
             canToggleFullBucket && updatedBucketCanFold(bucket.key),
             Boolean(showFullBuckets?.[bucket.key]),
-            collapsedOpenedBySessionIds
+            collapsedOpenedBySessionIds,
+            preserveOrder || bucket.key === 'focus' || bucket.key === 'later'
           ),
         };
       }),
@@ -596,6 +772,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
       canToggleFullBucket,
       collapsedBuckets,
       collapsedOpenedBySessionIds,
+      preserveOrder,
       sendStates,
       showFullBuckets,
     ]
@@ -614,7 +791,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
     );
   }
 
-  if (!items.length) {
+  if (!items.length && !preserveOrder) {
     return (
       <div {...stylex.props(updatedStyles.listStack)}>
         {headerAction ? <HeaderActionRow action={headerAction} /> : null}
@@ -628,14 +805,76 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
 
   return (
     <Tooltip.Provider>
-      <div className={clsx(stylex.props(updatedStyles.listStack).className, className)}>
+      <div
+        className={clsx(stylex.props(updatedStyles.listStack).className, className)}
+        data-pin-section={
+          pinSectionId === undefined ? undefined : (pinSectionId ?? DEFAULT_PIN_SECTION_KEY)
+        }
+        onDragOver={pinDrag?.onDragOver}
+        onDragLeave={pinDrag?.onDragLeave}
+        onDrop={pinDrag?.onDrop}
+      >
         {buckets.map((bucket, bucketIndex) => {
           const bucketHeaderAction = bucketIndex === 0 ? headerAction : null;
-          const collapsed = Boolean(collapsedBuckets?.[bucket.key]);
+          const collapsed = isSidebarBucketCollapsed(bucket.key, collapsedBuckets);
           const handleToggle = () => {
             if (!canToggleBucket) return;
             onToggleBucket?.(bucket.key);
           };
+          if (grouping === 'status' && bucket.key === 'focus' && onDropFocusSession && !isMobile) {
+            return (
+              <div
+                key={bucket.key}
+                className={cn(
+                  'group flex flex-col gap-0.5',
+                  collapsed ? 'mb-1 last:mb-0' : 'mb-4 last:mb-0'
+                )}
+              >
+                <SidebarFocusDndContainer
+                  items={bucket.items}
+                  enabled={!collapsed}
+                  onDropFocusSession={onDropFocusSession}
+                  onDropIntoPinSection={onDropFocusIntoPinSection}
+                >
+                  {(orderedFocusItems) => (
+                    <SidebarUpdatedSessionList
+                      items={orderedFocusItems}
+                      now={now}
+                      selectedItemId={selectedItemId}
+                      isMobile={isMobile}
+                      showPinnedIcon={showPinnedIcon}
+                      showProjectContext={showProjectContext}
+                      grouping="manual"
+                      showStatusActions
+                      pinSectionId={FOCUS_SECTION_DND_KEY}
+                      onDropPinnedSession={onDropFocusSession}
+                      labels={{
+                        heading: bucketLabels.focus,
+                        emptyTitle: merged.emptyTitle,
+                        emptyDescription: merged.emptyDescription,
+                      }}
+                      collapsedBuckets={collapsed ? { all: true } : undefined}
+                      onToggleBucket={canToggleBucket ? handleToggle : undefined}
+                      toggleBucketLabel={toggleBucketLabel}
+                      headerAction={bucketHeaderAction}
+                      onSelectItem={onSelectItem}
+                      onArchiveItem={onArchiveItem}
+                      onMarkItemUnread={onMarkItemUnread}
+                      onRenameItem={onRenameItem}
+                      onTogglePinItem={onTogglePinItem}
+                      onSnoozeItem={onSnoozeItem}
+                      onSettleItem={onSettleItem}
+                      onMoveItemToFocus={onMoveItemToFocus}
+                      onCopyItemUrl={onCopyItemUrl}
+                      onShareItemWithTeam={onShareItemWithTeam}
+                      onOpenPullRequest={onOpenPullRequest}
+                      getItemHref={getItemHref}
+                    />
+                  )}
+                </SidebarFocusDndContainer>
+              </div>
+            );
+          }
           const showFull = Boolean(showFullBuckets?.[bucket.key]);
           const {
             overflows,
@@ -646,6 +885,18 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
             nodes: EMPTY_TREE_NODES,
             collapsedActivity: null,
           };
+          const showBucketCount =
+            (bucket.key === 'later' || bucket.key === 'settled') && bucket.items.length > 0;
+          const headerLabel = showBucketCount ? (
+            <span className="inline-flex items-center gap-1.5">
+              <span>{bucketLabels[bucket.key]}</span>
+              <span className="text-[11px] font-normal tabular-nums text-sidebar-foreground-muted/70">
+                {bucket.items.length}
+              </span>
+            </span>
+          ) : (
+            bucketLabels[bucket.key]
+          );
           // Only a bucket that actually contains an opened Session enables the
           // tree wrapper. Unrelated top-level rows keep their flat geometry.
           const showTreeGutter = hasOpenedByTreeNesting(visibleNodes);
@@ -665,63 +916,124 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
             >
               {/* Same shared section header as Workspace mode, so section labels
                   read identically (13px medium) across organize modes. */}
-              <SidebarSectionHeader
-                label={bucketLabels[bucket.key]}
-                collapsed={collapsed}
-                activity={collapsedActivity}
-                action={bucketHeaderAction}
-                isMobile={isMobile}
-                toggleLabel={toggleBucketLabel}
-                onToggleCollapsed={canToggleBucket ? handleToggle : undefined}
-              />
+              {(renderHeader ?? identityHeader)(
+                <SidebarSectionHeader
+                  label={headerLabel}
+                  collapsed={collapsed}
+                  activity={collapsedActivity}
+                  action={bucketHeaderAction}
+                  isMobile={isMobile}
+                  toggleLabel={toggleBucketLabel}
+                  onToggleCollapsed={canToggleBucket ? handleToggle : undefined}
+                />
+              )}
               {!collapsed ? (
-                <div className={SIDEBAR_ROW_LIST_CLASS}>
-                  {visibleNodes.map((node, nodeIndex) => {
-                    const openedByTree = buildSessionRowOpenedByTreeSlot(node, t, () =>
-                      handleToggleOpenedBySessions(node.item.id)
-                    );
-                    const prevNode = visibleNodes[nodeIndex - 1];
-                    const treeSlot: SessionRowOpenedByTreeSlot | undefined =
-                      openedByTree?.kind === 'child' && (showProjectContext || showBranchContext)
-                        ? {
-                            ...openedByTree,
-                            isFirstChild: prevNode?.depth === 0,
-                            tallOpener: true,
-                          }
-                        : openedByTree;
-                    return (
-                      <SessionOpenedByTreeRow
-                        key={node.item.id}
-                        depth={node.depth}
-                        gutter={showTreeGutter}
-                      >
-                        <UpdatedItemRow
-                          item={node.item}
-                          now={now}
-                          selected={node.item.id === selectedItemId}
-                          isMobile={isMobile}
-                          showPinnedIcon={showPinnedIcon}
-                          showProjectContext={showProjectContext}
-                          showBranchContext={showBranchContext}
-                          href={getItemHref?.(node.item.id)}
-                          onSelect={onSelectItem}
-                          onArchive={onArchiveItem}
-                          onMarkUnread={onMarkItemUnread}
-                          onRename={onRenameItem}
-                          onTogglePin={onTogglePinItem}
-                          onCopyUrl={onCopyItemUrl}
-                          onShareWithTeam={onShareItemWithTeam}
-                          onOpenPullRequest={onOpenPullRequest}
-                          onBeginRename={beginRename}
-                          openedByTree={treeSlot}
-                          contextMenuLabels={contextMenuLabels}
-                          archiveTooltipLabel={archiveLabels.tooltip}
-                          archiveActionLabel={archiveLabels.action}
-                          archiveConfirmLabel={archiveLabels.confirm}
-                        />
-                      </SessionOpenedByTreeRow>
-                    );
-                  })}
+                <div
+                  ref={pinDrag?.rowsRef}
+                  data-pin-rows={pinDrag ? '' : undefined}
+                  className={cn(SIDEBAR_ROW_LIST_CLASS, pinDrag && 'relative')}
+                  style={pinDrag?.rowsStyle}
+                >
+                  {(() => {
+                    const renderNode = (
+                      node: OpenedBySessionTreeNode<SidebarUpdatedItem>,
+                      nodeIndex: number
+                    ) => {
+                      const openedByTree = buildSessionRowOpenedByTreeSlot(node, t, () =>
+                        handleToggleOpenedBySessions(node.item.id)
+                      );
+                      const prevNode = visibleNodes[nodeIndex - 1];
+                      const treeSlot: SessionRowOpenedByTreeSlot | undefined =
+                        openedByTree?.kind === 'child' && (showProjectContext || showBranchContext)
+                          ? {
+                              ...openedByTree,
+                              isFirstChild: prevNode?.depth === 0,
+                              tallOpener: true,
+                            }
+                          : openedByTree;
+                      return (
+                        <SessionOpenedByTreeRow
+                          key={node.item.id}
+                          depth={node.depth}
+                          gutter={showTreeGutter}
+                        >
+                          <UpdatedItemRow
+                            item={node.item}
+                            now={now}
+                            selected={node.item.id === selectedItemId}
+                            isMobile={isMobile}
+                            showPinnedIcon={showPinnedIcon}
+                            showProjectContext={showProjectContext}
+                            showBranchContext={showBranchContext}
+                            href={getItemHref?.(node.item.id)}
+                            onSelect={onSelectItem}
+                            onArchive={onArchiveItem}
+                            onMarkUnread={onMarkItemUnread}
+                            onRename={onRenameItem}
+                            onTogglePin={onTogglePinItem}
+                            onSnooze={effectiveShowStatusActions ? onSnoozeItem : undefined}
+                            onSettle={effectiveShowStatusActions ? onSettleItem : undefined}
+                            onMoveToFocus={
+                              effectiveShowStatusActions ? onMoveItemToFocus : undefined
+                            }
+                            onBeginCustomSnooze={
+                              effectiveShowStatusActions ? beginCustomSnooze : undefined
+                            }
+                            showSnoozeCountdown={effectiveShowStatusActions}
+                            showStatusActions={effectiveShowStatusActions}
+                            onCopyUrl={onCopyItemUrl}
+                            onShareWithTeam={onShareItemWithTeam}
+                            onOpenPullRequest={onOpenPullRequest}
+                            onBeginRename={beginRename}
+                            pinSectionMenu={pinSectionMenu}
+                            nativeDrag={!pinDrag}
+                            openedByTree={treeSlot}
+                            contextMenuLabels={contextMenuLabels}
+                            archiveTooltipLabel={archiveLabels.tooltip}
+                            archiveActionLabel={archiveLabels.action}
+                            archiveConfirmLabel={archiveLabels.confirm}
+                          />
+                        </SessionOpenedByTreeRow>
+                      );
+                    };
+                    if (!pinDrag) return visibleNodes.map(renderNode);
+                    if (pinSectionId === FOCUS_SECTION_DND_KEY && visibleNodes.length === 0) {
+                      return (
+                        <div
+                          data-status-focus-empty=""
+                          className="flex min-h-10 items-center justify-center rounded-md border border-dashed border-sidebar-border/60 px-3 py-2 text-xs text-sidebar-foreground-muted/75"
+                        >
+                          {t('sidebar.status.focusEmptyDrop', 'Drag a conversation here to focus')}
+                        </div>
+                      );
+                    }
+                    // A pin section moves an opener together with the Sessions it
+                    // opened: each top-level row and its children are one slot.
+                    const groups: {
+                      rootId: string;
+                      nodes: [number, (typeof visibleNodes)[number]][];
+                    }[] = [];
+                    visibleNodes.forEach((node, nodeIndex) => {
+                      const last = groups[groups.length - 1];
+                      if (node.depth === 0 || !last) {
+                        groups.push({ rootId: node.item.id, nodes: [[nodeIndex, node]] });
+                      } else {
+                        last.nodes.push([nodeIndex, node]);
+                      }
+                    });
+                    return groups.map((group) => {
+                      return (
+                        <DraggablePinnedRowSlot
+                          key={group.rootId}
+                          id={group.rootId}
+                          drag={pinDrag}
+                          gutter={showTreeGutter}
+                        >
+                          {group.nodes.map(([nodeIndex, node]) => renderNode(node, nodeIndex))}
+                        </DraggablePinnedRowSlot>
+                      );
+                    });
+                  })()}
                   {showToggleFullList ? (
                     <button
                       type="button"
@@ -736,6 +1048,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                   ) : null}
                 </div>
               ) : null}
+              {!collapsed ? footer : null}
             </div>
           );
         })}
@@ -743,6 +1056,12 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
           target={renameTarget}
           onClose={() => setRenameTarget(null)}
           onRename={(sessionId, nextTitle) => onRenameItem?.(sessionId, nextTitle)}
+        />
+        <CustomSnoozeDialog
+          target={customSnoozeTarget}
+          now={now}
+          onClose={() => setCustomSnoozeTarget(null)}
+          onConfirm={(sessionId, snoozedUntil) => onSnoozeItem?.(sessionId, snoozedUntil)}
         />
       </div>
     </Tooltip.Provider>
@@ -810,12 +1129,25 @@ type UpdatedItemRowProps = {
   onMarkUnread?: (id: string) => void;
   onRename?: (id: string, nextTitle: string) => void | Promise<void>;
   onTogglePin?: (id: string, nextPinned: boolean) => void;
+  onSnooze?: (id: string, snoozedUntil: number) => void;
+  onSettle?: (id: string) => void;
+  onMoveToFocus?: (id: string) => void;
+  onBeginCustomSnooze?: (id: string, title: string) => void;
+  showSnoozeCountdown?: boolean;
+  /**
+   * Status view: Focus and Later rows replace the hover Archive button with a
+   * one-click Settle ("mark as completed") action; Settled rows keep Archive.
+   */
+  showStatusActions?: boolean;
   onCopyUrl?: (id: string) => void;
   onShareWithTeam?: (id: string) => void;
   onOpenPullRequest?: (request: SessionListPullRequestOpen) => void;
   onBeginRename: (id: string, currentTitle: string) => void;
   openedByTree?: SessionRowOpenedByTreeSlot;
   contextMenuLabels: SidebarUpdatedContextMenuLabels;
+  pinSectionMenu?: SidebarPinSectionMenu;
+  /** False in pin sections, whose rows are dragged by dnd-kit instead. */
+  nativeDrag?: boolean;
   archiveTooltipLabel: string;
   archiveActionLabel: string;
   archiveConfirmLabel: string;
@@ -835,10 +1167,18 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   onMarkUnread,
   onRename,
   onTogglePin,
+  onSnooze,
+  onSettle,
+  onMoveToFocus,
+  onBeginCustomSnooze,
+  showSnoozeCountdown = false,
+  showStatusActions = false,
   onCopyUrl,
   onShareWithTeam,
   onOpenPullRequest,
   onBeginRename,
+  pinSectionMenu,
+  nativeDrag = true,
   openedByTree,
   contextMenuLabels,
   archiveTooltipLabel,
@@ -901,9 +1241,23 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   const readOnly = item.sharing?.access === 'read';
   const canArchive = !readOnly && typeof onArchive === 'function';
   const canMarkUnread = typeof onMarkUnread === 'function' && !item.hasUnreadMessages;
-  const showInlineArchive = canArchive && !isMobile;
   const canRename = !readOnly && typeof onRename === 'function';
   const canTogglePin = typeof onTogglePin === 'function';
+  const nowMs = now instanceof Date ? now.getTime() : Date.now();
+  const statusGroup = sidebarStatusGroup(item, nowMs);
+  const snoozeCountdown =
+    showSnoozeCountdown && typeof item.snoozedUntil === 'number'
+      ? formatSnoozeCountdown(item.snoozedUntil, nowMs)
+      : null;
+  const canSnooze = !readOnly && typeof onSnooze === 'function';
+  const canSettle = !readOnly && typeof onSettle === 'function' && statusGroup !== 'settled';
+  // The Status view trades Archive's two-step destructive action for a
+  // one-click Settle on rows that are still open; only a Settled row keeps
+  // Archive in the hover slot. Other organize modes always show Archive.
+  const showInlineSettle = canSettle && !isMobile && showStatusActions;
+  const showInlineArchive = canArchive && !isMobile && !showInlineSettle;
+  const canMoveToFocus =
+    !readOnly && typeof onMoveToFocus === 'function' && statusGroup !== 'focus';
   const canCopyUrl = typeof onCopyUrl === 'function';
   // Copy URL stays available for private sessions (the link still works for
   // the owner); sharing is a separate menu item shown only while the
@@ -934,6 +1288,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
     !isMobile &&
     (canRename ||
       canTogglePin ||
+      canSnooze ||
+      canSettle ||
+      canMoveToFocus ||
       canArchive ||
       canMarkUnread ||
       canCopyUrl ||
@@ -941,7 +1298,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       Boolean(branchName) ||
       canGoToOpener ||
       (showPr && Boolean(onOpenPullRequest)) ||
-      Boolean(openedByOpener));
+      Boolean(openedByOpener) ||
+      Boolean(pinSectionMenu));
   const handlePrOpen =
     onOpenPullRequest && prUrl
       ? () =>
@@ -992,10 +1350,17 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       data-sidebar-updated-id={item.id}
       data-sidebar-updated-kind={item.kind}
       data-menu-open={rowMenuOpen ? '' : undefined}
-      // Drag a conversation onto a chat surface to mention it there.
-      draggable
-      onDragStart={(event) =>
-        startSessionMentionDrag(event, { sessionId: item.id, title: item.title })
+      // Drag a conversation onto a chat surface to mention it there. Pin
+      // sections drag with dnd-kit and mention through the pointer-drop bridge.
+      draggable={nativeDrag}
+      onDragStart={
+        nativeDrag
+          ? (event) => {
+              startSessionMentionDrag(event, { sessionId: item.id, title: item.title });
+              // A drop into a pin section lands from where this row was released.
+              recordPinnedDragOrigin(item.id, event.currentTarget, event);
+            }
+          : undefined
       }
       className={clsx(
         // Named group ('row') so the archive hover-reveal scopes to the hovered row
@@ -1128,11 +1493,13 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         >
           <SidebarRowEndSlot
             sessionId={item.id}
+            selected={showSelectedState}
             isWaitingPermission={item.isWaitingPermission}
             isWorking={item.isWorking}
             hasUnreadMessages={item.hasUnreadMessages}
             fadeClassName={stylex.props(updatedStyles.rowFade).className}
             restIcon={
+              snoozeCountdown ||
               showPr ||
               showMergeablePill ||
               isMobile ||
@@ -1147,7 +1514,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                     SIDEBAR_CAPTION_TEXT_CLASS
                   )}
                 >
-                  {isMobile ? <span>{relativeTime}</span> : null}
+                  {isMobile && !snoozeCountdown ? <span>{relativeTime}</span> : null}
                   {showMergeablePill ? <SessionMergeablePill /> : null}
                   <SessionRowWorktreeIndicator
                     isWorktree={item.kind === 'local' && item.isWorktree}
@@ -1155,11 +1522,43 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                   {showPr ? (
                     <SessionPrIcon compact prStatus={prStatus} prCiState={item.prCiState} />
                   ) : null}
+                  {/* The wake-up countdown sits at the far right in a neutral
+                      chip: it is recurring meta, not an alert, so it keeps the
+                      row's own ink instead of a status colour. */}
+                  {snoozeCountdown ? (
+                    <span
+                      data-snooze-countdown=""
+                      title={
+                        typeof item.snoozedUntil === 'number'
+                          ? new Date(item.snoozedUntil).toLocaleString()
+                          : undefined
+                      }
+                      className="inline-flex items-center gap-1 rounded-full bg-sidebar-foreground/10 px-1.5 py-0.5 text-[11px] font-medium leading-none tabular-nums text-sidebar-foreground-muted"
+                    >
+                      <Timer className="h-3 w-3 shrink-0" aria-hidden="true" />
+                      <span>{snoozeCountdown}</span>
+                    </span>
+                  ) : null}
                 </span>
               ) : undefined
             }
+            menu={
+              hasMenuActions ? (
+                <SessionRowMenuButton
+                  label={contextMenuLabels.moreActions}
+                  revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
+                />
+              ) : undefined
+            }
             archive={
-              showInlineArchive ? (
+              showInlineSettle ? (
+                <SidebarRowActionButton
+                  label={contextMenuLabels.settle}
+                  icon={<CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />}
+                  onConfirm={() => onSettle?.(item.id)}
+                  revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
+                />
+              ) : showInlineArchive ? (
                 <SidebarRowArchiveButton
                   label={archiveTooltipLabel}
                   confirmLabel={archiveConfirmLabel}
@@ -1221,9 +1620,80 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             {item.isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
           </ContextMenu.Item>
         ) : null}
+        {pinSectionMenu ? (
+          <ContextMenu.Submenu>
+            <ContextMenu.SubmenuTrigger icon={FolderInput}>
+              {pinSectionMenu.labels.moveToSection}
+            </ContextMenu.SubmenuTrigger>
+            <ContextMenu.SubmenuContent className="min-w-[180px]">
+              {pinSectionMenu.sections.map((section) => (
+                <ContextMenu.Item
+                  key={section.id ?? DEFAULT_PIN_SECTION_KEY}
+                  disabled={section.id === pinSectionMenu.currentSectionId}
+                  onClick={() => pinSectionMenu.onMove(item.id, section.id)}
+                >
+                  {section.name}
+                </ContextMenu.Item>
+              ))}
+              <ContextMenu.Separator />
+              <ContextMenu.Item icon={FolderPlus} onClick={() => pinSectionMenu.onCreate(item.id)}>
+                {pinSectionMenu.labels.newSection}
+              </ContextMenu.Item>
+            </ContextMenu.SubmenuContent>
+          </ContextMenu.Submenu>
+        ) : null}
+        {canSnooze ? (
+          <ContextMenu.Submenu>
+            <ContextMenu.SubmenuTrigger icon={AlarmClock}>
+              {contextMenuLabels.snooze}
+            </ContextMenu.SubmenuTrigger>
+            <ContextMenu.SubmenuContent className="min-w-[200px]">
+              {buildSnoozePresets(now).map((preset) => {
+                const label =
+                  preset.id === 'oneHour'
+                    ? contextMenuLabels.snoozeOneHour
+                    : preset.id === 'laterToday'
+                      ? contextMenuLabels.snoozeLaterToday
+                      : preset.id === 'tomorrowMorning'
+                        ? contextMenuLabels.snoozeTomorrowMorning
+                        : contextMenuLabels.snoozeNextWeek;
+                return (
+                  <ContextMenu.Item
+                    key={preset.id}
+                    onClick={() => onSnooze?.(item.id, preset.timestamp)}
+                  >
+                    <span className="flex w-full items-center justify-between gap-4">
+                      <span>{label}</span>
+                      <span className="text-[11px] tabular-nums text-muted-foreground">
+                        {preset.countdown}
+                      </span>
+                    </span>
+                  </ContextMenu.Item>
+                );
+              })}
+              <ContextMenu.Separator />
+              <ContextMenu.Item
+                icon={Timer}
+                onClick={() => onBeginCustomSnooze?.(item.id, item.title)}
+              >
+                {contextMenuLabels.snoozeCustom}
+              </ContextMenu.Item>
+            </ContextMenu.SubmenuContent>
+          </ContextMenu.Submenu>
+        ) : null}
+        {canSettle ? (
+          <ContextMenu.Item icon={CheckCircle2} onClick={() => onSettle?.(item.id)}>
+            {contextMenuLabels.settle}
+          </ContextMenu.Item>
+        ) : null}
+        {canMoveToFocus ? (
+          <ContextMenu.Item icon={ArrowUpCircle} onClick={() => onMoveToFocus?.(item.id)}>
+            {contextMenuLabels.moveToFocus}
+          </ContextMenu.Item>
+        ) : null}
         {canMarkUnread ? (
           <ContextMenu.Item
-            icon={Mail}
+            icon={MailOpen}
             onClick={() => {
               onMarkUnread?.(item.id);
             }}
@@ -1259,7 +1729,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           <ContextMenu.Item
             icon={GitBranch}
             onClick={() => {
-              void navigator.clipboard.writeText(branchName).catch(() => {});
+              void copyTextToClipboard(branchName).catch(() => {});
             }}
           >
             {contextMenuLabels.copyBranch}
@@ -1573,3 +2043,307 @@ const updatedStyles = stylex.create({
     color: themeColors.sidebarHoverForeground,
   },
 });
+
+const identityHeader = (header: ReactElement): ReactNode => header;
+
+/**
+ * Drop index for a pointer at `clientY` over a pin section's rows element:
+ * how many of its other rows rest above the pointer. Resting layout
+ * (`offsetTop`, which the gap's transforms do not move), so the gap cannot
+ * chase the pointer. Above the rows (the header) is the top; below, the end.
+ */
+export function pinnedDropIndexAt(
+  rows: HTMLElement | null,
+  clientY: number,
+  draggedId: string
+): number {
+  if (!rows) return 0;
+  const y = clientY - rows.getBoundingClientRect().top;
+  let index = 0;
+  for (const node of Array.from(rows.children)) {
+    if (!(node instanceof HTMLElement)) continue;
+    const id = node.getAttribute('data-pin-node');
+    if (!id || id === draggedId) continue;
+    if (node.offsetTop + node.offsetHeight / 2 < y) index += 1;
+  }
+  return index;
+}
+
+const escapeAttributeValue = (value: string) =>
+  typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+    ? CSS.escape(value)
+    : value.replace(/["\\]/g, '\\$&');
+
+const PINNED_DROP_DEFAULT_GAP_PX = 29;
+const PINNED_DROP_TRANSITION = 'transform 160ms ease, opacity 120ms ease';
+const PINNED_DROP_ROWS_TRANSITION = 'padding-bottom 160ms ease, margin-bottom 160ms ease';
+
+type PinnedDropGap = {
+  rowsRef: RefObject<HTMLDivElement | null>;
+  rowsStyle: CSSProperties | undefined;
+  nodeStyle: (id: string) => CSSProperties | undefined;
+  onDragOver: (event: DragEvent<HTMLDivElement>) => void;
+  onDragLeave: (event: DragEvent<HTMLDivElement>) => void;
+  onDrop: (event: DragEvent<HTMLDivElement>) => void;
+};
+
+const noopSubscribe = () => () => {};
+const readNoDrag = () => null;
+
+/**
+ * Pin-section drop target. While a conversation is dragged, the dragged row's
+ * slot closes and the rows at the drop position slide down to open a gap of
+ * its height. The drop index is read against the rows' resting layout
+ * (`offsetTop`, which transforms do not move), so the gap cannot chase the pointer.
+ * `null` for lists that accept no drop.
+ */
+function usePinnedDropGap(
+  items: readonly SidebarUpdatedItem[],
+  onDropPinnedSession: ((sessionId: string, toIndex: number) => void) | undefined,
+  sectionId: string | null
+): PinnedDropGap | null {
+  const enabled = typeof onDropPinnedSession === 'function';
+  const inFlight = useSyncExternalStore(
+    enabled ? subscribeSessionMentionDrag : noopSubscribe,
+    enabled ? getInFlightSessionMentionDragId : readNoDrag,
+    readNoDrag
+  );
+  const settle = useSyncExternalStore(
+    enabled ? subscribePinnedDropSettle : noopSubscribe,
+    enabled ? getPinnedDropSettle : readNoDrag,
+    readNoDrag
+  );
+  // Only this section's index: moving the pointer elsewhere re-renders nothing here.
+  const readPointerIndex = useCallback(() => {
+    const target = getPinnedPointerTarget();
+    return target && target.sectionId === sectionId ? target.index : null;
+  }, [sectionId]);
+  const pointerIndex = useSyncExternalStore(
+    enabled ? subscribePinnedPointerTarget : noopSubscribe,
+    enabled ? readPointerIndex : readNoDrag,
+    readNoDrag
+  );
+  const rowsRef = useRef<HTMLDivElement | null>(null);
+  const [nativeDropIndex, setDropIndex] = useState<number | null>(null);
+  // A pointer (dnd-kit) drag of a pinned row aims here, or a native drag does.
+  const dropIndex = nativeDropIndex ?? pointerIndex;
+  const [gap, setGap] = useState(PINNED_DROP_DEFAULT_GAP_PX);
+  // A released row still owns the layout until it lands in its slot.
+  const dragged = enabled
+    ? (inFlight ?? (settle?.phase === 'waiting' ? settle.sessionId : null))
+    : null;
+  const flyingId = enabled && settle?.phase === 'flying' ? settle.sessionId : null;
+  // Only a live drag animates. After the release, the rows' new layout equals
+  // what is already on screen, so it must snap: the landing has one motion.
+  const animate = Boolean(enabled && inFlight);
+
+  useEffect(() => {
+    if (!dragged) {
+      setDropIndex(null);
+      return;
+    }
+    const row = document.querySelector<HTMLElement>(
+      `[data-sidebar-updated-id="${escapeAttributeValue(dragged)}"]`
+    );
+    // The list's 1px row gap travels with the slot.
+    if (row && row.offsetHeight > 0) setGap(row.offsetHeight + 1);
+  }, [dragged]);
+
+  const layout = useMemo(() => {
+    const rootOf = new Map<string, string>();
+    const rootIds: string[] = [];
+    if (sectionId === FOCUS_SECTION_DND_KEY) {
+      const nodes = buildOpenedBySessionTree(items, SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS);
+      let currentRootId: string | null = null;
+      for (const node of nodes) {
+        if (node.depth === 0 || !currentRootId) {
+          currentRootId = node.item.id;
+          rootIds.push(currentRootId);
+        }
+        rootOf.set(node.item.id, currentRootId);
+      }
+    } else {
+      for (const item of items) {
+        rootOf.set(item.id, item.isPinned ? item.id : (item.openedByRowSessionId ?? item.id));
+        if (item.isPinned) rootIds.push(item.id);
+      }
+    }
+    const rowIndex = new Map(items.map((item, index) => [item.id, index]));
+    return { rootOf, rootIds, rowIndex };
+  }, [items, sectionId]);
+  // Each root's position among the section's rows other than the dragged one.
+  const otherIndex = useMemo(
+    () =>
+      new Map(
+        layout.rootIds.filter((id) => id !== dragged).map((id, index) => [id, index] as const)
+      ),
+    [dragged, layout.rootIds]
+  );
+  // Events read the live drag: the first dragover can arrive before a re-render.
+  const liveDragged = useCallback(
+    () => (enabled ? getInFlightSessionMentionDragId() : null),
+    [enabled]
+  );
+  const sourceHere = Boolean(dragged && layout.rootOf.has(dragged));
+
+  // The write landed: the row now renders in this section at the dropped index.
+  // Measure its slot before paint and hand the landing to the flight.
+  useLayoutEffect(() => {
+    if (!enabled || settle?.phase !== 'waiting' || settle.toSectionId !== sectionId) return;
+    if (layout.rootIds.indexOf(settle.sessionId) !== settle.toIndex) return;
+    const node = Array.from(rowsRef.current?.children ?? []).find(
+      (child) => child.getAttribute('data-pin-node') === settle.sessionId
+    );
+    const row = node?.querySelector<HTMLElement>('[data-sidebar-updated-id]');
+    if (!row) return;
+    const rect = row.getBoundingClientRect();
+    flyPinnedDropSettle(
+      { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      getComputedStyle(row).backgroundColor,
+      row.cloneNode(true) as HTMLElement,
+      getComputedStyle(row).borderRadius
+    );
+  }, [enabled, layout.rootIds, sectionId, settle]);
+
+  const resolveIndex = useCallback(
+    (event: DragEvent<HTMLDivElement>): number | null => {
+      const current = liveDragged();
+      if (!current) return null;
+      return pinnedDropIndexAt(rowsRef.current, event.clientY, current);
+    },
+    [liveDragged]
+  );
+
+  const onDragOver = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      const index = resolveIndex(event);
+      if (index === null) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+      setDropIndex(index);
+    },
+    [resolveIndex]
+  );
+  const onDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
+    // Chrome often reports no relatedTarget when the pointer moves onto a child,
+    // so only a pointer outside the section's box closes the gap.
+    const box = event.currentTarget.getBoundingClientRect();
+    const inside =
+      event.clientX >= box.left &&
+      event.clientX < box.right &&
+      event.clientY >= box.top &&
+      event.clientY < box.bottom;
+    if (inside) return;
+    setDropIndex(null);
+  }, []);
+  const onDrop = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      const index = resolveIndex(event);
+      const current = liveDragged();
+      if (index === null || !current) {
+        setDropIndex(null);
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setDropIndex(index);
+      const origin = takePinnedDragOrigin(current);
+      beginPinnedDropSettle({
+        sessionId: current,
+        toSectionId: sectionId,
+        toIndex: index,
+        from: origin
+          ? {
+              left: event.clientX - origin.offsetX,
+              top: event.clientY - origin.offsetY,
+              width: origin.width,
+              height: origin.height,
+            }
+          : { left: event.clientX - 24, top: event.clientY - gap / 2, width: 0, height: gap },
+        ghost: origin?.ghost ?? null,
+        fromBackground: origin?.background ?? null,
+      });
+      // The drag ends here: when the move unmounts the source row, no dragend
+      // will arrive. The settle keeps the layout until the row lands.
+      clearSessionMentionDrag();
+      onDropPinnedSession?.(current, index);
+    },
+    [gap, liveDragged, onDropPinnedSession, resolveIndex, sectionId]
+  );
+
+  const nodeStyle = useCallback(
+    (id: string): CSSProperties | undefined => {
+      // Under its flying copy, the landed row waits invisible, without a fade.
+      if (flyingId && (layout.rootOf.get(id) ?? id) === flyingId) return { opacity: 0 };
+      if (!dragged) return undefined;
+      const root = layout.rootOf.get(id) ?? id;
+      if (root === dragged) {
+        return { opacity: 0, transition: animate ? PINNED_DROP_TRANSITION : undefined };
+      }
+      let shift = 0;
+      // Rows below the dragged one close its slot.
+      if (sourceHere && (layout.rowIndex.get(id) ?? 0) > (layout.rowIndex.get(dragged) ?? 0)) {
+        shift -= gap;
+      }
+      // Rows at and after the drop position open the gap.
+      const position = otherIndex.get(root) ?? -1;
+      if (dropIndex !== null && position >= dropIndex) shift += gap;
+      return {
+        transform: shift ? `translateY(${shift}px)` : undefined,
+        transition: animate ? PINNED_DROP_TRANSITION : undefined,
+      };
+    },
+    [animate, dragged, dropIndex, flyingId, gap, layout, otherIndex, sourceHere]
+  );
+
+  if (!enabled) return null;
+  return {
+    rowsRef,
+    // A gap opened in another section needs room below its last row, and the
+    // section the row left gives its slot back, so the sidebar keeps its height.
+    rowsStyle: !dragged
+      ? undefined
+      : {
+          transition: animate ? PINNED_DROP_ROWS_TRANSITION : undefined,
+          ...(dropIndex !== null && !sourceHere ? { paddingBottom: gap } : {}),
+          ...(dropIndex === null && sourceHere ? { marginBottom: -gap } : {}),
+        },
+    nodeStyle,
+    onDragOver,
+    onDragLeave,
+    onDrop,
+  };
+}
+
+type PinnedRowSlotProps = {
+  id: string;
+  drag: PinnedDropGap;
+  gutter: boolean;
+  children: ReactNode;
+};
+
+const slotClassName = (gutter: boolean) =>
+  // A nested trunk draws into the list's 1px gap; the slot keeps that pixel
+  // inside its own (paint-contained) box, as `SessionOpenedByTreeRow` does.
+  cn('flex min-w-0 flex-col gap-px', gutter && 'relative pb-px -mb-px');
+
+/**
+ * One row slot of a pin section (a top-level row and the Sessions it opened).
+ * dnd-kit picks it up (pin rows carry no native drag), and it carries the gap
+ * layout shared by pointer drags and native drops from other lists.
+ */
+function DraggablePinnedRowSlot({ id, drag, gutter, children }: PinnedRowSlotProps) {
+  const { setNodeRef, listeners } = useDraggable({ id: pinnedRowDndId(id) });
+  return (
+    <div
+      ref={setNodeRef}
+      data-pin-node={id}
+      data-pin-sortable=""
+      className={slotClassName(gutter)}
+      style={drag.nodeStyle(id)}
+      {...listeners}
+    >
+      {children}
+    </div>
+  );
+}

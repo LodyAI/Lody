@@ -3,7 +3,7 @@ import { useMySessionScope } from '@/hooks/use-visible-session-metas';
 import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
 import { machineSupportsAndroidEmulatorProtocol } from '@lody/shared';
-import { writeTextToClipboard } from '@/lib/clipboard';
+import { copyTextToClipboard, writeTextToClipboard } from '@/lib/clipboard';
 import { SessionHistoryAccessBoundary } from './session-history-access-boundary';
 import { useSessionForkCapabilities } from '@/hooks/use-session-fork-capabilities';
 import { requireWorkspaceFeature } from '@/lib/workspace-feature';
@@ -11,7 +11,7 @@ import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import {
   useArchiveConfirmationRequest,
   useArchiveSessionWithConfirmation,
-} from './session-archive-confirmation';
+} from './session-sub-conversation-confirmation';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import { pendingSessionLinkAtom } from '@/lib/session-deep-link';
 import { windowPreparationAtom } from '@/lib/window-preparation';
@@ -43,7 +43,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { useRouter } from '@tanstack/react-router';
 import { useComposerNavigationFocus } from '../chat/submission/use-composer-navigation-focus';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import {
   getProjectRefBranch,
   getServerNow,
@@ -3283,7 +3283,7 @@ const SessionDetail = ({
         if (!currentWorkspaceId || !workspaceSlug || !activeSessionTabId) {
           throw new Error('Session is not ready');
         }
-        await navigator.clipboard.writeText(
+        await copyTextToClipboard(
           linkFormat === 'deeplink'
             ? buildSessionLink({ sessionId: activeSessionTabId, workspaceId: currentWorkspaceId })
             : buildAppSessionUrl(workspaceSlug, activeSessionTabId)
@@ -3347,8 +3347,7 @@ const SessionDetail = ({
 
   const handleCopyText = useCallback(
     (text: string, successMessage?: string) => {
-      void navigator.clipboard
-        .writeText(text)
+      void copyTextToClipboard(text)
         .then(() => {
           if (successMessage) toast.success(successMessage);
         })
@@ -4991,21 +4990,6 @@ const SessionDetail = ({
     [activeTabSessionId, handleSessionTabSelect, orderedSessionTabIds]
   );
 
-  // ⌘1–⌘8 jump to that conversation tab, ⌘9 to the last one (index < 0) — the
-  // same ordered list next/previousTab steps through, so digit positions match
-  // what the tab strip shows.
-  const handleSwitchSessionTabToIndex = useCallback(
-    (index: number) => {
-      const targetIndex = index < 0 ? orderedSessionTabIds.length - 1 : index;
-      const nextTabId = orderedSessionTabIds[targetIndex];
-      if (!nextTabId || nextTabId === activeTabSessionId) {
-        return;
-      }
-      void handleSessionTabSelect(nextTabId);
-    },
-    [activeTabSessionId, handleSessionTabSelect, orderedSessionTabIds]
-  );
-
   useCommand({
     id: 'session.archiveCurrent',
     title: t('commands.session.archiveCurrent', 'Archive Current Chat'),
@@ -5156,87 +5140,6 @@ const SessionDetail = ({
     keybindings: getCommandKeybindings('session.previousTab'),
     when: () => orderedSessionTabIds.length > 1,
     run: () => handleSwitchSessionTab(-1),
-  });
-
-  useCommand({
-    id: 'session.switchToTab1',
-    title: t('commands.session.switchToTab1', 'Switch to Tab 1'),
-    category: 'Navigation',
-    keybindings: getCommandKeybindings('session.switchToTab1'),
-    when: () => orderedSessionTabIds.length > 0,
-    run: () => handleSwitchSessionTabToIndex(0),
-  });
-
-  useCommand({
-    id: 'session.switchToTab2',
-    title: t('commands.session.switchToTab2', 'Switch to Tab 2'),
-    category: 'Navigation',
-    keybindings: getCommandKeybindings('session.switchToTab2'),
-    when: () => orderedSessionTabIds.length > 1,
-    run: () => handleSwitchSessionTabToIndex(1),
-  });
-
-  useCommand({
-    id: 'session.switchToTab3',
-    title: t('commands.session.switchToTab3', 'Switch to Tab 3'),
-    category: 'Navigation',
-    keybindings: getCommandKeybindings('session.switchToTab3'),
-    when: () => orderedSessionTabIds.length > 2,
-    run: () => handleSwitchSessionTabToIndex(2),
-  });
-
-  useCommand({
-    id: 'session.switchToTab4',
-    title: t('commands.session.switchToTab4', 'Switch to Tab 4'),
-    category: 'Navigation',
-    keybindings: getCommandKeybindings('session.switchToTab4'),
-    when: () => orderedSessionTabIds.length > 3,
-    run: () => handleSwitchSessionTabToIndex(3),
-  });
-
-  useCommand({
-    id: 'session.switchToTab5',
-    title: t('commands.session.switchToTab5', 'Switch to Tab 5'),
-    category: 'Navigation',
-    keybindings: getCommandKeybindings('session.switchToTab5'),
-    when: () => orderedSessionTabIds.length > 4,
-    run: () => handleSwitchSessionTabToIndex(4),
-  });
-
-  useCommand({
-    id: 'session.switchToTab6',
-    title: t('commands.session.switchToTab6', 'Switch to Tab 6'),
-    category: 'Navigation',
-    keybindings: getCommandKeybindings('session.switchToTab6'),
-    when: () => orderedSessionTabIds.length > 5,
-    run: () => handleSwitchSessionTabToIndex(5),
-  });
-
-  useCommand({
-    id: 'session.switchToTab7',
-    title: t('commands.session.switchToTab7', 'Switch to Tab 7'),
-    category: 'Navigation',
-    keybindings: getCommandKeybindings('session.switchToTab7'),
-    when: () => orderedSessionTabIds.length > 6,
-    run: () => handleSwitchSessionTabToIndex(6),
-  });
-
-  useCommand({
-    id: 'session.switchToTab8',
-    title: t('commands.session.switchToTab8', 'Switch to Tab 8'),
-    category: 'Navigation',
-    keybindings: getCommandKeybindings('session.switchToTab8'),
-    when: () => orderedSessionTabIds.length > 7,
-    run: () => handleSwitchSessionTabToIndex(7),
-  });
-
-  useCommand({
-    id: 'session.switchToLastTab',
-    title: t('commands.session.switchToLastTab', 'Switch to Last Tab'),
-    category: 'Navigation',
-    keybindings: getCommandKeybindings('session.switchToLastTab'),
-    when: () => orderedSessionTabIds.length > 0,
-    run: () => handleSwitchSessionTabToIndex(-1),
   });
 
   useEffect(() => {
@@ -6460,6 +6363,8 @@ const SessionDetail = ({
 
     // Floating frosted header: absolutely positioned over the conversation so
     // content scrolls UNDER it and gets frosted by the backdrop blur. The
+    // scrim is 90% opaque: WKWebView often does not blur a sibling scroller,
+    // and at 55% the transcript stayed sharp under the title. The
     // conversation scroll + viewer panels read `--conversation-top-inset` so
     // their content clears the header at rest (see ai-gui/view.tsx VList).
     const mobileHeaderInset = isNativeAppShell()
@@ -7100,6 +7005,11 @@ const SessionDetail = ({
   const hasMacOSTitlebarInset =
     !isNativeAppShell() && isMacOSElectronRenderer() && !isElectronFullscreen;
 
+  // Viewers and side chats render their own absolutely positioned surfaces on
+  // top; the fixed-panel body only shows when neither owns the panel.
+  const showFixedSidePanelBody =
+    effectiveActiveViewerTabId === null && effectiveActiveSideSessionId === null;
+
   const nonBrowserSidebarContent =
     activeSidebarTab === 'files' ? (
       <FileTreeView
@@ -7125,7 +7035,7 @@ const SessionDetail = ({
         className={stylex.props(detailStyles.background).className}
         // The side panel stays mounted while collapsed, so GitHub polling has
         // to be paused explicitly — same signal SessionBrowserPanel takes.
-        visible={isSidebarVisible}
+        visible={showFixedSidePanelBody && isSidebarVisible}
       />
     ) : activeSidebarTab === 'changes' ? (
       <SessionChangesSidebar
@@ -7160,9 +7070,10 @@ const SessionDetail = ({
       placement === 'hidden' && detailStyles.invisibleFill
     ).className;
 
-  // Keep the browser mounted while another sidebar tab is selected. Managed
-  // pages retain DOM state and Electron's native view is only hidden, so tab
-  // switching behaves like a browser rather than rebuilding the page.
+  // Keep the browser and device previews mounted while another sidebar tab,
+  // file viewer, or side chat is selected. Managed pages and device streams
+  // stay alive in memory and Electron's native view is only hidden, so tab
+  // switching never reconnects an active preview.
   const sidebarContent = (
     <div
       {...stylex.props(detailStyles.sidebarContentRoot)}
@@ -7188,7 +7099,7 @@ const SessionDetail = ({
         >
           <SessionBrowserPanel
             session={activeBrowserSession}
-            active={activeSidebarTab === 'browser' && isSidebarVisible}
+            active={showFixedSidePanelBody && activeSidebarTab === 'browser' && isSidebarVisible}
             candidateNavigationRequestId={
               browserCandidateNavigationRequest?.sessionId === activeBrowserSession.id
                 ? browserCandidateNavigationRequest.id
@@ -7215,7 +7126,9 @@ const SessionDetail = ({
         >
           <SessionIosSimulatorPanel
             session={activeIosSimulatorSession}
-            active={iosSimulatorPlacement !== 'hidden' && isSidebarVisible}
+            active={
+              showFixedSidePanelBody && iosSimulatorPlacement !== 'hidden' && isSidebarVisible
+            }
             onAttachScreenshot={(file) =>
               handleAttachSimulatorScreenshot(activeIosSimulatorSession.id, file)
             }
@@ -7230,25 +7143,23 @@ const SessionDetail = ({
           <SessionDevicePreviewPanel
             platform="android"
             session={activeAndroidEmulatorSession}
-            active={androidEmulatorPlacement !== 'hidden' && isSidebarVisible}
+            active={
+              showFixedSidePanelBody && androidEmulatorPlacement !== 'hidden' && isSidebarVisible
+            }
             onAttachScreenshot={(file) =>
               handleAttachSimulatorScreenshot(activeAndroidEmulatorSession.id, file)
             }
           />
         </div>
       ) : null}
-      {activeSidebarTab !== 'browser' &&
+      {showFixedSidePanelBody &&
+      activeSidebarTab !== 'browser' &&
       activeSidebarTab !== 'ios-simulator' &&
       activeSidebarTab !== 'android-emulator' ? (
         <div {...stylex.props(detailStyles.absoluteFill)}>{nonBrowserSidebarContent}</div>
       ) : null}
     </div>
   );
-
-  // Viewers and side chats render their own absolutely positioned surfaces on
-  // top; the fixed-panel body only shows when neither owns the panel.
-  const showFixedSidePanelBody =
-    effectiveActiveViewerTabId === null && effectiveActiveSideSessionId === null;
   const defaultSizes = showFixedSidePanelBody
     ? { main: 75, sidebar: 25 }
     : { main: 60, sidebar: 40 };
@@ -7542,7 +7453,19 @@ const SessionDetail = ({
         )}
       />
       <div {...stylex.props(detailStyles.sidebarBody)}>
-        {showFixedSidePanelBody && activeSidebarTab !== null ? sidebarContent : null}
+        {openedSidebarTabs.length > 0 ? (
+          <div
+            className={
+              stylex.props(
+                detailStyles.absoluteFill,
+                (!showFixedSidePanelBody || activeSidebarTab === null) && detailStyles.invisibleFill
+              ).className
+            }
+            aria-hidden={!showFixedSidePanelBody || activeSidebarTab === null}
+          >
+            {sidebarContent}
+          </div>
+        ) : null}
         {showFixedSidePanelBody && activeSidebarTab === null && sidePanelTabs.length === 0 ? (
           <SessionSidePanelEmptyState
             panels={sidePanelOptions}

@@ -6,7 +6,7 @@ import { SessionSendProgressRing } from '@/components/sidebar-row-shared';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import type { PendingSessionSend } from '@/lib/session-pending-sends';
 import { deriveSessionSendProgress } from '@/lib/session-send-status';
-import { QUEUE_LINE, queueSurface } from './surface';
+import { QUEUE_LINE, queuePreviewStyle, queueSurface } from './surface';
 import { IconAction, TextAction, queueRowStyles } from './message-queue-row';
 import { themeColors } from '../../../style/theme-colors.stylex';
 import { themeSpace } from '../../../style/theme-scale.stylex';
@@ -165,11 +165,8 @@ export function PendingQueueRow({
         <div {...stylex.props(styles.text)}>
           {/* Muted until it is a real queue item, like an unsent conversation's title. */}
           <div
-            {...stylex.props(
-              queueSurface.text,
-              !instant && queueSurface.preparingText
-            )}
-            style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}
+            {...stylex.props(queueSurface.text, !instant && queueSurface.preparingText)}
+            style={queuePreviewStyle(false)}
           >
             {queuedText(record)}
           </div>

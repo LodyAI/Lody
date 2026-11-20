@@ -17,6 +17,7 @@ import {
   loadConversationQuoteDraft,
   saveConversationQuoteDraft,
 } from '@/lib/conversation-quote-draft';
+import { formatMessageQuoteExcerpt } from '@/components/ai-gui/message-quote-markdown';
 import { useSessionMentionSource } from '@/hooks/use-session-mention-source';
 import * as stylex from '@stylexjs/stylex';
 import { composerActionButtonTheme } from '../chat/composer-action-button.stylex';
@@ -85,7 +86,7 @@ import {
   type PersistedMentionRange,
 } from '@/components/mentions/mention-persistence';
 import { useTranslation } from 'react-i18next';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { captureAgentRoleMentionsApplied } from '@/lib/agent-role-analytics';
 import type {
@@ -1820,10 +1821,10 @@ export const SessionChatInputArea = memo(
             );
             return false;
           }
-          const excerpt = Array.from(text.replace(/\s+/g, ' ').trim()).slice(0, 32).join('');
+          const excerpt = formatMessageQuoteExcerpt(text);
           return insertLargePastedTextAtSelection(text, {
             kind: 'message_quote',
-            label: t('composer.messageQuoteInlineLabel', '[Quote: {{text}}]', { text: excerpt }),
+            label: t('composer.messageQuoteInlineLabel', '[{{text}}]', { text: excerpt }),
           });
         },
         addDocumentSelection,

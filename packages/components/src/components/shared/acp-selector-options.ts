@@ -1,6 +1,8 @@
 import {
   ACP_CONFIG_OPTION_OFF_VALUE,
   ACP_CONFIG_OPTION_ON_VALUE,
+  ACP_FAST_MODE_VALUE_FAST,
+  ACP_FAST_MODE_VALUE_ULTRAFAST,
   ACP_COLLABORATION_MODE_CONFIG_ID,
   ACP_COLLABORATION_MODE_DEFAULT_VALUE,
   ACP_COLLABORATION_MODE_PLAN_VALUE,
@@ -82,6 +84,48 @@ export const isFastModeSelector = (selector: AcpConfigOptionSelector): boolean =
   isAcpFastModeConfigId(selector.configId) &&
   (selector.type === 'boolean' || isOnOffSelectSelector(selector));
 
+export const isSpeedTierSelector = (
+  selector: AcpConfigOptionSelector
+): selector is AcpSelectConfigOptionSelector =>
+  isAcpFastModeConfigId(selector.configId) &&
+  selector.type === 'select' &&
+  !isOnOffSelectSelector(selector);
+
+export const coerceFastModeConfigOptionValue = (
+  selector: AcpConfigOptionSelector,
+  value: AcpConfigOptionValue | undefined
+): AcpConfigOptionValue | undefined => {
+  if (!isAcpFastModeConfigId(selector.configId) || value === undefined) {
+    return value;
+  }
+  if (selector.type === 'boolean') {
+    if (typeof value === 'boolean') return value;
+    if (value === CONFIG_OPTION_ON_VALUE || value === ACP_FAST_MODE_VALUE_FAST) return true;
+    if (value === CONFIG_OPTION_OFF_VALUE) return false;
+    return undefined;
+  }
+  if (isOnOffSelectSelector(selector)) {
+    if (value === true || value === ACP_FAST_MODE_VALUE_FAST) return CONFIG_OPTION_ON_VALUE;
+    if (value === false) return CONFIG_OPTION_OFF_VALUE;
+    return typeof value === 'string' && selector.options.some((option) => option.value === value)
+      ? value
+      : undefined;
+  }
+  if (value === true || value === CONFIG_OPTION_ON_VALUE) {
+    return selector.options.some((option) => option.value === ACP_FAST_MODE_VALUE_FAST)
+      ? ACP_FAST_MODE_VALUE_FAST
+      : undefined;
+  }
+  if (value === false) {
+    return selector.options.some((option) => option.value === CONFIG_OPTION_OFF_VALUE)
+      ? CONFIG_OPTION_OFF_VALUE
+      : undefined;
+  }
+  return typeof value === 'string' && selector.options.some((option) => option.value === value)
+    ? value
+    : undefined;
+};
+
 export const isOnOffConfigOptionValue = (
   value: AcpConfigOptionValue | undefined
 ): value is typeof CONFIG_OPTION_ON_VALUE | typeof CONFIG_OPTION_OFF_VALUE =>
@@ -120,8 +164,10 @@ export const isConfigOptionValueValid = (
 export const resolveConfigOptionValue = (
   selector: AcpConfigOptionSelector,
   value: AcpConfigOptionValue | undefined
-): AcpConfigOptionValue =>
-  isConfigOptionValueValid(selector, value) ? value : selector.currentValue;
+): AcpConfigOptionValue => {
+  const normalized = coerceFastModeConfigOptionValue(selector, value);
+  return isConfigOptionValueValid(selector, normalized) ? normalized : selector.currentValue;
+};
 
 export const resolveFastModeSelectorEnabled = (
   selector: AcpFastModeConfigOptionSelector,
@@ -495,35 +541,122 @@ const applyEffortLadder = (
     };
   });
 
+const SPEED_TIER_DEFAULT_META: Record<string, { label: string; description: string }> = {
+  [ACP_FAST_MODE_VALUE_FAST]: {
+    label: 'Fast',
+    description: '2x speed, increased usage',
+  },
+  [ACP_FAST_MODE_VALUE_ULTRAFAST]: {
+    label: 'Ultrafast',
+    description: 'The fastest available responses for latency-sensitive work.',
+  },
+};
+
+const isAnySpeedControlSelector = (selector: AcpConfigOptionSelector): boolean =>
+  isFastModeSelector(selector) || isSpeedTierSelector(selector);
+
+const buildSpeedTierSelectSelector = (
+  configId: string,
+  tiers: readonly string[],
+  existing: AcpConfigOptionSelector | undefined
+): AcpSelectConfigOptionSelector => {
+  const existingOptionsByValue = new Map(
+    existing?.type === 'select' ? existing.options.map((opt) => [opt.value, opt]) : []
+  );
+  const options: AcpSessionSelectOption[] = [
+    existingOptionsByValue.get(CONFIG_OPTION_OFF_VALUE) ?? {
+      value: CONFIG_OPTION_OFF_VALUE,
+      label: 'Standard',
+      description: 'Default speed, normal usage',
+    },
+    ...tiers.map((tier) => {
+      const preserved = existingOptionsByValue.get(tier);
+      if (preserved) return preserved;
+      const fallback = SPEED_TIER_DEFAULT_META[tier];
+      return {
+        value: tier,
+        label: fallback?.label ?? tier.charAt(0).toUpperCase() + tier.slice(1),
+        description: fallback?.description,
+      };
+    }),
+  ];
+  const validValues = new Set(options.map((opt) => opt.value));
+  const currentValue =
+    existing?.type === 'select' && validValues.has(existing.currentValue)
+      ? existing.currentValue
+      : CONFIG_OPTION_OFF_VALUE;
+  return {
+    configId,
+    label: existing && isSpeedTierSelector(existing) ? existing.label : 'Speed',
+    description:
+      existing && isSpeedTierSelector(existing)
+        ? existing.description
+        : 'Response speed tier for the session',
+    category: existing?.category ?? 'model_config',
+    type: 'select',
+    currentValue,
+    options,
+  };
+};
+
 /**
- * Shows the Fast toggle for exactly the models that have it. The probed options
- * describe one model, so the toggle can be missing for a model that has Fast or
- * present for one that lacks it. A declared `fastMode` decides; an undeclared
- * model keeps what the probe showed.
+ * Shows the Fast toggle or multi-tier Speed select for exactly the models that
+ * have them. The probed options describe one model, so speed controls can be
+ * missing, stale, or in the wrong shape for another model. A declared
+ * `speedTiers` / `fastMode` decides; an undeclared model keeps what the probe showed.
  */
 const normalizeFastModeSelectors = (
   selectors: AcpConfigOptionSelector[],
   options: PerModelSelectorContext
 ): AcpConfigOptionSelector[] => {
-  const fastMode = getDeclaredModelControls(options, options.selectedModelId)?.fastMode;
-  if (fastMode === undefined) return selectors;
-  const hasFast = selectors.some(isFastModeSelector);
-  if (!fastMode) {
-    return hasFast ? selectors.filter((selector) => !isFastModeSelector(selector)) : selectors;
+  const declared = getDeclaredModelControls(options, options.selectedModelId);
+  const declaredTiers =
+    declared?.speedTiers !== undefined
+      ? declared.speedTiers
+      : declared?.fastMode === true
+        ? [ACP_FAST_MODE_VALUE_FAST]
+        : declared?.fastMode === false
+          ? []
+          : undefined;
+  if (declaredTiers === undefined) return selectors;
+
+  const existingIndex = selectors.findIndex(isAnySpeedControlSelector);
+  const existing = existingIndex >= 0 ? selectors[existingIndex] : undefined;
+  if (declaredTiers.length === 0) {
+    return existing
+      ? selectors.filter((selector) => !isAnySpeedControlSelector(selector))
+      : selectors;
   }
-  const configId = getBuiltinModelControlBinding(options)?.fastConfigId;
-  if (hasFast || !configId) return selectors;
-  return [
-    ...selectors,
-    {
-      configId,
-      label: 'Fast mode',
-      category: 'model_config',
-      type: 'boolean',
-      currentValue: false,
-      options: [],
-    },
-  ];
+
+  const configId = existing?.configId ?? getBuiltinModelControlBinding(options)?.fastConfigId;
+  const needsSelect = declaredTiers.some((tier) => tier !== ACP_FAST_MODE_VALUE_FAST);
+  if (needsSelect) {
+    if (!configId) return selectors;
+    const nextSelector = buildSpeedTierSelectSelector(configId, declaredTiers, existing);
+    if (existingIndex >= 0) {
+      return selectors.map((selector, index) =>
+        index === existingIndex ? nextSelector : selector
+      );
+    }
+    return [...selectors, nextSelector];
+  }
+
+  if (existing && isFastModeSelector(existing)) return selectors;
+  if (!configId) return selectors;
+  const toggleSelector: AcpBooleanConfigOptionSelector = {
+    configId,
+    label: 'Fast mode',
+    category: 'model_config',
+    type: 'boolean',
+    currentValue: false,
+    options: [],
+  };
+  if (existingIndex >= 0) {
+    return selectors.map((selector, index) =>
+      index === existingIndex ? toggleSelector : selector
+    );
+  }
+  return [...selectors, toggleSelector];
 };
 
 /**

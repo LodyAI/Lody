@@ -231,6 +231,8 @@ export type SessionPreviewRevokeRequest = {
   sessionId: SessionId;
   requestedByUserId: string;
   reason?: string;
+  /** Explicitly terminate the user-owned loopback server process for this preview target. */
+  stopProcess?: boolean;
 };
 
 export type SessionPreviewRevokeResponse = {

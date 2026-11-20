@@ -61,6 +61,7 @@ import {
   groupUsageWeekBuckets,
   usageTimelineHourLabels,
 } from './usage-timeline-bucket-label';
+import { copyTextToClipboard } from '@/lib/clipboard';
 // Export generation remains available in code while the settings UI focuses on the active views.
 const SHOW_SKYLINE_EXPORTS = false;
 
@@ -374,7 +375,13 @@ const styles = stylex.create({
   weekColumn: { minWidth: 0, flex: 1 },
   mutedHalf: { color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 60%, transparent)' },
   foreground: { color: 'hsl(var(--foreground))' },
-  peakLine: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: '12px', rowGap: '4px' },
+  peakLine: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: '12px',
+    rowGap: '4px',
+  },
   rangeFrame: { position: 'relative', minHeight: '10.5rem', minWidth: 0 },
   fixedReadout: {
     display: 'flex',
@@ -1188,7 +1195,10 @@ function UsageWeekMatrix({
   const formats = useCalendarFormats();
   const { buckets } = timeline;
   const timeZone = formats.timeline.resolvedOptions().timeZone;
-  const { labels, rows } = useMemo(() => groupUsageWeekBuckets(buckets, timeZone), [buckets, timeZone]);
+  const { labels, rows } = useMemo(
+    () => groupUsageWeekBuckets(buckets, timeZone),
+    [buckets, timeZone]
+  );
 
   // One tab stop for the grid. Vertical arrows stay in the same clock column.
   const cellRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -1234,9 +1244,7 @@ function UsageWeekMatrix({
         {rows.map(({ dateMs }) => (
           <span key={dateMs} {...stylex.props(styles.gutterLabel, styles.weekRow)}>
             <span>{formats.weekday.format(dateMs)}</span>
-            <span {...stylex.props(styles.dimmedText)}>
-              {formats.dayOfMonth.format(dateMs)}
-            </span>
+            <span {...stylex.props(styles.dimmedText)}>{formats.dayOfMonth.format(dateMs)}</span>
           </span>
         ))}
       </div>
@@ -2828,7 +2836,7 @@ export function UsageCalendarVisualization({
 
   const copyAscii = async () => {
     try {
-      await navigator.clipboard.writeText(ascii);
+      await copyTextToClipboard(ascii);
       toast.success(t('workspace.usage.skyline.asciiCopied'));
     } catch {
       toast.error(t('workspace.usage.skyline.copyFailed'));
@@ -2883,10 +2891,7 @@ export function UsageCalendarVisualization({
             letting the old view vanish before the new one starts. */}
         {/* Keep the containing block even after the hourly-only grid goes away:
             popLayout's measured offsets must retain the same coordinate system. */}
-        <div
-          data-usage-view-frame
-          {...stylex.props(styles.viewFrame, rings && styles.ringLayout)}
-        >
+        <div data-usage-view-frame {...stylex.props(styles.viewFrame, rings && styles.ringLayout)}>
           {/* Hourly ranges only: the ring runs its own plain fade, independent
               of the matrix container's fade. popLayout pops the
               leaving ring out of flow at its old spot — otherwise the grid

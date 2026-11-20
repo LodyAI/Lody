@@ -15,6 +15,8 @@ import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import {
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -28,6 +30,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
+import { RESET } from 'jotai/utils';
 import {
   ACP_CAPABILITY_ROW_FAMILIES,
   buildSessionTurnInputConfig,
@@ -69,7 +72,7 @@ import {
   deriveDraftSessionTitle,
 } from '@lody/shared';
 import { useCloudMutation, useCloudQuery, usePlatform } from '@lody/platform/react';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import {
   ArrowUp,
   ChevronsUpDown,
@@ -372,6 +375,13 @@ const landingStyles = stylex.create({
     alignItems: 'center',
     gap: themeSpace[2],
   },
+  topSelectorRowEmbedded: {
+    display: 'flex',
+    minWidth: 0,
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+  },
   footerSlot: { display: 'contents' },
   glyph14: { width: themeSpace[3.5], height: themeSpace[3.5] },
   glyph14Muted: {
@@ -482,7 +492,11 @@ import {
   arePersistedMentionRangesEqual,
   toPersistedMentionRanges,
 } from '@/components/mentions/mention-persistence';
-import { buildChatLandingDraftKey } from '@/atoms/chat-landing-draft';
+import {
+  buildChatLandingDraftKey,
+  buildChatLandingSurfaceDraftKey,
+  type ChatLandingSurface,
+} from '@/atoms/chat-landing-draft';
 import { useChatLandingImageDraft } from '@/hooks/use-chat-landing-image-draft';
 import { useChatLandingFileDraft } from '@/hooks/use-chat-landing-file-draft';
 import { useChatLandingDraftSession } from '@/hooks/use-chat-landing-draft-session';
@@ -502,6 +516,7 @@ import {
   useVisibleSessionMetas,
 } from '@/hooks/use-visible-session-metas';
 import { useReportVisibleSessionsForEagerSync } from '@/hooks/use-report-visible-sessions-for-eager-sync';
+import { useLatestRef } from '@/hooks/use-latest-ref';
 import { getLocalProjectVisibilityKey } from '@/lib/visible-local-project-index';
 import { shouldShowSessionSharing } from '@/lib/session-sharing';
 import { isNativeAppShell } from '@/lib/native-platform';
@@ -551,7 +566,7 @@ import {
 } from '@/components/sessions/desktop-run-config-menu';
 import { resolvePermissionModeFace } from '@/lib/permission-mode-face';
 import { SessionUsagePopover } from '@/components/sessions/session-usage-popover';
-import { useArchiveSessionWithConfirmation } from '@/components/sessions/session-archive-confirmation';
+import { useArchiveSessionWithConfirmation } from '@/components/sessions/session-sub-conversation-confirmation';
 import { MachinePairingDialog } from './machine-pairing-dialog';
 import {
   DATE_BUCKET_THIS_MONTH,
@@ -607,10 +622,15 @@ import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspac
 import { MobileCreateWorkspaceSheet } from '@/components/mobile/mobile-create-workspace-sheet';
 import { ChatComposer } from '@/components/chat/chat-composer';
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
-import {
-  MobileProjectFileBrowser,
-  type MobileProjectFileBrowserHandle,
-} from '@/components/files/mobile-project-file-browser';
+/* The files tab only renders in a mobile project context, but `chat-landing`
+   is on the desktop boot path — and the browser pulls `SessionMonacoTextViewer`
+   (the whole monaco editor). Keep the type eager, defer the implementation. */
+const MobileProjectFileBrowser = lazy(() =>
+  import('@/components/files/mobile-project-file-browser').then((module) => ({
+    default: module.MobileProjectFileBrowser,
+  }))
+);
+import type { MobileProjectFileBrowserHandle } from '@/components/files/mobile-project-file-browser';
 import {
   createLocalProjectIpcFileTransport,
   createLocalProjectRpcFileTransport,
@@ -700,7 +720,38 @@ interface ChatLandingProps {
    * chat route only; mobile keeps its base-context model.
    */
   onSelectionUrlSync?: (search: ChatLandingSearch) => void;
+  /**
+   * Renders the landing inside another surface (Today's "Convert to task"
+   * dialog) instead of as the new-chat page. Absent on the page, whose
+   * behaviour does not change.
+   */
+  embedding?: ChatLandingEmbedding;
 }
+
+export type ChatLandingEmbedding = {
+  /** Selects the separate draft, prompt id, analytics entrypoint and eager-sync source. */
+  surface: ChatLandingSurface;
+  /** Replaces the page's navigation once `startSession` has accepted the first turn. */
+  onSessionAccepted: (result: { sessionId: SessionId }) => void;
+  /** Reports a send in flight, so the host can refuse to close meanwhile. */
+  onPendingChange?: (pending: boolean) => void;
+  /** The host's words for the submit button, which the dialog layout labels. */
+  submitLabel?: string;
+  /** Dismisses the host; the dialog layout shows Cancel only when given. */
+  onCancel?: () => void;
+};
+
+/** Everything an embedded landing does differently, derived in one place. */
+const CHAT_LANDING_EMBEDDED_SURFACES: Record<
+  ChatLandingSurface,
+  { entrypoint: string; eagerSyncSourceId: string; promptId: string }
+> = {
+  'today-convert': {
+    entrypoint: 'today_convert',
+    eagerSyncSourceId: 'chat-landing:today-convert',
+    promptId: 'today-convert-prompt',
+  },
+};
 
 const getGitHubOwnerHandle = (fullName: string): string => {
   const [owner] = fullName.split('/');
@@ -869,7 +920,12 @@ function WorkspaceChatLanding({
   preSelectedRepo,
   preSelectedGroup,
   onSelectionUrlSync,
+  embedding,
 }: ChatLandingProps) {
+  const embeddedSurface = embedding ? CHAT_LANDING_EMBEDDED_SURFACES[embedding.surface] : null;
+  const isEmbedded = embeddedSurface != null;
+  const sessionEntrypoint = embeddedSurface?.entrypoint ?? 'chat_landing';
+  const embeddingRef = useLatestRef(embedding);
   // A Project group runs on top of the plain chat context: every existing
   // local/GitHub branch below sees `chat`, and the group overrides only the
   // picker value, the context pill, the machine and the submit payload.
@@ -893,7 +949,9 @@ function WorkspaceChatLanding({
   const { activeOrganization, organizations, switchOrganization } = useOrganization({
     targetSlug: workspaceSlug,
   });
-  const isMobile = useIsMobile();
+  const viewportIsMobile = useIsMobile();
+  // An embedded landing is a desktop surface (Today has no mobile layout in v1).
+  const isMobile = viewportIsMobile && !isEmbedded;
   const mobileKeyboardAction = useAtomValue(mobileKeyboardActionAtom);
   const usesMobileKeyboardAction = isMobile || isNativeAppShell();
   const hidesBillingUi = usesMobileKeyboardAction;
@@ -978,7 +1036,7 @@ function WorkspaceChatLanding({
     historyOnlySessionIds: activeReadOnlyIds,
   } = useVisibleSessionMetas();
   useReportVisibleSessionsForEagerSync(
-    'chat-landing',
+    embeddedSurface?.eagerSyncSourceId ?? 'chat-landing',
     visibleActiveSessions,
     visibleAllActiveSessions
   );
@@ -1312,7 +1370,9 @@ function WorkspaceChatLanding({
 
   // ── Prompt state (shared across contexts) ──
   const chatLandingStateOwnerKey = userId ?? null;
-  const chatLandingDraftKey = buildChatLandingDraftKey(chatLandingStateOwnerKey, workspaceSlug);
+  const chatLandingDraftKey = embedding
+    ? buildChatLandingSurfaceDraftKey(chatLandingStateOwnerKey, embedding.surface, workspaceSlug)
+    : buildChatLandingDraftKey(chatLandingStateOwnerKey, workspaceSlug);
   const [sessionState, setSessionState] = useAtom(
     chatLandingSessionStateAtomFamily(chatLandingDraftKey)
   );
@@ -1431,6 +1491,9 @@ function WorkspaceChatLanding({
   projectGroupPinnedMachineIdRef.current = projectGroupPinnedMachineId;
   const [selectedAgent, setSelectedAgent] = useState<AgentSelection | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  useEffect(() => {
+    embeddingRef.current?.onPendingChange?.(submitting);
+  }, [embeddingRef, submitting]);
   // The project selector always uses the machine-aware picker so multi-machine
   // workspaces can choose the target explicitly. Standalone Electron entry
   // points such as the sidebar and onboarding may still use the native dialog.
@@ -1737,6 +1800,20 @@ function WorkspaceChatLanding({
     sessionId: draftSessionId,
     ensureSessionId: ensureDraftSessionId,
   });
+  // The page keeps its draft across route unmounts; an embedded landing's
+  // draft lives only as long as its host, so closing it releases previews,
+  // uploads, the reserved id and the stored text.
+  const releaseEmbeddedDraftRef = useLatestRef(() => {
+    clearPendingImages();
+    clearPendingFiles();
+    resetDraftSessionId();
+    setSessionState(RESET);
+  });
+  useLayoutEffect(() => {
+    if (!isEmbedded) return undefined;
+    const release = releaseEmbeddedDraftRef;
+    return () => release.current();
+  }, [isEmbedded, releaseEmbeddedDraftRef]);
   const insertLargePastedTextAtSelection = useCallback(
     (text: string) => {
       const normalizedText = normalizePastedTextDraft(text).trim();
@@ -2730,6 +2807,8 @@ function WorkspaceChatLanding({
 
   // ── PostHog tracking ──
   useEffect(() => {
+    // The page funnel counts page views; an embedded landing is not one.
+    if (isEmbedded) return;
     if (!postHog || !userId || !workspaceId) return;
     if (!fireLandingViewedOnce(`${userId}:${workspaceId}`)) return;
     capturePostHogEvent(postHog, 'chat_landing/viewed', {
@@ -2748,6 +2827,7 @@ function WorkspaceChatLanding({
   }, [
     contextType,
     fireLandingViewedOnce,
+    isEmbedded,
     isMobile,
     launchMode,
     localProjectCount,
@@ -3328,7 +3408,7 @@ function WorkspaceChatLanding({
     ) => {
       capturePostHogEvent(postHog, 'session/input_blocked', {
         reason,
-        entrypoint: 'chat_landing',
+        entrypoint: sessionEntrypoint,
         project_kind: analyticsProjectKind,
         has_pending_images: hasBlockingImages,
         workspace_id: workspaceId ?? null,
@@ -3351,6 +3431,7 @@ function WorkspaceChatLanding({
       selectedAgent,
       selectedLocalProject,
       selectedRepo,
+      sessionEntrypoint,
       workspaceId,
     ]
   );
@@ -3635,6 +3716,21 @@ function WorkspaceChatLanding({
       clearPendingImages();
       clearPendingFiles();
       resetDraftSessionId();
+      if (embeddingRef.current) {
+        // The host's handoff runs once the turn is accepted; its failure is
+        // not a start failure, so it must not reach the catch below.
+        try {
+          embeddingRef.current.onSessionAccepted({ sessionId });
+        } catch (handoffError) {
+          console.error('Embedded landing failed to hand off the new session', handoffError);
+          toast.error(
+            t(
+              'chat.embeddedHandoffFailed',
+              'The conversation was created, but this view could not be updated.'
+            )
+          );
+        }
+      }
       if (!historyEntry || typeof historyEntry !== 'object' || !('id' in historyEntry)) {
         throw new Error(`Initial session history missing entry id (sessionId=${sessionId})`);
       }
@@ -3680,7 +3776,7 @@ function WorkspaceChatLanding({
         workdir_mode: contextType === 'local' ? effectiveWorkdirMode : null,
         has_images: inputBlocks.some((block) => block.type === 'image'),
         image_count: inputBlocks.filter((block) => block.type === 'image').length,
-        entrypoint: 'chat_landing',
+        entrypoint: sessionEntrypoint,
         launch_mode: launchMode,
         submit_prepare_ms: getDurationSinceMs(submitStartedAtMs),
         agent_role_used: activeAgentRole != null,
@@ -3708,7 +3804,7 @@ function WorkspaceChatLanding({
         agent_type: selectedConfig.agentType,
         ...acpAnalyticsProperties,
         project_kind: analyticsProjectKind,
-        entrypoint: 'chat_landing',
+        entrypoint: sessionEntrypoint,
         launch_mode: launchMode,
       });
 
@@ -3732,7 +3828,7 @@ function WorkspaceChatLanding({
           project_kind: analyticsProjectKind,
           local_project_id: selectedLocalProject?.localProjectId ?? null,
           workdir_mode: contextType === 'local' ? effectiveWorkdirMode : null,
-          entrypoint: 'chat_landing',
+          entrypoint: sessionEntrypoint,
           launch_mode: launchMode,
           duration_ms: getDurationSinceMs(dispatchStartedAtMs),
           error_message: errorMessage,
@@ -3795,6 +3891,8 @@ function WorkspaceChatLanding({
       // be misattributed.
       startFailureReason = 'unknown';
 
+      // An embedded landing handed the session to its host above; it stays put.
+      if (embeddingRef.current) return;
       // The mobile host acknowledges its committed session surface before
       // dismissing the new-chat page; navigation may resolve before portals paint.
       await navigate(
@@ -3818,7 +3916,7 @@ function WorkspaceChatLanding({
         project_kind: analyticsProjectKind,
         local_project_id: selectedLocalProject?.localProjectId ?? null,
         failure_reason: startFailureReason,
-        entrypoint: 'chat_landing',
+        entrypoint: sessionEntrypoint,
         launch_mode: launchMode,
         duration_ms: getDurationSinceMs(submitStartedAtMs),
         error_message: error instanceof Error ? error.message : String(error),
@@ -4369,7 +4467,12 @@ function WorkspaceChatLanding({
         </Button>
       )}
     >
-      <div {...stylex.props(landingStyles.topSelectorRow)}>
+      {/* Embedded, the scope pills share one wrapping row with the run config. */}
+      <div
+        {...stylex.props(
+          isEmbedded ? landingStyles.topSelectorRowEmbedded : landingStyles.topSelectorRow
+        )}
+      >
         <DesktopMachineMenu
           value={desktopSelectedMachineId}
           visibleLocalMachineId={visibleLocalMachineId}
@@ -4444,6 +4547,7 @@ function WorkspaceChatLanding({
             onEdit: handleAgentRoleEdit,
             machine: scopedMachineId ? (machines.get(scopedMachineId) ?? null) : null,
           }}
+          menuSide={isEmbedded ? 'top' : undefined}
         />
         {/* Permission is part of what a Role pins, so behind one it stops being
             a separate control and is stated in the Role's own face instead. It
@@ -4458,6 +4562,7 @@ function WorkspaceChatLanding({
             configOptionSelectors={configOptionSelectors}
             configOptionValues={configOptionValues}
             onConfigOptionChange={handleConfigOptionChange}
+            menuSide={isEmbedded ? 'top' : undefined}
           />
         )}
         <SessionUsagePopover
@@ -5296,6 +5401,8 @@ function WorkspaceChatLanding({
           isOffline: !isOnline,
           hasUnreadMessages: activity.hasUnreadMessages,
           isPinned: Boolean(session.isPinned),
+          pinSectionId: session.pinSectionId ?? null,
+          orderKey: session.orderKey ?? null,
           readOnly: activeReadOnlyIds.has(session.id) || archivedReadOnlyIds.has(session.id),
           machineId: session.machineId,
           /* Provenance for the list's opened-by tree. TWO fields, never
@@ -6218,6 +6325,8 @@ function WorkspaceChatLanding({
           isOffline: !isOnline,
           hasUnreadMessages: activity.hasUnreadMessages,
           isPinned: Boolean(session.isPinned),
+          pinSectionId: session.pinSectionId ?? null,
+          orderKey: session.orderKey ?? null,
           readOnly: activeReadOnlyIds.has(session.id) || archivedReadOnlyIds.has(session.id),
           machineId: session.machineId,
           /* See the home Chat-tab builder: precise opener for navigation, row
@@ -6593,20 +6702,25 @@ function WorkspaceChatLanding({
         localAgentRunning={localAgentRunsWorkspace(localCliState, runtime.workspaceId)}
       />
     ) : null;
+  // Pi migration and the sharing review are page guidance; an embedded
+  // landing keeps only the notices that concern the send itself.
+  const landingSharingReviewNoticeNode = isEmbedded ? null : sharingReviewNoticeNode;
   const composerNoticeNode =
     mcpSelection.defaultsFailed ||
     e2eeLocalAgentNode ||
-    sharingReviewNoticeNode ||
+    landingSharingReviewNoticeNode ||
     sessionLimitNoticeNode ||
-    canMigratePi ? (
+    (!isEmbedded && canMigratePi) ? (
       <>
-        <PiProviderMigrationCard
-          count={migratablePiProviders.length}
-          busy={piMigrationBusy}
-          error={piMigrationError}
-          canMigrate={canMigratePi}
-          onConfirm={() => void confirmPiMigration()}
-        />
+        {isEmbedded ? null : (
+          <PiProviderMigrationCard
+            count={migratablePiProviders.length}
+            busy={piMigrationBusy}
+            error={piMigrationError}
+            canMigrate={canMigratePi}
+            onConfirm={() => void confirmPiMigration()}
+          />
+        )}
         {mcpSelection.defaultsFailed ? (
           <McpDefaultsRecovery
             onRetry={mcpSelection.retryDefaults}
@@ -6615,7 +6729,7 @@ function WorkspaceChatLanding({
           />
         ) : null}
         {e2eeLocalAgentNode}
-        {sharingReviewNoticeNode}
+        {landingSharingReviewNoticeNode}
         {sessionLimitNoticeNode}
       </>
     ) : null;
@@ -6973,19 +7087,21 @@ function WorkspaceChatLanding({
           fileNavSegments={mobileFileNavSegments}
           onFileNavBack={() => mobileFileBrowserRef.current?.goBack()}
           filesTabContent={({ onScrollActivity, bottomTabBarVisible }) => (
-            <MobileProjectFileBrowser
-              key={mobileProjectFileProviderKey ?? 'no-provider'}
-              ref={mobileFileBrowserRef}
-              provider={mobileProjectFileProvider}
-              onPathChange={setMobileFileNavSegments}
-              onScrollActivity={onScrollActivity}
-              bottomTabBarVisible={bottomTabBarVisible}
-              message={
-                mobileProjectFileProvider
-                  ? undefined
-                  : t('workspace.projects.filesUnavailable', 'Files are unavailable.')
-              }
-            />
+            <Suspense fallback={null}>
+              <MobileProjectFileBrowser
+                key={mobileProjectFileProviderKey ?? 'no-provider'}
+                ref={mobileFileBrowserRef}
+                provider={mobileProjectFileProvider}
+                onPathChange={setMobileFileNavSegments}
+                onScrollActivity={onScrollActivity}
+                bottomTabBarVisible={bottomTabBarVisible}
+                message={
+                  mobileProjectFileProvider
+                    ? undefined
+                    : t('workspace.projects.filesUnavailable', 'Files are unavailable.')
+                }
+              />
+            </Suspense>
           )}
           /* Both project kinds get a real per-project Settings tab. Local
              projects expose team-share + ACP history sync + worktree
@@ -7321,6 +7437,8 @@ function WorkspaceChatLanding({
       <ChatLandingView
         tone={tone}
         isMobile={isMobile}
+        layout={isEmbedded ? 'dialog' : 'page'}
+        promptId={embeddedSurface?.promptId}
         navRootRef={keyboardNavRef}
         mentionSource={mentionSource}
         availableCommands={availableCommands}
@@ -7355,7 +7473,13 @@ function WorkspaceChatLanding({
         onFileRemove={handleRemoveFile}
         onFileRetry={handleRetryFile}
         mcp={mcpSelection.menu}
-        topSelector={<div {...stylex.props(landingStyles.topSelector)}>{topSelectorNode}</div>}
+        topSelector={
+          isEmbedded ? (
+            topSelectorNode
+          ) : (
+            <div {...stylex.props(landingStyles.topSelector)}>{topSelectorNode}</div>
+          )
+        }
         footerSelector={footerSelectorNode}
         bottomBar={bottomBarNode}
         composerNotice={composerNoticeNode}
@@ -7366,8 +7490,10 @@ function WorkspaceChatLanding({
         onSubmit={() => {
           void handleSubmit();
         }}
-        submitLabel={t('chat.send')}
+        submitLabel={embedding?.submitLabel ?? t('chat.send')}
         submittingLabel={t('chat.submitting')}
+        onCancel={embedding?.onCancel}
+        cancelLabel={t('common.cancel', 'Cancel')}
         hintType={hintType}
         noMachineVariant={isElectron ? 'daemon-starting' : 'download-client'}
         hintDownloadClientTitle={t('chat.cliHint.downloadClientTitle')}

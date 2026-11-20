@@ -1,3 +1,4 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 // @vitest-environment jsdom
 import { act } from 'react';
 import i18next from 'i18next';
@@ -13,7 +14,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore, Provider } from 'jotai';
 import {
   getProjectMcpKey,
-  createHistoryWriter,
   buildPendingUserHistoryEntry,
   buildSessionTurnInputConfig,
   resolveSessionConversationConfig,

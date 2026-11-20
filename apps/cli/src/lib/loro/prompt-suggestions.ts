@@ -1,11 +1,13 @@
-import { EphemeralStoreAdaptor, EphemeralStreamCrdt } from '@loro-dev/streams-crdt/loro';
 import {
   PromptSuggestionStore,
+  toPromptSuggestionStreamUrl,
+} from '@lody/shared/prompt-suggestions';
+import { EphemeralStoreAdaptor, EphemeralStreamCrdt } from '@loro-dev/streams-crdt/loro';
+import {
   LORO_STREAMS_BUCKET_ID,
   createLoroStreamUrl,
   getLoroMetaStreamId,
   getLoroStreamsPresenceBaseUrl,
-  toPromptSuggestionStreamUrl,
   type WorkspaceId,
 } from '@lody/shared';
 import type { Logger } from '@/utils/logger';

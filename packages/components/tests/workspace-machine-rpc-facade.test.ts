@@ -1385,6 +1385,55 @@ describe('encrypted file and preview routing', () => {
     expect(mintPreviewControlProof).not.toHaveBeenCalled();
   });
 
+  it('omits stopProcess on ordinary preview revoke and signs stopProcess: true only when explicitly requested', async () => {
+    const runtimeNonce = '00000000-0000-4000-8000-000000000009';
+    const rpcRevoke = vi.fn(async () => ({
+      type: 'session/preview-revoke_response' as const,
+      sessionId,
+      success: true,
+    }));
+    vi.mocked(mintPreviewControlProof).mockImplementation(async (intent) => ({
+      runtimeNonce: intent.runtimeNonce,
+      requestId: intent.requestId,
+      requestToken: 'tok-revoke',
+    }));
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getSessionToken: () => 'test-login-token',
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () =>
+        ({
+          requestPreviewControl: async () => ({ success: true, runtimeNonce }),
+          requestSessionPreviewRevoke: rpcRevoke,
+        }) as never,
+    });
+
+    await facade.requestSessionPreviewRevoke(remoteMachineId, sessionId, 'owner', {
+      reason: 'user_revoked',
+    });
+    expect(mintPreviewControlProof).toHaveBeenLastCalledWith(
+      expect.objectContaining({ operation: { action: 'revoke' } }),
+      'test-login-token'
+    );
+    expect(rpcRevoke).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ stopProcess: expect.anything() })
+    );
+
+    await facade.requestSessionPreviewRevoke(remoteMachineId, sessionId, 'owner', {
+      reason: 'user_revoked',
+      stopProcess: true,
+    });
+    expect(mintPreviewControlProof).toHaveBeenLastCalledWith(
+      expect.objectContaining({ operation: { action: 'revoke', stopProcess: true } }),
+      'test-login-token'
+    );
+    expect(rpcRevoke).toHaveBeenLastCalledWith(expect.objectContaining({ stopProcess: true }));
+  });
+
   it('forks an encrypted session through the protected feature channel, never ordinary RPC', async () => {
     const spec = {
       sourceSessionId: sessionId,

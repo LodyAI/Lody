@@ -165,6 +165,15 @@ export const pinnedSectionCollapsedAtom = atomWithStorage<boolean>(
   false
 );
 
+/**
+ * Folded user pin sections on this device, by section id (ids are unique
+ * across workspaces). The default section keeps `pinnedSectionCollapsedAtom`.
+ */
+export const pinSectionsCollapsedAtom = atomWithStorage<Record<string, boolean>>(
+  'lody-sidebar-pin-sections-collapsed',
+  {}
+);
+
 // ============================================================================
 // Local Project Collapse State (folders under Local Projects / <Machine> project)
 // ============================================================================
@@ -293,6 +302,30 @@ export const sidebarCollapsedAtom: ReturnType<typeof atomWithStorage<boolean>> =
     createJSONStorage<boolean>(windowStorage),
     { getOnInit: true }
   );
+
+/** Today pinned as a column next to the sidebar (specs/today-outline.md); per window. */
+export const todayPinnedAtom: ReturnType<typeof atomWithStorage<boolean>> =
+  atomWithStorage<boolean>('lody-today-pinned', false, createJSONStorage<boolean>(windowStorage), {
+    getOnInit: true,
+  });
+
+/**
+ * A day opened while pinned (a Today link, or the sidebar entry with `{}` for
+ * today): the column shows this member/date and clears it (in memory only).
+ */
+export const todayPinnedTargetAtom = atom<{ member?: string; date?: string } | null>(null);
+
+export const TODAY_COLUMN_DEFAULT_WIDTH = 360;
+export const TODAY_COLUMN_MIN_WIDTH = 280;
+export const TODAY_COLUMN_MAX_WIDTH = 560;
+
+/** Width of the pinned Today column in px; stored on this device. */
+export const todayColumnWidthAtom = atomWithStorage<number>(
+  'lody-today-column-width',
+  TODAY_COLUMN_DEFAULT_WIDTH,
+  undefined,
+  { getOnInit: true }
+);
 
 /**
  * Last expanded width in px. Restored when the user re-opens the sidebar so

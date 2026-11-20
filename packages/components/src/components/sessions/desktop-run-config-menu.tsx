@@ -126,6 +126,12 @@ const styles = stylex.create({
 /* Option-only submenus hug the longest label instead of inheriting the
    200px surface floor. 108px is the floor so a short name is not a sliver;
    `max-w-80` still caps a long provider list. */
+const compactOptionSubmenuStyles = stylex.create({
+  bounds: {
+    minWidth: '108px',
+    maxWidth: 'calc(var(--spacing) * 80)',
+  },
+});
 const COMPACT_OPTION_SUBMENU_BOUNDS = {
   minWidth: '108px',
   maxWidth: 'calc(var(--spacing) * 80)',
@@ -356,6 +362,16 @@ export function DesktopMachineMenu({
   );
 }
 
+/** Placement for a `menuSide` caller; nothing for the default placement. */
+function menuSideProps(menuSide: 'top' | undefined) {
+  return menuSide === 'top'
+    ? ({
+        side: 'top',
+        collisionAvoidance: { side: 'none', align: 'shift', fallbackAxisSide: 'none' },
+      } as const)
+    : {};
+}
+
 /* ── Run config (agent + model + reasoning + plan/fast) ──────────────── */
 
 export type DesktopRunConfigMenuProps = {
@@ -419,6 +435,12 @@ export type DesktopRunConfigMenuProps = {
     /** The machine those Roles are bound to, for resolving their stored ids. */
     machine?: MachineViewMeta | null;
   };
+  /**
+   * `top` opens the menu upward and keeps it there, for a control placed
+   * above content it must not cover (a create dialog's footer actions).
+   * Omitted, it opens below and flips when there is no room.
+   */
+  menuSide?: 'top';
 };
 
 export function DesktopRunConfigMenu({
@@ -442,6 +464,7 @@ export function DesktopRunConfigMenu({
   recentRunConfigs,
   onRecentRunConfigSelect,
   agentRoles,
+  menuSide,
 }: DesktopRunConfigMenuProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -458,6 +481,7 @@ export function DesktopRunConfigMenu({
     modelSelectors,
     interactionModeSelectors,
     thoughtLevelSelectors,
+    speedTierSelectors,
     planModeSelectors,
     fastModeSelectors,
     otherSelectors,
@@ -554,6 +578,18 @@ export function DesktopRunConfigMenu({
   const thinkingLabel =
     thinkingSelector?.options.find((opt) => opt.value === thinkingValue)?.label ?? thinkingValue;
 
+  /* Speed tier dropdown (when model supports multiple speed tiers, e.g. Fast + Ultrafast). */
+  const speedTierSelector = speedTierSelectors[0];
+  const speedTierValue = speedTierSelector
+    ? ((resolveConfigOptionValue(
+        speedTierSelector,
+        configOptionValues?.[speedTierSelector.configId]
+      ) as string) ?? null)
+    : null;
+  const speedTierLabel =
+    speedTierSelector?.options.find((opt) => opt.value === speedTierValue)?.label ?? speedTierValue;
+  const speedTierActive = Boolean(speedTierValue && speedTierValue !== 'off');
+
   /* Plan / Fast. */
   const planSelector = planModeSelectors[0];
   const planOn = planSelector
@@ -600,6 +636,13 @@ export function DesktopRunConfigMenu({
   }
   if (fastOn) {
     configFaceParts.push(<Zap key="fast" {...stylex.props(surface.faceLive)} aria-hidden="true" />);
+  } else if (speedTierActive && speedTierLabel) {
+    configFaceParts.push(
+      <span key="speed" {...stylex.props(surface.faceGroup, surface.faceFixed)}>
+        <Zap {...stylex.props(surface.faceLive)} aria-hidden="true" />
+        {speedTierLabel}
+      </span>
+    );
   }
   /* Permission joins the face ONLY behind a Role, and only one the Role pins:
      otherwise the standalone permission button is showing the same value a step
@@ -655,6 +698,7 @@ export function DesktopRunConfigMenu({
     extraSelectSelectors.length > 0 ||
     interactionSelector != null ||
     thinkingSelector != null ||
+    speedTierSelector != null ||
     planSelector != null ||
     fastSelector != null;
   if (!hasAnyRow) return null;
@@ -992,6 +1036,28 @@ export function DesktopRunConfigMenu({
             </Menu.Submenu>
           ) : null}
 
+          {speedTierSelector ? (
+            <Menu.Submenu>
+              <ValueSubTrigger label={speedTierSelector.label} value={speedTierLabel} />
+              <Menu.Content {...submenuPlacement} xstyle={compactOptionSubmenuStyles.bounds}>
+                {speedTierSelector.options.map((opt) => (
+                  <OptionItem
+                    key={opt.value}
+                    label={opt.label}
+                    selected={opt.value === speedTierValue}
+                    disabled={opt.disabled}
+                    onSelect={() =>
+                      onConfigOptionChange?.(
+                        speedTierSelector.configId,
+                        opt.value as AcpConfigOptionValue
+                      )
+                    }
+                  />
+                ))}
+              </Menu.Content>
+            </Menu.Submenu>
+          ) : null}
+
           {planSelector || fastSelector ? <Menu.Separator /> : null}
           {planSelector ? (
             <ToggleItem
@@ -1123,6 +1189,8 @@ export type DesktopPermissionModeButtonProps = {
   configOptionSelectors?: AcpConfigOptionSelector[];
   configOptionValues?: Record<string, AcpConfigOptionValue>;
   onConfigOptionChange?: (configId: string, value: AcpConfigOptionValue) => void;
+  /** See `DesktopRunConfigMenuProps.menuSide`. */
+  menuSide?: 'top';
 };
 
 export function DesktopPermissionModeButton({
@@ -1133,6 +1201,7 @@ export function DesktopPermissionModeButton({
   configOptionValues,
   onConfigOptionChange,
   disabled = false,
+  menuSide,
 }: DesktopPermissionModeButtonProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);

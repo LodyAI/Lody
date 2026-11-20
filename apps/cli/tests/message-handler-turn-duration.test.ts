@@ -514,6 +514,7 @@ type ApplyAcpModeAndModel = (
     agentClient: {
       isCreated: () => boolean;
       getAvailableCommands: () => [];
+      getAvailableCommandsForSession: () => [];
       getConfigOptions: () => Array<{ id: string; category?: string }>;
       setSessionMode: (sessionId: ACPSessionId, modeId: string) => Promise<void>;
       unstable_setSessionModel: (sessionId: ACPSessionId, modelId: string) => Promise<void>;
@@ -568,6 +569,7 @@ function createFableHarness() {
     agentClient: {
       isCreated: () => true,
       getAvailableCommands: () => [],
+      getAvailableCommandsForSession: () => [],
       getConfigOptions: () => [
         { id: 'model', category: 'model' },
         { id: 'fast', category: 'model_config' },

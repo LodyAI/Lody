@@ -1,7 +1,7 @@
+import { ScheduleRepository } from '@lody/shared/schedule-repository';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createLoroStreamsTokenProviderLegacy,
-  ScheduleRepository,
   getSessionRoomId,
   type MachineId,
   type SessionId,
@@ -742,7 +742,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     // The regression this pins: a dual-homed room's cloud subscription failing
     // while the local plane stays healthy produced no signal anywhere and the
     // pending renderer-authored ops sat local-only. The repair loop must
-    // discover it via repo.transportRooms('cloud') and reconnect that plane.
+    // discover it via repo.transportRooms('cloud') and repair the cloud member.
     mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
     enableElectronLocalDataPlane();
     Object.assign(navigator, { onLine: true });
@@ -754,8 +754,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       apiBaseUrl: 'https://api.example.test',
       token: 'auth-token',
     });
-    // A dual-homed room needs resolved LOCAL ownership: the scan deliberately
-    // skips cloud-readiness rooms (their binding is already registry-tracked).
+    // Keep the document dual-homed with resolved local ownership.
     runtime.setLocalMachineId('local-machine' as MachineId);
     await runtime.setAuthToken('auth-token');
     await flushPromises();
@@ -773,7 +772,11 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     await flushPromises();
     expect(mocks.reconnect).not.toHaveBeenCalled();
 
-    const brokenRejoin = vi.fn(async () => {});
+    const fullStreamReads: number[] = [];
+    const failedAt = Date.now();
+    const brokenRejoin = async () => {
+      fullStreamReads.push(Date.now() - failedAt);
+    };
     mocks.transportRooms.mockReturnValue([
       {
         room: { kind: 'doc', id: 'machine-local-machine' },
@@ -782,9 +785,10 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     ]);
     await vi.advanceTimersByTimeAsync(120_000);
     await flushPromises();
-    expect(mocks.reconnect).toHaveBeenCalledWith({ transportIds: ['cloud'], resetBackoff: true });
-    // A failed loro-repo-level attach is only repaired by the per-room rejoin.
-    expect(brokenRejoin).toHaveBeenCalled();
+    // The 60s backstop discovers the room; only its own rejoin repairs failed
+    // attaches. Persistent error then waits 30s, followed by a full 60s.
+    expect(fullStreamReads).toEqual([60_000, 90_000]);
+    expect(mocks.reconnect).not.toHaveBeenCalled();
 
     mocks.transportRooms.mockReturnValue([]);
     await runtime.dispose();

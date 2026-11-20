@@ -11,7 +11,7 @@ import * as stylex from '@stylexjs/stylex';
 import { useEffect, useState } from 'react';
 import { LoroDoc } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
-import { sessionDocSchema } from '@lody/shared';
+import { sessionDocSchema } from '@lody/shared/session-doc-schemas';
 import { createConversationSession, type ConversationView } from '@/lib/conversation-view';
 import { useConversationStreamItems } from '@/hooks/use-conversation-stream-items';
 import type { Meta, StoryObj } from '@storybook/react';

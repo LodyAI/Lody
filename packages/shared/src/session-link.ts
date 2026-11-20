@@ -1,4 +1,5 @@
 import { LODY_PROTOCOLS, SESSION_LINK_SCHEMES } from './session-link-schemes.mjs';
+import { encodeTodayUserId, parseTodayDate } from './today-types';
 export {
   LODY_PROTOCOLS,
   SESSION_LINK_SCHEMES,
@@ -78,4 +79,42 @@ export function resolveSessionLinkId(raw: string, workspaceId: string): string {
   // A bare session reference is unambiguous; tab relationships require a catalog.
   if (link.tabSessionId) throw new Error('Use the child session ID directly for MCP requests');
   return link.sessionId;
+}
+
+/** A member's Today page for one day (specs/today-outline.md). */
+export type TodayLink = { userId: string; date: string; workspaceId: string };
+
+/**
+ * `lody://today/<encodeURIComponent(userId)>/<YYYY-MM-DD>?workspace=<id>`.
+ * Unlike session links the user segment may hold `%XX` (local ids contain `:`),
+ * but only in its canonical encoding, so one page has exactly one link.
+ */
+export function parseTodayLink(raw: string): TodayLink | null {
+  if (raw.length > 8192 || /[\s\\]/u.test(raw)) return null;
+  const match =
+    /^([a-zA-Z.-]+):\/\/today\/([A-Za-z0-9_.~%-]+)\/(\d{4}-\d{2}-\d{2})\?workspace=([A-Za-z0-9_-]+)$/u.exec(
+      raw
+    );
+  if (!match || !SCHEMES.has(`${match[1]}:`)) return null;
+  const [, , encodedUser, date, workspaceId] = match as unknown as [
+    string,
+    string,
+    string,
+    string,
+    string,
+  ];
+  let userId: string;
+  try {
+    userId = decodeURIComponent(encodedUser);
+  } catch {
+    return null;
+  }
+  if (!userId || /^\.+$/u.test(userId) || encodeTodayUserId(userId) !== encodedUser) return null;
+  if (!parseTodayDate(date)) return null;
+  return { userId, date, workspaceId };
+}
+
+/** A link the app opens itself: a conversation or a Today page. */
+export function isAppResourceLink(raw: string): boolean {
+  return parseSessionLink(raw) !== null || parseTodayLink(raw) !== null;
 }

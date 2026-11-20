@@ -155,6 +155,13 @@ const styles = stylex.create({
     paddingInline: 'calc(var(--spacing) * 4)',
     paddingBlock: 'calc(var(--spacing) * 3)',
   },
+  textareaModal: {
+    minHeight: '132px',
+    borderWidth: 0,
+    paddingInline: 0,
+    paddingBlock: 0,
+    resize: 'none',
+  },
   textareaHint: { paddingRight: 'calc(var(--spacing) * 16)' },
   secondaryAction: { width: 'auto', userSelect: 'none', flexShrink: 0 },
   /* The composer's own frame. */
@@ -515,6 +522,71 @@ const styles = stylex.create({
   glyphMuted: { color: colors.secondaryLabel },
 });
 
+/* The `modal` variant: the composer as the body of a create dialog (Today's
+   "Convert to task"). The prompt is the page, with no box of its own; the
+   selectors sit under it as one wrapping row of pills, and a footer ruled off
+   across the panel holds the "+" entry and the dialog's own actions. */
+const modalStyles = stylex.create({
+  box: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[3],
+  },
+  textarea: {
+    minHeight: '132px',
+    borderWidth: 0,
+    paddingInline: 0,
+    paddingBlock: 0,
+    resize: 'none',
+  },
+  pills: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: space[1.5],
+    rowGap: space[1.5],
+    minWidth: 0,
+    userSelect: 'none',
+  },
+  // The run-config group sizes to its content, so it follows the scope pills
+  // on their line and wraps to its own as one piece. It is not the footer's
+  // `composer-face` container: a pill row is never the narrow footer whose
+  // labels that container hides, and a long model name truncates instead.
+  face: {
+    display: 'flex',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    columnGap: space[1.5],
+    flexGrow: 0,
+    flexShrink: 1,
+    minWidth: 0,
+    maxWidth: '100%',
+    overflow: 'hidden',
+  },
+  // Ruled off across the whole panel: the negative inline margin is the
+  // dialog's own padding (`dialog.padding`, space[4]).
+  footer: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    columnGap: space[2],
+    marginInline: `calc(-1 * ${space[4]})`,
+    paddingInline: space[4],
+    paddingTop: space[3],
+    borderTopWidth: 1,
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
+    userSelect: 'none',
+  },
+  actions: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    columnGap: space[2],
+    marginInlineStart: 'auto',
+  },
+});
+
 const promptSuggestionStyles = stylex.create({
   // The hint is ghost text over the empty textarea, set in the textarea's own
   // size and line height so it sits exactly where typing will appear. The
@@ -577,7 +649,8 @@ const promptSuggestionStyles = stylex.create({
 });
 
 type ChatComposerTone = 'light' | 'dark';
-type ChatComposerVariant = 'landing' | 'session' | 'dialog' | 'sheet';
+/** `modal` is the body of a create dialog; see `modalStyles`. */
+type ChatComposerVariant = 'landing' | 'session' | 'dialog' | 'sheet' | 'modal';
 type ChatComposerStatusTone = 'error' | 'warning' | 'info';
 
 export interface ChatComposerAction {
@@ -724,6 +797,7 @@ export function getChatComposerTextareaStyles({
   variant: ChatComposerVariant;
   isMobile?: boolean;
 }): stylex.StyleXStyles {
+  const isModal = variant === 'modal';
   return [
     typography.prompt,
     styles.textarea,
@@ -731,7 +805,9 @@ export function getChatComposerTextareaStyles({
       ? styles.textareaSheet
       : variant === 'landing'
         ? styles.textareaLanding
-        : [styles.textareaSession, isMobile ? styles.textareaMobile : styles.textareaDesktop],
+        : isModal
+          ? styles.textareaModal
+          : [styles.textareaSession, isMobile ? styles.textareaMobile : styles.textareaDesktop],
   ];
 }
 
@@ -823,6 +899,7 @@ export function ChatComposer({
   const isDialog = variant === 'dialog';
   const isLanding = variant === 'landing';
   const isSheet = variant === 'sheet';
+  const isModal = variant === 'modal';
   // Mobile session composer starts at a single line to save vertical space
   // (desktop keeps its 2-line default); it still auto-grows as the user types.
   const singleLineMobile = isMobile && variant === 'session';
@@ -1350,10 +1427,12 @@ export function ChatComposer({
           styles.fieldFocus,
           isImageDropActive && styles.boxDropping
         );
+  const modalBoxStyle = isModal ? stylex.props(modalStyles.box, styles.mentionSurface) : undefined;
+  const resolvedBoxStyle = modalBoxStyle ?? boxStyle;
   const boxClassName = [
     // `group` is the focus hint's anchor: it fades when the box takes focus.
     'group',
-    boxStyle.className,
+    resolvedBoxStyle.className,
   ]
     .filter(Boolean)
     .join(' ');
@@ -1366,7 +1445,9 @@ export function ChatComposer({
   const focusHintBinding = commands.getKeybindingsFor('session.focusInput')[0];
   // Only when the box is idle: desktop, has a focus binding, and nothing entered/attached
   // yet (so the chip never collides with text or thumbnails). focus-within hides it too.
+  // A dialog's prompt already holds focus; ⌘L names the page's composer.
   const showFocusHint =
+    !isModal &&
     focusHintSupported &&
     Boolean(focusHintBinding) &&
     !promptValue &&
@@ -1421,7 +1502,9 @@ export function ChatComposer({
             )}
           >
             {/* Top selector (repo, branch) - shown outside and above the input box */}
-            {topSelector ? <div {...stylex.props(styles.topSelector)}>{topSelector}</div> : null}
+            {topSelector && !isModal ? (
+              <div {...stylex.props(styles.topSelector)}>{topSelector}</div>
+            ) : null}
             <div
               ref={composerBoxRef}
               data-mention-frame=""
@@ -1430,7 +1513,7 @@ export function ChatComposer({
                  more. */
               data-lody-composer-box=""
               className={boxClassName}
-              style={boxStyle.style}
+              style={resolvedBoxStyle.style}
               onDragEnter={canHandleImageDrop ? handleImageDragEnter : undefined}
               onDragOver={canHandleImageDrop ? handleImageDragOver : undefined}
               onDragLeave={canHandleImageDrop ? handleImageDragLeave : undefined}
@@ -1841,55 +1924,80 @@ export function ChatComposer({
                 </div>
               ) : null}
 
-              <div
-                {...stylex.props(
-                  styles.footer,
-                  isSheet
-                    ? styles.footerSheet
-                    : isLanding
-                      ? styles.footerLanding
-                      : styles.footerSession
-                )}
-              >
-                {/* Single bottom-left "+" attachment entry (replaces the old
+              {isModal ? (
+                <>
+                  {topSelector || footerSelector ? (
+                    <div {...stylex.props(modalStyles.pills)}>
+                      {topSelector}
+                      {footerSelector ? (
+                        <div {...stylex.props(modalStyles.face)}>{footerSelector}</div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <div {...stylex.props(modalStyles.footer)}>
+                    <AttachmentAddMenu
+                      isMobile={isMobile}
+                      disabled={promptDisabled}
+                      onAddAttachment={onAttachmentAddClick}
+                      attachmentDisabled={attachmentAddDisabled}
+                      mcp={mcp}
+                      onScheduleSend={onScheduleSend}
+                      scheduleDisabledReason={scheduleDisabledReason}
+                    />
+                    <div {...stylex.props(modalStyles.actions)}>{primaryAction}</div>
+                  </div>
+                </>
+              ) : (
+                <div
+                  {...stylex.props(
+                    styles.footer,
+                    isSheet
+                      ? styles.footerSheet
+                      : isLanding
+                        ? styles.footerLanding
+                        : styles.footerSession
+                  )}
+                >
+                  {/* Single bottom-left "+" attachment entry (replaces the old
                     image + paperclip icons). Hidden when neither add callback
                     is provided. */}
-                <AttachmentAddMenu
-                  isMobile={isMobile}
-                  isLanding={isLanding}
-                  isSheet={isSheet}
-                  disabled={promptDisabled}
-                  onAddAttachment={onAttachmentAddClick}
-                  attachmentDisabled={attachmentAddDisabled}
-                  mcp={mcp}
-                  onScheduleSend={onScheduleSend}
-                  scheduleDisabledReason={scheduleDisabledReason}
-                />
+                  <AttachmentAddMenu
+                    isMobile={isMobile}
+                    isLanding={isLanding}
+                    isSheet={isSheet}
+                    disabled={promptDisabled}
+                    onAddAttachment={onAttachmentAddClick}
+                    attachmentDisabled={attachmentAddDisabled}
+                    mcp={mcp}
+                    onScheduleSend={onScheduleSend}
+                    scheduleDisabledReason={scheduleDisabledReason}
+                  />
 
-                {/* Single row only: long model names must shrink/truncate inside
+                  {/* Single row only: long model names must shrink/truncate inside
                     the run-config face rather than wrapping config chips onto a
                     second line (especially on mobile). */}
-                <div {...stylex.props(styles.footerFace)}>{footerSelector}</div>
+                  <div {...stylex.props(styles.footerFace)}>{footerSelector}</div>
 
-                <div {...stylex.props(styles.footerActions)}>
-                  {secondaryAction ? (
-                    <Button
-                      type="button"
-                      variant={secondaryAction.variant ?? 'secondary'}
-                      size={secondaryButtonSize}
-                      onClick={() => {
-                        void secondaryAction.onClick();
-                      }}
-                      disabled={secondaryAction.disabled}
-                      className={secondaryAction.className}
-                      xstyle={[secondaryButtonStyles, secondaryAction.xstyle]}
-                    >
-                      {secondaryAction.label}
-                    </Button>
-                  ) : null}
-                  {primaryAction}
+                  <div {...stylex.props(styles.footerActions)}>
+                    {secondaryAction ? (
+                      <Button
+                        type="button"
+                        variant={secondaryAction.variant ?? 'secondary'}
+                        size={secondaryButtonSize}
+                        onClick={() => {
+                          void secondaryAction.onClick();
+                        }}
+                        disabled={secondaryAction.disabled}
+                        className={secondaryAction.className}
+                        xstyle={[secondaryButtonStyles, secondaryAction.xstyle]}
+                      >
+                        {secondaryAction.label}
+                      </Button>
+                    ) : null}
+                    {primaryAction}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
             {bottomBar ? <div {...stylex.props(styles.bottomBar)}>{bottomBar}</div> : null}
           </div>

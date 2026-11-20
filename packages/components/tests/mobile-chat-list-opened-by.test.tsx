@@ -2,7 +2,6 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
-import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import {
@@ -17,6 +16,7 @@ import {
 } from '../src/components/mobile/mobile-project-screen';
 import { sidebarCollapsedOpenedBySessionsAtom } from '../src/atoms/focus-layer';
 import { initI18n } from '../src/i18n';
+import { flushSync } from 'react-dom';
 
 describe('mobile-chat-list-opened-by', () => {
   /**
@@ -70,7 +70,7 @@ describe('mobile-chat-list-opened-by', () => {
 
   beforeEach(async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    await initI18n('en');
+    await initI18n();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -150,11 +150,9 @@ describe('mobile-chat-list-opened-by', () => {
       expect(isNested(list[1]!)).toBe(false);
       expect(isNested(list[2]!)).toBe(true);
       // It still indents — losing the lines must not also lose the hierarchy.
-      expect(
-        list[1]
-          ?.querySelector('[data-conversation-row-leading-slot]')
-          ?.getAttribute('data-conversation-row-slot')
-      ).toBe('nested');
+      expect(list[1]?.querySelector('[data-conversation-row-leading-slot]')?.className).toContain(
+        'w-8'
+      );
     });
 
     it('gives an ACTIVE opener its status instead of the fold control', async () => {
@@ -407,9 +405,7 @@ describe('mobile-conversation-row-pr', () => {
 
       expect(row.querySelector('[data-session-mergeable-pill]')).toBeNull();
       // The diff does not come back either — the slot stays quiet on the active row.
-      expect([...row.querySelectorAll('span')].some((span) => span.textContent === '+12')).toBe(
-        false
-      );
+      expect(row.querySelector('.text-github-addition')).toBeNull();
       expect(row.querySelector('[data-pr-ci-verdict]')).not.toBeNull();
     });
 
@@ -417,9 +413,7 @@ describe('mobile-conversation-row-pr', () => {
       for (const prStatus of ['merged', 'closed'] as const) {
         const row = renderRow({ ...readyPr, id: `${prStatus}-session`, prStatus });
         expect(row.querySelector('[data-session-mergeable-pill]')).toBeNull();
-        expect([...row.querySelectorAll('span')].some((span) => span.textContent === '+12')).toBe(
-          true
-        );
+        expect(row.querySelector('.text-github-addition')?.textContent).toBe('+12');
         flushSync(() => root?.unmount());
         root = undefined;
         container?.remove();

@@ -133,61 +133,54 @@ describe('sidebar navigation model', () => {
     expect(sessionIds(items)).toEqual(['pinned', 'updated-new', 'updated-old']);
   });
 
-  it('walks the Status groups in the mobile Home order, skipping folded groups and idle overflow', () => {
-    const at = (hour: number) => `2026-07-16T${String(hour).padStart(2, '0')}:00:00Z`;
-    const idle = Array.from({ length: 21 }, (_, index) => updatedItem(`idle-${index}`, at(index)));
+  it('walks Status Focus in manual order and skips default-collapsed Later/Settled until expanded', () => {
+    const nowMs = Date.now();
+    const recent = (minutesAgo: number) => nowMs - minutesAgo * 60_000;
+    const settledItems = Array.from({ length: 22 }, (_, index) => ({
+      ...updatedItem(`settled-${index}`, nowMs - (10 + index) * 86_400_000),
+    }));
     const statusItems: SidebarUpdatedItem[] = [
-      ...idle,
-      { ...updatedItem('running', at(23)), isWorking: true, hasUnreadMessages: true },
-      { ...updatedItem('waiting', at(1)), isWaitingPermission: true },
-      { ...updatedItem('ci-failed', at(2)), prStatus: 'open', prCiState: 'f' },
-      { ...updatedItem('draft', at(3)), prStatus: 'draft', prCiState: 's' },
-      { ...updatedItem('unread', at(4)), hasUnreadMessages: true },
-      { ...updatedItem('open-pr', at(5)), prStatus: 'open', prCiState: 'p' },
-      { ...updatedItem('merged', at(22)), prStatus: 'merged' },
-      { ...updatedItem('failed', at(6)), hasFailedTurn: true },
-      // Working again after a failure: the agent may be fixing it.
-      { ...updatedItem('retrying', at(21)), hasFailedTurn: true, isWorking: true },
+      ...settledItems,
+      { ...updatedItem('focus-second', recent(1)), orderKey: '82' },
+      { ...updatedItem('focus-first', recent(30)), orderKey: '80' },
+      { ...updatedItem('focus-unkeyed', recent(5)) },
+      { ...updatedItem('later-soon', recent(10)), snoozedUntil: nowMs + 2 * 3_600_000 },
+      { ...updatedItem('later-far', recent(2)), snoozedUntil: nowMs + 3 * 86_400_000 },
     ];
 
-    const items = buildSidebarNavigationItems({
+    const defaultItems = buildSidebarNavigationItems({
       ...baseOptions,
       organizeMode: 'status',
       updated: { items: statusItems, collapsedBuckets: {}, showFullBuckets: {} },
     });
-    const ids = sessionIds(items);
-    // Needs you (newest first), just finished, open pull requests, running, then idle.
-    expect(ids.slice(0, 8)).toEqual([
-      'failed',
-      'draft',
-      'ci-failed',
-      'waiting',
-      'unread',
-      'open-pr',
-      'running',
-      'retrying',
-    ]);
-    // A merged pull request is idle; idle alone folds to its first 20 rows.
-    expect(ids.slice(8)).toHaveLength(20);
-    expect(ids[8]).toBe('merged');
-    expect(items.find((item) => item.kind === 'session' && item.sessionId === 'unread')).toEqual({
+    // Later and Settled are collapsed by default; Focus preserves manual orderKey then unkeyed recency.
+    expect(sessionIds(defaultItems)).toEqual(['focus-first', 'focus-second', 'focus-unkeyed']);
+    expect(defaultItems[0]).toEqual({
       kind: 'session',
-      sessionId: 'unread',
-      groupKey: '__status:finished__',
+      sessionId: 'focus-first',
+      groupKey: '__status:focus__',
     });
 
-    const folded = buildSidebarNavigationItems({
+    const expanded = buildSidebarNavigationItems({
       ...baseOptions,
       organizeMode: 'status',
       updated: {
         items: statusItems,
-        collapsedBuckets: { attention: true, all: true },
-        showFullBuckets: { idle: true },
+        collapsedBuckets: { later: false, settled: false },
+        showFullBuckets: {},
       },
     });
-    const foldedIds = sessionIds(folded);
-    expect(foldedIds.slice(0, 4)).toEqual(['unread', 'open-pr', 'running', 'retrying']);
-    expect(foldedIds).toHaveLength(4 + 22);
+    const expandedIds = sessionIds(expanded);
+    // Focus (3), Later ascending by wake-up (2), Settled capped at 20.
+    expect(expandedIds.slice(0, 5)).toEqual([
+      'focus-first',
+      'focus-second',
+      'focus-unkeyed',
+      'later-soon',
+      'later-far',
+    ]);
+    expect(expandedIds.slice(5)).toHaveLength(20);
+    expect(expandedIds[5]).toBe('settled-0');
   });
 
   it('matches collapsed sections and each list preview limit', () => {
@@ -242,6 +235,31 @@ describe('sidebar navigation model', () => {
       },
     });
     expect(sessionIds(updatedCollapsed)).toEqual(['pinned']);
+  });
+});
+
+describe('sidebar navigation model pin sections', () => {
+  it('walks pin sections in their order and manual row order, skipping folded sections', () => {
+    const items = buildSidebarNavigationItems({
+      ...baseOptions,
+      pinnedSections: [
+        { id: null, items: [updatedItem('loose', '2026-07-16T12:00:00Z')], collapsed: false },
+        {
+          id: 'maintenance',
+          // Manual order: the older conversation stays first.
+          items: [
+            updatedItem('weekly-mirror', '2026-07-01T12:00:00Z'),
+            updatedItem('deps-bump', '2026-07-16T13:00:00Z'),
+          ],
+          collapsed: false,
+        },
+        { id: 'folded', items: [updatedItem('hidden', '2026-07-16T14:00:00Z')], collapsed: true },
+      ],
+    });
+    expect(sessionIds(items)).toEqual(['loose', 'weekly-mirror', 'deps-bump']);
+    expect(
+      items.find((item) => item.kind === 'session' && item.sessionId === 'deps-bump')
+    ).toMatchObject({ groupKey: '__pinned__' });
   });
 });
 

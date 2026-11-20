@@ -6,14 +6,16 @@ import {
 } from './code-collab-rooms';
 export * from './preview-control';
 import { CliType } from './ai';
-export * from './history-writer';
+export type * from './history-writer';
 export type { AgentHistoryTargets } from './history-agent-window';
 export * from './history-write-schema';
-export * from './session-mirror';
-export * from './session-control-plane';
+export type * from './session-mirror';
+export type * from './session-control-plane';
+export * from './session-cancel-request';
 import type { AgentConfigId, MachineId, SessionId, TaskId, WorkspaceId } from './ids';
 import { PREVIEW_COMMENT_DOC_PREFIX, getLoroPreviewCommentStreamId } from './preview-comment-types';
 import { TASK_DOC_PREFIX, getLoroTaskStreamId } from './task-types';
+import { getLoroTodayStreamId, parseTodayDocId } from './today-types';
 import { SCHEDULE_DOC_PREFIX, getLoroScheduleStreamId } from './schedule-registry';
 import type { StreamsCrdtShardUrlsOptions } from '@loro-dev/streams-crdt';
 
@@ -59,10 +61,10 @@ export * from './schedule-types';
 export * from './schedule-time';
 export * from './schedule-recurrence';
 export * from './schedule-registry';
-export * from './schedule-schema';
-export * from './schedule-authorization';
+export type * from './schedule-schema';
+export type * from './schedule-authorization';
 export * from './e2ee-execution-intent';
-export * from './schedule-repository';
+export type * from './schedule-repository';
 export * from './cron-next-fire';
 export * from './scheduled-tasks-from-history';
 export * from './project';
@@ -110,8 +112,10 @@ export * from './goal';
 export * from './comment-reference-format';
 export * from './session-comment-types';
 export * from './preview-comment-types';
-export * from './preview-comment-schema';
+export type * from './preview-comment-schema';
 export * from './task-types';
+export * from './today-types';
+export * from './today-outline';
 export * from './task-index';
 export * from './pr-prompts';
 export * from './preview-comment-mutation';
@@ -138,6 +142,8 @@ export * from './mcp-authentication';
 export * from './agent-role';
 export * from './agent-role-proposal';
 export * from './workspace-flock';
+export * from './pinned-sections';
+export { FractionalIndex, type JitterOptions } from './vendor/loro-fractional-index';
 export * from './local-machine-rpc';
 export * from './local-loro-data-plane';
 export * from './json-guards';
@@ -451,6 +457,10 @@ export const getLoroStreamIdForDocId = (workspaceId: WorkspaceId, docId: string)
   if (docId.startsWith(TASK_DOC_PREFIX)) {
     return getLoroTaskStreamId(workspaceId, docId.slice(TASK_DOC_PREFIX.length) as TaskId);
   }
+  const todayPage = parseTodayDocId(docId);
+  if (todayPage) {
+    return getLoroTodayStreamId(workspaceId, todayPage.userId, todayPage.date);
+  }
   return docId;
 };
 export const isAgentConfigDocRoomId = (roomId: string) =>
@@ -524,7 +534,7 @@ export * from './project-path';
 
 export * from './session-pull-requests';
 
-export * from './prompt-suggestions';
+export type * from './prompt-suggestions';
 
 export * from './encrypted-attachment';
 
@@ -537,3 +547,8 @@ export {
   sessionHistoryWriteIntentDigest,
   type SessionAccessRecord,
 } from './session-access';
+
+export {
+  getWorkspaceShortcutBodyStreamId,
+  getWorkspaceShortcutIndexStreamId,
+} from './prompt-shortcuts/access';

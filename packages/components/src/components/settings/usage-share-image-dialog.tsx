@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import * as stylex from '@stylexjs/stylex';
 import { dialog } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { Check, Copy, Download } from 'lucide-react';

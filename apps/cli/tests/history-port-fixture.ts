@@ -1,3 +1,4 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 import { historyQueryRow } from '../../../packages/shared/src/session-data/history-selection';
 import { resolveLatestSessionGoalFromHistory } from '@lody/shared';
 import { selectTurnOutput } from '../../../packages/shared/src/session-data/read';
@@ -5,7 +6,6 @@ import {
   pickDirectoryScalars,
   pickDirectoryInputConfig,
 } from '../../../packages/shared/src/session-data/directory';
-import { createHistoryWriter } from '@lody/shared';
 import type { LoroDoc } from 'loro-crdt';
 import { applyHistoryAction } from '../../../packages/shared/src/session-data/history-actions';
 import type { SessionData, SessionEntry, HistoryAction } from '@lody/shared/session-data';

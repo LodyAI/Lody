@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { Provider } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -28,7 +28,15 @@ import {
 } from '@/components/sessions/session-side-panel-tab-bar';
 import { SessionTabBar } from '@/components/sessions/session-tab-bar';
 import { PrTabView } from '@/components/sessions/pr-tab-view';
-import { TerminalDock } from '@/components/terminal/terminal-dock';
+/* xterm stays out of the boot chunk even though the onboarding graph is
+   statically imported: the dock only ever mounts after `terminalEverOpened`,
+   so React.lazy fetches the chunk on exactly the same render that would have
+   mounted a static import — the still-0-height pre-mount is unchanged. */
+const TerminalDock = lazy(() =>
+  import('@/components/terminal/terminal-dock').then((module) => ({
+    default: module.TerminalDock,
+  }))
+);
 import { buildAcpSelectorOptions } from '@/components/shared/acp-selector-options';
 import { StableSessionContext } from '@/hooks/useStableSession';
 import { clsx } from 'clsx';
@@ -737,12 +745,14 @@ function TourWindow({
                     transition: 'height 420ms ease, opacity 420ms ease',
                   }}
                 >
-                  <TerminalDock
-                    channel={terminalChannel}
-                    sessionId={TOUR_SESSION_ID}
-                    defaultView="terminal"
-                    autoOpenFirstTerminal
-                  />
+                  <Suspense fallback={null}>
+                    <TerminalDock
+                      channel={terminalChannel}
+                      sessionId={TOUR_SESSION_ID}
+                      defaultView="terminal"
+                      autoOpenFirstTerminal
+                    />
+                  </Suspense>
                 </div>
               ) : null
             }

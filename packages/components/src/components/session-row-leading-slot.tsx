@@ -195,9 +195,9 @@ export function buildSessionRowOpenedByTreeSlot(
 }
 
 export function SessionRowLeadingSlot({
-  showMenuButton,
-  menuLabel,
   openedByTree,
+  showMenuButton = false,
+  menuLabel = 'More actions',
   /** Fade the rest state while hovering (e.g. 'group-hover/row:opacity-0' for named groups). */
   fadeClassName = stylex.props(tree.groupFade).className,
   /** Disable an opener disclosure while its ⋯ replacement is active. */
@@ -205,9 +205,9 @@ export function SessionRowLeadingSlot({
   /** Reveal the ⋯ button while hovering. */
   revealClassName = stylex.props(tree.groupReveal).className,
 }: {
-  showMenuButton?: boolean;
-  menuLabel: string;
   openedByTree?: SessionRowOpenedByTreeSlot;
+  showMenuButton?: boolean;
+  menuLabel?: string;
   fadeClassName?: string;
   restPointerClassName?: string;
   revealClassName?: string;

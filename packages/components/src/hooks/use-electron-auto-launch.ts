@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { getIpcServices, type IpcServices } from '@/lib/electron-ipc-client';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 

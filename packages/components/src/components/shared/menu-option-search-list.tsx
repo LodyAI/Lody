@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 
 import { filterFuzzyOptions, shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
 import { withClassName } from '@/lib/stylex';

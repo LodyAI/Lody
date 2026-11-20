@@ -1,7 +1,7 @@
+import { ScheduleRepository } from '@lody/shared/schedule-repository';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createLoroStreamsTokenProviderLegacy,
-  ScheduleRepository,
   getSessionRoomId,
   type MachineId,
   type SessionId,
@@ -503,6 +503,47 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it('backs off a cloud-readiness binding in the actual dual-plane runtime', async () => {
+    mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
+    enableElectronLocalDataPlane();
+    const downloads: number[] = [];
+    // No registry projection for this room: only the cloud member reports error.
+    const entry = {
+      room: { kind: 'doc', id: 'cloud-only-large-stream' },
+      subscription: {
+        status: 'error',
+        rejoin: async () => {
+          downloads.push(Date.now());
+        },
+      },
+    };
+    mocks.transportRooms.mockReturnValue([entry] as never[]);
+    const runtime = await createWorkspaceRuntime({
+      content: { mode: 'plaintext' },
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+    });
+    try {
+      await runtime.setAuthToken('auth-token');
+      await vi.advanceTimersByTimeAsync(0);
+      const afterStartup = downloads.length;
+      expect(afterStartup).toBeGreaterThan(0);
+      mocks.reconnect.mockClear();
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(downloads.length).toBe(afterStartup + 1);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(downloads.length).toBe(afterStartup + 1);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(downloads.length).toBe(afterStartup + 2);
+      // No workspace-wide restart may bypass this member's backoff.
+      expect(mocks.reconnect.mock.calls).toEqual([]);
+    } finally {
+      mocks.transportRooms.mockReturnValue([]);
+      await runtime.dispose();
+    }
   });
 
   it('aborts the real token provider fetch when startup is cancelled', async () => {

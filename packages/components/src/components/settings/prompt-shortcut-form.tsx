@@ -18,7 +18,6 @@ import { Button } from '@lody/ui/button';
 import { Dialog } from '@lody/ui/dialog';
 import { Input } from '@lody/ui/input';
 import { Textarea } from '@lody/ui/textarea';
-import { Field as UiField } from '@lody/ui/field';
 import { Select } from '@lody/ui/select';
 import { Switch } from '@lody/ui/switch';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -35,7 +34,7 @@ import {
   ScopeAxisIcon,
   SHORTCUT_SCOPE_NONE,
 } from './prompt-shortcut-scope';
-import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
+import { settingsCatalog as catalog } from './surface';
 
 const WIDE = '@media (min-width: 640px)';
 
@@ -92,7 +91,6 @@ const styles = stylex.create({
     listStyleType: 'disc',
   },
   mono: { fontFamily: 'var(--font-mono, ui-monospace, monospace)' },
-  shareBlock: { display: 'flex', flexDirection: 'column', gap: space[2] },
   /** The command's live warning floats above the field rather than pushing the
       form down while the draft settles. */
   slugWarningPopup: { pointerEvents: 'none' },
@@ -153,7 +151,6 @@ const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 export function PromptShortcutForm({
   initial,
   options,
-  canShare,
   saving,
   allowMachineSelection = true,
   isNew = false,
@@ -164,7 +161,6 @@ export function PromptShortcutForm({
 }: {
   initial: PromptShortcut;
   options: ShortcutScopeOptions;
-  canShare: boolean;
   saving: boolean;
   /** Local-only platforms have no remote machine list to choose from. */
   allowMachineSelection?: boolean;
@@ -346,9 +342,9 @@ export function PromptShortcutForm({
 
         <Section
           title={t('settings.promptShortcuts.prompt', 'Prompt')}
-          hint={t(
+          info={t(
             'settings.promptShortcuts.promptHelp',
-            'One message. @ mentions a file or Role, $ a skill, # an issue. The selectors below say where this Shortcut can be called and what @ completes against — None on every axis means anywhere in this workspace.'
+            'One message. @ mentions a file or Role, $ a skill, # an issue. The scope controls in this section say where this Shortcut can be called and what @ completes against — None on every axis means anywhere in this workspace.'
           )}
         >
           {/* Scope sits with the prompt rather than in a section of its own: it
@@ -454,40 +450,6 @@ export function PromptShortcutForm({
             </FormMessage>
           )}
         </Section>
-
-        {canShare && (
-          <div {...stylex.props(surface.formBlock, styles.shareBlock)}>
-            <div {...stylex.props(catalog.blockRow)}>
-              <div {...stylex.props(catalog.blockText)}>
-                <UiField.Label htmlFor={`${fieldId}-share`}>
-                  {t('settings.promptShortcuts.share', 'Share with workspace')}
-                </UiField.Label>
-                <p {...stylex.props(catalog.blockHint)}>
-                  {t(
-                    'settings.promptShortcuts.shareHint',
-                    'Off by default. Sharing is separate from where the Shortcut applies.'
-                  )}
-                </p>
-              </div>
-              <Switch
-                id={`${fieldId}-share`}
-                checked={value.visibility === 'workspace'}
-                disabled={saving}
-                onCheckedChange={(checked) =>
-                  setValue({ ...value, visibility: checked ? 'workspace' : 'private' })
-                }
-              />
-            </div>
-            {value.visibility === 'workspace' && (
-              <FormMessage tone="warning">
-                {t(
-                  'settings.promptShortcuts.shareWarning',
-                  'Workspace members can read and copy this Prompt, its default values and its reference labels. Making it private later cannot remove copies they already received.'
-                )}
-              </FormMessage>
-            )}
-          </div>
-        )}
 
         {error && <FormMessage tone="error">{error}</FormMessage>}
       </div>

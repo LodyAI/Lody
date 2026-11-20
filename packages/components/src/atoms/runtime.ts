@@ -1,3 +1,5 @@
+import { previewVisualCommentDocSchema } from '@lody/shared/preview-comment-schema';
+import { sessionDocSchema } from '@lody/shared/session-doc-schemas';
 import type {
   CodeCollabOpenDiffManifestRequest,
   CodeCollabOpenDiffManifestResponse,
@@ -62,8 +64,6 @@ import type {
   PreviewTargetApproval,
   WorkspaceId,
   LocalProjectId,
-  previewVisualCommentDocSchema,
-  sessionDocSchema,
   CodeCollabV2Error,
   CodeCollabV2FileIndexRequest,
   CodeCollabV2FileIndexSnapshot,
@@ -214,6 +214,8 @@ export type WorkspaceRuntime = {
     options?: { create?: boolean }
   ) => Promise<T>;
   acquireScheduleStore: (scheduleId: string) => Promise<ScheduleDocStore>;
+  /** Today outline pages and member date indexes (specs/today-outline.md). */
+  todayPages: import('../providers/today-page-store-cache').TodayPageStoreCache;
   releaseScheduleStoreRef: (scheduleId: string) => void;
   /**
    * The workspace id used for IndexedDB/WebSocket connections.
@@ -229,6 +231,11 @@ export type WorkspaceRuntime = {
     subscribe(listener: () => void): () => void;
   };
   readonly attachmentToken?: () => Promise<string>;
+  readonly cloudStreamsEnabled?: boolean;
+  readonly getWorkspaceStreamsGrant?: (options?: {
+    forceRefresh?: boolean;
+    signal?: AbortSignal;
+  }) => Promise<{ token: string; gatewayBaseUrl: string }>;
   readonly sendResources: SessionSendResources;
   /** In-memory sends whose attachments are still preparing; lost with the page. */
   readonly pendingSends: PendingSessionSends | null;
@@ -589,7 +596,7 @@ export type WorkspaceRuntime = {
     machineId: MachineId,
     sessionId: SessionId,
     requestedByUserId: string,
-    options?: { reason?: string; timeoutMs?: number }
+    options?: { reason?: string; stopProcess?: boolean; timeoutMs?: number }
   ) => Promise<SessionPreviewRevokeResponse | null>;
   requestLocalProjectGitState: (
     machineId: MachineId,

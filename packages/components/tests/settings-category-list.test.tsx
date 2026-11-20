@@ -13,6 +13,8 @@ import {
   experimentalFeaturesEnabledAtom,
   roostHistoryExperimentEnabledAtom,
   roostHistoryFeatureEnabledAtom,
+  todayExperimentEnabledAtom,
+  todayFeatureEnabledAtom,
 } from '../src/atoms/settings';
 
 import { SettingsCategoryList } from '../src/components/settings/settings-category-list';
@@ -203,6 +205,30 @@ describe('SettingsCategoryList', () => {
     expect(store?.get(e2eeWorkspaceCreationFeatureEnabledAtom)).toBe(false);
     expect(store?.get(e2eeWorkspaceCreationEnabledAtom)).toBe(true);
     expect(container.querySelector('[role="switch"]')).toBeNull();
+  });
+
+  it('offers Today under the experimental master switch and keeps the opt-in when it is off', async () => {
+    store?.set(experimentalFeaturesEnabledAtom, true);
+    store?.set(todayExperimentEnabledAtom, false);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <Provider store={store}>
+          <ExperimentalFeaturesSection />
+        </Provider>
+      );
+    });
+    const todaySwitch = () =>
+      container?.querySelector<HTMLElement>('[role="switch"][aria-label="Today"]') ?? null;
+    await act(async () => todaySwitch()?.click());
+    expect(store?.get(todayFeatureEnabledAtom)).toBe(true);
+
+    await act(async () => store?.set(experimentalFeaturesEnabledAtom, false));
+    expect(store?.get(todayFeatureEnabledAtom)).toBe(false);
+    expect(todaySwitch()).toBeNull();
+    expect(store?.get(todayExperimentEnabledAtom)).toBe(true);
   });
 
   it('keeps Roost in developer features without an experimental master gate', async () => {

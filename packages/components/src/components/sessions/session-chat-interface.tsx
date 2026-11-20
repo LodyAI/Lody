@@ -19,7 +19,6 @@ import type { DocumentSelection } from '@/lib/document-selection';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import { getAutomationProofIssuer } from '@/lib/cloud-http-port';
-import { RepoSyncError, RepoTransportError } from 'loro-repo';
 import { useSessionPendingMessages } from '@/components/chat/session-pending-messages';
 import {
   buildDraftUserHistoryEntry,
@@ -35,7 +34,6 @@ import { conversationCopyRange } from '@/lib/conversation-copy-range';
 import { readConversationCopySource } from '@/lib/conversation-copy-source';
 import { describeCopiedConversation } from '@/lib/describe-copied-conversation';
 import { SessionShareRequestCards } from '../sharing/session-share-request-cards';
-import { SessionWindowMenuItem } from '../session-window-menu-item';
 import {
   MessageSelectionContext,
   MessageSelectionToolbar,
@@ -58,22 +56,28 @@ import { createPortal } from 'react-dom';
 import { useOpenSettings } from '../../hooks/use-open-settings';
 import { v4 as uuidv4 } from 'uuid';
 import {
+  AlarmClock,
   ArrowDown,
   ArrowUp,
+  ArrowUpCircle,
   Archive,
   ArchiveRestore,
+  CheckCircle2,
   ChevronDown,
   Copy,
+  CircleDot,
   CornerLeftUp,
   Ellipsis,
   FileText,
   Folder,
+  FolderOpen,
   GitBranch,
   GitBranchPlus,
   GitFork,
   Github,
   History,
   Image,
+  Info,
   Link,
   LockKeyhole,
   MessageCircle,
@@ -85,11 +89,13 @@ import {
   Search,
   Share2,
   SquareArrowOutUpRight,
+  Timer,
   Trash2,
-  UserRoundCog,
   Users,
   X,
 } from 'lucide-react';
+import { buildSnoozePresets, sidebarStatusGroup } from '@/lib/sidebar-status-group';
+import { CustomSnoozeDialog, type CustomSnoozeDialogTarget } from '../sidebar-status-snooze-dialog';
 import { useRouter } from '@tanstack/react-router';
 import { Spinner } from '@lody/ui/spinner';
 import { Switch } from '@lody/ui/switch';
@@ -171,7 +177,6 @@ import {
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
   decodeProjectPreparationProgress,
-  ScheduleRepository,
   type McpServerId,
   type ScheduleDocument,
   type SessionPullRequestView,
@@ -232,6 +237,10 @@ import { buildAppSessionUrl } from '@/lib/session-app-url';
 import { openSessionDeepLink } from '@/lib/session-deep-link';
 import { resolveSessionOpenInIdePathTarget } from '@/lib/session-open-in-ide-path';
 import {
+  normalizeSessionFileActionPlatform,
+  resolveOpenFolderInFileManagerLabel,
+} from '@/lib/session-file-actions';
+import {
   buildPathLauncherLaunchInput,
   executePathLauncher,
   buildPathLauncherProbes,
@@ -264,7 +273,6 @@ import {
   type SessionAccessAction,
   type SessionShareEditorContext,
   getSessionSharingDescription,
-  getSessionSharingLabel,
   type SessionSharingTranslator,
 } from '@/components/session-sharing';
 
@@ -280,15 +288,21 @@ import { useSessionPendingConfig } from '@/hooks/use-session-pending-config';
 import { getSessionRunConfigDraftTargetKey } from '@/atoms/session-run-config-drafts';
 import { sessionProjectMemberSelectionAtomFamily } from '@/atoms/session-project-member-selection';
 import { useSessionActions } from '@/hooks/use-session-actions';
-import { useWorkspaceMembers, type WorkspaceMember } from '@/hooks/use-workspace-members';
-import { UserAvatar } from '@/components/user-avatar';
+import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
+import type { WorkspaceMember } from '@/hooks/use-workspace-members';
 import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-session-dialog';
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
+import { SessionInfoDialog, type SessionInfoPullRequest } from './session-info-dialog';
 import { SessionInfoBar } from './session-info-bar';
 import { SessionPreviewPreload } from './session-preview-preload';
 import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
 import { SessionProjectMembersChip } from './session-project-members-chip';
+import {
+  useMoveToFocusWithConfirmation,
+  useSettleSessionWithConfirmation,
+  useSnoozeSessionWithConfirmation,
+} from './session-sub-conversation-confirmation';
 import {
   buildSessionProjectMemberRows,
   resolveSessionProjectMemberRow,
@@ -389,7 +403,13 @@ import {
   resolveUnstartedTrailingDispatchAtMs,
   UNSTARTED_TRAILING_USER_TURN_TIMEOUT_MS,
 } from '@/lib/session-dispatch-state';
-import { shouldMarkSessionRead } from '@/lib/session-read-receipt';
+import {
+  getEffectiveSessionLastMessageAt,
+  resolveManualUnreadLatch,
+  shouldMarkSessionRead,
+  type ReadReceiptSnapshot,
+} from '@/lib/session-read-receipt';
+import { useWindowReadEngagement } from '@/lib/window-read-engagement';
 import { recordSessionRenderTrace, shortTraceId } from '@/lib/session-render-trace';
 import { getPathLauncherIcon } from '@/components/icons/path-launcher-icon';
 import {
@@ -425,7 +445,16 @@ import {
 import { AlertDialog } from '@/ui/dialog';
 import { resolveSessionHtmlAttachmentAction } from './session-html-attachment-action';
 
-const { formatLoroSyncError } = createLoroSyncErrorTools({ RepoSyncError, RepoTransportError });
+// loro-repo stays out of the session route chunk: its error classes resolve in
+// the background and start formatting once loaded. Errors that arrive before
+// the chunk resolves fall through to the generic Error formatting, matching
+// what non-repo failures already produced.
+let loroSyncErrorTools: ReturnType<typeof createLoroSyncErrorTools> | null = null;
+void import('loro-repo')
+  .then(({ RepoSyncError, RepoTransportError }) => {
+    loroSyncErrorTools = createLoroSyncErrorTools({ RepoSyncError, RepoTransportError });
+  })
+  .catch(() => {});
 
 const styles = stylex.create({
   shrink: { flexShrink: 0 },
@@ -630,25 +659,8 @@ const styles = stylex.create({
   stream: { height: '100%' },
   shareRequestsScroller: { maxHeight: '35vh', flexShrink: 0, overflowY: 'auto' },
   shareRequestsColumn: { paddingInline: 'calc(var(--spacing) * 3)' },
-  headerMenuStaticRow: {
-    display: 'flex',
-    width: '100%',
-    minWidth: 0,
-    minHeight: 'calc(var(--spacing) * 8)',
-    alignItems: 'center',
-    gap: 'calc(var(--spacing) * 2)',
-    overflow: 'hidden',
-    paddingBlock: 'calc(var(--spacing) * 1.5)',
-    paddingInline: 'calc(var(--spacing) * 2)',
-    borderRadius: 'var(--radius-md)',
-    cursor: 'default',
-    userSelect: 'none',
-    fontSize: '13px',
-    lineHeight: 'calc(var(--spacing) * 4)',
-  },
   menuIcon: { width: 'calc(var(--spacing) * 3.5)', height: 'calc(var(--spacing) * 3.5)' },
   menuIconFixed: { flexShrink: 0 },
-  menuIconMuted: { color: colors.secondaryLabel },
   menuTrailingIcon: { marginLeft: 'auto' },
   menuCopyIcon: { width: 'calc(var(--spacing) * 3)', height: 'calc(var(--spacing) * 3)' },
   menuBranchIcon: { marginTop: 'calc(var(--spacing) * 0.5)' },
@@ -672,17 +684,6 @@ const styles = stylex.create({
     fontSize: '0.75rem',
     lineHeight: '1rem',
     color: colors.secondaryLabel,
-  },
-  machineAccessibleLabel: {
-    position: 'absolute',
-    width: '1px',
-    height: '1px',
-    padding: 0,
-    margin: '-1px',
-    overflow: 'hidden',
-    clip: 'rect(0, 0, 0, 0)',
-    whiteSpace: 'nowrap',
-    borderWidth: 0,
   },
   searchShortcut: {
     borderRadius: 'var(--radius-sm)',
@@ -865,14 +866,14 @@ const styles = stylex.create({
 });
 
 function getErrorMessage(err: unknown): string {
-  const syncError = formatLoroSyncError(err);
+  const syncError = loroSyncErrorTools?.formatLoroSyncError(err);
   if (syncError) return syncError;
   if (err instanceof Error) return err.message;
   if (typeof err === 'string') return err;
   return String(err);
 }
 
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import {
   capturePostHogEvent,
   capturePostHogOutcome,
@@ -895,6 +896,7 @@ import { shouldShowCodexProposedPlanDecision } from '@/lib/codex-plan-decision';
 import { buildExecutionTurnConfigOverrides } from '@/lib/execution-turn-config';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 // ── Path launcher options for "Open in" split button ──
 
@@ -1441,6 +1443,9 @@ export function SessionHeaderMenu({
   forkWorktreeAvailability = 'hidden',
   onForkMenuOpen,
   onRename,
+  onSnooze,
+  onSettle,
+  onMoveToFocus,
   owner,
   openedByRelations,
   onArchive,
@@ -1448,6 +1453,9 @@ export function SessionHeaderMenu({
   onDelete,
   compact = false,
   openInIde,
+  openInFileManager,
+  isLauncherPillVisible,
+  pullRequest,
   continuationTweaks,
   t,
 }: {
@@ -1472,6 +1480,9 @@ export function SessionHeaderMenu({
   forkWorktreeAvailability?: SessionForkWorktreeAvailability;
   onForkMenuOpen?: () => void;
   onRename?: () => void | Promise<void>;
+  onSnooze?: (snoozedUntil: number) => void | Promise<void>;
+  onSettle?: () => void | Promise<void>;
+  onMoveToFocus?: () => void | Promise<void>;
   /** Multi-member workspaces only; omitted elsewhere. */
   owner?: SessionOwnerMenuState;
   /** Omitted when this Session neither opened nor was opened by another. */
@@ -1488,6 +1499,19 @@ export function SessionHeaderMenu({
     onOpen: () => void;
     onSelect: (launcher: PathLauncherOption) => void;
   };
+  /**
+   * Opens this session's directory in Finder, File Explorer, or the host file
+   * manager. Stays in `⋯` even when the editor pill is on screen — it is not
+   * one of the editor choices.
+   */
+  openInFileManager?: {
+    label: string;
+    onOpen: () => void;
+  };
+  /** Whether the header's launcher pill is on screen; read when the menu opens. */
+  isLauncherPillVisible?: () => boolean;
+  /** The session's current pull request, listed in the info dialog. */
+  pullRequest?: SessionInfoPullRequest;
   t: SessionSharingTranslator;
 }) {
   const rpcReason = useMachineRpcFeatureReason(session.machineId);
@@ -1496,6 +1520,21 @@ export function SessionHeaderMenu({
   const sharingReason = useWorkspaceFeatureReason('sharing');
   const previewReason = useWorkspaceFeatureReason('remote-preview');
   const isArchived = !!session.isArchived;
+  const [customSnoozeTarget, setCustomSnoozeTarget] = useState<CustomSnoozeDialogTarget | null>(
+    null
+  );
+  const statusNow = new Date();
+  const statusGroup = sidebarStatusGroup(
+    {
+      latestMessageAt: session.lastMessageAt ?? session.createdAt,
+      isWorking: session.status?.type === 'running' || session.status?.type === 'initializing',
+      isWaitingPermission: session.status?.type === 'requestPermission',
+      snoozedUntil: session.snoozedUntil,
+      settledAt: session.settledAt,
+      focusRestoredAt: session.focusRestoredAt,
+    },
+    statusNow.getTime()
+  );
   const project = session.project as
     | { kind: 'github'; repoFullName?: string; branch?: string }
     | { kind: 'local'; localProjectId?: string; branch?: string; githubRepoFullName?: string }
@@ -1504,18 +1543,10 @@ export function SessionHeaderMenu({
   const isGitHub = project?.kind === 'github' || !!repoFullName;
   const baseBranch = session.baseBranch?.trim() || getProjectRefBranch(project) || '';
   const currentBranch = session.branchName?.trim() || '';
-  const showBranchInfo = Boolean(
-    (isGitHub || project?.kind === 'local') && (baseBranch || currentBranch)
-  );
   const localPath = localProjectMeta?.rootPath ?? '';
   const trimmedWorkspacePath = workspacePath?.trim() || '';
-  const branchDisplayValue = currentBranch || baseBranch;
   const showBaseBranchContext = Boolean(
     currentBranch && baseBranch && currentBranch !== baseBranch
-  );
-  const showProjectPath = !showBranchInfo && Boolean(localPath);
-  const showSessionContext = Boolean(
-    (isGitHub && repoFullName) || showBranchInfo || showProjectPath || machineName || sharing
   );
   const shareActionDisabled =
     !onShareWithTeam ||
@@ -1524,6 +1555,33 @@ export function SessionHeaderMenu({
       (sharing.privateReason === 'machine-not-registered' || !sharing.canManage));
   const conversationWide = useAtomValue(conversationWideModeAtom);
   const setConversationWide = useSetAtom(conversationWideModeAtom);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [launcherPillVisible, setLauncherPillVisible] = useState(false);
+  const infoOwner = isArchived ? undefined : owner;
+  const sessionPlacement =
+    machineName && project?.kind === 'local'
+      ? session.isWorktree
+        ? ('worktree' as const)
+        : ('local' as const)
+      : undefined;
+  const hasSessionInfo = Boolean(
+    (isGitHub && repoFullName) ||
+    currentBranch ||
+    baseBranch ||
+    pullRequest ||
+    machineName ||
+    trimmedWorkspacePath ||
+    localPath ||
+    sharing ||
+    infoOwner
+  );
+  const showStatusMenu =
+    !isArchived &&
+    Boolean(
+      onSnooze ||
+      (statusGroup !== 'settled' && onSettle) ||
+      (statusGroup !== 'focus' && onMoveToFocus)
+    );
 
   const openedBySession = openedByRelations?.openedBy ?? null;
   const openedSessions = openedByRelations?.opened ?? [];
@@ -1565,7 +1623,6 @@ export function SessionHeaderMenu({
             </Menu.Content>
           </Menu.Submenu>
         ) : null}
-        <Menu.Separator />
       </>
     ) : null;
 
@@ -1623,8 +1680,7 @@ export function SessionHeaderMenu({
     // branch name copied to clipboard") — no raw value echo, which reads
     // noisy for long paths/URLs.
     (text: string, successMessage: string) => {
-      void navigator.clipboard
-        .writeText(text)
+      void copyTextToClipboard(text)
         .then(() => toast.success(successMessage))
         .catch(() => toast.error(t('sessions.copyFailed', 'Unable to copy')));
     },
@@ -1635,7 +1691,9 @@ export function SessionHeaderMenu({
     <>
       <Menu.Root
         onOpenChange={(open) => {
-          if (open) onForkMenuOpen?.();
+          if (!open) return;
+          onForkMenuOpen?.();
+          setLauncherPillVisible(isLauncherPillVisible?.() ?? false);
         }}
       >
         <Menu.Trigger
@@ -1666,165 +1724,17 @@ export function SessionHeaderMenu({
           </Button>
         </Menu.Trigger>
         <Menu.Content align="end" minWidth={200} maxWidth={290}>
-          <SessionWindowMenuItem xstyle={styles.headerMenuItem} sessionId={session.id} dropdown />
-          {/* Identity stays inline: a group label wastes a row, and a submenu hides
-              repo/branch/machine behind another step. */}
-          {!compact && showSessionContext ? (
-            <>
-              {isGitHub && repoFullName ? (
-                <Menu.Item
-                  xstyle={styles.headerMenuItem}
-                  onClick={() =>
-                    copyToClipboard(
-                      repoFullName,
-                      t('sessions.repoCopied', 'Repository name copied to clipboard')
-                    )
-                  }
-                  title={repoFullName}
-                  aria-label={`${t('sessions.copyRepository', 'Copy repository')}: ${repoFullName}`}
-                  icon={Github}
-                  endContent={<Copy {...stylex.props(styles.menuCopyIcon, styles.menuIconMuted)} />}
-                >
-                  {repoFullName}
-                </Menu.Item>
-              ) : null}
-
-              {showBranchInfo ? (
-                <Menu.Item
-                  xstyle={styles.headerMenuItem}
-                  onClick={() =>
-                    copyToClipboard(
-                      branchDisplayValue,
-                      currentBranch
-                        ? t(
-                            'sessions.currentBranchCopied',
-                            'Current branch name copied to clipboard'
-                          )
-                        : t('sessions.baseBranchCopied', 'Base branch name copied to clipboard')
-                    )
-                  }
-                  title={
-                    showBaseBranchContext
-                      ? `${branchDisplayValue}\n${t(
-                          'sessions.baseBranch',
-                          'Base branch'
-                        )}: ${baseBranch}`
-                      : branchDisplayValue
-                  }
-                  aria-label={`${
-                    currentBranch
-                      ? t('sessions.copyCurrentBranch', 'Copy current branch')
-                      : t('sessions.copyBaseBranch', 'Copy base branch')
-                  }: ${branchDisplayValue}`}
-                  icon={GitBranch}
-                  endContent={<Copy {...stylex.props(styles.menuCopyIcon, styles.menuIconMuted)} />}
-                >
-                  <span {...stylex.props(styles.menuText)}>
-                    <span {...stylex.props(styles.menuTextTruncated, styles.menuTextBlock)}>
-                      {branchDisplayValue}
-                    </span>
-                    {showBaseBranchContext ? (
-                      <span {...stylex.props(styles.menuBranchValue, styles.menuBaseBranch)}>
-                        {t('sessions.baseBranch', 'Base branch')}: {baseBranch}
-                      </span>
-                    ) : null}
-                  </span>
-                </Menu.Item>
-              ) : showProjectPath ? (
-                <Menu.Item
-                  xstyle={styles.headerMenuItem}
-                  onClick={() =>
-                    copyToClipboard(
-                      localPath,
-                      t('sessions.projectPathCopied', 'Project path copied to clipboard')
-                    )
-                  }
-                  title={localPath}
-                  aria-label={`${t('sessions.copyProjectPath', 'Copy project path')}: ${localPath}`}
-                  icon={Folder}
-                  endContent={<Copy {...stylex.props(styles.menuCopyIcon, styles.menuIconMuted)} />}
-                >
-                  {localPath}
-                </Menu.Item>
-              ) : null}
-
-              {machineName ? (
-                <div {...stylex.props(styles.headerMenuStaticRow)}>
-                  <Monitor
-                    {...stylex.props(styles.menuIcon, styles.menuIconFixed, styles.menuIconMuted)}
-                  />
-                  <span {...stylex.props(styles.machineAccessibleLabel)}>
-                    {t('sessions.machineLabel', 'Machine')}:{' '}
-                  </span>
-                  <span {...stylex.props(styles.menuText, styles.menuTextTruncated)}>
-                    {machineName}
-                  </span>
-                  {project?.kind === 'local' ? (
-                    <Badge className={stylex.props(styles.badgeEnd).className}>
-                      {session.isWorktree
-                        ? t('chat.workdir.worktree', 'Worktree')
-                        : t('chat.workdir.local', 'Local')}
-                    </Badge>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {sharing ? (
-                <Tooltip.Root>
-                  <Tooltip.Trigger
-                    delay={300}
-                    render={
-                      <div {...stylex.props(styles.headerMenuStaticRow)}>
-                        {sharing.visibility === 'team' ? (
-                          <Users
-                            {...stylex.props(
-                              styles.menuIcon,
-                              styles.menuIconFixed,
-                              styles.menuIconMuted
-                            )}
-                          />
-                        ) : sharing.visibility === 'private' ? (
-                          <LockKeyhole
-                            {...stylex.props(
-                              styles.menuIcon,
-                              styles.menuIconFixed,
-                              styles.menuIconMuted
-                            )}
-                          />
-                        ) : (
-                          <Spinner
-                            diameter="calc(var(--spacing) * 3.5)"
-                            className={stylex.props(styles.muted).className}
-                          />
-                        )}
-                        <span
-                          {...stylex.props(
-                            styles.menuText,
-                            styles.menuTextTruncated,
-                            styles.menuTextNormal
-                          )}
-                        >
-                          {getSessionSharingLabel(t, sharing)}
-                        </span>
-                      </div>
-                    }
-                  />
-                  <Tooltip.Content
-                    side="left"
-                    className={stylex.props(styles.tooltipPadding).className}
-                  >
-                    {getSessionSharingDescription(t, sharing)}
-                  </Tooltip.Content>
-                </Tooltip.Root>
-              ) : null}
-
-              <Menu.Separator />
-            </>
+          {/* Where the session lives (repository, branch, PR, machine, path,
+              access, owner) opens in one dialog instead of stacking rows here. */}
+          {!compact && hasSessionInfo ? (
+            <Menu.Item icon={Info} onClick={() => setInfoOpen(true)}>
+              {t('sessions.info.menu', 'Session info…')}
+            </Menu.Item>
           ) : null}
 
           {/* View preference, not a session action: device-local toggle mirrored
-              from Settings > Appearance. It leads the action block — the page's
-              own display option, right after identity, like Notion's page
+              from Settings > Appearance. It sits with "Session info…" above the
+              actions — the page's own display option, like Notion's page
               controls. A trailing Switch, not a checkmark; the row stays open
               so the flip is visible. */}
           <Menu.Item
@@ -1848,22 +1758,16 @@ export function SessionHeaderMenu({
             {t('sessions.fullWidth', 'Full width')}
           </Menu.Item>
 
-          {openedByRelationRows}
+          <Menu.Separator />
 
-          {continuationTweaks && (
-            <Menu.Submenu>
-              <Menu.SubmenuTrigger>
-                {t('sessions.continuation.tweaks.title', '自动化设置')}
-              </Menu.SubmenuTrigger>
-              <Menu.Content xstyle={styles.continuationMenu}>{continuationTweaks}</Menu.Content>
-            </Menu.Submenu>
-          )}
-
-          {openInIdeMenu}
-
-          {onOpenPublicShare && !sharingReason && (
-            <Menu.Item xstyle={styles.headerMenuItem} icon={Share2} onClick={onOpenPublicShare}>
-              {t('sharing.manager.title', 'Share')}
+          {onRename && !isArchived && (
+            <Menu.Item
+              icon={Pencil}
+              onClick={() => {
+                void onRename();
+              }}
+            >
+              {t('sidebar.renameChat.title', 'Rename Chat')}
             </Menu.Item>
           )}
 
@@ -1943,102 +1847,163 @@ export function SessionHeaderMenu({
             </Menu.Submenu>
           ) : null}
 
-          {onRename && !isArchived && (
-            <Menu.Item
-              xstyle={styles.headerMenuItem}
-              icon={Pencil}
-              onClick={() => {
-                void onRename();
-              }}
-            >
-              {t('sidebar.renameChat.title', 'Rename Chat')}
-            </Menu.Item>
+          {continuationTweaks && (
+            <Menu.Submenu>
+              <Menu.SubmenuTrigger>
+                {t('sessions.continuation.tweaks.title', '自动化设置')}
+              </Menu.SubmenuTrigger>
+              <Menu.Content className="w-[290px] p-3">{continuationTweaks}</Menu.Content>
+            </Menu.Submenu>
           )}
 
-          {owner && !isArchived ? (
+          {openedByRelationRows}
+
+          {/* The header pill is the primary launcher; the menu lists it only
+              while the narrow-page container query hides that pill. Opening the
+              folder in Finder / Explorer stays here either way. */}
+          {launcherPillVisible ? null : openInIdeMenu}
+          {openInFileManager ? (
+            <Menu.Item icon={FolderOpen} onClick={() => void openInFileManager.onOpen()}>
+              {openInFileManager.label}
+            </Menu.Item>
+          ) : null}
+
+          <Menu.Separator />
+
+          {showStatusMenu ? (
             <Menu.Submenu>
-              <Menu.SubmenuTrigger xstyle={styles.headerMenuItem} icon={UserRoundCog}>
-                {t('sessions.owner.change', 'Change owner')}
+              <Menu.SubmenuTrigger icon={CircleDot}>
+                {t('sessions.status.change', 'Change status')}
               </Menu.SubmenuTrigger>
-              <Menu.Content maxHeight="calc(var(--spacing) * 72)" minWidth={200} maxWidth={280}>
-                <Menu.RadioGroup
-                  value={owner.ownerUserId}
-                  onValueChange={(userId) => {
-                    // Guard in the handler, not just via `disabled`: the
-                    // menu stays mounted while the write is in flight.
-                    if (
-                      userId === owner.ownerUserId ||
-                      owner.pendingUserId != null ||
-                      owner.getDisabledReason?.(userId)
-                    )
-                      return;
-                    void owner.onChangeOwner(userId);
-                  }}
-                >
-                  {owner.members.map((member) => {
-                    const isPending = owner.pendingUserId === member.userId;
-                    const disabledReason = owner.getDisabledReason?.(member.userId);
-                    return (
-                      <Menu.RadioItem
-                        key={member.userId}
-                        value={member.userId}
-                        disabled={owner.pendingUserId != null || !!disabledReason}
-                        title={disabledReason ?? member.email ?? member.name}
-                        indicator="check"
-                        indicatorSide="end"
-                        endContent={
-                          isPending ? <Spinner diameter="calc(var(--spacing) * 3.5)" /> : undefined
+              <Menu.Content className="min-w-[200px]">
+                {onSnooze ? (
+                  <Menu.Submenu>
+                    <Menu.SubmenuTrigger icon={AlarmClock}>
+                      {t('sessions.contextMenu.snooze', 'Later')}
+                    </Menu.SubmenuTrigger>
+                    <Menu.Content className="min-w-[200px]">
+                      {buildSnoozePresets(statusNow).map((preset) => {
+                        const label =
+                          preset.id === 'oneHour'
+                            ? t('sessions.contextMenu.snoozeOneHour', 'In 1 hour')
+                            : preset.id === 'laterToday'
+                              ? t('sessions.contextMenu.snoozeLaterToday', 'Later today')
+                              : preset.id === 'tomorrowMorning'
+                                ? t(
+                                    'sessions.contextMenu.snoozeTomorrowMorning',
+                                    'Tomorrow morning'
+                                  )
+                                : t('sessions.contextMenu.snoozeNextWeek', 'Next week');
+                        return (
+                          <Menu.Item
+                            key={preset.id}
+                            onClick={() => void onSnooze(preset.timestamp)}
+                          >
+                            <span className="flex w-full items-center justify-between gap-4">
+                              <span>{label}</span>
+                              <span className="text-[11px] tabular-nums text-muted-foreground">
+                                {preset.countdown}
+                              </span>
+                            </span>
+                          </Menu.Item>
+                        );
+                      })}
+                      <Menu.Separator />
+                      <Menu.Item
+                        icon={Timer}
+                        onClick={() =>
+                          setCustomSnoozeTarget({
+                            sessionId: session.id,
+                            title: session.title ?? '',
+                          })
                         }
                       >
-                        <UserAvatar
-                          user={{ id: member.userId, name: member.name, image: member.image }}
-                          size="mini"
-                          className={stylex.props(styles.shrink).className}
-                        />
-                        {member.name}
-                        {disabledReason ? <span>{disabledReason}</span> : null}
-                      </Menu.RadioItem>
-                    );
-                  })}
-                </Menu.RadioGroup>
+                        {t('sessions.contextMenu.snoozeCustom', 'Custom time…')}
+                      </Menu.Item>
+                    </Menu.Content>
+                  </Menu.Submenu>
+                ) : null}
+                {statusGroup !== 'settled' && onSettle ? (
+                  <Menu.Item icon={CheckCircle2} onClick={() => void onSettle()}>
+                    {t('sessions.contextMenu.settle', 'Settle')}
+                  </Menu.Item>
+                ) : null}
+                {statusGroup !== 'focus' && onMoveToFocus ? (
+                  <Menu.Item icon={ArrowUpCircle} onClick={() => void onMoveToFocus()}>
+                    {t('sessions.contextMenu.moveToFocus', 'Move to Focus')}
+                  </Menu.Item>
+                ) : null}
               </Menu.Content>
             </Menu.Submenu>
           ) : null}
 
-          {/* Copy URL stays in the Copy submenu even for private sessions (the
+          <Menu.Submenu>
+            <Menu.SubmenuTrigger icon={Share2}>
+              {t('sharing.manager.title', 'Share')}
+            </Menu.SubmenuTrigger>
+            <Menu.Content className="min-w-[200px]">
+              {onOpenPublicShare && !sharingReason && (
+                <Menu.Item icon={Link} onClick={onOpenPublicShare}>
+                  {t('sessions.share.publicLink', 'Public link…')}
+                </Menu.Item>
+              )}
+              {/* Copy URL stays in the Copy submenu even for private sessions (the
               link still works for the owner); sharing is a separate action that
               only appears while the conversation isn't team-visible. */}
-          {sharing && !sharingReason && sharing.visibility !== 'team' ? (
-            <Menu.Item
-              xstyle={styles.headerMenuItem}
-              disabled={shareActionDisabled}
-              onClick={() => {
-                void onShareWithTeam?.();
-              }}
-              icon={
-                sharing.visibility === 'unknown' ? (
-                  <Spinner size="small" label={null} />
-                ) : sharing.privateReason === 'machine-not-registered' ? (
-                  <Monitor size="100%" />
-                ) : sharing.canManage ? (
-                  Users
-                ) : (
-                  LockKeyhole
-                )
-              }
-            >
-              {sharing.visibility === 'unknown'
-                ? t('sessions.sharing.loadingAction', 'Checking sharing…')
-                : sharing.privateReason === 'machine-not-registered'
-                  ? t(
-                      'sessions.sharing.registerDeviceToShare',
-                      'Register this device before sharing'
+              {sharing && !sharingReason && sharing.visibility !== 'team' ? (
+                <Menu.Item
+                  disabled={shareActionDisabled}
+                  onClick={() => {
+                    void onShareWithTeam?.();
+                  }}
+                  icon={
+                    sharing.visibility === 'unknown' ? (
+                      <Spinner size="small" label={null} />
+                    ) : sharing.privateReason === 'machine-not-registered' ? (
+                      <Monitor size="100%" />
+                    ) : sharing.canManage ? (
+                      Users
+                    ) : (
+                      LockKeyhole
                     )
-                  : sharing.canManage
-                    ? t('sessions.sharing.shareWithTeam', 'Share with team…')
-                    : t('sessions.sharing.onlyOwnerCanShare', 'Only the device owner can share')}
-            </Menu.Item>
-          ) : null}
+                  }
+                >
+                  {sharing.visibility === 'unknown'
+                    ? t('sessions.sharing.loadingAction', 'Checking sharing…')
+                    : sharing.privateReason === 'machine-not-registered'
+                      ? t(
+                          'sessions.sharing.registerDeviceToShare',
+                          'Register this device before sharing'
+                        )
+                      : sharing.canManage
+                        ? t('sessions.sharing.shareWithTeam', 'Share with team…')
+                        : t(
+                            'sessions.sharing.onlyOwnerCanShare',
+                            'Only the device owner can share'
+                          )}
+                </Menu.Item>
+              ) : null}
+              {sharingReason ? (
+                <Menu.Item disabled icon={Share2}>
+                  <WorkspaceFeatureReasonText reason={sharingReason} />
+                </Menu.Item>
+              ) : null}
+              <Menu.Item
+                disabled={!!exportReason || !onShareAsImage}
+                title={exportReason}
+                onClick={() => {
+                  onShareAsImage?.();
+                }}
+                icon={Image}
+              >
+                {exportReason ? (
+                  <WorkspaceFeatureReasonText reason={exportReason} />
+                ) : (
+                  t('sessions.shareAsImage', 'Share as image…')
+                )}
+              </Menu.Item>
+            </Menu.Content>
+          </Menu.Submenu>
 
           <Menu.Submenu>
             <Menu.SubmenuTrigger xstyle={styles.headerMenuItem} icon={Copy}>
@@ -2133,11 +2098,6 @@ export function SessionHeaderMenu({
               <WorkspaceFeatureReasonText reason={rpcReason} />
             </Menu.Item>
           ) : null}
-          {sharingReason ? (
-            <Menu.Item disabled icon={Share2}>
-              <WorkspaceFeatureReasonText reason={sharingReason} />
-            </Menu.Item>
-          ) : null}
           {previewReason ? (
             <Menu.Item disabled>
               <WorkspaceFeatureReasonText reason={previewReason} />
@@ -2190,6 +2150,28 @@ export function SessionHeaderMenu({
               )}
         </Menu.Content>
       </Menu.Root>
+      {onSnooze ? (
+        <CustomSnoozeDialog
+          target={customSnoozeTarget}
+          now={statusNow}
+          onClose={() => setCustomSnoozeTarget(null)}
+          onConfirm={(_sessionId, snoozedUntil) => void onSnooze(snoozedUntil)}
+        />
+      ) : null}
+      <SessionInfoDialog
+        open={infoOpen}
+        onOpenChange={setInfoOpen}
+        repoFullName={isGitHub ? repoFullName || undefined : undefined}
+        currentBranch={currentBranch || undefined}
+        baseBranch={baseBranch || undefined}
+        pullRequest={pullRequest}
+        machineName={machineName}
+        placement={sessionPlacement}
+        workspacePath={trimmedWorkspacePath || localPath || undefined}
+        sharing={sharing}
+        owner={infoOwner}
+        t={t}
+      />
     </>
   );
 }
@@ -3114,6 +3096,7 @@ export const SessionChatInterface = memo(
       void openExternalUrl(latestPr.url);
     });
     const prLinkHandler = latestPr ? openLatestPr : undefined;
+    const launcherPillRef = useRef<HTMLDivElement>(null);
     // The PR tab follows the current PR, so an earlier PR opens on GitHub.
     const openHistoryPr = useStableCallback((view: SessionPullRequestView) => {
       void openExternalUrl(view.url);
@@ -3249,7 +3232,13 @@ export const SessionChatInterface = memo(
       transferSessionOwner,
       setTreeCollaborationStopped,
       updateSessionMetadata,
+      snoozeSession,
+      settleSession,
+      moveSessionToFocus,
     } = useSessionActions();
+    const settleSessionWithConfirmation = useSettleSessionWithConfirmation(settleSession);
+    const snoozeSessionWithConfirmation = useSnoozeSessionWithConfirmation(snoozeSession);
+    const moveToFocusWithConfirmation = useMoveToFocusWithConfirmation(moveSessionToFocus);
     const [renameDialogTarget, setRenameDialogTarget] = useState<RenameSessionDialogTarget | null>(
       null
     );
@@ -4397,7 +4386,7 @@ export const SessionChatInterface = memo(
             });
             await admitOutput();
             assertCurrent();
-            await navigator.clipboard.writeText(markdown);
+            await copyTextToClipboard(markdown);
             assertCurrent();
             captureSessionEvent('session/history_copy_succeeded', {
               history_count: turnCount,
@@ -4444,38 +4433,72 @@ export const SessionChatInterface = memo(
     );
 
     // Inactive tabs and collapsed side chats stay mounted for fast switching, so
-    // being mounted is not evidence the user saw this conversation: only the
-    // visible surface may clear unread state. Otherwise opening a parent session
-    // marks every one of its sub-sessions read at once.
-    const lastReadAtForReceiptRef = useRef(parseTimestamp(session.lastReadAt));
-    lastReadAtForReceiptRef.current = parseTimestamp(session.lastReadAt);
+    // being mounted is not evidence the user saw this conversation: only a
+    // visible surface inside an active foreground window that has received page
+    // interaction may clear unread state.
+    const {
+      isWindowActive: isWindowReadActive,
+      hasPageInteraction: hasWindowReadInteraction,
+      engagementRevision: windowReadEngagementRevision,
+      getLatestState: getLatestWindowReadEngagement,
+    } = useWindowReadEngagement();
+    const prevReadReceiptSnapshotRef = useRef<ReadReceiptSnapshot | null>(null);
+    const manualUnreadAtMessageRef = useRef<number | null>(null);
 
     useEffect(() => {
-      const lastMessageAt = parseTimestamp(session.lastMessageAt);
+      const surfaceVisible = isVisible && !preparingWindow;
+      const lastMessageAt = getEffectiveSessionLastMessageAt({
+        lastMessageAt: parseTimestamp(session.lastMessageAt),
+        snoozedUntil: parseTimestamp(session.snoozedUntil),
+      });
+      const lastReadAt = parseTimestamp(session.lastReadAt);
+      const snapshot: ReadReceiptSnapshot = {
+        sessionId: session.id,
+        isVisible: surfaceVisible,
+        lastMessageAt,
+        lastReadAt,
+      };
+      const manualUnreadAt = resolveManualUnreadLatch(
+        prevReadReceiptSnapshotRef.current,
+        snapshot,
+        manualUnreadAtMessageRef.current
+      );
+      prevReadReceiptSnapshotRef.current = snapshot;
+      manualUnreadAtMessageRef.current = manualUnreadAt;
+
+      if (manualUnreadAt !== null && lastMessageAt !== null && lastMessageAt <= manualUnreadAt) {
+        return;
+      }
+
+      const liveEngagement = getLatestWindowReadEngagement();
       if (
         !shouldMarkSessionRead({
           rendersConversation: !hideMessageArea,
-          isVisible: isVisible && !preparingWindow,
+          isVisible: surfaceVisible,
+          isWindowActive: isWindowReadActive && liveEngagement.isWindowActive,
+          hasPageInteraction: hasWindowReadInteraction && liveEngagement.hasPageInteraction,
           lastMessageAt,
-          lastReadAt: lastReadAtForReceiptRef.current,
+          lastReadAt,
         })
       ) {
         return;
       }
-      void markSessionRead(session.id, session.lastMessageAt ?? null).catch((error: unknown) => {
+      void markSessionRead(session.id, lastMessageAt).catch((error: unknown) => {
         console.warn('Failed to mark session as read', error);
       });
-      // A receipt gets a new opportunity when this surface becomes visible or
-      // a new message arrives. Deliberately do not depend on lastReadAt: moving
-      // that receipt backwards is the user's explicit "Mark as unread" action,
-      // which must remain visible until they leave and reopen the conversation.
     }, [
+      getLatestWindowReadEngagement,
+      hasWindowReadInteraction,
       hideMessageArea,
       isVisible,
-      preparingWindow,
+      isWindowReadActive,
       markSessionRead,
+      preparingWindow,
       session.id,
       session.lastMessageAt,
+      session.lastReadAt,
+      session.snoozedUntil,
+      windowReadEngagementRevision,
     ]);
 
     const isDispatching = inputActionState === 'dispatching';
@@ -5880,6 +5903,9 @@ export const SessionChatInterface = memo(
     const readScheduledMessage = useCallback(
       async (scheduleId: string) => {
         if (!runtime) return null;
+        // loro-mirror keeps loro-crdt (WASM) in whichever chunk imports it;
+        // this route file is on the boot path, so construct lazily.
+        const { ScheduleRepository } = await import('@lody/shared/schedule-repository');
         return new ScheduleRepository(runtime.repo, runtime.workspaceId, {
           protectedContent: runtime.contentMode === 'e2ee',
           signDeclaration: runtime.signScheduleDeclaration,
@@ -5956,6 +5982,7 @@ export const SessionChatInterface = memo(
       async (item: ScheduledQueueItem) => {
         if (!runtime || !currentUser) return false;
         try {
+          const { ScheduleRepository } = await import('@lody/shared/schedule-repository');
           await runtime.withScheduleStore(item.scheduleId, () =>
             new ScheduleRepository(runtime.repo, runtime.workspaceId, {
               protectedContent: runtime.contentMode === 'e2ee',
@@ -6571,113 +6598,69 @@ export const SessionChatInterface = memo(
       workspaceId,
     ]);
 
-    const handleInterruptAndSend = useCallback(
+    const handleSteerQueuedMessage = useCallback(
       async (item: MessageQueueItem) => {
-        if (isExternalHistoryRefreshing) {
-          captureSessionEvent('session/queue_interrupt_blocked', {
-            reason: 'external_history_syncing',
-            queue_item_id: item.$cid,
-          });
-          return;
-        }
-        if (!workspaceId || !activeAssistantTurnId) {
-          captureSessionEvent('session/queue_interrupt_blocked', {
-            reason: !workspaceId ? 'missing_workspace' : 'missing_active_turn',
-            queue_item_id: item.$cid,
-          });
-          toast.error(t('sessions.interruptFailed', 'Failed to interrupt current task'));
-          return;
-        }
-        setInputActionState('ready');
-        pendingUserInterruptRef.current = true;
-        try {
-          // Not a Stop: the queued item must stay eligible to run next.
-          await requestSessionCancel(session.id, activeAssistantTurnId, { interrupt: true });
-          captureSessionEvent('session/queue_interrupt_succeeded', {
-            queue_item_id: item.$cid,
-            active_assistant_turn_id: activeAssistantTurnId,
-          });
-        } catch (error) {
-          console.error('Failed to interrupt for queued message', error);
-          pendingUserInterruptRef.current = false;
-          captureSessionEvent('session/queue_interrupt_failed', {
-            queue_item_id: item.$cid,
-            active_assistant_turn_id: activeAssistantTurnId,
-            error_name: error instanceof Error ? error.name : typeof error,
-            error_message: getErrorMessage(error),
-          });
-          toast.error(t('sessions.interruptFailed', 'Failed to interrupt current task'), {
-            description: getErrorMessage(error),
-          });
-        }
-      },
-      [
-        activeAssistantTurnId,
-        captureSessionEvent,
-        isExternalHistoryRefreshing,
-        requestSessionCancel,
-        session.id,
-        t,
-        workspaceId,
-      ]
-    );
-
-    const handleNativeSteerQueuedMessage = useCallback(
-      async (item: MessageQueueItem) => {
-        if (isExternalHistoryRefreshing || !activeAssistantTurnId) {
-          return;
-        }
-        if (steeringQueueItemIdsRef.current.has(item.$cid)) {
-          return;
-        }
+        if (isExternalHistoryRefreshing || steeringQueueItemIdsRef.current.has(item.$cid)) return;
+        const targetTurnId = activeAssistantTurnId;
+        const guide = Boolean(isSessionActive && targetTurnId && nativeSteerAvailable);
+        if (targetTurnId && !guide && !item.paused && messageQueue[0]?.$cid !== item.$cid) return;
         steeringQueueItemIdsRef.current.add(item.$cid);
         try {
-          const inputConfig = normalizeSessionTurnInputConfig(item.acpSessionConfig);
-          if (!inputConfig) {
-            throw new Error('Queued message input config is invalid');
+          if (runtime) {
+            const current = await runtime.sendResources.withSessionStore(session.id, (store) =>
+              store.getState().mq?.find((row) => row.$cid === item.$cid)
+            );
+            if (!current) return;
+            item = current as MessageQueueItem;
           }
+          const inputConfig = normalizeSessionTurnInputConfig(item.acpSessionConfig);
+          if (!inputConfig) throw new Error('Queued message input config is invalid');
           const inputBlocks = normalizeSessionInputBlocks(
             inputConfig.inputBlocks,
             inputConfig.prompt ?? item.task
           );
           const pendingHistoryEntry = buildDraftUserHistoryEntry({
-            userId: item.userId,
+            userId: item.paused
+              ? ((runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+                currentUser?.id ??
+                session.userId)
+              : item.userId,
             inputBlocks,
-            timestamp: item.timestamp,
+            timestamp: item.paused ? new Date().toISOString() : item.timestamp,
             inputConfig,
-            status: 'pending_apply',
+            status: guide ? 'pending_apply' : 'pending',
           });
-          if (!pendingHistoryEntry) {
-            throw new Error('Queued message is empty');
-          }
-          const queuedUserTurnId = item.userTurnId?.trim() || `queued-${item.$cid}`;
-          // History first, then the queue row: the input is never absent from both.
-          const { entry: historyEntry } = await addSessionHistory(
-            { ...pendingHistoryEntry, id: queuedUserTurnId },
-            { guideExpectedTurnId: activeAssistantTurnId }
+          if (!pendingHistoryEntry) throw new Error('Queued message is empty');
+          const originalTurnId = item.userTurnId?.trim() || `queued-${item.$cid}`;
+          // Stop's cancellation receipt stays final. An explicit resend owns a
+          // distinct, stable id so retries cannot revive or duplicate the old input.
+          const userTurnId = item.paused ? `queue-resend:${originalTurnId}` : originalTurnId;
+          const { entry } = await addSessionHistory(
+            { ...pendingHistoryEntry, id: userTurnId },
+            guide && targetTurnId ? { guideExpectedTurnId: targetTurnId } : { dispatch: true }
           );
           await removeMessageQueueItem(item.$cid);
-          trackMessageSend(historyEntry.id);
-          touchSessionActivity(session.id).catch((error: unknown) => {
-            console.warn('Failed to update session activity for steer', error);
+          trackMessageSend(entry.id);
+          void touchSessionActivity(session.id).catch((error: unknown) => {
+            console.warn('Failed to update session activity for queued send', error);
           });
-          const applied = await guideHistoryEntry(historyEntry.id, activeAssistantTurnId);
-          captureSessionEvent('session/queue_guide_result', {
-            queue_item_id: item.$cid,
-            active_assistant_turn_id: activeAssistantTurnId,
-            applied,
-          });
+          if (guide && targetTurnId) {
+            await guideHistoryEntry(entry.id, targetTurnId);
+          } else {
+            if (targetTurnId) {
+              pendingUserInterruptRef.current = true;
+              await requestSessionCancel(session.id, targetTurnId, { interrupt: true });
+            }
+            await requestSessionDispatch(session.id, entry.id, {
+              inputConfig,
+              machineId: session.machineId,
+            });
+            anchorChatToMessage(entry.id);
+          }
         } catch (error) {
-          console.error('Failed to guide with queued message', error);
-          captureSessionEvent('session/queue_guide_failed', {
-            queue_item_id: item.$cid,
-            active_assistant_turn_id: activeAssistantTurnId,
-            error_name: error instanceof Error ? error.name : typeof error,
-            error_message: getErrorMessage(error),
-          });
-          toast.error(t('sessions.sendError'), {
-            description: getErrorMessage(error),
-          });
+          pendingUserInterruptRef.current = false;
+          console.error('Failed to send queued message', error);
+          toast.error(t('sessions.sendError'), { description: getErrorMessage(error) });
         } finally {
           steeringQueueItemIdsRef.current.delete(item.$cid);
         }
@@ -6685,32 +6668,24 @@ export const SessionChatInterface = memo(
       [
         activeAssistantTurnId,
         addSessionHistory,
-        captureSessionEvent,
+        anchorChatToMessage,
+        currentUser?.id,
         guideHistoryEntry,
         isExternalHistoryRefreshing,
+        isSessionActive,
+        messageQueue,
+        nativeSteerAvailable,
         removeMessageQueueItem,
+        requestSessionCancel,
+        requestSessionDispatch,
+        runtime,
         session.id,
+        session.machineId,
+        session.userId,
         t,
-        touchSessionActivity,
         trackMessageSend,
+        touchSessionActivity,
       ]
-    );
-
-    const handleSteerQueuedMessage = useCallback(
-      async (item: MessageQueueItem) => {
-        // Interrupt-and-send always runs the queue head next, so it is only a
-        // valid steer substitute for the first item. Later items are steerable
-        // exclusively through native acknowledged steering.
-        if (messageQueue[0]?.$cid !== item.$cid && !nativeSteerAvailable) {
-          return;
-        }
-        if (nativeSteerAvailable) {
-          await handleNativeSteerQueuedMessage(item);
-          return;
-        }
-        await handleInterruptAndSend(item);
-      },
-      [handleInterruptAndSend, handleNativeSteerQueuedMessage, messageQueue, nativeSteerAvailable]
     );
 
     const handleReorderQueueItem = useCallback(
@@ -6754,9 +6729,6 @@ export const SessionChatInterface = memo(
               ? current
               : { ...current, isEditing: true, editingStartedAt: getServerNow() }
           );
-          if (isFirstItem) {
-            await waitUntilSynced();
-          }
         } catch (error) {
           console.error('Failed to start editing queued message', error);
           captureSessionEvent('session/queue_item_edit_start_failed', {
@@ -6771,7 +6743,7 @@ export const SessionChatInterface = memo(
           throw error;
         }
       },
-      [captureSessionEvent, messageQueue, t, updateMessageQueueItem, waitUntilSynced]
+      [captureSessionEvent, messageQueue, t, updateMessageQueueItem]
     );
 
     const handleCancelQueueItemEdit = useCallback(
@@ -6783,9 +6755,6 @@ export const SessionChatInterface = memo(
               ? { ...current, isEditing: false, editingStartedAt: undefined }
               : current
           );
-          if (isFirstItem) {
-            await waitUntilSynced();
-          }
           captureSessionEvent('session/queue_item_edit_cancelled', {
             queue_item_id: item.$cid,
             is_first_queue_item: isFirstItem,
@@ -6804,7 +6773,7 @@ export const SessionChatInterface = memo(
           throw error;
         }
       },
-      [captureSessionEvent, messageQueue, t, updateMessageQueueItem, waitUntilSynced]
+      [captureSessionEvent, messageQueue, t, updateMessageQueueItem]
     );
 
     const handleSaveQueueItemEdit = useCallback(
@@ -6814,9 +6783,6 @@ export const SessionChatInterface = memo(
           await updateMessageQueueItem(item.$cid, (current) =>
             buildEditedMessageQueueItem(current, task)
           );
-          if (isFirstItem) {
-            await waitUntilSynced();
-          }
           captureSessionEvent('session/queue_item_edit_saved', {
             queue_item_id: item.$cid,
             is_first_queue_item: isFirstItem,
@@ -6835,7 +6801,7 @@ export const SessionChatInterface = memo(
           throw error;
         }
       },
-      [captureSessionEvent, messageQueue, t, updateMessageQueueItem, waitUntilSynced]
+      [captureSessionEvent, messageQueue, t, updateMessageQueueItem]
     );
 
     const handleRemoveQueueItem = useCallback(
@@ -7137,6 +7103,48 @@ export const SessionChatInterface = memo(
       void launchPathWithLauncher(selectedPathLauncher, 'session/open_in_ide_clicked');
     }, [launchPathWithLauncher, selectedPathLauncher]);
 
+    const openInFileManagerLabel = resolveOpenFolderInFileManagerLabel(
+      normalizeSessionFileActionPlatform(electronPathLauncherPlatform),
+      t
+    );
+    const canOpenInFileManager = Boolean(openInIdePath) && isElectronRendererForPathLaunch;
+    const handleOpenInFileManager = useCallback(async () => {
+      const path = await resolveOpenInIdePath();
+      if (!path) {
+        toast.error(t('sessions.openFolder.failed', 'Could not open that folder'));
+        return;
+      }
+      const analyticsProperties = { path_source: openInIdePathSource };
+      captureSessionEvent('session/open_in_file_manager_clicked', analyticsProperties);
+      const services = getIpcServices();
+      if (!services) {
+        captureSessionEvent('session/open_in_file_manager_failed', {
+          ...analyticsProperties,
+          reason: 'native_bridge_unavailable',
+        });
+        toast.error(
+          t('sessions.pathLaunchUnsupported', 'This launcher is only available in the desktop app')
+        );
+        return;
+      }
+      try {
+        const result = await services.app.openLocalPath(path);
+        if (!result.opened) {
+          captureSessionEvent('session/open_in_file_manager_failed', {
+            ...analyticsProperties,
+            reason: result.error,
+          });
+          toast.error(t('sessions.openFolder.failed', 'Could not open that folder'));
+        }
+      } catch (error) {
+        captureSessionEvent('session/open_in_file_manager_failed', {
+          ...analyticsProperties,
+          reason: getErrorMessage(error),
+        });
+        toast.error(t('sessions.openFolder.failed', 'Could not open that folder'));
+      }
+    }, [captureSessionEvent, openInIdePathSource, resolveOpenInIdePath, t]);
+
     const handleCopyPath = useCallback(async () => {
       const path = await resolveOpenInIdePath();
       if (!path) {
@@ -7147,7 +7155,7 @@ export const SessionChatInterface = memo(
         return;
       }
       try {
-        await navigator.clipboard.writeText(path);
+        await copyTextToClipboard(path);
         captureSessionEvent('session/path_copied', {
           path_source: openInIdePathSource,
         });
@@ -7168,7 +7176,7 @@ export const SessionChatInterface = memo(
       async (linkFormat: 'https' | 'deeplink' = 'https') => {
         try {
           if (!workspaceId || !workspaceSlug) throw new Error('Workspace is not ready');
-          await navigator.clipboard.writeText(
+          await copyTextToClipboard(
             linkFormat === 'deeplink'
               ? buildSessionLink({ sessionId: session.id, workspaceId })
               : buildAppSessionUrl(workspaceSlug, session.id)
@@ -7191,10 +7199,11 @@ export const SessionChatInterface = memo(
     );
 
     /* Shared header pieces used by both header variants. */
+    const isLauncherPillVisible = () => (launcherPillRef.current?.getClientRects().length ?? 0) > 0;
     const headerLauncherActions = (
       <>
         {shouldShowOpenInIdeButton && isElectronRendererForPathLaunch && (
-          <div {...stylex.props(styles.headerPills)}>
+          <div ref={launcherPillRef} {...stylex.props(styles.headerPills)}>
             <button
               type="button"
               {...stylex.props(styles.headerLauncher, styles.headerLauncherPrimary)}
@@ -7244,6 +7253,9 @@ export const SessionChatInterface = memo(
                   })}
                 </Menu.RadioGroup>
                 <Menu.Separator />
+                <Menu.Item icon={FolderOpen} onClick={() => void handleOpenInFileManager()}>
+                  {openInFileManagerLabel}
+                </Menu.Item>
                 {ACTION_OPTIONS.map((action) => (
                   <Menu.Item
                     key={action.id}
@@ -7372,11 +7384,33 @@ export const SessionChatInterface = memo(
                   });
                 }
         }
+        onSnooze={
+          headerSharing?.access !== 'read'
+            ? (snoozedUntil) =>
+                snoozeSessionWithConfirmation(session.id, snoozedUntil).then(() => undefined)
+            : undefined
+        }
+        onSettle={
+          headerSharing?.access !== 'read'
+            ? () => settleSessionWithConfirmation(session.id).then(() => undefined)
+            : undefined
+        }
+        onMoveToFocus={
+          headerSharing?.access !== 'read'
+            ? () => moveToFocusWithConfirmation(session.id).then(() => undefined)
+            : undefined
+        }
         owner={ownerMenuState}
         openedByRelations={openedByRelations}
         onArchive={toolbarActions ? toolbarActions.onArchiveSession : onArchiveSession}
         onRestore={toolbarActions ? toolbarActions.onRestoreSession : onRestoreSession}
         onDelete={toolbarActions ? toolbarActions.onDeleteSession : onDeleteSession}
+        isLauncherPillVisible={isLauncherPillVisible}
+        pullRequest={
+          latestPr
+            ? { number: latestPrNumber ?? null, status: latestPr.status, onOpen: openLatestPr }
+            : undefined
+        }
         openInIde={
           shouldShowOpenInIdeButton && isElectronRendererForPathLaunch
             ? {
@@ -7385,6 +7419,16 @@ export const SessionChatInterface = memo(
                 onOpen: handleOpenInIde,
                 onSelect: (launcher) => {
                   void handleSelectPathLauncher(launcher);
+                },
+              }
+            : undefined
+        }
+        openInFileManager={
+          canOpenInFileManager
+            ? {
+                label: openInFileManagerLabel,
+                onOpen: () => {
+                  void handleOpenInFileManager();
                 },
               }
             : undefined
@@ -7892,12 +7936,9 @@ export const SessionChatInterface = memo(
                               onEditCancel={handleCancelQueueItemEdit}
                               onEditSave={handleSaveQueueItemEdit}
                               onSteer={handleSteerQueuedMessage}
-                              showSteerAction={
-                                isSessionActive &&
-                                !!activeAssistantTurnId &&
-                                !isExternalHistoryRefreshing
-                              }
+                              showSteerAction={!isExternalHistoryRefreshing}
                               nativeSteerAvailable={nativeSteerAvailable}
+                              sendWhileIdle={!activeAssistantTurnId}
                               roomy={isMobile}
                               footerPosition={isMobile ? 'inline' : 'below'}
                             />
