@@ -13,6 +13,13 @@ export type RoostCachedHead = {
   checkpoint?: string;
   /** A covered change interval, usable only with complete bodies, never patches. */
   recoveryCheckpoint?: string;
+  /** The invalidation proved by the transaction that installed this checkpoint. */
+  change?: {
+    baseCheckpoint: string;
+    previousCount: number;
+    from: number | undefined;
+    ids: readonly string[];
+  };
   directoryRevision?: number;
   revision: number;
   count: number;
@@ -248,6 +255,7 @@ export function createRoostHistoryCache(scope: string) {
               {
                 ...head,
                 checkpoint,
+                change: checkpoint === head.checkpoint ? head.change : undefined,
                 recoveryCheckpoint: checkpoint
                   ? undefined
                   : (head.checkpoint ?? head.recoveryCheckpoint),
@@ -289,6 +297,7 @@ export function createRoostHistoryCache(scope: string) {
             {
               ...head,
               revision,
+              change: undefined,
               directoryRevision:
                 change?.kind === 'structure' ? revision : (head.directoryRevision ?? head.revision),
               checkpoint,
@@ -376,7 +385,7 @@ export function createRoostHistoryCache(scope: string) {
       checkpoint: string,
       from: number | undefined,
       replacements: readonly { position: number; turn: SessionHistoryInput }[],
-      completeBodies = false
+      options: { completeBodies?: boolean; changedIds?: readonly string[] } = {}
     ) =>
       transact<boolean>('readwrite', (tx, done) => {
         const heads = tx.objectStore(HEADS);
@@ -386,7 +395,7 @@ export function createRoostHistoryCache(scope: string) {
           const head = request.result as RoostCachedHead | undefined;
           if (
             !head ||
-            !(head.checkpoint || (completeBodies && head.recoveryCheckpoint)) ||
+            !(head.checkpoint || (options.completeBodies && head.recoveryCheckpoint)) ||
             !sameHead(head, expected) ||
             revision < head.revision
           )
@@ -432,6 +441,15 @@ export function createRoostHistoryCache(scope: string) {
               start,
               checkpoint,
               recoveryCheckpoint: undefined,
+              change:
+                head.checkpoint && options.changedIds && options.changedIds.length <= 500
+                  ? {
+                      baseCheckpoint: head.checkpoint,
+                      previousCount: head.count,
+                      from,
+                      ids: options.changedIds,
+                    }
+                  : undefined,
               directoryRevision:
                 from === undefined ? (head.directoryRevision ?? head.revision) : revision,
             },
@@ -466,6 +484,7 @@ export function createRoostHistoryCache(scope: string) {
               ...head,
               revision,
               checkpoint: undefined,
+              change: undefined,
               recoveryCheckpoint: head.checkpoint ?? head.recoveryCheckpoint,
               directoryRevision: head.directoryRevision ?? head.revision,
             },

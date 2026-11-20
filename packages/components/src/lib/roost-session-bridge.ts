@@ -222,6 +222,12 @@ const isHistorySuperseded = (error: unknown): boolean =>
   error instanceof HistoryRefreshSupersededError ||
   (error instanceof RoostHistoryError && error.retryReason === 'superseded');
 
+const isHistoryReadTimeout = (error: unknown): boolean =>
+  (error instanceof Error && error.name === 'TimeoutError') ||
+  (error instanceof SessionHistoryRequestError &&
+    error.failure.source === 'transport' &&
+    error.failure.code === 'response_timeout');
+
 class HistoryDirectoryChangedDuringReadError extends Error {
   constructor(message: string) {
     super(message);
@@ -343,7 +349,12 @@ const createRoostSessionDataFactoryFromTransport =
       const next = (async () => {
         if (disposed) throw new Error('Roost session bridge is disposed');
         const epoch = historyEpoch;
-        const response = takeInline(query) ?? (await transport.readHistory(query));
+        const response =
+          takeInline(query) ??
+          (await transport.readHistory(query).catch((error) => {
+            if (epoch !== historyEpoch) throw new HistoryRefreshSupersededError();
+            throw error;
+          }));
         if (disposed) throw new Error('Roost session bridge is disposed');
         if (epoch !== historyEpoch) throw new HistoryRefreshSupersededError();
         const revision = response.historyRevision;
@@ -361,6 +372,10 @@ const createRoostSessionDataFactoryFromTransport =
         ) {
           throw new Error('Roost history read has no durable observation');
         }
+        // These bodies belong to the repair's checkpoint. The repair checks
+        // their revision and count and commits against its original cache head.
+        if ((query.kind === 'readTurn' || query.kind === 'readRange') && query.atCheckpoint)
+          return response;
         if (!coherentProgress && ownerRevision !== undefined && revision < ownerRevision) {
           throw new HistoryRefreshSupersededError();
         }
@@ -534,9 +549,21 @@ const createRoostSessionDataFactoryFromTransport =
     let latestChange: SessionHistoryChange | null | undefined;
     let observedDirectoryEpoch = 0;
     let notificationQueue: Promise<void> = Promise.resolve();
+    const notifyAppliedChanges = (from: number | undefined, to: number, ids: readonly string[]) => {
+      if (from !== undefined) observedDirectoryEpoch++;
+      for (const listener of listeners) {
+        try {
+          if (from !== undefined) listener({ kind: 'structure', from, to });
+          if (ids.length) listener({ kind: 'changed', ids: [...ids] });
+        } catch (error) {
+          console.error('Roost history observer failed', error);
+        }
+      }
+    };
     const adoptCachedHead = (head: RoostCachedHead) => {
       if (!head.checkpoint || head.checkpoint === appliedCheckpoint) return;
       const previousCount = observedHistoryCount ?? 0;
+      const change = head.change?.baseCheckpoint === appliedCheckpoint ? head.change : undefined;
       appliedCheckpoint = head.checkpoint;
       // A different reader committed this projection. Fence reads and cursors
       // from the previous local view, including a retired owner generation.
@@ -548,15 +575,18 @@ const createRoostSessionDataFactoryFromTransport =
       replacingSnapshot = false;
       hasIncrementalCheckpoint = true;
       displayedCacheRevision = head.revision;
-      bodies.clear();
-      observedDirectoryEpoch++;
-      for (const listener of listeners) {
-        try {
-          listener({ kind: 'structure', from: 0, to: Math.max(previousCount, head.count) });
-        } catch (error) {
-          console.error('Roost history observer failed', error);
-        }
+      seenCacheRevision = head.revision;
+      if (!change) {
+        bodies.clear();
+        notifyAppliedChanges(0, Math.max(previousCount, head.count), []);
+        return;
       }
+      for (const id of change.ids) bodies.delete(id);
+      if (change.from !== undefined) {
+        for (const [id, entry] of bodies)
+          if (entry.position === undefined || entry.position >= change.from) bodies.delete(id);
+      }
+      notifyAppliedChanges(change.from, Math.max(change.previousCount, head.count), change.ids);
     };
     const notifyChanged = (
       change?: SessionHistoryChange | null,
@@ -775,6 +805,10 @@ const createRoostSessionDataFactoryFromTransport =
       try {
         const prior = await cached(() => cache.getHead());
         if (epoch !== historyEpoch) return;
+        if (appliedCheckpoint && prior?.checkpoint && prior.checkpoint !== appliedCheckpoint) {
+          adoptCachedHead(prior);
+          epoch = historyEpoch;
+        }
         const checkpoint = prior?.checkpoint ?? prior?.recoveryCheckpoint;
         let ownerReset = false;
         if (incrementalEnabled() && prior && !checkpoint) {
@@ -809,6 +843,19 @@ const createRoostSessionDataFactoryFromTransport =
           }
           if (change.state === 'ready') {
             const from = change.from === undefined ? undefined : Math.min(change.from, count);
+            const readBody = async (
+              query: Extract<SessionHistoryReadQuery, { kind: 'readTurn' | 'readRange' }>
+            ) => {
+              const read = () => readOwner({ ...query, atCheckpoint: change.checkpoint });
+              try {
+                return await read();
+              } catch (error) {
+                // Keep verified pages while retrying a timed-out body at the
+                // same checkpoint. A second failure returns to normal recovery.
+                if (!isHistoryReadTimeout(error)) throw error;
+                return read();
+              }
+            };
             const affected = (await cached(() => cache.readAffected(change.ids))) ?? [];
             const replacements: { position: number; turn: SessionHistoryInput }[] = [];
             const patches = new Map(
@@ -851,12 +898,9 @@ const createRoostSessionDataFactoryFromTransport =
                 if (!change.patches?.turns.some((patch) => patch.turnId === row.turnId))
                   throw new Error('Roost incremental body is incomplete');
               }
-              const read = await readOwner({
-                kind: 'readTurn',
-                turnId: row.turnId,
-                atCheckpoint: change.checkpoint,
-              });
-              if (read.historyRevision !== revision) throw new HistoryRefreshSupersededError();
+              const read = await readBody({ kind: 'readTurn', turnId: row.turnId });
+              if (read.historyRevision !== revision || read.historyCount !== count)
+                throw new HistoryRefreshSupersededError();
               const turn = validateTurnRead(read.result, 'Roost incremental body');
               if (turn.state !== 'ready' || turn.turn.id !== row.turnId)
                 throw new Error('Roost incremental turn is unavailable');
@@ -883,13 +927,13 @@ const createRoostSessionDataFactoryFromTransport =
                 position < count;
                 position += READ_PAGE_SIZE
               ) {
-                const read = await readOwner({
+                const read = await readBody({
                   kind: 'readRange',
-                  atCheckpoint: change.checkpoint,
                   from: position,
                   to: Math.min(count, position + READ_PAGE_SIZE),
                 });
-                if (read.historyRevision !== revision) throw new HistoryRefreshSupersededError();
+                if (read.historyRevision !== revision || read.historyCount !== count)
+                  throw new HistoryRefreshSupersededError();
                 if (
                   !Array.isArray(read.result) ||
                   read.result.length !== Math.min(READ_PAGE_SIZE, count - position)
@@ -906,8 +950,6 @@ const createRoostSessionDataFactoryFromTransport =
                 });
               }
             }
-            if (change.bodies === undefined && revision < observedHistoryRevision)
-              throw new HistoryRefreshSupersededError();
             const applied = await cached(() =>
               epoch === historyEpoch
                 ? cache.applyChanges(
@@ -917,7 +959,7 @@ const createRoostSessionDataFactoryFromTransport =
                     change.checkpoint,
                     from,
                     replacements,
-                    !withPatches
+                    { completeBodies: !withPatches, changedIds: change.ids }
                   )
                 : Promise.resolve(false)
             );
@@ -936,17 +978,7 @@ const createRoostSessionDataFactoryFromTransport =
             displayedCacheRevision = revision;
             for (const replacement of replacements)
               rememberBody(replacement.turn, replacement.position);
-            if (from !== undefined) {
-              observedDirectoryEpoch += 1;
-              for (const listener of listeners)
-                listener({
-                  kind: 'structure',
-                  from: Math.min(from, count),
-                  to: Math.max(prior.count, count),
-                });
-            }
-            if (change.ids.length)
-              for (const listener of listeners) listener({ kind: 'changed', ids: [...change.ids] });
+            notifyAppliedChanges(from, Math.max(prior.count, count), change.ids);
             retryDelay = refreshRequested ? 0 : 250;
             consecutiveSupersessions = 0;
             // Complete checkpoint coverage repairs the retained window even

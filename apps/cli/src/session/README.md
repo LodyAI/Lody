@@ -716,6 +716,11 @@ them to reconcile a potentially committed result. Bounded leases release parked
 observers and renew from the reader's applied checkpoint. An exact-base delta can
 travel with the checkpoint. Subscription reads only prepare inline deltas. The
 reader's incremental request repairs larger intervals and resets lost coverage.
+After a body read times out, the reader can retry that request once at the same
+checkpoint and keep the pages it already verified. It commits the window
+atomically against its starting cache head. Readers sharing that cache can apply
+the recorded invalidation when it starts at their displayed checkpoint. A reset
+or a gap without a matching invalidation rebuilds the displayed range.
 One viewer's lease does not retain Native worker or writer capacity. Local IPC
 remains usable offline.
 [Peer-reader readiness and observation](../../../../.agents/notes/implemented/bug-fix/2026-10-16-roost-peer-reader-readiness.md)
