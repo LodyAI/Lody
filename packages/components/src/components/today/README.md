@@ -6,7 +6,7 @@ Experimental daily outline notes ([Spec](../../../../../specs/today-outline.md))
 | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `today-page.tsx`                                              | Full-page route surface                                                                                                     |
 | `today-pinned-column.tsx`, `use-open-today.ts`                | Column pinned beside the sidebar; `use-open-today.ts` opens a day in it or as the page                                      |
-| `today-view.tsx`                                              | Day stream shell: calendar, member menu, surface, picker, drag layer                                                        |
+| `today-view.tsx`                                              | Day stream shell: calendar, member menu, surface, picker, drag layer; window-top toolbar                                    |
 | `today-day-section.tsx`                                       | One day: lazy page store, rows with inline mentions                                                                         |
 | `today-stream.ts`                                             | Which days show, local date and midnight math                                                                               |
 | `today-session-mention.tsx`, `today-session-status.ts`        | Inline conversation mention and its sidebar-derived status                                                                  |

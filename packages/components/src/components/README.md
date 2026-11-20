@@ -33,8 +33,10 @@ The sidebar spans `loro-sidebar.tsx`, `loro-app-sidebar.tsx`, `session-list.tsx`
 `sidebar-*.tsx`. `sessions/session-list-rows.ts` resolves row relationships, while
 `lib/session-opened-by-tree.ts` builds the presentation tree.
 
-Header controls use the local `CuidaSidebarExpandOutline` SVG for the sidebar toggle
-and Lucide `ChevronLeft` / `ChevronRight` for history navigation, in 16px boxes.
+Header controls (`sidebar-history-controls.tsx`) use the local `CuidaSidebarExpandOutline`
+SVG for the sidebar toggle and Lucide `ChevronLeft` / `ChevronRight` for history
+navigation, in 16px boxes. The conversation, new-chat and Today page headers render the
+same controls while the sidebar is hidden.
 Cuida's source and Apache-2.0 license are retained beside the icon component.
 
 The Add folder and view controls use Lucide `FolderPlus` and `SlidersHorizontal`
