@@ -39,9 +39,11 @@ E2EE 远程机器的刷新行为不变。
    依次切到每个模型，只有当模型选择器正是该模型时才保留回答；切换被拒绝的模型跳过；某次切换
    在 `ACP_MODEL_OPTIONS_SWITCH_TIMEOUT_MS`（60 秒）内没有回答就停止，并保留已读到的结果。没有
    总时长上限：用户在看进度。daemon 只对内置 Agent 读取模型。
-3. **谁会读取模型。** 只有 `useRefreshMachineAcpCapabilities` 设置这个标记：设置页刷新、Agent 配置
-   对话框的探测、Test 和 Retry，以及引导页的对话框。启动时刷新、登录后验证、Provider 设置流程和
-   CLI 命令保持原样。
+3. **谁会读取模型。** 只有设置 › Agent 列表里的显式 Provider 刷新（`ProviderRow` 调用
+   `useRefreshMachineAcpCapabilities` 并传入 `readModelOptions: true`）会设置这个标记。
+   Agent 配置对话框的创建、测试、重试探测，Lody Agent 连接发现、引导页、启动时刷新、
+   登录后验证、Provider 设置流程和 CLI 命令都不带该标记，避免模型目录很大的 Provider
+   （例如 Devin 的 169 个模型）在新建或验证时长时间阻塞对话框。
 4. **进度。** 每个模型作为一条 `machine/acp-binary-progress` 帧上报，状态为
    `reading-model-options`，并带 `configId`、`modelId`、`modelName`、`modelIndex`、`modelCount`，
    因此沿用现有的本地 IPC 和 Machine RPC 进度通道。渲染端从不把这些帧存为运行时安装状态，只有
