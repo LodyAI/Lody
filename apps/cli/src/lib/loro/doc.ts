@@ -3884,7 +3884,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       return null;
     }
 
-    const first = queue[0];
+    const first = queue.find((item) => !item.paused);
     if (first?.isEditing) {
       // The editing client may never get a chance to clear `isEditing` (hard close,
       // crash, killed tab). Treat `editingStartedAt` as a lease; once it expires we
@@ -3898,6 +3898,17 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     }
 
     return first ?? null;
+  }
+
+  async pauseMessageQueueItems(cids: readonly string[]): Promise<void> {
+    if (!this.mirror) throw new Error('SessionDocument not initialized');
+    const targets = new Set(cids);
+    this.mirror.setState((prev) => {
+      for (const item of (prev.mq ?? []) as MessageQueueItem[]) {
+        if (targets.has(item.$cid)) item.paused = true;
+      }
+      return prev;
+    });
   }
 
   async popMessageQueue(): Promise<MessageQueueItem | null> {

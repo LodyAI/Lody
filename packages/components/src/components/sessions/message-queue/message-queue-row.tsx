@@ -43,6 +43,7 @@ export type MessageQueueRowProps = {
   isFirst: boolean;
   showSteerAction: boolean;
   nativeSteerAvailable: boolean;
+  sendWhileIdle?: boolean;
   canReorder: boolean;
   isEditing: boolean;
   editValue: string;
@@ -396,9 +397,16 @@ function RowActions(props: MessageQueueRowProps) {
         <Menu.Root>
           <Menu.Trigger render={<MoreTrigger fine={!props.roomy} />} />
           <Menu.Content align="end" width="compact">
-            {shouldShowQueuedItemSteer({ showSteerAction, isFirst, nativeSteerAvailable }) ? (
+            {shouldShowQueuedItemSteer({
+              showSteerAction,
+              isFirst,
+              nativeSteerAvailable:
+                nativeSteerAvailable || props.sendWhileIdle === true || item.paused === true,
+            }) ? (
               <Menu.Item icon={Send} onClick={() => void onSteer(item)}>
-                {t('sessions.messageQueue.guideAction', 'Steer')}
+                {props.sendWhileIdle
+                  ? t('sessions.messageQueue.sendAction', 'Send')
+                  : t('sessions.messageQueue.guideAction', 'Steer')}
               </Menu.Item>
             ) : null}
             {props.onMoveToTop ? (
@@ -432,19 +440,27 @@ function RowActions(props: MessageQueueRowProps) {
 
   return (
     <div {...stylex.props(queueSurface.actions, props.roomy && queueSurface.roomyActions)}>
-      {shouldShowQueuedItemSteer({ showSteerAction, isFirst, nativeSteerAvailable }) ? (
+      {shouldShowQueuedItemSteer({
+        showSteerAction,
+        isFirst,
+        nativeSteerAvailable:
+          nativeSteerAvailable || props.sendWhileIdle === true || item.paused === true,
+      }) ? (
         <button
           type="button"
-          aria-label={t(
-            'sessions.messageQueue.guide',
-            'Steer the active response with this message'
-          )}
+          aria-label={
+            props.sendWhileIdle
+              ? t('sessions.messageQueue.sendAction', 'Send')
+              : t('sessions.messageQueue.guide', 'Steer the active response with this message')
+          }
           {...stylex.props(queueSurface.steer)}
           onClick={() => {
             void onSteer(item);
           }}
         >
-          {t('sessions.messageQueue.guideAction', 'Steer')}
+          {props.sendWhileIdle
+            ? t('sessions.messageQueue.sendAction', 'Send')
+            : t('sessions.messageQueue.guideAction', 'Steer')}
         </button>
       ) : null}
       <IconAction

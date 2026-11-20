@@ -635,12 +635,17 @@ export function useSessionActions(): SessionActions {
             log('session cancel rpc threw for %s/%s: %o', sessionId, turnId, error);
           });
       }
-      if (cancelId) {
+      if (!interrupt) {
+        // Keep the observed drafts paused before publishing the durable Stop
+        // marker. The immediate RPC above must not wait for a store read.
         await runtime.sendResources.withSessionStore(sessionId, (sessionStore) => {
           sessionStore.setState((draft: SessionDocDraft) => {
-            draft.cancelRequest = { id: cancelId, turnId };
+            for (const item of draft.mq ?? []) item.paused = true;
+            if (cancelId) draft.cancelRequest = { id: cancelId, turnId };
           });
         });
+      }
+      if (cancelId) {
         await runtime.repo.flush();
       }
       await updateSessionMetadata(sessionId, {

@@ -530,7 +530,9 @@ class LoroSessionBackend implements SessionBackend {
   peekReadyMessageQueue(): Promise<MessageQueueItem | null> {
     if (this.queuePort.peekReadyMessageQueue) return this.queuePort.peekReadyMessageQueue();
     return (
-      this.queuePort.getMessageQueue?.().then((queue) => queue[0] ?? null) ?? Promise.resolve(null)
+      this.queuePort
+        .getMessageQueue?.()
+        .then((queue) => queue.find((item) => !item.paused) ?? null) ?? Promise.resolve(null)
     );
   }
 

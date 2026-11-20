@@ -56,6 +56,7 @@ export type MessageQueueDisplayProps = {
   showSteerAction?: boolean;
   /** Native acknowledged steer: lets every queued row steer, not just the first. */
   nativeSteerAvailable?: boolean;
+  sendWhileIdle?: boolean;
   renderItemFooter?: (item: MessageQueueItem) => ReactNode;
   /** Dedicated reservations, kept out of the executable mq list. */
   scheduledItems?: readonly ScheduledQueueItem[];
@@ -146,6 +147,7 @@ export function MessageQueueDisplay({
   onSteer,
   showSteerAction = false,
   nativeSteerAvailable = false,
+  sendWhileIdle = false,
   renderItemFooter,
   scheduledItems: dedicatedScheduledItems = [],
   onOpenScheduled,
@@ -249,6 +251,7 @@ export function MessageQueueDisplay({
         isFirst={index === 0}
         showSteerAction={showSteerAction}
         nativeSteerAvailable={nativeSteerAvailable}
+        sendWhileIdle={sendWhileIdle}
         canReorder={canReorder}
         isEditing={isEditing}
         editValue={isEditing ? editing.editValue : ''}
