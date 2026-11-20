@@ -3874,7 +3874,9 @@ function WorkspaceChatLanding({
       labelOf={projectMemberLabel}
     />
   ) : branchSelectorNode || topWorktreeNode ? (
-    <div {...stylex.props(composerSurface.contextPill)}>
+    <div
+      {...stylex.props(composerSurface.contextPill, isEmbedded && composerSurface.contextPillFixed)}
+    >
       {branchSelectorNode}
       {branchSelectorNode && topWorktreeNode ? (
         <span aria-hidden="true" {...stylex.props(composerSurface.contextPillDivider)} />
@@ -4233,11 +4235,12 @@ function WorkspaceChatLanding({
         </Button>
       )}
     >
-      {/* Embedded, the scope pills share one row with the run config. */}
+      {/* Embedded, the scope pills are items of the composer's one property row,
+          beside the run config, so each pill shrinks by its own rule. */}
       <div
         className={
           isEmbedded
-            ? 'flex min-w-0 shrink flex-nowrap items-center gap-1.5'
+            ? 'contents'
             : 'flex w-full min-w-0 items-center gap-2'
         }
       >
@@ -4251,23 +4254,27 @@ function WorkspaceChatLanding({
           disabled={isInitialDataLoading}
           onAddMachine={handleAddMachine}
         />
-        <UnifiedProjectSelectorView
-          value={desktopProjectSelection}
-          onChange={handleDesktopProjectChange}
-          localProjects={desktopLocalProjectOptions}
-          projectGroups={desktopProjectGroupOptions}
-          repositories={repositories}
-          latestMessageAtByRepo={mobileSheetRecency.byRepo}
-          onConnectGitRepo={handleConnectGitRepo}
-          onAddLocalProject={handleAddLocalProject}
-          onCreateProject={handleCreateProject}
-          onEditProjectGroup={handleEditProjectGroup}
-          onShareLocalProjectWithTeam={
-            showProjectSharing ? handleShareLocalProjectWithTeam : undefined
-          }
-          getShareErrorMessage={getProjectShareErrorMessage}
-          renderLimit={UNIFIED_PROJECT_OPTION_RENDER_LIMIT}
-        />
+        {/* Embedded, the project label is the one that gives way first, but
+            never below its icon and a few characters. */}
+        <div className={isEmbedded ? 'flex min-w-[4.5rem] shrink' : 'contents'}>
+          <UnifiedProjectSelectorView
+            value={desktopProjectSelection}
+            onChange={handleDesktopProjectChange}
+            localProjects={desktopLocalProjectOptions}
+            projectGroups={desktopProjectGroupOptions}
+            repositories={repositories}
+            latestMessageAtByRepo={mobileSheetRecency.byRepo}
+            onConnectGitRepo={handleConnectGitRepo}
+            onAddLocalProject={handleAddLocalProject}
+            onCreateProject={handleCreateProject}
+            onEditProjectGroup={handleEditProjectGroup}
+            onShareLocalProjectWithTeam={
+              showProjectSharing ? handleShareLocalProjectWithTeam : undefined
+            }
+            getShareErrorMessage={getProjectShareErrorMessage}
+            renderLimit={UNIFIED_PROJECT_OPTION_RENDER_LIMIT}
+          />
+        </div>
         {localGitStateRetryNode}
         {branchWorktreePill}
       </div>

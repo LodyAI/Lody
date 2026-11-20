@@ -133,6 +133,11 @@ export const composerSurface = stylex.create({
     backgroundImage: sheen.raised,
     boxShadow: shadow.raised,
   },
+  /**
+   * In a one-row property bar (the embedded landing), the branch pill keeps its
+   * size: the machine and project labels truncate first.
+   */
+  contextPillFixed: { flexShrink: 0 },
   /** The line between the pill's two halves. */
   contextPillDivider: {
     flexShrink: 0,
