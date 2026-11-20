@@ -76,7 +76,8 @@ and what can wait or has settled.
   apply to this conversation only, or to the whole opened-session tree.
   Contained Tabs follow their owner's bucket and are never written separately,
   matching the sub-conversation summary the Archive confirmation already
-  shows. Explicitly dragging a single row into Focus stays a per-row gesture.
+  shows. Dragging a row into Focus restores its opened sub-conversations with
+  it without asking; only the dropped row gains an `orderKey`.
 - Sending a message in a snoozed or settled conversation clears its
   `snoozedUntil` / `settledAt` state so it returns to Focus.
 - Dragging a row in Focus materializes real `orderKey`s for any expired-snooze

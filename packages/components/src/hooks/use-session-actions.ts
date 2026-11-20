@@ -1147,15 +1147,40 @@ export function useSessionActions(): SessionActions {
     [runtime, updateSessionPreference]
   );
 
+  // The session plus its opened sub-conversations. Contained Tabs share the
+  // owner's bucket and never render their own status row.
+  const openedSubTreeSessionIds = useCallback(
+    async (sessionId: SessionId) => {
+      if (!runtime) {
+        throw new Error('Runtime not ready');
+      }
+      const tree = await runtime.readSessionOperationTargets(sessionId, 'archive-tree');
+      if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
+        throw new Error('Workspace changed during session operation');
+      }
+      const ids = [sessionId];
+      for (const session of tree.slice(1)) {
+        if (session.parentSessionId === undefined) ids.push(session.id);
+      }
+      return ids;
+    },
+    [runtime, store]
+  );
+
   const applySessionFocusOrder = useCallback(
     async (writes: readonly ManualOrderWrite[], restoredSessionId?: SessionId) => {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
+      // Dragging a parent row into Focus drags its opened sub-conversations
+      // with it; they restore without their own orderKey writes.
+      const restoredIds = new Set<SessionId>(
+        restoredSessionId ? await openedSubTreeSessionIds(restoredSessionId) : []
+      );
       const now = getServerNow();
       for (const write of writes) {
         const targetId = write.sessionId as SessionId;
-        const isRestored = restoredSessionId != null && write.sessionId === restoredSessionId;
+        const isRestored = restoredIds.delete(targetId);
         const roomId = getSessionRoomId(targetId);
         const existing = await runtime.repo.getDocMeta(roomId);
         const meta = !isLoroRepoDocDeleted(existing)
@@ -1179,28 +1204,15 @@ export function useSessionActions(): SessionActions {
               : {}),
         });
       }
+      for (const restoredId of restoredIds) {
+        await updateSessionMetadata(restoredId, {
+          snoozedUntil: undefined,
+          settledAt: undefined,
+          focusRestoredAt: now,
+        });
+      }
     },
-    [runtime, updateSessionMetadata]
-  );
-
-  // The session plus its opened sub-conversations. Contained Tabs share the
-  // owner's bucket and never render their own status row.
-  const openedSubTreeSessionIds = useCallback(
-    async (sessionId: SessionId) => {
-      if (!runtime) {
-        throw new Error('Runtime not ready');
-      }
-      const tree = await runtime.readSessionOperationTargets(sessionId, 'archive-tree');
-      if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
-        throw new Error('Workspace changed during session operation');
-      }
-      const ids = [sessionId];
-      for (const session of tree.slice(1)) {
-        if (session.parentSessionId === undefined) ids.push(session.id);
-      }
-      return ids;
-    },
-    [runtime, store]
+    [runtime, openedSubTreeSessionIds, updateSessionMetadata]
   );
 
   const snoozeSession = useCallback(

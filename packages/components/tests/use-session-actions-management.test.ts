@@ -1691,6 +1691,33 @@ describe('useSessionActions', () => {
     });
   });
 
+  it('restores opened sub-conversations when the parent row is dragged into Focus', async () => {
+    const tree = createOpenedSubTree('drag-focus');
+    tree.metaRepo.setMeta(getSessionRoomId(tree.openedSession.id), {
+      ...tree.openedSession,
+      snoozedUntil: Date.now() + 60_000,
+    });
+    const actions = await renderActions(createRuntime({ repo: tree.metaRepo.repo }));
+
+    await actions.applySessionFocusOrder(
+      [{ sessionId: tree.rootSession.id, orderKey: 'a0' }],
+      tree.rootSession.id
+    );
+
+    const root = tree.metaRepo.getSession(tree.rootSession.id);
+    expect(root?.orderKey).toBe('a0');
+    expect(root?.focusRestoredAt).toBeGreaterThan(0);
+    // The dropped parent's opened sub-conversations restore without order keys.
+    for (const session of [tree.openedSession, tree.openedFromTabSession]) {
+      const meta = tree.metaRepo.getSession(session.id);
+      expect(meta?.focusRestoredAt).toBeGreaterThan(0);
+      expect(meta?.snoozedUntil).toBeUndefined();
+      expect(meta?.orderKey).toBeUndefined();
+    }
+    // Contained Tabs are never status targets.
+    expect(tree.metaRepo.getSession(tree.tabSession.id)?.focusRestoredAt).toBeUndefined();
+  });
+
   it.each([
     ['archiveSession', 'finish'],
     ['archiveSession', 'fail'],
