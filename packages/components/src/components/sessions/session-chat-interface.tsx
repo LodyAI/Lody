@@ -283,6 +283,7 @@ import { SessionInfoBar } from './session-info-bar';
 import { SessionPreviewPreload } from './session-preview-preload';
 import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
 import { SessionProjectMembersChip } from './session-project-members-chip';
+import { useSettleSessionWithConfirmation } from './session-sub-conversation-confirmation';
 import {
   buildSessionProjectMemberRows,
   resolveSessionProjectMemberRow,
@@ -3228,6 +3229,7 @@ export const SessionChatInterface = memo(
       settleSession,
       moveSessionToFocus,
     } = useSessionActions();
+    const settleSessionWithConfirmation = useSettleSessionWithConfirmation(settleSession);
     const [renameDialogTarget, setRenameDialogTarget] = useState<RenameSessionDialogTarget | null>(
       null
     );
@@ -7331,7 +7333,11 @@ export const SessionChatInterface = memo(
             ? (snoozedUntil) => snoozeSession(session.id, snoozedUntil)
             : undefined
         }
-        onSettle={headerSharing?.access !== 'read' ? () => settleSession(session.id) : undefined}
+        onSettle={
+          headerSharing?.access !== 'read'
+            ? () => settleSessionWithConfirmation(session.id).then(() => undefined)
+            : undefined
+        }
         onMoveToFocus={
           headerSharing?.access !== 'read' ? () => moveSessionToFocus(session.id) : undefined
         }
