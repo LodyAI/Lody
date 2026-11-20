@@ -383,7 +383,12 @@ import {
   resolveUnstartedTrailingDispatchAtMs,
   UNSTARTED_TRAILING_USER_TURN_TIMEOUT_MS,
 } from '@/lib/session-dispatch-state';
-import { shouldMarkSessionRead } from '@/lib/session-read-receipt';
+import {
+  resolveManualUnreadLatch,
+  shouldMarkSessionRead,
+  type ReadReceiptSnapshot,
+} from '@/lib/session-read-receipt';
+import { useWindowReadEngagement } from '@/lib/window-read-engagement';
 import { recordSessionRenderTrace, shortTraceId } from '@/lib/session-render-trace';
 import { getPathLauncherIcon } from '@/components/icons/path-launcher-icon';
 import {
@@ -4417,20 +4422,48 @@ export const SessionChatInterface = memo(
     );
 
     // Inactive tabs and collapsed side chats stay mounted for fast switching, so
-    // being mounted is not evidence the user saw this conversation: only the
-    // visible surface may clear unread state. Otherwise opening a parent session
-    // marks every one of its sub-sessions read at once.
-    const lastReadAtForReceiptRef = useRef(parseTimestamp(session.lastReadAt));
-    lastReadAtForReceiptRef.current = parseTimestamp(session.lastReadAt);
+    // being mounted is not evidence the user saw this conversation: only a
+    // visible surface inside an active foreground window that has received page
+    // interaction may clear unread state.
+    const {
+      isWindowActive: isWindowReadActive,
+      hasPageInteraction: hasWindowReadInteraction,
+      getLatestState: getLatestWindowReadEngagement,
+    } = useWindowReadEngagement();
+    const prevReadReceiptSnapshotRef = useRef<ReadReceiptSnapshot | null>(null);
+    const manualUnreadAtMessageRef = useRef<number | null>(null);
 
     useEffect(() => {
+      const surfaceVisible = isVisible && !preparingWindow;
       const lastMessageAt = parseTimestamp(session.lastMessageAt);
+      const lastReadAt = parseTimestamp(session.lastReadAt);
+      const snapshot: ReadReceiptSnapshot = {
+        sessionId: session.id,
+        isVisible: surfaceVisible,
+        lastMessageAt,
+        lastReadAt,
+      };
+      const manualUnreadAt = resolveManualUnreadLatch(
+        prevReadReceiptSnapshotRef.current,
+        snapshot,
+        manualUnreadAtMessageRef.current
+      );
+      prevReadReceiptSnapshotRef.current = snapshot;
+      manualUnreadAtMessageRef.current = manualUnreadAt;
+
+      if (manualUnreadAt !== null && lastMessageAt !== null && lastMessageAt <= manualUnreadAt) {
+        return;
+      }
+
+      const liveEngagement = getLatestWindowReadEngagement();
       if (
         !shouldMarkSessionRead({
           rendersConversation: !hideMessageArea,
-          isVisible: isVisible && !preparingWindow,
+          isVisible: surfaceVisible,
+          isWindowActive: isWindowReadActive && liveEngagement.isWindowActive,
+          hasPageInteraction: hasWindowReadInteraction && liveEngagement.hasPageInteraction,
           lastMessageAt,
-          lastReadAt: lastReadAtForReceiptRef.current,
+          lastReadAt,
         })
       ) {
         return;
@@ -4438,17 +4471,17 @@ export const SessionChatInterface = memo(
       void markSessionRead(session.id, session.lastMessageAt ?? null).catch((error: unknown) => {
         console.warn('Failed to mark session as read', error);
       });
-      // A receipt gets a new opportunity when this surface becomes visible or
-      // a new message arrives. Deliberately do not depend on lastReadAt: moving
-      // that receipt backwards is the user's explicit "Mark as unread" action,
-      // which must remain visible until they leave and reopen the conversation.
     }, [
+      getLatestWindowReadEngagement,
+      hasWindowReadInteraction,
       hideMessageArea,
       isVisible,
-      preparingWindow,
+      isWindowReadActive,
       markSessionRead,
+      preparingWindow,
       session.id,
       session.lastMessageAt,
+      session.lastReadAt,
     ]);
 
     const isDispatching = inputActionState === 'dispatching';
