@@ -21,13 +21,13 @@ export type TodayDropTarget = {
   depth: number;
   expandParent: boolean;
   lineTop: number;
-  lineLeft: number;
 };
 
 export function projectTodayDrop(
   rows: readonly TodayDropRow[],
   pointer: { x: number; y: number },
-  contentLeft: number,
+  /** Pointer x that means depth 0. */
+  depthOrigin: number,
   indent: number,
   excluded: ReadonlySet<string>
 ): TodayDropTarget | null {
@@ -37,12 +37,11 @@ export function projectTodayDrop(
   const next = candidates[gap];
   const maxDepth = previous ? previous.depth + 1 : 0;
   const minDepth = next ? Math.min(next.depth, maxDepth) : 0;
-  const wanted = Math.round((pointer.x - contentLeft) / indent);
+  const wanted = Math.round((pointer.x - depthOrigin) / indent);
   const depth = Math.min(Math.max(wanted, minDepth), maxDepth);
   const lineTop = previous ? previous.bottom : (next?.top ?? 0);
-  const lineLeft = contentLeft + depth * indent;
   if (!previous) {
-    return { parentId: null, after: null, depth: 0, expandParent: false, lineTop, lineLeft };
+    return { parentId: null, after: null, depth: 0, expandParent: false, lineTop };
   }
   if (depth === previous.depth + 1) {
     return {
@@ -51,7 +50,6 @@ export function projectTodayDrop(
       depth,
       expandParent: previous.collapsed,
       lineTop,
-      lineLeft,
     };
   }
   const byId = new Map(rows.map((row) => [row.id, row] as const));
@@ -65,7 +63,6 @@ export function projectTodayDrop(
     depth,
     expandParent: false,
     lineTop,
-    lineLeft,
   };
 }
 

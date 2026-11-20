@@ -41,6 +41,8 @@ export type TodayDropIndicator =
 export type TodayDragGhost = { x: number; y: number; label: string; count: number };
 /** Indentation per outline level; matches the rows' padding. */
 export const TODAY_INDENT_PX = 22;
+/** Distance from a row's start to its bullet's centre (fold toggle + gap + half bullet). */
+const TODAY_BULLET_CENTER_PX = 28;
 const DRAG_THRESHOLD_PX = 5;
 
 export type TodaySessionPickerState = {
@@ -237,22 +239,33 @@ export class TodayEditorController {
     return { rows, contentLeft, right };
   }
 
+  /**
+   * Project a drop and place its line. `depthOrigin` is the x at which the
+   * pointer means depth 0: for a node drag it follows the grab point, so a
+   * purely vertical drag keeps the node's depth; otherwise it is the bullet
+   * column. The line starts at the target depth's bullet, where the node lands.
+   */
   private project(
     store: TodayPageStore,
     day: Element,
     point: { x: number; y: number },
-    excluded: ReadonlySet<string>
+    excluded: ReadonlySet<string>,
+    depthOrigin?: number
   ): TodayDropTarget | null {
     const { rows, contentLeft, right } = this.dayRows(store, day);
-    const target = projectTodayDrop(rows, point, contentLeft, TODAY_INDENT_PX, excluded);
-    this.dropIndicator = target
-      ? {
-          kind: 'line',
-          top: target.lineTop,
-          left: target.lineLeft,
-          width: Math.max(right - target.lineLeft, 40),
-        }
-      : null;
+    const origin = depthOrigin ?? contentLeft + TODAY_BULLET_CENTER_PX;
+    const target = projectTodayDrop(rows, point, origin, TODAY_INDENT_PX, excluded);
+    if (!target) {
+      this.dropIndicator = null;
+      return null;
+    }
+    const left = contentLeft + TODAY_BULLET_CENTER_PX + target.depth * TODAY_INDENT_PX;
+    this.dropIndicator = {
+      kind: 'line',
+      top: target.lineTop,
+      left,
+      width: Math.max(right - left, 40),
+    };
     return target;
   }
 
@@ -300,6 +313,9 @@ export class TodayEditorController {
         : [nodeId];
     const ids = topLevelSelection(store.getSnapshot().visible, selection);
     const label = store.outline.getNode(ids[0]!)?.text ?? '';
+    // Horizontal movement from the grab point changes depth, one indent per level.
+    const depthOrigin =
+      start.clientX - (store.outline.getNode(ids[0]!)?.depth ?? 0) * TODAY_INDENT_PX;
     let dragging = false;
     let target: TodayDropTarget | null = null;
     const finish = (commit: boolean) => {
@@ -328,7 +344,13 @@ export class TodayEditorController {
       const rect = day.getBoundingClientRect();
       const inside = event.clientY >= rect.top && event.clientY <= rect.bottom;
       if (inside) {
-        target = this.project(store, day, { x: event.clientX, y: event.clientY }, new Set(ids));
+        target = this.project(
+          store,
+          day,
+          { x: event.clientX, y: event.clientY },
+          new Set(ids),
+          depthOrigin
+        );
       } else {
         target = null;
         this.dropIndicator = { kind: 'blocked', x: event.clientX, y: event.clientY };
