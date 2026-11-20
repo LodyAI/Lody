@@ -200,6 +200,8 @@ const INCREMENTAL_CAPABILITY = 'loro-external-metadata-v2' as const;
 export type NotCommitted = (reason: string) => Error;
 
 export interface NativeWorkspaceMeta extends IncrementalExternalMetadataAdapter<JsonObject> {
+  /** One document's current row from the live projection (main's per-request read checks). */
+  readDoc(docId: string): Promise<RepoDocMeta<JsonObject> | undefined>;
   /** Releases the shared observation once every listener has unsubscribed. */
   close(): Promise<void>;
 }
@@ -314,6 +316,11 @@ export function createNativeWorkspaceMeta(
           listeners.delete(listener);
         },
       };
+    },
+    async readDoc(docId) {
+      await start();
+      await observation!.ready;
+      return projection.docRow(docId);
     },
     commit,
     flush: async () => ({ outcome: 'committed' as const, revision }),

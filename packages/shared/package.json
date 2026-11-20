@@ -200,6 +200,10 @@
       "types": "./src/native-flock-bundle.ts",
       "import": "./src/native-flock-bundle.ts"
     },
+    "./session-visibility": {
+      "types": "./src/session-visibility.ts",
+      "import": "./src/session-visibility.ts"
+    },
     "./native-workspace-meta-ipc": {
       "types": "./src/native-workspace-meta-ipc.ts",
       "import": "./src/native-workspace-meta-ipc.ts"

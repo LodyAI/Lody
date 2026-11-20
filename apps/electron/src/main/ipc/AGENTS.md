@@ -88,3 +88,13 @@ the untagged `e2ee_not_open`, which the boundary publishes only as the sanitized
 `e2ee_host_operation_failed`. After recording a loss, main sends reader windows the
 reason-free `e2ee.accessLost` hint; the renderer's own refresh learns the exact code.
 [Rationale](../../../../../.agents/notes/implemented/architecture/2026-10-30-e2ee-desktop-device-revocation.md#live-reader-cut).
+
+## Native Workspace Meta in encrypted workspaces
+
+Behind `LODY_NATIVE_E2EE=1`, native IPC admits a request only while the sending
+window holds that workspace's E2EE reader lease for the signed-in account; the
+first admitted request attaches the namespace. Every Session document request is
+checked with the shared `@lody/shared/session-visibility` rules, whose inputs come
+from native Meta and the host's verified sharing view; never copy the rules here.
+Access loss closes the workspace's views and discards replies started before it.
+Design: [encrypted workspaces](../../../../../.agents/docs/native-workspace-meta.md#encrypted-workspaces).

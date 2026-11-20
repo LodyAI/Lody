@@ -408,6 +408,30 @@ reaches the engine only through custody's purpose-limited `withEngineSeed`.
 Content-token refusals go to the same credential-failure handler as Streams
 tokens, and the install reruns after every verified background refresh.
 
+On the desktop, main attaches on the first native request a window makes while it
+holds the workspace's E2EE reader lease
+([`native-encrypted-access.ts`](../../apps/electron/src/main/services/native-encrypted-access.ts)).
+Its writer is `personal:<signing public key>`, and the desktop host's
+`syncEngineKeyring` installs the seed through the same `withEngineSeed`. The host
+reports every successful key round and ledger ingest, and main then reinstalls.
+When the last reader leaves, main stops reinstalling. Each Session document request
+is checked with the shared
+[`session-visibility.ts`](../../packages/shared/src/session-visibility.ts) rules,
+the same functions the renderer lists Sessions with. Their inputs are the
+Session's Meta row, its parent, its machine's owner, and the host's verified
+sharing view for that machine
+([`native-session-read.ts`](../../apps/electron/src/main/services/native-session-read.ts)).
+Once the removal receipt is durable, `removeLocalWorkspace` closes the workspace's
+views (late replies are discarded), then retires main's writer or drops the
+namespace. Main's first connection finishes any pending wipe
+(`finishPendingNativeWipes`). The renderer tries native Meta for protected
+content too. A window without a lease, or an attach that fails, stays on the
+legacy path, so the switch never blocks opening a workspace.
+
+Each client and namespace registers one token provider, because the client
+replays registrations and cannot remove one. It serves the current attachment's
+tokens, and a closed attachment (an account switch or a wipe) serves none.
+
 Limits: an encrypted namespace does not import the legacy local store. It
 bootstraps from the cloud, because re-uploading imported state would sign
 other authors' ops as this device. Content tokens are per remote, not per writer;
