@@ -34,12 +34,10 @@ archive procedure for [Agent Notes](../notes/AGENTS.md#supersession); the rules 
 in that file. `.claude/skills/archive-agent-notes` links to it. See the
 [decision note](../notes/implemented/process/2026-10-28-agent-note-memory-hygiene.md).
 
-`lody-cli` is authored in this repository; its canonical copy is
-[`skills/lody-cli`](../../skills/lody-cli/SKILL.md) at the repository root. It is the operating guide for the `lody`
-CLI: runtime prerequisites, sign-in recovery, work-context selection, selector and
-environment conventions, the schedule draft format, and confirmation-worthy commands.
-Built-in `--help` remains the flag authority.
-`.agents/skills/lody-cli` and `.claude/skills/lody-cli` link to it. See the
+`lody-cli` is maintained in the dedicated public repository
+[`LodyAI/skills`](https://github.com/LodyAI/skills) (`npx skills add LodyAI/skills`)
+rather than inside this monorepo, so external users can install user-facing skills
+without cloning repository-maintainer skills. See the
 [decision note](../notes/proposed/process/2026-10-21-lody-cli-skill.md).
 
 ## Session execution verification

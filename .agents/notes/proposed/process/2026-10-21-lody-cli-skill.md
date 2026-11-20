@@ -20,10 +20,10 @@ PTY/non-TTY login check; live agent dispatch remains untested.
 
 ## Decision
 
-- Canonical copy at `skills/lody-cli/SKILL.md`, the repository-root directory for skills
-  written for external users rather than repository maintainers. `.agents/skills/lody-cli`
-  and `.claude/skills/lody-cli` are symlinks to it, so in-repository skill discovery is
-  unchanged.
+- Canonical copy lives in the dedicated public repository
+  [`LodyAI/skills`](https://github.com/LodyAI/skills) (`npx skills add LodyAI/skills`)
+  so external users can install user-facing skills without cloning this monorepo or
+  discovering repository-maintainer skills.
 - Audience is external: users who install `lody` globally or run `npx lody`, called by agents
   inside Lody sessions or by outside coding agents. The skill describes product behavior only
   and names no source paths, internal transports or build steps; maintainer evidence stays in
