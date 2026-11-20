@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createLocalCloudPort } from '@lody/platform';
-import { getSessionRoomId, type WorkspaceId } from '@lody/shared';
+import { getSessionRoomId, getWorkspaceFlockDocId, type WorkspaceId } from '@lody/shared';
 import { connectNativeRepo, nativeRepoDataDir } from '@lody/shared/node/native-repo';
 import { bindTestPresenceApplication } from './presence-application-fixture';
 import {
@@ -111,6 +111,15 @@ describe('native Workspace Meta in the CLI daemon', () => {
     const kept = await legacy.manager.createSession('local-machine', 'builtin', 'claude');
     const removed = await legacy.manager.createSession('local-machine', 'builtin', 'claude');
     await legacy.manager.repo.upsertDocMeta(getSessionRoomId(kept), { title: 'kept' });
+    const catalogId = getWorkspaceFlockDocId(workspace.id as WorkspaceId);
+    const catalog = async (manager: LoroDocumentManager) =>
+      (await manager.repo.openFlockDoc(catalogId)).flock;
+    const putRow = async (manager: LoroDocumentManager, key: string[], value: unknown) => {
+      const flock = await catalog(manager);
+      flock.put(key, value as never);
+      await manager.repo.persistFlockDocNow(catalogId, flock);
+    };
+    await putRow(legacy.manager, ['mcpServer', 'legacy'], { name: 'legacy' });
     await legacy.manager.repo.deleteDoc(getSessionRoomId(removed));
     await legacy.close();
 
@@ -130,6 +139,11 @@ describe('native Workspace Meta in the CLI daemon', () => {
       ]);
 
       await daemon.manager.repo.upsertDocMeta(getSessionRoomId(kept), { title: 'renamed' });
+      // The workspace catalog is migrated and owned natively too.
+      expect((await catalog(daemon.manager)).get(['mcpServer', 'legacy'])).toEqual({
+        name: 'legacy',
+      });
+      await putRow(daemon.manager, ['mcpServer', 'native'], { name: 'native' });
     } finally {
       await daemon.close();
     }
@@ -156,7 +170,11 @@ describe('native Workspace Meta in the CLI daemon', () => {
       expect(
         (await legacyAgain.manager.repo.getDocMeta(getSessionRoomId(nativeOnly)))?.deleted
       ).toBe(false);
+      expect((await catalog(legacyAgain.manager)).get(['mcpServer', 'native'])).toEqual({
+        name: 'native',
+      });
       await legacyAgain.manager.repo.upsertDocMeta(getSessionRoomId(kept), { title: 'offline' });
+      await putRow(legacyAgain.manager, ['mcpServer', 'offline'], { name: 'offline' });
     } finally {
       await legacyAgain.close();
     }
@@ -168,6 +186,9 @@ describe('native Workspace Meta in the CLI daemon', () => {
       expect((await nativeAgain.manager.repo.getDocMeta(getSessionRoomId(kept)))?.meta.title).toBe(
         'offline'
       );
+      expect((await catalog(nativeAgain.manager)).get(['mcpServer', 'offline'])).toEqual({
+        name: 'offline',
+      });
     } finally {
       await nativeAgain.close();
       await connection.close();

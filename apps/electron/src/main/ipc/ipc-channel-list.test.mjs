@@ -161,6 +161,7 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
   const nativeRepo = await import('@lody/shared/node/native-repo')
   const nativeMeta = await import('@lody/shared/node/native-workspace-meta')
   const nativeIpc = await import('@lody/shared/native-workspace-meta-ipc')
+  const nativeFlockDocs = await import('@lody/shared/node/native-flock-docs')
   const nativeDir = await mkdtemp(join(tmpdir(), 'lody-native-meta-ipc-'))
   const hostScript = fileURLToPath(
     new URL('../../../../../packages/shared/tests/fixtures/native-repo-host.mjs', import.meta.url)
@@ -183,6 +184,7 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
         nativeRepo.connectNativeRepo({ ...options, dataDir: nativeDir })
     },
     '@lody/shared/node/native-workspace-meta': nativeMeta,
+    '@lody/shared/node/native-flock-docs': nativeFlockDocs,
     '@lody/shared/native-workspace-meta-ipc': nativeIpc
   })
   new meta.NativeWorkspaceMetaIpc()
@@ -238,6 +240,38 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
         command: { kind: 'upsert-doc', docId: 'x', patch: {}, extra: 1 }
       })
     )
+    // Owned named Flock documents: only this workspace's owned ids are admitted.
+    const catalogId = nativeIpc.nativeFlockDocIds('lw_test')[0]
+    await assert.rejects(
+      handlers.get('nativeWorkspaceMeta.openFlockDoc')(auxiliary, {
+        ...scope,
+        flockDocId: 'lw_test:mf:other',
+        observationId: '00000000-0000-4000-8000-000000000003'
+      }),
+      /scope_denied/
+    )
+    const flockEvents = []
+    auxiliary.sender.on(nativeIpc.NATIVE_FLOCK_CHANNEL, (event) => flockEvents.push(event))
+    await handlers.get('nativeWorkspaceMeta.openFlockDoc')(auxiliary, {
+      ...scope,
+      flockDocId: catalogId,
+      observationId: '00000000-0000-4000-8000-000000000004'
+    })
+    assert.equal(flockEvents[0].event.kind, 'snapshot')
+    const bundle = {
+      version: 0,
+      entries: { '["mcpServer","a"]': { c: '1,0,renderer', d: { name: 'a' } } }
+    }
+    await handlers.get('nativeWorkspaceMeta.commitFlockDoc')(auxiliary, {
+      ...scope,
+      flockDocId: catalogId,
+      payloads: [new TextEncoder().encode(JSON.stringify(bundle))]
+    })
+    while (!flockEvents.some((event) => event.event.kind === 'changes'))
+      await new Promise((resolve) => setImmediate(resolve))
+    const changed = flockEvents.find((event) => event.event.kind === 'changes').event.registers
+    assert.deepEqual(changed[0].key, ['mcpServer', 'a'])
+    assert.equal(changed[0].clockEncoded, '1,0,renderer')
   } finally {
     const connection = await nativeRepo.connectNativeRepo({
       dataDir: nativeDir,

@@ -184,6 +184,10 @@
       "types": "./src/layout.ts",
       "import": "./src/layout.ts"
     },
+    "./native-flock-bundle": {
+      "types": "./src/native-flock-bundle.ts",
+      "import": "./src/native-flock-bundle.ts"
+    },
     "./native-workspace-meta-ipc": {
       "types": "./src/native-workspace-meta-ipc.ts",
       "import": "./src/native-workspace-meta-ipc.ts"
@@ -242,6 +246,7 @@
     "loro-repo": "catalog:",
     "@loro-dev/loro-repo-engine": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "@loro-dev/flock-wasm": "catalog:"
   }
 }

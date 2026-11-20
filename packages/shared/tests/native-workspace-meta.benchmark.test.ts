@@ -10,11 +10,15 @@ import {
   LoroRepo,
   type JsonObject,
 } from 'loro-repo';
-import { connectNativeRepo } from '../src/node/native-repo';
+import { Flock } from '@loro-dev/flock-wasm';
+import { createNativeFlockDocs } from '../src/node/native-flock-docs';
+import {
+  connectNativeRepo,
+  importLegacyRoom,
+  type LegacyFlockBundle,
+} from '../src/node/native-repo';
 import {
   createNativeWorkspaceMeta,
-  importLegacyMeta,
-  type LegacyFlockBundle,
 } from '../src/node/native-workspace-meta';
 
 // Opt-in: LODY_NATIVE_META_BENCH=1. Real host process, real socket connections.
@@ -71,7 +75,7 @@ async function bench(docs: number) {
   try {
     const bundle = syntheticBundle(docs);
     let started = performance.now();
-    await importLegacyMeta(connection.client, ns, 'bench', async () => bundle);
+    await importLegacyRoom(connection.client, ns, META_ROOM, 'bench', async () => bundle);
     const migrationMs = performance.now() - started;
     const registers = Object.keys(bundle.entries).length;
 
@@ -147,6 +151,85 @@ async function bench(docs: number) {
     await rm(dataDir, { recursive: true, force: true });
   }
 }
+
+async function benchFlockDoc(rows: number) {
+  const dataDir = await mkdtemp(join(tmpdir(), `lody-native-flock-bench-${rows}-`));
+  const ns = `flock-${rows}`;
+  const id = 'ws:wf:workspace';
+  const connection = await connectNativeRepo({
+    dataDir,
+    launcher: () => ({ command: process.execPath, args: [hostScript] }),
+  });
+  const peer = await connectEngine(dataDir, { queueWhileReconnecting: false });
+  const owner = (client: typeof peer) =>
+    createNativeFlockDocs(client, ns, (doc) => doc === id, (file) => Flock.fromFile(file).exportJson());
+  try {
+    const seed = new Flock('seed');
+    // Row shape of an MCP/Role catalog entry (~200 bytes of JSON).
+    for (let i = 0; i < rows; i++)
+      seed.put(['row', String(i)], { name: `row-${i}`, command: 'node', args: ['server.js', String(i)] });
+    await importLegacyRoom(connection.client, ns, { kind: 'flock', id }, 'bench', async () =>
+      seed.exportJson() as LegacyFlockBundle
+    );
+    const open = await measure(async () => {
+      const repo = await LoroRepo.create({ externalFlockDocs: owner(connection.client) });
+      await repo.openFlockDoc(id);
+      await repo.destroy();
+    });
+    const daemon = await LoroRepo.create({ externalFlockDocs: owner(connection.client) });
+    const renderer = await LoroRepo.create({ externalFlockDocs: owner(peer) });
+    const a = await daemon.openFlockDoc(id);
+    const b = await renderer.openFlockDoc(id);
+    const write = await measure(async (i) => {
+      a.flock.put(['row', String(i % rows)], { name: `w${i}` });
+      await daemon.persistFlockDocNow(id, a.flock);
+    });
+    const update = await measure(async (i) => {
+      const key = ['row', String(i % rows)];
+      const seen = new Promise<void>((resolve) => {
+        const stop = b.flock.subscribe(() => {
+          if ((b.flock.get(key) as { name?: string } | undefined)?.name === `u${i}`) {
+            stop();
+            resolve();
+          }
+        });
+      });
+      a.flock.put(key, { name: `u${i}` });
+      await daemon.persistFlockDocNow(id, a.flock);
+      await seen;
+    });
+    await renderer.destroy();
+    await daemon.destroy();
+    return { rows, fileBytes: seed.exportFile().length, open, write, update };
+  } finally {
+    await peer.close();
+    const pid = (JSON.parse(await readFile(join(dataDir, 'engine.json'), 'utf8')) as { pid: number })
+      .pid;
+    await connection.close();
+    process.kill(pid, 'SIGTERM');
+    while (
+      (() => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      })()
+    )
+      await new Promise((resolve) => setImmediate(resolve));
+    await rm(dataDir, { recursive: true, force: true });
+  }
+}
+
+describe.skipIf(!enabled)('native named Flock document benchmark', () => {
+  it('opens and writes catalog-sized rooms', async () => {
+    const results = [];
+    for (const rows of [24, 524, 5000]) results.push(await benchFlockDoc(rows));
+    const out = process.env.LODY_NATIVE_META_BENCH_OUT;
+    if (out) await writeFile(out.replace(/\.json$/, '-flock.json'), JSON.stringify(results, null, 2));
+  }, 600_000);
+});
 
 describe.skipIf(!enabled)('native Workspace Meta benchmark', () => {
   it('keeps per-operation latency flat from 10k to 100k documents', async () => {

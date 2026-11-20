@@ -1991,6 +1991,9 @@ importers:
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.2(effect@4.0.2)(vitest@5.0.2)
+      '@loro-dev/flock-wasm':
+        specifier: 'catalog:'
+        version: 0.5.0
       '@loro-dev/loro-repo-engine':
         specifier: 'catalog:'
         version: 0.1.0

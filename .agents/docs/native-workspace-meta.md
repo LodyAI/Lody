@@ -53,6 +53,35 @@ The listener receives one `snapshot`, then `changes`; disconnect or a gap emits
 `invalidated`. After the SDK resubscribes on reconnect, or after a gap, the same
 load runs again, so every view recovers from a new snapshot.
 
+`observeFlockRegisters` is the same lifecycle with a different load: the
+subscription also carries each change's clock (`registers: true`), the initial
+state is the room's complete raw export, and buffered or repeated changes merge
+in any order because they are Flock records with clocks.
+
+## Named Flock documents
+
+The workspace catalog (`<ws>:wf:workspace`) is owned natively by the same
+switch. Its consumers keep using `repo.openFlockDoc` and the in-memory wasm
+Flock: the repo is given loro-repo's external Flock owner
+([`native-flock-docs.ts`](../../packages/shared/src/node/native-flock-docs.ts)), so the
+replica is loaded from the native room's raw export, receives changes with clocks,
+and commits local changes on the existing persistence barriers (`flush`,
+`persistFlockDocNow`, `syncOnce`) with `importRoomState`. Owned documents are never
+written to local storage and never routed to the local data plane. The renderer
+opens and commits them through main (`openFlockDoc`/`commitFlockDoc`), which admits
+only the workspace's owned ids (`nativeFlockDocIds`).
+
+Writers: the daemon and each renderer hold their own replica and commit
+independently. The same key resolves by Flock clock (last writer wins) in every
+replica and the native room; different keys are all kept. A commit that fails
+(host down) rejects its barrier, keeps the change pending in the replica, and the
+next barrier commits it; it is never reported as committed.
+
+Real sizes from a long-lived local workspace on the development machine (1,296
+documents, 106k Meta registers) bound the in-memory trade-off: `wf` 24 rows / 8 KB
+file, the largest of ten `mf` rooms 524 rows / 100 KB, `sr` 97 rows / 12 KB. Each
+replica is the whole room, as with the legacy storage-backed replica.
+
 ## Workspace Meta
 
 [`native-workspace-meta.ts`](../../packages/shared/src/node/native-workspace-meta.ts)
@@ -72,9 +101,11 @@ legacy Meta room. The renderer does the same through an IPC adapter
 ([`providers/native-workspace-meta.ts`](../../packages/components/src/providers/native-workspace-meta.ts)).
 The four CLI helpers that scanned the raw Meta Flock read `repo.listDoc()` in this mode.
 
-## Migration from legacy Meta
+## Migration from legacy replicas
 
-The native room uses the legacy key layout unchanged. Each legacy replica is a
+Every native room (Meta and each owned named Flock document) uses the legacy key
+layout unchanged and migrates with the same `importLegacyRoom` step. Each legacy
+replica is a
 _source_: the CLI SQLite store (`cli-sqlite`) and each renderer IndexedDB store
 (`renderer:<db>`). For each source:
 
@@ -109,7 +140,7 @@ handling; a failed write-back is logged and retried on the next start.
 | -------- | ----------------------------------------------------------------------------------------------------- | --------------------- |
 | 1 (this) | Host, shared connection, observation, Meta adapter, migration, daemon/main/renderer wiring, packaging | 1,500 (actual ≈1,300) |
 | 2        | Write-back on flag-off                                                                                | 400 (actual ≈60)      |
-| 3        | Workspace catalog (`wf`) on the same lifecycle                                                        | 600                   |
+| 3        | Workspace catalog (`wf`) on the same lifecycle                                                        | 600 (actual ≈330)     |
 | —        | Switch to the released SDK packages when loro-repo #290/#308 ship                                     | manifests only        |
 | 4        | Machine Flock (`mf`) and schedule registry (`sr`)                                                     | 800                   |
 | 5        | Cloud replication of native rooms (needs remote Meta design)                                          | separate proposal     |
@@ -141,11 +172,29 @@ every document. One-time migration takes 0.8 s and 19.0 s. The write p99 tail
 grows with the room and is not caused by Lody: it matches the engine's periodic
 whole-room auto-compaction inside the write path, an SDK follow-up.
 
+Owned named Flock documents, same machine and method (milliseconds; open = new
+repo plus loaded replica; write = `put` plus committed `persistFlockDocNow`;
+update = write until the other connection's replica shows it):
+
+|   Rows (file) | Operation |  p50 |  p95 |  p99 |
+| ------------: | --------- | ---: | ---: | ---: |
+|   24 (0.6 KB) | open      | 1.69 | 2.78 | 6.27 |
+|            24 | write     | 1.00 | 1.68 | 3.57 |
+|            24 | update    | 0.66 | 1.69 | 3.18 |
+|  524 (4.4 KB) | open      | 3.84 | 4.91 | 5.95 |
+|           524 | write     | 0.96 | 1.75 | 12.2 |
+|           524 | update    | 0.62 | 1.54 | 9.39 |
+| 5,000 (37 KB) | open      | 10.2 | 21.9 | 24.9 |
+|         5,000 | write     | 0.94 | 1.22 | 76.0 |
+|         5,000 | update    | 0.93 | 1.58 | 84.1 |
+
 ## Limits
 
 - Requires unreleased SDK changes: loro-repo #301–#307 (#306 adds changes
   subscriptions without a snapshot, #307 the incremental external metadata
-  contract). Local builds are used only through an uncommitted override.
+  contract) plus register-bearing changes and the external named Flock owner
+  (branches `lody/flock-changes-registers`, `lody/external-flock-docs`). Local
+  builds are used only through an uncommitted override.
 - A commit already sent when the host dies is an unknown outcome. Per the SDK
   contract this latches that repo's metadata writes until it is recreated; reads
   continue. Commits attempted while disconnected are certain non-commits.
