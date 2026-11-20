@@ -1,5 +1,8 @@
+import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { createLodyWorkspaceRoutes, type RepoClient } from '@loro-dev/loro-repo-client';
 import { encryptedWorkspaceNamespace } from '../workspace-streams-content';
+import { forgetDeclaredDocRooms } from './native-docs';
 import { setNativeNamespaceEncryption } from './native-repo';
 
 /**
@@ -53,10 +56,39 @@ export const NATIVE_ENCRYPTED_SNAPSHOT_POLICY = {
 const WRITER_TOKEN_PRIORITY = 200;
 const READER_TOKEN_PRIORITY = 100;
 
-export class NativeWorkspaceWipedError extends Error {
-  constructor(workspaceId: string) {
-    super(`native_workspace_wiped: ${workspaceId}`);
-  }
+/**
+ * The pending-wipe marker of one workspace, in the engine's data directory. It is
+ * machine-wide, beside the namespace it guards: whichever process connects next
+ * finishes the wipe, and erasing a member's identity directory cannot lose it.
+ */
+export function nativePendingWipeMarker(dataDir: string, workspaceId: string): NativePendingWipe {
+  const file = join(dataDir, 'pending-wipes', `${Buffer.from(workspaceId).toString('hex')}.json`);
+  return {
+    read: () =>
+      readFile(file).then(
+        () => true,
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return false;
+          throw error;
+        }
+      ),
+    async write() {
+      await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+      const temporary = `${file}.${process.pid}.pending`;
+      const handle = await open(temporary, 'w', 0o600);
+      try {
+        await handle.writeFile(JSON.stringify({ workspaceId }));
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      await rename(temporary, file);
+    },
+    clear: () =>
+      unlink(file).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') throw error;
+      }),
+  };
 }
 
 export interface NativeEncryptedWorkspace {
@@ -66,12 +98,18 @@ export interface NativeEncryptedWorkspace {
    */
   refresh(): Promise<void>;
   /**
-   * Removes this workspace from the device after credential-confirmed member
-   * removal or revocation: writes the pending-wipe marker, clears the keyring,
+   * Removes this workspace's content from the device after credential-confirmed
+   * member removal: writes the pending-wipe marker, clears the keyring,
    * removes the remote and drops the namespace. Only a successful drop clears the
    * marker; a failure leaves it for the next attach to finish.
    */
   wipe(): Promise<void>;
+  /**
+   * This process's device was revoked while the member stays: only its writer
+   * leaves the keyring (its rows wait unsealed). Another device of the member on
+   * this installation keeps using the namespace, so nothing is dropped.
+   */
+  retireWriter(writer: string): Promise<void>;
   /** Stops reinstalling on reconnect. Keys stay: another process may share the namespace. */
   close(): void;
 }
@@ -82,22 +120,20 @@ async function finishWipe(options: NativeEncryptedWorkspaceOptions) {
   await client.keyringClear(workspaceId);
   await client.removeRemote(workspaceId, NATIVE_CONTENT_REMOTE_ID).catch(() => {});
   await client.dropNamespace(workspaceId);
+  forgetDeclaredDocRooms(client, workspaceId);
   await options.pendingWipe.clear();
 }
 
 /**
- * Attaches the namespace. A pending wipe is finished first and the attach then
- * refuses (`NativeWorkspaceWipedError`), so content-open admission never reopens
- * a removed workspace.
+ * Attaches the namespace. A pending wipe is finished first, before any other
+ * request for the namespace: the caller passed content-open admission again (a
+ * new pairing), so the workspace then opens from a fresh, empty namespace.
  */
 export async function attachNativeEncryptedWorkspace(
   options: NativeEncryptedWorkspaceOptions
 ): Promise<NativeEncryptedWorkspace> {
   const { client, workspaceId } = options;
-  if (await options.pendingWipe.read()) {
-    await finishWipe(options);
-    throw new NativeWorkspaceWipedError(workspaceId);
-  }
+  if (await options.pendingWipe.read()) await finishWipe(options);
   setNativeNamespaceEncryption(client, workspaceId, 'encrypted');
 
   let serial: Promise<unknown> = Promise.resolve();
@@ -161,6 +197,11 @@ export async function attachNativeEncryptedWorkspace(
         offState();
         await options.pendingWipe.write();
         await finishWipe(options);
+      }),
+    retireWriter: (writer) =>
+      run(async () => {
+        await client.keyringHoldSealing(workspaceId, writer);
+        await client.keyringRemoveSigner(workspaceId, writer);
       }),
     close() {
       closed = true;

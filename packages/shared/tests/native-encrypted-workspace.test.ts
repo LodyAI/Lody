@@ -12,7 +12,7 @@ import { createDocRoom } from '../src/node/native-docs';
 import {
   attachNativeEncryptedWorkspace,
   NATIVE_CONTENT_REMOTE_ID,
-  NativeWorkspaceWipedError,
+  nativePendingWipeMarker,
   type NativePendingWipe,
 } from '../src/node/native-encrypted-workspace';
 import { createLoroStreamUrl, getLoroStreamIdForDocId, type WorkspaceId } from '../src';
@@ -85,8 +85,7 @@ async function device(name: 'a' | 'b', baseUrl: string) {
   const writer = `device-${name}`;
   let tokens = 0;
   let syncs = 0;
-  const pendingWipe = memoryWipe();
-  const attach = () =>
+  const attach = (pendingWipe: NativePendingWipe = memoryWipe()) =>
     attachNativeEncryptedWorkspace({
       client,
       workspaceId: ws,
@@ -107,7 +106,7 @@ async function device(name: 'a' | 'b', baseUrl: string) {
       },
       pendingWipe,
     });
-  return { dataDir, client, writer, attach, pendingWipe, syncs: () => syncs };
+  return { dataDir, client, writer, attach, syncs: () => syncs };
 }
 
 const write = (client: RepoClient, writer: string, note: string) =>
@@ -161,14 +160,20 @@ describe('native encrypted workspace', () => {
       })
       .toBe(0);
 
-    // Removal: the marker survives a host that is down; the next attach finishes the wipe.
-    await a.pendingWipe.write();
+    // Removal: a marker written while the host is down survives; the next attach
+    // finishes the wipe before anything else and opens a fresh namespace.
     wa.close();
+    const marker = nativePendingWipeMarker(a.dataDir, ws);
+    await marker.write();
     const nsFile = join(a.dataDir, 'namespaces', `ns_${Buffer.from(ws).toString('hex')}.sqlite3`);
     expect(existsSync(nsFile)).toBe(true);
-    await expect(a.attach()).rejects.toBeInstanceOf(NativeWorkspaceWipedError);
-    expect(a.pendingWipe.pending).toBe(false);
-    expect(existsSync(nsFile)).toBe(false);
-    expect(await a.client.getRemoteStatus(ws)).toEqual([]);
+    const reopened = await a.attach(marker);
+    cleanups.push(async () => reopened.close());
+    expect(await marker.read()).toBe(false);
+    await expect(a.client.readDoc(ws, room)).rejects.toThrow();
+    // The fresh namespace syncs again: the cloud still has the room.
+    await createDocRoom(a.client, ws, room.id);
+    await a.client.syncRooms(ws, [room], NATIVE_CONTENT_REMOTE_ID);
+    expect(JSON.stringify((await a.client.readDoc(ws, room)).value)).toContain('after-crash');
   }, 90_000);
 });
