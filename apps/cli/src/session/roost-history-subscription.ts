@@ -11,7 +11,9 @@ import {
 export async function publishRoostHistorySubscription(options: {
   subscription: Extract<SessionHistorySubscription, { action: 'open' }>;
   signal: AbortSignal;
-  read: (query: SessionHistoryReadQuery) => Promise<SessionHistoryReadResponse>;
+  read: (
+    query: SessionHistoryReadQuery & { inlineOnly?: true }
+  ) => Promise<SessionHistoryReadResponse>;
   waitForChange: (checkpoint: string) => Promise<void>;
   publish: (publication: SessionHistoryPublication) => Promise<void>;
 }): Promise<void> {
@@ -27,6 +29,9 @@ export async function publishRoostHistorySubscription(options: {
             checkpoint,
             includeBodiesFrom: subscription.includeBodiesFrom,
             withPatches: subscription.withPatches,
+            // The subscription can send a small delta or a checkpoint. The
+            // follow-up read owns any retained pages needed to repair that gap.
+            inlineOnly: true,
           }
         : { kind: 'count', withCheckpoint: true }
     );

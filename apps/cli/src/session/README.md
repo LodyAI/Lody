@@ -708,9 +708,10 @@ over local `session/history-subscription` and remote `session/history-subscribe`
 The owner wakes subscriptions on Native publication. A write failure also wakes
 them to reconcile a potentially committed result. Bounded leases release parked
 observers and renew from the reader's applied checkpoint. An exact-base delta can
-travel with the checkpoint. The existing incremental read repairs larger intervals
-and resets lost coverage. One viewer's lease does not retain Native worker or
-writer capacity. Local IPC remains usable offline.
+travel with the checkpoint. Subscription reads only prepare inline deltas. The
+reader's incremental request repairs larger intervals and resets lost coverage.
+One viewer's lease does not retain Native worker or writer capacity. Local IPC
+remains usable offline.
 [Peer-reader readiness and observation](../../../../.agents/notes/implemented/bug-fix/2026-10-16-roost-peer-reader-readiness.md)
 records the lifecycle and limits.
 

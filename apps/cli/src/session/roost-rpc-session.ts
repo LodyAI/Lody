@@ -192,6 +192,7 @@ export function createRoostRpcSessionServices(
     const controller = new AbortController();
     subscription = controller;
     let queued = Promise.resolve();
+    let failed = false;
     const onPublication = (publication: SessionHistoryPublication) => {
       queued = queued
         .then(async () => {
@@ -217,10 +218,10 @@ export function createRoostRpcSessionServices(
           }
         })
         .catch(() => {
+          failed = true;
           controller.abort();
         });
     };
-    let delay = 0;
     void rpc
       .subscribe(
         { action: 'open', id: crypto.randomUUID(), checkpoint },
@@ -228,7 +229,7 @@ export function createRoostRpcSessionServices(
         controller.signal
       )
       .catch((error) => {
-        delay = 250;
+        failed = true;
         if (!controller.signal.aborted && !disposed && listeners.size)
           console.error('Owner history subscription failed', error);
       })
@@ -236,10 +237,13 @@ export function createRoostRpcSessionServices(
         await queued;
         subscription = undefined;
         if (!disposed && listeners.size)
-          retry = setTimeout(() => {
-            retry = undefined;
-            startSubscription();
-          }, delay);
+          retry = setTimeout(
+            () => {
+              retry = undefined;
+              startSubscription();
+            },
+            failed ? 250 : 0
+          );
       });
   };
   const readEntries = async (query: SessionHistoryReadQuery) =>
