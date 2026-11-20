@@ -73,16 +73,11 @@ const styles = stylex.create({
 /** List `13.5rem` + detail pane `16rem`. Below this, the pane cannot fit. */
 const TWO_PANE_MIN_PX = 29.5 * 16;
 
-/** Space the Role submenu may still grow into. Prefer Radix's popper var
+/** Space the Role submenu may still grow into. Prefer Base UI's positioner var
  *  (set after it positions); fall back to the box's distance to the viewport. */
 function remainingWidthForRolePanel(el: HTMLElement): number {
-  const fromVar = Number.parseFloat(
-    getComputedStyle(el).getPropertyValue('--radix-popper-available-width')
-  );
-  const host =
-    (el.closest('[role="menu"]') as HTMLElement | null) ??
-    (el.closest('[data-radix-popper-content-wrapper]') as HTMLElement | null) ??
-    el;
+  const fromVar = Number.parseFloat(getComputedStyle(el).getPropertyValue('--available-width'));
+  const host = (el.closest('[role="menu"]') as HTMLElement | null) ?? el;
   const toViewportRight = window.innerWidth - Math.max(host.getBoundingClientRect().left, 0);
   const candidates = [toViewportRight];
   if (Number.isFinite(fromVar) && fromVar > 0) candidates.push(fromVar);
@@ -129,8 +124,8 @@ export function ComposerAgentRolePanel({
 }) {
   const { t } = useTranslation();
   const rootRef = useRef<HTMLDivElement>(null);
-  // Start compact so a two-pane first paint cannot overflow before Radix
-  // writes `--radix-popper-available-width`. Expand only once that space fits.
+  // Start compact so a two-pane first paint cannot overflow before Base UI
+  // writes `--available-width`. Expand only once that space fits.
   const [detectedCompact, setDetectedCompact] = useState(compactOverride !== false);
   const compact = compactOverride ?? detectedCompact;
   const [previewRoleId, setPreviewRoleId] = useState<AgentRoleId | null>(null);
@@ -154,7 +149,7 @@ export function ComposerAgentRolePanel({
     const tick = () => {
       measure();
       frames += 1;
-      const positioned = getComputedStyle(el).getPropertyValue('--radix-popper-available-width');
+      const positioned = getComputedStyle(el).getPropertyValue('--available-width');
       if (frames < 16 && (!positioned || frames < 4)) {
         raf = requestAnimationFrame(tick);
       }

@@ -12,6 +12,8 @@ import {
   ScheduleDefinitionSchema,
   SESSION_FILE_MAX_SIZE_BYTES,
   type MachineId,
+  getTodayDocId,
+  parseTodayDocId,
 } from '@lody/shared';
 import { validateHistoricalAttachments } from './attachments';
 import {
@@ -96,11 +98,20 @@ export async function freezeSource(
         manifest.machineMeta = entry.meta;
         continue;
       }
+      const todayPage = parseTodayDocId(entry.docId);
       if (
+        !todayPage &&
         !isSessionDocRoomId(entry.docId) &&
         !/^(schedule|task|preview-comment)-/.test(entry.docId)
       )
         throw new Error(`Unsupported document kind: ${entry.docId}`);
+      if (todayPage && todayPage.userId !== input.sourceUserId)
+        throw new Error(`OSS snapshot contains another user's Today page: ${entry.docId}`);
+      // A Today page is keyed by its owner: it moves to the target user's id.
+      const targetId = todayPage ? getTodayDocId(input.targetUserId, todayPage.date) : entry.docId;
+      const targetMeta = todayPage
+        ? { ...entry.meta, userId: input.targetUserId, date: todayPage.date }
+        : entry.meta;
       if (entry.meta.historyBackend && entry.meta.historyBackend !== 'loro')
         throw new Error(
           `Cannot yet migrate ${entry.meta.historyBackend} history (${entry.docId}). Nothing has been uploaded.`
@@ -112,8 +123,8 @@ export async function freezeSource(
         );
       const bytes = doc.export({ mode: 'snapshot' });
       const record = documentSchema.parse({
-        id: entry.docId,
-        meta: entry.meta,
+        id: targetId,
+        meta: targetMeta,
         sha256: hashBytes(bytes),
       });
       const prepared = prepareDocument(bytes, record, manifest); // Validate every body before any upload.
@@ -128,7 +139,7 @@ export async function freezeSource(
           })
         );
       }
-      await fs.writeFile(sourceDocumentPath(directory, entry.docId), bytes, { mode: 0o600 });
+      await fs.writeFile(sourceDocumentPath(directory, record.id), bytes, { mode: 0o600 });
       manifest.documents.push(record);
       if (isSessionDocRoomId(entry.docId)) {
         const sessionId = safeId.parse(entry.docId.slice('session-'.length));

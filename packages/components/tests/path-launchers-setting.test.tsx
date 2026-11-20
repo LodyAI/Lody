@@ -10,7 +10,7 @@ import {
   writeStoredPathLauncherPreference,
 } from '../src/lib/session-path-launchers';
 
-vi.mock('@posthog/react', () => ({
+vi.mock('@/lib/posthog-context', () => ({
   usePostHog: () => null,
 }));
 

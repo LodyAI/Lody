@@ -28,7 +28,10 @@ coordinate may change as filtering resizes the popup.
 Short model menus without search remain content-sized.
 
 The submenu prefers inline-end (right in LTR, left in RTL) and may flip to the
-opposite side when space requires it. Vertical collisions may shift it away from
+opposite side when space requires it. When neither side fits, as in a narrow
+window, it keeps the preferred side and shifts inward to stay within the
+viewport, covering part of the parent menu rather than leaving the window.
+Its width is capped by the window. Vertical collisions may shift it away from
 row alignment to keep it within the viewport.
 Existing viewport padding, height limits, scrolling, search focus, and selection
 behavior remain in effect. This does not introduce a drill-in presentation for

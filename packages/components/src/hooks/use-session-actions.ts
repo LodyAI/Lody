@@ -52,7 +52,7 @@ import {
   type PinnedSessionPlacement,
 } from '@lody/shared';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 // Default import: `debug` is CJS. Named `{ debug }` breaks Vite 8 / TanStack
 // module-runner interop used by site-docs SSR (UNEXPECTED named-export error).
 import debug from 'debug';
@@ -307,14 +307,21 @@ export type SessionActions = {
     restoredSessionId?: SessionId
   ) => Promise<void>;
   /** Snooze a session until `snoozedUntil` (epoch ms) in the Status view's Later section. */
-  snoozeSession: (sessionId: SessionId, snoozedUntil: number) => Promise<void>;
+  snoozeSession: (
+    sessionId: SessionId,
+    snoozedUntil: number,
+    options?: { includeOpenedSessions?: boolean }
+  ) => Promise<void>;
   /** Mark a session as settled in the Status view's Settled section. */
   settleSession: (
     sessionId: SessionId,
     options?: { includeOpenedSessions?: boolean }
   ) => Promise<void>;
   /** Restore a snoozed or settled session back to Focus. */
-  moveSessionToFocus: (sessionId: SessionId) => Promise<void>;
+  moveSessionToFocus: (
+    sessionId: SessionId,
+    options?: { includeOpenedSessions?: boolean }
+  ) => Promise<void>;
 };
 
 const toPinnedSessionPlacement = (meta: SessionMeta): PinnedSessionPlacement => ({
@@ -1140,15 +1147,40 @@ export function useSessionActions(): SessionActions {
     [runtime, updateSessionPreference]
   );
 
+  // The session plus its opened sub-conversations. Contained Tabs share the
+  // owner's bucket and never render their own status row.
+  const openedSubTreeSessionIds = useCallback(
+    async (sessionId: SessionId) => {
+      if (!runtime) {
+        throw new Error('Runtime not ready');
+      }
+      const tree = await runtime.readSessionOperationTargets(sessionId, 'archive-tree');
+      if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
+        throw new Error('Workspace changed during session operation');
+      }
+      const ids = [sessionId];
+      for (const session of tree.slice(1)) {
+        if (session.parentSessionId === undefined) ids.push(session.id);
+      }
+      return ids;
+    },
+    [runtime, store]
+  );
+
   const applySessionFocusOrder = useCallback(
     async (writes: readonly ManualOrderWrite[], restoredSessionId?: SessionId) => {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
+      // Dragging a parent row into Focus drags its opened sub-conversations
+      // with it; they restore without their own orderKey writes.
+      const restoredIds = new Set<SessionId>(
+        restoredSessionId ? await openedSubTreeSessionIds(restoredSessionId) : []
+      );
       const now = getServerNow();
       for (const write of writes) {
         const targetId = write.sessionId as SessionId;
-        const isRestored = restoredSessionId != null && write.sessionId === restoredSessionId;
+        const isRestored = restoredIds.delete(targetId);
         const roomId = getSessionRoomId(targetId);
         const existing = await runtime.repo.getDocMeta(roomId);
         const meta = !isLoroRepoDocDeleted(existing)
@@ -1172,18 +1204,35 @@ export function useSessionActions(): SessionActions {
               : {}),
         });
       }
+      for (const restoredId of restoredIds) {
+        await updateSessionMetadata(restoredId, {
+          snoozedUntil: undefined,
+          settledAt: undefined,
+          focusRestoredAt: now,
+        });
+      }
     },
-    [runtime, updateSessionMetadata]
+    [runtime, openedSubTreeSessionIds, updateSessionMetadata]
   );
 
   const snoozeSession = useCallback(
-    async (sessionId: SessionId, snoozedUntil: number) => {
-      await updateSessionMetadata(sessionId, {
-        snoozedUntil,
-        settledAt: undefined,
-      });
+    async (
+      sessionId: SessionId,
+      snoozedUntil: number,
+      options?: { includeOpenedSessions?: boolean }
+    ) => {
+      const targetIds =
+        options?.includeOpenedSessions === true
+          ? await openedSubTreeSessionIds(sessionId)
+          : [sessionId];
+      for (const target of targetIds) {
+        await updateSessionMetadata(target, {
+          snoozedUntil,
+          settledAt: undefined,
+        });
+      }
     },
-    [updateSessionMetadata]
+    [openedSubTreeSessionIds, updateSessionMetadata]
   );
 
   const settleSession = useCallback(
@@ -1191,18 +1240,10 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const targetIds = [sessionId];
-      if (options?.includeOpenedSessions === true) {
-        // Settle covers only first-class Sessions: contained Tabs share the
-        // owner's bucket and never render their own status row.
-        const tree = await runtime.readSessionOperationTargets(sessionId, 'archive-tree');
-        if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
-          throw new Error('Workspace changed before settling');
-        }
-        for (const session of tree.slice(1)) {
-          if (session.parentSessionId === undefined) targetIds.push(session.id);
-        }
-      }
+      const targetIds =
+        options?.includeOpenedSessions === true
+          ? await openedSubTreeSessionIds(sessionId)
+          : [sessionId];
       await assertCanManageSessions(targetIds);
       for (const target of targetIds) {
         const roomId = getSessionRoomId(target);
@@ -1221,18 +1262,25 @@ export function useSessionActions(): SessionActions {
         });
       }
     },
-    [runtime, store, assertCanManageSessions, updateSessionMetadata]
+    [runtime, store, openedSubTreeSessionIds, assertCanManageSessions, updateSessionMetadata]
   );
 
   const moveSessionToFocus = useCallback(
-    async (sessionId: SessionId) => {
-      await updateSessionMetadata(sessionId, {
-        snoozedUntil: undefined,
-        settledAt: undefined,
-        focusRestoredAt: getServerNow(),
-      });
+    async (sessionId: SessionId, options?: { includeOpenedSessions?: boolean }) => {
+      const targetIds =
+        options?.includeOpenedSessions === true
+          ? await openedSubTreeSessionIds(sessionId)
+          : [sessionId];
+      const focusRestoredAt = getServerNow();
+      for (const target of targetIds) {
+        await updateSessionMetadata(target, {
+          snoozedUntil: undefined,
+          settledAt: undefined,
+          focusRestoredAt,
+        });
+      }
     },
-    [updateSessionMetadata]
+    [openedSubTreeSessionIds, updateSessionMetadata]
   );
 
   return {

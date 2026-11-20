@@ -30,7 +30,7 @@ import {
   GripVertical,
   Link2,
   LockKeyhole,
-  Mail,
+  MailOpen,
   Pencil,
   Pin,
   PinOff,
@@ -1246,7 +1246,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         ) : null}
         {canMarkUnread ? (
           <ContextMenu.Item
-            icon={Mail}
+            icon={MailOpen}
             onClick={() => {
               onMarkSessionUnread?.(session.sessionId);
             }}
