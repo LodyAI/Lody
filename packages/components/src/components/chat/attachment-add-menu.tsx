@@ -1,6 +1,6 @@
 import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
 import { useWorkspaceFeatureReason } from '@/hooks/use-workspace-feature';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Clock, ChevronLeft, ChevronRight, Paperclip, Plug, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { describeMcpConnection, type McpServerId, type WorkspaceMcpServerMeta } from '@lody/shared';
@@ -79,6 +79,10 @@ export function AttachmentAddMenu({
   const [open, setOpen] = useState(false);
   // Mobile's pushed panel. Desktop uses a real submenu and stays on 'root'.
   const [view, setView] = useState<'root' | 'mcp'>('root');
+  // iOS dismisses the file picker as soon as the prompt regains focus (the
+  // keyboard returns instead), so choosing the picker skips the composer
+  // focus restore every other selection gets.
+  const filePickerOpenedRef = useRef(false);
   const triggerLabel = t('sessions.addAttachmentMenu', 'Add attachment');
 
   const mcpServers = mcp?.servers ?? [];
@@ -134,6 +138,7 @@ export function AttachmentAddMenu({
       open={open}
       onOpenChange={(nextOpen) => {
         setOpen(nextOpen);
+        if (nextOpen) filePickerOpenedRef.current = false;
         // Always reopen at the root level; a stale pushed panel would hide the
         // upload actions behind a back row.
         if (!nextOpen) setView('root');
@@ -181,6 +186,7 @@ export function AttachmentAddMenu({
       <Menu.Content
         align="start"
         side="top"
+        finalFocus={() => !filePickerOpenedRef.current}
         /* Size to the widest item (`w-max`) so short attachment labels don't
            leave a wide blank gutter; a small floor keeps it from
            collapsing too narrow. The pushed MCP panel keeps a fixed width so
@@ -210,7 +216,10 @@ export function AttachmentAddMenu({
           <div key="root" className="animate-in fade-in-0 slide-in-from-left-2 duration-150">
             {onAddAttachment ? (
               <Menu.Item
-                onClick={onAddAttachment}
+                onClick={() => {
+                  filePickerOpenedRef.current = true;
+                  onAddAttachment();
+                }}
                 disabled={attachmentDisabled || !!attachmentFeatureReason}
                 title={attachmentFeatureReason}
                 className={itemClass}
@@ -247,11 +256,7 @@ export function AttachmentAddMenu({
                         trigger is the last row of a menu that opens upward;
                         `start` (the submenu default) hangs the description and
                         the footnote down onto the model row. */}
-                    <Menu.Content
-                      align="end"
-                      sideOffset={8}
-                      className={MCP_PANEL_CLASS}
-                    >
+                    <Menu.Content align="end" sideOffset={8} className={MCP_PANEL_CLASS}>
                       <McpServerItems mcp={mcp} isMobile={isMobile} />
                     </Menu.Content>
                   </Menu.Submenu>
