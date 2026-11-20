@@ -59,7 +59,13 @@ export const IosSimulatorCommandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('exterior'), udid: IosSimulatorUdidSchema }).strict(),
   z.object({ action: z.literal('start'), udid: IosSimulatorUdidSchema }).strict(),
   z.object({ action: z.literal('status'), operationId: id.optional() }).strict(),
-  z.object({ action: z.literal('stop'), operationId: id }).strict(),
+  z
+    .object({
+      action: z.literal('stop'),
+      operationId: id,
+      shutdownDevice: z.boolean().optional(),
+    })
+    .strict(),
 ]);
 export const IosSimulatorRequestSchema = z
   .object({
