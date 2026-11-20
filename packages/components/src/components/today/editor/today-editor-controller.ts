@@ -11,7 +11,7 @@ import {
 } from 'lexical';
 import type { FocusIntent, TodayDate, TodayNodeId, TodayNodeView } from '@lody/shared';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
-import type { TodayPageStoreCache } from '@/providers/today-page-store-cache';
+import type { TodayPageStoreCache } from '../../../providers/today-page-store-cache';
 import {
   $readComposerValue,
   $readSelectionOffsets,

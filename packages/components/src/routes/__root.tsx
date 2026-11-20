@@ -33,7 +33,13 @@ import { persistAuthToken, signOutWithoutRedirect } from '../lib/auth';
 import { setLoginHintCookie } from '../lib/login-hint-cookie';
 import i18next from 'i18next';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
-import { buildSessionLink, parseSessionLink, type SessionLink } from '@lody/shared/session-link';
+import {
+  buildSessionLink,
+  parseSessionLink,
+  parseTodayLink,
+  type SessionLink,
+  type TodayLink,
+} from '@lody/shared/session-link';
 import {
   SESSION_DEEP_LINK_EVENT,
   pendingSessionLinkAtom,
@@ -457,6 +463,11 @@ function SessionDeepLinkRouter() {
   useEffect(() => {
     const receive = (raw: unknown) => {
       if (typeof raw !== 'string') return;
+      const today = parseTodayLink(raw);
+      if (today) {
+        setPendingToday(today);
+        return;
+      }
       const link = parseSessionLink(raw);
       if (link) {
         setNavigationTarget(null);
@@ -469,6 +480,32 @@ function SessionDeepLinkRouter() {
       window.removeEventListener(SESSION_DEEP_LINK_EVENT, onOpen);
     };
   }, [setNavigationTarget]);
+  const [pendingToday, setPendingToday] = useState<TodayLink | null>(null);
+  useEffect(() => {
+    // A Today page link (specs/today-outline.md): open that member's day in its workspace.
+    if (!pendingToday) return;
+    const resolution = resolveSessionLinkWorkspace(
+      { sessionId: '' as SessionLink['sessionId'], workspaceId: pendingToday.workspaceId },
+      workspaces,
+      currentWorkspaceId
+    );
+    if (resolution.kind === 'wait') return;
+    setPendingToday(null);
+    if (resolution.kind === 'unavailable') {
+      toast.error(
+        i18next.t(
+          'deepLink.workspaceUnavailable',
+          'This workspace is unavailable in this version of Lody. Open the link in the installation that owns it.'
+        )
+      );
+      return;
+    }
+    void navigate({
+      to: '/$workspaceName/today',
+      params: { workspaceName: resolution.slug },
+      search: { member: pendingToday.userId, date: pendingToday.date },
+    });
+  }, [currentWorkspaceId, navigate, pendingToday, workspaces]);
   useEffect(() => {
     // Let auth/provisioning and the default landing settle before applying the explicit target.
     if (!pending) return;

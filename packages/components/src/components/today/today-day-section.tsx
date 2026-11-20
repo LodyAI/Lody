@@ -8,7 +8,7 @@ import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { useTodayEditor } from './editor/today-editor-context';
 import { TodaySessionLabel } from './today-session-node';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
-import type { TodayPageStoreCache } from '@/providers/today-page-store-cache';
+import type { TodayPageStoreCache } from '../../providers/today-page-store-cache';
 import { todayDateToLocalDate } from './today-stream';
 
 /** Indentation per outline level. */
