@@ -119,6 +119,19 @@ it('a rejected credential leaves an installed entry but never registers or start
   expect(await fs.readFile(f.service)).toEqual(await fs.readFile(f.capsule));
   await expect(fs.access(f.events)).rejects.toThrow();
 });
+it('an explicit reinstall makes the installed release active even after a remote update selected another', async () => {
+  const f = await fixture();
+  const selected = path.join(f.data, 'daemon-managed', 'selected.json');
+  await fs.mkdir(path.dirname(selected), { recursive: true });
+  await fs.writeFile(selected, JSON.stringify({ format: 1, digest: 'd'.repeat(64) }) + '\n');
+
+  await installManagedDaemon({});
+
+  expect(JSON.parse(await fs.readFile(selected, 'utf8'))).toEqual({
+    format: 1,
+    digest: null,
+  });
+});
 function hostPorts(overrides: Partial<InstallHostPorts>) {
   const stopped: string[] = [];
   const value: InstallHostPorts = {
