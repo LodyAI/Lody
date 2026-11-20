@@ -1625,6 +1625,8 @@ function inboxExecutionFixture(
     workspaceDocument: {
       repo,
       getOrCreateSessionDoc: async () => doc,
+      // Not native: automation reads open the replica above.
+      openIdleSessionReader: async () => undefined,
       getOrOpenSessionCode: async () => null,
       updateAcpCapabilities: async () => {},
     } as never,

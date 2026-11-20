@@ -31,8 +31,14 @@ import {
   listNativeDocIds,
   unpublishLegacyDoc,
 } from '@lody/shared/node/native-docs';
-import { createRemoteLoroHistoryReader, readRemoteLatestGoal } from '@lody/shared/session-data';
-import type { MessageQueueItem } from '@lody/shared';
+import {
+  createRemoteLoroHistoryReader,
+  readRemoteHistoryTranscript,
+  readRemoteLatestGoal,
+  readSessionHistory,
+  shareObservation,
+} from '@lody/shared/session-data';
+import type { MessageQueueItem, SessionHistoryInput } from '@lody/shared';
 import {
   createNativeWorkspaceMeta,
   type NativeWorkspaceMeta,
@@ -180,11 +186,19 @@ export async function writeBackNativeWorkspaceMeta(
  */
 export async function openNativeSessionReader(workspaceId: string, roomId: string) {
   const { client } = await connectNativeRepo({ launcher: cliNativeRepoHostLauncher });
-  const port = createNativeRemoteHistoryPort(client, workspaceId, roomId);
+  const port = shareObservation(createNativeRemoteHistoryPort(client, workspaceId, roomId));
   const history = createRemoteLoroHistoryReader(port);
   return {
     history,
     readHistoryDirectory: async (from: number, to: number) => history.readDirectory(from, to),
+    readTurn: async (turnId: string) => history.readTurn(turnId),
+    /** Every turn in one consistent read, as `SessionBackend.readHistory`. */
+    readHistory: async () => {
+      const all = await history.readAll();
+      return readSessionHistory({ readAll: () => all }) as SessionHistoryInput[];
+    },
+    readHistoryTranscript: async (options: { limit?: number; reverse?: boolean }) =>
+      readRemoteHistoryTranscript(port, options),
     getMessageQueue: async () => {
       const value = await port.readPath(['mq']);
       return (Array.isArray(value) ? value : []) as readonly MessageQueueItem[];
@@ -193,5 +207,13 @@ export async function openNativeSessionReader(workspaceId: string, roomId: strin
     /** The document's `session` metadata root, as `SessionDocument.getMetaState`. */
     getMetaState: async () =>
       (await port.readPath(['session'])) as Record<string, unknown> | undefined,
+    /** Fires when a root other than `history` changes, as `SessionDocument.subscribeControl`. */
+    subscribeControl: (listener: () => void) => {
+      const observation = port.observePaths((event) => {
+        if (event.kind === 'reset' || event.changes.some((change) => change.path[0] !== 'history'))
+          listener();
+      });
+      return () => observation.close();
+    },
   };
 }

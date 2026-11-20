@@ -1,5 +1,5 @@
 import { selectTranscriptHistoryPositions } from '@lody/shared/session-data';
-import type { SessionBackend } from '@/session/session-backend';
+import type { SessionBackend, SessionTranscriptSource } from '@/session/session-backend';
 import {
   readProjectDefaultMcpIds,
   syncMcpCatalog,
@@ -182,7 +182,11 @@ import {
 import { flushTelemetry } from '@/instrument';
 import { captureSessionCommandEvent } from './analytics-events';
 import { readMachineAccessWithBoundedRetry } from '@/session/session-access-retry';
-import { createSessionBackend, readHistoryEntry } from '@/session/session-backend';
+import {
+  createSessionBackend,
+  openSessionReadPort,
+  readHistoryEntry,
+} from '@/session/session-backend';
 import { Effect } from 'effect';
 import { createSessionObserveWriter, resolveObserveSelection } from './session-observe';
 import { acquireSessionObservation } from './session-observe-runtime';
@@ -707,7 +711,7 @@ export function selectSessionTranscriptEntries(
 
 /** Count visible rows and hydrate the requested transcript positions. */
 export async function readSessionTranscript(
-  backend: Pick<SessionBackend, 'readHistory' | 'readHistorySelection' | 'readHistoryTranscript'>,
+  backend: Pick<SessionBackend, 'readHistory'> & SessionTranscriptSource,
   options: { all?: boolean; limit?: number; reverse?: boolean }
 ): Promise<{ total: number; entries: SessionTranscriptEntry[] }> {
   if (options.all) {
@@ -725,7 +729,7 @@ export async function readSessionTranscript(
     total = result.total;
     positions = result.positions;
     selected = result.entries;
-  } else {
+  } else if ('readHistorySelection' in backend) {
     selected = await backend.readHistorySelection(
       (rows) => {
         const result = selectTranscriptHistoryPositions(rows, options);
@@ -735,7 +739,7 @@ export async function readSessionTranscript(
       },
       { transcriptVisibility: true }
     );
-  }
+  } else throw new Error('session_transcript_unavailable');
   return {
     total,
     entries: selected.flatMap((entry, index) => {
@@ -4600,17 +4604,6 @@ export async function sendSessionChatResult(
   }
 }
 
-/**
- * Read access for status and show: an idle native Session is read from the
- * engine without opening (and caching) its replica.
- */
-async function openSessionReadPort(manager: LoroDocumentManager, sessionId: SessionId) {
-  const idle = await manager.openIdleSessionReader(sessionId);
-  if (idle) return idle;
-  const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  return await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
-}
-
 async function buildSessionShowResult(
   workspace: WorkspaceSummary,
   manager: LoroDocumentManager,
@@ -5831,8 +5824,7 @@ const sessionHistoryCommand = new Command('history')
           `session.history:${sessionId}`
         );
         await resolveSessionMetaOrThrow(manager, sessionId);
-        const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-        const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+        const backend = await openSessionReadPort(manager, sessionId);
         const { total, entries } = await readSessionTranscript(backend, {
           all: options.all,
           limit: options.limit,

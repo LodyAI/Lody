@@ -168,7 +168,11 @@ import { LODY_SKILL_INSTRUCTIONS, registerLodySkills } from './skills/server';
 import { truncateSessionHistoryText as truncateUtf8HeadTail } from '@/mcp/session-history-page';
 import { buildSessionHistoryForReader } from '@/mcp/session-history-handler';
 import type { SessionWithdrawInputResponse } from '@lody/shared/local-machine-rpc';
-import { createSessionBackend } from '@/session/session-backend';
+import {
+  createSessionBackend,
+  openSessionReadPort,
+  type SessionReadPort,
+} from '@/session/session-backend';
 import { version as cliVersion } from '@/pkg';
 import {
   configureWorkspaceMcpServer,
@@ -1836,12 +1840,6 @@ const REMOTE_SESSION_HISTORY_SYNC_WAIT_MS = 8_000;
  * Reads another Machine's Session doc without keeping its cloud room joined.
  * This Machine's own Sessions keep the shared cached doc that execution uses.
  */
-/** What MCP status, history, quote and queue reads need from a Session: nothing writable. */
-type SessionReadPort = Pick<
-  Awaited<ReturnType<typeof createSessionBackend>>,
-  'history' | 'readHistoryDirectory' | 'getMessageQueue'
->;
-
 /**
  * Reads one Session for MCP. An idle native Session of this machine is read
  * from the engine without a replica, so status and history reads over many
@@ -1861,11 +1859,7 @@ const readSessionDocForMcp = async <T>(
       async (sessionDoc) => await read(await createSessionBackend(sessionDoc, session)),
       { remoteSyncTimeoutMs }
     );
-  const idle = await manager.openIdleSessionReader(session.id);
-  if (idle) return await read(idle);
-  return await read(
-    await createSessionBackend(await manager.getOrCreateSessionDoc(session.id), session)
-  );
+  return await read(await openSessionReadPort(manager, session.id, session));
 };
 
 const FAILURE_DIRECTORY_SCAN_ROWS = 64;

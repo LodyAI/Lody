@@ -29,7 +29,7 @@ import type { AuthContext } from '../command-runtime';
 import type { WorkspaceSummary } from '../workspace';
 import type { LoroDocumentManager } from '../loro/doc';
 import type { Logger } from '@/utils/logger';
-import { createSessionBackend } from '@/session/session-backend';
+import { openSessionReadPort } from '@/session/session-backend';
 import { streamsRoomBinding } from '../loro/streams-room-binding';
 import {
   buildScheduleRunTarget,
@@ -289,8 +289,7 @@ export async function createScheduleWorkspace(args: {
         (meta.messageQueueUpdatedAt ?? 0) > (meta.messageQueueCheckedAt ?? 0)
       )
         return false;
-      const session = await manager.getOrCreateSessionDoc(id);
-      const backend = await createSessionBackend(session, meta);
+      const backend = await openSessionReadPort(manager, id, meta);
       if ((await backend.getMessageQueue()).length) return false;
       const [userRead, assistantRead] = await Promise.all([
         backend.readTurn(run.userTurnId),
