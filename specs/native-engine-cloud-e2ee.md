@@ -1,6 +1,6 @@
 # Cloud sync and encrypted workspaces on the native engine
 
-Status: draft
+Status: approved · [approval](https://github.com/LodyAI/Lody/pull/2955#issuecomment-7028570219)
 Translation: current
 
 [中文](native-engine-cloud-e2ee.zh.md)
@@ -345,7 +345,7 @@ None.
     permission checks, no format change, availability first.
   - Owner decisions 1–4 given in the coordinating session on 2026-11-20 and
     recorded on [#2955](https://github.com/LodyAI/Lody/pull/2955).
-  - This revision is not approved.
+  - The owner approved this revision (`f4bd8d1c0`) on 2026-11-20 ([record](https://github.com/LodyAI/Lody/pull/2955#issuecomment-7028570219)).
 - **Inspected.**
   - The native stack: draft PRs #2902–#2942 (top `native-desktop-acceptance-fixes`
     @ `840f6d05`) and its design doc `.agents/docs/native-workspace-meta.md`.

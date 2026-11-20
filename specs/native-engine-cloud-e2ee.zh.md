@@ -1,6 +1,6 @@
 # native 引擎上的云同步与加密工作区
 
-Status: draft
+Status: approved · [批准记录](https://github.com/LodyAI/Lody/pull/2955#issuecomment-7028570219)
 Translation: current
 
 [English](native-engine-cloud-e2ee.md)
@@ -264,7 +264,7 @@ npm 发布版必须包含发布构建用到的全部原语。0.1.0 早于其中�
 - **意图**：
   - 2026-11-20 转达的 owner 方向：E2EE 优先、Roost 将成默认、权限本地验证、不改格式、可用性优先。
   - owner 于 2026-11-20 在主控会话中给出决定 1–4，记录在 [#2955](https://github.com/LodyAI/Lody/pull/2955)。
-  - 本修订尚未批准。
+  - owner 于 2026-11-20 批准本修订（`f4bd8d1c0`，[批准记录](https://github.com/LodyAI/Lody/pull/2955#issuecomment-7028570219)）。
 - **已检查**：
   - native 实现栈：draft PR #2902–#2942（顶层 `native-desktop-acceptance-fixes` @ `840f6d05`），以及设计文档 `.agents/docs/native-workspace-meta.md`。
   - loro-dev/loro-repo `main` @ `ad97aa3`：
