@@ -14,7 +14,13 @@ describe('detectPullRequestForBranch', () => {
     isCrossRepository: false,
   };
 
-  async function detect(branchName: string, repo: unknown, prs: unknown, error = false) {
+  async function detect(
+    branchName: string,
+    repo: unknown,
+    prs: unknown,
+    error = false,
+    repoFailure?: 'exec' | 'json'
+  ) {
     const logger: Logger = {
       info: vi.fn(),
       warn: vi.fn(),
@@ -30,6 +36,10 @@ describe('detectPullRequestForBranch', () => {
     const session = {
       exec: vi.fn(async (_command: string, args: string[]) => {
         if (error) throw new Error('gh unavailable');
+        if (args[0] === 'repo') {
+          if (repoFailure === 'exec') throw new Error('repo lookup unavailable');
+          if (repoFailure === 'json') return 'invalid JSON';
+        }
         return JSON.stringify(args[0] === 'repo' ? repo : prs);
       }),
     } as unknown as ISession;
@@ -76,4 +86,15 @@ describe('detectPullRequestForBranch', () => {
   it('does not infer a default branch from malformed repository metadata', async () => {
     expect(await detect('feature', { defaultBranchRef: {} }, [pr])).toMatchObject({ prNumber: 1 });
   });
+
+  it.each(['exec', 'json'] as const)(
+    'keeps detecting PRs after default-branch lookup %s failure',
+    async (failure) => {
+      expect(await detect('feature', {}, [pr], false, failure)).toMatchObject({
+        prNumber: 1,
+        status: 'open',
+        branch: 'feature',
+      });
+    }
+  );
 });

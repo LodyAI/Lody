@@ -84,7 +84,6 @@ export async function detectPullRequestForBranch(options: {
     return null;
   }
 
-  // Use gh pr list to find PRs for this branch
   try {
     const repoOutput = await session.exec(
       'gh',
@@ -94,7 +93,12 @@ export async function detectPullRequestForBranch(options: {
     );
     const repo = GhRepoSchema.safeParse(JSON.parse(repoOutput.trim()));
     if (repo.success && repo.data.defaultBranchRef?.name === branchName) return null;
+  } catch (error) {
+    logger.debug(`[pr-detector] Could not resolve default branch: ${formatErrorMessage(error)}`);
+  }
 
+  // Use gh pr list to find PRs for this branch
+  try {
     const output = await session.exec(
       'gh',
       [
