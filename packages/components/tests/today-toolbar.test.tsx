@@ -82,10 +82,40 @@ describe('Today toolbar window chrome', () => {
     expect(toolbar.querySelector('[aria-label="commands.sidebar.toggle"]')).toBeNull();
   });
 
-  it('leaves the pinned column out of the window chrome', async () => {
-    const { toolbar } = await renderToolbar(true, true);
-    expect(toolbar.classList.contains('app-region-drag')).toBe(false);
-    expect(toolbar.querySelector('[aria-label="commands.sidebar.toggle"]')).toBeNull();
-    expect(toolbar.querySelectorAll('button')).toHaveLength(3);
+  it('keeps the pinned column out of the drag chrome, carrying the sidebar controls while the sidebar is hidden', async () => {
+    const hidden = await renderToolbar(true, true);
+    expect(hidden.toolbar.classList.contains('app-region-drag')).toBe(false);
+    // Pinned with the sidebar hidden, the column is the leftmost surface.
+    expect(
+      [...hidden.toolbar.querySelectorAll('button')].map(
+        (button) => button.getAttribute('aria-label') ?? button.textContent
+      )
+    ).toEqual([
+      'commands.sidebar.toggle',
+      'commands.nav.back',
+      'commands.nav.forward',
+      'Pick a date',
+      'Pin',
+      'More',
+    ]);
+    await act(async () => [...hidden.toolbar.querySelectorAll('button')][0]!.click());
+    expect(hidden.store.get(sidebarCollapsedAtom)).toBe(false);
+    expect(hidden.toolbar.querySelectorAll('button')).toHaveLength(3);
+  });
+
+  it('hands the sidebar controls to pinned Today: the main page no longer owns the window edge', async () => {
+    const { mainPageAtWindowEdgeAtom } = await import('../src/atoms/layout-state');
+    const { todayPinnedAtom } = await import('../src/atoms/sidebar-state');
+    const { experimentalFeaturesEnabledAtom, todayExperimentEnabledAtom } =
+      await import('../src/atoms/settings');
+    const store = createStore();
+    store.set(sidebarCollapsedAtom, true);
+    expect(store.get(mainPageAtWindowEdgeAtom)).toBe(true);
+    store.set(experimentalFeaturesEnabledAtom, true);
+    store.set(todayExperimentEnabledAtom, true);
+    store.set(todayPinnedAtom, true);
+    expect(store.get(mainPageAtWindowEdgeAtom)).toBe(false);
+    store.set(sidebarCollapsedAtom, false);
+    expect(store.get(mainPageAtWindowEdgeAtom)).toBe(false);
   });
 });
