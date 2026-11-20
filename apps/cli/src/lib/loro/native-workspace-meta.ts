@@ -27,9 +27,12 @@ import {
 import { createNativeFlockDocs } from '@lody/shared/node/native-flock-docs';
 import {
   createNativeDocs,
+  createNativeRemoteHistoryPort,
   listNativeDocIds,
   unpublishLegacyDoc,
 } from '@lody/shared/node/native-docs';
+import { createRemoteLoroHistoryReader, readRemoteLatestGoal } from '@lody/shared/session-data';
+import type { MessageQueueItem } from '@lody/shared';
 import {
   createNativeWorkspaceMeta,
   type NativeWorkspaceMeta,
@@ -168,4 +171,27 @@ export async function writeBackNativeWorkspaceMeta(
   } finally {
     await connection.close();
   }
+}
+
+/**
+ * Read-only access to an idle native Session without a replica: bounded history
+ * reads and the queue root, served by the engine on the shared connection.
+ * Nothing here writes, arms auto-seen or enters the session cache.
+ */
+export async function openNativeSessionReader(workspaceId: string, roomId: string) {
+  const { client } = await connectNativeRepo({ launcher: cliNativeRepoHostLauncher });
+  const port = createNativeRemoteHistoryPort(client, workspaceId, roomId);
+  const history = createRemoteLoroHistoryReader(port);
+  return {
+    history,
+    readHistoryDirectory: async (from: number, to: number) => history.readDirectory(from, to),
+    getMessageQueue: async () => {
+      const value = await port.readPath(['mq']);
+      return (Array.isArray(value) ? value : []) as readonly MessageQueueItem[];
+    },
+    readLatestGoal: async () => readRemoteLatestGoal(port),
+    /** The document's `session` metadata root, as `SessionDocument.getMetaState`. */
+    getMetaState: async () =>
+      (await port.readPath(['session'])) as Record<string, unknown> | undefined,
+  };
 }

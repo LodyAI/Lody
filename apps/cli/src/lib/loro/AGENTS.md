@@ -36,6 +36,8 @@ Rules:
   so slow rooms still converge and no one-off read holds the room forever. A
   failed wrapper cleanup never replaces the completed read
   ([rationale](../../../../../.agents/notes/implemented/bug-fix/2026-11-02-cross-machine-read-room-lifetime.md)).
+- Read-only reports on an idle native Session use `openIdleSessionReader`; check-then-write
+  calls take a replica ([boundary](../../../../../.agents/docs/native-workspace-meta.md#daemon-replicas-only-for-running-sessions)).
 - To drop a doc you opened for inspection, first prove no other holder adopted
   it: `LoroDocumentManager.sessions` is a shared cache with **no refcounting**,
   and `cleanSessionDoc`/`destroy` disposes every holder's mirror/subscriptions

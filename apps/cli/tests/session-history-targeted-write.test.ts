@@ -31,6 +31,8 @@ describe('targeted history writes', () => {
     const receiver = {
       workspaceDocument: {
         peekSessionDoc: () => undefined,
+        // Not native: an uncached Session is opened, never read from the engine.
+        openIdleSessionReader: async () => undefined,
         getOrCreateSessionDoc: async () => ({ getMetaState: async () => undefined }),
       },
       getSessionBackend: async () => backend,

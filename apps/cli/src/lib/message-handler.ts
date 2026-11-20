@@ -12325,6 +12325,14 @@ export class MessageHandler {
    */
   async hasActiveGoal(sessionId: SessionId): Promise<boolean> {
     // Peek first: GC asks this of cached docs, and an open would count as an access.
+    // An idle native Session is read from the engine rather than reopened.
+    if (!this.workspaceDocument.peekSessionDoc(sessionId)) {
+      const idle = await this.workspaceDocument.openIdleSessionReader(sessionId);
+      if (idle) {
+        const legacyMeta = (await idle.getMetaState()) as SessionLegacyMetaFields | undefined;
+        return isSessionGoalActive((await idle.readLatestGoal()) ?? legacyMeta?.latestGoal);
+      }
+    }
     const sessionDoc =
       this.workspaceDocument.peekSessionDoc(sessionId) ??
       (await this.workspaceDocument.getOrCreateSessionDoc(sessionId));

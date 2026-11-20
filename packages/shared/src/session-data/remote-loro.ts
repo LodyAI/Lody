@@ -1,3 +1,4 @@
+import { resolveLatestSessionGoalFromHistory, type SessionGoalMessage } from '../goal';
 import { SESSION_DIRECTORY_INPUT_CONFIG_KEYS } from './domain';
 import type { SessionDirectoryRow, SessionEntry, SessionTurnRead } from './domain';
 import {
@@ -150,15 +151,23 @@ export function createRemoteLoroHistoryReader(port: RemoteLoroHistoryPort): Sess
     }
   };
 
+  /** Rows `[from, to)`, in as many bounded pages as the engine's byte limit needs. */
   const readDirectory = async (from: number, to: number) => {
-    if (to <= from) return [];
-    const page = await port.readListFields(from, to, DIRECTORY_FIELDS);
-    knownLength = page.len;
-    return page.rows.map((cells, offset) => {
-      const row = directoryRow(page.start + offset, cells);
-      remember(row.position, row.turnId);
-      return row;
-    });
+    const rows: SessionDirectoryRow[] = [];
+    let at = Math.max(0, from);
+    while (at < to) {
+      const page = await port.readListFields(at, to, DIRECTORY_FIELDS);
+      knownLength = page.len;
+      for (const [offset, cells] of page.rows.entries()) {
+        const row = directoryRow(page.start + offset, cells);
+        remember(row.position, row.turnId);
+        rows.push(row);
+      }
+      if (page.rows.length === 0) break;
+      at = page.start + page.rows.length;
+      if (at >= page.len) break;
+    }
+    return rows;
   };
 
   /** The page of `limit` items ending at `end`, or at the tail when `end` is omitted. */
@@ -389,3 +398,40 @@ export function createRemoteLoroHistoryReader(port: RemoteLoroHistoryPort): Sess
   };
   return reader;
 }
+
+/**
+ * The newest goal in a remote history, as the in-process reader's
+ * `readLatestGoal`: turns are read back from the tail in bounded pages and the
+ * scan stops at the first turn that holds one.
+ */
+export async function readRemoteLatestGoal(
+  port: Pick<RemoteLoroHistoryPort, 'readListFields'>
+): Promise<SessionGoalMessage | null> {
+  let end: number | undefined;
+  for (;;) {
+    const page = await port.readListFields(
+      end === undefined ? -GOAL_SCAN_PAGE : Math.max(0, end - GOAL_SCAN_PAGE),
+      end,
+      [{ path: ['items'] }]
+    );
+    for (let i = page.rows.length - 1; i >= 0; i--) {
+      const [items] = page.rows[i] ?? [];
+      if (!Array.isArray(items)) continue;
+      for (let j = items.length - 1; j >= 0; j--) {
+        const item: unknown = items[j];
+        if (
+          typeof item !== 'object' ||
+          item === null ||
+          (item as { type?: unknown }).type !== 'goal'
+        )
+          continue;
+        const goal = resolveLatestSessionGoalFromHistory([{ items: [item] }] as never);
+        if (goal) return structuredClone(goal);
+      }
+    }
+    if (page.start === 0 || page.rows.length === 0) return null;
+    end = page.start;
+  }
+}
+
+const GOAL_SCAN_PAGE = 32;

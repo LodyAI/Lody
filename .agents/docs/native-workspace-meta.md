@@ -163,9 +163,14 @@ ids instead of opening a replica.
 - **Why not a write replica in main.** Running the HistoryWriter in main would
   need `loro-crdt` in the Electron main bundle (it ships only with the embedded
   CLI); routing writes to the daemon would reintroduce proxy authoring, which the
-  CLI rules forbid. The SDK's own `LODY_SESSION_DOC_SCHEMA` preset does not match
-  the Mirror (it stores `mq[*].acpSessionConfig` and `project` as values), so the
-  schema is derived instead.
+  CLI rules forbid. The schema is derived from the Mirror; the SDK's earlier
+  Session preset, which did not match it, is removed (`lody/remove-session-preset`).
+- **Parity.** The renderer's commands share the HistoryWriter's planners and
+  validation, but apply through JSON patches rather than the writer's Loro
+  operations. Moving the writer onto the same patch application would touch its
+  streaming paths and legacy text/primitive representations, so a differential
+  test instead runs every renderer command through both and compares the stored
+  JSON and containers.
 
 Measured choices for the primitives: JSONPath (`LoroDoc.jsonpath`) was not used
 for the batch read — per-item projections drop absent fields, so results do not
@@ -174,6 +179,53 @@ it selects; filters cost 0.5–0.8 s; and results are unbounded. Changed paths c
 from the document's own events (0.01–0.1 ms per commit at 100k items), not
 `LoroDoc::diff` between versions (160–1,150 ms). `subscribeJsonpath` only signals
 that a path may have changed, with no position, so it cannot name changed turns.
+
+### Daemon: replicas only for running Sessions
+
+The daemon opens a replica (`getOrCreateSessionDoc`) when it runs or is about to
+run a Session, and reads every other Session of its own machine from the engine
+(`LoroDocumentManager.openIdleSessionReader`). The boundary is drawn by what a
+call does after it reads, not by who calls it.
+
+**Synchronous, on a replica.** A call that checks and then writes in one decision
+needs the in-process document, because the check and the write must see the same
+state with no await between them. These are: the permission response (find the
+request, answer it), auto-seen (scan scalars, commit with its guard), the import
+cursor recheck and history write, the editable-tail replacement and its rollback,
+local-project import and Edit & Resend, queue pushes and the dispatch watcher,
+`markMessageQueueSignalChecked`, `TurnHistoryGate`, and an observation that
+subscribes and captures its initial directory without a gap. All of them run on a
+Session that is running or about to run, so taking a replica for them costs
+nothing extra. They keep the synchronous rules in the
+[session-data contract](../../packages/shared/src/session-data/AGENTS.md).
+
+**Asynchronous, remote.** A read whose result is only reported needs no replica:
+MCP `lody_session_list`/`status_many` (the execution snapshot), `session_history`,
+quote resolution, the queue list, `lody session status`/`show`, and the GC's
+goal check for an evicted document. These go through a read port
+(`openNativeSessionReader`: `history`, `readHistoryDirectory`, `getMessageQueue`,
+`readLatestGoal`, `getMetaState`).
+
+How the rules are kept:
+
+- The read port has no write methods, so a check-then-write cannot be built on a
+  remote read: a caller that writes must take the replica path, where the
+  no-await rules already apply. A remote read is a snapshot and never authorizes
+  a later write; writers recheck inside their own transaction, as before.
+- A cached replica always wins (`peekSessionDoc`): it can hold committed local
+  changes the engine has not yet received, and reads must see the process's own
+  writes. Another machine's Session keeps the transient synchronized read.
+- An idle read never opens a replica, so it does not arm auto-seen, model summary
+  or the GC cache, and a status read cannot mark a turn seen.
+- The execution snapshot reads the last 128 directory rows and the queue, and
+  reads the whole directory only when that tail holds no assistant turn. The goal
+  check reads turn items back from the tail in pages of 32 and stops at the first
+  goal; a Session without any goal reads all its items once, without retaining
+  them.
+
+Still opening a replica: automation and schedule condition reads, `lody session
+history`/`observe`, and every write outside a turn (rename, archive, queue edits
+from the CLI). They are correct, only not yet lean.
 
 ## Workspace Meta
 
@@ -239,6 +291,7 @@ handling; a failed write-back is logged and retried on the next start.
 | 5        | Session Loro documents through the external document owner                                            | 700 (actual ≈490)     |
 | 6        | Paged Session directory; reopen from retained bytes plus ops since its version                        | 400 (actual ≈140)     |
 | —        | Cold 100k-turn opens: owner decision pending (segmented history or SDK transfer work)                 | to be sized           |
+| 10       | Daemon reads idle Sessions from the engine; replicas only for running Sessions                        | 300 (actual ≈160)     |
 | —        | Remaining Loro documents (`schedule-*`, Preview comments) on the same owner                           | small per type        |
 | —        | Cloud replication of native rooms (needs remote Meta design)                                          | separate proposal     |
 
@@ -352,6 +405,21 @@ stable sentinel per requested hole), and whole-history loops start at
 With the sparse view, the legacy path's 100k first screen is 219 ms and the native
 replica's reopen 48 ms.
 
+Daemon reads of idle Sessions (`LODY_DAEMON_IDLE_BENCH=4x50000`, four 50k-turn
+Sessions, 19.2 MB snapshot each). Before: each read opened a replica that the
+daemon cache retained. After: engine reads.
+
+| Per Session                     | Replica (before)       | Engine (after)       |
+| ------------------------------- | ---------------------- | -------------------- |
+| Status snapshot, cold           | 580–715 ms open + ~1 s | 208–257 ms           |
+| Status snapshot, warm           | ~1 s (whole directory) | 6.1–6.3 ms           |
+| Latest 50 directory rows (list) | —                      | 2.9–3.6 ms           |
+| Latest turn body                | 0.2–0.8 ms             | 0.8–1.3 ms           |
+| Daemon RSS, all four            | +254 MB                | +0.6 MB              |
+| Engine host RSS, all four       | +118 MB (already warm) | +161 MB (cold rooms) |
+
+The host launch (186 ms) is excluded; cold engine reads are the room load.
+
 Memory with one 100k-turn Session open: the replica adds about 65–90 MB to the
 opening process (in-process measurement 87.5 MB), and the engine host 10–15 MB
 for a loaded room; RSS deltas below 20 MB are within measurement noise.
@@ -368,8 +436,11 @@ for a loaded room; RSS deltas below 20 MB are within measurement noise.
   override.
 - The remote store's measurements use one engine connection; the renderer adds a
   main-process IPC hop per read, which the benchmark does not measure, and no
-  packaged desktop run exists yet. The daemon still opens a replica for every
-  Session it touches; reading idle Sessions from the engine is the next slice.
+  packaged desktop run exists yet. The daemon reads idle Sessions from the engine
+  for the paths listed above; the others still open a replica.
+- The engine host keeps a room loaded after it is read (about 40 MB per
+  50k-turn room in the measurement below). Unloading idle rooms is the host's
+  policy, not Lody's.
 - A commit already sent when the host dies is an unknown outcome. Per the SDK
   contract this latches that repo's metadata writes until it is recreated; reads
   continue. Commits attempted while disconnected are certain non-commits.

@@ -4600,14 +4600,24 @@ export async function sendSessionChatResult(
   }
 }
 
+/**
+ * Read access for status and show: an idle native Session is read from the
+ * engine without opening (and caching) its replica.
+ */
+async function openSessionReadPort(manager: LoroDocumentManager, sessionId: SessionId) {
+  const idle = await manager.openIdleSessionReader(sessionId);
+  if (idle) return idle;
+  const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
+  return await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+}
+
 async function buildSessionShowResult(
   workspace: WorkspaceSummary,
   manager: LoroDocumentManager,
   sessionId: SessionId
 ): Promise<SessionShowResult> {
   const session = await resolveSessionMetaOrThrow(manager, sessionId);
-  const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+  const backend = await openSessionReadPort(manager, sessionId);
   const [directory, queue] = await Promise.all([
     backend.readHistoryDirectory(0, Number.MAX_SAFE_INTEGER),
     backend.getMessageQueue(),
@@ -4837,8 +4847,7 @@ async function buildSessionStatusResult(
   sessionId: SessionId
 ): Promise<SessionStatusResult> {
   const session = await resolveSessionMetaOrThrow(manager, sessionId);
-  const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+  const backend = await openSessionReadPort(manager, sessionId);
   const history = await readSessionHistoryMetadata(backend.history);
   const assistantTurnId = resolveActiveAssistantTurnId(history);
   const live = await readSessionLiveStatus({

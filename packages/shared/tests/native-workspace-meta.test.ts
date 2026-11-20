@@ -28,6 +28,7 @@ import {
   createRemoteControlState,
   createRemoteHistoryCommands,
   createRemoteLoroHistoryReader,
+  readRemoteLatestGoal,
   shareObservation,
   type SessionDataChange,
 } from '../src/session-data';
@@ -380,10 +381,9 @@ describe('remote Session history reader', () => {
     const { doc } = await repo.openPersistedDoc(DOC);
     const data = createLoroSessionData({ sessionId: 'remote' as SessionId, doc });
     const commit = () => repo.persistDocNow(DOC, doc);
-    const remote = createRemoteLoroHistoryReader(
-      createNativeRemoteHistoryPort(await peer(dataDir), ns, DOC)
-    );
-    return { data, commit, remote };
+    const port = createNativeRemoteHistoryPort(await peer(dataDir), ns, DOC);
+    const remote = createRemoteLoroHistoryReader(port);
+    return { data, commit, remote, port };
   }
 
   it('reads the latest page, turns and outputs as the in-process reader does', async () => {
@@ -405,6 +405,39 @@ describe('remote Session history reader', () => {
     expect(await remote.readTurn('turn-3')).toEqual(data.history.readTurn('turn-3'));
     expect(await remote.readTurn('turn-404')).toEqual({ state: 'missing' });
     expect(await remote.readTurnOutput('turn-88')).toEqual(data.history.readTurnOutput('turn-88'));
+  });
+
+  it('reads a whole directory past the page byte limit and the newest goal as the in-process reader does', async () => {
+    const { data, commit, remote, port } = await open();
+    const goal = (status: string) => ({
+      type: 'goal',
+      threadId: 'thread-1',
+      turnId: null,
+      objective: 'ship the release',
+      status,
+      tokenBudget: null,
+      tokensUsed: 1,
+      timeUsedSeconds: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    expect(await readRemoteLatestGoal(port)).toBeNull();
+    // Large configurations push one directory read past a single page's byte limit.
+    const big = 'x'.repeat(8192);
+    for (let i = 0; i < 400; i++)
+      await data.commands.appendTurn(
+        i === 41
+          ? turn(i, { items: [goal('complete'), goal('active')] } as never)
+          : turn(i, i % 2 === 0 ? ({ inputConfig: { agentRoleId: big } } as never) : {})
+      );
+    await commit();
+    const whole = await remote.readDirectory(0, 400);
+    expect(whole.map((row) => row.turnId)).toEqual(
+      data.history.readDirectory(0, 400).map((row) => row.turnId)
+    );
+    // The goal sits ten pages back from the tail: the scan finds the newest item.
+    expect(await readRemoteLatestGoal(port)).toEqual(data.readLatestGoal());
+    expect(data.readLatestGoal()).toMatchObject({ status: 'active' });
   });
 
   it('notifies appends structurally and field edits by turn id, never by content', async () => {
@@ -687,5 +720,116 @@ describe('remote Session writes', () => {
       const read = daemon.data.history.readTurn('u-2');
       return read.state === 'ready' && read.turn.status === 'processing';
     });
+  });
+
+  it('writes the same history as the HistoryWriter for every renderer command', async () => {
+    // Differential guard: the remote commands re-apply the writer's planners as
+    // patches, so the same command sequence must leave the same stored history,
+    // containers, results and refusals as the HistoryWriter on a local replica.
+    const { connection } = await setup();
+    await createDocRoom(connection.client, ns, 'session-parity');
+    const port = createNativeRemoteHistoryPort(connection.client, ns, 'session-parity');
+    const remote = createRemoteHistoryCommands(port);
+    const doc = new LoroDoc();
+    const local = createLoroSessionData({ sessionId: 'parity' as SessionId, doc }).commands;
+    const user = (id: string, text: string, extra: object = {}) =>
+      ({
+        id,
+        role: 'user',
+        timestamp: '2026-01-01T00:00:00Z',
+        status: 'pending',
+        items: [{ type: 'text', text }],
+        fileDiff: [],
+        inputConfig: { prompt: text, mcpServerIds: [], configOptionValues: { effort: 'high' } },
+        ...extra,
+      }) as never;
+    const steps: [string, (c: typeof local) => Promise<unknown>][] = [
+      ['append user', (c) => c.appendTurn(user('u-1', 'hello'))],
+      [
+        'append assistant with a request',
+        (c) =>
+          c.appendTurn({
+            id: 'a-1',
+            role: 'assistant',
+            timestamp: '2026-01-01T00:00:00Z',
+            userTurnId: 'u-1',
+            items: [
+              { type: 'text', text: 'working' },
+              {
+                type: 'tool_call',
+                toolCallId: 'tc-1',
+                title: 'Run',
+                status: 'pending',
+                permissionRequest: { requestId: 'p-1', options: [] },
+              },
+            ],
+            plan: [{ content: 'step', status: 'pending', priority: 'medium' }],
+            fileDiff: [],
+          } as never),
+      ],
+      ['replace user', (c) => c.replaceTurn('u-1', user('u-1', 'hello again', { read: true }))],
+      [
+        'answer request',
+        (c) =>
+          c.respondPermission('p-1', { outcome: 'selected', optionId: 'allow' } as never, {
+            turnId: 'a-1',
+          }),
+      ],
+      [
+        'answer again (never overwrites)',
+        (c) => c.respondPermission('p-1', { outcome: 'cancelled' } as never),
+      ],
+      [
+        'answer an unknown request',
+        (c) => c.respondPermission('p-404', { outcome: 'cancelled' } as never),
+      ],
+      [
+        'status processing',
+        (c) =>
+          c.applyHistoryAction({
+            kind: 'user-status',
+            turnId: 'u-1',
+            status: 'processing',
+          } as never),
+      ],
+      [
+        'guarded status refused once started',
+        (c) =>
+          c.applyHistoryAction({
+            kind: 'user-status',
+            turnId: 'u-1',
+            status: 'canceled',
+            onlyAwaitingStart: true,
+          } as never),
+      ],
+      ['duplicate copy', (c) => c.appendTurn(user('u-1', 'copy'))],
+      [
+        'status of every copy',
+        (c) =>
+          c.applyHistoryAction({
+            kind: 'user-status',
+            turnId: 'u-1',
+            status: 'completed',
+          } as never),
+      ],
+      ['invalid append', (c) => c.appendTurn({ id: 'bad', role: 'user', items: 'nope' } as never)],
+      ['replace missing', (c) => c.replaceTurn('nope', user('nope', 'x'))],
+    ];
+    const outcome = async (run: () => Promise<unknown>) => {
+      try {
+        return { ok: await run() };
+      } catch (error) {
+        return { error: (error as Error).name };
+      }
+    };
+    for (const [label, step] of steps) {
+      const a = await outcome(() => step(local));
+      const b = await outcome(() => step(remote as never));
+      expect({ label, result: b }).toEqual({ label, result: a });
+    }
+    const stored = LoroDoc.fromSnapshot(
+      (await connection.client.exportLoroRaw(ns, { kind: 'loro_doc', id: 'session-parity' })).bytes
+    );
+    expect(shape(stored)).toEqual(shape(doc));
   });
 });
