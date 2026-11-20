@@ -76,3 +76,15 @@ describe('Today convert-to-task prompt', () => {
     );
   });
 });
+
+describe('Today block selection covers subtrees', () => {
+  it('shows every descendant of a selected parent as selected, since it is deleted with it', async () => {
+    const { selectionCovers } = await import('../src/components/today/editor/block-selection');
+    const { visible, id } = outline('p\n  c1\n  c2\n  c3\nq');
+    const range = blockRange(visible, id('c2'), id('p'));
+    expect(range).toEqual([id('p'), id('c1'), id('c2')]);
+    const covered = selectionCovers(visible, range);
+    expect([...covered].sort()).toEqual([id('p'), id('c1'), id('c2'), id('c3')].sort());
+    expect(covered.has(id('q'))).toBe(false);
+  });
+});

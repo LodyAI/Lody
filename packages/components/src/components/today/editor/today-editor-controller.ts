@@ -24,6 +24,7 @@ import {
   blockRange,
   parseTodayClipboard,
   resolveBlockKey,
+  selectionCovers,
   serializeTodayFragments,
   topLevelSelection,
 } from './block-selection';
@@ -68,6 +69,11 @@ export class TodayEditorController {
   private active: TodayActiveNode | null = null;
   private selection: TodayBlockSelection | null = null;
   private blockAnchor: TodayNodeId | null = null;
+  private coveredFor: {
+    snapshot: unknown;
+    ids: readonly TodayNodeId[];
+    covered: Set<TodayNodeId>;
+  } | null = null;
   private blockFocus: TodayNodeId | null = null;
   private surface: HTMLElement | null = null;
   private stopPointer: (() => void) | null = null;
@@ -177,7 +183,17 @@ export class TodayEditorController {
     return this.active?.store === store && this.active.nodeId === nodeId;
   }
   isBlockSelected(store: TodayPageStore, nodeId: TodayNodeId) {
-    return this.selection?.store === store && this.selection.ids.includes(nodeId);
+    if (this.selection?.store !== store) return false;
+    // Descendants of a selected row are acted on with it, so they show as selected.
+    const snapshot = store.getSnapshot();
+    if (this.coveredFor?.snapshot !== snapshot || this.coveredFor.ids !== this.selection.ids) {
+      this.coveredFor = {
+        snapshot,
+        ids: this.selection.ids,
+        covered: selectionCovers(snapshot.visible, this.selection.ids),
+      };
+    }
+    return this.coveredFor.covered.has(nodeId);
   }
   getBlockSelection() {
     return this.selection;

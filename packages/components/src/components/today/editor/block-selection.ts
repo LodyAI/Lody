@@ -147,3 +147,29 @@ export function buildConvertPrompt(fragment: TodayFragment): string {
   const children = serializeTodayFragments(fragment.children, (sessionId) => sessionId);
   return children ? `${fragment.text}\n${children}` : fragment.text;
 }
+
+/**
+ * Every visible row a block selection acts on: the selected rows plus all
+ * descendants of each selected row (deleting, moving or copying a parent takes
+ * its subtree, so the highlight must show it too).
+ */
+export function selectionCovers(
+  visible: readonly TodayNodeView[],
+  ids: readonly TodayNodeId[]
+): Set<TodayNodeId> {
+  const selected = new Set(ids);
+  const covered = new Set<TodayNodeId>();
+  let subtreeDepth: number | null = null;
+  for (const node of visible) {
+    if (subtreeDepth !== null && node.depth > subtreeDepth) {
+      covered.add(node.id);
+      continue;
+    }
+    subtreeDepth = null;
+    if (selected.has(node.id)) {
+      covered.add(node.id);
+      subtreeDepth = node.depth;
+    }
+  }
+  return covered;
+}
