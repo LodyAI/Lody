@@ -421,10 +421,14 @@ const styles = stylex.create({
     fontWeight: 400,
     color: colors.secondaryLabel,
   },
+  /* `auto`, not 0: mobile Settings mounts this list inside a page ScrollArea
+     whose content has no definite height, where a zero basis with
+     `min-height: 0` collapses the rows to nothing. A bounded parent still
+     shrinks it to fit and scrolls here. */
   scroller: {
     flexGrow: 1,
     flexShrink: 1,
-    flexBasis: 0,
+    flexBasis: 'auto',
     minHeight: 0,
     minWidth: 0,
     overflowY: 'auto',

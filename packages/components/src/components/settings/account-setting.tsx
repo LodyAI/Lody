@@ -45,6 +45,7 @@ import { WorkspaceJoinRequestsSettings } from './workspace-join-requests-setting
 import { WorkspaceOwnershipTransfer } from './workspace-ownership-transfer';
 import { DeletedWorkspaceBilling } from './deleted-workspace-billing';
 import { AccountMachinesOverview } from './account-machines-overview';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const styles = stylex.create({
   empty: { margin: 0, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
@@ -574,7 +575,7 @@ function CloudAccountSettings({
 
   const handleCopyInviteLink = async (link: string) => {
     try {
-      await navigator.clipboard.writeText(link);
+      await copyTextToClipboard(link);
     } catch (error) {
       console.error('Failed to copy link:', error);
       toast.error(t('workspace.invite.linkCopyError', 'Failed to copy invite link'));
@@ -612,7 +613,7 @@ function CloudAccountSettings({
         }
 
         try {
-          await navigator.clipboard.writeText(result.apiKey);
+          await copyTextToClipboard(result.apiKey);
           toast.success(t('settings.account.cliAuth.generated'), {
             description: t('settings.account.cliAuth.copiedToClipboard'),
           });
@@ -638,7 +639,7 @@ function CloudAccountSettings({
     if (!generatedCliApiKey) return;
 
     try {
-      await navigator.clipboard.writeText(generatedCliApiKey);
+      await copyTextToClipboard(generatedCliApiKey);
       toast.success(t('settings.account.cliAuth.copied'));
     } catch (error) {
       console.error('Failed to copy CLI API key:', error);

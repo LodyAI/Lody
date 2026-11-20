@@ -35,7 +35,6 @@ import { conversationCopyRange } from '@/lib/conversation-copy-range';
 import { readConversationCopySource } from '@/lib/conversation-copy-source';
 import { describeCopiedConversation } from '@/lib/describe-copied-conversation';
 import { SessionShareRequestCards } from '../sharing/session-share-request-cards';
-import { SessionWindowMenuItem } from '../session-window-menu-item';
 import {
   MessageSelectionContext,
   MessageSelectionToolbar,
@@ -67,16 +66,19 @@ import {
   CheckCircle2,
   ChevronDown,
   Copy,
+  CircleDot,
   CornerLeftUp,
   Ellipsis,
   FileText,
   Folder,
+  FolderOpen,
   GitBranch,
   GitBranchPlus,
   GitFork,
   Github,
   History,
   Image,
+  Info,
   Link,
   LockKeyhole,
   MessageCircle,
@@ -90,7 +92,6 @@ import {
   SquareArrowOutUpRight,
   Timer,
   Trash2,
-  UserRoundCog,
   Users,
   X,
 } from 'lucide-react';
@@ -238,6 +239,10 @@ import { buildAppSessionUrl } from '@/lib/session-app-url';
 import { openSessionDeepLink } from '@/lib/session-deep-link';
 import { resolveSessionOpenInIdePathTarget } from '@/lib/session-open-in-ide-path';
 import {
+  normalizeSessionFileActionPlatform,
+  resolveOpenFolderInFileManagerLabel,
+} from '@/lib/session-file-actions';
+import {
   buildPathLauncherLaunchInput,
   executePathLauncher,
   buildPathLauncherProbes,
@@ -260,7 +265,6 @@ import {
   type SessionAccessAction,
   type SessionShareEditorContext,
   getSessionSharingDescription,
-  getSessionSharingLabel,
   type SessionSharingTranslator,
 } from '@/components/session-sharing';
 
@@ -274,15 +278,24 @@ import { useSessionPendingConfig } from '@/hooks/use-session-pending-config';
 import { getSessionRunConfigDraftTargetKey } from '@/atoms/session-run-config-drafts';
 import { sessionProjectMemberSelectionAtomFamily } from '@/atoms/session-project-member-selection';
 import { useSessionActions } from '@/hooks/use-session-actions';
-import { useWorkspaceMembers, type WorkspaceMember } from '@/hooks/use-workspace-members';
-import { UserAvatar } from '@/components/user-avatar';
+import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-session-dialog';
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
+import {
+  SessionInfoDialog,
+  type SessionInfoPullRequest,
+  type SessionOwnerMenuState,
+} from './session-info-dialog';
 import { SessionInfoBar } from './session-info-bar';
 import { SessionPreviewPreload } from './session-preview-preload';
 import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
 import { SessionProjectMembersChip } from './session-project-members-chip';
+import {
+  useMoveToFocusWithConfirmation,
+  useSettleSessionWithConfirmation,
+  useSnoozeSessionWithConfirmation,
+} from './session-sub-conversation-confirmation';
 import {
   buildSessionProjectMemberRows,
   resolveSessionProjectMemberRow,
@@ -383,7 +396,12 @@ import {
   resolveUnstartedTrailingDispatchAtMs,
   UNSTARTED_TRAILING_USER_TURN_TIMEOUT_MS,
 } from '@/lib/session-dispatch-state';
-import { shouldMarkSessionRead } from '@/lib/session-read-receipt';
+import {
+  resolveManualUnreadLatch,
+  shouldMarkSessionRead,
+  type ReadReceiptSnapshot,
+} from '@/lib/session-read-receipt';
+import { useWindowReadEngagement } from '@/lib/window-read-engagement';
 import { recordSessionRenderTrace, shortTraceId } from '@/lib/session-render-trace';
 import { getPathLauncherIcon } from '@/components/icons/path-launcher-icon';
 import {
@@ -577,58 +595,16 @@ const styles = stylex.create({
   stream: { height: '100%' },
   shareRequestsScroller: { maxHeight: '35vh', flexShrink: 0, overflowY: 'auto' },
   shareRequestsColumn: { paddingInline: 'calc(var(--spacing) * 3)' },
-  headerMenuStaticRow: {
-    display: 'flex',
-    width: '100%',
-    minWidth: 0,
-    minHeight: 'calc(var(--spacing) * 8)',
-    alignItems: 'center',
-    gap: 'calc(var(--spacing) * 2)',
-    overflow: 'hidden',
-    paddingBlock: 'calc(var(--spacing) * 1.5)',
-    paddingInline: 'calc(var(--spacing) * 2)',
-    borderRadius: 'var(--radius-md)',
-    cursor: 'default',
-    userSelect: 'none',
-    fontSize: '13px',
-    lineHeight: 'calc(var(--spacing) * 4)',
-  },
   menuIcon: { width: 'calc(var(--spacing) * 3.5)', height: 'calc(var(--spacing) * 3.5)' },
   menuIconFixed: { flexShrink: 0 },
-  menuIconMuted: { color: colors.secondaryLabel },
   menuTrailingIcon: { marginLeft: 'auto' },
   menuCopyIcon: { width: 'calc(var(--spacing) * 3)', height: 'calc(var(--spacing) * 3)' },
   menuBranchIcon: { marginTop: 'calc(var(--spacing) * 0.5)' },
-  menuText: { minWidth: 0, flex: '1 1 0%' },
-  menuTextTruncated: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  menuTextNormal: { fontWeight: 400 },
-  menuBranchValue: {
-    display: 'block',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  menuBaseBranch: {
-    fontSize: '0.68rem',
-    lineHeight: 'calc(var(--spacing) * 4)',
-    color: colors.secondaryLabel,
-  },
   menuForkStatus: {
     flexShrink: 0,
     fontSize: '0.75rem',
     lineHeight: '1rem',
     color: colors.secondaryLabel,
-  },
-  machineAccessibleLabel: {
-    position: 'absolute',
-    width: '1px',
-    height: '1px',
-    padding: 0,
-    margin: '-1px',
-    overflow: 'hidden',
-    clip: 'rect(0, 0, 0, 0)',
-    whiteSpace: 'nowrap',
-    borderWidth: 0,
   },
   searchShortcut: {
     borderRadius: 'var(--radius-sm)',
@@ -826,6 +802,7 @@ import { shouldShowCodexProposedPlanDecision } from '@/lib/codex-plan-decision';
 import { buildExecutionTurnConfigOverrides } from '@/lib/execution-turn-config';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 // ── Path launcher options for "Open in" split button ──
 
@@ -1320,21 +1297,6 @@ export function SessionProjectInfo({
 }
 
 /**
- * Owner-transfer state for the "···" menu. Only resolved on multi-member
- * workspaces — a solo workspace has nobody to hand the session to, so the
- * caller passes `undefined` and the submenu never renders.
- */
-export type SessionOwnerMenuState = {
-  members: WorkspaceMember[];
-  getDisabledReason?: (userId: string) => string | null;
-  /** Current `SessionMeta.userId`; may name someone who already left. */
-  ownerUserId: string;
-  onChangeOwner: (userId: string) => void | Promise<void>;
-  /** Member whose write is still in flight — keeps the row from looking inert. */
-  pendingUserId?: string | null;
-};
-
-/**
  * Navigation across the presentation-only "opened by" relationship (see
  * `lib/session-opened-by-tree.ts`). Both directions live here so an
  * MCP-opened independent Session can walk back to the Session that created it,
@@ -1384,6 +1346,9 @@ export function SessionHeaderMenu({
   onDelete,
   compact = false,
   openInIde,
+  openInFileManager,
+  isLauncherPillVisible,
+  pullRequest,
   continuationTweaks,
   t,
 }: {
@@ -1427,6 +1392,19 @@ export function SessionHeaderMenu({
     onOpen: () => void;
     onSelect: (launcher: PathLauncherOption) => void;
   };
+  /**
+   * Opens this session's directory in Finder, File Explorer, or the host file
+   * manager. Stays in `⋯` even when the editor pill is on screen — it is not
+   * one of the editor choices.
+   */
+  openInFileManager?: {
+    label: string;
+    onOpen: () => void;
+  };
+  /** Whether the header's launcher pill is on screen; read when the menu opens. */
+  isLauncherPillVisible?: () => boolean;
+  /** The session's current pull request, listed in the info dialog. */
+  pullRequest?: SessionInfoPullRequest;
   t: SessionSharingTranslator;
 }) {
   const rpcReason = useMachineRpcFeatureReason(session.machineId);
@@ -1458,18 +1436,10 @@ export function SessionHeaderMenu({
   const isGitHub = project?.kind === 'github' || !!repoFullName;
   const baseBranch = session.baseBranch?.trim() || getProjectRefBranch(project) || '';
   const currentBranch = session.branchName?.trim() || '';
-  const showBranchInfo = Boolean(
-    (isGitHub || project?.kind === 'local') && (baseBranch || currentBranch)
-  );
   const localPath = localProjectMeta?.rootPath ?? '';
   const trimmedWorkspacePath = workspacePath?.trim() || '';
-  const branchDisplayValue = currentBranch || baseBranch;
   const showBaseBranchContext = Boolean(
     currentBranch && baseBranch && currentBranch !== baseBranch
-  );
-  const showProjectPath = !showBranchInfo && Boolean(localPath);
-  const showSessionContext = Boolean(
-    (isGitHub && repoFullName) || showBranchInfo || showProjectPath || machineName || sharing
   );
   const shareActionDisabled =
     !onShareWithTeam ||
@@ -1478,6 +1448,33 @@ export function SessionHeaderMenu({
       (sharing.privateReason === 'machine-not-registered' || !sharing.canManage));
   const conversationWide = useAtomValue(conversationWideModeAtom);
   const setConversationWide = useSetAtom(conversationWideModeAtom);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [launcherPillVisible, setLauncherPillVisible] = useState(false);
+  const infoOwner = isArchived ? undefined : owner;
+  const sessionPlacement =
+    machineName && project?.kind === 'local'
+      ? session.isWorktree
+        ? ('worktree' as const)
+        : ('local' as const)
+      : undefined;
+  const hasSessionInfo = Boolean(
+    (isGitHub && repoFullName) ||
+    currentBranch ||
+    baseBranch ||
+    pullRequest ||
+    machineName ||
+    trimmedWorkspacePath ||
+    localPath ||
+    sharing ||
+    infoOwner
+  );
+  const showStatusMenu =
+    !isArchived &&
+    Boolean(
+      onSnooze ||
+      (statusGroup !== 'settled' && onSettle) ||
+      (statusGroup !== 'focus' && onMoveToFocus)
+    );
 
   const openedBySession = openedByRelations?.openedBy ?? null;
   const openedSessions = openedByRelations?.opened ?? [];
@@ -1518,7 +1515,6 @@ export function SessionHeaderMenu({
             </Menu.Content>
           </Menu.Submenu>
         ) : null}
-        <Menu.Separator />
       </>
     ) : null;
 
@@ -1574,8 +1570,7 @@ export function SessionHeaderMenu({
     // branch name copied to clipboard") — no raw value echo, which reads
     // noisy for long paths/URLs.
     (text: string, successMessage: string) => {
-      void navigator.clipboard
-        .writeText(text)
+      void copyTextToClipboard(text)
         .then(() => toast.success(successMessage))
         .catch(() => toast.error(t('sessions.copyFailed', 'Unable to copy')));
     },
@@ -1586,7 +1581,9 @@ export function SessionHeaderMenu({
     <>
       <Menu.Root
         onOpenChange={(open) => {
-          if (open) onForkMenuOpen?.();
+          if (!open) return;
+          onForkMenuOpen?.();
+          setLauncherPillVisible(isLauncherPillVisible?.() ?? false);
         }}
       >
         <Menu.Trigger
@@ -1611,154 +1608,17 @@ export function SessionHeaderMenu({
           </Button>
         </Menu.Trigger>
         <Menu.Content align="end" className={SESSION_HEADER_MENU_CONTENT_CLASS}>
-          <SessionWindowMenuItem sessionId={session.id} dropdown />
-          {/* Identity stays inline: a group label wastes a row, and a submenu hides
-              repo/branch/machine behind another step. */}
-          {!compact && showSessionContext ? (
-            <>
-              {isGitHub && repoFullName ? (
-                <Menu.Item
-                  onClick={() =>
-                    copyToClipboard(
-                      repoFullName,
-                      t('sessions.repoCopied', 'Repository name copied to clipboard')
-                    )
-                  }
-                  title={repoFullName}
-                  aria-label={`${t('sessions.copyRepository', 'Copy repository')}: ${repoFullName}`}
-                  icon={Github}
-                  endContent={<Copy className="h-3 w-3 text-muted-foreground" />}
-                >
-                  {repoFullName}
-                </Menu.Item>
-              ) : null}
-
-              {showBranchInfo ? (
-                <Menu.Item
-                  onClick={() =>
-                    copyToClipboard(
-                      branchDisplayValue,
-                      currentBranch
-                        ? t(
-                            'sessions.currentBranchCopied',
-                            'Current branch name copied to clipboard'
-                          )
-                        : t('sessions.baseBranchCopied', 'Base branch name copied to clipboard')
-                    )
-                  }
-                  title={
-                    showBaseBranchContext
-                      ? `${branchDisplayValue}\n${t(
-                          'sessions.baseBranch',
-                          'Base branch'
-                        )}: ${baseBranch}`
-                      : branchDisplayValue
-                  }
-                  aria-label={`${
-                    currentBranch
-                      ? t('sessions.copyCurrentBranch', 'Copy current branch')
-                      : t('sessions.copyBaseBranch', 'Copy base branch')
-                  }: ${branchDisplayValue}`}
-                  icon={GitBranch}
-                  endContent={<Copy className="h-3 w-3 text-muted-foreground" />}
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate">{branchDisplayValue}</span>
-                    {showBaseBranchContext ? (
-                      <span {...stylex.props(styles.menuBranchValue, styles.menuBaseBranch)}>
-                        {t('sessions.baseBranch', 'Base branch')}: {baseBranch}
-                      </span>
-                    ) : null}
-                  </span>
-                </Menu.Item>
-              ) : showProjectPath ? (
-                <Menu.Item
-                  onClick={() =>
-                    copyToClipboard(
-                      localPath,
-                      t('sessions.projectPathCopied', 'Project path copied to clipboard')
-                    )
-                  }
-                  title={localPath}
-                  aria-label={`${t('sessions.copyProjectPath', 'Copy project path')}: ${localPath}`}
-                  icon={Folder}
-                  endContent={<Copy className="h-3 w-3 text-muted-foreground" />}
-                >
-                  {localPath}
-                </Menu.Item>
-              ) : null}
-
-              {machineName ? (
-                <div {...stylex.props(styles.headerMenuStaticRow)}>
-                  <Monitor
-                    {...stylex.props(styles.menuIcon, styles.menuIconFixed, styles.menuIconMuted)}
-                  />
-                  <span {...stylex.props(styles.machineAccessibleLabel)}>
-                    {t('sessions.machineLabel', 'Machine')}:{' '}
-                  </span>
-                  <span {...stylex.props(styles.menuText, styles.menuTextTruncated)}>
-                    {machineName}
-                  </span>
-                  {project?.kind === 'local' ? (
-                    <Badge className="ml-auto">
-                      {session.isWorktree
-                        ? t('chat.workdir.worktree', 'Worktree')
-                        : t('chat.workdir.local', 'Local')}
-                    </Badge>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {sharing ? (
-                <Tooltip.Root>
-                  <Tooltip.Trigger
-                    delay={300}
-                    render={
-                      <div {...stylex.props(styles.headerMenuStaticRow)}>
-                        {sharing.visibility === 'team' ? (
-                          <Users
-                            {...stylex.props(
-                              styles.menuIcon,
-                              styles.menuIconFixed,
-                              styles.menuIconMuted
-                            )}
-                          />
-                        ) : sharing.visibility === 'private' ? (
-                          <LockKeyhole
-                            {...stylex.props(
-                              styles.menuIcon,
-                              styles.menuIconFixed,
-                              styles.menuIconMuted
-                            )}
-                          />
-                        ) : (
-                          <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                        )}
-                        <span
-                          {...stylex.props(
-                            styles.menuText,
-                            styles.menuTextTruncated,
-                            styles.menuTextNormal
-                          )}
-                        >
-                          {getSessionSharingLabel(t, sharing)}
-                        </span>
-                      </div>
-                    }
-                  />
-                  <Tooltip.Content side="left" className="max-w-64 px-2.5 py-2 text-xs">
-                    {getSessionSharingDescription(t, sharing)}
-                  </Tooltip.Content>
-                </Tooltip.Root>
-              ) : null}
-
-              <Menu.Separator />
-            </>
+          {/* Where the session lives (repository, branch, PR, machine, path,
+              access, owner) opens in one dialog instead of stacking rows here. */}
+          {!compact && hasSessionInfo ? (
+            <Menu.Item icon={Info} onClick={() => setInfoOpen(true)}>
+              {t('sessions.info.menu', 'Session info…')}
+            </Menu.Item>
           ) : null}
 
           {/* View preference, not a session action: device-local toggle mirrored
-              from Settings > Appearance. It leads the action block — the page's
-              own display option, right after identity, like Notion's page
+              from Settings > Appearance. It sits with "Session info…" above the
+              actions — the page's own display option, like Notion's page
               controls. A trailing Switch, not a checkmark; the row stays open
               so the flip is visible. */}
           <Menu.Item
@@ -1781,22 +1641,16 @@ export function SessionHeaderMenu({
             {t('sessions.fullWidth', 'Full width')}
           </Menu.Item>
 
-          {openedByRelationRows}
+          <Menu.Separator />
 
-          {continuationTweaks && (
-            <Menu.Submenu>
-              <Menu.SubmenuTrigger>
-                {t('sessions.continuation.tweaks.title', '自动化设置')}
-              </Menu.SubmenuTrigger>
-              <Menu.Content className="w-[290px] p-3">{continuationTweaks}</Menu.Content>
-            </Menu.Submenu>
-          )}
-
-          {openInIdeMenu}
-
-          {onOpenPublicShare && !sharingReason && (
-            <Menu.Item icon={Share2} onClick={onOpenPublicShare}>
-              {t('sharing.manager.title', 'Share')}
+          {onRename && !isArchived && (
+            <Menu.Item
+              icon={Pencil}
+              onClick={() => {
+                void onRename();
+              }}
+            >
+              {t('sidebar.renameChat.title', 'Rename Chat')}
             </Menu.Item>
           )}
 
@@ -1876,154 +1730,163 @@ export function SessionHeaderMenu({
             </Menu.Submenu>
           ) : null}
 
-          {onRename && !isArchived && (
-            <Menu.Item
-              icon={Pencil}
-              onClick={() => {
-                void onRename();
-              }}
-            >
-              {t('sidebar.renameChat.title', 'Rename Chat')}
-            </Menu.Item>
+          {continuationTweaks && (
+            <Menu.Submenu>
+              <Menu.SubmenuTrigger>
+                {t('sessions.continuation.tweaks.title', '自动化设置')}
+              </Menu.SubmenuTrigger>
+              <Menu.Content className="w-[290px] p-3">{continuationTweaks}</Menu.Content>
+            </Menu.Submenu>
           )}
 
-          {!isArchived && (onSnooze || onSettle || onMoveToFocus) ? (
-            <>
-              {onSnooze ? (
-                <Menu.Submenu>
-                  <Menu.SubmenuTrigger icon={AlarmClock}>
-                    {t('sessions.contextMenu.snooze', 'Later')}
-                  </Menu.SubmenuTrigger>
-                  <Menu.Content className="min-w-[200px]">
-                    {buildSnoozePresets(statusNow).map((preset) => {
-                      const label =
-                        preset.id === 'laterToday'
-                          ? t('sessions.contextMenu.snoozeLaterToday', 'Later today')
-                          : preset.id === 'tomorrowMorning'
-                            ? t('sessions.contextMenu.snoozeTomorrowMorning', 'Tomorrow morning')
-                            : t('sessions.contextMenu.snoozeNextWeek', 'Next week');
-                      return (
-                        <Menu.Item key={preset.id} onClick={() => void onSnooze(preset.timestamp)}>
-                          <span className="flex w-full items-center justify-between gap-4">
-                            <span>{label}</span>
-                            <span className="text-[11px] tabular-nums text-muted-foreground">
-                              {preset.countdown}
-                            </span>
-                          </span>
-                        </Menu.Item>
-                      );
-                    })}
-                    <Menu.Separator />
-                    <Menu.Item
-                      icon={Timer}
-                      onClick={() =>
-                        setCustomSnoozeTarget({
-                          sessionId: session.id,
-                          title: session.title ?? '',
-                        })
-                      }
-                    >
-                      {t('sessions.contextMenu.snoozeCustom', 'Custom time…')}
-                    </Menu.Item>
-                  </Menu.Content>
-                </Menu.Submenu>
-              ) : null}
-              {statusGroup !== 'settled' && onSettle ? (
-                <Menu.Item icon={CheckCircle2} onClick={() => void onSettle()}>
-                  {t('sessions.contextMenu.settle', 'Settle')}
-                </Menu.Item>
-              ) : null}
-              {statusGroup !== 'focus' && onMoveToFocus ? (
-                <Menu.Item icon={ArrowUpCircle} onClick={() => void onMoveToFocus()}>
-                  {t('sessions.contextMenu.moveToFocus', 'Move to Focus')}
-                </Menu.Item>
-              ) : null}
-            </>
+          {openedByRelationRows}
+
+          {/* The header pill is the primary launcher; the menu lists it only
+              while the narrow-page container query hides that pill. Opening the
+              folder in Finder / Explorer stays here either way. */}
+          {launcherPillVisible ? null : openInIdeMenu}
+          {openInFileManager ? (
+            <Menu.Item icon={FolderOpen} onClick={() => void openInFileManager.onOpen()}>
+              {openInFileManager.label}
+            </Menu.Item>
           ) : null}
 
-          {owner && !isArchived ? (
+          <Menu.Separator />
+
+          {showStatusMenu ? (
             <Menu.Submenu>
-              <Menu.SubmenuTrigger icon={UserRoundCog}>
-                {t('sessions.owner.change', 'Change owner')}
+              <Menu.SubmenuTrigger icon={CircleDot}>
+                {t('sessions.status.change', 'Change status')}
               </Menu.SubmenuTrigger>
-              <Menu.Content className="max-h-72 min-w-[200px] max-w-[280px] overflow-y-auto">
-                <Menu.RadioGroup
-                  value={owner.ownerUserId}
-                  onValueChange={(userId) => {
-                    // Guard in the handler, not just via `disabled`: the
-                    // menu stays mounted while the write is in flight.
-                    if (
-                      userId === owner.ownerUserId ||
-                      owner.pendingUserId != null ||
-                      owner.getDisabledReason?.(userId)
-                    )
-                      return;
-                    void owner.onChangeOwner(userId);
-                  }}
-                >
-                  {owner.members.map((member) => {
-                    const isPending = owner.pendingUserId === member.userId;
-                    const disabledReason = owner.getDisabledReason?.(member.userId);
-                    return (
-                      <Menu.RadioItem
-                        key={member.userId}
-                        value={member.userId}
-                        disabled={owner.pendingUserId != null || !!disabledReason}
-                        title={disabledReason ?? member.email ?? member.name}
-                        indicator="check"
-                        indicatorSide="end"
-                        endContent={
-                          isPending ? <Spinner className="h-3.5 w-3.5 shrink-0" /> : undefined
+              <Menu.Content className="min-w-[200px]">
+                {onSnooze ? (
+                  <Menu.Submenu>
+                    <Menu.SubmenuTrigger icon={AlarmClock}>
+                      {t('sessions.contextMenu.snooze', 'Later')}
+                    </Menu.SubmenuTrigger>
+                    <Menu.Content className="min-w-[200px]">
+                      {buildSnoozePresets(statusNow).map((preset) => {
+                        const label =
+                          preset.id === 'oneHour'
+                            ? t('sessions.contextMenu.snoozeOneHour', 'In 1 hour')
+                            : preset.id === 'laterToday'
+                              ? t('sessions.contextMenu.snoozeLaterToday', 'Later today')
+                              : preset.id === 'tomorrowMorning'
+                                ? t(
+                                    'sessions.contextMenu.snoozeTomorrowMorning',
+                                    'Tomorrow morning'
+                                  )
+                                : t('sessions.contextMenu.snoozeNextWeek', 'Next week');
+                        return (
+                          <Menu.Item
+                            key={preset.id}
+                            onClick={() => void onSnooze(preset.timestamp)}
+                          >
+                            <span className="flex w-full items-center justify-between gap-4">
+                              <span>{label}</span>
+                              <span className="text-[11px] tabular-nums text-muted-foreground">
+                                {preset.countdown}
+                              </span>
+                            </span>
+                          </Menu.Item>
+                        );
+                      })}
+                      <Menu.Separator />
+                      <Menu.Item
+                        icon={Timer}
+                        onClick={() =>
+                          setCustomSnoozeTarget({
+                            sessionId: session.id,
+                            title: session.title ?? '',
+                          })
                         }
                       >
-                        <UserAvatar
-                          user={{ id: member.userId, name: member.name, image: member.image }}
-                          size="mini"
-                          className="shrink-0"
-                        />
-                        {member.name}
-                        {disabledReason ? <span>{disabledReason}</span> : null}
-                      </Menu.RadioItem>
-                    );
-                  })}
-                </Menu.RadioGroup>
+                        {t('sessions.contextMenu.snoozeCustom', 'Custom time…')}
+                      </Menu.Item>
+                    </Menu.Content>
+                  </Menu.Submenu>
+                ) : null}
+                {statusGroup !== 'settled' && onSettle ? (
+                  <Menu.Item icon={CheckCircle2} onClick={() => void onSettle()}>
+                    {t('sessions.contextMenu.settle', 'Settle')}
+                  </Menu.Item>
+                ) : null}
+                {statusGroup !== 'focus' && onMoveToFocus ? (
+                  <Menu.Item icon={ArrowUpCircle} onClick={() => void onMoveToFocus()}>
+                    {t('sessions.contextMenu.moveToFocus', 'Move to Focus')}
+                  </Menu.Item>
+                ) : null}
               </Menu.Content>
             </Menu.Submenu>
           ) : null}
 
-          {/* Copy URL stays in the Copy submenu even for private sessions (the
+          <Menu.Submenu>
+            <Menu.SubmenuTrigger icon={Share2}>
+              {t('sharing.manager.title', 'Share')}
+            </Menu.SubmenuTrigger>
+            <Menu.Content className="min-w-[200px]">
+              {onOpenPublicShare && !sharingReason && (
+                <Menu.Item icon={Link} onClick={onOpenPublicShare}>
+                  {t('sessions.share.publicLink', 'Public link…')}
+                </Menu.Item>
+              )}
+              {/* Copy URL stays in the Copy submenu even for private sessions (the
               link still works for the owner); sharing is a separate action that
               only appears while the conversation isn't team-visible. */}
-          {sharing && !sharingReason && sharing.visibility !== 'team' ? (
-            <Menu.Item
-              disabled={shareActionDisabled}
-              onClick={() => {
-                void onShareWithTeam?.();
-              }}
-              icon={
-                sharing.visibility === 'unknown' ? (
-                  <Spinner size="small" label={null} />
-                ) : sharing.privateReason === 'machine-not-registered' ? (
-                  <Monitor size="100%" />
-                ) : sharing.canManage ? (
-                  Users
-                ) : (
-                  LockKeyhole
-                )
-              }
-            >
-              {sharing.visibility === 'unknown'
-                ? t('sessions.sharing.loadingAction', 'Checking sharing…')
-                : sharing.privateReason === 'machine-not-registered'
-                  ? t(
-                      'sessions.sharing.registerDeviceToShare',
-                      'Register this device before sharing'
+              {sharing && !sharingReason && sharing.visibility !== 'team' ? (
+                <Menu.Item
+                  disabled={shareActionDisabled}
+                  onClick={() => {
+                    void onShareWithTeam?.();
+                  }}
+                  icon={
+                    sharing.visibility === 'unknown' ? (
+                      <Spinner size="small" label={null} />
+                    ) : sharing.privateReason === 'machine-not-registered' ? (
+                      <Monitor size="100%" />
+                    ) : sharing.canManage ? (
+                      Users
+                    ) : (
+                      LockKeyhole
                     )
-                  : sharing.canManage
-                    ? t('sessions.sharing.shareWithTeam', 'Share with team…')
-                    : t('sessions.sharing.onlyOwnerCanShare', 'Only the device owner can share')}
-            </Menu.Item>
-          ) : null}
+                  }
+                >
+                  {sharing.visibility === 'unknown'
+                    ? t('sessions.sharing.loadingAction', 'Checking sharing…')
+                    : sharing.privateReason === 'machine-not-registered'
+                      ? t(
+                          'sessions.sharing.registerDeviceToShare',
+                          'Register this device before sharing'
+                        )
+                      : sharing.canManage
+                        ? t('sessions.sharing.shareWithTeam', 'Share with team…')
+                        : t(
+                            'sessions.sharing.onlyOwnerCanShare',
+                            'Only the device owner can share'
+                          )}
+                </Menu.Item>
+              ) : null}
+              {sharingReason ? (
+                <Menu.Item disabled icon={Share2}>
+                  <WorkspaceFeatureReasonText reason={sharingReason} />
+                </Menu.Item>
+              ) : null}
+              <Menu.Item
+                disabled={!!exportReason || !onShareAsImage}
+                title={exportReason}
+                onClick={() => {
+                  onShareAsImage?.();
+                }}
+                icon={Image}
+              >
+                {exportReason ? (
+                  <WorkspaceFeatureReasonText reason={exportReason} />
+                ) : (
+                  t('sessions.shareAsImage', 'Share as image…')
+                )}
+              </Menu.Item>
+            </Menu.Content>
+          </Menu.Submenu>
 
           <Menu.Submenu>
             <Menu.SubmenuTrigger icon={Copy}>{t('sessions.copy', 'Copy')}</Menu.SubmenuTrigger>
@@ -2095,29 +1958,9 @@ export function SessionHeaderMenu({
             </Menu.Content>
           </Menu.Submenu>
 
-          <Menu.Item
-            disabled={!!exportReason || !onShareAsImage}
-            title={exportReason}
-            onClick={() => {
-              onShareAsImage?.();
-            }}
-            icon={Image}
-          >
-            {exportReason ? (
-              <WorkspaceFeatureReasonText reason={exportReason} />
-            ) : (
-              t('sessions.shareAsImage', 'Share as image…')
-            )}
-          </Menu.Item>
-
           {rpcReason ? (
             <Menu.Item disabled>
               <WorkspaceFeatureReasonText reason={rpcReason} />
-            </Menu.Item>
-          ) : null}
-          {sharingReason ? (
-            <Menu.Item disabled icon={Share2}>
-              <WorkspaceFeatureReasonText reason={sharingReason} />
             </Menu.Item>
           ) : null}
           {previewReason ? (
@@ -2177,6 +2020,20 @@ export function SessionHeaderMenu({
           onConfirm={(_sessionId, snoozedUntil) => void onSnooze(snoozedUntil)}
         />
       ) : null}
+      <SessionInfoDialog
+        open={infoOpen}
+        onOpenChange={setInfoOpen}
+        repoFullName={isGitHub ? repoFullName || undefined : undefined}
+        currentBranch={currentBranch || undefined}
+        baseBranch={baseBranch || undefined}
+        pullRequest={pullRequest}
+        machineName={machineName}
+        placement={sessionPlacement}
+        workspacePath={trimmedWorkspacePath || localPath || undefined}
+        sharing={sharing}
+        owner={infoOwner}
+        t={t}
+      />
     </>
   );
 }
@@ -3084,6 +2941,7 @@ export const SessionChatInterface = memo(
       void openExternalUrl(latestPr.url);
     });
     const prLinkHandler = latestPr ? openLatestPr : undefined;
+    const launcherPillRef = useRef<HTMLDivElement>(null);
     // The PR tab follows the current PR, so an earlier PR opens on GitHub.
     const openHistoryPr = useStableCallback((view: SessionPullRequestView) => {
       void openExternalUrl(view.url);
@@ -3223,6 +3081,9 @@ export const SessionChatInterface = memo(
       settleSession,
       moveSessionToFocus,
     } = useSessionActions();
+    const settleSessionWithConfirmation = useSettleSessionWithConfirmation(settleSession);
+    const snoozeSessionWithConfirmation = useSnoozeSessionWithConfirmation(snoozeSession);
+    const moveToFocusWithConfirmation = useMoveToFocusWithConfirmation(moveSessionToFocus);
     const [renameDialogTarget, setRenameDialogTarget] = useState<RenameSessionDialogTarget | null>(
       null
     );
@@ -4370,7 +4231,7 @@ export const SessionChatInterface = memo(
             });
             await admitOutput();
             assertCurrent();
-            await navigator.clipboard.writeText(markdown);
+            await copyTextToClipboard(markdown);
             assertCurrent();
             captureSessionEvent('session/history_copy_succeeded', {
               history_count: turnCount,
@@ -4417,20 +4278,48 @@ export const SessionChatInterface = memo(
     );
 
     // Inactive tabs and collapsed side chats stay mounted for fast switching, so
-    // being mounted is not evidence the user saw this conversation: only the
-    // visible surface may clear unread state. Otherwise opening a parent session
-    // marks every one of its sub-sessions read at once.
-    const lastReadAtForReceiptRef = useRef(parseTimestamp(session.lastReadAt));
-    lastReadAtForReceiptRef.current = parseTimestamp(session.lastReadAt);
+    // being mounted is not evidence the user saw this conversation: only a
+    // visible surface inside an active foreground window that has received page
+    // interaction may clear unread state.
+    const {
+      isWindowActive: isWindowReadActive,
+      hasPageInteraction: hasWindowReadInteraction,
+      getLatestState: getLatestWindowReadEngagement,
+    } = useWindowReadEngagement();
+    const prevReadReceiptSnapshotRef = useRef<ReadReceiptSnapshot | null>(null);
+    const manualUnreadAtMessageRef = useRef<number | null>(null);
 
     useEffect(() => {
+      const surfaceVisible = isVisible && !preparingWindow;
       const lastMessageAt = parseTimestamp(session.lastMessageAt);
+      const lastReadAt = parseTimestamp(session.lastReadAt);
+      const snapshot: ReadReceiptSnapshot = {
+        sessionId: session.id,
+        isVisible: surfaceVisible,
+        lastMessageAt,
+        lastReadAt,
+      };
+      const manualUnreadAt = resolveManualUnreadLatch(
+        prevReadReceiptSnapshotRef.current,
+        snapshot,
+        manualUnreadAtMessageRef.current
+      );
+      prevReadReceiptSnapshotRef.current = snapshot;
+      manualUnreadAtMessageRef.current = manualUnreadAt;
+
+      if (manualUnreadAt !== null && lastMessageAt !== null && lastMessageAt <= manualUnreadAt) {
+        return;
+      }
+
+      const liveEngagement = getLatestWindowReadEngagement();
       if (
         !shouldMarkSessionRead({
           rendersConversation: !hideMessageArea,
-          isVisible: isVisible && !preparingWindow,
+          isVisible: surfaceVisible,
+          isWindowActive: isWindowReadActive && liveEngagement.isWindowActive,
+          hasPageInteraction: hasWindowReadInteraction && liveEngagement.hasPageInteraction,
           lastMessageAt,
-          lastReadAt: lastReadAtForReceiptRef.current,
+          lastReadAt,
         })
       ) {
         return;
@@ -4438,17 +4327,17 @@ export const SessionChatInterface = memo(
       void markSessionRead(session.id, session.lastMessageAt ?? null).catch((error: unknown) => {
         console.warn('Failed to mark session as read', error);
       });
-      // A receipt gets a new opportunity when this surface becomes visible or
-      // a new message arrives. Deliberately do not depend on lastReadAt: moving
-      // that receipt backwards is the user's explicit "Mark as unread" action,
-      // which must remain visible until they leave and reopen the conversation.
     }, [
+      getLatestWindowReadEngagement,
+      hasWindowReadInteraction,
       hideMessageArea,
       isVisible,
-      preparingWindow,
+      isWindowReadActive,
       markSessionRead,
+      preparingWindow,
       session.id,
       session.lastMessageAt,
+      session.lastReadAt,
     ]);
 
     const isDispatching = inputActionState === 'dispatching';
@@ -7058,6 +6947,48 @@ export const SessionChatInterface = memo(
       void launchPathWithLauncher(selectedPathLauncher, 'session/open_in_ide_clicked');
     }, [launchPathWithLauncher, selectedPathLauncher]);
 
+    const openInFileManagerLabel = resolveOpenFolderInFileManagerLabel(
+      normalizeSessionFileActionPlatform(electronPathLauncherPlatform),
+      t
+    );
+    const canOpenInFileManager = Boolean(openInIdePath) && isElectronRendererForPathLaunch;
+    const handleOpenInFileManager = useCallback(async () => {
+      const path = await resolveOpenInIdePath();
+      if (!path) {
+        toast.error(t('sessions.openFolder.failed', 'Could not open that folder'));
+        return;
+      }
+      const analyticsProperties = { path_source: openInIdePathSource };
+      captureSessionEvent('session/open_in_file_manager_clicked', analyticsProperties);
+      const services = getIpcServices();
+      if (!services) {
+        captureSessionEvent('session/open_in_file_manager_failed', {
+          ...analyticsProperties,
+          reason: 'native_bridge_unavailable',
+        });
+        toast.error(
+          t('sessions.pathLaunchUnsupported', 'This launcher is only available in the desktop app')
+        );
+        return;
+      }
+      try {
+        const result = await services.app.openLocalPath(path);
+        if (!result.opened) {
+          captureSessionEvent('session/open_in_file_manager_failed', {
+            ...analyticsProperties,
+            reason: result.error,
+          });
+          toast.error(t('sessions.openFolder.failed', 'Could not open that folder'));
+        }
+      } catch (error) {
+        captureSessionEvent('session/open_in_file_manager_failed', {
+          ...analyticsProperties,
+          reason: getErrorMessage(error),
+        });
+        toast.error(t('sessions.openFolder.failed', 'Could not open that folder'));
+      }
+    }, [captureSessionEvent, openInIdePathSource, resolveOpenInIdePath, t]);
+
     const handleCopyPath = useCallback(async () => {
       const path = await resolveOpenInIdePath();
       if (!path) {
@@ -7068,7 +6999,7 @@ export const SessionChatInterface = memo(
         return;
       }
       try {
-        await navigator.clipboard.writeText(path);
+        await copyTextToClipboard(path);
         captureSessionEvent('session/path_copied', {
           path_source: openInIdePathSource,
         });
@@ -7089,7 +7020,7 @@ export const SessionChatInterface = memo(
       async (linkFormat: 'https' | 'deeplink' = 'https') => {
         try {
           if (!workspaceId || !workspaceSlug) throw new Error('Workspace is not ready');
-          await navigator.clipboard.writeText(
+          await copyTextToClipboard(
             linkFormat === 'deeplink'
               ? buildSessionLink({ sessionId: session.id, workspaceId })
               : buildAppSessionUrl(workspaceSlug, session.id)
@@ -7112,10 +7043,11 @@ export const SessionChatInterface = memo(
     );
 
     /* Shared header pieces used by both header variants. */
+    const isLauncherPillVisible = () => (launcherPillRef.current?.getClientRects().length ?? 0) > 0;
     const headerLauncherActions = (
       <>
         {shouldShowOpenInIdeButton && isElectronRendererForPathLaunch && (
-          <div {...stylex.props(styles.headerPills)}>
+          <div ref={launcherPillRef} {...stylex.props(styles.headerPills)}>
             <button
               type="button"
               {...stylex.props(styles.headerLauncher, styles.headerLauncherPrimary)}
@@ -7165,6 +7097,9 @@ export const SessionChatInterface = memo(
                   })}
                 </Menu.RadioGroup>
                 <Menu.Separator />
+                <Menu.Item icon={FolderOpen} onClick={() => void handleOpenInFileManager()}>
+                  {openInFileManagerLabel}
+                </Menu.Item>
                 {ACTION_OPTIONS.map((action) => (
                   <Menu.Item
                     key={action.id}
@@ -7295,18 +7230,31 @@ export const SessionChatInterface = memo(
         }
         onSnooze={
           headerSharing?.access !== 'read'
-            ? (snoozedUntil) => snoozeSession(session.id, snoozedUntil)
+            ? (snoozedUntil) =>
+                snoozeSessionWithConfirmation(session.id, snoozedUntil).then(() => undefined)
             : undefined
         }
-        onSettle={headerSharing?.access !== 'read' ? () => settleSession(session.id) : undefined}
+        onSettle={
+          headerSharing?.access !== 'read'
+            ? () => settleSessionWithConfirmation(session.id).then(() => undefined)
+            : undefined
+        }
         onMoveToFocus={
-          headerSharing?.access !== 'read' ? () => moveSessionToFocus(session.id) : undefined
+          headerSharing?.access !== 'read'
+            ? () => moveToFocusWithConfirmation(session.id).then(() => undefined)
+            : undefined
         }
         owner={ownerMenuState}
         openedByRelations={openedByRelations}
         onArchive={toolbarActions ? toolbarActions.onArchiveSession : onArchiveSession}
         onRestore={toolbarActions ? toolbarActions.onRestoreSession : onRestoreSession}
         onDelete={toolbarActions ? toolbarActions.onDeleteSession : onDeleteSession}
+        isLauncherPillVisible={isLauncherPillVisible}
+        pullRequest={
+          latestPr
+            ? { number: latestPrNumber ?? null, status: latestPr.status, onOpen: openLatestPr }
+            : undefined
+        }
         openInIde={
           shouldShowOpenInIdeButton && isElectronRendererForPathLaunch
             ? {
@@ -7315,6 +7263,16 @@ export const SessionChatInterface = memo(
                 onOpen: handleOpenInIde,
                 onSelect: (launcher) => {
                   void handleSelectPathLauncher(launcher);
+                },
+              }
+            : undefined
+        }
+        openInFileManager={
+          canOpenInFileManager
+            ? {
+                label: openInFileManagerLabel,
+                onOpen: () => {
+                  void handleOpenInFileManager();
                 },
               }
             : undefined

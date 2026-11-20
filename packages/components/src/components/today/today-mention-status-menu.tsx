@@ -8,7 +8,7 @@ import {
   type CustomSnoozeDialogTarget,
 } from '@/components/sidebar-status-snooze-dialog';
 import { useSessionActions } from '@/hooks/use-session-actions';
-import { buildSnoozePresets } from '@/lib/sidebar-status-group';
+import { buildSnoozePresets, type SnoozePresetId } from '@/lib/sidebar-status-group';
 import { toast } from '@/lib/toast';
 import { useTodayEditor } from './editor/today-editor-context';
 import { useTodaySessionDisplay } from './today-session-mention';
@@ -96,7 +96,8 @@ function TodayMentionStatusMenuContent(props: {
   const now = new Date();
   if (display.state !== 'ok') return null;
   const laterLabel = t('sessions.contextMenu.snooze', 'Later');
-  const presetLabel = {
+  const presetLabel: Record<SnoozePresetId, string> = {
+    oneHour: t('sessions.contextMenu.snoozeOneHour', 'In 1 hour'),
     laterToday: t('sessions.contextMenu.snoozeLaterToday', 'Later today'),
     tomorrowMorning: t('sessions.contextMenu.snoozeTomorrowMorning', 'Tomorrow morning'),
     nextWeek: t('sessions.contextMenu.snoozeNextWeek', 'Next week'),

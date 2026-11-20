@@ -596,7 +596,7 @@ export type WorkspaceRuntime = {
     machineId: MachineId,
     sessionId: SessionId,
     requestedByUserId: string,
-    options?: { reason?: string; timeoutMs?: number }
+    options?: { reason?: string; stopProcess?: boolean; timeoutMs?: number }
   ) => Promise<SessionPreviewRevokeResponse | null>;
   requestLocalProjectGitState: (
     machineId: MachineId,

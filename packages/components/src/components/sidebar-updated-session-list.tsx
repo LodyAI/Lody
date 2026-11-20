@@ -49,7 +49,7 @@ import {
   GitPullRequest,
   Link2,
   LockKeyhole,
-  Mail,
+  MailOpen,
   MessageCircle,
   Pencil,
   Pin,
@@ -134,6 +134,7 @@ import {
   RenameSessionDialogView,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type SidebarUpdatedItemKind = SidebarRowKind;
 
@@ -259,6 +260,7 @@ export type SidebarUpdatedContextMenuLabels = {
   copyBranch: string;
   goToOpenerSession: string;
   snooze: string;
+  snoozeOneHour: string;
   snoozeLaterToday: string;
   snoozeTomorrowMorning: string;
   snoozeNextWeek: string;
@@ -585,6 +587,11 @@ export type SidebarUpdatedSessionListProps = {
   onDropPinnedSession?: (sessionId: string, toIndex: number) => void;
   /** Pinned sections only: wraps the section header (the section drag handle). */
   renderHeader?: (header: ReactElement) => ReactNode;
+  /**
+   * Pinned sections only: a quiet line under the section's rows, rendered
+   * only while the section is expanded (e.g. "2 hidden in this view").
+   */
+  footer?: ReactNode;
 };
 
 const defaultLabels: SidebarUpdatedSessionListLabels = {
@@ -629,6 +636,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   pinSectionId,
   onDropPinnedSession,
   renderHeader,
+  footer,
 }: SidebarUpdatedSessionListProps) {
   const preserveOrder = grouping === 'manual';
   const effectiveShowStatusActions = showStatusActions ?? grouping === 'status';
@@ -684,6 +692,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
       copyBranch: t('sessions.contextMenu.copyBranch', 'Copy Current Branch'),
       goToOpenerSession: t('sessions.contextMenu.goToOpenerSession', 'Go to Opener Session'),
       snooze: t('sessions.contextMenu.snooze', 'Later'),
+      snoozeOneHour: t('sessions.contextMenu.snoozeOneHour', 'In 1 hour'),
       snoozeLaterToday: t('sessions.contextMenu.snoozeLaterToday', 'Later today'),
       snoozeTomorrowMorning: t('sessions.contextMenu.snoozeTomorrowMorning', 'Tomorrow morning'),
       snoozeNextWeek: t('sessions.contextMenu.snoozeNextWeek', 'Next week'),
@@ -1042,6 +1051,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                   ) : null}
                 </div>
               ) : null}
+              {!collapsed ? footer : null}
             </div>
           );
         })}
@@ -1622,11 +1632,13 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             <ContextMenu.SubmenuContent className="min-w-[200px]">
               {buildSnoozePresets(now).map((preset) => {
                 const label =
-                  preset.id === 'laterToday'
-                    ? contextMenuLabels.snoozeLaterToday
-                    : preset.id === 'tomorrowMorning'
-                      ? contextMenuLabels.snoozeTomorrowMorning
-                      : contextMenuLabels.snoozeNextWeek;
+                  preset.id === 'oneHour'
+                    ? contextMenuLabels.snoozeOneHour
+                    : preset.id === 'laterToday'
+                      ? contextMenuLabels.snoozeLaterToday
+                      : preset.id === 'tomorrowMorning'
+                        ? contextMenuLabels.snoozeTomorrowMorning
+                        : contextMenuLabels.snoozeNextWeek;
                 return (
                   <ContextMenu.Item
                     key={preset.id}
@@ -1663,7 +1675,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         ) : null}
         {canMarkUnread ? (
           <ContextMenu.Item
-            icon={Mail}
+            icon={MailOpen}
             onClick={() => {
               onMarkUnread?.(item.id);
             }}
@@ -1699,7 +1711,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           <ContextMenu.Item
             icon={GitBranch}
             onClick={() => {
-              void navigator.clipboard.writeText(branchName).catch(() => {});
+              void copyTextToClipboard(branchName).catch(() => {});
             }}
           >
             {contextMenuLabels.copyBranch}

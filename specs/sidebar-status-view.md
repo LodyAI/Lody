@@ -63,14 +63,21 @@ and what can wait or has settled.
 
 - Both the sidebar context menu and the conversation header menu (`…`)
   provide (for users with write permission on non-archived conversations):
-  - **Snooze / Later** submenu with quick presets (Later today +3h, Tomorrow
-    morning 9:00, Next week Monday 9:00, Custom date/time) and **Move to
-    Focus** when already snoozed.
+  - **Snooze / Later** submenu with quick presets (In 1 hour, Later today
+    +3h, Tomorrow morning 9:00, Next week Monday 9:00, Custom date/time) and
+    **Move to Focus** when already snoozed.
   - **Settle** when in Focus or Later, or **Move to Focus** when in Settled.
 - On desktop, Focus and Later rows reveal a one-click **Settle** action on
   hover in the slot other organize modes give to Archive; Settled rows keep
   Archive there. A Later row's wake-up countdown parks at the row's right
   edge in neutral ink.
+- Snoozing, settling, or moving a conversation back to Focus when it has
+  active opened sub-conversations first asks whether they should follow —
+  apply to this conversation only, or to the whole opened-session tree.
+  Contained Tabs follow their owner's bucket and are never written separately,
+  matching the sub-conversation summary the Archive confirmation already
+  shows. Dragging a row into Focus restores its opened sub-conversations with
+  it without asking; only the dropped row gains an `orderKey`.
 - Sending a message in a snoozed or settled conversation clears its
   `snoozedUntil` / `settledAt` state so it returns to Focus.
 - Dragging a row in Focus materializes real `orderKey`s for any expired-snooze

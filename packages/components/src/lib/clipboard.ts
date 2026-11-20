@@ -1,25 +1,23 @@
 /**
- * Copy `text` to the clipboard, returning whether it succeeded.
+ * Native clipboard installed by WebView app shells as `window.__LODY_CLIPBOARD__`.
  *
- * Prefers the async Clipboard API and falls back to a hidden-`<textarea>` +
- * `document.execCommand('copy')` selection copy for insecure contexts and
- * browsers that reject `navigator.clipboard` (e.g. non-HTTPS, missing user
- * gesture). Safe to call in non-DOM environments — returns `false` instead of
- * throwing.
- *
- * Several components still keep local copies of this helper (e.g. the ai-gui
- * renderer/view); migrate them here when they are next touched.
+ * Android System WebView never grants `navigator.clipboard.readText()` and grants
+ * `writeText()` only while the click's transient user activation is still live,
+ * which an awaited fetch or export easily outlives. The shell therefore routes
+ * plain-text clipboard access through the platform clipboard instead.
  */
-export const writeTextToClipboard = async (text: string): Promise<boolean> => {
-  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {
-      // Fall through to the selection-based copy path below.
-    }
-  }
+export type LodyClipboardBridge = {
+  writeText: (text: string) => Promise<void>;
+  /** Resolves `null` when the clipboard holds no text. */
+  readText: () => Promise<string | null>;
+};
 
+const nativeClipboard = (): LodyClipboardBridge | undefined =>
+  typeof window === 'undefined'
+    ? undefined
+    : (window as Window & { __LODY_CLIPBOARD__?: LodyClipboardBridge }).__LODY_CLIPBOARD__;
+
+const copyWithSelection = (text: string): boolean => {
   if (typeof document === 'undefined') {
     return false;
   }
@@ -42,5 +40,60 @@ export const writeTextToClipboard = async (text: string): Promise<boolean> => {
     return false;
   } finally {
     textarea.remove();
+  }
+};
+
+/**
+ * Copy `text` to the clipboard, rejecting when every route fails. Use it in
+ * place of `navigator.clipboard.writeText`.
+ *
+ * Order: the native shell clipboard, then the async Clipboard API, then a
+ * hidden-`<textarea>` + `document.execCommand('copy')` selection copy for
+ * insecure contexts and browsers that reject `navigator.clipboard`.
+ */
+export const copyTextToClipboard = async (text: string): Promise<void> => {
+  const native = nativeClipboard();
+  if (native) {
+    await native.writeText(text);
+    return;
+  }
+
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Fall through to the selection-based copy path below.
+    }
+  }
+
+  if (!copyWithSelection(text)) {
+    throw new Error('Clipboard write failed');
+  }
+};
+
+/**
+ * Copy `text` to the clipboard, returning whether it succeeded. Safe to call
+ * in non-DOM environments — returns `false` instead of throwing.
+ */
+export const writeTextToClipboard = async (text: string): Promise<boolean> => {
+  try {
+    await copyTextToClipboard(text);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** Read plain text from the clipboard; `null` when empty or access is denied. */
+export const readTextFromClipboard = async (): Promise<string | null> => {
+  try {
+    const native = nativeClipboard();
+    if (native) {
+      return await native.readText();
+    }
+    return (await navigator.clipboard?.readText?.()) ?? null;
+  } catch {
+    return null;
   }
 };
