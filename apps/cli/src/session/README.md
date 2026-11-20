@@ -676,12 +676,16 @@ paging. Inline-only subscription reads never reserve catch-up pages.
 Requests for that exact checkpoint page through the retained bodies while the Agent
 commits later updates. A capture holds at most 4,000 bodies and 16 MiB of encoded data
 and expires after two minutes or owner disposal. The daemon budgets 16 concurrent
-captures and 64 MiB across retained and in-progress captures. When a capture cannot
-fit those bounds, the verified interval still permits paging against the matching
-current head. Superseded pages retry from the last applied checkpoint, preserving
-the cache. A reset requires missing or invalid change coverage. The renderer
-atomically commits bodies, positions, revision and checkpoint. Coherent replies
-may advance behind newer control hints and catch up again while streaming continues.
+captures and 64 MiB across retained and in-progress captures. Requests for the same
+repair share preparation and cancel their waits independently. The owner stops the
+preparation when its last waiter leaves and releases the budget on settlement.
+When a capture cannot fit those bounds, the verified interval still permits paging
+against the matching current head. Superseded pages preserve the cache and retry
+from the last applied checkpoint. A reset requires missing or invalid change coverage.
+The renderer atomically commits bodies, positions, revision and checkpoint against its original
+cache head. Exact-checkpoint pages are validated against the repair's revision and
+count. A newer observation schedules the next repair while this checkpoint can
+still be committed.
 Body-only edits retain cached directory cursor validity.
 A successful delta repair finishes even for a partial tail cache, without rereading
 the unchanged latest page.

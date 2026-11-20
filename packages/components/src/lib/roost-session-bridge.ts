@@ -315,6 +315,10 @@ const createRoostSessionDataFactoryFromTransport =
         ) {
           throw new Error('Roost history read has no durable observation');
         }
+        // These bodies belong to the repair's checkpoint. The repair checks
+        // their revision and count and commits against its original cache head.
+        if ((query.kind === 'readTurn' || query.kind === 'readRange') && query.atCheckpoint)
+          return response;
         if (!coherentProgress && ownerRevision !== undefined && revision < ownerRevision) {
           throw new HistoryRefreshSupersededError();
         }
@@ -776,7 +780,8 @@ const createRoostSessionDataFactoryFromTransport =
                 turnId: row.turnId,
                 atCheckpoint: change.checkpoint,
               });
-              if (read.historyRevision !== revision) throw new HistoryRefreshSupersededError();
+              if (read.historyRevision !== revision || read.historyCount !== count)
+                throw new HistoryRefreshSupersededError();
               const turn = validateTurnRead(read.result, 'Roost incremental body');
               if (turn.state !== 'ready' || turn.turn.id !== row.turnId)
                 throw new Error('Roost incremental turn is unavailable');
@@ -809,7 +814,8 @@ const createRoostSessionDataFactoryFromTransport =
                   from: position,
                   to: Math.min(count, position + READ_PAGE_SIZE),
                 });
-                if (read.historyRevision !== revision) throw new HistoryRefreshSupersededError();
+                if (read.historyRevision !== revision || read.historyCount !== count)
+                  throw new HistoryRefreshSupersededError();
                 if (
                   !Array.isArray(read.result) ||
                   read.result.length !== Math.min(READ_PAGE_SIZE, count - position)
@@ -826,8 +832,6 @@ const createRoostSessionDataFactoryFromTransport =
                 });
               }
             }
-            if (change.bodies === undefined && revision < observedHistoryRevision)
-              throw new HistoryRefreshSupersededError();
             const applied = await cached(() =>
               cache.applyChanges(
                 prior,

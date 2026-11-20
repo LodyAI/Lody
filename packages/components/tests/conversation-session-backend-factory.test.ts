@@ -2190,6 +2190,87 @@ it('rejects a late reset window after another tab advances the durable cache', a
   }
 });
 
+it('commits every page of an exact repair after a separate read observes a newer revision', async () => {
+  const h = await cachedRecoveryFixture('paged-repair', 1);
+  const timers = controlledRefreshTimers();
+  const lastPageStarted = Promise.withResolvers<void>();
+  const releaseLastPage = Promise.withResolvers<void>();
+  const nextCommitted = Promise.withResolvers<void>();
+  const suffix = Array.from({ length: 501 }, (_, index) => ({
+    ...h.entries[0]!,
+    id: `missed-${index}`,
+  }));
+  const tail = suffix.at(-1)!;
+  const newTail = { ...tail, items: [{ type: 'text' as const, text: 'new revision' }] };
+  const reply = (revision: number, result: unknown) => ({
+    ok: true as const,
+    responses: [{ ...h.reply(revision, result).responses[0]!, historyCount: 1 + suffix.length }],
+  });
+  const data = createLocalRoostSessionDataFactory({
+    incremental: true,
+    workspaceId: h.workspaceId,
+    machineId: h.machineId,
+    sendControl: async (request) => {
+      if (request.type !== 'session/history-read') throw new Error('Unexpected write');
+      const query = request.query;
+      if (query.kind === 'readChanges') {
+        if (query.checkpoint === 'checkpoint-1')
+          return reply(2, { state: 'ready', checkpoint: 'checkpoint-2', ids: [], from: 1 });
+        expect(query.checkpoint).toBe('checkpoint-2');
+        return reply(3, {
+          state: 'ready',
+          checkpoint: 'checkpoint-3',
+          ids: [tail.id],
+          bodies: { changed: [newTail], suffix: [] },
+        });
+      }
+      if (query.kind === 'readRange') {
+        expect(query.atCheckpoint).toBe('checkpoint-2');
+        if (query.from === 501) {
+          lastPageStarted.resolve();
+          await releaseLastPage.promise;
+        }
+        return reply(
+          2,
+          suffix.slice(query.from - 1, query.to - 1).map((turn) => ({ state: 'ready', turn }))
+        );
+      }
+      if (query.kind === 'readTurn' && query.turnId === tail.id && !query.atCheckpoint)
+        return reply(3, { state: 'ready', turn: newTail });
+      throw new Error(`Unexpected ${query.kind}`);
+    },
+  })({ sessionId: h.sessionId, doc: h.doc, backendKind: 'roost' });
+  const observation = data.history.observe(() => {
+    void h.cache.getHead().then((head) => {
+      if (head?.checkpoint === 'checkpoint-3') nextCommitted.resolve();
+    });
+  });
+  try {
+    await observation.initial;
+    (await timers.next()).callback();
+    await lastPageStarted.promise;
+    expect(await data.history.readTurn(tail.id)).toMatchObject({ state: 'ready', turn: newTail });
+    expect(await h.cache.getHead()).toMatchObject({ checkpoint: 'checkpoint-1', count: 1 });
+    releaseLastPage.resolve();
+    const followup = await timers.next();
+    expect(await h.cache.getHead()).toMatchObject({ checkpoint: 'checkpoint-2', count: 502 });
+    expect(await h.cache.readTurn(tail.id)).toEqual(tail);
+    followup.callback();
+    await nextCommitted.promise;
+    expect(await h.cache.readTurn(tail.id)).toEqual(newTail);
+    expect((await h.cache.readRows(0, 501))?.map((row) => row.turn)).toEqual([
+      ...h.entries,
+      ...suffix.slice(0, -1),
+    ]);
+  } finally {
+    releaseLastPage.resolve();
+    observation.unsubscribe();
+    data.dispose?.();
+    h.cache.dispose();
+    timers.restore();
+  }
+});
+
 it('notifies the actual view for a committed non-inline interval even when a newer hint arrives during its transaction', async () => {
   const h = await cachedRecoveryFixture('commit-notification', 600, 560);
   const timers = controlledRefreshTimers();

@@ -42,8 +42,28 @@ type CaptureRead = {
   response: CatchupResponse;
   readRange(from: number, to: number): Promise<readonly SessionTurnRead[]>;
   readTurns(ids: readonly string[]): Promise<ReadonlyMap<string, ReadyTurn>>;
-  validate(response: CatchupResponse): Promise<void>;
+  validate(response: CatchupResponse, signal?: AbortSignal): Promise<void>;
   signal?: AbortSignal;
+};
+
+type CapturePreparation = CaptureRead & {
+  owner: symbol;
+  assertAvailable(signal: AbortSignal): void;
+  onOwner<T>(read: () => Promise<T>, signal: AbortSignal): Promise<T>;
+  // The final receipt covers every change from the initial head through the
+  // head at which the owner certifies the staged bodies.
+  finish<T>(
+    capture: (latest: CatchupResponse, tail: ReadyChanges) => Promise<T>,
+    signal: AbortSignal
+  ): Promise<T>;
+};
+
+type PendingCapture = {
+  owner: symbol;
+  key: string;
+  controller: AbortController;
+  result: Promise<CatchupResponse>;
+  waiters: number;
 };
 
 function captureFrom(query: ChangesQuery, response: CatchupResponse): number | undefined {
@@ -92,7 +112,7 @@ export async function readInlineRoostHistory(
       : (await args.readRange(from, response.historyCount)).map(
           (read) => captureBody(read).turn as SessionHistoryInput
         );
-  await args.validate(response);
+  await args.validate(response, signal);
   return {
     ...response,
     result: { ...changes, bodies: { changed, ...(from === undefined ? {} : { from }), suffix } },
@@ -102,8 +122,8 @@ export async function readInlineRoostHistory(
 /** Bounded, detached data for exact-checkpoint reads on a single daemon. */
 export class RoostHistoryCatchup {
   private readonly captures = new Set<Capture>();
+  private readonly pending = new Set<PendingCapture>();
   private bytes = 0;
-  private preparing = 0;
 
   read(owner: symbol, query: BodyQuery): SessionHistoryReadResponse | undefined {
     if (!query.atCheckpoint) return undefined;
@@ -124,6 +144,7 @@ export class RoostHistoryCatchup {
   }
 
   release(owner: symbol): void {
+    for (const pending of this.pending) if (pending.owner === owner) pending.controller.abort();
     for (const capture of this.captures) if (capture.owner === owner) this.remove(capture);
   }
 
@@ -148,17 +169,9 @@ export class RoostHistoryCatchup {
     return false;
   }
 
-  async prepare(
-    args: CaptureRead & {
-      owner: symbol;
-      assertAvailable(): void;
-      onOwner<T>(read: () => Promise<T>): Promise<T>;
-      // Called on the owner after staging. The receipt covers every change from
-      // the initial response through the response at which we finalize the capture.
-      finish<T>(capture: (latest: CatchupResponse, tail: ReadyChanges) => Promise<T>): Promise<T>;
-    }
-  ): Promise<CatchupResponse> {
+  async prepare(args: CapturePreparation): Promise<CatchupResponse> {
     const { owner, response, query, signal } = args;
+    signal?.throwIfAborted();
     const changes = response.result;
     if (changes.state !== 'ready' || query.includeBodiesFrom === undefined || query.inlineOnly)
       return response;
@@ -168,13 +181,71 @@ export class RoostHistoryCatchup {
     // the current head and the reader can retry a superseded page.
     if (
       Math.max(changes.ids.length, count - start) > MAX_CAPTURE_TURNS ||
-      this.hasCapture(owner, response, start) ||
-      this.captures.size + this.preparing >= MAX_RETAINED_CAPTURES ||
+      this.hasCapture(owner, response, start)
+    )
+      return response;
+    const key = JSON.stringify([
+      query.checkpoint,
+      changes.checkpoint,
+      query.includeBodiesFrom,
+      query.withPatches ?? false,
+    ]);
+    for (const pending of this.pending) {
+      if (pending.owner === owner && pending.key === key && !pending.controller.signal.aborted)
+        return this.waitForCapture(pending, signal);
+    }
+    if (
+      this.captures.size + this.pending.size >= MAX_RETAINED_CAPTURES ||
       this.bytes >= MAX_RETAINED_BYTES
     )
       return response;
 
-    this.preparing++;
+    // Each RPC owns its wait. The capture owns the signal passed to Native reads.
+    const controller = new AbortController();
+    const pending: PendingCapture = {
+      owner,
+      key,
+      controller,
+      result: Promise.resolve()
+        .then(() => this.materialize(args, changes, start, controller.signal))
+        .finally(() => this.pending.delete(pending)),
+      waiters: 0,
+    };
+    this.pending.add(pending);
+    return this.waitForCapture(pending, signal);
+  }
+
+  private async waitForCapture(
+    pending: PendingCapture,
+    signal?: AbortSignal
+  ): Promise<CatchupResponse> {
+    pending.waiters++;
+    let onAbort: (() => void) | undefined;
+    try {
+      const response = await (signal
+        ? new Promise<CatchupResponse>((resolve, reject) => {
+            onAbort = () => reject(signal.reason);
+            signal.addEventListener('abort', onAbort, { once: true });
+            pending.result.then(resolve, reject);
+          })
+        : pending.result);
+      signal?.throwIfAborted();
+      return response;
+    } finally {
+      if (onAbort) signal?.removeEventListener('abort', onAbort);
+      if (--pending.waiters === 0 && this.pending.has(pending)) pending.controller.abort();
+    }
+  }
+
+  private async materialize(
+    args: CapturePreparation,
+    changes: ReadyChanges,
+    start: number,
+    signal: AbortSignal
+  ): Promise<CatchupResponse> {
+    const { owner, response, query } = args;
+    const count = response.historyCount;
+    args.assertAvailable(signal);
     let bytes = 0;
     const range: ReadyTurn[] = [];
     const turns = new Map<string, SessionTurnRead>();
@@ -190,7 +261,7 @@ export class RoostHistoryCatchup {
     try {
       for (let position = start; position < count; position += SESSION_HISTORY_READ_MAX_RANGE) {
         const end = Math.min(count, position + SESSION_HISTORY_READ_MAX_RANGE);
-        const page = await args.onOwner(() => args.readRange(position, end));
+        const page = await args.onOwner(() => args.readRange(position, end), signal);
         for (const value of page) {
           const read = captureBody(value);
           if (range.length >= MAX_CAPTURE_TURNS || !reserve(read.turn.id, read)) return response;
@@ -205,15 +276,15 @@ export class RoostHistoryCatchup {
       if (turns.size + remaining.length > MAX_CAPTURE_TURNS) return response;
       for (let offset = 0; offset < remaining.length; offset += SESSION_HISTORY_READ_MAX_RANGE) {
         const ids = remaining.slice(offset, offset + SESSION_HISTORY_READ_MAX_RANGE);
-        const reads = await args.onOwner(() => args.readTurns(ids));
+        const reads = await args.onOwner(() => args.readTurns(ids), signal);
         for (const id of ids) {
           const read = reads.get(id) ?? { state: 'missing' };
           if (!reserve(id, read)) return response;
           turns.set(id, read);
         }
       }
-      const final = await args.finish(async (latest, tail) => {
-        args.assertAvailable();
+      const reconcile = async (latest: CatchupResponse, tail: ReadyChanges) => {
+        args.assertAvailable(signal);
         const latestCount = latest.historyCount;
         const latestStart = captureFrom(query, latest) ?? latestCount;
         const latestChanges = latest.result;
@@ -222,7 +293,7 @@ export class RoostHistoryCatchup {
         if (latestChanges.checkpoint === changes.checkpoint) {
           if (range.length !== count - start)
             throw new Error('History catch-up range is incomplete');
-          await args.validate(latest);
+          await args.validate(latest, signal);
           return { response: latest, data: { start, range, turns } };
         }
         // Pages may have been read at different heads. Only the positions
@@ -240,7 +311,7 @@ export class RoostHistoryCatchup {
         )
           return { response: latest };
         const readRange = async (from: number, to: number): Promise<ReadyTurn[]> => {
-          signal?.throwIfAborted();
+          signal.throwIfAborted();
           const page = (from < to ? await args.readRange(from, to) : []).map(captureBody);
           if (page.length !== to - from) throw new Error('History catch-up range is incomplete');
           return page;
@@ -258,7 +329,7 @@ export class RoostHistoryCatchup {
           if (tail.from !== undefined || dirty.has(id) || !turns.has(id)) repairs.add(id);
         }
         if (missing + repairs.size > SESSION_HISTORY_READ_MAX_RANGE) return { response: latest };
-        signal?.throwIfAborted();
+        signal.throwIfAborted();
         const repaired = await args.readTurns([...repairs]);
         const finalRange = [
           ...prefix,
@@ -279,13 +350,14 @@ export class RoostHistoryCatchup {
             : turns.get(id)!;
           finalTurns.set(id, read);
         }
-        await args.validate(latest);
+        await args.validate(latest, signal);
         return {
           response: latest,
           data: { start: latestStart, range: finalRange, turns: finalTurns },
         };
-      });
-      args.assertAvailable();
+      };
+      const final = await args.finish(reconcile, signal);
+      args.assertAvailable(signal);
       if (!final.data) return final.response;
       let retainedBytes = 0;
       for (const [id, read] of final.data.turns) {
@@ -310,7 +382,6 @@ export class RoostHistoryCatchup {
       bytes -= retainedBytes;
       return final.response;
     } finally {
-      this.preparing--;
       this.bytes -= bytes;
     }
   }

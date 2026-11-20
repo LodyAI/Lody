@@ -3666,23 +3666,24 @@ const createNodeServicesForLease = async (
   // after the private initial load; no consumer checkpoint has been exposed yet.
   refreshCommitSubscription();
   const readHistoryCatchup = async (query: RoostCatchupQuery, signal?: AbortSignal) => {
-    const assertAvailable = () => {
-      signal?.throwIfAborted();
+    const assertAvailable = (readSignal?: AbortSignal) => {
+      readSignal?.throwIfAborted();
       if (closing || disposed) throw new Error('Roost session backend is disposed');
     };
-    assertAvailable();
+    assertAvailable(signal);
     if (query.kind !== 'readChanges') return historyCatchup.read(catchupOwner, query);
-    const scan = async (checkpoint: string) => {
-      const before = await getHistoryPublication(signal);
+    const scan = async (checkpoint: string, readSignal?: AbortSignal) => {
+      assertAvailable(readSignal);
+      const before = await getHistoryPublication(readSignal);
       const through = roostCheckpointCursor(before.checkpoint);
-      const changes = await historyChanges.read(checkpoint, through, signal);
-      assertAvailable();
+      const changes = await historyChanges.read(checkpoint, through, readSignal);
+      assertAvailable(readSignal);
       if (changes.checkpoint !== before.checkpoint) throw staleRead();
       return { through, changes };
     };
-    const extend = async (interval: Awaited<ReturnType<typeof scan>>) => {
-      assertAvailable();
-      const published = await getHistoryPublication(signal);
+    const extend = async (interval: Awaited<ReturnType<typeof scan>>, readSignal?: AbortSignal) => {
+      assertAvailable(readSignal);
+      const published = await getHistoryPublication(readSignal);
       const through = roostCheckpointCursor(published.checkpoint);
       if (published.checkpoint === interval.changes.checkpoint)
         return { published, through, changes: interval.changes };
@@ -3693,7 +3694,7 @@ const createNodeServicesForLease = async (
         through - interval.through > ROOST_HISTORY_RECEIPT_PAGE_SIZE
       )
         throw staleRead();
-      const changes = await historyChanges.read(interval.changes, through, signal);
+      const changes = await historyChanges.read(interval.changes, through, readSignal);
       if (changes.state !== 'ready' || changes.checkpoint !== published.checkpoint)
         throw staleRead();
       return { published, through, changes };
@@ -3710,10 +3711,13 @@ const createNodeServicesForLease = async (
       historyCount: published.historyCount,
       historyChange: published.historyChange,
     });
-    const validate = async (expected: { result: SessionHistoryChanges }) => {
-      if ((await getHistoryPublication(signal)).checkpoint !== expected.result.checkpoint)
+    const validate = async (
+      expected: { result: SessionHistoryChanges },
+      readSignal?: AbortSignal
+    ) => {
+      if ((await getHistoryPublication(readSignal)).checkpoint !== expected.result.checkpoint)
         throw staleRead();
-      assertAvailable();
+      assertAvailable(readSignal);
     };
     const bodies = {
       query,
@@ -3726,16 +3730,16 @@ const createNodeServicesForLease = async (
     for (let attempt = 0; ; attempt++) {
       try {
         // The receipts describe a fixed range. Scanning them does not need the writer.
-        const interval = await scan(query.checkpoint);
+        const interval = await scan(query.checkpoint, signal);
         const finish = async () => {
-          const { published, through, changes: verified } = await extend(interval);
+          const { published, through, changes: verified } = await extend(interval, signal);
           let changes = verified;
           if (query.withPatches)
             changes = await withHistoryPatches(changes, query.checkpoint, through, signal);
           const response = reply(published, changes);
           const inline = await readInlineRoostHistory({ ...bodies, response });
           if (inline) return inline;
-          await validate(response);
+          await validate(response, signal);
           return response;
         };
         const response = await (interval.changes.state === 'ready' &&
@@ -3757,18 +3761,18 @@ const createNodeServicesForLease = async (
           response,
           owner: catchupOwner,
           assertAvailable,
-          onOwner: (read) =>
+          onOwner: (read, readSignal) =>
             onOwner(async () => {
-              assertAvailable();
+              assertAvailable(readSignal);
               const result = await read();
-              assertAvailable();
+              assertAvailable(readSignal);
               if (roostHistory !== source || historyScope !== scope) throw staleRead();
               return result;
             }),
-          finish: async (capture) => {
-            const scanned = await scan(initial.checkpoint);
+          finish: async (capture, readSignal) => {
+            const scanned = await scan(initial.checkpoint, readSignal);
             return onOwner(async () => {
-              const { published, changes: tail } = await extend(scanned);
+              const { published, changes: tail } = await extend(scanned, readSignal);
               if (tail.state !== 'ready' || roostHistory !== source || historyScope !== scope)
                 throw staleRead();
               if (tail.checkpoint === initial.checkpoint) return capture(response, tail);
@@ -3786,7 +3790,7 @@ const createNodeServicesForLease = async (
           },
         });
       } catch (error) {
-        assertAvailable();
+        assertAvailable(signal);
         if (attempt >= 2 || !(error instanceof Error && 'code' in error && error.code === 'stale'))
           throw error;
       }
@@ -3948,6 +3952,7 @@ const createNodeServicesForLease = async (
     },
     dispose: async () => {
       closing = true;
+      historyCatchup.release(catchupOwner);
       for (const wake of checkpointObservers) wake();
       unsubscribeCommits();
       try {
@@ -3955,7 +3960,6 @@ const createNodeServicesForLease = async (
         await writeSerial;
       } finally {
         disposed = true;
-        historyCatchup.release(catchupOwner);
         branchCursors.clear();
         pageEntries.clear();
         pageIdsByPosition.clear();

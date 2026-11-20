@@ -22,10 +22,11 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { createRoostHistoryCache } from '../../../packages/components/src/lib/roost-history-cache';
 import { createRemoteRoostSessionDataFactory } from '../../../packages/components/src/lib/roost-session-bridge';
 import { AGENT_RECEIPTS_TABLE } from '../src/session/roost-content-patches';
+import { RoostHistoryCatchup } from '../src/session/roost-history-catchup';
 import { RoostHistoryGeneration } from '../src/session/roost-history-generation';
 import { loadRoostOwnerSeedLegacy } from '../src/session/roost-writer-identity';
 import { createSessionBackend } from '../src/session/session-backend';
@@ -1020,6 +1021,109 @@ describe('Production Roost dispatch projection', () => {
       await fixture.close();
     }
   }, 120_000);
+
+  it.each([false, true])(
+    'shares exact body preparation across concurrent readers (cancel all: %s)',
+    async (cancelAll) => {
+      const fixture = await coldHistoryHandlerFixture(1);
+      const sessionId = [...fixture.docs.keys()][0]!;
+      const releasePage = Promise.withResolvers<void>();
+      onTestFinished(releasePage.resolve);
+      try {
+        await fixture.ready(sessionId);
+        const active = nativeAssistant('shared-catchup-agent');
+        expect(
+          await fixture.rpc.writeSessionHistoryForRpc(sessionId, 'append', { entry: active })
+        ).toMatchObject({ success: true });
+        const backend = await createSessionBackend(fixture.docs.get(sessionId)!);
+        const initial = await backend.history.getPublication?.();
+        if (!initial) throw new Error('Expected the initial owner checkpoint');
+        for (let index = 0; index < 501; index++)
+          await backend.appendHistoryTurn(nativeUser(`shared-missed-${index}`));
+
+        // Let both RPCs reach preparation before either holds the writer queue.
+        const bothPlanned = Promise.withResolvers<void>();
+        onTestFinished(bothPlanned.resolve);
+        const prepare = RoostHistoryCatchup.prototype.prepare;
+        let requests = 0;
+        vi.spyOn(RoostHistoryCatchup.prototype, 'prepare').mockImplementation(
+          async function (args) {
+            if (++requests === 2) bothPlanned.resolve();
+            await bothPlanned.promise;
+            return prepare.call(this, args);
+          }
+        );
+        const pageStarted = Promise.withResolvers<void>();
+        const hydrate = NodeLodyHistory.prototype.readActiveBranchMessages;
+        let firstPageReads = 0;
+        vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchMessages').mockImplementation(
+          async function (view, ids) {
+            if (ids.length === 500 && ids[0] === 'shared-missed-0' && ++firstPageReads === 1) {
+              pageStarted.resolve();
+              await releasePage.promise;
+            }
+            return hydrate.call(this, view, ids);
+          }
+        );
+        const query = {
+          kind: 'readChanges' as const,
+          checkpoint: initial.checkpoint,
+          includeBodiesFrom: 0,
+        };
+        const firstAbort = new AbortController();
+        const secondAbort = new AbortController();
+        const first = fixture.rpc.readSessionHistoryForRpc(sessionId, query, firstAbort.signal);
+        const second = fixture.rpc.readSessionHistoryForRpc(sessionId, query, secondAbort.signal);
+        await pageStarted.promise;
+        const disconnected = new Error('Synthetic reader disconnected during body preparation');
+        firstAbort.abort(disconnected);
+        if (cancelAll) secondAbort.abort(disconnected);
+        const cancelled = { success: false, error: disconnected.message };
+        expect(await first).toMatchObject(cancelled);
+        if (cancelAll) expect(await second).toMatchObject(cancelled);
+        releasePage.resolve();
+        const plan = await (cancelAll
+          ? fixture.rpc.readSessionHistoryForRpc(sessionId, query)
+          : second);
+        expect(plan).toMatchObject({ success: true, historyCount: 502 });
+        const changes = SessionHistoryChangesSchema.parse(plan.result);
+        expect(changes.state).toBe('ready');
+        expect(firstPageReads).toBe(cancelAll ? 2 : 1);
+
+        await backend.applyAgentBatch({
+          targetAssistantEntryId: active.id,
+          operationIds: ['output-after-shared-read'],
+          notifications: [
+            {
+              sessionId,
+              update: {
+                sessionUpdate: 'agent_message_chunk',
+                content: { type: 'text', text: 'new output' },
+              },
+            },
+          ],
+        });
+        for (const [from, to] of [
+          [1, 501],
+          [501, 502],
+        ] as const) {
+          const page = await fixture.rpc.readSessionHistoryForRpc(sessionId, {
+            kind: 'readRange',
+            from,
+            to,
+            atCheckpoint: changes.checkpoint,
+          });
+          expect(page).toMatchObject({ success: true, historyRevision: plan.historyRevision });
+          expect(page.result).toHaveLength(to - from);
+        }
+        expect(firstPageReads).toBe(cancelAll ? 2 : 1);
+      } finally {
+        releasePage.resolve();
+        await fixture.close();
+      }
+    },
+    120_000
+  );
 
   it('allows Agent output to commit while a cancelled watch is between receipt pages', async ({
     onTestFinished,

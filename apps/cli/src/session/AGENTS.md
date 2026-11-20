@@ -102,6 +102,7 @@ and the isolation of Roost reads alongside authorization and execution boundarie
   Native proofs gate path reuse/goal read elision; head/watch replaces Loro cursor.
   Scan catch-up receipts outside the writer queue and yield between body pages.
   Verify retained bodies against one checkpoint. Capture limits preserve verified coverage.
+  Identical repairs share in-progress preparation until all waiters leave or the owner closes.
 - `Session.createAgent` gates ACP spawn; failures reject JSON-RPC. Terminals: argv (shell for
   unsplit lines only), direct exit and bounded drain. Managed Codex reused-refresh retries once after process cleanup, delay and live Provider recheck; other auth errors do not.
 - Child tabs reuse parent workspace. No per-session paths in `MachineMeta`:
