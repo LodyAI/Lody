@@ -12,9 +12,15 @@ import type { LoroDoc } from 'loro-crdt';
 /**
  * One open Today page: its outline model, undo, and the rule that viewing a
  * day never creates it remotely. The room is joined only once the page is
- * registered (by this client's first local commit or by a peer), so opening an
- * empty day creates no server stream. Registration and joining are idempotent
- * and retried on the next local commit after a failure.
+ * registered (by this client's first content or by a peer), so opening an
+ * empty day creates no server stream.
+ *
+ * Registration and joining follow the session rooms: a join that produced a
+ * subscription keeps it (the SDK heals it, even when its first sync failed);
+ * a step that failed outright retries with backoff while the page is open,
+ * and a local edit retries at once. A page opened with local content that
+ * never got registered registers then, so a failed registration cannot leave
+ * notes local-only.
  * Behavior: specs/today-outline.md (Page stream and dates, Data ownership).
  */
 export type TodayPageStore = {
@@ -34,14 +40,22 @@ export type TodayPageStore = {
 
 type RoomSubscription = { unsubscribe(): void };
 
+/** A joined room; `synced` is false when the subscription exists but its first sync failed. */
+export type TodayRoomJoin = { room: RoomSubscription; synced: boolean };
+
 export function createTodayPageStore(options: {
   docId: string;
   doc: LoroDoc;
   registered: boolean;
-  /** Join the page's room; `signal` aborts when the page is released. */
-  join: (signal: AbortSignal) => Promise<RoomSubscription | null | undefined>;
+  /**
+   * Join the page's room; `signal` aborts when the page is released. Rejects
+   * only when no subscription was produced.
+   */
+  join: (signal: AbortSignal) => Promise<TodayRoomJoin | null | undefined>;
   register: (meta: { userId: string; date: TodayDate }) => Promise<void>;
   setTimer: (callback: () => void, ms: number) => () => void;
+  /** Backoff before retry number `attempt` (0-based) of a failed register or join. */
+  retryDelayMs: (attempt: number) => number;
   onBackgroundError?: (stage: 'register' | 'join', error: unknown) => void;
 }): TodayPageStore {
   const identity = parseTodayDocId(options.docId);
@@ -57,24 +71,44 @@ export function createTodayPageStore(options: {
   let registering: Promise<void> | undefined;
   let joining: Promise<void> | undefined;
   let room: RoomSubscription | undefined;
+  let failures = 0;
+  let cancelRetry: (() => void) | undefined;
   let markSynced: () => void = () => {};
   const synced = new Promise<void>((resolve) => {
     markSynced = resolve;
   });
 
+  const clearRetry = () => {
+    cancelRetry?.();
+    cancelRetry = undefined;
+  };
+  // One pending retry at a time; it re-runs whichever step is still missing.
+  const retryLater = (stage: 'register' | 'join', error: unknown) => {
+    options.onBackgroundError?.(stage, error);
+    if (disposed || cancelRetry) return;
+    const delay = options.retryDelayMs(failures);
+    failures += 1;
+    cancelRetry = options.setTimer(() => {
+      cancelRetry = undefined;
+      advance();
+    }, delay);
+  };
+
   const ensureJoined = () => {
     if (disposed || room || joining) return;
     joining = options
       .join(releaseSignal.signal)
-      .then((subscription) => {
-        if (!subscription) return;
-        if (disposed) subscription.unsubscribe();
-        else {
-          room = subscription;
-          markSynced();
+      .then((joined) => {
+        if (!joined) return;
+        if (disposed) {
+          joined.room.unsubscribe();
+          return;
         }
+        room = joined.room;
+        failures = 0;
+        if (joined.synced) markSynced();
       })
-      .catch((error: unknown) => options.onBackgroundError?.('join', error))
+      .catch((error: unknown) => retryLater('join', error))
       .finally(() => {
         joining = undefined;
       });
@@ -86,25 +120,35 @@ export function createTodayPageStore(options: {
       .register({ userId: identity.userId, date: identity.date })
       .then(() => {
         registered = true;
+        failures = 0;
         ensureJoined();
       })
-      .catch((error: unknown) => options.onBackgroundError?.('register', error))
+      .catch((error: unknown) => retryLater('register', error))
       .finally(() => {
         registering = undefined;
       });
   };
+
+  /**
+   * Take the next missing step. Unregistered pages register only once they
+   * hold content: an empty line (a click on the empty day) is not yet input.
+   */
+  function advance() {
+    if (disposed) return;
+    if (registered) ensureJoined();
+    else if (!outline.getSnapshot().isEmpty) ensureRegistered();
+  }
 
   const unsubscribeDoc = doc.subscribe(() => {
     snapshot = outline.getSnapshot();
     for (const listener of listeners) listener();
   });
   const unsubscribeLocal = doc.subscribeLocalUpdates(() => {
-    if (registered) ensureJoined();
-    // An empty line (a click on the empty day) is not yet input: the page is
-    // created on its first content.
-    else if (!outline.getSnapshot().isEmpty) ensureRegistered();
+    // A local edit is a caller asking now: it pre-empts a pending backoff.
+    clearRetry();
+    advance();
   });
-  if (registered) ensureJoined();
+  advance();
 
   return {
     docId: options.docId,
@@ -120,10 +164,12 @@ export function createTodayPageStore(options: {
     },
     markRegistered: () => {
       registered = true;
+      clearRetry();
       ensureJoined();
     },
     dispose: () => {
       disposed = true;
+      clearRetry();
       releaseSignal.abort();
       unsubscribeDoc();
       unsubscribeLocal();

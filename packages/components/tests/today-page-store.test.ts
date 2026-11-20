@@ -7,17 +7,51 @@ import { createTodayPageStoreCache } from '../src/providers/today-page-store-cac
 const date = parseTodayDate('2026-11-20') as TodayDate;
 const docId = getTodayDocId('local:me', date);
 
-function harness(options: { registered?: boolean; failRegisterOnce?: boolean } = {}) {
-  const calls = { joins: 0, registrations: [] as unknown[] };
+/** Timers that run only when the test fires them. */
+function manualTimers() {
+  const pending = new Map<number, { callback: () => void; ms: number }>();
+  let next = 0;
+  return {
+    setTimer: (callback: () => void, ms: number) => {
+      const id = next++;
+      pending.set(id, { callback, ms });
+      return () => pending.delete(id);
+    },
+    delays: () => [...pending.values()].map((timer) => timer.ms),
+    fireAll: () => {
+      const due = [...pending.values()];
+      pending.clear();
+      for (const timer of due) timer.callback();
+    },
+  };
+}
+
+function harness(
+  options: {
+    registered?: boolean;
+    failRegisterOnce?: boolean;
+    /** Join outcomes in order; afterwards joins succeed and sync. */
+    joins?: Array<'fail' | 'unsynced'>;
+    doc?: LoroDoc;
+  } = {}
+) {
+  const calls = { joins: 0, registrations: [] as unknown[], unsubscribed: 0 };
   let failRegister = options.failRegisterOnce ?? false;
-  const doc = new LoroDoc();
+  const outcomes = [...(options.joins ?? [])];
+  const doc = options.doc ?? new LoroDoc();
+  const timers = manualTimers();
   const store = createTodayPageStore({
     docId,
     doc,
     registered: options.registered ?? false,
     join: async () => {
       calls.joins += 1;
-      return { unsubscribe: () => {} };
+      const outcome = outcomes.shift();
+      if (outcome === 'fail') throw new Error('join failed');
+      return {
+        room: { unsubscribe: () => void (calls.unsubscribed += 1) },
+        synced: outcome !== 'unsynced',
+      };
     },
     register: async (meta) => {
       if (failRegister) {
@@ -26,10 +60,14 @@ function harness(options: { registered?: boolean; failRegisterOnce?: boolean } =
       }
       calls.registrations.push(meta);
     },
-    setTimer: () => () => {},
+    // Only the retry backoff (a delay no other timer uses) is driven by the test.
+    setTimer: (callback, ms) => (ms === RETRY_MS ? timers.setTimer(callback, ms) : () => {}),
+    retryDelayMs: () => RETRY_MS,
   });
-  return { doc, store, calls };
+  return { doc, store, calls, timers };
 }
+
+const RETRY_MS = 7_321;
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -38,7 +76,7 @@ describe('Today page store', () => {
     const { store, calls } = harness();
     expect(store.getSnapshot().isEmpty).toBe(true);
     await flush();
-    expect(calls).toEqual({ joins: 0, registrations: [] });
+    expect(calls).toMatchObject({ joins: 0, registrations: [] });
   });
 
   it('the first local edit registers the page and joins its room', async () => {
@@ -53,7 +91,7 @@ describe('Today page store', () => {
   it('a registered page joins immediately without registering again', async () => {
     const { calls } = harness({ registered: true });
     await flush();
-    expect(calls).toEqual({ joins: 1, registrations: [] });
+    expect(calls).toMatchObject({ joins: 1, registrations: [] });
   });
 
   it('retries a failed registration on the next local edit', async () => {
@@ -70,7 +108,7 @@ describe('Today page store', () => {
     const { store, calls } = harness();
     const focus = store.outline.insertFirst('') as { nodeId: never };
     await flush();
-    expect(calls).toEqual({ joins: 0, registrations: [] });
+    expect(calls).toMatchObject({ joins: 0, registrations: [] });
     store.undo.editText(store.outline.getText(focus.nodeId)!, (text) => text.insert(0, 'a'));
     await flush();
     expect(calls.registrations).toHaveLength(1);
@@ -88,9 +126,64 @@ describe('Today page store', () => {
       },
       register: async () => {},
       setTimer: () => () => {},
+      retryDelayMs: () => 1000,
     });
     store.dispose();
     expect(signals.map((signal) => signal.aborted)).toEqual([true]);
+  });
+
+  it('retries a failed registration with backoff even when nothing more is typed', async () => {
+    const { store, calls, timers } = harness({ failRegisterOnce: true });
+    store.outline.insertFirst('a');
+    await flush();
+    expect(calls.registrations).toEqual([]);
+    expect(timers.delays()).toEqual([RETRY_MS]);
+    timers.fireAll();
+    await flush();
+    expect(calls.registrations).toHaveLength(1);
+    expect(calls.joins).toBe(1);
+  });
+
+  it('registers a page reopened with local content that never got registered', async () => {
+    const doc = new LoroDoc();
+    harness({ doc, failRegisterOnce: true }).store.outline.insertFirst('kept locally');
+    await flush();
+    const reopened = harness({ doc });
+    await flush();
+    expect(reopened.calls.registrations).toEqual([{ userId: 'local:me', date: '2026-11-20' }]);
+    expect(reopened.calls.joins).toBe(1);
+  });
+
+  it('retries a join that produced no room while the page stays open, without any edit', async () => {
+    const { store, calls, timers } = harness({ registered: true, joins: ['fail', 'fail'] });
+    let synced = false;
+    void store.synced.then(() => (synced = true));
+    await flush();
+    expect(calls.joins).toBe(1);
+    timers.fireAll();
+    await flush();
+    expect(calls.joins).toBe(2);
+    timers.fireAll();
+    await flush();
+    expect(calls.joins).toBe(3);
+    expect(synced).toBe(true);
+    expect(timers.delays()).toEqual([]);
+  });
+
+  it('keeps a room whose first sync failed instead of joining again, and releases it on dispose', async () => {
+    const { store, calls, timers } = harness({ registered: true, joins: ['unsynced'] });
+    let synced = false;
+    void store.synced.then(() => (synced = true));
+    await flush();
+    const focus = store.outline.insertFirst('a') as { nodeId: never };
+    store.undo.editText(store.outline.getText(focus.nodeId)!, (text) => text.insert(1, 'b'));
+    await flush();
+    expect(calls.joins).toBe(1);
+    expect(timers.delays()).toEqual([]);
+    // Not synced: an empty-looking day is not skipped as empty.
+    expect(synced).toBe(false);
+    store.dispose();
+    expect(calls.unsubscribed).toBe(1);
   });
 
   it('remote content arriving after a peer registered the page shows up in the snapshot', async () => {
@@ -100,9 +193,10 @@ describe('Today page store', () => {
       docId,
       doc: peer,
       registered: true,
-      join: async () => ({ unsubscribe: () => {} }),
+      join: async () => ({ room: { unsubscribe: () => {} }, synced: true }),
       register: async () => {},
       setTimer: () => () => {},
+      retryDelayMs: () => 1000,
     });
     peerStore.outline.insertFirst('from peer');
     doc.import(peer.export({ mode: 'update' }));
@@ -111,7 +205,10 @@ describe('Today page store', () => {
 });
 
 describe('Today page store cache', () => {
-  function cacheHarness(registeredIds: string[] = []) {
+  function cacheHarness(
+    registeredIds: string[] = [],
+    options: { failRegisteredCheck?: boolean } = {}
+  ) {
     const opened: string[] = [];
     const unloaded: string[] = [];
     const meta = new Map<string, unknown>(registeredIds.map((id) => [id, {}]));
@@ -120,9 +217,15 @@ describe('Today page store cache', () => {
       repo: {
         openDoc: async (id) => {
           opened.push(id);
-          return { doc: new LoroDoc(), joinRoom: async () => ({ unsubscribe: () => {} }) };
+          return {
+            doc: new LoroDoc(),
+            joinRoom: async () => ({ room: { unsubscribe: () => {} }, synced: true }),
+          };
         },
-        isRegistered: async (id) => meta.has(id),
+        isRegistered: async (id) => {
+          if (options.failRegisteredCheck) throw new Error('index unreadable');
+          return meta.has(id);
+        },
         upsertDocMeta: async (id, value) => {
           meta.set(id, value);
         },
@@ -142,6 +245,7 @@ describe('Today page store cache', () => {
       releaseDelayMs: 60_000,
       idleCap: 1,
       setTimer: () => () => {},
+      retryDelayMs: () => 1000,
     });
     return {
       cache,
@@ -161,6 +265,12 @@ describe('Today page store cache', () => {
     h.emit(day('2026-11-19'));
     expect(seen.at(-1)).toEqual(['2026-11-20', '2026-11-19', '2026-11-18']);
     stop();
+  });
+
+  it('opens a page even when its registration cannot be checked', async () => {
+    const h = cacheHarness([], { failRegisteredCheck: true });
+    const page = await h.cache.acquire(day('2026-11-20'));
+    expect(page.getSnapshot().isEmpty).toBe(true);
   });
 
   it('evicts the oldest idle page beyond the cap and keeps pages still held', async () => {

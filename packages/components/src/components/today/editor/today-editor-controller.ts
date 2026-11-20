@@ -400,6 +400,8 @@ export class TodayEditorController {
     const finish = (commit: boolean) => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('blur', cancel);
       window.removeEventListener('keydown', key, true);
       this.stopPointer = null;
       const wasDragging = dragging;
@@ -411,6 +413,9 @@ export class TodayEditorController {
       if (commit && !wasDragging) this.onNodeMenu?.(store, nodeId, bullet);
     };
     const move = (event: PointerEvent) => {
+      // The release happened where we could not see it (another window or app):
+      // the drag is over, and a later click must not drop it.
+      if ((event.buttons & 1) === 0) return finish(false);
       if (
         !dragging &&
         Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY) < DRAG_THRESHOLD_PX
@@ -438,6 +443,7 @@ export class TodayEditorController {
       this.notify();
     };
     const up = () => finish(true);
+    const cancel = () => finish(false);
     const key = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || !dragging) return;
       // Esc only cancels the drag; it must not also enter block selection.
@@ -447,6 +453,8 @@ export class TodayEditorController {
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('blur', cancel);
     window.addEventListener('keydown', key, true);
     this.stopPointer = () => finish(false);
   }

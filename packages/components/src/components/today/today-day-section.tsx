@@ -1,8 +1,17 @@
 import * as stylex from '@stylexjs/stylex';
 import { ChevronRight } from 'lucide-react';
-import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { getTodayDocId, type TodayDate, type TodayNodeView } from '@lody/shared';
+import { Button } from '@lody/ui/button';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { useTodayEditor } from './editor/today-editor-context';
@@ -73,6 +82,13 @@ const styles = stylex.create({
     overflowWrap: 'anywhere',
   },
   placeholder: { color: colors.tertiaryLabel, cursor: 'text' },
+  failed: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    fontSize: text.bodySize,
+    color: colors.secondaryLabel,
+  },
   editable: { outline: 'none', cursor: 'text' },
   handle: { cursor: 'grab', touchAction: 'none' },
   blockSelected: { backgroundColor: `color-mix(in srgb, ${colors.accent} 14%, transparent)` },
@@ -95,7 +111,7 @@ export function TodayDaySection(props: {
 }) {
   const { t, i18n } = useTranslation();
   const ref = useRef<HTMLElement | null>(null);
-  const store = useNearViewportPage(ref, props.cache, getTodayDocId(props.userId, props.date));
+  const page = useNearViewportPage(ref, props.cache, getTodayDocId(props.userId, props.date));
   const heading = formatTodayHeading(props.date, props.today, i18n.language);
   return (
     <section ref={ref} {...stylex.props(styles.section)} data-today-date={props.date}>
@@ -103,8 +119,15 @@ export function TodayDaySection(props: {
         {heading.isToday ? t('today.title', 'Today') : heading.date}
         <span {...stylex.props(styles.headerMeta)}>{heading.meta}</span>
       </h2>
-      {store ? (
-        <TodayStaticOutline store={store} isTop={props.isTop} onEmpty={props.onEmpty} />
+      {page.store ? (
+        <TodayStaticOutline store={page.store} isTop={props.isTop} onEmpty={props.onEmpty} />
+      ) : page.failed ? (
+        <div {...stylex.props(styles.outline, styles.failed)} role="alert">
+          {t('today.pageOpenFailed', "Couldn't open this day.")}
+          <Button size="small" variant="ghost" onClick={page.retry}>
+            {t('common.retry', 'Retry')}
+          </Button>
+        </div>
       ) : (
         <div {...stylex.props(styles.outline)} />
       )}
@@ -270,9 +293,12 @@ function useNearViewportPage(
   ref: React.RefObject<HTMLElement | null>,
   cache: TodayPageStoreCache,
   docId: string
-): TodayPageStore | undefined {
+): { store: TodayPageStore | undefined; failed: boolean; retry: () => void } {
   const [near, setNear] = useState(() => typeof IntersectionObserver === 'undefined');
   const [store, setStore] = useState<TodayPageStore | undefined>(() => cache.peek(docId));
+  const [failed, setFailed] = useState(false);
+  // Bumped by Retry: a failed open is not cached, so acquiring again starts over.
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     const element = ref.current;
     if (!element || typeof IntersectionObserver === 'undefined') return undefined;
@@ -287,19 +313,27 @@ function useNearViewportPage(
     if (!near) return undefined;
     let cancelled = false;
     let held = false;
-    void cache.acquire(docId).then((acquired) => {
-      if (cancelled) {
-        cache.releaseRef(docId);
-        return;
+    setFailed(false);
+    cache.acquire(docId).then(
+      (acquired) => {
+        if (cancelled) {
+          cache.releaseRef(docId);
+          return;
+        }
+        held = true;
+        setStore(acquired);
+      },
+      (error: unknown) => {
+        console.warn('Today page failed to open', { docId, error });
+        if (!cancelled) setFailed(true);
       }
-      held = true;
-      setStore(acquired);
-    });
+    );
     return () => {
       cancelled = true;
       setStore(undefined);
       if (held) cache.releaseRef(docId);
     };
-  }, [cache, docId, near]);
-  return store;
+  }, [attempt, cache, docId, near]);
+  const retry = useCallback(() => setAttempt((value) => value + 1), []);
+  return { store, failed, retry };
 }

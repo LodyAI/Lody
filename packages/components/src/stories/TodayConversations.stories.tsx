@@ -219,6 +219,7 @@ function Surface() {
       createTodayPageStoreCache({
         releaseDelayMs: 60_000,
         idleCap: 4,
+        retryDelayMs: () => 1_000,
         setTimer: (callback, ms) => {
           const timer = setTimeout(callback, ms);
           return () => clearTimeout(timer);
@@ -227,7 +228,10 @@ function Surface() {
           openDoc: async () => {
             const doc = new LoroDoc();
             openTodayOutline(doc).paste({ kind: 'page-start' }, PAGE);
-            return { doc, joinRoom: async () => ({ unsubscribe: () => {} }) };
+            return {
+              doc,
+              joinRoom: async () => ({ room: { unsubscribe: () => {} }, synced: true }),
+            };
           },
           isRegistered: async () => true,
           upsertDocMeta: async () => {},

@@ -23,6 +23,7 @@ function useDemoCache() {
       createTodayPageStoreCache({
         releaseDelayMs: 60_000,
         idleCap: 4,
+        retryDelayMs: () => 1_000,
         setTimer: (callback, ms) => {
           const timer = setTimeout(callback, ms);
           return () => clearTimeout(timer);
@@ -33,7 +34,10 @@ function useDemoCache() {
             const seed = PAGES[docId];
             if (seed)
               openTodayOutline(doc).paste({ kind: 'page-start' }, parseTodayPasteText(seed));
-            return { doc, joinRoom: async () => ({ unsubscribe: () => {} }) };
+            return {
+              doc,
+              joinRoom: async () => ({ room: { unsubscribe: () => {} }, synced: true }),
+            };
           },
           isRegistered: async (docId) => docId in PAGES,
           upsertDocMeta: async () => {},

@@ -1,6 +1,10 @@
 import { getTodayDocIdPrefix, parseTodayDocId, type TodayDate } from '@lody/shared';
 import type { LoroDoc } from 'loro-crdt';
-import { createTodayPageStore, type TodayPageStore } from '@/lib/today/today-page-store';
+import {
+  createTodayPageStore,
+  type TodayPageStore,
+  type TodayRoomJoin,
+} from '@/lib/today/today-page-store';
 import { createManagedStoreCache } from './store-ref-tracker';
 
 /**
@@ -14,7 +18,8 @@ import { createManagedStoreCache } from './store-ref-tracker';
 export type TodayRepoPort = {
   openDoc(docId: string): Promise<{
     doc: LoroDoc;
-    joinRoom(signal: AbortSignal): Promise<{ unsubscribe(): void } | null | undefined>;
+    /** Rejects only when no room subscription was produced. */
+    joinRoom(signal: AbortSignal): Promise<TodayRoomJoin | null | undefined>;
   }>;
   isRegistered(docId: string): Promise<boolean>;
   upsertDocMeta(docId: string, meta: { userId: string; date: TodayDate }): Promise<void>;
@@ -41,6 +46,8 @@ export function createTodayPageStoreCache(options: {
   releaseDelayMs: number;
   idleCap: number;
   setTimer: (callback: () => void, ms: number) => () => void;
+  /** Backoff before retry number `attempt` of a page's failed register or join. */
+  retryDelayMs: (attempt: number) => number;
   onBackgroundError?: (docId: string, stage: string, error: unknown) => void;
 }): TodayPageStoreCache {
   const { repo } = options;
@@ -50,7 +57,13 @@ export function createTodayPageStoreCache(options: {
     create: async (docId) => {
       const [handle, registered] = await Promise.all([
         repo.openDoc(docId),
-        repo.isRegistered(docId),
+        // A hint only: an unreadable index must not keep the page from opening.
+        // Unregistered pages still register on content, and the date index
+        // marks pages a peer registered.
+        repo.isRegistered(docId).catch((error: unknown) => {
+          options.onBackgroundError?.(docId, 'registered-check', error);
+          return false;
+        }),
       ]);
       return createTodayPageStore({
         docId,
@@ -59,6 +72,7 @@ export function createTodayPageStoreCache(options: {
         join: (signal) => handle.joinRoom(signal),
         register: (meta) => repo.upsertDocMeta(docId, meta),
         setTimer: options.setTimer,
+        retryDelayMs: options.retryDelayMs,
         onBackgroundError: (stage, error) => options.onBackgroundError?.(docId, stage, error),
       });
     },

@@ -9,6 +9,8 @@ import {
 import { registerPlainText } from '@lexical/plain-text';
 import { LoroDoc } from 'loro-crdt';
 import { afterEach, describe, expect, it } from 'vitest';
+import { act, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
 import {
   TODAY_MENTION_CHAR as M,
   createTodayPageUndo,
@@ -16,6 +18,10 @@ import {
   readTodayText,
 } from '@lody/shared';
 import { bindLoroText } from '../src/components/today/editor/loro-lexical-binding';
+import { TodayDaySection } from '../src/components/today/today-day-section';
+import type { TodayPageStoreCache } from '../src/providers/today-page-store-cache';
+import { createTodayPageStore } from '../src/lib/today/today-page-store';
+import { createTestI18n, withTestI18n } from './test-i18n';
 import { resolveMentionKey } from '../src/components/today/editor/mention-keys';
 import { resolveOutlineKey } from '../src/components/today/editor/outline-keys';
 import {
@@ -652,5 +658,61 @@ describe('Today editor around mentions', () => {
     await ctx.press('Backspace');
     expect(ctx.store.outline.getNode(ctx.nodeId)).toMatchObject({ text: 'ab', mentions: [] });
     ctx.done();
+  });
+});
+
+describe('Today day section opening', () => {
+  it('shows a failed open with Retry, and Retry opens the day', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const date = '2026-11-20' as never;
+    let failNext = true;
+    const store = createTodayPageStore({
+      docId: 'today-u1-2026-11-20',
+      doc: new LoroDoc(),
+      registered: false,
+      join: async () => null,
+      register: async () => {},
+      setTimer: () => () => {},
+      retryDelayMs: () => 1000,
+    });
+    store.outline.insertFirst('opened');
+    const cache = {
+      peek: () => undefined,
+      acquire: async () => {
+        if (failNext) {
+          failNext = false;
+          throw new Error('storage unavailable');
+        }
+        return store;
+      },
+      releaseRef: () => {},
+    } as unknown as TodayPageStoreCache;
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const i18n = createTestI18n();
+    await act(async () =>
+      root.render(
+        withTestI18n(
+          createElement(TodayDaySection, {
+            cache,
+            userId: 'u1',
+            date,
+            today: date,
+            isTop: true,
+            onEmpty: () => {},
+          }),
+          i18n
+        )
+      )
+    );
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain("Couldn't open this day.");
+    await act(async () => alert!.querySelector('button')!.click());
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.textContent).toContain('opened');
+    act(() => root.unmount());
+    container.remove();
+    store.dispose();
   });
 });

@@ -6919,5 +6919,6 @@
   "today.markRead": "标记为已读",
   "today.markDone": "完成",
   "today.laterWithCountdown": "{{label}} · {{countdown}}",
+  "today.pageOpenFailed": "无法打开这一天。",
   "chat.embeddedHandoffFailed": "对话已创建，但当前视图未能更新。"
 }

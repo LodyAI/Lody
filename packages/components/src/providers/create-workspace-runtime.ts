@@ -5649,6 +5649,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const todayPageStoreCache = createTodayPageStoreCache({
     releaseDelayMs: STORE_RELEASE_DELAY_MS,
     idleCap: TODAY_IDLE_PAGE_CAP,
+    retryDelayMs: (attempt) => computeLocalReconnectDelayMs(attempt),
     setTimer: (callback, ms) => {
       const timer = setTimeout(callback, ms);
       return () => clearTimeout(timer);
@@ -5665,23 +5666,36 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
             // Same release contract as schedule stores: a released page stops waiting
             // and never keeps a room it no longer owns.
             await waitForPromiseOrAbort(transportReady.promise, signal);
-            let joined: RepoRoomSubscription | null = null;
-            const subscription = await waitForRoomToSync(() => handle.joinRoom(), {
-              roomId: docId,
-              initialDelayMs: 0,
-              signal,
-              isCancelled: () => signal.aborted,
-              firstSynced: (sub) => readinessBindingForDocRoom(sub, docId).firstSyncedWithRemote,
-              onSubscription: (sub) => {
-                if (signal.aborted) sub.unsubscribe();
-                else joined = sub;
-              },
-            });
+            // Assigned in a callback: widen it so control flow keeps the type.
+            let joined = null as RepoRoomSubscription | null;
+            let subscription: RepoRoomSubscription | null;
+            try {
+              subscription = await waitForRoomToSync(() => handle.joinRoom(), {
+                roomId: docId,
+                initialDelayMs: 0,
+                signal,
+                isCancelled: () => signal.aborted,
+                firstSynced: (sub) => readinessBindingForDocRoom(sub, docId).firstSyncedWithRemote,
+                onSubscription: (sub) => {
+                  if (signal.aborted) sub.unsubscribe();
+                  else joined = sub;
+                },
+              });
+            } catch (error) {
+              // As for session rooms: a subscription that exists heals inside the
+              // SDK, so the page keeps it; only a join that produced none fails.
+              if (signal.aborted) {
+                joined?.unsubscribe();
+                return null;
+              }
+              if (!joined) throw error;
+              return { room: joined, synced: false };
+            }
             if (signal.aborted) {
               (subscription ?? joined)?.unsubscribe();
               return null;
             }
-            return subscription;
+            return subscription ? { room: subscription, synced: true } : null;
           },
         };
       },
