@@ -1,6 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 import { CalendarDays, ChevronLeft, ChevronRight, MoreHorizontal, Pin, PinOff } from 'lucide-react';
-import { useAtomValue, useSetAtom, useStore } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
+import { todayFullWidthAtom } from '@/atoms/sidebar-state';
 import {
   useCallback,
   useEffect,
@@ -61,6 +62,7 @@ import { useTodayEditor } from './editor/today-editor-context';
 import { TodayEditorContext } from './editor/today-editor-context';
 import { TodayEditorController } from './editor/today-editor-controller';
 import { TodayDaySection } from './today-day-section';
+import { todayOutline } from './outline.stylex';
 import { TodayConvertDialog } from './today-convert-dialog';
 import { TodayMentionStatusMenuHost } from './today-mention-status-menu';
 import { buildConvertPrompt, todayMentionMarkdown } from './editor/block-selection';
@@ -70,6 +72,9 @@ import { buildDayStream, localTodayDate, todayDateToLocalDate } from './today-st
 import { useTodayClock } from './use-today-clock';
 
 export type TodayViewTarget = { member?: string; date?: string };
+
+/** Default max width of the Today page's text column, in px. */
+export const TODAY_READABLE_WIDTH = 720;
 
 const styles = stylex.create({
   root: {
@@ -106,9 +111,16 @@ const styles = stylex.create({
     flex: 1,
     minHeight: 0,
     overflowY: 'auto',
-    paddingInline: space[6],
+    // The fold toggles hang left of the text: keep a full gutter beside them too.
+    paddingInlineStart: `calc(${space[6]} + ${todayOutline.foldOverhang})`,
+    paddingInlineEnd: space[6],
     paddingBottom: space[8],
   },
+  // The readable column (Obsidian 700px, Notion ~708px, AFFiNE ~752px of
+  // text): centred, shrinking with the window inside the scroller's gutters.
+  // The scroller stays full width, so its scrollbar, drops and clicks beside
+  // the column keep working.
+  column: { maxWidth: TODAY_READABLE_WIDTH, marginInline: 'auto' },
   back: {
     position: 'absolute',
     insetInline: 0,
@@ -182,6 +194,7 @@ export function TodayView(props: {
   const today = useTodayClock();
   const anchor = props.target.date ? (parseTodayDate(props.target.date) ?? undefined) : undefined;
   const [registered, setRegistered] = useState<readonly TodayDate[]>([]);
+  const [fullWidth, setFullWidth] = useAtom(todayFullWidthAtom);
   const [empty, setEmpty] = useState<ReadonlySet<TodayDate>>(new Set());
   const { members, isMultiMember } = useWorkspaceMembers();
 
@@ -301,6 +314,15 @@ export function TodayView(props: {
                   </Menu.Content>
                 </Menu.Submenu>
               ) : null}
+              {props.pinned ? null : (
+                <Menu.CheckboxItem
+                  checked={fullWidth}
+                  indicatorSide="end"
+                  onCheckedChange={(checked) => setFullWidth(checked)}
+                >
+                  {t('today.fullWidth', 'Full width')}
+                </Menu.CheckboxItem>
+              )}
               <Menu.Item
                 onClick={() => {
                   void writeTextToClipboard(
@@ -315,7 +337,7 @@ export function TodayView(props: {
             </Menu.Content>
           </Menu.Root>
         </TodayToolbar>
-        <TodayOutlineSurface controller={controller}>
+        <TodayOutlineSurface controller={controller} fullWidth={props.pinned || fullWidth}>
           {days.map((date, index) => (
             <TodayDaySection
               key={`${userId}:${date}`}
@@ -401,6 +423,8 @@ export function TodayToolbar(props: { pinned: boolean; title: ReactNode; childre
 /** The scroll surface: focus, keys and clipboard for block selection. */
 export function TodayOutlineSurface(props: {
   controller: TodayEditorController | null;
+  /** Span the whole width instead of the readable column (the pinned column is narrow anyway). */
+  fullWidth?: boolean;
   children: React.ReactNode;
 }) {
   const { controller } = props;
@@ -458,7 +482,7 @@ export function TodayOutlineSurface(props: {
         if (event.target === event.currentTarget) controller?.onBlockPaste(event.nativeEvent);
       }}
     >
-      {props.children}
+      <div {...stylex.props(!props.fullWidth && styles.column)}>{props.children}</div>
       <TodayDragLayer />
     </div>
   );

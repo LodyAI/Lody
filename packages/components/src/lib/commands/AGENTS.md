@@ -17,7 +17,10 @@ only tells global dispatch to yield for events originating in its subtree.
   dispatch honor it; do not add screen-specific filters elsewhere.
 - `built-ins.ts` registers `when: () => false` placeholders so configurable shortcuts
   remain visible when their real component is unmounted. A mounted implementation
-  shadows the placeholder and removal restores it.
+  shadows the placeholder and removal restores it. A command that belongs to an
+  experiment is not a built-in: its placeholder is registered by an always-mounted
+  component of that experiment, before the routes (`TodayCommandPlaceholder`), so it
+  is listed only while the experiment is on and never masks the mounted command.
 - The registry is a per-id stack. Multiple `register` calls push implementations and
   the most recently mounted one wins. Hidden retained tabs/toolbars must pass
   `enabled=false` to `useCommand` or they can shadow the active surface.

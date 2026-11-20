@@ -58,7 +58,7 @@ export function TodayPinnedColumn() {
     <section
       {...stylex.props(styles.column)}
       style={{ width: clamp(width) }}
-      aria-label={t('today.title', 'Today')}
+      aria-label={t('today.nav', 'Today')}
       data-testid="today-column"
     >
       <TodayView

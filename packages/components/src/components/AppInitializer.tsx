@@ -5,6 +5,7 @@ import { usePlatformCapability } from '@lody/platform/react';
 import { API_BASE_URL } from '../lib';
 import { registerBuiltInCommands } from '../lib/commands';
 import { CommandShortcutHost } from '../lib/commands/shortcut-host';
+import { TodayCommandPlaceholder } from './today/today-command';
 import { rehydrateAvatarMemoryCacheFromPersistent } from '../lib/avatar-cache';
 import { languageAtom } from '../atoms/settings';
 import { maybeClearLodyCacheOnBoot } from '../lib/clear-local-cache';
@@ -119,6 +120,7 @@ const AppInitializer = ({ children }: { children: React.ReactNode }) => {
   return (
     <>
       <CommandShortcutHost />
+      <TodayCommandPlaceholder />
       {children}
     </>
   );

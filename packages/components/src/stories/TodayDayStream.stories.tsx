@@ -52,7 +52,12 @@ function useDemoCache() {
   );
 }
 
-function DayStream(props: { dates: TodayDate[] }) {
+function DayStream(props: {
+  dates: TodayDate[];
+  /** Fill the canvas, as the Today page does in a wide main area. */
+  wide?: boolean;
+  fullWidth?: boolean;
+}) {
   const cache = useDemoCache();
   const [controller, setController] = useState<TodayEditorController | null>(null);
   useEffect(() => {
@@ -62,8 +67,15 @@ function DayStream(props: { dates: TodayDate[] }) {
   }, [cache]);
   return (
     <TodayEditorContext.Provider value={controller}>
-      <div style={{ maxWidth: 720, height: 640, display: 'flex', flexDirection: 'column' }}>
-        <TodayOutlineSurface controller={controller}>
+      <div
+        style={{
+          maxWidth: props.wide ? undefined : 720,
+          height: 640,
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <TodayOutlineSurface controller={controller} fullWidth={props.fullWidth}>
           {props.dates.map((date, index) => (
             <TodayDaySection
               key={date}
@@ -93,4 +105,14 @@ export const TodayWithEarlierDay: StoryObj<typeof DayStream> = {
 
 export const EmptyToday: StoryObj<typeof DayStream> = {
   args: { dates: ['2026-11-21' as TodayDate] },
+};
+
+/** A wide main area: the stream keeps its readable column, centred. */
+export const WideWindow: StoryObj<typeof DayStream> = {
+  args: { dates: [TODAY, '2026-11-18' as TodayDate], wide: true },
+};
+
+/** The same with the page's Full width preference on. */
+export const WideWindowFullWidth: StoryObj<typeof DayStream> = {
+  args: { dates: [TODAY, '2026-11-18' as TodayDate], wide: true, fullWidth: true },
 };

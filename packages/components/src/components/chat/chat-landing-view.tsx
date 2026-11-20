@@ -20,7 +20,7 @@ import {
 import type { AttachmentAddMenuMcp } from '@/components/chat/attachment-add-menu';
 import { ErrorBoundary } from '@/components/error-boundary';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
-import { ArrowUp, Settings } from 'lucide-react';
+import { ArrowUp, CornerDownLeft, Settings } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import type { PastedTextDraft } from '@/lib/pasted-text-draft';
 import { getDroppedFileLocalPath, toPathMentionInsertion } from '@/lib/dropped-local-path';
@@ -34,9 +34,10 @@ import { type ComposerInputElement, getComposerSelection } from '@/ui/mention/co
 import * as stylex from '@stylexjs/stylex';
 
 const styles = stylex.create({
-  // The send chord inside the dialog's submit button: part of the label,
-  // one step quieter than the word.
-  chord: { opacity: 0.6, fontWeight: 400 },
+  // The Return glyph inside the dialog's submit button: part of the label,
+  // one step quieter than the word. An icon, never the ↩ character, which
+  // macOS paints as a colour emoji.
+  chord: { opacity: 0.6, flexShrink: 0 },
 });
 
 export type ChatLandingTone = 'light' | 'dark';
@@ -437,9 +438,7 @@ export function ChatLandingView({
         {submissionPending ? <Spinner className="h-3.5 w-3.5" /> : null}
         <span>{submitLabel}</span>
         {/* Return sends, as in the new-conversation composer. */}
-        <span aria-hidden="true" {...stylex.props(styles.chord)}>
-          ↩
-        </span>
+        <CornerDownLeft size={14} strokeWidth={2} aria-hidden {...stylex.props(styles.chord)} />
       </Button>
     </ErrorBoundary>
   );

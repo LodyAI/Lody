@@ -195,7 +195,7 @@ export function ConvertDialogPreview({
           data-testid="today-convert-dialog"
         >
           <TodayConvertDialogHeader
-            parent={t('today.title', 'Today')}
+            parent={t('today.nav', 'Today')}
             title={t('today.convertTitle', 'Convert to task')}
           />
           {open ? (
@@ -262,7 +262,7 @@ function ConvertDialogBody({
   };
 
   const topSelector = (
-    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+    <div className="contents">
       <DesktopMachineMenu
         value={machineId}
         visibleLocalMachineId={MAC_STUDIO}
@@ -278,23 +278,25 @@ function ConvertDialogBody({
         }}
         onAddMachine={() => {}}
       />
-      <UnifiedProjectSelectorView
-        value={selection}
-        onChange={(next) => {
-          if (next.kind === 'none') setProjectId(null);
-          else if (next.kind === 'local') {
-            setMachineId(next.machineId);
-            setProjectId(next.localProjectId);
-          }
-        }}
-        localProjects={machineProjects}
-        repositories={[]}
-        onAddLocalProject={() => {}}
-        onConnectGitRepo={() => {}}
-        renderLimit={20}
-      />
+      <div className="flex min-w-[4.5rem] shrink">
+        <UnifiedProjectSelectorView
+          value={selection}
+          onChange={(next) => {
+            if (next.kind === 'none') setProjectId(null);
+            else if (next.kind === 'local') {
+              setMachineId(next.machineId);
+              setProjectId(next.localProjectId);
+            }
+          }}
+          localProjects={machineProjects}
+          repositories={[]}
+          onAddLocalProject={() => {}}
+          onConnectGitRepo={() => {}}
+          renderLimit={20}
+        />
+      </div>
       {project ? (
-        <div {...stylex.props(composerSurface.contextPill)}>
+        <div {...stylex.props(composerSurface.contextPill, composerSurface.contextPillFixed)}>
           {isGit && worktree ? (
             <>
               <BranchSelector

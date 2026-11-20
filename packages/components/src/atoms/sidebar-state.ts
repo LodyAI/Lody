@@ -315,6 +315,19 @@ export const todayPinnedAtom: ReturnType<typeof atomWithStorage<boolean>> =
  */
 export const todayPinnedTargetAtom = atom<{ member?: string; date?: string } | null>(null);
 
+/**
+ * Today page spans the whole main area instead of the readable column
+ * (specs/today-outline.md); a preference stored on this device.
+ */
+export const todayFullWidthAtom = atomWithStorage<boolean>(
+  'lody-today-full-width',
+  false,
+  undefined,
+  {
+    getOnInit: true,
+  }
+);
+
 export const TODAY_COLUMN_DEFAULT_WIDTH = 360;
 export const TODAY_COLUMN_MIN_WIDTH = 280;
 export const TODAY_COLUMN_MAX_WIDTH = 560;
