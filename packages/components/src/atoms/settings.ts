@@ -352,6 +352,22 @@ export const experimentalFeaturesEnabledAtom = atomWithStorage<boolean>(
   { getOnInit: true }
 );
 
+/** Opt-in for the Today outline notes (specs/today-outline.md). */
+export const todayExperimentEnabledAtom = atomWithStorage<boolean>(
+  'lody-today-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
+
+/**
+ * The single gate for every Today surface. Turning the master switch off hides
+ * Today without clearing its opt-in; data keeps syncing either way.
+ */
+export const todayFeatureEnabledAtom = atom(
+  (get) => get(experimentalFeaturesEnabledAtom) && get(todayExperimentEnabledAtom)
+);
+
 /** Opt-in for Roost-backed history on newly created sessions. */
 export const roostHistoryExperimentEnabledAtom = atomWithStorage<boolean>(
   ROOST_HISTORY_EXPERIMENT_STORAGE_KEY,

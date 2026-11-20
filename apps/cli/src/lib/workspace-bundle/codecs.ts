@@ -24,6 +24,7 @@ const LORO_CODECS = {
   'task-': 'task/v1',
   'machine-': 'machine/v1',
   'agent-': 'agent-config/v1',
+  'today-': 'today/v1',
 } as const;
 
 const FLOCK_CODECS = {
@@ -53,6 +54,7 @@ export const CODEC_TRAITS: Readonly<
   'schedule-registry/v1': { kind: 'schedules', counted: false },
   'task/v1': { kind: 'other', counted: true },
   'task-index/v1': { kind: 'other', counted: false },
+  'today/v1': { kind: 'other', counted: true },
   'workspace-catalog/v1': { kind: 'catalog', counted: true },
   'machine/v1': { kind: 'machines', counted: false, machine: true },
   'agent-config/v1': { kind: 'machines', counted: false, machine: true },

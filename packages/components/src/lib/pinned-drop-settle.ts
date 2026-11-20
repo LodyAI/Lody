@@ -162,6 +162,9 @@ function releasePinnedHoverOnPointerMove(): void {
  * after the drop, so the landed row does not light up under a still pointer.
  */
 export function setPinnedPointerDrag(active: boolean): void {
+  if (pointerDragActive === active) return;
+  pointerDragActive = active;
+  for (const listener of pointerDragListeners) listener();
   if (typeof document === 'undefined') return;
   if (active) {
     document.body.setAttribute(DRAGGING_ATTR, '');
@@ -170,6 +173,19 @@ export function setPinnedPointerDrag(active: boolean): void {
   }
   document.body.removeAttribute(DRAGGING_ATTR);
   releasePinnedHoverOnPointerMove();
+}
+
+let pointerDragActive = false;
+const pointerDragListeners = new Set<() => void>();
+
+/** Whether a pinned-row or pin-section pointer drag is in flight. */
+export function isPinnedPointerDragActive(): boolean {
+  return pointerDragActive;
+}
+
+export function subscribePinnedPointerDrag(listener: () => void): () => void {
+  pointerDragListeners.add(listener);
+  return () => pointerDragListeners.delete(listener);
 }
 
 // ---------------------------------------------------------------------------

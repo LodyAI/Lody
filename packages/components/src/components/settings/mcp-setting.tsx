@@ -6,7 +6,7 @@ import * as stylex from '@stylexjs/stylex';
 import { SettingsPageActions, SettingsPageLead, useSettingsPane } from './settings-page-header';
 import { SettingsEmptyState, settingsRecordsCard } from './compact-layout';
 import { useAtomValue } from 'jotai';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { Plus, RefreshCw, Trash2, Settings } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
@@ -251,11 +251,7 @@ export function McpSetting() {
       </SettingsPageActions>
 
       {servers.length === 0 ? (
-        <SettingsEmptyState
-          title={t('settings.mcp.empty')}
-          description={t('settings.mcp.emptyHint')}
-          action={addButton}
-        />
+        <SettingsEmptyState title={t('settings.mcp.empty')} action={addButton} />
       ) : (
         <div {...stylex.props(settingsRecordsCard)}>
           {servers.map((server, index) => (

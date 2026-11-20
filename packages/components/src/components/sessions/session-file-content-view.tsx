@@ -94,7 +94,7 @@ import {
 } from '@/lib/session-file-language';
 import { getOfficePreviewKind } from '@/lib/session-file-office-source';
 import { downloadBytesAsFile } from '@/lib/download-file';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { useCodeCollabLiveText } from '@/hooks/use-code-collab-live-text';
 import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
@@ -1205,11 +1205,12 @@ function SessionFileContentViewImpl({
 
   const isTextFileReady = data.status === 'ready' && data.snapshot.kind === 'text';
   const htmlScriptSupport = getExecutableHtmlPreviewSupport();
+  const isHtmlFile = isHtmlPath(normalizedPath);
   const htmlPreviewSource =
     data.status === 'ready' &&
     data.snapshot.kind === 'text' &&
     data.snapshot.truncated !== true &&
-    isHtmlPath(normalizedPath)
+    isHtmlFile
       ? (latestEditorTextRef.current ?? data.snapshot.text)
       : null;
   // WebKit has no credentialless frames, so HTML there runs scripts only after an
@@ -1221,14 +1222,21 @@ function SessionFileContentViewImpl({
   } = useTextBoundScriptOptIn(htmlPreviewSource);
   const supportsHtmlPreview =
     htmlScriptSupport === 'automatic' || (htmlScriptSupport === 'opt-in' && htmlScriptsOptedIn);
-  const isHtmlTextFile = htmlPreviewSource !== null;
-  const showHtmlRendered = isActiveSurface && isHtmlTextFile && htmlRenderMode === 'rendered';
   // Desktop + file on this machine: serve the real file from its own isolated
   // origin so relative assets load, after a per-entry consent that decides
   // JavaScript. Everything else keeps the inline srcdoc preview below.
-  const localHtmlHostPath = sessionFileActions.localHost
-    ? sessionFileActions.resolveHostPath(normalizedPath)
-    : null;
+  const [localHtmlUnavailablePath, setLocalHtmlUnavailablePath] = useState<string | null>(null);
+  const localHtmlHostPath =
+    localHtmlUnavailablePath !== normalizedPath && sessionFileActions.localHost
+      ? sessionFileActions.resolveHostPath(normalizedPath)
+      : null;
+  const canPreviewHtml =
+    htmlPreviewSource !== null ||
+    (isHtmlFile &&
+      localHtmlHostPath !== null &&
+      data.status === 'ready' &&
+      data.snapshot.kind === 'paged-text');
+  const showHtmlRendered = isActiveSurface && canPreviewHtml && htmlRenderMode === 'rendered';
   const workspaceRoot = sessionFileActions.workspacePath;
   const nestedWorkspaceFile =
     workspaceRoot &&
@@ -1237,7 +1245,6 @@ function SessionFileContentViewImpl({
       [{ id: 'main', absolutePath: workspaceRoot }],
       localHtmlHostPath
     )?.relativePath.includes('/');
-  const [localHtmlUnavailablePath, setLocalHtmlUnavailablePath] = useState<string | null>(null);
   const handleLocalHtmlCancel = useCallback(() => setHtmlRenderMode('code'), []);
   const handleLocalHtmlUnavailable = useCallback(
     () => setLocalHtmlUnavailablePath(normalizedPath),
@@ -1246,7 +1253,7 @@ function SessionFileContentViewImpl({
   const localHtmlPreview = useLocalHtmlPreview({
     active: showHtmlRendered,
     machineId: session.machineId,
-    hostPath: localHtmlUnavailablePath === normalizedPath ? null : localHtmlHostPath,
+    hostPath: localHtmlHostPath,
     onCancel: handleLocalHtmlCancel,
     onUnavailable: handleLocalHtmlUnavailable,
   });
@@ -1380,7 +1387,6 @@ function SessionFileContentViewImpl({
     lastCopyMarkdownRequestSeqRef.current = copyMarkdownRequestSeq;
     void handleCopyMarkdown();
   }, [copyMarkdownRequestSeq, data, handleCopyMarkdown, normalizedPath]);
-  const isHtmlFile = isHtmlPath(normalizedPath);
   const handleDownloadHtml = useCallback(() => {
     if (data.status !== 'ready' || data.snapshot.kind !== 'text') return;
     const content = latestEditorTextRef.current ?? data.snapshot.text;
@@ -1656,15 +1662,6 @@ function SessionFileContentViewImpl({
         {...(fileErrorActions ? { fileActions: fileErrorActions } : {})}
       />
     );
-  } else if (data.snapshot.kind === 'paged-text') {
-    body = (
-      <PagedFileViewer
-        key={normalizedPath}
-        source={data.snapshot.source}
-        active={isActiveSurface}
-        onOpenExternal={fileErrorActions?.localHost?.onOpen}
-      />
-    );
   } else if (data.snapshot.kind === 'binary') {
     body = (
       <SessionFileBinaryPreview
@@ -1703,6 +1700,15 @@ function SessionFileContentViewImpl({
           <Spinner {...stylex.props(styles.spinner16)} />
         </div>
       ) : null;
+  } else if (data.snapshot.kind === 'paged-text') {
+    body = (
+      <PagedFileViewer
+        key={normalizedPath}
+        source={data.snapshot.source}
+        active={isActiveSurface}
+        onOpenExternal={fileErrorActions?.localHost?.onOpen}
+      />
+    );
   } else if (showHtmlRendered && !supportsHtmlPreview && htmlPreviewSource !== null) {
     body = <ReadOnlyHtmlPreview text={htmlPreviewSource} />;
   } else if (showHtmlRendered && htmlPreviewDocument !== null) {
@@ -1879,6 +1885,7 @@ function SessionFileContentViewImpl({
   // PDF and Office own their scrollports and need a definite height; the outer
   // ScrollArea content wrapper sizes itself from its children instead.
   const bodyUsesNativeScrolling =
+    useLocalHtml ||
     (isTextFileReady && !showSvgRendered && !showMarkdownRendered) ||
     (data.status === 'ready' &&
       data.snapshot.kind === 'binary' &&
@@ -1888,7 +1895,7 @@ function SessionFileContentViewImpl({
   // status bar (which now only carries save/live/offline state). The search
   // button only appears when a Monaco editor is mounted — a rendered SVG/Markdown
   // preview has no editor to search.
-  const showPreviewToggle = isSvgTextFile || isMarkdownTextFile || isHtmlTextFile || isCsvTextFile;
+  const showPreviewToggle = isSvgTextFile || isMarkdownTextFile || canPreviewHtml || isCsvTextFile;
   const filePreviewActive = isSvgTextFile
     ? svgRenderMode === 'rendered'
     : isMarkdownTextFile
@@ -1954,7 +1961,7 @@ function SessionFileContentViewImpl({
                   }
                 }}
                 showLabel={
-                  isHtmlTextFile && !localHtmlHostPath && htmlScriptSupport === 'automatic'
+                  canPreviewHtml && !localHtmlHostPath && htmlScriptSupport === 'automatic'
                     ? t('sessions.fileViewer.htmlPreview.show', 'Preview HTML (runs scripts)')
                     : t('sessions.fileViewer.preview.show', 'Preview')
                 }

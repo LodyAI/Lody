@@ -48,7 +48,7 @@ Read parent rules and linked context.
   navigation-stripped HTML with an empty sandbox.
   The only other executable frame is the consented desktop direct preview in
   `local-html-preview.tsx` (same doc).
-  Never preview truncated text; static frames die with their tab.
+  Paged HTML may open from disk after consent. Never render partial text; static frames die with their tab.
 - Encrypted remote preview controls require the existing protected feature host
   and verified write role; never fall back to ordinary preview proofs. Explain
   that page bytes pass through the tunnel service as plaintext.

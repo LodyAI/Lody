@@ -30,6 +30,17 @@ PR review Markdown offers per-image HTTPS loading; automatic loading is a
 device-local preference, off by default. The isolated desktop image document
 keeps the main renderer's image policy unchanged. [Decision](../../../../../.agents/notes/implemented/feature/2026-11-02-pr-remote-images.md).
 
+## Helper text and info buttons
+
+A visible helper under a row, field or form section is reserved for what the
+reader must see to act: current state, errors, and consequences such as an
+unencrypted export or a project share that also shares its machine. Optional
+background (what a switch affects, syntax notes, troubleshooting) goes behind
+the `info` prop of `CompactRow`, `Field` or `Section`, which renders
+`settings-info.tsx`: an "i" button opening a popover on hover or click. Copy
+that only restates the label is removed. A page lead stays one short sentence,
+and an empty state does not repeat it.
+
 ## Ordinary member approval
 
 The join-request subscription and Better Auth's member cache have different owners.

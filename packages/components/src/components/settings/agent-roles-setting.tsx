@@ -196,11 +196,7 @@ export function AgentRolesSetting() {
       </SettingsPageActions>
 
       {rows.length === 0 ? (
-        <SettingsEmptyState
-          title={t('settings.agentRoles.empty')}
-          description={t('settings.agentRoles.emptyHint')}
-          action={addButton}
-        />
+        <SettingsEmptyState title={t('settings.agentRoles.empty')} action={addButton} />
       ) : (
         // One provider: after the first machine note opens, the next opens at once.
         <Tooltip.Provider delay={250}>

@@ -1,9 +1,11 @@
 import React, { forwardRef, type ComponentProps, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { ArrowUpRight, ChevronRight } from 'lucide-react';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { withClassName } from '@/lib/stylex';
 import { settingsBoxed } from './material.stylex';
 import { settingsSurface as surface } from './surface';
+import { SettingsInfo } from './settings-info';
 
 /**
  * The settings card for a standalone catalog row (MCP server, Agent role,
@@ -38,6 +40,7 @@ interface CompactSectionProps {
 
 const rowStyles = stylex.create({
   flush: { paddingInline: 0 },
+  labelLine: { display: 'inline-flex', alignItems: 'center', gap: space[1] },
 });
 
 interface CompactRowProps {
@@ -48,6 +51,7 @@ interface CompactRowProps {
   labelId?: string;
   helperId?: string;
   helper?: ReactNode;
+  info?: ReactNode;
   /** Interactive disclosure content needs a block container rather than a paragraph. */
   helperBlock?: boolean;
   children?: ReactNode;
@@ -160,6 +164,7 @@ export function CompactRow({
   labelId,
   helperId,
   helper,
+  info,
   helperBlock = false,
   children,
   className,
@@ -170,9 +175,12 @@ export function CompactRow({
   const Helper = helperBlock ? 'div' : 'p';
   const text = (
     <div {...stylex.props(surface.rowText, helper != null && surface.rowTextCapped)}>
-      <p id={labelId} {...stylex.props(surface.rowLabel, disabled && surface.rowLabelDisabled)}>
-        {label}
-      </p>
+      <div {...stylex.props(rowStyles.labelLine)}>
+        <p id={labelId} {...stylex.props(surface.rowLabel, disabled && surface.rowLabelDisabled)}>
+          {label}
+        </p>
+        {info != null ? <SettingsInfo label={label}>{info}</SettingsInfo> : null}
+      </div>
       {helper ? (
         <Helper id={helperId} {...stylex.props(surface.rowHelper)}>
           {helper}
@@ -287,14 +295,16 @@ export function SettingsEmptyState({
   action,
 }: {
   title: ReactNode;
-  description: ReactNode;
+  description?: ReactNode;
   action: ReactNode;
 }) {
   return (
     <div {...stylex.props(settingsRecordsCard)}>
       <div {...stylex.props(surface.emptyState)}>
         <p {...stylex.props(surface.emptyStateTitle)}>{title}</p>
-        <p {...stylex.props(surface.emptyStateDescription)}>{description}</p>
+        {description != null ? (
+          <p {...stylex.props(surface.emptyStateDescription)}>{description}</p>
+        ) : null}
         <div {...stylex.props(surface.emptyStateAction)}>{action}</div>
       </div>
     </div>

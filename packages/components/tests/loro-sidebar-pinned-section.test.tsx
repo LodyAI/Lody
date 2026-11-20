@@ -524,6 +524,40 @@ describe('LoroSidebar pinned section', () => {
     expect(onTogglePinSection).toHaveBeenCalledWith('maintenance');
   });
 
+  it('names the rows a scope hides inside an expanded pin section', () => {
+    renderSidebar({
+      pinnedItems: [pinnedItem],
+      pinnedSections: [
+        { id: null, name: 'Pinned', items: [pinnedItem] },
+        { id: 'maintenance', name: 'Maintenance', items: [] },
+      ],
+      pinnedHiddenCounts: { default: 1, maintenance: 3 },
+    });
+    const sections = Array.from(
+      container?.querySelectorAll<HTMLElement>('[data-pin-section]') ?? []
+    ).map((section) => [
+      section.getAttribute('data-pin-section'),
+      section.querySelector('[data-pin-section-hidden-count]')?.textContent,
+    ]);
+    expect(sections).toEqual([
+      ['default', '1 session hidden'],
+      ['maintenance', '3 sessions hidden'],
+    ]);
+  });
+
+  it('hides the hidden-row count inside a folded pin section', () => {
+    renderSidebar({
+      pinnedItems: [pinnedItem],
+      pinnedSections: [
+        { id: null, name: 'Pinned', items: [pinnedItem] },
+        { id: 'maintenance', name: 'Maintenance', items: [] },
+      ],
+      pinnedHiddenCounts: { maintenance: 3 },
+      collapsedPinSectionIds: { maintenance: true },
+    });
+    expect(container?.querySelector('[data-pin-section-hidden-count]')).toBeNull();
+  });
+
   it('moves a pinned conversation to another section from its context menu', async () => {
     const onDropItem = vi.fn();
     renderSidebar({

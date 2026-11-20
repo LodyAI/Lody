@@ -71,6 +71,7 @@ import {
   Ellipsis,
   FileText,
   Folder,
+  FolderOpen,
   GitBranch,
   GitBranchPlus,
   GitFork,
@@ -238,6 +239,10 @@ import { buildAppSessionUrl } from '@/lib/session-app-url';
 import { openSessionDeepLink } from '@/lib/session-deep-link';
 import { resolveSessionOpenInIdePathTarget } from '@/lib/session-open-in-ide-path';
 import {
+  normalizeSessionFileActionPlatform,
+  resolveOpenFolderInFileManagerLabel,
+} from '@/lib/session-file-actions';
+import {
   buildPathLauncherLaunchInput,
   executePathLauncher,
   buildPathLauncherProbes,
@@ -392,6 +397,7 @@ import {
   UNSTARTED_TRAILING_USER_TURN_TIMEOUT_MS,
 } from '@/lib/session-dispatch-state';
 import {
+  getEffectiveSessionLastMessageAt,
   resolveManualUnreadLatch,
   shouldMarkSessionRead,
   type ReadReceiptSnapshot,
@@ -774,7 +780,7 @@ function getErrorMessage(err: unknown): string {
   return String(err);
 }
 
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import {
   capturePostHogEvent,
   capturePostHogOutcome,
@@ -1341,6 +1347,7 @@ export function SessionHeaderMenu({
   onDelete,
   compact = false,
   openInIde,
+  openInFileManager,
   isLauncherPillVisible,
   pullRequest,
   continuationTweaks,
@@ -1385,6 +1392,15 @@ export function SessionHeaderMenu({
     selected: PathLauncherOption;
     onOpen: () => void;
     onSelect: (launcher: PathLauncherOption) => void;
+  };
+  /**
+   * Opens this session's directory in Finder, File Explorer, or the host file
+   * manager. Stays in `⋯` even when the editor pill is on screen — it is not
+   * one of the editor choices.
+   */
+  openInFileManager?: {
+    label: string;
+    onOpen: () => void;
   };
   /** Whether the header's launcher pill is on screen; read when the menu opens. */
   isLauncherPillVisible?: () => boolean;
@@ -1727,8 +1743,14 @@ export function SessionHeaderMenu({
           {openedByRelationRows}
 
           {/* The header pill is the primary launcher; the menu lists it only
-              while the narrow-page container query hides that pill. */}
+              while the narrow-page container query hides that pill. Opening the
+              folder in Finder / Explorer stays here either way. */}
           {launcherPillVisible ? null : openInIdeMenu}
+          {openInFileManager ? (
+            <Menu.Item icon={FolderOpen} onClick={() => void openInFileManager.onOpen()}>
+              {openInFileManager.label}
+            </Menu.Item>
+          ) : null}
 
           <Menu.Separator />
 
@@ -1739,118 +1761,131 @@ export function SessionHeaderMenu({
               </Menu.SubmenuTrigger>
               <Menu.Content className="min-w-[200px]">
                 {onSnooze ? (
-                <Menu.Submenu>
-                  <Menu.SubmenuTrigger icon={AlarmClock}>
-                    {t('sessions.contextMenu.snooze', 'Later')}
-                  </Menu.SubmenuTrigger>
-                  <Menu.Content className="min-w-[200px]">
-                    {buildSnoozePresets(statusNow).map((preset) => {
-                      const label =
-                        preset.id === 'laterToday'
-                          ? t('sessions.contextMenu.snoozeLaterToday', 'Later today')
-                          : preset.id === 'tomorrowMorning'
-                            ? t('sessions.contextMenu.snoozeTomorrowMorning', 'Tomorrow morning')
-                            : t('sessions.contextMenu.snoozeNextWeek', 'Next week');
-                      return (
-                        <Menu.Item key={preset.id} onClick={() => void onSnooze(preset.timestamp)}>
-                          <span className="flex w-full items-center justify-between gap-4">
-                            <span>{label}</span>
-                            <span className="text-[11px] tabular-nums text-muted-foreground">
-                              {preset.countdown}
+                  <Menu.Submenu>
+                    <Menu.SubmenuTrigger icon={AlarmClock}>
+                      {t('sessions.contextMenu.snooze', 'Later')}
+                    </Menu.SubmenuTrigger>
+                    <Menu.Content className="min-w-[200px]">
+                      {buildSnoozePresets(statusNow).map((preset) => {
+                        const label =
+                          preset.id === 'oneHour'
+                            ? t('sessions.contextMenu.snoozeOneHour', 'In 1 hour')
+                            : preset.id === 'laterToday'
+                              ? t('sessions.contextMenu.snoozeLaterToday', 'Later today')
+                              : preset.id === 'tomorrowMorning'
+                                ? t(
+                                    'sessions.contextMenu.snoozeTomorrowMorning',
+                                    'Tomorrow morning'
+                                  )
+                                : t('sessions.contextMenu.snoozeNextWeek', 'Next week');
+                        return (
+                          <Menu.Item
+                            key={preset.id}
+                            onClick={() => void onSnooze(preset.timestamp)}
+                          >
+                            <span className="flex w-full items-center justify-between gap-4">
+                              <span>{label}</span>
+                              <span className="text-[11px] tabular-nums text-muted-foreground">
+                                {preset.countdown}
+                              </span>
                             </span>
-                          </span>
-                        </Menu.Item>
-                      );
-                    })}
-                    <Menu.Separator />
-                    <Menu.Item
-                      icon={Timer}
-                      onClick={() =>
-                        setCustomSnoozeTarget({
-                          sessionId: session.id,
-                          title: session.title ?? '',
-                        })
-                      }
-                    >
-                      {t('sessions.contextMenu.snoozeCustom', 'Custom time…')}
-                    </Menu.Item>
-                  </Menu.Content>
-                </Menu.Submenu>
+                          </Menu.Item>
+                        );
+                      })}
+                      <Menu.Separator />
+                      <Menu.Item
+                        icon={Timer}
+                        onClick={() =>
+                          setCustomSnoozeTarget({
+                            sessionId: session.id,
+                            title: session.title ?? '',
+                          })
+                        }
+                      >
+                        {t('sessions.contextMenu.snoozeCustom', 'Custom time…')}
+                      </Menu.Item>
+                    </Menu.Content>
+                  </Menu.Submenu>
                 ) : null}
-              {statusGroup !== 'settled' && onSettle ? (
-                <Menu.Item icon={CheckCircle2} onClick={() => void onSettle()}>
-                  {t('sessions.contextMenu.settle', 'Settle')}
-                </Menu.Item>
-              ) : null}
-              {statusGroup !== 'focus' && onMoveToFocus ? (
-                <Menu.Item icon={ArrowUpCircle} onClick={() => void onMoveToFocus()}>
-                  {t('sessions.contextMenu.moveToFocus', 'Move to Focus')}
-                </Menu.Item>
-              ) : null}
+                {statusGroup !== 'settled' && onSettle ? (
+                  <Menu.Item icon={CheckCircle2} onClick={() => void onSettle()}>
+                    {t('sessions.contextMenu.settle', 'Settle')}
+                  </Menu.Item>
+                ) : null}
+                {statusGroup !== 'focus' && onMoveToFocus ? (
+                  <Menu.Item icon={ArrowUpCircle} onClick={() => void onMoveToFocus()}>
+                    {t('sessions.contextMenu.moveToFocus', 'Move to Focus')}
+                  </Menu.Item>
+                ) : null}
               </Menu.Content>
             </Menu.Submenu>
           ) : null}
 
           <Menu.Submenu>
-            <Menu.SubmenuTrigger icon={Share2}>{t('sharing.manager.title', 'Share')}</Menu.SubmenuTrigger>
+            <Menu.SubmenuTrigger icon={Share2}>
+              {t('sharing.manager.title', 'Share')}
+            </Menu.SubmenuTrigger>
             <Menu.Content className="min-w-[200px]">
               {onOpenPublicShare && !sharingReason && (
                 <Menu.Item icon={Link} onClick={onOpenPublicShare}>
                   {t('sessions.share.publicLink', 'Public link…')}
                 </Menu.Item>
               )}
-          {/* Copy URL stays in the Copy submenu even for private sessions (the
+              {/* Copy URL stays in the Copy submenu even for private sessions (the
               link still works for the owner); sharing is a separate action that
               only appears while the conversation isn't team-visible. */}
-          {sharing && !sharingReason && sharing.visibility !== 'team' ? (
-            <Menu.Item
-              disabled={shareActionDisabled}
-              onClick={() => {
-                void onShareWithTeam?.();
-              }}
-              icon={
-                sharing.visibility === 'unknown' ? (
-                  <Spinner size="small" label={null} />
-                ) : sharing.privateReason === 'machine-not-registered' ? (
-                  <Monitor size="100%" />
-                ) : sharing.canManage ? (
-                  Users
-                ) : (
-                  LockKeyhole
-                )
-              }
-            >
-              {sharing.visibility === 'unknown'
-                ? t('sessions.sharing.loadingAction', 'Checking sharing…')
-                : sharing.privateReason === 'machine-not-registered'
-                  ? t(
-                      'sessions.sharing.registerDeviceToShare',
-                      'Register this device before sharing'
+              {sharing && !sharingReason && sharing.visibility !== 'team' ? (
+                <Menu.Item
+                  disabled={shareActionDisabled}
+                  onClick={() => {
+                    void onShareWithTeam?.();
+                  }}
+                  icon={
+                    sharing.visibility === 'unknown' ? (
+                      <Spinner size="small" label={null} />
+                    ) : sharing.privateReason === 'machine-not-registered' ? (
+                      <Monitor size="100%" />
+                    ) : sharing.canManage ? (
+                      Users
+                    ) : (
+                      LockKeyhole
                     )
-                  : sharing.canManage
-                    ? t('sessions.sharing.shareWithTeam', 'Share with team…')
-                    : t('sessions.sharing.onlyOwnerCanShare', 'Only the device owner can share')}
-            </Menu.Item>
-          ) : null}
-          {sharingReason ? (
-            <Menu.Item disabled icon={Share2}>
-              <WorkspaceFeatureReasonText reason={sharingReason} />
-            </Menu.Item>
-          ) : null}
-          <Menu.Item
-            disabled={!!exportReason || !onShareAsImage}
-            title={exportReason}
-            onClick={() => {
-              onShareAsImage?.();
-            }}
-            icon={Image}
-          >
-            {exportReason ? (
-              <WorkspaceFeatureReasonText reason={exportReason} />
-            ) : (
-              t('sessions.shareAsImage', 'Share as image…')
-            )}
-          </Menu.Item>
+                  }
+                >
+                  {sharing.visibility === 'unknown'
+                    ? t('sessions.sharing.loadingAction', 'Checking sharing…')
+                    : sharing.privateReason === 'machine-not-registered'
+                      ? t(
+                          'sessions.sharing.registerDeviceToShare',
+                          'Register this device before sharing'
+                        )
+                      : sharing.canManage
+                        ? t('sessions.sharing.shareWithTeam', 'Share with team…')
+                        : t(
+                            'sessions.sharing.onlyOwnerCanShare',
+                            'Only the device owner can share'
+                          )}
+                </Menu.Item>
+              ) : null}
+              {sharingReason ? (
+                <Menu.Item disabled icon={Share2}>
+                  <WorkspaceFeatureReasonText reason={sharingReason} />
+                </Menu.Item>
+              ) : null}
+              <Menu.Item
+                disabled={!!exportReason || !onShareAsImage}
+                title={exportReason}
+                onClick={() => {
+                  onShareAsImage?.();
+                }}
+                icon={Image}
+              >
+                {exportReason ? (
+                  <WorkspaceFeatureReasonText reason={exportReason} />
+                ) : (
+                  t('sessions.shareAsImage', 'Share as image…')
+                )}
+              </Menu.Item>
             </Menu.Content>
           </Menu.Submenu>
 
@@ -4250,6 +4285,7 @@ export const SessionChatInterface = memo(
     const {
       isWindowActive: isWindowReadActive,
       hasPageInteraction: hasWindowReadInteraction,
+      engagementRevision: windowReadEngagementRevision,
       getLatestState: getLatestWindowReadEngagement,
     } = useWindowReadEngagement();
     const prevReadReceiptSnapshotRef = useRef<ReadReceiptSnapshot | null>(null);
@@ -4257,7 +4293,10 @@ export const SessionChatInterface = memo(
 
     useEffect(() => {
       const surfaceVisible = isVisible && !preparingWindow;
-      const lastMessageAt = parseTimestamp(session.lastMessageAt);
+      const lastMessageAt = getEffectiveSessionLastMessageAt({
+        lastMessageAt: parseTimestamp(session.lastMessageAt),
+        snoozedUntil: parseTimestamp(session.snoozedUntil),
+      });
       const lastReadAt = parseTimestamp(session.lastReadAt);
       const snapshot: ReadReceiptSnapshot = {
         sessionId: session.id,
@@ -4290,7 +4329,7 @@ export const SessionChatInterface = memo(
       ) {
         return;
       }
-      void markSessionRead(session.id, session.lastMessageAt ?? null).catch((error: unknown) => {
+      void markSessionRead(session.id, lastMessageAt).catch((error: unknown) => {
         console.warn('Failed to mark session as read', error);
       });
     }, [
@@ -4304,6 +4343,8 @@ export const SessionChatInterface = memo(
       session.id,
       session.lastMessageAt,
       session.lastReadAt,
+      session.snoozedUntil,
+      windowReadEngagementRevision,
     ]);
 
     const isDispatching = inputActionState === 'dispatching';
@@ -6913,6 +6954,48 @@ export const SessionChatInterface = memo(
       void launchPathWithLauncher(selectedPathLauncher, 'session/open_in_ide_clicked');
     }, [launchPathWithLauncher, selectedPathLauncher]);
 
+    const openInFileManagerLabel = resolveOpenFolderInFileManagerLabel(
+      normalizeSessionFileActionPlatform(electronPathLauncherPlatform),
+      t
+    );
+    const canOpenInFileManager = Boolean(openInIdePath) && isElectronRendererForPathLaunch;
+    const handleOpenInFileManager = useCallback(async () => {
+      const path = await resolveOpenInIdePath();
+      if (!path) {
+        toast.error(t('sessions.openFolder.failed', 'Could not open that folder'));
+        return;
+      }
+      const analyticsProperties = { path_source: openInIdePathSource };
+      captureSessionEvent('session/open_in_file_manager_clicked', analyticsProperties);
+      const services = getIpcServices();
+      if (!services) {
+        captureSessionEvent('session/open_in_file_manager_failed', {
+          ...analyticsProperties,
+          reason: 'native_bridge_unavailable',
+        });
+        toast.error(
+          t('sessions.pathLaunchUnsupported', 'This launcher is only available in the desktop app')
+        );
+        return;
+      }
+      try {
+        const result = await services.app.openLocalPath(path);
+        if (!result.opened) {
+          captureSessionEvent('session/open_in_file_manager_failed', {
+            ...analyticsProperties,
+            reason: result.error,
+          });
+          toast.error(t('sessions.openFolder.failed', 'Could not open that folder'));
+        }
+      } catch (error) {
+        captureSessionEvent('session/open_in_file_manager_failed', {
+          ...analyticsProperties,
+          reason: getErrorMessage(error),
+        });
+        toast.error(t('sessions.openFolder.failed', 'Could not open that folder'));
+      }
+    }, [captureSessionEvent, openInIdePathSource, resolveOpenInIdePath, t]);
+
     const handleCopyPath = useCallback(async () => {
       const path = await resolveOpenInIdePath();
       if (!path) {
@@ -6967,8 +7050,7 @@ export const SessionChatInterface = memo(
     );
 
     /* Shared header pieces used by both header variants. */
-    const isLauncherPillVisible = () =>
-      (launcherPillRef.current?.getClientRects().length ?? 0) > 0;
+    const isLauncherPillVisible = () => (launcherPillRef.current?.getClientRects().length ?? 0) > 0;
     const headerLauncherActions = (
       <>
         {shouldShowOpenInIdeButton && isElectronRendererForPathLaunch && (
@@ -7022,6 +7104,9 @@ export const SessionChatInterface = memo(
                   })}
                 </Menu.RadioGroup>
                 <Menu.Separator />
+                <Menu.Item icon={FolderOpen} onClick={() => void handleOpenInFileManager()}>
+                  {openInFileManagerLabel}
+                </Menu.Item>
                 {ACTION_OPTIONS.map((action) => (
                   <Menu.Item
                     key={action.id}
@@ -7185,6 +7270,16 @@ export const SessionChatInterface = memo(
                 onOpen: handleOpenInIde,
                 onSelect: (launcher) => {
                   void handleSelectPathLauncher(launcher);
+                },
+              }
+            : undefined
+        }
+        openInFileManager={
+          canOpenInFileManager
+            ? {
+                label: openInFileManagerLabel,
+                onOpen: () => {
+                  void handleOpenInFileManager();
                 },
               }
             : undefined

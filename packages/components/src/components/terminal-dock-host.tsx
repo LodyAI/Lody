@@ -1,14 +1,20 @@
 import { getSessionRoomId, type ElectronCliState, type SessionId } from '@lody/shared';
 import { useAtomValue } from 'jotai';
 import { useParams } from '@tanstack/react-router';
-import { useMemo } from 'react';
+import { lazy, Suspense, useMemo } from 'react';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { sessionLiveStatusAtomFamily } from '@/atoms/presence';
 import { useElectronCliDaemon } from '@/hooks/use-electron-cli-daemon';
-import { TerminalDock } from './terminal/terminal-dock';
 import { createElectronTerminalChannel } from './terminal/electron-terminal-channel';
+
+/* Lazy so the xterm/local-terminal graph (~878KB) stays out of the boot chunk:
+   the dock is Electron-only and gated below, so web and mobile never fetch it,
+   and even on Electron it loads only when the host first mounts. */
+const TerminalDock = lazy(() =>
+  import('./terminal/terminal-dock').then((module) => ({ default: module.TerminalDock }))
+);
 
 function canUseTerminalCliState(state: ElectronCliState | null, workspaceId?: string): boolean {
   if (!state) return false;
@@ -69,10 +75,12 @@ export function TerminalDockHost() {
   if (!isElectron || !terminalChannel) return null;
 
   return (
-    <TerminalDock
-      channel={terminalChannel}
-      sessionId={terminalSessionId}
-      canCreateTerminal={canCreateTerminal}
-    />
+    <Suspense fallback={null}>
+      <TerminalDock
+        channel={terminalChannel}
+        sessionId={terminalSessionId}
+        canCreateTerminal={canCreateTerminal}
+      />
+    </Suspense>
   );
 }

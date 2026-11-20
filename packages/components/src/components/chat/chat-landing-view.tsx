@@ -3,7 +3,7 @@ import { useAtomValue } from 'jotai';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { readPastedSessionLink } from '@/lib/session-deep-link';
 import type { ClipboardEvent, KeyboardEvent, ReactNode, Ref } from 'react';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import type { Mention as MentionRange } from '@/ui/mention/index';
 import type { CombinedMentionTextareaHandle } from '@/components/mentions/combined-mention-textarea';
 import type { PersistedMentionRange } from '@/components/mentions/mention-persistence';
@@ -29,7 +29,15 @@ import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { MobileChatLandingScreen } from '@/components/mobile/mobile-chat-landing-screen';
 import { NoMachineHint, type NoMachineHintVariant } from './no-machine-hint';
 import { WebChatLandingScreen } from './web-chat-landing-screen';
+import { DialogChatLandingScreen } from './dialog-chat-landing-screen';
 import { type ComposerInputElement, getComposerSelection } from '@/ui/mention/composer-input';
+import * as stylex from '@stylexjs/stylex';
+
+const styles = stylex.create({
+  // The send chord inside the dialog's submit button: part of the label,
+  // one step quieter than the word.
+  chord: { opacity: 0.6, fontWeight: 400 },
+});
 
 export type ChatLandingTone = 'light' | 'dark';
 
@@ -40,6 +48,14 @@ export interface ChatLandingViewProps {
   tone: ChatLandingTone;
   /** Whether the view is in mobile mode */
   isMobile?: boolean;
+  /**
+   * `page` is the new-chat route; `dialog` is the compact layout of a landing
+   * embedded in a dialog: hints and composer only, no greeting, ambient boards,
+   * page chrome or sidebar session drop target. Ignored on mobile.
+   */
+  layout?: 'page' | 'dialog';
+  /** DOM id of the prompt; an embedded landing needs its own beside the page's. */
+  promptId?: string;
   /** Scope root for desktop keyboard navigation (web layout only) — wraps the config
    *  controls + composer so arrow/Esc nav stays out of the sidebar and page chrome. */
   navRootRef?: Ref<HTMLDivElement>;
@@ -119,6 +135,12 @@ export interface ChatLandingViewProps {
   submitLabel?: string;
   /** Label for submit button when idle */
   submittingLabel?: string;
+  /**
+   * The dialog layout's dismiss action, beside its labelled submit button.
+   * Absent: no Cancel button (the panel's own close still dismisses).
+   */
+  onCancel?: () => void;
+  cancelLabel?: string;
   /** Hint type to display around the composer area */
   hintType?: ChatLandingHintType;
   /**
@@ -198,6 +220,8 @@ function useSessionMentionDrop(enabled: boolean) {
 export function ChatLandingView({
   tone,
   isMobile = false,
+  layout = 'page',
+  promptId: promptIdProp,
   navRootRef,
   mentionSource,
   availableCommands,
@@ -238,6 +262,8 @@ export function ChatLandingView({
   onSubmit,
   submitLabel = 'Send',
   submittingLabel = 'Sending...',
+  onCancel,
+  cancelLabel = 'Cancel',
   hintType = null,
   noMachineVariant = 'download-client',
   hintDownloadClientTitle = "Nothing's plugged in yet",
@@ -259,8 +285,11 @@ export function ChatLandingView({
   errorLabels = {},
 }: ChatLandingViewProps) {
   const postHog = usePostHog();
+  const isDialogLayout = !isMobile && layout === 'dialog';
+  const promptId = promptIdProp ?? (isMobile ? 'chat-prompt-mobile' : 'chat-prompt');
+  // A dialog's backdrop covers the sidebar, so no session can be dragged in.
   const { mentionActionsRef, dropZone, pointerDropRef, overlayActive } = useSessionMentionDrop(
-    !isMobile && !submissionPending
+    !isMobile && !submissionPending && !isDialogLayout
   );
   // A folder is not an attachment — it becomes a `@path` mention, through the
   // same handle the session drop uses, so it lands in this composer's draft.
@@ -379,12 +408,48 @@ export function ChatLandingView({
     </ErrorBoundary>
   );
 
+  // A create dialog states its action in words, with the chord that sends it.
+  // Enter sends too (the prompt's own keydown); the chord is what a person
+  // who has learned to press it for a newline-friendly editor expects.
+  const dialogActionsNode = (
+    <ErrorBoundary name="ChatLandingPrimaryAction" variant="inline" resetKeys={resetKeys}>
+      {onCancel ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="small"
+          data-testid="composer-cancel"
+          onClick={onCancel}
+          disabled={submissionPending}
+        >
+          {cancelLabel}
+        </Button>
+      ) : null}
+      <Button
+        type="button"
+        variant="primary"
+        size="small"
+        data-testid="composer-send"
+        onClick={onSubmit}
+        disabled={submitDisabled}
+        aria-label={submissionPending ? submittingLabel : submitLabel}
+      >
+        {submissionPending ? <Spinner className="h-3.5 w-3.5" /> : null}
+        <span>{submitLabel}</span>
+        {/* Return sends, as in the new-conversation composer. */}
+        <span aria-hidden="true" {...stylex.props(styles.chord)}>
+          ↩
+        </span>
+      </Button>
+    </ErrorBoundary>
+  );
+
   const fallbackRender = ({ resetErrorBoundary }: { resetErrorBoundary: () => void }) => (
     <div className="w-full rounded-xl border border-border/60 bg-background/80 p-4">
       <div className="text-sm font-semibold text-foreground">{somethingWentWrong}</div>
       <div className="mt-1 text-xs text-muted-foreground">{composerCrashed}</div>
       <textarea
-        id={isMobile ? 'chat-prompt-mobile' : 'chat-prompt'}
+        id={promptId}
         ref={promptRef as Ref<HTMLTextAreaElement>}
         value={submissionPending ? '' : promptValue}
         onChange={(event) => onPromptChange(event.target.value)}
@@ -440,11 +505,11 @@ export function ChatLandingView({
       {composerNotice}
       <ChatComposer
         tone={tone}
-        variant={isMobile ? 'landing' : 'session'}
+        variant={isMobile ? 'landing' : isDialogLayout ? 'modal' : 'session'}
         mentionSource={mentionSource}
         availableCommands={availableCommands}
         skillAgent={skillAgent}
-        promptId={isMobile ? 'chat-prompt-mobile' : 'chat-prompt'}
+        promptId={promptId}
         promptRef={promptRef}
         promptValue={submissionPending ? '' : promptValue}
         onPromptChange={onPromptChange}
@@ -477,9 +542,9 @@ export function ChatLandingView({
         bottomBar={bottomBar}
         statusMessage={composerStatusMessage}
         statusTone={composerStatusTone}
-        primaryAction={primaryActionNode}
+        primaryAction={isDialogLayout ? dialogActionsNode : primaryActionNode}
         autoResize
-        maxRows={isMobile ? 10 : 11}
+        maxRows={isMobile ? 10 : isDialogLayout ? 14 : 11}
       />
     </ErrorBoundary>
   );
@@ -493,6 +558,17 @@ export function ChatLandingView({
         noMachineHint={noMachineHintNode}
         agentConfigHint={agentConfigHintNode}
         onOpenMobileDrawer={onOpenMobileDrawer}
+      />
+    );
+  }
+
+  if (isDialogLayout) {
+    return (
+      <DialogChatLandingScreen
+        navRootRef={navRootRef}
+        composer={composerNode}
+        noMachineHint={noMachineHintNode}
+        agentConfigHint={agentConfigHintNode}
       />
     );
   }

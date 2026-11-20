@@ -79,6 +79,15 @@ const INITIAL_CONVERSATIONS: DemoConversation[] = [
     pinSectionId: 'releases',
     orderKey: '80',
   },
+  // Pinned extras so the pinned area itself overflows too.
+  ...Array.from({ length: 16 }, (_, index) => ({
+    id: `pinned-extra-${index + 1}`,
+    title: `Pinned thread ${index + 1}`,
+    latestMessageAt: NOW - (index + 1) * 40 * 60 * 1000,
+    isPinned: true,
+    pinSectionId: index % 2 === 0 ? 'maintenance' : 'releases',
+    orderKey: `${90 + index}`,
+  })),
   {
     id: 'c7',
     title: 'Investigate flaky CI job',
@@ -87,6 +96,14 @@ const INITIAL_CONVERSATIONS: DemoConversation[] = [
   },
   { id: 'c8', title: 'Review onboarding copy', latestMessageAt: NOW - 4 * HOUR, isPinned: false },
   { id: 'c9', title: 'Plan Q1 roadmap', latestMessageAt: NOW - 26 * HOUR, isPinned: false },
+  // Enough rows to overflow the viewport: drag one toward the top edge and the
+  // list auto-scrolls up to the pin sections.
+  ...Array.from({ length: 80 }, (_, index) => ({
+    id: `extra-${index + 1}`,
+    title: `Follow-up thread ${index + 1}`,
+    latestMessageAt: NOW - (30 + index) * HOUR,
+    isPinned: false,
+  })),
 ];
 
 const toItem = (conversation: DemoConversation): SidebarUpdatedItem => ({
@@ -260,6 +277,7 @@ function PinnedSectionsPlayground() {
       >
         <div className="p-6 text-sm text-muted-foreground" data-story-mention-target="">
           <p>Drag conversations between rows and onto section headers.</p>
+          <p>Hold a dragged conversation near the top or bottom edge to auto-scroll.</p>
           <p>Drag a section header to reorder sections.</p>
           <p>Right-click a pinned conversation for “Move to Section” and “New Section…”.</p>
           <p>Use a section header’s ⋯ menu to rename or delete it.</p>
@@ -275,6 +293,62 @@ function PinnedSectionsPlayground() {
   );
 }
 
+/**
+ * "My Tasks" scope: Maintenance holds only teammates' conversations, and the
+ * default section hides one more. Both say what the view hides instead of
+ * rendering a bare header.
+ */
+function HiddenByScopeDemo() {
+  const [selected, setSelected] = useState<string | null>('c1');
+  // What the scope leaves visible: c3/c4/c5 (maintenance) and one default row
+  // are filtered out before the pinned area is built.
+  const visiblePinned = useMemo(
+    () => INITIAL_CONVERSATIONS.filter((entry) => ['c1', 'c2', 'c6'].includes(entry.id)),
+    []
+  );
+  const layout = useMemo(
+    () => buildPinnedSectionLayout(visiblePinned, INITIAL_SECTIONS, toPlacement),
+    [visiblePinned]
+  );
+  const pinnedSections = useMemo(
+    () =>
+      layout.map((entry) => ({
+        id: entry.sectionId,
+        name: entry.section?.name ?? '',
+        items: entry.items.map(toItem),
+      })),
+    [layout]
+  );
+  const pinnedItems = useMemo(() => visiblePinned.map(toItem), [visiblePinned]);
+
+  return (
+    <div className="flex h-screen bg-sidebar">
+      <div className="h-full w-[280px] shrink-0">
+        <LoroSidebar
+          workspaceName="Loro"
+          userEmail="demo@example.com"
+          workspaces={[{ id: 'ws-1', name: 'Loro' }]}
+          currentWorkspaceId="ws-1"
+          repoSections={[]}
+          chats={[]}
+          organizeMode="updated"
+          pinnedItems={pinnedItems}
+          pinnedSections={pinnedSections}
+          pinnedHiddenCounts={{ default: 1, maintenance: 3 }}
+          updatedItems={[]}
+          updatedSelectedItemId={selected}
+          onSelectUpdatedItem={setSelected}
+        />
+      </div>
+      <div className="flex-1 p-6 text-sm text-muted-foreground">
+        <p>Maintenance renders its header and names the rows this view hides.</p>
+        <p>The default section keeps its visible rows and reports the rest.</p>
+        <p>A folded section hides the hint; its header already implies content.</p>
+      </div>
+    </div>
+  );
+}
+
 const meta = {
   title: 'Sidebar/Pinned Sections',
   component: PinnedSectionsPlayground,
@@ -285,3 +359,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Playground: Story = {};
+
+export const HiddenByScope: Story = {
+  render: () => <HiddenByScopeDemo />,
+};

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
+import { setAppLanguage } from '@/i18n';
 import { Moon, Sun, PanelLeft, Languages } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -253,7 +254,7 @@ function ShareLanguageToggle() {
       aria-label={label}
       title={label}
       onClick={() => {
-        void i18n.changeLanguage(nextLanguage);
+        void setAppLanguage(nextLanguage);
         try {
           window.localStorage.setItem('lody-language', JSON.stringify(nextLanguage));
         } catch {

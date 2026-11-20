@@ -632,8 +632,12 @@ export function SessionOpenedByTreeRow({
 /**
  * ③ The hover-revealed ⋯ action. It opens the row's ordinary right-click menu from
  * a left click by re-dispatching `contextmenu` at its own corner, so the button and
- * the right-click gesture can never diverge. `SidebarRowEndSlot` parks it one 20px
- * column left of Archive (or at the right edge itself on a menu-only row).
+ * the right-click gesture can never diverge. `SidebarRowEndSlot` reserves its own
+ * 20px column left of Archive and paints its revealed-action area with the row's
+ * fill, so the trigger sits on the same opaque `--sidebar-hover` /
+ * `--sidebar-selection` as the row beneath it. The pressed tint shades that fill
+ * as an inset shadow rather than a translucent background-color that would let
+ * content through again.
  */
 export function SessionRowMenuButton({
   label,
@@ -663,12 +667,13 @@ export function SessionRowMenuButton({
       }}
       className={cn(
         'flex h-5 w-5 items-center justify-center rounded-sm opacity-0 pointer-events-none',
-        'text-sidebar-foreground-muted/80 transition-[opacity,color,background-color] duration-100',
-        'hover:bg-sidebar-foreground/15 hover:text-sidebar-foreground',
+        'text-sidebar-foreground-muted/80 transition-[opacity,color,box-shadow] duration-100',
+        'hover:text-sidebar-foreground hover:shadow-[inset_0_0_0_20px_hsl(var(--sidebar-foreground)/0.15)]',
         'focus-visible:outline-hidden',
         // The trigger itself stays pressed-looking while its menu is open,
         // not just the row around it.
-        'group-data-[menu-open]:bg-sidebar-foreground/15 group-data-[menu-open]:text-sidebar-foreground',
+        'group-data-[menu-open]:text-sidebar-foreground group-data-[menu-open]:shadow-[inset_0_0_0_20px_hsl(var(--sidebar-foreground)/0.15)]',
+        'group-data-[menu-open]/row:text-sidebar-foreground group-data-[menu-open]/row:shadow-[inset_0_0_0_20px_hsl(var(--sidebar-foreground)/0.15)]',
         revealClassName
       )}
     >
@@ -779,7 +784,9 @@ export function SidebarRowActionButton({
  * The hover actions (the ⋯ menu, then Archive) are absolutely overlaid on hover, so a
  * wide rest cluster never causes layout movement. The slot reserves one 20px
  * column per action even when no rest content shows, so the ⋯ stays inside the
- * row's trailing edge instead of overlaying the title.
+ * row's trailing edge instead of overlaying the title, and while its actions
+ * are revealed the slot paints itself with the row's own fill — every end-slot
+ * action, present or added later, is opaque over its column.
  */
 export function SidebarRowEndSlot({
   sessionId,
@@ -846,11 +853,24 @@ export function SidebarRowEndSlot({
     // the row's navigation; the hover action buttons re-enable pointer events on hover.
     // justify-end keeps a narrower resting mark's right edge exactly where the
     // revealed action lands, so the row's rightmost mark never shifts on hover.
+    // The revealed fill keeps the same color the row paints under these states:
+    // --sidebar-hover on hover and menu-open alike. aria-current lives on the
+    // same group element, so the selection overrides compound the state into
+    // one ancestor selector to win over the plain hover fill.
     <div
       data-session-row-end-slot=""
       className={cn(
         'relative flex h-5 shrink-0 items-center justify-end pointer-events-none',
-        reserve ? (actionColumns > 1 ? 'min-w-10' : 'min-w-5') : 'w-0'
+        reserve ? (actionColumns > 1 ? 'min-w-10' : 'min-w-5') : 'w-0',
+        showActions && cn(
+          'transition-colors duration-100',
+          'group-hover:bg-sidebar-hover group-hover/row:bg-sidebar-hover',
+          'group-data-[menu-open]:bg-sidebar-hover group-data-[menu-open]/row:bg-sidebar-hover',
+          '[.group:hover[aria-current=page]_&]:bg-sidebar-selection',
+          '[.group\\/row:hover[aria-current=page]_&]:bg-sidebar-selection',
+          '[.group[data-menu-open][aria-current=page]_&]:bg-sidebar-selection',
+          '[.group\\/row[data-menu-open][aria-current=page]_&]:bg-sidebar-selection'
+        )
       )}
     >
       {hasRest ? (

@@ -308,7 +308,7 @@ export function MachineBatchUpdateDialog({
         return {
           desktop: t(
             'settings.machines.batchUpdate.unsupported.desktop',
-            'Desktop app; update it on that computer'
+            'Desktop app; update it on that machine'
           ),
           foreground: t(
             'settings.machines.batchUpdate.unsupported.foreground',
