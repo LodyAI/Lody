@@ -61,7 +61,9 @@ there" pins this; it fails on the textarea and passes on the editor.
 - **Handler order.** Caller `onKeyDown`, `onPaste`, `onCopy`, `onCut` and
   `onBeforeInput` run before Lexical, and Lexical's default is skipped when they
   call `preventDefault`. Script-dispatched input events edit nothing, as with a
-  textarea.
+  textarea. An Enter the caller does not claim inserts one line break in the
+  editor. Soft-keyboard Return is a separate policy:
+  [mobile composer newline](../bug-fix/2026-11-20-mobile-composer-enter-newline.md).
 - **Element and API.** The ref is still a DOM element, the editor `div`. Text,
   caret and geometry go through `ui/mention/composer-input.ts`, which serves both
   the editor and the plain textarea, so focus, `closest`, floating-ui anchoring

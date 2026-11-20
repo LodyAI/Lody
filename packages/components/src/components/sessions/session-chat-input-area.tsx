@@ -110,9 +110,10 @@ import {
   addVisualAnnotationReferenceItem,
   toggleVisualAnnotationReferenceItem,
 } from '@/components/chat/visual-annotation-reference-state';
+import { handleComposerEnterKey } from '@/components/chat/composer-enter';
 import { SESSION_IMAGE_MAX_COUNT } from '@lody/shared';
 import { ConversationColumn } from '@/components/shared/conversation-column';
-import { useIsMobile } from '@/hooks/use-mobile';
+import { prefersSoftKeyboardEnterPolicy, useIsMobile } from '@/hooks/use-mobile';
 import type {
   AcpConfigOptionSelector,
   AcpConfigOptionValue,
@@ -120,7 +121,6 @@ import type {
 import { currentWorkspaceIdAtom, mobileKeyboardActionAtom } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms';
 import { getDroppedFileLocalPath, toPathMentionInsertion } from '@/lib/dropped-local-path';
-import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { toast } from '@/lib/toast';
 import { validateSessionImageFile } from '@/lib/session-image-upload';
 import { formatDocumentSelection, type DocumentSelection } from '@/lib/document-selection';
@@ -148,10 +148,7 @@ import { wrapPastedTextChipLabel } from '@/components/mentions/mention-chips';
 import { toIntlLocale } from '@/lib/intl-locale';
 import type { AgentSelection } from '@/components/shared/agent-selector';
 import { isNativeAppShell } from '@/lib/native-platform';
-import {
-  resolveMobileKeyboardEnterKeyHint,
-  shouldSubmitOnEnterForMobileKeyboardAction,
-} from '@/lib/mobile-keyboard-action';
+import { resolveMobileKeyboardEnterKeyHint } from '@/lib/mobile-keyboard-action';
 import { selectPastedClipboardFiles, splitImageAndFileAttachments } from '@/lib/file-drop';
 import { isPlainLinkPasteShortcut, parseAppSessionUrl } from '@/lib/session-app-url';
 import { readPastedSessionLink } from '@/lib/session-deep-link';
@@ -668,9 +665,10 @@ export const SessionChatInputArea = memo(
     const isMobile = useIsMobile();
     const mobileKeyboardAction = useAtomValue(mobileKeyboardActionAtom);
     const usesMobileKeyboardAction = isMobile || isNativeAppShell();
+    const softKeyboardEnter = isMobile || prefersSoftKeyboardEnterPolicy();
     const promptEnterKeyHint = resolveMobileKeyboardEnterKeyHint(
       mobileKeyboardAction,
-      usesMobileKeyboardAction
+      softKeyboardEnter
     );
     const numberFormatter = useMemo(() => new Intl.NumberFormat(intlLocale), [intlLocale]);
     const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
@@ -2125,29 +2123,20 @@ export const SessionChatInputArea = memo(
 
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent<ComposerInputElement>) => {
-        if (e.key !== 'Enter' || isImeComposingKeyboardEvent(e)) {
-          return;
-        }
-        // Mod+Shift+Enter sends through the opposite busy-send behavior:
-        // a queue default steers, a steer default queues.
-        if (e.shiftKey && (e.metaKey || e.ctrlKey)) {
-          e.preventDefault();
-          void sendMessage({ invertSubmitBehavior: true });
-          return;
-        }
-        if (
-          !shouldSubmitOnEnterForMobileKeyboardAction({
-            action: mobileKeyboardAction,
-            isMobile: usesMobileKeyboardAction,
-            shiftKey: e.shiftKey,
-          })
-        ) {
-          return;
-        }
-        e.preventDefault();
-        void sendMessage();
+        handleComposerEnterKey(e, {
+          softKeyboard: softKeyboardEnter,
+          action: mobileKeyboardAction,
+          onSubmit: () => {
+            void sendMessage();
+          },
+          // Mod+Shift+Enter sends through the opposite busy-send behavior:
+          // a queue default steers, a steer default queues.
+          onInvertSubmit: () => {
+            void sendMessage({ invertSubmitBehavior: true });
+          },
+        });
       },
-      [mobileKeyboardAction, sendMessage, usesMobileKeyboardAction]
+      [mobileKeyboardAction, sendMessage, softKeyboardEnter]
     );
 
     const hasDraft =

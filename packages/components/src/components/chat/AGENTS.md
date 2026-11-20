@@ -124,3 +124,5 @@ project.sharedWithTeam`. The selected Private segment opens `ProjectShareDialog`
 - Chat Landing must not initiate ACP capability probes: startup refresh lives in
   the workspace runtime and explicit probes in settings/onboarding. Do not render
   their spinner, download progress, or ready state in the landing composer.
+- Soft-keyboard Return follows `mobileKeyboardActionAtom` (default newline), including landscape phones. Desktop and Electron keep Enter-to-send and Shift+Enter-newline; explicit Send still submits.
+  [Decision](../../../../../.agents/notes/implemented/bug-fix/2026-11-20-mobile-composer-enter-newline.md).

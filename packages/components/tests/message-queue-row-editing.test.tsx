@@ -2,12 +2,12 @@
 import { act, createElement, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
-import { createStore, Provider } from 'jotai';
+import { createStore, getDefaultStore, Provider } from 'jotai';
 import type { MessageQueueItem, SessionId, WorkspaceId } from '@lody/shared';
 
 import { queueTask } from '../src/components/sessions/message-queue/queue-task';
 import { MessageQueueDisplay } from '../src/components/sessions/message-queue';
-import { currentWorkspaceIdAtom } from '../src/atoms';
+import { currentWorkspaceIdAtom, mobileKeyboardActionAtom } from '../src/atoms';
 import { authTokenAtom, runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import type { PendingSessionSend } from '../src/lib/session-pending-sends';
 import { initI18n } from '../src/i18n';
@@ -382,6 +382,29 @@ describe('queued message editing commits', () => {
       ]);
     });
   }
+
+  it('leaves Return on a wide phone as a newline instead of saving', async () => {
+    getDefaultStore().set(mobileKeyboardActionAtom, 'newline');
+    Object.defineProperty(window.navigator, 'userAgent', {
+      configurable: true,
+      value:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148',
+    });
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 900 });
+    try {
+      const view = await renderQueue();
+      const textarea = await startEditing(view);
+      await act(async () => setTextareaValue(textarea, 'First line'));
+      const event = await pressEnter(textarea);
+      expect(event.defaultPrevented).toBe(false);
+      expect(saved).toEqual([]);
+      expect(view.querySelector('textarea')).toBeTruthy();
+    } finally {
+      getDefaultStore().set(mobileKeyboardActionAtom, 'newline');
+      Reflect.deleteProperty(window.navigator, 'userAgent');
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+    }
+  });
 
   it('leaves Shift+Enter to the textarea as a newline', async () => {
     const view = await renderQueue();

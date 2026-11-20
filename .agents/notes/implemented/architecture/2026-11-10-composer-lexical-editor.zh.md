@@ -21,7 +21,7 @@ Translation: current
 - **文档结构**：一个段落，由文本节点、换行节点和 `MentionDecoratorNode` 组成。mention 节点的文本内容正好是它的区间所覆盖的文字。`ui/mention/composer-document.ts` 是唯一计算偏移量的地方，负责 `{text, mentions}` 与 Lexical 位置（包括实时 DOM 位置）之间的换算。
 - **对外模型不变**：调用方仍持有字符串和区间。调用方的值与文档不同时就重建文档；就像给 textarea 赋值一样，光标随后到末尾，除非组件自身要求了特定光标；编辑器自带的撤销历史也随之清空，所以发送后被清空的草稿不能被撤销找回。写入的值成为下一次编辑撤销回去的基准：Lexical 清空历史时也会丢掉当前状态，曾导致提交 chip 之后输入的文字无法撤销。组字期间不写入调用方的值；调用方只在组字提交后才收到文字。
 - **编辑逻辑保留**：方向键跨 chip、Backspace/Delete 规则、菜单按键、触发符、历史快照和所有插入路径，都还是原来的字符串运算，没有改动。
-- **事件处理顺序**：调用方的 `onKeyDown`、`onPaste`、`onCopy`、`onCut`、`onBeforeInput` 先于 Lexical 执行；它们调用 `preventDefault` 时，跳过 Lexical 的默认处理。脚本派发的输入事件不会改动内容，和 textarea 一样。
+- **事件处理顺序**：调用方的 `onKeyDown`、`onPaste`、`onCopy`、`onCut`、`onBeforeInput` 先于 Lexical 执行；它们调用 `preventDefault` 时，跳过 Lexical 的默认处理。脚本派发的输入事件不会改动内容，和 textarea 一样。调用方没有接住的 Enter 由编辑器插入一个换行。软键盘回车是另一项策略：[手机输入框换行](../bug-fix/2026-11-20-mobile-composer-enter-newline.zh.md)。
 - **元素与接口**：ref 仍是一个 DOM 元素，即编辑器的 `div`。文字、光标和几何信息通过 `ui/mention/composer-input.ts` 读写，它同时支持编辑器和普通 textarea；因此 focus、`closest`、floating-ui 锚定和 `activeElement` 判断都还是普通 DOM 操作。
 - **与 textarea 对齐**：
   - CSS 给它 textarea 的 UA 盒模型：inline-block、pre-wrap、`overflow: auto`。

@@ -42,6 +42,10 @@ falling back to a cloud transfer. Upload progress is subscribed only inside the 
 reads `useHasPendingQueueRecords`. Decisions: [local queue rows](../../../../../../.agents/notes/implemented/feature/2026-09-28-local-queue-pending-rows.md),
 [in-memory held sends](../../../../../../.agents/notes/implemented/simplification/2026-09-29-remove-session-send-journal.md).
 
+Queued-message editing uses the composer's soft-keyboard Return policy: desktop
+Enter commits and Shift+Enter inserts a newline, while a phone Return inserts a
+newline unless the user chose Send.
+
 Only the latest edit operation may change the local editor or pending state;
 an earlier blur-save acknowledgement must preserve the next row's draft and focus.
 [Decision](../../../../../../.agents/notes/implemented/bug-fix/2026-10-13-queued-edit-operation-ownership.md).

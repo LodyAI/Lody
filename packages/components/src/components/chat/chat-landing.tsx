@@ -123,12 +123,11 @@ import {
 } from '@/atoms/presence';
 import { buildAgentPrompt } from '@/lib';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
-import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { useNavigate } from '@tanstack/react-router';
 import { activeWorkspaceRuntimeAtom, authTokenAtom, runtimeAtom } from '@/atoms/runtime';
 
 import { toast } from '@/lib/toast';
-import { useIsMobile } from '@/hooks/use-mobile';
+import { prefersSoftKeyboardEnterPolicy, useIsMobile } from '@/hooks/use-mobile';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import {
   focusFirstChatLandingOption,
@@ -286,10 +285,7 @@ import {
   readWorkdirModePreference,
   writeWorkdirModePreference,
 } from '@/lib/workdir-mode-preferences';
-import {
-  resolveMobileKeyboardEnterKeyHint,
-  shouldSubmitOnEnterForMobileKeyboardAction,
-} from '@/lib/mobile-keyboard-action';
+import { resolveMobileKeyboardEnterKeyHint } from '@/lib/mobile-keyboard-action';
 import { getChatComposerPromptPlaceholderKey } from '@/lib/chat-composer-placeholder';
 import { selectPastedClipboardFiles, splitImageAndFileAttachments } from '@/lib/file-drop';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
@@ -379,6 +375,7 @@ import { MobileWorkspaceSwitcherSheet } from '@/components/mobile/mobile-workspa
 import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import { MobileCreateWorkspaceSheet } from '@/components/mobile/mobile-create-workspace-sheet';
 import { ChatComposer } from '@/components/chat/chat-composer';
+import { handleComposerEnterKey } from '@/components/chat/composer-enter';
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
 import {
   MobileProjectFileBrowser,
@@ -670,9 +667,11 @@ function WorkspaceChatLanding({
   const mobileKeyboardAction = useAtomValue(mobileKeyboardActionAtom);
   const usesMobileKeyboardAction = isMobile || isNativeAppShell();
   const hidesBillingUi = usesMobileKeyboardAction;
+  // Landscape phones keep the desktop layout but still have a software keyboard.
+  const softKeyboardEnter = isMobile || prefersSoftKeyboardEnterPolicy();
   const promptEnterKeyHint = resolveMobileKeyboardEnterKeyHint(
     mobileKeyboardAction,
-    usesMobileKeyboardAction
+    softKeyboardEnter
   );
   const resolvedTheme = useResolvedTheme();
   const isDark = resolvedTheme === 'dark';
@@ -2963,18 +2962,13 @@ function WorkspaceChatLanding({
 
   // ── Prompt keydown ──
   const handlePromptKeyDown = (event: KeyboardEvent<ComposerInputElement>) => {
-    if (event.key !== 'Enter' || isImeComposingKeyboardEvent(event)) return;
-    if (
-      !shouldSubmitOnEnterForMobileKeyboardAction({
-        action: mobileKeyboardAction,
-        isMobile: usesMobileKeyboardAction,
-        shiftKey: event.shiftKey,
-      })
-    ) {
-      return;
-    }
-    event.preventDefault();
-    void handleSubmit();
+    handleComposerEnterKey(event, {
+      softKeyboard: softKeyboardEnter,
+      action: mobileKeyboardAction,
+      onSubmit: () => {
+        void handleSubmit();
+      },
+    });
   };
 
   const attachPastedFiles = useCallback(

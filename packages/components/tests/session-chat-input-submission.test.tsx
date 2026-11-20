@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { LoroDoc } from 'loro-crdt';
 import { ScheduleRepository, type MachineMeta, type ScheduleRepositoryPort } from '@lody/shared';
-import { userAtom } from '../src/atoms';
+import { mobileKeyboardActionAtom, userAtom } from '../src/atoms';
 
 import {
   act,
@@ -318,6 +318,7 @@ describe('SessionChatInputArea submission feedback', () => {
     Reflect.deleteProperty(window, '__LODY_NATIVE__');
     Reflect.deleteProperty(window.navigator, 'userAgent');
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+    getDefaultStore().set(mobileKeyboardActionAtom, 'newline');
     root = null;
     container?.remove();
     container = null;
@@ -1487,6 +1488,84 @@ describe('SessionChatInputArea submission feedback', () => {
     }
   );
 
+  function setPhoneIdentity(width: number) {
+    Object.defineProperty(window.navigator, 'userAgent', {
+      configurable: true,
+      value:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148',
+    });
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+  }
+
+  it('inserts a newline on a wide phone without sending', async () => {
+    setPhoneIdentity(900);
+    getDefaultStore().set(mobileKeyboardActionAtom, 'newline');
+    const onSendMessage = vi.fn(async () => true);
+    const textarea = await renderComposer({
+      onSendMessage,
+      overrides: { initialInputText: 'hello' },
+    });
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length);
+    await act(async () => {
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
+    });
+    expect(onSendMessage).not.toHaveBeenCalled();
+    expect(textarea.value).toBe('hello\n');
+  });
+
+  it('still sends on a phone when Return is set to send, without inserting a newline', async () => {
+    setPhoneIdentity(390);
+    getDefaultStore().set(mobileKeyboardActionAtom, 'send');
+    const submitted: string[] = [];
+    const textarea = await renderComposer({
+      onSendMessage: async (blocks) => {
+        const text = blocks.find((block) => block.type === 'text');
+        submitted.push(text && text.type === 'text' ? text.text : '');
+        return true;
+      },
+      overrides: { initialInputText: 'hello' },
+    });
+    textarea.focus();
+    await act(async () => {
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
+    });
+    expect(submitted).toEqual(['hello']);
+  });
+
+  it('keeps desktop Enter as send and Shift+Enter as a newline', async () => {
+    getDefaultStore().set(mobileKeyboardActionAtom, 'newline');
+    const onSendMessage = vi.fn(async () => true);
+    const textarea = await renderComposer({
+      onSendMessage,
+      overrides: { initialInputText: 'hello' },
+    });
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length);
+    await act(async () => {
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    });
+    expect(onSendMessage).not.toHaveBeenCalled();
+    expect(textarea.value).toBe('hello\n');
+    await act(async () => {
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
+    });
+    expect(onSendMessage).toHaveBeenCalledTimes(1);
+  });
+
   for (const mobilePlatform of ['mobile-browser', 'wide-native'] as const) {
     function setMobilePlatform() {
       let id = 0;
@@ -1498,6 +1577,9 @@ describe('SessionChatInputArea submission feedback', () => {
       vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((frame) => {
         frames.delete(frame);
       });
+      // These cases submit. A phone's default Return inserts a newline, so the
+      // keyboard path opts into the explicit Send preference.
+      getDefaultStore().set(mobileKeyboardActionAtom, 'send');
       if (mobilePlatform === 'wide-native') {
         Object.defineProperty(window, '__LODY_NATIVE__', { configurable: true, value: true });
       } else {

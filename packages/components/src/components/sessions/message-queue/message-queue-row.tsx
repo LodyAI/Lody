@@ -21,10 +21,13 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useAtomValue } from 'jotai';
 import type { MessageQueueItem, SessionId } from '@lody/shared';
 import { normalizeSessionInputBlocks } from '@lody/shared';
 import { Menu } from '@lody/ui/menu';
-import { useIsMobile } from '@/hooks/use-mobile';
+import { mobileKeyboardActionAtom } from '@/atoms';
+import { prefersSoftKeyboardEnterPolicy, useIsMobile } from '@/hooks/use-mobile';
+import { shouldSubmitOnEnterForMobileKeyboardAction } from '@/lib/mobile-keyboard-action';
 import { Tooltip } from '@lody/ui/tooltip';
 import { text as type } from '@lody/ui/tokens/scales.stylex';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
@@ -222,6 +225,9 @@ function LeadingHandle({
 
 function RowBody(props: MessageQueueRowProps & EditCommitProps) {
   const { t } = useTranslation();
+  const mobileLayout = useIsMobile();
+  const mobileKeyboardAction = useAtomValue(mobileKeyboardActionAtom);
+  const softKeyboardEnter = mobileLayout || prefersSoftKeyboardEnterPolicy();
   const {
     sessionId,
     item,
@@ -245,9 +251,10 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
   }, []);
 
   if (isEditing) {
-    // Enter, the confirm button, and clicking away all commit; Shift+Enter inserts a
-    // newline. Esc blurs, which commits too — there is no separate "discard changes"
-    // affordance by design.
+    // Desktop: Enter, the confirm button, and clicking away commit; Shift+Enter
+    // inserts a newline. A soft keyboard follows the mobile Return setting
+    // (default newline) because that keyboard has no Shift+Enter. Esc blurs,
+    // which commits too — there is no separate "discard changes" affordance.
     return (
       <div
         className={cn('min-w-0 flex-1', props.roomy && stylex.props(queueSurface.editor).className)}
@@ -290,9 +297,16 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
                 event.currentTarget.blur();
                 return;
               }
-              if (event.key !== 'Enter' || event.shiftKey) return;
-              // An IME uses Enter to accept its candidate; that must not commit the edit.
-              if (isImeComposingKeyboardEvent(event)) return;
+              if (event.key !== 'Enter' || isImeComposingKeyboardEvent(event)) return;
+              if (
+                !shouldSubmitOnEnterForMobileKeyboardAction({
+                  action: mobileKeyboardAction,
+                  isMobile: softKeyboardEnter,
+                  shiftKey: event.shiftKey,
+                })
+              ) {
+                return;
+              }
               event.preventDefault();
               onCommitEdit();
             }}

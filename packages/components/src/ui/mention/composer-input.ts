@@ -1,3 +1,5 @@
+import { $getRoot, $getSelection, $isRangeSelection, type LexicalEditor } from 'lexical';
+
 /**
  * The composer input is a contenteditable element managed by a Lexical editor.
  * Its text and caret are not DOM properties the way a textarea's `value` and
@@ -96,4 +98,27 @@ export function getComposerCaretRect(element: Element, offset: number): DOMRect 
 /** Geometry of a text range, for hit-testing hovers over committed mentions. */
 export function getComposerRangeRects(element: Element, start: number, end: number): DOMRect[] {
   return getComposerController(element)?.getRangeRects(start, end) ?? [];
+}
+
+/**
+ * Insert one line break at the editor caret. Returns false for a plain
+ * textarea, which keeps the browser's own newline. A contenteditable must
+ * insert the break itself: iOS does not turn keydown Enter into a break, and
+ * preventDefault on that key swallows the one the browser would have made.
+ */
+export function insertComposerLineBreak(element: Element): boolean {
+  const editor = (element as { __lexicalEditor?: LexicalEditor }).__lexicalEditor;
+  if (!editor) return false;
+  editor.update(
+    () => {
+      let selection = $getSelection();
+      if (!$isRangeSelection(selection)) {
+        $getRoot().selectEnd();
+        selection = $getSelection();
+      }
+      if ($isRangeSelection(selection)) selection.insertLineBreak(false);
+    },
+    { discrete: true }
+  );
+  return true;
 }
