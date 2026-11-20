@@ -56,7 +56,8 @@ export class ShortcutPage {
     await settings.locator('[data-settings-tab-id="keyboard-shortcuts"]').click();
 
     const label = settings.getByText(/^(Toggle Sidebar|切换侧边栏)$/u, { exact: true });
-    const row = label.locator('..').locator('..');
+    // Find the containing command row by its recorder, independent of label wrappers.
+    const row = label.locator('xpath=ancestor::div[.//button[@title]][1]');
     await row.getByTitle(/^(Click to record a new shortcut|点击录制新的快捷键)$/u).click();
     await this.page.keyboard.press(USER_SIDEBAR_BINDING);
     await expect(
@@ -96,9 +97,7 @@ export class ShortcutPage {
     await expect(secondaryPage.locator('#chat-prompt')).toBeEditable({ timeout: 60_000 });
   }
 
-  /* The desktop session strip is the ONE tablist labelled "Session tabs"; the
-     right-aside viewer strip is a separate surface, so digit shortcuts must
-     only ever move selection inside this locator. */
+  // The conversation strip is distinct from the sidebar sessions targeted by digits.
   async openDraftSessionTabsWithShortcut(count: number): Promise<void> {
     const tabs = this.sessionTabStrip().getByRole('tab');
     for (let opened = 0; opened < count; opened += 1) {
@@ -108,9 +107,16 @@ export class ShortcutPage {
     }
   }
 
-  async pressSessionTabDigit(digit: number): Promise<void> {
+  async pressSidebarSessionDigit(digit: number): Promise<void> {
     await this.page.bringToFront();
     await this.page.keyboard.press(`${PRIMARY_MODIFIER}+${digit}`);
+  }
+
+  async switchSessionTab(direction: 'previous' | 'next'): Promise<void> {
+    await this.page.bringToFront();
+    await this.page.keyboard.press(
+      `${PRIMARY_MODIFIER}+Shift+${direction === 'previous' ? ',' : '.'}`
+    );
   }
 
   async expectActiveSessionTabPosition(position: number): Promise<void> {
