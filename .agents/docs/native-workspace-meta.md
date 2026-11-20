@@ -75,7 +75,7 @@ The four CLI helpers that scanned the raw Meta Flock read `repo.listDoc()` in th
 ## Migration from legacy Meta
 
 The native room uses the legacy key layout unchanged. Each legacy replica is a
-*source*: the CLI SQLite store (`cli-sqlite`) and each renderer IndexedDB store
+_source_: the CLI SQLite store (`cli-sqlite`) and each renderer IndexedDB store
 (`renderer:<db>`). For each source:
 
 1. **Freeze.** In native mode the source's legacy Meta is never opened for writing,
@@ -93,18 +93,26 @@ This is the room-level step a workspace import also needs (merge an exported roo
 into an existing workspace), so the general export/import feature can call
 `importLegacyMeta` per room rather than adding another framework.
 
-Turning the flag off reopens the frozen legacy replicas, which do not contain native
-writes made since migration. Reverse export is a later slice.
+Turning the flag off writes native state back. Native mode leaves a
+`native-meta-published` file beside the CLI SQLite store. A legacy-mode daemon that
+finds it merges the native room's complete export (`exportFlockRaw`, with clocks
+and tombstones) into its legacy Meta Flock, persists it, and removes the
+`cli-sqlite` marker and the file. Renderers then receive the merged catalogue over
+the existing local data plane. Because the marker is gone, enabling the flag again
+re-imports the replica, including edits made while the flag was off. Native mode
+has no released data, so this is a development switch-back with no compatibility
+handling; a failed write-back is logged and retried on the next start.
 
 ## Slices and budgets
 
-| Slice | Content | Product-line budget |
-| --- | --- | --- |
+| Slice    | Content                                                                                               | Product-line budget   |
+| -------- | ----------------------------------------------------------------------------------------------------- | --------------------- |
 | 1 (this) | Host, shared connection, observation, Meta adapter, migration, daemon/main/renderer wiring, packaging | 1,500 (actual ≈1,300) |
-| 2 | Reverse export on flag-off, and switching to the released SDK packages | 400 |
-| 3 | Workspace catalog (`wf`) on the same lifecycle | 600 |
-| 4 | Machine Flock (`mf`) and schedule registry (`sr`) | 800 |
-| 5 | Cloud replication of native rooms (needs remote Meta design) | separate proposal |
+| 2        | Write-back on flag-off                                                                                | 400 (actual ≈60)      |
+| 3        | Workspace catalog (`wf`) on the same lifecycle                                                        | 600                   |
+| —        | Switch to the released SDK packages when loro-repo #290/#308 ship                                     | manifests only        |
+| 4        | Machine Flock (`mf`) and schedule registry (`sr`)                                                     | 800                   |
+| 5        | Cloud replication of native rooms (needs remote Meta design)                                          | separate proposal     |
 
 ## Performance
 
@@ -116,16 +124,16 @@ field. 20 warm-up and 200 measured samples; milliseconds.
 Reproduce with `LODY_NATIVE_META_BENCH=1` on
 [`native-workspace-meta.benchmark.test.ts`](../../packages/shared/tests/native-workspace-meta.benchmark.test.ts).
 
-| Docs (registers) | Operation | p50 | p95 | p99 |
-| ---: | --- | ---: | ---: | ---: |
-| 10k (33k) | `getDocMeta` (product read) | 0.004 | 0.007 | 0.034 |
-| 100k (333k) | `getDocMeta` (product read) | 0.004 | 0.006 | 0.013 |
-| 10k | bounded engine read (`e` key + `m` prefix) | 0.589 | 0.872 | 1.050 |
-| 100k | bounded engine read | 0.604 | 0.865 | 1.077 |
-| 10k | single-field `upsertDocMeta` (read, conditional write, visible) | 1.306 | 2.214 | 42.6 |
-| 100k | single-field `upsertDocMeta` | 1.995 | 2.907 | 504.7 |
-| 10k | write → other connection's repo event | 3.506 | 4.705 | 49.2 |
-| 100k | write → other connection's repo event | 4.356 | 9.858 | 512.1 |
+| Docs (registers) | Operation                                                       |   p50 |   p95 |   p99 |
+| ---------------: | --------------------------------------------------------------- | ----: | ----: | ----: |
+|        10k (33k) | `getDocMeta` (product read)                                     | 0.004 | 0.007 | 0.034 |
+|      100k (333k) | `getDocMeta` (product read)                                     | 0.004 | 0.006 | 0.013 |
+|              10k | bounded engine read (`e` key + `m` prefix)                      | 0.589 | 0.872 | 1.050 |
+|             100k | bounded engine read                                             | 0.604 | 0.865 | 1.077 |
+|              10k | single-field `upsertDocMeta` (read, conditional write, visible) | 1.306 | 2.214 |  42.6 |
+|             100k | single-field `upsertDocMeta`                                    | 1.995 | 2.907 | 504.7 |
+|              10k | write → other connection's repo event                           | 3.506 | 4.705 |  49.2 |
+|             100k | write → other connection's repo event                           | 4.356 | 9.858 | 512.1 |
 
 Startup load (open plus paged initial view) takes 332 ms at 10k and 3,413 ms at
 100k; it is the one path proportional to catalogue size, because the UI lists

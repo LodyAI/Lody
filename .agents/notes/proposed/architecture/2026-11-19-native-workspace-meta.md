@@ -51,7 +51,9 @@ owns the long-term directory contract, and both stay active.
 - Startup is still proportional to the catalogue (3.4 s at 100k documents), since
   the UI lists every document. Per-operation latency stays flat (see the design
   page). The write p99 tail matches engine auto-compaction; that is an SDK follow-up.
-- Flag-off after native writes shows the frozen legacy catalogue; reverse export
-  is the next slice. A commit already sent when the host dies latches that repo's
+- Flag-off writes the native room back into the CLI replica by importing its
+  complete raw export; the alternative of a development-only flag that silently
+  reopened the stale replica was rejected because the merge reuses the same LWW
+  import and needs no compatibility handling. A commit already sent when the host dies latches that repo's
   Meta writes until it is recreated (SDK contract).
 - Cloud and encrypted workspaces are out of scope: the OSS desktop is local-only.
