@@ -41,6 +41,8 @@ import {
   type LegacyFlockBundle,
 } from '../src/node/native-repo';
 import { createNativeWorkspaceMeta } from '../src/node/native-workspace-meta';
+import { ScheduleRepository, type ScheduleRepositoryPort } from '../src/schedule-repository';
+import { isNativeDocId } from '../src/native-workspace-meta-ipc';
 
 const hostScript = fileURLToPath(new URL('./fixtures/native-repo-host.mjs', import.meta.url));
 const launcher = () => ({ command: process.execPath, args: [hostScript] });
@@ -867,5 +869,64 @@ describe('remote Session writes', () => {
       (await connection.client.exportLoroRaw(ns, { kind: 'loro_doc', id: 'session-parity' })).bytes
     );
     expect(shape(stored)).toEqual(shape(doc));
+  });
+});
+
+describe('natively owned Schedule documents', () => {
+  it('writes a Schedule in one replica and reads it in another through the same owner', async () => {
+    const { dataDir, connection } = await setup();
+    const rows = new Map<string, unknown>();
+    /** One process's repository over its own connection; the registry rows are shared. */
+    const open = async (client: RepoClient) => {
+      const repo = await LoroRepo.create({
+        externalDocs: createNativeDocs(client, ns, isNativeDocId),
+      });
+      cleanups.push(() => repo.destroy());
+      const opened = new Map<string, LoroDoc>();
+      const port: ScheduleRepositoryPort = {
+        openPersistedDoc: async (id) => {
+          const { doc } = await repo.openPersistedDoc(id);
+          opened.set(id, doc);
+          return { doc };
+        },
+        openFlockDoc: async () => ({
+          flock: {
+            scan: () => [...rows].map(([key, value]) => ({ key: JSON.parse(key), value })),
+            get: (key) => rows.get(JSON.stringify(key)),
+            set: (key, value) => rows.set(JSON.stringify(key), value),
+          },
+        }),
+        flush: async () => {
+          for (const [id, doc] of opened) await repo.persistDocNow(id, doc);
+        },
+      };
+      return new ScheduleRepository(port, ns as never);
+    };
+    const daemon = await open(connection.client);
+    const saved = await daemon.save({
+      scheduleId: 'native',
+      draft: {
+        title: 'Nightly',
+        machineId: 'machine',
+        trigger: { kind: 'interval', everyMs: 60_000, anchorAt: '2026-01-01T00:00:00Z' },
+        agent: { agentConfigId: 'agent', modeId: 'safe' },
+        misfirePolicy: { kind: 'skip' },
+        overlapPolicy: 'queue_one',
+        retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86_400_000 },
+        prompt: 'summarize the day',
+      },
+      actorId: 'owner',
+      now: 1,
+      activationId: 'activation',
+      activityId: 'created',
+      create: true,
+    });
+    const desktop = await open(await peer(dataDir));
+    expect(await desktop.read('native')).toEqual(saved);
+    // The engine holds the document the Mirror wrote, readable by root without a replica.
+    const stored = LoroDoc.fromSnapshot(
+      (await connection.client.exportLoroRaw(ns, { kind: 'loro_doc', id: 'schedule-native' })).bytes
+    );
+    expect(stored.getText('prompt').toString()).toBe('summarize the day');
   });
 });

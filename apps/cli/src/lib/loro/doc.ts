@@ -1,4 +1,4 @@
-import { isNativeDocId } from '@lody/shared/native-workspace-meta-ipc';
+import { isNativeSessionDocId } from '@lody/shared/native-workspace-meta-ipc';
 import { Cause, Effect } from 'effect';
 import { isDeepStrictEqual } from 'node:util';
 import type { CliE2eeWorkspaceLegacy } from '../e2ee/workspace-legacy';
@@ -2502,7 +2502,7 @@ export class LoroDocumentManager {
   async openIdleSessionReader(sessionId: SessionId) {
     if (!this.nativeMeta || this.peekSessionDoc(sessionId)) return undefined;
     const roomId = getSessionRoomId(sessionId);
-    if (!isNativeDocId(roomId)) return undefined;
+    if (!isNativeSessionDocId(roomId)) return undefined;
     // Only Loro history lives in the document; a Roost Session reads through its backend.
     const record = await this.repo.getDocMeta(roomId);
     const meta = record?.meta as Pick<SessionMeta, 'historyBackend'> | undefined;

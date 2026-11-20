@@ -7,6 +7,8 @@ import {
 } from '../session-data/remote-document';
 import { engineDocSchemaFromMirror } from '../session-data/engine-doc-schema';
 import { sessionDocSchema } from '../schema';
+import { scheduleDocSchema } from '../schedule-schema';
+import { isNativeScheduleDocId } from '../native-workspace-meta-ipc';
 import { MIGRATIONS_ROOM, observeLoroDoc, observeLoroPaths } from './native-repo';
 
 /** Type-only loro-repo use keeps its WASM out of the Electron main bundle. */
@@ -15,7 +17,7 @@ const CAPABILITY = 'loro-external-docs-v1' as const;
 const docRoom = (docId: string): RoomKey => ({ kind: 'loro_doc', id: docId });
 
 /**
- * Creates (or re-declares) a Session document room. Declaring every root lets
+ * Creates (or re-declares) an owned document room. Declaring every root lets
  * the engine read below it by type: an undeclared root is found through the
  * document's shallow value, which a freshly loaded 100k-turn room answers in
  * about 240 ms. The schema makes remote patches create Mirror-shaped containers.
@@ -30,8 +32,8 @@ export function createDocRoom(client: RepoClient, namespace: string, docId: stri
   if (!pending) {
     pending = client
       .createRoom(namespace, docRoom(docId), 'plaintext', {
-        rootContainers: SESSION_ENGINE_DOC_SCHEMA.roots,
-        docSchema: SESSION_ENGINE_DOC_SCHEMA,
+        rootContainers: engineDocSchemaFor(docId).roots,
+        docSchema: engineDocSchemaFor(docId),
       })
       .then(() => {});
     pending.catch(() => declared.delete(key));
@@ -43,6 +45,10 @@ const declaredRooms = new WeakMap<RepoClient, Map<string, Promise<void>>>();
 
 /** Remote writes create the containers the Mirror and HistoryWriter would. */
 export const SESSION_ENGINE_DOC_SCHEMA = engineDocSchemaFromMirror(sessionDocSchema);
+const SCHEDULE_ENGINE_DOC_SCHEMA = engineDocSchemaFromMirror(scheduleDocSchema);
+/** Each owned document type declares the roots and containers of its Mirror. */
+const engineDocSchemaFor = (docId: string) =>
+  isNativeScheduleDocId(docId) ? SCHEDULE_ENGINE_DOC_SCHEMA : SESSION_ENGINE_DOC_SCHEMA;
 /** Migration and native-write markers share one prefix per document. */
 const marker = (docId: string, source: string) => ['loro_doc', docId, source];
 export const NATIVE_WRITE_SOURCE = 'native';
