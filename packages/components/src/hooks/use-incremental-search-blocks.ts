@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SessionHistory } from '@lody/shared';
-import { subscribeOnFrame, type ConversationView } from '@/lib/conversation-view';
+import { loadedStart, subscribeOnFrame, type ConversationView } from '@/lib/conversation-view';
 import { extractSearchBlocksForMessage, type SessionSearchBlock } from '@/lib/session-chat-search';
 
 const EMPTY_BLOCKS: SessionSearchBlock[] = [];
@@ -38,7 +38,7 @@ export function useIncrementalSearchBlocks(
       if (cancelled) return;
       const cache = cacheRef.current;
       const next: SessionSearchBlock[] = [];
-      for (let i = 0; i < view.turnCount; i += 1) {
+      for (let i = loadedStart(view); i < view.turnCount; i += 1) {
         const turn = view.turn(i);
         if (!turn) continue;
         let cached = cache.get(turn);

@@ -19,6 +19,7 @@ export {
   collectHydratedRange,
   countUserTurns,
   findLastIndex,
+  loadedStart,
   resolveActiveAssistantTurnIdFromIndex,
   resolveLastAssistantTurnIds,
   resolveTailStart,

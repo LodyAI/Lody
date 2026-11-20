@@ -637,6 +637,95 @@ describe.each(backends)('createConversationViewFromReader over $name', (backend)
  * the asserted behavior is "the display cache must not be worse than the raw
  * view", not new product behavior.
  */
+describe('createConversationViewFromReader over a paged reader', () => {
+  /** A paged backend of `total` turns that serves only bounded pages and turns. */
+  const pagedReader = (initial: number) => {
+    let total = initial;
+    let listener: SessionDataChangeListener | undefined;
+    const row = (position: number) => ({
+      metadataVersion: 1 as const,
+      position,
+      state: 'ready' as const,
+      turnId: `t-${position}`,
+      scalars: { id: `t-${position}`, role: position % 2 ? 'assistant' : 'user', timestamp: '' },
+    });
+    const page = (end: number, limit: number) => {
+      const start = Math.max(0, end - limit);
+      return {
+        startPosition: start,
+        totalCount: total,
+        rows: Array.from({ length: end - start }, (_, i) => row(start + i)),
+        hasMoreOlder: start > 0,
+        cursor: start > 0 ? String(start) : null,
+      };
+    };
+    const turn = (id: string) => ({
+      state: 'ready' as const,
+      turn: { id, role: 'user', timestamp: '', items: [], fileDiff: [] } as unknown as SessionTurn,
+    });
+    const reader = {
+      count: () => total,
+      readAt: (position: number) => turn(`t-${position}`),
+      readTurn: (id: string) => turn(id),
+      readRange: () => [],
+      readDirectory: (from: number, to: number) =>
+        Array.from({ length: Math.max(0, Math.min(to, total) - from) }, (_, i) => row(from + i)),
+      readAll: () => [],
+      readTurnOutput: () => [],
+      readLatestDirectoryPage: async (limit: number) => page(total, limit),
+      readOlderDirectoryPage: async (cursor: string, limit: number) => page(Number(cursor), limit),
+      observe: (next: SessionDataChangeListener) => {
+        listener = next;
+        return { initial: Promise.resolve([]), unsubscribe() {} };
+      },
+    } as unknown as SessionHistoryReader;
+    return {
+      reader,
+      append() {
+        total += 1;
+        listener?.({ kind: 'structure', from: total - 1, to: total });
+      },
+    };
+  };
+
+  it('opens and follows a 50-million-turn history by allocating only the loaded window', async () => {
+    // A dense per-position directory would allocate 50M rows on open and again
+    // on every applied page; this test would then run out of time or memory.
+    const backend = pagedReader(50_000_000);
+    const idle = createManualIdle();
+    const view = createConversationViewFromReader(backend.reader, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 2,
+      scheduleIdle: idle.scheduleIdle,
+      yieldToEventLoop: () => Promise.resolve(),
+    });
+    try {
+      await settle(idle, view);
+      expect(view.turnCount).toBe(50_000_000);
+      expect(view.loadedFrom).toBe(50_000_000 - 40);
+      expect(view.index(view.turnCount - 1)?.id).toBe('t-49999999');
+      expect(view.isHydrated(view.turnCount - 1)).toBe(true);
+      // An unloaded position answers with one stable sentinel that names itself.
+      const sentinel = view.index(7)!;
+      expect(view.index(7)).toBe(sentinel);
+      expect(view.indexOf(sentinel.id)).toBe(7);
+      expect(view.indexOf('t-7')).toBe(-1);
+      const kept = view.index(view.turnCount - 3);
+
+      backend.append();
+      await flush();
+      idle.runAll();
+      await flush();
+      expect(view.turnCount).toBe(50_000_001);
+      expect(view.index(50_000_000)?.id).toBe('t-50000000');
+      // Rows before the appended position keep their objects.
+      expect(view.index(view.turnCount - 4)).toBe(kept);
+    } finally {
+      view.dispose();
+    }
+  }, 30_000);
+});
+
 describe('createConversationViewFromReader audit regressions', () => {
   const checkpoint = () => new Promise<void>((resolve) => setImmediate(resolve));
 

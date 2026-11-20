@@ -299,15 +299,32 @@ client recopied its receive buffer per socket chunk, and a 38.5 MB open took
 10–12 s.
 
 Remote reader (no replica), same composition through `createConversationViewFromReader`,
-`LODY_SESSION_FIRST_SCREEN_PATHS=remote`; _cold_ follows a host restart. Total ms,
-best of two runs: 1,000 turns 82 cold / 20 warm; 10,000 turns 73 / 31; 100,000
-turns 798 / 250. The opening process holds no document; the engine host adds
-about 83 MB for a loaded 100k-turn room. Two costs remain at 100k: the engine's
-first load of the room (about 340 ms), and the view's dense per-position rows
-(74 ms and 23.5 MB with an instant reader, repeated for each applied page). The
-cold load needed the engine compaction fix (`lody/compact-by-bytes`): a migrated
-snapshot stayed update-encoded, and the first read after a restart took 6.0 s and
-1.18 GB.
+`LODY_SESSION_FIRST_SCREEN_PATHS=remote`; _cold_ follows a host restart, so it
+includes launching the host and opening the namespace. Total ms: 1,000 turns 108
+cold / 15 warm; 10,000 turns 48 / 18; 100,000 turns 312 / 20. The opening process
+holds no document; the engine host adds about 60 MB for a loaded 100k-turn room.
+Of a 100k cold open, launching and connecting to the host take about 196 ms (paid
+once per app start) and the first directory page about 174 ms (namespace open
+~50 ms, room load ~45 ms, the read). With a running host, the first read of a cold
+100k-turn room takes about 80 ms.
+
+Three engine costs were removed on the way:
+
+- `lody/compact-by-bytes`: a migrated snapshot stayed update-encoded, and the
+  first read after a restart took 6.0 s and 1.18 GB.
+- `lody/declared-root-reads`: reading below an undeclared root looks it up through
+  the document's shallow value, which registers every container of a freshly
+  loaded document (~240 ms at 100k). Session rooms declare `history` as a list
+  (`createDocRoom`), and declared roots resolve by type.
+- The view itself: see below.
+
+ConversationView keeps only loaded rows of a paged reader (holes elsewhere, a
+stable sentinel per requested hole), and whole-history loops start at
+`loadedFrom`. With an instant reader at 100k turns: open 43 → 1.3–2.6 ms, heap
+36.9 → 1.6 MB, and the refresh after each appended turn p50 105 → 1.1 ms (p95
+124–136 → 1.3–2.2 ms); the refresh had rebuilt every position on each append.
+With the sparse view, the legacy path's 100k first screen is 219 ms and the native
+replica's reopen 48 ms.
 
 Memory with one 100k-turn Session open: the replica adds about 65–90 MB to the
 opening process (in-process measurement 87.5 MB), and the engine host 10–15 MB
@@ -318,12 +335,15 @@ for a loaded room; RSS deltas below 20 MB are within measurement noise.
 - Session documents require unreleased SDK branches: binary Loro update
   subscriptions (`lody/loro-doc-updates`), the external Loro document owner
   (`lody/external-docs`), the client framer fix (`lody/framer-chunks`), exports
-  since a version (`lody/loro-export-since`) and retained reopen
-  (`lody/external-docs-reuse`). Local builds are used only through an uncommitted
+  since a version (`lody/loro-export-since`), retained reopen
+  (`lody/external-docs-reuse`), list-field reads and changed paths
+  (`lody/doc-list-read`), size-triggered compaction (`lody/compact-by-bytes`) and
+  declared-root reads (`lody/declared-root-reads`). Local builds are used only through an uncommitted
   override.
-- A cold open of a 100,000-turn Session misses the 200 ms target (see
-  Performance). The renderer path adds main-to-renderer IPC of the snapshot, which
-  the benchmark does not measure.
+- With a local replica, a cold open of a 100,000-turn Session misses the 200 ms
+  target (about 1 s; see Performance); the remote reader meets it once the host is
+  running. The renderer path adds main-to-renderer IPC, which the benchmark does
+  not measure.
 - A commit already sent when the host dies is an unknown outcome. Per the SDK
   contract this latches that repo's metadata writes until it is recreated; reads
   continue. Commits attempted while disconnected are certain non-commits.
