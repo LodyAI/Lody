@@ -101,7 +101,10 @@ activate their preview. The owner still holds a plain string and UTF-16 ranges;
 `ui/mention/composer-document.ts` converts between that model and the editor's
 single paragraph. Callers read and write text and caret only through
 `ui/mention/composer-input.ts`. A composer without mention sources keeps a plain
-`@lody/ui` textarea, which that API serves too.
+`@lody/ui` textarea, which that API serves too. An Enter key the caller has not
+claimed inserts one line break in the editor; soft-keyboard Return policy is
+the composer's.
+[Decision](../notes/implemented/bug-fix/2026-11-20-mobile-composer-enter-newline.md).
 
 ## Ranking
 

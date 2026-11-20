@@ -40,6 +40,7 @@ import {
   type ComposerController,
   type ComposerEditorElement,
   type ComposerSelection,
+  insertComposerLineBreak,
   registerComposerController,
 } from './composer-input';
 import { MentionRangeView } from './mention-chip-content';
@@ -1245,6 +1246,15 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
     [applyInputValue, readSelection, writeSelection]
   );
 
+  // Runs after the caller's onKeyDown. A submit/save chord preventDefaults
+  // first and keeps the key. Otherwise insert the break here: iOS will not
+  // turn keydown Enter into one, and a later preventDefault would swallow it.
+  const onUnclaimedEnter = React.useCallback((event: React.KeyboardEvent<InputElement>) => {
+    if (event.key !== 'Enter' || event.defaultPrevented || event.metaKey || event.ctrlKey) return;
+    if (isImeComposingKeyboardEvent(event)) return;
+    if (insertComposerLineBreak(event.currentTarget)) event.preventDefault();
+  }, []);
+
   // Native, not React: chips render through portals, and React routes a
   // portal's events through its React parent instead of the editor element.
   const onClickPrimitive = React.useCallback(
@@ -1385,7 +1395,10 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         style={{ '--composer-rows': rows, ...style } as React.CSSProperties}
         // Chip glyphs repaint under native spelling decorations.
         spellCheck={mirrorSelection ? false : spellCheck}
-        onKeyDownCapture={composeEventHandlers(onKeyDownPrimitive, onKeyDown)}
+        onKeyDownCapture={composeEventHandlers(
+          onKeyDownPrimitive,
+          composeEventHandlers(onKeyDown, onUnclaimedEnter)
+        )}
         onPasteCapture={onPaste}
         onCopyCapture={onCopy}
         onCutCapture={onCut}

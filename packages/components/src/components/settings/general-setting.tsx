@@ -36,7 +36,10 @@ import { usePostHog } from '@posthog/react';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { ClearCacheConfirmDialog, useClearCache } from './clear-cache';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { isMobileKeyboardAction } from '@/lib/mobile-keyboard-action';
+import {
+  isMobileKeyboardAction,
+  normalizeMobileKeyboardAction,
+} from '@/lib/mobile-keyboard-action';
 import { MobileGeneralSettings } from '@/components/mobile/mobile-general-settings';
 import { PathLaunchersSettings } from './path-launchers-setting';
 import { QueuedMessageBehaviorControl } from './queued-message-behavior-control';
@@ -157,9 +160,7 @@ export function GeneralSettingsComponent() {
   const autoLaunch = useElectronAutoLaunch(isElectron && !isMobile);
   const isNative = !isElectron && isNativeAppShell();
   const showMobileInputSettings = isMobile || isNative;
-  const selectedMobileKeyboardAction = isMobileKeyboardAction(mobileKeyboardAction)
-    ? mobileKeyboardAction
-    : 'send';
+  const selectedMobileKeyboardAction = normalizeMobileKeyboardAction(mobileKeyboardAction);
   // `Select.Value` reads the label of the current value from `items`, not from
   // the rows, so the list is stated once and drives both.
   const mobileKeyboardActionOptions = useMemo(

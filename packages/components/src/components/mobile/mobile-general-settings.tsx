@@ -36,7 +36,10 @@ import {
 import { isNativeAppShell, isNativeIOSAppShell } from '@/lib/native-platform';
 import { ClearCacheConfirmDialog, useClearCache } from '@/components/settings/clear-cache';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { isMobileKeyboardAction } from '@/lib/mobile-keyboard-action';
+import {
+  isMobileKeyboardAction,
+  normalizeMobileKeyboardAction,
+} from '@/lib/mobile-keyboard-action';
 import { usePostHog } from '@posthog/react';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { QueuedMessageBehaviorControl } from '@/components/settings/queued-message-behavior-control';
@@ -88,9 +91,7 @@ export function MobileGeneralSettings() {
   const isNative = !isElectron && isNativeAppShell();
   const isNativeIOS = !isElectron && isNativeIOSAppShell();
   const showMobileInputSettings = isMobile || isNative;
-  const selectedMobileKeyboardAction = isMobileKeyboardAction(mobileKeyboardAction)
-    ? mobileKeyboardAction
-    : 'send';
+  const selectedMobileKeyboardAction = normalizeMobileKeyboardAction(mobileKeyboardAction);
   const electronPlatform = useMemo(() => {
     if (!isElectron || typeof window === 'undefined') {
       return 'unknown';

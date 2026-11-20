@@ -169,3 +169,17 @@ export function checkIsHandheldScanner(): boolean {
   const nav = window.navigator;
   return nav.platform === 'MacIntel' && nav.maxTouchPoints > 1;
 }
+
+/**
+ * Whether Return should follow the mobile keyboard setting.
+ *
+ * This is not the layout breakpoint. A phone rotated past
+ * `MOBILE_LAYOUT_BREAKPOINT` keeps the desktop renderer, but its software
+ * keyboard still has no Shift+Enter. Desktop browsers and Electron keep
+ * Enter-to-send at every width.
+ */
+export function prefersSoftKeyboardEnterPolicy(): boolean {
+  if (typeof window === 'undefined') return false;
+  if (isDesktopLayoutShell()) return false;
+  return checkIsHandheldScanner();
+}

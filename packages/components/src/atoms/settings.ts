@@ -224,10 +224,10 @@ export const electronSuppressMobilePushWhenFocusedAtom = atomWithStorage<boolean
 // mount via the viewer reading this atom directly.
 export const fileViewerWordWrapAtom = atomWithStorage<boolean>('lody-file-viewer-word-wrap', true);
 
-// Mobile composer keyboard return key behavior.
+// Soft-keyboard Return in chat inputs. Newline is the default; Send is explicit.
 export const mobileKeyboardActionAtom = atomWithStorage<MobileKeyboardAction>(
   'lody-mobile-keyboard-action',
-  'send'
+  'newline'
 );
 
 // iOS app: whether to keep the conversation Live Activity / Dynamic Island enabled.
