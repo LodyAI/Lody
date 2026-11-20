@@ -10,7 +10,12 @@ import { sessionDocSchema } from '../session-doc-schemas';
 import { scheduleDocSchema } from '../schedule-schema';
 import { isNativePreviewCommentDocId, isNativeScheduleDocId } from '../native-workspace-meta-ipc';
 import { previewVisualCommentDocSchema } from '../preview-comment-schema';
-import { MIGRATIONS_ROOM, observeLoroDoc, observeLoroPaths } from './native-repo';
+import {
+  MIGRATIONS_ROOM,
+  nativeRoomEncryption,
+  observeLoroDoc,
+  observeLoroPaths,
+} from './native-repo';
 
 /** Type-only loro-repo use keeps its WASM out of the Electron main bundle. */
 const CAPABILITY = 'loro-external-docs-v1' as const;
@@ -30,7 +35,7 @@ export function createDocRoom(client: RepoClient, namespace: string, docId: stri
   let pending = declared.get(key);
   if (!pending) {
     pending = client
-      .createRoom(namespace, docRoom(docId), 'plaintext', {
+      .createRoom(namespace, docRoom(docId), nativeRoomEncryption(client, namespace), {
         rootContainers: engineDocSchemaFor(docId).roots,
         docSchema: engineDocSchemaFor(docId),
       })

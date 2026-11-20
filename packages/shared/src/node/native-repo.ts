@@ -15,14 +15,44 @@ import type {
   LoroPathChange,
   LoroPathChanges,
   LoroUpdates,
+  EncryptionPolicy,
   RepoClient,
   RoomKey,
 } from '@loro-dev/loro-repo-client';
 import { startProcessLegacy } from './process';
 import { getLodyDataDir } from './installation-profile';
+import type { PlatformKind } from '../platform-kind';
 
-/** One engine directory per installation; namespaces are workspace ids. */
-export const nativeRepoDataDir = () => join(getLodyDataDir('local'), 'native-repo', 'v1');
+/**
+ * One engine directory per installation and platform; namespaces are workspace
+ * ids. The local (OSS) and cloud installations keep separate data directories,
+ * so each has its own engine.
+ */
+export const nativeRepoDataDir = (platform: PlatformKind = 'local') =>
+  join(getLodyDataDir(platform), 'native-repo', 'v1');
+
+/**
+ * Room encryption of each native namespace this process opened. An encrypted
+ * workspace's namespace is registered before any of its rooms is created;
+ * encryption is fixed when a room is created, and an encrypted remote refuses a
+ * plaintext room, so a missing registration fails closed instead of uploading.
+ */
+const namespaceEncryption = new WeakMap<RepoClient, Map<string, EncryptionPolicy>>();
+export function setNativeNamespaceEncryption(
+  client: RepoClient,
+  namespace: string,
+  encryption: EncryptionPolicy
+) {
+  let byNamespace = namespaceEncryption.get(client);
+  if (!byNamespace) namespaceEncryption.set(client, (byNamespace = new Map()));
+  const known = byNamespace.get(namespace);
+  if (known && known !== encryption)
+    throw new Error(`native_namespace_encryption_conflict: ${namespace}`);
+  byNamespace.set(namespace, encryption);
+}
+/** The encryption new rooms of `namespace` are created with (plaintext unless registered). */
+export const nativeRoomEncryption = (client: RepoClient, namespace: string): EncryptionPolicy =>
+  namespaceEncryption.get(client)?.get(namespace) ?? 'plaintext';
 
 /** Explicit opt-in. Both daemon and desktop read the same variable. */
 export const isNativeWorkspaceMetaEnabled = (env: NodeJS.ProcessEnv = process.env) =>
@@ -550,7 +580,7 @@ export async function importLegacyRoom(
   const marker = [room.kind, room.id, source];
   await client.createRoom(namespace, MIGRATIONS_ROOM, 'plaintext');
   if ((await client.flockGet(namespace, MIGRATIONS_ROOM, marker)).found) return 'already-published';
-  await client.createRoom(namespace, room, 'plaintext');
+  await client.createRoom(namespace, room, nativeRoomEncryption(client, namespace));
   const bundle = await load();
   const entries = bundle ? Object.keys(bundle.entries).length : 0;
   if (bundle && entries > 0) {

@@ -160,3 +160,7 @@ Control, probe and Loro data-plane requests require the private daemon token bef
   loro-repo's external owners, never storage or the local data plane.
   A renderer patch reaches the engine only after `authorizeSessionPatch`.
   Design: [native Workspace Meta](../../../../.agents/docs/native-workspace-meta.md).
+- An encrypted workspace's namespace is registered (`setNativeNamespaceEncryption`)
+  before any of its rooms is created, because room encryption is fixed at creation.
+  Only `attachNativeEncryptedWorkspace` connects it to the cloud, after the caller's
+  content-open admission; a pending wipe is finished before anything else opens it.

@@ -15,7 +15,7 @@ import type {
   RepoDocMeta,
   RepoFlockDocMeta,
 } from 'loro-repo';
-import { observeFlock, type FlockObservation } from './native-repo';
+import { nativeRoomEncryption, observeFlock, type FlockObservation } from './native-repo';
 
 /**
  * Native Workspace Meta uses the legacy Meta Flock layout unchanged, so the
@@ -225,7 +225,7 @@ export function createNativeWorkspaceMeta(
 
   const start = () =>
     (opening ??= (async () => {
-      await client.createRoom(namespace, META_ROOM, 'plaintext');
+      await client.createRoom(namespace, META_ROOM, nativeRoomEncryption(client, namespace));
       observation = observeFlock(client, namespace, META_ROOM, [], (event) => {
         if (event.kind === 'invalidated') return;
         const docIds = new Set<string>();
