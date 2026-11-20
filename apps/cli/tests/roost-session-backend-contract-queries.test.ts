@@ -1125,7 +1125,7 @@ describe('Production Roost dispatch projection', () => {
     120_000
   );
 
-  it('allows Agent output to commit while a cancelled watch is between receipt pages', async ({
+  it('commits Agent output while a cancelled history read is between receipt pages', async ({
     onTestFinished,
   }) => {
     const fixture = await coldHistoryHandlerFixture(1);
@@ -1136,7 +1136,7 @@ describe('Production Roost dispatch projection', () => {
     onTestFinished(paused.release);
     try {
       await fixture.ready(sessionId);
-      const active = nativeAssistant('writing-during-watch');
+      const active = nativeAssistant('writing-during-history-read');
       expect(
         await fixture.rpc.writeSessionHistoryForRpc(sessionId, 'append', { entry: active })
       ).toMatchObject({ success: true });
@@ -1149,9 +1149,8 @@ describe('Production Roost dispatch projection', () => {
       const reading = fixture.rpc.readSessionHistoryForRpc(
         sessionId,
         {
-          kind: 'watchChanges',
+          kind: 'readChanges',
           checkpoint,
-          waitMs: 15_000,
           includeBodiesFrom: 0,
           withPatches: true,
         },
