@@ -35,17 +35,37 @@ const styles = stylex.create({
     flex: 1,
     minWidth: 0,
   },
-  // Over the 4px of window ground between this card and the main one.
+  // An 8px hit area centred on the 4px of window ground between this card and
+  // the main one. It paints nothing at rest; resting on it (after a short
+  // delay, so a passing pointer does not flash it), dragging it or focusing it
+  // from the keyboard draws a 2px accent line down the middle of the gap, clear
+  // of the cards' rounded corners.
   sash: {
     position: 'absolute',
     top: 0,
     bottom: 0,
-    right: -1,
-    width: 6,
+    right: -2,
+    width: 8,
     cursor: 'col-resize',
     zIndex: 5,
-    ':hover': { backgroundColor: colors.separator },
+    outline: 'none',
+    '::after': {
+      content: '""',
+      position: 'absolute',
+      top: space[3],
+      bottom: space[3],
+      left: 3,
+      width: 2,
+      borderRadius: radius.full,
+      backgroundColor: colors.accent,
+      opacity: { default: 0, ':hover': 1, ':active': 1, ':focus-visible': 1 },
+      transitionProperty: 'opacity',
+      transitionDuration: '120ms',
+      transitionDelay: { default: '0ms', ':hover': '150ms' },
+    },
   },
+  // Kept lit while the pointer is captured, even when it leaves the hit area.
+  sashDragging: { '::after': { opacity: 1, transitionDelay: '0ms' } },
 });
 
 /**
@@ -59,7 +79,6 @@ export function TodayPinnedColumn() {
   const [width, setWidth] = useAtom(todayColumnWidthAtom);
   const setPinned = useSetAtom(todayPinnedAtom);
   const [target, setTarget] = useState<TodayViewTarget>({});
-  const drag = useRef<{ startX: number; startWidth: number } | null>(null);
   const linked = useAtomValue(todayPinnedTargetAtom);
   const clearLinked = useSetAtom(todayPinnedTargetAtom);
   useEffect(() => {
@@ -76,32 +95,10 @@ export function TodayPinnedColumn() {
       anchored={sidebarVisible}
       label={t('today.nav', 'Today')}
       sash={
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-valuemin={TODAY_COLUMN_MIN_WIDTH}
-          aria-valuemax={TODAY_COLUMN_MAX_WIDTH}
-          aria-valuenow={clamp(width)}
-          aria-label={t('today.resize', 'Resize Today')}
-          tabIndex={0}
-          {...stylex.props(styles.sash)}
-          onPointerDown={(event) => {
-            event.currentTarget.setPointerCapture(event.pointerId);
-            drag.current = { startX: event.clientX, startWidth: clamp(width) };
-          }}
-          onPointerMove={(event) => {
-            if (!drag.current) return;
-            setWidth(clamp(drag.current.startWidth + event.clientX - drag.current.startX));
-          }}
-          onPointerUp={() => {
-            drag.current = null;
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'ArrowLeft') setWidth(clamp(width - 16));
-            else if (event.key === 'ArrowRight') setWidth(clamp(width + 16));
-            else return;
-            event.preventDefault();
-          }}
+        <TodayColumnSash
+          width={clamp(width)}
+          onWidthChange={(next) => setWidth(clamp(next))}
+          label={t('today.resize', 'Resize Today')}
         />
       }
     >
@@ -143,5 +140,52 @@ export function TodayPinnedCard(props: {
       </div>
       {props.sash}
     </section>
+  );
+}
+
+/**
+ * The column's resize handle (pointer drag, or ←/→ in 16px steps). Shared with
+ * Storybook so the handle's states can be seen.
+ */
+export function TodayColumnSash(props: {
+  width: number;
+  onWidthChange: (width: number) => void;
+  label: string;
+}) {
+  const drag = useRef<{ startX: number; startWidth: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const end = () => {
+    drag.current = null;
+    setDragging(false);
+  };
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-valuemin={TODAY_COLUMN_MIN_WIDTH}
+      aria-valuemax={TODAY_COLUMN_MAX_WIDTH}
+      aria-valuenow={props.width}
+      aria-label={props.label}
+      tabIndex={0}
+      data-today-sash=""
+      {...stylex.props(styles.sash, dragging && styles.sashDragging)}
+      onPointerDown={(event) => {
+        event.currentTarget.setPointerCapture(event.pointerId);
+        drag.current = { startX: event.clientX, startWidth: props.width };
+        setDragging(true);
+      }}
+      onPointerMove={(event) => {
+        if (!drag.current) return;
+        props.onWidthChange(drag.current.startWidth + event.clientX - drag.current.startX);
+      }}
+      onPointerUp={end}
+      onLostPointerCapture={end}
+      onKeyDown={(event) => {
+        if (event.key === 'ArrowLeft') props.onWidthChange(props.width - 16);
+        else if (event.key === 'ArrowRight') props.onWidthChange(props.width + 16);
+        else return;
+        event.preventDefault();
+      }}
+    />
   );
 }

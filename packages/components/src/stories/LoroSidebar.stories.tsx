@@ -6,7 +6,7 @@ import {
 } from '@/lib/commands';
 import { __resetPlatformCacheForTests } from '@/lib/commands/platform';
 import type { Meta, StoryObj } from '@storybook/react';
-import { TodayPinnedCard } from '@/components/today/today-pinned-column';
+import { TodayColumnSash, TodayPinnedCard } from '@/components/today/today-pinned-column';
 import { TodayToolbar } from '@/components/today/today-view';
 import todayDayStreamMeta, { TodayWithEarlierDay } from './TodayDayStream.stories';
 
@@ -678,7 +678,12 @@ export const PinnedToday: Story = {
     <StoryLayout
       {...args}
       besideSidebar={
-        <TodayPinnedCard width={360} anchored label="Today">
+        <TodayPinnedCard
+          width={360}
+          anchored
+          label="Today"
+          sash={<TodayColumnSash width={360} onWidthChange={() => {}} label="Resize Today" />}
+        >
           <TodayToolbar pinned title={null}>
             <Button variant="ghost" size="small" icon aria-label="Pick a date">
               <CalendarDays size={16} strokeWidth={1.5} />
