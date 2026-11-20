@@ -12,6 +12,7 @@ import {
   type SidebarUpdatedItem,
 } from '@/components/sidebar-updated-session-list';
 import { buildOpenedBySessionTree } from '@/lib/session-opened-by-tree';
+import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import { planManualOrderMove, sortByManualOrder } from '@lody/shared';
 
 const NOW = Date.parse('2026-11-20T10:00:00.000Z');
@@ -185,5 +186,56 @@ describe('Focus manual fractional-index ordering', () => {
       'b',
       'z',
     ]);
+  });
+
+  it('derives snooze wake-up unread state and Focus top placement without mutating lastMessageAt or orderKey', () => {
+    const tenDaysAgo = NOW - 10 * 86_400_000;
+    const snoozeTarget = NOW - 5_000; // already elapsed
+
+    // Older >7d session surfaces in Focus once its snooze elapses, and sorts to the top of Focus.
+    expect(sidebarStatusGroup({ latestMessageAt: tenDaysAgo, snoozedUntil: snoozeTarget }, NOW)).toBe(
+      'focus'
+    );
+    const items: SidebarUpdatedItem[] = [
+      { id: 'focus-a', kind: 'chat', title: 'A', sectionLabel: 'Chats', latestMessageAt: NOW, orderKey: '80' },
+      { id: 'focus-b', kind: 'chat', title: 'B', sectionLabel: 'Chats', latestMessageAt: NOW, orderKey: '82' },
+      {
+        id: 'woken-old',
+        kind: 'chat',
+        title: 'Woken',
+        sectionLabel: 'Chats',
+        latestMessageAt: tenDaysAgo,
+        orderKey: '99',
+        snoozedUntil: snoozeTarget,
+      },
+    ];
+    const focus = buildSidebarUpdatedBuckets(items, 'status', NOW).find((b) => b.key === 'focus')!;
+    expect(focus.items.map((i) => i.id)).toEqual(['woken-old', 'focus-a', 'focus-b']);
+
+    // Unread derives from max(lastMessageAt, expiredSnoozeAt) > lastReadAt.
+    expect(
+      sessionHasUnreadMessages(
+        { lastMessageAt: tenDaysAgo, lastReadAt: tenDaysAgo, snoozedUntil: snoozeTarget },
+        NOW
+      )
+    ).toBe(true);
+    // Reading after snoozeTarget clears unread and stays read.
+    expect(
+      sessionHasUnreadMessages(
+        { lastMessageAt: tenDaysAgo, lastReadAt: snoozeTarget + 10_000, snoozedUntil: snoozeTarget },
+        NOW
+      )
+    ).toBe(false);
+    // A newer real reply after reading marks unread again.
+    expect(
+      sessionHasUnreadMessages(
+        {
+          lastMessageAt: snoozeTarget + 30_000,
+          lastReadAt: snoozeTarget + 10_000,
+          snoozedUntil: snoozeTarget,
+        },
+        NOW + 60_000
+      )
+    ).toBe(true);
   });
 });

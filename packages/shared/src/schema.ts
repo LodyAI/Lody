@@ -1103,8 +1103,6 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   orderKey?: string;
   /** Epoch ms until which this session is snoozed in the Status view's Later section. */
   snoozedUntil?: number;
-  /** Monotonic watermark of the latest snoozedUntil already woken so each snooze wakes at most once across devices. */
-  snoozeWokenUntil?: number;
   /** Epoch ms when the user explicitly settled this session in the Status view's Settled section. */
   settledAt?: number;
   /** Epoch ms when the user explicitly moved an inactive session back to Focus (overrides 7d auto-settle for 7d). */

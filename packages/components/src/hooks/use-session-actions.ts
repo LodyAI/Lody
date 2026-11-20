@@ -44,8 +44,6 @@ import {
   OPERATION_INBOX_PROTOCOL_VERSION,
   buildPinnedSectionLayout,
   planNewPinPlacement,
-  planTopOrderKey,
-  type ManualOrderPlacement,
   type ManualOrderWrite,
   type PinPlacementWrite,
   type PinnedSessionPlacement,
@@ -311,16 +309,6 @@ export type SessionActions = {
   settleSession: (sessionId: SessionId) => Promise<void>;
   /** Restore a snoozed or settled session back to Focus. */
   moveSessionToFocus: (sessionId: SessionId) => Promise<void>;
-  /**
-   * Perform a one-shot wake-up when a snoozed session's `snoozedUntil` elapses:
-   * updates `lastMessageAt` so it becomes unread, places it at the top of Focus
-   * (below Pinned), and clears `snoozedUntil`.
-   */
-  wakeSnoozedSession: (
-    sessionId: SessionId,
-    expectedSnoozedUntil: number,
-    focusRootPlacements: readonly ManualOrderPlacement[]
-  ) => Promise<void>;
 };
 
 const toPinnedSessionPlacement = (meta: SessionMeta): PinnedSessionPlacement => ({
@@ -759,7 +747,13 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const readAt = getFiniteTimestamp(lastMessageAt) ?? getServerNow();
+      const now = getServerNow();
+      const baseReadAt = getFiniteTimestamp(lastMessageAt) ?? now;
+      const roomId = getSessionRoomId(sessionId);
+      const cachedMeta = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
+      const snoozedUntil = getFiniteTimestamp(cachedMeta?.snoozedUntil);
+      const expiredSnoozeAt = snoozedUntil !== null && snoozedUntil <= now ? snoozedUntil : 0;
+      const readAt = Math.max(baseReadAt, expiredSnoozeAt);
       await assertReadablePreferences([sessionId]);
       await touchSessionActivityMeta(
         runtime,
@@ -768,7 +762,7 @@ export function useSessionActions(): SessionActions {
         assertReadablePreferences
       );
     },
-    [runtime, assertReadablePreferences]
+    [runtime, store, assertReadablePreferences]
   );
 
   const markSessionUnread = useCallback(
@@ -787,13 +781,21 @@ export function useSessionActions(): SessionActions {
       const lastMessageAt =
         getFiniteTimestamp(repoMeta?.lastMessageAt) ??
         getFiniteTimestamp(cachedMeta?.lastMessageAt);
-      if (lastMessageAt === null) return;
+      const now = getServerNow();
+      const snoozedUntil =
+        getFiniteTimestamp(repoMeta?.snoozedUntil) ?? getFiniteTimestamp(cachedMeta?.snoozedUntil);
+      const expiredSnoozeAt = snoozedUntil !== null && snoozedUntil <= now ? snoozedUntil : null;
+      const effectiveLastMessageAt =
+        lastMessageAt !== null && expiredSnoozeAt !== null
+          ? Math.max(lastMessageAt, expiredSnoozeAt)
+          : (lastMessageAt ?? expiredSnoozeAt);
+      if (effectiveLastMessageAt === null) return;
 
-      // Unread is the durable comparison `lastMessageAt > lastReadAt`. Move
-      // only this receipt behind the latest known message; do not touch the
+      // Unread is the durable comparison `effectiveLastMessageAt > lastReadAt`. Move
+      // only this receipt behind the latest known activity; do not touch the
       // activity timestamp, which would reorder the sidebar.
       await updateSessionPreference(sessionId, {
-        lastReadAt: lastMessageAt - 1,
+        lastReadAt: effectiveLastMessageAt - 1,
       } as Partial<SessionMeta>);
     },
     [runtime, store, updateSessionPreference]
@@ -1121,8 +1123,17 @@ export function useSessionActions(): SessionActions {
       }
       const now = getServerNow();
       for (const write of writes) {
+        const targetId = write.sessionId as SessionId;
         const isRestored = restoredSessionId != null && write.sessionId === restoredSessionId;
-        await updateSessionMetadata(write.sessionId as SessionId, {
+        const roomId = getSessionRoomId(targetId);
+        const existing = await runtime.repo.getDocMeta(roomId);
+        const meta = !isLoroRepoDocDeleted(existing)
+          ? (existing?.meta as SessionMeta | undefined)
+          : undefined;
+        const hasExpiredSnooze =
+          typeof meta?.snoozedUntil === 'number' && meta.snoozedUntil <= now;
+        const existingRestored = getFiniteTimestamp(meta?.focusRestoredAt) ?? 0;
+        await updateSessionMetadata(targetId, {
           orderKey: write.orderKey,
           ...(isRestored
             ? {
@@ -1130,7 +1141,12 @@ export function useSessionActions(): SessionActions {
                 settledAt: undefined,
                 focusRestoredAt: now,
               }
-            : {}),
+            : hasExpiredSnooze
+              ? {
+                  snoozedUntil: undefined,
+                  focusRestoredAt: Math.max(existingRestored, meta.snoozedUntil!),
+                }
+              : {}),
         });
       }
     },
@@ -1181,46 +1197,6 @@ export function useSessionActions(): SessionActions {
     [updateSessionMetadata]
   );
 
-  const wakeSnoozedSession = useCallback(
-    async (
-      sessionId: SessionId,
-      expectedSnoozedUntil: number,
-      focusRootPlacements: readonly ManualOrderPlacement[]
-    ) => {
-      if (!runtime) return;
-      const roomId = getSessionRoomId(sessionId);
-      const existing = await runtime.repo.getDocMeta(roomId);
-      if (isLoroRepoDocDeleted(existing)) return;
-      const meta = existing?.meta as SessionMeta | undefined;
-      // One-shot guard across devices and reopens: only fire if this exact snooze
-      // is still active, has elapsed, and has not already been woken.
-      if (!meta || meta.snoozedUntil !== expectedSnoozedUntil) return;
-      if (getServerNow() < expectedSnoozedUntil) return;
-      const existingWokenUntil = getFiniteTimestamp(meta.snoozeWokenUntil) ?? 0;
-      if (existingWokenUntil >= expectedSnoozedUntil) return;
-
-      // Anchor wake-up timestamps strictly to `expectedSnoozedUntil` (never Date.now())
-      // and advance `snoozeWokenUntil` instead of deleting `snoozedUntil`:
-      // - Once read after `expectedSnoozedUntil`, a concurrent/late wake for the same
-      //   event can never push `lastMessageAt` past `lastReadAt` or re-top the row.
-      // - A newer user-set `snoozedUntil` on another device is never clobbered.
-      const wakeAt = expectedSnoozedUntil;
-      const existingLastMessageAt = getFiniteTimestamp(meta.lastMessageAt) ?? 0;
-      const existingLastReadAt = getFiniteTimestamp(meta.lastReadAt) ?? 0;
-      const existingFocusRestoredAt = getFiniteTimestamp(meta.focusRestoredAt) ?? 0;
-      const otherRoots = focusRootPlacements.filter((p) => p.id !== sessionId);
-      const topOrderKey = existingLastReadAt < wakeAt ? planTopOrderKey(otherRoots) : undefined;
-      await updateSessionMetadata(sessionId, {
-        snoozeWokenUntil: expectedSnoozedUntil,
-        ...(topOrderKey ? { orderKey: topOrderKey } : {}),
-        ...(wakeAt > existingLastMessageAt ? { lastMessageAt: wakeAt } : {}),
-        ...(wakeAt > existingFocusRestoredAt ? { focusRestoredAt: wakeAt } : {}),
-        ...(meta.settledAt !== undefined ? { settledAt: undefined } : {}),
-      });
-    },
-    [runtime, updateSessionMetadata]
-  );
-
   return {
     createSession,
     startSession,
@@ -1248,6 +1224,5 @@ export function useSessionActions(): SessionActions {
     snoozeSession,
     settleSession,
     moveSessionToFocus,
-    wakeSnoozedSession,
   };
 }

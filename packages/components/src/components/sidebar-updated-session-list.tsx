@@ -111,6 +111,7 @@ import {
 } from '@/lib/session-opened-by-tree';
 import {
   buildSnoozePresets,
+  expiredSnoozeTimestamp,
   formatSnoozeCountdown,
   isSidebarBucketCollapsed,
   SIDEBAR_STATUS_GROUPS,
@@ -190,8 +191,6 @@ export type SidebarUpdatedItem = {
   orderKey?: string | null;
   /** Epoch ms until which the session is snoozed in Status Later. */
   snoozedUntil?: number | null;
-  /** Monotonic watermark of the latest snoozedUntil already woken. */
-  snoozeWokenUntil?: number | null;
   /** Epoch ms when the session was explicitly settled in Status Settled. */
   settledAt?: number | null;
   /** Epoch ms when the user explicitly restored an inactive session to Focus. */
@@ -337,16 +336,25 @@ export function buildSidebarUpdatedBuckets(
       return key === 'focus' ? [{ key, items: [] }] : [];
     }
     if (key === 'focus') {
-      return [
-        {
-          key,
-          items: sortByManualOrder(members, (item) => ({
-            id: item.id,
-            orderKey: item.orderKey ?? null,
-            recency: getSortKey(item),
-          })),
-        },
-      ];
+      const woken: SidebarUpdatedItem[] = [];
+      const regular: SidebarUpdatedItem[] = [];
+      for (const item of members) {
+        if (expiredSnoozeTimestamp(item.snoozedUntil, nowMs) !== null) {
+          woken.push(item);
+        } else {
+          regular.push(item);
+        }
+      }
+      woken.sort((a, b) => {
+        const byWake = (b.snoozedUntil ?? 0) - (a.snoozedUntil ?? 0);
+        return byWake !== 0 ? byWake : a.id.localeCompare(b.id);
+      });
+      const orderedRegular = sortByManualOrder(regular, (item) => ({
+        id: item.id,
+        orderKey: item.orderKey ?? null,
+        recency: getSortKey(item),
+      }));
+      return [{ key, items: [...woken, ...orderedRegular] }];
     }
     if (key === 'later') {
       return [

@@ -59,6 +59,19 @@ export function isSidebarBucketCollapsed(
 }
 
 /**
+ * Returns the elapsed `snoozedUntil` timestamp once `nowMs >= snoozedUntil`,
+ * or `null` if the session has no expired snooze. Used to derive wake-up
+ * activity, unread state, and Focus top placement without background CRDT writes.
+ */
+export function expiredSnoozeTimestamp(
+  snoozedUntil: number | null | undefined,
+  nowMs: number
+): number | null {
+  if (typeof snoozedUntil !== 'number' || !Number.isFinite(snoozedUntil)) return null;
+  return snoozedUntil <= nowMs ? snoozedUntil : null;
+}
+
+/**
  * Classify one non-pinned, non-archived conversation into Focus, Later, or Settled.
  *
  * Snooze expiration and 7-day inactivity settling are pure derived states so no
@@ -78,16 +91,18 @@ export function sidebarStatusGroup(
   }
 
   const lastMessageMs = toTimestampMs(input.latestMessageAt);
+  const expiredSnoozeMs = expiredSnoozeTimestamp(input.snoozedUntil, nowMs) ?? 0;
+  const effectiveMessageMs = Math.max(lastMessageMs, expiredSnoozeMs);
   if (
     typeof input.settledAt === 'number' &&
     input.settledAt > 0 &&
-    lastMessageMs <= input.settledAt
+    effectiveMessageMs <= input.settledAt
   ) {
     return 'settled';
   }
 
   const restoredMs = typeof input.focusRestoredAt === 'number' ? input.focusRestoredAt : 0;
-  const effectiveActivityMs = Math.max(lastMessageMs, restoredMs);
+  const effectiveActivityMs = Math.max(effectiveMessageMs, restoredMs);
   if (
     !input.isWorking &&
     effectiveActivityMs > 0 &&

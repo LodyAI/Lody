@@ -123,10 +123,7 @@ import {
 } from '@/lib/agent-role-create';
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
 import { readMachineLocalProjects } from '@/lib/local-project-meta';
-import {
-  listWorkspaceGitHubRepositoriesForCliToken,
-  listWorkspaceMembersForCliToken,
-} from '@/lib/workspace';
+import { listWorkspaceGitHubRepositoriesForCliToken } from '@/lib/workspace';
 import {
   cancelSessionTurn,
   createSessionResult,
@@ -221,7 +218,6 @@ const SESSION_CREATE_TOOL_NAME = 'lody_session_create';
 const SESSION_CHAT_TOOL_NAME = 'lody_session_chat';
 const SESSION_CANCEL_TOOL_NAME = 'lody_session_cancel';
 const SESSION_LIST_TOOL_NAME = 'lody_session_list';
-const MEMBER_LIST_TOOL_NAME = 'lody_member_list';
 const SESSION_STATUS_MANY_TOOL_NAME = 'lody_session_status_many';
 const SESSION_HISTORY_TOOL_NAME = 'lody_session_history';
 const SESSION_CREATE_MANY_TOOL_NAME = 'lody_session_create_many';
@@ -524,14 +520,6 @@ const SessionCreateCommandInputShape = {
     .describe(
       'Target agent config; required if ambiguous, ignored with agentRoleId. Defaults above.'
     ),
-  ownerUserId: z
-    .string()
-    .trim()
-    .min(1)
-    .optional()
-    .describe(
-      'Human workspace member userId who owns this session (from lody_member_list). Omit to inherit the calling session owner.'
-    ),
   ...SessionRunConfigInputShape,
 };
 
@@ -776,7 +764,6 @@ const SessionCreateBatchItemShape = {
     .describe('Role target machine; required for multi-machine Roles.'),
   machineId: SessionCreateCommandInputShape.machineId,
   agentConfigId: SessionCreateCommandInputShape.agentConfigId,
-  ownerUserId: SessionCreateCommandInputShape.ownerUserId,
   ...SessionRunConfigInputShape,
   label: z
     .string()
@@ -1491,8 +1478,8 @@ type ResolvedMcpSessionCreate = {
 
 const resolveMcpSessionCreate = (
   input: SessionCreateCommandInput,
-  _invoking: InvokingTurnContext | undefined,
-  requester: Pick<SessionMeta, 'machineId' | 'project' | 'userId'>,
+  invoking: InvokingTurnContext | undefined,
+  requester: Pick<SessionMeta, 'machineId' | 'project'>,
   catalogRole: AgentRole | undefined,
   /**
    * The requester Local Project's linked GitHub repository, present only when
@@ -1500,13 +1487,9 @@ const resolveMcpSessionCreate = (
    */
   cloneableRepo?: string
 ): ResolvedMcpSessionCreate => {
-  const resolvedOwnerUserId = input.ownerUserId ?? requester.userId;
   if (!input.agentRoleId) {
     return {
-      input: {
-        ...input,
-        ...(resolvedOwnerUserId ? { ownerUserId: resolvedOwnerUserId } : {}),
-      },
+      input,
       prompt: input.prompt,
       dispatchConfig: buildMcpTurnDispatchConfig(input),
     };
@@ -1585,7 +1568,6 @@ const resolveMcpSessionCreate = (
     ...withoutTarget,
     machineId: role.machineId,
     agentConfigId: role.agentConfigId,
-    ...(resolvedOwnerUserId ? { ownerUserId: resolvedOwnerUserId } : {}),
     ...(useCurrentSessionAsParent !== undefined ? { useCurrentSessionAsParent } : {}),
     ...(workContext !== undefined ? { workContext } : {}),
   } as SessionCreateCommandInput;
@@ -1655,7 +1637,6 @@ const buildResolvedMcpCreateCanonicalCommand = (
   ...(resolved.input.useCurrentSessionAsParent !== undefined
     ? { useCurrentSessionAsParent: resolved.input.useCurrentSessionAsParent }
     : {}),
-  ...(resolved.input.ownerUserId ? { ownerUserId: resolved.input.ownerUserId } : {}),
   ...(resolved.input.workContext ? { workContext: resolved.input.workContext } : {}),
   ...(deadlineSeconds !== undefined ? { deadlineSeconds } : {}),
 });
@@ -1677,9 +1658,6 @@ const buildMcpCreateOptions = (
   }
   if (input.useCurrentSessionAsParent !== undefined) {
     options.useCurrentSessionAsParent = input.useCurrentSessionAsParent;
-  }
-  if (input.ownerUserId !== undefined) {
-    options.sessionOwnerUserId = input.ownerUserId;
   }
   if (input.wait !== undefined) {
     options.wait = input.wait;
@@ -2172,87 +2150,6 @@ const matchesSessionListFilters = (
     }
   }
   return true;
-};
-
-const MemberListToolInputSchema = z
-  .object({
-    query: z
-      .string()
-      .trim()
-      .min(1)
-      .max(128)
-      .optional()
-      .describe('Optional case-insensitive filter matching userId, name, or email.'),
-    limit: z
-      .number()
-      .int()
-      .positive()
-      .max(MAX_MCP_SESSION_LIST_LIMIT)
-      .optional()
-      .describe('Maximum members to return. Defaults to 20.'),
-  })
-  .strict();
-
-type MemberListToolInput = z.infer<typeof MemberListToolInputSchema>;
-
-const buildMemberList = async (input: MemberListToolInput): Promise<unknown> => {
-  const ctx = getSessionContext();
-  const auth = getCliAuthContextOrThrow('mcp');
-  const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
-  const invokingIdentity = buildInvocationIdentity(await resolveInvokingTurnSource());
-  const currentUserId = invokingIdentity.userId ?? auth.userId;
-
-  return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-    const currentSessionRecord = await manager.repo.getDocMeta(
-      getSessionRoomId(ctx.sessionId as SessionId)
-    );
-    const currentSessionOwnerId =
-      !isLoroRepoDocDeleted(currentSessionRecord) &&
-      typeof (currentSessionRecord?.meta as SessionMeta | undefined)?.userId === 'string'
-        ? (currentSessionRecord?.meta as SessionMeta).userId
-        : currentUserId;
-
-    const env = getSessionCommandEnvironment();
-    const directoryMembers = env?.listWorkspaceMembers
-      ? await env.listWorkspaceMembers({ workspaceId: workspace.id as WorkspaceId })
-      : !auth.token
-        ? [
-            {
-              userId: currentUserId,
-              name: currentUserId === auth.userId ? (auth.userName ?? null) : null,
-              image: null,
-            },
-          ]
-        : await listWorkspaceMembersForCliToken({
-            token: auth.token,
-            workspaceId: workspace.id,
-          });
-
-    const queryLower = input.query?.toLowerCase();
-    const limit = input.limit ?? DEFAULT_MCP_SESSION_LIST_LIMIT;
-
-    const members = [...directoryMembers]
-      .sort((a, b) => a.userId.localeCompare(b.userId))
-      .map((member) => ({
-        userId: member.userId,
-        ...(member.name ? { name: member.name } : {}),
-        isCurrentUser: member.userId === currentUserId,
-        isCurrentSessionOwner: member.userId === currentSessionOwnerId,
-      }))
-      .filter((member) => {
-        if (!queryLower) return true;
-        return (
-          member.userId.toLowerCase().includes(queryLower) ||
-          Boolean(member.name?.toLowerCase().includes(queryLower))
-        );
-      });
-
-    return {
-      workspaceId: workspace.id,
-      items: members.slice(0, limit),
-      total: members.length,
-    };
-  });
 };
 
 const buildSessionList = async (input: SessionListToolInput): Promise<unknown> => {
@@ -4224,7 +4121,6 @@ const startSessionCreateManyOperation = async (
           ...(item.useCurrentSessionAsParent !== undefined
             ? { useCurrentSessionAsParent: item.useCurrentSessionAsParent }
             : {}),
-          ...(item.ownerUserId ? { ownerUserId: item.ownerUserId } : {}),
           ...(item.workContext ? { workContext: item.workContext } : {}),
         } as SessionCreateCommandInput;
         return {
@@ -5837,25 +5733,6 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     async (args: SessionListToolInput) => {
       try {
         return jsonTextResult(await buildSessionList(args));
-      } catch (error) {
-        return mcpErrorResult(error);
-      }
-    }
-  );
-
-  registerSessionTool(
-    MEMBER_LIST_TOOL_NAME,
-    {
-      summary: 'List known human members in the current workspace for session owner selection.',
-      title: 'List workspace members',
-      description:
-        'List known human member userIds in the current workspace (default 20, maximum 100) so lody_session_create can assign an explicit ownerUserId. Directory entries are for owner selection only and never grant machine or workspace execution permissions.',
-      inputSchema: MemberListToolInputSchema,
-      annotations: { readOnlyHint: true },
-    },
-    async (args: MemberListToolInput) => {
-      try {
-        return jsonTextResult(await buildMemberList(args));
       } catch (error) {
         return mcpErrorResult(error);
       }
