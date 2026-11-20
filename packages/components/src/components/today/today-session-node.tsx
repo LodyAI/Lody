@@ -17,7 +17,6 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space[1.5],
-    paddingBlock: 4,
     fontSize: text.bodySize,
     lineHeight: text.bodyLeading,
   },
@@ -38,7 +37,12 @@ const styles = stylex.create({
     textUnderlineOffset: '3px',
     ':hover': { textDecorationColor: colors.tertiaryLabel },
   },
-  done: { color: colors.tertiaryLabel, textDecorationLine: 'line-through' },
+  done: {
+    color: colors.tertiaryLabel,
+    textDecorationLine: 'line-through',
+    textDecorationColor: 'currentColor',
+    ':hover': { textDecorationColor: 'currentColor' },
+  },
   muted: { color: colors.tertiaryLabel, fontStyle: 'italic' },
   check: {
     width: 14,

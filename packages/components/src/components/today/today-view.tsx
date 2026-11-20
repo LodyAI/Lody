@@ -1,7 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 import { CalendarDays, ChevronLeft, ChevronRight, MoreHorizontal, Pin, PinOff } from 'lucide-react';
 import { useAtomValue } from 'jotai';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { useTranslation } from 'react-i18next';
 import { buildTodayLink, parseTodayDate, type SessionId, type TodayDate } from '@lody/shared';
 import { buildSessionLink } from '@lody/shared/session-link';
@@ -26,6 +26,7 @@ import {
 import {
   selectSessionMentionCandidates,
   useSessionMentionItems,
+  type SessionMentionItem,
 } from '@/components/mentions/mention-session-source';
 import { useTodayEditor } from './editor/today-editor-context';
 import { TodayEditorContext } from './editor/today-editor-context';
@@ -162,17 +163,7 @@ export function TodayView(props: {
     [anchor, empty, registered, today]
   );
   const cache = runtime?.todayPages ?? null;
-  const [nodeMenu, setNodeMenu] = useState<{
-    store: TodayPageStore;
-    nodeId: TodayNodeId;
-    x: number;
-    y: number;
-  } | null>(null);
-  const [converting, setConverting] = useState<{
-    store: TodayPageStore;
-    nodeId: TodayNodeId;
-    prompt: string;
-  } | null>(null);
+  const sessionItems = useSessionMentionItems();
   const [controller, setController] = useState<TodayEditorController | null>(null);
   useEffect(() => {
     if (!cache) return undefined;
@@ -185,10 +176,6 @@ export function TodayView(props: {
         : sessionId;
     created.onOpenSession = (sessionId) => {
       if (workspaceId) openSessionDeepLink({ sessionId: sessionId as SessionId, workspaceId });
-    };
-    created.onNodeMenu = (store, nodeId, anchor) => {
-      const rect = anchor.getBoundingClientRect();
-      setNodeMenu({ store, nodeId, x: rect.left, y: rect.bottom + 4 });
     };
     setController(created);
     return () => {
@@ -292,49 +279,8 @@ export function TodayView(props: {
             />
           ))}
         </TodayOutlineSurface>
-        <TodaySessionPicker />
-        {nodeMenu ? (
-          <TodayNodeMenu
-            {...nodeMenu}
-            onClose={() => setNodeMenu(null)}
-            onConvert={() => {
-              const [fragment] = nodeMenu.store.outline.extract([nodeMenu.nodeId]);
-              setNodeMenu(null);
-              if (!fragment || fragment.sessionId) return;
-              controller?.deactivate();
-              setConverting({
-                store: nodeMenu.store,
-                nodeId: nodeMenu.nodeId,
-                prompt: buildConvertPrompt(fragment),
-              });
-            }}
-          />
-        ) : null}
-        <TodayConvertDialog
-          open={converting !== null}
-          prompt={converting?.prompt ?? ''}
-          onOpenChange={(open) => {
-            if (!open) setConverting(null);
-          }}
-          onAccepted={(sessionId) => {
-            const target = converting;
-            if (!target) return;
-            const { store, nodeId } = target;
-            // Only an accepted conversation replaces the node; children stay, folded.
-            const converted = store.undo.structural(() =>
-              store.outline.convertToSession(nodeId, sessionId, { collapseChildren: true })
-            );
-            if (!converted) {
-              store.undo.structural(() =>
-                store.outline.insertSessionNode(
-                  { parentId: null, index: Number.MAX_SAFE_INTEGER },
-                  sessionId
-                )
-              );
-            }
-            if (props.pinned) controller?.onOpenSession?.(sessionId);
-          }}
-        />
+        <TodaySessionPicker items={sessionItems} />
+        <TodayNodeActions pinned={props.pinned ?? false} />
         {anchor && anchor !== today ? (
           <div {...stylex.props(styles.back)}>
             <span {...stylex.props(styles.backButton)}>
@@ -535,11 +481,11 @@ const pickerStyles = stylex.create({
   empty: { padding: space[2], fontSize: text.footnoteSize, color: colors.tertiaryLabel },
 });
 
-/** The `@` session picker of an empty node, below the editing caret. */
-function TodaySessionPicker() {
+/** The `@` session picker of an empty node, below the editing caret. Items come from the host. */
+export function TodaySessionPicker(props: { items: readonly SessionMentionItem[] }) {
   const { t } = useTranslation();
   const controller = useTodayEditor();
-  const items = useSessionMentionItems();
+  const { items } = props;
   const picker = controller?.getPicker() ?? null;
   const root = controller?.getEditorRoot() ?? null;
   const candidates = useMemo(() => {
@@ -578,6 +524,93 @@ function TodaySessionPicker() {
         ))
       )}
     </div>
+  );
+}
+
+export type TodayConvertDialogComponent = ComponentType<{
+  open: boolean;
+  prompt: string;
+  onAccepted: (sessionId: SessionId) => void;
+  onOpenChange: (open: boolean) => void;
+}>;
+
+/**
+ * The bullet menu and "Convert to task". Only an accepted conversation
+ * replaces the node (children stay, folded); a node deleted meanwhile gets its
+ * session appended to the page instead. The dialog is replaceable so Storybook
+ * can stand in for the full new-conversation surface.
+ */
+export function TodayNodeActions(props: {
+  pinned: boolean;
+  ConvertDialog?: TodayConvertDialogComponent;
+}) {
+  const controller = useTodayEditor();
+  const ConvertDialog = props.ConvertDialog ?? TodayConvertDialog;
+  const [nodeMenu, setNodeMenu] = useState<{
+    store: TodayPageStore;
+    nodeId: TodayNodeId;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [converting, setConverting] = useState<{
+    store: TodayPageStore;
+    nodeId: TodayNodeId;
+    prompt: string;
+  } | null>(null);
+  useEffect(() => {
+    if (!controller) return undefined;
+    controller.onNodeMenu = (store, nodeId, anchor) => {
+      const rect = anchor.getBoundingClientRect();
+      setNodeMenu({ store, nodeId, x: rect.left, y: rect.bottom + 4 });
+    };
+    return () => {
+      controller.onNodeMenu = null;
+    };
+  }, [controller]);
+  return (
+    <>
+      {nodeMenu ? (
+        <TodayNodeMenu
+          {...nodeMenu}
+          onClose={() => setNodeMenu(null)}
+          onConvert={() => {
+            const [fragment] = nodeMenu.store.outline.extract([nodeMenu.nodeId]);
+            setNodeMenu(null);
+            if (!fragment || fragment.sessionId) return;
+            controller?.deactivate();
+            setConverting({
+              store: nodeMenu.store,
+              nodeId: nodeMenu.nodeId,
+              prompt: buildConvertPrompt(fragment, controller?.sessionLink ?? ((id) => id)),
+            });
+          }}
+        />
+      ) : null}
+      <ConvertDialog
+        open={converting !== null}
+        prompt={converting?.prompt ?? ''}
+        onOpenChange={(open) => {
+          if (!open) setConverting(null);
+        }}
+        onAccepted={(sessionId) => {
+          const target = converting;
+          if (!target) return;
+          const { store, nodeId } = target;
+          const converted = store.undo.structural(() =>
+            store.outline.convertToSession(nodeId, sessionId, { collapseChildren: true })
+          );
+          if (!converted) {
+            store.undo.structural(() =>
+              store.outline.insertSessionNode(
+                { parentId: null, index: Number.MAX_SAFE_INTEGER },
+                sessionId
+              )
+            );
+          }
+          if (props.pinned) controller?.onOpenSession?.(sessionId);
+        }}
+      />
+    </>
   );
 }
 

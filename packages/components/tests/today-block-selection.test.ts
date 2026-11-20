@@ -70,9 +70,10 @@ describe('Today convert-to-task prompt', () => {
     const { buildConvertPrompt } = await import('../src/components/today/editor/block-selection');
     const { model, id } = outline('Refactor sync\n  keep it deterministic\n    no sleeps\nother');
     model.setCollapsed(id('Refactor sync'), true);
+    model.insertSessionNode({ parentId: id('Refactor sync'), index: 9 }, 'sess-7');
     const [fragment] = model.extract([id('Refactor sync')]);
-    expect(buildConvertPrompt(fragment!)).toBe(
-      'Refactor sync\n- keep it deterministic\n  - no sleeps'
+    expect(buildConvertPrompt(fragment!, (sessionId) => `lody://session/${sessionId}`)).toBe(
+      'Refactor sync\n- keep it deterministic\n  - no sleeps\n- lody://session/sess-7'
     );
   });
 });

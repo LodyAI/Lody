@@ -143,8 +143,12 @@ export function parseTodayClipboard(data: {
 }
 
 /** "Convert to task" prompt: the node's text, then its subtree as an indented list. */
-export function buildConvertPrompt(fragment: TodayFragment): string {
-  const children = serializeTodayFragments(fragment.children, (sessionId) => sessionId);
+export function buildConvertPrompt(
+  fragment: TodayFragment,
+  sessionLink: (sessionId: string) => string
+): string {
+  // Session nodes below the prompt reach the agent as conversation links.
+  const children = serializeTodayFragments(fragment.children, sessionLink);
   return children ? `${fragment.text}\n${children}` : fragment.text;
 }
 
