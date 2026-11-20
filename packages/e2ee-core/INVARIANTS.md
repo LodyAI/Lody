@@ -21,7 +21,14 @@
   is a fixed backend with the pure-JS fallback, never injectable, and must accept
   exactly what the pure-JS path accepts (`test/ed25519-wasm.test.ts`).
 - Byte wrappers own copies. Epoch keys have no public byte export; private keys
-  stay with the platform. Every key copy and plaintext buffer is disposed with
+  stay with the platform. The single exception is `EngineKeyringSync`
+  (`installIntoEngineKeyring` in the native engine Spec): it copies verified epoch
+  keys and admitted public keys only into the local native engine connection of
+  the same installation, through `EngineKeyringSink` and its binary install
+  frames, and wipes every copy on every exit. The platform installs its own
+  writer seed; the library never sees it. The engine exposes content sealing and
+  opening only: it never signs ledger or governance records, never returns key
+  material and never becomes ledger authority. Every key copy and plaintext buffer is disposed with
   `acquireUseRelease`; native calls are uninterruptible.
 - Ledger authority starts only at caller-pinned genesis plus expected head/count,
   or a module-created view. `VerifiedLedger` is the only source of ledger state

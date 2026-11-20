@@ -63,6 +63,12 @@ _需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`KeyProtector`�
 
 恢复从账本当前 Epoch 向下寻找本地已安装的最高 Epoch 密钥，因此当前信封尚未送达时仍可读取旧历史。请求的密钥缺失时，必须有更高 Epoch 的已安装密钥才能回溯。查找只跳过缺失记录，其他错误直接上抛。`recoverLedgerHistory(view, key, startEpoch?)` 使用对应 Epoch 的已验证承诺校验起始密钥，包括 Epoch 0；省略 `startEpoch` 时使用账本当前 Epoch。
 
+## EngineKeyringSync
+
+_需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`InstalledEpochHistory`、`EngineKeyringSink`。_
+
+`sync()` 让 native 引擎的 keyring 与本设备的已验证状态一致：已 pin 的 genesis、所有历史上准入过的设备公钥（事后被吊销的作者写的帧仍能解开）、本设备持有的所有已验证 epoch 密钥（不含已废弃的 epoch），以及封装 epoch。当前 epoch 的密钥已安装时，封装 epoch 就是当前 epoch；否则取 `VerifiedLedger` 15 分钟预算内允许的较早保留 epoch。设备不能写时（Guest、恢复设备、已被移除，或没有可封装的 epoch），先暂停该写入者的封装；能写时，由平台装入自己的种子并恢复封装。每一步都是幂等的，所以调用方在每个触发点（准入、新 epoch、账本前进、失去权限、引擎重连）都直接调用 `sync`。这是"epoch 密钥没有公开字节导出"的唯一例外（见 `INVARIANTS.md`）：密钥字节只交给 sink，每次调用结束后擦除。返回值列出已安装和缺失的 epoch、封装 epoch，以及设备能否写入。
+
 ## KeyReceiver
 
 _需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`InstalledEpochKeys`、`KeyMailbox`、`ReceiveJournal`。_

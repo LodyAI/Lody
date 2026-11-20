@@ -214,6 +214,18 @@ Shared local-wrapping v1 bytes and all CLIENT_KEY_PURPOSES are pinned by
 independent CBOR generation, the pinned DAG-CBOR codec, WebCrypto and noble.
 These are synthetic compatibility checks, not native custody or IDB acceptance.
 
+### EngineKeyringSink
+
+The local native engine connection that seals and opens this workspace's
+content with an engine-resident keyring. The adapter binds every call to one
+engine namespace and this process's own writer, and sends keys only in the
+engine's binary secret frames; it never keeps, logs or returns them.
+`installEpoch` borrows the key bytes, which the workflow wipes when the call
+settles. `installSigner` copies the platform's own device seed from custody, so
+the library never sees that private key. Every request is idempotent;
+`EngineKeyringSinkError` reports a refused or lost request, and retrying the
+whole sync is safe.
+
 ## Application ports
 
 ### WorkspaceScope
