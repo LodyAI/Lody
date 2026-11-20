@@ -114,7 +114,7 @@ any time; when off it changes none of the app's existing behavior.
   | Later                                     | Blue clock ring + countdown (same blue, baseline) |
   | Done (settled), archived                  | Dimmed grey check ring, same grey as struck title |
   | Unread (not shown for agent-managed ones) | Small solid blue dot; title not bold              |
-  | Idle                                      | Yellow dashed ring                                |
+  | Idle                                      | Blue dashed ring                                  |
 
 - Clicking the status icon opens a status menu that changes the conversation's status (writing the same session
   metadata as the sidebar): Mark as unread / Mark as read (whichever applies), Later (presets and custom, reusing

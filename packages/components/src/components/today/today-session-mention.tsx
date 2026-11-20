@@ -83,9 +83,8 @@ const styles = stylex.create({
     verticalAlign: 'top',
   },
   // Mark colours follow the text beside them: link accent for running,
-  // waiting, unread and Later; warning for idle; Done takes its dimmed title's grey.
+  // waiting, unread, Later and idle; Done takes its dimmed title's grey.
   markAccent: { color: colors.accent, display: 'block' },
-  markWarning: { color: colors.warning, display: 'block' },
   markQuiet: { color: colors.tertiaryLabel, display: 'block' },
 
   // Plain inline text: it sits on the line's baseline like the title.
@@ -137,7 +136,7 @@ function StatusGlyph(props: { status: Extract<TodaySessionDisplay, { state: 'ok'
           height="12"
           viewBox="0 0 12 12"
           aria-hidden
-          {...stylex.props(styles.markWarning)}
+          {...stylex.props(styles.markAccent)}
         >
           <circle {...ring} stroke="currentColor" strokeDasharray="2.2 1.8" />
         </svg>
