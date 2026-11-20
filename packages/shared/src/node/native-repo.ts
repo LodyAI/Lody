@@ -10,6 +10,8 @@ import type {
   FlockKey,
   FlockRegisterEntry,
   FlockStateEntry,
+  LoroPathChange,
+  LoroPathChanges,
   LoroUpdates,
   RepoClient,
   RoomKey,
@@ -387,6 +389,43 @@ export function observeLoroDoc(
       };
     },
     (update) => listener({ kind: 'changes', updates: update.updates, txId: update.txId }),
+    () => listener({ kind: 'invalidated' })
+  );
+}
+
+/** Changed-path mode: `reset` when (re)established at the head, then path changes. */
+export type LoroPathObservationEvent =
+  | { kind: 'reset'; txId: number }
+  | { kind: 'changes'; changes: LoroPathChange[]; txId: number }
+  | { kind: 'invalidated' };
+
+/**
+ * Changed-path view of a Loro document that is read on demand rather than
+ * replicated: no initial state is loaded; a reader re-reads what it holds on
+ * each `reset`. Path changes carry no contents.
+ */
+export function observeLoroPaths(
+  client: RepoClient,
+  namespace: string,
+  room: RoomKey,
+  listener: (event: LoroPathObservationEvent) => void
+): FlockObservation {
+  return observe<LoroPathChanges>(
+    client,
+    (onUpdate) => client.beginLoroPathsSubscription(namespace, room, onUpdate),
+    (update) => {
+      const buffered: LoroPathChange[] = [];
+      return {
+        buffer: (next) => buffered.push(...next.changes),
+        async run() {
+          listener({ kind: 'reset', txId: update.roomTxId });
+          if (buffered.length)
+            listener({ kind: 'changes', changes: buffered, txId: update.roomTxId });
+          return true;
+        },
+      };
+    },
+    (update) => listener({ kind: 'changes', changes: update.changes, txId: update.txId }),
     () => listener({ kind: 'invalidated' })
   );
 }

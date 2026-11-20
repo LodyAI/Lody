@@ -58,6 +58,13 @@ owns the long-term directory contract, and both stay active.
   existing document subscription re-projects and JSON-diffs the whole document per
   commit. Migration is lazy per document and source, so opening a workspace never
   imports every Session.
+- **Session reads from the engine instead of a renderer replica (in progress).**
+  Directed by the owner: a remote reader uses bounded list-field reads and
+  changed-path subscriptions, added to the SDK as generic primitives. JSONPath was
+  measured and rejected for the batch read (unaligned projections, about 150 ms
+  first query at 100k items, unbounded results), and per-commit `diff` for changed
+  paths (160–1,150 ms at 100k); document events cost 0.01–0.1 ms. The control-plane
+  roots in the same document are an open owner decision.
 - **One host process, launched by either side.** The daemon owning the engine (#2895)
   would couple Meta availability to the daemon; a host per side would race
   `files.lock`. The host idles out after its last connection.
