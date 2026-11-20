@@ -6,6 +6,7 @@ import {
 } from '@lody/shared/node/local-cli-host-lease';
 import { createInterface } from 'node:readline/promises';
 import { statSync } from 'node:fs';
+import path from 'node:path';
 import { runCommandTextLegacy, terminatePidLegacy } from '@lody/shared/node/process';
 import { toShared } from '@/platform/process-options';
 import { readPidFileRecord, stopDaemonProcess } from './daemon-shared';
@@ -19,8 +20,10 @@ import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import {
   getSeaContext,
   installFixedServiceEntry,
+  managedDaemonRoot,
   publishManagedInstallation,
   readManagedOperation,
+  writeManagedRecord,
 } from '@/lib/managed-daemon-release';
 import { installCommandShim } from '@/lib/command-shim';
 
@@ -189,6 +192,10 @@ export async function installManagedDaemon(
   if (host) await releaseExistingHost(host, options, ports);
   {
     const service = await installFixedServiceEntry(context.capsulePath);
+    await writeManagedRecord(path.join(managedDaemonRoot(), 'selected.json'), {
+      format: 1,
+      digest: null,
+    });
     await publishManagedInstallation(context.metadata.product, service);
     console.log(`Installed Lody ${context.metadata.version}: ${service}`);
     try {

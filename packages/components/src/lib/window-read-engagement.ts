@@ -110,19 +110,22 @@ export function createWindowReadEngagementTracker(
 
   const scheduleIdleTimer = (delayMs: number) => {
     clearIdleTimer();
-    idleTimer = setTimeout(() => {
-      idleTimer = null;
-      if (!hasInteractedSinceActive || !computeActive() || lastInteractionAt === null) {
+    idleTimer = setTimeout(
+      () => {
+        idleTimer = null;
+        if (!hasInteractedSinceActive || !computeActive() || lastInteractionAt === null) {
+          emitIfChanged();
+          return;
+        }
+        const remaining = lastInteractionAt + idleMs - env.now();
+        if (remaining > 0) {
+          scheduleIdleTimer(remaining);
+          return;
+        }
         emitIfChanged();
-        return;
-      }
-      const remaining = lastInteractionAt + idleMs - env.now();
-      if (remaining > 0) {
-        scheduleIdleTimer(remaining);
-        return;
-      }
-      emitIfChanged();
-    }, Math.max(0, delayMs));
+      },
+      Math.max(0, delayMs)
+    );
   };
 
   const armInteraction = (timestampMs: number) => {
@@ -159,6 +162,12 @@ export function createWindowReadEngagementTracker(
     onFocusChange: handleFocusChange,
     onInput: (type) => {
       const nowMs = env.now();
+      if (env.isForeground()) {
+        // Real foreground user input proves the OS is neither suspended nor
+        // screen-locked, recovering from a missed resume/unlock power event.
+        suspended = false;
+        locked = false;
+      }
       if (!computeActive()) {
         // Track only direct pointer/touch presses so clicking into an unfocused
         // window's content area still registers if `focus` fires slightly after.
@@ -238,7 +247,9 @@ function acquireSharedWindowReadEngagementTracker(): {
   release: () => void;
 } {
   if (!sharedTracker) {
-    sharedTracker = createWindowReadEngagementTracker(createBrowserWindowReadEngagementEnvironment());
+    sharedTracker = createWindowReadEngagementTracker(
+      createBrowserWindowReadEngagementEnvironment()
+    );
   }
   sharedSubscriberCount += 1;
   const tracker = sharedTracker;
@@ -273,26 +284,37 @@ export function useObserveWindowReadEngagement(): void {
  * foreground and has received page interaction.
  */
 export function useWindowReadEngagement(): WindowReadEngagementState & {
+  /** Increments on each emitted engagement transition so effects re-run even after a clock-jump re-arm. */
+  engagementRevision: number;
   getLatestState: () => WindowReadEngagementState;
 } {
   const trackerRef = useRef<WindowReadEngagementTracker | null>(null);
-  const [state, setState] = useState<WindowReadEngagementState>(() =>
-    sharedTracker
+  const [snapshot, setSnapshot] = useState<{
+    state: WindowReadEngagementState;
+    revision: number;
+  }>(() => ({
+    state: sharedTracker
       ? sharedTracker.getState()
-      : { isWindowActive: isAppForeground(), hasPageInteraction: false }
-  );
+      : { isWindowActive: isAppForeground(), hasPageInteraction: false },
+    revision: 0,
+  }));
 
   useEffect(() => {
     const { tracker: acquired, release } = acquireSharedWindowReadEngagementTracker();
     trackerRef.current = acquired;
     const latest = acquired.getState();
-    setState((current) =>
-      current.isWindowActive === latest.isWindowActive &&
-      current.hasPageInteraction === latest.hasPageInteraction
+    setSnapshot((current) =>
+      current.state.isWindowActive === latest.isWindowActive &&
+      current.state.hasPageInteraction === latest.hasPageInteraction
         ? current
-        : latest
+        : { state: latest, revision: current.revision + 1 }
     );
-    const unsubscribe = acquired.subscribe(setState);
+    const unsubscribe = acquired.subscribe((next) => {
+      setSnapshot((current) => ({
+        state: next,
+        revision: current.revision + 1,
+      }));
+    });
     return () => {
       unsubscribe();
       if (trackerRef.current === acquired) {
@@ -310,7 +332,8 @@ export function useWindowReadEngagement(): WindowReadEngagementState & {
   }, []);
 
   return {
-    ...state,
+    ...snapshot.state,
+    engagementRevision: snapshot.revision,
     getLatestState,
   };
 }

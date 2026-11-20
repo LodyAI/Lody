@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { PromptShortcutError } from '@lody/shared/prompt-shortcuts/model';
 import type { PromptShortcutScope } from '@lody/shared/prompt-shortcuts';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';

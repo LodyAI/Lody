@@ -25,7 +25,7 @@ import {
 import { Toggle } from '@lody/ui/toggle';
 import { ToggleGroup } from '@lody/ui/toggle-group';
 import { useAtomValue } from 'jotai';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { toast } from '@/lib/toast';
 import { currentWorkspaceIdAtom, userAtom } from '@/atoms';
 import { getDurationSinceMs, getPerformanceNowMs } from '@/lib/posthog-analytics';

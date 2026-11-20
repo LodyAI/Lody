@@ -19,7 +19,6 @@ import {
   type TodayFragment,
   type TodayDate,
   type TodayNodeId,
-  type TodayNodeView,
 } from '@lody/shared';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
 import type { TodayPageStoreCache } from '../../../providers/today-page-store-cache';

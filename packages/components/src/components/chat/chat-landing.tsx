@@ -14,6 +14,8 @@ import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import {
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -69,7 +71,7 @@ import {
   deriveDraftSessionTitle,
 } from '@lody/shared';
 import { useCloudMutation, useCloudQuery, usePlatform } from '@lody/platform/react';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import {
   ArrowUp,
   ChevronsUpDown,
@@ -386,10 +388,15 @@ import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspac
 import { MobileCreateWorkspaceSheet } from '@/components/mobile/mobile-create-workspace-sheet';
 import { ChatComposer } from '@/components/chat/chat-composer';
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
-import {
-  MobileProjectFileBrowser,
-  type MobileProjectFileBrowserHandle,
-} from '@/components/files/mobile-project-file-browser';
+/* The files tab only renders in a mobile project context, but `chat-landing`
+   is on the desktop boot path — and the browser pulls `SessionMonacoTextViewer`
+   (the whole monaco editor). Keep the type eager, defer the implementation. */
+const MobileProjectFileBrowser = lazy(() =>
+  import('@/components/files/mobile-project-file-browser').then((module) => ({
+    default: module.MobileProjectFileBrowser,
+  }))
+);
+import type { MobileProjectFileBrowserHandle } from '@/components/files/mobile-project-file-browser';
 import {
   createLocalProjectIpcFileTransport,
   createLocalProjectRpcFileTransport,
@@ -6853,19 +6860,21 @@ function WorkspaceChatLanding({
           fileNavSegments={mobileFileNavSegments}
           onFileNavBack={() => mobileFileBrowserRef.current?.goBack()}
           filesTabContent={({ onScrollActivity, bottomTabBarVisible }) => (
-            <MobileProjectFileBrowser
-              key={mobileProjectFileProviderKey ?? 'no-provider'}
-              ref={mobileFileBrowserRef}
-              provider={mobileProjectFileProvider}
-              onPathChange={setMobileFileNavSegments}
-              onScrollActivity={onScrollActivity}
-              bottomTabBarVisible={bottomTabBarVisible}
-              message={
-                mobileProjectFileProvider
-                  ? undefined
-                  : t('workspace.projects.filesUnavailable', 'Files are unavailable.')
-              }
-            />
+            <Suspense fallback={null}>
+              <MobileProjectFileBrowser
+                key={mobileProjectFileProviderKey ?? 'no-provider'}
+                ref={mobileFileBrowserRef}
+                provider={mobileProjectFileProvider}
+                onPathChange={setMobileFileNavSegments}
+                onScrollActivity={onScrollActivity}
+                bottomTabBarVisible={bottomTabBarVisible}
+                message={
+                  mobileProjectFileProvider
+                    ? undefined
+                    : t('workspace.projects.filesUnavailable', 'Files are unavailable.')
+                }
+              />
+            </Suspense>
           )}
           /* Both project kinds get a real per-project Settings tab. Local
              projects expose team-share + ACP history sync + worktree
