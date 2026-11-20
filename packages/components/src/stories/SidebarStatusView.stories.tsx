@@ -439,7 +439,7 @@ function StatusViewPlayground({
             <code>3d</code>). Drag a row into Focus or use the context menu to restore.
           </p>
           <p>
-            <strong>Settled (已收尾)</strong>: collapsed by default; includes manually settled and
+            <strong>Settled (已完成)</strong>: collapsed by default; includes manually settled and
             7+ day inactive sessions. Right-click any row to test <strong>Later</strong>,{' '}
             <strong>Settle</strong>, and <strong>Move to Focus</strong>.
           </p>

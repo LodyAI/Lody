@@ -60,7 +60,7 @@ creating conversations.
      already-read sessions unread on late-syncing devices, assigns a top Focus
      `orderKey` (still below Pinned) when unread, and records
      `focusRestoredAt` (so older sessions also surface).
-  3. **Settled** (`已收尾`): Collapsed by default (showing its count).
+  3. **Settled** (`已完成`): Collapsed by default (showing its count).
      Contains conversations explicitly settled (`settledAt` with no newer
      message) or inactive for at least 7 days (`now - lastMessageAt >= 7d`,
      not working, not waiting for permission, and not manually restored to

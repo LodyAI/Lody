@@ -2,7 +2,7 @@
  * The sidebar's "Status" (`状态`) groups in display order:
  * - `focus`   (进行中): expanded by default, manually ordered via `orderKey`
  * - `later`   (稍后):   collapsed by default, snoozed until `snoozedUntil`, sorted by wake-up time ascending
- * - `settled` (已收尾): collapsed by default, manually settled or inactive >= 7 days, sorted by recency descending
+ * - `settled` (已完成): collapsed by default, manually settled or inactive >= 7 days, sorted by recency descending
  *
  * Behavior: specs/sidebar-status-view.md.
  */
