@@ -219,7 +219,7 @@ export function TodayView(props: {
             </Menu.Content>
           </Menu.Root>
         </div>
-        <div {...stylex.props(styles.scroller)}>
+        <TodayOutlineSurface controller={controller}>
           {days.map((date, index) => (
             <TodayDaySection
               key={`${userId}:${date}`}
@@ -231,7 +231,7 @@ export function TodayView(props: {
               onEmpty={onEmpty}
             />
           ))}
-        </div>
+        </TodayOutlineSurface>
         {anchor && anchor !== today ? (
           <div {...stylex.props(styles.back)}>
             <span {...stylex.props(styles.backButton)}>
@@ -248,6 +248,33 @@ export function TodayView(props: {
         ) : null}
       </div>
     </TodayEditorContext.Provider>
+  );
+}
+
+/** The scroll surface: focus, keys and clipboard for block selection. */
+export function TodayOutlineSurface(props: {
+  controller: TodayEditorController | null;
+  children: React.ReactNode;
+}) {
+  const { controller } = props;
+  return (
+    <div
+      {...stylex.props(styles.scroller)}
+      ref={controller?.attachSurface}
+      tabIndex={-1}
+      role="tree"
+      aria-multiselectable
+      onKeyDown={(event) => {
+        if (event.target === event.currentTarget) controller?.onBlockKey(event.nativeEvent);
+      }}
+      onCopy={(event) => controller?.onBlockClipboard(event.nativeEvent, false)}
+      onCut={(event) => controller?.onBlockClipboard(event.nativeEvent, true)}
+      onPaste={(event) => {
+        if (event.target === event.currentTarget) controller?.onBlockPaste(event.nativeEvent);
+      }}
+    >
+      {props.children}
+    </div>
   );
 }
 

@@ -3,6 +3,7 @@ import {
   COMMAND_PRIORITY_CRITICAL,
   COMMAND_PRIORITY_HIGH,
   KEY_DOWN_COMMAND,
+  PASTE_COMMAND,
   REDO_COMMAND,
   UNDO_COMMAND,
   createEditor,
@@ -17,6 +18,14 @@ import {
   $setSelectionOffsets,
 } from '@/ui/mention/composer-document';
 import { caretEdgeLines, offsetFromPoint } from './caret-geometry';
+import {
+  TODAY_CLIPBOARD_MIME,
+  blockRange,
+  parseTodayClipboard,
+  resolveBlockKey,
+  serializeTodayFragments,
+  topLevelSelection,
+} from './block-selection';
 import { bindLoroText } from './loro-lexical-binding';
 import { resolveOutlineKey, type OutlineIntent } from './outline-keys';
 
@@ -40,6 +49,12 @@ export class TodayEditorController {
   readonly editor: LexicalEditor;
   private active: TodayActiveNode | null = null;
   private selection: TodayBlockSelection | null = null;
+  private blockAnchor: TodayNodeId | null = null;
+  private blockFocus: TodayNodeId | null = null;
+  private surface: HTMLElement | null = null;
+  private stopPointer: (() => void) | null = null;
+  /** Builds the plain-text form of a copied session node. */
+  sessionLink: (sessionId: string) => string = (sessionId) => sessionId;
   private pendingCaret: CaretTarget = 'end';
   private root: HTMLElement | null = null;
   private binding: { dispose(): void } | null = null;
@@ -133,11 +148,20 @@ export class TodayEditorController {
     this.notify();
   }
 
-  selectBlocks(store: TodayPageStore, ids: TodayNodeId[]) {
+  selectBlocks(
+    store: TodayPageStore,
+    ids: TodayNodeId[],
+    ends: { anchor?: TodayNodeId; focus?: TodayNodeId } = {}
+  ) {
+    if (ids.length === 0) return;
     this.deactivate(false);
     this.pin(store.docId);
     this.selection = { store, ids };
+    this.blockAnchor = ends.anchor ?? ids[0]!;
+    this.blockFocus = ends.focus ?? ids.at(-1)!;
     store.undo.setSelection({ blockSelect: ids });
+    window.getSelection()?.removeAllRanges();
+    this.surface?.focus({ preventScroll: true });
     this.notify();
   }
 
@@ -145,6 +169,221 @@ export class TodayEditorController {
     if (!this.selection) return;
     this.selection = null;
     this.notify();
+  }
+
+  /** The scroll surface: owns focus, keys and clipboard while blocks are selected. */
+  attachSurface = (element: HTMLElement | null) => {
+    this.surface = element;
+  };
+
+  /** Keys on the surface while blocks are selected. Returns true when handled. */
+  onBlockKey(event: KeyboardEvent): boolean {
+    const selection = this.selection;
+    if (!selection) return false;
+    const intent = resolveBlockKey(event, isMac() ? 'mac' : 'other');
+    if (!intent) return false;
+    event.preventDefault();
+    const { store } = selection;
+    const outline = store.outline;
+    const visible = store.getSnapshot().visible;
+    const roots = topLevelSelection(visible, selection.ids);
+    const focusIndex = visible.findIndex((node) => node.id === this.blockFocus);
+    const keep = () =>
+      this.selectBlocks(store, selection.ids, {
+        anchor: this.blockAnchor ?? undefined,
+        focus: this.blockFocus ?? undefined,
+      });
+    switch (intent.type) {
+      case 'clear':
+        this.clearBlockSelection();
+        return true;
+      case 'edit': {
+        const node = visible.find((candidate) => candidate.id === this.blockFocus);
+        if (!node) return true;
+        if (node.kind === 'session') this.onOpenSession?.(node.sessionId!, event);
+        else this.activate(store, node.id, 'end');
+        return true;
+      }
+      case 'delete':
+        this.clearBlockSelection();
+        this.apply(
+          store,
+          store.undo.structural(() => outline.deleteNodes(roots))
+        );
+        return true;
+      case 'step': {
+        const next = visible[focusIndex + intent.step];
+        if (next) this.selectBlocks(store, [next.id]);
+        return true;
+      }
+      case 'extend': {
+        const next = visible[focusIndex + intent.step];
+        if (!next || !this.blockAnchor) return true;
+        this.selectBlocks(store, blockRange(visible, this.blockAnchor, next.id), {
+          anchor: this.blockAnchor,
+          focus: next.id,
+        });
+        return true;
+      }
+      case 'select-all':
+        this.selectBlocks(
+          store,
+          visible.map((node) => node.id)
+        );
+        return true;
+      case 'indent':
+        store.undo.structural(() => outline.indent(roots));
+        keep();
+        return true;
+      case 'outdent':
+        store.undo.structural(() => outline.outdent(roots));
+        keep();
+        return true;
+      case 'move-up':
+        store.undo.structural(() => outline.moveUp(roots));
+        keep();
+        return true;
+      case 'move-down':
+        store.undo.structural(() => outline.moveDown(roots));
+        keep();
+        return true;
+    }
+  }
+
+  /** Copy or cut the selected blocks (surface `copy`/`cut` events). */
+  onBlockClipboard(event: ClipboardEvent, cut: boolean): boolean {
+    const selection = this.selection;
+    if (!selection || !event.clipboardData) return false;
+    const { store } = selection;
+    const roots = topLevelSelection(store.getSnapshot().visible, selection.ids);
+    const fragments = store.outline.extract(roots);
+    event.preventDefault();
+    event.clipboardData.setData('text/plain', serializeTodayFragments(fragments, this.sessionLink));
+    event.clipboardData.setData(TODAY_CLIPBOARD_MIME, JSON.stringify({ v: 1, fragments }));
+    if (cut) {
+      this.clearBlockSelection();
+      this.apply(
+        store,
+        store.undo.structural(() => store.outline.deleteNodes(roots))
+      );
+    }
+    return true;
+  }
+
+  /** Paste after the selected blocks. */
+  onBlockPaste(event: ClipboardEvent): boolean {
+    const selection = this.selection;
+    const fragments = event.clipboardData && readClipboard(event.clipboardData);
+    if (!selection || !fragments) return false;
+    event.preventDefault();
+    const { store } = selection;
+    const roots = topLevelSelection(store.getSnapshot().visible, selection.ids);
+    const after = roots.at(-1);
+    if (!after) return true;
+    this.apply(
+      store,
+      store.undo.structural(() => store.outline.paste({ kind: 'after', nodeId: after }, fragments))
+    );
+    return true;
+  }
+
+  private onEditorPaste(event: ClipboardEvent | InputEvent | KeyboardEvent | null): boolean {
+    const active = this.active;
+    if (!active || !(event instanceof ClipboardEvent) || !event.clipboardData) return false;
+    const data = event.clipboardData;
+    const structured = data.getData(TODAY_CLIPBOARD_MIME);
+    const text = data.getData('text/plain');
+    if (!structured && !text.includes('\n')) return false;
+    const fragments = readClipboard(data);
+    if (!fragments) return false;
+    event.preventDefault();
+    const offset = this.editor.getEditorState().read(() => $readSelectionOffsets())?.start ?? 0;
+    const { store, nodeId } = active;
+    queueMicrotask(() =>
+      this.apply(
+        store,
+        store.undo.structural(() =>
+          store.outline.paste({ kind: 'text', nodeId, offset }, fragments)
+        )
+      )
+    );
+    return true;
+  }
+
+  /** Opens a session node (wired by the host). */
+  onOpenSession:
+    | ((sessionId: string, event?: { metaKey?: boolean; ctrlKey?: boolean }) => void)
+    | null = null;
+
+  /**
+   * Pointer pressed on a row: edit it, or extend a block selection with Shift.
+   * Dragging onto another row of the same day turns the gesture into a block
+   * selection; dragging back onto the starting row returns to text editing.
+   */
+  pointerDown(
+    store: TodayPageStore,
+    nodeId: TodayNodeId,
+    element: HTMLElement,
+    event: { clientX: number; clientY: number; shiftKey: boolean }
+  ) {
+    const extendFrom =
+      this.selection?.store === store
+        ? this.blockAnchor
+        : this.active?.store === store
+          ? this.active.nodeId
+          : null;
+    if (event.shiftKey && extendFrom) {
+      const visible = store.getSnapshot().visible;
+      this.selectBlocks(store, blockRange(visible, extendFrom, nodeId), {
+        anchor: extendFrom,
+        focus: nodeId,
+      });
+      return;
+    }
+    // Read the day before activation: activating replaces this static element.
+    const day = element.closest('[data-today-date]');
+    this.activateAtPoint(store, nodeId, element, event.clientX, event.clientY);
+    this.trackDrag(store, nodeId, day);
+  }
+
+  private trackDrag(store: TodayPageStore, anchor: TodayNodeId, day: Element | null) {
+    this.stopPointer?.();
+    if (!day) return;
+    const rowAt = (y: number): TodayNodeId | null => {
+      const rows = [...day.querySelectorAll<HTMLElement>('[data-today-node]')];
+      let best: HTMLElement | undefined;
+      for (const row of rows) {
+        const rect = row.getBoundingClientRect();
+        if (y < rect.top) break;
+        best = row;
+      }
+      return (
+        (best?.dataset.todayNode as TodayNodeId | undefined) ??
+        (rows[0]?.dataset.todayNode as TodayNodeId | undefined) ??
+        null
+      );
+    };
+    const move = (event: PointerEvent) => {
+      if ((event.buttons & 1) === 0) return stop();
+      const target = rowAt(event.clientY);
+      if (!target) return;
+      if (target !== anchor) {
+        const visible = store.getSnapshot().visible;
+        this.selectBlocks(store, blockRange(visible, anchor, target), { anchor, focus: target });
+      } else if (this.selection) {
+        this.activate(store, anchor, 'end');
+      }
+    };
+    const stop = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('blur', stop);
+      this.stopPointer = null;
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('blur', stop);
+    this.stopPointer = stop;
   }
 
   deactivate(notify = true) {
@@ -348,10 +587,18 @@ export class TodayEditorController {
   }
 
   dispose() {
+    this.stopPointer?.();
     this.deactivate(false);
     if (this.pinnedDocId) this.cache.releaseRef(this.pinnedDocId);
     this.pinnedDocId = null;
     for (const cleanup of this.cleanups.splice(0)) cleanup();
     this.listeners.clear();
   }
+}
+
+function readClipboard(data: DataTransfer) {
+  return parseTodayClipboard({
+    json: data.getData(TODAY_CLIPBOARD_MIME) || undefined,
+    text: data.getData('text/plain') || undefined,
+  });
 }

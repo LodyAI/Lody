@@ -5,6 +5,7 @@ import { getTodayDocId, openTodayOutline, parseTodayPasteText, type TodayDate } 
 import { TodayEditorContext } from '@/components/today/editor/today-editor-context';
 import { TodayEditorController } from '@/components/today/editor/today-editor-controller';
 import { TodayDaySection } from '@/components/today/today-day-section';
+import { TodayOutlineSurface } from '@/components/today/today-view';
 import { createTodayPageStoreCache } from '@/providers/today-page-store-cache';
 
 const USER = 'demo-user';
@@ -54,18 +55,20 @@ function DayStream(props: { dates: TodayDate[] }) {
   }, [cache]);
   return (
     <TodayEditorContext.Provider value={controller}>
-      <div style={{ maxWidth: 720, padding: 24 }}>
-        {props.dates.map((date, index) => (
-          <TodayDaySection
-            key={date}
-            cache={cache}
-            userId={USER}
-            date={date}
-            today={TODAY}
-            isTop={index === 0}
-            onEmpty={() => {}}
-          />
-        ))}
+      <div style={{ maxWidth: 720, height: 640, display: 'flex', flexDirection: 'column' }}>
+        <TodayOutlineSurface controller={controller}>
+          {props.dates.map((date, index) => (
+            <TodayDaySection
+              key={date}
+              cache={cache}
+              userId={USER}
+              date={date}
+              today={TODAY}
+              isTop={index === 0}
+              onEmpty={() => {}}
+            />
+          ))}
+        </TodayOutlineSurface>
       </div>
     </TodayEditorContext.Provider>
   );

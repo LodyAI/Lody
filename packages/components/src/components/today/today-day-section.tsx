@@ -198,17 +198,10 @@ function TodayRow(props: { node: TodayNodeView | null; store: TodayPageStore }) 
           {...stylex.props(styles.text, (!node || !node.text) && styles.placeholder)}
           onPointerDown={(event) => {
             if (!controller || event.button !== 0 || event.metaKey || event.ctrlKey) return;
-            if (event.shiftKey || event.altKey) return;
+            if (event.altKey) return;
             event.preventDefault();
             if (!node) controller.startPage(store);
-            else
-              controller.activateAtPoint(
-                store,
-                node.id,
-                event.currentTarget,
-                event.clientX,
-                event.clientY
-              );
+            else controller.pointerDown(store, node.id, event.currentTarget, event);
           }}
         >
           {node ? node.text || '\u200b' : t('today.empty', 'Write something…')}
