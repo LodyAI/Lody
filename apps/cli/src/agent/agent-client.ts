@@ -638,6 +638,7 @@ export class AgentClient implements acp.Client {
   /** Session config options returned by the agent; the source of model/mode choices and names. */
   private configOptions: acp.SessionConfigOption[] = [];
   private availableCommands: AcpCommandSummary[] | undefined;
+  private readonly availableCommandsWaiters = new Set<() => void>();
   private readonly configOptionsListeners = new Set<() => void>();
   /** Desired config retained across same-client replacement sessions. */
   private readonly configOptionValues: NonNullable<SessionTurnInputConfig['configOptionValues']>;
@@ -973,6 +974,7 @@ export class AgentClient implements acp.Client {
           description: description ?? undefined,
         })
       );
+      for (const wake of [...this.availableCommandsWaiters]) wake();
     }
 
     if (notification.update.sessionUpdate === 'config_option_update') {
@@ -3004,6 +3006,36 @@ export class AgentClient implements acp.Client {
 
   getAvailableCommands(): AcpCommandSummary[] | undefined {
     return this.availableCommands;
+  }
+
+  /** Commands observed for `acpSessionId`; undefined once this client serves another session. */
+  getAvailableCommandsForSession(acpSessionId: string): AcpCommandSummary[] | undefined {
+    return this.isCurrentAcpSession(acpSessionId) ? this.availableCommands : undefined;
+  }
+
+  /**
+   * Standard ACP agents advertise commands with `available_commands_update` after
+   * `session/new` returns. Resolves with the observed list as soon as one exists, or with
+   * `undefined` once `timeoutMs` elapses or `signal` aborts; never rejects.
+   */
+  waitForAvailableCommands(
+    timeoutMs: number,
+    signal?: AbortSignal
+  ): Promise<AcpCommandSummary[] | undefined> {
+    if (this.availableCommands !== undefined || signal?.aborted) {
+      return Promise.resolve(this.availableCommands);
+    }
+    return new Promise((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        this.availableCommandsWaiters.delete(finish);
+        signal?.removeEventListener('abort', finish);
+        resolve(this.availableCommands);
+      };
+      const timer = setTimeout(finish, timeoutMs);
+      this.availableCommandsWaiters.add(finish);
+      signal?.addEventListener('abort', finish, { once: true });
+    });
   }
 
   /** Returns the config options currently known for this session. */

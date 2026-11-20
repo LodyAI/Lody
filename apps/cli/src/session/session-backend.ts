@@ -106,6 +106,10 @@ export interface SessionBackend {
     basedOnUserTurnId: string,
     patch: SessionAcpRuntimeConfigPatch
   ): Promise<boolean>;
+  /** Patches the current snapshot only while it belongs to `patch.acpSessionId`. */
+  applyAcpRuntimeConfigPatchToCurrentSnapshot(
+    patch: SessionAcpRuntimeConfigPatch
+  ): Promise<boolean>;
   replaceEditableTail(input: ReplaceEditableTailInput): Promise<SessionEditableTailResult>;
   openAssistantTurn(input: OpenAssistantTurnInput): Promise<void>;
   respondPermission(
@@ -387,6 +391,12 @@ class LoroSessionBackend implements SessionBackend {
     patch: SessionAcpRuntimeConfigPatch
   ): Promise<boolean> {
     return this.sessionDoc.applyAcpRuntimeConfigPatch(basedOnUserTurnId, patch);
+  }
+
+  applyAcpRuntimeConfigPatchToCurrentSnapshot(
+    patch: SessionAcpRuntimeConfigPatch
+  ): Promise<boolean> {
+    return this.sessionDoc.applyAcpRuntimeConfigPatchToCurrentSnapshot(patch);
   }
 
   replaceEditableTail(input: ReplaceEditableTailInput): Promise<SessionEditableTailResult> {

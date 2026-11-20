@@ -320,7 +320,7 @@ import {
   clearThreadGoalFromHistory,
 } from '@/lib/acp/history';
 import type { AcpAgentEditEvidence, AcpStandardDiffBlockEvidence } from '@/lib/acp/history';
-import { mergeAcpRuntimeConfigUpdates } from '@/lib/acp/runtime-config';
+import { getAcpRuntimeConfigPatch, mergeAcpRuntimeConfigUpdates } from '@/lib/acp/runtime-config';
 import { generateTitleIsolated, sanitizeTitle } from '@/agent/title-generator';
 import type { AgentSessionWarning, NativeAgentWork } from '@/agent/agent-client';
 import { SessionActivePresenceControllerLegacy } from './loro/session-active-presence-legacy';
@@ -1914,7 +1914,17 @@ export class MessageHandler {
         await this.awaitTurnHistoryGate(session.sessionId);
         if (context.signal?.aborted) return;
         const backend = await this.getSessionBackend(context.sessionDoc);
-        await backend.applyAcpRuntimeConfigPatch(basedOnUserTurnId, runtimeConfigPatch);
+        // Read commands at write time: one advertised after the run config was applied found
+        // no snapshot for this ACP session yet, so this write is the one that must carry it.
+        const availableCommands = session.agentClient?.getAvailableCommandsForSession(
+          runtimeConfigPatch.acpSessionId
+        );
+        await backend.applyAcpRuntimeConfigPatch(
+          basedOnUserTurnId,
+          availableCommands === undefined
+            ? runtimeConfigPatch
+            : { ...runtimeConfigPatch, availableCommands }
+        );
       };
       void persistRuntimeConfig().catch((error) => {
         this.logger.warn(
@@ -5359,6 +5369,11 @@ export class MessageHandler {
     }
     const target = this.store.getCurrentACPUpdateTarget(sessionId);
     if (target) this.recordLiveActivity(sessionId, update);
+    if (!target && update.update.sessionUpdate === 'available_commands_update') {
+      // Standard agents advertise commands right after session/new, before any assistant entry.
+      this.persistOutOfTurnAvailableCommands(sessionId, update);
+      return;
+    }
     if (!target) {
       this.captureACPUpdateInvariant('out_of_turn_acp_update_without_target', sessionId, update);
       this.logger.debug(
@@ -5393,6 +5408,23 @@ export class MessageHandler {
       target,
     });
     this.scheduleFlushACPUpdates(sessionId);
+  }
+
+  private persistOutOfTurnAvailableCommands(
+    sessionId: SessionId,
+    notification: AcpSessionNotification
+  ): void {
+    const patch = getAcpRuntimeConfigPatch(notification);
+    if (!patch) return;
+    void (async () => {
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
+      await backend.applyAcpRuntimeConfigPatchToCurrentSnapshot(patch);
+    })().catch((error: unknown) => {
+      this.logger.debug(
+        `[${sessionId}] Failed to persist out-of-turn ACP commands: ${formatErrorMessage(error)}`
+      );
+    });
   }
 
   private clearScheduledACPFlush(sessionId: SessionId): void {

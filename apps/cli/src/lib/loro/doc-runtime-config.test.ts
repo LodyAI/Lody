@@ -94,6 +94,39 @@ describe('SessionDocument ACP runtime config', () => {
     expect(doc.mirror?.getState().acpRuntimeConfig?.availableCommands).toBeUndefined();
   });
 
+  it('applies out-of-turn commands only to the snapshot of the same runtime', async () => {
+    const doc = createDocument();
+    const commands = (name: string) => ({
+      acpSessionId: 'acp-1' as never,
+      availableCommands: [{ name }],
+    });
+    // Before any run-config snapshot exists the next turn's capture carries the list.
+    expect(await doc.applyAcpRuntimeConfigPatchToCurrentSnapshot(commands('early'))).toBe(false);
+    expect(doc.mirror?.getState().acpRuntimeConfig?.availableCommands).toBeUndefined();
+
+    await doc.applyAcpRuntimeConfigPatch('turn-1', {
+      acpSessionId: 'acp-1' as never,
+      modelId: 'm',
+    });
+    expect(await doc.applyAcpRuntimeConfigPatchToCurrentSnapshot(commands('goal'))).toBe(true);
+    expect(doc.mirror?.getState().acpRuntimeConfig).toMatchObject({
+      basedOnUserTurnId: 'turn-1',
+      modelId: 'm',
+      availableCommands: [{ name: 'goal' }],
+    });
+
+    expect(
+      await doc.applyAcpRuntimeConfigPatchToCurrentSnapshot({
+        acpSessionId: 'acp-old' as never,
+        availableCommands: [{ name: 'stale' }],
+      })
+    ).toBe(false);
+    // A newer user turn whose run config has not been captured yet is not overwritten.
+    await updateTestHistory(doc, (history) => [...history, historyEntry('turn-2', 'user')]);
+    expect(await doc.applyAcpRuntimeConfigPatchToCurrentSnapshot(commands('late'))).toBe(false);
+    expect(doc.mirror?.getState().acpRuntimeConfig?.availableCommands).toEqual([{ name: 'goal' }]);
+  });
+
   it('never persists sensitive option ids even when a caller passes them directly', async () => {
     const doc = createDocument();
 

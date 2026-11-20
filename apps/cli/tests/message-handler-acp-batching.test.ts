@@ -229,6 +229,8 @@ const createRecoveryHarness = async (
     onPrompt?: () => Promise<void>;
     retryError?: Error;
     cleanup?: () => Promise<void>;
+    /** Commands the client holds when the run-config snapshot is written. */
+    commandsAtWrite?: { name: string; description?: string }[];
   } = {}
 ) => {
   const fakeTimersActive = vi.isFakeTimers();
@@ -345,6 +347,7 @@ const createRecoveryHarness = async (
     session.agentClient = {
       isCreated: () => true,
       getAvailableCommands: () => [],
+      getAvailableCommandsForSession: () => options.commandsAtWrite ?? [],
       getConfigOptions: () => [],
       currentModel: undefined,
       get pendingPromptCompletion() {
@@ -810,6 +813,58 @@ describe('MessageHandler ACP batching', () => {
       expect(h.outcomes.map((fact) => fact.outcome)).toEqual([
         { kind: 'unknown', code: 'agent_disconnected' },
       ]);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('writes the commands observed when the run-config snapshot is persisted', async () => {
+    const h = await createRecoveryHarness({
+      completeNormally: true,
+      updates: [{ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'done' } }],
+      commandsAtWrite: [{ name: 'goal', description: 'goal' }],
+    });
+    try {
+      await h.service.continueSession(h.message);
+      await h.service.drainInboxExecutions();
+      await vi.waitFor(() =>
+        expect(h.doc.mirror?.getState().acpRuntimeConfig).toMatchObject({
+          acpSessionId: 'acp-old',
+          availableCommands: [{ name: 'goal', description: 'goal' }],
+        })
+      );
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('stores commands a standard agent advertises before its first assistant entry', async () => {
+    const h = await createRecoveryHarness();
+    const advertise = (acpSessionId: string, name: string) =>
+      h.manager.emit('onACPUpdateMessage', h.sessionId, {
+        sessionId: acpSessionId,
+        update: {
+          sessionUpdate: 'available_commands_update',
+          availableCommands: [{ name, description: name }],
+        },
+      });
+    try {
+      await h.doc.applyAcpRuntimeConfigPatch(h.message.userTurnId, {
+        acpSessionId: 'acp-old' as ACPSessionId,
+        modelId: 'synthetic-model',
+      });
+      expect(h.host.store.getCurrentACPUpdateTarget(h.sessionId)).toBeUndefined();
+      advertise('acp-detached', 'stale');
+      advertise('acp-old', 'goal');
+
+      await vi.waitFor(() =>
+        expect(h.doc.mirror?.getState().acpRuntimeConfig).toMatchObject({
+          acpSessionId: 'acp-old',
+          modelId: 'synthetic-model',
+          availableCommands: [{ name: 'goal', description: 'goal' }],
+        })
+      );
+      expect(h.host.store.get(h.sessionId).acpUpdateBuffer).toEqual([]);
     } finally {
       await h.close();
     }
