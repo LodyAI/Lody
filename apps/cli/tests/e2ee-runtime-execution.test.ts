@@ -1,3 +1,6 @@
+import { recordScheduleAuthorization } from '@lody/shared/schedule-authorization';
+import { readScheduleAuthorization } from '@lody/shared/schedule-authorization';
+import { ScheduleRepository } from '@lody/shared/schedule-repository';
 import { reuseRuntimeKeyPairs } from './e2ee-runtime-key-pairs';
 import { authorizeCliE2eeSessionTarget } from '../src/lib/e2ee/execution-authorization';
 import { createDaemonLossRegistry } from '../src/lib/e2ee/client-loss-observer';
@@ -6,14 +9,11 @@ import {
   decodeE2eeIntentRecord,
   encodeE2eeIntentRecord,
   manualScheduleRunKey,
-  readScheduleAuthorization,
-  recordScheduleAuthorization,
   scheduleDeclarationSubject,
   scheduleDefinitionFingerprint,
   type ScheduleAuthorizationRequest,
 } from '@lody/shared';
 import {
-  ScheduleRepository,
   getScheduleRegistryFlockDocId,
   getScheduleRoomId,
   type ScheduleDocument,

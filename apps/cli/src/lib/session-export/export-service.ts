@@ -1,3 +1,4 @@
+import { ScheduleRepository } from '@lody/shared/schedule-repository';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
@@ -12,7 +13,7 @@ import { encodeExportPathSegment, joinExportPath } from './path-utils';
 import { fetchWorkspaceUsageBundle } from './workspace-usage';
 import type { ExportManifest, ExportSessionSummary } from './types';
 import { formatErrorMessage } from '@/utils/format-error';
-import { getScheduleRegistryFlockDocId, ScheduleRepository } from '@lody/shared';
+import { getScheduleRegistryFlockDocId } from '@lody/shared';
 import { listWorkspaceScheduleIds } from '../schedules/schedule-documents';
 
 type WorkspaceDescriptor = {

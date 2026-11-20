@@ -1,7 +1,7 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
 import {
-  createHistoryWriter,
   type SessionHistoryInput,
   type SessionId,
   type SessionMeta,

@@ -127,6 +127,11 @@ describe('PromptShortcutProvider lifecycle', () => {
         </StrictMode>
       );
     });
+    // The provider defers its loro/streams stack behind dynamic imports, which
+    // settle on the event loop rather than inside act's microtask drain.
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
   }
 
   beforeEach(() => {

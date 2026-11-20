@@ -19,7 +19,6 @@ import type { DocumentSelection } from '@/lib/document-selection';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import { getAutomationProofIssuer } from '@/lib/cloud-http-port';
-import { RepoSyncError, RepoTransportError } from 'loro-repo';
 import { useSessionPendingMessages } from '@/components/chat/session-pending-messages';
 import {
   buildDraftUserHistoryEntry,
@@ -178,7 +177,6 @@ import {
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
   decodeProjectPreparationProgress,
-  ScheduleRepository,
   type McpServerId,
   type ScheduleDocument,
   type SessionPullRequestView,
@@ -438,7 +436,16 @@ import {
 import { AlertDialog } from '@/ui/dialog';
 import { resolveSessionHtmlAttachmentAction } from './session-html-attachment-action';
 
-const { formatLoroSyncError } = createLoroSyncErrorTools({ RepoSyncError, RepoTransportError });
+// loro-repo stays out of the session route chunk: its error classes resolve in
+// the background and start formatting once loaded. Errors that arrive before
+// the chunk resolves fall through to the generic Error formatting, matching
+// what non-repo failures already produced.
+let loroSyncErrorTools: ReturnType<typeof createLoroSyncErrorTools> | null = null;
+void import('loro-repo')
+  .then(({ RepoSyncError, RepoTransportError }) => {
+    loroSyncErrorTools = createLoroSyncErrorTools({ RepoSyncError, RepoTransportError });
+  })
+  .catch(() => {});
 
 const styles = stylex.create({
   historyTriggerIcon: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
@@ -773,7 +780,7 @@ const styles = stylex.create({
 });
 
 function getErrorMessage(err: unknown): string {
-  const syncError = formatLoroSyncError(err);
+  const syncError = loroSyncErrorTools?.formatLoroSyncError(err);
   if (syncError) return syncError;
   if (err instanceof Error) return err.message;
   if (typeof err === 'string') return err;
@@ -5749,6 +5756,9 @@ export const SessionChatInterface = memo(
     const readScheduledMessage = useCallback(
       async (scheduleId: string) => {
         if (!runtime) return null;
+        // loro-mirror keeps loro-crdt (WASM) in whichever chunk imports it;
+        // this route file is on the boot path, so construct lazily.
+        const { ScheduleRepository } = await import('@lody/shared/schedule-repository');
         return new ScheduleRepository(runtime.repo, runtime.workspaceId, {
           protectedContent: runtime.contentMode === 'e2ee',
           signDeclaration: runtime.signScheduleDeclaration,
@@ -5825,6 +5835,7 @@ export const SessionChatInterface = memo(
       async (item: ScheduledQueueItem) => {
         if (!runtime || !currentUser) return false;
         try {
+          const { ScheduleRepository } = await import('@lody/shared/schedule-repository');
           await runtime.withScheduleStore(item.scheduleId, () =>
             new ScheduleRepository(runtime.repo, runtime.workspaceId, {
               protectedContent: runtime.contentMode === 'e2ee',

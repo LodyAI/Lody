@@ -1,15 +1,15 @@
+import { previewVisualCommentDocSchema } from '@lody/shared/preview-comment-schema';
+import { sessionDocSchema } from '@lody/shared/session-doc-schemas';
 import type {
   CodeCollabOpenDiffManifestRequest,
   CodeCollabOpenDiffManifestResponse,
   CodeCollabReadBlobRequest,
-  CodeCollabReadBlobResponse,
-} from '@lody/shared';
+  CodeCollabReadBlobResponse} from '@lody/shared';
 import type { FileDownloadRequest, FileDownloadResponse } from '@lody/shared';
 import type {
   MemoryProviderRequest,
   MemoryProviderResponse,
-  ProjectProbeLocalMemberResult,
-} from '@lody/shared';
+  ProjectProbeLocalMemberResult} from '@lody/shared';
 import type { PendingSessionSends } from '../lib/session-pending-sends';
 import type { SessionSendResources } from '@/lib/session-send-resources';
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
@@ -62,8 +62,6 @@ import type {
   PreviewTargetApproval,
   WorkspaceId,
   LocalProjectId,
-  previewVisualCommentDocSchema,
-  sessionDocSchema,
   CodeCollabV2Error,
   CodeCollabV2FileIndexRequest,
   CodeCollabV2FileIndexSnapshot,
@@ -83,8 +81,7 @@ import type {
   CodeCollabV2SaveTextRequest,
   CodeCollabV2SaveTextResponse,
   FilePreviewV3Request,
-  FilePreviewV3Response,
-} from '@lody/shared';
+  FilePreviewV3Response} from '@lody/shared';
 import type { LocalProjectGitStateRpcResponse } from '@lody/loro-streams-rpc';
 import type { WorkspaceWriter } from '../providers/workspace-writer';
 import type { CodeCollabFileIndexCache } from '@/lib/code-collab-file-index-cache';

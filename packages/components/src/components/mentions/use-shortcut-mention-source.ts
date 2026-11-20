@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@/lib/posthog-context';
-import { PromptShortcutError, type PromptShortcutScope } from '@lody/shared/prompt-shortcuts';
+import { PromptShortcutError } from '@lody/shared/prompt-shortcuts/model';
+import type { PromptShortcutScope } from '@lody/shared/prompt-shortcuts';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { getPromptShortcutAnalyticsProperties } from '@/lib/prompt-shortcut-analytics';
 import { usePromptShortcuts } from '../../providers/prompt-shortcut-provider';

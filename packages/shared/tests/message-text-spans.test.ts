@@ -13,7 +13,7 @@ import {
   normalizeSessionInputBlocks,
 } from '../src/session-input';
 import { SessionInputBlocksSchema } from '../src/message-schemas';
-import { sessionDocSchema } from '../src/schema';
+import { sessionDocSchema } from '../src/session-doc-schemas';
 import type { MessageContent, SessionId, SessionInputBlock } from '../src/ai';
 import type { SessionDoc, SessionHistoryInput } from '../src/schema';
 

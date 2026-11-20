@@ -1,5 +1,6 @@
+import { ScheduleRepository } from '@lody/shared/schedule-repository';
 import { LoroDoc } from 'loro-crdt';
-import { ScheduleRepository, type ScheduleRepositoryPort } from '@lody/shared';
+import { type ScheduleRepositoryPort } from '@lody/shared';
 import { isScheduledMessageFile } from './scheduled-message-files';
 import { v5 as uuidv5 } from 'uuid';
 

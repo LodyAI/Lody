@@ -1,6 +1,7 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 import { describe, expect, it, vi } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
-import { createHistoryWriter, parseSessionNotification, type SessionId } from '@lody/shared';
+import { parseSessionNotification, type SessionId } from '@lody/shared';
 import { SessionDocument } from '../src/lib/loro/doc';
 import { composeTestSessionDoc } from './session-doc-fixture';
 import { appendACPNotificationsToAssistantEntry } from '../src/lib/acp/history';
