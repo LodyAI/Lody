@@ -119,7 +119,7 @@ describe('Magpie runtime preparation', () => {
     });
     expect(Object.keys(g.model as object)).toEqual([selected, 'magpie/second/model']);
   });
-  it('accepts Magpie vendor effort words and scopes Grok to its own ladder', async () => {
+  it('accepts unbounded vendor metadata and scopes Grok to its own ladder', async () => {
     const directory = await root();
     const catalog: typeof fetch = async (input, init) =>
       String(input).endsWith('/models')
@@ -135,6 +135,19 @@ describe('Magpie runtime preparation', () => {
                 ],
               },
               {
+                id: 'vendor/wide-model',
+                display_name: 'w'.repeat(300),
+                context_window: 200_000_000,
+                supported_reasoning_levels: [
+                  '',
+                  ...Array.from({ length: 19 }, (_, i) => `tier-${i}`),
+                  'high',
+                ].map((effort) => ({ effort })),
+                modalities: {
+                  input: ['text', 'audio', 'video', 'pdf', 'file', 'csv', 'docx', 'xlsx', 'image'],
+                },
+              },
+              {
                 id: 'vendor/free-model',
                 reasoning: true,
                 supported_reasoning_levels: [
@@ -147,7 +160,7 @@ describe('Magpie runtime preparation', () => {
             ],
           })
         : fetcher(input, init);
-    expect(await readMagpieModels(gateway, undefined, catalog)).toHaveLength(2);
+    expect(await readMagpieModels(gateway, undefined, catalog)).toHaveLength(3);
     const kimi = await prepareMagpieRuntime('kimi', gateway, undefined, directory, catalog);
     const k = parseToml(await readFile(join(kimi.env.KIMI_CODE_HOME!, 'config.toml'), 'utf8'));
     expect(k).toMatchObject({
@@ -161,6 +174,12 @@ describe('Magpie runtime preparation', () => {
           support_efforts: ['disabled', 'low', 'medium', 'high'],
           default_effort: 'medium',
         },
+        'magpie/vendor/wide-model': {
+          max_context_size: 200_000_000,
+          capabilities: ['tool_use', 'image_in', 'thinking'],
+          support_efforts: [...Array.from({ length: 19 }, (_, i) => `tier-${i}`), 'high'],
+          default_effort: 'tier-0',
+        },
       },
     });
     const grok = await prepareMagpieRuntime('grok', gateway, undefined, directory, catalog);
@@ -171,6 +190,7 @@ describe('Magpie runtime preparation', () => {
     expect(grokModels['magpie/vendor/free-model']).toMatchObject({
       reasoning_efforts: ['low', 'medium', 'high'],
     });
+    expect(grokModels['magpie/vendor/wide-model']).toMatchObject({ reasoning_efforts: ['high'] });
   });
   it('configures Bub through its native OpenAI environment without enabling fallback models', async () => {
     const directory = await root();
