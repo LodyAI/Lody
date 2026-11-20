@@ -48,8 +48,9 @@ const landed = (status: MemoryProviderResponse['status']): boolean =>
  * between them is a choice between what they do — not an artefact of one
  * having been given a heading and the other a loose sentence.
  *
- * What the button does differs: a provider Lody can fetch is installed in
- * place, and one it cannot is a trip to its own page. The arrow says which.
+ * What the buttons do differs: a missing provider Lody can fetch offers both a
+ * one-click download in place and a manual install from its own page, and one
+ * it cannot fetch is only a trip to that page. The arrow marks the page.
  */
 export function MemoryInstallCard({
   logo,
@@ -185,7 +186,7 @@ export function MemoryInstallCard({
         ) : null}
         {/* The arrow marks the one that leaves Lody. Two identical buttons,
             one of which silently installs software, is the thing to avoid. */}
-        {installUrl && (!reason || phase === 'failed' || phase === 'stranded') ? (
+        {installUrl && (reason !== 'unreadable' || phase === 'failed' || phase === 'stranded') ? (
           <Button
             type="button"
             variant="secondary"

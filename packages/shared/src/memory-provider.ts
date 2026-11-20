@@ -190,7 +190,7 @@ export const MEMORY_PROVIDERS = [
   {
     id: 'everme',
     name: 'EverMe',
-    installUrl: 'https://github.com/EverMind-AI/EverMe',
+    installUrl: 'https://evermind.ai/everme',
     createFields: [],
   },
 ] as const;

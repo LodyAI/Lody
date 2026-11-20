@@ -241,11 +241,14 @@ it('holds every provider block until the machine answers, then shows them togeth
   expect(container.textContent).toContain('Memory per role');
   expect(container.textContent).toContain('One memory per account');
   expect(labels()).not.toContain('Get Nowledge Mem');
-  expect(labels()).not.toContain('Get EverMe');
+  expect(labels()).not.toContain('One-click download');
+  expect(labels()).not.toContain('Install manually');
   mocks.provider.result = { type: 'machine/memory', status: 'not_installed', memories: [] };
   await renderSetting();
   expect(labels()).toContain('Get Nowledge Mem');
-  expect(labels()).toContain('Get EverMe');
+  // EverMe offers its in-place download beside the manual route to its own page.
+  expect(labels()).toContain('One-click download');
+  expect(labels()).toContain('Install manually');
 });
 
 it('keeps a stopped provider named and says to start it when asked to add a memory', async () => {

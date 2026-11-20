@@ -16,7 +16,7 @@ const meta = {
     logo: <MemoryProviderLogo providerId="everme" brandColor decorative />,
     name: 'EverMe',
     providerKey: 'everme',
-    installUrl: 'https://github.com/EverMind-AI/EverMe',
+    installUrl: 'https://evermind.ai/everme',
     reason: 'missing',
     state: memoryProviderStoryState(missing),
   },
