@@ -4,7 +4,12 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { META_ROOM, type RepoClient } from '@loro-dev/loro-repo-client';
-import { connectEngine } from '@loro-dev/loro-repo-client/node';
+import {
+  connectEngine,
+  engineSatisfies,
+  readEngineEndpoint,
+} from '@loro-dev/loro-repo-client/node';
+import { startProcessLegacy } from '../src/node/process';
 import {
   ExternalMetadataNotCommittedError,
   LoroRepo,
@@ -47,6 +52,9 @@ import { ScheduleRepository, type ScheduleRepositoryPort } from '../src/schedule
 import { isNativeDocId } from '../src/native-workspace-meta-ipc';
 
 const hostScript = fileURLToPath(new URL('./fixtures/native-repo-host.mjs', import.meta.url));
+const earlierHostScript = fileURLToPath(
+  new URL('./fixtures/native-repo-host-earlier.mjs', import.meta.url)
+);
 const launcher = () => ({ command: process.execPath, args: [hostScript] });
 const ns = 'ws-native-meta';
 
@@ -181,6 +189,51 @@ describe('native Workspace Meta', () => {
     await connection.close();
     await main.repo.deleteDoc('session-1');
     expect((await main.repo.getDocMeta('session-1'))?.deleted).toBe(true);
+  });
+
+  it("takes over an earlier build's host that is still running, keeping its data and clients", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'lody-native-upgrade-'));
+    cleanups.push(() => rm(dataDir, { recursive: true, force: true }));
+    cleanups.push(() => killHost(dataDir, 'SIGTERM'));
+    const earlierHost = startProcessLegacy({
+      command: process.execPath,
+      args: [earlierHostScript, dataDir],
+      options: {
+        stdio: 'ignore',
+        env: { ...process.env, LODY_TEST_EARLIER_CAPABILITIES: 'doc_list_fields,engine_handoff' },
+      },
+    });
+    earlierHost.child.once('error', () => {});
+    const earlier = await connectEngine(dataDir, { waitForEndpointMs: 10_000 });
+    cleanups.push(() => earlier.close());
+    const earlierPid = await hostPid(dataDir);
+    expect(engineSatisfies(await readEngineEndpoint(dataDir))).toBe(false);
+    const earlierMeta = createNativeWorkspaceMeta(earlier, ns, notCommitted);
+    cleanups.push(() => earlierMeta.close());
+    await earlierMeta.open(() => {});
+    await earlierMeta.commit({
+      kind: 'upsert-doc',
+      docId: 'session-1',
+      patch: { title: 'before' },
+    });
+
+    const connection = await connectNativeRepo({ launcher, dataDir });
+    cleanups.push(() => connection.close());
+    const endpoint = await readEngineEndpoint(dataDir);
+    expect(engineSatisfies(endpoint)).toBe(true);
+    expect(endpoint.pid).not.toBe(earlierPid);
+    await untilGone(earlierPid);
+    const current = await nativeRepo(connection.client);
+    expect((await current.repo.getDocMeta('session-1'))?.meta).toEqual({ title: 'before' });
+
+    await earlier.whenConnected();
+    const seen = nextEvent(
+      current.events,
+      (e) => e.kind === 'doc-metadata' && e.docId === 'session-2'
+    );
+    await earlierMeta.commit({ kind: 'upsert-doc', docId: 'session-2', patch: { title: 'after' } });
+    await seen;
+    expect((await current.repo.getDocMeta('session-2'))?.meta).toEqual({ title: 'after' });
   });
 
   it('recovers every view from a new snapshot after the host crashes', async () => {
