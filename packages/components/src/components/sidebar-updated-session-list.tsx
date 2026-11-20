@@ -49,7 +49,7 @@ import {
   GitPullRequest,
   Link2,
   LockKeyhole,
-  Mail,
+  MailOpen,
   MessageCircle,
   Pencil,
   Pin,
@@ -1664,7 +1664,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         ) : null}
         {canMarkUnread ? (
           <ContextMenu.Item
-            icon={Mail}
+            icon={MailOpen}
             onClick={() => {
               onMarkUnread?.(item.id);
             }}

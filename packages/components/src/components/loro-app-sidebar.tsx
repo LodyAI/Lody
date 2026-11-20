@@ -217,7 +217,7 @@ import {
   FolderPlus,
   Link2,
   LockKeyhole,
-  Mail,
+  MailOpen,
   FolderOpen,
   GripVertical,
   MoreHorizontal,
@@ -725,7 +725,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         ) : null}
         {canMarkUnread ? (
           <ContextMenu.Item
-            icon={Mail}
+            icon={MailOpen}
             onClick={() => {
               onMarkUnread?.(session.id);
             }}
