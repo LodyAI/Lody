@@ -91,6 +91,8 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
   starting ref — would associate unrelated PRs). Discovery continues while an
   open/draft PR exists (newer-PR detection); only idle-terminal owners
   (terminal PR + checkpoint matching repo, branch and owner/child activity) stop.
+  Discovery excludes the repository's known default branch and never newly associates
+  merged/closed fork PRs; open/draft fork PRs and non-default same-repository PRs remain eligible.
 - **GitHub-capable direct local projects are tracked.** A local project using
   its original directory gets the same PR discovery and status targets when
   `githubRepoFullName` and runtime `branchName` are present. Its branch is shared

@@ -28,6 +28,7 @@ export type PrObservation = {
   headRefName: string;
   headSha?: string;
   headRepository?: string;
+  isCrossRepository?: boolean;
   updatedAt: string;
   /** Rollup CI state of the head commit; null when the commit has no checks. */
   ciState: SessionPullRequestCiState | null;
@@ -147,6 +148,7 @@ const PullRequestNodeSchema = Schema.Struct({
   isDraft: Schema.Boolean,
   updatedAt: Schema.String,
   headRefName: Schema.String,
+  isCrossRepository: Schema.optional(Schema.Boolean),
   headRefOid: Schema.optional(Schema.String),
   headRepository: Schema.optional(Schema.NullOr(Schema.Struct({ nameWithOwner: Schema.String }))),
   mergeable: Schema.NullOr(Schema.String),
@@ -163,8 +165,12 @@ const PullRequestNodeSchema = Schema.Struct({
 });
 
 const DiscoveryAliasSchema = Schema.Struct({
-  nodes: Schema.Array(PullRequestNodeSchema),
+  nodes: Schema.Array(
+    Schema.Struct({ ...PullRequestNodeSchema.fields, isCrossRepository: Schema.Boolean })
+  ),
 });
+
+const DefaultBranchRefSchema = Schema.Struct({ name: Schema.String });
 
 const GraphQlErrorSchema = Schema.Struct({
   message: Schema.String,
@@ -209,6 +215,7 @@ function projectPullRequestNode(
     headRefName: node.headRefName,
     headSha: node.headRefOid,
     headRepository: node.headRepository?.nameWithOwner.toLowerCase(),
+    isCrossRepository: node.isCrossRepository,
     updatedAt: node.updatedAt,
     ciState: mapStatusCheckRollupState(rollupState),
     mergeState: mapMergeState({
@@ -333,12 +340,20 @@ export function parsePrPollBatchResponse(
   }
 
   const discoveriesByBranch = new Map<string, { prs: PrObservation[]; ok: boolean }>();
+  const defaultBranchRef = Schema.decodeUnknownResult(DefaultBranchRefSchema)(
+    repository.defaultBranchRef
+  );
+  const defaultBranch =
+    Result.isSuccess(defaultBranchRef) && defaultBranchRef.success.name.trim()
+      ? defaultBranchRef.success.name
+      : null;
   for (const { alias, branch } of batch.discoveryAliases) {
     let entry = discoveriesByBranch.get(branch);
     if (!entry) {
       entry = { prs: [], ok: true };
       discoveriesByBranch.set(branch, entry);
     }
+    if (branch === defaultBranch) continue;
     const value = repository[alias];
     if (value === null || value === undefined) {
       entry.ok = false;
@@ -352,7 +367,7 @@ export function parsePrPollBatchResponse(
     for (const node of list.success.nodes) {
       const pr = projectPullRequestNode(node);
       if (pr) {
-        entry.prs.push(pr);
+        if (pr.headRefName !== defaultBranch) entry.prs.push(pr);
       } else {
         entry.ok = false;
       }

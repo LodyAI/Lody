@@ -134,6 +134,9 @@ export function planAssociation(args: {
   }
   const eligible = new Map<string, PrObservation>();
   for (const pr of args.discovered) {
+    if (!associatedUrls.has(pr.url) && pr.isCrossRepository && isTerminal(pr.status)) {
+      continue;
+    }
     if (
       (associatedUrls.has(pr.url) &&
         (args.confirmedAssociationUrls ?? associatedUrls).has(pr.url)) ||

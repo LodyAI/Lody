@@ -127,6 +127,7 @@ export function buildPrPollBatchQuery(options: {
   const lines: string[] = [];
   lines.push(`query PrPollBatch(${variableDefs.join(', ')}) {`);
   lines.push('  repository(owner: $owner, name: $name) {');
+  lines.push('    defaultBranchRef { name }');
   for (const { alias, prNumber } of statusAliases) {
     lines.push(`    ${alias}: pullRequest(number: ${prNumber}) {`);
     lines.push(PR_FIELDS);
@@ -140,6 +141,7 @@ export function buildPrPollBatchQuery(options: {
         'orderBy: {field: UPDATED_AT, direction: DESC}) {'
     );
     lines.push('      nodes {');
+    lines.push('        isCrossRepository');
     lines.push(PR_FIELDS);
     lines.push('      }');
     lines.push('    }');

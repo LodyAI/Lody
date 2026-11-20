@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Logger } from '@/utils/logger';
 import { buildPrPollBatchQuery, type PrPollBatchQuery } from './graphql-batch-builder';
 import { GitHubGraphQlClient, parsePrPollBatchResponse } from './github-graphql-client';
+import { planAssociation, planPullRequestMetaWrite } from './pr-poll-writeback';
 
 function createTestLogger(): Logger {
   const logger: Logger = {
@@ -42,6 +43,7 @@ function prNode(
     isDraft: false,
     updatedAt: '2026-07-17T08:00:00Z',
     headRefName: 'feat/x',
+    isCrossRepository: false,
     mergeable: 'MERGEABLE',
     mergeStateStatus: 'CLEAN',
     commits: { nodes: [{ commit: { statusCheckRollup: { state: 'SUCCESS' } } }] },
@@ -80,6 +82,102 @@ function successFixtureBody() {
 type FixtureRepository = ReturnType<typeof successFixtureBody>['data']['repository'];
 
 describe('parsePrPollBatchResponse', () => {
+  it.each([
+    { branch: 'main', state: 'MERGED', fork: true, associated: false },
+    { branch: 'main', state: 'OPEN', fork: true, associated: false },
+    { branch: 'feat/x', state: 'OPEN', fork: true, associated: true },
+    { branch: 'feat/x', state: 'OPEN', fork: true, draft: true, associated: true },
+    { branch: 'feat/x', state: 'MERGED', fork: true, associated: false },
+    { branch: 'feat/x', state: 'CLOSED', fork: true, associated: false },
+    { branch: 'feat/x', state: 'MERGED', fork: false, associated: true },
+    { branch: 'feat/x', state: 'CLOSED', fork: false, associated: true },
+  ])(
+    'publishes eligible discovery only: $branch $state fork=$fork draft=$draft',
+    ({ branch, state, fork, draft, associated }) => {
+      const batch = buildPrPollBatchQuery({
+        repoFullName: 'owner/repo',
+        statusTargets: [],
+        discoveryTargets: [{ branch }],
+      });
+      if (!batch) throw new Error('expected batch');
+      const node = prNode(39, {
+        state,
+        isDraft: draft ?? false,
+        headRefName: branch,
+        isCrossRepository: fork,
+      });
+      const outcome = parsePrPollBatchResponse(
+        {
+          data: {
+            repository: {
+              defaultBranchRef: { name: 'main' },
+              d0o: { nodes: state === 'OPEN' ? [node] : [] },
+              d0t: { nodes: state === 'OPEN' ? [] : [node] },
+            },
+            rateLimit: null,
+          },
+        },
+        batch
+      );
+      if (outcome.kind !== 'success') throw new Error('expected success');
+      const discovery = outcome.batch.discoveries[0];
+      expect(discovery?.ok).toBe(true);
+      const discovered = discovery?.prs ?? [];
+      const plan = planAssociation({
+        meta: undefined,
+        observations: discovered,
+        discovered,
+        runtimeBranch: branch,
+      });
+      expect(plan?.prNumber ?? null).toBe(associated ? 39 : null);
+      const write = planPullRequestMetaWrite({
+        meta: undefined,
+        observations: discovered,
+        newlyAssociated: plan ? discovered.filter((pr) => pr.url === plan.url) : [],
+        runtimeBranch: branch,
+        nowSec: 1_800_000_000,
+      });
+      expect(write?.pullRequests?.map((pr) => pr.url) ?? []).toEqual(associated ? [node.url] : []);
+    }
+  );
+
+  it.each([undefined, null, {}, { name: 7 }, { name: '' }])(
+    'does not infer default-branch exclusion from %j',
+    (defaultBranchRef) => {
+      const body = successFixtureBody();
+      (body.data.repository as Record<string, unknown>).defaultBranchRef = defaultBranchRef;
+      const outcome = parsePrPollBatchResponse(body, makeBatch());
+      if (outcome.kind !== 'success') throw new Error('expected success');
+      expect(outcome.batch.discoveries[0]?.prs.map((pr) => pr.number)).toEqual([99]);
+      delete (body.data.repository as Record<string, unknown>).d0o;
+      const malformed = parsePrPollBatchResponse(body, makeBatch());
+      if (malformed.kind !== 'success') throw new Error('expected success');
+      expect(malformed.batch.discoveries[0]).toEqual({ branch: 'feat/x', prs: [], ok: false });
+    }
+  );
+
+  it('rejects default-branch heads in either bucket without affecting status refreshes', () => {
+    const body = successFixtureBody();
+    Object.assign(body.data.repository, {
+      defaultBranchRef: { name: 'main' },
+      p0: prNode(101, { state: 'MERGED', headRefName: 'main', isCrossRepository: true }),
+      d0o: { nodes: [prNode(40, { headRefName: 'main' })] },
+      d0t: { nodes: [prNode(39, { state: 'MERGED', headRefName: 'main' })] },
+    });
+    const outcome = parsePrPollBatchResponse(body, makeBatch());
+    if (outcome.kind !== 'success') throw new Error('expected success');
+    expect(outcome.batch.discoveries[0]).toEqual({ branch: 'feat/x', prs: [], ok: true });
+    expect(outcome.batch.pullRequests[0]?.pr?.status).toBe('merged');
+  });
+
+  it('does not confirm discovery when cross-repository identity is malformed', () => {
+    const body = successFixtureBody();
+    body.data.repository.d0t.nodes = [prNode(39, { isCrossRepository: 'false' })];
+    const outcome = parsePrPollBatchResponse(body, makeBatch());
+    if (outcome.kind !== 'success') throw new Error('expected success');
+    expect(outcome.batch.discoveries[0]).toEqual({ branch: 'feat/x', prs: [], ok: false });
+  });
+
   it('a per-alias null (deleted/moved PR) is a CONFIRMED missing PR (ok: true)', () => {
     const body = successFixtureBody();
     (body.data.repository as Record<string, unknown>).p1 = null;

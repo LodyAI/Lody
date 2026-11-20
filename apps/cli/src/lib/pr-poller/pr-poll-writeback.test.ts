@@ -35,6 +35,21 @@ function obs(prNumber: number, overrides: Partial<PrObservation> = {}): PrObserv
   };
 }
 
+describe('historical fork association', () => {
+  it('retries hosted linkage for an already-published terminal fork PR', () => {
+    const pr = obs(1, { status: 'merged', isCrossRepository: true });
+    expect(
+      planAssociation({
+        meta: makeMeta({ pullRequests: [{ url: URL_1, status: 'merged' }] }),
+        observations: [pr],
+        discovered: [pr],
+        runtimeBranch: 'feat/x',
+        confirmedAssociationUrls: new Set(),
+      })
+    ).toEqual({ url: URL_1, prNumber: 1, status: 'merged' });
+  });
+});
+
 describe('selectCurrentPullRequestUrl', () => {
   const associated: SessionPullRequestMeta[] = [
     { url: URL_1, status: 'open' },

@@ -33,9 +33,13 @@ const GhPrListItemSchema = z.object({
   isDraft: z.boolean(),
   headRefName: z.string(),
   baseRefName: z.string(),
+  isCrossRepository: z.boolean(),
 });
 
 const GhPrListSchema = z.array(GhPrListItemSchema);
+const GhRepoSchema = z.object({
+  defaultBranchRef: z.object({ name: z.string().min(1) }).nullable(),
+});
 
 async function resolveBranchName(
   session: ISession,
@@ -82,15 +86,26 @@ export async function detectPullRequestForBranch(options: {
 
   // Use gh pr list to find PRs for this branch
   try {
+    const repoOutput = await session.exec(
+      'gh',
+      ['repo', 'view', repoFullName, '--json', 'defaultBranchRef'],
+      workdir,
+      false
+    );
+    const repo = GhRepoSchema.safeParse(JSON.parse(repoOutput.trim()));
+    if (repo.success && repo.data.defaultBranchRef?.name === branchName) return null;
+
     const output = await session.exec(
       'gh',
       [
         'pr',
         'list',
+        '--repo',
+        repoFullName,
         '--head',
         branchName,
         '--json',
-        'number,url,state,isDraft,headRefName,baseRefName',
+        'number,url,state,isDraft,headRefName,baseRefName,isCrossRepository',
         '--limit',
         '5',
       ],
@@ -110,8 +125,9 @@ export async function detectPullRequestForBranch(options: {
     }
 
     // Prefer open PRs, fall back to first result
-    const openPr = parsed.data.find((pr) => pr.state === 'OPEN');
-    const pr = openPr ?? parsed.data[0];
+    const candidates = parsed.data.filter((pr) => !pr.isCrossRepository);
+    const openPr = candidates.find((pr) => pr.state === 'OPEN');
+    const pr = openPr ?? candidates[0];
     if (!pr) {
       return null;
     }
