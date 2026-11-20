@@ -1,4 +1,12 @@
-import { LoroText, type LoroDoc, type LoroTree, type LoroTreeNode, type TreeID } from 'loro-crdt';
+import {
+  LoroText,
+  UndoManager,
+  type Cursor,
+  type LoroDoc,
+  type LoroTree,
+  type LoroTreeNode,
+  type TreeID,
+} from 'loro-crdt';
 
 /**
  * Today outline page model over one LoroDoc.
@@ -536,4 +544,134 @@ export function parseTodayPasteText(input: string): TodayFragment[] {
     place(indent, trimmed.replace(BULLET_PATTERN, ''));
   }
   return roots;
+}
+
+export type TodaySelection =
+  | { nodeId: TodayNodeId; anchor: number; focus: number }
+  | { blockSelect: TodayNodeId[] }
+  | null;
+
+export type TodayPageUndo = {
+  /** Record the selection the next undo step should restore. */
+  setSelection(selection: TodaySelection): void;
+  /** Apply a typing edit; consecutive edits to one node share an undo step until idle. */
+  editText(text: LoroText, apply: (text: LoroText) => void): void;
+  /** Run a structural operation as its own undo step. */
+  structural<T>(operation: () => T): T;
+  endGroup(): void;
+  undo(): boolean;
+  redo(): boolean;
+  canUndo(): boolean;
+  canRedo(): boolean;
+  clear(): void;
+  onRestore(listener: (intent: FocusIntent) => void): () => void;
+  dispose(): void;
+};
+
+/** Idle gap that closes a typing group. */
+export const TODAY_TYPING_GROUP_IDLE_MS = 1000;
+
+/**
+ * Per-page undo. Loro's merge interval is 0 because, in loro-crdt 1.17, a
+ * merge interval also merges across groups (typing followed by Enter would
+ * become one step); typing groups are managed here instead, closed by an idle
+ * timer, a node switch, a structural operation, or an undo/redo. Commits whose
+ * origin starts with `sys:` are never undone.
+ */
+export function createTodayPageUndo(
+  doc: LoroDoc,
+  options: {
+    setTimer: (callback: () => void, ms: number) => () => void;
+    origin?: string;
+    idleMs?: number;
+  }
+): TodayPageUndo {
+  const origin = options.origin ?? TODAY_OUTLINE_EDIT_ORIGIN;
+  const listeners = new Set<(intent: FocusIntent) => void>();
+  let selection: TodaySelection = null;
+  let groupText: LoroText | undefined;
+  let cancelIdle: (() => void) | undefined;
+
+  const manager = new UndoManager(doc, {
+    mergeInterval: 0,
+    maxUndoSteps: 100,
+    excludeOriginPrefixes: ['sys:'],
+    onPush: () => {
+      if (!selection) return { value: null, cursors: [] };
+      if ('blockSelect' in selection) {
+        return { value: { blockSelect: selection.blockSelect }, cursors: [] };
+      }
+      const text = doc.getTree(TODAY_OUTLINE_TREE).getNodeByID(selection.nodeId)?.data.get('text');
+      const cursor = text instanceof LoroText ? text.getCursor(selection.focus) : undefined;
+      return { value: { nodeId: selection.nodeId }, cursors: cursor ? [cursor] : [] };
+    },
+    onPop: (_isUndo, { value, cursors }) => {
+      const intent = restoredIntent(value, cursors);
+      for (const listener of listeners) listener(intent);
+    },
+  });
+
+  const restoredIntent = (value: unknown, cursors: Cursor[]): FocusIntent => {
+    if (!value || typeof value !== 'object') return null;
+    if ('blockSelect' in value && Array.isArray(value.blockSelect)) {
+      return { blockSelect: value.blockSelect as TodayNodeId[] };
+    }
+    if (!('nodeId' in value) || typeof value.nodeId !== 'string') return null;
+    const cursor = cursors[0];
+    const offset = cursor ? doc.getCursorPos(cursor)?.offset : undefined;
+    return { nodeId: value.nodeId as TodayNodeId, offset: offset ?? 'end' };
+  };
+
+  const endGroup = () => {
+    cancelIdle?.();
+    cancelIdle = undefined;
+    if (!groupText) return;
+    groupText = undefined;
+    manager.groupEnd();
+  };
+
+  return {
+    setSelection: (next) => {
+      selection = next;
+    },
+    editText: (text, apply) => {
+      if (groupText && groupText.id !== text.id) endGroup();
+      if (!groupText) {
+        manager.groupStart();
+        groupText = text;
+      }
+      apply(text);
+      doc.commit({ origin });
+      cancelIdle?.();
+      cancelIdle = options.setTimer(endGroup, options.idleMs ?? TODAY_TYPING_GROUP_IDLE_MS);
+    },
+    structural: (operation) => {
+      endGroup();
+      return operation();
+    },
+    endGroup,
+    undo: () => {
+      endGroup();
+      return manager.undo();
+    },
+    redo: () => {
+      endGroup();
+      return manager.redo();
+    },
+    canUndo: () => manager.canUndo(),
+    canRedo: () => manager.canRedo(),
+    clear: () => {
+      endGroup();
+      manager.clear();
+    },
+    onRestore: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    dispose: () => {
+      endGroup();
+      listeners.clear();
+      manager.free();
+    },
+  };
 }

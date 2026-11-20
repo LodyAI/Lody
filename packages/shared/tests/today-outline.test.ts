@@ -1,6 +1,7 @@
 import { LoroDoc } from 'loro-crdt';
 import { describe, expect, it } from 'vitest';
 import {
+  createTodayPageUndo,
   openTodayOutline,
   parseTodayPasteText,
   type TodayOutline,
@@ -220,5 +221,74 @@ describe('Today outline structure', () => {
       ?.data.set('futureKey', 'v');
     doc.commit();
     expect(render(openTodayOutline(doc))).toBe('a');
+  });
+});
+
+describe('Today page undo', () => {
+  function setup(lines = '') {
+    const doc = new LoroDoc();
+    const outline = openTodayOutline(doc);
+    if (lines) outline.paste({ kind: 'page-start' }, parseTodayPasteText(lines));
+    let pending: (() => void) | undefined;
+    const undo = createTodayPageUndo(doc, {
+      setTimer: (callback) => {
+        pending = callback;
+        return () => {
+          pending = undefined;
+        };
+      },
+    });
+    const restores: unknown[] = [];
+    undo.onRestore((intent) => restores.push(intent));
+    const fireIdle = () => pending?.();
+    return { doc, outline, undo, restores, fireIdle };
+  }
+
+  const type = (ctx: ReturnType<typeof setup>, nodeId: string, offset: number, value: string) => {
+    ctx.undo.setSelection({ nodeId: nodeId as never, anchor: offset, focus: offset });
+    ctx.undo.editText(ctx.outline.getText(nodeId as never)!, (text) => text.insert(offset, value));
+  };
+
+  it('undoes typing and the following Enter as two separate steps', () => {
+    const ctx = setup();
+    ctx.undo.clear();
+    const { nodeId } = ctx.outline.insertFirst() as { nodeId: string };
+    ctx.undo.clear();
+    type(ctx, nodeId, 0, 'a');
+    type(ctx, nodeId, 1, 'b');
+    ctx.undo.structural(() => ctx.outline.split(nodeId as never, 2));
+    expect(ctx.outline.getAllNodes().map((n) => n.text)).toEqual(['ab', '']);
+    ctx.undo.undo();
+    expect(ctx.outline.getAllNodes().map((n) => n.text)).toEqual(['ab']);
+    ctx.undo.undo();
+    expect(ctx.outline.getAllNodes().map((n) => n.text)).toEqual(['']);
+  });
+
+  it('starts a new step after the idle timer closes the typing group', () => {
+    const ctx = setup('x');
+    ctx.undo.clear();
+    const id = ctx.outline.getAllNodes()[0]!.id;
+    type(ctx, id, 1, 'a');
+    ctx.fireIdle();
+    type(ctx, id, 2, 'b');
+    ctx.undo.undo();
+    expect(ctx.outline.getAllNodes()[0]!.text).toBe('xa');
+  });
+
+  it('restores the caret captured before the undone step', () => {
+    const ctx = setup('hello');
+    ctx.undo.clear();
+    const id = ctx.outline.getAllNodes()[0]!.id;
+    type(ctx, id, 5, '!');
+    ctx.undo.undo();
+    expect(ctx.restores.at(-1)).toEqual({ nodeId: id, offset: 5 });
+  });
+
+  it('does not undo system commits', () => {
+    const ctx = setup('a');
+    ctx.undo.clear();
+    ctx.doc.getMap('today').set('v', 1);
+    ctx.doc.commit({ origin: 'sys:init' });
+    expect(ctx.undo.canUndo()).toBe(false);
   });
 });
