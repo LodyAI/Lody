@@ -31,9 +31,12 @@ const hasPrefix = (docId: string, prefix: string) =>
 export const isNativeSessionDocId = (docId: string): boolean => hasPrefix(docId, 'session-');
 /** Schedule documents (`schedule-*`): small, so every process keeps a replica. */
 export const isNativeScheduleDocId = (docId: string): boolean => hasPrefix(docId, 'schedule-');
+/** Preview comment documents (`preview-comment-*`): renderer-only, small, kept as replicas. */
+export const isNativePreviewCommentDocId = (docId: string): boolean =>
+  hasPrefix(docId, 'preview-comment-');
 /** Loro documents the native mode owns. */
 export const isNativeDocId = (docId: string): boolean =>
-  isNativeSessionDocId(docId) || isNativeScheduleDocId(docId);
+  isNativeSessionDocId(docId) || isNativeScheduleDocId(docId) || isNativePreviewCommentDocId(docId);
 
 /** Owned ids among a legacy replica's documents, plus the fixed ones. */
 export const ownedLegacyFlockDocIds = (workspaceId: string, stored: readonly string[]) => [
