@@ -3,7 +3,8 @@ import { CalendarDays, ChevronLeft, ChevronRight, MoreHorizontal } from 'lucide-
 import { useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { buildTodayLink, parseTodayDate, type TodayDate } from '@lody/shared';
+import { buildTodayLink, parseTodayDate, type SessionId, type TodayDate } from '@lody/shared';
+import { buildSessionLink } from '@lody/shared/session-link';
 import { Button } from '@lody/ui/button';
 import { Menu } from '@lody/ui/menu';
 import { Popover } from '@lody/ui/popover';
@@ -15,6 +16,12 @@ import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope'
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { toast } from '@/lib/toast';
+import { openSessionDeepLink } from '@/lib/session-deep-link';
+import {
+  selectSessionMentionCandidates,
+  useSessionMentionItems,
+} from '@/components/mentions/mention-session-source';
+import { useTodayEditor } from './editor/today-editor-context';
 import { TodayEditorContext } from './editor/today-editor-context';
 import { TodayEditorController } from './editor/today-editor-controller';
 import { TodayDaySection } from './today-day-section';
@@ -146,6 +153,15 @@ export function TodayView(props: {
   useEffect(() => {
     if (!cache) return undefined;
     const created = new TodayEditorController(cache);
+    const workspaceId = runtime?.workspaceId ?? null;
+    created.workspaceId = workspaceId;
+    created.sessionLink = (sessionId) =>
+      workspaceId
+        ? buildSessionLink({ sessionId: sessionId as SessionId, workspaceId })
+        : sessionId;
+    created.onOpenSession = (sessionId) => {
+      if (workspaceId) openSessionDeepLink({ sessionId: sessionId as SessionId, workspaceId });
+    };
     setController(created);
     return () => {
       created.dispose();
@@ -232,6 +248,7 @@ export function TodayView(props: {
             />
           ))}
         </TodayOutlineSurface>
+        <TodaySessionPicker />
         {anchor && anchor !== today ? (
           <div {...stylex.props(styles.back)}>
             <span {...stylex.props(styles.backButton)}>
@@ -274,6 +291,82 @@ export function TodayOutlineSurface(props: {
       }}
     >
       {props.children}
+    </div>
+  );
+}
+
+const pickerStyles = stylex.create({
+  menu: {
+    position: 'fixed',
+    zIndex: 50,
+    minWidth: 260,
+    maxWidth: 420,
+    padding: space[1],
+    borderRadius: radius.medium,
+    backgroundColor: colors.raisedBackground,
+    boxShadow: '0 8px 24px rgb(0 0 0 / 0.16)',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  item: {
+    textAlign: 'start',
+    borderWidth: 0,
+    background: 'none',
+    color: colors.label,
+    padding: `${space[1]} ${space[2]}`,
+    borderRadius: radius.small,
+    fontSize: text.subheadlineSize,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    cursor: 'pointer',
+  },
+  highlighted: { backgroundColor: colors.hoverFill },
+  empty: { padding: space[2], fontSize: text.footnoteSize, color: colors.tertiaryLabel },
+});
+
+/** The `@` session picker of an empty node, below the editing caret. */
+function TodaySessionPicker() {
+  const { t } = useTranslation();
+  const controller = useTodayEditor();
+  const items = useSessionMentionItems();
+  const picker = controller?.getPicker() ?? null;
+  const root = controller?.getEditorRoot() ?? null;
+  const candidates = useMemo(() => {
+    if (!picker) return [];
+    return picker.query
+      ? selectSessionMentionCandidates(items, picker.query, 8)
+      : [...items].sort((a, b) => b.activityAt - a.activityAt).slice(0, 8);
+  }, [items, picker]);
+  if (controller) controller.pickerItems = candidates.map((item) => item.sessionId);
+  if (!controller || !picker || !root) return null;
+  const rect = root.getBoundingClientRect();
+  return (
+    <div
+      {...stylex.props(pickerStyles.menu)}
+      style={{ left: rect.left, top: rect.bottom + 4 }}
+      role="listbox"
+      aria-label={t('today.pickSession', 'Conversations')}
+    >
+      {candidates.length === 0 ? (
+        <span {...stylex.props(pickerStyles.empty)}>
+          {t('today.noSessions', 'No matching conversations')}
+        </span>
+      ) : (
+        candidates.map((item, index) => (
+          <button
+            type="button"
+            key={item.sessionId}
+            role="option"
+            aria-selected={index === picker.index}
+            {...stylex.props(pickerStyles.item, index === picker.index && pickerStyles.highlighted)}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => controller.acceptPicker(item.sessionId)}
+          >
+            {item.title || t('today.untitledSession', 'Untitled conversation')}
+          </button>
+        ))
+      )}
     </div>
   );
 }

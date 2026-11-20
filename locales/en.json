@@ -6907,5 +6907,9 @@
   "today.backToToday": "Back to today",
   "today.calendar": "Pick a date",
   "today.previousMonth": "Previous month",
-  "today.nextMonth": "Next month"
+  "today.nextMonth": "Next month",
+  "today.sessionMissing": "Conversation deleted / No access",
+  "today.untitledSession": "Untitled conversation",
+  "today.pickSession": "Conversations",
+  "today.noSessions": "No matching conversations"
 }

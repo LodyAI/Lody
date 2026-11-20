@@ -141,3 +141,48 @@ describe('Today LoroText binding', () => {
     });
   });
 });
+
+describe('Today session picker', () => {
+  it('turns an `@query` node into a session node, and one undo brings the text back', async () => {
+    const { createTodayPageStoreCache } = await import('../src/providers/today-page-store-cache');
+    const { TodayEditorController } =
+      await import('../src/components/today/editor/today-editor-controller');
+    const { getTodayDocId } = await import('@lody/shared');
+    const cache = createTodayPageStoreCache({
+      releaseDelayMs: 1000,
+      idleCap: 2,
+      setTimer: () => () => {},
+      repo: {
+        openDoc: async () => ({ doc: new LoroDoc(), joinRoom: async () => null }),
+        isRegistered: async () => true,
+        upsertDocMeta: async () => {},
+        unloadDoc: async () => {},
+        observeDocs: () => ({ docIds: [], unsubscribe: () => {} }),
+      },
+    });
+    const store = await cache.acquire(getTodayDocId('me', '2026-11-20' as never));
+    const controller = new TodayEditorController(cache);
+    const root = document.createElement('div');
+    root.contentEditable = 'true';
+    document.body.append(root);
+    controller.startPage(store);
+    controller.attachRoot(root);
+    controller.editor.update(
+      () => {
+        const selection = $getSelection();
+        if ($isRangeSelection(selection)) selection.insertText('@fix');
+      },
+      { discrete: true }
+    );
+    expect(store.getSnapshot().visible.map((n) => n.text)).toEqual(['@fix']);
+    expect(controller.getPicker()?.query).toBe('fix');
+    controller.pickerItems = ['sess-1'];
+    controller.acceptPicker('sess-1');
+    const [node] = store.getSnapshot().visible;
+    expect(node).toMatchObject({ kind: 'session', sessionId: 'sess-1' });
+    store.undo.undo();
+    expect(store.getSnapshot().visible[0]).toMatchObject({ kind: 'text', text: '@fix' });
+    controller.dispose();
+    root.remove();
+  });
+});

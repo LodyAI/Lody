@@ -26,11 +26,19 @@ import {
   serializeTodayFragments,
   topLevelSelection,
 } from './block-selection';
+import { readPastedSessionLink } from '@/lib/session-deep-link';
 import { bindLoroText } from './loro-lexical-binding';
 import { resolveOutlineKey, type OutlineIntent } from './outline-keys';
 
 export type TodayActiveNode = { store: TodayPageStore; nodeId: TodayNodeId };
 export type TodayBlockSelection = { store: TodayPageStore; ids: TodayNodeId[] };
+export type TodaySessionPickerState = {
+  store: TodayPageStore;
+  nodeId: TodayNodeId;
+  query: string;
+  index: number;
+};
+const PICKER_TRIGGER = /^[@＠]([^\n]*)$/;
 type CaretTarget = number | 'start' | 'end' | { goalX: number; edge: 'top' | 'bottom' };
 
 const isMac = () =>
@@ -53,6 +61,12 @@ export class TodayEditorController {
   private blockFocus: TodayNodeId | null = null;
   private surface: HTMLElement | null = null;
   private stopPointer: (() => void) | null = null;
+  private picker: TodaySessionPickerState | null = null;
+  private pickerDismissedFor: TodayNodeId | null = null;
+  /** Candidates the picker currently shows, set by its view. */
+  pickerItems: readonly string[] = [];
+  /** Workspace whose session links may be pasted into a node. */
+  workspaceId: string | null = null;
   /** Builds the plain-text form of a copied session node. */
   sessionLink: (sessionId: string) => string = (sessionId) => sessionId;
   private pendingCaret: CaretTarget = 'end';
@@ -86,6 +100,31 @@ export class TodayEditorController {
         () => this.history('redo'),
         COMMAND_PRIORITY_CRITICAL
       ),
+      this.editor.registerCommand(
+        KEY_DOWN_COMMAND,
+        (event) => this.onPickerKey(event),
+        COMMAND_PRIORITY_CRITICAL
+      ),
+      this.editor.registerCommand(
+        PASTE_COMMAND,
+        (event) => this.onEditorPaste(event),
+        COMMAND_PRIORITY_HIGH
+      ),
+      this.editor.registerUpdateListener(({ editorState }) => {
+        const active = this.active;
+        if (!active) return;
+        const text = editorState.read(() => $readComposerValue().text);
+        const match = PICKER_TRIGGER.exec(text);
+        if (match && this.pickerDismissedFor !== active.nodeId) {
+          const query = match[1] ?? '';
+          if (this.picker?.nodeId === active.nodeId && this.picker.query === query) return;
+          this.picker = { store: active.store, nodeId: active.nodeId, query, index: 0 };
+          this.notify();
+        } else if (this.picker) {
+          this.picker = null;
+          this.notify();
+        }
+      }),
       this.editor.registerUpdateListener(({ editorState }) => {
         const active = this.active;
         if (!active) return;
@@ -120,6 +159,56 @@ export class TodayEditorController {
   getBlockSelection() {
     return this.selection;
   }
+  getPicker() {
+    return this.picker;
+  }
+  getEditorRoot() {
+    return this.root;
+  }
+
+  private onPickerKey(event: KeyboardEvent): boolean {
+    const picker = this.picker;
+    if (!picker || event.isComposing || event.keyCode === 229) return false;
+    const count = this.pickerItems.length;
+    switch (event.key) {
+      case 'ArrowDown':
+      case 'ArrowUp': {
+        if (count === 0) return false;
+        const step = event.key === 'ArrowDown' ? 1 : -1;
+        this.picker = { ...picker, index: (picker.index + step + count) % count };
+        break;
+      }
+      case 'Enter':
+      case 'Tab': {
+        const sessionId = this.pickerItems[picker.index];
+        if (!sessionId) return false;
+        event.preventDefault();
+        queueMicrotask(() => this.acceptPicker(sessionId));
+        return true;
+      }
+      case 'Escape':
+        this.pickerDismissedFor = picker.nodeId;
+        this.picker = null;
+        break;
+      default:
+        return false;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    this.notify();
+    return true;
+  }
+
+  /** Turn the `@query` node into a session node; one undo brings `@query` back. */
+  acceptPicker(sessionId: string) {
+    const picker = this.picker;
+    if (!picker) return;
+    this.picker = null;
+    const { store, nodeId } = picker;
+    this.deactivate(false);
+    store.undo.structural(() => store.outline.convertToSession(nodeId, sessionId));
+    this.selectBlocks(store, [nodeId]);
+  }
 
   /** Sections register their open page so the caret can cross days. */
   registerDay(date: TodayDate, store: TodayPageStore) {
@@ -145,6 +234,7 @@ export class TodayEditorController {
     }
     this.pin(store.docId);
     this.active = { store, nodeId };
+    if (this.pickerDismissedFor !== nodeId) this.pickerDismissedFor = null;
     this.notify();
   }
 
@@ -293,6 +383,18 @@ export class TodayEditorController {
     const data = event.clipboardData;
     const structured = data.getData(TODAY_CLIPBOARD_MIME);
     const text = data.getData('text/plain');
+    const empty = this.editor.getEditorState().read(() => $readComposerValue().text) === '';
+    const link = empty && !structured ? readPastedSessionLink(text, this.workspaceId) : null;
+    if (link) {
+      event.preventDefault();
+      const { store, nodeId } = active;
+      queueMicrotask(() => {
+        this.deactivate(false);
+        store.undo.structural(() => store.outline.convertToSession(nodeId, link.sessionId));
+        this.selectBlocks(store, [nodeId]);
+      });
+      return true;
+    }
     if (!structured && !text.includes('\n')) return false;
     const fragments = readClipboard(data);
     if (!fragments) return false;
