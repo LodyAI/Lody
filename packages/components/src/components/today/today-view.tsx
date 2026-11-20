@@ -15,6 +15,8 @@ import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope'
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { toast } from '@/lib/toast';
+import { TodayEditorContext } from './editor/today-editor-context';
+import { TodayEditorController } from './editor/today-editor-controller';
 import { TodayDaySection } from './today-day-section';
 import { buildDayStream, localTodayDate, todayDateToLocalDate } from './today-stream';
 import { useTodayClock } from './use-today-clock';
@@ -22,7 +24,13 @@ import { useTodayClock } from './use-today-clock';
 export type TodayViewTarget = { member?: string; date?: string };
 
 const styles = stylex.create({
-  root: { position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 },
+  root: {
+    position: 'relative',
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    minHeight: 0,
+  },
   toolbar: {
     display: 'flex',
     alignItems: 'center',
@@ -39,11 +47,35 @@ const styles = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  scroller: { flex: 1, minHeight: 0, overflowY: 'auto', paddingInline: space[6], paddingBottom: space[8] },
-  back: { position: 'absolute', insetInline: 0, bottom: space[4], display: 'flex', justifyContent: 'center', pointerEvents: 'none' },
+  scroller: {
+    flex: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    paddingInline: space[6],
+    paddingBottom: space[8],
+  },
+  back: {
+    position: 'absolute',
+    insetInline: 0,
+    bottom: space[4],
+    display: 'flex',
+    justifyContent: 'center',
+    pointerEvents: 'none',
+  },
   backButton: { pointerEvents: 'auto' },
-  calendar: { display: 'flex', flexDirection: 'column', gap: space[2], padding: space[2], width: 252 },
-  calendarHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: text.subheadlineSize },
+  calendar: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    padding: space[2],
+    width: 252,
+  },
+  calendarHead: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    fontSize: text.subheadlineSize,
+  },
   grid: { display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2 },
   weekday: { fontSize: text.captionSize, color: colors.tertiaryLabel, textAlign: 'center' },
   day: {
@@ -109,96 +141,113 @@ export function TodayView(props: {
     () => buildDayStream({ today, anchor, registered, empty }),
     [anchor, empty, registered, today]
   );
+  const cache = runtime?.todayPages ?? null;
+  const [controller, setController] = useState<TodayEditorController | null>(null);
+  useEffect(() => {
+    if (!cache) return undefined;
+    const created = new TodayEditorController(cache);
+    setController(created);
+    return () => {
+      created.dispose();
+      setController(null);
+    };
+  }, [cache]);
   const memberName =
-    userId && userId !== self ? members.find((member) => member.userId === userId)?.name : undefined;
+    userId && userId !== self
+      ? members.find((member) => member.userId === userId)?.name
+      : undefined;
 
   if (!runtime || !userId) return null;
   return (
-    <div {...stylex.props(styles.root)} data-testid="today-view">
-      <div {...stylex.props(styles.toolbar)}>
-        <span {...stylex.props(styles.title)}>
-          {memberName ? t('today.memberTitle', '{{name}}’s Today', { name: memberName }) : null}
-        </span>
-        <TodayCalendar
-          today={today}
-          selected={anchor ?? today}
-          registered={registered}
-          language={i18n.language}
-          onPick={(date) =>
-            props.onNavigate({ ...props.target, date: date === today ? undefined : date })
-          }
-        />
-        <Menu.Root>
-          <Menu.Trigger
-            render={
-              <Button variant="ghost" size="small" icon aria-label={t('today.more', 'More')}>
-                <MoreHorizontal size={16} />
-              </Button>
+    <TodayEditorContext.Provider value={controller}>
+      <div {...stylex.props(styles.root)} data-testid="today-view">
+        <div {...stylex.props(styles.toolbar)}>
+          <span {...stylex.props(styles.title)}>
+            {memberName ? t('today.memberTitle', '{{name}}’s Today', { name: memberName }) : null}
+          </span>
+          <TodayCalendar
+            today={today}
+            selected={anchor ?? today}
+            registered={registered}
+            language={i18n.language}
+            onPick={(date) =>
+              props.onNavigate({ ...props.target, date: date === today ? undefined : date })
             }
           />
-          <Menu.Content>
-            {isMultiMember ? (
-              <Menu.Submenu>
-                <Menu.SubmenuTrigger>{t('today.viewMember', "View a member's Today")}</Menu.SubmenuTrigger>
-                <Menu.Content>
-                  {members.map((member) => (
-                    <Menu.Item
-                      key={member.userId}
-                      onClick={() =>
-                        props.onNavigate({
-                          date: props.target.date,
-                          member: member.userId === self ? undefined : member.userId,
-                        })
-                      }
-                    >
-                      {member.name}
-                    </Menu.Item>
-                  ))}
-                </Menu.Content>
-              </Menu.Submenu>
-            ) : null}
-            <Menu.Item
-              onClick={() => {
-                void writeTextToClipboard(
-                  buildTodayLink(runtime.workspaceId, userId, anchor ?? today)
-                ).then((copied) => {
-                  if (copied) toast.success(t('today.linkCopied', 'Link copied'));
-                });
-              }}
-            >
-              {t('today.copyLink', 'Copy link')}
-            </Menu.Item>
-          </Menu.Content>
-        </Menu.Root>
-      </div>
-      <div {...stylex.props(styles.scroller)}>
-        {days.map((date, index) => (
-          <TodayDaySection
-            key={`${userId}:${date}`}
-            cache={runtime.todayPages}
-            userId={userId}
-            date={date}
-            today={today}
-            isTop={index === 0}
-            onEmpty={onEmpty}
-          />
-        ))}
-      </div>
-      {anchor && anchor !== today ? (
-        <div {...stylex.props(styles.back)}>
-          <span {...stylex.props(styles.backButton)}>
-            <Button
-              variant="secondary"
-              size="small"
-              shape="pill"
-              onClick={() => props.onNavigate({ ...props.target, date: undefined })}
-            >
-              {t('today.backToToday', 'Back to today')}
-            </Button>
-          </span>
+          <Menu.Root>
+            <Menu.Trigger
+              render={
+                <Button variant="ghost" size="small" icon aria-label={t('today.more', 'More')}>
+                  <MoreHorizontal size={16} />
+                </Button>
+              }
+            />
+            <Menu.Content>
+              {isMultiMember ? (
+                <Menu.Submenu>
+                  <Menu.SubmenuTrigger>
+                    {t('today.viewMember', "View a member's Today")}
+                  </Menu.SubmenuTrigger>
+                  <Menu.Content>
+                    {members.map((member) => (
+                      <Menu.Item
+                        key={member.userId}
+                        onClick={() =>
+                          props.onNavigate({
+                            date: props.target.date,
+                            member: member.userId === self ? undefined : member.userId,
+                          })
+                        }
+                      >
+                        {member.name}
+                      </Menu.Item>
+                    ))}
+                  </Menu.Content>
+                </Menu.Submenu>
+              ) : null}
+              <Menu.Item
+                onClick={() => {
+                  void writeTextToClipboard(
+                    buildTodayLink(runtime.workspaceId, userId, anchor ?? today)
+                  ).then((copied) => {
+                    if (copied) toast.success(t('today.linkCopied', 'Link copied'));
+                  });
+                }}
+              >
+                {t('today.copyLink', 'Copy link')}
+              </Menu.Item>
+            </Menu.Content>
+          </Menu.Root>
         </div>
-      ) : null}
-    </div>
+        <div {...stylex.props(styles.scroller)}>
+          {days.map((date, index) => (
+            <TodayDaySection
+              key={`${userId}:${date}`}
+              cache={runtime.todayPages}
+              userId={userId}
+              date={date}
+              today={today}
+              isTop={index === 0}
+              onEmpty={onEmpty}
+            />
+          ))}
+        </div>
+        {anchor && anchor !== today ? (
+          <div {...stylex.props(styles.back)}>
+            <span {...stylex.props(styles.backButton)}>
+              <Button
+                variant="secondary"
+                size="small"
+                shape="pill"
+                onClick={() => props.onNavigate({ ...props.target, date: undefined })}
+              >
+                {t('today.backToToday', 'Back to today')}
+              </Button>
+            </span>
+          </div>
+        ) : null}
+      </div>
+    </TodayEditorContext.Provider>
   );
 }
 

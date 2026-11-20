@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { getTodayDocId, type TodayDate, type TodayNodeView } from '@lody/shared';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { useTodayEditor } from './editor/today-editor-context';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
 import type { TodayPageStoreCache } from '@/providers/today-page-store-cache';
 import { todayDateToLocalDate } from './today-stream';
@@ -67,7 +68,9 @@ const styles = stylex.create({
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
   },
-  placeholder: { color: colors.tertiaryLabel },
+  placeholder: { color: colors.tertiaryLabel, cursor: 'text' },
+  editable: { outline: 'none', cursor: 'text' },
+  blockSelected: { backgroundColor: `color-mix(in srgb, ${colors.accent} 14%, transparent)` },
 });
 
 /**
@@ -115,6 +118,8 @@ function TodayStaticOutline(props: {
 }) {
   const { store, isTop, onEmpty } = props;
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const controller = useTodayEditor();
+  useEffect(() => controller?.registerDay(store.date, store), [controller, store]);
   useEffect(() => {
     if (isTop) return undefined;
     let cancelled = false;
@@ -145,11 +150,15 @@ function TodayStaticOutline(props: {
 function TodayRow(props: { node: TodayNodeView | null; store: TodayPageStore }) {
   const { t } = useTranslation();
   const { node, store } = props;
+  const controller = useTodayEditor();
+  const active = !!node && !!controller?.isActive(store, node.id);
+  const selected = !!node && !!controller?.isBlockSelected(store, node.id);
   return (
     <div
-      {...stylex.props(styles.row)}
+      {...stylex.props(styles.row, selected && styles.blockSelected)}
       style={{ paddingInlineStart: (node?.depth ?? 0) * TODAY_INDENT_PX }}
       role="treeitem"
+      aria-selected={selected || undefined}
       aria-expanded={node?.hasChildren ? !node.collapsed : undefined}
       data-today-node={node?.id}
     >
@@ -172,9 +181,40 @@ function TodayRow(props: { node: TodayNodeView | null; store: TodayPageStore }) 
       <span {...stylex.props(styles.bullet)}>
         <span {...stylex.props(styles.dot, node?.collapsed && styles.dotFolded)} />
       </span>
-      <span {...stylex.props(styles.text, (!node || !node.text) && styles.placeholder)}>
-        {node ? node.text || '​' : t('today.empty', 'Write something…')}
-      </span>
+      {active && controller ? (
+        <div
+          key="editor"
+          ref={controller.attachRoot}
+          contentEditable
+          suppressContentEditableWarning
+          spellCheck={false}
+          role="textbox"
+          aria-multiline
+          {...stylex.props(styles.text, styles.editable)}
+        />
+      ) : (
+        <div
+          key="static"
+          {...stylex.props(styles.text, (!node || !node.text) && styles.placeholder)}
+          onPointerDown={(event) => {
+            if (!controller || event.button !== 0 || event.metaKey || event.ctrlKey) return;
+            if (event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            if (!node) controller.startPage(store);
+            else
+              controller.activateAtPoint(
+                store,
+                node.id,
+                event.currentTarget,
+                event.clientX,
+                event.clientY
+              );
+          }}
+        >
+          {node ? node.text || '\u200b' : t('today.empty', 'Write something…')}
+          {node?.text.endsWith('\n') ? '\n' : null}
+        </div>
+      )}
     </div>
   );
 }

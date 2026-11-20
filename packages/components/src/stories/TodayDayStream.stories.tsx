@@ -1,7 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { LoroDoc } from 'loro-crdt';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { getTodayDocId, openTodayOutline, parseTodayPasteText, type TodayDate } from '@lody/shared';
+import { TodayEditorContext } from '@/components/today/editor/today-editor-context';
+import { TodayEditorController } from '@/components/today/editor/today-editor-controller';
 import { TodayDaySection } from '@/components/today/today-day-section';
 import { createTodayPageStoreCache } from '@/providers/today-page-store-cache';
 
@@ -44,20 +46,28 @@ function useDemoCache() {
 
 function DayStream(props: { dates: TodayDate[] }) {
   const cache = useDemoCache();
+  const [controller, setController] = useState<TodayEditorController | null>(null);
+  useEffect(() => {
+    const created = new TodayEditorController(cache);
+    setController(created);
+    return () => created.dispose();
+  }, [cache]);
   return (
-    <div style={{ maxWidth: 720, padding: 24 }}>
-      {props.dates.map((date, index) => (
-        <TodayDaySection
-          key={date}
-          cache={cache}
-          userId={USER}
-          date={date}
-          today={TODAY}
-          isTop={index === 0}
-          onEmpty={() => {}}
-        />
-      ))}
-    </div>
+    <TodayEditorContext.Provider value={controller}>
+      <div style={{ maxWidth: 720, padding: 24 }}>
+        {props.dates.map((date, index) => (
+          <TodayDaySection
+            key={date}
+            cache={cache}
+            userId={USER}
+            date={date}
+            today={TODAY}
+            isTop={index === 0}
+            onEmpty={() => {}}
+          />
+        ))}
+      </div>
+    </TodayEditorContext.Provider>
   );
 }
 
