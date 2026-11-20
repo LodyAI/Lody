@@ -206,6 +206,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@loro-dev/loro-repo-engine": "catalog:",
     "@lody/configs": "workspace:*",
     "@lody/e2ee-client": "workspace:*",
     "@playwright/test": "^1.58.2",
