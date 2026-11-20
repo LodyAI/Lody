@@ -114,6 +114,7 @@ export * from './preview-comment-types';
 export * from './preview-comment-schema';
 export * from './task-types';
 export * from './today-types';
+export * from './today-outline';
 export * from './task-index';
 export * from './pr-prompts';
 export * from './preview-comment-mutation';
