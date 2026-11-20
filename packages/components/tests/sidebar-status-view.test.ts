@@ -29,18 +29,16 @@ describe('sidebarStatusGroup', () => {
     expect(
       sidebarStatusGroup({ latestMessageAt: NOW - 1_000, snoozedUntil: NOW + 60_000 }, NOW)
     ).toBe('later');
-    expect(
-      sidebarStatusGroup({ latestMessageAt: NOW - 1_000, snoozedUntil: NOW }, NOW)
-    ).toBe('focus');
+    expect(sidebarStatusGroup({ latestMessageAt: NOW - 1_000, snoozedUntil: NOW }, NOW)).toBe(
+      'focus'
+    );
   });
 
   it('classifies manually settled sessions into settled until a newer message arrives', () => {
-    expect(
-      sidebarStatusGroup({ latestMessageAt: NOW - 5_000, settledAt: NOW - 1_000 }, NOW)
-    ).toBe('settled');
-    expect(
-      sidebarStatusGroup({ latestMessageAt: NOW, settledAt: NOW - 1_000 }, NOW)
-    ).toBe('focus');
+    expect(sidebarStatusGroup({ latestMessageAt: NOW - 5_000, settledAt: NOW - 1_000 }, NOW)).toBe(
+      'settled'
+    );
+    expect(sidebarStatusGroup({ latestMessageAt: NOW, settledAt: NOW - 1_000 }, NOW)).toBe('focus');
   });
 
   it('auto-settles quiet sessions after 7 days unless working, waiting, or restored to Focus', () => {
@@ -97,13 +95,19 @@ describe('sidebarStatusGroup', () => {
     const later = buckets.find((b) => b.key === 'later')!;
 
     // Snoozed child moves to Later on its own as a top-level row while its parent stays in Focus.
-    const laterTree = buildOpenedBySessionTree(later.items, SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS);
+    const laterTree = buildOpenedBySessionTree(
+      later.items,
+      SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS
+    );
     expect(laterTree.map((n) => ({ id: n.item.id, depth: n.depth }))).toEqual([
       { id: 'child-a2-snoozed', depth: 0 },
     ]);
 
     // Child in the same group stays indented under root-a; Focus DnD indexes over roots only.
-    const focusTree = buildOpenedBySessionTree(focus.items, SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS);
+    const focusTree = buildOpenedBySessionTree(
+      focus.items,
+      SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS
+    );
     expect(focusTree.map((n) => ({ id: n.item.id, depth: n.depth }))).toEqual([
       { id: 'root-a', depth: 0 },
       { id: 'child-a1', depth: 1 },
@@ -122,9 +126,7 @@ describe('sidebarStatusGroup', () => {
       restoredBuckets.find((b) => b.key === 'focus')!.items,
       SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS
     );
-    expect(
-      restoredFocusTree.find((n) => n.item.id === 'child-a2-snoozed')?.depth
-    ).toBe(1);
+    expect(restoredFocusTree.find((n) => n.item.id === 'child-a2-snoozed')?.depth).toBe(1);
 
     const focusRoots = focusTree.filter((node) => node.depth === 0).map((node) => node.item);
     expect(focusRoots.map((r) => r.id)).toEqual(['root-a', 'root-b']);
@@ -159,9 +161,14 @@ describe('formatSnoozeCountdown & buildSnoozePresets', () => {
     expect(formatSnoozeCountdown(NOW + 3 * 86_400_000, NOW)).toBe('3d');
   });
 
-  it('produces three future quick snooze presets', () => {
+  it('produces four future quick snooze presets', () => {
     const presets = buildSnoozePresets(new Date(NOW));
-    expect(presets.map((p) => p.id)).toEqual(['laterToday', 'tomorrowMorning', 'nextWeek']);
+    expect(presets.map((p) => p.id)).toEqual([
+      'oneHour',
+      'laterToday',
+      'tomorrowMorning',
+      'nextWeek',
+    ]);
     for (const preset of presets) {
       expect(preset.timestamp).toBeGreaterThan(NOW);
       expect(preset.countdown.length).toBeGreaterThan(0);
@@ -200,12 +207,26 @@ describe('Focus manual fractional-index ordering', () => {
     const snoozeTarget = NOW - 5_000; // already elapsed
 
     // Older >7d session surfaces in Focus once its snooze elapses, and sorts to the top of Focus.
-    expect(sidebarStatusGroup({ latestMessageAt: tenDaysAgo, snoozedUntil: snoozeTarget }, NOW)).toBe(
-      'focus'
-    );
+    expect(
+      sidebarStatusGroup({ latestMessageAt: tenDaysAgo, snoozedUntil: snoozeTarget }, NOW)
+    ).toBe('focus');
     const items: SidebarUpdatedItem[] = [
-      { id: 'focus-a', kind: 'chat', title: 'A', sectionLabel: 'Chats', latestMessageAt: NOW, orderKey: '80' },
-      { id: 'focus-b', kind: 'chat', title: 'B', sectionLabel: 'Chats', latestMessageAt: NOW, orderKey: '82' },
+      {
+        id: 'focus-a',
+        kind: 'chat',
+        title: 'A',
+        sectionLabel: 'Chats',
+        latestMessageAt: NOW,
+        orderKey: '80',
+      },
+      {
+        id: 'focus-b',
+        kind: 'chat',
+        title: 'B',
+        sectionLabel: 'Chats',
+        latestMessageAt: NOW,
+        orderKey: '82',
+      },
       {
         id: 'woken-old',
         kind: 'chat',
@@ -229,7 +250,11 @@ describe('Focus manual fractional-index ordering', () => {
     // Reading after snoozeTarget clears unread and stays read.
     expect(
       sessionHasUnreadMessages(
-        { lastMessageAt: tenDaysAgo, lastReadAt: snoozeTarget + 10_000, snoozedUntil: snoozeTarget },
+        {
+          lastMessageAt: tenDaysAgo,
+          lastReadAt: snoozeTarget + 10_000,
+          snoozedUntil: snoozeTarget,
+        },
         NOW
       )
     ).toBe(false);
