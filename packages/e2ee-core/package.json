@@ -39,12 +39,14 @@
     "effect": "catalog:"
   },
   "devDependencies": {
+    "@loro-dev/loro-repo-engine": "catalog:",
     "@loro-dev/streams-client": "catalog:",
     "@loro-dev/streams-crdt": "catalog:",
     "@playwright/test": "1.58.2",
     "@types/better-sqlite3": "catalog:",
     "@types/node": "catalog:",
     "esbuild": "0.28.2",
+    "loro-repo": "catalog:",
     "oxfmt": "^0.65.0",
     "tsx": "4.23.7",
     "typescript": "catalog:",
