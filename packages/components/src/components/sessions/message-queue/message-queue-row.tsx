@@ -30,7 +30,7 @@ import { text as type } from '@lody/ui/tokens/scales.stylex';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 import { QueuedImagePreview, type QueuedImageBlock } from './queued-image-preview';
-import { QUEUE_LINE, queueSurface } from './surface';
+import { QUEUE_LINE, queuePreviewStyle, queueSurface } from './surface';
 import { shouldShowQueuedItemSteer } from './queued-message-steer';
 import { getEditableTaskText } from './use-message-queue-editing';
 
@@ -360,12 +360,7 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
       ) : null}
       <div
         className={cn('min-w-0 flex-1 overflow-hidden', stylex.props(queueSurface.text).className)}
-        style={{
-          display: '-webkit-box',
-          // A narrow sheet keeps every row to one line, like the phone layout.
-          WebkitLineClamp: props.footerPosition === 'inline' || props.compact ? 1 : 2,
-          WebkitBoxOrient: 'vertical',
-        }}
+        style={queuePreviewStyle(props.footerPosition === 'inline' || !!props.compact)}
       >
         {props.footerPosition === 'inline' && props.footer ? <>{props.footer} </> : null}
         {item.task}

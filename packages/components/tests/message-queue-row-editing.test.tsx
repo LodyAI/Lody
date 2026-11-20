@@ -667,4 +667,41 @@ describe('queued message images', () => {
     expect(editsStarted).toEqual([]);
     expect(container!.querySelector('textarea')).toBeNull();
   });
+
+  it('keeps the scroll fade off the scroller and clamps a phone row to one line', async () => {
+    const long =
+      '暂时只写代码，不需要改任何的约定或者是 agent 的提示，后面还有很多不会发出去的说明。';
+    await act(async () => {
+      root?.render(
+        createElement(MessageQueueDisplay, {
+          sessionId: 'session-test' as SessionId,
+          items: [{ ...makeItem(), $cid: 'cid-long', task: long }],
+          onRemove: () => undefined,
+          onReorder: () => undefined,
+          onEditStart: () => undefined,
+          onEditCancel: () => undefined,
+          onEditSave: () => undefined,
+          onSteer: () => undefined,
+          roomy: true,
+          footerPosition: 'inline',
+        })
+      );
+    });
+
+    const scroller = container!.querySelector<HTMLElement>('.overflow-y-auto');
+    expect(scroller).toBeTruthy();
+    expect(scroller!.style.maxHeight).toBe('min(25vh, 240px)');
+    // Unset mask properties are '' in some jsdom builds and undefined in others.
+    expect(scroller!.style.getPropertyValue('mask-image')).toBe('');
+    expect(scroller!.style.getPropertyValue('-webkit-mask-image')).toBe('');
+    expect(scroller!.parentElement?.style.overflow).toBe('hidden');
+    expect(scroller!.parentElement?.style.maxHeight).toBe('min(25vh, 240px)');
+
+    // The row wrapper has the same text. The clamp lives on the preview itself.
+    const preview = [...container!.querySelectorAll('div')].find(
+      (node) => node.textContent === long && node.style.whiteSpace === 'nowrap'
+    );
+    expect(preview).toBeTruthy();
+    expect(preview?.style.display).not.toBe('-webkit-box');
+  });
 });

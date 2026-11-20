@@ -26,7 +26,13 @@ Rows are inset tiles without hairline dividers; desktop rows share a 16 px index
 gutter, mobile rows drop it. Actions always end the row and stay on the message line, because a separate action
 line looked detached and cost a full row per item. Mobile rows, and any sheet
 narrower than 520 px, fold them into one More button (a real 40 × 36 px box on 36 px touch rows)
-whose menu preserves Steer, move-to-top, edit and delete when applicable. Prior intent:
+whose menu preserves Steer, move-to-top, edit and delete when applicable. One-line
+previews use ellipsis, not `display: -webkit-box`: that display ignores the clamp
+inside the touch grid on iOS and the sheet paints the extra height black. The
+scroll fade is a mask on a non-scrolling wrapper around the scroller. Never put
+the mask on the overflow element, and never emit a zero-length `transparent` /
+`#000` stop for an edge that does not overflow — WKWebView fills that layer black.
+Prior intent:
 [queue touch actions](../../../../../../specs/message-queue-touch-actions.md).
 
 Queue-bound sends held in memory (`runtime.pendingSends`) while attachments
