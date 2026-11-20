@@ -82,11 +82,11 @@ const styles = stylex.create({
     height: text.bodyLeading,
     verticalAlign: 'top',
   },
-  // Mark colours: accent for live work and unread, warning for idle and
-  // waiting on you, quiet grey for Later and Done.
+  // Mark colours follow the text beside them: link accent for running,
+  // waiting, unread and Later; warning for idle; Done takes its dimmed title's grey.
   markAccent: { color: colors.accent, display: 'block' },
   markWarning: { color: colors.warning, display: 'block' },
-  markQuiet: { color: colors.secondaryLabel, display: 'block' },
+  markQuiet: { color: colors.tertiaryLabel, display: 'block' },
 
   // Plain inline text: it sits on the line's baseline like the title.
   countdown: {
@@ -95,7 +95,7 @@ const styles = stylex.create({
     // pushes the line taller.
     lineHeight: 1,
     marginInlineStart: 2,
-    color: colors.tertiaryLabel,
+    color: colors.accent,
     fontVariantNumeric: 'tabular-nums',
   },
 
@@ -177,7 +177,7 @@ function StatusGlyph(props: { status: Extract<TodaySessionDisplay, { state: 'ok'
           height="12"
           viewBox="0 0 12 12"
           aria-hidden
-          {...stylex.props(styles.markQuiet)}
+          {...stylex.props(styles.markAccent)}
         >
           <circle {...ring} stroke="currentColor" />
           <path

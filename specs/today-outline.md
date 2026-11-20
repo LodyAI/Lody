@@ -107,14 +107,14 @@ any time; when off it changes none of the app's existing behavior.
 - Status matches the sidebar exactly by reusing its status grouping and unread, running and approval signals;
   Today derives nothing on its own. Icon priority (static 12px icons, circles except the hand):
 
-  | Conversation status                       | Leading icon                                     |
-  | ----------------------------------------- | ------------------------------------------------ |
-  | Waiting for approval / question           | Blue raised-hand icon                            |
-  | Running                                   | Blue ring, right half filled (static, no motion) |
-  | Later                                     | Grey clock ring + countdown (muted, on baseline) |
-  | Done (settled), archived                  | Grey check ring; title struck through and dimmed |
-  | Unread (not shown for agent-managed ones) | Small solid blue dot; title not bold             |
-  | Idle                                      | Yellow dashed ring                               |
+  | Conversation status                       | Leading icon                                      |
+  | ----------------------------------------- | ------------------------------------------------- |
+  | Waiting for approval / question           | Blue raised-hand icon                             |
+  | Running                                   | Blue ring, right half filled (static, no motion)  |
+  | Later                                     | Blue clock ring + countdown (same blue, baseline) |
+  | Done (settled), archived                  | Dimmed grey check ring, same grey as struck title |
+  | Unread (not shown for agent-managed ones) | Small solid blue dot; title not bold              |
+  | Idle                                      | Yellow dashed ring                                |
 
 - Clicking the status icon opens a status menu that changes the conversation's status (writing the same session
   metadata as the sidebar): Mark as unread / Mark as read (whichever applies), Later (presets and custom, reusing
