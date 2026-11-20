@@ -1283,6 +1283,7 @@ export function MachineAgentSettings({
       await refreshCapabilities({
         machineId: config.machineId,
         configId: config.id,
+        readModelOptions: true,
         onModelOptionsProgress: options?.onModelOptionsProgress,
       });
     },

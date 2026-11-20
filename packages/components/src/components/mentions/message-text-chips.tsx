@@ -3,8 +3,16 @@ import * as stylex from '@stylexjs/stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { useTranslation } from 'react-i18next';
 
-import { readMessageQuote, sanitizeMessageTextSpans, type MessageTextSpan } from '@lody/shared';
+import {
+  readMessageQuote,
+  sanitizeMessageTextSpans,
+  type MessageTextSpan,
+  type SessionId,
+} from '@lody/shared';
+import { buildSessionLink } from '@lody/shared/session-link';
 import { cn } from '@/lib/utils';
+import { useSessionLinkNavigator } from '@/components/ai-gui/session-link-context';
+import { SessionReadonlyContext } from '@/components/ai-gui/session-readonly-context';
 import {
   getMentionKindIcon,
   MENTION_CHIP_CLASS_NAME,
@@ -109,16 +117,35 @@ function formatChipDisplayLabel(kind: MessageTextSpan['kind'], label: string): s
   return label.replace(/^\u2007?\[(.*)\]\u2007?$/, '$1');
 }
 
+/**
+ * Spans arrive unvalidated: a corrupt `target` is any string, while activation
+ * goes through `buildSessionLink`, which throws on a non-identifier. Resolve
+ * once here so a bad stored span renders an ordinary chip instead of a link
+ * affordance whose click throws.
+ */
+function navigableSessionId(target: string | undefined): SessionId | undefined {
+  if (!target) return undefined;
+  try {
+    buildSessionLink({ sessionId: target });
+  } catch {
+    return undefined;
+  }
+  return target as SessionId;
+}
+
 function MessageTextChip({
   span,
   label,
   onToggle,
+  onActivate,
 }: {
   span: MessageTextSpan;
   /** Resolved by the parent so a chip costs no i18n subscription of its own. */
   label: string;
-  /** Only pasted text has an action: it expands in place. */
+  /** Pasted text and quotes expand in place. */
   onToggle?: () => void;
+  /** Session mentions navigate to the conversation they name. */
+  onActivate?: () => void;
 }) {
   const isBoxed = Boolean(onToggle);
   const displayLabel = formatChipDisplayLabel(span.kind, label);
@@ -131,7 +158,7 @@ function MessageTextChip({
         : MENTION_CHIP_CLASS_NAME,
     span.kind === 'message_quote' && stylex.props(styles.quoteButton).className,
     // With no fill to darken, the hover affordance has to be typographic.
-    onToggle && 'cursor-pointer hover:underline'
+    (onToggle || onActivate) && 'cursor-pointer hover:underline'
   );
   // A frozen mark (an Agent Role's emoji) stands in for the kind's icon, so the
   // bubble shows the same thing the composer did.
@@ -171,17 +198,40 @@ function MessageTextChip({
     </>
   );
 
-  return onToggle ? (
-    <button
-      type="button"
-      className={cn(stylex.props(styles.pasteButton).className, className)}
-      onClick={onToggle}
-    >
-      {content}
-    </button>
-  ) : (
-    <span className={className}>{content}</span>
-  );
+  if (onToggle) {
+    return (
+      <button
+        type="button"
+        className={cn(stylex.props(styles.pasteButton).className, className)}
+        onClick={onToggle}
+      >
+        {content}
+      </button>
+    );
+  }
+  // The chip is ordinary inline content, so the link form stays a span: a
+  // <button> is an atomic box that could not wrap the way the comments above
+  // require. role="link" + Enter keeps it keyboard-reachable instead.
+  if (onActivate) {
+    return (
+      <span
+        role="link"
+        tabIndex={0}
+        data-session-link={span.target}
+        className={className}
+        onClick={onActivate}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            onActivate();
+          }
+        }}
+      >
+        {content}
+      </span>
+    );
+  }
+  return <span className={className}>{content}</span>;
 }
 
 /**
@@ -200,6 +250,11 @@ export function MessageTextWithChips({
   spans: readonly MessageTextSpan[] | undefined;
 }) {
   const { t } = useTranslation();
+  // Session mention chips navigate through the same deep-link dispatch as
+  // Markdown session links; absent the provider (share pages, settings,
+  // read-only views) they keep their ordinary chip presentation.
+  const navigateSession = useSessionLinkNavigator();
+  const readonly = React.useContext(SessionReadonlyContext);
   const resolved = React.useMemo(() => sanitizeMessageTextSpans(text, spans), [spans, text]);
   const [expanded, setExpanded] = React.useState<ReadonlySet<number>>(() => new Set());
 
@@ -218,10 +273,19 @@ export function MessageTextWithChips({
     const expandable = span.kind === 'pasted_text' || span.kind === 'message_quote';
     const isExpanded = expandable && expanded.has(span.start);
     const start = span.start;
+    const sessionId =
+      !readonly && navigateSession && span.kind === 'session'
+        ? navigableSessionId(span.target)
+        : undefined;
     nodes.push(
       <React.Fragment key={`s-${start}`}>
         <MessageTextChip
           span={span}
+          onActivate={
+            sessionId && navigateSession
+              ? () => navigateSession({ sessionId })
+              : undefined
+          }
           label={
             isExpanded
               ? span.kind === 'message_quote'

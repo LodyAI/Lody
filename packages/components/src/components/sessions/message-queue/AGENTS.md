@@ -12,9 +12,11 @@ queued-turn list (`message-queue-display.tsx`, `message-queue-row.tsx`,
 Composer routing and queued-row native steering share one capability predicate.
 Native acknowledged steering is available only when the
 authoritative ACP capability cache advertises it. Never infer steering support
-from built-in/custom config type or agent identity. Every row offers Steer
-while native steering is available; without it only the FIRST row keeps the
-interrupt-and-send fallback, because interrupt always runs the queue head next.
+from built-in/custom config type or agent identity. Every row offers Send while idle. Stop retains queued drafts as paused, and only
+an explicit Send/Steer reissues the selected paused draft under a fresh input id.
+While working, native steering serves every row. Without it, unpaused rows keep
+only the first-row interrupt fallback; a paused row can explicitly submit its new
+input and interrupt the current turn without releasing its paused siblings.
 
 The queue intentionally stays OUT of the composer info bar's items
 ([.agents/docs/sessions-info-bar.md](../../../../../../.agents/docs/sessions-info-bar.md)).
@@ -26,7 +28,13 @@ Rows are inset tiles without hairline dividers; desktop rows share a 16 px index
 gutter, mobile rows drop it. Actions always end the row and stay on the message line, because a separate action
 line looked detached and cost a full row per item. Mobile rows, and any sheet
 narrower than 520 px, fold them into one More button (a real 40 × 36 px box on 36 px touch rows)
-whose menu preserves Steer, move-to-top, edit and delete when applicable. Prior intent:
+whose menu preserves Steer, move-to-top, edit and delete when applicable. One-line
+previews use ellipsis, not `display: -webkit-box`: that display ignores the clamp
+inside the touch grid on iOS and the sheet paints the extra height black. The
+scroll fade is a mask on a non-scrolling wrapper around the scroller. Never put
+the mask on the overflow element, and never emit a zero-length `transparent` /
+`#000` stop for an edge that does not overflow — WKWebView fills that layer black.
+Prior intent:
 [queue touch actions](../../../../../../specs/message-queue-touch-actions.md).
 
 Queue-bound sends held in memory (`runtime.pendingSends`) while attachments

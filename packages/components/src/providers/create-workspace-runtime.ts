@@ -158,6 +158,7 @@ import {
   type LocalReconnectLoop,
   type LocalReconnectTriggerReason,
 } from './local-reconnect-loop';
+import { createCloudRoomRecovery } from './cloud-room-recovery';
 import { resolveWorkspaceControlConnectionState } from './control-connection-state';
 import { createRoomSyncTracker, type RoomSyncTracker } from './room-sync-tracker';
 import type { RoomSyncState } from '@/lib/room-sync-state';
@@ -432,8 +433,6 @@ const isTimeoutError = (error: unknown): boolean =>
 // whole sweep. It runs inside the reconnect loop's in-flight guard, so an
 // unbounded pass would wedge cloud repair permanently.
 const CLOUD_REJOIN_TIMEOUT_MS = 10_000;
-const CLOUD_REJOIN_SWEEP_CONCURRENCY = 4;
-const CLOUD_REJOIN_SWEEP_BUDGET_MS = 30_000;
 
 const withTimeout = async <TResult>(
   promise: Promise<TResult>,
@@ -1081,18 +1080,14 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     !!authToken &&
     isBrowserOnline();
 
-  // Selection, not merging: every room's cloud subscription is first-class in
-  // loro-repo, so the repair loop enumerates that plane directly instead of
-  // relying on any per-room status projection. Cloud-READINESS rooms are
-  // excluded: their cloud binding is the room's own tracked status (registry
-  // covers them), so counting them here would double-trigger the loop.
+  // Inspect all cloud bindings, including cloud-readiness rooms. Registry
+  // projection must not hide a failing member of a dual-homed room.
   const listCloudTransportProblemEntries = () =>
     repo
       .transportRooms('cloud')
       .filter(
         (entry) =>
-          (entry.subscription.status === 'error' || entry.subscription.status === 'disconnected') &&
-          targetRouter.getReadinessTransportForRoom(entry.room) === 'local'
+          entry.subscription.status === 'error' || entry.subscription.status === 'disconnected'
       );
 
   const listCloudTransportProblemRooms = (): string[] =>
@@ -4624,8 +4619,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         } else {
           await repo.reconnect(
             electronLocalDataPlane
-              ? { transportIds: ['local'], resetBackoff: true }
-              : { resetBackoff: true }
+              ? { transportIds: ['local'], resetBackoff: force }
+              : { resetBackoff: force }
           );
           // A failed repo-level meta attach leaves no subscription for
           // repo.reconnect() to revive. Rejoin it through the same recovery
@@ -4690,9 +4685,38 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   });
 
   if (electronLocalDataPlane && cloudPlaneEnabled) {
+    const cloudRoomRecovery = createCloudRoomRecovery({
+      listRooms: () => repo.transportRooms('cloud'),
+      reconnect: (force) => repo.reconnect({ transportIds: ['cloud'], resetBackoff: force }),
+      isClosing: () => !!disposePromise,
+      rejoin: (entry) => {
+        // Timeout ends this wait, not SDK work. Disposal joins raw attempts.
+        const rejoin = entry.subscription.rejoin().finally(() => {
+          pendingCloudRejoins.delete(rejoin);
+        });
+        pendingCloudRejoins.add(rejoin);
+        return withTimeout(
+          rejoin,
+          CLOUD_REJOIN_TIMEOUT_MS,
+          `Timeout rejoining cloud binding (room=${entry.room.kind}:${entry.room.id})`
+        ).catch(() => undefined);
+      },
+    });
     cloudReconnectLoop = createLocalReconnectLoop({
       canRun: canRunCloudReconnect,
-      hasProblem: hasCloudReconnectableProblem,
+      hasProblem: () => {
+        cloudRoomRecovery.update();
+        return hasCloudReconnectableProblem();
+      },
+      getRetryDelayMs: (defaultDelayMs) => {
+        const roomDelayMs = cloudRoomRecovery.getRetryDelayMs(defaultDelayMs);
+        return !cloudTransportAttached ||
+          presenceTransport.needsReconnect() ||
+          machineMonitorTransport.needsReconnect() ||
+          promptSuggestions.needsReconnect()
+          ? Math.min(defaultDelayMs, roomDelayMs)
+          : roomDelayMs;
+      },
       reconnect: async ({ force, triggerReason }) => {
         if (!cloudTransportAttached) {
           await attachCloudPlaneTransport();
@@ -4723,38 +4747,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
               promptSuggestions.shouldRestartOnExternalWake()));
 
         if (force || durableProblemRooms.length > 0 || cloudMemberProblemRooms.length > 0) {
-          await repo.reconnect({ transportIds: ['cloud'], resetBackoff: true });
-          // Adapter reconnect revives adapter-level sessions but does not retry
-          // loro-repo-level FAILED ATTACHES (binding 'error'); only the per-room
-          // rejoin re-runs the attach. Bounded per rejoin, in width, and in
-          // total: rejoin awaits doc setup inside loro-repo with no deadline of
-          // its own, and this runs inside the reconnect loop's `inFlight` guard
-          // — one that never settles would kill cloud repair for the runtime's
-          // lifetime. Leftovers are picked up by the next pass.
-          const errored = listCloudTransportProblemEntries().filter(
-            (entry) => entry.subscription.status === 'error'
-          );
-          const sweepDeadline = Date.now() + CLOUD_REJOIN_SWEEP_BUDGET_MS;
-          for (let i = 0; i < errored.length; i += CLOUD_REJOIN_SWEEP_CONCURRENCY) {
-            if (disposePromise || Date.now() >= sweepDeadline) {
-              break;
-            }
-            await Promise.all(
-              errored.slice(i, i + CLOUD_REJOIN_SWEEP_CONCURRENCY).map((entry) => {
-                // The timeout releases the retry loop, not the underlying SDK
-                // work. Retain every attempt until it actually settles.
-                const rejoin = entry.subscription.rejoin().finally(() => {
-                  pendingCloudRejoins.delete(rejoin);
-                });
-                pendingCloudRejoins.add(rejoin);
-                return withTimeout(
-                  rejoin,
-                  CLOUD_REJOIN_TIMEOUT_MS,
-                  `Timeout rejoining cloud binding (room=${entry.room.kind}:${entry.room.id})`
-                ).catch(() => undefined);
-              })
-            );
-          }
+          await cloudRoomRecovery.recover(force);
         }
         if (
           (restartPresence || restartMachineMonitor) &&

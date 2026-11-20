@@ -1,6 +1,7 @@
 import { isAcpPlanModeConfigOption } from '@lody/shared';
 import {
   isFastModeSelector,
+  isSpeedTierSelector,
   isThoughtLevelSelector,
   type AcpBooleanConfigOptionSelector,
   type AcpConfigOptionSelector,
@@ -10,6 +11,7 @@ import {
 export type OrderedAcpConfigOptionSelectors = {
   modelSelectors: AcpSelectConfigOptionSelector[];
   thoughtLevelSelectors: AcpConfigOptionSelector[];
+  speedTierSelectors: AcpSelectConfigOptionSelector[];
   fastModeSelectors: AcpConfigOptionSelector[];
   planModeSelectors: AcpConfigOptionSelector[];
   booleanSelectors: AcpBooleanConfigOptionSelector[];
@@ -25,6 +27,7 @@ export const orderAcpConfigOptionSelectors = (
   const ordered: OrderedAcpConfigOptionSelectors = {
     modelSelectors: [],
     thoughtLevelSelectors: [],
+    speedTierSelectors: [],
     fastModeSelectors: [],
     planModeSelectors: [],
     booleanSelectors: [],
@@ -56,6 +59,10 @@ export const orderAcpConfigOptionSelectors = (
     }
     if (selector.category === 'mode' && selector.type === 'select') {
       ordered.modeSelectors.push(selector);
+      continue;
+    }
+    if (isSpeedTierSelector(selector)) {
+      ordered.speedTierSelectors.push(selector);
       continue;
     }
     if (isFastModeSelector(selector)) {

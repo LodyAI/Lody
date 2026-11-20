@@ -800,7 +800,8 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
       typeof value.workspaceId === 'string' &&
       typeof value.sessionId === 'string' &&
       typeof value.requestedByUserId === 'string' &&
-      isOptionalString(value.reason)
+      isOptionalString(value.reason) &&
+      (value.stopProcess === undefined || typeof value.stopProcess === 'boolean')
     );
   }
 

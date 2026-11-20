@@ -13,6 +13,8 @@ export type AcpModelControls = {
   effortValues?: string[];
   /** Whether the model has a Fast toggle; absent when not declared. */
   fastMode?: boolean;
+  /** Additional speed tiers the model supports (e.g. `['fast', 'ultrafast']`); absent when not declared. */
+  speedTiers?: string[];
 };
 
 export type AcpModelCapabilities = {
@@ -40,6 +42,15 @@ const parseModelControls = (value: unknown): AcpModelControls | undefined => {
   if (value.fastMode !== undefined) {
     if (typeof value.fastMode !== 'boolean') return undefined;
     controls.fastMode = value.fastMode;
+  }
+  if (value.speedTiers !== undefined) {
+    if (
+      !Array.isArray(value.speedTiers) ||
+      !value.speedTiers.every((tier) => typeof tier === 'string' && tier.length > 0)
+    ) {
+      return undefined;
+    }
+    controls.speedTiers = [...value.speedTiers];
   }
   return controls;
 };

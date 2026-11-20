@@ -267,11 +267,17 @@ applied processing record becomes canceled, never an ordinary replay.
 
 The execution service does not decide that interruption means non-delivery. AgentClient returns
 `applied`, `not-applied`, or `unknown`; only `not-applied` can move a steer back to ordinary
-dispatch, and only when the cancellation boundary selected `pendingInput: 'promote'`. User Stop preserves history and cancels queued execution eligibility; Edit & Resend and
+dispatch, and only when the cancellation boundary selected `pendingInput: 'promote'`. User Stop preserves history and retains queued drafts with `paused: true`, canceling their old execution eligibility; Edit & Resend and
 access revocation also preserve pending input. Inbox recovery never revives pre-Stop input. `unknown` becomes `delivery_unknown` in history. The UI offers a
 confirmed fresh send with a duplicate-work warning, never an automatic retry. RPC application
 ACKs update presentation only; the execution service alone projects processing and terminal
 steer status, so delayed ACKs cannot resurrect canceled or completed history.
+
+Paused queue rows never promote automatically, including after fresh input or restart. An explicit
+queue Send/Steer accepts only the selected draft under a stable fresh input id, preserving its
+content and frozen configuration while leaving the old cancellation receipt final. The renderer
+marks its observed queue paused before publishing Stop; the host repairs missing markers from
+Inbox cancellation receipts. Legacy and degraded hosts persist the pause directly in the control doc.
 
 Stop and target completion abort local steer waits before entering the serialized completion
 lane. A submitted request keeps its late verdict outside that lane and its rewrite lease.

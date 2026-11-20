@@ -324,7 +324,7 @@ import {
 } from '@/components/sessions/desktop-run-config-menu';
 import { resolvePermissionModeFace } from '@/lib/permission-mode-face';
 import { SessionUsagePopover } from '@/components/sessions/session-usage-popover';
-import { useArchiveSessionWithConfirmation } from '@/components/sessions/session-archive-confirmation';
+import { useArchiveSessionWithConfirmation } from '@/components/sessions/session-sub-conversation-confirmation';
 import { MachinePairingDialog } from './machine-pairing-dialog';
 import {
   DATE_BUCKET_THIS_MONTH,
@@ -5070,7 +5070,7 @@ function WorkspaceChatLanding({
           hasUnreadMessages: activity.hasUnreadMessages,
           isPinned: Boolean(session.isPinned),
           pinSectionId: session.pinSectionId ?? null,
-          pinOrderKey: session.pinOrderKey ?? null,
+          orderKey: session.orderKey ?? null,
           readOnly: activeReadOnlyIds.has(session.id) || archivedReadOnlyIds.has(session.id),
           machineId: session.machineId,
           /* Provenance for the list's opened-by tree. TWO fields, never
@@ -5994,7 +5994,7 @@ function WorkspaceChatLanding({
           hasUnreadMessages: activity.hasUnreadMessages,
           isPinned: Boolean(session.isPinned),
           pinSectionId: session.pinSectionId ?? null,
-          pinOrderKey: session.pinOrderKey ?? null,
+          orderKey: session.orderKey ?? null,
           readOnly: activeReadOnlyIds.has(session.id) || archivedReadOnlyIds.has(session.id),
           machineId: session.machineId,
           /* See the home Chat-tab builder: precise opener for navigation, row

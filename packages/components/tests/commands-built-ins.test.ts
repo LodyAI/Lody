@@ -30,11 +30,11 @@ describe('commands-built-ins', () => {
       expect(commands.getDefaultKeybindingsFor('session.focusInput')).toEqual([]);
       expect(commands.getDefaultKeybindingsFor('session.nextTab')).toEqual([]);
       expect(commands.getDefaultKeybindingsFor('session.previousVisible')).toEqual([]);
-      // Direct tab jumps are electron-only too — the browser owns ⌘<digit> for its
-      // own tab strip, so web shows the commands as unbound.
-      expect(commands.getDefaultKeybindingsFor('session.switchToTab1')).toEqual([]);
-      expect(commands.getDefaultKeybindingsFor('session.switchToTab8')).toEqual([]);
-      expect(commands.getDefaultKeybindingsFor('session.switchToLastTab')).toEqual([]);
+      // Direct sidebar session jumps are electron-only too — the browser owns ⌘<digit>
+      // for its own tab strip, so web shows the commands as unbound.
+      expect(commands.getDefaultKeybindingsFor('session.switchToVisible1')).toEqual([]);
+      expect(commands.getDefaultKeybindingsFor('session.switchToVisible8')).toEqual([]);
+      expect(commands.getDefaultKeybindingsFor('session.switchToVisible9')).toEqual([]);
       // ⌥N works on web too (always a new tab there); ⌘[/⌘] back/forward and the terminal
       // toggle are electron-only; ⌘, settings is cross-platform (desktop's native menu shows
       // it but doesn't register it — the registry owns the binding).
@@ -68,15 +68,15 @@ describe('commands-built-ins', () => {
       expect(commands.getDefaultKeybindingsFor('session.previousTab')).toEqual(['Mod+Shift+,']);
       expect(commands.getDefaultKeybindingsFor('session.previousVisible')).toEqual(['Mod+Shift+[']);
       expect(commands.getDefaultKeybindingsFor('session.nextVisible')).toEqual(['Mod+Shift+]']);
-      expect(commands.getDefaultKeybindingsFor('session.switchToTab1')).toEqual(['Mod+1']);
-      expect(commands.getDefaultKeybindingsFor('session.switchToTab2')).toEqual(['Mod+2']);
-      expect(commands.getDefaultKeybindingsFor('session.switchToTab3')).toEqual(['Mod+3']);
-      expect(commands.getDefaultKeybindingsFor('session.switchToTab4')).toEqual(['Mod+4']);
-      expect(commands.getDefaultKeybindingsFor('session.switchToTab5')).toEqual(['Mod+5']);
-      expect(commands.getDefaultKeybindingsFor('session.switchToTab6')).toEqual(['Mod+6']);
-      expect(commands.getDefaultKeybindingsFor('session.switchToTab7')).toEqual(['Mod+7']);
-      expect(commands.getDefaultKeybindingsFor('session.switchToTab8')).toEqual(['Mod+8']);
-      expect(commands.getDefaultKeybindingsFor('session.switchToLastTab')).toEqual(['Mod+9']);
+      expect(commands.getDefaultKeybindingsFor('session.switchToVisible1')).toEqual(['Mod+1']);
+      expect(commands.getDefaultKeybindingsFor('session.switchToVisible2')).toEqual(['Mod+2']);
+      expect(commands.getDefaultKeybindingsFor('session.switchToVisible3')).toEqual(['Mod+3']);
+      expect(commands.getDefaultKeybindingsFor('session.switchToVisible4')).toEqual(['Mod+4']);
+      expect(commands.getDefaultKeybindingsFor('session.switchToVisible5')).toEqual(['Mod+5']);
+      expect(commands.getDefaultKeybindingsFor('session.switchToVisible6')).toEqual(['Mod+6']);
+      expect(commands.getDefaultKeybindingsFor('session.switchToVisible7')).toEqual(['Mod+7']);
+      expect(commands.getDefaultKeybindingsFor('session.switchToVisible8')).toEqual(['Mod+8']);
+      expect(commands.getDefaultKeybindingsFor('session.switchToVisible9')).toEqual(['Mod+9']);
       // ⌘T is the browser-convention new-tab chord, electron-only like the digit jumps.
       expect(commands.getDefaultKeybindingsFor('session.newTabOrTerminal')).toEqual([
         'Alt+n',

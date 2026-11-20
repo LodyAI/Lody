@@ -9,6 +9,7 @@ import {
   buildChatFailedErrorReport,
   type ChatFailedErrorReportInput,
 } from './chat-failed-error-report';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type ChatFailedDetailDialogProps = ChatFailedErrorReportInput & {
   open: boolean;
@@ -46,7 +47,7 @@ export function ChatFailedDetailDialog({
 
   const handleCopy = () => {
     if (!reportText) return;
-    void navigator.clipboard?.writeText(reportText).then(
+    void copyTextToClipboard(reportText).then(
       () => setCopied(true),
       () => toast.error(t('sessions.systemNotices.chatFailed.copyFailed', 'Failed to copy error'))
     );

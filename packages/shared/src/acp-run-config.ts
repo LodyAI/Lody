@@ -40,6 +40,8 @@ export const ACP_THOUGHT_LEVEL_CATEGORY = 'thought_level';
 
 export const ACP_CONFIG_OPTION_ON_VALUE = 'on';
 export const ACP_CONFIG_OPTION_OFF_VALUE = 'off';
+export const ACP_FAST_MODE_VALUE_FAST = 'fast';
+export const ACP_FAST_MODE_VALUE_ULTRAFAST = 'ultrafast';
 
 /** Permission mode id that means "plan without editing" across builtin agents. */
 export const ACP_PLAN_PERMISSION_MODE_ID = 'plan';
@@ -180,6 +182,15 @@ const isOnOffSelect = (option: AcpConfigOptionSummary): boolean =>
 const isToggleOption = (option: AcpConfigOptionSummary): boolean =>
   option.type === 'boolean' || isOnOffSelect(option);
 
+export const isSpeedTierSelectOption = (option: AcpConfigOptionSummary): boolean =>
+  isAcpFastModeConfigId(option.id) &&
+  option.type === 'select' &&
+  !isOnOffSelect(option) &&
+  option.options.some(
+    (value) =>
+      value.value === ACP_FAST_MODE_VALUE_FAST || value.value === ACP_FAST_MODE_VALUE_ULTRAFAST
+  );
+
 const isCollaborationModeSelect = (option: AcpConfigOptionSummary): boolean =>
   option.type === 'select' &&
   option.options.some((value) => value.value === ACP_COLLABORATION_MODE_DEFAULT_VALUE) &&
@@ -188,16 +199,22 @@ const isCollaborationModeSelect = (option: AcpConfigOptionSummary): boolean =>
 const toggleValue = (option: AcpConfigOptionSummary, enabled: boolean): AcpConfigOptionValue =>
   option.type === 'boolean'
     ? enabled
-    : enabled
-      ? ACP_CONFIG_OPTION_ON_VALUE
-      : ACP_CONFIG_OPTION_OFF_VALUE;
+    : isSpeedTierSelectOption(option)
+      ? enabled
+        ? ACP_FAST_MODE_VALUE_FAST
+        : ACP_CONFIG_OPTION_OFF_VALUE
+      : enabled
+        ? ACP_CONFIG_OPTION_ON_VALUE
+        : ACP_CONFIG_OPTION_OFF_VALUE;
 
 const findFastModeOption = (
   capability: RunConfigCapabilitySource | undefined
 ): AcpConfigOptionSummary | undefined =>
   findConfigOption(
     capability,
-    (option) => isAcpFastModeConfigId(option.id) && isToggleOption(option)
+    (option) =>
+      isAcpFastModeConfigId(option.id) &&
+      (isToggleOption(option) || isSpeedTierSelectOption(option))
   );
 
 const findReasoningEffortOption = (
@@ -292,6 +309,31 @@ export const withAcpConfigOptionsForModel = <T extends RunConfigCapabilitySource
 ): T => forObservedModel(capability, modelId).capability;
 
 /**
+ * Additional speed tiers a model supports (e.g. `['fast']`, `['fast', 'ultrafast']`,
+ * or `[]` when none). Undefined means unknown.
+ */
+export const getAcpModelSpeedTiers = (
+  capability: RunConfigCapabilitySource,
+  modelId: string | undefined
+): string[] | undefined => {
+  const declared = getDeclaredModelControls(capability, modelId);
+  if (declared?.speedTiers !== undefined) return [...declared.speedTiers];
+  if (declared?.fastMode !== undefined) {
+    return declared.fastMode ? [ACP_FAST_MODE_VALUE_FAST] : [];
+  }
+  const target = forObservedModel(capability, modelId);
+  if (!target.observed) return undefined;
+  const option = findFastModeOption(target.capability);
+  if (!option) return [];
+  if (isSpeedTierSelectOption(option)) {
+    return option.options
+      .map((choice) => choice.value)
+      .filter((value) => value !== ACP_CONFIG_OPTION_OFF_VALUE);
+  }
+  return [ACP_FAST_MODE_VALUE_FAST];
+};
+
+/**
  * Whether a model has a Fast toggle: its declaration first, then whether its
  * own observed list has one. Undefined means unknown.
  */
@@ -299,10 +341,8 @@ export const getAcpModelFastSupport = (
   capability: RunConfigCapabilitySource,
   modelId: string | undefined
 ): boolean | undefined => {
-  const declared = getDeclaredModelControls(capability, modelId)?.fastMode;
-  if (declared !== undefined) return declared;
-  const target = forObservedModel(capability, modelId);
-  return target.observed ? findFastModeOption(target.capability) !== undefined : undefined;
+  const tiers = getAcpModelSpeedTiers(capability, modelId);
+  return tiers !== undefined ? tiers.includes(ACP_FAST_MODE_VALUE_FAST) : undefined;
 };
 
 /** The model the agent had selected when these capabilities were captured. */

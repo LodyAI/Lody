@@ -11,6 +11,7 @@ import {
   type SessionListRow,
 } from '@/components/session-list';
 import { buildOpenedBySessionTree, countOpenedByTreeRoots } from '@/lib/session-opened-by-tree';
+import { isSidebarBucketCollapsed } from '@/lib/sidebar-status-group';
 import {
   buildSidebarUpdatedBuckets,
   getVisibleUpdatedItems,
@@ -210,13 +211,14 @@ export function buildSidebarNavigationItems({
   if (organizeMode === 'updated' || organizeMode === 'status') {
     const grouping = organizeMode === 'updated' ? 'recency' : 'status';
     for (const bucket of buildSidebarUpdatedBuckets(updated.items, grouping)) {
-      if (updated.collapsedBuckets[bucket.key]) continue;
+      if (isSidebarBucketCollapsed(bucket.key, updated.collapsedBuckets)) continue;
       const groupKey = bucket.key === 'all' ? '__updated__' : `__status:${bucket.key}__`;
       for (const item of getVisibleUpdatedItems(
         bucket.items,
         updatedBucketCanFold(bucket.key),
         Boolean(updated.showFullBuckets[bucket.key]),
-        collapsedOpenedBySessions
+        collapsedOpenedBySessions,
+        bucket.key === 'focus' || bucket.key === 'later'
       )) {
         items.push({ kind: 'session', sessionId: item.id, groupKey });
       }

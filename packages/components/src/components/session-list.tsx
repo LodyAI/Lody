@@ -30,7 +30,7 @@ import {
   GripVertical,
   Link2,
   LockKeyhole,
-  Mail,
+  MailOpen,
   Pencil,
   Pin,
   PinOff,
@@ -119,6 +119,7 @@ import {
   RenameSessionDialogView,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type { PrStatus };
 
@@ -1175,6 +1176,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         <div className={showMetaLine ? lineBoxClassName : 'contents'}>
           <SidebarRowEndSlot
             sessionId={session.sessionId}
+            selected={showSelectedState}
             isWaitingPermission={session.isWaitingPermission}
             isWorking={session.isWorking}
             hasUnreadMessages={session.hasUnreadMessages}
@@ -1244,7 +1246,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         ) : null}
         {canMarkUnread ? (
           <ContextMenu.Item
-            icon={Mail}
+            icon={MailOpen}
             onClick={() => {
               onMarkSessionUnread?.(session.sessionId);
             }}
@@ -1280,7 +1282,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
           <ContextMenu.Item
             icon={GitBranch}
             onClick={() => {
-              void navigator.clipboard.writeText(session.branchName).catch(() => {});
+              void copyTextToClipboard(session.branchName).catch(() => {});
             }}
           >
             {contextMenuLabels.copyBranch}

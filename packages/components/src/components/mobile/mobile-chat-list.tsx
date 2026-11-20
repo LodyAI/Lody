@@ -753,7 +753,7 @@ export function groupChats(
     (chat) => ({
       id: chat.id,
       pinSectionId: chat.pinSectionId ?? null,
-      pinOrderKey: chat.pinOrderKey ?? null,
+      orderKey: chat.orderKey ?? null,
       recency: chat.latestMessageAt ?? 0,
     }),
     { sectionsLoaded }

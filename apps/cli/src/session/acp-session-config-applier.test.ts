@@ -411,4 +411,88 @@ describe('applyAcpSessionRunConfig', () => {
       runtimeConfigPatch: { availableCommands: [], acpSessionId: 'acp-5', configOptionValues: {} },
     });
   });
+
+  it('coerces legacy boolean fast-mode onto a multi-tier speed select and skips unsupported speed tiers', async () => {
+    const applied: Array<[string, string | boolean]> = [];
+    const liveMultiTier = [
+      {
+        id: 'fast-mode',
+        type: 'select',
+        currentValue: 'off',
+        options: [
+          { value: 'off', name: 'Standard' },
+          { value: 'fast', name: 'Fast' },
+          { value: 'ultrafast', name: 'Ultrafast' },
+        ],
+      },
+    ];
+    const makeClient = (options: unknown[]) =>
+      ({
+        isCreated: () => true,
+        getAvailableCommands: () => [],
+        getConfigOptions: () => options,
+        setSessionConfigOption: vi.fn(
+          async (_sessionId: string, configId: string, value: string | boolean) => {
+            applied.push([configId, value]);
+          }
+        ),
+      }) as unknown as AgentClient;
+
+    await applyAcpSessionRunConfig({
+      session: {
+        sessionId: 'session-speed-1' as SessionId,
+        acpSessionId: 'acp-speed-1' as ACPSessionId,
+        agentClient: makeClient(liveMultiTier),
+      },
+      config: {
+        cliType: 'builtin',
+        agentType: 'codex',
+        configOptionValues: { 'fast-mode': true },
+      },
+      logger: createLogger(),
+    });
+    expect(applied).toEqual([['fast-mode', 'fast']]);
+
+    applied.length = 0;
+    await applyAcpSessionRunConfig({
+      session: {
+        sessionId: 'session-speed-2' as SessionId,
+        acpSessionId: 'acp-speed-2' as ACPSessionId,
+        agentClient: makeClient([
+          { id: 'fast-mode', type: 'boolean', currentValue: false, options: [] },
+        ]),
+      },
+      config: {
+        cliType: 'builtin',
+        agentType: 'codex',
+        configOptionValues: { 'fast-mode': 'ultrafast' },
+      },
+      logger: createLogger(),
+    });
+    expect(applied).toEqual([]);
+
+    applied.length = 0;
+    await applyAcpSessionRunConfig({
+      session: {
+        sessionId: 'session-speed-3' as SessionId,
+        acpSessionId: 'acp-speed-3' as ACPSessionId,
+        agentClient: makeClient([
+          {
+            id: 'model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'slow-model',
+            options: [],
+          },
+        ]),
+      },
+      config: {
+        cliType: 'builtin',
+        agentType: 'codex',
+        configOptionValues: { 'fast-mode': 'ultrafast' },
+      },
+      logger: createLogger(),
+    });
+    expect(applied).toEqual([]);
+  });
 });

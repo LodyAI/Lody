@@ -57,6 +57,7 @@ import {
 } from '@/lib/session-mention-drag';
 import {
   DEFAULT_PIN_SECTION_KEY,
+  FOCUS_SECTION_DND_KEY,
   moveRowIntoSection,
   parsePinnedDndId,
   pinSectionDndId,
@@ -408,6 +409,9 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
       <DndContext
         sensors={sensors}
         collisionDetection={pinnedCollisionDetection}
+        // The sidebar viewport owns edge scrolling (`useSessionDragAutoScroll`);
+        // two scrollers on one container would double the speed.
+        autoScroll={false}
         onDragStart={handleDragStart}
         onDragMove={handleDragMove}
         onDragEnd={handleDragEnd}
@@ -569,6 +573,7 @@ function pinnedPointerTargetAt(
       continue;
     }
     const attr = element.getAttribute('data-pin-section');
+    if (attr === FOCUS_SECTION_DND_KEY) continue;
     const sectionId = attr === DEFAULT_PIN_SECTION_KEY ? null : attr;
     const rows = element.querySelector<HTMLElement>('[data-pin-rows]');
     return { sectionId, index: pinnedDropIndexAt(rows, point.y, draggedId) };
@@ -601,7 +606,7 @@ function PinnedRowGhost({ source }: { source: HTMLElement | null }) {
     <div
       ref={bodyRef}
       data-pin-drag-overlay=""
-      className="overflow-hidden rounded-md bg-sidebar"
+      className="overflow-hidden rounded-md border border-sidebar-border bg-sidebar"
       style={{ boxShadow: PINNED_ROW_LIFT_SHADOW, cursor: 'grabbing' }}
     />
   );

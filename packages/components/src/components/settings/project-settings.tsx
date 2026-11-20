@@ -104,6 +104,7 @@ import type { ProjectSkillsSource } from '@/hooks/use-project-skills';
 import { useAppCapability } from '@/lib/app-platform';
 import { getVisibleLocalProjectHistoryFailures } from '@/lib/local-project-history-catalog';
 import { settingsType as type } from './type.stylex';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type ProjectSettingsRow = {
   key: string;
@@ -2589,8 +2590,7 @@ function isUnreachableMachineError(message: string | null | undefined): boolean 
 }
 
 function copyProjectPath(path: string, t: TFunction) {
-  void navigator.clipboard
-    .writeText(path)
+  void copyTextToClipboard(path)
     .then(() => toast.success(t('sessions.pathCopied', 'Path copied to clipboard')))
     .catch(() => toast.error(t('sessions.copyFailed', 'Unable to copy')));
 }

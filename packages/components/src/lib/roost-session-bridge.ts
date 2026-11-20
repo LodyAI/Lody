@@ -908,18 +908,20 @@ const createRoostSessionDataFactoryFromTransport =
             }
             if (change.bodies === undefined && revision < observedHistoryRevision)
               throw new HistoryRefreshSupersededError();
-            if (epoch !== historyEpoch) return;
             const applied = await cached(() =>
-              cache.applyChanges(
-                prior,
-                revision,
-                count,
-                change.checkpoint,
-                from,
-                replacements,
-                !withPatches
-              )
+              epoch === historyEpoch
+                ? cache.applyChanges(
+                    prior,
+                    revision,
+                    count,
+                    change.checkpoint,
+                    from,
+                    replacements,
+                    !withPatches
+                  )
+                : Promise.resolve(false)
             );
+            if (epoch !== historyEpoch) return;
             if (applied === undefined) throw new Error('Roost history cache is unavailable');
             if (!applied) throw new HistoryRefreshSupersededError();
             await notificationQueue;
