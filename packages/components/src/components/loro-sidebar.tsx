@@ -286,6 +286,14 @@ export interface LoroSidebarProps {
   onRenameUpdatedItem?: (id: string, nextTitle: string) => void | Promise<void>;
   /** Toggle pin for an Updated row. Mirrors `sessionListProps.onTogglePinSession`. */
   onToggleUpdatedItemPinned?: (id: string, nextPinned: boolean) => void;
+  /** Snooze a session into Status Later until `snoozedUntil` (epoch ms). */
+  onSnoozeUpdatedItem?: (id: string, snoozedUntil: number) => void;
+  /** Mark a session as settled into Status Settled. */
+  onSettleUpdatedItem?: (id: string) => void;
+  /** Restore a snoozed or settled session back into Status Focus. */
+  onMoveUpdatedItemToFocus?: (id: string) => void;
+  /** Reorder (or restore via drag) a session into Status Focus at `toIndex`. */
+  onDropFocusItem?: (id: string, toIndex: number) => void;
   /** Copy session URL for an Updated row. Mirrors `sessionListProps.onCopySessionUrl`. */
   onCopyUpdatedItemUrl?: (id: string) => void;
   /** Share an Updated row with the team. Mirrors `sessionListProps.onShareSessionWithTeam`. */
@@ -931,6 +939,10 @@ export const LoroSidebar = memo(function LoroSidebar({
   onMarkUpdatedItemUnread,
   onRenameUpdatedItem,
   onToggleUpdatedItemPinned,
+  onSnoozeUpdatedItem,
+  onSettleUpdatedItem,
+  onMoveUpdatedItemToFocus,
+  onDropFocusItem,
   onCopyUpdatedItemUrl,
   onShareUpdatedItemWithTeam,
   onOpenUpdatedItemPullRequest,
@@ -1751,6 +1763,11 @@ export const LoroSidebar = memo(function LoroSidebar({
                     onMarkItemUnread={onMarkUpdatedItemUnread}
                     onRenameItem={onRenameUpdatedItem}
                     onTogglePinItem={onToggleUpdatedItemPinned}
+                    onSnoozeItem={onSnoozeUpdatedItem}
+                    onSettleItem={onSettleUpdatedItem}
+                    onMoveItemToFocus={onMoveUpdatedItemToFocus}
+                    onDropFocusSession={onDropFocusItem}
+                    onDropFocusIntoPinSection={pinSectionActions?.onDropItem}
                     onCopyItemUrl={onCopyUpdatedItemUrl}
                     onShareItemWithTeam={onShareUpdatedItemWithTeam}
                     onOpenPullRequest={onOpenUpdatedItemPullRequest}

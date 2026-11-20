@@ -16,8 +16,8 @@ const pinned = (
   id: string,
   recency: number,
   pinSectionId?: string,
-  pinOrderKey?: string
-): PinnedSessionPlacement => ({ id, recency, pinSectionId, pinOrderKey });
+  orderKey?: string
+): PinnedSessionPlacement => ({ id, recency, pinSectionId, orderKey });
 
 // Deterministic jitter so planned keys are reproducible.
 const jitter = { jitter: 1, randomByte: () => 0x11 };
@@ -125,7 +125,7 @@ describe('pinned conversation moves', () => {
 
     const moved = items.map((item) =>
       item.id === 'x'
-        ? { ...item, pinSectionId: 'maintenance', pinOrderKey: write?.pinOrderKey }
+        ? { ...item, pinSectionId: 'maintenance', orderKey: write?.orderKey }
         : item
     );
     expect(idsBySection(buildPinnedSectionLayout(moved, sections, (item) => item))).toEqual([
@@ -143,7 +143,7 @@ describe('pinned conversation moves', () => {
       jitter
     );
     expect(writes).toEqual([
-      { sessionId: 'm1', pinSectionId: undefined, pinOrderKey: expect.any(String) },
+      { sessionId: 'm1', pinSectionId: undefined, orderKey: expect.any(String) },
     ]);
   });
 
@@ -167,7 +167,7 @@ describe('pinned conversation moves', () => {
     const moved = items.map((item) => {
       const write = byId.get(item.id);
       return write
-        ? { ...item, pinSectionId: write.pinSectionId, pinOrderKey: write.pinOrderKey }
+        ? { ...item, pinSectionId: write.pinSectionId, orderKey: write.orderKey }
         : item;
     });
     expect(idsBySection(buildPinnedSectionLayout(moved, sections, (item) => item))).toEqual([
@@ -180,7 +180,7 @@ describe('pinned conversation moves', () => {
     const items = [pinned('top', 1, undefined, '80'), pinned('legacy', 5)];
     const layout = buildPinnedSectionLayout(items, sections, (item) => item);
     const placement = planNewPinPlacement(layout, jitter);
-    const next = [...items, pinned('new', 0, undefined, placement.pinOrderKey)];
+    const next = [...items, pinned('new', 0, undefined, placement.orderKey)];
     expect(idsBySection(buildPinnedSectionLayout(next, sections, (item) => item))[0]).toEqual([
       null,
       ['new', 'top', 'legacy'],

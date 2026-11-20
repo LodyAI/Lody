@@ -289,7 +289,7 @@ it.each(['Archive', 'Restore', 'Delete', 'Pin'])(
         expect.soft(entry?.meta).toEqual(
           operation === 'Pin' && original.id === id
             ? // Pinning also records the pin position (specs/pinned-session-sections.md).
-              { ...original, isPinned: true, pinOrderKey: expect.stringMatching(/^[0-9A-F]+$/) }
+              { ...original, isPinned: true, orderKey: expect.stringMatching(/^[0-9A-F]+$/) }
             : original
         );
       }

@@ -1,3 +1,4 @@
+import { isSidebarBucketCollapsed } from '@/lib/sidebar-status-group';
 import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { E2eeMachineWindowPill, E2eeOfflineSummary } from '@/components/e2ee-offline-window';
@@ -46,9 +47,12 @@ import {
   type SessionMeta,
   type SessionStatus,
   buildPinnedSectionLayout,
+  getServerNow,
+  planManualOrderMove,
   planNewPinSectionOrderKey,
   planPinnedSessionMove,
   planPinSectionMove,
+  planTopOrderKey,
   type PinSection,
   type PinnedSessionPlacement,
 } from '@lody/shared';
@@ -100,6 +104,8 @@ import {
   setWorkspaceContextAtom,
 } from '@/atoms';
 import { docMetaCacheScopeAtom } from '@/atoms/doc-meta';
+import { expiredSnoozeTimestamp } from '@/lib/sidebar-status-group';
+import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import { useWorkspaceRouteTargetSlug } from '../providers/workspace-route-target';
 import { resolveWorkspaceDataScope } from '@/lib/workspace-data-scope';
 
@@ -136,6 +142,7 @@ import {
 } from '@/atoms/sidebar-state';
 import {
   sortUpdatedItems,
+  buildSidebarUpdatedBuckets,
   SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS,
   type SidebarUpdatedBucketKey,
   type SidebarUpdatedItem,
@@ -1843,6 +1850,10 @@ export function LoroAppSidebar({
     markSessionUnread,
     setSessionPinned,
     applySessionPinPlacements,
+    applySessionFocusOrder,
+    snoozeSession,
+    settleSession,
+    moveSessionToFocus,
     updateSessionTitle,
   } = useSessionActions();
   const {
@@ -2547,6 +2558,7 @@ export function LoroAppSidebar({
   // Rows are memoized, so an unchanged item keeps its previous object and only
   // the rows whose data changed re-render.
   const previousSidebarItemsRef = useRef<readonly SidebarUpdatedItem[]>([]);
+  const statusTick = useStableNow(SIDEBAR_RELATIVE_TIME_REFRESH_MS);
   const allSidebarItems = useMemo<SidebarUpdatedItem[]>(() => {
     if (sessionsListLoading) return [];
 
@@ -2706,10 +2718,37 @@ export function LoroAppSidebar({
       }
     }
 
+    void statusTick;
+    const nowMs = getServerNow();
     const previousById = new Map(previousSidebarItemsRef.current.map((item) => [item.id, item]));
     return items.map((item) => {
-      const previous = previousById.get(item.id);
-      return previous && jsonValueEqual(previous, item) ? previous : item;
+      const meta = sessionById.get(item.id);
+      if (!meta) {
+        const previous = previousById.get(item.id);
+        return previous && jsonValueEqual(previous, item) ? previous : item;
+      }
+      const expiredSnoozeAt = expiredSnoozeTimestamp(meta.snoozedUntil, nowMs);
+      const baseLatestMs =
+        typeof item.latestMessageAt === 'number'
+          ? item.latestMessageAt
+          : item.latestMessageAt instanceof Date
+            ? item.latestMessageAt.getTime()
+            : Date.parse(item.latestMessageAt) || 0;
+      const latestMessageAt =
+        expiredSnoozeAt !== null && expiredSnoozeAt > baseLatestMs
+          ? expiredSnoozeAt
+          : item.latestMessageAt;
+      const enriched: SidebarUpdatedItem = {
+        ...item,
+        latestMessageAt,
+        hasUnreadMessages: sessionHasUnreadMessages(meta, nowMs),
+        orderKey: meta.orderKey ?? null,
+        snoozedUntil: typeof meta.snoozedUntil === 'number' ? meta.snoozedUntil : null,
+        settledAt: typeof meta.settledAt === 'number' ? meta.settledAt : null,
+        focusRestoredAt: typeof meta.focusRestoredAt === 'number' ? meta.focusRestoredAt : null,
+      };
+      const previous = previousById.get(enriched.id);
+      return previous && jsonValueEqual(previous, enriched) ? previous : enriched;
     });
   }, [
     chatSessions,
@@ -2724,7 +2763,9 @@ export function LoroAppSidebar({
     resolveOpenerRowId,
     resolveSessionAuthor,
     sessionsListLoading,
+    sessionById,
     sessionSharingById,
+    statusTick,
     t,
   ]);
   previousSidebarItemsRef.current = allSidebarItems;
@@ -2751,7 +2792,7 @@ export function LoroAppSidebar({
       return {
         id: item.id,
         pinSectionId: owner?.isPinned ? (owner.pinSectionId ?? null) : null,
-        pinOrderKey: owner?.isPinned ? (owner.pinOrderKey ?? null) : null,
+        orderKey: owner?.isPinned ? (owner.orderKey ?? null) : null,
         recency: latest instanceof Date ? latest.getTime() : Date.parse(String(latest ?? '')) || 0,
       };
     },
@@ -3856,9 +3897,90 @@ export function LoroAppSidebar({
   );
   const handleToggleUpdatedBucket = useCallback(
     (key: SidebarUpdatedBucketKey) => {
-      setUpdatedBucketCollapseState((prev) => ({ ...prev, [key]: !(prev[key] ?? false) }));
+      setUpdatedBucketCollapseState((prev) => ({
+        ...prev,
+        [key]: !isSidebarBucketCollapsed(key, prev),
+      }));
     },
     [setUpdatedBucketCollapseState]
+  );
+
+  const handleSnoozeSession = useCallback(
+    (sessionId: string, snoozedUntil: number) => {
+      void snoozeSession(sessionId as SessionId, snoozedUntil).catch((error) => {
+        toast.error(error instanceof Error ? error.message : String(error));
+      });
+    },
+    [snoozeSession]
+  );
+
+  const handleSettleSession = useCallback(
+    (sessionId: string) => {
+      void settleSession(sessionId as SessionId).catch((error) => {
+        toast.error(error instanceof Error ? error.message : String(error));
+      });
+    },
+    [settleSession]
+  );
+
+  const handleMoveSessionToFocus = useCallback(
+    (sessionId: string) => {
+      void moveSessionToFocus(sessionId as SessionId).catch((error) => {
+        toast.error(error instanceof Error ? error.message : String(error));
+      });
+    },
+    [moveSessionToFocus]
+  );
+
+  const handleDropFocusItem = useCallback(
+    (sessionId: string, toIndex: number) => {
+      const nowMs = getServerNow();
+      const focusBucket = buildSidebarUpdatedBuckets(updatedItems, 'status', nowMs).find(
+        (bucket) => bucket.key === 'focus'
+      );
+      // `toIndex` counts top-level `[data-pin-node]` root groups, so plan moves over roots only.
+      const focusRoots = buildOpenedBySessionTree(
+        focusBucket?.items ?? [],
+        SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS
+      )
+        .filter((node) => node.depth === 0)
+        .map((node) => node.item);
+
+      // Expired-snooze roots float to the top of Focus without background writes.
+      // When the user explicitly drags in Focus, materialize top orderKeys for any
+      // expired-snooze roots so the planned drop index matches the visual order 1:1.
+      const wokenRoots = focusRoots.filter(
+        (item) => expiredSnoozeTimestamp(item.snoozedUntil, nowMs) !== null
+      );
+      const regularPlacements = focusRoots
+        .filter((item) => expiredSnoozeTimestamp(item.snoozedUntil, nowMs) === null)
+        .map((item) => ({ id: item.id, orderKey: item.orderKey ?? null }));
+      const materializedPlacements = [...regularPlacements];
+      const materializedWrites = new Map<string, string>();
+      for (let i = wokenRoots.length - 1; i >= 0; i -= 1) {
+        const woken = wokenRoots[i]!;
+        const topKey = planTopOrderKey(materializedPlacements);
+        materializedPlacements.unshift({ id: woken.id, orderKey: topKey });
+        materializedWrites.set(woken.id, topKey);
+      }
+
+      const moveWrites = planManualOrderMove(materializedPlacements, { sessionId, toIndex });
+      for (const write of moveWrites) {
+        materializedWrites.set(write.sessionId, write.orderKey);
+      }
+      const writes = Array.from(materializedWrites, ([id, orderKey]) => ({
+        sessionId: id,
+        orderKey,
+      }));
+      const wasInFocus = focusRoots.some((item) => item.id === sessionId);
+      void applySessionFocusOrder(
+        writes,
+        wasInFocus ? undefined : (sessionId as SessionId)
+      ).catch((error) => {
+        toast.error(error instanceof Error ? error.message : String(error));
+      });
+    },
+    [applySessionFocusOrder, updatedItems]
   );
   const [updatedBucketShowFullState, setUpdatedBucketShowFullState] = useAtom(
     sidebarUpdatedBucketShowFullStateAtom
@@ -4157,6 +4279,10 @@ export function LoroAppSidebar({
         onMarkUpdatedItemUnread={handleMarkSessionUnread}
         onRenameUpdatedItem={handleRenameSession}
         onToggleUpdatedItemPinned={handleTogglePinSession}
+        onSnoozeUpdatedItem={handleSnoozeSession}
+        onSettleUpdatedItem={handleSettleSession}
+        onMoveUpdatedItemToFocus={handleMoveSessionToFocus}
+        onDropFocusItem={handleDropFocusItem}
         onCopyUpdatedItemUrl={handleCopySessionUrl}
         onShareUpdatedItemWithTeam={handleRequestShareSession}
         onOpenUpdatedItemPullRequest={handleOpenUpdatedItemPullRequest}
