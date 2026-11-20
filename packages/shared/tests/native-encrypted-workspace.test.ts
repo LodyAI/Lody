@@ -93,7 +93,9 @@ async function device(name: 'a' | 'b', baseUrl: string) {
   let tokens = 0;
   let syncs = 0;
   const network = { online: true };
-  const attach = (pendingWipe: NativePendingWipe = memoryWipe()) =>
+  /** The verified ledger's admitted devices, as this device last ingested them. */
+  const ledger = { admitted };
+  const attach = (pendingWipe: NativePendingWipe = memoryWipe(), onOpenPending?: () => void) =>
     attachNativeEncryptedWorkspace({
       client,
       workspaceId: ws,
@@ -107,15 +109,16 @@ async function device(name: 'a' | 'b', baseUrl: string) {
       syncKeyring: async () => {
         syncs += 1;
         await client.keyringConfigure(ws, genesis);
-        await client.keyringAdmit(ws, admitted);
+        await client.keyringAdmit(ws, ledger.admitted);
         await client.keyringInstallEpoch(ws, 0, epochKey);
         await client.keyringSetSigner(ws, writer, seeds[name]);
         await client.keyringSetSealEpoch(ws, 0);
         return { mayWrite: true };
       },
       pendingWipe,
+      onOpenPending,
     });
-  return { dataDir, client, writer, attach, network, syncs: () => syncs };
+  return { dataDir, client, writer, attach, network, ledger, syncs: () => syncs };
 }
 
 /** A replica's local edit, committed as the daemon and desktop commit theirs. */
@@ -175,6 +178,40 @@ describe('native encrypted workspace', () => {
     await createDocRoom(b.client, ws, room.id);
     await b.client.syncRooms(ws, [room], NATIVE_CONTENT_REMOTE_ID);
     expect(JSON.stringify((await b.client.readDoc(ws, room)).value)).toContain('written-offline');
+  }, 60_000);
+
+  it('a frame from a writer the installed ledger does not admit yet asks for a catch-up, then opens', async () => {
+    const baseUrl = await streamsServer();
+    const a = await device('a', baseUrl);
+    const b = await device('b', baseUrl);
+    const wa = await a.attach();
+    cleanups.push(async () => wa.close());
+    await createDocRoom(a.client, ws, room.id);
+    await write(a.client, 'from-a');
+    await a.client.syncNamespace(ws, NATIVE_CONTENT_REMOTE_ID);
+
+    b.ledger.admitted = [publicKey(seeds.b)];
+    let asked = 0;
+    const caughtUp = Promise.withResolvers<void>();
+    const wb = await b.attach(memoryWipe(), () => {
+      asked += 1;
+      b.ledger.admitted = admitted;
+      void wb.refresh().then(caughtUp.resolve, caughtUp.reject);
+    });
+    cleanups.push(async () => wb.close());
+    await createDocRoom(b.client, ws, room.id);
+    await b.client.syncRooms(ws, [room], NATIVE_CONTENT_REMOTE_ID);
+    await caughtUp.promise;
+    expect(asked).toBeGreaterThan(0);
+    await expect
+      .poll(
+        async () => {
+          await b.client.syncRooms(ws, [room], NATIVE_CONTENT_REMOTE_ID);
+          return JSON.stringify((await b.client.readDoc(ws, room)).value);
+        },
+        { timeout: 30_000 }
+      )
+      .toContain('from-a');
   }, 60_000);
 
   it('a removal while the host is down finishes once the host is back', async () => {

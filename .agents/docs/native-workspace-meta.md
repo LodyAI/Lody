@@ -395,6 +395,14 @@ that installed its seed (K1), so every local write names this process's writer
 synced and never uploads them. The writer that may write registers its token at
 a higher priority, so an append never uses a read-only token.
 
+When the engine holds a room it cannot open yet (an unknown key, or a writer the
+installed ledger does not admit, because the Streams data arrived before the
+ledger), `onOpenPending` asks the caller for the same spaced, single-flight
+catch-up a key-pending JS frame gets. The daemon calls `contentCatchUp.pending()`;
+main calls `nativeCatchUp`, which ingests the ledger and receives keys. Both end
+in the notification table's reinstall. Forged frames (`invalid_frame`) never
+trigger it.
+
 Removal follows the whitepaper's split. Device revocation calls `retireWriter()`:
 it holds and removes only this device's writer, because another device of the
 member on this installation keeps using the namespace. Credential-confirmed
