@@ -34,7 +34,10 @@ any time; when off it changes none of the app's existing behavior.
   sidebar (layout: left sidebar | Today | main area). Pinned state and column width are stored on this device
   only; the width is resizable. The pinned column is a page card like the main area's (the darker
   inset sheet, same radius and rim), anchored to the sidebar with 4px of window ground between it and the main
-  card, so the two read as separate pages rather than one fused panel (user decision). Unpinning keeps the main area's current content and only hides the column.
+  card, so the two read as separate pages rather than one fused panel (user decision). With the sidebar hidden the
+  pinned column is the window's leftmost surface: the sidebar toggle and Back/Forward move to its toolbar (right of
+  the traffic lights) and leave the main page, which no longer clears the traffic lights; its content tightens so the
+  fold toggles' centre lines up with the close button's (x=23), with a 16px end gutter (user decision). Unpinning keeps the main area's current content and only hides the column.
 - Filling the main area, the stream sits in a centred readable column of at most 720px (compare Obsidian's 700px,
   Notion's ~708px and AFFiNE's ~752px of text) that narrows with the window and keeps side gutters; nesting
   indents within it. "Full width" in the More menu spans the whole main area instead, a global preference stored on

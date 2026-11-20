@@ -115,7 +115,7 @@ import {
 } from '@/ui/window-drag-region';
 import {
   getZenAwarePanelToggleState,
-  navigationSidebarVisibleAtom,
+  mainPageAtWindowEdgeAtom,
   showNavigationSidebarAtom,
   zenLayoutModeAtom,
   zenRightPanelAtom,
@@ -1287,7 +1287,8 @@ const SessionDetail = ({
   const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const pendingSessionLink = useAtomValue(pendingSessionLinkAtom);
   const clearPendingSessionLink = useSetAtom(pendingSessionLinkAtom);
-  const isLeftSidebarHidden = !useAtomValue(navigationSidebarVisibleAtom);
+  // Hidden sidebar and no pinned Today in front: this page owns the window's left edge.
+  const isLeftSidebarHidden = useAtomValue(mainPageAtWindowEdgeAtom);
   const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const exportAllowed = useWorkspaceFeature('export');
   const previewAllowed = useWorkspaceFeature('remote-preview');

@@ -1,5 +1,6 @@
 import { atom } from 'jotai';
-import { sidebarCollapsedAtom } from './sidebar-state';
+import { sidebarCollapsedAtom, todayPinnedAtom } from './sidebar-state';
+import { todayFeatureEnabledAtom } from './settings';
 
 /**
  * Zen is a transient visibility override for the current app window. The
@@ -45,6 +46,21 @@ export const navigationSidebarVisibleAtom = atom(
   (get) =>
     !get(navigationSidebarHiddenAtom) &&
     !(get(compactDesktopLayoutAtom) && get(compactSidebarSuppressedAtom))
+);
+
+/** Pinned Today shows as a column (never in the compact layout). */
+export const todayColumnShownAtom = atom(
+  (get) => get(todayFeatureEnabledAtom) && get(todayPinnedAtom) && !get(compactDesktopLayoutAtom)
+);
+
+/**
+ * The main page reaches the window's left edge: the sidebar is hidden and no
+ * pinned Today column stands in front of it. Only then does a page clear the
+ * macOS traffic lights and carry the sidebar toggle and Back/Forward; with
+ * Today pinned, its column carries them instead.
+ */
+export const mainPageAtWindowEdgeAtom = atom(
+  (get) => !get(navigationSidebarVisibleAtom) && !get(todayColumnShownAtom)
 );
 
 /**

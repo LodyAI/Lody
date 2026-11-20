@@ -35,7 +35,7 @@ import { Menu } from '@lody/ui/menu';
 import { Popover } from '@lody/ui/popover';
 import { Skeleton } from '@lody/ui/skeleton';
 import { Tooltip } from '@lody/ui/tooltip';
-import { navigationSidebarVisibleAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
+import { mainPageAtWindowEdgeAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { isNativeAppShell } from '@/lib/native-platform';
@@ -945,7 +945,8 @@ export function ScheduleListView({
 }) {
   const { t, i18n } = useTranslation();
   const isMobile = useIsMobile();
-  const isLeftSidebarHidden = !useAtomValue(navigationSidebarVisibleAtom);
+  // Hidden sidebar and no pinned Today in front: this page owns the window's left edge.
+  const isLeftSidebarHidden = useAtomValue(mainPageAtWindowEdgeAtom);
   const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const isElectronFullscreen = useElectronFullscreen();
   const windowDrag = useWindowDragRegionClass();

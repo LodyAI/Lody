@@ -115,6 +115,15 @@ const styles = stylex.create({
     paddingInlineEnd: space[6],
     paddingBottom: space[8],
   },
+  // The pinned column is narrow: a tighter end gutter.
+  scrollerPinned: { paddingInlineEnd: space[4] },
+  // Pinned with the sidebar hidden, the column is the window's leftmost
+  // surface: the fold toggles' centre (8px into the 16px toggle) lines up with
+  // the macOS close button's centre at x=23. The card's content edge starts 5px
+  // in (4px of window ground plus the rim, as laid out).
+  scrollerAtWindowEdge: {
+    paddingInlineStart: `calc(23px - 8px + ${todayOutline.foldOverhang} - 5px)`,
+  },
   // The readable column (Obsidian 700px, Notion ~708px, AFFiNE ~752px of
   // text): centred, shrinking with the window inside the scroller's gutters.
   // The scroller stays full width, so its scrollbar, drops and clicks beside
@@ -191,6 +200,7 @@ export function TodayView(props: {
   const self = useAtomValue(userAtom)?.id ?? null;
   const userId = props.target.member ?? self;
   const today = useTodayClock();
+  const sidebarVisible = useAtomValue(navigationSidebarVisibleAtom);
   const anchor = props.target.date ? (parseTodayDate(props.target.date) ?? undefined) : undefined;
   const [registered, setRegistered] = useState<readonly TodayDate[]>([]);
   const [fullWidth, setFullWidth] = useAtom(todayFullWidthAtom);
@@ -340,7 +350,11 @@ export function TodayView(props: {
             </Menu.Content>
           </Menu.Root>
         </TodayToolbar>
-        <TodayOutlineSurface controller={controller} fullWidth={props.pinned || fullWidth}>
+        <TodayOutlineSurface
+          controller={controller}
+          fullWidth={props.pinned || fullWidth}
+          placement={props.pinned ? (sidebarVisible ? 'pinned' : 'pinnedAtWindowEdge') : 'page'}
+        >
           {days.map((date, index) => (
             <TodayDaySection
               key={`${userId}:${date}`}
@@ -418,7 +432,9 @@ export function TodayToolbar(props: { pinned: boolean; title: ReactNode; childre
       )}
       data-testid="today-toolbar"
     >
-      {page && !sidebarVisible ? (
+      {/* With the sidebar hidden, Today (page or pinned column) is the window's
+          leftmost surface and carries the sidebar toggle and Back/Forward. */}
+      {!sidebarVisible ? (
         <SidebarHistoryControls onToggleSidebar={showSidebar} className={exemptClassName} />
       ) : null}
       <span {...stylex.props(styles.title)}>{props.title}</span>
@@ -432,6 +448,8 @@ export function TodayOutlineSurface(props: {
   controller: TodayEditorController | null;
   /** Span the whole width instead of the readable column (the pinned column is narrow anyway). */
   fullWidth?: boolean;
+  /** Where the surface sits: its gutters follow (default `page`). */
+  placement?: 'page' | 'pinned' | 'pinnedAtWindowEdge';
   children: React.ReactNode;
 }) {
   const { controller } = props;
@@ -451,7 +469,11 @@ export function TodayOutlineSurface(props: {
   }, [controller]);
   return (
     <div
-      {...stylex.props(styles.scroller)}
+      {...stylex.props(
+        styles.scroller,
+        props.placement !== undefined && props.placement !== 'page' && styles.scrollerPinned,
+        props.placement === 'pinnedAtWindowEdge' && styles.scrollerAtWindowEdge
+      )}
       ref={(element) => {
         surfaceRef.current = element;
         controller?.attachSurface(element);
