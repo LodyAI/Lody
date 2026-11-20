@@ -25,11 +25,7 @@ import {
   subscribeSessionMentionDrag,
 } from '@/lib/session-mention-drag';
 import { useDraggable } from '@dnd-kit/core';
-import {
-  DEFAULT_PIN_SECTION_KEY,
-  FOCUS_SECTION_DND_KEY,
-  pinnedRowDndId,
-} from './pinned-rows-dnd';
+import { DEFAULT_PIN_SECTION_KEY, FOCUS_SECTION_DND_KEY, pinnedRowDndId } from './pinned-rows-dnd';
 import {
   beginPinnedDropSettle,
   flyPinnedDropSettle,
@@ -121,10 +117,7 @@ import {
   type SidebarStatusGroup,
 } from '@/lib/sidebar-status-group';
 import { sortByManualOrder } from '@lody/shared';
-import {
-  CustomSnoozeDialog,
-  type CustomSnoozeDialogTarget,
-} from './sidebar-status-snooze-dialog';
+import { CustomSnoozeDialog, type CustomSnoozeDialogTarget } from './sidebar-status-snooze-dialog';
 import { SidebarFocusDndContainer } from './sidebar-status-focus-dnd';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import type {
@@ -363,8 +356,10 @@ export function buildSidebarUpdatedBuckets(
         {
           key,
           items: [...members].sort((a, b) => {
-            const aUntil = typeof a.snoozedUntil === 'number' ? a.snoozedUntil : Number.MAX_SAFE_INTEGER;
-            const bUntil = typeof b.snoozedUntil === 'number' ? b.snoozedUntil : Number.MAX_SAFE_INTEGER;
+            const aUntil =
+              typeof a.snoozedUntil === 'number' ? a.snoozedUntil : Number.MAX_SAFE_INTEGER;
+            const bUntil =
+              typeof b.snoozedUntil === 'number' ? b.snoozedUntil : Number.MAX_SAFE_INTEGER;
             if (aUntil !== bUntil) return aUntil - bUntil;
             return a.id.localeCompare(b.id);
           }),
@@ -813,12 +808,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
             if (!canToggleBucket) return;
             onToggleBucket?.(bucket.key);
           };
-          if (
-            grouping === 'status' &&
-            bucket.key === 'focus' &&
-            onDropFocusSession &&
-            !isMobile
-          ) {
+          if (grouping === 'status' && bucket.key === 'focus' && onDropFocusSession && !isMobile) {
             return (
               <div
                 key={bucket.key}
@@ -999,10 +989,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                           data-status-focus-empty=""
                           className="flex min-h-10 items-center justify-center rounded-md border border-dashed border-sidebar-border/60 px-3 py-2 text-xs text-sidebar-foreground-muted/75"
                         >
-                          {t(
-                            'sidebar.status.focusEmptyDrop',
-                            'Drag a conversation here to focus'
-                          )}
+                          {t('sidebar.status.focusEmptyDrop', 'Drag a conversation here to focus')}
                         </div>
                       );
                     }
@@ -1480,6 +1467,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         <div className={cn('flex shrink-0 items-center', SIDEBAR_ROW_LINE_CLASS)}>
           <SidebarRowEndSlot
             sessionId={item.id}
+            selected={showSelectedState}
             isWaitingPermission={item.isWaitingPermission}
             isWorking={item.isWorking}
             hasUnreadMessages={item.hasUnreadMessages}
