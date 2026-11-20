@@ -1,5 +1,6 @@
 import {
   getMachineFlockAcpCapabilities,
+  getMachineFlockMemories,
   getMachineFlockRateLimits,
   MACHINE_PROTOCOL_CAPABILITIES,
   machineSupportsProtocolCapability,
@@ -11,6 +12,7 @@ import {
   readWorkspaceFlockRowsFromFlock,
   type MachineId,
   type MachineMeta,
+  type MemoryProviderResponse,
   type WorkspaceId,
 } from '@lody/shared';
 import {
@@ -24,6 +26,7 @@ import type { LoroDocumentManager } from './loro/doc';
 import { readSessionMachineAccess, type DelegatedSessionRequester } from '@/commands/session';
 import { listMergedAgentConfigs } from './agent-config-machine-flock';
 import { readMachineLocalProjects } from './local-project-meta';
+import { handleMemoryProviderRequest } from './memory-providers';
 import { listWorkspaceGitHubRepositoriesForCliToken } from './workspace';
 import { listWorkspaceMcpCatalog } from './workspace-mcp-store';
 import { ResourceDiscovery } from './resource-discovery';
@@ -187,6 +190,25 @@ export async function createResourceDiscovery(args: {
         baselines.get(getMachineFlockDocId(workspaceId, machineId)) !== false
       );
       return Object.values(await readMachineLocalProjects(manager.repo, workspaceId, machineId));
+    },
+    memories: async (machineId) => {
+      const rows = await readMachineFlockRows(machineId);
+      machineBaselines.set(
+        machineId,
+        baselines.get(getMachineFlockDocId(workspaceId, machineId)) !== false
+      );
+      return getMachineFlockMemories(rows, machineId);
+    },
+    memoryInventory: async (machineId, providerId): Promise<MemoryProviderResponse | undefined> => {
+      const request = { action: 'list' as const, providerId };
+      // This daemon's own adapter answers directly; local-only hosts have no machine RPC.
+      if (machineId === auth.machineId) return handleMemoryProviderRequest(request);
+      if (args.offline || getCliPlatformKind() === 'local') return undefined;
+      return (
+        (await withMachineRpcClient({ auth, workspaceId, machineId }, (client) =>
+          client.requestMemoryProvider(request)
+        )) ?? undefined
+      );
     },
     roles: async () => {
       const id = getWorkspaceFlockDocId(workspaceId);

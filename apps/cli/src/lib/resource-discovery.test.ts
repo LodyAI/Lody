@@ -58,6 +58,7 @@ const source = (overrides: Partial<DiscoverySource> = {}): DiscoverySource => ({
       machineId: id,
     } as LocalProjectMeta,
   ],
+  memories: async () => [],
   roles: async () => [],
   repositories: async () => [{ fullName: 'synthetic/repo' }],
   mcpServers: async () => [],
@@ -467,5 +468,112 @@ describe('resource discovery across MCP and CLI', () => {
     expect(mcp.items[0]?.selectedForCurrentTurn).toBe(false);
     expect(JSON.stringify(mcp)).not.toContain('synthetic-command');
     expect(JSON.stringify(mcp)).not.toContain('synthetic-secret');
+  });
+
+  describe('memory identities for Role bindings', () => {
+    const memoryMachine = (id: string, supported = true): MachineMeta =>
+      ({
+        id,
+        name: id,
+        protocolCapabilities: supported ? { memoryProviders: 1 } : {},
+      }) as MachineMeta;
+    const imported = {
+      machineId: 'one',
+      providerId: 'nowledge-mem',
+      memoryId: 'reviewer',
+      name: 'Reviewer',
+      description: 'Review lessons',
+    };
+    const asked: string[] = [];
+    const memorySource = (overrides: Partial<DiscoverySource> = {}) =>
+      source({
+        machines: async () => [
+          memoryMachine('one'),
+          memoryMachine('old', false),
+          machine('hidden'),
+        ],
+        memories: async (id) => (id === 'one' ? [imported] : []),
+        memoryInventory: async (id, providerId) => {
+          asked.push(`${id}/${providerId}`);
+          return {
+            type: 'machine/memory',
+            status: 'ready',
+            memories: [
+              { id: 'reviewer', name: 'Reviewer' },
+              { id: 'scout', name: '  ', description: 'Finds root causes' },
+            ],
+          };
+        },
+        ...overrides,
+      });
+
+    it('lists imported identities per readable machine by the id the CLI accepts', async () => {
+      const page = await new ResourceDiscovery(memorySource()).list('memory');
+      expect(page.items).toEqual([
+        {
+          id: 'nowledge-mem:reviewer',
+          name: 'Reviewer',
+          description: 'Review lessons',
+          machineId: 'one',
+          providerId: 'nowledge-mem',
+          memoryId: 'reviewer',
+          availability: { state: 'available' },
+        },
+      ]);
+    });
+
+    it('accepts an imported identity without asking its provider', async () => {
+      asked.length = 0;
+      const discovery = new ResourceDiscovery(memorySource());
+      await expect(
+        discovery.resolveMemoryBinding('one', { providerId: 'nowledge-mem', memoryId: 'reviewer' })
+      ).resolves.toBeUndefined();
+      expect(asked).toEqual([]);
+    });
+
+    it('returns a provider identity Lody has not imported as the association to import', async () => {
+      const discovery = new ResourceDiscovery(memorySource());
+      await expect(
+        discovery.resolveMemoryBinding('one', { providerId: 'nowledge-mem', memoryId: 'scout' })
+      ).resolves.toEqual({
+        machineId: 'one',
+        providerId: 'nowledge-mem',
+        memoryId: 'scout',
+        name: 'scout',
+        description: 'Finds root causes',
+      });
+    });
+
+    it('refuses identities it cannot confirm on that machine', async () => {
+      const binding = (memoryId: string) => ({ providerId: 'nowledge-mem', memoryId });
+      const discovery = new ResourceDiscovery(memorySource());
+      await expect(discovery.resolveMemoryBinding('one', binding('ghost'))).rejects.toThrow(
+        'does not exist in its provider'
+      );
+      await expect(discovery.resolveMemoryBinding('old', binding('reviewer'))).rejects.toThrow(
+        'without memory provider support'
+      );
+      await expect(discovery.resolveMemoryBinding('hidden', binding('reviewer'))).rejects.toThrow(
+        'not readable'
+      );
+      const offline = new ResourceDiscovery(
+        memorySource({ memoryInventory: async () => undefined })
+      );
+      await expect(offline.resolveMemoryBinding('one', binding('scout'))).rejects.toThrow(
+        'could not be asked'
+      );
+      const stopped = new ResourceDiscovery(
+        memorySource({
+          memoryInventory: async () => ({
+            type: 'machine/memory',
+            status: 'not_running',
+            memories: [],
+          }),
+        })
+      );
+      await expect(stopped.resolveMemoryBinding('one', binding('scout'))).rejects.toThrow(
+        'reports not_running'
+      );
+    });
   });
 });

@@ -65,6 +65,17 @@ listing its machines, never an automatic choice. A schedule proposal naming a
 multi-target Role runs on its named machine, else on the proposing conversation's
 machine when the Role runs there, and otherwise asks for a machine.
 
+## Agent proposals
+
+Agents and the CLI add a machine through the Role proposal card, never by writing the
+Role. An update target naming a machine the Role does not run on must carry an
+`agentConfigId` on that machine; the new target uses that Agent's defaults and only the
+memory the proposal names. It does not copy the run config of other targets, unlike the
+editor's "Add to this machine", so nothing unsupported is carried over. An existing target
+keeps its Agent config; changing it stays in Settings, where run-config issues are shown.
+The card shows each added machine and its Agent, and Save checks again that the Agent
+config is on that machine. Adding a second target writes the v2 shape below.
+
 ## Compatibility
 
 New clients read all existing (v1) Role rows: a v1 Role is a Role with one target.
@@ -94,7 +105,8 @@ history do not depend on the Role row's version.
 - [Role editor](../packages/components/src/components/settings/agent-role-editor-dialog.tsx)
 - [Role list](../packages/components/src/components/settings/agent-roles-setting.tsx)
 - [Mention items](../packages/components/src/components/mentions/mention-agent-role-source.ts)
-- [CLI and MCP resolution](../apps/cli/src/lib/agent-role-create.ts)
+- [CLI and MCP resolution](../apps/cli/src/lib/agent-role-create.ts); proposals add targets in
+  [the proposal contract](../packages/shared/src/agent-role-proposal.ts)
 - Behavior tests: `packages/shared/tests/agent-role.test.ts`,
   `packages/shared/tests/workspace-flock.test.ts`,
   `packages/components/tests/agent-role-form.test.ts`,

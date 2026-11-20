@@ -385,9 +385,20 @@ never model tool fields, role or userId.
 in the invoking conversation; neither writes the Role catalog. Both use the active
 Turn's human identity and the daemon Session tool route in both compositions. Save is a renderer
 catalog write by that user. Updating requires Role ownership and patches only name,
-description and promptPrefix against the latest row. There is no revision precondition:
-concurrent replicas use the existing Flock merge behavior. Deleted Roles are not recreated.
-New Roles are private, bind explicit machineId + agentConfigId, and use Agent defaults.
+description, promptPrefix and per-machine memory against the latest row. There is no revision
+precondition: concurrent replicas use the existing Flock merge behavior. Deleted Roles are not
+recreated. New Roles are private, bind explicit machineId + agentConfigId, and use Agent
+defaults plus an optional memory binding.
+
+Memory is a `{ providerId, memoryId }` reference on one machine target
+([memory contract](../../../../specs/agent-role-memory.md#agent-proposals)). Each
+`patch.targets` entry names a machine. `agentConfigId` adds a machine the Role does not run
+on yet, with that Agent's defaults ([targets](../../../../specs/agent-role-machine-targets.md#agent-proposals));
+an existing target keeps its Agent config. `memory: null` unlinks. Preparation checks
+ownership and targets first, then that each identity is imported on its machine or listed
+by that machine's provider. A listed identity that is not imported travels as
+`memoryImports` in the card, and Save imports it before writing the Role.
+`lody_memory_list` and `lody memory list` show imported identities by `providerId:memoryId`.
 
 Reuse requestId for retries. The same request returns the stored pending/saved/dismissed
 outcome; changed input under that id fails. The generated Role id lives in the card, so
@@ -404,11 +415,16 @@ lody agent-role create --name "Reviewer" --description "Review code" \
   --prompt-prefix "Find actionable bugs" --machine-id MACHINE_ID --agent-config-id CONFIG_ID
 lody agent-role update ROLE_ID --name "Reviewer" --description "" \
   --prompt-prefix "Focus on correctness"
+lody agent-role update ROLE_ID --machine MACHINE_ID --memory nowledge-mem:reviewer
+lody agent-role update ROLE_ID --machine MACHINE_ID --no-memory
+lody agent-role update ROLE_ID --machine MACHINE_ID --agent-config-id CONFIG_ID \
+  --memory nowledge-mem:reviewer
 ```
 
-Creation requires `--name`, `--machine-id`, and `--agent-config-id`; description and
-prompt prefix are optional. Updates accept `--name`, `--description`, and
-`--prompt-prefix`, and require at least one field. Omitted fields stay unchanged;
+Creation requires `--name`, `--machine-id`, and `--agent-config-id`; description,
+prompt prefix and `--memory` are optional. Updates accept `--name`, `--description`,
+`--prompt-prefix`, and `--machine` with `--agent-config-id` (to add that machine),
+`--memory` or `--no-memory`, and require at least one field. Several machines in one update use a file with `targets`. Omitted fields stay unchanged;
 `--description ""` and `--prompt-prefix ""` clear the corresponding text.
 For multiline instructions, the shell can supply `--prompt-prefix "$(cat reviewer.md)"`.
 

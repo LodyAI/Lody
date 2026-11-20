@@ -193,6 +193,85 @@ it('preserves memory references, revises identity changes, and gates older machi
   ).toBeUndefined();
 });
 
+it('creates a Role bound to memory and refuses ambiguous per-machine memory patches', () => {
+  const memory = { providerId: 'nowledge-mem', memoryId: 'reviewer' };
+  const created = applyAgentRoleProposal(
+    {
+      command: {
+        action: 'create',
+        requestId: 'request',
+        name: 'Reviewer',
+        machineId: 'machine',
+        agentConfigId: 'agent',
+        memory,
+      },
+      requesterUserId: 'user',
+      roleId: 'role',
+    },
+    [],
+    'user',
+    0
+  );
+  expect(created.runConfig).toEqual({ memory });
+  const update = (targets: unknown) =>
+    AgentRoleProposalCommandSchema.safeParse({
+      action: 'update',
+      requestId: 'request',
+      roleId: 'role',
+      patch: { targets },
+    }).success;
+  expect(update([{ machineId: 'machine', memory: null }])).toBe(true);
+  expect(update([])).toBe(false);
+  expect(update([{ machineId: 'machine' }])).toBe(false);
+  expect(
+    update([
+      { machineId: 'machine', memory },
+      { machineId: 'machine', memory: null },
+    ])
+  ).toBe(false);
+  expect(update([{ machineId: 'machine', memory: null, agentConfigId: 'other' }])).toBe(true);
+});
+
+it('adds a machine target with Agent defaults and never swaps an existing target config', () => {
+  const memory = { providerId: 'nowledge-mem', memoryId: 'scout' };
+  const existing = role({ runConfig: { modelId: 'model' } });
+  const propose = (targets: unknown) =>
+    applyAgentRoleProposal(
+      {
+        command: AgentRoleProposalCommandSchema.parse({
+          action: 'update',
+          requestId: 'request',
+          roleId: existing.id,
+          patch: { targets },
+        }),
+        requesterUserId: existing.ownerUserId,
+        roleId: existing.id,
+      },
+      [existing],
+      existing.ownerUserId,
+      9
+    );
+  const added = propose([{ machineId: 'build', agentConfigId: 'build-agent', memory }]);
+  expect(getAgentRoleTargets(added)).toEqual([
+    {
+      machineId: existing.machineId,
+      agentConfigId: existing.agentConfigId,
+      runConfig: { modelId: 'model' },
+    },
+    { machineId: 'build', agentConfigId: 'build-agent', runConfig: { memory } },
+  ]);
+  expect(added.revision).toBe(existing.revision + 1);
+  expect(() => propose([{ machineId: 'build', memory }])).toThrow('pass agentConfigId to add it');
+  expect(() => propose([{ machineId: existing.machineId, agentConfigId: 'other-agent' }])).toThrow(
+    'change its Agent configuration in Settings'
+  );
+  expect(
+    getAgentRoleTargets(
+      propose([{ machineId: existing.machineId, agentConfigId: existing.agentConfigId }])
+    )
+  ).toEqual(getAgentRoleTargets(existing));
+});
+
 describe('agent role run config availability', () => {
   const capability = (overrides: Partial<AcpCapabilityCacheEntry> = {}) =>
     ({

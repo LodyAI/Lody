@@ -50,6 +50,15 @@ Agent 在创建工具中用 `agentRoleMachineId` 指定机器；CLI 使用 `--ma
 Role 时，使用提案中指定的机器；未指定时，若 Role 在提案所在会话的机器上运行就用那台，
 否则要求指定机器。
 
+## Agent 提案
+
+Agent 和 CLI 通过 Role 提案卡片新增机器，从不直接写 Role。修改提案中指向 Role 尚未运行的
+机器的目标，必须带上该机器上的 `agentConfigId`；新目标使用该 Agent 的默认配置，只绑定提案
+指定的记忆。它不像编辑器的“添加到此机器”那样复制其他目标的运行配置，因此不会带入不支持的值。
+已有目标保留其 Agent 配置；修改它仍在设置中进行，那里会显示运行配置问题。卡片显示每台新增
+机器及其 Agent，保存时会再次检查该 Agent 配置确实在那台机器上。新增第二个目标后按下文的 v2
+形态写入。
+
 ## 兼容性
 
 新客户端读取所有现有（v1）Role：v1 Role 视为只有一份配置的 Role。只有一份配置的
@@ -75,7 +84,8 @@ Role 继续以 v1 结构写入，包括自动 [schema 对齐](agent-role-schema-
 - [Role 编辑器](../packages/components/src/components/settings/agent-role-editor-dialog.tsx)
 - [Role 列表](../packages/components/src/components/settings/agent-roles-setting.tsx)
 - [提及条目](../packages/components/src/components/mentions/mention-agent-role-source.ts)
-- [CLI 与 MCP 解析](../apps/cli/src/lib/agent-role-create.ts)
+- [CLI 与 MCP 解析](../apps/cli/src/lib/agent-role-create.ts)；提案新增目标见
+  [提案契约](../packages/shared/src/agent-role-proposal.ts)
 - 行为测试：`packages/shared/tests/agent-role.test.ts`、
   `packages/shared/tests/workspace-flock.test.ts`、
   `packages/components/tests/agent-role-form.test.ts`、

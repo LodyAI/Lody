@@ -22,6 +22,7 @@ export function registerDiscoveryTools(
       'Find agent configurations and their supported models/run options across machines.',
     agent_role:
       'Find saved agent Roles, target machines/configurations and delegation availability.',
+    memory: 'List memory identities imported into Lody on each machine, for Role memory bindings.',
     mcp: 'List workspace MCP configurations and current-turn selections, without connection values.',
   };
   const descriptions: Record<DiscoveryResource, string> = {
@@ -33,6 +34,8 @@ export function registerDiscoveryTools(
       'List readable Agent configurations across machines, with model and run-config capabilities. Launch commands and credentials are omitted.',
     agent_role:
       'Discover readable Agent Roles and stable ids for session_create. Unavailable Roles remain listed with reasons. get returns the prompt prefix.',
+    memory:
+      'List memory identities imported into Lody, one row per machine. id is providerId:memoryId; a Role target binds only an identity on its own machine. Memory contents are not included.',
     mcp: 'List workspace MCP server summaries without connection values. selectedForCurrentTurn describes selection, not successful runtime loading.',
   };
   const result = async (read: (discovery: ResourceDiscovery) => Promise<unknown>) => {

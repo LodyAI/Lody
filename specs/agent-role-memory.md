@@ -20,7 +20,8 @@ local durability completes the action and remote upload is best-effort. Stable
 keys make linking idempotent without overwriting customized metadata. Editing updates the provider profile via its adapter and synchronizes the returned
 name/description into Lody; deleting removes only this association, never provider data.
 A failed local save after enrollment can retry linking without enrolling again.
-Existing provider identities are not automatically imported.
+Existing provider identities are not automatically imported; a saved Role proposal imports
+only the identity it binds ([Agent proposals](#agent-proposals)).
 
 Cards show a vertically centered grayscale provider logo before the name and description, with edit/delete
 actions on hover or keyboard focus. The page has top-right Add Memory and Refresh
@@ -79,12 +80,34 @@ Forks and restores use their frozen history rather than rereading a mutable Role
 Unknown providers fail explicitly. Other provider integrations and automatic
 installation/configuration of agent-side Mem plugins are outside this change.
 
+## Agent proposals
+
+Agents and the CLI bind memory through the existing Role proposal card, never by
+writing a Role or association directly. A create proposal may bind its one target; an
+update binds or unlinks memory per machine target, including a machine it
+[adds](agent-role-machine-targets.md#agent-proposals).
+`lody_memory_list` / `lody memory list` show imported identities as `providerId:memoryId`.
+
+An identity the user created with the provider's own tools need not be imported first.
+Preparation accepts an identity imported on that machine, or one the machine's live
+provider inventory lists; the latter rides in the card and Save imports it, with the name
+and description the provider reported, before writing the Role. This is the one place an
+existing identity is imported without the Import tab, and only after the user saves the
+card. An identity that is neither imported nor confirmable (machine offline, provider not
+ready or missing the identity) fails the proposal. Save does not re-probe providers: an
+association removed between proposal and Save does not block the Role write.
+
 ## Evidence
 
 - [Provider contract](../packages/shared/src/memory-provider.ts)
 - [Daemon adapter](../apps/cli/src/lib/memory-providers.ts)
 - [Settings](../packages/components/src/components/settings/memory-setting.tsx)
 - [Process boundary](../apps/cli/src/session/session.ts)
+- [Proposal contract](../packages/shared/src/agent-role-proposal.ts),
+  [preparation](../apps/cli/src/lib/agent-role-proposal.ts) and
+  [binding check](../apps/cli/src/lib/resource-discovery.ts); tests in
+  `apps/cli/src/lib/agent-role-proposal.test.ts`, `apps/cli/src/lib/resource-discovery.test.ts`
+  and `packages/components/tests/agent-role-proposal.test.tsx`
 
 The memory editor is window-centered, with a compact 900 × 600 px desktop size
 clamped to 96dvw × 92dvh.

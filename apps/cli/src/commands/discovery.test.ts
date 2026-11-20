@@ -90,6 +90,7 @@ function fixture(): ResourceDiscovery {
     configs: async () => [],
     capabilities: async () => ({}),
     projects: async () => [],
+    memories: async () => [],
     repositories: async () => [],
     mcpServers: async () => [],
     roles: async () =>
@@ -226,6 +227,68 @@ describe('CLI Role proposal tools', () => {
   it('rejects missing create bindings and empty updates before publishing', async () => {
     await expect(run('create', undefined, ['--name', 'Reviewer'])).rejects.toThrow();
     await expect(run('update', undefined)).rejects.toThrow();
+    expect(state.proposed).toEqual([]);
+  });
+  it('binds and unlinks memory per machine target from direct options', async () => {
+    await run('create', undefined, [
+      '--name',
+      'Reviewer',
+      '--machine-id',
+      'machine',
+      '--agent-config-id',
+      'agent',
+      '--memory',
+      'nowledge-mem:reviewer',
+    ]);
+    await run('update', undefined, ['--machine', 'build', '--memory', 'nowledge-mem:gate:v2']);
+    await run('update', undefined, ['--machine', 'build', '--no-memory']);
+    await run('update', undefined, ['--machine', 'build', '--agent-config-id', 'build-agent']);
+    expect(state.proposed).toEqual([
+      {
+        action: 'create',
+        requestId: 'request',
+        name: 'Reviewer',
+        machineId: 'machine',
+        agentConfigId: 'agent',
+        memory: { providerId: 'nowledge-mem', memoryId: 'reviewer' },
+      },
+      {
+        action: 'update',
+        requestId: 'request',
+        roleId: 'role',
+        patch: {
+          targets: [
+            { machineId: 'build', memory: { providerId: 'nowledge-mem', memoryId: 'gate:v2' } },
+          ],
+        },
+      },
+      {
+        action: 'update',
+        requestId: 'request',
+        roleId: 'role',
+        patch: { targets: [{ machineId: 'build', memory: null }] },
+      },
+      {
+        action: 'update',
+        requestId: 'request',
+        roleId: 'role',
+        patch: { targets: [{ machineId: 'build', agentConfigId: 'build-agent' }] },
+      },
+    ]);
+  });
+  it('rejects memory options without a machine or a provider before publishing', async () => {
+    await expect(run('update', undefined, ['--memory', 'nowledge-mem:reviewer'])).rejects.toThrow(
+      'Pass --machine together with'
+    );
+    await expect(run('update', undefined, ['--machine', 'build'])).rejects.toThrow(
+      'Pass --machine together with'
+    );
+    await expect(
+      run('update', undefined, ['--machine', 'build', '--memory', 'reviewer'])
+    ).rejects.toThrow('providerId:memoryId');
+    await expect(
+      run('update', { targets: [{ machineId: 'build', memory: null }] }, ['--machine', 'build'])
+    ).rejects.toThrow();
     expect(state.proposed).toEqual([]);
   });
   it('surfaces daemon scope rejection without reporting success', async () => {
