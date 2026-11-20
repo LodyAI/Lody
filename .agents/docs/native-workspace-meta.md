@@ -381,6 +381,10 @@ then, after the caller's content-open admission:
    token, `aadDomain: lody-e2ee:<genesis>`, and the Lody route table, so rooms map to
    the same `<base>/ds/<bucket>/<ws>:s:<id>` streams legacy clients use.
 
+Opening never waits on the network. The engine persists the remote, and each
+install (attach, refresh or reconnect) configures it until a content token is
+issued; offline edits stay queued meanwhile.
+
 The keyring and snapshot policy live in engine memory, so they are reinstalled on
 every reconnect (host restart or build handoff). `refresh()` reruns the install
 for the Spec's notification table. Daemon and main share the namespace, and each

@@ -204,6 +204,9 @@ export async function attachNativeEncryptedWorkspace(
       enabled: mayWrite,
     });
     if (!closed) slot ??= await serveTokens(client, workspaceId, options.contentToken, mayWrite);
+    // Best effort: offline, a persisted remote keeps its rows queued and the next
+    // install (refresh or reconnect) configures it.
+    if (!closed && !remoteConfigured) await configureContentRemote().catch(() => {});
   };
   const stopServing = () => {
     closed = true;
@@ -217,21 +220,26 @@ export async function attachNativeEncryptedWorkspace(
   };
 
   // The bucket and gateway come from the token itself; they are fixed per workspace.
-  const first = await options.contentToken();
+  // The engine persists the remote, so opening never waits on the network.
+  let remoteConfigured = false;
+  const configureContentRemote = async () => {
+    const grant = await options.contentToken();
+    await client.configureRemote(workspaceId, {
+      remote_id: NATIVE_CONTENT_REMOTE_ID,
+      base_url: grant.gatewayBaseUrl,
+      bucket: grant.bucketId,
+      encrypted: true,
+      snapshot_zstd: true,
+      aadDomain: encryptedWorkspaceNamespace(options.genesisHash),
+      // Legacy session-comment documents and local migration markers stay off this remote.
+      routes: createLodyWorkspaceRoutes(workspaceId, {
+        excludePrefixes: ['session-comment-'],
+        excludeFlockPrefixes: ['lody-migrations'],
+      }),
+    });
+    remoteConfigured = true;
+  };
   await run(install);
-  await client.configureRemote(workspaceId, {
-    remote_id: NATIVE_CONTENT_REMOTE_ID,
-    base_url: first.gatewayBaseUrl,
-    bucket: first.bucketId,
-    encrypted: true,
-    snapshot_zstd: true,
-    aadDomain: encryptedWorkspaceNamespace(options.genesisHash),
-    // Legacy session-comment documents and local migration markers stay off this remote.
-    routes: createLodyWorkspaceRoutes(workspaceId, {
-      excludePrefixes: ['session-comment-'],
-      excludeFlockPrefixes: ['lody-migrations'],
-    }),
-  });
 
   // The keyring and snapshot policy live in engine memory: a host restart,
   // reconnect or build handoff starts empty, so reinstall on every reconnect.

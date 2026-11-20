@@ -86,6 +86,7 @@ async function device(name: 'a' | 'b', baseUrl: string) {
   const writer = `device-${name}`;
   let tokens = 0;
   let syncs = 0;
+  const network = { online: true };
   const attach = (pendingWipe: NativePendingWipe = memoryWipe()) =>
     attachNativeEncryptedWorkspace({
       client,
@@ -93,6 +94,7 @@ async function device(name: 'a' | 'b', baseUrl: string) {
       genesisHash,
       writer,
       contentToken: async () => {
+        if (!network.online) throw new Error('synthetic_offline');
         tokens += 1;
         return { token: `token-${tokens}`, bucketId, gatewayBaseUrl: baseUrl, expiresIn: 480 };
       },
@@ -108,7 +110,7 @@ async function device(name: 'a' | 'b', baseUrl: string) {
       },
       pendingWipe,
     });
-  return { dataDir, client, writer, attach, syncs: () => syncs };
+  return { dataDir, client, writer, attach, network, syncs: () => syncs };
 }
 
 /** A replica's local edit, committed as the daemon and desktop commit theirs. */
@@ -148,6 +150,27 @@ describe('native encrypted workspace', () => {
     expect(body.length).toBeGreaterThan(0);
     expect(body.includes('sealed-in-a')).toBe(false);
     expect(body.includes(Buffer.from('LSCE'))).toBe(true);
+  }, 60_000);
+
+  it('opens without a content token, keeps local writes, and uploads them once one is issued', async () => {
+    const baseUrl = await streamsServer();
+    const a = await device('a', baseUrl);
+    const b = await device('b', baseUrl);
+    a.network.online = false;
+    const wa = await a.attach();
+    cleanups.push(async () => wa.close());
+    await createDocRoom(a.client, ws, room.id);
+    await write(a.client, 'written-offline');
+    expect(JSON.stringify((await a.client.readDoc(ws, room)).value)).toContain('written-offline');
+
+    a.network.online = true;
+    await wa.refresh();
+    expect((await a.client.syncNamespace(ws, NATIVE_CONTENT_REMOTE_ID)).blockedRooms).toBe(0);
+    const wb = await b.attach();
+    cleanups.push(async () => wb.close());
+    await createDocRoom(b.client, ws, room.id);
+    await b.client.syncRooms(ws, [room], NATIVE_CONTENT_REMOTE_ID);
+    expect(JSON.stringify((await b.client.readDoc(ws, room)).value)).toContain('written-offline');
   }, 60_000);
 
   it('reinstalls keys after the host restarts, and finishes a pending wipe before reopening', async () => {
