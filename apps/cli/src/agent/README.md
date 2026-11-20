@@ -53,17 +53,16 @@ context/message-flow.md "Upstream".
   upstream auto-update in its child process and never downloads a fallback. Credentials
   remain in Dimcode's own configuration or provider environment. Refresh capabilities
   after upgrading. Existing registry configurations retain their saved launch contract.
-  [Sorbet authentication](../../../../.agents/notes/proposed/feature/2026-11-02-sorbet-acp-authentication.md)
-  uses the existing protected ACP interaction path. Its `sorbet.dev` credentials v1
-  extension runs in a separate bounded builtin Sorbet ACP process, with no session or
-  terminal; the daemon verifies the local Provider identity and does not use stored
-  launch overrides. Socket disconnect cancels the operation. Authentication and logout
-  share a daemon-wide mutation owner across workspaces; unconfirmed process cleanup is
-  retried before a later mutation. Account management is also available through signed E2EE
-  owned execution when the target advertises `sorbetCredentialsRemote`: the target verifies
-  the signer belongs to its owner's membership. List and logout use the execution journal;
-  an interrupted logout can have an unknown result. Metadata lists saved credential types,
-  not account identities, remote validity or environment-provided credentials.
+  [Sorbet authentication and control](../../../../.agents/notes/implemented/feature/2026-11-02-sorbet-acp-authentication.md)
+  keeps interactive sign-in on the existing protected ACP interaction path. Credential
+  metadata, logout, and custom Provider management call `@sorbetai/control@alpha` directly
+  against the same `<LodyDataDir>/sorbet` directory; no temporary ACP process or duplicate
+  management abstraction sits between the Machine RPC handler and Sorbet. The daemon still
+  verifies the local Provider identity and ignores stored launch overrides. Account management
+  is also available through signed E2EE owned execution when the target advertises
+  `sorbetCredentialsRemote`; the target verifies the signer belongs to its owner's membership.
+  Metadata lists saved credential types, not account identities, remote validity or
+  environment-provided credentials.
 - `deepseek-harness-runtime.ts` — Provider-scoped Harness homes, atomic host bundles,
   and npx launch wrapper around the `packages/acp-extension-dsh` submodule. DSH uses
   a supported standalone Node from the final launch PATH in the target working directory.
