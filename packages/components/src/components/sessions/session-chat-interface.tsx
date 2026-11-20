@@ -397,6 +397,7 @@ import {
   UNSTARTED_TRAILING_USER_TURN_TIMEOUT_MS,
 } from '@/lib/session-dispatch-state';
 import {
+  getEffectiveSessionLastMessageAt,
   resolveManualUnreadLatch,
   shouldMarkSessionRead,
   type ReadReceiptSnapshot,
@@ -4284,6 +4285,7 @@ export const SessionChatInterface = memo(
     const {
       isWindowActive: isWindowReadActive,
       hasPageInteraction: hasWindowReadInteraction,
+      engagementRevision: windowReadEngagementRevision,
       getLatestState: getLatestWindowReadEngagement,
     } = useWindowReadEngagement();
     const prevReadReceiptSnapshotRef = useRef<ReadReceiptSnapshot | null>(null);
@@ -4291,7 +4293,10 @@ export const SessionChatInterface = memo(
 
     useEffect(() => {
       const surfaceVisible = isVisible && !preparingWindow;
-      const lastMessageAt = parseTimestamp(session.lastMessageAt);
+      const lastMessageAt = getEffectiveSessionLastMessageAt({
+        lastMessageAt: parseTimestamp(session.lastMessageAt),
+        snoozedUntil: parseTimestamp(session.snoozedUntil),
+      });
       const lastReadAt = parseTimestamp(session.lastReadAt);
       const snapshot: ReadReceiptSnapshot = {
         sessionId: session.id,
@@ -4324,7 +4329,7 @@ export const SessionChatInterface = memo(
       ) {
         return;
       }
-      void markSessionRead(session.id, session.lastMessageAt ?? null).catch((error: unknown) => {
+      void markSessionRead(session.id, lastMessageAt).catch((error: unknown) => {
         console.warn('Failed to mark session as read', error);
       });
     }, [
@@ -4338,6 +4343,8 @@ export const SessionChatInterface = memo(
       session.id,
       session.lastMessageAt,
       session.lastReadAt,
+      session.snoozedUntil,
+      windowReadEngagementRevision,
     ]);
 
     const isDispatching = inputActionState === 'dispatching';

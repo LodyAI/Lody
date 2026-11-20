@@ -96,6 +96,34 @@ type SessionUnreadInput = {
   isArchived?: boolean;
 };
 
+/**
+ * Computes the effective activity timestamp that determines whether a session
+ * has unread state: the latest message timestamp or an expired snooze wake-up,
+ * whichever is newer.
+ */
+export function getEffectiveSessionLastMessageAt(
+  session: {
+    lastMessageAt?: number | null;
+    snoozedUntil?: number | null;
+  },
+  nowMs: number = getServerNow()
+): number | null {
+  const lastMessageAt =
+    typeof session.lastMessageAt === 'number' && Number.isFinite(session.lastMessageAt)
+      ? session.lastMessageAt
+      : null;
+  const expiredSnoozeAt =
+    typeof session.snoozedUntil === 'number' &&
+    Number.isFinite(session.snoozedUntil) &&
+    session.snoozedUntil <= nowMs
+      ? session.snoozedUntil
+      : null;
+  if (lastMessageAt !== null && expiredSnoozeAt !== null) {
+    return Math.max(lastMessageAt, expiredSnoozeAt);
+  }
+  return lastMessageAt ?? expiredSnoozeAt;
+}
+
 /** Closed and archived conversations suppress unread indicators without changing read receipts. */
 export function sessionHasUnreadMessages(
   session: SessionUnreadInput,
@@ -120,17 +148,7 @@ export function closedSessionHasUnreadMessages(
 }
 
 function hasUnreadOutput(session: SessionUnreadInput, nowMs: number): boolean {
-  const lastMessageAt = typeof session.lastMessageAt === 'number' ? session.lastMessageAt : null;
-  const expiredSnoozeAt =
-    typeof session.snoozedUntil === 'number' &&
-    Number.isFinite(session.snoozedUntil) &&
-    session.snoozedUntil <= nowMs
-      ? session.snoozedUntil
-      : null;
-  const effectiveLastMessageAt =
-    lastMessageAt !== null && expiredSnoozeAt !== null
-      ? Math.max(lastMessageAt, expiredSnoozeAt)
-      : (lastMessageAt ?? expiredSnoozeAt);
+  const effectiveLastMessageAt = getEffectiveSessionLastMessageAt(session, nowMs);
   if (effectiveLastMessageAt === null) return false;
   const lastReadAt = typeof session.lastReadAt === 'number' ? session.lastReadAt : null;
   return lastReadAt === null || effectiveLastMessageAt > lastReadAt;

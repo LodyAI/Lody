@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ElectronPowerState } from '@lody/shared/electron-ipc';
 import {
   closedSessionHasUnreadMessages,
+  getEffectiveSessionLastMessageAt,
   resolveManualUnreadLatch,
   sessionHasUnreadMessages,
   shouldMarkSessionRead,
@@ -57,6 +58,47 @@ describe('session-read-receipt', () => {
     it('keeps a session unread when the active window has not received page interaction', () => {
       expect(shouldMarkSessionRead({ ...visibleUnread, hasPageInteraction: false })).toBe(false);
     });
+
+    it('marks an expired-snooze session read even when lastMessageAt is already read or absent', () => {
+      const expiredSnoozeAt = 500;
+      const nowMs = 600;
+      expect(
+        sessionHasUnreadMessages(
+          { lastMessageAt: 200, lastReadAt: 200, snoozedUntil: expiredSnoozeAt },
+          nowMs
+        )
+      ).toBe(true);
+      const effectiveWithMessage = getEffectiveSessionLastMessageAt(
+        { lastMessageAt: 200, snoozedUntil: expiredSnoozeAt },
+        nowMs
+      );
+      expect(effectiveWithMessage).toBe(expiredSnoozeAt);
+      expect(
+        shouldMarkSessionRead({
+          ...visibleUnread,
+          lastMessageAt: effectiveWithMessage,
+          lastReadAt: 200,
+        })
+      ).toBe(true);
+
+      const effectiveWithoutMessage = getEffectiveSessionLastMessageAt(
+        { lastMessageAt: null, snoozedUntil: expiredSnoozeAt },
+        nowMs
+      );
+      expect(effectiveWithoutMessage).toBe(expiredSnoozeAt);
+      expect(
+        shouldMarkSessionRead({
+          ...visibleUnread,
+          lastMessageAt: effectiveWithoutMessage,
+          lastReadAt: null,
+        })
+      ).toBe(true);
+
+      // Future snooze does not count as unread or trigger a receipt.
+      expect(
+        getEffectiveSessionLastMessageAt({ lastMessageAt: 200, snoozedUntil: 900 }, nowMs)
+      ).toBe(200);
+    });
   });
 
   describe('resolveManualUnreadLatch', () => {
@@ -84,9 +126,7 @@ describe('session-read-receipt', () => {
     });
 
     it('does not latch pre-existing unread state on mount or initial sync', () => {
-      expect(
-        resolveManualUnreadLatch(null, { ...readSnapshot, lastReadAt: 100 }, null)
-      ).toBeNull();
+      expect(resolveManualUnreadLatch(null, { ...readSnapshot, lastReadAt: 100 }, null)).toBeNull();
       expect(
         resolveManualUnreadLatch(
           { ...readSnapshot, lastReadAt: 100 },
@@ -97,9 +137,9 @@ describe('session-read-receipt', () => {
     });
 
     it('clears the latch on session switch, leaving and returning, or a newer message', () => {
-      expect(resolveManualUnreadLatch(readSnapshot, { ...readSnapshot, sessionId: 's2' }, 200)).toBe(
-        null
-      );
+      expect(
+        resolveManualUnreadLatch(readSnapshot, { ...readSnapshot, sessionId: 's2' }, 200)
+      ).toBe(null);
       expect(
         resolveManualUnreadLatch(
           { ...readSnapshot, isVisible: false },
@@ -294,6 +334,34 @@ describe('window-read-engagement', () => {
     }
   });
 
+  it('recovers from a missed unlock/resume power event when foreground user input arrives', () => {
+    vi.useFakeTimers();
+    try {
+      const harness = createHarness(true);
+      const tracker = createWindowReadEngagementTracker(harness.env);
+      const states: Array<{ isWindowActive: boolean; hasPageInteraction: boolean }> = [];
+      tracker.subscribe((s) => states.push(s));
+
+      harness.power('lock-screen');
+      expect(tracker.getState()).toEqual({ isWindowActive: false, hasPageInteraction: false });
+
+      // Background input while not foreground must not clear locked state.
+      harness.setForeground(false);
+      harness.input('pointerdown');
+      expect(tracker.getState()).toEqual({ isWindowActive: false, hasPageInteraction: false });
+
+      // Foreground input proves the OS is awake and unlocked even if unlock-screen was missed.
+      harness.setForeground(true);
+      expect(tracker.getState()).toEqual({ isWindowActive: false, hasPageInteraction: false });
+      harness.input('pointerdown');
+      expect(tracker.getState()).toEqual({ isWindowActive: true, hasPageInteraction: true });
+      expect(states.at(-1)).toEqual({ isWindowActive: true, hasPageInteraction: true });
+      tracker.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   describe('browser hook & navigation lifecycle', () => {
     let root: Root | undefined;
     let container: HTMLDivElement | undefined;
@@ -332,29 +400,42 @@ describe('window-read-engagement', () => {
       isVisible,
       lastMessageAt,
       lastReadAt,
+      snoozedUntil,
       onMarkRead,
     }: {
       sessionId: string;
       isVisible: boolean;
       lastMessageAt: number | null;
       lastReadAt: number | null;
+      snoozedUntil?: number | null;
       onMarkRead: (sessionId: string, at: number | null) => void;
     }) {
-      const { isWindowActive, hasPageInteraction, getLatestState } = useWindowReadEngagement();
+      const { isWindowActive, hasPageInteraction, engagementRevision, getLatestState } =
+        useWindowReadEngagement();
       const prevRef = useRef<ReadReceiptSnapshot | null>(null);
       const latchedRef = useRef<number | null>(null);
 
       useEffect(() => {
+        const effectiveLastMessageAt = getEffectiveSessionLastMessageAt({
+          lastMessageAt,
+          snoozedUntil,
+        });
         const snapshot: ReadReceiptSnapshot = {
           sessionId,
           isVisible,
-          lastMessageAt,
+          lastMessageAt: effectiveLastMessageAt,
           lastReadAt,
         };
         const latched = resolveManualUnreadLatch(prevRef.current, snapshot, latchedRef.current);
         prevRef.current = snapshot;
         latchedRef.current = latched;
-        if (latched !== null && lastMessageAt !== null && lastMessageAt <= latched) return;
+        if (
+          latched !== null &&
+          effectiveLastMessageAt !== null &&
+          effectiveLastMessageAt <= latched
+        ) {
+          return;
+        }
 
         const live = getLatestState();
         if (
@@ -363,14 +444,15 @@ describe('window-read-engagement', () => {
             isVisible,
             isWindowActive: isWindowActive && live.isWindowActive,
             hasPageInteraction: hasPageInteraction && live.hasPageInteraction,
-            lastMessageAt,
+            lastMessageAt: effectiveLastMessageAt,
             lastReadAt,
           })
         ) {
           return;
         }
-        onMarkRead(sessionId, lastMessageAt);
+        onMarkRead(sessionId, effectiveLastMessageAt);
       }, [
+        engagementRevision,
         getLatestState,
         hasPageInteraction,
         isVisible,
@@ -379,6 +461,7 @@ describe('window-read-engagement', () => {
         lastReadAt,
         onMarkRead,
         sessionId,
+        snoozedUntil,
       ]);
 
       return null;
@@ -388,11 +471,13 @@ describe('window-read-engagement', () => {
       showSession,
       lastMessageAt,
       lastReadAt,
+      snoozedUntil,
       onMarkRead,
     }: {
       showSession: boolean;
       lastMessageAt: number;
       lastReadAt: number | null;
+      snoozedUntil?: number | null;
       onMarkRead: (sessionId: string, at: number | null) => void;
     }) {
       useObserveWindowReadEngagement();
@@ -402,6 +487,7 @@ describe('window-read-engagement', () => {
             isVisible: true,
             lastMessageAt,
             lastReadAt,
+            snoozedUntil,
             onMarkRead,
           })
         : null;
@@ -519,6 +605,90 @@ describe('window-read-engagement', () => {
         );
       });
       expect(onMarkRead).toHaveBeenCalledWith('s1', 200);
+    });
+
+    it('marks a session read on subsequent click after a clock-jump idle expiry', () => {
+      let nowMs = 10_000;
+      const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => nowMs);
+      try {
+        const onMarkRead = vi.fn();
+        root = createRoot(container!);
+
+        act(() => {
+          root!.render(
+            React.createElement(WorkspaceShell, {
+              showSession: true,
+              lastMessageAt: 200,
+              lastReadAt: 200,
+              onMarkRead,
+            })
+          );
+        });
+        act(() => {
+          window.dispatchEvent(new Event('pointerdown'));
+        });
+        expect(onMarkRead).not.toHaveBeenCalled();
+
+        // Advance Date.now() past idle window without running the idle timer so
+        // React's boolean hook state still reads hasPageInteraction=true.
+        nowMs += READ_INTERACTION_IDLE_MS + 5_000;
+        act(() => {
+          root!.render(
+            React.createElement(WorkspaceShell, {
+              showSession: true,
+              lastMessageAt: 300,
+              lastReadAt: 200,
+              onMarkRead,
+            })
+          );
+        });
+        expect(onMarkRead).not.toHaveBeenCalled();
+
+        // Clicking inside the foreground window must re-trigger the effect via engagementRevision.
+        act(() => {
+          window.dispatchEvent(new Event('pointerdown'));
+        });
+        expect(onMarkRead).toHaveBeenCalledWith('s1', 300);
+      } finally {
+        nowSpy.mockRestore();
+      }
+    });
+
+    it('marks an expired-snooze session read when clicked in the sidebar', () => {
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+      try {
+        const onMarkRead = vi.fn();
+        root = createRoot(container!);
+
+        act(() => {
+          root!.render(
+            React.createElement(WorkspaceShell, {
+              showSession: false,
+              lastMessageAt: 200,
+              lastReadAt: 200,
+              snoozedUntil: 800,
+              onMarkRead,
+            })
+          );
+        });
+        act(() => {
+          window.dispatchEvent(new Event('pointerdown'));
+        });
+        act(() => {
+          root!.render(
+            React.createElement(WorkspaceShell, {
+              showSession: true,
+              lastMessageAt: 200,
+              lastReadAt: 200,
+              snoozedUntil: 800,
+              onMarkRead,
+            })
+          );
+        });
+        expect(onMarkRead).toHaveBeenCalledWith('s1', 800);
+      } finally {
+        nowSpy.mockRestore();
+      }
     });
   });
 });
