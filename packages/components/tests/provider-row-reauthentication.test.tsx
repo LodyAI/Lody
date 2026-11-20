@@ -15,7 +15,7 @@ import type {
   WorkspaceId,
 } from '@lody/shared';
 
-import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
 import { ProviderRow } from '../src/components/settings/provider-row';
 import {
@@ -298,7 +298,8 @@ describe('ProviderRow model option refresh', () => {
 
     const store = createStore();
     store.set(currentWorkspaceIdAtom, 'ws-test' as WorkspaceId);
-    store.set(activeWorkspaceRuntimeAtom, {
+    store.set(runtimeAtom, {
+      workspaceId: 'ws-test' as WorkspaceId,
       requestMachineAcpCapabilitiesRefresh,
     } as unknown as WorkspaceRuntime);
 
