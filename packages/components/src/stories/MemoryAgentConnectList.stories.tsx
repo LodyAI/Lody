@@ -61,7 +61,6 @@ export const Notices: Story = {
       agent('claude', 'Claude Code', 'hook', { connected: true, notice: 'cloud_disconnected' }),
       agent('codex', 'Codex', 'hook', { notice: 'connect_failed' }),
       agent('kimi', 'Kimi Code', 'mcp', { connected: true, notice: 'disconnect_failed' }),
-      agent('opencode', 'OpenCode', 'mcp', { notice: 'deferred' }),
     ];
     return { agents: reported, state: listed(reported) };
   })(),

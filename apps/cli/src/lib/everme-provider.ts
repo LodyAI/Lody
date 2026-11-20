@@ -6,7 +6,7 @@ import type {
   MemoryInstallFailure,
   MemoryProviderResponse,
 } from '@lody/shared';
-import type { MemoryProvider } from './memory-providers';
+import type { MemoryAgentsSnapshot, MemoryProvider } from './memory-providers';
 import { ensureEverMeNode } from './everme-node';
 import { runEvercli, runNpm, type MemoryCommandRunner } from './memory-command-runner';
 
@@ -66,21 +66,6 @@ const EVERME_AGENTS: readonly {
   { id: 'pi', displayName: 'Pi', platform: 'pi', integration: 'mcp' },
   { id: 'deepseek', displayName: 'DeepSeek Harness', platform: 'dsh', integration: 'mcp' },
 ];
-
-/**
- * The transport caps a memory request at 60s, so a batch that would outlast it
- * stops early and reports the rest as untouched rather than failing wholesale.
- *
- * The budget is spent from the moment the request arrives and has to cover the
- * two inventories that bracket the loop as well as the command in flight when
- * the deadline passes — each of which may take the runner's full 20s. Starting
- * the clock after the first inventory, and checking it only before starting a
- * command, let a batch reach ~100s: the transport gave up, the panel greyed
- * every row out, and the connects had in fact succeeded on disk.
- */
-const EVERME_BATCH_BUDGET_MS = 60_000;
-/** What the runner may spend on one EverCLI call. */
-const EVERME_CALL_BUDGET_MS = 20_000;
 
 /**
  * How long to keep polling when EverCLI never says how long its code lives.
@@ -201,6 +186,15 @@ export function createEverMeMemoryProvider(
   let claiming = false;
   /** Last account the probe saw, so reading it costs no extra EverCLI call. */
   let account: string | undefined;
+  /**
+   * The connect or disconnect this machine is running, if any. A batch pays
+   * for two inventories and one EverCLI call per agent, each allowed the
+   * runner's full 20s, so it cannot fit inside the request that asked for it;
+   * the panel asks after it the way it asks after an install.
+   */
+  let agentJob: { running: boolean; failed: boolean; agents?: MemoryAgent[] } | undefined;
+  /** The newest inventory any read produced, shown while a job is still out. */
+  let lastAgents: MemoryAgent[] | undefined;
 
   const inventory = async (): Promise<Map<string, EvercliPlatform>> => {
     const result = await run(['plugin', 'list', '--no-prompt', '--format', 'json']);
@@ -249,12 +243,8 @@ export function createEverMeMemoryProvider(
 
   const apply = async (
     targets: readonly string[],
-    mode: 'install' | 'uninstall',
-    requestDeadline = Date.now() + EVERME_BATCH_BUDGET_MS - 1000
+    mode: 'install' | 'uninstall'
   ): Promise<MemoryAgent[]> => {
-    // The caller starts the budget before its login probe. Reserve time for
-    // one command and the final inventory before starting another mutation.
-    const deadline = requestDeadline - 2 * EVERME_CALL_BUDGET_MS;
     const rows = await inventory();
     const notes = new Map<string, MemoryAgentNotice>();
     const handled = new Set<string>();
@@ -271,10 +261,6 @@ export function createEverMeMemoryProvider(
       const connected = row.hasEverMeEntry === true;
       // Every install issues a new agent token, so a no-op click stays a no-op.
       if (mode === 'install' ? connected : !connected) continue;
-      if (Date.now() > deadline) {
-        notes.set(entry.platform, 'deferred');
-        continue;
-      }
       const args =
         mode === 'install'
           ? ['plugin', 'install', entry.platform, '--no-prompt', '--format', 'json']
@@ -315,6 +301,37 @@ export function createEverMeMemoryProvider(
     }
   };
 
+  const agentsSnapshot = (): MemoryAgentsSnapshot => {
+    // Nothing started here, or this process restarted since: the panel reads
+    // a fresh inventory rather than waiting on a job nobody is running.
+    if (!agentJob) return { job: { status: 'failed' } };
+    const status = agentJob.running ? 'running' : agentJob.failed ? 'failed' : 'done';
+    const agents = agentJob.agents ?? lastAgents;
+    return { job: { status }, ...(agents ? { agents } : {}) };
+  };
+
+  const startAgentJob = (targets: readonly string[], mode: 'install' | 'uninstall') => {
+    // A second click while a batch runs rejoins it. EverCLI rewrites one
+    // shared config per agent, so two batches at once would race over it.
+    if (agentJob?.running) return agentsSnapshot();
+    const started: NonNullable<typeof agentJob> = { running: true, failed: false };
+    agentJob = started;
+    void apply(targets, mode)
+      .then(
+        (agents) => {
+          started.agents = agents;
+          lastAgents = agents;
+        },
+        () => {
+          started.failed = true;
+        }
+      )
+      .finally(() => {
+        started.running = false;
+      });
+    return agentsSnapshot();
+  };
+
   return {
     id: 'everme',
     probe,
@@ -326,11 +343,16 @@ export function createEverMeMemoryProvider(
     update: async () => {
       throw new Error('EverMe memories are edited in EverMe, not in Lody.');
     },
-    agents: async () => toAgents(await inventory(), new Map()),
+    agents: async () => {
+      lastAgents = toAgents(await inventory(), new Map());
+      return lastAgents;
+    },
     /** Set by the probe that runs ahead of every read, so never stale here. */
     account: () => account,
-    connect: (targets, deadline) => apply(targets, 'install', deadline),
-    disconnect: (targets, deadline) => apply(targets, 'uninstall', deadline),
+    connect: async (targets) => startAgentJob(targets, 'install'),
+    disconnect: async (targets) => startAgentJob(targets, 'uninstall'),
+    // Reading a flag, not work: async only to match the calls it answers.
+    connectPoll: async () => agentsSnapshot(),
     /**
      * Device Flow, started but not awaited: approval happens in a browser, and
      * a request that blocked on it would outlive the transport long before the

@@ -11,6 +11,7 @@ import type {
 } from '@lody/shared';
 import { localProbeResultAtom } from '../src/atoms/local-probe';
 import { MemorySetting, RoleMemoryPicker } from '../src/components/settings/memory-setting';
+import { MemoryAgentConnectList } from '../src/components/settings/memory-agent-connect';
 import { initI18n } from '../src/i18n';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -40,6 +41,8 @@ const mocks = vi.hoisted(() => ({
     update: vi.fn(async () => undefined as MemoryProviderResponse | undefined),
     create: vi.fn(async () => undefined as MemoryProviderResponse | undefined),
   },
+  /** Per-provider hook state; providers absent here share `provider`. */
+  byProvider: {} as Record<string, unknown>,
   openExternalUrl: vi.fn(async () => true),
 }));
 
@@ -63,7 +66,8 @@ vi.mock('../src/hooks/use-machine-online-status', () => ({
   useOnlineMachineIds: () => mocks.onlineIds,
 }));
 vi.mock('../src/hooks/use-memory-provider', () => ({
-  useMemoryProvider: () => mocks.provider,
+  useMemoryProvider: (_machineId: string, providerId: string) =>
+    mocks.byProvider[providerId] ?? mocks.provider,
 }));
 vi.mock('../src/hooks/use-memory-associations', () => ({
   useMemoryAssociations: (machineId: string) => ({
@@ -146,6 +150,7 @@ beforeEach(async () => {
     memories: [],
   };
   mocks.provider.busy = false;
+  mocks.byProvider = {};
   mocks.provider.create.mockReset();
   mocks.provider.signIn.mockReset();
   mocks.provider.signInPoll.mockReset();
@@ -249,6 +254,85 @@ it('holds every provider block until the machine answers, then shows them togeth
   // EverMe offers its in-place download beside the manual route to its own page.
   expect(labels()).toContain('One-click download');
   expect(labels()).toContain('Install manually');
+});
+
+it('shows an answered provider after the short grace while another is still asking', async () => {
+  // Waiting for the slowest provider hid memories the user could already
+  // edit for up to four seconds.
+  vi.useFakeTimers();
+  mocks.entries = [saved];
+  mocks.byProvider['nowledge-mem'] = {
+    ...mocks.provider,
+    result: {
+      type: 'machine/memory',
+      status: 'ready',
+      memories: [{ id: 'reviewer', name: 'Reviewer', description: 'Review lessons' }],
+    },
+  };
+  mocks.byProvider.everme = { ...mocks.provider, result: undefined };
+  await renderSetting();
+  expect(container.textContent).not.toContain('Review lessons');
+  await act(async () => vi.advanceTimersByTime(800));
+  expect(container.textContent).toContain('Review lessons');
+  // EverMe has said nothing yet, so its block still offers nothing.
+  const labels = [...container.querySelectorAll('button')].map((node) => node.textContent);
+  expect(labels).not.toContain('One-click download');
+});
+
+it('keeps a connect pending until the job on the machine reports back', async () => {
+  vi.useFakeTimers();
+  const agent = (id: string, displayName: string, connected: boolean) => ({
+    id,
+    displayName,
+    integration: 'hook' as const,
+    supported: true,
+    connectable: true,
+    connected,
+  });
+  const before = [agent('claude', 'Claude Code', true), agent('codex', 'Codex', false)];
+  const after = [agent('claude', 'Claude Code', true), agent('codex', 'Codex', true)];
+  let job: 'running' | 'done' = 'running';
+  const state = {
+    ...mocks.provider,
+    result: { type: 'machine/memory' as const, status: 'ready' as const, memories: [], agents: before },
+    connect: vi.fn(async () => ({
+      type: 'machine/memory' as const,
+      status: 'ready' as const,
+      memories: [],
+      agentsJob: { status: 'running' as const },
+    })),
+    connectPoll: async () => ({
+      type: 'machine/memory' as const,
+      status: 'ready' as const,
+      memories: [],
+      agentsJob: { status: job },
+      ...(job === 'done' ? { agents: after } : {}),
+    }),
+  } as unknown as Parameters<typeof MemoryAgentConnectList>[0]['state'];
+  await act(async () =>
+    root.render(
+      <MemoryAgentConnectList
+        name="EverMe"
+        providerKey="everme"
+        configs={[
+          { agentType: 'claude', name: 'Claude Code' },
+          { agentType: 'codex', name: 'Codex' },
+        ]}
+        agents={before}
+        state={state}
+        disabled={false}
+      />
+    )
+  );
+  await click('Connect Codex');
+  const codex = () => button('Connect Codex');
+  expect(codex().getAttribute('aria-busy')).toBe('true');
+  // The request came back long ago; the machine is still running the job.
+  await act(async () => vi.advanceTimersByTime(2_000));
+  expect(codex().getAttribute('aria-busy')).toBe('true');
+  job = 'done';
+  await act(async () => vi.advanceTimersByTime(2_000));
+  expect(codex().getAttribute('aria-busy')).toBe('false');
 });
 
 it('keeps a stopped provider named and says to start it when asked to add a memory', async () => {

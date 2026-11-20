@@ -42,11 +42,12 @@ export const MemoryProviderRequestSchema = z.discriminatedUnion('action', [
     .strict(),
   // `signIn` opens a flow, `signInPoll` asks whether the browser finished it;
   // `install` puts the provider on the machine, `installPoll` watches it land.
+  // `connectPoll` watches the job a `connect` or `disconnect` left running.
   // None carries a device code: the flow belongs to the machine that started
   // it, so the secret half never has to cross back through the UI.
   z
     .object({
-      action: z.enum(['signIn', 'signInPoll', 'install', 'installPoll']),
+      action: z.enum(['signIn', 'signInPoll', 'install', 'installPoll', 'connectPoll']),
       providerId: z.string().min(1).max(100),
     })
     .strict(),
@@ -77,7 +78,6 @@ export const MemoryAgentNoticeSchema = z.enum([
   'cloud_disconnected',
   'connect_failed',
   'disconnect_failed',
-  'deferred',
 ]);
 export type MemoryAgentNotice = z.infer<typeof MemoryAgentNoticeSchema>;
 
@@ -156,6 +156,16 @@ export const MemoryInstallSchema = z
   .strict();
 export type MemoryInstall = z.infer<typeof MemoryInstallSchema>;
 
+/**
+ * Where a connect or disconnect has got to. Each EverCLI call may take its
+ * full budget, so a batch outlasts any one reply; the job runs on the machine
+ * and the panel asks after it instead of holding a request open.
+ */
+export const MemoryAgentsJobSchema = z
+  .object({ status: z.enum(['running', 'done', 'failed']) })
+  .strict();
+export type MemoryAgentsJob = z.infer<typeof MemoryAgentsJobSchema>;
+
 export const MemoryProviderResponseSchema = z
   .object({
     type: z.literal('machine/memory'),
@@ -174,6 +184,8 @@ export const MemoryProviderResponseSchema = z
     signIn: MemorySignInSchema.optional(),
     /** Only answers to `install` and `installPoll` carry this. */
     install: MemoryInstallSchema.optional(),
+    /** Only answers to `connect`, `disconnect` and `connectPoll` carry this. */
+    agentsJob: MemoryAgentsJobSchema.optional(),
     error: z.string().optional(),
   })
   .strict();

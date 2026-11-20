@@ -623,6 +623,25 @@ function useRevealTogether(loads: readonly ProviderLoad[]): boolean {
   }, [revealed, answered, waiting, mountedAt]);
   return revealed || answered;
 }
+
+/**
+ * Showing together is worth a moment, not a slow provider's whole wait: a
+ * block that has answered stops waiting on the others once the short grace is
+ * over, so one provider still taking inventory never hides another's memories.
+ */
+function useRevealedBlocks(
+  loads: Readonly<Record<string, ProviderLoad>>,
+  ids: readonly string[]
+): (id: string) => boolean {
+  const together = useRevealTogether(ids.map((id) => loads[id] ?? 'waiting'));
+  const [graceOver, setGraceOver] = useState(false);
+  useEffect(() => {
+    if (together || graceOver) return undefined;
+    const timer = window.setTimeout(() => setGraceOver(true), REVEAL_GRACE_MS);
+    return () => window.clearTimeout(timer);
+  }, [together, graceOver]);
+  return (id) => together || (graceOver && loads[id] === 'answered');
+}
 const SETTINGS_MEMORY_SEARCH_THRESHOLD = 7;
 function MachineMemories({
   machineId,
@@ -663,7 +682,10 @@ function MachineMemories({
       ),
     []
   );
-  const revealed = useRevealTogether(providers.map((provider) => loads[provider.id] ?? 'waiting'));
+  const revealed = useRevealedBlocks(
+    loads,
+    providers.map((provider) => provider.id)
+  );
   return (
     <>
       <SettingsPageActions>
@@ -687,7 +709,7 @@ function MachineMemories({
           machineId={machineId}
           isLocalMachine={machineId === localId}
           provider={provider}
-          revealed={revealed}
+          revealed={revealed(provider.id)}
           onLoad={reportLoad}
           refreshToken={refreshToken}
           query={searchable ? query : ''}
@@ -743,7 +765,7 @@ function ProviderRecords({
    */
   isLocalMachine: boolean;
   provider: ProviderDefinition;
-  /** Every provider on the page has answered, so the bodies may show together. */
+  /** This block may show its body: every provider answered, or this one did and the grace is over. */
   revealed: boolean;
   onLoad: (providerId: string, load: ProviderLoad) => void;
   supported: boolean;

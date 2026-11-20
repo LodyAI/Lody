@@ -29,9 +29,19 @@ applies outside Lody.
   the local machine, and the daemon refuses them on the workspace relay and the
   encrypted feature ingress. Both sides use the one predicate
   `isLocalOnlyMemoryProvider`.
+- **Connecting runs as a job on the machine.** A batch costs a login probe, two
+  inventories and one EverCLI call per agent, each allowed the runner's 20s, so
+  `connect` and `disconnect` start a single-slot job and reply at once, and the panel
+  follows it with `connectPoll` the way it follows an install. A second click while a
+  batch runs rejoins it, because EverCLI rewrites one shared config per agent.
 
 Enforcing the local-only rule in Settings alone was rejected: the relay reaches the
 daemon whatever the page shows.
+
+Fitting a batch inside the 60s local RPC by reserving time for one command and the
+final inventory was rejected: once the probe and first inventory together took more
+than 19s, even a single agent was deferred, and every retry paid for the same probes
+again, so a slow network left the user unable to connect or disconnect at all.
 
 ## Consequences
 
@@ -47,12 +57,23 @@ only releases it considers stable, and a pin would leave every Lody build instal
 an EverCLI that its backend may no longer serve. The Node.js that Lody provisions
 when the machine has no usable npm is pinned by version and checksum.
 
+The install and connect jobs are Promise work held by the provider's closure, and a
+process restart forgets them; a poll then answers `failed` and the panel reads a fresh
+inventory. A native Effect migration of the provider was assessed and deferred: its
+commands go through the deprecated `runCommandTextLegacy` facade with
+`getLoginShellEnvLegacy`, and `handleMemoryProviderRequest` is reached from Promise
+request handling, so a native unit would need a daemon-scoped provider service owning
+these jobs as fibers together with those callers. Until then each job is bounded only
+by the runner's per-call timeouts.
+
 ## Verification
 
 `packages/components/tests/memory-setting.test.tsx` covers the Settings states that
 Nowledge Mem shares with the new layout, and an active EverMe sign-in surviving
 transient errors until approval or expiry. `apps/cli/src/lib/memory-providers.test.ts`
-covers the connection budgets including the initial probe, the relay refusing every
+covers the connection job answering before EverCLI finishes, connecting when every
+call takes most of its budget, rejoining a running batch, and a failed or forgotten job,
+as well as the relay refusing every
 EverMe request before EverCLI or npm runs, the device flow keeping its device code on
 the machine, and the install job with its Node.js fallback.
 `apps/cli/tests/machine-runtime-remote-bridge.test.ts` covers the refusal on the

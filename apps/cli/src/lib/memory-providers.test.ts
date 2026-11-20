@@ -7,6 +7,7 @@ import {
   handleRelayedMemoryProviderRequest,
   memoryEnvironment,
   type MemoryCommandRunner,
+  type MemoryProvider,
 } from './memory-providers';
 import { createEverMeMemoryProvider } from './everme-provider';
 
@@ -98,83 +99,130 @@ describe('Nowledge memory provider', () => {
   });
 });
 
-describe('EverMe connection request budget', () => {
-  it.each(['connect', 'disconnect'] as const)(
-    'includes the login probe and defers %s before the RPC expires',
-    async (action) => {
-      vi.useFakeTimers();
-      vi.setSystemTime(0);
-      let connected = action === 'disconnect';
-      const provider = createEverMeMemoryProvider(async (args) => {
-        vi.setSystemTime(Date.now() + 19_000);
-        if (args[0] === 'auth')
-          return { stdout: JSON.stringify({ ok: true, data: { accountId: 'test-account' } }) };
-        if (args[1] === 'install' || args[1] === 'uninstall') {
-          connected = args[1] === 'install';
-          return { stdout: '{}' };
-        }
-        return {
-          stdout: JSON.stringify({
-            ok: true,
-            data: {
-              platforms: [{ platform: 'codex', installed: true, hasEverMeEntry: connected }],
-            },
-          }),
-        };
-      });
-      try {
-        const result = await handleMemoryProviderRequest(
-          { action, providerId: 'everme', targets: ['codex'] },
-          [provider]
-        );
-        expect(result.status).toBe('ready');
-        expect(result.agents?.find((agent) => agent.id === 'codex')).toMatchObject({
-          connected: action === 'disconnect',
-          notice: 'deferred',
-        });
-        expect(Date.now()).toBeLessThan(60_000);
-      } finally {
-        vi.useRealTimers();
-      }
-    }
-  );
-  it.each(['connect', 'disconnect'] as const)(
-    '%s succeeds when enough time remains',
-    async (action) => {
-      let connected = action === 'disconnect';
-      const provider = createEverMeMemoryProvider(async (args) => {
-        if (args[0] === 'auth')
-          return { stdout: JSON.stringify({ ok: true, data: { accountId: 'test-account' } }) };
-        if (args[1] === 'install' || args[1] === 'uninstall') {
-          connected = args[1] === 'install';
-          return { stdout: '{}' };
-        }
-        return {
-          stdout: JSON.stringify({
-            ok: true,
-            data: {
-              platforms: [{ platform: 'codex', installed: true, hasEverMeEntry: connected }],
-            },
-          }),
-        };
-      });
-      const result = await handleMemoryProviderRequest(
-        { action, providerId: 'everme', targets: ['codex'] },
-        [provider]
-      );
-      expect(result.agents?.find((agent) => agent.id === 'codex')).toMatchObject({
-        connected: action === 'connect',
-      });
-      expect(result.agents?.find((agent) => agent.id === 'codex')?.notice).toBeUndefined();
-    }
-  );
-});
-
 /** Lets the job an install leaves running reach its next await. */
 const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
 const signedIn = { stdout: JSON.stringify({ ok: true, data: { accountId: 'test-account' } }) };
 const signedOut = { stdout: JSON.stringify({ ok: false, data: null }), code: 1 };
 const noPlatforms = { stdout: JSON.stringify({ ok: true, data: { platforms: [] } }) };
+
+describe('EverMe agent connection job', () => {
+  /** A signed-in machine whose Codex row follows the commands EverCLI ran. */
+  const connectHarness = (connected: boolean, before?: (args: string[]) => Promise<void>) => {
+    const state = { connected, mutations: [] as string[][] };
+    const provider = createEverMeMemoryProvider(async (args) => {
+      await before?.(args);
+      if (args[0] === 'auth') return signedIn;
+      if (args[1] === 'install' || args[1] === 'uninstall') {
+        state.mutations.push(args);
+        state.connected = args[1] === 'install';
+        return { stdout: '{}' };
+      }
+      return {
+        stdout: JSON.stringify({
+          ok: true,
+          data: {
+            platforms: [{ platform: 'codex', installed: true, hasEverMeEntry: state.connected }],
+          },
+        }),
+      };
+    });
+    return { provider, state };
+  };
+  const ask = (provider: MemoryProvider, request: MemoryProviderRequest) =>
+    handleMemoryProviderRequest(request, [provider]);
+  const finished = async (provider: MemoryProvider) => {
+    for (let tick = 0; tick < 20; tick++) {
+      const reply = await ask(provider, { action: 'connectPoll', providerId: 'everme' });
+      if (reply.agentsJob?.status !== 'running') return reply;
+      await settle();
+    }
+    throw new Error('the connect job never finished');
+  };
+
+  it.each(['connect', 'disconnect'] as const)(
+    'answers %s before EverCLI finishes and reports the inventory the job left',
+    async (action) => {
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const { provider, state } = connectHarness(action === 'disconnect', async (args) => {
+        if (args[1] === 'install' || args[1] === 'uninstall') await held;
+      });
+      const reply = await ask(provider, { action, providerId: 'everme', targets: ['codex'] });
+      expect(reply).toMatchObject({ status: 'ready', agentsJob: { status: 'running' } });
+      await settle();
+      expect(
+        (await ask(provider, { action: 'connectPoll', providerId: 'everme' })).agentsJob
+      ).toEqual({ status: 'running' });
+      release();
+      const done = await finished(provider);
+      expect(done.agentsJob).toEqual({ status: 'done' });
+      expect(done.agents?.find((agent) => agent.id === 'codex')).toMatchObject({
+        connected: action === 'connect',
+      });
+      expect(state.connected).toBe(action === 'connect');
+    }
+  );
+
+  it('still connects when every EverCLI call takes most of its budget', async () => {
+    // Probe and inventory at 19s each used to leave no room for the command
+    // inside one request, so every retry was deferred before it started.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(0);
+    try {
+      const { provider, state } = connectHarness(false, async () => {
+        vi.setSystemTime(Date.now() + 19_000);
+      });
+      await ask(provider, { action: 'connect', providerId: 'everme', targets: ['codex'] });
+      const done = await finished(provider);
+      expect(state.mutations).toHaveLength(1);
+      expect(done.agents?.find((agent) => agent.id === 'codex')).toMatchObject({
+        connected: true,
+      });
+      expect(done.agents?.find((agent) => agent.id === 'codex')?.notice).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejoins a running batch instead of starting a second one', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { provider, state } = connectHarness(false, async (args) => {
+      if (args[1] === 'install') await held;
+    });
+    await ask(provider, { action: 'connect', providerId: 'everme', targets: ['codex'] });
+    await settle();
+    const second = await ask(provider, {
+      action: 'connect',
+      providerId: 'everme',
+      targets: ['codex'],
+    });
+    expect(second.agentsJob).toEqual({ status: 'running' });
+    release();
+    await finished(provider);
+    expect(state.mutations).toHaveLength(1);
+  });
+
+  it('reports a failed job, and no job at all, as an error to refresh from', async () => {
+    const fresh = connectHarness(false).provider;
+    expect(await ask(fresh, { action: 'connectPoll', providerId: 'everme' })).toMatchObject({
+      status: 'error',
+      agentsJob: { status: 'failed' },
+    });
+    const broken = createEverMeMemoryProvider(async (args) =>
+      args[0] === 'auth' ? signedIn : { stdout: 'not json' }
+    );
+    await ask(broken, { action: 'connect', providerId: 'everme', targets: ['codex'] });
+    expect(await finished(broken)).toMatchObject({
+      status: 'error',
+      agentsJob: { status: 'failed' },
+    });
+  });
+});
 
 describe('EverMe is set up only on the machine itself', () => {
   const requests: MemoryProviderRequest[] = [
@@ -183,6 +231,7 @@ describe('EverMe is set up only on the machine itself', () => {
     { action: 'signInPoll', providerId: 'everme' },
     { action: 'install', providerId: 'everme' },
     { action: 'installPoll', providerId: 'everme' },
+    { action: 'connectPoll', providerId: 'everme' },
     { action: 'connect', providerId: 'everme', targets: ['codex'] },
     { action: 'disconnect', providerId: 'everme', targets: ['codex'] },
   ];

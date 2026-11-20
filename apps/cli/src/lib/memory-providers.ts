@@ -4,6 +4,7 @@ import {
   MemoryProviderRequestSchema,
   isLocalOnlyMemoryProvider,
   type MemoryAgent,
+  type MemoryAgentsJob,
   type MemoryBinding,
   type MemoryCreateInput,
   type MemoryIdentity,
@@ -24,10 +25,15 @@ export interface MemoryProvider {
   create(input: MemoryCreateInput): Promise<void>;
   update(input: MemoryCreateInput): Promise<void>;
   environment(memoryId: string): Record<string, string>;
-  /** Agent-connect providers only; identity providers leave these undefined. */
+  /**
+   * Agent-connect providers only; identity providers leave these undefined.
+   * `connect` and `disconnect` start a job and answer at once; `connectPoll`
+   * reports it, with the inventory it left once it is done.
+   */
   agents?(): Promise<MemoryAgent[]>;
-  connect?(targets: readonly string[], deadline?: number): Promise<MemoryAgent[]>;
-  disconnect?(targets: readonly string[], deadline?: number): Promise<MemoryAgent[]>;
+  connect?(targets: readonly string[]): Promise<MemoryAgentsSnapshot>;
+  disconnect?(targets: readonly string[]): Promise<MemoryAgentsSnapshot>;
+  connectPoll?(): Promise<MemoryAgentsSnapshot>;
   /** Providers Lody can sign in to; the rest send the user to their own app. */
   signIn?(): Promise<MemorySignIn>;
   signInPoll?(): Promise<MemorySignIn>;
@@ -37,6 +43,31 @@ export interface MemoryProvider {
   install?(): Promise<MemoryInstall>;
   installPoll?(): Promise<MemoryInstall>;
 }
+
+export type MemoryAgentsSnapshot = { job: MemoryAgentsJob; agents?: MemoryAgent[] };
+
+const agentsJobReply = (
+  provider: MemoryProvider,
+  { job, agents }: MemoryAgentsSnapshot
+): MemoryProviderResponse => {
+  const account = provider.account?.();
+  return job.status === 'failed'
+    ? {
+        type: 'machine/memory',
+        status: 'error',
+        memories: [],
+        agentsJob: job,
+        error: 'Memory provider request failed. Check the provider and refresh.',
+      }
+    : {
+        type: 'machine/memory',
+        status: 'ready',
+        memories: [],
+        agentsJob: job,
+        ...(agents ? { agents } : {}),
+        ...(account ? { account } : {}),
+      };
+};
 
 export function createNowledgeMemoryProvider(run: MemoryCommandRunner = runNmem): MemoryProvider {
   const json = async (args: string[]) => {
@@ -189,19 +220,18 @@ export async function handleMemoryProviderRequest(
         ...(agents ? { agents } : {}),
       };
     }
-    // Leave one second for the reply inside the local RPC limit, including the probe.
-    const deadline = Date.now() + 59_000;
+    // Asking after a job reads what the job left; the probe that gated the
+    // click already ran, and probing again on every tick is the slow part.
+    if (request.action === 'connectPoll') {
+      if (!provider.connectPoll) throw new Error('This memory provider does not connect agents');
+      return agentsJobReply(provider, await provider.connectPoll());
+    }
     const status = await provider.probe();
     if (status !== 'ready') return { type: 'machine/memory', status, memories: [] };
     if (request.action === 'connect' || request.action === 'disconnect') {
       const apply = request.action === 'connect' ? provider.connect : provider.disconnect;
       if (!apply) throw new Error('This memory provider does not connect agents');
-      return {
-        type: 'machine/memory',
-        status: 'ready',
-        memories: [],
-        agents: await apply.call(provider, request.targets, deadline),
-      };
+      return agentsJobReply(provider, await apply.call(provider, request.targets));
     }
     if (request.action === 'create') await provider.create(request.input);
     if (request.action === 'update') await provider.update(request.input);

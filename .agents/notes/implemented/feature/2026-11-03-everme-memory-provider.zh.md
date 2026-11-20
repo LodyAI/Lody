@@ -21,8 +21,16 @@ Lody 把 EverMe 作为“连接 Agent”而不是“由 Role 绑定”的 Provid
 - **只能在这台机器上设置。** 设备码授权会把机器绑定到完成授权的人，来自其他成员设备的请求可能让
   这台机器的对话进入对方账号。设置页只向当前这台机器发送 EverMe 请求，Daemon 也会拒绝经工作区中转
   和加密功能通道到达的此类请求，两端共用同一个判断 `isLocalOnlyMemoryProvider`。
+- **连接作为机器上的任务运行。** 一批连接要执行一次登录检查、两次盘点，再为每个 Agent 调用一次
+  EverCLI，每次调用都可能用满执行器的 20 秒。因此 `connect` 和 `disconnect` 启动一个单槽任务后
+  立即回复，设置页像跟踪安装那样用 `connectPoll` 跟踪它。任务运行期间的第二次点击会并入当前任务，
+  因为 EverCLI 为每个 Agent 改写同一份共享配置。
 
 只在设置页限制“仅限这台机器”的方案被否决：无论页面显示什么，中转通道都能直接到达 Daemon。
+
+在 60 秒的本地 RPC 内为一次命令和最终盘点预留时间、把整批放进一个请求的方案被否决：只要登录
+检查和首次盘点合计超过 19 秒，连单个 Agent 都会被推迟，而每次重试都要重新支付同样的检查，网络
+持续缓慢时用户根本无法连接或断开。
 
 ## 影响
 
@@ -35,11 +43,19 @@ Lody 安装的是 `@everme/cli` 的当前发布版本，而不是在源码中固
 安装一个后端可能已不再支持的 EverCLI。机器没有可用 npm 时由 Lody 提供的 Node.js 则按版本和
 校验和固定。
 
+安装和连接任务都是由 Provider 闭包持有的 Promise 工作，进程重启后会丢失；此时轮询回答
+`failed`，设置页改为读取新的盘点结果。评估过把 Provider 迁移为原生 Effect，结论是暂缓：它的命令
+经由已弃用的 `runCommandTextLegacy` 外观和 `getLoginShellEnvLegacy` 执行，
+`handleMemoryProviderRequest` 也由 Promise 请求处理调用，原生单元需要一个 Daemon 范围的
+Provider 服务把这些任务作为 fiber 持有，并连同这些调用方一起迁移。在此之前，每个任务只受执行器
+单次调用超时的约束。
+
 ## 验证
 
 `packages/components/tests/memory-setting.test.tsx` 覆盖 Nowledge Mem 在新布局下的设置页
 状态，以及 EverMe 登录在短暂错误后继续等待、最终批准或过期的行为。
-`apps/cli/src/lib/memory-providers.test.ts` 覆盖包含前置检查的连接和断开时间预算、中转通道
+`apps/cli/src/lib/memory-providers.test.ts` 覆盖连接任务在 EverCLI 完成前就回复、每次调用都
+接近预算时仍能连接、运行中的批次被并入，以及失败或丢失的任务，并覆盖中转通道
 在运行 EverCLI 或 npm 之前拒绝全部 EverMe 请求、设备码不离开这台机器的登录流程，以及带
 Node.js 回退的安装任务。`apps/cli/tests/machine-runtime-remote-bridge.test.ts` 覆盖加密功能
 入口上的拒绝。`apps/cli/src/lib/everme-node.test.ts` 覆盖无论来自默认源还是镜像，与源码中

@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
@@ -35,6 +35,14 @@ const styles = stylex.create({
   rowName: { fontWeight: type.headingWeight },
   rowFacts: { fontSize: text.captionSize, lineHeight: text.captionLeading },
 });
+
+/** Each tick reads a flag on the machine, so it can be asked after often. */
+const POLL_INTERVAL_MS = 2_000;
+/**
+ * A batch is two inventories plus one EverCLI call per agent, each allowed
+ * 20s. Past this the panel stops waiting and reads the inventory instead.
+ */
+const JOB_BUDGET_MS = 5 * 60_000;
 
 /**
  * EverMe-style providers hold one memory per account, so there is nothing to
@@ -80,14 +88,56 @@ export function MemoryAgentConnectList({
   // Only a click the user made disables the list. `state.busy` also covers the
   // ambient refresh, which would grey every control out every thirty seconds.
   const busy = pending.length > 0;
+  // The click starts a job on the machine and returns; the rows stay pending
+  // until the job reports back, read through a ref so the interval is not
+  // rebuilt on every render.
+  const [watching, setWatching] = useState(false);
+  const poll = useRef(state.connectPoll);
+  poll.current = state.connectPoll;
+  const refresh = useRef(state.refresh);
+  refresh.current = state.refresh;
+  const endsAt = useRef(0);
+  useEffect(() => {
+    if (!watching) return undefined;
+    let cancelled = false;
+    let asking = false;
+    const finish = () => {
+      setWatching(false);
+      setPending([]);
+    };
+    const timer = window.setInterval(() => {
+      if (Date.now() > endsAt.current) {
+        finish();
+        void refresh.current();
+        return;
+      }
+      if (asking) return;
+      asking = true;
+      void poll
+        .current()
+        .finally(() => {
+          asking = false;
+        })
+        .then((result) => {
+          if (cancelled || result?.agentsJob?.status === 'running') return;
+          finish();
+          // A job that failed, or that a restart forgot, left no inventory.
+          if (result?.agentsJob?.status !== 'done') void refresh.current();
+        });
+    }, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [watching]);
   const run = async (action: 'connect' | 'disconnect', targets: readonly string[]) => {
     if (busy || disabled || !targets.length) return;
     setPending(targets);
-    try {
-      await (action === 'connect' ? state.connect : state.disconnect)([...targets]);
-    } finally {
-      setPending([]);
-    }
+    const reply = await (action === 'connect' ? state.connect : state.disconnect)([...targets]);
+    if (reply?.agentsJob?.status === 'running') {
+      endsAt.current = Date.now() + JOB_BUDGET_MS;
+      setWatching(true);
+    } else setPending([]);
   };
   // The first connection on a machine is the one that starts uploading its
   // conversations, so it is the one that has to say so. Once an agent is

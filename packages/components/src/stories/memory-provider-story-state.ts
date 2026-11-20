@@ -19,10 +19,12 @@ export const memoryProviderStoryState = (
 ): MemoryProviderState => ({
   result,
   busy: false,
+  refresh: async () => result,
   create: async () => result,
   update: async () => result,
   connect: async () => result,
   disconnect: async () => result,
+  connectPoll: async () => result,
   signIn: async () => result,
   signInPoll: async () => result,
   install: async () => result,
