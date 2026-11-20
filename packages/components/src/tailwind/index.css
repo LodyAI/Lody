@@ -1974,9 +1974,23 @@ pre,
   will-change: transform;
 }
 
+/* Back destination under the sliding-off page (`useMobileBackRevealClass`):
+   iOS-style parallax in from a dimmed, left-shifted position. */
+@keyframes mobile-drill-reveal {
+  from {
+    transform: translate3d(-28%, 0, 0);
+    opacity: 0.72;
+  }
+}
+
+.mobile-drill-reveal {
+  animation: mobile-drill-reveal 0.28s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mobile-drill-in,
-  .mobile-drill-out {
+  .mobile-drill-out,
+  .mobile-drill-reveal {
     animation: none;
   }
 }
