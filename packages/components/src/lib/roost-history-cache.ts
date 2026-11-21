@@ -211,7 +211,8 @@ export function createRoostHistoryCache(scope: string, namespace?: string) {
   const retainOlderPage = (
     base: RoostCachedHead,
     from: number,
-    turns: readonly SessionHistoryInput[]
+    turns: readonly SessionHistoryInput[],
+    observedCheckpoint = base.checkpoint
   ) =>
     transact<SessionHistoryDirectoryPage | undefined>('readwrite', (tx, done) => {
       const heads = tx.objectStore(HEADS);
@@ -227,8 +228,10 @@ export function createRoostHistoryCache(scope: string, namespace?: string) {
           end > head.count
         )
           return done(undefined);
-        if (head.checkpoint !== base.checkpoint) {
-          const changes = roostCachedChangesSince(head, base.checkpoint);
+        if (head.checkpoint !== base.checkpoint && head.checkpoint !== observedCheckpoint) {
+          const changes =
+            (observedCheckpoint && roostCachedChangesSince(head, observedCheckpoint)) ||
+            roostCachedChangesSince(head, base.checkpoint);
           if (!changes) return done(undefined);
           const ids = new Set(turns.map((turn) => turn.id));
           // A changed suffix before this page can shift its positions. Body

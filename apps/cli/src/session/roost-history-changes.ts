@@ -143,5 +143,8 @@ export function createRoostHistoryChanges(host: () => RoostNodeStream, scope: ()
         ids: [...ids],
       };
     },
+    readThroughCheckpoint(baseCheckpoint: string, checkpoint: string, signal?: AbortSignal) {
+      return this.read(baseCheckpoint, roostCheckpointCursor(checkpoint), signal);
+    },
   };
 }

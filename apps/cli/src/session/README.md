@@ -740,10 +740,18 @@ Initial population and missing or rejected coverage read only the latest coheren
 An explicit reset atomically replaces the active cache in the other slot even when its
 Native publication revision is equal or lower after an explicit reset, provided the
 captured head has not changed.
-Last-change hints cannot repair unknown coverage. Older pages load on demand, using a
-checkpoint-protected absolute range where supported; ordinary refresh never sweeps the
-whole history. Genuine reset invalidates old pages until fetched again, including for
-offline use; ordinary complete-change repair preserves the retained prefix.
+Last-change hints cannot repair unknown coverage. Older pages load on demand.
+With incremental history v2, the owner reads one coherent page at its current
+publication, then releases the writer and verifies receipts through that fixed
+publication. The returned bodies can join the requested cache checkpoint when
+the interval proves the page's positions and turn IDs were unaffected. The
+reply also identifies the publication at which the page was read. The cache
+can attach it at either checkpoint or across later verified changes. A page
+alone does not advance the cache checkpoint. A missing receipt interval, an
+overlapping edit, or a replacement generation requires refreshing before retry.
+Ordinary refresh never sweeps the whole history. Genuine reset invalidates older
+pages until fetched again, including for offline use. Complete-change repair
+preserves the retained prefix.
 See [bounded cache recovery](../../../../.agents/notes/implemented/bug-fix/2026-10-21-roost-cache-recovery-network-cost.md).
 
 Cold readers observe backend metadata before composition; provisional absence remains

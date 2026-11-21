@@ -52,6 +52,10 @@ export interface SessionBackend {
 
   initialize(options: { skipAutoRead: boolean }): Promise<void>;
   readHistory(): Promise<SessionHistoryInput[]>;
+  readonly readOlderHistoryRange?: (
+    query: Extract<import('@lody/shared').SessionHistoryReadQuery, { kind: 'readOlderRange' }>,
+    signal?: AbortSignal
+  ) => Promise<import('@lody/shared').SessionHistoryReadResponse>;
   readonly readHistoryInspection?: (
     query: import('@lody/shared').SessionHistoryInspectionQuery
   ) => Promise<import('@lody/shared').SessionHistoryReadResponse>;
