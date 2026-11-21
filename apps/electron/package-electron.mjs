@@ -213,6 +213,9 @@ export function runCloudPackaging() {
       cwd: repoRoot,
       env: {
         ...process.env,
+        ...(process.env.CSC_NAME
+          ? { CSC_NAME: process.env.CSC_NAME.replace(/^Developer ID Application:\s*/u, "") }
+          : {}),
         LODY_SPARKLE_PACKAGE_ENVIRONMENT: updateEnvironment,
         LODY_SPARKLE_UPDATE_BASE_URL: updateConfig.url
       },

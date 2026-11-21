@@ -6,7 +6,8 @@ import { pathToFileURL } from 'node:url'
 import {
   githubApi,
   inspectNightlyPublication,
-  validateNightlyCandidate
+  validateNightlyCandidate,
+  validateStoredNightlyCandidate
 } from './nightly-candidate.mjs'
 import { assertNightlyVersionReservation, validateNightlyVersion } from './nightly-version.mjs'
 import { createNightlyR2Store, hashFile, NIGHTLY_ANDROID_METADATA_KEY } from './nightly-r2.mjs'
@@ -17,8 +18,8 @@ export function mobileNightlyVersion(version) {
   return { android: version, ios: version.split('-')[0] }
 }
 
-export function androidNightlyIdentity(candidate, version) {
-  validateNightlyCandidate(candidate)
+export function androidNightlyIdentity(candidate, version, { allowStored = false } = {}) {
+  ;(allowStored ? validateStoredNightlyCandidate : validateNightlyCandidate)(candidate)
   return {
     versionName: mobileNightlyVersion(version).android,
     versionCode: androidVersionCode(candidate.builtAt),
@@ -111,7 +112,7 @@ export async function publishNightlyAndroid({ directory, candidate, displayVersi
   if (published !== undefined) {
     assert.ok(
       Number(androidNightlyIdentity(candidate, displayVersion).versionCode) >
-        Number(androidNightlyIdentity(published.candidate, published.version).versionCode),
+        Number(androidNightlyIdentity(published.candidate, published.version, { allowStored: true }).versionCode),
       'Android version code must increase'
     )
   }
