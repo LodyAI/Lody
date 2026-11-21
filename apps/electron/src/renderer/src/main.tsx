@@ -25,6 +25,7 @@ import '@lody/components/tailwind/index.css'
 import { jotaiStore } from '@lody/components/lib'
 import { collectBootDiagnostics, renderBootFailure } from '@lody/components/lib/boot-failure'
 import { installResizeObserverLoopErrorHandler } from '@lody/components/lib/resize-observer'
+import { installAmbientMotionBudget } from '@lody/components/lib/ambient-motion'
 import { getIpcServices, onIpcEvent, sendIpc } from '@lody/components/lib/electron-ipc-client'
 import { Provider } from 'jotai'
 
@@ -41,6 +42,9 @@ import.meta.hot?.dispose(stopClientDiagnostics)
 // Desktop windows should not Tab-cycle a focus ring through the whole UI like a web page.
 installNativeTabBehavior()
 installResizeObserverLoopErrorHandler()
+// A visible but unfocused window (another app in front, or Lody on a second
+// display) is never throttled; cap its ambient animations to a frame budget.
+installAmbientMotionBudget(window)
 
 const rootElement = document.getElementById('root')
 if (!rootElement) {
