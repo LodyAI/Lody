@@ -92,7 +92,7 @@
     },
     "apps/mobile-capacitor": {
       "component": "lody-mobile",
-      "package-name": "@lody/mobile",
+      "package-name": "@lody/mobile-capacitor",
       "release-type": "node",
       "bump-minor-pre-major": true,
       "initial-version": "0.55.2",

@@ -29,7 +29,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 26.13.0
+          node-version: 22.23.4
       - name: Restore original candidate on retry
         if: github.run_attempt > 1
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -70,7 +70,7 @@ jobs:
           submodules: recursive
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 26.13.0
+          node-version: 22.23.4
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: nightly-candidate-${{ github.run_id }}
@@ -111,7 +111,7 @@ jobs:
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 26.13.0
+          node-version: 22.23.4
           cache: pnpm
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
@@ -210,7 +210,7 @@ jobs:
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 26.13.0
+          node-version: 22.23.4
           cache: pnpm
       - name: Install exact composition dependencies
         run: corepack pnpm install --frozen-lockfile --prefer-offline
@@ -399,7 +399,7 @@ jobs:
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 26.13.0
+          node-version: 22.23.4
           cache: pnpm
       - name: Setup Java
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
@@ -480,7 +480,7 @@ jobs:
           trap 'rm -f "${ANDROID_KEYSTORE_PATH}"' EXIT
           printf '%s' "${ANDROID_KEYSTORE_BASE64}" | sed -e 's/\\n//g' -e 's/\\r//g' | tr -d '[:space:]' | openssl base64 -A -d > "${ANDROID_KEYSTORE_PATH}"
           unset ANDROID_KEYSTORE_BASE64
-          corepack pnpm --filter @lody/mobile run ci:sync:android:nightly
+          corepack pnpm --filter @lody/mobile-capacitor run ci:sync:android:nightly
           (cd apps/mobile-capacitor/android && ./gradlew --no-daemon :app:assembleRelease -PmobileVersionName="${MOBILE_VERSION_NAME}" -PmobileVersionCode="${MOBILE_VERSION_CODE}")
           APKANALYZER="$(command -v apkanalyzer)"
           export APKANALYZER
@@ -516,7 +516,7 @@ jobs:
           submodules: recursive
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 26.13.0
+          node-version: 22.23.4
       - name: Verify Nightly installation before client publication
         env:
           DAEMON_EXPECTED_VERSION: ${{ needs.prepare.outputs.version }}
@@ -550,7 +550,7 @@ jobs:
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 26.13.0
+          node-version: 22.23.4
           cache: pnpm
       - name: Install verification dependencies without lifecycle scripts
         run:
@@ -611,7 +611,7 @@ jobs:
           submodules: recursive
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 26.13.0
+          node-version: 22.23.4
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: nightly-candidate-${{ github.run_id }}
@@ -670,7 +670,7 @@ jobs:
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 26.13.0
+          node-version: 22.23.4
           cache: pnpm
           registry-url: https://registry.npmjs.org
       - name: Setup npm trusted publishing

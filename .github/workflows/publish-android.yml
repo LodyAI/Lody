@@ -18,7 +18,7 @@ permissions:
   actions: read
   contents: read
 env:
-  NODE_VERSION: 26.13.0
+  NODE_VERSION: 22.23.4
   NODE_OPTIONS: --max-old-space-size=8192
 jobs:
   validate-target:
@@ -274,11 +274,11 @@ jobs:
           test -n "${PUSH_ANDROID_GOOGLE_SERVICES_JSON}" || { echo "Missing PUSH_ANDROID_GOOGLE_SERVICES_JSON" >&2; exit
           1; }
 
-          pnpm --filter @lody/mobile run configure:push
+          pnpm --filter @lody/mobile-capacitor run configure:push
 
-          pnpm --filter @lody/mobile exec vite build --mode "${MOBILE_VITE_MODE}"
+          pnpm --filter @lody/mobile-capacitor exec vite build --mode "${MOBILE_VITE_MODE}"
 
-          pnpm --filter @lody/mobile exec cap sync android
+          pnpm --filter @lody/mobile-capacitor exec cap sync android
       - name: Build signed Android APK
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}

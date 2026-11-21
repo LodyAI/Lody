@@ -1,7 +1,7 @@
 # Public cloud client release migration
 
 This is Track C of the client migration. These workflows are disabled until the
-repository variable `CLIENT_RELEASES_ENABLED` is exactly `true`. Keep this PR in
+Repository Variable `CLIENT_RELEASES_ENABLED` is exactly `true`. Keep this PR in
 draft until the dependencies below are integrated and the owner completes cutover.
 It does not change the local-only default build, private web deployment, or legacy
 cross-repository publishers.
@@ -67,8 +67,8 @@ use the component workflow or rerun failed jobs; ambiguous state fails closed.
 
 All mobile dependency installs set `LODY_SKIP_ELECTRON_POSTINSTALL=1` and select
 `{./apps/mobile-capacitor}...`, including its complete dependency closure. Track A's
-package is currently named `@lody/mobile`, so the directory selector avoids relying
-on the proposed `@lody/mobile-capacitor` name. `@lody/shared` brings
+package is named `@lody/mobile-capacitor`; the directory selector includes its
+complete dependency closure independently of the package selector. `@lody/shared` brings
 `acp-extension-core` into this closure; its own prepare script still builds its
 runtime export. Android sets up Java before installation and hashes only the
 Capacitor Gradle files and wrapper properties for its dependency cache.
@@ -113,7 +113,7 @@ these workflow changes have not yet been benchmarked on public release runners.
 No `apps/`, `packages/`, workspace manifest, or Sparkle action files change here.
 Before enabling, verify these dependencies against the merged A/B heads:
 
-- Track A provides `apps/mobile-capacitor`, named `@lody/mobile`, with the existing
+- Track A provides `apps/mobile-capacitor`, named `@lody/mobile-capacitor`, with the existing
   `ci:sync:android:nightly`, Android stable sync, and iOS sync scripts. It keeps the
   Android output filename, app identity, provisioning targets and iOS project
   structure used by the former private client.
@@ -143,11 +143,21 @@ nightly-artifacts,release-profile,sparkle-signing}.mjs`, plus the related import
   additional workflow dependency; it previously lived under private `scripts/`.
 
 Stable manifest versions are seeded from the private client packages (`0.113.1`),
-which are ahead of its stable manifest (`0.112.0`). The prerelease manifest retains
-its existing private value (`0.111.2-next.2`). Reconcile both manifests and all three
+which are ahead of its stable manifest (`0.112.0`). The prerelease manifest uses
+the same `0.113.1` baseline, so Next cannot restart from an older release cycle.
+Reconcile both manifests and all three
 packages against the final private shipped state immediately before cutover.
 
 ## Owner configuration and cutover
+
+Configure `CLIENT_RELEASES_ENABLED` and `NIGHTLY_ENABLED` under **Settings →
+Secrets and variables → Actions → Variables** as **Repository Variables**. Their
+admission checks run in job-level `if:` expressions before an environment is
+available; Environment Variables cannot supply these switches. Set both to the
+literal string `true` only at the corresponding cutover step below.
+
+All client workflows pin Node `22.23.4` for desktop/mobile native extension
+compatibility. Only `publish-daemon-sea.yml` pins Node `26.13.0` for SEA packaging.
 
 Create `cloud-staging` and `cloud-nightly` restricted to `main`, and
 `cloud-production` restricted to `release` with required reviewers. Keep signing,

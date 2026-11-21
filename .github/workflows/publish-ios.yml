@@ -23,7 +23,7 @@ permissions:
   contents: read
   actions: read
 env:
-  NODE_VERSION: 26.13.0
+  NODE_VERSION: 22.23.4
   NODE_OPTIONS: --max-old-space-size=8192
   LODY_ENV: production
 jobs:
@@ -327,9 +327,9 @@ jobs:
           MOBILE_CHANNEL: ${{ inputs.nightly-version != '' && 'nightly' || 'stable' }}
         run: |
           if [[ "${MOBILE_CHANNEL}" == nightly ]]; then
-            corepack pnpm --filter @lody/mobile run ci:sync:ios:nightly
+            corepack pnpm --filter @lody/mobile-capacitor run ci:sync:ios:nightly
           else
-            corepack pnpm --filter @lody/mobile run ci:sync:ios
+            corepack pnpm --filter @lody/mobile-capacitor run ci:sync:ios
           fi
       - name: Configure manual code signing
         working-directory: apps/mobile-capacitor/ios/App

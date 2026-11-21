@@ -30,7 +30,7 @@ on:
 permissions:
   contents: read
 env:
-  NODE_VERSION: 26.13.0
+  NODE_VERSION: 22.23.4
 concurrency:
   group: |-
     ${{
@@ -215,7 +215,7 @@ jobs:
           submodules: recursive
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 26.13.0
+          node-version: 22.23.4
       - name: Verify public installers and all platform downloads before client publication
         env:
           DAEMON_CHANNEL: ${{ needs.release.outputs.target_environment == 'production' && 'stable' || 'next' }}
@@ -1033,11 +1033,11 @@ jobs:
           test -n "${PUSH_ANDROID_GOOGLE_SERVICES_JSON}" || { echo "Missing PUSH_ANDROID_GOOGLE_SERVICES_JSON" >&2; exit
           1; }
 
-          pnpm --filter @lody/mobile run configure:push
+          pnpm --filter @lody/mobile-capacitor run configure:push
 
-          pnpm --filter @lody/mobile exec vite build --mode "${MOBILE_VITE_MODE}"
+          pnpm --filter @lody/mobile-capacitor exec vite build --mode "${MOBILE_VITE_MODE}"
 
-          pnpm --filter @lody/mobile exec cap sync android
+          pnpm --filter @lody/mobile-capacitor exec cap sync android
       - name: Build signed Android APK
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -1360,7 +1360,7 @@ jobs:
             "${RUNNER_TEMP}/live-activity-widget.mobileprovision" \
             "IOS_LIVE_ACTIVITY_WIDGET_PROFILE_NAME"
       - name: Sync iOS project
-        run: pnpm --filter @lody/mobile run ci:sync:ios
+        run: pnpm --filter @lody/mobile-capacitor run ci:sync:ios
       - name: Configure manual code signing
         working-directory: apps/mobile-capacitor/ios/App
         shell: bash

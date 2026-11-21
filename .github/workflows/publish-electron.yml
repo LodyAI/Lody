@@ -17,7 +17,7 @@ on:
 permissions:
   contents: read
 env:
-  NODE_VERSION: 26.13.0
+  NODE_VERSION: 22.23.4
 concurrency:
   group: ${{ github.ref == 'refs/heads/release' && 'lody-production-release' || 'lody-staging-release' }}
   cancel-in-progress: false
