@@ -4347,6 +4347,7 @@
   "sidebar.status.focus": "Focus",
   "sidebar.status.focusEmptyDrop": "Drag a conversation here to focus",
   "sidebar.status.later": "Later",
+  "sidebar.status.moveRefused": "Nothing moved: this would reorder conversations you can't manage.",
   "sidebar.status.settled": "Settled",
   "sidebar.status.snooze.quick1h": "1h",
   "sidebar.status.snooze.quick4h": "4h",

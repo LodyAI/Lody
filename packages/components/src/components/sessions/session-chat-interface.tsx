@@ -95,7 +95,8 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { buildSnoozePresets, sidebarStatusGroup } from '@/lib/sidebar-status-group';
+import { buildSnoozePresets, statusViewTier } from '@lody/shared';
+import { useStatusViewWritable } from '@/hooks/use-status-view-writable';
 import { CustomSnoozeDialog, type CustomSnoozeDialogTarget } from '../sidebar-status-snooze-dialog';
 import { useRouter } from '@tanstack/react-router';
 import { Spinner } from '@lody/ui/spinner';
@@ -1430,9 +1431,9 @@ export function SessionHeaderMenu({
     null
   );
   const statusNow = new Date();
-  const statusGroup = sidebarStatusGroup(
+  const statusGroup = statusViewTier(
     {
-      latestMessageAt: session.lastMessageAt ?? session.createdAt,
+      activityAt: session.lastMessageAt ?? (Date.parse(session.createdAt ?? '') || 0),
       isWorking: session.status?.type === 'running' || session.status?.type === 'initializing',
       isWaitingPermission: session.status?.type === 'requestPermission',
       snoozedUntil: session.snoozedUntil,
@@ -3100,6 +3101,7 @@ export const SessionChatInterface = memo(
       settleSession,
       moveSessionToFocus,
     } = useSessionActions();
+    const statusViewWritable = useStatusViewWritable();
     // Linked pull requests: the user unlinks through their own records (the reconciler
     // alone publishes `pullRequests`). Rows open the primary PR's tab, others on GitHub.
     const prOwnerMeta = workspaceSession ?? session;
@@ -7295,18 +7297,18 @@ export const SessionChatInterface = memo(
                 }
         }
         onSnooze={
-          headerSharing?.access !== 'read'
+          statusViewWritable && headerSharing?.access !== 'read'
             ? (snoozedUntil) =>
                 snoozeSessionWithConfirmation(session.id, snoozedUntil).then(() => undefined)
             : undefined
         }
         onSettle={
-          headerSharing?.access !== 'read'
+          statusViewWritable && headerSharing?.access !== 'read'
             ? () => settleSessionWithConfirmation(session.id).then(() => undefined)
             : undefined
         }
         onMoveToFocus={
-          headerSharing?.access !== 'read'
+          statusViewWritable && headerSharing?.access !== 'read'
             ? () => moveToFocusWithConfirmation(session.id).then(() => undefined)
             : undefined
         }

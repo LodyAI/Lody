@@ -31,6 +31,16 @@ Translation: current
 - 向「稍后」或「已完成」的对话发送消息时，自动清除 `snoozedUntil` / `settledAt` 并回到「进行中」。
 - 在「进行中」拖拽重排时，会为顶部已到期的稍后条目落地真实 `orderKey` 并清除已过期的 `snoozedUntil`（同时保留 `focusRestoredAt`），保证用户显式拖拽后的顺序稳定生效。将「稍后」或「已完成」中的对话拖入「进行中」时，自动清除暂缓/完成状态并落在松手位置的 `orderKey` 处。
 
+### 手机端
+
+手机 WebView 布局和原生 iOS、Android 客户端显示与桌面侧栏相同的 Pinned 区和相同的三个状态区，顺序也相同。以下内容尚未实现；设计见[手机端笔记](../.agents/notes/proposed/architecture/2026-11-21-status-view-on-phones.zh.md)。
+
+- 所有界面都用同一份共享实现来推导列表和规划写入。原生客户端只显示共享 runtime 算好的布局，自己不对这些列表做排序或分类。
+- 长按弹出完整操作菜单，按住不放并移动就变成拖拽：在「进行中」排序，或把「稍后」「已完成」的行拖进「进行中」。每一种拖拽结果都有对应的菜单项和无障碍操作。
+- 左滑时，「进行中」和「稍后」的行提供「标记为已完成」和「稍后」，「已完成」的行提供归档。「稍后」打开底部面板，包含预设和自定义日期时间。标记为已完成和稍后之后给出带「撤销」的提示。对话页的「…」面板提供同样的状态操作。
+- 原生客户端原有的状态分组（需要你、运行中、刚完成、PR、空闲）由这三个区取代。
+- 原生客户端没有实时的会话在线状态，按已同步的状态判断对话是否在运行或等待审批。因此已稍后或已完成的对话正在等待审批时，或七天没有消息的对话正在运行时，它在原生端可能短暂落在不同的区。
+
 ## 数据归属与排序
 
 - 将尚未上线的 `SessionMeta.pinOrderKey` 重命名为 `SessionMeta.orderKey`（使用 `@loro-dev/fractional-index` 规范大写十六进制键）。Pinned 与进行中共用 `orderKey`；取消固定时清除 `pinSectionId`，但保留 `orderKey`。
@@ -52,13 +62,15 @@ Translation: current
 - 进行中列表的键盘排序移动。
 - Agent 托管未读抑制与 MCP 成员目录/Owner 指定工具（留待独立改动）。
 - 个人私有的排序布局与基于 LoroDoc 的 Today 大纲编辑器（留待后续实验特性阶段）。
-- 原生 iOS / Android 客户端。
+- 原生 iOS / Android 客户端上的加密工作区：它们目前完全打不开加密工作区。手机 WebView 支持。
+- 原生客户端上的实时会话在线状态。
 
 ## 证据
 
 实现：
 
 - 共享 schema、排序与未读汇总：`packages/shared/src/schema.ts`、`packages/shared/src/pinned-sections.ts`、`packages/shared/src/live-activity-summary.ts`
-- 状态分类、已读回执与倒计时：`packages/components/src/lib/sidebar-status-group.ts`、`packages/components/src/lib/session-read-receipt.ts`
+- 状态布局、写入规划、倒计时与测试样例：`packages/shared/src/status-view/`
+- 已读回执：`packages/components/src/lib/session-read-receipt.ts`
 - 侧栏渲染、拖拽、菜单与写入：`packages/components/src/components/sidebar-updated-session-list.tsx`、`packages/components/src/components/loro-sidebar.tsx`、`packages/components/src/components/loro-app-sidebar.tsx`、`packages/components/src/components/sessions/session-chat-interface.tsx`、`packages/components/src/hooks/use-session-actions.ts`、`packages/components/src/atoms/doc-meta.ts`、`packages/components/src/atoms/sidebar-state.ts`
 - Storybook：`packages/components/src/stories/SidebarStatusView.stories.tsx`

@@ -1,0 +1,4160 @@
+{
+  "version": 1,
+  "description": "planStatusViewCommand golden vectors: randomByte returns env.randomBytes in order, repeating, starting fresh for each case.",
+  "cases": [
+    {
+      "name": "snooze-only-this",
+      "description": "Later writes the wake-up time and clears an explicit settle.",
+      "state": {
+        "sessions": [
+          {
+            "id": "root",
+            "title": "root",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "child",
+            "title": "child",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795222800000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "root",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "grandchild",
+            "title": "grandchild",
+            "lastMessageAt": 1795219500000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "child",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "unrelated",
+            "title": "unrelated",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000,
+        "related": [
+          {
+            "id": "hidden-child",
+            "title": "hidden-child",
+            "lastMessageAt": 1794960000000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "root",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ]
+      },
+      "command": {
+        "type": "snooze",
+        "sessionId": "root",
+        "until": 1795305600000,
+        "includeOpened": false
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "root",
+          "access": "manage",
+          "patch": {
+            "snoozedUntil": 1795305600000,
+            "settledAt": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "snooze-opened-tree",
+      "description": "Including opened sub-conversations reaches every descendant, also ones the list does not show.",
+      "state": {
+        "sessions": [
+          {
+            "id": "root",
+            "title": "root",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "child",
+            "title": "child",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795222800000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "root",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "grandchild",
+            "title": "grandchild",
+            "lastMessageAt": 1795219500000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "child",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "unrelated",
+            "title": "unrelated",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000,
+        "related": [
+          {
+            "id": "hidden-child",
+            "title": "hidden-child",
+            "lastMessageAt": 1794960000000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "root",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ]
+      },
+      "command": {
+        "type": "snooze",
+        "sessionId": "root",
+        "until": 1795305600000,
+        "includeOpened": true
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "root",
+          "access": "manage",
+          "patch": {
+            "snoozedUntil": 1795305600000,
+            "settledAt": null
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "hidden-child",
+          "access": "manage",
+          "patch": {
+            "snoozedUntil": 1795305600000,
+            "settledAt": null
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "child",
+          "access": "manage",
+          "patch": {
+            "snoozedUntil": 1795305600000,
+            "settledAt": null
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "grandchild",
+          "access": "manage",
+          "patch": {
+            "snoozedUntil": 1795305600000,
+            "settledAt": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "snooze-in-the-past-is-refused",
+      "description": "A wake-up time at or before now plans nothing.",
+      "state": {
+        "sessions": [
+          {
+            "id": "root",
+            "title": "root",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "child",
+            "title": "child",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795222800000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "root",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "grandchild",
+            "title": "grandchild",
+            "lastMessageAt": 1795219500000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "child",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "unrelated",
+            "title": "unrelated",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000,
+        "related": [
+          {
+            "id": "hidden-child",
+            "title": "hidden-child",
+            "lastMessageAt": 1794960000000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "root",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ]
+      },
+      "command": {
+        "type": "snooze",
+        "sessionId": "root",
+        "until": 1795219200000,
+        "includeOpened": false
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "snooze-read-only-is-refused",
+      "description": "A target without management permission refuses the whole command.",
+      "state": {
+        "sessions": [
+          {
+            "id": "ro",
+            "title": "ro",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": false,
+            "canPrefer": true
+          },
+          {
+            "id": "ok",
+            "title": "ok",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "ro",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "snooze",
+        "sessionId": "ro",
+        "until": 1795222800000,
+        "includeOpened": true
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "settle-tree-tolerates-clock-skew",
+      "description": "settledAt is max(now, lastMessageAt) per target, and clears snoozedUntil.",
+      "state": {
+        "sessions": [
+          {
+            "id": "root",
+            "title": "root",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "child",
+            "title": "child",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795222800000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "root",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "grandchild",
+            "title": "grandchild",
+            "lastMessageAt": 1795219500000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "child",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "unrelated",
+            "title": "unrelated",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000,
+        "related": [
+          {
+            "id": "hidden-child",
+            "title": "hidden-child",
+            "lastMessageAt": 1794960000000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "root",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ]
+      },
+      "command": {
+        "type": "settle",
+        "sessionId": "root",
+        "includeOpened": true
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "root",
+          "access": "manage",
+          "patch": {
+            "settledAt": 1795219200000,
+            "snoozedUntil": null
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "hidden-child",
+          "access": "manage",
+          "patch": {
+            "settledAt": 1795219200000,
+            "snoozedUntil": null
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "child",
+          "access": "manage",
+          "patch": {
+            "settledAt": 1795219200000,
+            "snoozedUntil": null
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "grandchild",
+          "access": "manage",
+          "patch": {
+            "settledAt": 1795219500000,
+            "snoozedUntil": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "move-to-focus-only-this",
+      "description": "Move to Focus clears snooze and settle and records focusRestoredAt.",
+      "state": {
+        "sessions": [
+          {
+            "id": "root",
+            "title": "root",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "child",
+            "title": "child",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795222800000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "root",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "grandchild",
+            "title": "grandchild",
+            "lastMessageAt": 1795219500000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "child",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "unrelated",
+            "title": "unrelated",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000,
+        "related": [
+          {
+            "id": "hidden-child",
+            "title": "hidden-child",
+            "lastMessageAt": 1794960000000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "root",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ]
+      },
+      "command": {
+        "type": "moveToFocus",
+        "sessionId": "child",
+        "includeOpened": false
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "child",
+          "access": "manage",
+          "patch": {
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": 1795219200000
+          }
+        }
+      ]
+    },
+    {
+      "name": "pin-goes-to-top-of-default-section",
+      "description": "A newly pinned row gets a key above the default section; other sections do not count.",
+      "state": {
+        "sessions": [
+          {
+            "id": "p-default-1",
+            "title": "p-default-1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-default-2",
+            "title": "p-default-2",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-new",
+            "title": "p-unkeyed-new",
+            "lastMessageAt": 1795219140000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-old",
+            "title": "p-unkeyed-old",
+            "lastMessageAt": 1795132800000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-work-keyed",
+            "title": "p-work-keyed",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "carried",
+            "title": "carried",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "p-default-1",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "focus-row",
+            "title": "focus-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [
+          {
+            "id": "work",
+            "name": "Work",
+            "orderKey": "80"
+          },
+          {
+            "id": "home",
+            "name": "Home",
+            "orderKey": "8180"
+          }
+        ],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "setPinned",
+        "sessionId": "focus-row",
+        "pinned": true
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "focus-row",
+          "access": "prefer",
+          "patch": {
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "7F80112233"
+          }
+        }
+      ]
+    },
+    {
+      "name": "unpin-keeps-order-key",
+      "description": "Unpinning clears the section and keeps orderKey for Focus.",
+      "state": {
+        "sessions": [
+          {
+            "id": "p-default-1",
+            "title": "p-default-1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-default-2",
+            "title": "p-default-2",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-new",
+            "title": "p-unkeyed-new",
+            "lastMessageAt": 1795219140000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-old",
+            "title": "p-unkeyed-old",
+            "lastMessageAt": 1795132800000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-work-keyed",
+            "title": "p-work-keyed",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "carried",
+            "title": "carried",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "p-default-1",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "focus-row",
+            "title": "focus-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [
+          {
+            "id": "work",
+            "name": "Work",
+            "orderKey": "80"
+          },
+          {
+            "id": "home",
+            "name": "Home",
+            "orderKey": "8180"
+          }
+        ],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "setPinned",
+        "sessionId": "p-work-keyed",
+        "pinned": false
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "p-work-keyed",
+          "access": "prefer",
+          "patch": {
+            "isPinned": false,
+            "pinSectionId": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "move-in-focus-materializes-expired-snoozes",
+      "description": "Reordering Focus first keys the woken rows at the top, clearing their snooze and keeping focusRestoredAt, then keys unkeyed rows above the drop and the moved row.",
+      "state": {
+        "sessions": [
+          {
+            "id": "woke-a",
+            "title": "woke-a",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "82",
+            "snoozedUntil": 1795215600000,
+            "settledAt": null,
+            "focusRestoredAt": 1795046400000,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "woke-b",
+            "title": "woke-b",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795212000000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f1",
+            "title": "f1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f2",
+            "title": "f2",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f3",
+            "title": "f3",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f4",
+            "title": "f4",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "later-row",
+            "title": "later-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795305600000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "later-child",
+            "title": "later-child",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": 1795215600000,
+            "focusRestoredAt": null,
+            "openedById": "later-row",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "pinned-row",
+            "title": "pinned-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "move",
+        "sessionId": "f1",
+        "to": {
+          "area": "focus"
+        },
+        "beforeId": "f4"
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "woke-b",
+          "access": "manage",
+          "patch": {
+            "orderKey": "7E80112233",
+            "snoozedUntil": null,
+            "focusRestoredAt": 1795212000000
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "woke-a",
+          "access": "manage",
+          "patch": {
+            "orderKey": "7D80112233",
+            "snoozedUntil": null,
+            "focusRestoredAt": 1795215600000
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "f3",
+          "access": "manage",
+          "patch": {
+            "orderKey": "8180112233"
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "f1",
+          "access": "manage",
+          "patch": {
+            "orderKey": "8280112233"
+          }
+        }
+      ]
+    },
+    {
+      "name": "move-in-focus-to-end",
+      "description": "beforeId null lands after the last row.",
+      "state": {
+        "sessions": [
+          {
+            "id": "woke-a",
+            "title": "woke-a",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "82",
+            "snoozedUntil": 1795215600000,
+            "settledAt": null,
+            "focusRestoredAt": 1795046400000,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "woke-b",
+            "title": "woke-b",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795212000000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f1",
+            "title": "f1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f2",
+            "title": "f2",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f3",
+            "title": "f3",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f4",
+            "title": "f4",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "later-row",
+            "title": "later-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795305600000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "later-child",
+            "title": "later-child",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": 1795215600000,
+            "focusRestoredAt": null,
+            "openedById": "later-row",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "pinned-row",
+            "title": "pinned-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "move",
+        "sessionId": "f2",
+        "to": {
+          "area": "focus"
+        },
+        "beforeId": null
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "woke-b",
+          "access": "manage",
+          "patch": {
+            "orderKey": "7E80112233",
+            "snoozedUntil": null,
+            "focusRestoredAt": 1795212000000
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "woke-a",
+          "access": "manage",
+          "patch": {
+            "orderKey": "7D80112233",
+            "snoozedUntil": null,
+            "focusRestoredAt": 1795215600000
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "f3",
+          "access": "manage",
+          "patch": {
+            "orderKey": "80112233"
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "f4",
+          "access": "manage",
+          "patch": {
+            "orderKey": "8180112233"
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "f2",
+          "access": "manage",
+          "patch": {
+            "orderKey": "8280112233"
+          }
+        }
+      ]
+    },
+    {
+      "name": "move-in-focus-stale-before-id",
+      "description": "A beforeId that is not a Focus row resolves to the end.",
+      "state": {
+        "sessions": [
+          {
+            "id": "woke-a",
+            "title": "woke-a",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "82",
+            "snoozedUntil": 1795215600000,
+            "settledAt": null,
+            "focusRestoredAt": 1795046400000,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "woke-b",
+            "title": "woke-b",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795212000000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f1",
+            "title": "f1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f2",
+            "title": "f2",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f3",
+            "title": "f3",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f4",
+            "title": "f4",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "later-row",
+            "title": "later-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795305600000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "later-child",
+            "title": "later-child",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": 1795215600000,
+            "focusRestoredAt": null,
+            "openedById": "later-row",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "pinned-row",
+            "title": "pinned-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "move",
+        "sessionId": "f2",
+        "to": {
+          "area": "focus"
+        },
+        "beforeId": "gone"
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "woke-b",
+          "access": "manage",
+          "patch": {
+            "orderKey": "7E80112233",
+            "snoozedUntil": null,
+            "focusRestoredAt": 1795212000000
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "woke-a",
+          "access": "manage",
+          "patch": {
+            "orderKey": "7D80112233",
+            "snoozedUntil": null,
+            "focusRestoredAt": 1795215600000
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "f3",
+          "access": "manage",
+          "patch": {
+            "orderKey": "80112233"
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "f4",
+          "access": "manage",
+          "patch": {
+            "orderKey": "8180112233"
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "f2",
+          "access": "manage",
+          "patch": {
+            "orderKey": "8280112233"
+          }
+        }
+      ]
+    },
+    {
+      "name": "move-later-row-into-focus-restores-opened",
+      "description": "Dropping a Later row into Focus restores it and its opened sub-conversations; only the dropped row gets a key.",
+      "state": {
+        "sessions": [
+          {
+            "id": "woke-a",
+            "title": "woke-a",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "82",
+            "snoozedUntil": 1795215600000,
+            "settledAt": null,
+            "focusRestoredAt": 1795046400000,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "woke-b",
+            "title": "woke-b",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795212000000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f1",
+            "title": "f1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f2",
+            "title": "f2",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f3",
+            "title": "f3",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f4",
+            "title": "f4",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "later-row",
+            "title": "later-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795305600000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "later-child",
+            "title": "later-child",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": 1795215600000,
+            "focusRestoredAt": null,
+            "openedById": "later-row",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "pinned-row",
+            "title": "pinned-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "move",
+        "sessionId": "later-row",
+        "to": {
+          "area": "focus"
+        },
+        "beforeId": "f1"
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "woke-b",
+          "access": "manage",
+          "patch": {
+            "orderKey": "7E80112233",
+            "snoozedUntil": null,
+            "focusRestoredAt": 1795212000000
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "woke-a",
+          "access": "manage",
+          "patch": {
+            "orderKey": "7D80112233",
+            "snoozedUntil": null,
+            "focusRestoredAt": 1795215600000
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "later-row",
+          "access": "manage",
+          "patch": {
+            "orderKey": "7E8180112233",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": 1795219200000
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "later-child",
+          "access": "manage",
+          "patch": {
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": 1795219200000
+          }
+        }
+      ]
+    },
+    {
+      "name": "move-pinned-row-into-focus-unpins",
+      "description": "A pinned row dropped into Focus leaves the Pinned area at the drop slot.",
+      "state": {
+        "sessions": [
+          {
+            "id": "woke-a",
+            "title": "woke-a",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "82",
+            "snoozedUntil": 1795215600000,
+            "settledAt": null,
+            "focusRestoredAt": 1795046400000,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "woke-b",
+            "title": "woke-b",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795212000000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f1",
+            "title": "f1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f2",
+            "title": "f2",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f3",
+            "title": "f3",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f4",
+            "title": "f4",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "later-row",
+            "title": "later-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795305600000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "later-child",
+            "title": "later-child",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": 1795215600000,
+            "focusRestoredAt": null,
+            "openedById": "later-row",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "pinned-row",
+            "title": "pinned-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "move",
+        "sessionId": "pinned-row",
+        "to": {
+          "area": "focus"
+        },
+        "beforeId": "f2"
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "woke-b",
+          "access": "manage",
+          "patch": {
+            "orderKey": "7E80112233",
+            "snoozedUntil": null,
+            "focusRestoredAt": 1795212000000
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "woke-a",
+          "access": "manage",
+          "patch": {
+            "orderKey": "7D80112233",
+            "snoozedUntil": null,
+            "focusRestoredAt": 1795215600000
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "pinned-row",
+          "access": "manage",
+          "patch": {
+            "orderKey": "7F8180112233",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": 1795219200000,
+            "isPinned": false,
+            "pinSectionId": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "move-in-focus-over-read-only-unkeyed-row-is-refused",
+      "description": "A drop below a row without a key that the member cannot manage would have to write that row, so the move plans nothing.",
+      "state": {
+        "sessions": [
+          {
+            "id": "k1",
+            "title": "k1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "ro-unkeyed",
+            "title": "ro-unkeyed",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": false,
+            "canPrefer": true
+          },
+          {
+            "id": "mine",
+            "title": "mine",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "move",
+        "sessionId": "k1",
+        "to": {
+          "area": "focus"
+        },
+        "beforeId": null
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "move-in-focus-leaves-read-only-woken-row-unkeyed",
+      "description": "A woken row the member cannot manage keeps floating at the top without a key; the move still lands.",
+      "state": {
+        "sessions": [
+          {
+            "id": "ro-woken",
+            "title": "ro-woken",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795215600000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": false,
+            "canPrefer": true
+          },
+          {
+            "id": "f1",
+            "title": "f1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f2",
+            "title": "f2",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "move",
+        "sessionId": "f2",
+        "to": {
+          "area": "focus"
+        },
+        "beforeId": "f1"
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "f2",
+          "access": "manage",
+          "patch": {
+            "orderKey": "7E80112233"
+          }
+        }
+      ]
+    },
+    {
+      "name": "move-into-section-keys-unkeyed-rows-above",
+      "description": "Dropping below rows without keys gives those above the drop keys first, in their current order.",
+      "state": {
+        "sessions": [
+          {
+            "id": "p-default-1",
+            "title": "p-default-1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-default-2",
+            "title": "p-default-2",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-new",
+            "title": "p-unkeyed-new",
+            "lastMessageAt": 1795219140000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-old",
+            "title": "p-unkeyed-old",
+            "lastMessageAt": 1795132800000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-work-keyed",
+            "title": "p-work-keyed",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "carried",
+            "title": "carried",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "p-default-1",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "focus-row",
+            "title": "focus-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [
+          {
+            "id": "work",
+            "name": "Work",
+            "orderKey": "80"
+          },
+          {
+            "id": "home",
+            "name": "Home",
+            "orderKey": "8180"
+          }
+        ],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "move",
+        "sessionId": "p-default-1",
+        "to": {
+          "area": "pinned",
+          "sectionId": "work"
+        },
+        "beforeId": null
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "p-unkeyed-new",
+          "access": "prefer",
+          "patch": {
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": "8180112233"
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "p-unkeyed-old",
+          "access": "prefer",
+          "patch": {
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": "8280112233"
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "p-default-1",
+          "access": "prefer",
+          "patch": {
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": "8380112233"
+          }
+        }
+      ]
+    },
+    {
+      "name": "move-unpinned-row-into-section-pins-it",
+      "description": "A Focus row dropped into a pin section is pinned at that slot.",
+      "state": {
+        "sessions": [
+          {
+            "id": "p-default-1",
+            "title": "p-default-1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-default-2",
+            "title": "p-default-2",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-new",
+            "title": "p-unkeyed-new",
+            "lastMessageAt": 1795219140000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-old",
+            "title": "p-unkeyed-old",
+            "lastMessageAt": 1795132800000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-work-keyed",
+            "title": "p-work-keyed",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "carried",
+            "title": "carried",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "p-default-1",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "focus-row",
+            "title": "focus-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [
+          {
+            "id": "work",
+            "name": "Work",
+            "orderKey": "80"
+          },
+          {
+            "id": "home",
+            "name": "Home",
+            "orderKey": "8180"
+          }
+        ],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "move",
+        "sessionId": "focus-row",
+        "to": {
+          "area": "pinned",
+          "sectionId": null
+        },
+        "beforeId": "p-default-2"
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "focus-row",
+          "access": "prefer",
+          "patch": {
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "817F80112233"
+          }
+        }
+      ]
+    },
+    {
+      "name": "move-to-section-top",
+      "description": "\"Move to section\" lands at the top of that section.",
+      "state": {
+        "sessions": [
+          {
+            "id": "p-default-1",
+            "title": "p-default-1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-default-2",
+            "title": "p-default-2",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-new",
+            "title": "p-unkeyed-new",
+            "lastMessageAt": 1795219140000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-old",
+            "title": "p-unkeyed-old",
+            "lastMessageAt": 1795132800000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-work-keyed",
+            "title": "p-work-keyed",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "carried",
+            "title": "carried",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "p-default-1",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "focus-row",
+            "title": "focus-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [
+          {
+            "id": "work",
+            "name": "Work",
+            "orderKey": "80"
+          },
+          {
+            "id": "home",
+            "name": "Home",
+            "orderKey": "8180"
+          }
+        ],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "move",
+        "sessionId": "p-default-2",
+        "to": {
+          "area": "pinned",
+          "sectionId": "home"
+        },
+        "beforeId": null
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "p-default-2",
+          "access": "prefer",
+          "patch": {
+            "isPinned": true,
+            "pinSectionId": "home",
+            "orderKey": "80112233"
+          }
+        }
+      ]
+    },
+    {
+      "name": "create-section-after-the-last",
+      "description": "A new section goes after every existing one; the name is trimmed.",
+      "state": {
+        "sessions": [
+          {
+            "id": "p-default-1",
+            "title": "p-default-1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-default-2",
+            "title": "p-default-2",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-new",
+            "title": "p-unkeyed-new",
+            "lastMessageAt": 1795219140000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-old",
+            "title": "p-unkeyed-old",
+            "lastMessageAt": 1795132800000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-work-keyed",
+            "title": "p-work-keyed",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "carried",
+            "title": "carried",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "p-default-1",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "focus-row",
+            "title": "focus-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [
+          {
+            "id": "work",
+            "name": "Work",
+            "orderKey": "80"
+          },
+          {
+            "id": "home",
+            "name": "Home",
+            "orderKey": "8180"
+          }
+        ],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "createSection",
+        "sectionId": "new",
+        "name": "  Reading  "
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "putSection",
+          "section": {
+            "id": "new",
+            "name": "Reading",
+            "orderKey": "8280112233"
+          }
+        }
+      ]
+    },
+    {
+      "name": "create-section-blank-name-is-refused",
+      "description": "A section the catalog would drop is never written.",
+      "state": {
+        "sessions": [
+          {
+            "id": "p-default-1",
+            "title": "p-default-1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-default-2",
+            "title": "p-default-2",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-new",
+            "title": "p-unkeyed-new",
+            "lastMessageAt": 1795219140000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-old",
+            "title": "p-unkeyed-old",
+            "lastMessageAt": 1795132800000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-work-keyed",
+            "title": "p-work-keyed",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "carried",
+            "title": "carried",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "p-default-1",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "focus-row",
+            "title": "focus-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [
+          {
+            "id": "work",
+            "name": "Work",
+            "orderKey": "80"
+          },
+          {
+            "id": "home",
+            "name": "Home",
+            "orderKey": "8180"
+          }
+        ],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "createSection",
+        "sectionId": "new",
+        "name": "   "
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "rename-section",
+      "description": "Rename rewrites the whole row with the same key.",
+      "state": {
+        "sessions": [
+          {
+            "id": "p-default-1",
+            "title": "p-default-1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-default-2",
+            "title": "p-default-2",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-new",
+            "title": "p-unkeyed-new",
+            "lastMessageAt": 1795219140000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-old",
+            "title": "p-unkeyed-old",
+            "lastMessageAt": 1795132800000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-work-keyed",
+            "title": "p-work-keyed",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "carried",
+            "title": "carried",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "p-default-1",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "focus-row",
+            "title": "focus-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [
+          {
+            "id": "work",
+            "name": "Work",
+            "orderKey": "80"
+          },
+          {
+            "id": "home",
+            "name": "Home",
+            "orderKey": "8180"
+          }
+        ],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "renameSection",
+        "sectionId": "work",
+        "name": "Office"
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "putSection",
+          "section": {
+            "id": "work",
+            "name": "Office",
+            "orderKey": "80"
+          }
+        }
+      ]
+    },
+    {
+      "name": "move-section-down",
+      "description": "Move down places the section after its next neighbor.",
+      "state": {
+        "sessions": [
+          {
+            "id": "p-default-1",
+            "title": "p-default-1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-default-2",
+            "title": "p-default-2",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-new",
+            "title": "p-unkeyed-new",
+            "lastMessageAt": 1795219140000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-old",
+            "title": "p-unkeyed-old",
+            "lastMessageAt": 1795132800000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-work-keyed",
+            "title": "p-work-keyed",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "carried",
+            "title": "carried",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "p-default-1",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "focus-row",
+            "title": "focus-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [
+          {
+            "id": "work",
+            "name": "Work",
+            "orderKey": "80"
+          },
+          {
+            "id": "home",
+            "name": "Home",
+            "orderKey": "8180"
+          }
+        ],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "moveSection",
+        "sectionId": "work",
+        "beforeId": null
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "putSection",
+          "section": {
+            "id": "work",
+            "name": "Work",
+            "orderKey": "8280112233"
+          }
+        }
+      ]
+    },
+    {
+      "name": "delete-section",
+      "description": "Deleting a section deletes its row; its conversations fall back on read.",
+      "state": {
+        "sessions": [
+          {
+            "id": "p-default-1",
+            "title": "p-default-1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-default-2",
+            "title": "p-default-2",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-new",
+            "title": "p-unkeyed-new",
+            "lastMessageAt": 1795219140000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-old",
+            "title": "p-unkeyed-old",
+            "lastMessageAt": 1795132800000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-work-keyed",
+            "title": "p-work-keyed",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "carried",
+            "title": "carried",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "p-default-1",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "focus-row",
+            "title": "focus-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [
+          {
+            "id": "work",
+            "name": "Work",
+            "orderKey": "80"
+          },
+          {
+            "id": "home",
+            "name": "Home",
+            "orderKey": "8180"
+          }
+        ],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "deleteSection",
+        "sectionId": "home"
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "deleteSection",
+          "sectionId": "home"
+        }
+      ]
+    },
+    {
+      "name": "section-management-read-only-is-refused",
+      "description": "A read-only member cannot change sections.",
+      "state": {
+        "sessions": [
+          {
+            "id": "p-default-1",
+            "title": "p-default-1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-default-2",
+            "title": "p-default-2",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-new",
+            "title": "p-unkeyed-new",
+            "lastMessageAt": 1795219140000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-old",
+            "title": "p-unkeyed-old",
+            "lastMessageAt": 1795132800000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-work-keyed",
+            "title": "p-work-keyed",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "carried",
+            "title": "carried",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "p-default-1",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "focus-row",
+            "title": "focus-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [
+          {
+            "id": "work",
+            "name": "Work",
+            "orderKey": "80"
+          },
+          {
+            "id": "home",
+            "name": "Home",
+            "orderKey": "8180"
+          }
+        ],
+        "sectionsLoaded": true,
+        "canManageSections": false,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "deleteSection",
+        "sectionId": "home"
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "touch-on-send-clears-status",
+      "description": "Sending clears snoozedUntil and settledAt that are set, and nothing else.",
+      "state": {
+        "sessions": [
+          {
+            "id": "snoozed",
+            "title": "snoozed",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795222800000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "touchOnSend",
+        "sessionId": "snoozed"
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "snoozed",
+          "access": "manage",
+          "patch": {
+            "snoozedUntil": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "touch-on-send-without-status",
+      "description": "Sending in a Focus row plans nothing.",
+      "state": {
+        "sessions": [
+          {
+            "id": "plain",
+            "title": "plain",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "touchOnSend",
+        "sessionId": "plain"
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "new-session-goes-to-top-of-focus",
+      "description": "A new top-level conversation gets a key below every existing key, pinned rows included.",
+      "state": {
+        "sessions": [
+          {
+            "id": "p-default-1",
+            "title": "p-default-1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-default-2",
+            "title": "p-default-2",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-new",
+            "title": "p-unkeyed-new",
+            "lastMessageAt": 1795219140000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-unkeyed-old",
+            "title": "p-unkeyed-old",
+            "lastMessageAt": 1795132800000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "p-work-keyed",
+            "title": "p-work-keyed",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "carried",
+            "title": "carried",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "p-default-1",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "focus-row",
+            "title": "focus-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [
+          {
+            "id": "work",
+            "name": "Work",
+            "orderKey": "80"
+          },
+          {
+            "id": "home",
+            "name": "Home",
+            "orderKey": "8180"
+          }
+        ],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "newSessionOrder",
+        "sessionId": "brand-new"
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "brand-new",
+          "access": "manage",
+          "patch": {
+            "orderKey": "7E80112233"
+          }
+        }
+      ]
+    },
+    {
+      "name": "new-opened-session-gets-no-key",
+      "description": "A conversation opened by another one renders nested and gets no key.",
+      "state": {
+        "sessions": [
+          {
+            "id": "opener",
+            "title": "opener",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "opened",
+            "title": "opened",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "opener",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "newSessionOrder",
+        "sessionId": "opened"
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": []
+    }
+  ]
+}

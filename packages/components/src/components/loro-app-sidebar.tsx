@@ -49,18 +49,22 @@ import {
   type SessionId,
   type SessionMeta,
   type SessionStatus,
-  buildPinnedSectionLayout,
+  buildStatusViewLayout,
+  flattenStatusViewRows,
   getServerNow,
-  planManualOrderMove,
-  planNewPinSectionOrderKey,
-  planPinnedSessionMove,
-  planPinSectionMove,
-  planTopOrderKey,
-  type PinSection,
-  type PinnedSessionPlacement,
+  statusViewActivityAt,
+  statusViewPinnedIds,
+  type StatusViewCommand,
+  type StatusViewLayoutInput,
+  type StatusViewSession,
 } from '@lody/shared';
 import { useWorkspaceCatalog } from '@/hooks/use-workspace-catalog';
-import { deleteWorkspacePinSection, writeWorkspacePinSection } from '@/lib/workspace-catalog-write';
+import { useStatusViewWritable } from '@/hooks/use-status-view-writable';
+import {
+  focusDropBeforeId,
+  pinnedDropBeforeId,
+  sectionDropBeforeId,
+} from '@/lib/status-view-state';
 import type { SidebarPinSectionActions, SidebarPinnedSection } from './sidebar-pinned-sections';
 import { useTranslation } from 'react-i18next';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -107,7 +111,6 @@ import {
   setWorkspaceContextAtom,
 } from '@/atoms';
 import { docMetaCacheScopeAtom } from '@/atoms/doc-meta';
-import { expiredSnoozeTimestamp } from '@/lib/sidebar-status-group';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import { useWorkspaceRouteTargetSlug } from '../providers/workspace-route-target';
 import { resolveWorkspaceDataScope } from '@/lib/workspace-data-scope';
@@ -150,8 +153,7 @@ import {
 } from '@/atoms/sidebar-state';
 import {
   sortUpdatedItems,
-  buildSidebarUpdatedBuckets,
-  SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS,
+  toStatusViewSession,
   type SidebarUpdatedBucketKey,
   type SidebarUpdatedItem,
 } from '@/components/sidebar-updated-session-list';
@@ -1646,7 +1648,12 @@ export function LoroAppSidebar({
     [updaterState, resolvedLanguage]
   );
 
-  const { organizations, activeOrganization, switchOrganization } = useOrganization();
+  const {
+    organizations,
+    activeOrganization,
+    switchOrganization,
+    role: workspaceRole,
+  } = useOrganization();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const navigateWorkspace = useCallback(
     (slug: string) => {
@@ -1875,8 +1882,7 @@ export function LoroAppSidebar({
     archiveSession,
     markSessionUnread,
     setSessionPinned,
-    applySessionPinPlacements,
-    applySessionFocusOrder,
+    runStatusViewCommand,
     snoozeSession,
     settleSession,
     moveSessionToFocus,
@@ -2760,17 +2766,15 @@ export function LoroAppSidebar({
         const previous = previousById.get(item.id);
         return previous && jsonValueEqual(previous, item) ? previous : item;
       }
-      const expiredSnoozeAt = expiredSnoozeTimestamp(meta.snoozedUntil, nowMs);
       const baseLatestMs =
         typeof item.latestMessageAt === 'number'
           ? item.latestMessageAt
           : item.latestMessageAt instanceof Date
             ? item.latestMessageAt.getTime()
             : Date.parse(item.latestMessageAt) || 0;
-      const latestMessageAt =
-        expiredSnoozeAt !== null && expiredSnoozeAt > baseLatestMs
-          ? expiredSnoozeAt
-          : item.latestMessageAt;
+      // A woken snooze reads as activity, the same as the shared Status view.
+      const activityAt = statusViewActivityAt(baseLatestMs, meta.snoozedUntil, nowMs);
+      const latestMessageAt = activityAt > baseLatestMs ? activityAt : item.latestMessageAt;
       const enriched: SidebarUpdatedItem = {
         ...item,
         latestMessageAt,
@@ -2802,56 +2806,39 @@ export function LoroAppSidebar({
     t,
   ]);
   previousSidebarItemsRef.current = allSidebarItems;
-  const pinnedSessionIds = useMemo(
+  const statusViewWritable = useStatusViewWritable(workspaceRole);
+  // The shared Status view's input: presence, permissions and activity come from
+  // the sidebar's rows, placement from each conversation's own metadata.
+  const statusViewSessions = useMemo<StatusViewSession[]>(
     () =>
-      getPinnedSessionTreeIds(allSidebarItems, {
-        ...SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS,
-        isPinned: (item) => Boolean(item.isPinned),
+      allSidebarItems.map((item) => {
+        const meta = sessionById.get(item.id);
+        return {
+          ...toStatusViewSession(item),
+          lastMessageAt: typeof meta?.lastMessageAt === 'number' ? meta.lastMessageAt : null,
+          lastReadAt: typeof meta?.lastReadAt === 'number' ? meta.lastReadAt : null,
+          isPinned: Boolean(item.isPinned),
+          pinSectionId: meta?.pinSectionId ?? null,
+          orderKey: meta?.orderKey ?? null,
+          canManage: statusViewWritable && !historyOnlySessionIds.has(item.id),
+          canPrefer: true,
+        };
       }),
-    [allSidebarItems]
+    [allSidebarItems, sessionById, statusViewWritable, historyOnlySessionIds]
+  );
+  const pinnedSessionIds = useMemo(
+    () => statusViewPinnedIds(statusViewSessions),
+    [statusViewSessions]
   );
   const pinnedItems = useMemo(
     () => sortUpdatedItems(allSidebarItems.filter((item) => pinnedSessionIds.has(item.id))),
     [allSidebarItems, pinnedSessionIds]
   );
-  // Where each pinned row sits. An opened Session shown here only because its
-  // opener is pinned follows its opener's section and position.
-  const pinnedPlacementOf = useCallback(
-    (item: SidebarUpdatedItem): PinnedSessionPlacement => {
-      const owner = sessionById.get(
-        item.isPinned ? item.id : (item.openedByRowSessionId ?? item.id)
-      );
-      const latest = item.latestMessageAt;
-      return {
-        id: item.id,
-        pinSectionId: owner?.isPinned ? (owner.pinSectionId ?? null) : null,
-        orderKey: owner?.isPinned ? (owner.orderKey ?? null) : null,
-        recency: latest instanceof Date ? latest.getTime() : Date.parse(String(latest ?? '')) || 0,
-      };
-    },
-    [sessionById]
-  );
-  const pinnedLayout = useMemo(
-    () =>
-      buildPinnedSectionLayout(pinnedItems, pinSections, pinnedPlacementOf, {
-        sectionsLoaded: pinSectionsLoaded,
-      }),
-    [pinnedItems, pinSections, pinSectionsLoaded, pinnedPlacementOf]
-  );
-  const pinnedSections = useMemo<SidebarPinnedSection[]>(
-    () =>
-      pinnedLayout.map((entry) => ({
-        id: entry.sectionId,
-        name: entry.section?.name ?? '',
-        items: entry.items,
-      })),
-    [pinnedLayout]
-  );
   // The My-Tasks scope drops teammates' conversations before the pinned area
   // is built, so a section holding only them would render as a bare header.
-  // Count what the scope hides per section so it can say so under its rows.
-  const pinnedHiddenCounts = useMemo(() => {
-    if (scope !== 'my' || sessionsListLoading || !pinSectionsLoaded) return undefined;
+  // Count what the scope hides by the section their pinned root names.
+  const scopeHiddenCounts = useMemo(() => {
+    if (scope !== 'my' || sessionsListLoading) return undefined;
     const listed = new Map<string, SessionMeta>();
     for (const session of selectSidebarTaskSessions(
       sessions,
@@ -2875,7 +2862,6 @@ export function LoroAppSidebar({
       getOpenedBySessionId,
       isPinned: (session) => Boolean(session.isPinned),
     });
-    const knownSectionIds = new Set(pinSections.map((section) => section.id));
     const counts: Record<string, number> = {};
     for (const id of unscopedPinnedIds) {
       if (pinnedSessionIds.has(id)) continue;
@@ -2892,88 +2878,150 @@ export function LoroAppSidebar({
         seen.add(opener);
         root = listed.get(opener);
       }
-      const pinSectionId = root?.pinSectionId;
-      const sectionKey = pinSectionKey(
-        pinSectionId && knownSectionIds.has(pinSectionId) ? pinSectionId : null
-      );
-      counts[sectionKey] = (counts[sectionKey] ?? 0) + 1;
+      const key = root?.pinSectionId ?? '';
+      counts[key] = (counts[key] ?? 0) + 1;
     }
     return Object.keys(counts).length > 0 ? counts : undefined;
   }, [
     scope,
     sessionsListLoading,
-    pinSectionsLoaded,
     sessions,
     visibleLocalProjectMap,
     workspaceHistoryReadable,
     resolveOpenerRowId,
-    pinSections,
     pinnedSessionIds,
   ]);
-  const pinnedLayoutRef = useRef(pinnedLayout);
-  pinnedLayoutRef.current = pinnedLayout;
-  const pinSectionsRef = useRef(pinSections);
-  pinSectionsRef.current = pinSections;
-  /** Plan against the pinned rows themselves; carried opened Sessions never move alone. */
-  const planPinnedMove = useCallback(
-    (
-      itemId: string,
-      toSectionId: string | null,
-      toIndex: number,
-      sections: readonly PinSection[] = pinSectionsRef.current
-    ) => {
-      const placements = pinnedLayoutRef.current.flatMap((entry) =>
-        entry.items.filter((item) => item.isPinned).map(pinnedPlacementOf)
-      );
-      return planPinnedSessionMove(
-        buildPinnedSectionLayout(placements, sections, (placement) => placement),
-        { sessionId: itemId, toSectionId, toIndex }
-      );
-    },
-    [pinnedPlacementOf]
+  const statusViewInput = useMemo<StatusViewLayoutInput>(() => {
+    void statusTick;
+    return {
+      sessions: statusViewSessions,
+      sections: pinSections,
+      sectionsLoaded: pinSectionsLoaded,
+      canManageSections: statusViewWritable,
+      ...(scopeHiddenCounts ? { scopeHiddenCounts } : {}),
+      nowMs: getServerNow(),
+    };
+  }, [
+    statusViewSessions,
+    pinSections,
+    pinSectionsLoaded,
+    statusViewWritable,
+    scopeHiddenCounts,
+    statusTick,
+  ]);
+  const statusLayout = useMemo(() => buildStatusViewLayout(statusViewInput), [statusViewInput]);
+  const sidebarItemById = useMemo(
+    () => new Map(allSidebarItems.map((item) => [item.id, item])),
+    [allSidebarItems]
   );
-  const reportPinError = useCallback((error: unknown) => {
+  const pinnedSections = useMemo<SidebarPinnedSection[]>(
+    () =>
+      statusLayout.pinned.map((entry) => ({
+        id: entry.sectionId,
+        name: entry.name ?? '',
+        items: flattenStatusViewRows(entry.rows).flatMap((row) => {
+          const item = sidebarItemById.get(row.id);
+          return item ? [item] : [];
+        }),
+      })),
+    [statusLayout, sidebarItemById]
+  );
+  const previousPinnedHiddenCountsRef = useRef<Record<string, number> | undefined>(undefined);
+  const pinnedHiddenCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const entry of statusLayout.pinned) {
+      if (entry.hiddenCount > 0) counts[pinSectionKey(entry.sectionId)] = entry.hiddenCount;
+    }
+    const next = Object.keys(counts).length > 0 ? counts : undefined;
+    const previous = previousPinnedHiddenCountsRef.current;
+    return previous && next && jsonValueEqual(previous, next) ? previous : next;
+  }, [statusLayout]);
+  previousPinnedHiddenCountsRef.current = pinnedHiddenCounts;
+  const statusViewInputRef = useRef(statusViewInput);
+  statusViewInputRef.current = statusViewInput;
+  const statusLayoutRef = useRef(statusLayout);
+  statusLayoutRef.current = statusLayout;
+  const reportStatusViewError = useCallback((error: unknown) => {
     toast.error(error instanceof Error ? error.message : String(error));
   }, []);
+  /**
+   * Plans against what the sidebar shows. A drop the planner refuses (it would
+   * reorder conversations this member cannot manage) says so instead of
+   * snapping back silently.
+   */
+  const runSidebarStatusViewCommand = useCallback(
+    async (command: StatusViewCommand) => {
+      const writes = await runStatusViewCommand(command, statusViewInputRef.current);
+      if (command.type === 'move' && writes.length === 0) {
+        throw new Error(t('sidebar.status.moveRefused'));
+      }
+      return writes;
+    },
+    [runStatusViewCommand, t]
+  );
   const pinSectionActions = useMemo<SidebarPinSectionActions | undefined>(() => {
-    if (!runtime) return undefined;
+    if (!runtime || !statusViewWritable) return undefined;
     return {
       onDropItem: (itemId, sectionId, toIndex) => {
-        void applySessionPinPlacements(planPinnedMove(itemId, sectionId, toIndex)).catch(
-          reportPinError
-        );
+        void runSidebarStatusViewCommand({
+          type: 'move',
+          sessionId: itemId,
+          to: { area: 'pinned', sectionId },
+          beforeId: pinnedDropBeforeId(
+            statusLayoutRef.current,
+            statusViewInputRef.current.sessions,
+            sectionId,
+            itemId,
+            toIndex
+          ),
+        }).catch(reportStatusViewError);
       },
       onMoveSection: (sectionId, toIndex) => {
-        const section = pinSectionsRef.current.find((entry) => entry.id === sectionId);
-        if (!section) return;
-        void writeWorkspacePinSection(runtime, {
-          ...section,
-          orderKey: planPinSectionMove(pinSectionsRef.current, sectionId, toIndex),
-        }).catch(reportPinError);
+        void runSidebarStatusViewCommand({
+          type: 'moveSection',
+          sectionId,
+          beforeId: sectionDropBeforeId(statusLayoutRef.current, sectionId, toIndex),
+        }).catch(reportStatusViewError);
       },
       onCreateSection: async (name, moveItemId) => {
-        const section: PinSection = {
-          id: crypto.randomUUID(),
+        const writes = await runSidebarStatusViewCommand({
+          type: 'createSection',
+          sectionId: crypto.randomUUID(),
           name,
-          orderKey: planNewPinSectionOrderKey(pinSectionsRef.current),
-        };
-        await writeWorkspacePinSection(runtime, section);
-        if (moveItemId) {
-          await applySessionPinPlacements(
-            planPinnedMove(moveItemId, section.id, 0, [...pinSectionsRef.current, section])
-          );
-        }
+        });
+        const created = writes.find((write) => write.type === 'putSection')?.section;
+        if (!moveItemId || !created) return;
+        // The written row may not have been read back yet.
+        const base = statusViewInputRef.current;
+        await runStatusViewCommand(
+          {
+            type: 'move',
+            sessionId: moveItemId,
+            to: { area: 'pinned', sectionId: created.id },
+            beforeId: null,
+          },
+          {
+            ...base,
+            sections: [...base.sections.filter((section) => section.id !== created.id), created],
+          }
+        );
       },
       onRenameSection: async (sectionId, name) => {
-        const section = pinSectionsRef.current.find((entry) => entry.id === sectionId);
-        if (!section) return;
-        await writeWorkspacePinSection(runtime, { ...section, name });
+        await runSidebarStatusViewCommand({ type: 'renameSection', sectionId, name });
       },
       onDeleteSection: (sectionId) => {
-        void deleteWorkspacePinSection(runtime, sectionId).catch(reportPinError);
+        void runSidebarStatusViewCommand({ type: 'deleteSection', sectionId }).catch(
+          reportStatusViewError
+        );
       },
     };
-  }, [applySessionPinPlacements, planPinnedMove, reportPinError, runtime]);
+  }, [
+    reportStatusViewError,
+    runSidebarStatusViewCommand,
+    runStatusViewCommand,
+    runtime,
+    statusViewWritable,
+  ]);
   const [pinSectionsCollapsed, setPinSectionsCollapsed] = useAtom(pinSectionsCollapsedAtom);
   const handleTogglePinSection = useCallback(
     (sectionId: string) => {
@@ -4030,57 +4078,14 @@ export function LoroAppSidebar({
 
   const handleDropFocusItem = useCallback(
     (sessionId: string, toIndex: number) => {
-      const nowMs = getServerNow();
-      const focusBucket = buildSidebarUpdatedBuckets(updatedItems, 'status', nowMs).find(
-        (bucket) => bucket.key === 'focus'
-      );
-      // `toIndex` counts top-level `[data-pin-node]` root groups, so plan moves over roots only.
-      const focusRoots = buildOpenedBySessionTree(
-        focusBucket?.items ?? [],
-        SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS
-      )
-        .filter((node) => node.depth === 0)
-        .map((node) => node.item);
-
-      // Expired-snooze roots float to the top of Focus without background writes.
-      // When the user explicitly drags in Focus, materialize top orderKeys for any
-      // expired-snooze roots so the planned drop index matches the visual order 1:1.
-      const wokenRoots = focusRoots.filter(
-        (item) => expiredSnoozeTimestamp(item.snoozedUntil, nowMs) !== null
-      );
-      const regularPlacements = focusRoots
-        .filter((item) => expiredSnoozeTimestamp(item.snoozedUntil, nowMs) === null)
-        .map((item) => ({ id: item.id, orderKey: item.orderKey ?? null }));
-      const materializedPlacements = [...regularPlacements];
-      const materializedWrites = new Map<string, string>();
-      for (let i = wokenRoots.length - 1; i >= 0; i -= 1) {
-        const woken = wokenRoots[i]!;
-        const topKey = planTopOrderKey(materializedPlacements);
-        materializedPlacements.unshift({ id: woken.id, orderKey: topKey });
-        materializedWrites.set(woken.id, topKey);
-      }
-
-      const moveWrites = planManualOrderMove(materializedPlacements, { sessionId, toIndex });
-      for (const write of moveWrites) {
-        materializedWrites.set(write.sessionId, write.orderKey);
-      }
-      const writes = Array.from(materializedWrites, ([id, orderKey]) => ({
-        sessionId: id,
-        orderKey,
-      }));
-      const wasInFocus = focusRoots.some((item) => item.id === sessionId);
-      const unpin = sessionById.get(sessionId)?.isPinned
-        ? setSessionPinned(sessionId as SessionId, false)
-        : Promise.resolve();
-      void unpin
-        .then(() =>
-          applySessionFocusOrder(writes, wasInFocus ? undefined : (sessionId as SessionId))
-        )
-        .catch((error) => {
-          toast.error(error instanceof Error ? error.message : String(error));
-        });
+      void runSidebarStatusViewCommand({
+        type: 'move',
+        sessionId,
+        to: { area: 'focus' },
+        beforeId: focusDropBeforeId(statusLayoutRef.current, sessionId, toIndex),
+      }).catch(reportStatusViewError);
     },
-    [applySessionFocusOrder, sessionById, setSessionPinned, updatedItems]
+    [reportStatusViewError, runSidebarStatusViewCommand]
   );
   const [updatedBucketShowFullState, setUpdatedBucketShowFullState] = useAtom(
     sidebarUpdatedBucketShowFullStateAtom
@@ -4380,10 +4385,10 @@ export function LoroAppSidebar({
         onMarkUpdatedItemUnread={handleMarkSessionUnread}
         onRenameUpdatedItem={handleRenameSession}
         onToggleUpdatedItemPinned={handleTogglePinSession}
-        onSnoozeUpdatedItem={handleSnoozeSession}
-        onSettleUpdatedItem={handleSettleSession}
-        onMoveUpdatedItemToFocus={handleMoveSessionToFocus}
-        onDropFocusItem={handleDropFocusItem}
+        onSnoozeUpdatedItem={statusViewWritable ? handleSnoozeSession : undefined}
+        onSettleUpdatedItem={statusViewWritable ? handleSettleSession : undefined}
+        onMoveUpdatedItemToFocus={statusViewWritable ? handleMoveSessionToFocus : undefined}
+        onDropFocusItem={statusViewWritable ? handleDropFocusItem : undefined}
         onCopyUpdatedItemUrl={handleCopySessionUrl}
         onShareUpdatedItemWithTeam={handleRequestShareSession}
         onOpenUpdatedItemPullRequest={handleOpenUpdatedItemPullRequest}

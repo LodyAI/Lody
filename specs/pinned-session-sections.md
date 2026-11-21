@@ -47,7 +47,13 @@ place them in named pin sections, such as "Maintenance".
 - Opener child conversations stay under their root conversation and move with
   it; they are not ordered independently.
 - The mobile layout shows non-empty sections and their order but offers no
-  dragging or section management.
+  dragging or section management. The intended phone behavior, not yet
+  implemented and designed in the [phone note](../.agents/notes/proposed/architecture/2026-11-21-status-view-on-phones.md),
+  is the same on the phone WebView and the native iOS and Android clients: a long
+  press that turns into a drag reorders pinned conversations and moves them
+  between sections, dropping an unpinned conversation into the pin area pins it,
+  the row menu offers "Move to section" and "Move to top", and each section
+  header's menu offers New section, Rename, Move up, Move down and Delete.
 
 ## Data ownership
 
@@ -103,14 +109,14 @@ their recent-activity order among themselves. There is no migration.
   tasks that need a fixed place use a destination that reuses one conversation
   (`own_session` or `existing_session`) and are pinned once.
 - Private, per-member pin layouts.
-- Native iOS and Android clients. They ignore the new fields and are
-  unaffected.
+- Native iOS and Android clients until the phone behavior above ships. They
+  ignore the new fields and are unaffected.
 
 ## Permissions
 
 Every member with workspace write permission can create, rename, delete and
 drag sections, including in encrypted workspaces; read-only members can only
-view them. Members already write the workspace Flock, for example when creating
+view them and are not offered section management. Members already write the workspace Flock, for example when creating
 a private Agent Role. A write path that rejects a `pinSection` row from a
 member with write permission is a gap to fix, not a reason to narrow section
 management further.

@@ -4,7 +4,7 @@ import { Timer } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Dialog } from '@/ui/dialog';
-import { formatSnoozeCountdown } from '@/lib/sidebar-status-group';
+import { formatSnoozeCountdown } from '@lody/shared';
 import { cn } from '@/lib/utils';
 
 export type CustomSnoozeDialogTarget = {

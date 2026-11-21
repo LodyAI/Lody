@@ -86,6 +86,30 @@ and what can wait or has settled.
   wins cleanly. Dragging a row from Later or Settled into Focus clears its
   snooze/settled state and places it at the dropped `orderKey`.
 
+### Phones
+
+The phone WebView layout and the native iOS and Android clients show the same
+Pinned area and the same three tiers, in the same order, as the desktop sidebar.
+Nothing below is implemented yet; the design is in the
+[phone note](../.agents/notes/proposed/architecture/2026-11-21-status-view-on-phones.md).
+
+- Every surface derives the list and plans its writes from one shared
+  implementation. Native clients render the layout their shared runtime computes
+  and never sort or classify these lists themselves.
+- A long press opens the full action menu, and moving while still pressed turns
+  into a drag: reorder Focus, or drop a Later or Settled row into Focus. Every drag
+  outcome is also a menu item and an accessibility action.
+- A trailing swipe offers Settle and Later on Focus and Later rows and Archive on
+  Settled rows. Later opens a bottom sheet with the presets and a custom date and
+  time. Settle and Later confirm with an Undo notice. The conversation page's "…"
+  sheet carries the same status actions.
+- The native clients' previous status grouping (Needs you, Running, Finished, Pull
+  requests, Idle) is replaced by these tiers.
+- Native clients have no live session presence. They treat a conversation as
+  working or waiting for approval from its synced status, so a snoozed or settled
+  conversation waiting for approval, or a conversation silent for seven days that
+  is running, can sit in a different tier there for a short time.
+
 ## Data ownership and ordering
 
 - `SessionMeta.pinOrderKey` is renamed to `SessionMeta.orderKey` (canonical
@@ -122,7 +146,9 @@ and what can wait or has settled.
   separate changes).
 - Per-user private Focus ordering or per-session LoroDoc scratch pads / Today
   outliner (tracked for a later experimental phase).
-- Mobile native iOS/Android clients.
+- Encrypted workspaces on the native iOS and Android clients, which do not open
+  encrypted workspaces at all yet. The phone WebView supports them.
+- Live session presence on the native clients.
 
 ## Evidence
 
@@ -131,9 +157,9 @@ Implementation:
 - Shared schema, ordering & unread summary: `packages/shared/src/schema.ts`,
   `packages/shared/src/pinned-sections.ts`,
   `packages/shared/src/live-activity-summary.ts`
-- Status classification, read receipts & snooze countdown:
-  `packages/components/src/lib/sidebar-status-group.ts`,
-  `packages/components/src/lib/session-read-receipt.ts`
+- Status layout, write planning, snooze countdown & golden vectors:
+  `packages/shared/src/status-view/`
+- Read receipts: `packages/components/src/lib/session-read-receipt.ts`
 - Sidebar rendering, DnD, menus & actions:
   `packages/components/src/components/sidebar-updated-session-list.tsx`,
   `packages/components/src/components/loro-sidebar.tsx`,
