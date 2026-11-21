@@ -1,0 +1,24 @@
+{
+  "appId": "ai.lody.mobile",
+  "appName": "Lody",
+  "webDir": "dist",
+  "plugins": {
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "launchShowDuration": 8000,
+      "launchFadeOutDuration": 200
+    },
+    "Keyboard": {
+      "resize": "none",
+      "resizeOnFullScreen": true
+    },
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    }
+  },
+  "ios": {
+    "handleApplicationNotifications": true,
+    "allowsBackForwardNavigationGestures": false
+  },
+  "loggingBehavior": "none"
+}

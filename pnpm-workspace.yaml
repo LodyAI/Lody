@@ -4,6 +4,7 @@ packages:
   - '!packages/acp-extension-pi'
   - apps/cli
   - apps/electron
+  - apps/mobile-capacitor
   - e2e
   - site-docs
 
@@ -11,6 +12,7 @@ catalog:
   vitest: 5.0.2
   '@agentclientprotocol/sdk': ^1.3.0
   '@better-auth/api-key': 1.6.33
+  '@better-auth/core': 1.6.33
   '@better-auth/electron': 1.6.33
   '@convex-dev/better-auth': 0.12.5
   '@devframes/agentic': 1.0.0
@@ -228,6 +230,14 @@ onlyBuiltDependencies:
   - workerd
 
 overrides:
+  # Align cloud clients with the existing public security floor.
+  electron@44.7.0: 44.9.3
+  '@better-auth/utils': 0.4.2
+  'storybook@>=10.6.0 <10.6.2': 10.6.2
+  '@storybook/react@>=10.6.0 <10.6.2': 10.6.2
+  '@storybook/react-vite@>=10.6.0 <10.6.2': 10.6.2
+  '@storybook/react-dom-shim@>=10.6.0 <10.6.2': 10.6.2
+  '@storybook/builder-vite@>=10.6.0 <10.6.2': 10.6.2
   '@loro-dev/streams-crdt>@loro-dev/flock-wasm': ^0.5.0
   'loro-repo>@loro-dev/flock-wasm': ^0.5.0
   'loro-repo>@loro-dev/streams-crdt': 0.22.1
