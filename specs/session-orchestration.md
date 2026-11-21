@@ -237,9 +237,10 @@ Recovery uses the frozen prompt, Role revision and dispatch configuration. Befor
 replaying a missing target input, OSS and Cloud same-machine targets authored through
 the daemon's own repo confirm the authoritative daemon repo (`repo.flush()`) and
 recheck the fixed Turn under the existing materialization claim; Cloud remote-machine
-or locally absent targets confirm remote Streams document catch-up. Missing cloud
-connectivity never counts as authority for remote targets or unverified cross-account
-access in a cloud workspace. Completion writes directly to the native Inbox in
+or locally absent targets confirm remote Streams document catch-up
+([availability trade-off](../.agents/notes/implemented/architecture/2026-11-21-cloud-same-machine-recovery-authority.md)).
+Missing cloud connectivity never counts as authority for remote targets or unverified
+cross-account access in a cloud workspace. Completion writes directly to the native Inbox in
 the same Operation transaction; the result-consumption rules below control execution.
 This changes local persisted storage, not the hosted API.
 

@@ -13,7 +13,8 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
   and clean pre-dispatch transient failures may release their own claim token.
   Loro history clears claims, and `updateItems` monotonically preserves
   `inputDurable`. Before replaying a missing Turn, confirm authority: OSS and
-  Cloud same-machine daemon targets flush the authoritative daemon repo; remote
+  Cloud same-machine daemon targets flush the authoritative daemon repo
+  ([availability trade-off](../../../../.agents/notes/implemented/architecture/2026-11-21-cloud-same-machine-recovery-authority.md)); remote
   or cold Cloud targets require Streams catch-up. Materialization runs in scoped
   `FiberMap` fibers with Effect Clock timeout and bounded concurrency so slow
   syncs never block unrelated reconciliation; retries arm bounded backoff and

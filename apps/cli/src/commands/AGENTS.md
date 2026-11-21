@@ -99,9 +99,12 @@ Metadata idle/Presence loss is not completion; sequence is local.
   Remote identity is not authorization: the PR reconciler uses authenticated GitHub reads,
   never a product-cloud registry. Absent/unreadable remotes leave creation local.
 - Dispatch point-of-no-rollback (`createSessionResult` / `sendSessionChatResult`):
-  `writeDispatchPointer` commits `latestUserMsgId` and enables execution. AWAIT
-  `confirmDispatchSyncedBestEffort` before transport teardown; it must NEVER throw.
-  The durable pointer and SQLite Operation own delivery.
+  `writeDispatchPointer` commits `latestUserMsgId` and enables execution. One-shot CLI
+  processes and cross-machine targets must AWAIT `confirmDispatchSyncedBestEffort` before
+  transport teardown so writes do not strand in a closing transport; it must NEVER throw.
+  When `resolveDaemonTarget` confirms the resident daemon's own replica, flush locally
+  (`repo.flush()`) instead because the daemon keeps syncing that replica in the background
+  and executes the turn in-process. The durable pointer and SQLite Operation own delivery.
   Create/chat may unwind only before dispatch (`if (!dispatched)`). Never roll back
   a dispatched Session or introduce a hard-fail Streams acknowledgement.
 - MCP create combines semantic controls with `modeId`/`configOptionValues` via shared
