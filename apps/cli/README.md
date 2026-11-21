@@ -251,8 +251,8 @@ lody session list --workspace team --query parser --machine-id MACHINE_ID --agen
 ```
 
 Matching MCP tools are `lody_machine_list`, `lody_project_list`,
-`lody_agent_config_list/get`, `lody_agent_role_list/get`, `lody_mcp_list`, and
-`lody_operation_list`. Session list adds `query`, `machineId`, `agentConfigId`,
+`lody_agent_config`, `lody_agent_role`, `lody_mcp_list`, and
+`lody_operation` (list mode). Session list adds `query`, `machineId`, `agentConfigId`,
 and `agentRoleId`. Creation provenance is what the Role filter matches.
 
 `lody_session_create_options` and Agent config discovery expose `runConfig.modes`

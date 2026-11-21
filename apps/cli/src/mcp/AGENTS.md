@@ -67,7 +67,8 @@ Parent instructions apply. Background: [README.md](README.md).
   rederive until authored. Explicit choices/access stay strict.
   [Freshness/retries](README.md#machine-catalog-retry-guidance).
 
-- `lody_ios_simulator_preview` and `lody_android_emulator_preview` are the native-app tools; web previews remain
+- `lody_simulator_preview` is the native-app tool; it offers `platform: "ios"` only on macOS hosts,
+  fixed when the server is built. Web previews remain
   `lody_report_preview_candidate`. Bind local agent-control RPC to MCP session context;
   the daemon resolves the active user. Return operation handles, never viewer URLs or
   raw preview/transport errors. Reuse simulator lifecycle/schema, never a second owner.
@@ -124,6 +125,10 @@ Parent instructions apply. Background: [README.md](README.md).
   `[@Title](lody://session/<id>?workspace=<id>)`; accept bare ids and legacy
   `session://` URIs too. Explicit workspace must match the tool context.
   ([contract](../../../../specs/deep-links.md))
+
+- Keep one published tool per job ([catalog size](README.md#catalog-size)): a batch or
+  list form is a mode of its single tool, validated by its own unchanged mode schema, and
+  a new tool name updates the exact-name guard in `lody-mcp-server.test.ts`.
 
 - Single create/chat attachments require durable Operations and the calling daemon's
   `sessionInputAttachments` capability. Resolve paths inside the calling Session's

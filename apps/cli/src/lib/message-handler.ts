@@ -9423,7 +9423,7 @@ export class MessageHandler {
       return;
     }
 
-    // This channel is agent-facing (MCP lody_upload_files): paths MUST stay
+    // This channel is agent-facing (MCP lody_upload, kind=files): paths MUST stay
     // inside the session workspace, or the tool would let a prompt-injected
     // agent exfiltrate arbitrary host files past its own read-approval gate.
     const workspaceRoot = this.resolveSessionWorkspaceRoot(sessionId);
