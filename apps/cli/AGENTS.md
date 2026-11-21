@@ -29,7 +29,8 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
   The `daemon-runner` watchdog composes no Workspace presence and must never open a workspace
   document. Daemon-owned Node children cap glibc arenas, and release the cap before launching
   anything ([decision](../../.agents/notes/implemented/architecture/2026-11-21-daemon-memory-footprint.md)).
-- The public CLI defaults to the local platform, discovers no deployment dotenv files, and must
+- The CLI defaults to local; explicit `LODY_PLATFORM=cloud` consumes caller deployment values without dotenv discovery. It must
+
   never initialize telemetry in local mode even if PostHog env vars are set.
 - INVARIANT: the dev output layout must match production's — `index.js` plus flat sibling
   `claude-acp.js` / `codex-acp.js` / `*-worker.js` — because worker owners resolve their child by

@@ -104,11 +104,11 @@ async function main() {
       }
     }
     for (const scriptName of Object.keys(manifest.scripts ?? {})) {
-      // Capacitor staging commands only build/sync a client; they deploy no service.
-      const mobileClientBuild =
-        file === 'apps/mobile-capacitor/package.json' &&
-        ['staging:ios', 'staging:android'].includes(scriptName);
-      if (hostedScriptNamePattern.test(scriptName) && !mobileClientBuild) {
+      const clientBuild =
+        (file === 'apps/mobile-capacitor/package.json' &&
+          ['staging:ios', 'staging:android'].includes(scriptName)) ||
+        (file === 'apps/electron/package.json' && scriptName === 'build:mac:staging');
+      if (hostedScriptNamePattern.test(scriptName) && !clientBuild) {
         violations.push(`${file}: hosted deployment script ${scriptName} is not public`);
       }
     }

@@ -16,9 +16,9 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
 - Shared packages stay platform-neutral. The public Electron composition
   selects `local` explicitly; Web, Capacitor mobile entries and cloud composition
   roots may inject `cloud` without forking those shared packages.
-- The OSS desktop entry is local-only and must not make authenticated product-cloud requests;
+- The default desktop entry is local-only and must not make authenticated product-cloud requests;
   public managed-runtime artifact downloads are the explicit exception.
-- An absent platform selector resolves to `local`; public build scripts must
+- An absent platform selector resolves to `local`; cloud builds require an explicit platform selector and deployment values; local builds must
   not accept or discover staging/production deployment presets.
 - Local CLI, renderer, and Electron-main telemetry is hard-disabled even when
   unrelated PostHog variables exist in the caller's shell.

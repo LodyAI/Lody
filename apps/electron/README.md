@@ -2,7 +2,7 @@
 
 Lody desktop application built with Electron, React, and TypeScript.
 
-The desktop pins Electron 44.7.0 and requires macOS 13 or newer on Mac.
+The desktop pins Electron 44.9.3 and requires macOS 13 or newer on Mac.
 This runtime is compatible with the pinned DeepSeek Harness native loader;
 see the [runtime compatibility decision](../../.agents/notes/implemented/bug-fix/2026-10-10-dsh-electron-runtime.md).
 
@@ -67,6 +67,30 @@ native modern renderer syntax. Outputs are isolated under `.test-build/electron/
 Main externals, renderer entries, CSP and native probes are preserved. These
 artifacts are for tests; normal build and packaging commands retain the original
 release configuration.
+
+### Cloud builds and packaging
+
+Builds default to `local`. An official cloud build explicitly sets
+`VITE_LODY_PLATFORM=cloud` and `LODY_ENV=production` or `staging`, then runs
+`pnpm --dir apps/electron build`. This also rebuilds and stages the cloud CLI.
+Required values are `VITE_CONVEX_DEPLOY_URL`, `VITE_CONVEX_SITE_URL`,
+`VITE_SERVER_URL`, `VITE_SITE_URL`, `VITE_ELECTRON_UPDATE_URL`, and `VITE_ELECTRON_UPDATE_CHANNEL` (`latest`,
+`next`, or `nightly` matching the selected release).
+Missing values fail the build; neither platform discovers deployment dotenv files.
+Package through `pnpm --dir apps/electron package -- --production` (or
+`--staging`) with the same platform and update values. Packaging checks the built
+update config and release identity before invoking electron-builder. Native macOS
+signing and notarization use electron-builder directly on the release runner.
+
+Nightly candidates freeze the `LodyAI/Lody` main commit as `sourceSha`. Exported
+build values use `LODY_SOURCE_SHA`, `LODY_NIGHTLY_BUILD_NUMBER`,
+`LODY_BUILD_RUN_ID`, `LODY_BUILD_TIMESTAMP`, and the reserved
+`LODY_NIGHTLY_VERSION`. A retry must restore its original candidate. Publication
+keeps immutable artifacts and a recoverable metadata journal. Historical two-repository
+records remain readable for recovery and version floors. At cutover, pass a
+`LODY_NIGHTLY_BUILD_NUMBER` above the old repository counter to preserve native
+version ordering; otherwise the new workflow run number is used. Mobile publication
+also uses the shared `.github/scripts/android-version-code.mjs` helper.
 
 ### Cloud browser login
 
