@@ -215,14 +215,19 @@ removed.
   for seven days that is running.
 - Read-only members must not be offered section management or status actions; today
   the desktop offers them and the encrypted upload fails silently.
-- Status actions use the full session-management guard. On the phone WebView in an
-  encrypted workspace, sessions on another member's shared machine may be refused
-  because the phone does not discover those machines; this needs tracing.
+- Status actions use the full session-management guard. Traced: on the phone WebView
+  in an encrypted workspace, the person's own conversations on another member's
+  shared machine are refused, because the phone does not discover that machine
+  (`isSessionEditableToUser`); other members' conversations there are not listed
+  at all. The guard is kept: allowing the write needs the portable machine-sharing
+  read the phone lacks, not a looser guard. Those rows are already `readOnly` by
+  the same predicate, so the phone list does not offer Later, Settle or Move to
+  Focus on them; pinning stays available.
 - Encrypted workspaces on the WebView need no special handling: no in-repository
   layer filters session metadata fields or workspace Flock row families. A
-  non-owner member writing a `pinSection` row through encrypted transport has no
-  test, and the hosted gateway's admission cannot be inspected from this
-  repository.
+  non-owner Member sealing a `pinSection` row and the new session-meta fields is
+  tested at the room level (`apps/electron/src/main/services/e2ee-runtime.test.mjs`);
+  the hosted gateway's admission cannot be inspected from this repository.
 - Android has no mark-read command; whether opening a woken conversation clears
   its unread state there is unverified.
 
