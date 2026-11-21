@@ -51,6 +51,8 @@ import {
   type LaunchHandle,
   type CliRunResult,
   type SupervisorState,
+  parseWorkerMaxOldSpaceOverride,
+  WORKER_MAX_OLD_SPACE_ENV,
 } from '@lody/cli-supervisor';
 import {
   LOCAL_CLI_SUPERVISOR_CONTRACT_VERSION,
@@ -64,6 +66,7 @@ import {
   type LocalCliHostLease,
 } from '@lody/shared/node/local-cli-host-lease';
 import { createHybridLogger, getLogger } from '../utils/logger';
+import { withDaemonMallocArenaLimit } from '../utils/malloc-arena';
 import {
   DAEMON_WORKER_MAX_OLD_SPACE_MB,
   DAEMON_RUNNER_READY_FD_ENV,
@@ -118,7 +121,7 @@ function launchLodyStart(
     ...passthroughArgs,
   ];
   const env: NodeJS.ProcessEnv = {
-    ...process.env,
+    ...withDaemonMallocArenaLimit(process.env),
     [LODY_DAEMON_SUPERVISED_ENV]: '1',
     ...(managed
       ? {
@@ -398,6 +401,15 @@ export const daemonRunnerCommand = new Command('daemon-runner')
       process.exit(1);
     }
     logger.info(`Daemon watchdog started (PID ${process.pid})`);
+    const workerHeapOverride = process.env[WORKER_MAX_OLD_SPACE_ENV];
+    if (
+      workerHeapOverride !== undefined &&
+      parseWorkerMaxOldSpaceOverride(workerHeapOverride) === undefined
+    )
+      logger.warn(
+        `Ignoring ${WORKER_MAX_OLD_SPACE_ENV}=${JSON.stringify(workerHeapOverride.slice(0, 32))}: ` +
+          `expected whole MiB from 256 to 65536; Worker heap limit is ${DAEMON_WORKER_MAX_OLD_SPACE_MB} MiB`
+      );
 
     await normalizeCurrentProcessResourceProfile(logger);
     for (const diagnostic of getRuntimeDiagnostics(version)) {

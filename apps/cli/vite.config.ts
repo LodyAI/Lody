@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import wasm from 'vite-plugin-wasm';
 import { devinRuntimeContractPlugin } from './scripts/devin-runtime-contract.mjs';
+import { externalWasmPlugin } from './scripts/external-wasm.mjs';
+import { workspaceModuleSideEffects } from './scripts/workspace-module-side-effects.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -81,7 +83,7 @@ export default defineConfig(({ mode }) => ({
   // Node 22 supports native top-level await, including wasm initialization.
   // The browser compatibility transform reparses every emitted chunk into an
   // additional SWC AST and exhausts the 2 GB packaging heap on this bundle.
-  plugins: [wasm(), devinRuntimeContractPlugin()],
+  plugins: [wasm(), externalWasmPlugin(), devinRuntimeContractPlugin()],
   define: inlineEnv,
   resolve: {
     alias: [
@@ -126,6 +128,9 @@ export default defineConfig(({ mode }) => ({
         bundledNodeBuiltins.has(id) ||
         explicitlyExternal.has(id) ||
         id.includes('/node_modules/@loro-dev/roost-node/'),
+      treeshake: {
+        moduleSideEffects: workspaceModuleSideEffects(path.resolve(__dirname, '../../packages')),
+      },
       output: {
         // Keep dependency sourcemaps out of the large CLI entry.
         manualChunks(id) {

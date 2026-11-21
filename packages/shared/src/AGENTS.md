@@ -3,6 +3,11 @@
 - New quote spans require `messageQuotes` v1 on the target machine. Execution
   includes the full snapshot as ordinary ACP text, independently of Agent identity.
 
+- The package barrel (`index.ts`) only re-exports and declares types. Put runtime code in a
+  module it re-exports, as `loro-streams-routing.ts` does: a bundle that imports a binding the
+  barrel defines reaches every module the barrel re-exports, and each daemon process then
+  evaluates their Zod schemas ([decision](../../../.agents/notes/implemented/architecture/2026-11-21-daemon-memory-footprint.md)).
+
 Parent contracts apply. Before changing MCP catalog serialization, also read
 [the authorization decision](../../../.agents/notes/implemented/architecture/2026-10-26-mcp-oauth-local-credentials.md).
 
