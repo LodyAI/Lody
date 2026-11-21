@@ -12,7 +12,7 @@ import {
 import { createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
 import { createFlockAdapter } from '@loro-dev/streams-crdt/flock';
 import type { LoroRepo } from 'loro-repo';
-import { createLoroStreamUrl, LORO_STREAMS_BUCKET_ID } from '../index';
+import { createLoroStreamUrl, LORO_STREAMS_BUCKET_ID } from '../loro-streams-routing';
 import { getShortcutResourceStreamId, type ShortcutResource } from './access';
 import { PromptShortcutError } from './model';
 import { ShortcutLifetime } from './lifetime';

@@ -6,6 +6,7 @@ import { once } from 'node:events';
 import type { Readable } from 'node:stream';
 import { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
+import { withDaemonMallocArenaLimit } from '@/utils/malloc-arena';
 import { startProcessLegacy, type ProcessHandleLegacy } from '@lody/shared/node/process';
 
 import {
@@ -177,7 +178,7 @@ class McpHttpHostSupervisor {
           // never through argv.
           stdio: ['pipe', 'ignore', 'pipe', 'pipe'],
           env: {
-            ...process.env,
+            ...withDaemonMallocArenaLimit(process.env),
             [MCP_HTTP_TOKEN_ENV]: this.token,
             [MCP_HTTP_PREFERRED_PORT_ENV]: String(this.lastPort),
           },
