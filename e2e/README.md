@@ -204,3 +204,11 @@ as an independently retryable inline video comment on the matching open PR.
 The current active coverage is tracked in [the coverage matrix](./COVERAGE.md).
 The suite checker parses Gherkin and enforces IDs, priorities, runtime ownership,
 documentation indexes, and P0 matrix entries before any application build.
+
+## Multi-device acceptance
+
+The opt-in [multi-device lane](src/multidevice/README.md) exercises two independent
+Cloud desktop replicas through real UI and a deterministic external ACP provider.
+It requires an isolated fixture implemented in the private outer repository; the
+public OSS full suite does not supply cloud synchronization. Missing infrastructure
+is reported as blocked with a nonzero exit, never as passing coverage.
