@@ -27,9 +27,9 @@ import {
   applyDetectedProjectSubmodules,
   buildProjectGroupFormValue,
   buildWorkspaceProjectFromForm,
+  collectTakenProjectGroupNames,
   EMPTY_PROJECT_GROUP_FORM_VALUE,
   getProjectMemberSourceKey,
-  normalizeProjectGroupName,
   validateProjectGroupForm,
   type ProjectGroupFormValue,
   type ProjectGroupMemberDraft,
@@ -326,16 +326,11 @@ export function ProjectGroupEditorDialog({
     if (next !== openEditor.value) onChange({ ...openEditor, value: next });
   }, [detection.detected, labelOf, onChange, openEditor, readOnly, repositoryOf]);
 
-  // One project per name: every other project's, normalized.
+  // One project per name among those offered on the same machine.
   const editingId = editor ? (editor.mode === 'add' ? editor.projectId : editor.project.id) : null;
   const takenNames = useMemo(
-    () =>
-      new Set(
-        workspaceProjects
-          .filter((project) => project.id !== editingId)
-          .map((project) => normalizeProjectGroupName(project.name))
-      ),
-    [editingId, workspaceProjects]
+    () => collectTakenProjectGroupNames(workspaceProjects, value, editingId),
+    [editingId, value, workspaceProjects]
   );
   const validation = useMemo(
     () =>
