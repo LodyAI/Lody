@@ -2226,6 +2226,8 @@ export interface SessionChatInterfaceProps {
   onFilePathClick?: (filePath: string) => void;
   /** Opens an agent-uploaded HTML source path directly in rendered file preview. */
   onOpenHtmlFile?: (filePath: string) => void;
+  /** Opens an attachment preview as a side-panel tab; false when there is no panel. */
+  onOpenFileAttachment?: (file: SessionFilePayload, sessionId: SessionId) => boolean;
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
   /** Optional replacement for the GitHub badge area in the header. */
   headerActionsSlot?: React.ReactNode;
@@ -2458,6 +2460,7 @@ export const SessionChatInterface = memo(
       onFileDiffClick,
       onFilePathClick,
       onOpenHtmlFile,
+      onOpenFileAttachment,
       messageFileDiffEntriesByTurn,
       headerActionsSlot,
       headerEndSlot,
@@ -7640,6 +7643,7 @@ export const SessionChatInterface = memo(
                                 onFileDiffClick={onFileDiffClick}
                                 onFilePathClick={onFilePathClick ? handleFilePathClick : undefined}
                                 onOpenHtmlFile={handleOpenHtmlAttachment}
+                                onOpenFileAttachment={onOpenFileAttachment}
                                 onAnnotateImage={
                                   isArchivedSession ? undefined : handleAnnotateImage
                                 }

@@ -68,6 +68,7 @@ import {
   type LocalProjectId,
   type LocalProjectMeta,
   type ProjectRef,
+  type SessionFilePayload,
   type SessionId,
   type SessionMeta,
   type SessionStatus,
@@ -207,6 +208,7 @@ import { toast } from '@/lib/toast';
 
 import { SessionConversationDiffPanel } from './session-conversation-diff-panel';
 import { SessionFileContentView, type SessionFileSaveViewState } from './session-file-content-view';
+import { SessionFileAttachmentPane } from '../ai-gui/session-file-attachment';
 import { SessionFileQuickOpen } from './session-file-quick-open';
 import { PrTabContainer } from './pr-tab-container';
 import { SessionBrowserPanel } from './session-browser-panel';
@@ -408,7 +410,19 @@ type ViewerTab =
       focusRequestSeq: number;
       mode?: 'conversation' | 'base';
       label: string;
+    }
+  | {
+      /** A message attachment: bytes come from the attachment store, not a workspace path. */
+      id: string;
+      type: 'attachment';
+      file: SessionFilePayload;
+      /** The Session whose message carried it; `file.storageSessionId` wins when set. */
+      sessionId: SessionId;
+      label: string;
     };
+
+const getViewerTabAnalyticsType = (tabId: string): 'file' | 'diff' | 'attachment' =>
+  tabId.startsWith('file:') ? 'file' : tabId.startsWith('attachment:') ? 'attachment' : 'diff';
 
 type SessionDetailOpenFileOptions = {
   /** Analytics only. */
@@ -859,6 +873,16 @@ const areViewerTabsEquivalent = (prev: ViewerTab, next: ViewerTab): boolean => {
       prev.endLine === next.endLine &&
       prev.focusRequestSeq === next.focusRequestSeq &&
       prev.htmlPreviewRequestSeq === next.htmlPreviewRequestSeq
+    );
+  }
+
+  if (prev.type === 'attachment' && next.type === 'attachment') {
+    // A re-click hands over a fresh payload object for the same upload; keeping
+    // the existing tab avoids refetching the preview it already shows.
+    return (
+      prev.sessionId === next.sessionId &&
+      prev.file.fileId === next.file.fileId &&
+      prev.file.storageSessionId === next.file.storageSessionId
     );
   }
 
@@ -4210,6 +4234,21 @@ const SessionDetail = ({
     });
   });
 
+  /** Desktop opens a message attachment as a side-panel tab; mobile keeps its Drawer. */
+  const handleOpenFileAttachment = useStableCallback(
+    (file: SessionFilePayload, chatSessionId: SessionId): boolean => {
+      if (isMobile) return false;
+      upsertViewerTab({
+        id: `attachment:${file.storageSessionId ?? chatSessionId}:${file.fileId}`,
+        type: 'attachment',
+        file,
+        sessionId: chatSessionId,
+        label: file.fileName,
+      });
+      return true;
+    }
+  );
+
   /**
    * Every entry point whose path came from the file index. Kept stable so the
    * file tree's memoized rows do not re-render on each parent commit.
@@ -4505,7 +4544,7 @@ const SessionDetail = ({
       }
       captureSessionDetailEvent('session/viewer_tab_selected', {
         viewer_tab_id: tabId,
-        viewer_tab_type: tabId.startsWith('file:') ? 'file' : 'diff',
+        viewer_tab_type: getViewerTabAnalyticsType(tabId),
       });
     },
     [captureSessionDetailEvent, isMobile, revealRightSidebar, selectSidePanelTab]
@@ -4639,9 +4678,15 @@ const SessionDetail = ({
     () =>
       viewerTabs.map((tab) => ({
         id: tab.id,
-        type: tab.type,
+        // An attachment tab reads as a file tab: same glyph by name, same strip slot.
+        type: tab.type === 'diff' ? 'diff' : 'file',
         label: tab.label,
-        filePath: tab.type === 'file' ? tab.filePath : undefined,
+        filePath:
+          tab.type === 'file'
+            ? tab.filePath
+            : tab.type === 'attachment'
+              ? tab.file.fileName
+              : undefined,
         dirty: tab.type === 'file' ? viewerTabSaveStates[tab.id]?.dirty === true : false,
         saving: tab.type === 'file' ? viewerTabSaveStates[tab.id]?.saving === true : false,
         conflict:
@@ -4828,7 +4873,7 @@ const SessionDetail = ({
         }
         captureSessionDetailEvent('session/viewer_tab_closed', {
           viewer_tab_id: tabId,
-          viewer_tab_type: tabId.startsWith('file:') ? 'file' : 'diff',
+          viewer_tab_type: getViewerTabAnalyticsType(tabId),
           remaining_viewer_tab_count: Math.max(0, viewerTabs.length - 1),
         });
       }
@@ -5165,7 +5210,8 @@ const SessionDetail = ({
         : activeTabSessionId;
     writeStoredLastActiveTabState(sessionId, {
       sessionTabId: persistedSessionTabId,
-      viewerTab: activeViewerTab,
+      // Attachment tabs are not restored: their payload is message data, not a path.
+      viewerTab: activeViewerTab?.type === 'attachment' ? null : activeViewerTab,
       sidePanel: {
         open: isSidebarOpen,
         tab: activeSidebarTab,
@@ -6011,7 +6057,14 @@ const SessionDetail = ({
   );
 
   const renderViewerTabContent = (tab: ViewerTab, className = 'h-full', active = true) =>
-    tab.type === 'file' ? (
+    tab.type === 'attachment' ? (
+      <SessionFileAttachmentPane
+        key={`${activeSession.id}:${tab.id}`}
+        file={tab.file}
+        sessionId={tab.sessionId}
+        className={className}
+      />
+    ) : tab.type === 'file' ? (
       <SessionFileContentView
         key={`${activeSession.id}:${tab.id}`}
         sessionId={activeSession.id}
@@ -7265,6 +7318,7 @@ const SessionDetail = ({
       onFileDiffClick: handleOpenFileDiffForChat,
       onFilePathClick: handleOpenFile,
       onOpenHtmlFile: handleOpenHtmlFile,
+      onOpenFileAttachment: handleOpenFileAttachment,
       onOpenIosSimulator: () => handleOpenIosSimulator(),
       onOpenAndroidEmulator: () => handleOpenAndroidEmulator(),
       onOpenBrowser: previewAllowed ? () => handleOpenBrowser(chatSession.id, true) : undefined,

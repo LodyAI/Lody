@@ -6,20 +6,16 @@ import {
   resolveDirectMarkdownFileOpenTarget,
 } from '../src/lib/session-file-open-target';
 import { Provider, createStore } from 'jotai';
-import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import { authTokenAtom, runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import { currentWorkspaceIdAtom } from '../src/atoms';
-import { LocalAttachmentCard } from '../src/components/ai-gui/view';
+import { LocalAttachmentCard, WorkspaceSessionFileGroup } from '../src/components/ai-gui/view';
+import { SessionFileAttachmentPane } from '../src/components/ai-gui/session-file-attachment';
 import * as fileSaver from '../src/lib/download-file';
 
 // The card's second action exists for exactly one gap: an HTML attachment's
 // click opens the RENDERED page, so without it the uploaded source bytes have
 // no route at all. Every other previewable file downloads from inside the
-// preview dialog and must NOT grow a duplicate control.
-
-// The card's second action exists for exactly one gap: an HTML attachment's
-// click opens the RENDERED page, so without it the uploaded source bytes have
-// no route at all. Every other previewable file downloads from inside the
-// preview dialog and must NOT grow a duplicate control.
+// attachment preview and must NOT grow a duplicate control.
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -127,7 +123,7 @@ describe('SessionFileCard download action', () => {
     expect(view.textContent).not.toContain('expired');
   });
 
-  it('does not duplicate the control on a previewable file whose dialog downloads', async () => {
+  it('does not duplicate the control on a previewable file whose preview downloads', async () => {
     const view = await render({
       file: file({ fileName: 'README.md', mimeType: 'text/markdown' }),
     });
@@ -290,3 +286,93 @@ it.each(['/tmp/image # 中文.png', '/tmp/question?.txt', '/tmp/file:123', '/tmp
     }
   }
 );
+
+describe('attachment preview routing', () => {
+  const markdown = file({ fileName: 'notes.md', mimeType: 'text/markdown' });
+  let container: HTMLDivElement;
+  let root: Root;
+
+  const mount = async (element: ReturnType<typeof createElement>) => {
+    await initI18n('en');
+    const store = createStore();
+    store.set(currentWorkspaceIdAtom, 'workspace' as never);
+    store.set(authTokenAtom, 'token');
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => root.render(createElement(Provider, { store }, element)));
+  };
+
+  beforeEach(() => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () => new Response('# Synthetic notes\n\nbody text', { status: 206 })
+    );
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    vi.restoreAllMocks();
+  });
+
+  it('opens a desktop attachment in the side panel instead of a dialog', async () => {
+    const opened: Array<[string, string]> = [];
+    await mount(
+      createElement(
+        SessionChatActionContext.Provider,
+        {
+          value: {
+            openFileAttachment: (target: SessionFilePayload, sessionId: string) => {
+              opened.push([target.fileName, sessionId]);
+              return true;
+            },
+          },
+        },
+        createElement(WorkspaceSessionFileGroup, {
+          files: [markdown],
+          sessionId: 'session' as never,
+        })
+      )
+    );
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="notes.md"]')?.click()
+    );
+    expect(opened).toEqual([['notes.md', 'session']]);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps the modal preview where the host has no side panel', async () => {
+    await mount(
+      createElement(WorkspaceSessionFileGroup, {
+        files: [markdown],
+        sessionId: 'session' as never,
+      })
+    );
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="notes.md"]')?.click()
+    );
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain('notes.md');
+    expect(dialog?.textContent).toContain('Synthetic notes');
+  });
+
+  it('fills a side-panel tab with the fetched text and its file actions, without a close', async () => {
+    await mount(
+      createElement(SessionFileAttachmentPane, { file: markdown, sessionId: 'session' as never })
+    );
+    expect(container.textContent).toContain('notes.md');
+    expect(container.textContent).toContain('Synthetic notes');
+    expect(container.querySelector('button[aria-label="Download"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Close"]')).toBeNull();
+  });
+
+  it('shows the load failure with a download fallback in the side-panel tab', async () => {
+    vi.mocked(globalThis.fetch).mockImplementation(async () => new Response('', { status: 404 }));
+    await mount(
+      createElement(SessionFileAttachmentPane, { file: markdown, sessionId: 'session' as never })
+    );
+    expect(container.textContent).toContain('Could not load preview');
+    expect(container.querySelectorAll('button[aria-label="Download"]').length).toBe(1);
+  });
+});

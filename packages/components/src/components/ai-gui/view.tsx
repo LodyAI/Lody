@@ -271,10 +271,9 @@ import {
 } from '@/lib/session-image-cache';
 import { SessionFileCard, SessionFileCardList, SessionFileCardLayout } from './session-file-card';
 import {
-  SessionFilePreviewDialog,
-  type SessionFilePreviewStatus,
-} from './session-file-preview-dialog';
-import { downloadSessionFile, fetchSessionFilePreview } from '@/lib/session-file-download';
+  SessionFileAttachmentPreviewDialog,
+  useSessionFileDownload,
+} from './session-file-attachment';
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
 import { isHtmlSessionFile } from '@/lib/session-file-presentation';
 import type {
@@ -655,6 +654,8 @@ export interface SessionChatStreamViewProps {
   onFilePathClick?: (filePath: string, options?: { pathKind: 'canonical' }) => void;
   /** Returns true when an HTML attachment click was routed to a richer surface. */
   onOpenHtmlFile?: (file: SessionFilePayload) => boolean;
+  /** Returns true when the host opened the attachment preview in its side panel. */
+  onOpenFileAttachment?: (file: SessionFilePayload, sessionId: SessionId) => boolean;
   onAnnotateImage?: (selection: DocumentSelection) => boolean;
   lastAssistantMessageId?: string | null;
   lastCompletedAssistantMessageId?: string | null;
@@ -694,6 +695,8 @@ export interface SessionChatStreamViewProps {
 export const SessionChatActionContext = createContext<{
   sendMessage?: (message: ClientToServer) => void;
   openHtmlFile?: (file: SessionFilePayload) => boolean;
+  /** Opens an attachment preview in the host's side panel; false when it has none. */
+  openFileAttachment?: (file: SessionFilePayload, sessionId: SessionId) => boolean;
   openLocalFile?: (path: string, options?: { pathKind: 'canonical' }) => void;
   copyContext?: (messageId: string) => void;
 }>({});
@@ -1355,8 +1358,8 @@ export const buildChatVirtualRows = ({
         (lastEntry.content.type === 'thought' || lastEntry.content.kind === 'think')
       );
 
-      const visibleEntries = block.entries.filter((entry) =>
-        entry.content.type === 'thought' || entry.content.kind !== 'think'
+      const visibleEntries = block.entries.filter(
+        (entry) => entry.content.type === 'thought' || entry.content.kind !== 'think'
       );
       if (visibleEntries.length === 0) return;
 
@@ -1771,6 +1774,7 @@ export const SessionChatStreamView = forwardRef<
       onFileDiffClick,
       onFilePathClick,
       onOpenHtmlFile,
+      onOpenFileAttachment,
       onAnnotateImage,
       lastAssistantMessageId = null,
       lastCompletedAssistantMessageId = null,
@@ -2458,8 +2462,9 @@ export const SessionChatStreamView = forwardRef<
         openLocalFile: onFilePathClick,
         ...(sendMessage ? { sendMessage } : {}),
         ...(onOpenHtmlFile ? { openHtmlFile: onOpenHtmlFile } : {}),
+        ...(onOpenFileAttachment ? { openFileAttachment: onOpenFileAttachment } : {}),
       }),
-      [onCopyContext, onOpenHtmlFile, onFilePathClick, sendMessage]
+      [onCopyContext, onOpenFileAttachment, onOpenHtmlFile, onFilePathClick, sendMessage]
     );
     const hasOnlyEmptyItem = items.length === 1 && items[0]?.type === 'empty';
 
@@ -7322,44 +7327,10 @@ export const WorkspaceSessionFileGroup = ({
 }) => {
   const { t } = useTranslation();
   const readonlyPresentation = useContext(SessionReadonlyContext);
-  const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
-  const authToken = useAtomValue(authTokenAtom);
-  const attachmentRuntime = useAtomValue(runtimeAtom);
-  const { openHtmlFile } = useContext(SessionChatActionContext);
+  const { openHtmlFile, openFileAttachment } = useContext(SessionChatActionContext);
   const postHog = usePostHog();
   const [previewFile, setPreviewFile] = useState<SessionFilePayload | null>(null);
-  const [previewStatus, setPreviewStatus] = useState<SessionFilePreviewStatus>({ kind: 'loading' });
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const previewRequestRef = useRef<string | null>(null);
-
-  const handleDownload = useCallback(
-    (file: SessionFilePayload) => {
-      if (!workspaceId || !authToken) return;
-      capturePostHogEvent(postHog, 'file_preview/downloaded', {
-        file_kind: getAnalyticsFileKind(file.fileName),
-        source: 'attachment',
-      });
-      setDownloadingId(file.fileId);
-      void downloadSessionFile({
-        workspaceId,
-        sessionId: file.storageSessionId ?? sessionId,
-        fileId: file.fileId,
-        encryption: file.encryption,
-        attachmentToken:
-          attachmentRuntime?.workspaceId === workspaceId
-            ? attachmentRuntime.attachmentToken
-            : undefined,
-        token: authToken,
-        fileName: file.fileName,
-        mimeType: file.mimeType,
-      })
-        .catch(() => {
-          toast.error(t('sessions.fileDownloadFailed', { name: file.fileName }));
-        })
-        .finally(() => setDownloadingId((current) => (current === file.fileId ? null : current)));
-    },
-    [authToken, postHog, sessionId, t, workspaceId, attachmentRuntime]
-  );
+  const { download: handleDownload, downloadingId } = useSessionFileDownload(sessionId);
 
   const handlePreview = useCallback(
     (file: SessionFilePayload) => {
@@ -7370,48 +7341,14 @@ export const WorkspaceSessionFileGroup = ({
       if (isHtmlSessionFile(file) && openHtmlFile?.(file)) {
         return;
       }
-      setPreviewFile(file);
-      setPreviewStatus({ kind: 'loading' });
-      if (!workspaceId || !authToken) {
-        setPreviewStatus({
-          kind: 'error',
-          message: t('sessions.filePreviewUnavailable', 'Preview unavailable'),
-        });
+      // A desktop Session opens the attachment as a side-panel tab; hosts with
+      // no side panel (mobile, history readers) keep the Drawer / Dialog.
+      if (openFileAttachment?.(file, sessionId)) {
         return;
       }
-      // Stale-response guard: rapid open/close or switching files must not let
-      // an earlier fetch overwrite the state of the latest request.
-      previewRequestRef.current = file.fileId;
-      void fetchSessionFilePreview({
-        workspaceId,
-        sessionId: file.storageSessionId ?? sessionId,
-        fileId: file.fileId,
-        encryption: file.encryption,
-        attachmentToken:
-          attachmentRuntime?.workspaceId === workspaceId
-            ? attachmentRuntime.attachmentToken
-            : undefined,
-        token: authToken,
-        sizeBytes: file.sizeBytes,
-      })
-        .then((result) => {
-          if (previewRequestRef.current !== file.fileId) return;
-          setPreviewStatus({
-            kind: 'loaded',
-            text: result.text,
-            truncated: result.truncated,
-          });
-        })
-        .catch(() => {
-          if (previewRequestRef.current !== file.fileId) return;
-          // 4xx / network → degrade to a downloadable error state.
-          setPreviewStatus({
-            kind: 'error',
-            message: t('sessions.filePreviewFailed', 'Could not load preview'),
-          });
-        });
+      setPreviewFile(file);
     },
-    [authToken, openHtmlFile, postHog, sessionId, t, workspaceId, attachmentRuntime]
+    [openFileAttachment, openHtmlFile, postHog, sessionId]
   );
 
   // The send path caps at 8 files/message, but a block list synced from another
@@ -7447,13 +7384,11 @@ export const WorkspaceSessionFileGroup = ({
         ) : null}
       </SessionFileCardList>
       {previewFile ? (
-        <SessionFilePreviewDialog
-          open={previewFile !== null}
-          onOpenChange={(open) => {
-            if (!open) setPreviewFile(null);
-          }}
+        <SessionFileAttachmentPreviewDialog
+          key={previewFile.fileId}
           file={previewFile}
-          status={previewStatus}
+          sessionId={sessionId}
+          onClose={() => setPreviewFile(null)}
           onDownload={readonlyPresentation ? undefined : handleDownload}
           isDownloading={downloadingId === previewFile.fileId}
         />
