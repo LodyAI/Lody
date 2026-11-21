@@ -3024,6 +3024,27 @@ export class MessageHandler {
     }
   }
 
+  private async verifyAutomationEditAccess(
+    sessionId: SessionId,
+    userId: string
+  ): Promise<'yes' | 'no' | 'unknown'> {
+    if (userId === this.userId) return 'yes';
+    let localProjectId: string | undefined;
+    try {
+      const meta = (await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId)))
+        ?.meta as SessionMeta | undefined;
+      if (meta?.project?.kind === 'local') localProjectId = meta.project.localProjectId;
+    } catch {
+      return 'unknown';
+    }
+    const access = await this.verifyMachineAccess({
+      sessionId,
+      requesterUserId: userId,
+      ...(localProjectId ? { localProjectId } : {}),
+    });
+    return access.outcome === 'allowed' ? 'yes' : access.outcome === 'denied' ? 'no' : 'unknown';
+  }
+
   private async verifySessionMachineAccess(
     sessionId: SessionId,
     requesterUserId: string
@@ -12513,6 +12534,7 @@ export class MessageHandler {
       },
       author: (sessionId) =>
         this.executionService.getActiveInvocationContext(sessionId)?.requesterUserId,
+      canEdit: (sessionId, userId) => this.verifyAutomationEditAccess(sessionId, userId),
     }));
   }
 

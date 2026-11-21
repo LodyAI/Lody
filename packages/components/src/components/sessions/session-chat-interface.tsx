@@ -2630,7 +2630,7 @@ export const SessionChatInterface = memo(
           (!!localMachineId &&
             !!getAutomationProofIssuer() &&
             workspaceSupports(automationContent, 'rpc') &&
-            currentUser?.id === session.userId))
+            !!currentUser?.id))
         ? {
             workspaceId,
             machineId: session.machineId,

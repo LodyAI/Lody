@@ -43,6 +43,7 @@ function groupFixture() {
     ])
   );
   const barriers = new Set<SessionId>();
+  const editors = new Set(['user']);
   const writes: string[] = [];
   let failRootWrite = false;
   const repo = {
@@ -114,11 +115,13 @@ function groupFixture() {
     hasGoal: async () => false,
     nativeActivity: () => 'idle',
     author: () => 'user',
+    canEdit: async (_sessionId, userId) => (editors.has(userId) ? 'yes' : 'no'),
   });
   return {
     rootId,
     childId,
     authority,
+    editors,
     manager,
     meta,
     writes,
@@ -212,6 +215,71 @@ describe('Automation Session authority', () => {
       }
     }
   );
+
+  it('delivers a teammate’s continuation only while the teammate can still edit the Session', async () => {
+    const f = groupFixture();
+    f.editors.add('teammate');
+    const ledger = new AutomationLedger({ kind: 'memory' }, 'workspace', 'machine');
+    try {
+      const adapter = new AutomationSessionActionsLegacy({
+        lody: {
+          documentManager: f.manager,
+          getAutomationSessionAuthority: () => f.authority,
+          hasAutomationSessionWork: () => false,
+        } as unknown as Lody,
+        auth: { userId: 'user', machineId: 'machine' } as AuthContext,
+        workspace: { id: 'workspace' } as WorkspaceSummary,
+        ledger,
+        condition: allowed,
+        capacity: allowed,
+      });
+      const wait = ledger.registerWait(
+        { program: '() => false', intervalMs: 1000 },
+        f.rootId,
+        'teammate',
+        1
+      );
+      ledger.updateWait(wait.id, 'waiting', { state: 'checking' }, 2);
+      const matched = ledger.finishWait(wait, { resumeText: 'Continue the task' }, 3);
+      const receipt = matched?.invocationId ? ledger.receipt(matched.invocationId) : undefined;
+      if (!receipt) throw new Error('missing continuation receipt');
+      expect(await adapter.authorize(receipt)).toMatchObject({ value: 'yes' });
+      f.editors.delete('teammate');
+      expect(await adapter.authorize(receipt)).toMatchObject({
+        value: 'no',
+        reason: 'target_permission_revoked',
+      });
+    } finally {
+      ledger.close();
+    }
+  });
+
+  it('lets a teammate’s wait read the Session it can edit', async () => {
+    const f = groupFixture();
+    f.editors.add('teammate');
+    const ledger = new AutomationLedger({ kind: 'memory' }, 'workspace', 'machine');
+    try {
+      const wait = ledger.registerWait(
+        { program: '() => false', intervalMs: 1000 },
+        f.rootId,
+        'teammate',
+        1
+      );
+      ledger.updateWait(wait.id, 'waiting', { state: 'checking' }, 2);
+      expect(
+        await readAutomationContext({
+          ledger,
+          manager: f.manager,
+          authority: f.authority,
+          wait,
+          input: { resource: 'session', parameters: {} },
+          now: 3,
+        })
+      ).toMatchObject({ value: { id: f.rootId } });
+    } finally {
+      ledger.close();
+    }
+  });
 
   it('holds Stop at admission and queues the original continuation once after restore', async () => {
     const f = groupFixture();
