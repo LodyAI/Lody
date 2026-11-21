@@ -1,5 +1,11 @@
 import * as stylex from '@stylexjs/stylex';
-import { getSessionRoomId, type CoordinatorReplyRef, type SessionId } from '@lody/shared';
+import {
+  getSessionRoomId,
+  type CoordinatorReplyRef,
+  type GitHubMergeMethod,
+  type SessionId,
+  type SessionPullRequestView,
+} from '@lody/shared';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { useAtomValue } from 'jotai';
@@ -13,6 +19,10 @@ import type {
   ProjectBoardBucket,
   ProjectBoardRow,
 } from './project-board-model';
+import {
+  useCoordinatorActionExecutor,
+  type CoordinatorBubbleActionExecutionRequest,
+} from './use-coordinator-action-executor';
 
 /**
  * Project mode: the coordinator's conversation shows people what changed, not
@@ -31,6 +41,9 @@ type CoordinatorConversationValue = {
   activeThreadRootId?: string | null;
   onReplyToBubble?: (reply: CoordinatorReplyRef) => void;
   onOpenThread?: (threadRootId: string, previewHint?: string) => void;
+  preferredMergeMethod?: GitHubMergeMethod;
+  supportedActionCommands?: ReadonlySet<string>;
+  onExecuteBubbleAction?: (req: CoordinatorBubbleActionExecutionRequest) => Promise<void> | void;
 };
 
 const CoordinatorConversationContext = createContext<CoordinatorConversationValue | null>(null);
@@ -39,28 +52,54 @@ const CoordinatorConversationContext = createContext<CoordinatorConversationValu
 export const useCoordinatorConversation = (): CoordinatorConversationValue | null =>
   useContext(CoordinatorConversationContext);
 
+const noopAsyncFalse = async () => false;
+const noopVoid = () => {};
+
 export function CoordinatorConversationProvider({
   coordinatorSessionId,
   project,
   onOpenTask,
+  onOpenPr,
   onOpenExternalLink,
   replyCountByRootId,
   activeThreadRootId = null,
   onReplyToBubble,
   onOpenThread,
+  onSendCoordinatorPrompt,
+  onPrefillCoordinatorPrompt,
+  onPrefillChildSession,
   children,
 }: {
   coordinatorSessionId: string;
   project: CoordinatorProjectKey | null;
   onOpenTask: (sessionId: string) => void;
+  onOpenPr?: (sessionId: string, pr: SessionPullRequestView) => void;
   onOpenExternalLink?: (href: string, label?: string) => boolean;
   replyCountByRootId?: ReadonlyMap<string, number>;
   activeThreadRootId?: string | null;
   onReplyToBubble?: (reply: CoordinatorReplyRef) => void;
   onOpenThread?: (threadRootId: string, previewHint?: string) => void;
+  onSendCoordinatorPrompt?: (prompt: string, replyTo: CoordinatorReplyRef) => Promise<boolean>;
+  onPrefillCoordinatorPrompt?: (
+    prompt: string,
+    replyTo: CoordinatorReplyRef,
+    activeThreadRootId?: string | null
+  ) => void;
+  onPrefillChildSession?: (sessionId: SessionId, prompt: string) => void;
   children: ReactNode;
 }) {
   const tasks = useCoordinatorTasksData(coordinatorSessionId, project);
+  const { executeBubbleAction, supportedCommands, preferredMergeMethod } =
+    useCoordinatorActionExecutor({
+      coordinatorSessionId: coordinatorSessionId as SessionId,
+      tasks,
+      onOpenTask,
+      onOpenPr: onOpenPr ?? noopVoid,
+      onOpenExternalLink,
+      onSendCoordinatorPrompt: onSendCoordinatorPrompt ?? noopAsyncFalse,
+      onPrefillCoordinatorPrompt: onPrefillCoordinatorPrompt ?? noopVoid,
+      onPrefillChildSession: onPrefillChildSession ?? noopVoid,
+    });
   const value = useMemo<CoordinatorConversationValue>(
     () => ({
       tasks,
@@ -70,14 +109,20 @@ export function CoordinatorConversationProvider({
       activeThreadRootId,
       onReplyToBubble,
       onOpenThread,
+      preferredMergeMethod,
+      supportedActionCommands: supportedCommands,
+      onExecuteBubbleAction: executeBubbleAction,
     }),
     [
       activeThreadRootId,
+      executeBubbleAction,
       onOpenExternalLink,
       onOpenTask,
       onOpenThread,
       onReplyToBubble,
+      preferredMergeMethod,
       replyCountByRootId,
+      supportedCommands,
       tasks,
     ]
   );

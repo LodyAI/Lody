@@ -2674,6 +2674,27 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       executeDaemonSessionTool(context(), 'lody_coordinator_send_message', {
         markdown: '顺便汇报：分页测试已经全绿了。',
         threadId: 'bubble:assistant:user-open-turn:bubble-other',
+        actions: [
+          {
+            label: '让分页会话直接提 PR',
+            tone: 'primary',
+            intent: {
+              kind: 'session_dispatch',
+              sessionId: 'lody://session/child-pagination?workspace=ws',
+              prompt: '请提交分支并创建 PR',
+              mode: 'send',
+            },
+          },
+          {
+            id: 'custom-followup',
+            label: '再补一组压测',
+            intent: {
+              kind: 'coordinator_prompt',
+              prompt: '顺便派一个压测 Role 验证分页性能',
+              mode: 'send',
+            },
+          },
+        ],
       })
     );
     expect(explicitOtherThreadBubble.isError).not.toBe(true);
@@ -2712,6 +2733,31 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
           author: 'coordinator',
           previewText: '另一项分页测试也在跑。',
         },
+        linkedSessionIds: ['child-pagination'],
+        actions: [
+          {
+            id: 'act-1',
+            label: '让分页会话直接提 PR',
+            tone: 'primary',
+            source: 'agent',
+            intent: {
+              kind: 'session_dispatch',
+              sessionId: 'child-pagination',
+              prompt: '请提交分支并创建 PR',
+              mode: 'send',
+            },
+          },
+          {
+            id: 'custom-followup',
+            label: '再补一组压测',
+            source: 'agent',
+            intent: {
+              kind: 'coordinator_prompt',
+              prompt: '顺便派一个压测 Role 验证分页性能',
+              mode: 'send',
+            },
+          },
+        ],
         createdAt: expect.any(Number),
       },
     ]);

@@ -1,5 +1,6 @@
 import {
   COORDINATOR_LINKED_SESSIONS_MAX_COUNT,
+  extractActionLinkedSessionIds,
   extractLinkedSessionIdsFromText,
   formatCoordinatorAnchorId,
   normalizeSessionTurnInputConfig,
@@ -330,6 +331,7 @@ export function collectThreadLinkedSessionIds(
       if (item.type === 'coordinator_message') {
         for (const id of item.linkedSessionIds ?? []) push(id);
         for (const id of extractLinkedSessionIdsFromText(item.body)) push(id);
+        for (const id of extractActionLinkedSessionIds(item.actions)) push(id);
       } else if (item.type === 'operation_progress') {
         for (const entry of item.items) {
           push(entry.target.sessionId);

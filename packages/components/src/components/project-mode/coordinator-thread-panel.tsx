@@ -7,6 +7,7 @@ import {
   parseThreadRootsScalar,
   resolveSessionPrimaryPullRequest,
   type CoordinatorReplyRef,
+  type GitHubMergeMethod,
   type SessionHistoryParsed,
   type SessionId,
   type SessionPullRequestView,
@@ -69,6 +70,10 @@ import type {
   ProjectBoardRow,
 } from './project-board-model';
 import { ProjectBoardPrMenu } from './project-board-pr-menu';
+import {
+  useCoordinatorActionExecutor,
+  type CoordinatorBubbleActionExecutionRequest,
+} from './use-coordinator-action-executor';
 
 const STATE_LABELS: Record<ProjectBoardBucket, [key: string, fallback: string]> = {
   needsYou: ['projectMode.board.needsYou', 'Needs you'],
@@ -234,6 +239,12 @@ export interface CoordinatorThreadPanelProps {
   onOpenExternalLink?: (href: string, label?: string) => boolean;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   onSendReply?: (prompt: string, replyTo: CoordinatorReplyRef) => Promise<boolean> | boolean;
+  preferredMergeMethod?: GitHubMergeMethod;
+  supportedActionCommands?: ReadonlySet<string>;
+  onExecuteBubbleAction?: (req: CoordinatorBubbleActionExecutionRequest) => Promise<void> | void;
+  prefillBridgeRef?: React.MutableRefObject<
+    ((prompt: string, replyTo: CoordinatorReplyRef) => void) | null
+  >;
   agentActivityLabel?: string | null;
   agentActivityTone?: AgentActivityTone;
   conversationFontSize?: ConversationFontSize;
@@ -253,6 +264,10 @@ export function CoordinatorThreadPanel({
   onOpenExternalLink,
   onNavigateSession,
   onSendReply,
+  preferredMergeMethod,
+  supportedActionCommands,
+  onExecuteBubbleAction,
+  prefillBridgeRef,
   agentActivityLabel = null,
   agentActivityTone = 'primary',
   conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
@@ -435,6 +450,23 @@ export function CoordinatorThreadPanel({
     [canonicalRootId]
   );
 
+  useEffect(() => {
+    if (!prefillBridgeRef) return undefined;
+    prefillBridgeRef.current = (prompt: string, reply: CoordinatorReplyRef) => {
+      setSubReplyTarget({
+        ...reply,
+        threadRootId: canonicalRootId,
+      });
+      setPromptValue(prompt);
+      requestAnimationFrame(() => {
+        promptRef.current?.focus();
+      });
+    };
+    return () => {
+      prefillBridgeRef.current = null;
+    };
+  }, [canonicalRootId, prefillBridgeRef]);
+
   const effectiveReplyRef = subReplyTarget ?? defaultRootReplyRef;
   const canSend = Boolean(onSendReply && effectiveReplyRef && promptValue.trim().length > 0 && !submitting);
 
@@ -496,8 +528,21 @@ export function CoordinatorThreadPanel({
       openExternalLink: onOpenExternalLink,
       activeThreadRootId: canonicalRootId,
       onReplyToBubble: onSendReply ? handleReplyInsideThread : undefined,
+      preferredMergeMethod,
+      supportedActionCommands,
+      onExecuteBubbleAction,
     }),
-    [canonicalRootId, handleReplyInsideThread, onOpenExternalLink, onOpenTask, onSendReply, tasks]
+    [
+      canonicalRootId,
+      handleReplyInsideThread,
+      onExecuteBubbleAction,
+      onOpenExternalLink,
+      onOpenTask,
+      onSendReply,
+      preferredMergeMethod,
+      supportedActionCommands,
+      tasks,
+    ]
   );
 
   const threadStreamSessionId = `${coordinatorSessionId}#thread:${canonicalRootId}` as SessionId;
@@ -617,6 +662,8 @@ export function CoordinatorThreadPanel({
   );
 }
 
+const noopThreadVoid = () => {};
+
 /**
  * Leaf wrapper that subscribes to project-board presence & font-size atoms locally
  * so presence ticks never re-render `SessionDetail`.
@@ -625,17 +672,62 @@ export function ConnectedCoordinatorThreadPanel({
   coordinatorSessionId,
   project,
   conversationFontSize,
+  onOpenTask,
+  onOpenPr,
+  onOpenExternalLink,
+  onSendReply,
+  onPrefillChildSession,
   ...rest
-}: Omit<CoordinatorThreadPanelProps, 'tasks'> & {
+}: Omit<
+  CoordinatorThreadPanelProps,
+  'tasks' | 'preferredMergeMethod' | 'supportedActionCommands' | 'onExecuteBubbleAction'
+> & {
   project: CoordinatorProjectKey | null;
+  onPrefillChildSession?: (sessionId: SessionId, prompt: string) => void;
 }) {
   const tasks = useCoordinatorTasksData(coordinatorSessionId, project);
   const atomFontSize = useAtomValue(conversationFontSizeAtom);
+  const prefillBridgeRef = useRef<
+    ((prompt: string, replyTo: CoordinatorReplyRef) => void) | null
+  >(null);
+  const sendCoordinatorPrompt = useCallback(
+    async (prompt: string, replyTo: CoordinatorReplyRef) => {
+      if (!onSendReply) return false;
+      return Boolean(await onSendReply(prompt, replyTo));
+    },
+    [onSendReply]
+  );
+  const prefillCoordinatorPrompt = useCallback(
+    (prompt: string, replyTo: CoordinatorReplyRef) => {
+      prefillBridgeRef.current?.(prompt, replyTo);
+    },
+    []
+  );
+  const { executeBubbleAction, supportedCommands, preferredMergeMethod } =
+    useCoordinatorActionExecutor({
+      coordinatorSessionId,
+      tasks,
+      onOpenTask,
+      onOpenPr: onOpenPr ?? noopThreadVoid,
+      onOpenExternalLink,
+      onSendCoordinatorPrompt: sendCoordinatorPrompt,
+      onPrefillCoordinatorPrompt: prefillCoordinatorPrompt,
+      onPrefillChildSession: onPrefillChildSession ?? noopThreadVoid,
+    });
+
   return (
     <CoordinatorThreadPanel
       coordinatorSessionId={coordinatorSessionId}
       tasks={tasks}
       conversationFontSize={conversationFontSize ?? atomFontSize}
+      onOpenTask={onOpenTask}
+      onOpenPr={onOpenPr}
+      onOpenExternalLink={onOpenExternalLink}
+      onSendReply={onSendReply}
+      preferredMergeMethod={preferredMergeMethod}
+      supportedActionCommands={supportedCommands}
+      onExecuteBubbleAction={executeBubbleAction}
+      prefillBridgeRef={prefillBridgeRef}
       {...rest}
     />
   );

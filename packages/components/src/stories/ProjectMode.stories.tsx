@@ -292,6 +292,49 @@ const streamItems: ChatStreamItem[] = [
       id: 'msg-results-2',
       body: turns[2]!.text,
       linkedSessionIds: ['asks' as SessionId, 'unread-pr' as SessionId],
+      actions: [
+        {
+          id: 'act-keep-7d',
+          label: '旧链接保留 7 天',
+          tone: 'primary',
+          icon: 'sparkles',
+          source: 'agent',
+          intent: {
+            kind: 'coordinator_prompt',
+            prompt: '旧的分享链接保留 7 天有效期，然后再自动失效。',
+            mode: 'send',
+          },
+        },
+        {
+          id: 'act-expire-now',
+          label: '迁移后立即失效',
+          tone: 'default',
+          source: 'agent',
+          intent: {
+            kind: 'coordinator_prompt',
+            prompt: '迁移完成后旧的分享链接立即失效。',
+            mode: 'send',
+          },
+        },
+        {
+          id: 'act-custom-note',
+          label: '补充其他要求…',
+          tone: 'default',
+          icon: 'message-square',
+          source: 'agent',
+          intent: {
+            kind: 'coordinator_prompt',
+            prompt: '关于旧分享链接的迁移策略，我希望：',
+            mode: 'prefill',
+          },
+        },
+      ],
+      actionResolutions: {
+        'act-keep-7d': {
+          status: 'executed',
+          resolvedAt: minutesAgo(6),
+        },
+      },
     },
   ]),
   turnItem(
@@ -321,9 +364,24 @@ const streamItems: ChatStreamItem[] = [
       {
         type: 'coordinator_message',
         id: 'msg-reply-2',
-        body: '好，已经把「旧链接保留 7 天过渡期」转发给 **迁移 E2EE 会话分享** 继续实现了；**PR #2631** 单测全绿无冲突，你可以在右上角直接合并。',
+        body: '好，已经把「旧链接保留 7 天过渡期」转发给 **迁移 E2EE 会话分享** 继续实现了；**PR #2631** 单测全绿无冲突，你可以在下方一键合并。',
         replyTo: STORY_REPLY_TO_USER,
         linkedSessionIds: ['asks' as SessionId, 'unread-pr' as SessionId],
+        actions: [
+          {
+            id: 'act-squash-merge',
+            label: 'Squash 合并 #2631',
+            tone: 'primary',
+            icon: 'git-merge',
+            dedupKey: 'pr.merge:unread-pr',
+            source: 'agent',
+            intent: {
+              kind: 'client_command',
+              command: 'github.pr_merge',
+              params: { sessionId: 'unread-pr', method: 'squash' },
+            },
+          },
+        ],
       },
     ],
     true,
@@ -546,6 +604,7 @@ function CoordinatorPage({
             replyCountByRootId: storyReplyCountByRootId,
             onReplyToBubble: setReplyDraft,
             onOpenThread: openThread,
+            onExecuteBubbleAction: () => {},
           }}
         >
           <ConversationPage

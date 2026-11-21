@@ -99,9 +99,17 @@ export type HistoryAction =
             files?: import('../ai').SessionFilePayload[];
             replyTo?: import('../coordinator-threads').CoordinatorReplyRef;
             linkedSessionIds?: import('../ids').SessionId[];
+            actions?: import('../coordinator-actions').CoordinatorActionSpec[];
             createdAt: number;
           }
         | { kind: 'status'; status: string; updatedAt: number };
+    }
+  | {
+      kind: 'coordinator-action-resolved';
+      turnId: string;
+      bubbleId: string;
+      actionId: string;
+      resolution: import('../coordinator-actions').CoordinatorActionResolution;
     };
 
 /** Which actions can be committed by reading exactly one body. */
@@ -112,7 +120,8 @@ export function historyActionTarget(action: HistoryAction): string | undefined {
     action.kind === 'finish-assistant' ||
     action.kind === 'assistant-file-diff' ||
     action.kind === 'assistant-token-usage' ||
-    action.kind === 'coordinator-output'
+    action.kind === 'coordinator-output' ||
+    action.kind === 'coordinator-action-resolved'
     ? action.turnId
     : undefined;
 }
@@ -411,6 +420,7 @@ export function applyHistoryAction(
             ...(action.output.linkedSessionIds?.length
               ? { linkedSessionIds: action.output.linkedSessionIds }
               : {}),
+            ...(action.output.actions?.length ? { actions: action.output.actions } : {}),
             createdAt: action.output.createdAt,
           },
         ];
@@ -437,6 +447,30 @@ export function applyHistoryAction(
           : withoutStatus;
       }
       return { turns: history, matched: true };
+    }
+    case 'coordinator-action-resolved': {
+      const entry = history.find((t) => t.id === action.turnId && t.role === 'assistant');
+      if (!entry) return { turns: history, matched: false };
+      let matched = false;
+      for (const item of entry.items ?? []) {
+        if (item.type === 'coordinator_message' && item.id === action.bubbleId) {
+          const current = item.actionResolutions?.[action.actionId];
+          if (
+            current &&
+            current.status === action.resolution.status &&
+            current.summary === action.resolution.summary
+          ) {
+            return { turns: history, matched: true };
+          }
+          item.actionResolutions = {
+            ...(item.actionResolutions ?? {}),
+            [action.actionId]: action.resolution,
+          };
+          matched = true;
+          break;
+        }
+      }
+      return { turns: history, matched };
     }
   }
   const unreachable: never = action;

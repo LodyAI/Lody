@@ -13,6 +13,10 @@ import {
   CoordinatorLinkedSessionIdsSchema,
   CoordinatorReplyRefSchema,
 } from './coordinator-threads';
+import {
+  normalizeCoordinatorActionResolutions,
+  normalizeCoordinatorActionSpecs,
+} from './coordinator-actions';
 import { AgentRoleSnapshotSchema } from './message-author';
 import { z } from 'zod';
 import { SessionHistoryContentPatchSchema } from './session-data/history-patches';
@@ -3880,6 +3884,15 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
       files: z.array(SessionFileBlockSchema).min(1).max(SESSION_FILE_MAX_COUNT).optional(),
       replyTo: CoordinatorReplyRefSchema.optional(),
       linkedSessionIds: CoordinatorLinkedSessionIdsSchema.optional(),
+      actions: z
+        .array(z.unknown())
+        .max(32)
+        .transform((items) => normalizeCoordinatorActionSpecs(items))
+        .optional(),
+      actionResolutions: z
+        .record(z.string(), z.unknown())
+        .transform((entries) => normalizeCoordinatorActionResolutions(entries))
+        .optional(),
       createdAt: z.number().finite().optional(),
     })
     .strict(),

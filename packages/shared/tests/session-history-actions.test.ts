@@ -14,6 +14,10 @@ import type { StoredLodyOperation } from '../src/session-orchestration';
 import { createHistoryWriter } from '../src/history-writer';
 import { planOperationProgress } from '../src/session-data/operation-progress';
 import { formatCoordinatorAnchorId, parseCoordinatorAnchorId } from '../src/coordinator-threads';
+import {
+  computeCoordinatorActionDedupKey,
+  normalizeCoordinatorActionSpecs,
+} from '../src/coordinator-actions';
 const sid = 'actions' as SessionId;
 const row = (id: string, role: SessionTurn['role'] = 'assistant'): SessionEntry => ({
   id,
@@ -784,4 +788,124 @@ it('syncs coordinator bubble replies, originThreadId progress, and shallow direc
       ],
     },
   });
+
+  await data.commands.applyHistoryAction({
+    kind: 'coordinator-output',
+    turnId: 'assistant:user-reply-1',
+    output: {
+      kind: 'message',
+      id: 'b-actions',
+      body: 'PR 已就绪，选择下一步操作：',
+      actions: [
+        {
+          id: 'act-merge',
+          label: 'Rebase 合并',
+          tone: 'primary',
+          source: 'agent',
+          intent: {
+            kind: 'client_command',
+            command: 'github.pr_merge',
+            params: { sessionId: 'child-task-1', method: 'rebase' },
+          },
+        },
+        {
+          id: 'act-create-pr',
+          label: '帮子任务创建 PR',
+          source: 'agent',
+          intent: {
+            kind: 'session_dispatch',
+            sessionId: 'child-task-2' as SessionId,
+            prompt: '请提交分支并创建 PR',
+            mode: 'send',
+          },
+        },
+      ],
+      createdAt: 1005,
+    },
+  });
+
+  const resolvedRes = await data.commands.applyHistoryAction({
+    kind: 'coordinator-action-resolved',
+    turnId: 'assistant:user-reply-1',
+    bubbleId: 'b-actions',
+    actionId: 'act-create-pr',
+    resolution: {
+      status: 'executed',
+      resolvedAt: 2000,
+      summary: '已派发创建 PR',
+    },
+  });
+  expect(resolvedRes.matched).toBe(true);
+
+  const peer2 = new LoroDoc();
+  peer2.import(doc.export({ mode: 'snapshot' }));
+  const copy2 = createLoroSessionData({ sessionId: sid, doc: peer2 });
+  const updatedAssistant = await copy2.history.readTurn('assistant:user-reply-1');
+  expect(updatedAssistant).toMatchObject({
+    state: 'ready',
+    turn: {
+      items: [
+        { id: 'b-reply-a' },
+        { id: 'b-reply-b' },
+        {
+          type: 'coordinator_message',
+          id: 'b-actions',
+          actions: [
+            { id: 'act-merge', label: 'Rebase 合并' },
+            { id: 'act-create-pr', label: '帮子任务创建 PR' },
+          ],
+          actionResolutions: {
+            'act-create-pr': {
+              status: 'executed',
+              resolvedAt: 2000,
+              summary: '已派发创建 PR',
+            },
+          },
+        },
+      ],
+    },
+  });
+
+  expect(
+    computeCoordinatorActionDedupKey({
+      id: 'a1',
+      label: 'Rebase 合并',
+      intent: {
+        kind: 'client_command',
+        command: 'github.pr_merge',
+        params: { sessionId: 'lody://session/child-task-1?workspace=ws' },
+      },
+    })
+  ).toBe('pr.merge:child-task-1');
+  expect(
+    computeCoordinatorActionDedupKey({
+      id: 'a2',
+      label: '创建 PR',
+      intent: {
+        kind: 'session_dispatch',
+        sessionId: 'child-task-2' as SessionId,
+        prompt: 'push and create a pull request',
+      },
+    })
+  ).toBe('pr.create:child-task-2');
+  expect(
+    normalizeCoordinatorActionSpecs([
+      {
+        id: 'known',
+        label: 'Keep 7 days',
+        intent: { kind: 'coordinator_prompt', prompt: 'Keep 7 days' },
+      },
+      {
+        id: 'future-unknown',
+        label: 'Future Teleport',
+        intent: { kind: 'future_quantum_leap', target: 'mars' },
+      },
+    ])
+  ).toEqual([
+    {
+      id: 'known',
+      label: 'Keep 7 days',
+      intent: { kind: 'coordinator_prompt', prompt: 'Keep 7 days' },
+    },
+  ]);
 });

@@ -2386,6 +2386,7 @@ export type CoordinatorThreadHostState = {
 export type SessionChatInterfaceHandle = {
   addDocumentSelection: (selection: DocumentSelection) => boolean;
   focusInput: () => void;
+  setInputText: (text: string) => void;
   sendCoordinatorThreadReply: (prompt: string, replyTo: CoordinatorReplyRef) => Promise<boolean>;
   addCommentReference: (reference: CommentReferencePayload) => boolean;
   toggleCommentReference: (reference: CommentReferencePayload) => boolean;
@@ -6367,6 +6368,10 @@ export const SessionChatInterface = memo(
         addDocumentSelection: (selection) =>
           inputAreaRef.current?.addDocumentSelection(selection) ?? false,
         focusInput: () => {
+          inputAreaRef.current?.focusInput();
+        },
+        setInputText: (text) => {
+          inputAreaRef.current?.setInputText(text);
           inputAreaRef.current?.focusInput();
         },
         sendCoordinatorThreadReply: async (prompt, replyTo) => {

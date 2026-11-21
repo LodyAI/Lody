@@ -1554,6 +1554,7 @@ const SessionDetail = ({
   const [openedThreadTabs, setOpenedThreadTabs] = useState<
     Array<{ threadRootId: string; previewHint?: string }>
   >([]);
+  const pendingChatPrefillRef = useRef<Map<string, string>>(new Map());
   const [mountedSideSessionIds, setMountedSideSessionIds] = useState<Set<SessionId>>(
     () => new Set()
   );
@@ -1599,6 +1600,7 @@ const SessionDetail = ({
     setCoordinatorReplyDraft(null);
     setCoordinatorThreadHostState(null);
     setOpenedThreadTabs([]);
+    pendingChatPrefillRef.current.clear();
     setMountedChatSessionIds(new Set());
     setTabOrderState(readStoredTabOrder(sessionId));
     setViewerTabs(nextInitialTabState.viewerTabs);
@@ -2522,6 +2524,15 @@ const SessionDetail = ({
   const setChatTabRef = useCallback(
     (tabId: string, ref: SessionChatInterfaceHandle | DraftSessionChatInterfaceHandle | null) => {
       chatRefsMap.current.set(tabId, ref);
+      if (ref && 'setInputText' in ref) {
+        const pendingText = pendingChatPrefillRef.current.get(tabId);
+        if (pendingText !== undefined) {
+          pendingChatPrefillRef.current.delete(tabId);
+          requestAnimationFrame(() => {
+            ref.setInputText(pendingText);
+          });
+        }
+      }
     },
     []
   );
@@ -5546,6 +5557,34 @@ const SessionDetail = ({
     [sessionId]
   );
 
+  const handlePrefillCoordinatorPrompt = useCallback(
+    (prompt: string, replyTo: CoordinatorReplyRef) => {
+      setCoordinatorReplyDraft(replyTo);
+      requestAnimationFrame(() => {
+        const handle = chatRefsMap.current.get(sessionId);
+        if (handle && 'setInputText' in handle) {
+          handle.setInputText(prompt);
+        }
+      });
+    },
+    [sessionId]
+  );
+
+  const handlePrefillChildSession = useCallback(
+    (targetSessionId: SessionId, prompt: string) => {
+      handleOpenPanelSession(targetSessionId);
+      const handle = chatRefsMap.current.get(targetSessionId);
+      if (handle && 'setInputText' in handle) {
+        requestAnimationFrame(() => {
+          handle.setInputText(prompt);
+        });
+      } else {
+        pendingChatPrefillRef.current.set(targetSessionId, prompt);
+      }
+    },
+    [handleOpenPanelSession]
+  );
+
   const handleViewerUrlTabTitleChange = useCallback((tabId: string, title: string) => {
     const trimmed = title.trim();
     if (!trimmed) return;
@@ -7711,10 +7750,16 @@ const SessionDetail = ({
                   coordinatorSessionId={tabSession.id}
                   project={coordinatorProject}
                   onOpenTask={handleOpenPanelSession}
+                  onOpenPr={(ownerId, pr) => {
+                    handleOpenOwnedPrTab(ownerId as SessionId, pr);
+                  }}
                   onOpenExternalLink={handleOpenCoordinatorExternalLink}
                   replyCountByRootId={coordinatorThreadHostState?.threadIndex.replyCountByRootId}
                   onReplyToBubble={handleReplyToCoordinatorBubble}
                   onOpenThread={handleOpenCoordinatorThread}
+                  onSendCoordinatorPrompt={handleSendCoordinatorThreadReply}
+                  onPrefillCoordinatorPrompt={handlePrefillCoordinatorPrompt}
+                  onPrefillChildSession={handlePrefillChildSession}
                 >
                   {chatSurface}
                 </CoordinatorConversationProvider>
@@ -7944,6 +7989,7 @@ const SessionDetail = ({
                     onOpenExternalLink={handleOpenCoordinatorExternalLink}
                     onNavigateSession={handleCoordinatorNavigateSession}
                     onSendReply={handleSendCoordinatorThreadReply}
+                    onPrefillChildSession={handlePrefillChildSession}
                     agentActivityLabel={coordinatorThreadHostState?.agentActivityLabel ?? null}
                     agentActivityTone={coordinatorThreadHostState?.agentActivityTone ?? 'primary'}
                     isVisible={isThreadActive && isSidebarVisible}

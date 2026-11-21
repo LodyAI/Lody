@@ -1,10 +1,21 @@
 import { canReadSessionForCliRequester } from '@/lib/cloud-cli-port';
 import { LODY_AUTH_URL } from '@/utils/const';
 import {
+  COORDINATOR_ACTION_DEDUP_KEY_MAX_CHARS,
+  COORDINATOR_ACTION_DESCRIPTION_MAX_CHARS,
+  COORDINATOR_ACTION_ID_MAX_CHARS,
+  COORDINATOR_ACTION_LABEL_MAX_CHARS,
+  COORDINATOR_ACTIONS_MAX_COUNT,
   COORDINATOR_ANCHOR_ID_MAX_CHARS,
+  COORDINATOR_LINKED_SESSIONS_MAX_COUNT,
+  CoordinatorActionIntentSchema,
+  CoordinatorActionToneSchema,
+  extractActionLinkedSessionIds,
   extractLinkedSessionIdsFromText,
   isContainedSession,
   isCoordinatorSession,
+  normalizeCoordinatorActionSpecs,
+  type CoordinatorActionSpec,
   type ScheduleCommand,
 } from '@lody/shared';
 import {
@@ -252,6 +263,46 @@ const COORDINATOR_SET_STATUS_TOOL_NAME = 'lody_coordinator_set_status';
 const MAX_COORDINATOR_MESSAGE_CHARS = 64 * 1024;
 const MAX_COORDINATOR_STATUS_CHARS = 240;
 
+const CoordinatorSendMessageActionInputSchema = z
+  .object({
+    id: z
+      .string()
+      .trim()
+      .min(1)
+      .max(COORDINATOR_ACTION_ID_MAX_CHARS)
+      .optional()
+      .describe('Optional stable button identifier within this bubble.'),
+    label: z
+      .string()
+      .trim()
+      .min(1)
+      .max(COORDINATOR_ACTION_LABEL_MAX_CHARS)
+      .describe('Short button label in the user language.'),
+    description: z
+      .string()
+      .trim()
+      .max(COORDINATOR_ACTION_DESCRIPTION_MAX_CHARS)
+      .optional()
+      .describe('Optional tooltip or subtitle explaining what clicking the button does.'),
+    tone: CoordinatorActionToneSchema.optional().describe(
+      'Optional visual emphasis: "primary", "default", or "danger".'
+    ),
+    icon: z.string().trim().min(1).max(64).optional(),
+    dedupKey: z
+      .string()
+      .trim()
+      .min(1)
+      .max(COORDINATOR_ACTION_DEDUP_KEY_MAX_CHARS)
+      .optional()
+      .describe(
+        'Optional semantic key (such as "pr.merge:<sessionId>" or "pr.create:<sessionId>") to override the matching built-in rule button.'
+      ),
+    intent: CoordinatorActionIntentSchema.describe(
+      'Execution primitive: client_command (native zero-token UI action such as task.accept, panel.open, github.pr_merge, github.pr_ready, github.pr_close), session_dispatch (send or prefill a prompt directly in a child sessionId), or coordinator_prompt (send or prefill a follow-up prompt to this coordinator).'
+    ),
+  })
+  .strict();
+
 const CoordinatorSendMessageInputSchema = z
   .object({
     markdown: z
@@ -275,6 +326,13 @@ const CoordinatorSendMessageInputSchema = z
       .optional()
       .describe(
         "Optional thread root identifier (e.g. from a delegated completion item's originThreadId) when routing bubbles to distinct threads. Omitted calls automatically inherit the active turn's thread."
+      ),
+    actions: z
+      .array(CoordinatorSendMessageActionInputSchema)
+      .max(COORDINATOR_ACTIONS_MAX_COUNT)
+      .optional()
+      .describe(
+        'Optional interactive action buttons rendered on this bubble for one-click decisions, direct child-session prompts, or native client commands.'
       ),
   })
   .strict()
@@ -5114,7 +5172,13 @@ export function buildSessionToolServer(
   if (options?.coordinator === true) {
     const applyCoordinatorTurnOutput = async (
       output:
-        | { kind: 'message'; markdown?: string; attachments?: string[]; threadId?: string }
+        | {
+            kind: 'message';
+            markdown?: string;
+            attachments?: string[];
+            threadId?: string;
+            actions?: z.infer<typeof CoordinatorSendMessageActionInputSchema>[];
+          }
         | { kind: 'status'; status: string }
     ) => {
       const ctx = getSessionContext();
@@ -5186,9 +5250,32 @@ export function buildSessionToolServer(
               explicitThreadId: output.threadId,
             })
           : undefined;
+      const normalizedActions: CoordinatorActionSpec[] | undefined =
+        output.kind === 'message' && output.actions?.length
+          ? normalizeCoordinatorActionSpecs(
+              output.actions.map((item, idx) => ({
+                ...item,
+                id: item.id?.trim() || `act-${idx + 1}`,
+                source: 'agent' as const,
+              }))
+            )
+          : undefined;
       const linkedSessionIds =
-        output.kind === 'message' && output.markdown
-          ? extractLinkedSessionIdsFromText(output.markdown)
+        output.kind === 'message'
+          ? (() => {
+              const merged: SessionId[] = [];
+              const seen = new Set<string>();
+              for (const id of [
+                ...(output.markdown ? extractLinkedSessionIdsFromText(output.markdown) : []),
+                ...extractActionLinkedSessionIds(normalizedActions),
+              ]) {
+                if (!seen.has(id) && merged.length < COORDINATOR_LINKED_SESSIONS_MAX_COUNT) {
+                  seen.add(id);
+                  merged.push(id);
+                }
+              }
+              return merged.length > 0 ? merged : undefined;
+            })()
           : undefined;
 
       const result = await backend.applyHistoryAction({
@@ -5204,6 +5291,7 @@ export function buildSessionToolServer(
                 ...(files ? { files } : {}),
                 ...(replyTo ? { replyTo } : {}),
                 ...(linkedSessionIds?.length ? { linkedSessionIds } : {}),
+                ...(normalizedActions?.length ? { actions: normalizedActions } : {}),
                 createdAt: now,
               }
             : { kind: 'status', status: normalizedStatus, updatedAt: now },
@@ -5219,6 +5307,7 @@ export function buildSessionToolServer(
           ...(replyTo ? { threadId: replyTo.threadRootId } : {}),
           ...(images ? { imageCount: images.length } : {}),
           ...(files ? { fileCount: files.length } : {}),
+          ...(normalizedActions?.length ? { actionCount: normalizedActions.length } : {}),
         });
       }
       return jsonTextResult({ ok: true, status: normalizedStatus });
@@ -5227,10 +5316,11 @@ export function buildSessionToolServer(
     registerSessionTool(
       COORDINATOR_SEND_MESSAGE_TOOL_NAME,
       {
-        summary: 'Send one Markdown chat bubble (optionally with attachments) to the user.',
+        summary:
+          'Send one Markdown chat bubble (optionally with attachments and action buttons) to the user.',
         title: 'Send message to user',
         description:
-          'Send one Markdown chat bubble to the user in this coordinator conversation, optionally attaching images, videos, or documents via zero-copy references ("image:<id>", "file:<id>") from delegated results or this conversation, or workspace file paths. Plain assistant text and thoughts are hidden from the user; every message you want the user to read must be sent with this tool. Ready to call directly without lody_help.',
+          'Send one Markdown chat bubble to the user in this coordinator conversation, optionally attaching images, videos, or documents via zero-copy references ("image:<id>", "file:<id>") or workspace file paths, and optionally attaching interactive action buttons (`actions`). Plain assistant text and thoughts are hidden from the user; every message you want the user to read must be sent with this tool. Ready to call directly without lody_help.',
         inputSchema: CoordinatorSendMessageInputSchema,
         exemptFromHelp: true,
       },
@@ -5241,6 +5331,7 @@ export function buildSessionToolServer(
             markdown: args.markdown,
             attachments: args.attachments,
             threadId: args.threadId,
+            actions: args.actions,
           });
         } catch (error) {
           return mcpErrorResult(error);

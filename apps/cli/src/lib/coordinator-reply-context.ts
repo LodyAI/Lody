@@ -1,9 +1,11 @@
 import {
   COORDINATOR_LINKED_SESSIONS_MAX_COUNT,
   createCoordinatorReplyRef,
+  extractActionLinkedSessionIds,
   extractLinkedSessionIdsFromText,
   formatCoordinatorAnchorId,
   formatCoordinatorReplyContextBlock,
+  normalizeCoordinatorActionSpecs,
   normalizeSessionTurnInputConfig,
   parseCoordinatorAnchorId,
   parseThreadRootsScalar,
@@ -70,6 +72,13 @@ function collectTurnLinkedSessionIds(
       }
       if (typeof item.body === 'string') {
         for (const id of extractLinkedSessionIdsFromText(item.body)) push(id);
+      }
+      if (Array.isArray(item.actions)) {
+        for (const id of extractActionLinkedSessionIds(
+          normalizeCoordinatorActionSpecs(item.actions)
+        )) {
+          push(id);
+        }
       }
     } else if (item.type === 'operation_progress') {
       if (

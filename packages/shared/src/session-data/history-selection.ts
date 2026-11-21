@@ -259,6 +259,7 @@ export function selectHistoryActionRows(
     case 'assistant-token-usage':
     case 'user-status':
     case 'operation-batch-status':
+    case 'coordinator-action-resolved':
       addWhere((row) => row.id === action.turnId);
       break;
   }

@@ -249,6 +249,8 @@ const historyMessageItemSchema = schema
               (v.files === undefined || Array.isArray(v.files)) &&
               (v.replyTo === undefined || isRecord(v.replyTo)) &&
               (v.linkedSessionIds === undefined || Array.isArray(v.linkedSessionIds)) &&
+              (v.actions === undefined || Array.isArray(v.actions)) &&
+              (v.actionResolutions === undefined || isRecord(v.actionResolutions)) &&
               (v.createdAt === undefined || typeof v.createdAt === 'number')
               ? true
               : 'Missing coordinator message metadata';

@@ -3,6 +3,10 @@ import type { AgentRoleProposalMeta } from './agent-role-proposal';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
 import type { MemoryBinding } from './memory-provider';
 import type { CoordinatorReplyRef } from './coordinator-threads';
+import type {
+  CoordinatorActionResolution,
+  CoordinatorActionSpec,
+} from './coordinator-actions';
 import type { AcpModelControls } from './acp-model-capabilities';
 import {
   AvailableCommand,
@@ -2028,6 +2032,8 @@ export type MessageContent =
       files?: SessionFilePayload[];
       replyTo?: CoordinatorReplyRef;
       linkedSessionIds?: SessionId[];
+      actions?: CoordinatorActionSpec[];
+      actionResolutions?: Record<string, CoordinatorActionResolution>;
       createdAt?: number;
     }
   | {

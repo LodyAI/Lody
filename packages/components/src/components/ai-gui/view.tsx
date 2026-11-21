@@ -308,6 +308,11 @@ import {
   CoordinatorTaskChangeStrip,
   useCoordinatorConversation,
 } from '@/components/project-mode/coordinator-conversation';
+import { CoordinatorBubbleActionBar } from '@/components/project-mode/coordinator-action-bar';
+import {
+  buildLatestCoordinatorBubbleByTaskId,
+  resolveCoordinatorBubbleActions,
+} from '@/components/project-mode/coordinator-action-engine';
 import {
   CoordinatorBubbleFooterActions,
   CoordinatorInlineQuoteChip,
@@ -1319,7 +1324,8 @@ export const buildChatVirtualRows = ({
           entry.type === 'coordinator_message' &&
           (entry.body.trim().length > 0 ||
             (entry.images?.length ?? 0) > 0 ||
-            (entry.files?.length ?? 0) > 0)
+            (entry.files?.length ?? 0) > 0 ||
+            (entry.actions?.length ?? 0) > 0)
         ) {
           coordinatorEntries.push({
             key: `assistant:${message.id}:bubble:${entry.id}`,
@@ -1991,6 +1997,10 @@ export const SessionChatStreamView = forwardRef<
     const copyContextAvailable = onCopyContext !== undefined;
     const selectionLayouts = selectionLayoutsRef.current;
     const coordinatorBubbles = isMetaCoordinator || useCoordinatorConversation() !== null;
+    const latestCoordinatorBubbleByTaskId = useMemo(
+      () => (coordinatorBubbles ? buildLatestCoordinatorBubbleByTaskId(items) : undefined),
+      [coordinatorBubbles, items]
+    );
     const virtualRows = useMemo(() => {
       // Expansion lives in the module cache so virtualized child rows retain
       // their state after unmounting; this counter is its React invalidation
@@ -2775,132 +2785,134 @@ export const SessionChatStreamView = forwardRef<
     ].filter((row): row is ReactElement => row != null);
 
     return (
-      <SessionChatActionContext.Provider value={chatActionContextValue}>
-        <SessionImagePreviewContext.Provider value={imagePreviewContextValue}>
-          <LiveTurnContext.Provider value={liveTurnContextValue}>
-            <ContainerQueryProvider
-              ref={scrollRootRef}
-              className={cn('relative bg-background', className)}
-            >
-              <NativeSelectionRowsContext.Provider value={nativeSelectionRows}>
-                <EngineConversationScroller
-                  sessionId={sessionId}
-                  rows={listRows}
-                  rowMeta={engineRowMeta}
-                  item={ConversationVirtualRow}
-                  keepMounted={nativeTextSelection.keepMounted}
-                  initialWindowReady={initialWindowReady}
-                  hidden={!isVisible}
-                  suppressAutoScrollRef={autoScrollSuppressedRef}
-                  onAtBottomChange={onAtBottomChange}
-                  onScroll={handleStreamScroll}
-                  onStateChange={handleListStateChange}
-                  layoutKey={String(conversationFontSize)}
-                  // Keep x overflow explicit: overflow-y:auto otherwise computes
-                  // the untouched x axis to auto too, letting any wide row pan the
-                  // entire conversation instead of its own nested scroller.
-                  // Mobile session page floats a frosted header over the list;
-                  // `--conversation-top-inset` (set by session-detail's mobile
-                  // branch) pads the scroll content so the first message clears the
-                  // header at rest while later content scrolls under it and blurs.
-                  // Unset elsewhere → falls back to py-6's 1.5rem, a no-op.
-                  viewportClassName="chat-scrollbar relative h-full overflow-x-hidden py-5 sm:py-6"
-                  viewportStyle={CONVERSATION_VIEWPORT_STYLE}
-                  trailing={<MessageSelectionOverlay />}
-                  // Pre-render extra items outside the viewport to reduce blank areas
-                  // during fast scrolling (especially on mobile). This is 4x Virtua's
-                  // default (200px) — generous, but deliberately not the previous 2000px:
-                  // an oversized buffer keeps a huge set of still-resizing rows mounted,
-                  // which widens the window where Virtua's offsets are mid-recompute and
-                  // rows can transiently overlap. 800 keeps ~2 viewports of headroom.
-                  bufferSize={CONVERSATION_OVERSCAN}
-                  handleRef={listRef}
-                />
-              </NativeSelectionRowsContext.Provider>
-              {/* Top fade into the bg-background canvas above (desktop only),
-                hinting that the conversation continues past the top edge. */}
-              {!isMobile && isScrolledFromTop ? (
-                <div className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-background to-transparent" />
-              ) : null}
-              {/* Bottom fade into the same canvas over the last 40px above the
-                info bar (desktop only): more conversation below. */}
-              {!isMobile && hasContentBelow ? (
-                <div
-                  data-conversation-bottom-fade=""
-                  className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background to-transparent"
-                />
-              ) : null}
-              {/* Round outline. Its visual layer portals to the full-page overlay
-                when supplied, so composer growth cannot move its centre. It is
-                never a Virtua row or a child of the viewport: sticky scroll
-                takes the content element from that div's `firstElementChild`.
-                Touch has no hover, so mobile is excluded rather than shipped
-                without its preview card. */}
-              {isMobile || !showOutlineRail ? null : (
-                <ConversationOutlineRail
-                  entries={outlineEntries}
-                  activeIndex={activeOutlineIndex}
-                  onJumpToRound={handleOutlineJump}
-                  onPreviewRound={handleOutlinePreview}
-                  overlayRoot={outlineOverlayRoot}
-                  enableArrivalIntent
-                />
-              )}
-              {showScrollToLatest && !isSticky && (
-                /* Full-bleed overlay; ConversationColumn carries the shared
-                 horizontal gutter so the button lines up with the composer. */
-                <div className="pointer-events-none absolute inset-x-0 bottom-4">
-                  <ConversationColumn className="flex justify-end">
-                    <Button
-                      variant="secondary"
-                      icon
-                      data-scroll-to-latest=""
-                      className={cn(
-                        stylex.props(stylex.defaultMarker()).className,
-                        'pointer-events-auto rounded-full border-[0.5px] border-border bg-white text-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] hover:bg-white dark:bg-secondary dark:text-secondary-foreground dark:shadow-none'
-                      )}
-                      onClick={scrollToBottom}
-                      aria-label={t('sessions.scrollToLatest')}
-                    >
-                      {isScrollToLatestWorking ? (
-                        <Spinner
+      <CoordinatorStreamLatestBubbleContext.Provider value={latestCoordinatorBubbleByTaskId}>
+        <SessionChatActionContext.Provider value={chatActionContextValue}>
+          <SessionImagePreviewContext.Provider value={imagePreviewContextValue}>
+            <LiveTurnContext.Provider value={liveTurnContextValue}>
+              <ContainerQueryProvider
+                ref={scrollRootRef}
+                className={cn('relative bg-background', className)}
+              >
+                <NativeSelectionRowsContext.Provider value={nativeSelectionRows}>
+                  <EngineConversationScroller
+                    sessionId={sessionId}
+                    rows={listRows}
+                    rowMeta={engineRowMeta}
+                    item={ConversationVirtualRow}
+                    keepMounted={nativeTextSelection.keepMounted}
+                    initialWindowReady={initialWindowReady}
+                    hidden={!isVisible}
+                    suppressAutoScrollRef={autoScrollSuppressedRef}
+                    onAtBottomChange={onAtBottomChange}
+                    onScroll={handleStreamScroll}
+                    onStateChange={handleListStateChange}
+                    layoutKey={String(conversationFontSize)}
+                    // Keep x overflow explicit: overflow-y:auto otherwise computes
+                    // the untouched x axis to auto too, letting any wide row pan the
+                    // entire conversation instead of its own nested scroller.
+                    // Mobile session page floats a frosted header over the list;
+                    // `--conversation-top-inset` (set by session-detail's mobile
+                    // branch) pads the scroll content so the first message clears the
+                    // header at rest while later content scrolls under it and blurs.
+                    // Unset elsewhere → falls back to py-6's 1.5rem, a no-op.
+                    viewportClassName="chat-scrollbar relative h-full overflow-x-hidden py-5 sm:py-6"
+                    viewportStyle={CONVERSATION_VIEWPORT_STYLE}
+                    trailing={<MessageSelectionOverlay />}
+                    // Pre-render extra items outside the viewport to reduce blank areas
+                    // during fast scrolling (especially on mobile). This is 4x Virtua's
+                    // default (200px) — generous, but deliberately not the previous 2000px:
+                    // an oversized buffer keeps a huge set of still-resizing rows mounted,
+                    // which widens the window where Virtua's offsets are mid-recompute and
+                    // rows can transiently overlap. 800 keeps ~2 viewports of headroom.
+                    bufferSize={CONVERSATION_OVERSCAN}
+                    handleRef={listRef}
+                  />
+                </NativeSelectionRowsContext.Provider>
+                {/* Top fade into the bg-background canvas above (desktop only),
+                  hinting that the conversation continues past the top edge. */}
+                {!isMobile && isScrolledFromTop ? (
+                  <div className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-background to-transparent" />
+                ) : null}
+                {/* Bottom fade into the same canvas over the last 40px above the
+                  info bar (desktop only): more conversation below. */}
+                {!isMobile && hasContentBelow ? (
+                  <div
+                    data-conversation-bottom-fade=""
+                    className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background to-transparent"
+                  />
+                ) : null}
+                {/* Round outline. Its visual layer portals to the full-page overlay
+                  when supplied, so composer growth cannot move its centre. It is
+                  never a Virtua row or a child of the viewport: sticky scroll
+                  takes the content element from that div's `firstElementChild`.
+                  Touch has no hover, so mobile is excluded rather than shipped
+                  without its preview card. */}
+                {isMobile || !showOutlineRail ? null : (
+                  <ConversationOutlineRail
+                    entries={outlineEntries}
+                    activeIndex={activeOutlineIndex}
+                    onJumpToRound={handleOutlineJump}
+                    onPreviewRound={handleOutlinePreview}
+                    overlayRoot={outlineOverlayRoot}
+                    enableArrivalIntent
+                  />
+                )}
+                {showScrollToLatest && !isSticky && (
+                  /* Full-bleed overlay; ConversationColumn carries the shared
+                   horizontal gutter so the button lines up with the composer. */
+                  <div className="pointer-events-none absolute inset-x-0 bottom-4">
+                    <ConversationColumn className="flex justify-end">
+                      <Button
+                        variant="secondary"
+                        icon
+                        data-scroll-to-latest=""
+                        className={cn(
+                          stylex.props(stylex.defaultMarker()).className,
+                          'pointer-events-auto rounded-full border-[0.5px] border-border bg-white text-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] hover:bg-white dark:bg-secondary dark:text-secondary-foreground dark:shadow-none'
+                        )}
+                        onClick={scrollToBottom}
+                        aria-label={t('sessions.scrollToLatest')}
+                      >
+                        {isScrollToLatestWorking ? (
+                          <Spinner
+                            {...stylex.props(
+                              scrollToLatestStyles.icon,
+                              scrollToLatestStyles.workingSpinner
+                            )}
+                            aria-hidden="true"
+                          />
+                        ) : null}
+                        <ArrowDown
                           {...stylex.props(
                             scrollToLatestStyles.icon,
-                            scrollToLatestStyles.workingSpinner
+                            isScrollToLatestWorking && scrollToLatestStyles.workingArrow
                           )}
                           aria-hidden="true"
                         />
-                      ) : null}
-                      <ArrowDown
-                        {...stylex.props(
-                          scrollToLatestStyles.icon,
-                          isScrollToLatestWorking && scrollToLatestStyles.workingArrow
-                        )}
-                        aria-hidden="true"
-                      />
-                    </Button>
-                  </ConversationColumn>
-                </div>
-              )}
-              <ImagePreviewDialog
-                open={
-                  findSessionImageGalleryEntryIndex(activeGalleryEntries, activeImageKey) !== -1
-                }
-                onOpenChange={(open) => {
-                  if (!open) {
-                    setActiveImageKey(null);
+                      </Button>
+                    </ConversationColumn>
+                  </div>
+                )}
+                <ImagePreviewDialog
+                  open={
+                    findSessionImageGalleryEntryIndex(activeGalleryEntries, activeImageKey) !== -1
                   }
-                }}
-                activeImageKey={activeImageKey}
-                onActiveImageKeyChange={setActiveImageKey}
-                entries={activeGalleryEntries}
-                onAnnotateImage={onAnnotateImage}
-                portalAnchorRef={scrollRootRef}
-              />
-            </ContainerQueryProvider>
-          </LiveTurnContext.Provider>
-        </SessionImagePreviewContext.Provider>
-      </SessionChatActionContext.Provider>
+                  onOpenChange={(open) => {
+                    if (!open) {
+                      setActiveImageKey(null);
+                    }
+                  }}
+                  activeImageKey={activeImageKey}
+                  onActiveImageKeyChange={setActiveImageKey}
+                  entries={activeGalleryEntries}
+                  onAnnotateImage={onAnnotateImage}
+                  portalAnchorRef={scrollRootRef}
+                />
+              </ContainerQueryProvider>
+            </LiveTurnContext.Provider>
+          </SessionImagePreviewContext.Provider>
+        </SessionChatActionContext.Provider>
+      </CoordinatorStreamLatestBubbleContext.Provider>
     );
   }
 );
@@ -6787,6 +6799,10 @@ const coordinatorDotWave = stylex.keyframes({
  * its own reply bubble on the left rail. Plain assistant text, thoughts, tool
  * calls, and duration stay hidden.
  */
+const CoordinatorStreamLatestBubbleContext = createContext<ReadonlyMap<string, string> | undefined>(
+  undefined
+);
+
 function CoordinatorReplyBubble({
   messageId,
   entry,
@@ -6802,7 +6818,9 @@ function CoordinatorReplyBubble({
   onFilePathClick?: (filePath: string) => void;
   conversationFontSize: ConversationFontSize;
 }) {
+  const { t } = useTranslation();
   const coordinator = useCoordinatorConversation();
+  const latestBubbleByTaskId = useContext(CoordinatorStreamLatestBubbleContext);
   const isMobile = useIsMobile();
   const [isBubbleHovered, setIsBubbleHovered] = useState(false);
   const hasBody = entry.body.trim().length > 0;
@@ -6816,6 +6834,22 @@ function CoordinatorReplyBubble({
         bubbleId: entry.id,
       }),
     [entry.id, messageId]
+  );
+  const resolvedActions = useMemo(
+    () =>
+      coordinator
+        ? resolveCoordinatorBubbleActions({
+            turnId: messageId,
+            entry,
+            tasksById: coordinator.tasks,
+            latestBubbleByTaskId,
+            preferredMergeMethod: coordinator.preferredMergeMethod,
+            supportedCommands: coordinator.supportedActionCommands,
+            translate: (key, fallback, options) =>
+              String(t(key as never, { defaultValue: fallback, ...options } as never)),
+          })
+        : [],
+    [coordinator, entry, latestBubbleByTaskId, messageId, t]
   );
   const mobileActionsRevealed = useMobileMessageActionsRevealed(anchorId);
   const replyCount = coordinator?.activeThreadRootId
@@ -6878,6 +6912,24 @@ function CoordinatorReplyBubble({
             ) : null}
             {hasFiles ? (
               <SessionFileGroup files={entry.files!} sessionId={sessionId} align="start" />
+            ) : null}
+            {resolvedActions.length > 0 ? (
+              <CoordinatorBubbleActionBar
+                actions={resolvedActions}
+                onExecuteAction={
+                  coordinator?.onExecuteBubbleAction
+                    ? (action) =>
+                        coordinator.onExecuteBubbleAction!({
+                          turnId: messageId,
+                          bubbleId: entry.id,
+                          bubbleBody: entry.body,
+                          bubbleReplyTo: entry.replyTo,
+                          activeThreadRootId: coordinator.activeThreadRootId,
+                          action,
+                        })
+                    : undefined
+                }
+              />
             ) : null}
           </div>
         </div>

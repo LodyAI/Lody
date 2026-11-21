@@ -15,6 +15,12 @@ import {
   collectThreadLinkedSessionIds,
   filterThreadStreamItems,
 } from '../src/components/project-mode/coordinator-thread-model';
+import {
+  buildLatestCoordinatorBubbleByTaskId,
+  createCoordinatorActionCommandRegistry,
+  resolveCoordinatorBubbleActions,
+} from '../src/components/project-mode/coordinator-action-engine';
+import type { ProjectBoardRow } from '../src/components/project-mode/project-board-model';
 import type { TurnIndexRow } from '../src/lib/conversation-view';
 
 // Guards the per-turn row cache behind view.tsx `buildChatVirtualRows`: rows for
@@ -701,5 +707,202 @@ describe('coordinator conversation bubbles and search', () => {
       'user-reply-root-user',
     ]);
     expect(projectedUserRoot[1]?.items).toHaveLength(2);
+  });
+
+  it('merges agent actions ahead of fallback rules by semantic dedupKey, filters unknown commands, and projects live SessionMeta state', async () => {
+    const translate = (_key: string, fallback: string, opts?: Record<string, unknown>) =>
+      fallback.replace(/\{\{(\w+)\}\}/gu, (_, name: string) => String(opts?.[name] ?? ''));
+
+    const taskPrReady: ProjectBoardRow = {
+      session: {
+        id: 'task-pr' as SessionId,
+        title: 'Refactor auth',
+        isArchived: false,
+      } as ProjectBoardRow['session'],
+      taskNumber: 1,
+      bucket: 'review',
+      latestMessageAt: 1000,
+      pullRequest: {
+        pr: { url: 'https://github.com/LodyAI/lody/pull/42', status: 'open' },
+        url: 'https://github.com/LodyAI/lody/pull/42',
+        status: 'open',
+        repoFullName: 'LodyAI/lody',
+        number: 42,
+        readiness: 'y',
+        state: { m: 'c', s: 's', t: 10 },
+      },
+    };
+    const taskNoPrDirty: ProjectBoardRow = {
+      session: {
+        id: 'task-nopr' as SessionId,
+        title: 'Add metrics',
+        isArchived: false,
+        repoFullName: 'LodyAI/lody',
+        diffStats: { allChange: { add: 24, del: 4, files: 2 } },
+      } as ProjectBoardRow['session'],
+      taskNumber: 2,
+      bucket: 'review',
+      latestMessageAt: 1000,
+      pullRequest: null,
+    };
+
+    const tasksMap = new Map<string, ProjectBoardRow>([
+      ['task-pr', taskPrReady],
+      ['task-nopr', taskNoPrDirty],
+    ]);
+
+    const earlierBubbleEntry: Extract<MessageContent, { type: 'coordinator_message' }> = {
+      type: 'coordinator_message',
+      id: 'b-earlier',
+      body: 'Started [T1](lody://session/task-pr)',
+      linkedSessionIds: ['task-pr' as SessionId],
+    };
+    const latestBubbleEntry: Extract<MessageContent, { type: 'coordinator_message' }> = {
+      type: 'coordinator_message',
+      id: 'b-latest',
+      body: 'Both tasks finished!',
+      linkedSessionIds: ['task-pr' as SessionId, 'task-nopr' as SessionId],
+      actions: [
+        {
+          id: 'agent-rebase-merge',
+          label: 'Rebase & merge #42',
+          tone: 'primary',
+          source: 'agent',
+          intent: {
+            kind: 'client_command',
+            command: 'github.pr_merge',
+            params: { sessionId: 'task-pr', method: 'rebase' },
+          },
+        },
+        {
+          id: 'agent-future-cmd',
+          label: 'Future deploy',
+          source: 'agent',
+          intent: {
+            kind: 'client_command',
+            command: 'deploy.rocket_ship',
+            params: {},
+          },
+        },
+        {
+          id: 'agent-e2e',
+          label: 'Run E2E suite',
+          source: 'agent',
+          intent: {
+            kind: 'coordinator_prompt',
+            prompt: 'Dispatch E2E role now',
+            mode: 'send',
+          },
+        },
+      ],
+    };
+
+    const items: ChatStreamItem[] = [
+      wrap(makeMessage('assistant:u1', 'assistant', [earlierBubbleEntry], true)),
+      wrap(makeMessage('assistant:u2', 'assistant', [latestBubbleEntry], true)),
+    ];
+    const latestByTask = buildLatestCoordinatorBubbleByTaskId(items);
+
+    expect(
+      resolveCoordinatorBubbleActions({
+        turnId: 'assistant:u1',
+        entry: earlierBubbleEntry,
+        tasksById: tasksMap,
+        latestBubbleByTaskId: latestByTask,
+        translate,
+      })
+    ).toEqual([]);
+
+    const resolvedInitial = resolveCoordinatorBubbleActions({
+      turnId: 'assistant:u2',
+      entry: latestBubbleEntry,
+      tasksById: tasksMap,
+      latestBubbleByTaskId: latestByTask,
+      translate,
+      maxActions: 6,
+    });
+    expect(resolvedInitial.map((a) => ({ id: a.spec.id, label: a.displayLabel, state: a.liveState }))).toEqual([
+      { id: 'agent-rebase-merge', label: 'Rebase & merge #42', state: 'ready' },
+      { id: 'agent-e2e', label: 'Run E2E suite', state: 'ready' },
+      { id: 'rule:pr-open:task-pr', label: 'View #42', state: 'ready' },
+      { id: 'rule:pr-create:task-nopr', label: 'Create PR (T2)', state: 'ready' },
+      { id: 'rule:task-accept:task-pr', label: 'Accept T1', state: 'ready' },
+      { id: 'rule:task-accept:task-nopr', label: 'Accept T2', state: 'ready' },
+    ]);
+
+    const tasksAfterLiveWorldChanges = new Map<string, ProjectBoardRow>([
+      [
+        'task-pr',
+        {
+          ...taskPrReady,
+          bucket: 'accepted',
+          session: { ...taskPrReady.session, isArchived: true },
+          pullRequest: { ...taskPrReady.pullRequest!, status: 'merged' },
+        },
+      ],
+      [
+        'task-nopr',
+        {
+          ...taskNoPrDirty,
+          pullRequest: {
+            pr: { url: 'https://github.com/LodyAI/lody/pull/43', status: 'open' },
+            url: 'https://github.com/LodyAI/lody/pull/43',
+            status: 'open',
+            repoFullName: 'LodyAI/lody',
+            number: 43,
+            readiness: null,
+            state: null,
+          },
+        },
+      ],
+    ]);
+
+    const resolvedAfterWorldUpdate = resolveCoordinatorBubbleActions({
+      turnId: 'assistant:u2',
+      entry: {
+        ...latestBubbleEntry,
+        actionResolutions: {
+          'agent-e2e': { status: 'executed', resolvedAt: 2000 },
+        },
+      },
+      tasksById: tasksAfterLiveWorldChanges,
+      latestBubbleByTaskId: latestByTask,
+      translate,
+      maxActions: 6,
+    });
+    expect(resolvedAfterWorldUpdate.slice(0, 2)).toEqual([
+      expect.objectContaining({
+        spec: expect.objectContaining({ id: 'agent-rebase-merge' }),
+        liveState: 'completed',
+        displayLabel: '#42 merged',
+      }),
+      expect.objectContaining({
+        spec: expect.objectContaining({ id: 'agent-e2e' }),
+        liveState: 'completed',
+        displayLabel: 'Run E2E suite',
+      }),
+    ]);
+
+    const registry = createCoordinatorActionCommandRegistry();
+    const calls: string[] = [];
+    registry.register('preview.open_sim', async (params) => {
+      calls.push(String(params?.device ?? 'ios'));
+      return { persistResolution: true, summary: 'Opened simulator' };
+    });
+    expect(registry.has('preview.open_sim')).toBe(true);
+    const execRes = await registry.execute(
+      'preview.open_sim',
+      { device: 'pixel-9' },
+      {
+        coordinatorSessionId: 'coord-1' as SessionId,
+        turnId: 'assistant:u2',
+        bubbleId: 'b-latest',
+        bubbleBody: 'Done',
+        action: latestBubbleEntry.actions![0]!,
+        tasks: tasksMap,
+      }
+    );
+    expect(calls).toEqual(['pixel-9']);
+    expect(execRes).toEqual({ persistResolution: true, summary: 'Opened simulator' });
   });
 });
