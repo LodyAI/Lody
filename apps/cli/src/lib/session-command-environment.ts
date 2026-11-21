@@ -124,132 +124,123 @@ export interface DaemonWorkspace {
 
 export type DaemonTargetAuthority = 'local-daemon' | 'remote-or-unverified' | 'denied';
 
-export function classifyDaemonTargetAuthority(args: {
-  hasLocalEnvironment: boolean;
-  localEnvironmentMatches?: boolean;
-  daemonMatches: boolean;
-  sameMachine: boolean;
-  sameOwnerUser: boolean;
-  isEncryptedWorkspace: boolean;
-  accessStatus?: DaemonWorkspaceAccess['status'];
-  machineOwnerMatchesDaemon?: boolean;
-}): DaemonTargetAuthority {
-  if (args.hasLocalEnvironment) {
-    return args.localEnvironmentMatches ? 'local-daemon' : 'denied';
-  }
-  if (!args.daemonMatches || !args.sameMachine) return 'remote-or-unverified';
-  if (args.accessStatus === 'revoked' || args.accessStatus === 'unauthorized') return 'denied';
-  if (args.accessStatus === 'unknown') return 'remote-or-unverified';
-  if (args.isEncryptedWorkspace) return 'local-daemon';
-  if (!args.sameOwnerUser || args.machineOwnerMatchesDaemon !== true) return 'remote-or-unverified';
-  return 'local-daemon';
-}
+export type DaemonTargetResolution = {
+  sameReplica: boolean;
+  isLocalEnvironment: boolean;
+  localHost?: DaemonLocalSessionHost;
+  authority: DaemonTargetAuthority;
+  nativeOwnerAccess: boolean | undefined;
+};
 
-export function isBoundDaemonMachineFlockAuthoritative(
-  manager: LoroDocumentManager,
-  workspaceId: WorkspaceId,
-  machineId: MachineId
-): boolean {
-  if (getSessionCommandEnvironment()) return false;
-  const daemon = getDaemonWorkspace();
-  if (
-    !daemon ||
-    daemon.manager !== manager ||
-    daemon.workspaceId !== workspaceId ||
-    daemon.machineId !== machineId
-  ) {
-    return false;
-  }
-  const accessStatus = daemon.readAccess?.().status;
-  return (
-    accessStatus !== 'revoked' && accessStatus !== 'unauthorized' && accessStatus !== 'unknown'
-  );
-}
-
-export async function readDaemonTargetAuthority(args: {
-  auth: Pick<AuthContext, 'userId' | 'machineId'>;
-  manager: LoroDocumentManager;
+/**
+ * Single binding and local-authority resolver for daemon-hosted commands.
+ * `sameReplica` / `localHost` require matching manager, workspace, machine, optional auth,
+ * and non-revoked/non-unknown daemon access. `authority` / `nativeOwnerAccess` additionally
+ * verify requester ownership (or encrypted workspace authority) when `requesterUserId` is given.
+ */
+export async function resolveDaemonTarget(args: {
+  manager: unknown;
   workspaceId: WorkspaceId;
   machineId: MachineId;
-  requesterUserId: string;
-}): Promise<DaemonTargetAuthority> {
-  const environment = getSessionCommandEnvironment();
-  if (environment) {
-    return classifyDaemonTargetAuthority({
-      hasLocalEnvironment: true,
-      localEnvironmentMatches:
-        environment.manager === args.manager &&
-        environment.workspace.id === args.workspaceId &&
-        environment.auth.userId === args.auth.userId &&
-        environment.auth.machineId === args.auth.machineId &&
-        args.machineId === environment.auth.machineId &&
-        args.requesterUserId === environment.auth.userId,
-      daemonMatches: false,
-      sameMachine: false,
-      sameOwnerUser: false,
-      isEncryptedWorkspace: false,
-    });
-  }
+  auth?: Pick<AuthContext, 'userId' | 'machineId'>;
+  requesterUserId?: string;
+}): Promise<DaemonTargetResolution> {
+  const isLocalEnvironment = getSessionCommandEnvironment() !== undefined;
   const daemon = getDaemonWorkspace();
-  const daemonMatches = Boolean(
+  const bindingMatches = Boolean(
     daemon &&
     daemon.manager === args.manager &&
     daemon.workspaceId === args.workspaceId &&
-    daemon.userId === args.auth.userId &&
-    daemon.machineId === args.auth.machineId
+    daemon.machineId === args.machineId &&
+    (!args.auth || (daemon.userId === args.auth.userId && daemon.machineId === args.auth.machineId))
   );
-  if (!daemon || !daemonMatches || args.machineId !== daemon.machineId) {
-    return 'remote-or-unverified';
+
+  if (isLocalEnvironment) {
+    const requesterMatches =
+      args.requesterUserId === undefined || args.requesterUserId === daemon?.userId;
+    return {
+      sameReplica: bindingMatches,
+      isLocalEnvironment: true,
+      ...(bindingMatches && daemon?.host ? { localHost: daemon.host } : {}),
+      authority: bindingMatches && requesterMatches ? 'local-daemon' : 'denied',
+      nativeOwnerAccess: undefined,
+    };
   }
+
+  if (!daemon || !bindingMatches) {
+    return {
+      sameReplica: false,
+      isLocalEnvironment: false,
+      authority: 'remote-or-unverified',
+      nativeOwnerAccess: undefined,
+    };
+  }
+
   const accessStatus = daemon.readAccess?.().status;
-  if (accessStatus === 'revoked' || accessStatus === 'unauthorized') return 'denied';
-  if (accessStatus === 'unknown') return 'remote-or-unverified';
-  if (args.manager.isEncryptedWorkspace()) return 'local-daemon';
-  const row = await args.manager.repo.getDocMeta(getMachineRoomId(args.machineId));
+  if (accessStatus === 'revoked' || accessStatus === 'unauthorized') {
+    return {
+      sameReplica: false,
+      isLocalEnvironment: false,
+      authority: 'denied',
+      nativeOwnerAccess:
+        args.requesterUserId !== undefined && !daemon.manager.isEncryptedWorkspace()
+          ? false
+          : undefined,
+    };
+  }
+  if (accessStatus === 'unknown') {
+    return {
+      sameReplica: false,
+      isLocalEnvironment: false,
+      authority: 'remote-or-unverified',
+      nativeOwnerAccess: undefined,
+    };
+  }
+
+  const base = {
+    sameReplica: true,
+    isLocalEnvironment: false,
+    ...(daemon.host ? { localHost: daemon.host } : {}),
+  };
+  if (args.requesterUserId === undefined) {
+    return {
+      ...base,
+      authority: 'remote-or-unverified',
+      nativeOwnerAccess: undefined,
+    };
+  }
+  if (daemon.manager.isEncryptedWorkspace()) {
+    return {
+      ...base,
+      authority: 'local-daemon',
+      nativeOwnerAccess: undefined,
+    };
+  }
+  if (args.requesterUserId !== daemon.userId) {
+    return {
+      ...base,
+      authority: 'remote-or-unverified',
+      nativeOwnerAccess: undefined,
+    };
+  }
+  const row = await daemon.manager.repo.getDocMeta(getMachineRoomId(args.machineId));
   const machineOwnerMatchesDaemon = Boolean(
     row && !isLoroRepoDocDeleted(row) && (row.meta as MachineMeta).ownerUserId === daemon.userId
   );
-  return classifyDaemonTargetAuthority({
-    hasLocalEnvironment: false,
-    daemonMatches: true,
-    sameMachine: true,
-    sameOwnerUser: args.requesterUserId === daemon.userId,
-    isEncryptedWorkspace: false,
-    accessStatus,
-    machineOwnerMatchesDaemon,
-  });
+  return {
+    ...base,
+    authority: machineOwnerMatchesDaemon ? 'local-daemon' : 'remote-or-unverified',
+    nativeOwnerAccess: machineOwnerMatchesDaemon ? true : undefined,
+  };
 }
 
-/** Native ownership comes from the bound daemon identity, never SessionMeta.userId.
- * This only covers its own account on its own machine; other accounts and remote
- * targets retain their control-plane checks. Undefined means no native verdict. */
-export async function readBoundDaemonOwnerAccess(args: {
-  auth: Pick<AuthContext, 'userId' | 'machineId'>;
-  manager: LoroDocumentManager;
-  workspaceId: WorkspaceId;
-  machineId: MachineId;
-  requesterUserId: string;
-}): Promise<boolean | undefined> {
-  if (getSessionCommandEnvironment()) return undefined;
-  const daemon = getDaemonWorkspace();
-  if (
-    !daemon ||
-    daemon.manager !== args.manager ||
-    daemon.workspaceId !== args.workspaceId ||
-    daemon.userId !== args.auth.userId ||
-    daemon.machineId !== args.auth.machineId ||
-    args.machineId !== daemon.machineId ||
-    args.requesterUserId !== daemon.userId
-  )
-    return undefined;
-  if (args.manager.isEncryptedWorkspace()) return undefined;
-  const row = await args.manager.repo.getDocMeta(getMachineRoomId(args.machineId));
-  const access = daemon.readAccess?.();
-  if (access?.status === 'revoked' || access?.status === 'unauthorized') return false;
-  if (access?.status === 'unknown') return undefined;
-  if (!row || isLoroRepoDocDeleted(row) || (row.meta as MachineMeta).ownerUserId !== daemon.userId)
-    return undefined;
-  return true;
+export async function isBoundDaemonMachineFlockAuthoritative(
+  manager: LoroDocumentManager,
+  workspaceId: WorkspaceId,
+  machineId: MachineId
+): Promise<boolean> {
+  const resolved = await resolveDaemonTarget({ manager, workspaceId, machineId });
+  return !resolved.isLocalEnvironment && resolved.sameReplica;
 }
 
 /** A one-shot command's own encrypted replica decides machine access for that command. */

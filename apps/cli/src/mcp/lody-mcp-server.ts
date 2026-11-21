@@ -200,8 +200,7 @@ import {
 import {
   runWithSessionHistoryRequester,
   getDaemonWorkspace,
-  readBoundDaemonOwnerAccess,
-  readDaemonTargetAuthority,
+  resolveDaemonTarget,
   getSessionCommandEnvironment,
 } from '@/lib/session-command-environment';
 import { createSessionToolRegistrar, type SessionToolHandlers } from './session-tool-router';
@@ -2558,7 +2557,7 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
         ? await readCurrentSessionMeta(manager, session.parentSessionId as SessionId)
         : undefined;
       const root = isContainedSession(session, parent) ? parent! : session;
-      const nativeOwner = await readBoundDaemonOwnerAccess({
+      const { nativeOwnerAccess: nativeOwner } = await resolveDaemonTarget({
         auth,
         manager,
         workspaceId: workspace.id as WorkspaceId,
@@ -3410,15 +3409,21 @@ const snapshotAcceptedCreate = async (
 };
 
 const readRequesterSessionMetaForMcpOperation = async (
+  auth: Pick<AuthContext, 'userId' | 'machineId'>,
   manager: LoroDocumentManager,
   workspaceId: WorkspaceId,
   requesterSessionId: SessionId,
   reason: string
 ): Promise<{ session: SessionMeta; synced: boolean }> => {
-  const daemon = getDaemonWorkspace();
-  if (daemon && daemon.manager === manager && daemon.workspaceId === workspaceId) {
+  const daemonTarget = await resolveDaemonTarget({
+    auth,
+    manager,
+    workspaceId,
+    machineId: auth.machineId,
+  });
+  if (daemonTarget.sameReplica) {
     const localSession = await readCurrentSessionMeta(manager, requesterSessionId);
-    if (localSession && localSession.machineId === daemon.machineId) {
+    if (localSession && localSession.machineId === auth.machineId) {
       return { session: localSession, synced: false };
     }
   }
@@ -3465,6 +3470,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
     const { session: currentSession, synced: metaSynced } =
       await readRequesterSessionMetaForMcpOperation(
+        auth,
         manager,
         workspace.id as WorkspaceId,
         ctx.sessionId as SessionId,
@@ -3503,7 +3509,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
       return await snapshotAcceptedCreate(retry, args.operationId!);
     }
     const targetMachineId = (resolved.input.machineId ?? currentSession.machineId) as MachineId;
-    const targetAuthority = await readDaemonTargetAuthority({
+    const { authority: targetAuthority } = await resolveDaemonTarget({
       auth,
       manager,
       workspaceId: workspace.id as WorkspaceId,
@@ -3757,6 +3763,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
     const syncReason = `mcp.session_chat:${ctx.sessionId}:operation`;
     const initial = await readRequesterSessionMetaForMcpOperation(
+      auth,
       manager,
       workspace.id as WorkspaceId,
       ctx.sessionId as SessionId,
@@ -4327,6 +4334,7 @@ const startSessionCreateManyOperation = async (
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
     const { session: requester, synced: metaSynced } =
       await readRequesterSessionMetaForMcpOperation(
+        auth,
         manager,
         workspace.id as WorkspaceId,
         ctx.sessionId as SessionId,
@@ -4410,7 +4418,7 @@ const startSessionCreateManyOperation = async (
         if (!entry.resolved) continue;
         const targetMachineId = (entry.resolved.input.machineId ??
           requester.machineId) as MachineId;
-        const authority = await readDaemonTargetAuthority({
+        const { authority } = await resolveDaemonTarget({
           auth,
           manager,
           workspaceId: workspace.id as WorkspaceId,
@@ -4668,6 +4676,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
     const syncReason = `mcp.session_chat_many:${ctx.sessionId}`;
     const initial = await readRequesterSessionMetaForMcpOperation(
+      auth,
       manager,
       workspace.id as WorkspaceId,
       ctx.sessionId as SessionId,
@@ -4716,7 +4725,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
           needsSync = true;
           break;
         }
-        const authority = await readDaemonTargetAuthority({
+        const { authority } = await resolveDaemonTarget({
           auth,
           manager,
           workspaceId: workspace.id as WorkspaceId,
