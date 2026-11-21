@@ -15,6 +15,11 @@ export async function waitForPreviewDns(
 ): Promise<void> {
   signal.throwIfAborted();
   const resolver = new Resolver({ timeout: 2_000, tries: 1 });
+  const startedAt = performance.now();
+  let attempts = 0;
+  let lastOutcome = 'none';
+  const diagnostic = () =>
+    `query=A; attempts=${attempts}; elapsedMs=${Math.round(performance.now() - startedAt)}; lastOutcome=${lastOutcome}`;
   const deadline = new AbortController();
   const dnsSignal = AbortSignal.any([signal, deadline.signal]);
   const timer = setTimeout(() => deadline.abort(), DNS_PUBLICATION_BUDGET_MS);
@@ -24,10 +29,12 @@ export async function waitForPreviewDns(
     while (true) {
       dnsSignal.throwIfAborted();
       try {
+        attempts += 1;
         const addresses = await resolver.resolve4(hostname);
         dnsSignal.throwIfAborted();
+        lastOutcome = addresses.length > 0 ? 'resolved' : 'empty';
         if (addresses.length > 0) {
-          onDiagnostic?.(`dns host=${hostname}; published=true`);
+          onDiagnostic?.(`dns host=${hostname}; published=true; ${diagnostic()}`);
           return;
         }
       } catch (error) {
@@ -36,22 +43,26 @@ export async function waitForPreviewDns(
           error instanceof Error && 'code' in error && typeof error.code === 'string'
             ? error.code
             : 'UNKNOWN';
+        lastOutcome = /^[A-Z0-9_]{1,80}$/.test(code) ? code : 'UNKNOWN';
         // Some proxy-only networks disallow direct DNS. This is a startup
         // optimization, not a new network requirement: keep the existing HTTP
         // verifier in that case. Negative answers retry within the budget.
         if (code !== 'ENOTFOUND' && code !== 'ENODATA') {
-          const safeCode = /^[A-Z0-9_]{1,80}$/.test(code) ? code : 'UNKNOWN';
-          onDiagnostic?.(`dns host=${hostname}; unavailable=${safeCode}; using public probe`);
+          onDiagnostic?.(
+            `dns host=${hostname}; unavailable=${lastOutcome}; using public probe; ${diagnostic()}`
+          );
           return;
         }
       }
-      onDiagnostic?.(`dns host=${hostname}; published=false`);
+      onDiagnostic?.(`dns host=${hostname}; published=false; ${diagnostic()}`);
       await waitForPreviewRetry(dnsSignal);
     }
   } catch (error) {
     signal.throwIfAborted();
     if (!deadline.signal.aborted) throw error;
-    onDiagnostic?.(`dns host=${hostname}; publication budget expired; using public probe`);
+    onDiagnostic?.(
+      `dns host=${hostname}; publication budget expired; using public probe; ${diagnostic()}`
+    );
   } finally {
     clearTimeout(timer);
     dnsSignal.removeEventListener('abort', cancel);
