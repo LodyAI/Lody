@@ -38,7 +38,7 @@ note tools or change result delivery timing.
 ## Agent chat to a busy Session
 
 An orchestrating Agent sends corrections or new information to a Session that is
-still working. `lody_session_chat` and `lody_session_chat_many` steer that input
+still working. `lody_session_chat`, in single or batch mode, steers that input
 into the running turn on either Machine when its agent accepts steering, regardless
 of the human's queue or guide preference and of who started the running turn. A
 target whose agent cannot acknowledge a steer queues the input as its next ordinary
@@ -124,8 +124,8 @@ lock tasks or reject sends as duplicates.
 - **Queued inputs.** A requester may list, withdraw or replace its own queued
   inputs that have not started. A started input returns `ALREADY_STARTED` and is
   never cancelled by this path.
-- **Machine resources.** `lody_machine_list` reports agent quota with reset
-  times and disk usage. `lody_agent_config_list` and
+- **Machine resources.** `lody_catalog` action `machines` reports agent quota with reset
+  times and disk usage. Its `agent_configs` action and
   `lody_session_create_options` report an exhausted scoped quota as
   `quota_exhausted` with `availableAt`, so a coordinator stops dispatching to
   that config until the window resets. Lody does not manage or report agent-held
@@ -143,7 +143,7 @@ completion output, which already omits tool calls.
 ## Session creation configuration
 
 An orchestrator can select the target Agent's advertised configuration on
-`lody_session_create` and `lody_session_create_many` without creating an Agent Role.
+`lody_session_create`, in single or batch mode, without creating an Agent Role.
 Optional `modeId` uses ACP mode ids; `configOptionValues` uses actual option ids
 with string or boolean values. All advertised options are eligible, including
 permission options without a category. Discovery reports modes and option

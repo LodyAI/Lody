@@ -8,6 +8,7 @@ import {
   type PrStatus,
   type SessionId,
   type SessionMeta,
+  type SessionPullRequestLinkCheck,
   type SessionPullRequestMeta,
   type SessionPullRequestStateMeta,
   type WorkspaceId,
@@ -43,6 +44,8 @@ export type AssociatePullRequestArgs = {
 
 export type PrPollMetaPatch = {
   lifecycle?: PrMetaWritePlan['lifecycle'];
+  /** Per-URL `prLinkCheck:*` results (unreadable explicit links); own keys, never link records. */
+  linkChecks?: Array<{ field: `prLinkCheck:${string}`; value: SessionPullRequestLinkCheck }>;
   pullRequests?: SessionPullRequestMeta[];
   pullRequestState?: Record<string, SessionPullRequestStateMeta>;
 };
@@ -139,10 +142,11 @@ export function createLodyPrPollerWorkspace(options: {
     },
 
     async writeOwnerMeta(ownerSessionId: SessionId, patch: PrPollMetaPatch): Promise<void> {
-      const { lifecycle = [], ...legacyPatch } = patch;
+      const { lifecycle = [], linkChecks = [], ...legacyPatch } = patch;
       await documentManager.repo.upsertDocMeta(getSessionRoomId(ownerSessionId), {
         ...legacyPatch,
         ...Object.fromEntries(lifecycle.map((write) => [write.field, write.value])),
+        ...Object.fromEntries(linkChecks.map((write) => [write.field, write.value])),
       });
     },
 

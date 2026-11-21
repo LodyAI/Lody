@@ -7,7 +7,7 @@ Translation: current
 
 ## Abstract
 
-`lody_session_create_many` accepted MCP server selections but dropped them while
+`lody_session_create_many` (now the batch mode of `lody_session_create`) accepted MCP server selections but dropped them while
 converting batch items to single-create commands, causing explicit selections to
 fall back to target defaults. The batch-to-single conversion now carries the
 optional field only when it was supplied, preserving the distinction between an

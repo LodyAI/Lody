@@ -97,3 +97,73 @@ it('automatically detects removed identities and does not interrupt enrollment w
     vi.useRealTimers();
   }
 });
+
+/** A daemon whose `install` answers only when the test lets it. */
+function holdInstall() {
+  let answerInstall!: (value: MemoryProviderResponse) => void;
+  const install = new Promise<MemoryProviderResponse>((resolve) => {
+    answerInstall = resolve;
+  });
+  const reply = (overrides: Partial<MemoryProviderResponse> = {}): MemoryProviderResponse => ({
+    type: 'machine/memory',
+    status: 'not_installed',
+    memories: [],
+    ...overrides,
+  });
+  state.runtime = {
+    requestMemoryProvider: async (_machine: string, request: { action: string }) => {
+      if (request.action === 'install') return install;
+      if (request.action === 'installPoll')
+        return reply({ install: { status: 'running', step: 'runtime' } });
+      return reply();
+    },
+  };
+  return { answerInstall, reply };
+}
+
+it('hands a slow install its own reply even after a poll overtook it', async () => {
+  // The install card polls while the click is still out. The poll used to
+  // claim the latest slot, so the click came back empty and read as failed
+  // while the machine was still installing.
+  const { answerInstall, reply } = holdInstall();
+  let snapshot: ReturnType<typeof useMemoryProvider> | undefined;
+  function Harness() {
+    snapshot = useMemoryProvider('a' as MachineId, 'everme', true);
+    return null;
+  }
+  const root = createRoot(document.createElement('div'));
+  roots.push(root);
+  await act(async () => root.render(<Harness />));
+  const click = snapshot!.install();
+  await act(async () => {
+    await snapshot!.installPoll();
+  });
+  expect(snapshot?.result?.install).toEqual({ status: 'running', step: 'runtime' });
+  await act(async () => {
+    answerInstall(reply({ install: { status: 'running', step: 'provider' } }));
+    await click;
+  });
+  expect((await click)?.install).toEqual({ status: 'running', step: 'provider' });
+  // The page keeps showing the newer of the two replies.
+  expect(snapshot?.result?.install).toEqual({ status: 'running', step: 'runtime' });
+});
+
+it('drops a reply that lands after the hook moved to another provider', async () => {
+  const { answerInstall, reply } = holdInstall();
+  let snapshot: ReturnType<typeof useMemoryProvider> | undefined;
+  function Harness({ provider }: { provider: string }) {
+    snapshot = useMemoryProvider('a' as MachineId, provider, true);
+    return null;
+  }
+  const root = createRoot(document.createElement('div'));
+  roots.push(root);
+  await act(async () => root.render(<Harness provider="everme" />));
+  const click = snapshot!.install();
+  await act(async () => root.render(<Harness provider="nowledge-mem" />));
+  await act(async () => {
+    answerInstall(reply({ install: { status: 'done' } }));
+    await click;
+  });
+  expect(await click).toBeUndefined();
+  expect(snapshot?.result?.install).toBeUndefined();
+});

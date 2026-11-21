@@ -304,3 +304,32 @@ it('requires live verified authority for encrypted ACP interaction routing', asy
     'e2ee_feature_unavailable'
   );
 });
+
+it('keeps account memory providers off the encrypted feature ingress', async () => {
+  const { runtime, handler } = createHarness(true);
+  const dispatched: unknown[] = [];
+  Object.assign(handler, {
+    handleLocalMachineRpc: async (request: unknown) => {
+      dispatched.push(request);
+      return { ok: true, result: { type: 'machine/memory', status: 'ready', memories: [] } };
+    },
+  });
+  const base = {
+    workspaceId: 'workspace',
+    machineId: 'machine',
+    method: 'machine/memory' as const,
+  };
+  for (const params of [
+    { action: 'list' as const, providerId: 'everme' },
+    { action: 'signIn' as const, providerId: 'everme' },
+    { action: 'install' as const, providerId: 'everme' },
+    { action: 'connect' as const, providerId: 'everme', targets: ['codex'] },
+  ])
+    await expect(runtime.handleEncryptedFeatureRpc({ ...base, params })).rejects.toThrow(
+      'e2ee_feature_unavailable'
+    );
+  expect(dispatched).toEqual([]);
+  const identity = { ...base, params: { action: 'list' as const, providerId: 'nowledge-mem' } };
+  await runtime.handleEncryptedFeatureRpc(identity);
+  expect(dispatched).toEqual([identity]);
+});

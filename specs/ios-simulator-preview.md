@@ -79,8 +79,9 @@ Three-or-more-finger input, physical-key forwarding and advanced device configur
 Each new operation acknowledges a portrait baseline; reconnecting the same operation preserves rotation.
 Readiness separates preparation/transport from the first decoded frame.
 
-Agents use `lody_ios_simulator_preview` for native apps, separate from the web tool
-`lody_report_preview_candidate`. Actions are `list`, `start {udid}`,
+Agents use `lody_simulator_preview` with `platform: "ios"` for native apps, separate
+from the web tool `lody_report_preview_candidate`; macOS machines alone offer that
+platform. Actions are `list`, `start {udid}`,
 `status {operationId?}` and `stop {operationId}`. Machine/session context is implicit;
 the daemon derives the requester from the active turn and checks session ownership.
 Tool output excludes viewer credentials. This tool does not build or install apps.

@@ -37,6 +37,7 @@ import {
   type SessionSyncIndicatorVariant,
 } from './session-syncing-indicator';
 import { SessionMachineInfo } from './session-machine-info';
+import type { SessionPullRequestLinksProps } from './session-pr-links';
 
 export type InfoBarItemKey = 'status' | 'goal' | 'schedule' | 'scheduleSource' | 'context';
 
@@ -78,6 +79,8 @@ export type SessionInfoBarProps = {
    *  PR marker into a history list. */
   prHistory?: readonly SessionPullRequestView[];
   onOpenHistoryPr?: (view: SessionPullRequestView) => void;
+  /** Linked pull requests; the PR marker opens this list when set. */
+  prLinks?: SessionPullRequestLinksProps;
   /** Agent-driven PR/worktree actions shown inside the context stage. */
   contextActions?: readonly ContextChipAction[];
   /** Open the complete working-tree diff from the context diffstat. */
@@ -177,6 +180,7 @@ export function SessionInfoBar({
   onOpenPr,
   prHistory,
   onOpenHistoryPr,
+  prLinks,
   contextActions,
   onOpenAllChanges,
   relations,
@@ -215,7 +219,6 @@ export function SessionInfoBar({
 
   const [stage, setStage] = useState<InfoBarItemKey | null>(initialStage ?? defaultKey);
 
-  // ── Recency-driven focus ─────────────────────────────────────────────
   // Each item has a change signature; when it changes after mount, that item
   // takes the stage. Purely last-event-wins, no priority tiers.
   const statusSignature = status
@@ -342,6 +345,7 @@ export function SessionInfoBar({
             onOpenPr={onOpenPr}
             prHistory={prHistory}
             onOpenHistoryPr={onOpenHistoryPr}
+            prLinks={prLinks}
             actions={contextActions}
             onOpenAllChanges={onOpenAllChanges}
             diffStat={diffStat}

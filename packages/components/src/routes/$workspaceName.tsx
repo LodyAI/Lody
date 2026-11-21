@@ -225,9 +225,6 @@ function CloudWorkspaceGuardRoute() {
     );
   };
 
-  // ==========================================================================
-  // OPTIMISTIC RENDERING PATH (hasLocalToken = true)
-  // ==========================================================================
   // When user has a locally cached auth token, we skip blocking loading states
   // and render content immediately for better perceived performance.
   //
@@ -250,7 +247,6 @@ function CloudWorkspaceGuardRoute() {
   // The critical distinction: we only skip loading states when access is
   // UNKNOWN. Once server confirms denial, we block rendering to prevent
   // unauthorized access to workspace UI.
-  // ==========================================================================
   if (confirmedUnauthenticated) {
     // The root sign-out path redirects from here; if it never does, this wait
     // still has to offer a way out.

@@ -71,7 +71,10 @@ import {
   type ValidatedUploadFile,
   type UploadedSessionFile,
 } from './session-attachment-transfer';
-import { handleMemoryProviderRequest } from './memory-providers';
+import {
+  handleMemoryProviderRequest,
+  handleRelayedMemoryProviderRequest,
+} from './memory-providers';
 import { formatAgentSenderHeader, readMessageAuthor } from '@lody/shared';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
 import { IosSimulatorService } from '@/ios-simulator/service';
@@ -3936,7 +3939,7 @@ export class MessageHandler {
             workspaceId: this.workspaceId,
             agentType,
           }),
-        memoryProvider: handleMemoryProviderRequest,
+        memoryProvider: handleRelayedMemoryProviderRequest,
         listMachinePiExtensions: async ({ configId }) =>
           await this.executionService.listMachinePiExtensions(configId),
         installMachineAcpBinary: async ({ agentType, onAcpBinaryProgress }) =>
@@ -9423,7 +9426,7 @@ export class MessageHandler {
       return;
     }
 
-    // This channel is agent-facing (MCP lody_upload_files): paths MUST stay
+    // This channel is agent-facing (MCP lody_upload, kind=files): paths MUST stay
     // inside the session workspace, or the tool would let a prompt-injected
     // agent exfiltrate arbitrary host files past its own read-approval gate.
     const workspaceRoot = this.resolveSessionWorkspaceRoot(sessionId);
@@ -12250,9 +12253,6 @@ export class MessageHandler {
     void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
   }
 
-  // =====================================================================
-  // GC-related public methods
-  // =====================================================================
   /**
    * Check if a session has pending ACP updates that haven't been flushed yet.
    */

@@ -69,7 +69,7 @@ blocking. `session.ts` had a separate resolver that queried the same list even f
 ## Verification and limits
 
 `daemon-session-tools.test.ts` runs real `lody_session_list` and
-`lody_session_archive` handlers with discovery rejected. It covers:
+`lody_session_manage` `archive` handlers with discovery rejected. It covers:
 
 - zero list calls;
 - refusal after revocation;

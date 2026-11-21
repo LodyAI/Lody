@@ -83,7 +83,7 @@ transfers, not to the `local_attachment` path flow.
 ## Ingest
 
 `message-handler.ts` has two entry points: `handleSessionFileUpload` (cloud, and MCP
-`lody_upload_files`) and `handleSessionFileSendLocal`. Local bytes live in
+`lody_upload` with `kind: "files"`) and `handleSessionFileSendLocal`. Local bytes live in
 `session-file-blob-store.ts` under `~/.lody/session-files/<ws>/<sess>/<fileId>` and are
 persisted as `transport:'local'`.
 
