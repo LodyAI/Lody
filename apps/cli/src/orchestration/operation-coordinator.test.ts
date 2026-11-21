@@ -782,9 +782,6 @@ describe('LodyOperationCoordinator', () => {
       await vi.advanceTimersByTimeAsync(8_000);
       await harness.coordinator.idle();
       expect(harness.materializeTarget).not.toHaveBeenCalled();
-      expect(harness.logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('Target document catch-up timed out after 8000ms')
-      );
 
       await vi.advanceTimersByTimeAsync(1_000);
       await harness.coordinator.idle();

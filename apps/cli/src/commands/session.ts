@@ -9,7 +9,6 @@ import {
   getDaemonWorkspace,
   readEncryptedMachineAccess,
   resolveDaemonTarget,
-  shouldReadBoundDaemonMachineFlockLocally,
   type DaemonTargetResolution,
 } from '@/lib/session-command-environment';
 import { FlockSyncUnavailableError } from '@/lib/loro/flock-sync-errors';
@@ -1242,7 +1241,8 @@ async function syncMachineFlockDocsForRead(
   const logger = getLogger('session');
   const results = await Promise.all(
     Array.from(new Set(machineIds)).map(async (machineId): Promise<MachineFlockFreshness> => {
-      if (await shouldReadBoundDaemonMachineFlockLocally(manager, workspaceId, machineId)) {
+      const daemonTarget = await resolveDaemonTarget({ manager, workspaceId, machineId });
+      if (!daemonTarget.isLocalEnvironment && daemonTarget.sameReplica) {
         return {
           confirmed: false,
           error: new FlockSyncUnavailableError({
@@ -2891,6 +2891,23 @@ async function writeDispatchPointer(args: {
   } satisfies Partial<SessionMeta>);
 }
 
+async function persistDispatchedSessionWrite(args: {
+  sameReplica: boolean;
+  manager: LoroDocumentManager;
+  sessionDoc: SessionDocument;
+  reason: string;
+}): Promise<void> {
+  if (args.sameReplica) {
+    if (typeof args.manager.repo.flush === 'function') await args.manager.repo.flush();
+    return;
+  }
+  await confirmDispatchSyncedBestEffort({
+    manager: args.manager,
+    sessionDoc: args.sessionDoc,
+    reason: args.reason,
+  });
+}
+
 /**
  * Best-effort confirmation that the durable dispatch write reached Loro Streams.
  *
@@ -4218,15 +4235,12 @@ export async function createSessionResult(
       workspaceId: workspace.id as WorkspaceId,
       machineId: targetMachine.id,
     });
-    if (daemonTarget.sameReplica) {
-      if (typeof manager.repo.flush === 'function') await manager.repo.flush();
-    } else {
-      await confirmDispatchSyncedBestEffort({
-        manager,
-        sessionDoc,
-        reason: `session.create:${sessionId}`,
-      });
-    }
+    await persistDispatchedSessionWrite({
+      sameReplica: daemonTarget.sameReplica,
+      manager,
+      sessionDoc,
+      reason: `session.create:${sessionId}`,
+    });
     await dispatchTurnFastPath({
       auth,
       manager,
@@ -4303,18 +4317,13 @@ async function validateSessionChatTargetForRequester(args: {
     const localRecord = await args.manager.repo.getDocMeta(getSessionRoomId(args.sessionId));
     if (localRecord?.meta && !isLoroRepoDocDeleted(localRecord)) {
       const localMeta = localRecord.meta as SessionMeta;
-      const { authority } = await resolveDaemonTarget({
+      const { authority } = await resolveDaemonTargetOrThrow({
         auth: args.auth,
         manager: args.manager,
         workspaceId: args.workspace.id as WorkspaceId,
         machineId: localMeta.machineId,
         requesterUserId: args.requester.userId,
       });
-      if (authority === 'denied') {
-        throw new Error(
-          `Machine access denied for ${localMeta.machineId}: workspace_access_revoked`
-        );
-      }
       if (authority === 'local-daemon') {
         needsMetaSync = false;
       }
@@ -4699,15 +4708,12 @@ export async function sendSessionChatResult(
     if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await writeDispatchPointer({ manager, sessionId, userTurnId });
     dispatched = true;
-    if (daemonTarget.sameReplica) {
-      if (typeof manager.repo.flush === 'function') await manager.repo.flush();
-    } else {
-      await confirmDispatchSyncedBestEffort({
-        manager,
-        sessionDoc,
-        reason: `session.chat:${sessionId}:${userTurnId}`,
-      });
-    }
+    await persistDispatchedSessionWrite({
+      sameReplica: daemonTarget.sameReplica,
+      manager,
+      sessionDoc,
+      reason: `session.chat:${sessionId}:${userTurnId}`,
+    });
     await dispatchTurnFastPath({
       auth,
       manager,
@@ -6261,6 +6267,20 @@ export type SessionDocReadAuthorityContext = {
   requesterUserId: string;
 };
 
+async function resolveDaemonTargetOrThrow(args: {
+  auth: Pick<AuthContext, 'userId' | 'machineId'>;
+  manager: LoroDocumentManager;
+  workspaceId: WorkspaceId;
+  machineId: MachineId;
+  requesterUserId: string;
+}): Promise<DaemonTargetResolution> {
+  const resolved = await resolveDaemonTarget(args);
+  if (resolved.authority === 'denied') {
+    throw new Error(`Machine access denied for ${args.machineId}: workspace_access_revoked`);
+  }
+  return resolved;
+}
+
 async function syncSessionDocUnlessLocalDaemon(args: {
   manager: LoroDocumentManager;
   sessionId: SessionId;
@@ -6276,18 +6296,13 @@ async function syncSessionDocUnlessLocalDaemon(args: {
       nativeOwnerAccess: undefined,
     };
   }
-  const resolved = await resolveDaemonTarget({
+  const resolved = await resolveDaemonTargetOrThrow({
     auth: args.authorityContext.auth,
     manager: args.manager,
     workspaceId: args.authorityContext.workspaceId,
     machineId: args.authorityContext.machineId,
     requesterUserId: args.authorityContext.requesterUserId,
   });
-  if (resolved.authority === 'denied') {
-    throw new Error(
-      `Machine access denied for ${args.authorityContext.machineId}: workspace_access_revoked`
-    );
-  }
   if (resolved.authority !== 'local-daemon') {
     await syncDocForRead(args.manager, getSessionRoomId(args.sessionId), args.reason);
   }

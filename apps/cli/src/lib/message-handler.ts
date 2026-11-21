@@ -4371,13 +4371,6 @@ export class MessageHandler {
           await this.workspaceDocument.repo.flush();
           return;
         }
-        const record = await this.workspaceDocument.repo.getDocMeta(docId);
-        const meta =
-          record?.meta && !isLoroRepoDocDeleted(record) ? (record.meta as SessionMeta) : undefined;
-        if (meta && meta.machineId === this.machineId) {
-          await this.workspaceDocument.repo.flush();
-          return;
-        }
         await this.workspaceDocument.syncRemoteDocOrThrow(docId, {
           reason,
           timeoutMs: TARGET_CATCH_UP_TIMEOUT_MS,

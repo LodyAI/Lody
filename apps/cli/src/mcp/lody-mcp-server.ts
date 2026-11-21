@@ -3439,19 +3439,56 @@ const readRequesterSessionMetaForMcpOperation = async (
   return { session: currentSession, synced: true };
 };
 
-const releaseMaterializationClaimBestEffort = async (
-  requesterSessionId: SessionId,
-  operationId: string,
-  itemIndex: number,
-  claimToken: string
-): Promise<void> => {
+const ensureWorkspaceMetaSyncedForTargets = async (args: {
+  metaSynced: boolean;
+  auth: Pick<AuthContext, 'userId' | 'machineId'>;
+  manager: LoroDocumentManager;
+  workspaceId: WorkspaceId;
+  requesterUserId: string;
+  targetMachineIds: ReadonlyArray<MachineId | undefined>;
+  reason: string;
+}): Promise<boolean> => {
+  if (args.metaSynced) return true;
+  for (const machineId of args.targetMachineIds) {
+    if (!machineId) {
+      await syncWorkspaceMetaForRead(args.manager, args.reason);
+      return true;
+    }
+    const { authority } = await resolveDaemonTarget({
+      auth: args.auth,
+      manager: args.manager,
+      workspaceId: args.workspaceId,
+      machineId,
+      requesterUserId: args.requesterUserId,
+    });
+    if (authority === 'remote-or-unverified') {
+      await syncWorkspaceMetaForRead(args.manager, args.reason);
+      return true;
+    }
+  }
+  return false;
+};
+
+const isCleanPreDispatchHandoffError = (error: unknown): boolean =>
+  error instanceof WorkspaceSyncUnavailableError ||
+  error instanceof MachineOfflineError ||
+  error instanceof LocalDaemonAvailabilityError;
+
+const handoffAcceptedItemForReplay = async (args: {
+  requesterSessionId: SessionId;
+  operationId: string;
+  itemIndex: number;
+  claimToken: string;
+  error: unknown;
+}): Promise<void> => {
+  if (!isCleanPreDispatchHandoffError(args.error)) return;
   try {
     await withOperationStore((store) =>
       store.releaseItemMaterializationClaim?.(
-        requesterSessionId,
-        operationId,
-        itemIndex,
-        claimToken
+        args.requesterSessionId,
+        args.operationId,
+        args.itemIndex,
+        args.claimToken
       )
     );
   } catch {
@@ -3509,16 +3546,15 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
       return await snapshotAcceptedCreate(retry, args.operationId!);
     }
     const targetMachineId = (resolved.input.machineId ?? currentSession.machineId) as MachineId;
-    const { authority: targetAuthority } = await resolveDaemonTarget({
+    await ensureWorkspaceMetaSyncedForTargets({
+      metaSynced,
       auth,
       manager,
       workspaceId: workspace.id as WorkspaceId,
-      machineId: targetMachineId,
       requesterUserId: invoking.identity.userId,
+      targetMachineIds: [targetMachineId],
+      reason: `mcp.session_create:${ctx.sessionId}:operation`,
     });
-    if (!metaSynced && targetAuthority === 'remote-or-unverified') {
-      await syncWorkspaceMetaForRead(manager, `mcp.session_create:${ctx.sessionId}:operation`);
-    }
     await assertMachineNotOfflineForSingleCommand(manager, targetMachineId, ctx);
     const createOptions = buildMcpCreateOptions(resolved.input, ctx);
     bindMcpCreateContext(createOptions, invoking.identity, currentSession);
@@ -3646,6 +3682,13 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
         // The durable Operation already owns fixed target ids. A transport
         // failure is ambiguous, so leave it active for level-checked replay
         // instead of making the caller resend the prompt.
+        await handoffAcceptedItemForReplay({
+          requesterSessionId: ctx.sessionId as SessionId,
+          operationId: args.operationId!,
+          itemIndex: 0,
+          claimToken: materializationClaimToken,
+          error,
+        });
         getLogger('mcp').warn(
           `[mcp] Create ${args.operationId} left active for replay: ${formatMcpErrorMessage(error)}`
         );
@@ -3791,17 +3834,20 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
         fingerprint: quoteRefs?.length ? { ...canonical, quotes: quoteRefs } : undefined,
       };
     };
-    const initialLookup = buildRetryLookupCommand(resolvedSessionId);
-    const initialRetry = await withOperationStore((store) =>
-      store.findMatchingRetry(
-        ctx.sessionId as SessionId,
-        args.operationId!,
-        'session_chat',
-        initialLookup.fingerprint ?? initialLookup.canonical,
-        invoking.identity.userId,
-        invoking.identity.sourceTurnId
-      )
-    );
+    const findRetry = (sessionId: string) => {
+      const lookup = buildRetryLookupCommand(sessionId);
+      return withOperationStore((store) =>
+        store.findMatchingRetry(
+          ctx.sessionId as SessionId,
+          args.operationId!,
+          'session_chat',
+          lookup.fingerprint ?? lookup.canonical,
+          invoking.identity.userId,
+          invoking.identity.sourceTurnId
+        )
+      );
+    };
+    const initialRetry = await findRetry(resolvedSessionId);
     if (initialRetry) {
       return await withOperationStore((store) => store.snapshot(initialRetry));
     }
@@ -3810,17 +3856,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
       metaSynced = true;
       resolvedSessionId = await createSessionIdResolver(manager)(args.sessionId);
       targetSession = await readCurrentSessionMeta(manager, resolvedSessionId as SessionId);
-      const syncedLookup = buildRetryLookupCommand(resolvedSessionId);
-      const retryAfterSync = await withOperationStore((store) =>
-        store.findMatchingRetry(
-          ctx.sessionId as SessionId,
-          args.operationId!,
-          'session_chat',
-          syncedLookup.fingerprint ?? syncedLookup.canonical,
-          invoking.identity.userId,
-          invoking.identity.sourceTurnId
-        )
-      );
+      const retryAfterSync = await findRetry(resolvedSessionId);
       if (retryAfterSync) {
         return await withOperationStore((store) => store.snapshot(retryAfterSync));
       }
@@ -3990,12 +4026,13 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
         }
         // Like create: the accepted Operation owns the fixed target, so a
         // pre-dispatch availability/sync failure hands off cleanly for daemon replay.
-        await releaseMaterializationClaimBestEffort(
-          ctx.sessionId as SessionId,
-          args.operationId!,
-          0,
-          materializationClaimToken
-        );
+        await handoffAcceptedItemForReplay({
+          requesterSessionId: ctx.sessionId as SessionId,
+          operationId: args.operationId!,
+          itemIndex: 0,
+          claimToken: materializationClaimToken,
+          error,
+        });
         getLogger('mcp').warn(
           `[mcp] Chat ${args.operationId} left active for replay: ${error.message}`
         );
@@ -4413,24 +4450,17 @@ const startSessionCreateManyOperation = async (
     if (retry) {
       return await withOperationStore((store) => store.snapshot(retry));
     }
-    if (!metaSynced) {
-      for (const entry of resolvedItems) {
-        if (!entry.resolved) continue;
-        const targetMachineId = (entry.resolved.input.machineId ??
-          requester.machineId) as MachineId;
-        const { authority } = await resolveDaemonTarget({
-          auth,
-          manager,
-          workspaceId: workspace.id as WorkspaceId,
-          machineId: targetMachineId,
-          requesterUserId: invoking.identity.userId,
-        });
-        if (authority === 'remote-or-unverified') {
-          await syncWorkspaceMetaForRead(manager, `mcp.session_create_many:${ctx.sessionId}`);
-          break;
-        }
-      }
-    }
+    await ensureWorkspaceMetaSyncedForTargets({
+      metaSynced,
+      auth,
+      manager,
+      workspaceId: workspace.id as WorkspaceId,
+      requesterUserId: invoking.identity.userId,
+      targetMachineIds: resolvedItems.flatMap((entry) =>
+        entry.resolved ? [(entry.resolved.input.machineId ?? requester.machineId) as MachineId] : []
+      ),
+      reason: `mcp.session_create_many:${ctx.sessionId}`,
+    });
     const machineLiveness = makeMachineLivenessLookupForMcp(manager, ctx);
     const validatedItems = await mapWithConcurrency(
       expanded,
@@ -4650,11 +4680,18 @@ const startSessionCreateManyOperation = async (
             { distinctId: auth.machineId }
           );
           return markOperationItemInputDurable(storedItem);
-        } catch {
+        } catch (error) {
           // Acceptance already committed the fixed target ids. A write failure
           // here is ambiguous (the remote Loro write may have won) and an
           // offline transition after acceptance must not become an item error.
           // Keep the item active so the lease owner level-checks/replays it.
+          await handoffAcceptedItemForReplay({
+            requesterSessionId: ctx.sessionId as SessionId,
+            operationId: args.operationId,
+            itemIndex: index,
+            claimToken: materializationClaimToken,
+            error,
+          });
           return storedItem;
         }
       }
@@ -4703,58 +4740,48 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
       items: expanded,
       ...(args.deadlineSeconds !== undefined ? { deadlineSeconds: args.deadlineSeconds } : {}),
     };
-    const retry = await withOperationStore((store) =>
-      store.findMatchingRetry(
-        ctx.sessionId as SessionId,
-        args.operationId,
-        'session_chat_many',
-        canonicalCommand,
-        invoking.identity.userId,
-        invoking.identity.sourceTurnId
-      )
-    );
+    const findBatchRetry = (command: typeof canonicalCommand) =>
+      withOperationStore((store) =>
+        store.findMatchingRetry(
+          ctx.sessionId as SessionId,
+          args.operationId,
+          'session_chat_many',
+          command,
+          invoking.identity.userId,
+          invoking.identity.sourceTurnId
+        )
+      );
+    const retry = await findBatchRetry(canonicalCommand);
     if (retry) {
       return await withOperationStore((store) => store.snapshot(retry));
     }
     if (!metaSynced) {
-      let needsSync = false;
-      for (const item of expanded) {
-        if (!item.sessionId) continue;
-        const target = await readCurrentSessionMeta(manager, item.sessionId as SessionId);
-        if (!target) {
-          needsSync = true;
-          break;
-        }
-        const { authority } = await resolveDaemonTarget({
+      const targetMachineIds = await Promise.all(
+        expanded
+          .filter((item): item is typeof item & { sessionId: string } => Boolean(item.sessionId))
+          .map(
+            async (item) =>
+              (await readCurrentSessionMeta(manager, item.sessionId as SessionId))?.machineId
+          )
+      );
+      if (
+        await ensureWorkspaceMetaSyncedForTargets({
+          metaSynced,
           auth,
           manager,
           workspaceId: workspace.id as WorkspaceId,
-          machineId: target.machineId,
           requesterUserId: invoking.identity.userId,
-        });
-        if (authority === 'remote-or-unverified') {
-          needsSync = true;
-          break;
-        }
-      }
-      if (needsSync) {
-        await syncWorkspaceMetaForRead(manager, syncReason);
+          targetMachineIds,
+          reason: syncReason,
+        })
+      ) {
         metaSynced = true;
         expanded = await resolveExpandedItems();
         canonicalCommand = {
           items: expanded,
           ...(args.deadlineSeconds !== undefined ? { deadlineSeconds: args.deadlineSeconds } : {}),
         };
-        const retryAfterSync = await withOperationStore((store) =>
-          store.findMatchingRetry(
-            ctx.sessionId as SessionId,
-            args.operationId,
-            'session_chat_many',
-            canonicalCommand,
-            invoking.identity.userId,
-            invoking.identity.sourceTurnId
-          )
-        );
+        const retryAfterSync = await findBatchRetry(canonicalCommand);
         if (retryAfterSync) {
           return await withOperationStore((store) => store.snapshot(retryAfterSync));
         }
@@ -4934,9 +4961,16 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
           );
           deliveryByIndex[index] = sent.delivery;
           return markOperationItemInputDurable(storedItem);
-        } catch {
+        } catch (error) {
           // See create_many above: post-acceptance transport failure is
           // recoverable intent, not a trustworthy terminal item outcome.
+          await handoffAcceptedItemForReplay({
+            requesterSessionId: ctx.sessionId as SessionId,
+            operationId: args.operationId,
+            itemIndex: index,
+            claimToken: materializationClaimToken,
+            error,
+          });
           return storedItem;
         }
       }

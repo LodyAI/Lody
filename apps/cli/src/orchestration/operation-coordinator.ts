@@ -368,9 +368,7 @@ export class LodyOperationCoordinator {
     // Keep the native runtime/connection alive for the final release and settlement receipts.
     await withTimeout(
       (async () => {
-        await this.cancelMaterializationsForStop();
-        await this.drainActivity(false);
-        await this.cancelMaterializationsForStop();
+        await this.runCoreDrain((core) => core.stopDrain);
         if (this.startupComplete) await this.options.executionService.drainInboxExecutions?.();
         await Promise.allSettled([...this.inboxExecutions, ...this.nativeRawWork]);
       })(),
@@ -454,18 +452,14 @@ export class LodyOperationCoordinator {
   }
   async idle(): Promise<void> {
     if (!this.started && this.shutdown) return this.shutdown;
-    await this.drainActivity(true);
+    await this.runCoreDrain((core) => core.drain);
   }
-  private async cancelMaterializationsForStop(): Promise<void> {
+  private async runCoreDrain(
+    select: (core: CoordinatorWorkflow) => Effect.Effect<void, unknown>
+  ): Promise<void> {
     if (!this.nativeReady || this.nativeClose || !this.nativeRuntime) return;
     const { core } = await this.nativeReady;
-    await this.nativeRuntime.runPromise(core.cancelAllMaterializations());
-  }
-  private async drainActivity(includeMaterializations = true): Promise<void> {
-    if (!this.nativeReady) return;
-    if (this.nativeClose) return;
-    const { activity, core } = await this.nativeReady;
-    await this.nativeRuntime!.runPromise(includeMaterializations ? core.drain : activity.drain);
+    await this.nativeRuntime.runPromise(select(core));
   }
   private operationKey(operation: StoredLodyOperation): string {
     return `${operation.requesterSessionId}\0${operation.operationId}`;

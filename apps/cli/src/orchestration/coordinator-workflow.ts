@@ -78,7 +78,13 @@ export class CoordinatorWorkflow {
       }
     }.bind(this)
   );
-  cancelAllMaterializations = () => FiberMap.clear(this.materializations);
+  stopDrain = Effect.gen(
+    function* (this: CoordinatorWorkflow) {
+      yield* FiberMap.clear(this.materializations);
+      yield* this.activity.drain;
+      yield* FiberMap.clear(this.materializations);
+    }.bind(this)
+  );
   cancelInactiveOperations = (activeKeys: Set<string>) => this.dropInactiveResources(activeKeys);
   private get started() {
     return this.ports.active();

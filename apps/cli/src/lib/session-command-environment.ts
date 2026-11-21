@@ -234,15 +234,6 @@ export async function resolveDaemonTarget(args: {
   };
 }
 
-export async function shouldReadBoundDaemonMachineFlockLocally(
-  manager: LoroDocumentManager,
-  workspaceId: WorkspaceId,
-  machineId: MachineId
-): Promise<boolean> {
-  const resolved = await resolveDaemonTarget({ manager, workspaceId, machineId });
-  return !resolved.isLocalEnvironment && resolved.sameReplica;
-}
-
 /** A one-shot command's own encrypted replica decides machine access for that command. */
 export type EncryptedCommandAccess = NonNullable<DaemonWorkspace['checkEncryptedMachineAccess']>;
 const encryptedCommandAccess = new AsyncLocalStorage<EncryptedCommandAccess>();
