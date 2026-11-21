@@ -1,3 +1,4 @@
+import { resolveSessionShareOrigin } from '../../scripts/session-share-origin.mjs'
 import { preservePdfWorkerExports } from '../../packages/components/vite-pdf-worker'
 
 import { execSync } from 'node:child_process'
@@ -24,26 +25,6 @@ import { emojibaseAssetsPlugin } from '../../packages/components/vite-emojibase-
 import { cloudRendererCspHtmlPlugin } from './renderer-csp'
 import { resolveCloudElectronUpdateConfig } from './sparkle-packaging.mjs'
 import { resolveElectronReleaseProfile } from './release-profile.mjs'
-
-function resolveSessionShareOrigin(env: Record<string, string | undefined>) {
-  const value = env.VITE_SESSION_SHARE_ORIGIN?.trim() || 'https://share.lody.ai'
-  try {
-    const url = new URL(value)
-    const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
-    if (
-      (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) ||
-      url.username ||
-      url.password ||
-      url.pathname !== '/' ||
-      value.includes('?') ||
-      value.includes('#')
-    )
-      throw new Error()
-    return url.origin
-  } catch {
-    throw new Error('VITE_SESSION_SHARE_ORIGIN must be an HTTPS origin (HTTP loopback allowed)')
-  }
-}
 
 const electronDir = __dirname
 const componentsDir = resolve(__dirname, '../../packages/components')

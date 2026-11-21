@@ -7,39 +7,30 @@ import iconv from 'iconv-lite';
  * Reference: https://docs.microsoft.com/en-us/windows/win32/intl/code-page-identifiers
  */
 const WINDOWS_OEM_CODE_PAGES: Record<string, string> = {
-  // East Asian
-  'zh-CN': 'cp936', // Simplified Chinese (GBK)
-  'zh-TW': 'cp950', // Traditional Chinese (Big5)
-  'zh-HK': 'cp950', // Traditional Chinese (Big5)
-  'ja-JP': 'cp932', // Japanese (Shift-JIS)
-  'ko-KR': 'cp949', // Korean
-
-  // Cyrillic
-  'ru-RU': 'cp866', // Russian
-  'uk-UA': 'cp866', // Ukrainian
-  'bg-BG': 'cp866', // Bulgarian
-
-  // Western European
-  'en-US': 'cp437', // US English (DOS)
-  'de-DE': 'cp850', // German
-  'fr-FR': 'cp850', // French
-  'es-ES': 'cp850', // Spanish
-  'it-IT': 'cp850', // Italian
-  'pt-BR': 'cp850', // Portuguese (Brazil)
-  'pt-PT': 'cp850', // Portuguese (Portugal)
-
-  // Central/Eastern European
-  'pl-PL': 'cp852', // Polish
-  'cs-CZ': 'cp852', // Czech
-  'hu-HU': 'cp852', // Hungarian
-  'ro-RO': 'cp852', // Romanian
-
-  // Other
-  'tr-TR': 'cp857', // Turkish
-  'he-IL': 'cp862', // Hebrew
-  'ar-SA': 'cp720', // Arabic
-  'th-TH': 'cp874', // Thai
-  'vi-VN': 'cp1258', // Vietnamese
+  'zh-CN': 'cp936',
+  'zh-TW': 'cp950',
+  'zh-HK': 'cp950',
+  'ja-JP': 'cp932',
+  'ko-KR': 'cp949',
+  'ru-RU': 'cp866',
+  'uk-UA': 'cp866',
+  'bg-BG': 'cp866',
+  'en-US': 'cp437',
+  'de-DE': 'cp850',
+  'fr-FR': 'cp850',
+  'es-ES': 'cp850',
+  'it-IT': 'cp850',
+  'pt-BR': 'cp850',
+  'pt-PT': 'cp850',
+  'pl-PL': 'cp852',
+  'cs-CZ': 'cp852',
+  'hu-HU': 'cp852',
+  'ro-RO': 'cp852',
+  'tr-TR': 'cp857',
+  'he-IL': 'cp862',
+  'ar-SA': 'cp720',
+  'th-TH': 'cp874',
+  'vi-VN': 'cp1258',
 };
 
 /**
@@ -48,14 +39,7 @@ const WINDOWS_OEM_CODE_PAGES: Record<string, string> = {
  */
 const DEFAULT_OEM_CODE_PAGE = 'cp437';
 
-/**
- * Cached system locale (detected once at startup).
- */
 let cachedLocale: string | null = null;
-
-/**
- * Cached OEM code page for the current system.
- */
 let cachedOemCodePage: string | null = null;
 
 /**
@@ -74,12 +58,10 @@ function detectSystemLocale(): string {
     return cachedLocale;
   }
 
-  // Check common environment variables for locale
   const envLocale =
     process.env.LANG || process.env.LC_ALL || process.env.LC_CTYPE || process.env.LOCALE;
 
   if (envLocale) {
-    // Parse locale string (e.g., "zh_CN.UTF-8" -> "zh-CN")
     const match = envLocale.match(/^([a-z]{2})[-_]([A-Z]{2})/i);
     if (match && match[1] && match[2]) {
       cachedLocale = `${match[1].toLowerCase()}-${match[2].toUpperCase()}`;
@@ -87,20 +69,6 @@ function detectSystemLocale(): string {
     }
   }
 
-  // On Windows without LANG set, try to infer from other indicators
-  // This is a best-effort approach
-  if (process.platform === 'win32') {
-    // Check if running in a Chinese environment (common case)
-    // Windows sets some environment variables that can hint at the locale
-    const systemRoot = process.env.SystemRoot || '';
-    if (systemRoot.includes('\\Windows')) {
-      // Default to Chinese for now if on Windows without explicit locale
-      // This could be improved by checking registry or using native APIs
-      // For now, we'll use a safe default
-    }
-  }
-
-  // Default fallback
   cachedLocale = 'en-US';
   return cachedLocale;
 }
@@ -134,47 +102,37 @@ export function getWindowsOemCodePage(): string {
  * @returns true if the buffer appears to be valid UTF-8
  */
 export function isValidUtf8(buffer: Buffer): boolean {
-  // Empty buffer is valid UTF-8
   if (buffer.length === 0) {
     return true;
   }
 
-  // Check for UTF-8 BOM
   if (buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf) {
-    // Has UTF-8 BOM, likely UTF-8
     return true;
   }
 
-  // Validate UTF-8 byte sequences
   let i = 0;
   while (i < buffer.length) {
     const byte = buffer[i];
     if (byte === undefined) break;
 
     if (byte <= 0x7f) {
-      // ASCII (0x00-0x7F)
       i++;
     } else if ((byte & 0xe0) === 0xc0) {
-      // 2-byte sequence (0xC0-0xDF)
       if (i + 1 >= buffer.length) return false;
       const byte2 = buffer[i + 1];
       if (byte2 === undefined || (byte2 & 0xc0) !== 0x80) return false;
-      // Check for overlong encoding
       if (byte < 0xc2) return false;
       i += 2;
     } else if ((byte & 0xf0) === 0xe0) {
-      // 3-byte sequence (0xE0-0xEF)
       if (i + 2 >= buffer.length) return false;
       const byte2 = buffer[i + 1];
       const byte3 = buffer[i + 2];
       if (byte2 === undefined || byte3 === undefined) return false;
       if ((byte2 & 0xc0) !== 0x80 || (byte3 & 0xc0) !== 0x80) return false;
-      // Check for overlong encoding and surrogate pairs
       const codePoint = ((byte & 0x0f) << 12) | ((byte2 & 0x3f) << 6) | (byte3 & 0x3f);
       if (codePoint < 0x800 || (codePoint >= 0xd800 && codePoint <= 0xdfff)) return false;
       i += 3;
     } else if ((byte & 0xf8) === 0xf0) {
-      // 4-byte sequence (0xF0-0xF7)
       if (i + 3 >= buffer.length) return false;
       const byte2 = buffer[i + 1];
       const byte3 = buffer[i + 2];
@@ -182,13 +140,11 @@ export function isValidUtf8(buffer: Buffer): boolean {
       if (byte2 === undefined || byte3 === undefined || byte4 === undefined) return false;
       if ((byte2 & 0xc0) !== 0x80 || (byte3 & 0xc0) !== 0x80 || (byte4 & 0xc0) !== 0x80)
         return false;
-      // Check for overlong encoding and valid range
       const codePoint =
         ((byte & 0x07) << 18) | ((byte2 & 0x3f) << 12) | ((byte3 & 0x3f) << 6) | (byte4 & 0x3f);
       if (codePoint < 0x10000 || codePoint > 0x10ffff) return false;
       i += 4;
     } else {
-      // Invalid UTF-8 start byte
       return false;
     }
   }
@@ -212,45 +168,30 @@ export function isValidUtf8(buffer: Buffer): boolean {
  * @returns The decoded string
  */
 export function decodeBuffer(buffer: Buffer, forceEncoding?: string): string {
-  // Empty buffer
   if (buffer.length === 0) {
     return '';
   }
 
-  // If a specific encoding is forced, use it
   if (forceEncoding) {
     return iconv.decode(buffer, forceEncoding);
   }
 
-  // On non-Windows platforms, always use UTF-8
   if (process.platform !== 'win32') {
     return buffer.toString('utf8');
   }
 
-  // On Windows, check if the buffer is valid UTF-8
   if (isValidUtf8(buffer)) {
     return buffer.toString('utf8');
   }
 
-  // Buffer is not valid UTF-8, use the system's OEM code page
   const codePage = getWindowsOemCodePage();
   return iconv.decode(buffer, codePage);
 }
 
-/**
- * Sets the cached OEM code page for testing purposes.
- *
- * @param codePage - The code page to set (e.g., 'cp936', 'utf8')
- */
 export function setWindowsOemCodePageForTesting(codePage: string | null): void {
   cachedOemCodePage = codePage;
 }
 
-/**
- * Sets the cached locale for testing purposes.
- *
- * @param locale - The locale to set (e.g., 'zh-CN', 'en-US')
- */
 export function setLocaleForTesting(locale: string | null): void {
   cachedLocale = locale;
 }

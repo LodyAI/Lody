@@ -2,7 +2,6 @@ import type { SessionFileRoot } from '@lody/shared';
 import { type IssuePRMention, type ProjectRef, type SessionProjectRun } from '@lody/shared';
 import {
   LODY_HELP_INSTRUCTIONS,
-  LODY_LONG_RUN_GUIDANCE,
   LODY_PR_LINK_GUIDANCE,
   LODY_PR_LINK_GUIDANCE_WITHOUT_GH_SHIM,
 } from '../mcp/tool-help';
@@ -72,9 +71,7 @@ const GITHUB_SYSTEM_COMMANDS = `
   - When passing a multiline body to gh pr create, use $'..' syntax and replace literal \\n text with actual line breaks. Inside $'...', use real newlines rather than \\n strings.
   - The agent may use a one-time URL rewrite to fetch SSH git submodules over HTTPS, as long as the submodule is also authorized for lody or is public: git -c url."https://github.com/".insteadOf=git@github.com: submodule update --init --recursive`;
 
-const LODY_MCP_TOOLS_REMINDER = `\n\nUse the available Lody MCP tools when relevant. ${LODY_HELP_INSTRUCTIONS} ${LODY_LONG_RUN_GUIDANCE}`;
-
-// TODO: use system prompt
+const LODY_MCP_TOOLS_REMINDER = `\n\nUse the available Lody MCP tools when relevant. ${LODY_HELP_INSTRUCTIONS}`;
 export const buildPrompt = (
   prompt: string,
   project?: ProjectRef,

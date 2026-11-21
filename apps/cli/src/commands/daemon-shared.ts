@@ -25,7 +25,7 @@ import {
   requestLocalCliHostShutdown,
   type LocalCliHostRecord,
 } from '@lody/shared/node/local-cli-host-lease';
-import { calculateWorkerMaxOldSpaceMiB } from '@lody/cli-supervisor';
+import { resolveWorkerMaxOldSpaceMiB } from '@lody/cli-supervisor';
 import { startProcessLegacy, type ProcessHandleLegacy } from '@lody/shared/node/process';
 
 import type { NodeProcessApi } from '@lody/shared/node/process';
@@ -37,7 +37,10 @@ export const DAEMON_PID_FILE = path.join(getLodyDataDir(), 'daemon.pid');
 // long-lived Worker. The worker limit is intentionally machine-relative so an
 // 8GB Mac cannot claim the same V8 heap as a 32GB development machine.
 export const DAEMON_WATCHDOG_MAX_OLD_SPACE_MB = 512;
-export const DAEMON_WORKER_MAX_OLD_SPACE_MB = calculateWorkerMaxOldSpaceMiB(os.totalmem());
+export const DAEMON_WORKER_MAX_OLD_SPACE_MB = resolveWorkerMaxOldSpaceMiB(
+  process.env,
+  os.totalmem()
+);
 
 // `<active installation data root>/daemon.pid` is the daemon Supervisor control record: diagnostics
 // plus the private Host-control token `lody daemon stop` authenticates with.

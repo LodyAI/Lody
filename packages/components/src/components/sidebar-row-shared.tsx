@@ -852,15 +852,18 @@ export function SidebarRowEndSlot({
   const sendStatus = useAtomValue(sessionSendStatusAtomFamily(sessionId ?? ''));
   const shortcut = useSidebarRowShortcut(sessionId);
   const sendLabel = useSessionSendLabel(sendStatus);
-  const restContent = shortcut ? (
-    <SidebarShortcutPill index={shortcut.index} platform={shortcut.platform} selected={selected} />
-  ) : hasSessionRowStatus({
+  const showStatus =
+    !shortcut &&
+    hasSessionRowStatus({
       isWaitingPermission,
       needsAttention,
       isWorking: drawWorking,
       hasUnreadMessages,
       sendState: sendStatus?.state,
-    }) ? (
+    });
+  const restContent = shortcut ? (
+    <SidebarShortcutPill index={shortcut.index} platform={shortcut.platform} selected={selected} />
+  ) : showStatus ? (
     <SessionRowStatusIndicator
       isWaitingPermission={isWaitingPermission}
       needsAttention={needsAttention}
@@ -903,9 +906,13 @@ export function SidebarRowEndSlot({
       )}
     >
       {hasRest ? (
+        // A status mark centres in one 20px column, the same column the revealed
+        // actions and a folded group's mark centre their 14px icons in, so it
+        // lines up with both instead of sitting 3px right of them.
         <span
           className={cn(
             'flex',
+            showStatus && 'w-5 justify-center',
             showActions && cn('transition-opacity duration-100', fadeClassName)
           )}
         >

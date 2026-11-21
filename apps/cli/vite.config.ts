@@ -7,6 +7,8 @@ import { validateNightlyBuildIdentity } from '../electron/nightly-candidate.mjs'
 import { validateNightlyVersion } from '../electron/nightly-version.mjs';
 import desktopPackage from '../electron/package.json';
 import { devinRuntimeContractPlugin } from './scripts/devin-runtime-contract.mjs';
+import { externalWasmPlugin } from './scripts/external-wasm.mjs';
+import { workspaceModuleSideEffects } from './scripts/workspace-module-side-effects.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -127,6 +129,7 @@ export default defineConfig(({ mode }) => ({
   // additional SWC AST and exhausts the 2 GB packaging heap on this bundle.
   plugins: [
     wasm(),
+    externalWasmPlugin(),
     devinRuntimeContractPlugin(),
     {
       name: 'lody-cli-desktop-provenance',
@@ -140,6 +143,7 @@ export default defineConfig(({ mode }) => ({
       },
     },
   ],
+
   define: inlineEnv,
   resolve: {
     alias: [
@@ -184,6 +188,9 @@ export default defineConfig(({ mode }) => ({
         bundledNodeBuiltins.has(id) ||
         explicitlyExternal.has(id) ||
         id.includes('/node_modules/@loro-dev/roost-node/'),
+      treeshake: {
+        moduleSideEffects: workspaceModuleSideEffects(path.resolve(__dirname, '../../packages')),
+      },
       output: {
         // Keep dependency sourcemaps out of the large CLI entry.
         manualChunks(id) {

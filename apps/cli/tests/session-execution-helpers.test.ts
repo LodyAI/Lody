@@ -9,12 +9,12 @@ describe('session execution prompt helpers', () => {
     const prompt = buildPrompt('inspect the UI');
 
     expect(prompt).toBe(
-      'inspect the UI\n\nUse the available Lody MCP tools when relevant. Before executing a Lody command, you MUST call lody_help({command: TOOL_NAME}) and read its successful command-specific response. The index and short summaries do not replace full help. Read help before issuing the command, never in parallel with it. Reuse full help already in the current context; after compaction or loss, fetch it again. lody_help itself is exempt. An idle Session may be reclaimed, which ends background processes you started; run long commands with lody_automation `run`, which resumes this Session when they exit.'
+      'inspect the UI\n\nUse the available Lody MCP tools when relevant. Before executing a Lody command, you MUST call lody_help({command: TOOL_NAME}) and read its successful command-specific response. The index and short summaries do not replace full help. Read help before issuing the command, never in parallel with it. Reuse full help already in the current context; after compaction or loss, fetch it again. lody_help itself is exempt.'
     );
   });
 
   describe('approved PR-link sentence', () => {
-    const tail = 'which resumes this Session when they exit.';
+    const tail = 'lody_help itself is exempt.';
     const build = (options: { gitRepository?: boolean; managedGhShim?: boolean }) =>
       buildPrompt('fix it', undefined, undefined, undefined, options);
 

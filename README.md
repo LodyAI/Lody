@@ -160,6 +160,8 @@ action to trigger CI. Existing releases and their assets are preserved on reruns
 - `apps/cli` — Connect machines and run coding agents
 - `apps/electron` — Lody desktop app
 - [`apps/mobile`](apps/mobile/README.md) — New native iOS and Android clients
+- [`apps/mobile-capacitor`](apps/mobile-capacitor/README.md) — Capacitor cloud client for iOS and Android
+- `packages/client-e2ee` — Shared browser/mobile cloud E2EE composition
 - `packages/components` — Shared workspace UI
 - `packages/ui` — Base UI primitives and StyleX design tokens
 - `packages/platform` — Platform capabilities and integrations

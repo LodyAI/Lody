@@ -1,17 +1,17 @@
 ---
 name: lody-automations
-description: Run a long command under Lody and resume when it exits, register a background condition that resumes this Session when ready, inspect or cancel waits, and configure quota recovery, idle compaction, archive after merge or Auto delivery of the current pull request.
+description: Run a command beyond the current turn and resume when it exits, register a background condition that resumes this Session when ready, inspect or cancel waits, and configure quota recovery, idle compaction, archive after merge or Auto delivery of the current pull request.
 ---
 
 # Lody Automations
 
-Use `lody_automation` to wait for long work and for future behavior the user requested. A registration defaults to this Session. Pass `sessionId` to target another owned Session on the same machine; Lody checks the condition and queues the result in that target conversation. Registration returns immediately.
+Use `lody_automation` for commands that must continue after the current turn ends and resume the Session on exit, or for future behavior the user requested. Ordinary commands, builds and tests stay in the current turn; duration alone is not a reason to use Automation. A registration defaults to this Session. Pass `sessionId` to target another owned Session on the same machine; Lody checks the condition and queues the result in that target conversation. Registration returns immediately.
 
 ## Choose the operation
 
 | Need                                                                   | Read next                                                          |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| Run a long command (build, test suite) and continue when it exits      | The run section below                                              |
+| Continue a command after this turn ends and resume on exit             | The run section below                                              |
 | Wait for data to satisfy a custom condition                            | [Context](references/context.md), then the relevant data reference |
 | Recover after quota limits, compact while idle, or archive after merge | [Session settings](references/settings.md); no condition JS needed |
 | Hand the current PR's CI fixes, conflicts or merge to Lody             | [Session settings](references/settings.md), Auto delivery          |
@@ -50,10 +50,11 @@ Each wait completes once. A condition already satisfied at registration can matc
 immediately. Register again for a later cycle only when the user's task requires it.
 Busy Sessions queue continuation; automation does not clear a user's Stop.
 
-## Run a long command
+## Run beyond the current turn
 
-An idle Session may be reclaimed, which ends background processes the Agent
-started. Lody owns a `run` process instead: it keeps running, and its exit queues
+Use `run` only when work must outlive the current turn and its completion needs
+to resume the Session. An idle Session may be reclaimed, which ends background
+processes the Agent started. Lody owns a `run` process instead: it keeps running, and its exit queues
 one continuation in this Session with the exit code or signal, duration, log path
 and the last 4 KiB of output.
 

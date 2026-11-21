@@ -51,3 +51,8 @@ the history-based selection, failure isolation, current statecharts and verifica
 limits. The default verifier checks current code and catches deliberately broken
 variants; failed current properties remain nonzero. Dependencies and raw output stay
 outside the app workspace.
+
+`delete-comment` is authored in this repository. It is the audit procedure for
+the comment ratchet (`scripts/check-comment-ratchet.mjs`); the enforcement rules
+stay in that script and [scripts/AGENTS.md](../../scripts/AGENTS.md).
+`.claude/skills/delete-comment` links to it.

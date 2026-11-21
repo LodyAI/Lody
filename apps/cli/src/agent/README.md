@@ -53,17 +53,16 @@ context/message-flow.md "Upstream".
   Builtin Devin is a bundled proxy over the pinned official runtime; discovery hides duplicate
   registry Devin, Dimcode and Kimi entries while saved configurations keep their launch
   contracts ([decision and ablations](../../../../.agents/notes/implemented/feature/2026-09-30-builtin-devin.md)).
-  [Sorbet authentication](../../../../.agents/notes/proposed/feature/2026-11-02-sorbet-acp-authentication.md)
-  uses the existing protected ACP interaction path. Its `sorbet.dev` credentials v1
-  extension runs in a separate bounded builtin Sorbet ACP process, with no session or
-  terminal; the daemon verifies the local Provider identity and does not use stored
-  launch overrides. Socket disconnect cancels the operation. Authentication and logout
-  share a daemon-wide mutation owner across workspaces; unconfirmed process cleanup is
-  retried before a later mutation. Account management is also available through signed E2EE
-  owned execution when the target advertises `sorbetCredentialsRemote`: the target verifies
-  the signer belongs to its owner's membership. List and logout use the execution journal;
-  an interrupted logout can have an unknown result. Metadata lists saved credential types,
-  not account identities, remote validity or environment-provided credentials.
+  [Sorbet authentication and control](../../../../.agents/notes/implemented/feature/2026-11-02-sorbet-acp-authentication.md)
+  sends interactive sign-in, credential metadata, logout, Provider mutations, model refresh,
+  and model catalog reads directly through `@sorbetai/control@alpha` against the same
+  `<LodyDataDir>/sorbet` directory. The existing protected Machine RPC interaction stream carries
+  prompts and progress, but no temporary ACP process or duplicate management abstraction sits
+  between the handler and Sorbet. The daemon still verifies the local Provider identity and
+  ignores stored launch overrides. Account management is also available through signed E2EE
+  owned execution when the target advertises `sorbetCredentialsRemote`; the target verifies the
+  signer belongs to its owner's membership. Metadata lists saved credential types, not account
+  identities, remote validity or environment-provided credentials.
 - `deepseek-harness-runtime.ts` — Provider-scoped Harness homes, atomic host bundles,
   and npx launch wrapper around the `packages/acp-extension-dsh` submodule. DSH uses
   a supported standalone Node from the final launch PATH in the target working directory.

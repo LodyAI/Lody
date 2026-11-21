@@ -40,6 +40,8 @@ export const isE2eeFeatureMethod = (method: string): boolean =>
   method === 'sorbet/providers-list' ||
   method === 'sorbet/providers-create' ||
   method === 'sorbet/providers-delete' ||
+  method === 'sorbet/providers-refresh' ||
+  method === 'sorbet/models-list' ||
   method === 'file/preview' ||
   method === 'session/fork' ||
   method === 'session/edit-and-resend' ||

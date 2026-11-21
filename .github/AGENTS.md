@@ -131,3 +131,6 @@ their failures and perform expiry.
   organization members are not exempt. A valid edit clears bot-owned state.
 - `labeler.yml` is the source of truth for path-based `scope:*` labels. Overlap
   is intentional when a PR affects multiple product areas.
+
+- Before changing cloud publishers, read [the integration contract](client-releases.md)
+  and [release security](workflow-security.md#cloud-client-releases).

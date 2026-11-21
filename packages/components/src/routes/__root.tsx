@@ -96,7 +96,6 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootComponent,
   notFoundComponent: NotFound,
   head: () => ({
-    // TODO: head meta
     meta: [
       {
         charSet: 'utf-8',
