@@ -21,7 +21,8 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -238,10 +239,13 @@ function countFile(source) {
   return { counted: counted.size, exempt: exempt.size, jsdocLines };
 }
 
-// Tracked files only (`--cached`): the baseline must not shift when
-// install/codegen leaves untracked sources, or when the apps/mobile native
-// client submodules happen to be checked out. Native submodule sources live in
-// their own repositories and are out of this ratchet's scope.
+// The baseline must not shift with checkout state: untracked install/codegen
+// artifacts and checked-out native client submodules are excluded by using
+// tracked sources only. On pull_request, CI checks out the merge ref whose
+// worktree also contains newer base-branch commits; the second merge parent
+// is the PR head itself, so under CI a merge HEAD is scanned at that ref
+// instead of the merged worktree. Native submodule sources live in their own
+// repositories and are out of this ratchet's scope.
 function listTrackedFiles(root) {
   return execFileSync('git', ['ls-files', '--cached', '-z'], {
     cwd: root,
@@ -252,8 +256,47 @@ function listTrackedFiles(root) {
     .filter(Boolean);
 }
 
-export function collectCounts(root = repoRoot) {
-  const files = listTrackedFiles(root).filter((rel) => {
+function resolveScanSource(root) {
+  if (process.env.CI !== 'true' && process.env.GITHUB_ACTIONS !== 'true')
+    return { kind: 'worktree' };
+  try {
+    const line = execFileSync('git', ['rev-list', '--parents', '-n', '1', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim();
+    const parents = line.split(/\s+/);
+    if (parents.length < 3) return { kind: 'worktree' };
+    const prHead = parents[2];
+    try {
+      execFileSync('git', ['cat-file', '-e', `${prHead}^{commit}`], { cwd: root });
+    } catch {
+      execFileSync('git', ['fetch', '--no-tags', '--depth=1', 'origin', prHead], {
+        cwd: root,
+        stdio: 'inherit',
+      });
+    }
+    const dir = mkdtempSync(path.join(tmpdir(), 'comment-ratchet-'));
+    try {
+      execFileSync('git', ['archive', '-o', `${dir}/tree.tar`, prHead], { cwd: root });
+      execFileSync('tar', ['-xf', `${dir}/tree.tar`, '-C', dir]);
+    } finally {
+      rmSync(`${dir}/tree.tar`, { force: true });
+    }
+    process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
+    return { kind: 'dir', dir };
+  } catch {
+    return { kind: 'worktree' };
+  }
+}
+
+function readSource(source, rel, root) {
+  const base = source.kind === 'dir' ? source.dir : root;
+  return readFileSync(path.join(base, rel), 'utf8');
+}
+
+export function collectCounts(root = repoRoot, source = resolveScanSource(root)) {
+  const files = listTrackedFiles(root).filter(
+    (rel) => {
     const ext = path.extname(rel);
     if (!scanExtensions.has(ext)) return false;
     if (!scanRoots.some((r) => rel === r || rel.startsWith(`${r}/`))) return false;
@@ -266,7 +309,7 @@ export function collectCounts(root = repoRoot) {
   for (const rel of files) {
     let counts;
     try {
-      counts = countFile(readFileSync(path.join(root, rel), 'utf8'));
+      counts = countFile(readSource(source, rel, root));
     } catch {
       continue;
     }
@@ -279,7 +322,7 @@ export function collectCounts(root = repoRoot) {
     entry.files += 1;
     scopes.set(scope, entry);
   }
-  return { scopes, fileCounts };
+  return { scopes, fileCounts, source };
 }
 
 function loadBaseline() {
@@ -292,14 +335,14 @@ function loadBaseline() {
 
 function main() {
   const args = process.argv.slice(2);
-  const { scopes, fileCounts } = collectCounts(repoRoot);
+  const { scopes, fileCounts, source } = collectCounts(repoRoot);
 
   if (args.includes('--dump')) {
     const dir = args[args.indexOf('--dump') + 1] ?? '';
     for (const [rel] of fileCounts) {
       if (dir && !rel.startsWith(dir)) continue;
-      const source = readFileSync(path.join(repoRoot, rel), 'utf8');
-      for (const c of scanComments(source)) {
+      const text = readSource(source, rel, repoRoot);
+      for (const c of scanComments(text)) {
         const firstLine = c.text.split('\n')[0].trim().slice(0, 160);
         process.stdout.write(
           `${rel}:${c.startLine}-${c.endLine}\t${c.kind}${c.directive ? ':directive' : ''}\t${firstLine}\n`
