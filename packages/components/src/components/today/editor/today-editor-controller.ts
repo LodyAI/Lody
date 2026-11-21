@@ -18,6 +18,7 @@ import {
   type FocusIntent,
   type TodayFragment,
   type TodayDate,
+  type TodayMentionTarget,
   type TodayNodeId,
 } from '@lody/shared';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
@@ -91,7 +92,9 @@ export type TodaySessionPickerState = {
   index: number;
   /** Offset of the `@`; the mention replaces `start..start + 1 + query.length`. */
   start: number;
+  tab: TodayPickerTab;
 };
+export type TodayPickerTab = 'all' | 'member' | 'session';
 /**
  * An `@` (or full-width `＠`) at the line start or after whitespace, then the
  * query up to the caret: no newline and no other mention inside it.
@@ -147,7 +150,7 @@ export class TodayEditorController {
   /** The `@` the user dismissed with Esc (`nodeId:offset`): it stays closed. */
   private pickerDismissedFor: string | null = null;
   /** Candidates the picker currently shows, set by its view. */
-  pickerItems: readonly string[] = [];
+  pickerItems: readonly TodayMentionTarget[] = [];
   private dropIndicator: TodayDropIndicator | null = null;
   private dragGhost: TodayDragGhost | null = null;
   private cancelSettle: (() => void) | null = null;
@@ -257,7 +260,14 @@ export class TodayEditorController {
           this.picker.start === start &&
           this.picker.query === query;
         if (same) return;
-        this.picker = { store: active.store, nodeId: active.nodeId, query, index: 0, start };
+        this.picker = {
+          store: active.store,
+          nodeId: active.nodeId,
+          query,
+          index: 0,
+          start,
+          tab: this.picker?.tab ?? 'all',
+        };
         this.notify();
       })
     );
@@ -590,10 +600,10 @@ export class TodayEditorController {
       }
       case 'Enter':
       case 'Tab': {
-        const sessionId = this.pickerItems[picker.index];
-        if (!sessionId) return false;
+        const target = this.pickerItems[picker.index];
+        if (!target) return false;
         event.preventDefault();
-        queueMicrotask(() => this.acceptPicker(sessionId));
+        queueMicrotask(() => this.acceptPicker(target));
         return true;
       }
       case 'Escape':
@@ -610,19 +620,24 @@ export class TodayEditorController {
   }
 
   /** Replace the `@query` with a mention; one undo brings `@query` back. */
-  acceptPicker(sessionId: string) {
+  acceptPicker(target: TodayMentionTarget) {
     const picker = this.picker;
     if (!picker) return;
     this.picker = null;
     const { store, nodeId, start, query } = picker;
     const focus = store.undo.structural(() =>
-      store.outline.insertMention(nodeId, start, query.length + 1, {
-        kind: 'session',
-        id: sessionId,
-      })
+      store.outline.insertMention(nodeId, start, query.length + 1, target)
     );
     this.apply(store, focus);
   }
+
+  setPickerTab(tab: TodayPickerTab) {
+    if (!this.picker || this.picker.tab === tab) return;
+    this.picker = { ...this.picker, tab, index: 0 };
+    this.notify();
+  }
+
+  onOpenMember: ((userId: string) => void) | null = null;
 
   /** Sections register their open page so the caret can cross days. */
   registerDay(date: TodayDate, store: TodayPageStore) {

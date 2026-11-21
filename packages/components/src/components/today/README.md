@@ -12,7 +12,8 @@ Experimental daily outline notes ([Spec](../../../../../specs/today-outline.md))
 | `outline.stylex.ts`                                           | Outline geometry shared by rows and the surface (the fold toggle's overhang)                                                |
 | `today-command.tsx`                                           | "Open Today" command placeholder, listed only while the experiment is on                                                    |
 | `today-stream.ts`                                             | Which days show, local date and midnight math                                                                               |
-| `today-session-mention.tsx`, `today-session-status.ts`        | Inline conversation mention and its sidebar-derived status                                                                  |
+| `today-session-mention.tsx`, `today-session-status.ts`        | Inline conversation and member mentions; a conversation's sidebar-derived status                                            |
+| `today-mention-picker.tsx`, `today-members.ts`                | The `@` picker (All / People / Conversations) and the workspace members it and member mentions read                         |
 | `today-mention-status-menu.tsx`                               | Status menu a mention's icon opens (`useSessionActions`)                                                                    |
 | `today-dnd.ts`                                                | Drop projection for node and sidebar drags                                                                                  |
 | `today-convert-dialog.tsx`, `today-convert-dialog-header.tsx` | Convert to task: the new-conversation surface in the landing's dialog layout, under a breadcrumb header                     |

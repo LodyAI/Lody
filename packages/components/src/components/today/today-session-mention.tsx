@@ -15,6 +15,8 @@ import {
   type TodaySessionState,
 } from './today-session-status';
 import { useTodayNow } from './use-today-clock';
+import { useTodayMembers } from './today-members';
+import { UserAvatar } from '../user-avatar';
 
 // Inline-reference chip rules (Notion, Linear, Slack, AFFiNE, Outline): the chip
 // stays inline text so it never grows the line; it carries its own inline
@@ -114,6 +116,29 @@ const styles = stylex.create({
     textDecorationColor: 'currentColor',
   },
   muted: { color: colors.tertiaryLabel, fontStyle: 'italic' },
+  member: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1],
+    height: text.bodyLeading,
+    verticalAlign: 'top',
+    boxSizing: 'border-box',
+    paddingInlineStart: 2,
+    paddingInlineEnd: space[2],
+    marginInline: 1,
+    borderRadius: radius.full,
+    borderWidth: 0,
+    backgroundColor: {
+      default: `color-mix(in srgb, ${colors.accent} 14%, transparent)`,
+      ':hover': `color-mix(in srgb, ${colors.accent} 22%, transparent)`,
+    },
+    color: colors.accent,
+    font: 'inherit',
+    whiteSpace: 'nowrap',
+    cursor: 'pointer',
+    userSelect: 'none',
+  },
+  memberSelected: { backgroundColor: `color-mix(in srgb, ${colors.accent} 32%, transparent)` },
 });
 
 /**
@@ -195,6 +220,9 @@ function StatusIcon(props: { display: Extract<TodaySessionDisplay, { state: 'ok'
 export function TodayMention(props: { mention: TodayMentionTarget; selected?: boolean }) {
   const { t } = useTranslation();
   const { mention, selected = false } = props;
+  if (mention.kind === 'member' && mention.id) {
+    return <TodayMemberMention userId={mention.id} selected={selected} />;
+  }
   if (mention.kind !== 'session' || !mention.id) {
     return (
       <span
@@ -207,6 +235,39 @@ export function TodayMention(props: { mention: TodayMentionTarget; selected?: bo
     );
   }
   return <TodaySessionMention sessionId={mention.id} selected={selected} />;
+}
+
+function TodayMemberMention(props: { userId: string; selected: boolean }) {
+  const { t } = useTranslation();
+  const controller = useTodayEditor();
+  const member = useTodayMembers().get(props.userId);
+  const name = member?.name ?? t('today.memberUnknown', 'Unknown member');
+  return (
+    <button
+      type="button"
+      tabIndex={-1}
+      {...stylex.props(styles.member, props.selected && styles.memberSelected)}
+      data-today-mention=""
+      data-today-member={props.userId}
+      contentEditable={false}
+      aria-label={t('today.memberMention', '{{name}}, open their Today', { name })}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onClick={(event) => {
+        event.stopPropagation();
+        controller?.onOpenMember?.(props.userId);
+      }}
+    >
+      <UserAvatar
+        user={{ id: props.userId, name, image: member?.image }}
+        size="mini"
+        showIcon={!member}
+      />
+      {name}
+    </button>
+  );
 }
 
 /** A conversation's mention display from the sidebar's signals and the surface clock. */

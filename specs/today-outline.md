@@ -67,7 +67,7 @@ any time; when off it changes none of the app's existing behavior.
 - Every date's content is directly editable.
 - Your own Today shows by default. The top more menu has "View a member's Today", which switches to any member's
   Today and allows editing; it takes no permanent space. The member list reuses the workspace's existing member
-  source; with a single member (such as a local OSS workspace) the item is hidden. The more menu also offers
+  source, each member shown with their avatar; with a single member (such as a local OSS workspace) the item is hidden. The more menu also offers
   "Copy link" to a member's page for a day. v1 shows no remote cursors or presence; concurrent edits merge via CRDT.
 
 ### Outline editing
@@ -164,6 +164,16 @@ any time; when off it changes none of the app's existing behavior.
   conversation.
 - In plain text (copy, the Convert to task prompt) each mention is written as
   `[@Title](lody://session/<id>?workspace=<id>)`.
+
+### Member mentions
+
+- The `@` menu also lists workspace members (user decision, after Feishu): tabs "All", "People" and "Conversations";
+  "All" shows the first matches of each kind, people first. People show only in a workspace with other members.
+- A member mention is the same one-character mention with `kind: 'member'` and the member's userId as `id`. It shows
+  as a tinted pill with the member's avatar and current name; clicking it opens that member's Today. A member no
+  longer in the workspace shows as "Unknown member". Mentioning someone sends no notification.
+- In plain text a member mention is written as `@Name`. Clients that predate member mentions show the
+  "Unsupported reference" placeholder and keep the mark.
 
 ### Convert to task
 

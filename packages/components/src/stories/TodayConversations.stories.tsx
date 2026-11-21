@@ -25,9 +25,11 @@ import { TodayDaySection } from '@/components/today/today-day-section';
 import {
   TodayNodeActions,
   TodayOutlineSurface,
-  TodaySessionPicker,
   type TodayConvertDialogComponent,
 } from '@/components/today/today-view';
+import { TodaySessionPicker } from '@/components/today/today-mention-picker';
+import { TodayMembersContext } from '@/components/today/today-members';
+import type { WorkspaceMember } from '@/hooks/use-workspace-members';
 import {
   TodayMentionStatusMenu,
   type TodayMentionStatusActions,
@@ -108,6 +110,18 @@ const line = (...parts: Array<string | { m: string }>): TodayFragment => {
   }
   return { text, mentions, children: [] };
 };
+const face = (fill: string, skin: string) =>
+  `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" fill="${fill}"/><circle cx="20" cy="16" r="7" fill="${skin}"/><path d="M6 40c2-9 8-13 14-13s12 4 14 13z" fill="${skin}"/></svg>`
+  )}`;
+const MEMBERS: WorkspaceMember[] = [
+  { userId: USER, name: 'Sam Lee', image: face('#c7d2fe', '#f5d0b0') },
+  { userId: 'member-ava', name: 'Ava Chen', image: face('#fde68a', '#e8b48f') },
+  { userId: 'member-noah', name: 'Noah Park', image: face('#bbf7d0', '#d9a37c') },
+  { userId: 'member-mia', name: 'Mia Rossi' },
+];
+const MEMBERS_BY_ID = new Map(MEMBERS.map((member) => [member.userId, member] as const));
+
 const PAGE: TodayFragment[] = [
   line('Morning: ', { m: 'demo-running' }, ' should land before standup'),
   line('Approve ', { m: 'demo-waiting' }, ' once CI is green'),
@@ -115,6 +129,11 @@ const PAGE: TodayFragment[] = [
   line('Back on ', { m: 'demo-later' }, ' after lunch'),
   line('Done: ', { m: 'demo-settled' }, ', ', { m: 'demo-archived' }),
   line({ m: 'demo-idle' }),
+  {
+    text: `Pair with ${TODAY_MENTION_CHAR} on the sync review`,
+    mentions: [{ start: 10, kind: 'member', id: 'member-ava' }],
+    children: [],
+  },
   ...parseTodayPasteText(
     'Prompt for later\n  Make Today remember the last calendar month\n  Keep the change small'
   ),
@@ -269,11 +288,15 @@ function Surface() {
   useEffect(() => {
     const created = new TodayEditorController(cache);
     created.onOpenSession = (sessionId) => window.alert(`Open conversation ${sessionId}`);
+    created.onOpenMember = (userId) => window.alert(`Open ${userId}'s Today`);
     created.workspaceId = 'demo-workspace';
     created.mentionText = (mention) =>
       todayMentionMarkdown(mention, {
         workspaceId: 'demo-workspace',
-        title: SESSIONS.find((demo) => demo.id === mention.id)?.title,
+        title:
+          mention.kind === 'member'
+            ? MEMBERS_BY_ID.get(mention.id)?.name
+            : SESSIONS.find((demo) => demo.id === mention.id)?.title,
       });
     setController(created);
     return () => created.dispose();
@@ -289,21 +312,23 @@ function Surface() {
   );
   return (
     <TodayEditorContext.Provider value={controller}>
-      <div style={{ maxWidth: 720, height: 640, display: 'flex', flexDirection: 'column' }}>
-        <TodayOutlineSurface controller={controller}>
-          <TodayDaySection
-            cache={cache}
-            userId={USER}
-            date={TODAY}
-            today={TODAY}
-            isTop
-            onEmptyChange={() => {}}
-          />
-        </TodayOutlineSurface>
-        <TodaySessionPicker items={items} />
-        <TodayNodeActions pinned={false} ConvertDialog={DemoConvertDialog} />
-        <TodayMentionStatusMenu actions={actions} />
-      </div>
+      <TodayMembersContext.Provider value={MEMBERS_BY_ID}>
+        <div style={{ maxWidth: 720, height: 640, display: 'flex', flexDirection: 'column' }}>
+          <TodayOutlineSurface controller={controller}>
+            <TodayDaySection
+              cache={cache}
+              userId={USER}
+              date={TODAY}
+              today={TODAY}
+              isTop
+              onEmptyChange={() => {}}
+            />
+          </TodayOutlineSurface>
+          <TodaySessionPicker items={items} />
+          <TodayNodeActions pinned={false} ConvertDialog={DemoConvertDialog} />
+          <TodayMentionStatusMenu actions={actions} />
+        </div>
+      </TodayMembersContext.Provider>
     </TodayEditorContext.Provider>
   );
 }

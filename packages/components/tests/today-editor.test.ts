@@ -281,8 +281,8 @@ describe('Today session picker', () => {
       discrete: true,
     });
     expect(controller.getPicker()).toMatchObject({ query: 'fix', start: 4 });
-    controller.pickerItems = ['sess-1'];
-    controller.acceptPicker('sess-1');
+    controller.pickerItems = [{ kind: 'session', id: 'sess-1' }];
+    controller.acceptPicker({ kind: 'session', id: 'sess-1' });
     const [node] = store.getSnapshot().visible;
     expect(node).toMatchObject({
       text: `ask ${M} later`,
@@ -292,6 +292,133 @@ describe('Today session picker', () => {
     expect(store.getSnapshot().visible[0]).toMatchObject({ text: 'ask @fix later', mentions: [] });
     controller.dispose();
     root.remove();
+  });
+});
+
+describe('Today @ picker with people', () => {
+  it('lists people with avatars beside conversations, and a picked person becomes a chip that opens their Today', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const { TodayEditorController } =
+      await import('../src/components/today/editor/today-editor-controller');
+    const { TodayEditorContext } =
+      await import('../src/components/today/editor/today-editor-context');
+    const { TodayMembersContext } = await import('../src/components/today/today-members');
+    const { TodaySessionPicker } = await import('../src/components/today/today-mention-picker');
+    const { parseTodayPasteText } = await import('@lody/shared');
+    const store = createTodayPageStore({
+      docId: 'today-u1-2026-11-17',
+      doc: new LoroDoc(),
+      registered: true,
+      join: async () => ({ room: { unsubscribe: () => {} }, synced: Promise.resolve() }),
+      register: async () => {},
+      setTimer: () => () => {},
+      retryDelayMs: () => 1000,
+    });
+    store.outline.paste({ kind: 'page-start' }, parseTodayPasteText('ask'));
+    const cache = {
+      peek: () => store,
+      acquire: async () => store,
+      releaseRef: () => {},
+    } as unknown as TodayPageStoreCache;
+    const controller = new TodayEditorController(cache);
+    const opened: string[] = [];
+    controller.onOpenMember = (userId) => opened.push(userId);
+    const members = new Map([
+      ['u1', { userId: 'u1', name: 'Me' }],
+      ['u2', { userId: 'u2', name: 'Alice Wong', image: 'https://example.invalid/a.png' }],
+      ['u3', { userId: 'u3', name: 'Bob' }],
+    ]);
+    const sessions = [
+      {
+        slug: 's',
+        sessionId: 'sess-al' as never,
+        title: 'Align the release',
+        activityAt: 1,
+        projectKey: 'chat' as const,
+      },
+    ];
+    const surface = document.createElement('div');
+    document.body.append(surface);
+    const root = createRoot(surface);
+    await act(async () =>
+      root.render(
+        withTestI18n(
+          createElement(
+            TodayEditorContext.Provider,
+            { value: controller },
+            createElement(
+              TodayMembersContext.Provider,
+              { value: members },
+              createElement(TodayDaySection, {
+                cache,
+                userId: 'u1',
+                date: '2026-11-17' as never,
+                today: '2026-11-17' as never,
+                isTop: true,
+                onEmptyChange: () => {},
+              }),
+              createElement(TodaySessionPicker, { items: sessions })
+            )
+          ),
+          createTestI18n()
+        )
+      )
+    );
+    const id = store.getSnapshot().visible[0]!.id;
+    await act(async () => controller.activate(store, id, 'end'));
+    await act(async () =>
+      controller.editor.update(
+        () => {
+          $setSelectionOffsets(3);
+          const selection = $getSelection();
+          if ($isRangeSelection(selection)) selection.insertText(' @al');
+        },
+        { discrete: true }
+      )
+    );
+    const options = () =>
+      [...surface.querySelectorAll<HTMLElement>('[role="option"]')].map((option) => [
+        option.dataset.todayPickerKind,
+        option.textContent,
+      ]);
+    // "All": the matching person, then the matching conversation.
+    expect(options()).toEqual([
+      ['member', 'AWAlice Wong'],
+      ['session', 'Align the release'],
+    ]);
+    const tab = (label: string) =>
+      [...surface.querySelectorAll<HTMLElement>('[role="tab"]')].find(
+        (t) => t.textContent === label
+      )!;
+    await act(async () => tab('Conversations').click());
+    expect(options()).toEqual([['session', 'Align the release']]);
+    await act(async () => tab('People').click());
+    expect(options()).toEqual([['member', 'AWAlice Wong']]);
+    const editable = surface.querySelector<HTMLElement>('[contenteditable="true"]')!;
+    await act(async () => {
+      window.getSelection()?.removeAllRanges();
+      editable.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
+      await Promise.resolve();
+    });
+    expect(store.getSnapshot().visible[0]).toMatchObject({
+      text: `ask ${M}`,
+      mentions: [{ start: 4, kind: 'member', id: 'u2' }],
+    });
+    await act(async () => controller.deactivate());
+    const chip = surface.querySelector<HTMLElement>('[data-today-member="u2"]')!;
+    expect(chip.textContent).toBe('AWAlice Wong');
+    await act(async () => chip.click());
+    expect(opened).toEqual(['u2']);
+    // A member who left the workspace keeps the chip, named as unknown.
+    members.delete('u2');
+    await act(async () => void store.outline.insertMention(id, 0, 0, { kind: 'member', id: 'u2' }));
+    expect(surface.querySelector('[data-today-member="u2"]')?.textContent).toBe('Unknown member');
+    act(() => root.unmount());
+    controller.dispose();
+    store.dispose();
+    surface.remove();
   });
 });
 
