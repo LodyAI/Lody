@@ -152,14 +152,14 @@ removed.
 
 ### Phone interaction (WebView, iOS, Android)
 
-| Gesture                     | Result                                                                                 |
-| --------------------------- | -------------------------------------------------------------------------------------- |
-| Tap                         | Open the conversation                                                                  |
-| Long press                  | The full action menu; moving while still pressed turns into a drag                     |
-| Trailing swipe              | Focus and Later rows: Settle, Later. Settled rows: Archive                             |
-| Leading swipe               | Pin or unpin                                                                           |
-| Section header ⋯            | New section, Rename, Move up, Move down, Delete                                        |
-| Conversation page "…" sheet | Later, Settle, Move to Focus                                                           |
+| Gesture                     | Result                                                             |
+| --------------------------- | ------------------------------------------------------------------ |
+| Tap                         | Open the conversation                                              |
+| Long press                  | The full action menu; moving while still pressed turns into a drag |
+| Trailing swipe              | Focus and Later rows: Settle, Later. Settled rows: Archive         |
+| Leading swipe               | Pin or unpin                                                       |
+| Section header ⋯            | New section, Rename, Move up, Move down, Delete                    |
+| Conversation page "…" sheet | Later, Settle, Move to Focus                                       |
 
 - Drags reorder Focus, reorder and move between pin sections, pin a row dropped
   into the Pinned area, and restore a Later or Settled row dropped into Focus. The
