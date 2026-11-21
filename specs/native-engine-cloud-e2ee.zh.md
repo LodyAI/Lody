@@ -226,21 +226,21 @@ Roost 与 native 云同步**共存**。本设计里，两者都不迁移进对�
 
 ## SDK 原语
 
-按阻塞程度排序，名字是草案。SDK 中不出现 Lody 的领域概念。
+按阻塞程度排序，名字与 loro-dev/loro-repo 中的实现一致。SDK 中不出现 Lody 的领域概念。"分支"表示已推送待审、尚未合入。
 
-| 编号 | 阻塞 | 原语（草案） |
-| ---- | ---- | ------------ |
-| K0 | E2EE | **宿主内的 keyring**：现在 `ContentKeyring` 跑在 napi 客户端进程里，宿主协议也没有安装请求。需要新增走二进制帧的安装请求：`keyringConfigure(ns, genesis)`、`keyringInstallEpoch`、`keyringSetSigner(ns, writer, seed)`、`keyringAdmit`、`keyringClear`。宿主在清除、删除命名空间、交接和退出时清零；没有任何请求返回密钥材料。 |
-| K1 | E2EE | **写入者绑定连接**：只有安装了写入者 W 种子的那条连接，才能以 W 的身份写入和封装。 |
-| K2 | E2EE | **封装策略与准入分离**：`keyringSetSealEpoch(ns, epoch)`，以及 `keyringHoldSealing(ns, writer)` / `release`。暂停封装时保留准入和旧 epoch，这一点与 `revokeWriterPubkey` 不同。 |
-| S1 | 云同步 | 按房间的实时订阅与拉取：`setRoomInterest(ns, rooms, {live})`、`syncRooms(ns, rooms)`。同时修正二进制 Loro-update 订阅，使它也计入订阅。 |
-| S2 | 云同步 | token 回复携带 `{token, expiresAt?, baseUrl?, bucket?, shardUrls?}`，并在过期前刷新。加密内容 token 有效期 8 分钟，且自带 bucket。 |
-| S3 | 云同步、E2EE | 每个 remote 的快照上传策略：`{debounceMs, minBytes, maxBytes}`；由 Lody 推送的 `setSnapshotUpload(ns, allowed)` 开关；以及响应修复请求的 `uploadSnapshotNow(ns, room)`。快照字节必须与旧编码一致。 |
-| S4 | 云同步 | 远端导入永远不被本地 `docSchema` 拒绝。先验证，验证不通过才补这个原语。 |
-| E1 | E2EE | `dropNamespace(ns)`：排空、关闭，并持久删除命名空间的数据库和 outbox。删除持久完成后的回复即为完成确认。 |
-| N2 | — | 用流式实时传输（SSE 或 WebSocket）代替 long-poll。 |
+| 编号 | 阻塞 | 原语 | 状态 |
+| ---- | ---- | ---- | ---- |
+| K0 | E2EE | **宿主内的 keyring**：`keyringConfigure(ns, genesis)`、`keyringAdmit`、`keyringClear` 和封装策略相关调用都是 JSON 请求；`keyringInstallEpoch` 和 `keyringSetSigner(ns, writer, seed)` 只走二进制秘密帧。宿主在清除、删除命名空间、交接和退出时清零，没有任何请求返回密钥材料。 | #335 |
+| K1 | E2EE | **写入者绑定连接**：只有安装了写入者 W 种子的那条连接，才能以 W 写入、修改 W 的封装策略或重装 W。该连接关闭时种子随之移除，W 的行进入等待。 | #336 |
+| K2 | E2EE | **封装策略与准入分离**：`setSealEpoch`、`holdSealing` / `releaseSealing`，以及 `removeWriterSigner`（移除种子但保留公钥准入）。宿主侧对应 `keyringSetSealEpoch`、`keyringHoldSealing`、`keyringReleaseSealing`、`keyringRemoveSigner`。 | #333 |
+| S1 | 云同步 | 二进制 Loro-update 订阅和路径订阅计入实时订阅；`holdRoomInterest(ns, rooms)` 让这些房间保持实时，直到 `release()`；`syncRooms(ns, rooms, remoteId?)` 只拉取指定房间。 | 分支 `lody/room-interest` |
+| S2 | 云同步 | auth provider 可以返回 `{ token, expiresInMs }`，引擎在过期前 30 秒刷新（有效期更短时，在有效期过半时刷新）。bucket 和 gateway 仍由调用方用首次 token 回复通过 `configureRemote` 配置。回复中的 endpoint 字段没有实现：刷新时改写 remote 会在同步中途改变 stream 身份。 | 分支 `lody/token-expiry`（叠在 S1 上） |
+| S3 | 云同步、E2EE | `setSnapshotPolicy(ns, { enabled, quietMs, minUpdateBytes, maxUpdateBytes })`，保存在引擎内存中；`uploadSnapshotNow(ns, room)` 用于响应修复请求。快照编码本来就与 Lody 一致：zstd 帧，原始帧仍可读。 | 分支 `lody/snapshot-policy`（叠在 S2 上） |
+| S4 | 云同步 | 远端导入永远不被本地 `docSchema` 拒绝。已在代码中确认，并有测试覆盖，不需要新原语。 | 分支 `lody/schema-remote-import`（叠在 S3 上） |
+| E1 | E2EE | `dropNamespace(ns)`：排空、关闭，并持久删除命名空间的数据库和 outbox；持久完成后的回复即为完成确认。 | #338 |
+| N2 | — | 用流式实时传输（SSE 或 WebSocket）代替 long-poll。 | 未开始 |
 
-npm 发布版必须包含发布构建用到的全部原语。0.1.0 早于其中大部分原语。
+npm 发布版必须包含发布构建用到的全部原语；0.1.0 早于以上所有原语。
 
 ## 分阶段计划
 
