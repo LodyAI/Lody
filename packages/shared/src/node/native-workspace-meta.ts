@@ -443,3 +443,11 @@ export async function importLegacyMeta(
   ]);
   return 'imported';
 }
+
+/**
+ * Returns a source to legacy ownership: its marker is removed, so enabling the
+ * native mode again re-imports that replica (an LWW merge of its newer edits).
+ */
+export async function unpublishLegacyMeta(client: RepoClient, namespace: string, source: string) {
+  await client.flockBatch(namespace, MIGRATIONS_ROOM, [{ op: 'delete', key: ['meta', source] }]);
+}

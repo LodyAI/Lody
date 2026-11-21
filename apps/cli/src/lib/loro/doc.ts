@@ -371,7 +371,11 @@ import { FlockSyncUnavailableError } from './flock-sync-errors';
 import { ConcurrentQueue } from '../concurrent-queue';
 import type { CliSqliteRepoStore } from './sqlite-repo-store';
 import type { NativeWorkspaceMeta } from '@lody/shared/node/native-workspace-meta';
-import { openNativeWorkspaceMeta, usesNativeWorkspaceMeta } from './native-workspace-meta';
+import {
+  openNativeWorkspaceMeta,
+  usesNativeWorkspaceMeta,
+  writeBackNativeWorkspaceMeta,
+} from './native-workspace-meta';
 import { mentionsSqliteBusy, sqliteLockReporterLegacy } from './sqlite-lock-diagnostics';
 import type { CloudBillingPort, CloudStreamsTokenPort } from '@lody/platform';
 
@@ -680,6 +684,7 @@ export class LoroDocumentManager {
         nativeMeta = await openNativeWorkspaceMeta(
           workspaceId,
           cliSqliteRepoStore.storageAdapter,
+          cliSqliteRepoStore.dbPath,
           logger
         );
       const externalMeta = nativeMeta;
@@ -697,6 +702,17 @@ export class LoroDocumentManager {
           )
       );
       const createdRepo = repo;
+      if (!externalMeta && !options.encryptedWorkspace)
+        await writeBackNativeWorkspaceMeta(
+          workspaceId,
+          createdRepo,
+          cliSqliteRepoStore.dbPath,
+          logger
+        ).catch((error: unknown) =>
+          logger.warn(
+            `[${workspaceId}] Native Workspace Meta write-back failed; retrying on next start: ${formatErrorMessage(error)}`
+          )
+        );
       logger.debug(`[${workspaceId}] LoroRepo created in ${Date.now() - createRepoStartMs}ms`);
       // Presence is produced locally regardless of remote sync so local-first
       // renderers get machine/session liveness over the data plane; the cloud
