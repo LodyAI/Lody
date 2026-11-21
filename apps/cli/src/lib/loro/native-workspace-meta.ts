@@ -14,6 +14,7 @@ import {
 import {
   isNativeDocId,
   isNativeFlockDocId,
+  isNativePreviewCommentDocId,
   ownedLegacyFlockDocIds,
 } from '@lody/shared/native-workspace-meta-ipc';
 import {
@@ -28,6 +29,7 @@ import { createNativeFlockDocs } from '@lody/shared/node/native-flock-docs';
 import {
   createNativeDocs,
   createNativeRemoteHistoryPort,
+  importLegacyDoc,
   listNativeDocIds,
   unpublishLegacyDoc,
 } from '@lody/shared/node/native-docs';
@@ -87,7 +89,16 @@ export async function openNativeWorkspaceMeta(
   docs: ExternalDocsAdapter;
 }> {
   const { client } = await connectNativeRepo({ launcher: cliNativeRepoHostLauncher });
-  const stored = (await legacyStorage.inventory?.())?.flockDocIds ?? [];
+  const inventory = await legacyStorage.inventory?.();
+  const stored = inventory?.flockDocIds ?? [];
+  const loadLegacyDoc = async (docId: string) => {
+    const legacy = await legacyStorage.loadDoc(docId);
+    if (!legacy) return undefined;
+    return {
+      snapshot: legacy.export({ mode: 'snapshot' }),
+      version: Object.fromEntries(legacy.oplogVersion().toJSON()),
+    };
+  };
   const results = [
     await importLegacyRoom(client, workspaceId, META_ROOM, CLI_SOURCE, async () => {
       const legacy = await legacyStorage.loadMeta();
@@ -101,8 +112,20 @@ export async function openNativeWorkspaceMeta(
         return legacy?.exportJson() as LegacyFlockBundle | undefined;
       })
     );
+  let rendererDocsImported = 0;
+  for (const docId of inventory?.docIds ?? [])
+    if (
+      isNativePreviewCommentDocId(docId) &&
+      (await importLegacyDoc(client, workspaceId, docId, CLI_SOURCE, () =>
+        loadLegacyDoc(docId)
+      )) === 'imported'
+    )
+      rendererDocsImported += 1;
   await writeFile(publishedMarker(legacyDbPath), workspaceId);
-  logger.info(`[${workspaceId}] Native Workspace Meta: legacy CLI sources ${results.join(', ')}`);
+  logger.info(
+    `[${workspaceId}] Native Workspace Meta: legacy CLI sources ${results.join(', ')}; ` +
+      `${rendererDocsImported} renderer-only documents imported`
+  );
   return {
     meta: createNativeWorkspaceMeta(
       client,
@@ -117,14 +140,7 @@ export async function openNativeWorkspaceMeta(
     ),
     docs: createNativeDocs(client, workspaceId, isNativeDocId, {
       source: CLI_SOURCE,
-      async load(docId) {
-        const legacy = await legacyStorage.loadDoc(docId);
-        if (!legacy) return undefined;
-        return {
-          snapshot: legacy.export({ mode: 'snapshot' }),
-          version: Object.fromEntries(legacy.oplogVersion().toJSON()),
-        };
-      },
+      load: loadLegacyDoc,
     }),
   };
 }
