@@ -2546,6 +2546,215 @@
       ]
     },
     {
+      "name": "drop-restores-opened-child-keeping-its-wake-up",
+      "description": "A Later row dropped into Focus restores its opened sub-conversations; a woken child keeps its expired snooze, so it stays unread, while a future snooze is cleared.",
+      "state": {
+        "sessions": [
+          {
+            "id": "f1",
+            "title": "f1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "later-parent",
+            "title": "later-parent",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795305600000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "woken-child",
+            "title": "woken-child",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795046400000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795215600000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "later-parent",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "move",
+        "sessionId": "later-parent",
+        "to": {
+          "area": "focus"
+        },
+        "beforeId": "f1"
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "woken-child",
+          "access": "manage",
+          "patch": {
+            "orderKey": "7E80112233",
+            "settledAt": null,
+            "focusRestoredAt": 1795219200000
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "later-parent",
+          "access": "manage",
+          "patch": {
+            "orderKey": "7E8180112233",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": 1795219200000
+          }
+        }
+      ]
+    },
+    {
+      "name": "move-to-focus-tree-keeps-woken-child-wake-up",
+      "description": "Move to Focus with its opened sub-conversations clears a future snooze and settle state but keeps an expired snooze on a woken child.",
+      "state": {
+        "sessions": [
+          {
+            "id": "settled-parent",
+            "title": "settled-parent",
+            "lastMessageAt": 1795212000000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": 1795215600000,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "woken-child",
+            "title": "woken-child",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795046400000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795215600000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "settled-parent",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "later-child",
+            "title": "later-child",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795222800000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "settled-parent",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "moveToFocus",
+        "sessionId": "settled-parent",
+        "includeOpened": true
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "settled-parent",
+          "access": "manage",
+          "patch": {
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": 1795219200000
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "woken-child",
+          "access": "manage",
+          "patch": {
+            "settledAt": null,
+            "focusRestoredAt": 1795219200000
+          }
+        },
+        {
+          "type": "session",
+          "sessionId": "later-child",
+          "access": "manage",
+          "patch": {
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": 1795219200000
+          }
+        }
+      ]
+    },
+    {
       "name": "move-in-focus-over-read-only-unkeyed-row-is-refused",
       "description": "A drop below a row without a key that the member cannot manage would have to write that row, so the move plans nothing.",
       "state": {

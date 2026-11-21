@@ -115,6 +115,16 @@ const sessionWrite = (
   patch: StatusViewSessionPatch
 ): StatusViewWrite => ({ type: 'session', sessionId, access, patch });
 
+/**
+ * A restore into Focus: clears settle state and a snooze that is still ahead.
+ * An expired snooze is kept, so the restored row stays unread until it is read;
+ * `focusRestoredAt` marks it placed, so it does not float.
+ */
+const restorePatch = (session: StatusViewSession, nowMs: number): StatusViewSessionPatch =>
+  expiredSnoozeTimestamp(session.snoozedUntil, nowMs) === null
+    ? { snoozedUntil: null, settledAt: null, focusRestoredAt: nowMs }
+    : { settledAt: null, focusRestoredAt: nowMs };
+
 const allowed = (pool: Pool, writes: StatusViewWrite[]): StatusViewWrite[] =>
   writes.every((write) => {
     if (write.type !== 'session') return true;
@@ -145,9 +155,8 @@ function indexBefore(ids: readonly string[], beforeId: string | null): number {
  * gives them real keys first, so the drop lands where it was shown. Placing a
  * woken row records `focusRestoredAt` at its wake-up and keeps the expired
  * `snoozedUntil`, so it stops floating but stays unread until it is read. A row
- * dropped in from Later or Settled is restored together with its opened
- * sub-conversations, which get no keys of their own; a pinned row dropped in is
- * unpinned and keeps an expired snooze the same way.
+ * dropped in from Later, Settled or the Pinned area (unpinned) is restored
+ * together with its opened sub-conversations, which get no keys of their own.
  */
 function planFocusMove(
   state: StatusViewState,
@@ -191,13 +200,7 @@ function planFocusMove(
     const patch: StatusViewSessionPatch = { orderKey };
     const wokeAt = expiredSnoozeTimestamp(session.snoozedUntil, nowMs);
     if (restored.delete(id)) {
-      const keepWake = id === sessionId && moved.isPinned && wokeAt !== null;
-      Object.assign(
-        patch,
-        keepWake
-          ? { settledAt: null, focusRestoredAt: nowMs }
-          : { snoozedUntil: null, settledAt: null, focusRestoredAt: nowMs }
-      );
+      Object.assign(patch, restorePatch(session, nowMs));
     } else if (wokeAt !== null && wokeAt > (session.focusRestoredAt ?? 0)) {
       patch.focusRestoredAt = wokeAt;
     }
@@ -206,9 +209,7 @@ function planFocusMove(
     writes.push(sessionWrite(id, 'manage', patch));
   }
   for (const id of restored) {
-    writes.push(
-      sessionWrite(id, 'manage', { snoozedUntil: null, settledAt: null, focusRestoredAt: nowMs })
-    );
+    writes.push(sessionWrite(id, 'manage', restorePatch(pool.get(id)!, nowMs)));
   }
   return allowed(pool, writes);
 }
@@ -294,13 +295,7 @@ export function planStatusViewCommand(
       if (!targets) return [];
       return allowed(
         pool,
-        targets.map((session) =>
-          sessionWrite(session.id, 'manage', {
-            snoozedUntil: null,
-            settledAt: null,
-            focusRestoredAt: nowMs,
-          })
-        )
+        targets.map((session) => sessionWrite(session.id, 'manage', restorePatch(session, nowMs)))
       );
     }
     case 'setPinned': {

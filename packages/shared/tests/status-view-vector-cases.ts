@@ -425,6 +425,36 @@ export const COMMAND_CASES: CommandCase[] = [
     command: { type: 'move', sessionId: 'pinned-woken', to: { area: 'focus' }, beforeId: 'f2' },
   },
   {
+    name: 'drop-restores-opened-child-keeping-its-wake-up',
+    description:
+      'A Later row dropped into Focus restores its opened sub-conversations; a woken child keeps its expired snooze, so it stays unread, while a future snooze is cleared.',
+    state: state([
+      session('f1', { orderKey: K1 }),
+      session('later-parent', { snoozedUntil: NOW + DAY }),
+      session('woken-child', {
+        openedById: 'later-parent',
+        lastReadAt: NOW - 2 * DAY,
+        snoozedUntil: NOW - HOUR,
+      }),
+    ]),
+    command: { type: 'move', sessionId: 'later-parent', to: { area: 'focus' }, beforeId: 'f1' },
+  },
+  {
+    name: 'move-to-focus-tree-keeps-woken-child-wake-up',
+    description:
+      'Move to Focus with its opened sub-conversations clears a future snooze and settle state but keeps an expired snooze on a woken child.',
+    state: state([
+      session('settled-parent', { settledAt: NOW - HOUR, lastMessageAt: NOW - 2 * HOUR }),
+      session('woken-child', {
+        openedById: 'settled-parent',
+        lastReadAt: NOW - 2 * DAY,
+        snoozedUntil: NOW - HOUR,
+      }),
+      session('later-child', { openedById: 'settled-parent', snoozedUntil: NOW + HOUR }),
+    ]),
+    command: { type: 'moveToFocus', sessionId: 'settled-parent', includeOpened: true },
+  },
+  {
     name: 'move-in-focus-over-read-only-unkeyed-row-is-refused',
     description:
       'A drop below a row without a key that the member cannot manage would have to write that row, so the move plans nothing.',

@@ -116,7 +116,7 @@ Focus is reordered, opened sub-conversations restored with a row dropped into
 Focus, `settledAt = max(now, lastMessageAt)`, and unpinning keeps `orderKey`.
 
 **Golden vectors** — `vectors/layout.json` (11 cases) and `vectors/commands.json`
-(31 cases, fixed `nowMs` and random bytes) run in `packages/shared`, against the
+(33 cases, fixed `nowMs` and random bytes) run in `packages/shared`, against the
 desktop and phone-WebView adapters in `packages/components`, in the iOS runtime
 tests and in the Android runtime tests.
 
@@ -204,14 +204,17 @@ folds past 20 rows.
   hosted gateway's admission cannot be inspected from this repository.
 - Android marks a conversation read when it is opened in the foreground, so a woken
   conversation's unread state clears there too.
-- Reordering Focus gives a woken row a real key and records `focusRestoredAt` at
-  its wake-up but keeps the expired `snoozedUntil`, so the row stays where it was
-  placed and stays unread until it is opened. No new field is needed:
-  `focusRestoredAt` is written only by an explicit restore, which also clears
-  `snoozedUntil`, and by this placement, and a snooze always sets `snoozedUntil`
-  in the future. Clients older than this rule (native runtime snapshots until they
-  re-vendor, earlier desktop builds) float a placed woken row back to the top;
-  the data is valid both ways.
+- Placement and restore never consume a wake-up; only opening, sending or settling
+  does. Reordering Focus gives a woken row a real key and records `focusRestoredAt`
+  at its wake-up; a restore into Focus (a drop from Later, Settled or the Pinned
+  area, Move to Focus, and the opened sub-conversations that follow) records
+  `focusRestoredAt` now and clears only a snooze still in the future. Either way
+  an expired `snoozedUntil` stays, so the row stays where it was put and stays
+  unread until it is read. No new field is needed: `focusRestoredAt` is written
+  only by these placements and restores, and a snooze always sets `snoozedUntil`
+  in the future, so a re-snoozed row floats again when it expires. Clients older
+  than this rule (native runtime snapshots until they re-vendor, earlier desktop
+  builds) float a placed woken row back to the top; the data is valid both ways.
 - Known gaps: no haptics on the iOS WebView, and Chrome refuses vibration before
   the first tap; foldable split panes cannot drag between panes; the phone WebView
   does not show the count of pinned rows the scope hid; on all three phone surfaces
@@ -223,7 +226,7 @@ folds past 20 rows.
 
 Verified:
 
-- Golden vectors (11 layout cases, 31 command cases; the native runtime copies
+- Golden vectors (11 layout cases, 33 command cases; the native runtime copies
   carry the earlier 8 and 28 until they re-vendor) run in `packages/shared`,
   against the desktop and phone adapters in `packages/components`, in the iOS
   runtime tests and in the Android runtime tests.
