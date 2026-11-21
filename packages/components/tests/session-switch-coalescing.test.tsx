@@ -15,7 +15,9 @@ import {
   sidebarShortcutPlatformOverrideAtom,
 } from '../src/atoms/sidebar-shortcuts';
 import { SidebarRowEndSlot } from '../src/components/sidebar-row-shared';
+import { SidebarBindingPill } from '../src/components/sidebar-shortcut-pill';
 import { useKeyboardNavigation } from '../src/hooks/use-keyboard-navigation';
+import { __resetPlatformCacheForTests } from '../src/lib/commands/platform';
 import { commands } from '../src/lib/commands/registry';
 import { createTestI18n, withTestI18n } from './test-i18n';
 
@@ -396,5 +398,29 @@ describe('sidebar visible session 1-9 shortcuts and pills', () => {
     expect(winPill1?.getAttribute('data-sidebar-shortcut-platform')).toBe('windows');
     expect(winPill1?.querySelector('svg')).toBeNull();
     expect(winPill1?.textContent).toBe('Control1');
+  });
+
+  it('grows the ⇧ glyph inside a macOS binding pill to match ⌘ ink', () => {
+    (window as { __LODY_PLATFORM__?: { os?: string } }).__LODY_PLATFORM__ = { os: 'darwin' };
+    __resetPlatformCacheForTests();
+    try {
+      renderWith(createElement(SidebarBindingPill, { binding: 'Mod+Shift+D' }));
+
+      const pill = container.querySelector('[data-sidebar-binding-pill="Mod+Shift+D"]');
+      expect(pill).not.toBeNull();
+      const [commandGlyph, shiftGlyph] = pill!.querySelectorAll('svg');
+      expect(pill!.querySelectorAll('svg')).toHaveLength(2);
+      expect(shiftGlyph.getAttribute('stroke-width')).toBe('1.5');
+      expect(commandGlyph.getAttribute('stroke-width')).toBe('2');
+      const commandClasses = new Set((commandGlyph.getAttribute('class') ?? '').split(' '));
+      const grownClasses = (shiftGlyph.getAttribute('class') ?? '')
+        .split(' ')
+        .filter((name) => !commandClasses.has(name) && !name.startsWith('lucide'));
+      expect(grownClasses).toHaveLength(1);
+      expect(pill!.textContent).toBe('D');
+    } finally {
+      delete (window as { __LODY_PLATFORM__?: { os?: string } }).__LODY_PLATFORM__;
+      __resetPlatformCacheForTests();
+    }
   });
 });
