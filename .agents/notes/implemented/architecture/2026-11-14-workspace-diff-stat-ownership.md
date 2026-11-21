@@ -47,8 +47,11 @@ counts display the complete file count. Initial rendering still uses session
 metadata, and Project Member selection retains its Member scope. The live reader
 uses the existing diff transport and leaves metadata publication with its owner.
 Root initialization and terminal refresh reconcile against actual metadata even
-when index content is unchanged. Watcher-only refresh remains Flock-only; no new
-periodic metadata writer, Repo or retry owner is introduced. Cancelled comparisons
+when index content is unchanged. Watcher-only refresh originally stayed Flock-only;
+the [watch-refresh statistics decision](2026-11-21-watch-refresh-diff-stats.md) now
+publishes a changed aggregate from watch refreshes while the unchanged-total short
+circuit keeps idle saves from writing metadata. No new periodic metadata writer,
+Repo or retry owner is introduced. Cancelled comparisons
 cannot publish after waiting for the owner queue, and failures remain retryable.
 
 Keeping committed-only totals in the same field was rejected: the review-before-

@@ -32,6 +32,8 @@ See the [decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-21-c
   publish even when the scan itself ran in a worker. Full comparison totals, before
   index trimming, feed `WorkspaceGitService.publishDiffStats` for all Sessions and
   Project Members; identical indexes do not suppress requested statistics reconciliation.
+  Workspace watch refreshes request that reconciliation too, and the publisher skips an
+  unchanged total.
   [Statistics ownership](../../../../../.agents/notes/implemented/architecture/2026-11-14-workspace-diff-stat-ownership.md)
   explains the shared workspace meaning and why Git finalization cannot replace it.
 - `file-index-scan-core.ts` — shared scan and Git merge-base resolution. Tracking
