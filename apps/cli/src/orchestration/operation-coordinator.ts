@@ -63,7 +63,11 @@ export type LodyOperationCoordinatorOptions = {
   ) => Pick<FSWatcher, 'close'>;
   workerBootId?: string;
   /** Confirm authoritative input absence before replay; cloud requires remote catch-up. */
-  confirmTargetReadable?: (docId: string, reason: string) => Promise<void>;
+  confirmTargetReadable?: (
+    docId: string,
+    reason: string,
+    targetMachineId?: MachineId
+  ) => Promise<void>;
   materializeTarget: (
     operation: StoredLodyOperation,
     item: Extract<LodyOperationItemResult, { status: 'active' }>,
@@ -366,6 +370,7 @@ export class LodyOperationCoordinator {
       (async () => {
         await this.cancelMaterializationsForStop();
         await this.drainActivity(false);
+        await this.cancelMaterializationsForStop();
         if (this.startupComplete) await this.options.executionService.drainInboxExecutions?.();
         await Promise.allSettled([...this.inboxExecutions, ...this.nativeRawWork]);
       })(),

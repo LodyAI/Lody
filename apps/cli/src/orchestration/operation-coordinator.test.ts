@@ -805,6 +805,65 @@ describe('LodyOperationCoordinator', () => {
     }
   });
 
+  it('passes resolved target machine to confirmTargetReadable for cold same-machine creation and does not abort post-pointer flush', async () => {
+    const seenMachineIds: Array<MachineId | undefined> = [];
+    let releasePostPointerFlush: (() => void) | undefined;
+    let pointerWritten!: () => void;
+    const pointerWrittenReady = new Promise<void>((resolve) => {
+      pointerWritten = resolve;
+    });
+    let abortedDuringFlush = false;
+    const harness = await makeHarness({
+      targetInputDurable: false,
+      operationKind: 'session_create',
+      confirmTargetReadable: async (_docId, _reason, targetMachineId) => {
+        seenMachineIds.push(targetMachineId);
+      },
+    });
+    harness.metas.delete(harness.targetSessionId);
+    harness.materializeTarget.mockImplementation(async (_op, item, _index, signal) => {
+      signal.addEventListener('abort', () => {
+        abortedDuringFlush = true;
+      });
+      harness.metas.set(item.target.sessionId, {
+        id: item.target.sessionId,
+        workspaceId: 'workspace-1' as WorkspaceId,
+        machineId: 'machine-1' as MachineId,
+        userId: 'user-1',
+        cliType: 'builtin',
+        agentType: 'codex',
+        latestUserMsgId: item.target.userTurnId,
+      });
+      harness.histories.set(item.target.sessionId, [
+        {
+          id: item.target.userTurnId,
+          role: 'user',
+          timestamp: '2026-07-20T00:00:00.000Z',
+          items: [{ type: 'text', text: 'created work' }],
+          fileDiff: [],
+          status: 'pending',
+        },
+      ]);
+      pointerWritten();
+      await new Promise<void>((resolve) => {
+        releasePostPointerFlush = resolve;
+      });
+    });
+    harness.coordinator.start();
+    try {
+      await pointerWrittenReady;
+      await harness.coordinator.wake('doc-metadata-after-pointer');
+      expect(abortedDuringFlush).toBe(false);
+      releasePostPointerFlush?.();
+      await harness.coordinator.idle();
+      expect(seenMachineIds).toEqual(['machine-1']);
+      expect(abortedDuringFlush).toBe(false);
+    } finally {
+      releasePostPointerFlush?.();
+      await harness.coordinator.stop();
+    }
+  });
+
   it('recovers local creation using daemon authority even when remote Streams is unavailable', async () => {
     const harness = await makeHarness({
       targetInputDurable: false,

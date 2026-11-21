@@ -23,6 +23,7 @@ import {
   isTerminalAssistantEntry,
   MAX_STEER_HANDOFF_HOPS,
   progressIsSettled,
+  resolveOperationTargetMachineId,
   targetFailureError,
 } from './coordinator-model';
 import {
@@ -379,8 +380,20 @@ export class CoordinatorWorkflow {
             function* (this: CoordinatorWorkflow) {
               if (!this.started) return;
               const reason = `orchestration.materialize:${operation.operationId}:${index}`;
+              const targetMetaRecord = yield* this.ports.metadata(target.sessionId);
+              const requesterMetaRecord =
+                !targetMetaRecord?.meta &&
+                (operation.kind === 'session_create' || operation.kind === 'session_create_many')
+                  ? yield* this.ports.metadata(operation.requesterSessionId)
+                  : undefined;
+              const targetMachineId = resolveOperationTargetMachineId({
+                operation,
+                index,
+                targetMeta: targetMetaRecord?.meta,
+                requesterMeta: requesterMetaRecord?.meta,
+              });
               const caughtUp = yield* Effect.exit(
-                this.ports.confirmReadable(target.sessionId, reason).pipe(
+                this.ports.confirmReadable(target.sessionId, reason, targetMachineId).pipe(
                   Effect.timeoutOrElse({
                     duration: TARGET_CATCH_UP_TIMEOUT_MS,
                     orElse: () =>
@@ -502,7 +515,6 @@ export class CoordinatorWorkflow {
           target.userTurnId
         );
         if (alreadyMaterialized) {
-          yield* FiberMap.remove(this.materializations, materialKey);
           const materializedOperation = yield* this.operations.markItemInputDurable(
             operation.requesterSessionId,
             operation.operationId,
@@ -543,6 +555,7 @@ export class CoordinatorWorkflow {
             }
             return item;
           }
+          if (!this.started) return item;
           yield* FiberMap.run(
             this.materializations,
             materialKey,

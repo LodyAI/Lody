@@ -7,9 +7,11 @@ import {
 } from '@/lib/workspace-mcp-store';
 import {
   getDaemonWorkspace,
+  isBoundDaemonMachineFlockAuthoritative,
   readBoundDaemonOwnerAccess,
   readDaemonTargetAuthority,
   readEncryptedMachineAccess,
+  type DaemonTargetAuthority,
 } from '@/lib/session-command-environment';
 import type { SessionSteerResponse } from '@lody/shared';
 import { normalizeMcpServerIdSelection, resolveSessionConversationConfig } from '@lody/shared';
@@ -1240,6 +1242,9 @@ async function syncMachineFlockDocsForRead(
   const logger = getLogger('session');
   const results = await Promise.all(
     Array.from(new Set(machineIds)).map(async (machineId): Promise<MachineFlockFreshness> => {
+      if (isBoundDaemonMachineFlockAuthoritative(manager, workspaceId, machineId)) {
+        return { confirmed: true };
+      }
       try {
         await manager.syncFlockDocOrThrow(getMachineFlockDocId(workspaceId, machineId), {
           reason: `${reason}:${machineId}`,
@@ -4413,23 +4418,17 @@ export async function sendSessionChatResult(
       workspaceMetaPrewriteSatisfied: orchestration?.workspaceMetaPrewriteSatisfied,
     }));
 
-  const targetAuthority = await readDaemonTargetAuthority({
-    auth,
+  const targetAuthority = await syncSessionDocUnlessLocalDaemon({
     manager,
-    workspaceId: workspace.id as WorkspaceId,
-    machineId: session.machineId,
-    requesterUserId,
+    sessionId,
+    reason: `session.chat:${sessionId}:prewrite:doc`,
+    authorityContext: {
+      auth,
+      workspaceId: workspace.id as WorkspaceId,
+      machineId: session.machineId,
+      requesterUserId,
+    },
   });
-  if (targetAuthority === 'denied') {
-    throw new Error(`Machine access denied for ${session.machineId}: workspace_access_revoked`);
-  }
-  if (targetAuthority !== 'local-daemon') {
-    await syncDocForRead(
-      manager,
-      getSessionRoomId(sessionId),
-      `session.chat:${sessionId}:prewrite:doc`
-    );
-  }
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
   const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
   const quotaHistory = orchestration?.bypassSessionQuota
@@ -6264,13 +6263,54 @@ export const sessionCommand = new Command('session')
   .addCommand(sessionRestoreCommand)
   .addCommand(sessionDeleteCommand);
 
+export type SessionDocReadAuthorityContext = {
+  auth: Pick<AuthContext, 'userId' | 'machineId'>;
+  workspaceId: WorkspaceId;
+  machineId: MachineId;
+  requesterUserId: string;
+};
+
+async function syncSessionDocUnlessLocalDaemon(args: {
+  manager: LoroDocumentManager;
+  sessionId: SessionId;
+  reason: string;
+  authorityContext?: SessionDocReadAuthorityContext;
+}): Promise<DaemonTargetAuthority> {
+  if (!args.authorityContext) {
+    await syncDocForRead(args.manager, getSessionRoomId(args.sessionId), args.reason);
+    return 'remote-or-unverified';
+  }
+  const authority = await readDaemonTargetAuthority({
+    auth: args.authorityContext.auth,
+    manager: args.manager,
+    workspaceId: args.authorityContext.workspaceId,
+    machineId: args.authorityContext.machineId,
+    requesterUserId: args.authorityContext.requesterUserId,
+  });
+  if (authority === 'denied') {
+    throw new Error(
+      `Machine access denied for ${args.authorityContext.machineId}: workspace_access_revoked`
+    );
+  }
+  if (authority !== 'local-daemon') {
+    await syncDocForRead(args.manager, getSessionRoomId(args.sessionId), args.reason);
+  }
+  return authority;
+}
+
 export async function readSessionMcpIdsForAuthoring(
   manager: LoroDocumentManager,
   sessionId: SessionId,
-  explicitIds?: readonly string[]
+  explicitIds?: readonly string[],
+  authorityContext?: SessionDocReadAuthorityContext
 ): Promise<string[]> {
   if (explicitIds !== undefined) return [...explicitIds];
-  await syncDocForRead(manager, getSessionRoomId(sessionId), 'session-mcp-selection');
+  await syncSessionDocUnlessLocalDaemon({
+    manager,
+    sessionId,
+    reason: 'session-mcp-selection',
+    authorityContext,
+  });
   const doc = await manager.getOrCreateSessionDoc(sessionId);
   const backend = await createSessionBackend(doc, await doc.getMetaState());
   return (

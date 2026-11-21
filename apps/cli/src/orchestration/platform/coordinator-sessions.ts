@@ -81,10 +81,10 @@ export const coordinatorSessionsLayer = (
             }),
         } satisfies CoordinatorHistory;
       }),
-    confirmReadable: (id, reason) =>
+    confirmReadable: (id, reason, targetMachineId) =>
       io(() =>
         options.confirmTargetReadable
-          ? options.confirmTargetReadable(getSessionRoomId(id), reason)
+          ? options.confirmTargetReadable(getSessionRoomId(id), reason, targetMachineId)
           : options.workspaceDocument.syncRemoteDocOrThrow(getSessionRoomId(id), {
               reason,
               timeoutMs: TARGET_CATCH_UP_TIMEOUT_MS,

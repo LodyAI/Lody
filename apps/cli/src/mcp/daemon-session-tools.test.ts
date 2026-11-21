@@ -2354,17 +2354,47 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         status: 'processing',
       },
     });
+    const targetAgentConfigId = await manager.createAgentConfig(
+      'builtin',
+      'codex',
+      machineId,
+      'Local Codex'
+    );
     const targetSessionId = '33333333-3333-4333-8333-333333333333' as SessionId;
     await manager.repo.upsertDocMeta(getSessionRoomId(targetSessionId), {
       id: targetSessionId,
       workspaceId,
       machineId,
       userId: ownerUserId,
+      agentConfigId: targetAgentConfigId,
       cliType: 'builtin',
       agentType: 'codex',
       title: 'Local Target',
       createdAt: 1,
       updatedAt: 1,
+    });
+    const seededTargetDoc = await manager.getOrCreateSessionDoc(targetSessionId, {
+      historyBackend: 'loro',
+    });
+    const seededTargetBackend = await createSessionBackend(seededTargetDoc);
+    await seededTargetBackend.applyHistoryAction({
+      kind: 'upsert-turn',
+      turn: {
+        id: 'prior-target-turn',
+        role: 'user',
+        timestamp: '2026-11-21T05:59:00.000Z',
+        userId: ownerUserId,
+        author: { v: 1, kind: 'human', userId: ownerUserId },
+        items: [{ type: 'text', text: 'earlier work' }],
+        fileDiff: [],
+        status: 'handled',
+        inputConfig: {
+          cliType: 'builtin',
+          agentType: 'codex',
+          modelId: 'gpt-5',
+          mcpServerIds: ['inherited-mcp'],
+        },
+      },
     });
     const remoteMachineId = 'remote-chat-machine' as MachineId;
     const remoteTargetId = '44444444-4444-4444-8444-444444444444' as SessionId;
@@ -2387,7 +2417,14 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     const syncDocSpy = vi
       .spyOn(manager, 'syncDocOrThrow')
       .mockRejectedValue(new Error('ECONNRESET: Streams offline'));
-    const dispatched: Array<{ sessionId: SessionId; inputId?: string }> = [];
+    const syncFlockSpy = vi
+      .spyOn(manager, 'syncFlockDocOrThrow')
+      .mockRejectedValue(new Error('ECONNRESET: Streams offline'));
+    const dispatched: Array<{
+      sessionId: SessionId;
+      inputId?: string;
+      mcpServerIds?: string[];
+    }> = [];
     let accessVerdict:
       | { status: 'authorized'; workspace: typeof workspace }
       | { status: 'revoked' } = { status: 'authorized', workspace };
@@ -2406,9 +2443,13 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         },
         dispatchSession: async (
           targetId: SessionId,
-          input?: { inputId: string; userId: string }
+          input?: { inputId: string; userId: string; config?: { mcpServerIds?: string[] } }
         ) => {
-          dispatched.push({ sessionId: targetId, inputId: input?.inputId });
+          dispatched.push({
+            sessionId: targetId,
+            inputId: input?.inputId,
+            mcpServerIds: input?.config?.mcpServerIds,
+          });
         },
       },
     };
@@ -2418,7 +2459,6 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         operationId: 'local-cloud-chat-1',
         sessionId: targetSessionId,
         prompt: 'run local work',
-        mcpServerIds: [],
       })
     );
     expect(sent.isError, JSON.stringify(sent)).not.toBe(true);
@@ -2430,10 +2470,12 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     });
     expect(syncMetaSpy).not.toHaveBeenCalled();
     expect(syncDocSpy).not.toHaveBeenCalled();
+    expect(syncFlockSpy).not.toHaveBeenCalled();
     expect(dispatched).toEqual([
       {
         sessionId: targetSessionId,
         inputId: parsedSent.items[0].target.userTurnId,
+        mcpServerIds: ['inherited-mcp'],
       },
     ]);
     const targetDoc = await manager.getOrCreateSessionDoc(targetSessionId);
@@ -2445,7 +2487,6 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         operationId: 'local-cloud-chat-1',
         sessionId: targetSessionId,
         prompt: 'run local work',
-        mcpServerIds: [],
       })
     );
     expect(retried.isError, JSON.stringify(retried)).not.toBe(true);
@@ -2454,6 +2495,27 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       state: 'active',
     });
     expect(syncMetaSpy).not.toHaveBeenCalled();
+    expect(syncDocSpy).not.toHaveBeenCalled();
+    expect(syncFlockSpy).not.toHaveBeenCalled();
+
+    const created = await runWithDaemonWorkspace(cloudDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_create', {
+        operationId: 'local-cloud-create-1',
+        prompt: 'start local child',
+        agentConfigId: targetAgentConfigId,
+        useCurrentSessionAsParent: true,
+      })
+    );
+    expect(created.isError, JSON.stringify(created)).not.toBe(true);
+    const parsedCreated = JSON.parse(created.content[0]?.text ?? '{}');
+    expect(parsedCreated).toMatchObject({
+      id: 'local-cloud-create-1',
+      state: 'active',
+      items: [{ status: 'active', inputDurable: true }],
+    });
+    expect(syncMetaSpy).not.toHaveBeenCalled();
+    expect(syncDocSpy).not.toHaveBeenCalled();
+    expect(syncFlockSpy).not.toHaveBeenCalled();
 
     const remoteResult = await runWithDaemonWorkspace(cloudDaemon, () =>
       executeDaemonSessionTool(context(), 'lody_session_chat', {

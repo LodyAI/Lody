@@ -1,5 +1,6 @@
 import type {
   LodyOperationItemResult,
+  MachineId,
   SessionHistoryInput,
   SessionId,
   SessionMeta,
@@ -40,7 +41,11 @@ export class CoordinatorPorts extends Context.Service<
     now(): number;
     claimToken: string;
     session(id: SessionId): Effect.Effect<CoordinatorHistory, unknown>;
-    confirmReadable(id: SessionId, reason: string): Effect.Effect<void, unknown>;
+    confirmReadable(
+      id: SessionId,
+      reason: string,
+      targetMachineId?: MachineId
+    ): Effect.Effect<void, unknown>;
     materialize(
       operation: StoredLodyOperation,
       item: Extract<LodyOperationItemResult, { status: 'active' }>,

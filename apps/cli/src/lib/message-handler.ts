@@ -4345,8 +4345,8 @@ export class MessageHandler {
       dispatchWatcher: this.sessionDispatchWatcher,
       userResolver: this.sessionUserResolver,
       logger: this.logger,
-      confirmTargetReadable: async (docId, reason) => {
-        if (this.cloudPort.kind === 'local') {
+      confirmTargetReadable: async (docId, reason, targetMachineId) => {
+        if (this.cloudPort.kind === 'local' || targetMachineId === this.machineId) {
           await this.workspaceDocument.repo.flush();
           return;
         }

@@ -145,6 +145,27 @@ export function classifyDaemonTargetAuthority(args: {
   return 'local-daemon';
 }
 
+export function isBoundDaemonMachineFlockAuthoritative(
+  manager: LoroDocumentManager,
+  workspaceId: WorkspaceId,
+  machineId: MachineId
+): boolean {
+  if (getSessionCommandEnvironment()) return false;
+  const daemon = getDaemonWorkspace();
+  if (
+    !daemon ||
+    daemon.manager !== manager ||
+    daemon.workspaceId !== workspaceId ||
+    daemon.machineId !== machineId
+  ) {
+    return false;
+  }
+  const accessStatus = daemon.readAccess?.().status;
+  return (
+    accessStatus !== 'revoked' && accessStatus !== 'unauthorized' && accessStatus !== 'unknown'
+  );
+}
+
 export async function readDaemonTargetAuthority(args: {
   auth: Pick<AuthContext, 'userId' | 'machineId'>;
   manager: LoroDocumentManager;

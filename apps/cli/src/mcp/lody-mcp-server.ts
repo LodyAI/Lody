@@ -3874,7 +3874,13 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
       mcpServerIds: await readSessionMcpIdsForAuthoring(
         manager,
         targetSession.id,
-        args.mcpServerIds
+        args.mcpServerIds,
+        {
+          auth,
+          workspaceId: workspace.id as WorkspaceId,
+          machineId: validatedTarget?.machineId ?? targetSession.machineId,
+          requesterUserId: invoking.identity.userId,
+        }
       ),
     };
     const preallocatedUserTurnId = randomUUID();
@@ -4822,7 +4828,15 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
               mcpServerIds: await readSessionMcpIdsForAuthoring(
                 manager,
                 item.target.sessionId,
-                expanded[index]?.mcpServerIds
+                expanded[index]?.mcpServerIds,
+                validatedTargets[index]
+                  ? {
+                      auth,
+                      workspaceId: workspace.id as WorkspaceId,
+                      machineId: validatedTargets[index].machineId,
+                      requesterUserId: invoking.identity.userId,
+                    }
+                  : undefined
               ),
             }
           : null
