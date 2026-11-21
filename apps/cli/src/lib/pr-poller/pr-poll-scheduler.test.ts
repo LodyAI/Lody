@@ -406,7 +406,10 @@ describe('PrPollScheduler', () => {
     await startWith([workspace]);
     expect(calls().length).toBeGreaterThan(0);
     expect(demandCalls).toBeGreaterThan(0);
-    expect(demandCalls).toBeLessThan(owners.length);
+    expect(demandCalls).toBeLessThanOrEqual(4);
+    const before = demandCalls;
+    await advance(60_000);
+    expect(demandCalls - before).toBeLessThanOrEqual(4);
   });
 
   it('a new viewer promotes a stale session without waiting for the low cadence', async () => {

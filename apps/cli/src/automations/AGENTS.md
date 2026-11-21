@@ -53,7 +53,11 @@
   earliest durable deadline, capped at 15 seconds for staged-outcome reconciliation
   and auto delivery — no polling probe and no work-remaining rescan. A durable
   denial — revoked grant or authorization, superseded or deleted work — cancels the
-  queued input end to end; only transient denials re-verify.
+  queued input end to end; only transient denials re-verify. Guard predicates share
+  one `guard:` reason namespace at engine check and resource admission, so the same
+  durable classifier converges both; cancellation preserves that reason. Capacity
+  wake scans resolve candidates by the observed binding/model through normalized
+  columns and deduplicate on the snapshot's `observedAt`.
   [Decision](../../../../.agents/notes/implemented/architecture/2026-11-21-automation-ledger-query-columns.md).
 - Auto delivery requests only the existing quick-action text and facts the agent
   cannot discover, admitted under Session group settlement and a current-head guard.

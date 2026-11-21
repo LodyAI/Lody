@@ -252,7 +252,7 @@ export async function createAutomationWorkspaceLegacy(options: {
     if (authorization.value !== 'yes') return authorization;
     if (receipt.intent.guard) {
       const guard = await condition(receipt.intent.guard, receipt);
-      if (guard.value !== 'yes') return guard;
+      if (guard.value !== 'yes') return { ...guard, reason: `guard:${guard.reason}` };
     }
     if (receipt.intent.condition && !['queued', 'running', 'unknown'].includes(receipt.state)) {
       const predicate = await condition(receipt.intent.condition, receipt);
@@ -639,7 +639,7 @@ export async function createAutomationWorkspaceLegacy(options: {
           })
         ),
       workflowObservationOwners: () =>
-        new Set<SessionId>([...ledger.wantsReadSessions('github.workflowRuns')] as SessionId[]),
+        ledger.wantsReadSessions('github.workflowRuns') as Set<SessionId>,
       recordWorkflowObservations: ((meta, repository, headSha, runs, gap, observedAt) =>
         observe(async () => {
           observeWorkflows(ledger, meta, repository, headSha, runs, gap, observedAt);

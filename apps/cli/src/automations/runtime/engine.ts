@@ -166,7 +166,7 @@ export class Automations extends Context.Service<
             const result = yield* host.cancel(receipt);
             yield* persist(receipt, {
               ...result,
-              state: ['cancelled', 'settled', 'failed'].includes(result.state)
+              state: ['cancelled', 'settled', 'failed', 'superseded'].includes(result.state)
                 ? result.state
                 : 'cancelling',
               retryAt: now + 15_000,
@@ -372,8 +372,7 @@ export class Automations extends Context.Service<
             if (
               ['submitting', 'queued', 'running', 'unknown', 'cancelling'].includes(receipt.state)
             ) {
-              // Revoke admission before awaiting the resource owner. A racing submit
-              // cannot overwrite this fence; restart continues exact-input cancellation.
+              // Revoke admission before awaiting the owner; this fence survives restart.
               const fenced = yield* persist(receipt, {
                 state: 'cancelling',
                 reason: 'user_cancel_requested',

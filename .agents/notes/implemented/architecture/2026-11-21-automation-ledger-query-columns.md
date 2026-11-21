@@ -12,13 +12,15 @@ The automation ledger stored nearly every queryable field inside JSON `payload`
 columns, so hot predicates ran `json_extract`/`json_each` full-table scans with
 synchronous parsing on the main thread, and provider capacity events flooded the
 table by republishing recovery on every observation whose previous snapshot was
-stale or fingerprint-mismatched. Schema version 3 lifts every predicate field into
+stale or fingerprint-mismatched. Schema version 4 lifts every predicate field into
 real indexed columns, keeps the payload as the frozen acceptance-time record, and
 moves wait resource reads into a `wait_reads` table. The engine loop now races an
 explicit wake signal against a sleep until the earliest durable deadline, capped at
 15 seconds, replacing the work-remaining rescan and the one-second probe. Capacity
 publication requires a confirmed unavailable-to-available transition while recovery
-wake scanning still follows every fresh matching available observation.
+wake scanning still follows every fresh matching available observation, resolved to
+candidates for that binding/model through normalized columns instead of a workspace-
+wide payload scan.
 
 ## Decisions and ownership
 
@@ -35,7 +37,10 @@ other retry. The migration is
 idempotent — each `ALTER` is guarded by `table_info`, so partially columnized
 databases upgrade cleanly — and backfills by re-parsing payloads through the same
 `columnsFrom*` helpers the write paths use, which removes the SQL/JS drift a SQL
-`json_extract` backfill would introduce.
+`json_extract` backfill would introduce. Backfill reads run in bounded rowid-keyed
+batches (512 rows): a whole-table `.all()` materializes the entire payload column
+in memory, and streaming `.iterate()` cannot share the connection with the write
+cursor inside the same transaction.
 
 Optional predicates never compile to `(? IS NULL OR col=?)`: SQLite abandons the
 column's index for the whole statement, so `wantsRead`, `waits` and `activityPage`
@@ -63,6 +68,16 @@ the retrying `queued`/`blocked` states by design. The alternative, a boolean
 "admission denied" retried on a timer, is what produced unbounded
 `automation-admission-blocked` churn on dead inputs.
 
+Guard verdicts share one `guard:` reason namespace at every evaluation site —
+the engine's `check()` and the resource-admission `recheck()` both prefix a guard
+denial, so `isDurableSessionDenial` classifies them identically. Without the
+shared namespace a stale Auto Delivery guard (`delivery_pr_changed`,
+`delivery_step_replaced`) returned raw at admission escaped the durable set and
+the superseded input re-verified forever — the confirmed review defect this
+namespace exists to close. Cancellation preserves the denial: a `guard:` receipt
+settles `superseded`, other durable denials settle `cancelled`, both with their
+original reason instead of `user_cancelled`.
+
 `nextDueAt()` reports the minimum due timestamp across nonterminal waits, nonterminal
 receipts and staged turn observations, with an accepted delivery forcing "due now".
 Each loop iteration sleeps until `min(nextDueAt, now + 15s)` or until a wake signal;
@@ -75,7 +90,13 @@ staging and the next pass, exactly when an immediate pass is wanted.
 observation evaluated `no` and the current one is `yes`. Recovery wake scanning is
 not gated on the event: every fresh matching `yes` bumps `capacityWakeRevision`
 once per push, because a receipt parked at `MAX_SAFE_INTEGER` has no other revival
-path and `unknown`→`yes` still constitutes new evidence.
+path and `unknown`→`yes` still constitutes new evidence. The scan is scoped to the
+observed binding/model — `receipts.work_id` joins to `work(binding_id,
+fingerprint, model_id)` columns — so its cost follows the matching candidate set,
+not the workspace's recovery-receipt count. A `capacity` marker row records the
+highest `observedAt` scanned per binding/model key; re-pushed snapshots with the
+same or older `observedAt` skip the scan entirely since they can produce no new
+wake.
 
 ## Rejected alternatives
 
@@ -95,13 +116,15 @@ path and `unknown`→`yes` still constitutes new evidence.
 
 ## Verification and limits
 
-Tests cover the v2→v3 migration including a partially columnized database and
+Tests cover the v2→v4 migration including a partially columnized database and
 staged-outcome preservation, an `EXPLAIN QUERY PLAN` ratchet over the query
-whitelist (indexed `SEARCH` only; small rule/source scans are allowed), column↔
-payload consistency after every write path, capacity publish gating with wake
-decoupling, deadline/wake/15-second-cap scheduling under fake timers, a scheduler
-regression proving workflow demand costs one read per build regardless of session
-count, and a queued-continuation convergence test where a stopped target keeps
-waiting while a revoked authorization cancels. Event growth remains bounded only
-by source discipline until the deferred retention design lands; the durable-denial
-set is maintained by hand next to the authorizer that emits those reasons.
+whitelist (any `SCAN` on the hot tables fails, covering-index sweeps included;
+small rule/source scans are allowed), column↔payload consistency after every write
+path, capacity publish gating with wake decoupling, deadline/wake/15-second-cap
+scheduling under fake timers, a scheduler regression bounding workflow-demand
+reads per build regardless of session count, and queue-boundary convergence:
+a queued continuation whose admission guard went stale is cancelled by the real
+`cancelInput` removal and settles `superseded` with its guard reason, while a
+stopped target keeps waiting. Event growth remains bounded only by source
+discipline until the deferred retention design lands; the durable-denial set is
+maintained by hand next to the authorizer that emits those reasons.

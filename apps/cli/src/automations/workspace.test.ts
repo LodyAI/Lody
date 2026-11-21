@@ -94,7 +94,12 @@ async function workspaceFixture(
       return origin && admit ? admit({ ...args, origin }) : Promise.resolve(false);
     },
     inputDisposition: () => 'unsubmitted',
-    cancelInput: async () => true,
+    cancelInput: async (_sessionId: SessionId, turnId: string) => {
+      const backend = await createSessionBackend(doc);
+      for (const item of await backend.getMessageQueue())
+        if (item.userTurnId === turnId) await backend.removeMessageQueueItem(item.$cid);
+      return true;
+    },
     refreshCapacity: () => quota?.refresh(),
   };
   const repo = {
@@ -134,7 +139,11 @@ async function workspaceFixture(
     logger,
   });
   owners.push(handle);
-  return Object.assign(handle, { testRoot: root, testDocument: doc });
+  return Object.assign(handle, {
+    testRoot: root,
+    testDocument: doc,
+    testAdmission: (args: AutomationSessionAdmission) => admit?.(args),
+  });
 }
 describe('Automation control authority', () => {
   it('executes a registered condition in the Session workspace', async () => {
@@ -743,8 +752,107 @@ describe('Automation control authority', () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(host.ledger.receipt(receipt.id)).toMatchObject({
       state: 'cancelled',
-      reason: 'user_cancelled',
+      reason: 'authorization_revoked',
     });
+    const queue = await (await createSessionBackend(host.testDocument)).getMessageQueue();
+    expect(queue).toHaveLength(0);
+  });
+  it('supersedes a queued continuation whose admission guard went stale', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    const host = await workspaceFixture({
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+    });
+    const invocation: AutomationInvocation = {
+      target: { kind: 'existing', sessionId: 'session-a', onUnavailable: 'blocked' },
+      input: { kind: 'external_event', ref: 'event' },
+      ifBusy: 'enqueue',
+    };
+    const draft: AutomationRuleDraft = {
+      id: 'rule',
+      name: 'deliver',
+      scope: { workspaceId: 'workspace' },
+      selector: { types: ['test.event'] },
+      enabled: true,
+      handler: { kind: 'agent', invocation },
+      grants: {
+        actions: ['agent.invoke'],
+        sessionIds: ['session-a'],
+        agentRoleIds: [],
+        bindingIds: [],
+        allowLinkedSession: false,
+        allowCapacityAttempt: false,
+      },
+      budget: { maxActionsPerEvent: 10, maxInvocationsPerCorrelation: 2, maxDepth: 4 },
+    };
+    const rule = host.ledger.upsert(draft, 'user', Date.now());
+    host.ledger.publish({
+      id: 'e1',
+      source: 'test',
+      type: 'test.event',
+      version: 1,
+      subject: 'subject',
+      observedAt: Date.now(),
+      scope: { workspaceId: 'workspace', sessionId: 'session-a' },
+      data: {},
+      provenance: 'poll',
+      completeness: 'observed',
+      depth: 0,
+    });
+    const receipt = host.ledger.accept(
+      required(host.ledger.deliveries()[0]),
+      {
+        key: 'step',
+        guard: {
+          kind: 'session.delivery.current',
+          parameters: { sessionId: 'session-a', eventId: 'ev-stale' },
+        },
+        action: { kind: 'agent.invoke', parameters: invocation },
+      },
+      Date.now()
+    );
+    const origin = {
+      invocationId: receipt.id,
+      ruleId: rule.id,
+      ruleRevision: rule.revision,
+      eventRef: receipt.event.id,
+      authorizationUserId: 'user',
+    };
+    host.ledger.update(
+      receipt.id,
+      'accepted',
+      { state: 'queued', prepared: { kind: 'queue', config: { _lodyAutomation: origin } } },
+      Date.now()
+    );
+    await host.testDocument.pushMessageQueue({
+      task: 'deliver',
+      userId: 'user',
+      userTurnId: receipt.turnId,
+      operationId: receipt.id,
+      timestamp: new Date().toISOString(),
+      isEditing: false,
+      editingStartedAt: undefined,
+      project: undefined,
+    });
+    expect(
+      await host.testAdmission({
+        sessionId: 'session-a' as SessionId,
+        turnId: receipt.turnId,
+        userId: 'user',
+        origin,
+      })
+    ).toBe(false);
+    await host.wake();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(host.ledger.receipt(receipt.id)).toMatchObject({
+      state: 'superseded',
+      reason: 'guard:delivery_step_replaced',
+    });
+    const queue = await (await createSessionBackend(host.testDocument)).getMessageQueue();
+    expect(queue).toHaveLength(0);
   });
   it('manages an owned Session’s automations from another active Session', async () => {
     const host = await workspaceFixture({

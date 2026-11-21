@@ -11,11 +11,12 @@ Translation: current
 Automation 账本此前把几乎所有可查询字段都塞进 JSON `payload` 列，热谓词全部
 通过 `json_extract`/`json_each` 做全表扫描，并在主线程上同步解析 JSON；provider
 容量事件还会因为上一次快照过期或 fingerprint 不匹配而反复发布恢复事件，把事件
-表灌水。Schema v3 把所有谓词字段提升为带索引的真实列，payload 仅保留为接受时
+表灌水。Schema v4 把所有谓词字段提升为带索引的真实列，payload 仅保留为接受时
 冻结的记录，wait 的资源读取也移入 `wait_reads` 关联表。引擎循环改为在显式唤醒
 信号与"睡到最早 durable 截止时间"之间竞速，上限 15 秒，取代"还有活就重扫"和
 每秒探测。容量事件只在确认"不可用→可用"转换时发布，而恢复唤醒扫描仍跟随每次
-新的匹配可用观察。
+新的匹配可用观察，但通过规范化列把候选收敛到本次观察的 binding/model，不再做
+全工作区的 payload 扫描。
 
 ## 决策与归属
 
@@ -28,7 +29,9 @@ Automation 账本此前把几乎所有可查询字段都塞进 JSON `payload` �
 崩溃也仍在与其他重试相同的 15 秒界内完成对账。迁移是幂等的——每个 `ALTER` 都由
 `table_info` 检查保护，已部分列化的数据库也能干净升级——并通过与写入路径共用
 的 `columnsFrom*` 辅助函数重新解析 payload 回填，消除了 SQL `json_extract`
-回填会引入的 SQL/JS 漂移。
+回填会引入的 SQL/JS 漂移。回填读取以 512 行为一批、按 rowid 键推进：整表
+`.all()` 会把全部 payload 列物化进内存，而流式 `.iterate()` 无法与同一事务
+内的写游标共享连接。
 
 可选谓词绝不编译成 `(? IS NULL OR col=?)`：SQLite 会因此放弃整条语句的索引，
 所以 `wantsRead`、`waits`、`activityPage` 改为按参数形态生成专门语句。驱动型
@@ -51,6 +54,14 @@ grant/授权、已删除目标、已终结或不匹配的 pending work）会把�
 "准入被拒"的布尔值配定时器重试，正是它在死输入上制造了大量
 `automation-admission-blocked` 噪音。
 
+guard 判定在所有评估点共用一个 `guard:` reason 命名空间——引擎的 `check()`
+与资源准入的 `recheck()` 都给 guard 否定加前缀，`isDurableSessionDenial`
+因此对两者分类一致。缺少统一命名空间时，admission 处返回的原始
+`delivery_pr_changed`/`delivery_step_replaced` 会逃出持久集合，已过期的输入
+无限重验——这正是该命名空间要关闭的已确认评审缺陷。取消保留原始拒绝原因：
+`guard:` 收据以 `superseded` 终结，其余持久拒绝以 `cancelled` 终结，reason
+均为原始值而非 `user_cancelled`。
+
 `nextDueAt()` 报告未终结 waits、未终结 receipts 与已暂存 turn 观察中的最早
 到期时间，存在已接受 delivery 时立即到期。每轮循环睡到 `min(nextDueAt, now+15s)`
 或等到唤醒信号；15 秒上限保证 `host.observe`——暂存结果对账与自动投递推进——
@@ -61,6 +72,11 @@ grant/授权、已删除目标、已终结或不匹配的 pending work）会把�
 `yes` 时发布。恢复唤醒扫描不受事件门控：每次新的匹配 `yes` 都会把
 `capacityWakeRevision` 按推送一次（而非按子观察）递增，因为停在
 `MAX_SAFE_INTEGER` 的收据没有其他复活通道，且 `unknown`→`yes` 仍构成新证据。
+扫描范围限定到观察的 binding/model——`receipts.work_id` 连接 `work` 表的
+`binding_id`/`fingerprint`/`model_id` 列——成本只随匹配候选集增长，不随
+工作区恢复收据总数增长。`capacity` 表中的 marker 行记录每个 binding/model
+键已扫描的最高 `observedAt`；相同或更旧 `observedAt` 的重推快照不会产生新
+唤醒，直接跳过扫描。
 
 ## 被拒绝的替代方案
 
@@ -77,10 +93,11 @@ grant/授权、已删除目标、已终结或不匹配的 pending work）会把�
 
 ## 验证与限制
 
-测试覆盖：v2→v3 迁移（含部分列化数据库与暂存结果保留）、针对查询白名单的
-`EXPLAIN QUERY PLAN` 棘轮（只允许走索引的 `SEARCH`，小的 rule/source 表扫描
-放行）、每条写入路径后的列↔payload 一致性、容量发布门控与唤醒解耦、
-fake timers 下的截止时间/唤醒/15 秒上限调度、工作流需求每次 build 只读一次
-（与会话数无关）的调度回归，以及停止目标继续等待而撤销授权即取消的排队
-continuation 收敛测试。在推迟的保留期设计落地前，事件表增长仍仅由源头纪律
-约束；持久拒绝集合人工维护在产生这些 reason 的授权器旁。
+测试覆盖：v2→v4 迁移（含部分列化数据库与暂存结果保留）、针对查询白名单的
+`EXPLAIN QUERY PLAN` 棘轮（热表上的任何 `SCAN` 都失败，含覆盖索引扫描；小的
+rule/source 表扫描放行）、每条写入路径后的列↔payload 一致性、容量发布门控与
+唤醒解耦、fake timers 下的截止时间/唤醒/15 秒上限调度、每次 build 的工作流
+需求读数有界（与会话数无关）的调度回归，以及跨队列边界的收敛：准入 guard
+过期的排队 continuation 被真实的 `cancelInput` 移除并以 `superseded` 及原始
+guard reason 终结，而停止的目标继续等待。在推迟的保留期设计落地前，事件表
+增长仍仅由源头纪律约束；持久拒绝集合人工维护在产生这些 reason 的授权器旁。

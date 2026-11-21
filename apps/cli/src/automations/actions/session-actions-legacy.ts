@@ -639,8 +639,7 @@ export class AutomationSessionActionsLegacy {
       const verdict = await this.authorize(receipt);
       if (verdict.value === 'no' && isDurableSessionDenial(verdict))
         return { state: 'cancelling', reason: verdict.reason, retryAt: Date.now() };
-      // The process may have stopped after writing the row but before publishing
-      // its activation. Re-signal the same row; never enqueue a second input.
+      // A stopped process may have written the row pre-activation; re-signal, never re-enqueue.
       await this.signalQueue(doc);
       return { state: 'queued' };
     }
@@ -671,8 +670,7 @@ export class AutomationSessionActionsLegacy {
     if (pr.url !== prUrl) return { value: 'no', reason: 'pr_superseded' };
     const observation = this.options.ledger.checkpoint(pullRequestCheckpointId(sessionId, prUrl));
     if (!observation) return { value: 'unknown', reason: 'pr_observation_missing' };
-    // Merged is terminal provider evidence. The poller intentionally retires it;
-    // waiting for a busy group must not turn that fact into a permanent stale hold.
+    // Merged is terminal provider evidence; a busy group must not hold that stale forever.
     if (observation.data.status === 'merged' && pr.status === 'merged')
       return { value: 'yes', reason: 'merged' };
     if (Date.now() - observation.observedAt > 5 * 60_000)
@@ -693,9 +691,14 @@ export class AutomationSessionActionsLegacy {
       receipt.sessionId as SessionId,
       receipt.turnId
     );
+    const denied =
+      receipt.reason !== undefined &&
+      isDurableSessionDenial({ value: 'no', reason: receipt.reason })
+        ? receipt.reason
+        : undefined;
     return {
-      state: cancelled ? 'cancelled' : 'unknown',
-      reason: cancelled ? 'user_cancelled' : 'cancellation_unconfirmed',
+      state: cancelled ? (denied?.startsWith('guard:') ? 'superseded' : 'cancelled') : 'unknown',
+      reason: cancelled ? (denied ?? 'user_cancelled') : 'cancellation_unconfirmed',
     };
   }
 }

@@ -62,6 +62,7 @@ const receiptColumns = (receipt: AutomationReceipt) => ({
   event_id: receipt.event.id,
   correlation_key: receipt.event.correlationId ?? receipt.deliveryId,
   policy: receipt.rule.handler.kind === 'policy' ? receipt.rule.handler.policy : null,
+  work_id: typeof receipt.event.data.workId === 'string' ? receipt.event.data.workId : null,
   retry_at: receipt.retryAt ?? 0,
 });
 const waitColumns = (wait: AutomationWait) => ({
@@ -79,6 +80,9 @@ const workColumns = (work: PendingWork) => ({
   turn_id: work.turnId,
   invocation_id: work.invocationId ?? null,
   updated_at: work.updatedAt,
+  binding_id: work.bindingId,
+  fingerprint: work.fingerprint,
+  model_id: work.modelId ?? null,
 });
 const deliveryColumns = (delivery: Delivery) => ({
   rule_id: delivery.rule.id,
@@ -115,7 +119,7 @@ export class AutomationLedger {
     try {
       const db = this.connection.raw;
       const version = Number(db.pragma('user_version', { simple: true }));
-      if (version > 3) throw new Error('AUTOMATION_DATABASE_VERSION_UNSUPPORTED');
+      if (version > 4) throw new Error('AUTOMATION_DATABASE_VERSION_UNSUPPORTED');
       db.exec(`
         CREATE TABLE IF NOT EXISTS rules (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS events (
@@ -147,7 +151,7 @@ export class AutomationLedger {
           db.exec('ALTER TABLE turn_observations ADD COLUMN retry_at INTEGER NOT NULL DEFAULT 0');
           db.pragma('user_version = 2');
         });
-      if (version < 3) this.migrateQueryColumns();
+      if (version < 4) this.migrateQueryColumns();
       db.exec(`
         CREATE INDEX IF NOT EXISTS turn_observations_due ON turn_observations(retry_at);
         CREATE INDEX IF NOT EXISTS events_session ON events(session_id, observed_at);
@@ -156,8 +160,8 @@ export class AutomationLedger {
         CREATE INDEX IF NOT EXISTS receipts_due_active ON receipts(retry_at)
         WHERE state IN (${nonterminal});
         CREATE INDEX IF NOT EXISTS receipts_updated ON receipts(updated_at);
-        CREATE INDEX IF NOT EXISTS receipts_delivery ON receipts(delivery_id);
-        CREATE INDEX IF NOT EXISTS deliveries_state ON deliveries(state);
+        DROP INDEX IF EXISTS receipts_delivery;
+        DROP INDEX IF EXISTS deliveries_state;
         CREATE INDEX IF NOT EXISTS receipts_rule ON receipts(rule_id);
         CREATE INDEX IF NOT EXISTS receipts_invocation ON receipts(rule_id, action_kind, correlation_key);
         CREATE INDEX IF NOT EXISTS receipts_session ON receipts(session_id);
@@ -171,6 +175,8 @@ export class AutomationLedger {
         CREATE INDEX IF NOT EXISTS wait_reads_resource ON wait_reads(resource, wait_id);
         CREATE INDEX IF NOT EXISTS work_session ON work(session_id, state);
         CREATE INDEX IF NOT EXISTS work_owner ON work(owner_user_id);
+        CREATE INDEX IF NOT EXISTS work_binding ON work(binding_id);
+        CREATE INDEX IF NOT EXISTS receipts_work ON receipts(work_id);
         CREATE INDEX IF NOT EXISTS deliveries_event ON deliveries(event_source, event_id);
         CREATE INDEX IF NOT EXISTS deliveries_work ON deliveries(event_work_id, rule_id);
         CREATE INDEX IF NOT EXISTS deliveries_owner ON deliveries(owner_user_id);
@@ -213,6 +219,7 @@ export class AutomationLedger {
         event_id: 'TEXT',
         correlation_key: 'TEXT',
         policy: 'TEXT',
+        work_id: 'TEXT',
         retry_at: 'INTEGER NOT NULL DEFAULT 0',
       });
       addColumns('waits', {
@@ -230,6 +237,9 @@ export class AutomationLedger {
         turn_id: 'TEXT',
         invocation_id: 'TEXT',
         updated_at: 'INTEGER',
+        binding_id: 'TEXT',
+        fingerprint: 'TEXT',
+        model_id: 'TEXT',
       });
       addColumns('deliveries', {
         rule_id: 'TEXT',
@@ -246,13 +256,27 @@ export class AutomationLedger {
         observed_at: 'INTEGER',
       });
       db.exec('DROP INDEX IF EXISTS waits_due');
+      // Rowid-keyed batches bound upgrade memory; a write cursor cannot share a reading cursor.
+      const backfill = (
+        select: string,
+        apply: (row: JsonRow & { rowid: number; id: string }) => void
+      ) => {
+        const stmt = db.prepare(`${select} WHERE rowid>? ORDER BY rowid LIMIT 512`);
+        let after = 0;
+        for (;;) {
+          const rows = stmt.all(after) as Array<JsonRow & { rowid: number; id: string }>;
+          for (const row of rows) {
+            apply(row);
+            after = row.rowid;
+          }
+          if (rows.length < 512) return;
+        }
+      };
       const events = db.prepare(
         `UPDATE events SET type=?,source=?,subject=?,session_id=?,project_id=?,work_id=?,observed_at=?
         WHERE sequence=?`
       );
-      for (const row of db.prepare('SELECT sequence,payload FROM events').all() as Array<
-        JsonRow & { sequence: number }
-      >) {
+      backfill('SELECT rowid AS rowid,payload FROM events', (row) => {
         const c = eventColumns(JSON.parse(row.payload) as AutomationEvent);
         events.run(
           c.type,
@@ -262,16 +286,14 @@ export class AutomationLedger {
           c.project_id,
           c.work_id,
           c.observed_at,
-          row.sequence
+          row.rowid
         );
-      }
+      });
       const receipts = db.prepare(
         `UPDATE receipts SET session_id=?,scope_session_id=?,owner_user_id=?,rule_id=?,action_kind=?,
-        event_type=?,event_source=?,event_id=?,correlation_key=?,policy=?,retry_at=? WHERE id=?`
+        event_type=?,event_source=?,event_id=?,correlation_key=?,policy=?,work_id=?,retry_at=? WHERE id=?`
       );
-      for (const row of db.prepare('SELECT id,payload FROM receipts').all() as Array<
-        JsonRow & { id: string }
-      >) {
+      backfill('SELECT rowid,id,payload FROM receipts', (row) => {
         const c = receiptColumns(JSON.parse(row.payload) as AutomationReceipt);
         receipts.run(
           c.session_id,
@@ -284,18 +306,17 @@ export class AutomationLedger {
           c.event_id,
           c.correlation_key,
           c.policy,
+          c.work_id,
           c.retry_at,
           row.id
         );
-      }
+      });
       const waits = db.prepare(
         `UPDATE waits SET session_id=?,owner_user_id=?,invocation_id=?,created_at=?,due_at=?,run_pending=?
         WHERE id=?`
       );
       const insertRead = db.prepare('INSERT OR IGNORE INTO wait_reads VALUES (?,?)');
-      for (const row of db.prepare('SELECT id,payload FROM waits').all() as Array<
-        JsonRow & { id: string }
-      >) {
+      backfill('SELECT rowid,id,payload FROM waits', (row) => {
         const wait = JSON.parse(row.payload) as AutomationWait;
         const c = waitColumns(wait);
         waits.run(
@@ -308,14 +329,12 @@ export class AutomationLedger {
           row.id
         );
         for (const resource of wait.reads ?? []) insertRead.run(row.id, resource);
-      }
+      });
       const work = db.prepare(
-        `UPDATE work SET session_id=?,owner_user_id=?,state=?,turn_id=?,invocation_id=?,updated_at=?
-        WHERE id=?`
+        `UPDATE work SET session_id=?,owner_user_id=?,state=?,turn_id=?,invocation_id=?,updated_at=?,
+        binding_id=?,fingerprint=?,model_id=? WHERE id=?`
       );
-      for (const row of db.prepare('SELECT id,payload FROM work').all() as Array<
-        JsonRow & { id: string }
-      >) {
+      backfill('SELECT rowid,id,payload FROM work', (row) => {
         const c = workColumns(JSON.parse(row.payload) as PendingWork);
         work.run(
           c.session_id,
@@ -324,16 +343,17 @@ export class AutomationLedger {
           c.turn_id,
           c.invocation_id,
           c.updated_at,
+          c.binding_id,
+          c.fingerprint,
+          c.model_id,
           row.id
         );
-      }
+      });
       const deliveries = db.prepare(
         `UPDATE deliveries SET rule_id=?,owner_user_id=?,scope_session_id=?,event_source=?,event_id=?,
         event_work_id=?,updated_at=? WHERE id=?`
       );
-      for (const row of db.prepare('SELECT id,payload FROM deliveries').all() as Array<
-        JsonRow & { id: string }
-      >) {
+      backfill('SELECT rowid,id,payload FROM deliveries', (row) => {
         const c = deliveryColumns(JSON.parse(row.payload) as Delivery);
         deliveries.run(
           c.rule_id,
@@ -345,17 +365,15 @@ export class AutomationLedger {
           c.updated_at,
           row.id
         );
-      }
+      });
       const turns = db.prepare(
         'UPDATE turn_observations SET user_id=?,session_id=?,observed_at=? WHERE id=?'
       );
-      for (const row of db.prepare('SELECT id,payload FROM turn_observations').all() as Array<
-        JsonRow & { id: string }
-      >) {
+      backfill('SELECT rowid,id,payload FROM turn_observations', (row) => {
         const fact = JSON.parse(row.payload) as SessionAutomationObservation;
         turns.run(fact.userId, fact.sessionId, fact.observedAt, row.id);
-      }
-      db.pragma('user_version = 3');
+      });
+      db.pragma('user_version = 4');
     });
   }
   registerWait(
@@ -1043,8 +1061,8 @@ export class AutomationLedger {
         .prepare(
           `INSERT INTO receipts
           (id,delivery_id,state,updated_at,session_id,scope_session_id,owner_user_id,rule_id,
-          action_kind,event_type,event_source,event_id,correlation_key,policy,retry_at,payload)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+          action_kind,event_type,event_source,event_id,correlation_key,policy,work_id,retry_at,payload)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
         )
         .run(
           id,
@@ -1061,6 +1079,7 @@ export class AutomationLedger {
           c.event_id,
           c.correlation_key,
           c.policy,
+          c.work_id,
           c.retry_at,
           JSON.stringify(receipt)
         );
@@ -1223,7 +1242,7 @@ export class AutomationLedger {
       this.connection.raw
         .prepare(`UPDATE receipts SET state=?,updated_at=?,session_id=?,scope_session_id=?,
         owner_user_id=?,rule_id=?,action_kind=?,event_type=?,event_source=?,event_id=?,
-        correlation_key=?,policy=?,retry_at=?,payload=? WHERE id=?`)
+        correlation_key=?,policy=?,work_id=?,retry_at=?,payload=? WHERE id=?`)
         .run(
           next.state,
           now,
@@ -1237,6 +1256,7 @@ export class AutomationLedger {
           c.event_id,
           c.correlation_key,
           c.policy,
+          c.work_id,
           c.retry_at,
           JSON.stringify(next),
           id
@@ -1279,23 +1299,32 @@ export class AutomationLedger {
       if (event) this.publish(event);
       // A fresh available observation is new evidence; the deadline is a recheck, never admission.
       if (evaluateCapacity(observation, observation, now).value !== 'yes') return;
-      const rows = this.connection.raw
-        .prepare(
-          `SELECT payload FROM receipts WHERE state IN ('accepted','waiting','blocked','resolved')
-          AND event_type='provider.quota.exhausted' AND policy='recover-capacity'`
-        )
-        .all() as JsonRow[];
+      // Same-or-older evidence for this binding/model was already scanned — no new wake.
+      const wakeKey = `wake/${automationIdentity(observation.bindingId, observation.modelId ?? '')}`;
+      const seen = this.read('capacity', wakeKey) as { observedAt?: number } | undefined;
+      if ((seen?.observedAt ?? -1) >= observation.observedAt) return;
+      const rows = (
+        observation.modelId === undefined
+          ? this.connection.raw
+              .prepare(
+                `SELECT r.payload AS receipt, w.payload AS work FROM receipts r
+                JOIN work w ON w.id=r.work_id AND w.binding_id=? AND w.fingerprint=?
+                WHERE r.state IN ('accepted','waiting','blocked','resolved')
+                AND r.event_type='provider.quota.exhausted' AND r.policy='recover-capacity'`
+              )
+              .all(observation.bindingId, observation.fingerprint)
+          : this.connection.raw
+              .prepare(
+                `SELECT r.payload AS receipt, w.payload AS work FROM receipts r
+                JOIN work w ON w.id=r.work_id AND w.binding_id=? AND w.fingerprint=? AND w.model_id=?
+                WHERE r.state IN ('accepted','waiting','blocked','resolved')
+                AND r.event_type='provider.quota.exhausted' AND r.policy='recover-capacity'`
+              )
+              .all(observation.bindingId, observation.fingerprint, observation.modelId)
+      ) as Array<{ receipt: string; work: string }>;
       for (const row of rows) {
-        const receipt = JSON.parse(row.payload) as AutomationReceipt;
-        const ref = receipt.event.data.workId;
-        const work = typeof ref === 'string' ? this.work(ref) : undefined;
-        if (
-          !work ||
-          work.bindingId !== observation.bindingId ||
-          work.fingerprint !== observation.fingerprint ||
-          (observation.modelId !== undefined && work.modelId !== observation.modelId)
-        )
-          continue;
+        const receipt = JSON.parse(row.receipt) as AutomationReceipt;
+        const work = JSON.parse(row.work) as PendingWork;
         const current =
           this.capacity(work.bindingId, work.modelId) ?? this.capacity(work.bindingId);
         if (evaluateCapacity(current, work, now).value !== 'yes') continue;
@@ -1311,6 +1340,11 @@ export class AutomationLedger {
           now
         );
       }
+      this.connection.raw
+        .prepare(
+          'INSERT INTO capacity VALUES (?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload'
+        )
+        .run(wakeKey, JSON.stringify({ observedAt: observation.observedAt }));
     });
   }
   recordWork(work: PendingWork, event: AutomationEvent): void {
@@ -1425,11 +1459,14 @@ export class AutomationLedger {
     const c = workColumns(work);
     this.connection.raw
       .prepare(
-        `INSERT INTO work (id,session_id,owner_user_id,state,turn_id,invocation_id,updated_at,payload)
-        VALUES (?,?,?,?,?,?,?,?)
+        `INSERT INTO work (id,session_id,owner_user_id,state,turn_id,invocation_id,updated_at,
+        binding_id,fingerprint,model_id,payload)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET session_id=excluded.session_id,
         owner_user_id=excluded.owner_user_id,state=excluded.state,turn_id=excluded.turn_id,
-        invocation_id=excluded.invocation_id,updated_at=excluded.updated_at,payload=excluded.payload`
+        invocation_id=excluded.invocation_id,updated_at=excluded.updated_at,
+        binding_id=excluded.binding_id,fingerprint=excluded.fingerprint,model_id=excluded.model_id,
+        payload=excluded.payload`
       )
       .run(
         work.id,
@@ -1439,6 +1476,9 @@ export class AutomationLedger {
         c.turn_id,
         c.invocation_id,
         c.updated_at,
+        c.binding_id,
+        c.fingerprint,
+        c.model_id,
         JSON.stringify(work)
       );
   }

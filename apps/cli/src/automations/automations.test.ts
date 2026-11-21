@@ -2235,7 +2235,11 @@ describe('Ledger query columns', () => {
       const plan = original.call(raw, `EXPLAIN QUERY PLAN ${sql}`).all(...args) as Array<{
         detail: string;
       }>;
-      for (const step of plan) expect(step.detail, sql).not.toMatch(/^SCAN \S+$/);
+      for (const step of plan)
+        // No SCAN on hot tables — covering-index sweeps count; tiny list tables may SCAN.
+        expect(step.detail, sql).not.toMatch(
+          /^SCAN (receipts|waits|wait_reads|work|turn_observations|events)\b/
+        );
     }
   });
 });
