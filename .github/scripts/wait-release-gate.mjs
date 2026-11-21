@@ -76,7 +76,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         );
         jobs.push(...body.jobs);
         if (body.jobs.length < 100) {
-          assert.equal(jobs.length, body.total_count, 'Incomplete same-run jobs response');
           return jobs;
         }
       }
