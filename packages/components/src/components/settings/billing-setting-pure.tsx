@@ -768,7 +768,7 @@ export function BillingSettingsView({
       postGiftBillingScheduled);
 
   return (
-    <div className={settingContainerClass}>
+    <div className={settingContainerClass} data-text-selectable>
       {/* Desktop: checkout opened in the system browser, awaiting payment */}
       {externalCheckoutPending ? (
         <CompactSection>

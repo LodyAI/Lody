@@ -1243,29 +1243,46 @@ pre,
     -webkit-touch-callout: none;
   }
 
-  body.native-mobile-shell * {
+  body * {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  body textarea,
+  body [contenteditable]:not([contenteditable='false']),
+  body [contenteditable]:not([contenteditable='false']) *,
+  body [data-text-selectable],
+  body [data-text-selectable] *,
+  body
+    input:not([type='button']):not([type='submit']):not([type='reset']):not([type='checkbox']):not(
+      [type='radio']
+    ):not([type='range']):not([type='file']):not([type='color']) {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  body [data-text-selectable] :is(button, [role='button']),
+  body [data-text-selectable] :is(button, [role='button']) * {
     -webkit-user-select: none;
     user-select: none;
   }
 
   body.native-mobile-shell textarea,
-  body.native-mobile-shell [contenteditable='true'],
-  body.native-mobile-shell [contenteditable='true'] *,
-  body.native-mobile-shell [data-native-selection-allow],
-  body.native-mobile-shell [data-native-selection-allow] *,
+  body.native-mobile-shell [contenteditable]:not([contenteditable='false']),
+  body.native-mobile-shell [contenteditable]:not([contenteditable='false']) *,
+  body.native-mobile-shell [data-text-selectable],
+  body.native-mobile-shell [data-text-selectable] *,
   body.native-mobile-shell
     input:not([type='button']):not([type='submit']):not([type='reset']):not([type='checkbox']):not(
       [type='radio']
     ):not([type='range']):not([type='file']):not([type='color']) {
     -webkit-touch-callout: default;
-    -webkit-user-select: text;
-    user-select: text;
   }
 
   /* No WKWebView link preview inside selectable text: after its "Open Link",
      every later tap in the app reopened that link. Links open with a tap. */
-  body.native-mobile-shell [data-native-selection-allow] a[href],
-  body.native-mobile-shell [data-native-selection-allow] a[href] * {
+  body.native-mobile-shell [data-text-selectable] a[href],
+  body.native-mobile-shell [data-text-selectable] a[href] * {
     -webkit-touch-callout: none;
   }
 

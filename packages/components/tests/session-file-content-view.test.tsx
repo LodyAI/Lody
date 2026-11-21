@@ -918,7 +918,7 @@ describe('SessionFileContentView', () => {
     const view = await render(renderView(0));
     await flushMicrotasks();
 
-    expect(view.querySelector('[data-native-selection-allow]')).not.toBeNull();
+    expect(view.querySelector('[data-text-selectable]')).not.toBeNull();
     await act(async () => {
       view.querySelector<HTMLButtonElement>('button[aria-label="Copy full Markdown"]')?.click();
     });
@@ -960,7 +960,7 @@ describe('SessionFileContentView', () => {
     );
     expect(source?.value).toBe(markdown);
     expect(source?.readOnly).toBe(true);
-    expect(source?.hasAttribute('data-native-selection-allow')).toBe(true);
+    expect(source?.hasAttribute('data-text-selectable')).toBe(true);
     expect(view.querySelector('[data-testid="monaco-viewer"]')).toBeNull();
   });
 
