@@ -15,10 +15,8 @@ const fixtures = vi.hoisted(() => ({
   syncs: [] as string[][],
 }));
 
-vi.mock('@lody/shared', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@lody/shared')>();
+vi.mock('@lody/shared/schedule-repository', () => {
   return {
-    ...actual,
     ScheduleRepository: class {
       async read(scheduleId: string) {
         fixtures.reads.push(scheduleId);

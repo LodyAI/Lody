@@ -6,7 +6,7 @@ import {
 import { ChevronDown, Plus, TerminalSquare, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
 import { useSetAtom } from 'jotai';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import * as stylex from '@stylexjs/stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 

@@ -20,7 +20,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import { useStore } from 'jotai';
+import { useAtomValue, useStore } from 'jotai';
 import { cn } from '@/lib/utils';
 import { BOOT_SHELL_SIDEBAR_WIDTH, isMobileSidebarDevice } from '@/lib/boot-shell-script';
 import { sidebarScrollTopByWorkspaceAtom } from '@/atoms/sidebar-state';
@@ -37,10 +37,11 @@ import * as stylex from '@stylexjs/stylex';
 import { sidebarSurface } from './sidebar-surface';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space } from '@lody/ui/tokens/scales.stylex';
-import { Kbd } from '@lody/ui/kbd';
+import { SidebarBindingPill } from '@/components/sidebar-shortcut-pill';
+import { sidebarShortcutOverlayActiveAtom } from '@/atoms/sidebar-shortcuts';
 import { Tooltip } from '@lody/ui/tooltip';
 import { WorkingGrid } from '@/ui/working-grid';
-import { commands, formatKeyBinding, type ShortcutCommandId } from '@/lib/commands';
+import { commands, type ShortcutCommandId } from '@/lib/commands';
 import { setCommandPaletteOpen } from '@/lib/commands/palette-state';
 import { Menu } from '@/ui/menu';
 import { ScrollArea } from '@lody/ui/scroll-area';
@@ -50,6 +51,7 @@ import {
   CircleHelp,
   BookOpen,
   Bug,
+  CalendarDays,
   ClipboardList,
   ListTodo,
   Github,
@@ -57,15 +59,13 @@ import {
   ListFilter,
   MessageSquareMore,
   ArrowLeft,
-  ChevronLeft,
-  ChevronRight,
   Plus,
   Search,
   Settings,
   Users,
 } from 'lucide-react';
 import { MynauiEditOne } from '@lody/ui';
-import { CuidaSidebarExpandOutline } from './icons/cuida-sidebar-expand-outline';
+import { SidebarHistoryControls, useNavigationAvailability } from './sidebar-history-controls';
 import {
   SessionList,
   type SessionListProps,
@@ -88,6 +88,7 @@ import { WorkspaceAvatar } from './workspace-avatar';
 import { AuthRecoveryEntrySlot } from './auth-recovery-entry';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useSessionDragAutoScroll } from '@/hooks/use-session-drag-auto-scroll';
 import { useStableNow } from '@/hooks/use-stable-now';
 import {
   SIDEBAR_ROW_TEXT_CLASS,
@@ -96,7 +97,7 @@ import {
   SIDEBAR_CONTROL_TEXT_CLASS,
 } from './sidebar-row-shared';
 
-export type LoroSidebarNavKey = 'home' | 'archive' | 'schedules';
+export type LoroSidebarNavKey = 'home' | 'archive' | 'schedules' | 'today';
 
 export type LoroSidebarChatScope = 'my' | 'team';
 export type LoroSidebarOrganizeMode = SidebarOrganizeMode;
@@ -241,6 +242,12 @@ export interface LoroSidebarProps {
   pinnedSections?: SidebarPinnedSection[];
   /** Folded user pin sections, by section id (the default uses `pinnedSectionCollapsed`). */
   collapsedPinSectionIds?: Readonly<Record<string, boolean>>;
+  /**
+   * Rows the current sidebar scope hides from each pin section, keyed by
+   * `pinSectionKey(section.id)` (`'default'` for the default section). An
+   * expanded section with hidden rows says so under its rows.
+   */
+  pinnedHiddenCounts?: Readonly<Record<string, number>>;
   onTogglePinSection?: (sectionId: string) => void;
   /** Create, rename, delete and move between pin sections; absent hides those controls. */
   pinSectionActions?: SidebarPinSectionActions;
@@ -312,6 +319,8 @@ export interface LoroSidebarProps {
   onArchiveClicked?: () => void;
   /** Shows the Schedules entry; absent where there is nowhere to go. */
   onSchedulesClicked?: () => void;
+  /** Shows the experimental Today entry (specs/today-outline.md); absent when switched off. */
+  onTodayClicked?: () => void;
   onSettingsClicked?: () => void;
   onSettingsIntent?: () => void;
   settingsIcon?: ReactNode;
@@ -661,12 +670,8 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
   );
 });
 
-/**
- * The live binding for a command, formatted for this platform, or null when the
- * command is unbound (or not registered). Read from the registry rather than
- * `COMMAND_SHORTCUTS` so a rebound key is what the tooltip teaches.
- */
-function useCommandShortcutLabel(id: ShortcutCommandId): string | null {
+/** The live binding for a command in registry syntax, or null when unbound. */
+function useCommandBinding(id: ShortcutCommandId): string | null {
   const binding = useSyncExternalStore(
     (onChange) => commands.subscribe(onChange),
     // A string, not the array: `getKeybindingsFor` allocates, and an unstable
@@ -674,116 +679,7 @@ function useCommandShortcutLabel(id: ShortcutCommandId): string | null {
     () => commands.getKeybindingsFor(id)[0] ?? '',
     () => ''
   );
-  return binding ? formatKeyBinding(binding) : null;
-}
-
-type NavigationAvailability = {
-  canGoBack: boolean;
-  canGoForward: boolean;
-};
-
-type WindowNavigation = {
-  canGoBack: boolean;
-  canGoForward: boolean;
-  addEventListener: (type: string, listener: () => void) => void;
-  removeEventListener: (type: string, listener: () => void) => void;
-};
-
-const readNavigationAvailability = (): NavigationAvailability => {
-  const navigation = (window as Window & { navigation?: WindowNavigation }).navigation;
-  if (navigation && typeof navigation.canGoBack === 'boolean') {
-    return { canGoBack: navigation.canGoBack, canGoForward: navigation.canGoForward };
-  }
-  return {
-    canGoBack: window.history.length > 1,
-    canGoForward: false,
-  };
-};
-
-let navigationAvailabilitySnapshot: NavigationAvailability = {
-  canGoBack: false,
-  canGoForward: false,
-};
-
-const getNavigationAvailabilitySnapshot = (): NavigationAvailability => {
-  const next = readNavigationAvailability();
-  if (
-    next.canGoBack === navigationAvailabilitySnapshot.canGoBack &&
-    next.canGoForward === navigationAvailabilitySnapshot.canGoForward
-  ) {
-    return navigationAvailabilitySnapshot;
-  }
-  navigationAvailabilitySnapshot = next;
-  return next;
-};
-
-const subscribeNavigationAvailability = (onStoreChange: () => void) => {
-  window.addEventListener('popstate', onStoreChange);
-  const navigation = (window as Window & { navigation?: WindowNavigation }).navigation;
-  navigation?.addEventListener('currententrychange', onStoreChange);
-  navigation?.addEventListener('navigate', onStoreChange);
-  return () => {
-    window.removeEventListener('popstate', onStoreChange);
-    navigation?.removeEventListener('currententrychange', onStoreChange);
-    navigation?.removeEventListener('navigate', onStoreChange);
-  };
-};
-
-function useNavigationAvailability(): NavigationAvailability {
-  return useSyncExternalStore(
-    subscribeNavigationAvailability,
-    getNavigationAvailabilitySnapshot,
-    () => navigationAvailabilitySnapshot
-  );
-}
-
-function SidebarHeaderIconButton({
-  label,
-  shortcut,
-  onClick,
-  className,
-  disabled = false,
-  children,
-}: {
-  label: string;
-  shortcut?: string | null;
-  onClick?: () => void;
-  className?: string;
-  disabled?: boolean;
-  children: ReactNode;
-}) {
-  const button = (
-    <button
-      type="button"
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        // The same box, ink and fills as the footer's icon buttons.
-        stylex.props(sidebarSurface.iconButton).className,
-        'outline-hidden transition-colors',
-        disabled
-          ? // pointer-events-none keeps the hover fill off a control that cannot act.
-            // 60% keeps a disabled Back or Forward legible as "unavailable"
-            // rather than missing.
-            'pointer-events-none cursor-default text-sidebar-foreground-muted/60'
-          : 'focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
-        className
-      )}
-    >
-      {children}
-    </button>
-  );
-  if (disabled) return button;
-  return (
-    <Tooltip.Root>
-      <Tooltip.Trigger render={button} />
-      <Tooltip.Content side="bottom" className="flex items-center gap-1.5">
-        <span>{label}</span>
-        {shortcut ? <Kbd>{shortcut}</Kbd> : null}
-      </Tooltip.Content>
-    </Tooltip.Root>
-  );
+  return binding || null;
 }
 
 function NavButton({
@@ -794,12 +690,19 @@ function NavButton({
   onClick,
   badge,
   action,
+  shortcut,
 }: {
   active: boolean;
   isMobile: boolean;
   label: string;
   icon: ReactNode;
   onClick?: () => void;
+  /**
+   * The row's command binding (registry syntax), shown as key caps at the row's
+   * end while it is hovered or focused, so the resting sidebar stays quiet.
+   * Follows the live binding, so a rebound key is what it teaches.
+   */
+  shortcut?: string | null;
   /** Optional trailing count. Omitted (not zero-rendered) when there is nothing to report. */
   badge?: number;
   /**
@@ -862,9 +765,30 @@ function NavButton({
             {badge > 99 ? '99+' : badge}
           </span>
         ) : null}
+        {shortcut && !isMobile ? <NavShortcut binding={shortcut} selected={active} /> : null}
       </button>
       {action ? <span className="absolute right-1 flex items-center">{action}</span> : null}
     </div>
+  );
+}
+
+/**
+ * A navigation row's shortcut pill, at the row's end: it fades in on hover or
+ * keyboard focus, and shows with the session rows' ⌘1–9 pills while the
+ * modifier is held. A leaf, so holding the modifier re-renders only these.
+ */
+function NavShortcut({ binding, selected }: { binding: string; selected: boolean }) {
+  const held = useAtomValue(sidebarShortcutOverlayActiveAtom);
+  return (
+    <span
+      data-nav-shortcut=""
+      className={cn(
+        'ml-auto flex shrink-0 items-center pl-2 transition-opacity duration-150 motion-reduce:transition-none',
+        held ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100'
+      )}
+    >
+      <SidebarBindingPill binding={binding} selected={selected} />
+    </span>
   );
 }
 
@@ -917,6 +841,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   pinnedSectionCollapsed = false,
   pinnedSections,
   collapsedPinSectionIds,
+  pinnedHiddenCounts,
   onTogglePinSection,
   pinSectionActions,
   updatedSelectedItemId,
@@ -955,6 +880,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   onHomeClicked,
   onArchiveClicked,
   onSchedulesClicked,
+  onTodayClicked,
   onSettingsClicked,
   onSettingsIntent,
   settingsIcon,
@@ -976,6 +902,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   const { t } = useTranslation();
   const store = useStore();
   const scrollViewportRef = useRef<HTMLDivElement>(null);
+  useSessionDragAutoScroll(scrollViewportRef);
   useLayoutEffect(() => {
     const viewport = scrollViewportRef.current;
     if (!viewport || !scrollStateKey) return undefined;
@@ -988,10 +915,10 @@ export const LoroSidebar = memo(function LoroSidebar({
       });
     };
   }, [collapsed, scrollStateKey, store]);
-  const collapseShortcut = useCommandShortcutLabel('sidebar.toggle');
-  const backShortcut = useCommandShortcutLabel('nav.back');
-  const forwardShortcut = useCommandShortcutLabel('nav.forward');
-  const { canGoBack, canGoForward } = useNavigationAvailability();
+  const newChatBinding = useCommandBinding('session.new');
+  const searchBinding = useCommandBinding('palette.toggle');
+  const todayBinding = useCommandBinding('today.open');
+  const { canGoBack } = useNavigationAvailability();
   const mergedLabels: LoroSidebarLabels = {
     ...defaultLabels,
     ...labels,
@@ -1604,51 +1531,10 @@ export const LoroSidebar = memo(function LoroSidebar({
             </span>
           )}
           {!isMobile ? (
-            <Tooltip.Provider delay={400}>
-              <div
-                className={cn(
-                  // `gap-0.5` between full-size buttons keeps Back and Forward
-                  // apart as two targets instead of one fused control.
-                  'ml-auto flex shrink-0 items-center gap-0.5',
-                  windowDrag && WINDOW_DRAG_EXEMPT_CLASS
-                )}
-              >
-                {onRequestCollapse ? (
-                  <SidebarHeaderIconButton
-                    label={t('commands.sidebar.toggle', 'Toggle Sidebar')}
-                    shortcut={collapseShortcut}
-                    onClick={() => onRequestCollapse()}
-                    // Always visible: the collapse control is found where it
-                    // was last seen, not revealed by hovering the header.
-                    className="focus-visible:outline-hidden"
-                  >
-                    <CuidaSidebarExpandOutline className="h-4 w-4" />
-                  </SidebarHeaderIconButton>
-                ) : null}
-                <SidebarHeaderIconButton
-                  disabled={!canGoBack}
-                  label={t('commands.nav.back', 'Back')}
-                  shortcut={backShortcut}
-                  onClick={() => {
-                    if (!canGoBack) return;
-                    if (!commands.execute('nav.back')) window.history.back();
-                  }}
-                >
-                  <ChevronLeft className="h-4 w-4" strokeWidth={1.5} />
-                </SidebarHeaderIconButton>
-                <SidebarHeaderIconButton
-                  disabled={!canGoForward}
-                  label={t('commands.nav.forward', 'Forward')}
-                  shortcut={forwardShortcut}
-                  onClick={() => {
-                    if (!canGoForward) return;
-                    if (!commands.execute('nav.forward')) window.history.forward();
-                  }}
-                >
-                  <ChevronRight className="h-4 w-4" strokeWidth={1.5} />
-                </SidebarHeaderIconButton>
-              </div>
-            </Tooltip.Provider>
+            <SidebarHistoryControls
+              onToggleSidebar={onRequestCollapse}
+              className={cn('ml-auto', windowDrag && WINDOW_DRAG_EXEMPT_CLASS)}
+            />
           ) : null}
         </div>
 
@@ -1668,7 +1554,18 @@ export const LoroSidebar = memo(function LoroSidebar({
             label={mergedLabels.home}
             icon={<MynauiEditOne className="h-4 w-4" />}
             onClick={onHomeClicked}
+            shortcut={newChatBinding}
           />
+          {onTodayClicked && !isMobile ? (
+            <NavButton
+              active={activeNav === 'today'}
+              isMobile={isMobile}
+              label={t('today.nav', 'Today')}
+              icon={<CalendarDays className="h-4 w-4" strokeWidth={1.5} />}
+              onClick={onTodayClicked}
+              shortcut={todayBinding}
+            />
+          ) : null}
           {onSchedulesClicked && schedulesAllowed ? (
             <NavButton
               active={activeNav === 'schedules'}
@@ -1684,6 +1581,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             label={t('common.search', 'Search')}
             icon={<Search className="h-4 w-4" strokeWidth={1.5} />}
             onClick={() => setCommandPaletteOpen(true)}
+            shortcut={searchBinding}
           />
         </div>
 
@@ -1721,6 +1619,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                   defaultCollapsed={pinnedSectionCollapsed}
                   onToggleDefault={onTogglePinnedSection}
                   collapsedSectionIds={collapsedPinSectionIds}
+                  hiddenCounts={pinnedHiddenCounts}
                   onToggleSection={onTogglePinSection}
                   headerAction={sectionHeaderFilterAction ?? undefined}
                   actions={pinSectionActions}

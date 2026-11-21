@@ -14,7 +14,7 @@ import { useTranslation } from 'react-i18next';
 import { type CodeCollabContentUnavailableReason, type SessionMeta } from '@lody/shared';
 import { localHomeDirAtom, localMachineIdAtom } from '@/atoms/local-probe';
 import { useSessionWorkspacePath } from '@/hooks/use-session-workspace-path';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { downloadBytesAsFile, getDownloadFileName } from '@/lib/download-file';

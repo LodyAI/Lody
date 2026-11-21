@@ -1,13 +1,12 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 import { writeStoredField } from './conversation-view-fixtures';
 import { describe, expect, it, vi } from 'vitest';
 import { LoroDoc, type LoroMap } from 'loro-crdt';
 import type { SessionHistory } from '@lody/shared';
 import {
-  createHistoryWriter,
   resolveSessionAcpRuntimeConfig,
   resolveSessionConversationConfig,
-  resolveSessionConversationSourceFence,
-} from '@lody/shared';
+  resolveSessionConversationSourceFence} from '@lody/shared';
 import {
   createLoroSessionData,
   setFieldTo,

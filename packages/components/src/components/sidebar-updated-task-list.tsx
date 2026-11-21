@@ -48,6 +48,7 @@ import type {
 import type { TaskListPullRequestOpen, TaskListTaskOwner } from '@/components/task-list';
 import { SessionSharingIndicator } from '@/components/session-sharing';
 import type { SessionSharingState } from '@/lib/session-sharing';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type SidebarUpdatedItemKind = SidebarRowKind;
 
@@ -776,6 +777,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           isWorking={item.isWorking}
           hasUnreadMessages={item.hasUnreadMessages}
           fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
+          rowGroup="row"
           restIcon={
             showPr || showMergeablePill || isMobile || item.sharing?.visibility === 'private' ? (
               <span
@@ -934,7 +936,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           <ContextMenu.Item
             icon={GitBranch}
             onClick={() => {
-              void navigator.clipboard.writeText(branchName).catch(() => {});
+              void copyTextToClipboard(branchName).catch(() => {});
             }}
           >
             {contextMenuLabels.copyBranch}

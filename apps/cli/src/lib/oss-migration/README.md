@@ -17,7 +17,9 @@ fails closed. Conflicting row changes are detected on the server, not just in a 
 
 - Full Loro session operation history, including archived sessions, opaque history
   entries and unknown document roots; preview comments, legacy task documents and
-  disabled schedules retain their document history.
+  disabled schedules retain their document history. Today outline pages move to the target
+  user's page id (`today-<user>-<date>`) with full history; a snapshot holding another user's
+  page is refused.
 - Local file attachments from current and historical versions (including removed
   messages and overwritten references) are frozen and hash-checked before upload.
   Descriptor replacements are scanned at map-write run boundaries, including

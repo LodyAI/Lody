@@ -190,7 +190,7 @@ describe('local platform zero-cloud integration', () => {
         runWithSessionCommandEnvironment(environment, () =>
           executeDaemonSessionTool(context, name, args)
         );
-      const discovery = await call('lody_agent_role_list', {});
+      const discovery = await call('lody_agent_role', {});
       expect(discovery.isError).not.toBe(true);
       expect(discovery.content[0]?.text).toContain('reviewer');
       const input = {
@@ -469,7 +469,7 @@ describe('local platform zero-cloud integration', () => {
       expect((await doc.sessionData.history.readAll()).at(-1)?.inputConfig?.mcpServerIds).toEqual(
         []
       );
-      const batch = await call('lody_session_chat_many', {
+      const batch = await call('lody_session_chat', {
         operationId: 'batch-preserves-opt-out',
         items: [{ sessionId: targetId, prompt: 'Still without tools.' }],
       });
@@ -494,7 +494,7 @@ describe('local platform zero-cloud integration', () => {
         runWithSessionCommandEnvironment(environment, () =>
           executeDaemonSessionTool(
             { ...context, workspaceId: 'wrong-workspace' },
-            'lody_agent_role_list',
+            'lody_agent_role',
             {}
           )
         )

@@ -1,7 +1,7 @@
+import { createSessionMirror } from '@lody/shared/session-mirror';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { LoroDoc } from 'loro-crdt';
-import { createSessionMirror } from '@lody/shared';
 import { getSessionFileBlobPath } from '@/lib/session-file-blob-store';
 import type { BundleWriter, OpenBundle } from './bundle-file';
 import { sha256 } from './manifest';

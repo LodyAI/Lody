@@ -8,6 +8,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { languageAtom } from '@/atoms/settings';
 import { getIpcServices } from '@/lib/electron-ipc-client';
+import { setAppLanguage } from '@/i18n';
 import { OnboardingShell, OnboardingNextButton } from '../onboarding-shell';
 import { onboardingSurface as surface } from './surface';
 
@@ -118,12 +119,11 @@ interface LanguageScreenProps {
 }
 
 export function LanguageScreen({ onNext }: LanguageScreenProps) {
-  const { i18n } = useTranslation();
   const [language, setLanguage] = useAtom(languageAtom);
 
   const handleSelect = (next: SupportedLanguage) => {
     setLanguage(next);
-    void i18n.changeLanguage(next);
+    void setAppLanguage(next);
     void getIpcServices()?.app.setLanguage(next);
   };
 

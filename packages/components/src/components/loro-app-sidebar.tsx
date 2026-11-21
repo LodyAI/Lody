@@ -9,7 +9,7 @@ import { E2eeSettingsIcon } from './settings/e2ee/security-state';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { buildSessionLink } from '@lody/shared/session-link';
 import { jsonValueEqual } from '@/lib/json-value-equal';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { SessionWindowMenuItem } from './session-window-menu-item';
 import { SIDEBAR_ROW_LINE_CLASS } from './sidebar-surface';
@@ -34,6 +34,9 @@ import { CSS } from '@dnd-kit/utilities';
 import { useSidebarKeyboardNav } from '@/hooks/use-sidebar-keyboard-nav';
 import { useLocation, useRouter } from '@tanstack/react-router';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { todayFeatureEnabledAtom } from '@/atoms/settings';
+import { useOpenToday } from '@/components/today/use-open-today';
+import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import {
   findFreshSessionPresenceState,
   machineSupportsLocalProjectRemovalProtocol,
@@ -116,7 +119,12 @@ import { getLocalProjectVisibilityKey } from '@/lib/visible-local-project-index'
 import { selectAndWriteLocalProject } from '@/lib/local-project-import';
 import { importSidebarLocalProject } from '@/components/sidebar-local-project-import';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
-import { useArchiveSessionWithConfirmation } from '@/components/sessions/session-archive-confirmation';
+import {
+  useArchiveSessionWithConfirmation,
+  useMoveToFocusWithConfirmation,
+  useSettleSessionWithConfirmation,
+  useSnoozeSessionWithConfirmation,
+} from '@/components/sessions/session-sub-conversation-confirmation';
 import {
   chatScopeAtom,
   chatsCollapsedAtom,
@@ -212,7 +220,7 @@ import {
   FolderPlus,
   Link2,
   LockKeyhole,
-  Mail,
+  MailOpen,
   FolderOpen,
   GripVertical,
   MoreHorizontal,
@@ -264,6 +272,7 @@ import {
   hasOpenedByTreeNesting,
   normalizeSessionRowId,
 } from '@/lib/session-opened-by-tree';
+import { pinSectionKey } from '@/components/pinned-rows-dnd';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import { SessionShareDialog } from '@/components/session-sharing';
 import type { SessionSharingState } from '@/lib/session-sharing';
@@ -277,6 +286,7 @@ import {
   RenameSessionDialogView,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 /** A machine's sidebar label: its name without the mDNS `.local` suffix. */
 const sidebarMachineLabel = (name: string): string => name.trim().replace(/\.local$/i, '');
@@ -719,7 +729,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         ) : null}
         {canMarkUnread ? (
           <ContextMenu.Item
-            icon={Mail}
+            icon={MailOpen}
             onClick={() => {
               onMarkUnread?.(session.id);
             }}
@@ -1757,10 +1767,29 @@ export function LoroAppSidebar({
     return null;
   }, [location.pathname, location.search, selectedSessionId, workspaceSlug]);
 
+  const todayEnabled = useAtomValue(todayFeatureEnabledAtom);
+  const openToday = useOpenToday();
+  // Open Today from anywhere; rebindable in Settings > Keyboard shortcuts.
+  // Registered only while the experiment is on, over `TodayCommandPlaceholder`.
+  useCommand(
+    {
+      id: 'today.open',
+      title: t('commands.today.open', 'Open Today'),
+      titleKey: 'commands.today.open',
+      category: 'Navigation',
+      keybindings: getCommandKeybindings('today.open'),
+      when: () => Boolean(workspaceSlug),
+      run: () => {
+        if (workspaceSlug) openToday({ workspaceSlug, sameWorkspace: true });
+      },
+    },
+    todayEnabled
+  );
   const activeNav = useMemo(() => {
     if (isArchiveRoute(location.pathname, workspaceSlug)) return 'archive';
     if (workspaceSlug && location.pathname.startsWith(`/${workspaceSlug}/schedules`))
       return 'schedules';
+    if (workspaceSlug && location.pathname.startsWith(`/${workspaceSlug}/today`)) return 'today';
     if (
       isHomeRoute(location.pathname, workspaceSlug) &&
       !selectedSessionId &&
@@ -1869,6 +1898,9 @@ export function LoroAppSidebar({
   const presenceNowMs = useAtomValue(lodyPresenceNowMsAtom);
 
   const archiveSessionWithConfirmation = useArchiveSessionWithConfirmation(archiveSession);
+  const settleSessionWithConfirmation = useSettleSessionWithConfirmation(settleSession);
+  const snoozeSessionWithConfirmation = useSnoozeSessionWithConfirmation(snoozeSession);
+  const moveToFocusWithConfirmation = useMoveToFocusWithConfirmation(moveSessionToFocus);
   const rejectHistoryWrite = useCallback(
     (ids: string[]) => {
       if (!ids.some((id) => historyOnlySessionIds.has(id))) return false;
@@ -1934,7 +1966,7 @@ export function LoroAppSidebar({
       if (!workspaceId) return;
       if (typeof window === 'undefined') return;
       const url = buildSessionLink({ sessionId, workspaceId });
-      await navigator.clipboard.writeText(url);
+      await copyTextToClipboard(url);
       toast.success(successMessage);
     },
     [workspaceId]
@@ -2584,6 +2616,7 @@ export function LoroAppSidebar({
         isOffline: task.isOffline,
         isWaitingPermission: task.isWaitingPermission,
         hasFailedTurn: task.hasFailedTurn,
+        deliveryStalled: task.deliveryStalled,
         externalHistoryProvider: task.externalHistoryProvider ?? null,
         owner: task.owner ?? null,
         openedBySessionId: task.openedBySessionId ?? null,
@@ -2612,6 +2645,7 @@ export function LoroAppSidebar({
         isOffline: task.isOffline,
         isWaitingPermission: task.isWaitingPermission,
         hasFailedTurn: task.hasFailedTurn,
+        deliveryStalled: task.deliveryStalled,
         prStatus: task.prStatus,
         prCiState: task.prCiState,
         prReadiness: task.prReadiness,
@@ -2651,6 +2685,7 @@ export function LoroAppSidebar({
         isOffline: task.isOffline,
         isWaitingPermission: task.isWaitingPermission,
         hasFailedTurn: task.hasFailedTurn,
+        deliveryStalled: task.deliveryStalled,
         prStatus: task.prStatus,
         prCiState: task.prCiState,
         prReadiness: task.prReadiness,
@@ -2705,6 +2740,7 @@ export function LoroAppSidebar({
             isOffline,
             isWaitingPermission: activity.isWaitingPermission,
             hasFailedTurn: activity.hasFailedTurn,
+            deliveryStalled: session.autoDelivery?.state === 'stalled',
             prStatus: prInfo.status,
             prCiState: prInfo.ciState,
             prReadiness: prInfo.readiness,
@@ -2815,6 +2851,69 @@ export function LoroAppSidebar({
       })),
     [pinnedLayout]
   );
+  // The My-Tasks scope drops teammates' conversations before the pinned area
+  // is built, so a section holding only them would render as a bare header.
+  // Count what the scope hides per section so it can say so under its rows.
+  const pinnedHiddenCounts = useMemo(() => {
+    if (scope !== 'my' || sessionsListLoading || !pinSectionsLoaded) return undefined;
+    const listed = new Map<string, SessionMeta>();
+    for (const session of selectSidebarTaskSessions(
+      sessions,
+      visibleLocalProjectMap,
+      workspaceHistoryReadable
+    )) {
+      listed.set(session.id, session);
+    }
+    for (const session of sessions) {
+      const project = session.project;
+      if (project?.kind !== 'local' || session.projectRun) continue;
+      if (!visibleLocalProjectMap.has(`${session.machineId}:${project.localProjectId}`)) continue;
+      listed.set(session.id, session);
+    }
+    const getOpenedBySessionId = (session: SessionMeta) =>
+      session.openedByRootSessionId ??
+      resolveOpenerRowId(session.openedBySessionId) ??
+      session.openedBySessionId;
+    const unscopedPinnedIds = getPinnedSessionTreeIds([...listed.values()], {
+      getId: (session) => session.id,
+      getOpenedBySessionId,
+      isPinned: (session) => Boolean(session.isPinned),
+    });
+    const knownSectionIds = new Set(pinSections.map((section) => section.id));
+    const counts: Record<string, number> = {};
+    for (const id of unscopedPinnedIds) {
+      if (pinnedSessionIds.has(id)) continue;
+      // A hidden row counts under its pinned root's section, matching where
+      // the unscoped tree would place it.
+      let root = listed.get(id);
+      const seen = new Set<string>();
+      while (root && !root.isPinned) {
+        const opener = getOpenedBySessionId(root);
+        if (!opener || seen.has(opener)) {
+          root = undefined;
+          break;
+        }
+        seen.add(opener);
+        root = listed.get(opener);
+      }
+      const pinSectionId = root?.pinSectionId;
+      const sectionKey = pinSectionKey(
+        pinSectionId && knownSectionIds.has(pinSectionId) ? pinSectionId : null
+      );
+      counts[sectionKey] = (counts[sectionKey] ?? 0) + 1;
+    }
+    return Object.keys(counts).length > 0 ? counts : undefined;
+  }, [
+    scope,
+    sessionsListLoading,
+    pinSectionsLoaded,
+    sessions,
+    visibleLocalProjectMap,
+    workspaceHistoryReadable,
+    resolveOpenerRowId,
+    pinSections,
+    pinnedSessionIds,
+  ]);
   const pinnedLayoutRef = useRef(pinnedLayout);
   pinnedLayoutRef.current = pinnedLayout;
   const pinSectionsRef = useRef(pinSections);
@@ -3908,29 +4007,29 @@ export function LoroAppSidebar({
 
   const handleSnoozeSession = useCallback(
     (sessionId: string, snoozedUntil: number) => {
-      void snoozeSession(sessionId as SessionId, snoozedUntil).catch((error) => {
+      void snoozeSessionWithConfirmation(sessionId as SessionId, snoozedUntil).catch((error) => {
         toast.error(error instanceof Error ? error.message : String(error));
       });
     },
-    [snoozeSession]
+    [snoozeSessionWithConfirmation]
   );
 
   const handleSettleSession = useCallback(
     (sessionId: string) => {
-      void settleSession(sessionId as SessionId).catch((error) => {
+      void settleSessionWithConfirmation(sessionId as SessionId).catch((error) => {
         toast.error(error instanceof Error ? error.message : String(error));
       });
     },
-    [settleSession]
+    [settleSessionWithConfirmation]
   );
 
   const handleMoveSessionToFocus = useCallback(
     (sessionId: string) => {
-      void moveSessionToFocus(sessionId as SessionId).catch((error) => {
+      void moveToFocusWithConfirmation(sessionId as SessionId).catch((error) => {
         toast.error(error instanceof Error ? error.message : String(error));
       });
     },
-    [moveSessionToFocus]
+    [moveToFocusWithConfirmation]
   );
 
   const handleDropFocusItem = useCallback(
@@ -4256,6 +4355,7 @@ export function LoroAppSidebar({
         pinnedSectionCollapsed={pinnedSectionCollapsed}
         pinnedSections={pinnedSections}
         collapsedPinSectionIds={pinSectionsCollapsed}
+        pinnedHiddenCounts={pinnedHiddenCounts}
         onTogglePinSection={handleTogglePinSection}
         pinSectionActions={pinSectionActions}
         updatedItems={updatedItems}
@@ -4303,6 +4403,13 @@ export function LoroAppSidebar({
             });
           }
         }}
+        onTodayClicked={
+          todayEnabled
+            ? () => {
+                if (workspaceSlug) openToday({ workspaceSlug, sameWorkspace: true });
+              }
+            : undefined
+        }
         onDocsClicked={handleDocsClicked}
         onGithubClicked={handleGithubClicked}
         onJoinCommunityClicked={handleJoinCommunityClicked}

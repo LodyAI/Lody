@@ -95,7 +95,7 @@ CLI 上由按需启动的 Baguette 进程处理采集和输入；每个预览经
 
 ## RPC 与权限
 
-`lody_ios_simulator_preview` 独立于网页预览，提供 list/start/status/stop。严格输入不接受
+`lody_simulator_preview`（`platform: "ios"`，原 `lody_ios_simulator_preview`）独立于网页预览，提供 list/start/status/stop。严格输入不接受
 身份选择器；本地专用 `ios-simulator/agent-control` 从活动调用获取用户并复用服务授权。
 结果剔除 viewer URL 和预览自由文本诊断。
 

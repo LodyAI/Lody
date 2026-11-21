@@ -12,10 +12,77 @@ import { z } from 'zod';
 export const LODY_HELP_INSTRUCTIONS =
   'Before executing a Lody command, you MUST call lody_help({command: TOOL_NAME}) and read its successful command-specific response. The index and short summaries do not replace full help. Read help before issuing the command, never in parallel with it. Reuse full help already in the current context; after compaction or loss, fetch it again. lody_help itself is exempt.';
 
+/** Approved owner guidance: long work is resumed by an event rather than awaited in a turn. */
+export const LODY_LONG_RUN_GUIDANCE =
+  'An idle Session may be reclaimed, which ends background processes you started; run long commands with lody_automation `run`, which resumes this Session when they exit.';
+
 export const commandHelpReminder = (name: string): string =>
   `Before using this command, read lody_help({command:"${name}"}) and follow its parameter and retry rules.`;
 
-/** The SDK validates before callbacks; preserve the schema and append a recovery hint to issues. */
+type JsonSchemaNode = Record<string, unknown>;
+
+const isJsonSchemaNode = (value: unknown): value is JsonSchemaNode =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** Keywords whose value maps names (not keywords) to subschemas. */
+const SCHEMA_MAP_KEYWORDS = new Set([
+  'properties',
+  'patternProperties',
+  'dependentSchemas',
+  '$defs',
+  'definitions',
+]);
+/** Keywords whose value is instance data; copied verbatim, never walked. */
+const DATA_KEYWORDS = new Set(['const', 'default', 'enum', 'examples']);
+
+function withoutDescriptions(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(withoutDescriptions);
+  if (!isJsonSchemaNode(node)) return node;
+  const copy: JsonSchemaNode = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'description' && typeof value === 'string') continue;
+    if (key === 'pattern' && typeof node.format === 'string') continue;
+    if (DATA_KEYWORDS.has(key)) copy[key] = value;
+    else if (SCHEMA_MAP_KEYWORDS.has(key) && isJsonSchemaNode(value))
+      copy[key] = Object.fromEntries(
+        Object.entries(value).map(([name, schema]) => [name, withoutDescriptions(schema)])
+      );
+    else copy[key] = withoutDescriptions(value);
+  }
+  return copy;
+}
+
+/**
+ * The eager `tools/list` copy of an input schema. It keeps every type, enum, bound and
+ * required list, plus the short phrase on each top-level argument; prose on nested fields
+ * (batch items, work contexts, unions) is served only by `lody_help`. Validation never reads
+ * this copy. `$schema` is omitted because MCP defaults input schemas to draft 2020-12, and a
+ * generated `pattern` is omitted where a `format` (date-time, uuid, ...) already names it.
+ */
+export function eagerInputJsonSchema(schema: JsonSchemaNode): JsonSchemaNode {
+  const eager: JsonSchemaNode = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === '$schema' || (key === 'description' && typeof value === 'string')) continue;
+    if (key === 'pattern' && typeof schema.format === 'string') continue;
+    if (key === 'properties' && isJsonSchemaNode(value)) {
+      eager[key] = Object.fromEntries(
+        Object.entries(value).map(([name, property]) => {
+          if (!isJsonSchemaNode(property)) return [name, property];
+          const slim = withoutDescriptions(property);
+          return [
+            name,
+            typeof property.description === 'string' && isJsonSchemaNode(slim)
+              ? { description: property.description, ...slim }
+              : slim,
+          ];
+        })
+      );
+    } else eager[key] = withoutDescriptions(value);
+  }
+  return eager;
+}
+
+/** The SDK validates before callbacks; preserve the validator and append a recovery hint to issues. */
 function inputWithHelp<T extends z.ZodObject>(
   schema: T,
   name: string
@@ -23,11 +90,16 @@ function inputWithHelp<T extends z.ZodObject>(
   StandardSchemaWithJSON.InferInput<T>,
   StandardSchemaWithJSON.InferOutput<T>
 > {
+  const standard = schema['~standard'];
   return {
     '~standard': {
-      ...schema['~standard'],
+      ...standard,
+      jsonSchema: {
+        input: (options) => eagerInputJsonSchema(standard.jsonSchema.input(options)),
+        output: (options) => standard.jsonSchema.output(options),
+      },
       validate: async (value, options) => {
-        const result = await schema['~standard'].validate(value, options);
+        const result = await standard.validate(value, options);
         return result.issues
           ? { issues: [...result.issues, { message: commandHelpReminder(name) }] }
           : result;
@@ -114,7 +186,9 @@ export function createToolHelpServer(server: McpServer): LodyToolServer {
         {
           ...config,
           inputSchema,
-          description: `${summary} Before execution, read lody_help({command:"${name}"}); reuse only if full help remains in context.`,
+          // The help-first rule lives once in the server instructions and the Lody prompt,
+          // and every failure appends commandHelpReminder; repeating it per tool cost ~4 KB.
+          description: summary,
         },
         execute
       );

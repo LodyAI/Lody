@@ -35,6 +35,9 @@ Host; cross-device and Web access need a separate authorization contract.
 - The three behaviors are per-Session switches under the session menu, not a
   settings page: quota recovery, archive after merge, and idle compaction. A Host
   may disable a switch with a reason when the current Provider cannot support it.
+  Update (2026-11-16): Auto delivery is a fourth switch, also offered from the Info
+  Bar, with one progress line and a sidebar attention mark when it stops; see the
+  [Auto delivery note](2026-11-16-session-auto-delivery.md).
 - The view model is deliberately small: phase, next check, last check, expiry,
   delivery state and block reason. Raw programs, ledger receipts, bindings and
   evidence never cross into the renderer.
@@ -58,9 +61,7 @@ Host; cross-device and Web access need a separate authorization contract.
   and capability discovery are not connected. The explicit Stop restoration action
   now uses existing collaboration control; see the
   [reliability correction](../../implemented/bug-fix/2026-10-30-automation-pending-observations-and-stop.md).
-- This worktree has no installed `node_modules`. The three new suites were run
-  with a sibling worktree's installed toolchain: 18 tests passed. A package-wide
-  typecheck still reports pre-existing cross-worktree errors, but none in the new
-  files; Storybook was not started here. Human visual review is still pending.
+- The note, tweaks and state-collapse suites pin this behavior. Storybook was not
+  started for the original change, and human visual review is still pending.
 - The backend contract and policy remain owned by
   [the continuation coordinator note](../architecture/2026-10-25-session-automation-coordinator.md).

@@ -5,7 +5,7 @@ import { Immer } from 'immer';
 import { isContainer, LoroMap, type LoroDoc, type LoroList } from 'loro-crdt';
 import { z } from 'zod';
 import type { SessionHistory, SessionHistoryInput } from './schema';
-import { sessionHistorySchema } from './schema';
+import { sessionHistorySchema } from './session-doc-schemas';
 import type { PermissionOutcome } from './message';
 import {
   MessageContentSchema,

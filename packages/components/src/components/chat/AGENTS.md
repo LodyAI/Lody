@@ -83,6 +83,9 @@ project.sharedWithTeam`. The selected Private segment opens `ProjectShareDialog`
   window launch relationship. Keep the reserved session id and attachments
   in module-level atoms. Route unmount neither revokes previews nor aborts uploads;
   revoke/abort only on removal/full draft clear. App restart may lose attachments.
+- An embedded landing (`ChatLanding embedding`, Today's "Convert to task") keys its draft
+  with `buildChatLandingSurfaceDraftKey`, never the page's key, and releases that whole
+  draft when it unmounts. It hands the accepted session to its host instead of navigating.
 - Every new-chat entry point within a workspace reuses that one landing draft. Project
   selection may change, but navigation MUST NOT clear or replace Composer content;
   only an accepted submit or an explicit user removal may release draft resources.

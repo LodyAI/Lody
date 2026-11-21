@@ -38,7 +38,11 @@ import {
   clearSessionMentionDrag,
   dropSessionMentionAtPoint,
 } from '@/lib/session-mention-drag';
-import { DEFAULT_PIN_SECTION_KEY, FOCUS_SECTION_DND_KEY, parsePinnedDndId } from './pinned-rows-dnd';
+import {
+  DEFAULT_PIN_SECTION_KEY,
+  FOCUS_SECTION_DND_KEY,
+  parsePinnedDndId,
+} from './pinned-rows-dnd';
 import {
   pinnedDropIndexAt,
   SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS,
@@ -353,6 +357,9 @@ export function SidebarFocusDndContainer({
   return (
     <DndContext
       sensors={sensors}
+      // The sidebar viewport owns edge scrolling (`useSessionDragAutoScroll`);
+      // two scrollers on one container would double the speed.
+      autoScroll={false}
       onDragStart={handleDragStart}
       onDragMove={handleDragMove}
       onDragEnd={handleDragEnd}

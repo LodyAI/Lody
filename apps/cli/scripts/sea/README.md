@@ -47,6 +47,14 @@ directory in both SEA and ordinary Node. macOS requires the platform's Node floo
 (13.5 for this pin); Linux requires kernel 4.18, glibc 2.28 and GLIBCXX_3.4.25 or
 newer, plus any stricter addon requirement. musl is excluded.
 
+`daemon install` also writes a marked `lody` shim (`lib/command-shim.ts`) beside the
+user's local binaries and never replaces or shadows a foreign `lody`. Non-daemon
+commands started through the fixed entry forward to the release in `selected.json`
+(`lib/managed-daemon-forwarding.ts`); `daemon` and internal commands stay on the
+fixed entry, which must keep its Host lease role. An explicit `daemon install` makes
+its embedded release active by resetting the managed selection; remote updates keep
+using `selected.json`.
+
 Release `serviceProtocol: 1` and `dataFormat: 1` mean compatible process and storage
 contracts. A release changing existing-store schemas or requiring irreversible
 migration must use a separately reviewed protocol/data-format rollout; the current

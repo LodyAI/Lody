@@ -35,7 +35,7 @@ Spec。
 
 编排 Agent 会向仍在工作的会话补充纠正或新信息。只要目标的 agent 接受 steer，无论在本机还是另一台
 Machine 上运行，`lody_session_chat` 和
-`lody_session_chat_many` 就把输入 steer 进当前 turn，不受用户排队或引导偏好
+`lody_session_chat`（单条或批量模式）就把输入 steer 进当前 turn，不受用户排队或引导偏好
 影响，也不管当前 turn 由谁发起。目标 agent 无法确认 steer 时，输入排队成为它的
 下一个普通 turn。被 steer 的输入有自己的回复，作为它自己的 Operation 结果。
 
@@ -104,7 +104,7 @@ steer 请求再独立等待五秒响应，与 UI 一致。建连超时回退后�
 
 ## 会话创建配置
 
-编排 Agent 可以通过 `lody_session_create` 和 `lody_session_create_many`
+编排 Agent 可以通过 `lody_session_create`（单条或批量模式）
 选择目标 Agent 公布支持的配置，无需创建 Agent Role。可选的 `modeId`
 使用 ACP mode id；`configOptionValues` 使用真实 option id，值为字符串或布尔值。
 所有公布的 option 均可选择，包括没有类别的权限项。发现接口返回 mode 和 option

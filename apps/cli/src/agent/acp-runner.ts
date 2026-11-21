@@ -420,7 +420,9 @@ export async function initializeAndReadAcpRateLimits(
       isAntigravityRegistryAgent(agent) &&
       initialized.agentInfo?.name === 'antigravity-acp'
     ) {
-      return antigravity.read(connection, agent.workdir);
+      return antigravity.read(connection, agent.workdir, {
+        deleteSession: initialized.agentCapabilities?.sessionCapabilities?.delete != null,
+      });
     }
     throw new Error('Rate-limit query unsupported');
   }
@@ -1053,6 +1055,11 @@ export type ShutdownLocalAcpAgentOptions = {
   acpSessionId?: ACPSessionId | null;
   logger: Logger;
   sessionLabel: string;
+  /**
+   * The session is one-shot scratch work: remove it from the agent's history with
+   * `session/delete` when advertised, else close it as usual.
+   */
+  deleteSession?: boolean;
   closeSessionTimeoutMs?: number;
   exitTimeoutMs?: number;
   /** Test seam for the OS process table. */
@@ -1065,10 +1072,13 @@ export async function shutdownLocalAcpAgent(options: ShutdownLocalAcpAgentOption
 
   if (options.client && options.acpSessionId) {
     try {
-      await options.client.closeSession(options.acpSessionId, closeSessionTimeoutMs);
+      const deleted =
+        options.deleteSession === true &&
+        (await options.client.deleteSession(options.acpSessionId, closeSessionTimeoutMs));
+      if (!deleted) await options.client.closeSession(options.acpSessionId, closeSessionTimeoutMs);
     } catch (error) {
       options.logger.debug(
-        `[${options.sessionLabel}] ACP session close failed during local agent shutdown: ${
+        `[${options.sessionLabel}] ACP session ${options.deleteSession ? 'delete' : 'close'} failed during local agent shutdown: ${
           error instanceof Error ? error.message : String(error)
         }`
       );

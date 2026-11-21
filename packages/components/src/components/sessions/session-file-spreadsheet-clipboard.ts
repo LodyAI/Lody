@@ -1,3 +1,4 @@
+import { copyTextToClipboard } from '@/lib/clipboard';
 export interface SpreadsheetClipboard {
   readonly text: string;
   readonly html: string;
@@ -48,6 +49,6 @@ export async function writeSpreadsheetClipboard(
     // generic ClipboardItem rejection, while still observing clipboard denial.
     await Promise.all([result, write]);
   } else {
-    await navigator.clipboard.writeText((await data).text);
+    await copyTextToClipboard((await data).text);
   }
 }

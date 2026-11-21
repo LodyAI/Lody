@@ -24,6 +24,24 @@ const listInputSchema = z
   })
   .strict();
 const getInputSchema = z.object({ scheduleId: id }).strict();
+/** Read one by scheduleId or list a page; each mode keeps its own bounds and defaults. */
+const scheduleReadInputSchema = z
+  .object({
+    scheduleId: id.optional().describe('Read one Schedule.'),
+    query: listInputSchema.shape.query,
+    // Absence must survive to get-mode validation, which rejects list fields.
+    limit: listInputSchema.shape.limit.unwrap().optional(),
+    offset: listInputSchema.shape.offset,
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const parsed = (value.scheduleId === undefined ? listInputSchema : getInputSchema).safeParse(
+      value
+    );
+    if (!parsed.success)
+      for (const issue of parsed.error.issues)
+        ctx.addIssue({ code: 'custom', path: issue.path, message: issue.message });
+  });
 const pauseInputSchema = z.object({ scheduleId: id, requestId: id }).strict();
 const proposeInputSchema = z
   .object({
@@ -58,24 +76,19 @@ export function registerScheduleTools(server: LodyToolServer, deps: Dependencies
     }
   };
   server.registerTool(
-    'lody_schedule_list',
+    'lody_schedule',
     {
-      summary: 'Find scheduled tasks in this workspace and their owner-machine execution scope.',
+      summary:
+        'Find scheduled tasks in this workspace, or read one prompt, configuration activity and upcoming run times.',
       description:
-        'List scheduled-task summaries in the current workspace. Use get for details; execution belongs to the owner machine.',
-      inputSchema: listInputSchema,
+        'Without scheduleId: list scheduled-task summaries in the current workspace (query, limit default 30, offset); execution belongs to the owner machine. With scheduleId alone: read a Schedule, its prompt, recent configuration activity and next five times. Ordinary Sessions own execution results.',
+      inputSchema: scheduleReadInputSchema,
+      annotations: { readOnlyHint: true },
     },
-    (args) => call({ action: 'list', ...args })
-  );
-  server.registerTool(
-    'lody_schedule_get',
-    {
-      summary: 'Read one scheduled task prompt, configuration activity and upcoming run times.',
-      description:
-        'Read a Schedule, its prompt, recent configuration activity and next five times. Ordinary Sessions own execution results.',
-      inputSchema: getInputSchema,
-    },
-    (args) => call({ action: 'show', ...args })
+    (args) =>
+      args.scheduleId === undefined
+        ? call({ action: 'list', ...listInputSchema.parse(args) })
+        : call({ action: 'show', ...getInputSchema.parse(args) })
   );
   server.registerTool(
     'lody_schedule_pause',

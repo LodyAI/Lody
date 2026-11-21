@@ -14,7 +14,7 @@ import { PlatformContext } from '@lody/platform/react';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const analytics = vi.hoisted(() => ({ capture: vi.fn() }));
-vi.mock('@posthog/react', () => ({ usePostHog: () => analytics }));
+vi.mock('@/lib/posthog-context', () => ({ usePostHog: () => analytics }));
 
 vi.mock('@/hooks/use-authenticated-convex', () => ({
   useAuthenticatedConvex: () => ({ authSessionId: 'session-1' }),

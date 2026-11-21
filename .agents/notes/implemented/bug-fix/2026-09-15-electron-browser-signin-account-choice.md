@@ -51,6 +51,12 @@ The page now renders a handoff panel in the ordinary login card:
   the switch makes a transfer that resolves afterwards discard its code instead of
   producing a handoff, and the short-lived `better-auth.electron` cookie is cleared
   around each transfer so a stale code cannot be read back as this attempt's.
+- "Continue in browser" is a third exit: the session stays in this browser instead of
+  being handed to the desktop app. It bumps the same generation counter, so a
+  transfer in flight is discarded rather than opening the desktop app after the
+  choice, then follows the page's ordinary authenticated redirect (the validated
+  `redirect` target or the app root) through `window.location.replace`, which keeps
+  the handoff page out of history.
 - Only a *confirmed* sign-out releases the handoff. `signOutWithoutRedirect` used to
   swallow both failure shapes — Better Auth throws on transport failures and reports
   API failures in `response.error` — so a failed sign-out was indistinguishable from
@@ -87,7 +93,9 @@ an intended build difference, not part of this defect.
   no transfer without a choice; the link's decoded `identifier`/`state` payload
   matching the URL the page navigates to; a late transfer after a switch producing
   no link and no navigation; the `state`/`code_challenge` surviving the switch into
-  the next provider sign-in; and a failed transfer leaving an enabled retry.
+  the next provider sign-in; a failed transfer leaving an enabled retry; and the
+  web-browser exit navigating to the app's authenticated target while discarding
+  an in-flight transfer.
 - That suite found the switch button disabled while a transfer was in flight, which
   is the state the escape hatch exists for; the gate was removed.
 - The failed-sign-out cases (a rejected request and an `error` response) assert the

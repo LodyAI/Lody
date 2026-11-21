@@ -30,7 +30,7 @@ import {
   GripVertical,
   Link2,
   LockKeyhole,
-  Mail,
+  MailOpen,
   Pencil,
   Pin,
   PinOff,
@@ -119,6 +119,7 @@ import {
   RenameSessionDialogView,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type { PrStatus };
 
@@ -170,6 +171,8 @@ export type SessionListRow = {
   isWaitingPermission: boolean;
   /** The latest turn ended in failure (`hasFailedLatestTurn`), child Tabs rolled in. */
   hasFailedTurn?: boolean;
+  /** Auto delivery stopped for this conversation's PR and needs the person. */
+  deliveryStalled?: boolean;
   isPinned?: boolean;
   isWorktree?: boolean;
   externalHistoryProvider?: LocalProjectHistoryProvider | null;
@@ -1245,7 +1248,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         ) : null}
         {canMarkUnread ? (
           <ContextMenu.Item
-            icon={Mail}
+            icon={MailOpen}
             onClick={() => {
               onMarkSessionUnread?.(session.sessionId);
             }}
@@ -1281,7 +1284,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
           <ContextMenu.Item
             icon={GitBranch}
             onClick={() => {
-              void navigator.clipboard.writeText(session.branchName).catch(() => {});
+              void copyTextToClipboard(session.branchName).catch(() => {});
             }}
           >
             {contextMenuLabels.copyBranch}

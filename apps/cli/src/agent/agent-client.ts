@@ -610,6 +610,7 @@ export class AgentClient implements acp.Client {
   private supportsLoadSession = false;
   private supportsHttpMcp = false;
   private supportsClose = false;
+  private supportsDelete = false;
   private supportsFork = false;
   private supportsForkAtTurn = false;
   private supportsSessionList = false;
@@ -1983,6 +1984,7 @@ export class AgentClient implements acp.Client {
     const hasResumeMethod = typeof connection.resumeSession === 'function';
     const closeCapability = initResponse.agentCapabilities?.sessionCapabilities?.close;
     this.supportsClose = !!closeCapability;
+    this.supportsDelete = !!initResponse.agentCapabilities?.sessionCapabilities?.delete;
     const forkCapability = initResponse.agentCapabilities?.sessionCapabilities?.fork;
     this.supportsFork = !!forkCapability;
     this.supportsSessionList = Boolean(initResponse.agentCapabilities?.sessionCapabilities?.list);
@@ -2002,7 +2004,9 @@ export class AgentClient implements acp.Client {
         this.supportsResume ? 'yes' : 'no'
       } resumeMethod=${hasResumeMethod ? 'yes' : 'no'} close=${
         this.supportsClose ? 'yes' : 'no'
-      } closeMethod=${hasCloseMethod ? 'yes' : 'no'} acknowledgedSteer=${
+      } closeMethod=${hasCloseMethod ? 'yes' : 'no'} delete=${
+        this.supportsDelete ? 'yes' : 'no'
+      } acknowledgedSteer=${
         this.acknowledgedSteerCapability ? 'yes' : 'no'
       } fork=${this.supportsFork ? 'yes' : 'no'} forkMethod=${hasForkMethod ? 'yes' : 'no'})`
     );
@@ -2950,6 +2954,35 @@ export class AgentClient implements acp.Client {
     );
     return true;
   }
+  /**
+   * Removes a session Lody will never resume (title generation) from the agent's
+   * `session/list` history. Per ACP, `session/delete` closes an active session
+   * first. Returns false without a request when the agent does not advertise it.
+   */
+  async deleteSession(sessionId: ACPSessionId, timeoutMs: number = 5000): Promise<boolean> {
+    this.ensureSessionMatch(sessionId);
+    const connection = this.connection;
+    if (!this.supportsDelete || !connection) {
+      this.logger.debug(
+        `[${this.options.sessionId}] Skipping ACP session delete: agent did not advertise session.delete`
+      );
+      return false;
+    }
+    this.stopAntigravityMonitor();
+    this.logger.debug(
+      `[${this.options.sessionId}] Deleting ACP session (acpSessionId=${sessionId} timeoutMs=${timeoutMs})`
+    );
+    await withTimeout(
+      connection.deleteSession({ sessionId }),
+      this.logger,
+      'connection.deleteSession',
+      this.options.sessionId,
+      timeoutMs,
+      Math.min(timeoutMs, 1000)
+    );
+    return true;
+  }
+
   /**
    * Set a session configuration option via the new configOptions API.
    * Returns the updated configOptions array, or undefined on failure.

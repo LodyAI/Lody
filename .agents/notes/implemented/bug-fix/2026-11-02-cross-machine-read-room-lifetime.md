@@ -8,7 +8,7 @@ Issue: [#2194](https://github.com/LodyAI/Lody/issues/2194)
 
 ## Abstract
 
-A daemon MCP read of another Machine's data (`lody_agent_role_list` without a
+A daemon MCP read of another Machine's data (`lody_agent_role` list mode without a
 Machine filter, `lody_session_list`, `lody_session_status_many`,
 `lody_session_history`) joined that Machine's Flock or Session room and kept it
 joined until the process ended. When such a room never finished its initial sync,

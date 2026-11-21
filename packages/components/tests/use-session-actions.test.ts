@@ -1,3 +1,4 @@
+import { createSessionControlPlaneMirror } from '@lody/shared/session-control-plane';
 // @vitest-environment jsdom
 import { cloudOperations } from '../src/lib/cloud-api-operations';
 import { buildVisibleMachineIndex } from '../src/lib/visible-machine-index';
@@ -34,7 +35,6 @@ import {
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   getSessionRoomId,
   getSessionCancelRequestMarker,
-  createSessionControlPlaneMirror,
   isLoroRepoDocDeleted,
   machineFlockKeys,
   type LocalProjectId,
@@ -45,8 +45,7 @@ import {
   type SessionId,
   type SessionMeta,
   type SessionToCreate,
-  type WorkspaceId,
-} from '@lody/shared';
+  type WorkspaceId} from '@lody/shared';
 import {
   CLOUD_PLATFORM_CAPABILITIES,
   createStaticStore,
@@ -138,12 +137,6 @@ vi.mock('../src/hooks/use-authenticated-convex', () => ({
 }));
 
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
-import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '../src/atoms/presence';
-import {
-  SessionArchiveConfirmationDialog,
-  useArchiveSessionWithConfirmation,
-} from '../src/components/sessions/session-archive-confirmation';
-import { initI18n } from '../src/i18n';
 import { docMetaCacheReadyAtom, sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import {
   editSessionRunConfigDraftAtom,
@@ -179,16 +172,6 @@ import {
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
-
-type ConfirmedArchive = (sessionId: SessionId, options?: { confirm?: boolean }) => Promise<boolean>;
-
-function ConfirmedArchiveProbe({ onReady }: { onReady: (archive: ConfirmedArchive) => void }) {
-  const archive = useArchiveSessionWithConfirmation(useSessionActions().archiveSession);
-  useEffect(() => {
-    onReady(archive);
-  }, [archive, onReady]);
-  return createElement(SessionArchiveConfirmationDialog);
-}
 
 function ActionsProbe({ onReady }: { onReady: (actions: SessionActions) => void }) {
   const actions = useSessionActions();

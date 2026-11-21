@@ -44,8 +44,12 @@ URLs, machine state or another conversation. It executes no target command and
 changes no permissions.
 
 [Tool help registration](tool-help.ts) preserves the original validators and
-callbacks. Tool discovery retains concise purpose, the input schema and a help
-pointer; full descriptions are kept once per registration and returned on demand.
+callbacks. Tool discovery publishes only the purpose summary and a slim input
+schema: every type, enum, bound and required list, plus the short phrase on each
+top-level argument. Prose on nested fields (batch items, work contexts, unions),
+`$schema`, and generated patterns already named by a `format` are left to help, which
+returns the full description and complete schema kept once per registration.
+Validation always uses the original schema.
 Each registration supplies an explicit purpose summary, independent of its display
 title. Agents see these summaries in the tool list before reading help, and
 `lody_help({})` uses the same summaries. The short purpose distinguishes commands
@@ -54,8 +58,9 @@ results, and cancelling a current turn versus cancelling an Operation.
 The same path covers Session/catalog, Schedule, automation, preview and upload
 tools. Skills keep their existing resource-loading path.
 
-Each tool summary, server instructions and the Lody prompt require reading successful
-command-specific help before execution. The index alone does not satisfy this rule,
+Server instructions and the Lody prompt require reading successful command-specific
+help before execution; tool descriptions no longer repeat the rule, which cost about
+4 KB across the catalog (see [catalog size](#catalog-size)). The index alone does not satisfy this rule,
 and the agent must not run help and the command in parallel. Already-read full help
 may be reused while it remains in context; after compaction or loss, read it again.
 This is an agent instruction,
@@ -77,6 +82,32 @@ and durable completion precedes its delivery into the requesting conversation.
 Session status, history and Operation help document observation quality, partial
 failures, truncation and pagination so agents can retrieve evidence without
 restarting work. These details stay in help rather than the discovery summaries.
+
+## Catalog size
+
+Every Lody-started Agent loads the whole `tools/list`; clients that do not defer MCP
+schemas (Gemini CLI, VS Code Copilot) pay for it on every turn, and tool selection
+degrades as the count grows. The catalog therefore keeps one tool per job:
+
+- Single and batch forms share a tool. `lody_session_create` and `lody_session_chat`
+  switch to batch mode when `items` or `defaults` is present; that mode validates with
+  the former batch schema, so single-only fields (attachments, quotes, resume, legacy
+  wait, top-level target fields) are rejected there and per-item results and error codes
+  are unchanged. `lody_session_rename` takes `items` the same way.
+- Get and list share a tool: `lody_operation` (operationId, batchId, or a list),
+  `lody_agent_role`, `lody_agent_config` and `lody_schedule` (an id reads one, otherwise
+  a page). Each mode keeps its own bounds and defaults; mixing modes is rejected.
+- `lody_upload` takes `kind: images | files`; `lody_simulator_preview` takes `platform`.
+  iOS is offered only on macOS hosts, decided when the per-connection server is built,
+  so the list never changes during a session.
+
+Persisted Operation kinds (`session_create_many`, `session_chat_many`) are internal and
+did not change. Measured with an in-memory client against `buildLodyMcpServer()` on
+Linux: 40 tools and 51,355 bytes before; 30 tools and 35,368 bytes after. Dynamic tool
+lists (`tools/list_changed`) and a search/execute meta-tool were rejected: some clients
+ignore list changes, a changing list breaks prompt caches, and one execute tool loses
+per-tool permissions and read-only annotations. `lody-mcp-server.test.ts` guards the
+exact published names.
 
 ## Skills over MCP
 
@@ -373,7 +404,7 @@ or creating another session to evade the limit. These prompts guide behavior;
 the runtime guard enforces the depth bound.
 
 Completed work is persisted and batched at normal release or fresh human input; result
-arrival alone never wakes idle or paused sessions. `lody_operation_batch_get` reads
+arrival alone never wakes idle or paused sessions. `lody_operation` with a `batchId` reads
 a fixed, Session/user-bound batch without new work. Pages are bounded to 128 KiB; large
 individual members return ordered `member-json` fragments. This reader does not grant
 submission permission. Human recovery provenance comes from fixed UI/CLI producers,

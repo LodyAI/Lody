@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { automationRegistrationSchema, automationSettingsSchema } from './conditions';
+import {
+  automationRegistrationSchema,
+  automationRunSchema,
+  automationSettingsSchema,
+} from './conditions';
 import { RpcSecretEnvelopeSchema, RpcSecretPublicKeySchema } from '../rpc-secret';
 
 const id = z.string().min(1).max(512);
@@ -8,6 +12,7 @@ export const automationCommandSchema = z.discriminatedUnion('type', [
   automationRegistrationSchema
     .extend({ type: z.literal('register'), sessionId: id.optional() })
     .strict(),
+  automationRunSchema.extend({ type: z.literal('run'), sessionId: id.optional() }).strict(),
   z
     .object({
       type: z.literal('configure'),
