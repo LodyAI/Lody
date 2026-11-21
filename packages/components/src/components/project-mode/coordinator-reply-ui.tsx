@@ -8,8 +8,6 @@ import { useTranslation } from 'react-i18next';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { Tooltip } from '@/ui/armed-overlays';
 
-export const coordinatorBubbleHoverMarker = stylex.defaultMarker();
-
 const styles = stylex.create({
   composerBanner: {
     display: 'flex',
@@ -126,7 +124,7 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space[1.5],
-    minHeight: 24,
+    minHeight: 22,
     paddingInline: 2,
   },
   footerRowEnd: {
@@ -138,13 +136,11 @@ const styles = stylex.create({
     gap: 2,
     opacity: {
       default: 0,
-      [stylex.when.ancestor(':hover')]: 1,
-      [stylex.when.ancestor(':focus-within')]: 1,
+      ':focus-within': 1,
     },
     pointerEvents: {
       default: 'none',
-      [stylex.when.ancestor(':hover')]: 'auto',
-      [stylex.when.ancestor(':focus-within')]: 'auto',
+      ':focus-within': 'auto',
     },
     transitionProperty: 'opacity',
     transitionDuration: duration.fast,
@@ -305,6 +301,7 @@ export function CoordinatorThreadReplyCountPill({
 export function CoordinatorBubbleFooterActions({
   copyText,
   replyCount = 0,
+  isHovered = false,
   alwaysRevealActions = false,
   align = 'start',
   onReply,
@@ -312,6 +309,7 @@ export function CoordinatorBubbleFooterActions({
 }: {
   copyText: string;
   replyCount?: number;
+  isHovered?: boolean;
   alwaysRevealActions?: boolean;
   align?: 'start' | 'end';
   onReply?: () => void;
@@ -353,7 +351,7 @@ export function CoordinatorBubbleFooterActions({
       <div
         {...stylex.props(
           styles.hoverGroup,
-          (alwaysRevealActions || copied) && styles.hoverGroupVisible
+          (isHovered || alwaysRevealActions || copied) && styles.hoverGroupVisible
         )}
       >
         {hasCopy ? (

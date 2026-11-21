@@ -312,7 +312,6 @@ import {
   CoordinatorBubbleFooterActions,
   CoordinatorInlineQuoteChip,
   CoordinatorThreadReplyCountPill,
-  coordinatorBubbleHoverMarker,
 } from '@/components/project-mode/coordinator-reply-ui';
 import {
   getOperationCompletionItems,
@@ -6805,7 +6804,7 @@ function CoordinatorReplyBubble({
 }) {
   const coordinator = useCoordinatorConversation();
   const isMobile = useIsMobile();
-  const mobileActionsRevealed = useMobileMessageActionsRevealed(messageId);
+  const [isBubbleHovered, setIsBubbleHovered] = useState(false);
   const hasBody = entry.body.trim().length > 0;
   const hasImages = (entry.images?.length ?? 0) > 0;
   const hasFiles = (entry.files?.length ?? 0) > 0;
@@ -6818,6 +6817,7 @@ function CoordinatorReplyBubble({
       }),
     [entry.id, messageId]
   );
+  const mobileActionsRevealed = useMobileMessageActionsRevealed(anchorId);
   const replyCount = coordinator?.activeThreadRootId
     ? 0
     : (coordinator?.replyCountByRootId?.get(anchorId) ?? 0);
@@ -6828,9 +6828,22 @@ function CoordinatorReplyBubble({
 
   return (
     <div
-      {...stylex.props(coordinatorBubbleHoverMarker, coordinatorBubbleStyles.column)}
+      {...stylex.props(coordinatorBubbleStyles.column)}
       data-coordinator-reply-bubble=""
       data-coordinator-anchor-id={anchorId}
+      onPointerEnter={(event) => {
+        if (event.pointerType !== 'touch') setIsBubbleHovered(true);
+      }}
+      onPointerLeave={(event) => {
+        if (event.pointerType !== 'touch') setIsBubbleHovered(false);
+      }}
+      onClick={
+        isMobile
+          ? (event) => {
+              if (isMessageActionsToggleTap(event.target)) toggleMobileMessageActions(anchorId);
+            }
+          : undefined
+      }
     >
       <div {...stylex.props(coordinatorBubbleStyles.row)}>
         <div {...stylex.props(conversationSurface.bubble, coordinatorBubbleStyles.bubble)}>
@@ -6872,6 +6885,7 @@ function CoordinatorReplyBubble({
       <CoordinatorBubbleFooterActions
         copyText={entry.body}
         replyCount={replyCount}
+        isHovered={isBubbleHovered}
         alwaysRevealActions={isMobile && mobileActionsRevealed}
         onOpenThread={
           coordinator?.onOpenThread
@@ -7069,21 +7083,22 @@ function CoordinatorWorkingRow({
 
 const coordinatorBubbleStyles = stylex.create({
   siblingGap: {
-    paddingBlock: 2,
+    paddingBlock: 0,
   },
   column: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'flex-start',
     gap: 2,
-    maxWidth: '100%',
+    width: 'fit-content',
+    maxWidth: '88%',
   },
   row: {
     display: 'flex',
     justifyContent: 'flex-start',
     maxWidth: '100%',
   },
-  bubble: { display: 'flex', flexDirection: 'column', gap: 8, maxWidth: '88%' },
+  bubble: { display: 'flex', flexDirection: 'column', gap: 8, maxWidth: '100%' },
   statusPill: {
     display: 'inline-flex',
     alignItems: 'center',
