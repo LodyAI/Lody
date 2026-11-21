@@ -470,8 +470,15 @@ export function MobileChatListCard({
   preview,
   preserveOrder = false,
   status,
+  shownIds,
 }: {
   chats: MobileConversationItem[];
+  /**
+   * Ids every card of the surrounding list renders now. A row that leaves this
+   * card for another one (a drop into another section, a tier change) is
+   * removed at once instead of collapsing, so it is never shown twice.
+   */
+  shownIds?: ReadonlySet<string>;
   /** Status view rows: drag targeting, status swipes and the drop indicator. */
   status?: MobileChatCardStatus;
   /** A pin section: keep the given manual order instead of ranking by activity. */
@@ -589,6 +596,7 @@ export function MobileChatListCard({
          expanding adds its rows with no enter animation either. */}
       <AnimatePresence
         initial={false}
+        custom={shownIds}
         key={`${archived ? 'archived' : 'active'}:${capped ? 'preview' : 'full'}`}
       >
         {treeNodes.map((node, nodeIndex) => {
@@ -654,7 +662,8 @@ export function MobileChatListCard({
                  actually want the slide-up animation. */
               layoutDependency={chats.length}
               initial={false}
-              exit={{ height: 0, opacity: 0 }}
+              variants={rowExitVariants(conversation.id)}
+              exit="exit"
               transition={ROW_EXIT_TRANSITION}
               /* `overflow-hidden` lets `height: 0` actually clip the
                  row content while it collapses. Canvas bg matches the
@@ -741,6 +750,13 @@ export function MobileChatListCard({
     </>
   );
 }
+
+const rowExitVariants = (id: string) => ({
+  exit: (shown: ReadonlySet<string> | undefined) =>
+    shown?.has(id)
+      ? { height: 0, opacity: 0, transition: { duration: 0 } }
+      : { height: 0, opacity: 0 },
+});
 
 /** A lifted row must not start the WebView's text selection or callout. */
 const STATUS_ROW_TOUCH_STYLE = {
@@ -1442,9 +1458,15 @@ export function MobileChatList({
     pinSectionsLoaded,
     statusList.layout
   );
+  const isBucketExpanded = (id: string, tier: StatusViewTier | undefined) =>
+    collapsedBucketIds.has(id) === (tier ? isStatusTierCollapsedByDefault(tier) : false);
+  const shownIds = new Set(
+    groups.flatMap((group) =>
+      isBucketExpanded(group.id, group.tier) ? group.items.map((item) => item.id) : []
+    )
+  );
   const cards = groups.map(({ id, items, label, tier, pinSectionId }, index) => {
-    const collapsedByDefault = tier ? isStatusTierCollapsedByDefault(tier) : false;
-    const expanded = collapsedBucketIds.has(id) === collapsedByDefault;
+    const expanded = isBucketExpanded(id, tier);
     const isPinnedBucket = pinSectionId !== undefined;
     const dropTarget = statusList.dropTarget;
     const cardStatus: MobileChatCardStatus | undefined =
@@ -1535,6 +1557,7 @@ export function MobileChatList({
             onRequestDelete={selectionEnabled ? requestSwipeDelete : undefined}
             selection={selectionState}
             preview={bucketPreview}
+            shownIds={shownIds}
           />
         </Fragment>
       );
@@ -1635,6 +1658,7 @@ export function MobileChatList({
             selection={selectionState}
             preview={bucketPreview}
             preserveOrder={isPinnedBucketId(id) || tier !== undefined}
+            shownIds={shownIds}
             status={cardStatus}
           />
         ) : null}

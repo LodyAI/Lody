@@ -62,6 +62,9 @@ false`, so status actions are not offered where the guard would refuse them;
   too late, because the browser commits to a pan at `touchstart` and cancels
   the pointer. Haptics use `navigator.vibrate` where the WebView has it
   (Android); the Capacitor shell has no haptics bridge, so iOS is silent.
+  Chrome also refuses `vibrate` until the page has had a tap (user activation),
+  so the lift and slot feedback stay silent on a freshly loaded page whose
+  first gesture is a long press.
 - `MobileStatusSwipeRow`: a leading swipe pins or unpins; a trailing swipe gives
   Settle and Later on Focus and Later rows, Archive on Settled and pinned rows.
 - The fold layout's two panels are separate lists, so a drag cannot cross
