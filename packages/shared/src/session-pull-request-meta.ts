@@ -146,3 +146,21 @@ export type SessionPullRequestLifecycle = { s: PrStatus; u: number };
 export type SessionPullRequestLifecycleFields = {
   [field: `prLifecycle:${string}`]: SessionPullRequestLifecycle | undefined;
 };
+
+/**
+ * Explicit link intent for one pull request, stored at
+ * `prLink:<case-folded canonical URL>`. `k`: linked / unlinked; `o`: who wrote it
+ * (the managed `gh` shim, the user, or the agent through a Lody tool); `t`: epoch
+ * milliseconds of the write. Membership/order still come only from `pullRequests`.
+ */
+export type SessionPullRequestLink = { k: 'l' | 'u'; o: 's' | 'u' | 'a'; t: number };
+/** Reconciler result for a linked URL it could not read: `u` = unreadable at `t` (epoch ms). */
+export type SessionPullRequestLinkCheck = { r: 'u'; t: number };
+export type SessionPullRequestLinkFields = {
+  [field: `prLink:${string}`]: SessionPullRequestLink | undefined;
+  [field: `prLinkCheck:${string}`]: SessionPullRequestLinkCheck | undefined;
+};
+
+/** Per-PR records stored as top-level Session metadata keys (lifecycle and links). */
+export type SessionPullRequestRecordFields = SessionPullRequestLifecycleFields &
+  SessionPullRequestLinkFields;

@@ -60,12 +60,14 @@ client's 15 s poll to the reconciler's 20 s high lane; this is not measured.
 3. **Multi-repository agreement.** A Project-group session's sidebar row shows
    its legacy repository's PR (the `project` repository, else
    `repoFullName`). This is the PR its Info Bar shows when no Member is selected.
-4. **Subscription seam.** Explicit subscribe/unsubscribe records will join
-   `SessionPullRequestViewSource`, and will be merged with the discovered list
-   only inside `resolveSessionPullRequestViews`. No field, storage or
-   subscription behavior exists yet.
-5. **The Info Bar shows only the primary PR**; listing several is follow-up
-   work.
+4. **Subscription seam.** Explicit link records (`prLink:*`) now use this seam:
+   `resolveSessionPullRequests` hides unlinked URLs for every reader, and
+   `resolveSessionPullRequestLinkList` lists associated and pending links. Only
+   the reconciler still turns a link into an association. See
+   [explicit PR links](../feature/2026-11-21-session-explicit-pr-links.md).
+5. **The Info Bar marker shows the primary PR**; it opens the list of every
+   linked PR (link, unlink, open). A single-project Session's primary PR stays
+   in its project repository when it holds one there.
 6. **CI pill.** The pill's verdict and the popover header use the metadata CI
    code (`s` passed; `f`/`e` failed; `p`/`x` running), the same code the
    sidebar icon and the Fix CI gate read. Live runs only list the checks; with
