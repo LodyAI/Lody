@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.113.2-next](https://github.com/LodyAI/Lody/compare/lody-mobile-v0.113.1...lody-mobile-v0.113.2-next) (2026-11-21)
+
+
+### Features
+
+* migrate Capacitor client and shared E2EE composition ([#3029](https://github.com/LodyAI/Lody/issues/3029)) ([fc07d94](https://github.com/LodyAI/Lody/commit/fc07d94e504c0b7d1b1cc835dee64e913baeba84))
+
 ## [0.112.0](https://github.com/loro-dev/lody/compare/lody-mobile-v0.111.1...lody-mobile-v0.112.0) (2026-11-12)
 
 ### Features
