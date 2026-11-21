@@ -539,4 +539,121 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
     await send(harness, 'Status');
     expect(harness.client.hasUnsettledNativeWork()).toBe(false);
   });
+
+  it('resolves background tasks that wake the model inside the same turn instead of leaking them into post-turn polling', async () => {
+    const harness = createHarness();
+    const { wakeUp } = installTranscript();
+    await harness.client.startSession({} as never, '/synthetic/project');
+
+    const thought = (text: string) =>
+      n({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text } });
+
+    promptOnce([
+      tool('cmd-1', 'run_command', 'completed', {
+        rawOutput: 'Tool is running as a background task with task id: agy-sess-1/task-1',
+      }),
+      say('Install running in background.'),
+      thought('task-1 finished; now run build'),
+      tool('cmd-2', 'run_command', 'completed', {
+        rawOutput: 'Tool is running as a background task with task id: agy-sess-1/task-2',
+      }),
+      say('Build running in background.'),
+    ]);
+    await send(harness, 'Fix and build');
+    expect(harness.client.getNativeWork()).toBe('background');
+
+    await vi.advanceTimersByTimeAsync(listPollIntervalMs);
+    wakeUp();
+    await vi.advanceTimersByTimeAsync(WAKEUP_DONE);
+    expect(harness.client.getNativeWork()).toBeNull();
+  });
+
+  it('resolves a background task matched by in-turn SYSTEM_MESSAGE without double-counting the next thought block', async () => {
+    const harness = createHarness();
+    installTranscript();
+    await harness.client.startSession({} as never, '/synthetic/project');
+
+    const systemMsg = (sender: string) =>
+      n({
+        sessionUpdate: 'user_message_chunk',
+        content: {
+          type: 'text',
+          text: `<SYSTEM_MESSAGE>\n[Message] timestamp=2026-01-01T00:00:10Z sender=${sender} priority=NORMAL\nDone`,
+        },
+      });
+    const thought = (text: string) =>
+      n({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text } });
+
+    promptOnce([
+      tool('cmd-1', 'run_command', 'completed', {
+        rawOutput: 'Tool is running as a background task with task id: agy-sess-1/task-1',
+      }),
+      say('Merging PR in background.'),
+      systemMsg('agy-sess-1/task-1'),
+      say('PR merged and nightly triggered.'),
+    ]);
+    await send(harness, 'Merge PR');
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(mockState.listSessions).not.toHaveBeenCalled();
+    expect(harness.client.getNativeWork()).toBeNull();
+
+    promptOnce([
+      tool('cmd-2', 'run_command', 'completed', {
+        rawOutput: 'Tool is running as a background task with task id: agy-sess-1/task-2',
+      }),
+      tool('cmd-3', 'run_command', 'completed', {
+        rawOutput: 'Tool is running as a background task with task id: agy-sess-1/task-3',
+      }),
+      say('Both running.'),
+      systemMsg('agy-sess-1/task-2'),
+      thought('task-2 done, task-3 still running'),
+      say('Waiting on task-3.'),
+    ]);
+    await send(harness, 'Run two commands');
+    expect(harness.client.getNativeWork()).toBe('background');
+  });
+
+  it('settles an in-progress post-turn wakeup when the user starts a new turn before wakeupQuietMs elapses', async () => {
+    const harness = createHarness();
+    const { wakeUp } = installTranscript();
+    await harness.client.startSession({} as never, '/synthetic/project');
+
+    promptOnce([
+      tool('cmd-1', 'run_command', 'completed', {
+        rawOutput: 'Tool is running as a background task with task id: agy-sess-1/task-1',
+      }),
+      say('Running build.'),
+    ]);
+    await send(harness, 'Build');
+    expect(harness.client.getNativeWork()).toBe('background');
+
+    await vi.advanceTimersByTimeAsync(listPollIntervalMs);
+    wakeUp();
+    await vi.advanceTimersByTimeAsync(listPollIntervalMs * 2);
+    expect(harness.client.getNativeWork()).toBe('running');
+
+    promptOnce([say('Checked update feed.')]);
+    await send(harness, 'Why did update check fail?');
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(harness.client.getNativeWork()).toBeNull();
+  });
+
+  it('clears post-turn background tracking and stops polling on explicit cancel', async () => {
+    const harness = createHarness();
+    installTranscript();
+    await harness.client.startSession({} as never, '/synthetic/project');
+
+    promptOnce([tool('sched-1', 'schedule', 'in_progress')]);
+    await send(harness, 'Wait');
+    expect(harness.client.getNativeWork()).toBe('background');
+    expect(harness.client.hasUnsettledNativeWork()).toBe(true);
+
+    await harness.client.cancel('agy-sess-1' as ACPSessionId);
+    expect(harness.client.getNativeWork()).toBeNull();
+    expect(harness.client.hasUnsettledNativeWork()).toBe(false);
+
+    const listCalls = mockState.listSessions.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(mockState.listSessions.mock.calls.length).toBe(listCalls);
+  });
 });
