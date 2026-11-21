@@ -641,11 +641,8 @@ export function SessionOpenedByTreeRow({
  * ③ The hover-revealed ⋯ action. It opens the row's ordinary right-click menu from
  * a left click by re-dispatching `contextmenu` at its own corner, so the button and
  * the right-click gesture can never diverge. `SidebarRowEndSlot` reserves its own
- * 20px column left of Archive and paints its revealed-action area with the row's
- * fill, so the trigger sits on the same opaque `--sidebar-hover` /
- * `--sidebar-selection` as the row beneath it. The pressed tint shades that fill
- * as an inset shadow rather than a translucent background-color that would let
- * content through again.
+ * 20px column left of Archive, so the trigger sits on the row's own fill with the
+ * title already truncated before it. The pressed tint is an inset shadow.
  */
 export function SessionRowMenuButton({
   label,
@@ -779,19 +776,6 @@ export function SidebarRowActionButton({
   );
 }
 
-// Revealed end-slot fills, one per row group scope. Each set names only its
-// own scope so an unrelated ancestor `group` can never reveal the fill.
-const PLAIN_ROW_GROUP_FILL = cn(
-  'group-hover:bg-sidebar-hover group-data-[menu-open]:bg-sidebar-hover',
-  '[.group:hover[aria-current=page]_&]:bg-sidebar-selection',
-  '[.group[data-menu-open][aria-current=page]_&]:bg-sidebar-selection'
-);
-const NAMED_ROW_GROUP_FILL = cn(
-  'group-hover/row:bg-sidebar-hover group-data-[menu-open]/row:bg-sidebar-hover',
-  '[.group\\/row:hover[aria-current=page]_&]:bg-sidebar-selection',
-  '[.group\\/row[data-menu-open][aria-current=page]_&]:bg-sidebar-selection'
-);
-
 /**
  * ③ The final slot at the row's right edge, and the row's ONE status channel.
  *
@@ -805,9 +789,9 @@ const NAMED_ROW_GROUP_FILL = cn(
  * The hover actions (the ⋯ menu, then Archive) are absolutely overlaid on hover, so a
  * wide rest cluster never causes layout movement. The slot reserves one 20px
  * column per action even when no rest content shows, so the ⋯ stays inside the
- * row's trailing edge instead of overlaying the title, and while its actions
- * are revealed the slot paints itself with the row's own fill — every end-slot
- * action, present or added later, is opaque over its column.
+ * row's trailing edge instead of overlaying the title. The slot paints no fill
+ * of its own: the title is a flex sibling that truncates before it, so the
+ * actions sit directly on the row's hover or selection fill.
  */
 export function SidebarRowEndSlot({
   sessionId,
@@ -821,7 +805,6 @@ export function SidebarRowEndSlot({
   archive,
   /** Fade the rest icon while hovering (match the row's group, e.g. 'group-hover/row:opacity-0'). */
   fadeClassName = 'group-hover:opacity-0 group-data-[menu-open]:opacity-0',
-  rowGroup = 'group',
 }: {
   /**
    * Reads this session's local send status here, in the leaf, so upload
@@ -839,13 +822,6 @@ export function SidebarRowEndSlot({
   menu?: ReactNode;
   archive?: ReactNode;
   fadeClassName?: string;
-  /**
-   * The row's own Tailwind group: plain `group`, or the named `group/row` used
-   * where the row sits inside an outer plain `group` (a section list). The
-   * revealed fill must key off the row only — matching any ancestor `group`
-   * would paint every row's slot whenever the pointer is over the list.
-   */
-  rowGroup?: 'group' | 'row';
 }) {
   // The end slot outlives the status mark, so the hand-over hold lives here.
   const drawWorking = useWorkingHandOver(isWorking === true, hasUnreadMessages === true);
@@ -889,20 +865,11 @@ export function SidebarRowEndSlot({
     // the row's navigation; the hover action buttons re-enable pointer events on hover.
     // justify-end keeps a narrower resting mark's right edge exactly where the
     // revealed action lands, so the row's rightmost mark never shifts on hover.
-    // The revealed fill keeps the same color the row paints under these states:
-    // --sidebar-hover on hover and menu-open alike. aria-current lives on the
-    // same group element, so the selection overrides compound the state into
-    // one ancestor selector to win over the plain hover fill.
     <div
       data-session-row-end-slot=""
       className={cn(
         'relative flex h-5 shrink-0 items-center justify-end pointer-events-none',
-        reserve ? (actionColumns > 1 ? 'min-w-10' : 'min-w-5') : 'w-0',
-        showActions &&
-          cn(
-            'transition-colors duration-100',
-            rowGroup === 'row' ? NAMED_ROW_GROUP_FILL : PLAIN_ROW_GROUP_FILL
-          )
+        reserve ? (actionColumns > 1 ? 'min-w-10' : 'min-w-5') : 'w-0'
       )}
     >
       {hasRest ? (
