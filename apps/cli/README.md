@@ -364,3 +364,15 @@ protected replica used by chat, then writes JSON and Markdown on this device.
 are omitted; ordinary workspace exports keep their existing schedule data.
 Desktop conversation copy and image export likewise use the local history and
 save/clipboard bridges, without publishing a share.
+
+## Build platforms
+
+`pnpm --dir apps/cli build` builds the local platform by default. Set
+`LODY_PLATFORM=cloud` explicitly for cloud runtime support. Deployment values are
+read from the invoking process; the build never discovers deployment dotenv files.
+Both platforms use the same worker layout, native externals, bundled Loro WASM,
+and separate runtime/adapter build processes with a 2048 MiB heap.
+
+`prepare:publish` stages npm artifacts under `.publish/`; use pnpm to resolve
+catalog versions when packing. Release-script tests run with `test:release`.
+The [SEA publication guide](SEA.md) covers managed daemon artifacts and installers.

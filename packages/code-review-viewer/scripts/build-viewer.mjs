@@ -41,7 +41,11 @@ writeFileSync(outHtml, html);
 const sha256 = createHash('sha256').update(html).digest('hex');
 const packageJson = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
 const releaseVersionOverride = process.env.LODY_RELEASE_VERSION?.trim();
-const version = releaseVersionOverride || packageJson.version;
+const cloudCliVersion =
+  process.env.LODY_PLATFORM === 'cloud'
+    ? JSON.parse(readFileSync(path.resolve(packageRoot, '../../apps/cli/package.json'), 'utf8')).version
+    : undefined;
+const version = releaseVersionOverride || cloudCliVersion || packageJson.version;
 
 if (typeof version !== 'string' || version.trim() === '') {
   throw new Error('The code review viewer requires a non-empty package version.');

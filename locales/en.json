@@ -1,4 +1,9 @@
 {
+  "lodyAgentConnections.addKey": "Add API key",
+  "lodyAgentConnections.addProviderKey": "Add {{provider}} API key",
+  "agents.authentication.signInToProvider": "Sign in to {{provider}}",
+  "agents.authentication.authorizationResult": "Authorization result",
+  "agents.authentication.authorizationResultPlaceholder": "Paste the code or final redirect URL",
   "e2ee.recovery.restoreWorking": "{{name}}: restoring…",
   "e2ee.deviceIdentity.modelUnknown": "Model unavailable",
   "e2ee.deviceIdentity.osVersionUnavailable": "OS version unavailable",

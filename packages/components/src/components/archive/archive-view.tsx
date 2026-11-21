@@ -1728,7 +1728,7 @@ export function ArchiveView() {
   const [archiveScope, setArchiveScope] = useAtom(archiveScopeAtom);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortMode, setSortMode] = useState<ArchiveSortMode>('newest');
-  const [groupMode, setGroupMode] = useState<ArchiveGroupMode>('project');
+  const [groupMode, setGroupMode] = useState<ArchiveGroupMode>('flat');
   const { activeOrganization } = useOrganization();
   const machineMetaMap = useAtomValue(getMachineMetaMapAtom);
   const { currentUserId: myAccountId, ownedMachineIds } = useMySessionScope();
