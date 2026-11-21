@@ -7016,5 +7016,16 @@
   "sessions.iosSimulator.action.stopOptions": "停止预览选项",
   "sessions.iosSimulator.action.stopPreviewOnly": "只关闭预览",
   "sessions.iosSimulator.action.stopAndShutdown": "关闭预览并关闭模拟器",
-  "sessions.androidEmulator.action.stopAndShutdown": "关闭预览并关闭模拟器"
+  "sessions.androidEmulator.action.stopAndShutdown": "关闭预览并关闭模拟器",
+  "chat.mobileHome.swipeActions.settle": "已完成",
+  "chat.mobileHome.swipeActions.later": "稍后",
+  "chat.mobileHome.later.title": "稍后",
+  "chat.mobileHome.later.pastTime": "请选择一个未来的时间。",
+  "chat.mobileHome.later.confirmCustom": "稍后到这个时间",
+  "chat.mobileHome.status.movedToLater": "已移到稍后",
+  "chat.mobileHome.status.settled": "已标记为已完成",
+  "chat.mobileHome.status.moveToTop": "移到顶部",
+  "chat.mobileHome.status.moveUp": "上移",
+  "chat.mobileHome.status.moveDown": "下移",
+  "chat.mobileHome.filters.view.byStatus": "按状态分组"
 }

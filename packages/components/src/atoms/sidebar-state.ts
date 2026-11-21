@@ -334,8 +334,8 @@ export type SidebarOrganizeMode = 'workspace' | 'updated' | 'status';
  * How the sidebar groups items.
  * - 'workspace' = group by Chats / Local Projects / GitHub Worktrees (default)
  * - 'updated'   = single flat list sorted by latest-update recency
- * - 'status'    = the Updated rows split into status groups (needs you, just
- *                 finished, open pull requests, running, idle), as on mobile Home
+ * - 'status'    = the Status view: Pinned, then Focus / Later / Settled
+ *                 (`specs/sidebar-status-view.md`)
  */
 export const sidebarOrganizeModeAtom = atomWithStorage<SidebarOrganizeMode>(
   'lody-sidebar-organize-mode',

@@ -31,9 +31,41 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
 
 - `mobile-chat-list.tsx` (`MobileChatList`, `MobileChatListCard`),
   `mobile-swipeable-row.tsx` (iOS-Mail-style row actions; `touch-action: pan-y`),
+  `mobile-later-sheet.tsx` (Later picker and section-name sheet),
   `mobile-filter-pill-bar.tsx`, `mobile-filter-drawer.tsx`.
 - `MOBILE_CHAT_PREVIEW_MAX_ROOTS` is 5 — the desktop `MAX_VISIBLE_SESSIONS`,
   copied rather than imported so the mobile bundle skips `session-list.tsx`.
+
+### Status grouping
+
+The home list's Status grouping (`specs/sidebar-status-view.md#phones`) and the
+Pinned area of every grouping render the shared `buildStatusViewLayout` from
+`@lody/shared`; nothing here sorts or classifies those rows.
+
+- `mobile-status-view.ts` maps list rows onto the shared layout input. A row's
+  `readOnly` (the session-management guard's predicate) becomes `canManage:
+false`, so status actions are not offered where the guard would refuse them;
+  pinning stays available through the preference path.
+- `use-mobile-status-list.tsx` owns the surface state the shared contract leaves
+  to each surface: the clock (re-render at `nextChangeAt`, each minute while
+  Later countdowns show, and on foreground), the order frozen while a row is
+  lifted, the dropped order held until the moved row's placement reads back or
+  its write fails, and the row, section-picker, section-header, Later and
+  section-name sheets. Writes go through the injected `MobileStatusCommands`
+  (`runStatusViewCommand` plus `use-mobile-status-actions.ts`, which asks the
+  shared sub-conversation question and offers Undo after Later and Settle).
+- `use-status-list-drag.ts`: holding a row still for 450 ms lifts it; releasing
+  opens the action menu, moving drags it. Movement before the lift is a scroll
+  or a swipe. While a row is lifted, a non-passive `touchmove` listener on the
+  list surface stops the WebView scrolling; the list scrolls itself at its
+  edges. That listener must be registered at mount: one added at the lift is
+  too late, because the browser commits to a pan at `touchstart` and cancels
+  the pointer. Haptics use `navigator.vibrate` where the WebView has it
+  (Android); the Capacitor shell has no haptics bridge, so iOS is silent.
+- `MobileStatusSwipeRow`: a leading swipe pins or unpins; a trailing swipe gives
+  Settle and Later on Focus and Later rows, Archive on Settled and pinned rows.
+- The fold layout's two panels are separate lists, so a drag cannot cross
+  between them.
 
 ## Sheets and session surfaces
 

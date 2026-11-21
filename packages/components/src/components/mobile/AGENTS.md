@@ -2,7 +2,7 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-The Capacitor app is outside this repository; keep native-only behavior behind
+The Capacitor app is `apps/mobile-capacitor`; keep native-only behavior behind
 explicit platform capabilities. File ownership: [README.md](README.md).
 Background: [ui-mobile.md](../../../../../.agents/docs/ui-mobile.md) — read
 before touching gestures.
@@ -72,8 +72,12 @@ before touching gestures.
   16px, background unchanged), and its chevron is a SIBLING of the row
   `<button>` needing `MobileSwipeableRow liftAboveEdgeSwipeZone` — pass that
   flag ONLY when the chevron renders, since it costs the edge-back swipe.
-- `mobile-swipeable-row.tsx` owns Pin/Archive/Restore/Delete visible and aria
-  labels (`chat.mobileHome.swipeActions.*`); never hardcode localized overrides.
+- `mobile-swipeable-row.tsx` owns Pin/Archive/Restore/Delete/Settle/Later
+  visible and aria labels (`chat.mobileHome.swipeActions.*`); never hardcode
+  localized overrides.
+- Status rows render the shared layout, never local sorting; keep the drag's
+  non-passive `touchmove` listener registered at mount
+  ([README](README.md#status-grouping)).
 
 ## Session sheets and viewers
 

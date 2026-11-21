@@ -57,6 +57,7 @@ import {
   type MobileChatGroupBy,
   type MobileChatListSelectionLabels,
 } from './mobile-chat-list';
+import type { MobileStatusCommands } from './use-mobile-status-list';
 import {
   MobileConnectionStatus,
   type MobileConnectionStatusLabels,
@@ -479,6 +480,10 @@ export type MobileHomeScreenProps = {
      Receives the next pinned state so the handler doesn't have to
      re-derive the current state. */
   onChatTogglePin?: (chatId: string, nextPinned: boolean) => void;
+  /** Status view writes for the Chat list (drag, row and section menus). */
+  chatStatusCommands?: MobileStatusCommands;
+  /** Whether this member may write Status view state and manage pin sections. */
+  chatStatusWritable?: boolean;
   /** Archive a chat from the swipe-to-reveal drawer (or from the
      super-swipe). */
   onChatArchive?: (chatId: string) => void;
@@ -1308,6 +1313,8 @@ export function MobileHomeScreen({
   onGitHubRepositorySelect,
   onChatSelect,
   onChatTogglePin,
+  chatStatusCommands,
+  chatStatusWritable,
   onChatArchive,
   onChatRestore,
   onChatPermanentDelete,
@@ -1681,6 +1688,8 @@ export function MobileHomeScreen({
                   query=""
                   onSelect={onChatSelect}
                   onTogglePin={onChatTogglePin}
+                  statusCommands={chatStatusCommands}
+                  statusWritable={chatStatusWritable}
                   onArchive={onChatArchive}
                   onRestore={onChatRestore}
                   hasActiveFilters={hasActiveChatFilters}
@@ -1810,6 +1819,8 @@ export function MobileHomeScreen({
                     query={normalizedQuery}
                     onSelect={onChatSelect}
                     onTogglePin={onChatTogglePin}
+                    statusCommands={chatStatusCommands}
+                    statusWritable={chatStatusWritable}
                     onArchive={onChatArchive}
                     onRestore={onChatRestore}
                     archived={showArchived}
@@ -2355,8 +2366,12 @@ function ChatsFlatView({
   firstGroupTrailing,
   onPrivateHelp,
   splitTargets,
+  statusCommands,
+  statusWritable,
 }: {
   chats: MobileConversationItem[];
+  statusCommands?: MobileStatusCommands;
+  statusWritable?: boolean;
   groupBy: MobileChatGroupBy;
   labels: MobileHomeScreenLabels;
   query: string;
@@ -2460,6 +2475,8 @@ function ChatsFlatView({
         privateHelpAriaLabel={labels.privateHelpAriaLabel}
         onPrivateHelp={onPrivateHelp}
         splitTargets={splitTargets}
+        statusCommands={statusCommands}
+        statusWritable={statusWritable}
       />
     </section>
   );

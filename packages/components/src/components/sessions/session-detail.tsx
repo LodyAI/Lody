@@ -16,11 +16,19 @@ import { pendingSessionLinkAtom } from '@/lib/session-deep-link';
 import { windowPreparationAtom } from '@/lib/window-preparation';
 import { useEmptySessionDraft } from '@/hooks/use-empty-session-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
+import { MobileLaterSheet } from '../mobile/mobile-later-sheet';
+import {
+  useCanManageSessionStatus,
+  useMobileStatusActions,
+} from '../mobile/use-mobile-status-actions';
 import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
+  CircleCheck,
+  Clock,
   Ellipsis,
+  Focus,
   FileText,
   Folder,
   GitBranch,
@@ -47,6 +55,7 @@ import { usePostHog } from '@/lib/posthog-context';
 import {
   getProjectRefBranch,
   getServerNow,
+  statusViewTier,
   getSessionPullRequestLegacyFields,
   getSessionRoomId,
   isLoroRepoDocDeleted,
@@ -4930,6 +4939,24 @@ const SessionDetail = ({
     });
   }, [activeTabSessionId, isMobile]);
 
+  const mobileStatusActions = useMobileStatusActions();
+  const canManageActiveStatus = useCanManageSessionStatus(activeSession);
+  const [mobileLaterSheetOpen, setMobileLaterSheetOpen] = useState(false);
+  const activeStatusTier =
+    activeSession && !activeSession.isArchived && !activeSession.isPinned
+      ? statusViewTier(
+          {
+            activityAt: activeSession.lastMessageAt ?? null,
+            isWorking: activeSessionLiveStatus != null,
+            isWaitingPermission: activeSessionLiveStatus?.type === 'requestPermission',
+            snoozedUntil: activeSession.snoozedUntil ?? null,
+            settledAt: activeSession.settledAt ?? null,
+            focusRestoredAt: activeSession.focusRestoredAt ?? null,
+          },
+          getServerNow()
+        )
+      : null;
+
   // Drafts and pending children can resolve to the parent for display only.
   const canRenameCurrentSession =
     activeTabSession?.id === activeTabSessionId &&
@@ -6212,6 +6239,35 @@ const SessionDetail = ({
           }
         }
       }
+      if (activeStatusTier && canManageActiveStatus) {
+        const statusSessionId = activeSession.id;
+        if (activeStatusTier !== 'later') {
+          mobileMenuActions.push({
+            id: 'later',
+            icon: <Clock {...stylex.props(detailStyles.icon14)} />,
+            label: t('sessions.contextMenu.snooze', 'Later'),
+            onClick: () => setMobileLaterSheetOpen(true),
+            separatorBefore: true,
+          });
+        }
+        if (activeStatusTier !== 'settled') {
+          mobileMenuActions.push({
+            id: 'settle',
+            icon: <CircleCheck {...stylex.props(detailStyles.icon14)} />,
+            label: t('sessions.contextMenu.settle', 'Settle'),
+            onClick: () => mobileStatusActions.settle(statusSessionId),
+            separatorBefore: activeStatusTier === 'later',
+          });
+        }
+        if (activeStatusTier !== 'focus') {
+          mobileMenuActions.push({
+            id: 'move-to-focus',
+            icon: <Focus {...stylex.props(detailStyles.icon14)} />,
+            label: t('sessions.contextMenu.moveToFocus', 'Move to Focus'),
+            onClick: () => mobileStatusActions.moveToFocus(statusSessionId),
+          });
+        }
+      }
       if (canRenameCurrentSession) {
         mobileMenuActions.push({
           id: 'rename',
@@ -6384,6 +6440,13 @@ const SessionDetail = ({
           onCloseConversation={(id) => {
             void handleTabClose(id);
           }}
+        />
+        <MobileLaterSheet
+          open={mobileLaterSheetOpen}
+          onOpenChange={setMobileLaterSheetOpen}
+          title={activeSession.title ?? undefined}
+          nowMs={getServerNow()}
+          onPick={(until) => mobileStatusActions.snooze(activeSession.id, until)}
         />
         <SessionShareMobileMenu
           key={`${currentWorkspaceId}:${activeTabSessionId}`}
