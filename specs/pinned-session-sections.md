@@ -46,10 +46,8 @@ place them in named pin sections, such as "Maintenance".
   place; while expanded, it names the hidden row count under its rows.
 - Opener child conversations stay under their root conversation and move with
   it; they are not ordered independently.
-- The mobile layout shows non-empty sections and their order but offers no
-  dragging or section management. The intended phone behavior, not yet
-  implemented and designed in the [phone note](../.agents/notes/proposed/architecture/2026-11-21-status-view-on-phones.md),
-  is the same on the phone WebView and the native iOS and Android clients: a long
+- On phones the behavior is the same on the phone WebView and the native iOS and
+  Android clients ([phone note](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.md)): a long
   press that turns into a drag reorders pinned conversations and moves them
   between sections, dropping an unpinned conversation into the pin area pins it,
   the row menu offers "Move to section" and "Move to top", and each section
@@ -109,8 +107,8 @@ their recent-activity order among themselves. There is no migration.
   tasks that need a fixed place use a destination that reuses one conversation
   (`own_session` or `existing_session`) and are pinned once.
 - Private, per-member pin layouts.
-- Native iOS and Android clients until the phone behavior above ships. They
-  ignore the new fields and are unaffected.
+- Encrypted workspaces on the native iOS and Android clients, which do not open
+  encrypted workspaces at all yet. The phone WebView supports them.
 
 ## Permissions
 
@@ -145,5 +143,11 @@ Executed validation (unit and jsdom tests, not a running app):
 `packages/components/tests/workspace-catalog-write.test.ts`,
 `packages/components/tests/loro-sidebar-pinned-section.test.tsx`,
 `packages/components/tests/sidebar-navigation-model.test.ts`,
-`packages/components/tests/mobile-chat-list-preview-cap.test.tsx`. Dragging a
-section header and E2EE write admission were not exercised.
+`packages/components/tests/mobile-chat-list-preview-cap.test.tsx`,
+`packages/shared/tests/status-view.test.ts`. Storybook end-to-end
+(`packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`): a row moved
+into another section and a section reordered by dragging its header. A non-owner
+Member sealing a `pinSection` row is tested at the encrypted room level
+(`apps/electron/src/main/services/e2ee-runtime.test.mjs`); the hosted gateway's
+admission is not exercised. Known gap: the phone WebView does not show the count
+of pinned rows the scope hid. Phones: see the [phone note](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.md#verification).

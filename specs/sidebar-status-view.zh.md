@@ -33,7 +33,7 @@ Translation: current
 
 ### 手机端
 
-手机 WebView 布局和原生 iOS、Android 客户端显示与桌面侧栏相同的 Pinned 区和相同的三个状态区，顺序也相同。以下内容尚未实现；设计见[手机端笔记](../.agents/notes/proposed/architecture/2026-11-21-status-view-on-phones.zh.md)。
+手机 WebView 布局和原生 iOS、Android 客户端显示与桌面侧栏相同的 Pinned 区和相同的三个状态区，顺序也相同。三者都已实现；设计、限制和验证情况见[手机端笔记](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.zh.md)。
 
 - 所有界面都用同一份共享实现来推导列表和规划写入。原生客户端只显示共享 runtime 算好的布局，自己不对这些列表做排序或分类。
 - 长按弹出完整操作菜单，按住不放并移动就变成拖拽：在「进行中」排序，或把「稍后」「已完成」的行拖进「进行中」。每一种拖拽结果都有对应的菜单项和无障碍操作。
@@ -74,3 +74,12 @@ Translation: current
 - 已读回执：`packages/components/src/lib/session-read-receipt.ts`
 - 侧栏渲染、拖拽、菜单与写入：`packages/components/src/components/sidebar-updated-session-list.tsx`、`packages/components/src/components/loro-sidebar.tsx`、`packages/components/src/components/loro-app-sidebar.tsx`、`packages/components/src/components/sessions/session-chat-interface.tsx`、`packages/components/src/hooks/use-session-actions.ts`、`packages/components/src/atoms/doc-meta.ts`、`packages/components/src/atoms/sidebar-state.ts`
 - Storybook：`packages/components/src/stories/SidebarStatusView.stories.tsx`
+- 手机：`packages/components/src/components/mobile/`（WebView）；原生共享 runtime 和列表在
+  `apps/mobile/ios`、`apps/mobile/android` 子模块里。
+
+已执行的验证：测试样例（8 个布局用例、28 个命令用例）在 `packages/shared/tests/status-view.test.ts`
+里运行，也在 `packages/components` 的桌面和手机适配层、iOS 和 Android 的 runtime 测试里运行；Storybook
+端到端测试 `packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`（5 个用例）；手机
+WebView 在 iOS 模拟器和 Android 模拟器上的 Storybook；原生列表在模拟器上用离线测试数据。没有验证：
+真机、原生客户端登录后的云端工作区、桌面应用写入真实副本、真实的加密 Guest 会话和托管网关接受加密写入、
+设备上的 VoiceOver、Capacitor 打包后的 App。详见[手机端笔记](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.zh.md#验证)。

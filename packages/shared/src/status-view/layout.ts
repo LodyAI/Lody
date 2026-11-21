@@ -18,7 +18,7 @@ import {
  * The list layout of the Status view: the Pinned area, then Focus, Later and
  * Settled. Pure and JSON in, JSON out, so the desktop sidebar, the phone
  * WebView and the native clients' shared runtime compute the same rows.
- * Design: .agents/notes/proposed/architecture/2026-11-21-status-view-on-phones.md.
+ * Design: .agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.md.
  */
 
 /** One visible conversation: non-archived, scope applied, contained Tabs folded in. */

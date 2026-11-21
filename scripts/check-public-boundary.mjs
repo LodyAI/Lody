@@ -49,6 +49,8 @@ const publicRuntimeArtifactHostAllowlist = new Set([
   'apps/mobile/ios/apps/ios/verification/kit/attachments/README.md',
   'apps/mobile/ios/packages/cloud-runtime/src/runtime/sharing/runtime.ts',
   'apps/mobile/android/runtime/vendor/cloud-runtime/src/runtime/sharing/runtime.ts',
+  'apps/mobile/ios/packages/cloud-runtime/src/runtime/server-clock.ts',
+  'apps/mobile/android/runtime/vendor/cloud-runtime/src/runtime/server-clock.ts',
   'apps/cli/src/ios-simulator/baguette-manifest.json',
   'packages/platform/src/runtime-artifacts.ts',
 ]);
