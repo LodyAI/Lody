@@ -53,6 +53,7 @@ import {
   type RepoRoomSubscription,
   type RepoWatchHandle,
 } from 'loro-repo';
+import { openRendererNativeWorkspaceMeta } from './native-workspace-meta';
 import { createWorkspaceRepoStorage } from './workspace-repo-storage';
 import {
   reportWorkspaceCloseFailure,
@@ -611,15 +612,26 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     | null = null;
   const repoStorage = createWorkspaceRepoStorage(cacheIdentity.repoDbName);
   const openSessionWithSnapshot = createSessionSnapshotLoader(repoStorage);
-  const repo = await LoroRepo.create({
+  const repoOptions = {
     storageAdapter: repoStorage,
     metaDebounceCommitMs: 0,
     // Session metadata (what lists a Session) must reach disk with its history;
     // loro-repo's default 5 s trailing debounce let a crash drop new Sessions.
     metaPersistDebounceMs: 0,
-    resolveRoomTransports: (room) =>
-      resolveRoomTransportsImpl?.(room) ?? { transportIds: ['cloud'] },
-  });
+    resolveRoomTransports: (room: WorkspaceTransportRoom) =>
+      resolveRoomTransportsImpl?.(room) ?? { transportIds: ['cloud' as const] },
+  };
+  const nativeMeta =
+    !protectedContent && deps.syncMode === 'local'
+      ? await openRendererNativeWorkspaceMeta(
+          deps.workspaceId,
+          repoStorage,
+          cacheIdentity.repoDbName
+        )
+      : null;
+  const repo = nativeMeta
+    ? await LoroRepo.createWithExternalMetadata(repoOptions, nativeMeta)
+    : await LoroRepo.create(repoOptions);
   // Bound to this replica's immutable account/workspace/content admission.
   // Cloud adapter replacement must not renew its incomplete-recovery budget.
   const incompleteRecoveryScope = {};
@@ -4299,6 +4311,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     syncPhase: 'initial' | 'recovery' = 'initial'
   ): Promise<void> => {
     if (metaSub) {
+      return;
+    }
+    if (repo.metadataMode === 'external') {
+      initialMetaSyncCompleted = true;
+      initialMetaSyncFailed = false;
+      resumePendingInputs?.();
       return;
     }
     if (metaRoomJoinPromise) {

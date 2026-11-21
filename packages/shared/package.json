@@ -196,6 +196,10 @@
       "types": "./src/layout.ts",
       "import": "./src/layout.ts"
     },
+    "./native-workspace-meta-ipc": {
+      "types": "./src/native-workspace-meta-ipc.ts",
+      "import": "./src/native-workspace-meta-ipc.ts"
+    },
     "./node/*": {
       "types": "./src/node/*.ts",
       "import": "./src/node/*.ts",
@@ -258,6 +262,7 @@
     "dockerode": "^4.0.9",
     "effect": "catalog:",
     "loro-mirror": "catalog:",
+    "@loro-dev/loro-repo-client": "catalog:",
     "@agentclientprotocol/sdk": "catalog:",
     "acp-extension-core": "workspace:*",
     "zod": "catalog:",
@@ -275,6 +280,7 @@
     "@types/dockerode": "^3.3.47",
     "@types/node": "catalog:",
     "loro-repo": "catalog:",
+    "@loro-dev/loro-repo-engine": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

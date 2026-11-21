@@ -119,7 +119,7 @@ export function createLocalWindowBootstrap(
       }
     });
   };
-  void request('meta');
+  if (repo.metadataMode !== 'external') void request('meta');
   return {
     async readDocument(room: string): Promise<Uint8Array | undefined> {
       const peers = await registry.peers().catch(() => []);
