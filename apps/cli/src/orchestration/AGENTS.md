@@ -9,14 +9,15 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
   Result/system-Turn ids include both key parts, never the Session-scoped
   `operationId` alone.
 - Target input creation is fenced by the SQLite item-materialization claim.
-  Acceptance owns new claims; the lease Worker only adopts absent/expired
-  claims. Loro history evidence clears the claim. Before an adopted claim may
-  treat a missing fixed Turn as permission to write, confirm authority: cloud
-  requires remote Streams catch-up (local transport sync is insufficient); OSS
-  uses the daemon repo that owns every MCP write. A failed confirmation is
-  uncertainty and arms the same owned bounded-backoff wake as a materializer
-  error; unrelated SQLite/Meta watch hints must not be the only retry path, and
-  every retry rechecks the fixed user Turn id first.
+  Acceptance owns new claims; the lease Worker adopts absent or expired claims,
+  and clean pre-dispatch transient failures may release their own claim token.
+  Loro history clears claims, and `updateItems` monotonically preserves
+  `inputDurable`. Before replaying a missing Turn, confirm authority: OSS and
+  Cloud same-machine daemon targets flush the authoritative daemon repo; remote
+  or cold Cloud targets require Streams catch-up. Materialization runs in scoped
+  `FiberMap` fibers with Effect Clock timeout and bounded concurrency so slow
+  syncs never block unrelated reconciliation; retries arm bounded backoff and
+  recheck the fixed user Turn id first.
 - Successful item completion copies only visible assistant text into an 8 KiB
   `output` preview. The store may further head/tail-bound it to keep the whole
   completion at 64 KiB; preserve both per-output and aggregate omission metadata.

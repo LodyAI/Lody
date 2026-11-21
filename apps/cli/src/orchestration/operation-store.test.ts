@@ -1109,6 +1109,81 @@ describe('LodyOperationStore', () => {
     }
   });
 
+  it('releases only matching claims and preserves concurrent inputDurable flips in updateItems', async () => {
+    const store = await makeStore(() => 1_000);
+    try {
+      const batch = store.accept(
+        {
+          ...baseInput(),
+          kind: 'session_chat_many',
+          items: [
+            {
+              status: 'active',
+              target: { sessionId: 'target-1' as SessionId, userTurnId: 'turn-1' },
+              inputDurable: false,
+            },
+            {
+              status: 'active',
+              target: { sessionId: 'target-2' as SessionId, userTurnId: 'turn-2' },
+              inputDurable: false,
+            },
+          ],
+        },
+        { materializationClaimToken: 'acceptor' }
+      );
+      expect(batch.claimedItemIndexes).toEqual([0, 1]);
+
+      // Wrong token cannot release the active claim; matching token releases it immediately.
+      store.releaseItemMaterializationClaim(
+        'requester-1' as SessionId,
+        'review-round-1',
+        0,
+        'other'
+      );
+      expect(
+        store.claimItemMaterialization(
+          'requester-1' as SessionId,
+          'review-round-1',
+          0,
+          'coordinator'
+        )
+      ).toEqual({ claimed: false, retryAtMs: 61_000 });
+      store.releaseItemMaterializationClaim(
+        'requester-1' as SessionId,
+        'review-round-1',
+        0,
+        'acceptor'
+      );
+      expect(
+        store.claimItemMaterialization(
+          'requester-1' as SessionId,
+          'review-round-1',
+          0,
+          'coordinator'
+        )
+      ).toEqual({ claimed: true });
+
+      // Concurrent materialization marks item 1 durable before an older reconcile snapshot calls updateItems.
+      store.markItemInputDurable('requester-1' as SessionId, 'review-round-1', 1, 'acceptor');
+      const merged = store.updateItems('requester-1' as SessionId, 'review-round-1', [
+        {
+          status: 'succeeded',
+          target: { sessionId: 'target-1' as SessionId, userTurnId: 'turn-1' },
+          assistantTurnId: 'assistant:turn-1',
+        },
+        {
+          status: 'active',
+          target: { sessionId: 'target-2' as SessionId, userTurnId: 'turn-2' },
+          inputDurable: false,
+        },
+      ]);
+      expect(merged.items[0]).toMatchObject({ status: 'succeeded' });
+      expect(merged.items[1]).toMatchObject({ status: 'active', inputDurable: true });
+    } finally {
+      store.close();
+    }
+  });
+
   it('wins cancellation once and preserves the first terminal completion', async () => {
     const store = await makeStore();
     try {

@@ -2333,6 +2333,175 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     });
   });
 
+  it('delivers same-machine Cloud MCP session_chat locally without Streams sync while keeping remote, collaborator, and revoked guards strict', async () => {
+    const workspace = {
+      id: workspaceId,
+      name: 'Synthetic',
+      slug: 'synthetic',
+      role: 'owner' as const,
+    };
+    const requesterDoc = await manager.getOrCreateSessionDoc(sessionId, { historyBackend: 'loro' });
+    await requesterDoc.sessionData.commands.applyHistoryAction({
+      kind: 'upsert-turn',
+      turn: {
+        id: 'synthetic-turn',
+        role: 'user',
+        timestamp: '2026-11-21T06:00:00.000Z',
+        userId: ownerUserId,
+        author: { v: 1, kind: 'human', userId: ownerUserId },
+        items: [{ type: 'text', text: 'delegate work' }],
+        fileDiff: [],
+        status: 'processing',
+      },
+    });
+    const targetSessionId = '33333333-3333-4333-8333-333333333333' as SessionId;
+    await manager.repo.upsertDocMeta(getSessionRoomId(targetSessionId), {
+      id: targetSessionId,
+      workspaceId,
+      machineId,
+      userId: ownerUserId,
+      cliType: 'builtin',
+      agentType: 'codex',
+      title: 'Local Target',
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const remoteMachineId = 'remote-chat-machine' as MachineId;
+    const remoteTargetId = '44444444-4444-4444-8444-444444444444' as SessionId;
+    await manager.repo.upsertDocMeta(getSessionRoomId(remoteTargetId), {
+      id: remoteTargetId,
+      workspaceId,
+      machineId: remoteMachineId,
+      userId: ownerUserId,
+      cliType: 'builtin',
+      agentType: 'codex',
+      title: 'Remote Target',
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+    const syncMetaSpy = vi
+      .spyOn(manager, 'syncMetaOrThrow')
+      .mockRejectedValue(new Error('ECONNRESET: Streams offline'));
+    const syncDocSpy = vi
+      .spyOn(manager, 'syncDocOrThrow')
+      .mockRejectedValue(new Error('ECONNRESET: Streams offline'));
+    const dispatched: Array<{ sessionId: SessionId; inputId?: string }> = [];
+    let accessVerdict:
+      | { status: 'authorized'; workspace: typeof workspace }
+      | { status: 'revoked' } = { status: 'authorized', workspace };
+    let drivingUserId = ownerUserId;
+    const cloudDaemon = {
+      ...daemon,
+      readInvocation: (id: SessionId) => ({
+        ...daemon.readInvocation(id),
+        requesterUserId: drivingUserId,
+      }),
+      readAccess: () => accessVerdict,
+      host: {
+        readActiveTurnId: () => undefined,
+        steerSession: async () => {
+          throw new Error('Unexpected steer');
+        },
+        dispatchSession: async (
+          targetId: SessionId,
+          input?: { inputId: string; userId: string }
+        ) => {
+          dispatched.push({ sessionId: targetId, inputId: input?.inputId });
+        },
+      },
+    };
+
+    const sent = await runWithDaemonWorkspace(cloudDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_chat', {
+        operationId: 'local-cloud-chat-1',
+        sessionId: targetSessionId,
+        prompt: 'run local work',
+        mcpServerIds: [],
+      })
+    );
+    expect(sent.isError, JSON.stringify(sent)).not.toBe(true);
+    const parsedSent = JSON.parse(sent.content[0]?.text ?? '{}');
+    expect(parsedSent).toMatchObject({
+      id: 'local-cloud-chat-1',
+      state: 'active',
+      items: [{ status: 'active', inputDurable: true, target: { sessionId: targetSessionId } }],
+    });
+    expect(syncMetaSpy).not.toHaveBeenCalled();
+    expect(syncDocSpy).not.toHaveBeenCalled();
+    expect(dispatched).toEqual([
+      {
+        sessionId: targetSessionId,
+        inputId: parsedSent.items[0].target.userTurnId,
+      },
+    ]);
+    const targetDoc = await manager.getOrCreateSessionDoc(targetSessionId);
+    const targetMeta = await targetDoc.getMetaState();
+    expect(targetMeta?.latestUserMsgId).toBe(parsedSent.items[0].target.userTurnId);
+
+    const retried = await runWithDaemonWorkspace(cloudDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_chat', {
+        operationId: 'local-cloud-chat-1',
+        sessionId: targetSessionId,
+        prompt: 'run local work',
+        mcpServerIds: [],
+      })
+    );
+    expect(retried.isError, JSON.stringify(retried)).not.toBe(true);
+    expect(JSON.parse(retried.content[0]?.text ?? '{}')).toMatchObject({
+      id: 'local-cloud-chat-1',
+      state: 'active',
+    });
+    expect(syncMetaSpy).not.toHaveBeenCalled();
+
+    const remoteResult = await runWithDaemonWorkspace(cloudDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_chat', {
+        operationId: 'remote-cloud-chat-1',
+        sessionId: remoteTargetId,
+        prompt: 'run remote work',
+        mcpServerIds: [],
+      })
+    );
+    expect(remoteResult.isError).toBe(true);
+    expect(JSON.parse(remoteResult.content[0]?.text ?? '{}')).toMatchObject({
+      ok: false,
+      error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+    });
+    expect(syncMetaSpy).toHaveBeenCalledTimes(1);
+
+    syncMetaSpy.mockClear();
+    drivingUserId = 'collaborator-user-id';
+    const collaboratorResult = await runWithDaemonWorkspace(cloudDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_chat', {
+        operationId: 'collaborator-cloud-chat-1',
+        sessionId: targetSessionId,
+        prompt: 'collaborator chat',
+        mcpServerIds: [],
+      })
+    );
+    expect(collaboratorResult.isError).toBe(true);
+    expect(JSON.parse(collaboratorResult.content[0]?.text ?? '{}')).toMatchObject({
+      ok: false,
+      error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+    });
+    expect(syncMetaSpy).toHaveBeenCalledTimes(1);
+
+    syncMetaSpy.mockClear();
+    drivingUserId = ownerUserId;
+    accessVerdict = { status: 'revoked' };
+    const revokedResult = await runWithDaemonWorkspace(cloudDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_chat', {
+        operationId: 'revoked-cloud-chat-1',
+        sessionId: targetSessionId,
+        prompt: 'should fail',
+        mcpServerIds: [],
+      })
+    );
+    expect(revokedResult.isError).toBe(true);
+    expect(syncMetaSpy).not.toHaveBeenCalled();
+  });
+
   it('rejects calls outside the daemon workspace scope', async () => {
     await expect(
       executeDaemonSessionTool(context(), 'lody_operation', { action: 'list' })

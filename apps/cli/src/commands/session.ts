@@ -8,6 +8,7 @@ import {
 import {
   getDaemonWorkspace,
   readBoundDaemonOwnerAccess,
+  readDaemonTargetAuthority,
   readEncryptedMachineAccess,
 } from '@/lib/session-command-environment';
 import type { SessionSteerResponse } from '@lody/shared';
@@ -2649,6 +2650,15 @@ export async function ensureTargetMachineNotOffline(args: {
     return 'online';
   }
   if (args.machineId === args.auth.machineId) {
+    const daemon = getDaemonWorkspace();
+    if (
+      daemon &&
+      daemon.workspaceId === args.workspaceId &&
+      daemon.machineId === args.machineId &&
+      daemon.userId === args.auth.userId
+    ) {
+      return 'online';
+    }
     await ensureLocalRuntimeAvailable(args.machineId, args.workspaceId);
     return 'online';
   }
@@ -2736,6 +2746,7 @@ async function readResolvedSessionMachineAccess(args: {
   machineId: MachineId;
   requester: ResolvedSessionRequester;
   localProjectId?: string;
+  manager?: LoroDocumentManager;
 }): Promise<MachineAccessCheckResult> {
   const encrypted = await readEncryptedMachineAccess({
     machineId: args.machineId,
@@ -2752,6 +2763,19 @@ async function readResolvedSessionMachineAccess(args: {
       requesterUserId: args.requester.userId,
       localProjectId: args.localProjectId,
     });
+  }
+  const daemonManager = args.manager ?? getDaemonWorkspace()?.manager;
+  if (daemonManager) {
+    const nativeOwner = await readBoundDaemonOwnerAccess({
+      auth: args.auth,
+      manager: daemonManager,
+      workspaceId: args.workspaceId,
+      machineId: args.machineId,
+      requesterUserId: args.requester.userId,
+    });
+    if (nativeOwner !== undefined) {
+      return nativeOwner ? { allowed: true } : { allowed: false, reason: 'requester_not_member' };
+    }
   }
   const target = {
     token: args.auth.token,
@@ -2780,6 +2804,7 @@ async function assertMachineAccess(args: {
   machineId: MachineId;
   requester: ResolvedSessionRequester;
   localProjectId?: string;
+  manager?: LoroDocumentManager;
 }): Promise<void> {
   const access = await readResolvedSessionMachineAccess(args);
   if (!access.allowed) {
@@ -2799,8 +2824,14 @@ async function dispatchTurnFastPath(args: {
   inputConfig: SessionTurnInputConfig | undefined;
 }): Promise<void> {
   const environment = getSessionCommandEnvironment();
-  if (environment) {
-    await environment.host.dispatchSession(
+  const daemon = getDaemonWorkspace();
+  const localHost =
+    environment?.host ??
+    (daemon && daemon.workspaceId === args.workspaceId && daemon.machineId === args.machineId
+      ? daemon.host
+      : undefined);
+  if (localHost) {
+    await localHost.dispatchSession(
       args.sessionId,
       args.inputConfig
         ? {
@@ -4173,11 +4204,22 @@ export async function createSessionResult(
       sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await commitPreparedSessionDispatch(manager, prepared);
     dispatched = true;
-    await confirmDispatchSyncedBestEffort({
-      manager,
-      sessionDoc,
-      reason: `session.create:${sessionId}`,
-    });
+    const daemon = getDaemonWorkspace();
+    const isSameMachineDaemon = Boolean(
+      daemon &&
+      daemon.manager === manager &&
+      daemon.workspaceId === workspace.id &&
+      daemon.machineId === targetMachine.id
+    );
+    if (isSameMachineDaemon) {
+      if (typeof manager.repo.flush === 'function') await manager.repo.flush();
+    } else {
+      await confirmDispatchSyncedBestEffort({
+        manager,
+        sessionDoc,
+        reason: `session.create:${sessionId}`,
+      });
+    }
     await dispatchTurnFastPath({
       auth,
       workspaceId: workspace.id as WorkspaceId,
@@ -4223,6 +4265,7 @@ export async function validateSessionChatTarget(args: {
   sessionId: SessionId;
   requesterUserIdOverride?: string;
   delegatedRequester?: DelegatedSessionRequester;
+  workspaceMetaPrewriteSatisfied?: boolean;
 }): Promise<SessionMeta> {
   const requester = resolveSessionRequester(
     args.auth,
@@ -4235,6 +4278,7 @@ export async function validateSessionChatTarget(args: {
     manager: args.manager,
     sessionId: args.sessionId,
     requester,
+    workspaceMetaPrewriteSatisfied: args.workspaceMetaPrewriteSatisfied,
   });
 }
 
@@ -4244,8 +4288,33 @@ async function validateSessionChatTargetForRequester(args: {
   manager: LoroDocumentManager;
   sessionId: SessionId;
   requester: ResolvedSessionRequester;
+  workspaceMetaPrewriteSatisfied?: boolean;
 }): Promise<SessionMeta> {
-  await syncWorkspaceMetaForRead(args.manager, `session.chat:${args.sessionId}:prewrite:meta`);
+  let needsMetaSync = args.workspaceMetaPrewriteSatisfied !== true;
+  if (needsMetaSync) {
+    const localRecord = await args.manager.repo.getDocMeta(getSessionRoomId(args.sessionId));
+    if (localRecord?.meta && !isLoroRepoDocDeleted(localRecord)) {
+      const localMeta = localRecord.meta as SessionMeta;
+      const authority = await readDaemonTargetAuthority({
+        auth: args.auth,
+        manager: args.manager,
+        workspaceId: args.workspace.id as WorkspaceId,
+        machineId: localMeta.machineId,
+        requesterUserId: args.requester.userId,
+      });
+      if (authority === 'denied') {
+        throw new Error(
+          `Machine access denied for ${localMeta.machineId}: workspace_access_revoked`
+        );
+      }
+      if (authority === 'local-daemon') {
+        needsMetaSync = false;
+      }
+    }
+  }
+  if (needsMetaSync) {
+    await syncWorkspaceMetaForRead(args.manager, `session.chat:${args.sessionId}:prewrite:meta`);
+  }
   const session = await resolveSessionMetaOrThrow(args.manager, args.sessionId);
   if (session.isArchived) {
     throw new Error(`Session ${args.sessionId} is archived. Restore it before chatting.`);
@@ -4256,6 +4325,7 @@ async function validateSessionChatTargetForRequester(args: {
     machineId: session.machineId,
     requester: args.requester,
     localProjectId: session.project?.kind === 'local' ? session.project.localProjectId : undefined,
+    manager: args.manager,
   });
   await ensureTargetMachineNotOffline({
     auth: args.auth,
@@ -4316,6 +4386,10 @@ export async function sendSessionChatResult(
     bypassSessionQuota?: boolean;
     /** Agent chat: steer a running turn instead of queueing behind it. */
     steerActiveTurn?: boolean;
+    /** Caller already satisfied pre-write workspace metadata freshness. */
+    workspaceMetaPrewriteSatisfied?: boolean;
+    /** Target metadata already validated in this same request scope. */
+    prevalidatedTarget?: SessionMeta;
   },
   delegatedRequester?: DelegatedSessionRequester,
   input?: { paths?: string[]; attachments?: SessionInputAttachment[] }
@@ -4330,19 +4404,34 @@ export async function sendSessionChatResult(
   const requester = resolveSessionRequester(auth, requesterUserIdOverride, delegatedRequester);
   const requesterUserId = requester.userId;
   const author = resolveSessionInputAuthor(requesterUserId, delegatedRequester);
-  const session = await validateSessionChatTargetForRequester({
-    auth,
-    workspace,
-    manager,
-    sessionId,
-    requester,
-  });
+  const session =
+    orchestration?.prevalidatedTarget ??
+    (await validateSessionChatTargetForRequester({
+      auth,
+      workspace,
+      manager,
+      sessionId,
+      requester,
+      workspaceMetaPrewriteSatisfied: orchestration?.workspaceMetaPrewriteSatisfied,
+    }));
 
-  await syncDocForRead(
+  const targetAuthority = await readDaemonTargetAuthority({
+    auth,
     manager,
-    getSessionRoomId(sessionId),
-    `session.chat:${sessionId}:prewrite:doc`
-  );
+    workspaceId: workspace.id as WorkspaceId,
+    machineId: session.machineId,
+    requesterUserId,
+  });
+  if (targetAuthority === 'denied') {
+    throw new Error(`Machine access denied for ${session.machineId}: workspace_access_revoked`);
+  }
+  if (targetAuthority !== 'local-daemon') {
+    await syncDocForRead(
+      manager,
+      getSessionRoomId(sessionId),
+      `session.chat:${sessionId}:prewrite:doc`
+    );
+  }
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
   const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
   const quotaHistory = orchestration?.bypassSessionQuota
@@ -4422,6 +4511,12 @@ export async function sendSessionChatResult(
     }));
   const inputBlocks = buildCommandInputBlocks(prompt, attachments);
   const environment = getSessionCommandEnvironment();
+  const daemon = getDaemonWorkspace();
+  const localHost =
+    environment?.host ??
+    (daemon && daemon.workspaceId === workspace.id && daemon.machineId === session.machineId
+      ? daemon.host
+      : undefined);
   const derivedInputId = orchestration?.userTurnId ?? uuidV4();
   const derivation = await classifyDelegatedEncryptedInput(
     manager,
@@ -4437,7 +4532,7 @@ export async function sendSessionChatResult(
     orchestration?.steerActiveTurn && maySteer
       ? remoteMachine
         ? resolveActiveAssistantTurnId(historyForDefaults)
-        : environment?.host.readActiveTurnId(sessionId)
+        : localHost?.readActiveTurnId(sessionId)
       : undefined;
   const userTurn = await appendUserPromptHistory({
     steer: steerTurnId !== undefined,
@@ -4566,12 +4661,12 @@ export async function sendSessionChatResult(
     steerTurnId !== undefined &&
     userTurn.existingStatus === undefined &&
     !remoteMachine &&
-    environment &&
+    localHost &&
     userTurn.inputConfig
   ) {
     if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await updateSessionActivityTimestampsBestEffort(manager, sessionId);
-    const response = await environment.host.steerSession({
+    const response = await localHost.steerSession({
       sessionId,
       expectedTurnId: steerTurnId,
       userTurnId,
@@ -4610,11 +4705,22 @@ export async function sendSessionChatResult(
     if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await writeDispatchPointer({ manager, sessionId, userTurnId });
     dispatched = true;
-    await confirmDispatchSyncedBestEffort({
-      manager,
-      sessionDoc,
-      reason: `session.chat:${sessionId}:${userTurnId}`,
-    });
+    const isSameMachineDaemon = Boolean(
+      !remoteMachine &&
+      daemon &&
+      daemon.manager === manager &&
+      daemon.workspaceId === workspace.id &&
+      daemon.machineId === session.machineId
+    );
+    if (isSameMachineDaemon) {
+      if (typeof manager.repo.flush === 'function') await manager.repo.flush();
+    } else {
+      await confirmDispatchSyncedBestEffort({
+        manager,
+        sessionDoc,
+        reason: `session.chat:${sessionId}:${userTurnId}`,
+      });
+    }
     await dispatchTurnFastPath({
       auth,
       workspaceId: workspace.id as WorkspaceId,

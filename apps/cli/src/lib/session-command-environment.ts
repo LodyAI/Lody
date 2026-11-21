@@ -88,6 +88,11 @@ export type DaemonWorkspaceAccess =
  * It changes only which replica a command uses; platform behavior is unchanged.
  * The daemon owns its lifecycle, so a borrowing command never cleans it up.
  */
+export type DaemonLocalSessionHost = Pick<
+  SessionCommandHost,
+  'readActiveTurnId' | 'steerSession' | 'dispatchSession'
+>;
+
 export interface DaemonWorkspace {
   workspaceId: WorkspaceId;
   userId: string;
@@ -95,6 +100,8 @@ export interface DaemonWorkspace {
   manager: LoroDocumentManager;
   readInvocation(sessionId: SessionId): SessionActiveInvocationContextResult;
   readAccess?(): DaemonWorkspaceAccess;
+  host?: DaemonLocalSessionHost;
+  wakeOperations?(): void;
   /**
    * Encrypted only: classify an Agent-delegated input by its verified driving Turn.
    * Same-machine delegation returns the verified principal and human root. Machine-owned
@@ -113,6 +120,83 @@ export interface DaemonWorkspace {
     requesterUserId: string;
     localProjectId?: string;
   }): Promise<MachineAccessCheckResult>;
+}
+
+export type DaemonTargetAuthority = 'local-daemon' | 'remote-or-unverified' | 'denied';
+
+export function classifyDaemonTargetAuthority(args: {
+  hasLocalEnvironment: boolean;
+  localEnvironmentMatches?: boolean;
+  daemonMatches: boolean;
+  sameMachine: boolean;
+  sameOwnerUser: boolean;
+  isEncryptedWorkspace: boolean;
+  accessStatus?: DaemonWorkspaceAccess['status'];
+  machineOwnerMatchesDaemon?: boolean;
+}): DaemonTargetAuthority {
+  if (args.hasLocalEnvironment) {
+    return args.localEnvironmentMatches ? 'local-daemon' : 'denied';
+  }
+  if (!args.daemonMatches || !args.sameMachine) return 'remote-or-unverified';
+  if (args.accessStatus === 'revoked' || args.accessStatus === 'unauthorized') return 'denied';
+  if (args.accessStatus === 'unknown') return 'remote-or-unverified';
+  if (args.isEncryptedWorkspace) return 'local-daemon';
+  if (!args.sameOwnerUser || args.machineOwnerMatchesDaemon !== true) return 'remote-or-unverified';
+  return 'local-daemon';
+}
+
+export async function readDaemonTargetAuthority(args: {
+  auth: Pick<AuthContext, 'userId' | 'machineId'>;
+  manager: LoroDocumentManager;
+  workspaceId: WorkspaceId;
+  machineId: MachineId;
+  requesterUserId: string;
+}): Promise<DaemonTargetAuthority> {
+  const environment = getSessionCommandEnvironment();
+  if (environment) {
+    return classifyDaemonTargetAuthority({
+      hasLocalEnvironment: true,
+      localEnvironmentMatches:
+        environment.manager === args.manager &&
+        environment.workspace.id === args.workspaceId &&
+        environment.auth.userId === args.auth.userId &&
+        environment.auth.machineId === args.auth.machineId &&
+        args.machineId === environment.auth.machineId &&
+        args.requesterUserId === environment.auth.userId,
+      daemonMatches: false,
+      sameMachine: false,
+      sameOwnerUser: false,
+      isEncryptedWorkspace: false,
+    });
+  }
+  const daemon = getDaemonWorkspace();
+  const daemonMatches = Boolean(
+    daemon &&
+    daemon.manager === args.manager &&
+    daemon.workspaceId === args.workspaceId &&
+    daemon.userId === args.auth.userId &&
+    daemon.machineId === args.auth.machineId
+  );
+  if (!daemon || !daemonMatches || args.machineId !== daemon.machineId) {
+    return 'remote-or-unverified';
+  }
+  const accessStatus = daemon.readAccess?.().status;
+  if (accessStatus === 'revoked' || accessStatus === 'unauthorized') return 'denied';
+  if (accessStatus === 'unknown') return 'remote-or-unverified';
+  if (args.manager.isEncryptedWorkspace()) return 'local-daemon';
+  const row = await args.manager.repo.getDocMeta(getMachineRoomId(args.machineId));
+  const machineOwnerMatchesDaemon = Boolean(
+    row && !isLoroRepoDocDeleted(row) && (row.meta as MachineMeta).ownerUserId === daemon.userId
+  );
+  return classifyDaemonTargetAuthority({
+    hasLocalEnvironment: false,
+    daemonMatches: true,
+    sameMachine: true,
+    sameOwnerUser: args.requesterUserId === daemon.userId,
+    isEncryptedWorkspace: false,
+    accessStatus,
+    machineOwnerMatchesDaemon,
+  });
 }
 
 /** Native ownership comes from the bound daemon identity, never SessionMeta.userId.
@@ -172,6 +256,7 @@ export const getDaemonWorkspace = (): DaemonWorkspace | undefined => {
     machineId: environment.auth.machineId,
     manager: environment.manager,
     readInvocation: (sessionId) => environment.host.readInvocation(sessionId),
+    host: environment.host,
   };
 };
 

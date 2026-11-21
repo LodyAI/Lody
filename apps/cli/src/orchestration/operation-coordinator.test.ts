@@ -1,5 +1,5 @@
 import { SessionExecutionService } from '../session/session-execution-service';
-import { Cause, Effect, Exit } from 'effect';
+import { Cause, Effect, Exit, FiberMap, Semaphore } from 'effect';
 import { CoordinatorWorkflow } from './coordinator-workflow';
 import type { CoordinatorActivity } from './coordinator-activity';
 import type { CoordinatorPorts } from './coordinator-ports';
@@ -657,6 +657,152 @@ describe('LodyOperationCoordinator', () => {
       expect(store.get(harness.requesterSessionId, 'review-round-1').author).toEqual(author);
     } finally {
       store.close();
+      await harness.coordinator.stop();
+    }
+  });
+
+  it('isolates slow remote catch-up so unrelated local Operations still finalize and stop cleanly', async () => {
+    let releaseSlowCatchUp: (() => void) | undefined;
+    let slowCatchUpStarted: (() => void) | undefined;
+    const slowCatchUpEntered = new Promise<void>((resolve) => {
+      slowCatchUpStarted = resolve;
+    });
+    const slowCatchUpGate = new Promise<void>((resolve) => {
+      releaseSlowCatchUp = resolve;
+    });
+    const harness = await makeHarness({
+      targetInputDurable: false,
+      confirmTargetReadable: async (docId) => {
+        if (docId === getSessionRoomId(harness.targetSessionId)) {
+          slowCatchUpStarted?.();
+          await slowCatchUpGate;
+        }
+      },
+    });
+    const localTargetId = 'local-fast-target' as SessionId;
+    harness.metas.set(localTargetId, {
+      id: localTargetId,
+      workspaceId: 'workspace-1' as WorkspaceId,
+      machineId: 'machine-1' as MachineId,
+      userId: 'user-1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      latestUserMsgId: 'local-turn-1',
+    });
+    harness.histories.set(localTargetId, [
+      {
+        id: 'local-turn-1',
+        role: 'user',
+        timestamp: '2026-07-20T00:00:00.000Z',
+        items: [{ type: 'text', text: 'local work' }],
+        fileDiff: [],
+        status: 'handled',
+      },
+      {
+        id: 'assistant:local-turn-1',
+        role: 'assistant',
+        userTurnId: 'local-turn-1',
+        timestamp: '2026-07-20T00:00:00.500Z',
+        items: [{ type: 'text', text: 'fast local result' }],
+        fileDiff: [],
+        finished: true,
+      },
+    ]);
+    const seedStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    seedStore.accept({
+      workspaceId: 'workspace-1' as WorkspaceId,
+      ownerMachineId: 'machine-1' as MachineId,
+      requesterSessionId: harness.requesterSessionId,
+      requesterUserId: 'user-1',
+      operationId: 'local-fast-op',
+      kind: 'session_chat',
+      canonicalCommand: { sessionId: localTargetId, prompt: 'local work' },
+      frozenContinuationConfig: {
+        inputConfig: { cliType: 'builtin', agentType: 'codex', chainDepth: 0 },
+      },
+      initiatorChainDepth: 0,
+      createdAt: '2026-07-19T00:00:00.000Z',
+      deadlineAt: '2026-07-21T00:00:00.000Z',
+      items: [
+        {
+          status: 'active',
+          target: { sessionId: localTargetId, userTurnId: 'local-turn-1' },
+          inputDurable: true,
+        },
+      ],
+    });
+    seedStore.close();
+
+    harness.coordinator.start();
+    try {
+      await slowCatchUpEntered;
+      // Fast wake completes without waiting for the blocked remote catch-up fiber.
+      await harness.coordinator.wake('check-local-op');
+      const inspectStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+      try {
+        expect(inspectStore.get(harness.requesterSessionId, 'local-fast-op')).toMatchObject({
+          state: 'finished',
+          completion: {
+            type: 'result',
+            value: { items: [{ status: 'succeeded', output: { text: 'fast local result' } }] },
+          },
+        });
+        expect(inspectStore.get(harness.requesterSessionId, 'review-round-1').state).toBe('active');
+      } finally {
+        inspectStore.close();
+      }
+    } finally {
+      releaseSlowCatchUp?.();
+      await harness.coordinator.stop();
+    }
+  });
+
+  it('bounds hanging catch-up via Effect Clock timeout and retries on bounded backoff', async () => {
+    vi.useFakeTimers({
+      toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+    });
+    let attempts = 0;
+    let releaseHungAttempt: (() => void) | undefined;
+    const harness = await makeHarness({
+      targetInputDurable: false,
+      confirmTargetReadable: async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          await new Promise<void>((resolve) => {
+            releaseHungAttempt = resolve;
+          });
+        }
+      },
+    });
+    harness.coordinator.start();
+    try {
+      await harness.coordinator.wake('startup-kick');
+      expect(attempts).toBe(1);
+      expect(harness.materializeTarget).not.toHaveBeenCalled();
+
+      // Effect timeout fires at 8,000ms and arms the 1,000ms backoff retry.
+      await vi.advanceTimersByTimeAsync(8_000);
+      await harness.coordinator.idle();
+      expect(harness.materializeTarget).not.toHaveBeenCalled();
+      expect(harness.logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Target document catch-up timed out after 8000ms')
+      );
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      await harness.coordinator.idle();
+      expect(attempts).toBe(2);
+      expect(harness.materializeTarget).toHaveBeenCalledTimes(1);
+      const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+      try {
+        expect(store.get(harness.requesterSessionId, 'review-round-1').items[0]).toMatchObject({
+          status: 'active',
+          inputDurable: true,
+        });
+      } finally {
+        store.close();
+      }
+    } finally {
+      releaseHungAttempt?.();
       await harness.coordinator.stop();
     }
   });
@@ -1830,6 +1976,7 @@ describe('native coordinator failure boundaries', () => {
         cancel: () => Effect.void,
         cancelWhere: () => Effect.void,
         has: () => false,
+        hasPending: () => false,
         drain: Effect.void,
       };
       const ports: CoordinatorPorts['Service'] = {
@@ -1839,8 +1986,6 @@ describe('native coordinator failure boundaries', () => {
         metadata: () => Effect.failCause(cause),
         session: () => Effect.fail(new Error('unexpected history access')),
         execution: () => ({}),
-        operation: () => Effect.succeed({ signal: { aborted: false } }),
-        cancelInactive: () => Effect.void,
         receipts: Effect.succeed([]),
         wakeInbox: Effect.void,
         confirmReadable: () => Effect.void,
@@ -1856,12 +2001,16 @@ describe('native coordinator failure boundaries', () => {
             Effect.gen(function* () {
               const repository = yield* OperationRepository;
               const scope = yield* Effect.scope;
+              const materializations = yield* FiberMap.make<string, void, never>();
+              const permits = yield* Semaphore.make(5);
               const core = new CoordinatorWorkflow(
                 { workspaceId: operation.workspaceId, machineId: operation.ownerMachineId },
                 ports,
                 repository,
                 activity,
-                scope
+                scope,
+                materializations,
+                permits
               );
               const exit = yield* Effect.exit(
                 scenario.startsWith('progress')

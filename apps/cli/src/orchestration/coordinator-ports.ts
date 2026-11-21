@@ -6,8 +6,25 @@ import type {
   StoredLodyOperation,
 } from '@lody/shared';
 import type { HistoryAction, SessionTurnRead } from '@lody/shared/session-data';
-import { Context, Effect } from 'effect';
+import { Context, Data, Effect } from 'effect';
 import type { InboxBatch } from './inbox/model';
+
+/**
+ * Bounded remote catch-up budget for a single item materialization attempt.
+ * A timeout is uncertainty (never permanent absence): the item arms its own
+ * exponential backoff retry while unrelated Operations continue unhindered.
+ */
+export const TARGET_CATCH_UP_TIMEOUT_MS = 8_000;
+
+export class TargetCatchUpTimeoutError extends Data.TaggedError('TargetCatchUpTimeoutError')<{
+  readonly sessionId: SessionId;
+  readonly reason: string;
+  readonly timeoutMs: number;
+}> {
+  override get message(): string {
+    return `Target document catch-up timed out after ${this.timeoutMs}ms (${this.sessionId}, ${this.reason})`;
+  }
+}
 
 export type CoordinatorHistory = {
   meta: SessionMeta;
@@ -22,8 +39,6 @@ export class CoordinatorPorts extends Context.Service<
   {
     metadata(id: SessionId): Effect.Effect<{ meta: SessionMeta } | undefined, unknown>;
     execution(id: SessionId): { activeTurnId?: string };
-    operation(key: string): Effect.Effect<{ signal: { readonly aborted: boolean } }, unknown>;
-    cancelInactive(keys: Set<string>): Effect.Effect<void>;
     receipts: Effect.Effect<InboxBatch[], unknown>;
     wakeInbox: Effect.Effect<void, unknown>;
     active(): boolean;

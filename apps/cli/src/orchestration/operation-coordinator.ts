@@ -75,7 +75,6 @@ export type LodyOperationCoordinatorOptions = {
 export class LodyOperationCoordinator {
   private readonly storeFactory: () => LodyOperationStore;
   private readonly now: () => number;
-  private readonly operationAbortControllers = new Map<string, AbortController>();
   private metaWatch: RepoWatchHandle | null = null;
   private store: LodyOperationStore | null = null;
   private storeWatch: Pick<FSWatcher, 'close'> | null = null;
@@ -215,7 +214,6 @@ export class LodyOperationCoordinator {
             (effect) => {
               if (this.started && this.nativeEpoch === epoch) Effect.runSync(effect);
             },
-            this.operationAbortControllers,
             this.nativeRawWork,
             this.materializationClaimToken
           )
@@ -354,8 +352,6 @@ export class LodyOperationCoordinator {
     void this.quiesceReceipt.catch((cause) => {
       this.quiesceFailure = cause;
     });
-    for (const controller of this.operationAbortControllers.values()) controller.abort();
-    this.operationAbortControllers.clear();
     this.shutdown = this.finishStop().catch((cause) => {
       this.shutdownFailure = cause;
       throw cause;
@@ -368,7 +364,8 @@ export class LodyOperationCoordinator {
     // Keep the native runtime/connection alive for the final release and settlement receipts.
     await withTimeout(
       (async () => {
-        await this.drainActivity();
+        await this.cancelMaterializationsForStop();
+        await this.drainActivity(false);
         if (this.startupComplete) await this.options.executionService.drainInboxExecutions?.();
         await Promise.allSettled([...this.inboxExecutions, ...this.nativeRawWork]);
       })(),
@@ -452,28 +449,42 @@ export class LodyOperationCoordinator {
   }
   async idle(): Promise<void> {
     if (!this.started && this.shutdown) return this.shutdown;
-    await this.drainActivity();
+    await this.drainActivity(true);
   }
-  private async drainActivity(): Promise<void> {
+  private async cancelMaterializationsForStop(): Promise<void> {
+    if (!this.nativeReady || this.nativeClose || !this.nativeRuntime) return;
+    const { core } = await this.nativeReady;
+    await this.nativeRuntime.runPromise(core.cancelAllMaterializations());
+  }
+  private async drainActivity(includeMaterializations = true): Promise<void> {
     if (!this.nativeReady) return;
     if (this.nativeClose) return;
-    const { activity } = await this.nativeReady;
-    await this.nativeRuntime!.runPromise(activity.drain);
+    const { activity, core } = await this.nativeReady;
+    await this.nativeRuntime!.runPromise(includeMaterializations ? core.drain : activity.drain);
   }
   private operationKey(operation: StoredLodyOperation): string {
     return `${operation.requesterSessionId}\0${operation.operationId}`;
   }
 
   private abortTerminalCoordinators(): void {
-    if (!this.started || this.operationAbortControllers.size === 0) return;
+    if (!this.started || !this.nativeRuntime || !this.nativeReady) return;
     try {
       const active = this.store!.listActive(this.options.workspaceId, this.options.machineId);
       const keys = new Set(active.map((operation) => this.operationKey(operation)));
-      for (const [key, controller] of this.operationAbortControllers)
-        if (!keys.has(key)) {
-          controller.abort();
-          this.operationAbortControllers.delete(key);
-        }
+      const epoch = this.nativeEpoch;
+      const runtime = this.nativeRuntime;
+      void this.nativeReady
+        .then(({ core }) => {
+          if (!this.started || this.nativeEpoch !== epoch) return Promise.resolve();
+          return runtime.runPromise(core.cancelInactiveOperations(keys));
+        })
+        .catch((error) => {
+          this.options.logger.debug(
+            `[orchestration] Could not refresh coordinator cancellation state: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        });
     } catch (error) {
       this.options.logger.debug(
         `[orchestration] Could not refresh coordinator cancellation state: ${

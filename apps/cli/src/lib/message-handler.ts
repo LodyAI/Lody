@@ -365,6 +365,7 @@ import {
   SessionEditAndResendService,
   type SessionEditAndResendInput,
 } from '@/session/session-edit-and-resend-service';
+import { TARGET_CATCH_UP_TIMEOUT_MS } from '@/orchestration/coordinator-ports';
 import { LodyOperationCoordinator } from '@/orchestration/operation-coordinator';
 import {
   createLocalSessionCommandEnvironment,
@@ -4344,13 +4345,23 @@ export class MessageHandler {
       dispatchWatcher: this.sessionDispatchWatcher,
       userResolver: this.sessionUserResolver,
       logger: this.logger,
-      ...(this.cloudPort.kind === 'local'
-        ? {
-            confirmTargetReadable: async () => {
-              await this.workspaceDocument.repo.flush();
-            },
-          }
-        : {}),
+      confirmTargetReadable: async (docId, reason) => {
+        if (this.cloudPort.kind === 'local') {
+          await this.workspaceDocument.repo.flush();
+          return;
+        }
+        const record = await this.workspaceDocument.repo.getDocMeta(docId);
+        const meta =
+          record?.meta && !isLoroRepoDocDeleted(record) ? (record.meta as SessionMeta) : undefined;
+        if (meta && meta.machineId === this.machineId) {
+          await this.workspaceDocument.repo.flush();
+          return;
+        }
+        await this.workspaceDocument.syncRemoteDocOrThrow(docId, {
+          reason,
+          timeoutMs: TARGET_CATCH_UP_TIMEOUT_MS,
+        });
+      },
       materializeTarget: async (operation, item, index) =>
         await this.withDaemonCommandScope(() =>
           this.materializeOperationTarget(operation, item, index)
@@ -7613,6 +7624,21 @@ export class MessageHandler {
    * its authenticated command behavior; only the local platform adds the local host.
    */
   private withDaemonCommandScope<T>(run: () => T): T {
+    const localSessionHost: import('./session-command-environment').DaemonLocalSessionHost = {
+      readActiveTurnId: (sessionId) =>
+        this.executionService.getExecutionSnapshot(sessionId).activeTurnId,
+      steerSession: async (input) => await this.steerSessionWithAccessCheck(input),
+      dispatchSession: async (sessionId, input) => {
+        if (input?.inputOrigin === 'human')
+          await this.executionService.acceptInboxHumanInput({
+            sessionId,
+            inputId: input.inputId,
+            userId: input.userId,
+            config: input.config,
+          });
+        void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
+      },
+    };
     if (this.cloudPort.kind !== 'local')
       return runWithDaemonWorkspace(
         {
@@ -7621,6 +7647,10 @@ export class MessageHandler {
           machineId: this.machineId,
           manager: this.workspaceDocument,
           readInvocation: (sessionId) => this.readActiveInvocation(sessionId),
+          host: localSessionHost,
+          wakeOperations: () => {
+            void this.operationCoordinator.wake('mcp-handoff');
+          },
           ...(this.readWorkspaceAccess ? { readAccess: this.readWorkspaceAccess } : {}),
           ...(this.encryptedExecution
             ? {
@@ -7672,20 +7702,8 @@ export class MessageHandler {
               { pendingInput: 'preserve', prePromptSession: 'discard', pauseInbox: false }
             );
           },
-          readActiveTurnId: (sessionId) =>
-            this.executionService.getExecutionSnapshot(sessionId).activeTurnId,
           withdrawQueuedInput: async (args) => await this.withdrawQueuedInput(args),
-          steerSession: async (input) => await this.steerSessionWithAccessCheck(input),
-          dispatchSession: async (sessionId, input) => {
-            if (input?.inputOrigin === 'human')
-              await this.executionService.acceptInboxHumanInput({
-                sessionId,
-                inputId: input.inputId,
-                userId: input.userId,
-                config: input.config,
-              });
-            void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
-          },
+          ...localSessionHost,
         },
       }),
       run
