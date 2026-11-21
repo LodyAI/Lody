@@ -676,9 +676,11 @@ paging. Inline-only subscription reads never reserve catch-up pages.
 Requests for that exact checkpoint page through the retained bodies while the Agent
 commits later updates. A capture holds at most 4,000 bodies and 16 MiB of encoded data
 and expires after two minutes or owner disposal. The daemon budgets 16 concurrent
-captures and 64 MiB across retained and in-progress captures. Requests for the same
-repair share preparation and cancel their waits independently. The owner stops the
-preparation when its last waiter leaves and releases the budget on settlement.
+captures and 64 MiB across retained and in-progress captures. Requests from the same
+applied checkpoint and retained window share preparation through caller timeouts
+and newer publications. Each caller can cancel its own wait. The owner cancels
+unfinished preparation after two minutes, on generation retirement, or on disposal.
+In-progress work keeps its quota until it settles.
 When a capture cannot fit those bounds, the verified interval still permits paging
 against the matching current head. Superseded pages preserve the cache and retry
 from the last applied checkpoint. A reset requires missing or invalid change coverage.

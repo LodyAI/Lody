@@ -28,13 +28,11 @@ const CAPTURE_LIFETIME_MS = 120_000;
 type ReadyTurn = Extract<SessionTurnRead, { state: 'ready' }>;
 
 type Capture = {
-  owner: symbol;
   response: CatchupResponse;
   start: number;
   range: readonly SessionTurnRead[];
   turns: ReadonlyMap<string, SessionTurnRead>;
   bytes: number;
-  timer: ReturnType<typeof setTimeout>;
 };
 
 type CaptureRead = {
@@ -58,13 +56,17 @@ type CapturePreparation = CaptureRead & {
   ): Promise<T>;
 };
 
-type PendingCapture = {
+type HistoryPreparation = {
   owner: symbol;
   key: string;
   controller: AbortController;
+  timer: ReturnType<typeof setTimeout>;
   result: Promise<CatchupResponse>;
-  waiters: number;
+  capture?: Capture;
 };
+
+const preparationKey = (query: ChangesQuery) =>
+  JSON.stringify([query.checkpoint, query.includeBodiesFrom, query.withPatches ?? false]);
 
 function captureFrom(query: ChangesQuery, response: CatchupResponse): number | undefined {
   const { historyCount: count, result: changes } = response;
@@ -121,14 +123,18 @@ export async function readInlineRoostHistory(
 
 /** Bounded, detached data for exact-checkpoint reads on a single daemon. */
 export class RoostHistoryCatchup {
-  private readonly captures = new Set<Capture>();
-  private readonly pending = new Set<PendingCapture>();
+  private readonly preparations = new Set<HistoryPreparation>();
   private bytes = 0;
 
   read(owner: symbol, query: BodyQuery): SessionHistoryReadResponse | undefined {
     if (!query.atCheckpoint) return undefined;
-    for (const capture of this.captures) {
-      if (capture.owner !== owner || capture.response.result.checkpoint !== query.atCheckpoint)
+    for (const preparation of this.preparations) {
+      const capture = preparation.capture;
+      if (
+        preparation.owner !== owner ||
+        !capture ||
+        capture.response.result.checkpoint !== query.atCheckpoint
+      )
         continue;
       if (query.kind === 'readTurn') {
         const result = capture.turns.get(query.turnId);
@@ -144,23 +150,38 @@ export class RoostHistoryCatchup {
   }
 
   release(owner: symbol): void {
-    for (const pending of this.pending) if (pending.owner === owner) pending.controller.abort();
-    for (const capture of this.captures) if (capture.owner === owner) this.remove(capture);
+    for (const preparation of this.preparations)
+      if (preparation.owner === owner) this.retire(preparation);
   }
 
-  private remove(capture: Capture): void {
-    if (!this.captures.delete(capture)) return;
-    this.bytes -= capture.bytes;
-    clearTimeout(capture.timer);
+  private retire(preparation: HistoryPreparation): void {
+    preparation.controller.abort(
+      Object.assign(new Error('History preparation expired or was superseded'), { code: 'stale' })
+    );
+    if (preparation.capture) this.remove(preparation);
+  }
+
+  private remove(preparation: HistoryPreparation): void {
+    if (!this.preparations.delete(preparation)) return;
+    clearTimeout(preparation.timer);
+    if (preparation.capture) this.bytes -= preparation.capture.bytes;
+  }
+
+  private expire(preparation: HistoryPreparation) {
+    clearTimeout(preparation.timer);
+    const timer = setTimeout(() => this.retire(preparation), CAPTURE_LIFETIME_MS);
+    timer.unref();
+    return timer;
   }
 
   private hasCapture(owner: symbol, response: CatchupResponse, start: number): boolean {
     const changes = response.result;
     if (changes.state !== 'ready') return false;
-    for (const capture of this.captures) {
+    for (const preparation of this.preparations) {
+      const capture = preparation.capture;
       if (
-        capture.owner === owner &&
-        capture.response.result.checkpoint === changes.checkpoint &&
+        preparation.owner === owner &&
+        capture?.response.result.checkpoint === changes.checkpoint &&
         capture.start <= start &&
         changes.ids.every((id) => capture.turns.has(id))
       )
@@ -169,71 +190,80 @@ export class RoostHistoryCatchup {
     return false;
   }
 
-  async prepare(args: CapturePreparation): Promise<CatchupResponse> {
+  resume(
+    owner: symbol,
+    query: ChangesQuery,
+    signal?: AbortSignal
+  ): Promise<CatchupResponse> | undefined {
+    if (query.inlineOnly || query.includeBodiesFrom === undefined) return undefined;
+    const key = preparationKey(query);
+    for (const preparation of this.preparations) {
+      if (
+        preparation.owner === owner &&
+        preparation.key === key &&
+        !preparation.controller.signal.aborted
+      )
+        return this.waitForPreparation(preparation, signal);
+    }
+    return undefined;
+  }
+
+  prepare(args: CapturePreparation): Promise<CatchupResponse> | CatchupResponse {
     const { owner, response, query, signal } = args;
     signal?.throwIfAborted();
     const changes = response.result;
     if (changes.state !== 'ready' || query.includeBodiesFrom === undefined || query.inlineOnly)
       return response;
+    const existing = this.resume(owner, query, signal);
+    if (existing) return existing;
     const count = response.historyCount;
     const start = captureFrom(query, response) ?? count;
-    // Capacity does not invalidate a checkpoint. Ordinary pages still verify
-    // the current head and the reader can retry a superseded page.
+    // If there is no capture capacity, ordinary exact reads still verify their head.
     if (
       Math.max(changes.ids.length, count - start) > MAX_CAPTURE_TURNS ||
-      this.hasCapture(owner, response, start)
-    )
-      return response;
-    const key = JSON.stringify([
-      query.checkpoint,
-      changes.checkpoint,
-      query.includeBodiesFrom,
-      query.withPatches ?? false,
-    ]);
-    for (const pending of this.pending) {
-      if (pending.owner === owner && pending.key === key && !pending.controller.signal.aborted)
-        return this.waitForCapture(pending, signal);
-    }
-    if (
-      this.captures.size + this.pending.size >= MAX_RETAINED_CAPTURES ||
+      this.hasCapture(owner, response, start) ||
+      this.preparations.size >= MAX_RETAINED_CAPTURES ||
       this.bytes >= MAX_RETAINED_BYTES
     )
       return response;
 
-    // Each RPC owns its wait. The capture owns the signal passed to Native reads.
-    const controller = new AbortController();
-    const pending: PendingCapture = {
+    // All retries from one applied checkpoint share the same preparation.
+    // Ending an RPC releases its wait. The owner and the timer bound the work.
+    const preparation: HistoryPreparation = {
       owner,
-      key,
-      controller,
-      result: Promise.resolve()
-        .then(() => this.materialize(args, changes, start, controller.signal))
-        .finally(() => this.pending.delete(pending)),
-      waiters: 0,
+      key: preparationKey(query),
+      controller: new AbortController(),
+      timer: setTimeout(() => this.retire(preparation), CAPTURE_LIFETIME_MS),
+      result: Promise.resolve().then(() => this.materialize(args, changes, start, preparation)),
     };
-    this.pending.add(pending);
-    return this.waitForCapture(pending, signal);
+    preparation.timer.unref();
+    this.preparations.add(preparation);
+    void preparation.result.then(
+      () => {
+        if (!this.preparations.has(preparation)) return;
+        if (preparation.capture) preparation.timer = this.expire(preparation);
+        else this.remove(preparation);
+      },
+      () => this.remove(preparation)
+    );
+    return this.waitForPreparation(preparation, signal);
   }
 
-  private async waitForCapture(
-    pending: PendingCapture,
-    signal?: AbortSignal
-  ): Promise<CatchupResponse> {
-    pending.waiters++;
-    let onAbort: (() => void) | undefined;
+  private async waitForPreparation(preparation: HistoryPreparation, caller?: AbortSignal) {
+    const owner = preparation.controller.signal;
+    const signal = caller ? AbortSignal.any([caller, owner]) : owner;
+    signal.throwIfAborted();
+    let onAbort!: () => void;
     try {
-      const response = await (signal
-        ? new Promise<CatchupResponse>((resolve, reject) => {
-            onAbort = () => reject(signal.reason);
-            signal.addEventListener('abort', onAbort, { once: true });
-            pending.result.then(resolve, reject);
-          })
-        : pending.result);
-      signal?.throwIfAborted();
+      const response = await new Promise<CatchupResponse>((resolve, reject) => {
+        onAbort = () => reject(signal.reason);
+        signal.addEventListener('abort', onAbort, { once: true });
+        preparation.result.then(resolve, reject);
+      });
+      signal.throwIfAborted();
       return response;
     } finally {
-      if (onAbort) signal?.removeEventListener('abort', onAbort);
-      if (--pending.waiters === 0 && this.pending.has(pending)) pending.controller.abort();
+      signal.removeEventListener('abort', onAbort);
     }
   }
 
@@ -241,8 +271,9 @@ export class RoostHistoryCatchup {
     args: CapturePreparation,
     changes: ReadyChanges,
     start: number,
-    signal: AbortSignal
+    preparation: HistoryPreparation
   ): Promise<CatchupResponse> {
+    const signal = preparation.controller.signal;
     const { owner, response, query } = args;
     const count = response.historyCount;
     args.assertAvailable(signal);
@@ -369,16 +400,11 @@ export class RoostHistoryCatchup {
         this.hasCapture(owner, final.response, final.data.start)
       )
         return final.response;
-      const timer = setTimeout(() => this.remove(capture), CAPTURE_LIFETIME_MS);
-      timer.unref();
-      const capture = {
-        owner,
+      preparation.capture = {
         response: final.response,
         ...final.data,
         bytes: retainedBytes,
-        timer,
       };
-      this.captures.add(capture);
       bytes -= retainedBytes;
       return final.response;
     } finally {

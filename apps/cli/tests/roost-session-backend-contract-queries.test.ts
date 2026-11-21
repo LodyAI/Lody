@@ -1022,108 +1022,129 @@ describe('Production Roost dispatch projection', () => {
     }
   }, 120_000);
 
-  it.each([false, true])(
-    'shares exact body preparation across concurrent readers (cancel all: %s)',
-    async (cancelAll) => {
-      const fixture = await coldHistoryHandlerFixture(1);
-      const sessionId = [...fixture.docs.keys()][0]!;
-      const releasePage = Promise.withResolvers<void>();
-      onTestFinished(releasePage.resolve);
-      try {
-        await fixture.ready(sessionId);
-        const active = nativeAssistant('shared-catchup-agent');
-        expect(
-          await fixture.rpc.writeSessionHistoryForRpc(sessionId, 'append', { entry: active })
-        ).toMatchObject({ success: true });
-        const backend = await createSessionBackend(fixture.docs.get(sessionId)!);
-        const initial = await backend.history.getPublication?.();
-        if (!initial) throw new Error('Expected the initial owner checkpoint');
-        for (let index = 0; index < 501; index++)
-          await backend.appendHistoryTurn(nativeUser(`shared-missed-${index}`));
+  it('resumes body preparation after every reader times out and the owner publishes', async () => {
+    const fixture = await coldHistoryHandlerFixture(1);
+    const sessionId = [...fixture.docs.keys()][0]!;
+    const staged = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    onTestFinished(release.resolve);
+    try {
+      await fixture.ready(sessionId);
+      const active = nativeAssistant('shared-catchup-agent');
+      expect(
+        await fixture.rpc.writeSessionHistoryForRpc(sessionId, 'append', { entry: active })
+      ).toMatchObject({ success: true });
+      const backend = await createSessionBackend(fixture.docs.get(sessionId)!);
+      const initial = await backend.history.getPublication?.();
+      if (!initial) throw new Error('Expected the initial owner checkpoint');
+      for (let index = 0; index < 501; index++)
+        await backend.appendHistoryTurn(nativeUser(`shared-missed-${index}`));
 
-        // Let both RPCs reach preparation before either holds the writer queue.
-        const bothPlanned = Promise.withResolvers<void>();
-        onTestFinished(bothPlanned.resolve);
-        const prepare = RoostHistoryCatchup.prototype.prepare;
-        let requests = 0;
-        vi.spyOn(RoostHistoryCatchup.prototype, 'prepare').mockImplementation(
-          async function (args) {
-            if (++requests === 2) bothPlanned.resolve();
-            await bothPlanned.promise;
-            return prepare.call(this, args);
-          }
-        );
-        const pageStarted = Promise.withResolvers<void>();
-        const hydrate = NodeLodyHistory.prototype.readActiveBranchMessages;
-        let firstPageReads = 0;
-        vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchMessages').mockImplementation(
-          async function (view, ids) {
-            if (ids.length === 500 && ids[0] === 'shared-missed-0' && ++firstPageReads === 1) {
-              pageStarted.resolve();
-              await releasePage.promise;
-            }
-            return hydrate.call(this, view, ids);
-          }
-        );
-        const query = {
-          kind: 'readChanges' as const,
-          checkpoint: initial.checkpoint,
-          includeBodiesFrom: 0,
-        };
-        const firstAbort = new AbortController();
-        const secondAbort = new AbortController();
-        const first = fixture.rpc.readSessionHistoryForRpc(sessionId, query, firstAbort.signal);
-        const second = fixture.rpc.readSessionHistoryForRpc(sessionId, query, secondAbort.signal);
-        await pageStarted.promise;
-        const disconnected = new Error('Synthetic reader disconnected during body preparation');
-        firstAbort.abort(disconnected);
-        if (cancelAll) secondAbort.abort(disconnected);
-        const cancelled = { success: false, error: disconnected.message };
-        expect(await first).toMatchObject(cancelled);
-        if (cancelAll) expect(await second).toMatchObject(cancelled);
-        releasePage.resolve();
-        const plan = await (cancelAll
-          ? fixture.rpc.readSessionHistoryForRpc(sessionId, query)
-          : second);
-        expect(plan).toMatchObject({ success: true, historyCount: 502 });
-        const changes = SessionHistoryChangesSchema.parse(plan.result);
-        expect(changes.state).toBe('ready');
-        expect(firstPageReads).toBe(cancelAll ? 2 : 1);
-
-        await backend.applyAgentBatch({
-          targetAssistantEntryId: active.id,
-          operationIds: ['output-after-shared-read'],
-          notifications: [
-            {
-              sessionId,
-              update: {
-                sessionUpdate: 'agent_message_chunk',
-                content: { type: 'text', text: 'new output' },
-              },
-            },
-          ],
+      // Hold the final receipt scan outside the writer queue after staging the pages.
+      const prepare = RoostHistoryCatchup.prototype.prepare;
+      vi.spyOn(RoostHistoryCatchup.prototype, 'prepare').mockImplementation(function (args) {
+        return prepare.call(this, {
+          ...args,
+          finish: async (capture, signal) => {
+            staged.resolve();
+            await release.promise;
+            return args.finish(capture, signal);
+          },
         });
-        for (const [from, to] of [
-          [1, 501],
-          [501, 502],
-        ] as const) {
-          const page = await fixture.rpc.readSessionHistoryForRpc(sessionId, {
-            kind: 'readRange',
-            from,
-            to,
-            atCheckpoint: changes.checkpoint,
-          });
-          expect(page).toMatchObject({ success: true, historyRevision: plan.historyRevision });
-          expect(page.result).toHaveLength(to - from);
+      });
+      const hydrate = NodeLodyHistory.prototype.readActiveBranchMessages;
+      let firstPageReads = 0;
+      vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchMessages').mockImplementation(
+        async function (view, ids) {
+          if (ids.length === 500 && ids[0] === 'shared-missed-0') firstPageReads++;
+          return hydrate.call(this, view, ids);
         }
-        expect(firstPageReads).toBe(cancelAll ? 2 : 1);
-      } finally {
-        releasePage.resolve();
-        await fixture.close();
-      }
-    },
-    120_000
-  );
+      );
+      const query = {
+        kind: 'readChanges' as const,
+        checkpoint: initial.checkpoint,
+        includeBodiesFrom: 0,
+      };
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const firstAbort = new AbortController();
+      const timeout = new Error('Synthetic 30-second history read timeout');
+      setTimeout(() => firstAbort.abort(timeout), 30_000);
+      const first = fixture.rpc.readSessionHistoryForRpc(sessionId, query, firstAbort.signal);
+      const secondAbort = new AbortController();
+      const second = fixture.rpc.readSessionHistoryForRpc(sessionId, query, secondAbort.signal);
+      await Promise.race([
+        staged.promise,
+        first.then(() => {
+          throw new Error('Expected detached history preparation');
+        }),
+      ]);
+      const disconnected = new Error('Synthetic reader timed out during body preparation');
+      secondAbort.abort(disconnected);
+      expect(await second).toMatchObject({ success: false, error: disconnected.message });
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await first).toMatchObject({ success: false, error: timeout.message });
+
+      await backend.applyAgentBatch({
+        targetAssistantEntryId: active.id,
+        operationIds: ['output-during-retry'],
+        notifications: [
+          {
+            sessionId,
+            update: {
+              sessionUpdate: 'agent_message_chunk',
+              content: { type: 'text', text: 'Agent output after the timeout' },
+            },
+          },
+        ],
+      });
+      const published = await backend.history.getPublication?.();
+      const retry = fixture.rpc.readSessionHistoryForRpc(sessionId, query);
+      release.resolve();
+
+      const plan = await retry;
+      expect(plan).toMatchObject({
+        success: true,
+        historyCount: 502,
+        historyRevision: published?.historyRevision,
+      });
+      const changes = SessionHistoryChangesSchema.parse(plan.result);
+      expect(changes).toMatchObject({
+        state: 'ready',
+        checkpoint: published?.checkpoint,
+        ids: expect.arrayContaining([active.id]),
+      });
+      const [firstPage, lastPage, agent] = await Promise.all([
+        fixture.rpc.readSessionHistoryForRpc(sessionId, {
+          kind: 'readRange',
+          from: 1,
+          to: 501,
+          atCheckpoint: changes.checkpoint,
+        }),
+        fixture.rpc.readSessionHistoryForRpc(sessionId, {
+          kind: 'readRange',
+          from: 501,
+          to: 502,
+          atCheckpoint: changes.checkpoint,
+        }),
+        fixture.rpc.readSessionHistoryForRpc(sessionId, {
+          kind: 'readTurn',
+          turnId: active.id,
+          atCheckpoint: changes.checkpoint,
+        }),
+      ]);
+      expect(firstPage.result).toHaveLength(500);
+      expect(lastPage.result).toMatchObject([{ turn: { id: 'shared-missed-500' } }]);
+      expect(agent.result).toMatchObject({
+        state: 'ready',
+        turn: { items: [{ text: 'Agent output after the timeout' }] },
+      });
+      expect(firstPageReads).toBe(1);
+    } finally {
+      release.resolve();
+      vi.useRealTimers();
+      await fixture.close();
+    }
+  }, 120_000);
 
   it('commits Agent output while a cancelled history read is between receipt pages', async ({
     onTestFinished,

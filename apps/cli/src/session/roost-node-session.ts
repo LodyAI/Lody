@@ -792,6 +792,7 @@ const createNodeServicesForLease = async (
     const preservedGoal = operationCursor === undefined ? undefined : goalProjection;
     if (await historyGeneration.resolve()) {
       branchCursors.clear();
+      historyCatchup.release(catchupOwner);
     }
     roostHistory = historyGeneration.history;
     historyHost = historyGeneration.host;
@@ -3672,6 +3673,8 @@ const createNodeServicesForLease = async (
     };
     assertAvailable(signal);
     if (query.kind !== 'readChanges') return historyCatchup.read(catchupOwner, query);
+    const resumed = historyCatchup.resume(catchupOwner, query, signal);
+    if (resumed) return resumed;
     const scan = async (checkpoint: string, readSignal?: AbortSignal) => {
       assertAvailable(readSignal);
       const before = await getHistoryPublication(readSignal);
