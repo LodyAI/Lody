@@ -67,7 +67,7 @@ retry first recovers retained resources, then starts a replacement.
 `inbox/sqlite.ts` indexes results in the existing completion transaction, fixes release
 watermarks and persists input/batch/release receipts. `inbox/service.ts` owns coalesced
 signals, scoped workers and the shared admission gate. `inbox/legacy.ts` registers the
-single host runtime and the unfinished Session adapter. Interrupted executions retire without replay. Startup retires old active inputs and clears legacy
+single host runtime and the unfinished Session adapter. Interrupted executions retire without replay; the Session layer may follow one with a separate Lody-authored `continue` input, detected from Session metadata, not from this store ([continuation spec](../../../../specs/interrupted-turn-continuation.md)). Startup retires old active inputs and clears legacy
 blocks; `blocked` and `inbox_resources` are otherwise neither read nor written. Restart retirement
 currently emits a warning rather than a history notice because activation owns SQLite only.
 
@@ -85,6 +85,8 @@ retired execution, so it cannot clear a successor's slot. Failed exits grant no 
 intent, but later wakeable receipts can proceed. Process identities are not journaled;
 restart orphan-process cleanup is deferred. The offline recovery command and startup PID
 proof are removed. See the [availability decision](../../../../.agents/notes/implemented/bug-fix/2026-10-29-inbox-no-durable-block.md).
+
+Shared SQLite `busy` failures stop the current retry/prepare pass: another receipt cannot acquire the same writer lock, and repeating its synchronous five-second wait would freeze the daemon repeatedly. One interruptible scope-owned retry starts after 250 ms, doubles to a two-second cap, and coalesces scan wakes during backoff. Explicit admission, Stop and submit do not depend on that flag. Successful scanning resets the delay; scope closure cancels the retry. Row-local errors and `SQLITE_FULL` still attempt independent work, retaining failed receipts and full Causes. The native five-second wait for an individual SQL call remains unchanged.
 
 Session admission locks retain waiters and holders until zero references. Projected
 receipt caches follow SQLite identities/statuses; release retries own a private receipt.

@@ -14,6 +14,11 @@
   Never scan history for plausible work or replay a transcript for native continuation.
   Scan pending outcomes by due time; hashes identify duplicates, never recovery progress.
   Retain unconfirmed release and failed observations until a later successful check.
+- A run is a wait without a program, owned by the Host's run Scope, never by the check
+  that starts it. Persist the start before spawn; a started run without a live owner
+  is reported interrupted, never started again. Runs receive an explicit environment,
+  not Agent credentials. Prompt and MCP guidance recommending `run` is owner-approved;
+  keep it one sentence per surface. [Decision](../../../../.agents/notes/implemented/feature/2026-11-16-managed-long-runs.md).
 - External JavaScript checks conditions and returns false or a resume result. Keep
   event-to-action mapping internal; registration binds the same Session once.
 - Commit a matched result and its continuation identity together. Never rerun a matched
@@ -38,9 +43,16 @@
   `actions/session-actions-legacy.ts`, and `sources/sessions-legacy.ts` are explicit
   bridges to unfinished Fleet/Repo/Session Promise APIs. Join raw adapter work;
   remove each bridge when its owner migrates, rather than add a parallel runtime.
+- Auto delivery requests only the existing quick-action text and facts the agent
+  cannot discover, admitted under Session group settlement and a current-head guard.
+  The daemon never mutates GitHub. Keep its per-kind repair limit and one merge
+  request per head; exhausted limits stop with a reason, never retry.
+  [Spec](../../../../specs/session-auto-delivery.md).
 - PR poller: active CI waits and undelivered continuations retain current-PR demand,
   including terminal PRs, under existing quota/fairness gates. Actions denial cools
   only Actions reads. Source data belongs in this ledger, not poller scheduling state.
   Revalidate owner metadata before publishing.
-- Fleet uses the shared workspace content policy to withhold Automations from encrypted
-  workspaces until their automation channel is implemented, including control and retry paths.
+- Encrypted workspaces run Automations locally. Session actions sign their queued input
+  as this machine before the write, and encrypted admission refuses automation input
+  without that signature. Remote control follows the shared `rpc` content verdict: Fleet
+  installs the remote verifier, and the renderer offers remote controls, only where it holds.

@@ -1,7 +1,11 @@
-import { Spinner } from '@lody/ui/spinner';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { Button } from '@lody/ui/button';
 import { Textarea } from '@lody/ui/textarea';
+import { SecondaryPage, type SecondaryPageState } from '@/components/pages/secondary-page';
+// Placeholder workspace avatar until per-workspace avatars are supported.
 import workspaceAvatarPlaceholder from '@/assets/icon-transparent.png';
 
 export type WorkspaceJoinPageState =
@@ -31,6 +35,41 @@ export interface WorkspaceJoinRequestPageProps {
   onBackHome: () => void;
 }
 
+const styles = stylex.create({
+  avatar: {
+    width: 26,
+    height: 26,
+    objectFit: 'contain',
+  },
+  field: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+  },
+  label: {
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
+    fontWeight: 500,
+    color: colors.label,
+  },
+});
+
+const PAGE_STATE: Record<WorkspaceJoinPageState, SecondaryPageState> = {
+  loading: 'arrive',
+  submitting: 'arrive',
+  pending: 'arrive',
+  unavailable: 'blocked',
+  error: 'blocked',
+  auth_required: 'ask',
+  verification_required: 'ask',
+  form: 'ask',
+  rejected: 'ask',
+  approved: 'done',
+  already_member: 'done',
+};
+
+const HEADING_ID = 'join-request-title';
+
 export function WorkspaceJoinRequestPage({
   state,
   workspaceName,
@@ -45,135 +84,180 @@ export function WorkspaceJoinRequestPage({
   onBackHome,
 }: WorkspaceJoinRequestPageProps) {
   const { t } = useTranslation();
-  const name = workspaceName || t('joinRequest.workspaceFallback', 'Workspace');
-  const busy = state === 'loading' || state === 'submitting';
-
-  return (
-    <div className="flex min-h-screen w-full items-center justify-center bg-background p-4">
-      <div className="w-full max-w-md overflow-hidden rounded-2xl border border-border/60 bg-card shadow-[0_8px_30px_-12px_rgba(0,0,0,0.12)]">
-        <div className="flex flex-col items-center px-7 pb-7 pt-8 text-center">
-          {busy ? <Spinner size="large" className="mb-4 text-muted-foreground" /> : null}
-          {!busy ? (
-            <img
-              src={workspaceAvatarPlaceholder}
-              alt=""
-              aria-hidden="true"
-              className="mb-4 h-12 w-12 object-contain"
-            />
-          ) : null}
-          <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground/80">
-            {t('joinRequest.eyebrow', 'Workspace access request')}
-          </p>
-          <h1 className="mt-1.5 text-xl font-semibold tracking-tight">
-            {state === 'unavailable' ? t('joinRequest.unavailableTitle', 'Link unavailable') : name}
-          </h1>
-
-          {state === 'loading' ? (
-            <p className="mt-2 text-sm text-muted-foreground">
-              {t('joinRequest.loading', 'Checking this link…')}
-            </p>
-          ) : null}
-          {state === 'unavailable' ? (
-            <Message>
-              {t('joinRequest.unavailable', 'This link is invalid, expired, or disabled.')}
-            </Message>
-          ) : null}
-          {state === 'auth_required' ? (
-            <>
-              <Message>
-                {t(
-                  'joinRequest.authRequired',
-                  'Sign in or create an account to request access. You can use any verified email.'
-                )}
-              </Message>
-              <Button size="large" className="mt-6 w-full" onClick={onContinue}>
-                {t('joinRequest.continue', 'Continue')}
-              </Button>
-            </>
-          ) : null}
-          {state === 'verification_required' ? (
-            <>
-              <Message>
-                {t('joinRequest.verify', 'Verify {{email}} before submitting your request.', {
-                  email: currentEmail || '',
-                })}
-              </Message>
-              <Button size="large" className="mt-6 w-full" onClick={onVerifyEmail}>
-                {t('joinRequest.verifyAction', 'Verify email')}
-              </Button>
-            </>
-          ) : null}
-          {state === 'form' || state === 'submitting' || state === 'rejected' ? (
-            <div className="mt-5 w-full text-left">
-              {state === 'rejected' ? (
-                <p className="mb-4 rounded-lg bg-muted/60 p-3 text-sm text-muted-foreground">
-                  {t(
-                    'joinRequest.rejected',
-                    'Your previous request was not approved. You may submit a new reason.'
-                  )}
-                </p>
-              ) : null}
-              <label htmlFor="join-request-reason" className="text-sm font-medium">
-                {t('joinRequest.reasonLabel', 'Why do you want to join?')}
-              </label>
-              <Textarea
-                id="join-request-reason"
-                className="mt-2 min-h-28 resize-y"
-                value={reason}
-                maxLength={1000}
-                disabled={state === 'submitting'}
-                placeholder={t(
-                  'joinRequest.reasonPlaceholder',
-                  'Share context for the workspace owner…'
-                )}
-                onChange={(event) => onReasonChange(event.target.value)}
-              />
-              <p className="mt-2 text-xs text-muted-foreground">
-                {t('joinRequest.identity', 'Submitting as {{email}}', {
-                  email: currentEmail || '',
-                })}
-              </p>
-              <Button
-                size="large"
-                className="mt-5 w-full"
-                disabled={!reason.trim() || state === 'submitting'}
-                onClick={onSubmit}
-              >
-                {state === 'submitting'
-                  ? t('joinRequest.submitting', 'Submitting…')
-                  : t('joinRequest.submit', 'Submit request')}
-              </Button>
-            </div>
-          ) : null}
-          {state === 'pending' ? (
-            <Message>
-              {t('joinRequest.pending', 'Request sent. The workspace owner will review it.')}
-            </Message>
-          ) : null}
-          {state === 'approved' || state === 'already_member' ? (
-            <>
-              <Message>
-                {state === 'approved'
-                  ? t('joinRequest.approved', 'Your request was approved.')
-                  : t('joinRequest.alreadyMember', 'You are already a member of this workspace.')}
-              </Message>
-              <Button size="large" className="mt-6 w-full" onClick={onOpenWorkspace}>
-                {t('joinRequest.openWorkspace', 'Open workspace')}
-              </Button>
-            </>
-          ) : null}
-          {state === 'error' ? <Message>{errorMessage || t('common.tryAgain')}</Message> : null}
-          {state === 'unavailable' || state === 'error' ? (
-            <Button variant="ghost" className="mt-4" onClick={onBackHome}>
-              {t('invite.error.backButton', 'Back to home')}
-            </Button>
-          ) : null}
-        </div>
-      </div>
-    </div>
+  const name = workspaceName?.trim() || t('joinRequest.workspaceFallback', 'Workspace');
+  const avatar = (
+    <img
+      src={workspaceAvatarPlaceholder}
+      alt=""
+      aria-hidden="true"
+      draggable={false}
+      {...stylex.props(styles.avatar)}
+    />
   );
-}
+  const common = {
+    state: PAGE_STATE[state],
+    from: avatar,
+    markLabel: t('invite.markLabel', 'Workspace and Lody'),
+  };
+  const backHome = (
+    <Button size="large" variant="secondary" onClick={onBackHome}>
+      {t('invite.error.backButton', 'Back to home')}
+    </Button>
+  );
 
-function Message({ children }: { children: React.ReactNode }) {
-  return <p className="mt-3 text-sm leading-6 text-muted-foreground">{children}</p>;
+  if (state === 'loading') {
+    return (
+      <SecondaryPage
+        {...common}
+        title={t('joinRequest.eyebrow', 'Workspace access request')}
+        description={t('joinRequest.loading', 'Checking this link…')}
+      />
+    );
+  }
+
+  if (state === 'unavailable') {
+    return (
+      <SecondaryPage
+        {...common}
+        title={t('joinRequest.unavailableTitle', 'Link unavailable')}
+        description={t('joinRequest.unavailable', 'This link is invalid, expired, or disabled.')}
+        actions={backHome}
+      />
+    );
+  }
+
+  if (state === 'error') {
+    return (
+      <SecondaryPage
+        {...common}
+        title={name}
+        description={errorMessage || t('common.tryAgain')}
+        actions={backHome}
+      />
+    );
+  }
+
+  if (state === 'auth_required') {
+    return (
+      <SecondaryPage
+        {...common}
+        title={name}
+        description={t(
+          'joinRequest.authRequired',
+          'Sign in or create an account to request access. You can use any verified email.'
+        )}
+        actions={
+          <Button size="large" onClick={onContinue}>
+            {t('joinRequest.continue', 'Continue')}
+          </Button>
+        }
+      />
+    );
+  }
+
+  if (state === 'verification_required') {
+    return (
+      <SecondaryPage
+        {...common}
+        title={name}
+        description={t('joinRequest.verify', 'Verify {{email}} before submitting your request.', {
+          email: currentEmail || '',
+        })}
+        actions={
+          <Button size="large" onClick={onVerifyEmail}>
+            {t('joinRequest.verifyAction', 'Verify email')}
+          </Button>
+        }
+      />
+    );
+  }
+
+  if (state === 'pending') {
+    return (
+      <SecondaryPage
+        {...common}
+        title={name}
+        description={t('joinRequest.pending', 'Request sent. The workspace owner will review it.')}
+      />
+    );
+  }
+
+  if (state === 'approved' || state === 'already_member') {
+    return (
+      <SecondaryPage
+        {...common}
+        title={name}
+        description={
+          state === 'approved'
+            ? t('joinRequest.approved', 'Your request was approved.')
+            : t('joinRequest.alreadyMember', 'You are already a member of this workspace.')
+        }
+        actions={
+          <Button size="large" onClick={onOpenWorkspace}>
+            {t('joinRequest.openWorkspace', 'Open workspace')}
+          </Button>
+        }
+      />
+    );
+  }
+
+  // form, submitting, rejected
+  const submitting = state === 'submitting';
+  return (
+    <form
+      aria-labelledby={HEADING_ID}
+      aria-busy={submitting}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (reason.trim() && !submitting) onSubmit();
+      }}
+    >
+      <SecondaryPage
+        {...common}
+        headingId={HEADING_ID}
+        title={name}
+        description={
+          state === 'rejected'
+            ? t(
+                'joinRequest.rejected',
+                'Your previous request was not approved. You may submit a new reason.'
+              )
+            : t(
+                'joinRequest.formDescription',
+                'Request access. The workspace owner reviews every request.'
+              )
+        }
+        note={
+          currentEmail
+            ? t('joinRequest.identity', 'Submitting as {{email}}', { email: currentEmail })
+            : undefined
+        }
+        actions={
+          <Button type="submit" size="large" disabled={!reason.trim() || submitting}>
+            {submitting
+              ? t('joinRequest.submitting', 'Submitting…')
+              : t('joinRequest.submit', 'Submit request')}
+          </Button>
+        }
+      >
+        <div {...stylex.props(styles.field)}>
+          <label htmlFor="join-request-reason" {...stylex.props(styles.label)}>
+            {t('joinRequest.reasonLabel', 'Why do you want to join?')}
+          </label>
+          <Textarea
+            id="join-request-reason"
+            rows={4}
+            value={reason}
+            maxLength={1000}
+            disabled={submitting}
+            placeholder={t(
+              'joinRequest.reasonPlaceholder',
+              'Share context for the workspace owner…'
+            )}
+            onChange={(event) => onReasonChange(event.target.value)}
+          />
+        </div>
+      </SecondaryPage>
+    </form>
+  );
 }

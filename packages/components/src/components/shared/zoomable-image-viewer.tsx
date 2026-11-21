@@ -38,7 +38,7 @@ import './zoomable-image-viewer.css';
  *
  * `react-photo-view@1.2.7` is patched in root `patches/` to hard-clamp the
  * minimum pinch scale at `1`. Do not replace that with an outer
- * `overlayRender`/React state clamp; that fights PhotoView's touch state.
+ * React state clamp (`overlayRender` here only captures `changeIndex`); that fights PhotoView's touch state.
  *
  * On a desktop-shaped surface the same viewer presents as a LIGHTBOX rather
  * than a full-bleed takeover (`zoomable-image-viewer.css`): the photo keeps an
@@ -127,6 +127,8 @@ export type ZoomableImageViewerProps = {
    * enclosing Vaul drawer; pass the scroll root or the preview container.
    */
   readonly portalAnchorRef?: ImagePreviewPortalAnchorRef;
+  /** Read-only conversation surfaces suppress file export menus. Defaults to true. */
+  readonly allowExport?: boolean;
 };
 
 export function ZoomableImageViewer({
@@ -137,6 +139,7 @@ export function ZoomableImageViewer({
   onIndexChange,
   onAnnotate,
   portalAnchorRef,
+  allowExport = true,
 }: ZoomableImageViewerProps) {
   const portalContainer = resolveImagePreviewPortalContainer(portalAnchorRef?.current);
 
@@ -146,6 +149,7 @@ export function ZoomableImageViewer({
 
   return (
     <OpenZoomableImageViewer
+      allowExport={allowExport}
       onClose={onClose}
       images={images}
       index={index}
@@ -170,14 +174,14 @@ const PHOTO_SELECTOR = 'img.lody-photo-slider-image';
  * owns that element and re-creates it per slide, and while the viewer is open
  * it is the only thing on screen the selector can match.
  */
-function useImagePreviewContextMenu(images: ZoomableImageViewerItem[]) {
+function useImagePreviewContextMenu(images: ZoomableImageViewerItem[], allowExport: boolean) {
   const { t } = useTranslation();
   // Sliding to another photo must not re-install the listener.
   const imagesRef = useRef(images);
   imagesRef.current = images;
 
   useEffect(() => {
-    if (!getImagePreviewExportBridge()) {
+    if (allowExport && !getImagePreviewExportBridge()) {
       return undefined;
     }
 
@@ -218,6 +222,7 @@ function useImagePreviewContextMenu(images: ZoomableImageViewerItem[]) {
       }
 
       event.preventDefault();
+      if (!allowExport) return;
       const item = imagesRef.current.find((candidate) => candidate.src === src);
       void runImagePreviewContextMenu({
         src,
@@ -233,7 +238,7 @@ function useImagePreviewContextMenu(images: ZoomableImageViewerItem[]) {
     return () => {
       document.removeEventListener('contextmenu', handleContextMenu);
     };
-  }, [t]);
+  }, [t, allowExport]);
 }
 
 type TouchImageMenuTarget = {
@@ -454,6 +459,7 @@ function OpenZoomableImageViewer({
   onIndexChange,
   onAnnotate,
   portalContainer,
+  allowExport,
 }: {
   readonly onClose: () => void;
   readonly images: ZoomableImageViewerItem[];
@@ -461,6 +467,7 @@ function OpenZoomableImageViewer({
   readonly onIndexChange?: (index: number) => void;
   readonly onAnnotate?: (item: ZoomableImageViewerItem) => void;
   readonly portalContainer?: HTMLElement;
+  readonly allowExport: boolean;
 }) {
   const { t } = useTranslation();
   const closeRef = useRef<HTMLElement | null>(null);
@@ -469,15 +476,23 @@ function OpenZoomableImageViewer({
   );
   const { context, refs, elements } = useFloating({ open: true });
   const loops = images.length > 3;
-  const move = (offset: number) =>
-    onIndexChange?.(
-      loops
-        ? (index + offset + images.length) % images.length
-        : Math.max(0, Math.min(images.length - 1, index + offset))
-    );
+  // react-photo-view positions photos from its own internal offset, which only its
+  // `changeIndex` updates; calling `onIndexChange` directly would change the
+  // counter while the picture stayed put. Capture it from the overlay render prop.
+  const sliderChangeIndexRef = useRef<((index: number, pause?: boolean) => void) | null>(null);
+  const move = (offset: number) => {
+    const target = loops
+      ? index + offset
+      : Math.max(0, Math.min(images.length - 1, index + offset));
+    if (sliderChangeIndexRef.current) {
+      sliderChangeIndexRef.current(target, true);
+    } else {
+      onIndexChange?.(loops ? (target + images.length) % images.length : target);
+    }
+  };
   const isMobile = useIsMobile();
   const isElectronFullscreen = useElectronFullscreen();
-  useImagePreviewContextMenu(images);
+  useImagePreviewContextMenu(images, allowExport);
   const { menu, closeMenu } = useImagePreviewLongPress(elements.floating, images[index]);
 
   // Native window controls are drawn ABOVE web content, so the top bar clears
@@ -545,6 +560,10 @@ function OpenZoomableImageViewer({
             onClose={onClose}
             index={index}
             bannerVisible={false}
+            overlayRender={({ onIndexChange: changeIndex }) => {
+              sliderChangeIndexRef.current = changeIndex;
+              return null;
+            }}
             {...(onIndexChange ? { onIndexChange } : {})}
             maskClosable
             // The photo itself is the pan/zoom surface. Letting a tap close it makes
@@ -561,7 +580,9 @@ function OpenZoomableImageViewer({
             portalContainer={elements.floating}
           />
         )}
-        {menu && <TouchImageMenu target={menu} close={closeMenu} finalFocus={closeRef} />}
+        {allowExport && menu && (
+          <TouchImageMenu target={menu} close={closeMenu} finalFocus={closeRef} />
+        )}
         <div
           className={cn(
             sliderClassName,

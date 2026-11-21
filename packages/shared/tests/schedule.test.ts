@@ -7,13 +7,19 @@ import {
   previewSchedule,
   validateScheduleTrigger,
 } from '../src/schedule-time';
-import { scheduleDefinitionFingerprint } from '../src/schedule-registry';
+import {
+  manualScheduleRunKey,
+  scheduleRegistryKeys,
+  scheduleDefinitionFingerprint,
+} from '../src/schedule-registry';
 import {
   normalizeLegacyScheduleAgent,
   SCHEDULED_MESSAGE_RETENTION_MS,
   ScheduleAgentSchema,
   ScheduleDefinitionSchema,
 } from '../src/schedule-types';
+import { scheduleDeclarationSubject } from '../src/e2ee-execution-intent';
+import { readScheduleAuthorization } from '../src/schedule-authorization';
 import { ScheduleRepository, type ScheduleRepositoryPort } from '../src/schedule-repository';
 import { zonedLocalInputToInstant, instantToZonedLocalInput } from '../src/schedule-recurrence';
 
@@ -109,6 +115,131 @@ describe('Schedule time contract', () => {
 });
 
 describe('Schedule persistence contract', () => {
+  it('signs an encrypted declaration first and writes it with the declaration, never unsigned', async () => {
+    const docs = new Map<string, LoroDoc>();
+    const rows = new Map<string, unknown>();
+    const port: ScheduleRepositoryPort = {
+      openPersistedDoc: async (id) => {
+        if (!docs.has(id)) docs.set(id, new LoroDoc());
+        return { doc: docs.get(id)! };
+      },
+      openFlockDoc: async () => ({
+        flock: {
+          scan: () => [...rows].map(([key, value]) => ({ key: JSON.parse(key), value })),
+          get: (key) => rows.get(JSON.stringify(key)),
+          set: (key, value) => rows.set(JSON.stringify(key), value),
+        },
+      }),
+      flush: async () => {},
+    };
+    const d = definition();
+    const save = (repo: ScheduleRepository) =>
+      repo.save({
+        scheduleId: 'signed',
+        draft: {
+          title: d.title,
+          machineId: d.machineId,
+          trigger: d.trigger,
+          agent: d.agent,
+          project: d.project,
+          misfirePolicy: d.misfirePolicy,
+          overlapPolicy: d.overlapPolicy,
+          retryPolicy: d.retryPolicy,
+          prompt: 'hello',
+        },
+        actorId: 'owner',
+        now: 1,
+        activationId: 'activation',
+        activityId: 'created',
+        create: true,
+      });
+    await expect(
+      save(new ScheduleRepository(port, 'workspace' as never, { protectedContent: true }))
+    ).rejects.toThrow('e2ee_signature_unavailable');
+    expect(docs.get('schedule-signed')?.toJSON() ?? {}).toEqual({});
+    const signed: { fingerprint: string; manualRunKey?: string }[] = [];
+    let rejectManual = false;
+    const protectedRepo = new ScheduleRepository(port, 'workspace' as never, {
+      protectedContent: true,
+      signDeclaration: async (document, manualRunKey) => {
+        if (rejectManual && manualRunKey) throw new Error('manual signer unavailable');
+        signed.push({
+          fingerprint: scheduleDeclarationSubject(document, manualRunKey).contentDigest,
+          ...(manualRunKey ? { manualRunKey } : {}),
+        });
+        return 'A'.repeat(131);
+      },
+    });
+    await save(protectedRepo);
+    const signedDoc = docs.get('schedule-signed');
+    if (!signedDoc) throw new Error('missing signed Schedule');
+    const declared = (
+      signedDoc.toJSON() as {
+        scheduleAuthorizations: { definitionFingerprint: string; e2eeIntent?: string }[];
+      }
+    ).scheduleAuthorizations;
+    expect(declared).toEqual([
+      expect.objectContaining({
+        definitionFingerprint: signed[0]!.fingerprint,
+        e2eeIntent: 'A'.repeat(131),
+      }),
+    ]);
+    const unsigned = new ScheduleRepository(port, 'workspace' as never, { protectedContent: true });
+    const pause = {
+      scheduleId: 'signed',
+      enabled: false,
+      actorId: 'owner',
+      now: 2,
+      activationId: 'pause',
+      requestId: 'pause',
+    };
+    await unsigned.setEnabled(pause);
+    await unsigned.setEnabled(pause);
+    expect((await unsigned.read('signed'))?.definition).toMatchObject({
+      enabled: false,
+      activationId: 'pause',
+    });
+    expect((await unsigned.list())[0]?.enabled).toBe(false);
+    expect(
+      (signedDoc.toJSON() as { scheduleAuthorizations: unknown }).scheduleAuthorizations
+    ).toEqual(declared);
+    const manual = { scheduleId: 'signed', actorId: 'owner', manualRunId: 'paused-run', now: 3 };
+    rejectManual = true;
+    await expect(protectedRepo.requestRun(manual)).rejects.toThrow('manual signer unavailable');
+    expect(
+      (signedDoc.toJSON() as { scheduleAuthorizations: unknown }).scheduleAuthorizations
+    ).toEqual(declared);
+    expect(
+      rows.get(JSON.stringify(scheduleRegistryKeys.manual('signed', 'paused-run')))
+    ).toBeUndefined();
+    rejectManual = false;
+    await protectedRepo.requestRun(manual);
+    const paused = await protectedRepo.read('signed');
+    if (!paused) throw new Error('missing paused Schedule');
+    expect(readScheduleAuthorization(signedDoc)?.value).toMatchObject({
+      kind: 'definition',
+      definitionFingerprint: scheduleDefinitionFingerprint(paused),
+    });
+    expect(
+      readScheduleAuthorization(signedDoc, manualScheduleRunKey('signed', 'paused-run'))?.value
+    ).toMatchObject({
+      kind: 'manual',
+      definitionFingerprint: scheduleDefinitionFingerprint(paused),
+    });
+    const authorizations = signedDoc.toJSON().scheduleAuthorizations;
+    await protectedRepo.requestRun(manual);
+    expect(signedDoc.toJSON().scheduleAuthorizations).toEqual(authorizations);
+    expect(
+      rows.get(JSON.stringify(scheduleRegistryKeys.manual('signed', 'paused-run')))
+    ).toMatchObject({ activationId: 'pause' });
+    expect(paused.definition.enabled).toBe(false);
+    signedDoc.getText('prompt').insert(0, 'tampered');
+    await expect(
+      unsigned.setEnabled({ ...pause, enabled: true, requestId: 'resume', activationId: 'resume' })
+    ).rejects.toThrow('e2ee_signature_unavailable');
+    expect((await unsigned.read('signed'))?.definition.enabled).toBe(false);
+  });
+
   it('writes the definition durably before enabling its Registry and reads absent docs without seeding', async () => {
     const docs = new Map<string, LoroDoc>();
     const rows = new Map<string, unknown>();

@@ -113,6 +113,7 @@ describe('SessionList opened-by rendering', () => {
   beforeEach(async () => {
     await initI18n('en');
     Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
       writable: true,
       value: vi.fn().mockImplementation((query: string) => ({
         matches: false,
@@ -142,7 +143,8 @@ describe('SessionList opened-by rendering', () => {
   function renderList(
     sessions: SessionListRow[],
     collapsed: Record<string, boolean> = {},
-    showBranchNames = false
+    showBranchNames = false,
+    extraProps: Record<string, unknown> = {}
   ) {
     const store = createStore();
     store.set(sidebarCollapsedOpenedBySessionsAtom, collapsed);
@@ -161,6 +163,7 @@ describe('SessionList opened-by rendering', () => {
             sessions,
             repos: [{ repoFullName: REPO, collapsed: false }],
             onSelectSession,
+            ...extraProps,
           })
         )
       );
@@ -187,6 +190,38 @@ describe('SessionList opened-by rendering', () => {
     for (const id of ['child', 'grandchild', 'great-grandchild']) {
       expect(indentOf(id)).toBe('child');
     }
+  });
+
+  it('reveals the ⋯ menu in the end slot before Archive, leaving the leading slot to the tree', () => {
+    renderList(makeOpenerGroupRows(), {}, false, { onArchiveSession: () => undefined });
+
+    for (const id of ['opener', 'opened-1', 'unrelated']) {
+      const row = container?.querySelector(`[data-sidebar-session-id="${id}"]`);
+      const leading = row?.querySelector('[data-session-row-leading-slot]');
+      const endSlot = row?.querySelector('[data-session-row-end-slot]');
+      const menu = endSlot?.querySelector<HTMLButtonElement>('button[aria-label="More actions"]');
+      const archive = endSlot?.querySelector<HTMLButtonElement>(
+        'button[aria-label="Archive session"]'
+      );
+      expect(leading?.querySelector('[aria-label="More actions"]')).toBeNull();
+      expect(menu).toBeInstanceOf(HTMLButtonElement);
+      expect(archive).toBeInstanceOf(HTMLButtonElement);
+      expect(menu!.compareDocumentPosition(archive!) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING
+      );
+    }
+
+    // The opener's disclosure is the leading slot's only control.
+    const openerLeading = container
+      ?.querySelector('[data-sidebar-session-id="opener"]')
+      ?.querySelector('[data-session-row-leading-slot]');
+    expect(openerLeading?.querySelectorAll('button')).toHaveLength(1);
+    expect(openerLeading?.querySelector('[data-session-opened-by-toggle]')).not.toBeNull();
+    // A child keeps both connectors there instead.
+    const childLeading = container
+      ?.querySelector('[data-sidebar-session-id="opened-1"]')
+      ?.querySelector('[data-session-row-leading-slot]');
+    expect(childLeading?.querySelectorAll('[data-session-tree-connector]')).toHaveLength(2);
   });
 
   it('lets the disclosure toggle own keyboard activation without navigating', () => {
@@ -369,5 +404,186 @@ describe('Workspace placement under openers across groups', () => {
     // A hidden project (or a pinned opener, absent from every Workspace group)
     // cannot host the row, so it stays where it was.
     expect(place(natural, [opener], () => false)).toBe(natural);
+  });
+});
+
+describe('desktop sidebar mark-unread menus', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+
+  beforeEach(async () => {
+    await initI18n('en');
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    if (root) {
+      flushSync(() => root?.unmount());
+    }
+    root = undefined;
+    container?.remove();
+    container = undefined;
+    vi.restoreAllMocks();
+  });
+
+  it('hides the action once the row is already unread', () => {
+    flushSync(() => {
+      root?.render(
+        React.createElement(SessionList, {
+          sessions: [
+            {
+              sessionId: 'unread-session',
+              title: 'Unread session',
+              repoFullName: null,
+              branchName: '',
+              latestMessageAt: 500,
+              addedLines: 0,
+              deletedLines: 0,
+              isWorking: false,
+              hasUnreadMessages: true,
+              isOffline: false,
+              isWaitingPermission: false,
+            },
+          ],
+          repos: [],
+          onArchiveSession: () => undefined,
+          onMarkSessionUnread: () => undefined,
+        })
+      );
+    });
+
+    const row = container?.querySelector('[data-sidebar-session-id="unread-session"]');
+    const moreButton = row?.querySelector<HTMLButtonElement>('button[aria-label="More actions"]');
+    expect(moreButton).toBeInstanceOf(HTMLButtonElement);
+    flushSync(() => {
+      moreButton?.click();
+    });
+    expect(
+      Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).some((item) =>
+        item.textContent?.includes('Mark as unread')
+      )
+    ).toBe(false);
+  });
+});
+
+describe('SessionList anchor mode', () => {
+  const SAMPLE_SESSION = {
+    sessionId: 'session-1',
+    title: 'Anchor row',
+    repoFullName: 'loro-dev/lody',
+    branchName: 'feat/anchor-row',
+    latestMessageAt: '2026-04-22T00:00:00.000Z',
+    addedLines: 0,
+    deletedLines: 0,
+    isWorking: false,
+    hasUnreadMessages: false,
+    isOffline: false,
+    isWaitingPermission: false,
+  };
+
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+
+  beforeEach(async () => {
+    await initI18n('en');
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+  });
+
+  afterEach(() => {
+    if (root) {
+      flushSync(() => {
+        root?.unmount();
+      });
+    }
+    root = undefined;
+    container?.remove();
+    container = undefined;
+    vi.restoreAllMocks();
+  });
+
+  function renderList(getSessionHref?: (sessionId: string) => string | undefined) {
+    const onSelectSession = vi.fn();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    flushSync(() => {
+      root?.render(
+        React.createElement(SessionList, {
+          sessions: [SAMPLE_SESSION],
+          repos: [{ repoFullName: 'loro-dev/lody', collapsed: false }],
+          onSelectSession,
+          getSessionHref,
+        })
+      );
+    });
+
+    return { onSelectSession };
+  }
+
+  it('intercepts plain left-click and routes through onSelectSession', () => {
+    const { onSelectSession } = renderList((sessionId) => `/workspace-a/sessions/${sessionId}`);
+    const anchor = container?.querySelector<HTMLAnchorElement>(
+      'a[href="/workspace-a/sessions/session-1"]'
+    );
+    expect(anchor).not.toBeNull();
+
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+    flushSync(() => {
+      anchor?.dispatchEvent(event);
+    });
+
+    expect(onSelectSession).toHaveBeenCalledWith('session-1');
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('lets the browser open a new tab on Cmd/Ctrl-click without intercepting', () => {
+    const { onSelectSession } = renderList((sessionId) => `/workspace-a/sessions/${sessionId}`);
+    const anchor = container?.querySelector<HTMLAnchorElement>(
+      'a[href="/workspace-a/sessions/session-1"]'
+    );
+    expect(anchor).not.toBeNull();
+
+    const event = new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      metaKey: true,
+    });
+    flushSync(() => {
+      anchor?.dispatchEvent(event);
+    });
+
+    expect(onSelectSession).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
   });
 });

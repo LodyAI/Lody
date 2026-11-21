@@ -45,7 +45,7 @@ checkout filter 脱离托管选择。原测试 fixture 手动补装了缺失的 
 不能证明生产准备正确。
 
 owner 刷新现在同时更新 shell 资格和上下文。实际 owner 改变时终止旧运行实例，
-包括持有旧 token 环境的 terminal，并明确中止当前操作；下一轮可创建新实例。
+包括持有旧 token 环境的 terminal，同一轮可在新实例通过校验后提交待发送的 prompt。
 仅切换参与者而未转移 owner 不终止实例。session 和宿主准备均安装固定上下文的
 managed helper，覆盖 LFS 路径；非 owner 宿主子进程还清除继承的 GitHub token
 和机器 shell 启动配置。测试直接使用生产准备输出，并放置不得进入非 owner filter

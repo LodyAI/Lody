@@ -4,7 +4,6 @@ import type {
 } from './local-loro-data-plane';
 import type { TerminalDataEvent, TerminalExitEvent, TerminalTitleEvent } from './terminal-protocol';
 import type {
-  CliOutputEvent,
   ElectronCliState,
   ElectronLoginState,
   ElectronLocalSessionControlResponseEvent,
@@ -16,6 +15,7 @@ import type {
   PreparedWindowTarget,
   GlobalShortcutTriggeredPayload,
   SessionCompletionNotificationClickPayload,
+  ElectronPowerState,
 } from './electron-ipc';
 
 export type IpcPushMap = {
@@ -26,7 +26,6 @@ export type IpcPushMap = {
     | { type: 'error'; code: string; message: string };
   'loro.event': LocalLoroDataPlaneServerMessage;
   'loro.status': boolean;
-  'cli.output': CliOutputEvent;
   'cli.state': ElectronCliState;
   'updater.state': ElectronUpdaterState;
   'storageGuard.state': ElectronStorageGuardState;
@@ -45,6 +44,13 @@ export type IpcPushMap = {
   'app.activatePreparedWindow': PreparedWindowTarget;
   /** Re-read hint only: the renderer learns the exact reason from its own refresh. */
   'e2ee.accessLost': { workspaceId: string };
+  /** OS sleep/lock transitions; lock events exist on macOS and Windows only. */
+  'app.powerState': ElectronPowerState;
+  /** Only the requesting document receives these adopted, non-secret outcomes. */
+  'e2ee.recoveryProgress': {
+    operationId: string;
+    result: { workspaceId: string; name: string; outcome: string; partialEpochKey?: boolean };
+  };
 };
 
 export type IpcSendMap = {
@@ -65,7 +71,6 @@ export const IPC_PUSH_CHANNELS = {
   terminalEvent: 'terminal.event',
   loroEvent: 'loro.event',
   loroStatus: 'loro.status',
-  cliOutput: 'cli.output',
   cliState: 'cli.state',
   updaterState: 'updater.state',
   storageGuardState: 'storageGuard.state',
@@ -83,6 +88,8 @@ export const IPC_PUSH_CHANNELS = {
   appPrepareWindowTarget: 'app.prepareWindowTarget',
   appActivatePreparedWindow: 'app.activatePreparedWindow',
   e2eeAccessLost: 'e2ee.accessLost',
+  appPowerState: 'app.powerState',
+  e2eeRecoveryProgress: 'e2ee.recoveryProgress',
 } as const satisfies { [K: string]: keyof IpcPushMap };
 
 export const IPC_SEND_CHANNELS = {

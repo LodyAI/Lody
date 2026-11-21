@@ -1,3 +1,4 @@
+import i18next from 'i18next';
 import { resolveAttachmentRoute } from './session-attachment-routing';
 import { prepareElectronLocalAttachment } from './electron-local-attachment';
 import { isElectronRenderer } from './electron';
@@ -96,17 +97,29 @@ export async function prepareDraftAttachments(args: {
           const validationError = validateSessionImageFile(file);
           if (validationError) throw new Error(validationError);
         }
-        ready = await args.resources.run<SessionInputBlock>(
-          (signal) =>
-            prepareElectronLocalAttachment({
-              workspaceId: args.record.workspaceId,
-              sessionId: args.record.sessionId,
-              machineId: machineId!,
-              attachment,
-              signal,
-            }),
-          args.signal
-        );
+        ready = await args.resources
+          .run<SessionInputBlock>(
+            (signal) =>
+              prepareElectronLocalAttachment({
+                workspaceId: args.record.workspaceId,
+                sessionId: args.record.sessionId,
+                machineId: machineId!,
+                attachment,
+                signal,
+              }),
+            args.signal
+          )
+          .catch((error: unknown) => {
+            throwIfSendAborted(args.signal);
+            // The host's reason alone (a timeout, an unknown request) does not
+            // say which step failed or what the sender can do about it.
+            throw new Error(
+              i18next.t('sessions.localAttachmentPrepareFailed', {
+                reason: error instanceof Error ? error.message : String(error),
+              }),
+              { cause: error }
+            );
+          });
       } else if (attachment.kind === 'image') {
         const image = await args.resources.run(
           (signal) =>

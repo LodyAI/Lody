@@ -1,0 +1,62 @@
+{
+  "name": "antigravity",
+  "version": "1.5.10",
+  "artifacts": {
+    "darwin-arm64": {
+      "fileName": "antigravity-1.5.10-darwin-arm64.tar.zst",
+      "sha256": "ba68bf297c8e7f5c8e3584ed02c2469c0fec90e25c205f9e2a36c28f0e6b60d0",
+      "size": 77813578,
+      "sourceUrl": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.10-5253791805734912/darwin-arm/cli_mac_arm64.tar.gz",
+      "sourceSha512": "f192adfc6ca61bc8f0be93b8503c1a0a4e0314f127c9a13fb7e25228343dfbba09ae1a1be083851d9e79a703e535cc19242db44675e40cf7f9a4eaa8cb9b272f"
+    },
+    "darwin-x64": {
+      "fileName": "antigravity-1.5.10-darwin-x64.tar.zst",
+      "sha256": "a212118581a77738adbddb7bc39c03f116f1f8cd8383cf1b2aeff7d55db8cfb8",
+      "size": 82669446,
+      "sourceUrl": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.10-5253791805734912/darwin-x64/cli_mac_x64.tar.gz",
+      "sourceSha512": "060f38f8a9c436178ea58fd8ca84b7e6d9ce5f49600c52a90046945e0c496e25f0b52accb6440a0dc7b484e8a916f08c1da44da4db738adf9c1081c379a170c2"
+    },
+    "linux-arm64": {
+      "fileName": "antigravity-1.5.10-linux-arm64.tar.zst",
+      "sha256": "0eda27cbeb233fe11caa2e822f3917745d5e39abda48b56dacd3bce248fbf104",
+      "size": 83277394,
+      "sourceUrl": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.10-5253791805734912/linux-arm/cli_linux_arm64.tar.gz",
+      "sourceSha512": "f9f5c7ebc47a8b8de536acca8116b1f5a43dca614cde94008fe5a510517b23535fb281d85416930d76e76478858bf3dc66ea6d1b0c9b6eeadcfabe4d8ef2a807"
+    },
+    "linux-x64": {
+      "fileName": "antigravity-1.5.10-linux-x64.tar.zst",
+      "sha256": "ae75e1f0fd7152ef50569ca77846c183729698fe75d2cbbb5d7ed959353f2822",
+      "size": 91817700,
+      "sourceUrl": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.10-5253791805734912/linux-x64/cli_linux_x64.tar.gz",
+      "sourceSha512": "713ae840845d74736e2d4a96f5d84e3353d614e73a875793ddf500997ccee09595448cebfd8e94fdd90ce2a0fa97707bd1cc29763dcfe01c945d80c92234378f"
+    },
+    "linux-arm64-musl": {
+      "fileName": "antigravity-1.5.10-linux-arm64-musl.tar.zst",
+      "sha256": "f33469efe9838789d8a58d591d3c52699ec38aa925c2ac5c225d90a34b58eafc",
+      "size": 79707681,
+      "sourceUrl": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.10-5253791805734912/linux-arm-musl/cli_linux_arm64_musl.tar.gz",
+      "sourceSha512": "7a02312539551f049fb38363690bf315fb36704b3344b149147c4bca478edbb4096583b7057cdb1c56f80c6b50cdae55cf8e821754f6169b25c32c98e923dd9d"
+    },
+    "linux-x64-musl": {
+      "fileName": "antigravity-1.5.10-linux-x64-musl.tar.zst",
+      "sha256": "c6224597ff556cd8683043d5ff935b416d13f5e04d2de2664724dbc983ca7dcd",
+      "size": 84078335,
+      "sourceUrl": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.10-5253791805734912/linux-x64-musl/cli_linux_x64_musl.tar.gz",
+      "sourceSha512": "be7621488dd685cfd68c094fe5a4249342fb0ea2bf5eca43cf4dad7a47991faa7bc607521d677d8f141447813aa58371a7d9256beb1549493b4c6cbb069133be"
+    },
+    "win32-arm64": {
+      "fileName": "antigravity-1.5.10-win32-arm64.tar.zst",
+      "sha256": "03b97e944dc3f62782953cf7ad631bdd124ed3bd04da957fb618e9246c557b02",
+      "size": 69167432,
+      "sourceUrl": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.10-5253791805734912/windows-arm/cli_windows_arm64.exe",
+      "sourceSha512": "e4a6e8517904648b377656e849adc90e50e920cf248e82f85778c8cd44094c1cde39de3027ec1de57b6055b4011a2c021506d3cf496217dd8995b721c0b03e4d"
+    },
+    "win32-x64": {
+      "fileName": "antigravity-1.5.10-win32-x64.tar.zst",
+      "sha256": "8bf4aca2d28bfbb81b67eac39457328cfbe7e8e70b10ced7a0c7f5b2342f7678",
+      "size": 74452643,
+      "sourceUrl": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.10-5253791805734912/windows-x64/cli_windows_x64.exe",
+      "sourceSha512": "59a5e7b417a898b0322c7d6d6df06e32cf292eb732096ec958e2cf0a411b40f1186a63ca14370b9bf978c8b619420852f7352531556d941f1d3b1c117d4c05aa"
+    }
+  }
+}

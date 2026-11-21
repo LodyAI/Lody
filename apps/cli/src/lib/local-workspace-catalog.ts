@@ -137,6 +137,10 @@ export type CacheRemoteWorkspacesInput = {
     contentMode?: string;
     genesisHash?: string;
   }>;
+  /** Listed rows whose mode this machine's local evidence contradicts. Their
+   * previously cached rows stay exactly as they were: neither rewritten from the
+   * contradicting listing nor marked remote_missing. */
+  heldWorkspaceIds?: ReadonlySet<string>;
 };
 
 export type RecordWorkspaceAccessSnapshotInput = {
@@ -572,6 +576,7 @@ export function makeLocalWorkspaceCatalog(
       mutate(
         (snapshot) => {
           const now = getServerNow();
+          const held = input.heldWorkspaceIds ?? new Set<string>();
           const remoteIds = new Set(input.workspaces.map((workspace) => workspace.id));
           // Member grants were verified for the previous account and Machine.
           const keepMemberGrants =
@@ -584,10 +589,12 @@ export function makeLocalWorkspaceCatalog(
           // `contentMode` means plaintext, so an offline restart would fail open.
           const supported = input.workspaces.filter(
             (workspace) =>
-              workspace.contentMode === undefined ||
-              workspace.contentMode === 'plaintext' ||
-              workspace.contentMode === 'e2ee'
+              !held.has(workspace.id) &&
+              (workspace.contentMode === undefined ||
+                workspace.contentMode === 'plaintext' ||
+                workspace.contentMode === 'e2ee')
           );
+          const kept = snapshot.workspaces.filter((workspace) => held.has(workspace.workspaceId));
           const active = supported.map((workspace): LocalCatalogWorkspace => {
             const previous = previousById.get(workspace.id);
             return {
@@ -611,7 +618,10 @@ export function makeLocalWorkspaceCatalog(
             };
           });
           const remoteMissing = snapshot.workspaces
-            .filter((workspace) => !remoteIds.has(workspace.workspaceId))
+            .filter(
+              (workspace) =>
+                !remoteIds.has(workspace.workspaceId) && !held.has(workspace.workspaceId)
+            )
             .map((workspace): LocalCatalogWorkspace => ({
               ...workspace,
               state: 'remote_missing',
@@ -621,7 +631,7 @@ export function makeLocalWorkspaceCatalog(
             ...snapshot,
             identity: input.identity,
             machine: input.machine,
-            workspaces: [...active, ...remoteMissing],
+            workspaces: [...active, ...kept, ...remoteMissing],
           };
         },
         true,

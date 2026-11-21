@@ -188,6 +188,7 @@ export const makeLoroStreamsTokenProvider = Effect.fnUntraced(function* (
     fiber: Fiber.Fiber<CachedLoroStreamsToken, TokenFailure>;
     epoch: number;
     leases: number;
+    cancellation: { reason?: 'owner_released' | 'unknown' };
   };
   let task: Task | undefined;
   const operations = new Set<Fiber.Fiber<string, TokenFailure>>();
@@ -246,6 +247,8 @@ export const makeLoroStreamsTokenProvider = Effect.fnUntraced(function* (
   const stop = Effect.fnUntraced(function* (current: Task) {
     // v4's interrupt joins without a bound. Signal separately so the join can
     // have its own Clock bound even when called inside a finalizer.
+    // First intent wins: a later close cannot relabel a deadline/unknown release.
+    current.cancellation.reason ??= 'unknown';
     current.fiber.interruptUnsafe();
     const exit = yield* bounded(Fiber.await(current.fiber), cleanupTimeout * 2);
     if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) {
@@ -480,30 +483,29 @@ export const makeLoroStreamsTokenProvider = Effect.fnUntraced(function* (
               return { cached };
             }
             const epoch = generation;
+            const cancellation: Task['cancellation'] = {};
             const program = produce(login, epoch).pipe(
-              Effect.catchCause((cause) =>
-                Effect.uninterruptible(
-                  Effect.sync(() =>
-                    emit({
-                      type: 'fetch-failure',
-                      workspaceId: options.workspaceId,
-                      error: cause,
-                      status: terminal?.status,
-                    })
-                  ).pipe(
-                    Effect.exit,
-                    Effect.flatMap((observed) =>
-                      Effect.failCause(
-                        Exit.isFailure(observed) ? Cause.combine(cause, observed.cause) : cause
+              Effect.onExit((exit) =>
+                Exit.isSuccess(exit)
+                  ? Effect.void
+                  : Effect.sync(() =>
+                      emit(
+                        cancellation.reason === 'owner_released' &&
+                          Cause.hasInterruptsOnly(exit.cause)
+                          ? { type: 'fetch-cancelled', reason: 'owner_released' }
+                          : {
+                              type: 'fetch-failure',
+                              workspaceId: options.workspaceId,
+                              error: exit.cause,
+                              status: terminal?.status,
+                            }
                       )
                     )
-                  )
-                )
               ),
               Effect.interruptible
             );
             const fiber = yield* Effect.forkIn(program, producerScope);
-            task = { fiber, epoch, leases: 1 };
+            task = { fiber, epoch, leases: 1, cancellation };
             return { task };
           })
         );
@@ -594,6 +596,9 @@ export const makeLoroStreamsTokenProvider = Effect.fnUntraced(function* (
       closed = true;
       generation++;
       cached = null;
+      // Record the owner intent before interrupting readers: their last-lease
+      // finalizer can stop the shared producer before closeWork acquires serial.
+      if (task) task.cancellation.reason ??= 'owner_released';
       const result = yield* Effect.gen(function* () {
         const readers = [...operations];
         for (const reader of readers) reader.interruptUnsafe();

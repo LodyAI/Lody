@@ -1,9 +1,10 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -220,5 +221,47 @@ describe('SQLite runtime support guard', () => {
     );
     expect(importOnly.status).toBe(0);
     expect(importOnly.stderr).toBe('');
+  });
+});
+
+/**
+ * `npx lody` must work where npm install scripts are disabled (`ignore-scripts=true`
+ * or `pnpm dlx` since pnpm 10). better-sqlite3 >= 13.0.2 ships N-API prebuilt
+ * binaries inside the tarball with `gypfile: false` and no install scripts.
+ */
+describe('better-sqlite3 install-time contract', () => {
+  it('needs no install or postinstall script', () => {
+    const packageJsonPath = require.resolve('better-sqlite3/package.json');
+    const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as {
+      version: string;
+      gypfile?: boolean;
+      scripts?: Record<string, string>;
+    };
+
+    expect(packageJson.scripts?.install).toBeUndefined();
+    expect(packageJson.scripts?.postinstall).toBeUndefined();
+    expect(packageJson.scripts?.preinstall).toBeUndefined();
+    expect(packageJson.gypfile).toBe(false);
+  });
+
+  it('ships a prebuilt binding for this platform that opens a database', () => {
+    const packageDir = dirname(require.resolve('better-sqlite3/package.json'));
+    const isLinuxMusl =
+      process.platform === 'linux' && !process.report.getReport().header.glibcVersionRuntime;
+    const target = `${isLinuxMusl ? 'linuxmusl' : process.platform}-${process.arch}`;
+    const prebuildPath = join(packageDir, 'prebuilds', `${target}.node`);
+    expect(
+      readFileSync(prebuildPath).byteLength,
+      `no prebuilt binding at ${prebuildPath}`
+    ).toBeGreaterThan(0);
+
+    const database = new Database(':memory:');
+    try {
+      database.exec('CREATE TABLE t(a)');
+      database.prepare('INSERT INTO t VALUES (?)').run(1);
+      expect(database.prepare('SELECT COUNT(*) AS c FROM t').get()).toEqual({ c: 1 });
+    } finally {
+      database.close();
+    }
   });
 });

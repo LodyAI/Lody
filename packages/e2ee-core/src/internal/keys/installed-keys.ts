@@ -1,9 +1,10 @@
-import { Context, Effect, Exit, Layer, Result, Schema } from 'effect';
+import { Context, Effect, Exit, HashMap, Layer, Option, Result, Schema } from 'effect';
 import * as Bytes from '../foundation/bytes';
 import { bytesEqual } from '../foundation/cbor';
 import { copyEpochKeyBytes, disposeEpochKey } from '../foundation/epoch-key';
 import { keyId } from '../foundation/identifiers';
 import { epochHistoryPacket, type LedgerView } from '../ledger';
+import { internalViewState } from '../ledger/replay';
 import { VerifiedLedger, type VerifiedLedgerError } from '../ledger/verified-ledger';
 import { makeAdmissionGate, own, ownIdentity } from '../lifecycle';
 import { KeyProtector } from '../../services/keys';
@@ -271,9 +272,10 @@ function eligibleCommitment(view: LedgerView, recipient: Bytes.SigningPublicKey,
     const packet = yield* Result.mapError(epochHistoryPacket(view, epoch), () =>
       fail('unauthorized')
     );
-    const state = view.inspectState();
-    const device = state.devices.get(keyId(recipient.toBytes()));
-    if (!device || !state.members.has(keyId(device.membershipId.toBytes())))
+    const state = internalViewState(view);
+    if (!state) return yield* Result.fail(fail('unauthorized'));
+    const device = Option.getOrUndefined(HashMap.get(state.devices, keyId(recipient.toBytes())));
+    if (!device || !HashMap.has(state.members, keyId(device.membershipId.toBytes())))
       return yield* Result.fail(fail('unauthorized'));
     return packet.commitment;
   });
@@ -313,12 +315,25 @@ export class InstalledEpochHistory extends Context.Service<
         yield* gate.guard;
         return view;
       });
-      const recover = (view: LedgerView) =>
+      const newestInstalled = Effect.fnUntraced(function* (view: LedgerView, minimum: number) {
+        const state = internalViewState(view);
+        if (!state) return yield* fail('unauthorized');
+        for (let epoch = state.epoch.number; epoch >= minimum; epoch--) {
+          const result = yield* Effect.result(installed.read(epoch));
+          if (Result.isSuccess(result)) return { epoch, key: result.success };
+          if (result.failure.reason !== 'missing-key') return yield* result.failure;
+        }
+        return yield* fail('missing-key');
+      });
+      const recover = (
+        view: LedgerView,
+        minimum = Math.min(1, internalViewState(view)?.epoch.number ?? 1)
+      ) =>
         Effect.acquireUseRelease(
-          installed.read(view.inspectState().epoch.number),
-          (latest) =>
+          newestInstalled(view, minimum),
+          ({ epoch: startEpoch, key: latest }) =>
             Effect.acquireUseRelease(
-              Effect.fromResult(recoverLedgerHistory(view, latest)),
+              Effect.fromResult(recoverLedgerHistory(view, latest, startEpoch)),
               (keys) =>
                 Effect.gen(function* () {
                   for (const [epoch, key] of keys) {
@@ -332,7 +347,7 @@ export class InstalledEpochHistory extends Context.Service<
                   for (const key of keys.values()) disposeEpochKey(key);
                 })
             ),
-          (latest) => Effect.sync(() => disposeEpochKey(latest))
+          ({ key }) => Effect.sync(() => disposeEpochKey(key))
         );
       return InstalledEpochHistory.of({
         recover: Effect.fn('@lody/e2ee-core/InstalledEpochHistory.recover')(function* () {
@@ -355,8 +370,9 @@ export class InstalledEpochHistory extends Context.Service<
               yield* Effect.fromResult(
                 Result.mapError(Bytes.epochNumber(epoch), () => fail('invalid-input'))
               );
-              if (epoch > view.inspectState().epoch.number) return yield* existing.failure;
-              yield* recover(view);
+              const state = internalViewState(view);
+              if (!state || epoch > state.epoch.number) return yield* existing.failure;
+              yield* recover(view, epoch + 1);
               const recovered = yield* installed.read(epoch);
               if (gate.isClosed()) {
                 disposeEpochKey(recovered);

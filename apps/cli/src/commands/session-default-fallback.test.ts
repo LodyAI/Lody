@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  E2EE_INTENT_KIND,
+  encodeE2eeIntentRecord,
   getMachineRoomId,
   getWorkspaceFlockDocId,
   getSessionRoomId,
@@ -30,6 +32,7 @@ import {
 } from '@/lib/session-command-environment';
 import { createSessionBackend } from '@/session/session-backend';
 import * as commandRuntime from '@/lib/command-runtime';
+import * as commandEnvironment from '@/lib/session-command-environment';
 import * as workspaceAccess from '@/lib/workspace';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
 import { LodyOperationCoordinator } from '@/orchestration/operation-coordinator';
@@ -1820,6 +1823,79 @@ describe('agent chat to a busy target', () => {
     );
     expect(fixture.dispatched).toEqual([]);
   });
+
+  it.each(['owner', 'member'] as const)(
+    'preserves encrypted %s steering policy with signed root provenance',
+    async (principal) => {
+      const fixture = createFixture('codex', undefined, true);
+      await fixture.seedChat(inputConfig);
+      fixture.setActiveTurn('assistant:earlier-turn');
+      const origin = { sessionId: 'root-session', userTurnId: 'root-turn' };
+      vi.spyOn(fixture.manager, 'isEncryptedWorkspace').mockReturnValue(true);
+      const e2eeIntent = encodeE2eeIntentRecord({
+        kind: E2EE_INTENT_KIND.machineInput,
+        signer: new Uint8Array(32).fill(2),
+        signature: new Uint8Array(64).fill(3),
+      });
+      Object.assign(fixture.manager, { signMachineInput: async () => e2eeIntent });
+      vi.spyOn(commandEnvironment, 'getDaemonWorkspace').mockReturnValue({
+        workspaceId,
+        machineId,
+        userId,
+        manager: fixture.manager,
+        readInvocation: fixture.environment.host.readInvocation,
+        classifyEncryptedDerivation: async (_origin, target) => {
+          expect(target).toEqual({ machineId, userTurnId });
+          return { principal, origin };
+        },
+      });
+      const run = () =>
+        runWithSessionCommandEnvironment(fixture.environment, () =>
+          sendSessionChatResult(
+            fixture.environment.auth,
+            fixture.environment.workspace,
+            fixture.manager,
+            sessionId,
+            'Continue',
+            {},
+            undefined,
+            undefined,
+            { userTurnId, chainDepth: 0, bypassSessionQuota: true, steerActiveTurn: true },
+            {
+              userId,
+              author: {
+                v: 1,
+                kind: 'agent',
+                sessionId: 'root-session',
+                turnId: 'root-turn',
+                name: 'Synthetic Agent',
+              },
+            }
+          )
+        );
+      const result = await run();
+      const turn = (await fixture.history()).find((entry) => entry.id === userTurnId);
+      expect(turn).toMatchObject({
+        derivedFrom: origin,
+        e2eeIntent,
+        status: principal === 'owner' ? 'pending_apply' : 'pending',
+      });
+      if (principal === 'owner') {
+        expect(result.delivery).toBe('steered');
+        expect(fixture.dispatched).toEqual([]);
+        await run();
+        expect(fixture.steered).toEqual([
+          { expectedTurnId: 'assistant:earlier-turn', userTurnId, prompt: 'Continue' },
+        ]);
+        expect((await fixture.history()).filter((entry) => entry.id === userTurnId)).toHaveLength(
+          1
+        );
+      } else {
+        expect(fixture.steered).toEqual([]);
+        expect(fixture.dispatched.map((entry) => entry.id)).toEqual([userTurnId]);
+      }
+    }
+  );
 
   it('leaves a refused steer to the daemon instead of activating it twice', async () => {
     const fixture = createFixture('codex');

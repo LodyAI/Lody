@@ -1,4 +1,3 @@
-import { formatNotification, resolveNotificationPresentation } from '@lody/shared/notifications';
 import { useContext, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -79,9 +78,17 @@ export function LegacyElectronSessionNotifier({
       return undefined;
     }
 
-    const showCompletionNotification = (session: SessionListEntry): void => {
+    // Notification formatting pulls the session PR/schema helpers, which reach
+    // loro-mirror through @lody/shared/schema. Resolve it on the show path so
+    // the boot chunk stays free of the loro graph.
+    const showNotification = async (
+      session: SessionListEntry,
+      outcome: 'succeeded' | 'attention'
+    ): Promise<void> => {
+      const { formatNotification, resolveNotificationPresentation } =
+        await import('@lody/shared/notifications');
       const { title, body } = formatNotification(
-        'succeeded',
+        outcome,
         resolveNotificationPresentation(session, []),
         (key) => t(key)
       );
@@ -93,18 +100,12 @@ export function LegacyElectronSessionNotifier({
       });
     };
 
+    const showCompletionNotification = (session: SessionListEntry): void => {
+      void showNotification(session, 'succeeded');
+    };
+
     const showPermissionRequestNotification = (session: SessionListEntry): void => {
-      const { title, body } = formatNotification(
-        'attention',
-        resolveNotificationPresentation(session, []),
-        (key) => t(key)
-      );
-      void getIpcServices()?.notifications.showSessionCompletion({
-        sessionId: session.id,
-        workspaceSlug: workspaceSlug ?? undefined,
-        title,
-        body,
-      });
+      void showNotification(session, 'attention');
     };
 
     const clearTimerForSession = (sessionId: string): void => {

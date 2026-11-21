@@ -47,6 +47,7 @@ import { writeTextToClipboard } from '@/lib/clipboard';
 import { getDownloadPageUrl } from '@/lib/lody-urls';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { cn } from '@/lib/utils';
+import { useMobileBackRevealClass } from './mobile-drill-page-layout';
 import { usePullToRefresh } from '@/hooks/use-pull-to-refresh';
 import { GlassIconButton } from '@/components/mobile/glass-icon-button';
 import { type MobileConversationItem } from './mobile-project-screen';
@@ -353,9 +354,6 @@ export type MobileHomeScreenLabels = {
      renders an "全部对话" label above the flat list. */
   allLocalProjectsHeading?: string;
   allGitHubReposHeading?: string;
-  /** @deprecated Chat list no longer shows a section heading in the
-     active (non-archived) mode. Kept for call-site compatibility. */
-  allChatsHeading?: string;
   /** Heading rendered above the Chat tab's list when the archive
      toggle is on. Falls back to "归档对话" when not provided. */
   archivedChatsHeading?: string;
@@ -1479,6 +1477,10 @@ export function MobileHomeScreen({
     };
   }, [wantStatusSlot]);
 
+  /* Home is the destination of a project or Settings Back: settle in under
+     the sliding-off page. */
+  const backRevealClass = useMobileBackRevealClass();
+
   /* Tab swipe was removed — conflicted with the row-level
      left-swipe-to-reveal-actions gesture on conversation rows. The
      dock tabbar at the bottom remains the only way to switch tabs. */
@@ -1497,7 +1499,12 @@ export function MobileHomeScreen({
          scroll region — keeps the vertical scrollbar contained to
          the list area instead of running through the chrome at the
          top. Mirrors the structure on MobileProjectScreen. */}
-      <div className="mobile-home-shell relative flex h-full w-full flex-col bg-background">
+      <div
+        className={cn(
+          'mobile-home-shell relative flex h-full w-full flex-col bg-background',
+          backRevealClass
+        )}
+      >
         {/* Sticky header: safe-area padding outside the chrome row so the
            status/pull pill can center on the same h-9 band as the
            workspace / search / trailing controls — not the full header

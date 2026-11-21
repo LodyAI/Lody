@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -110,7 +108,8 @@ describe('electron browser sign-in handoff', () => {
     authClient: LodyAuthClient,
     sessionValue: StableSessionValue = createSessionValue(true),
     desktop = false,
-    standaloneClient?: ConvexReactClient
+    standaloneClient?: ConvexReactClient,
+    replaceLocation: (path: string) => void = () => undefined
   ) => {
     await act(async () => {
       root.render(
@@ -120,11 +119,11 @@ describe('electron browser sign-in handoff', () => {
               {standaloneClient ? (
                 <ConvexProvider client={standaloneClient}>
                   <CloudPlatformProvider>
-                    <LoginPage replaceLocation={() => undefined} isElectronRenderer={desktop} />
+                    <LoginPage replaceLocation={replaceLocation} isElectronRenderer={desktop} />
                   </CloudPlatformProvider>
                 </ConvexProvider>
               ) : (
-                <LoginPage replaceLocation={() => undefined} isElectronRenderer={desktop} />
+                <LoginPage replaceLocation={replaceLocation} isElectronRenderer={desktop} />
               )}
             </StableSessionContext.Provider>
           </AuthProvider>
@@ -245,6 +244,83 @@ describe('electron browser sign-in handoff', () => {
     expect(deepLinkNavigations).toEqual([link!.getAttribute('href')]);
     // Switching accounts stays reachable after the code exists.
     expect(findButton(/Use a different account/i)).toBeDefined();
+  });
+
+  it('offers continuing in the web browser instead of a desktop handoff', async () => {
+    const transferUser = vi.fn<TransferUser>(async () => ({
+      data: { electron_authorization_code: 'code-123' },
+    }));
+    const replaceLocation = vi.fn();
+    await renderLoginPage(
+      createAuthClient({ transferUser }),
+      undefined,
+      false,
+      undefined,
+      replaceLocation
+    );
+
+    await clickButton(/Continue in browser/i);
+
+    // The browser session is already good for the web app, so nothing is
+    // transferred and the page's normal authenticated target is used.
+    expect(transferUser).not.toHaveBeenCalled();
+    expect(replaceLocation).toHaveBeenCalledWith('/');
+    expect(deepLinkNavigations).toEqual([]);
+  });
+
+  it('still leaves for the web app after the handoff link exists', async () => {
+    const replaceLocation = vi.fn();
+    await renderLoginPage(
+      createAuthClient({
+        transferUser: async () => ({ data: { electron_authorization_code: 'code-123' } }),
+      }),
+      undefined,
+      false,
+      undefined,
+      replaceLocation
+    );
+    await clickButton(/Continue with this account/i);
+    expect(handoffLink()).not.toBeNull();
+
+    await clickButton(/Continue in browser/i);
+
+    expect(replaceLocation).toHaveBeenCalledWith('/');
+    // The mock leaves the page mounted; the panel must no longer offer the
+    // handoff link it just retracted.
+    expect(handoffLink()).toBeNull();
+  });
+
+  it('drops a transfer that lands after the user left for the web app', async () => {
+    let resolveTransfer: ((code: string) => void) | undefined;
+    const transferUser = vi.fn<TransferUser>(
+      () =>
+        new Promise((resolve) => {
+          resolveTransfer = (code) => resolve({ data: { electron_authorization_code: code } });
+        })
+    );
+    const replaceLocation = vi.fn();
+    await renderLoginPage(
+      createAuthClient({ transferUser }),
+      undefined,
+      false,
+      undefined,
+      replaceLocation
+    );
+
+    await clickButton(/Continue with this account/i);
+    expect(transferUser).toHaveBeenCalledTimes(1);
+
+    await clickButton(/Continue in browser/i);
+    expect(replaceLocation).toHaveBeenCalledWith('/');
+
+    await act(async () => {
+      resolveTransfer?.('code-from-old-account');
+    });
+
+    // The code minted for the desktop app must not open it after the user
+    // chose the web.
+    expect(handoffLink()).toBeNull();
+    expect(deepLinkNavigations).toEqual([]);
   });
 
   it('returns Nightly authorization to Nightly and preserves its PKCE state', async () => {

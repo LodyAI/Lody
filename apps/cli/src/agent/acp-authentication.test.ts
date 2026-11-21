@@ -233,6 +233,12 @@ describe('AcpAuthenticationManager', () => {
 
   it.each([
     {
+      agentType: 'antigravity',
+      runtimeOverrides: { antigravityPath: '/test/agy' },
+      command: '/test/agy',
+      args: ['acp', '--login', '--disable-telemetry'],
+    },
+    {
       agentType: 'claude',
       runtimeOverrides: { claudeCodeExecutable: '/test/claude' },
       command: '/test/claude',
@@ -282,67 +288,86 @@ describe('AcpAuthenticationManager', () => {
     }
   );
 
-  it('emits a Claude browser authorization event and accepts the fallback code through stdin', async () => {
-    const child = createFakeChild();
-    const stdin = new PassThrough();
-    const stdout = new PassThrough();
-    const stdoutListening = createDeferred<void>();
-    stdout.once('newListener', (event) => {
-      if (event === 'data') stdoutListening.resolve();
-    });
-    child.stdin = stdin;
-    child.stdout = stdout;
-    child.stderr = new PassThrough();
-    const receivedInput: string[] = [];
-    stdin.on('data', (chunk) => receivedInput.push(String(chunk)));
-    stdin.on('finish', () => {
-      queueMicrotask(() => {
-        child.exitCode = 0;
-        child.emit('exit', 0, null);
+  it.each([
+    { agentType: 'claude', input: 'browser-code', exitCode: 0 },
+    { agentType: 'antigravity', input: 'browser-code', exitCode: 0 },
+    {
+      agentType: 'antigravity',
+      input: 'https://example.test/callback?code=synthetic',
+      exitCode: 0,
+    },
+    { agentType: 'antigravity', input: 'invalid-code', exitCode: 1 },
+  ] as const)(
+    'handles $agentType browser sign-in with exit $exitCode and input $input',
+    async ({ agentType, input, exitCode }) => {
+      const child = createFakeChild();
+      const stdin = new PassThrough();
+      const stdout = new PassThrough();
+      const stdoutListening = createDeferred<void>();
+      stdout.once('newListener', (event) => {
+        if (event === 'data') stdoutListening.resolve();
       });
-    });
-    const authorizationReceived = createDeferred<void>();
-    const progress = vi.fn((event: { status: string }) => {
-      if (event.status === 'authorization') authorizationReceived.resolve();
-    });
-    const manager = new AcpAuthenticationManager(createSilentLogger(), {
-      nodeProcess: fakeNodeProcess(vi.fn(() => child)),
-      resolveLoginShellEnv: async () => ({}),
-    });
-    const authentication = manager.authenticate({
-      requestId: 'auth-claude',
-      cliType: 'builtin',
-      agentType: 'claude',
-      runtimeOverrides: { claudeCodeExecutable: '/test/claude' },
-      onProgress: progress,
-    });
+      child.stdin = stdin;
+      child.stdout = stdout;
+      child.stderr = new PassThrough();
+      const receivedInput: string[] = [];
+      stdin.on('data', (chunk) => receivedInput.push(String(chunk)));
+      stdin.on('finish', () => {
+        queueMicrotask(() => {
+          child.exitCode = exitCode;
+          child.emit('exit', exitCode, null);
+        });
+      });
+      const authorizationReceived = createDeferred<void>();
+      const progress = vi.fn((event: { status: string }) => {
+        if (event.status === 'authorization') authorizationReceived.resolve();
+      });
+      const manager = new AcpAuthenticationManager(createSilentLogger(), {
+        nodeProcess: fakeNodeProcess(vi.fn(() => child)),
+        resolveLoginShellEnv: async () => ({}),
+      });
+      const authentication = manager.authenticate({
+        requestId: 'auth-browser',
+        cliType: 'builtin',
+        agentType,
+        runtimeOverrides: { claudeCodeExecutable: '/test/claude', antigravityPath: '/test/agy' },
+        onProgress: progress,
+      });
 
-    await stdoutListening.promise;
-    stdout.write(
-      'If the browser did not open, visit: ' +
-        'https://claude.com/cai/oauth/authorize?code=true&client_id=test&state=test\n' +
-        'Paste code here if prompted > '
-    );
-    await authorizationReceived.promise;
-    expect(progress).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: 'authorization',
-        authorizationUrl:
-          'https://claude.com/cai/oauth/authorize?code=true&client_id=test&state=test',
-        acceptsAuthorizationCode: true,
-      })
-    );
+      const authorizationUrl =
+        agentType === 'claude'
+          ? 'https://claude.com/cai/oauth/authorize?code=true&client_id=test&state=test'
+          : 'https://accounts.google.com/o/oauth2/auth?client_id=test&state=test';
+      await stdoutListening.promise;
+      stdout.write(
+        'If the browser did not open, visit: ' +
+          `${authorizationUrl}\n` +
+          'Paste code here if prompted > '
+      );
+      await authorizationReceived.promise;
+      expect(progress).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'authorization',
+          authorizationUrl,
+          acceptsAuthorizationCode: true,
+        })
+      );
 
-    expect(manager.submitAuthorizationCode('auth-claude', 'browser-code')).toEqual({
-      success: true,
-      disposition: 'input-accepted',
-    });
-    await expect(authentication).resolves.toEqual({
-      success: true,
-      disposition: 'authenticated',
-    });
-    expect(receivedInput).toEqual(['browser-code\n']);
-  });
+      expect(manager.submitAuthorizationCode('auth-browser', input)).toEqual({
+        success: true,
+        disposition: 'input-accepted',
+      });
+      await expect(authentication).resolves.toMatchObject(
+        exitCode === 0
+          ? { success: true, disposition: 'authenticated' }
+          : { success: false, disposition: 'error' }
+      );
+      expect(receivedInput).toEqual([`${input}\n`]);
+      if (agentType === 'antigravity') {
+        expect(progress.mock.calls.map(([event]) => event.status)).not.toContain('output');
+      }
+    }
+  );
 
   it('cancels launch preparation without spawning and allows an immediate retry', async () => {
     const firstLoginShellEnv = createDeferred<Record<string, string>>();

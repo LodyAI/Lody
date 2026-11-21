@@ -171,8 +171,10 @@ action to trigger CI. Existing releases and their assets are preserved on reruns
 - `packages/e2ee-lab` — Local adversarial consumers and persistence probes for `@lody/e2ee-core`
 - `packages/turn-diff-store` — Local content-addressed turn snapshots
 - `packages/loro-streams-rpc` — RPC over Loro Streams
+- `packages/iroh-native` — Native iroh transport for encrypted-workspace RPC ([rules](packages/iroh-native/AGENTS.md))
 - `packages/acp-extension-{core,kimi,pi}` — ACP extension submodule workspaces. Kimi and Pi stay outside the root pnpm graph
 - `site-docs` — Website, documentation, and blog
+- [`skills`](skills/lody-cli/SKILL.md) — Agent skills for Lody users, such as `lody-cli`
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup and the community PR size policy.
 

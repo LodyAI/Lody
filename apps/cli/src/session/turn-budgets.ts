@@ -1,7 +1,7 @@
 /**
  * Every bounded wait on the turn-release and shutdown paths, in one place.
  *
- * Ordering is part of the contract and `turn-budgets.test.ts` pins it:
+ * Ordering is part of the contract and `tests/session-execution-helpers.test.ts` pins it:
  * - one Git observation command ends before the shared workspace-statistics budget,
  *   so a stuck probe is terminated by its own timeout and cannot write late;
  * - the shutdown release wait plus forced failed-release writes fit inside the CLI

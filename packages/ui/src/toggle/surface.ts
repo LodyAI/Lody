@@ -129,7 +129,6 @@ export const toggleSurface = stylex.create({
     },
   },
 
-  // ── The set ──────────────────────────────────────────────────────────────
   /**
    * A set of toggles answering to one value.
    *
@@ -154,7 +153,6 @@ export const toggleSurface = stylex.create({
    */
   groupWrap: { flexWrap: 'wrap' },
 
-  // ── The bar ──────────────────────────────────────────────────────────────
   /**
    * The bar itself, which draws nothing at all: no fill, no shadow, no radius,
    * and not even the line a table draws. It is a row of controls on whatever

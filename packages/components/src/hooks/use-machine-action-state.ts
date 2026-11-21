@@ -1,3 +1,4 @@
+import { collectClientBuildInfo } from '@/lib/client-build-info';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
@@ -10,7 +11,11 @@ export type MachineActionCallbacks = {
   onSharedWithTeamChange?: (machineId: MachineId, sharedWithTeam: boolean) => Promise<void>;
   onPing?: (machineId: MachineId) => Promise<number>;
   onRestartDaemon?: (machineId: MachineId) => Promise<void>;
-  onUpgradeDaemon?: (machineId: MachineId, targetVersion: string) => Promise<void>;
+  onUpgradeDaemon?: (
+    machineId: MachineId,
+    targetVersion: string,
+    switchPolicy?: 'when-idle' | 'immediate'
+  ) => Promise<void>;
 };
 
 /**
@@ -140,22 +145,47 @@ export function useMachineActionState({
     }
   }, [machine.id, onRestartDaemon, restartingDaemon, upgradingDaemon, t]);
 
-  const handleUpgradeDaemon = useCallback(async () => {
-    if (!onUpgradeDaemon || !daemonUpdate || restartingDaemon || upgradingDaemon) return;
-    try {
-      setUpgradingDaemon(true);
-      await onUpgradeDaemon(machine.id, daemonUpdate.latestVersion);
-      toast.success(
-        t('settings.agent.machineLifecycle.upgradeAccepted', 'Update request accepted')
-      );
-    } catch (error) {
-      toast.error(t('settings.agent.machineLifecycle.upgradeFailed', 'Update request failed'), {
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setUpgradingDaemon(false);
-    }
-  }, [machine.id, onUpgradeDaemon, daemonUpdate, restartingDaemon, upgradingDaemon, t]);
+  const handleUpgradeDaemon = useCallback(
+    async (switchPolicy: 'when-idle' | 'immediate' = 'when-idle') => {
+      if (!onUpgradeDaemon || !daemonUpdate || restartingDaemon || upgradingDaemon) return;
+      if (
+        !window.confirm(
+          t('settings.agent.machineLifecycle.confirmManagedUpdate', {
+            defaultValue:
+              'Change daemon from v{{current}} to v{{target}} ({{channel}})? {{timing}} Switching channels or installing an older version also requires compatible data.',
+            channel: collectClientBuildInfo().releaseChannel ?? 'stable',
+            current: daemonUpdate.currentVersion,
+            target: daemonUpdate.latestVersion,
+            timing:
+              switchPolicy === 'immediate'
+                ? t(
+                    'settings.agent.machineLifecycle.interruptWarning',
+                    'Running tasks will be interrupted.'
+                  )
+                : t(
+                    'settings.agent.machineLifecycle.idleExplanation',
+                    'The update will wait for running tasks to finish.'
+                  ),
+          })
+        )
+      )
+        return;
+      try {
+        setUpgradingDaemon(true);
+        await onUpgradeDaemon(machine.id, daemonUpdate.latestVersion, switchPolicy);
+        toast.success(
+          t('settings.agent.machineLifecycle.upgradeAccepted', 'Update request accepted')
+        );
+      } catch (error) {
+        toast.error(t('settings.agent.machineLifecycle.upgradeFailed', 'Update request failed'), {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        setUpgradingDaemon(false);
+      }
+    },
+    [machine.id, onUpgradeDaemon, daemonUpdate, restartingDaemon, upgradingDaemon, t]
+  );
 
   return {
     renaming,

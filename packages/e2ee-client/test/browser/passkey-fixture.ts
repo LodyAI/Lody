@@ -10,19 +10,19 @@ const hex = (bytes: Uint8Array | null) =>
 export async function run(input: { prfInput: number[]; exclude?: string[] }) {
   const prfInput = new Uint8Array(input.prfInput);
   const created = await port.register({
-    rpId: 'vault.lody.ai',
+    rpId: 'lody.ai',
     userHandle: new Uint8Array(32).fill(7),
     userName: 'Lody recovery vault',
     prfInput,
     excludeCredentialIds: input.exclude ?? [],
   });
   const known = await port.authenticate({
-    rpId: 'vault.lody.ai',
+    rpId: 'lody.ai',
     prfInput,
     allowCredentialIds: [created.credentialId],
   });
   const discovered = await port.authenticate({
-    rpId: 'vault.lody.ai',
+    rpId: 'lody.ai',
     prfInput,
     allowCredentialIds: [],
   });
@@ -65,7 +65,7 @@ export async function available() {
 export async function dismissed() {
   try {
     await port.authenticate({
-      rpId: 'vault.lody.ai',
+      rpId: 'lody.ai',
       prfInput: new Uint8Array([1]),
       allowCredentialIds: [],
     });

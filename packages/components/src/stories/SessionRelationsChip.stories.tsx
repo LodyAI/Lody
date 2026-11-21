@@ -87,10 +87,12 @@ function StoryHarness({
   currentSessionId,
   defaultOpen,
   initialStopped = false,
+  width = 720,
 }: {
   currentSessionId: string;
   defaultOpen?: boolean;
   initialStopped?: boolean;
+  width?: number;
 }) {
   const [store] = useState(() => {
     const next = createStore();
@@ -102,7 +104,7 @@ function StoryHarness({
   tree.session = { ...tree.session, collaborationStopped: stopped };
   return (
     <Provider store={store}>
-      <div className="flex max-w-full flex-col" style={{ width: 720 }}>
+      <div className="flex max-w-full flex-col" style={{ width }}>
         {/* Room above the bar so the popover (side=top) stays visible. */}
         <div className="h-60" />
         <SessionInfoBar
@@ -167,4 +169,8 @@ export const ConfirmStop: Story = {
 
 export const CollaborationStopped: Story = {
   args: { currentSessionId: 'relations', defaultOpen: true, initialStopped: true },
+};
+
+export const NarrowTabRow: Story = {
+  args: { currentSessionId: 'relations-story', defaultOpen: true, width: 360 },
 };

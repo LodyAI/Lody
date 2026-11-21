@@ -11,8 +11,6 @@ function assertSafeSessionId(sessionId: SessionId): void {
   }
 }
 
-// ── GitHub repo parsing (extracted from apps/cli/src/utils/github.ts) ──
-
 const GITHUB_REPO_PART_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
 const GITHUB_REPO_OWNER_MAX_LEN = 39;
 const GITHUB_REPO_NAME_MAX_LEN = 100;
@@ -77,8 +75,6 @@ export function parseGitHubRepo(raw: string): GitHubRepoParts {
 
   return parseOwnerRepoFromPathSegment(value, raw);
 }
-
-// ── Public API ──
 
 /**
  * Derives a stable repo id from a GitHub repo reference.

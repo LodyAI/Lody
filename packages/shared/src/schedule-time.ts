@@ -7,6 +7,9 @@ import {
   type ScheduleTrigger,
 } from './schedule-types';
 
+/** The last instant a JS Date (and the schedule `timestamp` schema) can hold. */
+const MAX_DATE_MS = 8_640_000_000_000_000;
+
 function cron(trigger: Extract<ScheduleTrigger, { kind: 'cron' }>): Cron {
   // Croner also accepts seconds, years and extensions. Our persisted protocol
   // deliberately accepts only portable, standard five-field expressions.
@@ -58,7 +61,11 @@ export function nextScheduleSlot(
   }
   if (trigger.kind === 'interval') {
     const anchor = Date.parse(trigger.anchorAt);
-    return anchor + Math.max(0, Math.ceil((lower - anchor) / trigger.everyMs)) * trigger.everyMs;
+    const next =
+      anchor + Math.max(0, Math.ceil((lower - anchor) / trigger.everyMs)) * trigger.everyMs;
+    // A slot past the last representable Date never comes; returning it would
+    // poison the ledger cursor and every formatter that renders it.
+    return next <= MAX_DATE_MS ? next : undefined;
   }
   const schedule = cron(trigger);
   let candidate = schedule.nextRun(new Date(lower - 1));

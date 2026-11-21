@@ -193,9 +193,13 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
         ledger: () => call(raw.ledger()),
         approvalOriginals: () => call(raw.approvalOriginals()),
         refresh: (...args: Parameters<RawSession['refresh']>) => call(raw.refresh(...args)),
-        keyRound: () => call(raw.keyRound()),
+        keyRound: (...args: Parameters<RawSession['keyRound']>) => call(raw.keyRound(...args)),
+        setupRecovery: (...args: Parameters<RawSession['setupRecovery']>) =>
+          call(raw.setupRecovery(...args)),
         keyDeliveryEvidence: (...args: Parameters<RawSession['keyDeliveryEvidence']>) =>
           call(raw.keyDeliveryEvidence(...args)),
+        keyPending: (...args: Parameters<RawSession['keyPending']>) =>
+          call(raw.keyPending(...args)),
         status: () => call(raw.status()),
         execute: (...args: Parameters<RawSession['execute']>) => call(raw.execute(...args)),
         resume: () => call(raw.resume()),
@@ -204,6 +208,8 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
         removeMember: (...args: Parameters<RawSession['removeMember']>) =>
           call(raw.removeMember(...args)),
         rotate: () => call(raw.rotate()),
+        updateKeys: () => call(raw.updateKeys()),
+        abandonEpoch: (baseEpoch: number) => call(raw.abandonEpoch(baseEpoch)),
         recoverHistory: () => call(raw.recoverHistory()),
         resumeRotation: () => call(raw.resumeRotation()),
         contentToken: (...args: Parameters<RawSession['contentToken']>) =>
@@ -214,7 +220,15 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
         updateMachineSharing: (...args: Parameters<RawSession['updateMachineSharing']>) =>
           call(raw.updateMachineSharing(...args)),
         ledgerState: () => call(raw.ledgerState()),
+        ingest: (page: Parameters<RawSession['ingest']>[0]) => call(raw.ingest(page)),
+        activateAccountPairing: (...args: Parameters<RawSession['activateAccountPairing']>) =>
+          call(raw.activateAccountPairing(...args)),
         accountApproval: Object.freeze({
+          checkpoint: () => call(raw.accountApproval.checkpoint()),
+          ingest: (page: Parameters<RawSession['ingest']>[0]) =>
+            call(raw.accountApproval.ingest(page)),
+          prepareDelivery: (recipient: string) =>
+            call(raw.accountApproval.prepareDelivery(recipient)),
           sign: (...args: Parameters<RawSession['accountApproval']['sign']>) =>
             call(raw.accountApproval.sign(...args)),
           settle: (...args: Parameters<RawSession['accountApproval']['settle']>) =>
@@ -223,16 +237,33 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
             call(raw.accountApproval.invitation(...args)),
           access: () => call(raw.accountApproval.access()),
         }),
+        members: Object.freeze({
+          invite: (...args: Parameters<RawSession['members']['invite']>) =>
+            call(raw.members.invite(...args)),
+          pending: () => call(raw.members.pending()),
+          admission: (...args: Parameters<RawSession['members']['admission']>) =>
+            call(raw.members.admission(...args)),
+          read: (...args: Parameters<RawSession['members']['read']>) =>
+            call(raw.members.read(...args)),
+          reject: (...args: Parameters<RawSession['members']['reject']>) =>
+            call(raw.members.reject(...args)),
+          revoke: (...args: Parameters<RawSession['members']['revoke']>) =>
+            call(raw.members.revoke(...args)),
+        }),
         acknowledgeRotation: (...args: Parameters<RawSession['acknowledgeRotation']>) =>
           call(raw.acknowledgeRotation(...args)),
         prepareDispatch: (...args: Parameters<RawSession['prepareDispatch']>) =>
           call(raw.prepareDispatch(...args)),
+        signScheduleDeclaration: (...args: Parameters<RawSession['signScheduleDeclaration']>) =>
+          call(raw.signScheduleDeclaration(...args)),
         acceptResponse: (...args: Parameters<RawSession['acceptResponse']>) =>
           call(raw.acceptResponse(...args)),
         prepareFeature: (...args: Parameters<RawSession['prepareFeature']>) =>
           call(raw.prepareFeature(...args)),
         acceptFeatureResponse: (...args: Parameters<RawSession['acceptFeatureResponse']>) =>
           call(raw.acceptFeatureResponse(...args)),
+        irohPath: (...args: Parameters<RawSession['irohPath']>) => call(raw.irohPath(...args)),
+        irohRoute: (...args: Parameters<RawSession['irohRoute']>) => call(raw.irohRoute(...args)),
         document: (...args: Parameters<RawSession['document']>) =>
           call(
             raw.document(...args).pipe(
@@ -300,12 +331,18 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
     begin: (...args: Parameters<RawHost['begin']>) => run(host!.begin(...args)),
     claim: (...args: Parameters<RawHost['claim']>) => run(host!.claim(...args)),
     cancel: (...args: Parameters<RawHost['cancel']>) => run(host!.cancel(...args)),
+    restoreRecovery: (...args: Parameters<RawHost['restoreRecovery']>) =>
+      run(host!.restoreRecovery(...args)),
     prepareAccount: (...args: Parameters<RawHost['prepareAccount']>) =>
       run(host!.prepareAccount(...args)),
     acceptAccount: (...args: Parameters<RawHost['acceptAccount']>) =>
       run(host!.acceptAccount(...args)),
     acceptAccountHistory: (...args: Parameters<RawHost['acceptAccountHistory']>) =>
       run(host!.acceptAccountHistory(...args)),
+    prepareMember: (...args: Parameters<RawHost['prepareMember']>) =>
+      run(host!.prepareMember(...args)),
+    claimMember: (...args: Parameters<RawHost['claimMember']>) => run(host!.claimMember(...args)),
+    memberJoin: (...args: Parameters<RawHost['memberJoin']>) => run(host!.memberJoin(...args)),
     open: (...args: Parameters<RawHost['open']>) =>
       run(
         Effect.acquireUseRelease(

@@ -210,6 +210,13 @@ export function ledgerRecordFields(
       return { ...base, target: bytesToHex(op.target.toBytes()) };
     case 'transferOwner':
       return { ...base, successorMembershipId: bytesToHex(op.successorMembershipId.toBytes()) };
+    case 'abandonEpoch':
+      return {
+        ...base,
+        epoch: op.epoch,
+        baseEpoch: op.baseEpoch,
+        commitment: bytesToHex(op.commitment.toBytes()),
+      };
     case 'publishEpoch':
       return { ...base, epoch: op.epoch, commitment: bytesToHex(op.commitment.toBytes()) };
     case 'removeMember':
@@ -230,7 +237,8 @@ export function ledgerRecordFields(
 /** Decode the host's own public state. Complete originals recover prefix hashes
  * omitted by retained-state serialization, at the exact same head and state digest. */
 export function hostLedgerHistory(
-  input: import('@lody/platform').E2eeRuntimeLedgerView
+  input: import('@lody/platform').E2eeRuntimeLedgerView,
+  previous?: VerifiedLedgerHistory
 ): VerifiedLedgerHistory {
   const status = input.status;
   let view = Result.getOrThrow(
@@ -255,29 +263,82 @@ export function hostLedgerHistory(
     )
   )
     throw new E2eeHistoryError('local-conflict', 'incomplete-local');
-  const records = input.recordsHex.map((rawHex, index) => {
-    const bytes = hexToBytes(rawHex);
-    const position = positions[index]!;
-    const hash = bytesToHex(hashRecordBytes(bytes).toBytes());
+  const canExtendPrevious =
+    previous !== undefined &&
+    previous.view.verification === 'full-history' &&
+    previous.view.historyStart === 0 &&
+    previous.view.genesis.equals(view.genesis) &&
+    positions.length === view.length &&
+    positions.every((position, index) => position === index) &&
+    previous.records.length === previous.view.length &&
+    previous.records.length <= input.recordsHex.length &&
+    previous.records.every(
+      (row, index) => row.index === index && row.rawHex === input.recordsHex[index]
+    );
+  let records: ReadableLedgerRecord[];
+  if (canExtendPrevious) {
+    const prefixLength = previous.records.length;
+    const suffixBytes: Uint8Array[] = [];
+    const suffixRecords: ReadableLedgerRecord[] = [];
+    for (let index = prefixLength; index < input.recordsHex.length; index++) {
+      const rawHex = input.recordsHex[index]!;
+      const bytes = hexToBytes(rawHex);
+      const hash = bytesToHex(hashRecordBytes(bytes).toBytes());
+      if (
+        (index === 0 && hash !== status.genesisHash) ||
+        (index === view.length - 1 && hash !== status.headHash)
+      )
+        throw new E2eeHistoryError('local-conflict', 'history-changed');
+      suffixBytes.push(bytes);
+      suffixRecords.push({
+        index,
+        rawHex,
+        hash,
+        body: Result.getOrThrow(decodeRecord(bytes)).body,
+      });
+    }
+    records = suffixRecords.length === 0 ? previous.records : [...previous.records, ...suffixRecords];
     if (
-      (position === 0 && hash !== status.genesisHash) ||
-      (position === view.length - 1 && hash !== status.headHash)
+      records.length > 0 &&
+      (records[0]!.hash !== status.genesisHash ||
+        records[records.length - 1]!.hash !== status.headHash)
     )
       throw new E2eeHistoryError('local-conflict', 'history-changed');
-    return { index: position, rawHex, hash, body: Result.getOrThrow(decodeRecord(bytes)).body };
-  });
-  if (records.length === view.length && positions.every((position, index) => position === index)) {
-    const replayed = Result.getOrThrow(
-      verifyLedger({
-        anchor: view.genesis,
-        records: input.recordsHex.map(hexToBytes),
-        checkpoint: { head: view.head, length: view.length },
-      })
-    );
+    const replayed =
+      suffixBytes.length === 0
+        ? previous.view
+        : Result.getOrThrow(
+            extendLedger(previous.view, suffixBytes, { head: view.head, length: view.length })
+          );
     const state = Result.getOrThrow(exportVerifiedState(replayed));
-    if (bytesToHex(state.stateDigest.toBytes()) !== status.stateDigest)
+    if (!replayed.head.equals(view.head) || bytesToHex(state.stateDigest.toBytes()) !== status.stateDigest)
       throw new E2eeHistoryError('local-conflict', 'history-changed');
     view = replayed;
+  } else {
+    records = input.recordsHex.map((rawHex, index) => {
+      const bytes = hexToBytes(rawHex);
+      const position = positions[index]!;
+      const hash = bytesToHex(hashRecordBytes(bytes).toBytes());
+      if (
+        (position === 0 && hash !== status.genesisHash) ||
+        (position === view.length - 1 && hash !== status.headHash)
+      )
+        throw new E2eeHistoryError('local-conflict', 'history-changed');
+      return { index: position, rawHex, hash, body: Result.getOrThrow(decodeRecord(bytes)).body };
+    });
+    if (records.length === view.length && positions.every((position, index) => position === index)) {
+      const replayed = Result.getOrThrow(
+        verifyLedger({
+          anchor: view.genesis,
+          records: input.recordsHex.map(hexToBytes),
+          checkpoint: { head: view.head, length: view.length },
+        })
+      );
+      const state = Result.getOrThrow(exportVerifiedState(replayed));
+      if (bytesToHex(state.stateDigest.toBytes()) !== status.stateDigest)
+        throw new E2eeHistoryError('local-conflict', 'history-changed');
+      view = replayed;
+    }
   }
   return {
     view,

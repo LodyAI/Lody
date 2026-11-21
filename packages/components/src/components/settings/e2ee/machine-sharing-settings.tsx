@@ -156,7 +156,6 @@ export function MachineSharingController({
       (issue && issue !== 'generation') ||
       loading ||
       !view.canManage ||
-      view.needsResign ||
       view.unavailable
     )
       return;

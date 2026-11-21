@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { Check, Pencil, Plus, Trash2 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -230,10 +230,7 @@ export function PathLaunchersSettings({
   const row = (
     <CompactRow
       label={t('settings.pathLaunchers.title', 'Open with')}
-      helper={t(
-        'settings.pathLaunchers.description',
-        "The app a session header's Open button uses."
-      )}
+      info={t('settings.pathLaunchers.description', "The app a session header's Open button uses.")}
     >
       <Select.Root
         open={selectOpen}

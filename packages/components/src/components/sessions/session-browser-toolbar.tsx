@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ComponentProps, type FormEvent, type ReactNode } from 'react';
-import { ArrowLeft, ArrowRight, MessageCircle, Power, RefreshCw, Share2, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, MessageCircle, RefreshCw, Share2, X } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { Spinner } from '@lody/ui/spinner';
@@ -12,6 +12,7 @@ import {
   PreviewConnectionStatus,
   type PreviewConnectionStatusProps,
 } from './preview-connection-status';
+import { PreviewDisconnectButton } from './preview-disconnect-button';
 
 const styles = stylex.create({
   toolbar: {
@@ -89,6 +90,7 @@ type SessionBrowserToolbarProps = {
   sharing: boolean;
   shareAvailable: boolean;
   hasShareUrl: boolean;
+  hasLocalPreview?: boolean;
   busy: boolean;
   onAddressChange: (address: string) => void;
   onRestoreAddress: () => void;
@@ -100,6 +102,7 @@ type SessionBrowserToolbarProps = {
   onToggleAnnotation: () => void;
   onShare: () => void;
   onStopSharing: () => void;
+  onStopPreviewAndProcess?: () => void;
 };
 
 function ToolbarButton({
@@ -142,6 +145,7 @@ export function SessionBrowserToolbar({
   sharing,
   shareAvailable,
   hasShareUrl,
+  hasLocalPreview = false,
   busy,
   onAddressChange,
   onRestoreAddress,
@@ -153,6 +157,7 @@ export function SessionBrowserToolbar({
   onToggleAnnotation,
   onShare,
   onStopSharing,
+  onStopPreviewAndProcess,
 }: SessionBrowserToolbarProps) {
   const { t } = useTranslation();
   const addressInputRef = useRef<HTMLInputElement>(null);
@@ -265,14 +270,29 @@ export function SessionBrowserToolbar({
             <Share2 {...stylex.props(styles.icon)} />
           )}
         </ToolbarButton>
-        {hasShareUrl ? (
-          <ToolbarButton
-            label={t('sessions.browser.stopSharing', 'Stop sharing')}
+        {hasShareUrl || hasLocalPreview ? (
+          <PreviewDisconnectButton
+            size="icon"
+            primaryLabel={
+              hasShareUrl
+                ? t('sessions.browser.stopSharing', 'Stop sharing')
+                : t('sessions.browser.stopPreview', 'Close preview')
+            }
+            menuAriaLabel={t('sessions.browser.disconnectOptions', 'Preview disconnect options')}
+            disconnectOnlyLabel={
+              hasShareUrl
+                ? t('sessions.browser.disconnectRemoteOnly', 'Stop remote preview only')
+                : t('sessions.browser.disconnectPreviewOnly', 'Close preview only')
+            }
+            disconnectAndTerminateLabel={t(
+              'sessions.browser.disconnectAndStopProcess',
+              'Close preview and stop server'
+            )}
             disabled={busy}
-            onClick={onStopSharing}
-          >
-            <Power {...stylex.props(styles.icon)} />
-          </ToolbarButton>
+            onDisconnectOnly={onStopSharing}
+            onDisconnectAndTerminate={onStopPreviewAndProcess}
+            testId="browser-disconnect-button"
+          />
         ) : null}
       </div>
     </Tooltip.Provider>

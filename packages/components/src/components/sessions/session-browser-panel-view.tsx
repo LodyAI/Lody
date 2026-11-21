@@ -110,13 +110,20 @@ export function SessionBrowserPanelView({
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const hasContent = Boolean(children);
-  // When remote content is absent the placeholder owns the single recovery
-  // action; keeping it out of the popover avoids two simultaneous Restore
-  // buttons. Local/connected content has no placeholder, so the popover owns it.
+  // When remote content is absent the placeholder owns the single Restore
+  // button inside the popover; the address bar still exposes a one-click
+  // regenerate icon button. Local/connected content has no placeholder, so the
+  // popover owns its actions.
   const toolbarPreviewStatus =
     previewStatus && hasContent
       ? previewStatus
-      : previewStatus && { ...previewStatus, onRestore: undefined, onStopSharing: undefined };
+      : previewStatus && {
+          ...previewStatus,
+          onRestore: undefined,
+          onStopSharing: undefined,
+          onStopAndKillProcess: undefined,
+          onRegenerate: previewStatus.onRegenerate ?? previewStatus.onRestore,
+        };
   const previewDiagnostic =
     previewStatus?.unavailableReason ??
     previewStatus?.error ??

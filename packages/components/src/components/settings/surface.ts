@@ -338,6 +338,33 @@ export const settingsSurface = stylex.create({
     gap: space[4],
     paddingBlock: space[2],
   },
+  /**
+   * An empty catalog that teaches its way in: what the list will hold, one line
+   * on what a record is for, and the page's add action, which leaves the header
+   * while the list is empty so it is never offered twice.
+   */
+  emptyState: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: space[1],
+    paddingInline: space[4],
+    paddingBlock: space[6],
+  },
+  emptyStateTitle: {
+    margin: 0,
+    fontSize: text.bodySize,
+    fontWeight: type.headingWeight,
+    lineHeight: type.leading,
+    color: colors.label,
+  },
+  emptyStateDescription: {
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: type.leading,
+    color: colors.secondaryLabel,
+  },
+  emptyStateAction: { marginTop: space[3] },
   /** A row whose control cannot be used here: its name steps back with it. */
   rowLabelDisabled: { color: colors.tertiaryLabel },
   /**

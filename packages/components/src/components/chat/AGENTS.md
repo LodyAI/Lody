@@ -26,7 +26,9 @@ project.sharedWithTeam`. The selected Private segment opens `ProjectShareDialog`
   its value equals `visibleLocalMachineId`, never by ownership or Private access.
 - The sharing-review landing notice has two distinct durable actions: dismissal
   keeps the current source revision quiet, while "Don't remind me again"
-  suppresses that user's notice for the workspace across future revisions.
+  suppresses that user's notice for the workspace across future revisions. The
+  composer notice concerns only the selected machine and projects the user owns;
+  unrelated private resources remain in the workspace Inbox review.
 - The composer box border is 1px. Light fill is `--composer`, dark fill is
   `bg-input/90`; it stays `rounded-2xl` with a soft wide lift
   (`COMPOSER_ELEVATION_CLASS`). The session info bar shares the light fill and
@@ -57,6 +59,9 @@ project.sharedWithTeam`. The selected Private segment opens `ProjectShareDialog`
 
 ## Invariants
 
+- My Tasks and personal summaries filter by session assignment (`userId`) only.
+  Machine ownership preserves access and management independently of that filter.
+
 - A landing selection follows the machine the user chose, not presence. Liveness may
   replace a restored selection only once per landing mount, when a synced room first
   reports its machine offline; that fallback stays out of stored defaults and returns
@@ -78,6 +83,9 @@ project.sharedWithTeam`. The selected Private segment opens `ProjectShareDialog`
   window launch relationship. Keep the reserved session id and attachments
   in module-level atoms. Route unmount neither revokes previews nor aborts uploads;
   revoke/abort only on removal/full draft clear. App restart may lose attachments.
+- An embedded landing (`ChatLanding embedding`, Today's "Convert to task") keys its draft
+  with `buildChatLandingSurfaceDraftKey`, never the page's key, and releases that whole
+  draft when it unmounts. It hands the accepted session to its host instead of navigating.
 - Every new-chat entry point within a workspace reuses that one landing draft. Project
   selection may change, but navigation MUST NOT clear or replace Composer content;
   only an accepted submit or an explicit user removal may release draft resources.

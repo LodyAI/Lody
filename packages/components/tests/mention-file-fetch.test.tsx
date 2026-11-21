@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -10,7 +9,7 @@ vi.mock('@lody/shared', async (original) => ({
   ...(await original<object>()),
   githubFetchFilePaths: (...args: unknown[]) => state.fetch(...args),
 }));
-vi.mock('@posthog/react', () => ({ usePostHog: () => state.client }));
+vi.mock('@/lib/posthog-context', () => ({ usePostHog: () => state.client }));
 vi.mock('../src/atoms', async () => ({
   currentWorkspaceIdAtom: (await import('jotai')).atom('ws'),
 }));

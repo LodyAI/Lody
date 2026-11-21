@@ -37,7 +37,7 @@ import { isNativeAppShell, isNativeIOSAppShell } from '@/lib/native-platform';
 import { ClearCacheConfirmDialog, useClearCache } from '@/components/settings/clear-cache';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isMobileKeyboardAction } from '@/lib/mobile-keyboard-action';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { QueuedMessageBehaviorControl } from '@/components/settings/queued-message-behavior-control';
 import { getIpcServices } from '@/lib/electron-ipc-client';

@@ -22,10 +22,21 @@ export const e2eeHistoryPageSchema: z.ZodType<E2eeWorkspaceHistoryPage> = z.obje
   nextCursor: z.string().min(1).nullable(),
 });
 
+export const mailboxStatusSchema = slot.extend({
+  revision: nonnegative,
+  status: z.enum([
+    'NeedsEnvelope',
+    'EnvelopeStored',
+    'InstallationReported',
+    'Ineligible',
+    'Obsolete',
+  ]),
+});
+
 export const e2eeMailboxReplySchemas: {
   [K in keyof E2eeMailboxReplies]: z.ZodType<E2eeMailboxReplies[K]>;
 } = {
-  put: z.null(),
+  put: z.union([z.null(), z.object({ frameHex: bytesHex(512), slot: mailboxStatusSchema })]),
   report: z.null(),
   repair: z.null(),
   read: bytesHex(512).nullable(),
@@ -35,15 +46,8 @@ export const e2eeMailboxReplySchemas: {
       .string()
       .regex(/^[0-9a-f]{64}:[0-9a-f]{64}$/)
       .nullable(),
+    slot: mailboxStatusSchema.optional(),
   }),
-  status: slot.extend({
-    revision: nonnegative,
-    status: z.enum([
-      'NeedsEnvelope',
-      'EnvelopeStored',
-      'InstallationReported',
-      'Ineligible',
-      'Obsolete',
-    ]),
-  }),
+  status: mailboxStatusSchema,
+  batchStatus: z.array(mailboxStatusSchema),
 };

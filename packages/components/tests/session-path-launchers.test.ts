@@ -84,7 +84,7 @@ describe('built-in path launchers', () => {
         label: 'Delta',
       });
       expect(buildPathLauncherProbes([delta!], targetPath, platform)).toEqual([
-        { launcherId: 'delta', input },
+        { launcherId: 'delta', targetPath, targetKind: 'directory' },
       ]);
       expect(
         pathLauncherPreferenceSchema.parse({ selectedLauncherId: 'delta' }).selectedLauncherId

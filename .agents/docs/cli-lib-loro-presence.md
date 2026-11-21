@@ -69,6 +69,9 @@ form (at most 30); machine IDs are UUIDs or
 or identity. Non-UUID session IDs do not publish presence in minimal mode: the
 shape of a legacy fallback cannot prove its provenance. Supporting an actual legacy
 session would require trusted local session-record confirmation, not a route value.
+The renderer's `desktop-foreground` entry carries only user/instance IDs and
+`updatedAt`; an identity outside the allowlist publishes nothing, so the Host
+keeps sending the mobile push.
 Invalid viewing routes are discarded before retention/heartbeat and
 clear a previous viewing entry. CLI validates before retaining producer keys:
 Loro emits deletion updates even for absent keys, so filtering only set values
@@ -120,9 +123,11 @@ liveness over the local plane while offline.
 
 ## Session active presence has exactly one owner
 
-`session-active-presence.ts` alone owns session active presence. It starts once for a
-visible CLI turn, accepts phase updates, heartbeats while active, and clears on the
-owning Effect release. Never publish or clear session presence from `setStatus`, RPC
+`session-active-presence.ts` alone owns session active presence. It owns visible Turn leases and native agent activity. Turn phases take precedence; after
+a Turn releases, the latest native running or background level remains visible until the
+agent reports idle or its process exits. Native levels reconcile on a one-second timer and
+heartbeat while active, so repeated agent notifications cannot flood the shared channel.
+A Turn lease clears only on the owning Effect release. Never publish or clear session presence from `setStatus`, RPC
 dispatch, permission or image callbacks, or watcher recovery paths — a second writer
 makes the clear path unreliable and leaves sessions showing work that ended.
 

@@ -57,6 +57,8 @@ export type WorkspaceJoinLinkPreview =
     };
 
 export interface WorkspaceJoinOwnerState {
+  /** Optional roster change marker; older servers omit it. Not a permission grant. */
+  membershipVersion?: string;
   activeLink: null | { id: string; token: string; expiresAt: number };
   pendingRequests: Array<{
     id: string;
@@ -96,9 +98,12 @@ function capabilityForOperation(name: string): PlatformCapability {
     name.startsWith('e2eeMembers:') ||
     // Personal device pairing relays: account-scoped, never on local composition.
     name.startsWith('e2eeAccountPairing:') ||
+    name.startsWith('e2eeAutomaticPairing:') ||
     name.startsWith('e2eeJoinMailbox:')
   )
     return 'multiWorkspace';
+  if (name.startsWith('workspaceMembers:')) return 'teamSharing';
+  if (name.startsWith('e2eeMachineSharing:')) return 'teamSharing';
   if (name.startsWith('promptShortcuts:')) return 'cloudAccount';
   if (name.startsWith('billing:') || name.startsWith('referrals:')) return 'billing';
   if (name.startsWith('usage:')) return 'usageAnalytics';
@@ -110,6 +115,8 @@ function capabilityForOperation(name: string): PlatformCapability {
   if (name.startsWith('machineCredentials:') || name.startsWith('machinePairing:')) {
     return 'remoteMachines';
   }
+  if (name === 'machines:listSessionAccess' || name === 'machines:setSessionReadSharedWithTeam')
+    return 'teamSharing';
   if (name === 'machines:setMachineSharedWithTeam') return 'teamSharing';
   if (name.startsWith('machines:')) return 'remoteMachines';
   if (name.startsWith('localProjects:') || name.startsWith('sessionSharing:')) return 'teamSharing';
@@ -146,6 +153,11 @@ const action = <Reference extends FunctionReference<'action'>>(
  * public cloud client contract, never from generated server API declarations.
  */
 export const cloudOperations = {
+  e2eeMachineSharing: {
+    listVersions: query<ConvexApi['e2eeMachineSharing']['listVersions']>(
+      'e2eeMachineSharing:listVersions'
+    ),
+  },
   /** Account-wide pairing relay for portable hosts. Opaque bytes; hosts verify every tag. */
   e2eeAccountPairing: {
     submit: mutation<ConvexApi['e2eeAccountPairing']['submit']>('e2eeAccountPairing:submit'),
@@ -171,7 +183,18 @@ export const cloudOperations = {
       import('@lody/cloud-api').E2eeMemberReplies['preview']
     >('teamSharing', 'e2eeMembers:preview'),
   },
+  e2eeAutomaticPairing: {
+    pending: query<ConvexApi['e2eeAutomaticPairing']['pending']>('e2eeAutomaticPairing:pending'),
+    read: query<ConvexApi['e2eeAutomaticPairing']['read']>('e2eeAutomaticPairing:read'),
+    exchange: mutation<ConvexApi['e2eeAutomaticPairing']['exchange']>(
+      'e2eeAutomaticPairing:exchange'
+    ),
+  },
   e2eeWorkspaces: {
+    reportDeviceProfile: mutation<ConvexApi['e2eeWorkspaces']['reportDeviceProfile']>(
+      'e2eeWorkspaces:reportDeviceProfile'
+    ),
+    ledgerHead: query<ConvexApi['e2eeWorkspaces']['ledgerHead']>('e2eeWorkspaces:ledgerHead'),
     memberProfiles: query<ConvexApi['e2eeWorkspaces']['memberProfiles']>(
       'e2eeWorkspaces:memberProfiles'
     ),
@@ -180,6 +203,9 @@ export const cloudOperations = {
     history: action<ConvexApi['e2eeWorkspaces']['history']>('e2eeWorkspaces:history'),
   },
   promptShortcuts: {
+    getStreamTokenV2: action<ConvexApi['promptShortcuts']['getStreamTokenV2']>(
+      'promptShortcuts:getStreamTokenV2'
+    ),
     stageDocument: mutation<ConvexApi['promptShortcuts']['stageDocument']>(
       'promptShortcuts:stageDocument'
     ),
@@ -224,6 +250,7 @@ export const cloudOperations = {
       ConvexApi['activity']['recordMyWorkspaceDailyActiveUser']
     >('activity:recordMyWorkspaceDailyActiveUser'),
   },
+  workspaceMembers: { list: query<ConvexApi['workspaceMembers']['list']>('workspaceMembers:list') },
   auth: {
     transferWorkspaceOwnership: mutation<ConvexApi['auth']['transferWorkspaceOwnership']>(
       'auth:transferWorkspaceOwnership'
@@ -441,6 +468,12 @@ export const cloudOperations = {
     ),
   },
   machines: {
+    listSessionAccess: query<ConvexApi['machines']['listSessionAccess']>(
+      'machines:listSessionAccess'
+    ),
+    setSessionReadSharedWithTeam: mutation<ConvexApi['machines']['setSessionReadSharedWithTeam']>(
+      'machines:setSessionReadSharedWithTeam'
+    ),
     listVisibleMachines: query<ConvexApi['machines']['listVisibleMachines']>(
       'machines:listVisibleMachines'
     ),

@@ -21,6 +21,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { KEY_DELIVERY_RETRY_DELAYS } from '../src/account-requester';
 const call = (p: Page, a: string) =>
   p.evaluate((action) => (globalThis as HostGlobal).HostFixture.invoke(action), a);
 const record = (result: Awaited<ReturnType<typeof call>>) => {
@@ -93,7 +94,7 @@ it.each(['chromium', 'webkit'] as const)(
         // The refused first store is retried on the due schedule without any other call,
         // and only mailbox evidence counts as delivered.
         deliveries: ['running:true', 'retrying:true:e2ee_key_not_sent', 'delivered:true'],
-        sleeps: [10_000],
+        sleeps: [KEY_DELIVERY_RETRY_DELAYS[0]],
         refused: true,
         retriedExactly: true,
         length: 3,
@@ -808,3 +809,142 @@ it.each(['chromium', 'webkit'] as const)(
     }
   }
 );
+
+it.each([
+  { options: {}, expected: { ok: true, outcome: 'Committed', sealed: true } },
+  {
+    options: { runtime: true },
+    expected: {
+      ok: true,
+      outcome: 'Committed',
+      sealed: true,
+      recoveryVerified: true,
+      sameIdentity: true,
+    },
+  },
+  {
+    options: { runtime: true, governance: true },
+    expected: { ok: true, guarded: true, removed: true },
+  },
+  {
+    options: { blockedEpoch: 'missing' as const },
+    expected: { ok: true, sealed: true, partialEpochKey: true },
+  },
+  {
+    options: { blockedEpoch: 'corrupt' as const },
+    expected: { ok: true, sealed: true, partialEpochKey: true },
+  },
+  { options: { setup: true }, expected: { ok: true, sealed: true, recoveryVerified: true } },
+  {
+    options: { setup: true, slowRecoveryIo: true },
+    expected: { ok: true, sealed: true, recoveryVerified: true, refreshedDuringSetup: true },
+  },
+  { options: { repair: true }, expected: { ok: true, sealed: true, noDuplicateAdmission: true } },
+  { options: { repair: true, revokePersonal: true }, expected: { ok: false } },
+  { options: { wrongAccount: true }, expected: { ok: false, phase: null } },
+  { options: { revokedRecovery: true }, expected: { ok: false } },
+  { options: { tamperedPackage: true }, expected: { ok: false, phase: null } },
+  { options: { failInstall: true }, expected: { ok: false } },
+  {
+    options: { failInstall: true, resume: true },
+    expected: { ok: true, sealed: true, noDuplicateAdmission: true },
+  },
+])(
+  'restores an authenticated vault with durable custody: $options',
+  async ({ options, expected }) => {
+    const browser = await chromium.launch();
+    try {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      const output = await build({
+        entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+        platform: 'browser',
+        bundle: true,
+        format: 'iife',
+        globalName: 'HostFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+      });
+      await page.route('https://lody.ai/**', (route) =>
+        route.fulfill({
+          contentType: 'text/html',
+          body:
+            '<script>' +
+            output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+            '</script>',
+        })
+      );
+      await page.goto('https://lody.ai/');
+      expect(
+        await page.evaluate(
+          (input) => (globalThis as HostGlobal).HostFixture.recoverBrowser(input),
+          options
+        )
+      ).toMatchObject(expected);
+      if (expected.ok && !('governance' in options))
+        expect(
+          await page.evaluate(() => (globalThis as HostGlobal).HostFixture.reopenRecoveredBrowser())
+        ).toMatchObject({ usableEpoch: 0 });
+      await context.close();
+    } finally {
+      await browser.close();
+    }
+  }
+);
+
+it('snapshot-joined personal status skips an installed abandoned K1 while K2 is missing', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'lody-abandoned-status-'));
+  let context: BrowserContext | undefined;
+  try {
+    const output = await build({
+      entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+      platform: 'browser',
+      bundle: true,
+      format: 'iife',
+      globalName: 'HostFixture',
+      target: 'safari16.4',
+      write: false,
+      logLevel: 'silent',
+    });
+    const file = join(dir, 'index.html');
+    await writeFile(
+      file,
+      '<!doctype html><script>' +
+        output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+        '</script>'
+    );
+    context = await chromium.launchPersistentContext(join(dir, 'profile'), { headless: true });
+    const page = await context.newPage();
+    await page.goto(pathToFileURL(file).href);
+    await page.evaluate(() => (globalThis as HostGlobal).HostFixture.boot());
+    for (const action of [
+      'rotateRemote',
+      'prepare',
+      'begin',
+      'approve',
+      'claim',
+      'open',
+      'currentMailbox',
+      'keyRound',
+    ]) {
+      const result = await call(page, action);
+      expect(result.ok, action + JSON.stringify(result)).toBe(true);
+    }
+    expect(record(await call(page, 'status')).usableEpoch).toBe(1);
+    for (const action of ['abandonRemote', 'refresh'])
+      expect((await call(page, action)).ok, action).toBe(true);
+    expect((await call(page, 'status')).value).toEqual({
+      currentEpoch: 2,
+      usableEpoch: null,
+      rotationRequired: false,
+    });
+    expect(record(await call(page, 'quotaThenGovern'))).toEqual({
+      refusal: 'self-service-rate-limited',
+      outcome: 'Committed',
+    });
+  } finally {
+    await context?.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

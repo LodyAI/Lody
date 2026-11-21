@@ -1,11 +1,18 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
-import { type MachineId, type MachineViewMeta } from '@lody/shared';
-import { MachineDetailPane } from '../src/components/settings/machine-detail-pane';
+import {
+  type AgentConfigId,
+  type AgentConfigMeta,
+  type MachineId,
+  type MachineViewMeta,
+  type ProviderSetupTask,
+} from '@lody/shared';
+import {
+  MachineDetailPane,
+  MachineProvidersSection,
+} from '../src/components/settings/machine-detail-pane';
 
 import { initI18n } from '../src/i18n';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -175,4 +182,128 @@ describe('MachineDetailPane revoke machine access', () => {
     expect(document.body.querySelector('button[aria-label="Revoke machine access"]')).toBeNull();
     expect(document.body.querySelector('button[aria-label="Remove from workspace"]')).toBeNull();
   });
+});
+
+describe('advanced daemon identity restore', () => {
+  let root: Root;
+  let container: HTMLDivElement;
+  beforeEach(async () => {
+    await initI18n();
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+  });
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+  it.each([false, true])(
+    'keeps recovery folded, preserves empty selection and scopes the pairing notice (encrypted=%s)',
+    async (encryptedWorkspace) => {
+      const { MachineIdentityRestore } =
+        await import('../src/components/settings/machine-identity-restore');
+      await act(async () =>
+        root.render(
+          <MachineIdentityRestore
+            machine={machine}
+            encryptedWorkspace={encryptedWorkspace}
+            candidates={[]}
+            onRestore={async () => {
+              throw new Error('must not run');
+            }}
+          />
+        )
+      );
+      expect(document.body.textContent).not.toContain('Choose old identity');
+      const advanced = Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('Advanced settings')
+      );
+      if (!advanced) throw new Error('Missing advanced recovery trigger');
+      await click(advanced);
+      const choose = Array.from(container.querySelectorAll('button')).find(
+        (button) => button.textContent === 'Choose old identity'
+      );
+      if (!choose) throw new Error('Missing recovery action');
+      await click(choose);
+      const dialog = findConfirmDialog();
+      expect(dialog.textContent).toContain('no machine is running with the old identity');
+      expect(dialog.textContent).toContain('Current machine name');
+      expect(dialog.textContent?.includes('Encrypted workspaces require pairing again.')).toBe(
+        encryptedWorkspace
+      );
+      expect(dialog.textContent).toContain('No other offline machine identities');
+      const submit = Array.from(dialog.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('restore and restart')
+      );
+      expect(submit?.disabled).toBe(true);
+    }
+  );
+});
+
+describe('provider setup rows beside published configs', () => {
+  let root: Root;
+  let container: HTMLDivElement;
+  beforeEach(async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    await initI18n('en');
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+  });
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  const config = (id: string, name: string): AgentConfigMeta => ({
+    id: id as AgentConfigId,
+    name,
+    cliType: 'builtin',
+    agentType: 'devin',
+    machineId: machine.id,
+    env: {},
+    prompt: '',
+  });
+  // A setup publishes its config under the setup's own id.
+  const setup: ProviderSetupTask = {
+    v: 1,
+    id: 'devin-setup' as AgentConfigId,
+    machineId: machine.id,
+    config: config('devin-setup', 'Devin'),
+    status: 'queued',
+    attempt: 1,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const setupRowCount = () =>
+    (container.textContent ?? '').split('to finish this provider setup.').length - 1;
+
+  it.each(['list', 'card', 'mobile-list'] as const)(
+    'removes a setup row that briefly coexisted with its published config (%s)',
+    async (view) => {
+      const render = (configs: AgentConfigMeta[], setups: ProviderSetupTask[]) =>
+        act(async () =>
+          root.render(
+            <Tooltip.Provider>
+              <MachineProvidersSection
+                machine={machine}
+                configs={configs}
+                setups={setups}
+                bare={view === 'card'}
+                variant={view === 'mobile-list' ? 'mobile-list' : 'default'}
+                onAddConfig={vi.fn()}
+                onEditConfig={vi.fn()}
+              />
+            </Tooltip.Provider>
+          )
+        );
+      const published = config('devin-setup', 'Devin');
+      await render([config('a', 'A'), published, config('z', 'Zed')], [setup]);
+      expect(setupRowCount()).toBe(1);
+
+      await render([config('a', 'A'), published], []);
+      expect(setupRowCount()).toBe(0);
+      expect(container.querySelectorAll('[data-agent-config-id="devin-setup"]')).toHaveLength(1);
+    }
+  );
 });

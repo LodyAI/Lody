@@ -1,0 +1,63 @@
+---
+title: End-to-End Encrypted Workspaces
+description: A plain-language guide to Lody end-to-end encrypted workspaces - who can see content, inviting teammates and adding devices, and what happens if you lose your devices.
+---
+
+# End-to-End Encrypted Workspaces
+
+In an end-to-end encrypted workspace, conversations, files and agent output **can only be read on devices you have authorized**. Lody's servers relay and store the data, but only ever see data they cannot read.
+
+<Callout type="warn">
+If you lose every authorized device and have no recovery file, the workspace can never be opened again, and Lody cannot recover it. Set up a recovery file soon after you create the workspace.
+</Callout>
+
+## How it differs from a standard workspace
+
+| | Standard workspace | End-to-end encrypted workspace |
+| --- | --- | --- |
+| Who can read content | Members with access, and Lody's servers | Only authorized devices |
+| Using a new device | Sign in | Sign in, then approve it from an authorized device |
+| Web app | Works right away | The browser must be authorized first |
+| Losing every device | Sign in again | Needs a recovery file or passkey |
+
+## Everyday tasks
+
+<Steps>
+<Step>
+
+**Recognize an encrypted workspace**: a lock appears next to its name. Hover the lock for an explanation.
+
+</Step>
+<Step>
+
+**Invite a teammate**: send an invitation under Settings › General › Open encryption console › Members & invitations. Once an administrator approves, their device receives the key.
+
+</Step>
+<Step>
+
+**Open it on a new device**: the new device sends a request automatically. Your authorized computer or phone shows an approval window; check the numbers match on both screens and choose Authorize.
+
+</Step>
+<Step>
+
+**Compare with teammates**: under Security code & history, compare security codes to confirm everyone sees the same members and devices.
+
+</Step>
+<Step>
+
+**Set up recovery**: under Recovery, save a recovery file or add a passkey so you can still open the workspace if every device is lost.
+
+</Step>
+</Steps>
+
+## Learn more
+
+<Cards>
+  <Card title="How the permission ledger works" href="/docs/encrypted-workspaces-ledger" description="Who can add members and devices, and why the server cannot quietly add anyone." />
+  <Card title="What the security code proves" href="/docs/encrypted-workspaces-security-code" description="How the code is computed and what a match or mismatch means." />
+</Cards>
+
+## Known limits
+
+- In a browser, security depends on the code the Lody website serves not being tampered with. If that matters to you, use the desktop or mobile app.
+- When the server is unreachable, your machines can keep working for a limited time; inviting, approving devices and replacing keys wait until you are back online.

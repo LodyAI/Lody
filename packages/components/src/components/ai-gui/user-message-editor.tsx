@@ -7,6 +7,7 @@ import { Spinner } from '@lody/ui/spinner';
 
 import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
+import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import type { ConversationFontSize } from '@/atoms/settings';
 import { conversationTextFontSizeStyle } from './conversation-font-size-classes';
 import { CombinedMentionTextarea } from '@/components/mentions/combined-mention-textarea';
@@ -25,6 +26,11 @@ import {
   useSessionMentionSource,
   type UseSessionMentionSourceArgs,
 } from '@/hooks/use-session-mention-source';
+import {
+  type ComposerInputElement,
+  getComposerText,
+  setComposerSelection,
+} from '@/ui/mention/composer-input';
 
 /** Grows with the text instead of reserving a fixed empty block. */
 const MAX_TEXTAREA_HEIGHT_PX = 320;
@@ -87,7 +93,8 @@ function UserMessageEditorContent({
   onQuoteDraftsChange,
 }: UserMessageEditorProps) {
   const { t } = useTranslation();
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const shortcutsEnabled = useWorkspaceFeature('shortcuts');
+  const textareaRef = useRef<ComposerInputElement | null>(null);
   // Live ranges the before-send rewrite needs; they only leave the component
   // on save, alongside the text they were measured against.
   const mentionRangesRef = useRef<MentionRange[]>([]);
@@ -115,11 +122,16 @@ function UserMessageEditorContent({
 
   // Put the caret at the end rather than selecting everything, so the common
   // case (appending a clarification) needs no extra click.
-  const focusAtEnd = useCallback((el: HTMLTextAreaElement | null) => {
+  const focusAtEnd = useCallback((el: ComposerInputElement | null) => {
     textareaRef.current = el;
     if (!el) return;
     el.focus();
-    el.setSelectionRange(el.value.length, el.value.length);
+    // The editor registers its text once it has mounted on the element.
+    requestAnimationFrame(() => {
+      if (textareaRef.current !== el) return;
+      const end = getComposerText(el).length;
+      setComposerSelection(el, end, end);
+    });
   }, []);
 
   const handleSave = useCallback(() => {
@@ -159,6 +171,7 @@ function UserMessageEditorContent({
         readOnly={isSaving}
         mentionSource={mentionSource}
         availableCommands={availableCommands}
+        enablePromptShortcuts={shortcutsEnabled}
         skillAgent={skillAgent}
         currentSessionId={currentSessionId}
         mentionSurface="session_chat"

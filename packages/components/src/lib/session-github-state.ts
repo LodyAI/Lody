@@ -5,7 +5,9 @@ import type {
 } from '@lody/shared';
 import {
   getSessionPullRequestLegacyFields,
+  hasWorkspaceChanges,
   resolveSessionPrimaryPullRequest,
+  resolveSessionPullRequestHistory,
   type SessionPullRequestView,
   parseGitHubPullRequestUrl,
   resolveProjectGitHubRepo,
@@ -17,6 +19,9 @@ export type SessionGitHubState = {
   repoFullName: string;
   /** Shared summary of the described PR; every surface reads the same view. */
   latestPrView: SessionPullRequestView | null;
+  /** Every associated PR in the described scope: `latestPrView` first, then
+   *  older associations newest first. Never shrinks when a newer PR appears. */
+  pullRequestHistory: SessionPullRequestView[];
   latestPr: SessionPullRequestMeta | null;
   latestPrState: SessionPullRequestStateMeta | null;
   canShowGitHubActions: boolean;
@@ -29,12 +34,10 @@ export type SessionGitHubState = {
    */
   workspaceUnpushed: boolean;
   /**
-   * Whether the session has any changes to base a PR on — uncommitted
-   * (`workspaceDirty`) OR already committed (`diffStats.allChange > 0`). These
-   * two signals come from independent writers (post-turn `git status` vs the
-   * Code Collab file-index scanner), so together they survive one being stale
-   * and, unlike `workspaceDirty` alone, keep "Create PR" available after the
-   * agent commits (clean tree, real commits, still no PR).
+   * Whether the session has changes to base a PR on. Workspace diff totals
+   * include committed and uncommitted changes against the workspace base.
+   * `workspaceDirty` also covers changes without text-line counts and remains
+   * independent of the asynchronously refreshed comparison summary.
    */
   hasChanges: boolean;
 };
@@ -77,23 +80,21 @@ export const getSessionGitHubState = (
     (resolveProjectGitHubRepo(sourceSession?.project) ?? sourceSession?.repoFullName)?.trim() ?? '';
   const repoFullName =
     activeRepository === undefined ? legacyRepoFullName : (activeRepository?.trim() ?? '');
-  const latestPrView = resolveSessionPrimaryPullRequest(
-    sourceSession,
-    activeRepository === undefined && !sourceSession?.projectRun ? undefined : repoFullName || null
-  );
+  const describedRepository =
+    activeRepository === undefined && !sourceSession?.projectRun ? undefined : repoFullName || null;
+  const latestPrView = resolveSessionPrimaryPullRequest(sourceSession, describedRepository);
+  const pullRequestHistory = resolveSessionPullRequestHistory(sourceSession, describedRepository);
   const latestPr = latestPrView?.pr ?? null;
   const latestPrState = latestPrView?.state ?? null;
 
   const workspaceDirty = sourceSession?.workspaceDirty ?? false;
   const workspaceUnpushed = sourceSession?.workspaceUnpushed ?? false;
   const allChange = sourceSession?.diffStats?.allChange;
-  const hasCommittedDiff = allChange ? allChange.add + allChange.del > 0 : false;
-  // `diffStats` is published only when every Member reports a diff, and a
-  // non-Git Member never does. Fall back to the Member rows so committed work
-  // still enables Create PR in a mixed Project group.
-  const memberHasCommittedDiff = sourceSession?.projectRun
-    ? Object.values(sourceSession.projectRun.members).some(
-        (member) => member.diff && member.diff.add + member.diff.del > 0
+  const hasWorkspaceDiff = hasWorkspaceChanges(allChange);
+  // A group total can be unknown while some Members have a complete comparison.
+  const memberHasWorkspaceDiff = sourceSession?.projectRun
+    ? Object.values(sourceSession.projectRun.members).some((member) =>
+        hasWorkspaceChanges(member.diff)
       )
     : false;
 
@@ -101,12 +102,13 @@ export const getSessionGitHubState = (
     sourceSessionId: sourceSession?.id,
     repoFullName,
     latestPrView,
+    pullRequestHistory,
     latestPr,
     latestPrState,
     canShowGitHubActions: !!repoFullName,
     hasExistingPr: !!repoFullName && !!latestPr,
     workspaceDirty,
     workspaceUnpushed,
-    hasChanges: workspaceDirty || hasCommittedDiff || memberHasCommittedDiff,
+    hasChanges: workspaceDirty || hasWorkspaceDiff || memberHasWorkspaceDiff,
   };
 };

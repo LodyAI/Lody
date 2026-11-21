@@ -28,6 +28,10 @@ UI rows and leaves attachment preparation in the trailing slot. It retains local
 bodies until matching formal history is hydrated; only real owner receipts mark
 delivery. The wrapper component keeps the standalone pending-message surface.
 
+The composer sharing reminder follows the selected machine and projects, and only
+offers sharing to their owner. Private resources elsewhere in the workspace do
+not trigger it; the Inbox retains its workspace-wide sharing review.
+
 ## Home dashboard transitions
 
 The Now summary and running session rows reuse the sidebar's
@@ -105,6 +109,12 @@ while the rest steps back (`home/focus-motion.ts`). [Why](../../../../../.agents
   sidebar writes a mention into the composer this layout renders, and nothing above
   it participates, so plumbing the handle up to `chat-landing.tsx` would buy
   nothing.
+- **The dialog layout as a create form.** An embedded landing (`layout: 'dialog'`,
+  `ChatComposer` `modal`) follows Linear's create-issue modal: the prompt is the
+  page with no box, every selector sits in one wrapping pill row under it, and a
+  ruled footer holds "+", Cancel and the labelled submit. Because the pill row sits
+  above that footer, the run-config and permission menus there open upward too
+  (`menuSide="top"`), like the scope menus, and never cover the actions.
 
 Chat Landing no longer emits the legacy onboarding project-source, project-selection,
 or agent-selection events. Onboarding owns its route-scoped flow, step and operation

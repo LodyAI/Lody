@@ -3,8 +3,10 @@ import { Effect } from 'effect'
 import {
   makeAccountPairing,
   type AccountPairingAdmissionRecord,
+  type AccountPairingApproverFilter,
   type AccountPairingApproverWorkspace,
   type AccountPairingRelay,
+  type AccountPairingRequesterFilter,
   type AccountPairingRequesterWorkspace,
   type AccountPairingStore
 } from '@lody/e2ee-client/account-pairing'
@@ -12,10 +14,12 @@ import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 
 export type {
   AccountPairingApproval,
+  AccountPairingApproverFilter,
   AccountPairingApproverWorkspace,
   AccountPairingPreview,
   AccountPairingRefusal,
   AccountPairingRelay,
+  AccountPairingRequesterFilter,
   AccountPairingRequesterWorkspace,
   AccountPairingState
 } from '@lody/e2ee-client/account-pairing'
@@ -194,8 +198,13 @@ export function makeDesktopAccountPairing(input: {
   account: string
   deviceName: string
   relay: AccountPairingRelay
-  approverWorkspaces: () => Effect.Effect<readonly AccountPairingApproverWorkspace[], unknown>
-  requesterWorkspaces: () => Effect.Effect<readonly AccountPairingRequesterWorkspace[], unknown>
+  approverWorkspaces: (
+    filter?: AccountPairingApproverFilter
+  ) => Effect.Effect<readonly AccountPairingApproverWorkspace[], unknown>
+  requesterWorkspaces: (
+    hints?: unknown,
+    filter?: AccountPairingRequesterFilter
+  ) => Effect.Effect<readonly AccountPairingRequesterWorkspace[], unknown>
   now?: () => number
   random?: (size: number) => Uint8Array
 }) {

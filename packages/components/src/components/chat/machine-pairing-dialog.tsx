@@ -1,3 +1,5 @@
+import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { useEffect, useMemo, useState } from 'react';
 import { getServerNow, type MachinePairingStatus } from '@lody/shared';
 import {
@@ -29,6 +31,7 @@ export type MachinePairingDialogProps = {
   machineId?: string;
   machineName?: string;
   command: string | null;
+  windowsCommand?: string | null;
   expiresAt: number | null;
   creating: boolean;
   createError: string | null;
@@ -52,6 +55,7 @@ export function MachinePairingDialog({
   machineId,
   machineName,
   command,
+  windowsCommand,
   expiresAt,
   creating,
   createError,
@@ -61,6 +65,8 @@ export function MachinePairingDialog({
 }: MachinePairingDialogProps) {
   const { t } = useTranslation();
   const getConvexErrorMessage = useConvexErrorMessage();
+  const [commandPlatform, setCommandPlatform] = useState<'unix' | 'windows'>('unix');
+  const activeCommand = commandPlatform === 'windows' && windowsCommand ? windowsCommand : command;
   const [now, setNow] = useState(() => getServerNow());
 
   useEffect(() => {
@@ -74,8 +80,8 @@ export function MachinePairingDialog({
   );
 
   const copyCommand = async () => {
-    if (!command) return;
-    const copied = await writeTextToClipboard(command);
+    if (!activeCommand) return;
+    const copied = await writeTextToClipboard(activeCommand);
     if (copied) {
       toast.success(t('machinePairing.commandCopied', 'Command copied'));
     } else {
@@ -207,21 +213,47 @@ export function MachinePairingDialog({
                       </p>
                     </div>
                   </div>
+                  {windowsCommand ? (
+                    <div {...stylex.props(installerStyles.platforms)}>
+                      <Button
+                        type="button"
+                        size="small"
+                        variant={commandPlatform === 'unix' ? 'secondary' : 'ghost'}
+                        aria-pressed={commandPlatform === 'unix'}
+                        onClick={() => setCommandPlatform('unix')}
+                      >
+                        {t('machinePairing.unixShell', 'macOS / Linux')}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="small"
+                        variant={commandPlatform === 'windows' ? 'secondary' : 'ghost'}
+                        aria-pressed={commandPlatform === 'windows'}
+                        onClick={() => setCommandPlatform('windows')}
+                      >
+                        {t('machinePairing.windowsShell', 'Windows (PowerShell)')}
+                      </Button>
+                    </div>
+                  ) : null}
                   <div className="relative mt-3 rounded-md border border-border bg-muted/40 p-3 pr-11">
                     <code className="block whitespace-pre-wrap break-words font-mono text-xs leading-5 text-foreground">
-                      {command}
+                      {activeCommand}
                     </code>
                     <Tooltip.Root>
-                      <Tooltip.Trigger render={<Button
-                          type="button"
-                          variant="ghost"
-                          icon
-                          className="absolute right-1.5 top-1.5"
-                          onClick={() => void copyCommand()}
-                          aria-label={t('machinePairing.copyCommand', 'Copy command')}
-                        >
-                          <Copy className="h-4 w-4" aria-hidden="true" />
-                        </Button>}/>
+                      <Tooltip.Trigger
+                        render={
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            icon
+                            className="absolute right-1.5 top-1.5"
+                            onClick={() => void copyCommand()}
+                            aria-label={t('machinePairing.copyCommand', 'Copy command')}
+                          >
+                            <Copy className="h-4 w-4" aria-hidden="true" />
+                          </Button>
+                        }
+                      />
                       <Tooltip.Content>
                         {t('machinePairing.copyCommand', 'Copy command')}
                       </Tooltip.Content>
@@ -276,3 +308,7 @@ export function MachinePairingDialog({
     </Dialog.Root>
   );
 }
+
+const installerStyles = stylex.create({
+  platforms: { display: 'flex', gap: space[2], marginTop: space[3] },
+});

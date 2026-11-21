@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
-import type { SessionHistoryParsed, SessionId } from '@lody/shared';
+import { createStore, Provider as JotaiProvider } from 'jotai';
+import { getSessionRoomId, type SessionHistoryParsed, type SessionId } from '@lody/shared';
 import { CornerLeftUp } from 'lucide-react';
 
 import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
+import { setDocMetaByRoomIdAtom } from '@/atoms/doc-meta';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { SessionRelationCard } from '@/components/shared/session-relation-card';
 
@@ -128,6 +130,62 @@ const renderOperation = (message: SessionHistoryParsed) => (
     />
   </div>
 );
+
+const agentChildren = [
+  { id: 'storybook-claude-child', title: '审核 PR 2799 的代码安全与故障', agentType: 'claude' },
+  { id: 'storybook-codex-child', title: 'Fix the flaky portal selection test', agentType: 'codex' },
+  { id: 'storybook-unsynced-child', title: 'Waiting for metadata', agentType: null },
+] as const;
+
+function CreatedSessionsWithAgentsStory() {
+  const [store] = useState(() => {
+    const next = createStore();
+    for (const child of agentChildren) {
+      if (!child.agentType) continue;
+      next.set(setDocMetaByRoomIdAtom, getSessionRoomId(child.id as SessionId), {
+        id: child.id,
+        machineId: 'storybook-machine',
+        userId: 'storybook-user',
+        createdAt: '2026-08-14T12:00:00.000Z',
+        cliType: 'builtin',
+        agentType: child.agentType,
+        title: child.title,
+      });
+    }
+    return next;
+  });
+  return (
+    <JotaiProvider store={store}>
+      {renderOperation({
+        id: 'storybook-agent-progress',
+        role: 'system',
+        read: true,
+        timestamp: '2026-08-14T12:00:00.000Z',
+        items: [
+          {
+            type: 'operation_progress',
+            operationId: 'storybook-agent-children',
+            operationKind: 'session_create_many',
+            items: agentChildren.map((child, index) => ({
+              status: index === 1 ? ('succeeded' as const) : ('running' as const),
+              label: child.title,
+              target: { sessionId: child.id as SessionId, userTurnId: `turn-${child.id}` },
+            })),
+          },
+        ],
+      })}
+    </JotaiProvider>
+  );
+}
+
+/**
+ * Each created Session leads with who runs it: its Agent Role when readable,
+ * otherwise its provider. A target whose metadata has not synced shows its title only.
+ */
+export const CreatedSessionsWithAgents: Story = {
+  args: operationStoryArgs,
+  render: () => <CreatedSessionsWithAgentsStory />,
+};
 
 /** A message Operation names the Session it reached and previews the reply. */
 export const MessageOperationCompleted: Story = {

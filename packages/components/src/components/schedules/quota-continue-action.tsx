@@ -71,15 +71,14 @@ function SessionLimitContinueOwner({
   const failure = findClaudeSessionLimit(turns);
   const current = failure?.noticeId === entryId;
   const local = !!localMachineId && session.machineId === localMachineId;
+  const content = { mode: runtime?.contentMode === 'e2ee' ? 'protected' : 'plaintext' } as const;
   const target =
     runtime &&
     session.machineId &&
     user?.id === session.userId &&
-    workspaceSupports(
-      { mode: runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
-      'automations'
-    ) &&
-    (local || (!!localMachineId && !!getAutomationProofIssuer()))
+    workspaceSupports(content, 'automations') &&
+    (local ||
+      (!!localMachineId && !!getAutomationProofIssuer() && workspaceSupports(content, 'rpc')))
       ? {
           workspaceId: runtime.workspaceId,
           machineId: session.machineId,

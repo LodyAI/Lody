@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { atom, Provider, createStore, type Store } from 'jotai';
@@ -26,7 +24,7 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock('@posthog/react', () => ({
+vi.mock('@/lib/posthog-context', () => ({
   usePostHog: () => null,
 }));
 

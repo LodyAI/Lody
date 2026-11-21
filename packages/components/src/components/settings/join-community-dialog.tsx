@@ -120,7 +120,7 @@ export function JoinCommunityDialog({
               <p {...stylex.props(styles.optionHint)}>
                 {t(
                   'settings.about.feishuGroupHint',
-                  'Scan the QR code with Feishu to join the group.'
+                  'Scan the QR code with Feishu (Lark) to join the group.'
                 )}
               </p>
             </div>

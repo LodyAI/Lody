@@ -23,7 +23,7 @@ When(
 );
 
 When(
-  'the user switches to the second project from the sidebar and reopens the first from the picker',
+  'the user switches to the second project and reopens the first from the picker',
   async function (this: LodyWorld) {
     await this.projectReopenPage!.switchToSecondProjectAndReopenFirstFromPicker();
   }
@@ -44,8 +44,8 @@ Then(
 );
 
 Then(
-  'the sidebar and project picker agree on the first selected project',
+  'the empty projects stay out of the sidebar but remain selectable in the picker',
   async function (this: LodyWorld) {
-    await this.projectReopenPage!.expectSidebarAndPickerAgreeOnFirstProject();
+    await this.projectReopenPage!.expectEmptyProjectsStayInPicker();
   }
 );

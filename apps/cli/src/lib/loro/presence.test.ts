@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { EphemeralStore } from 'loro-crdt';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -25,6 +27,18 @@ import {
   makeLoroStreamsTokenWebPorts,
   LoroStreamsTokenPorts,
 } from '@lody/shared';
+
+const sdkPresenceOptions = vi.hoisted(() => [] as unknown[]);
+vi.mock('@loro-dev/streams-crdt/effect', async (importOriginal) => {
+  const sdk = await importOriginal<typeof import('@loro-dev/streams-crdt/effect')>();
+  return {
+    ...sdk,
+    makeEphemeralStream: (options: Parameters<typeof sdk.makeEphemeralStream>[0]) => {
+      sdkPresenceOptions.push(options);
+      return sdk.makeEphemeralStream(options);
+    },
+  };
+});
 
 const SESSION_ID = '01020304-1111-4222-8333-010203040501' as SessionId;
 const MACHINE_ID = '01020304-1111-4222-8333-010203040502' as MachineId;
@@ -590,6 +604,7 @@ describe('native workspace presence ownership', () => {
 
 import { makeApplicationRuntime } from '@lody/shared/node/application-runtime';
 import {
+  createPresenceWebSocketAuthLegacy,
   bindWorkspacePresenceApplicationLegacy,
   createCliPresenceRuntimeLegacy,
   WorkspacePresenceLegacyFailure,
@@ -773,3 +788,144 @@ effectIt.effect(
       return undefined;
     })
 );
+
+describe('presence HTTP response ownership', () => {
+  it('keeps the live SSE body usable through GC and releases its reader', () => {
+    // A separate native process exposes GC without changing the Vitest host.
+    // The real SDK receives synthetic SSE/POST responses; no network or sleeps.
+    const source = [
+      "import assert from 'node:assert/strict';",
+      "import { Effect } from 'effect';",
+      "import { makeEphemeralStream, EphemeralAuth } from '@loro-dev/streams-crdt/effect';",
+      'const encoder = new TextEncoder();',
+      'let aborted = 0, cancelled = 0, remote, publish;',
+      'let collected = false;',
+      'const collection = new FinalizationRegistry(() => { collected = true; });',
+      '(() => { const sentinel = {}; collection.register(sentinel, null); })();',
+      'const received = [];',
+      'const applied = Promise.withResolvers();',
+      "const frame = (event, data) => encoder.encode(`event: ${event}\\ndata: ${Buffer.from(data).toString('base64')}\\n\\n`);",
+      'const fetch = async (_url, init) => {',
+      "  if (init.method === 'POST') return new Response(null, { status: 204 });",
+      '  return new Response(new ReadableStream({',
+      '    start(controller) {',
+      '      remote = controller;',
+      "      controller.enqueue(frame('bootstrap', new Uint8Array([1])));",
+      "      init.signal.addEventListener('abort', () => { aborted++; try { controller.error(new DOMException('aborted','AbortError')); } catch {} }, {once:true});",
+      '    },',
+      '    cancel() { cancelled++; }',
+      "  }), { headers: { 'content-type':'text/event-stream', 'stream-sse-data-encoding':'base64' }});",
+      '};',
+      'const run = Effect.scoped(Effect.gen(function*() {',
+      "  const stream = yield* makeEphemeralStream({ streamUrl:'https://diagnostic.invalid/ds/synthetic/presence?ephemeral=presence', fetch,",
+      '    adaptor: { applyRemoteUpdates: updates => { received.push(...updates.map(b=>[...b])); if (updates.some(b => b[0] === 2)) applied.resolve(); }, subscribeLocalUpdates: listener => {publish=listener; return ()=>{};} },',
+      '    reconnectConfig: { maxAttempts:0, connectTimeoutMs:0 }',
+      '  });',
+      '  const subscription = yield* stream.join();',
+      '  assert.deepEqual(received, [[1]]);',
+      '  for(let i=0;i<20;i++) {',
+      '    yield* Effect.promise(() => new Promise(setImmediate));',
+      '    global.gc();',
+      '    yield* Effect.promise(() => new Promise(setImmediate));',
+      '  }',
+      "  assert.equal(collected, true, 'The explicit GC control must be collected');",
+      "  assert.equal(aborted, 0, 'GC must not abort an owned presence SSE body');",
+      '  publish(new Uint8Array([3]));',
+      '  yield* subscription.waitUntilSynced;',
+      "  remote.enqueue(frame('data',new Uint8Array([2])));",
+      '  yield* Effect.promise(() => applied.promise);',
+      '  assert.deepEqual(received, [[1],[2]]);',
+      '  yield* subscription.release;',
+      "  assert.equal(cancelled, 1, 'Releasing the subscription must cancel its reader');",
+      '})).pipe(Effect.provideService(EphemeralAuth, { enabled:false, getToken:()=>Effect.succeed(undefined) }));',
+      "try { await Effect.runPromise(run); console.log(JSON.stringify({ result:'PASS', received, abortedAfterRelease:aborted, cancelled })); }",
+      "catch(e) { console.error('FAIL', String(e)); process.exitCode=1; }",
+    ].join('\n');
+    const output = execFileSync(
+      process.execPath,
+      ['--expose-gc', '--input-type=module', '-e', source],
+      {
+        cwd: fileURLToPath(new URL('../../../', import.meta.url)),
+        encoding: 'utf8',
+        timeout: 10_000,
+      }
+    );
+    expect(JSON.parse(output)).toMatchObject({
+      result: 'PASS',
+      received: [[1], [2]],
+      cancelled: 1,
+    });
+  });
+});
+
+describe('presence WebSocket token bridge', () => {
+  it.each(['connect', 'initial', 'renew', 'reauth'] as const)(
+    'maps %s with the rejected token retained',
+    async (reason) => {
+      const bridge = createPresenceWebSocketAuthLegacy((context) =>
+        Effect.succeed(JSON.stringify(context))
+      );
+      expect(JSON.parse(await bridge({ reason, previousToken: 'synthetic-rejected' }))).toEqual({
+        reason: reason === 'reauth' ? 'unauthorized' : 'request',
+        previousToken: 'synthetic-rejected',
+      });
+    }
+  );
+  it('preserves provider failures and rejects absent tokens', async () => {
+    const failure = new Error('synthetic provider failure');
+    await expect(
+      createPresenceWebSocketAuthLegacy(() => Effect.fail(failure))({ reason: 'reauth' })
+    ).rejects.toBe(failure);
+    await expect(
+      createPresenceWebSocketAuthLegacy(() => Effect.succeed(undefined))({ reason: 'initial' })
+    ).rejects.toThrow('presence_websocket_token_unavailable');
+  });
+});
+
+describe('CLI presence WebSocket opt-in composition', () => {
+  it.each([undefined, false, true])(
+    'uses the main WS gateway and preserves HTTP shards (%s)',
+    async (enabled) => {
+      vi.stubEnv('LODY_LORO_STREAMS_WS_ENABLED', 'false');
+      const store = new EphemeralStore(LODY_PRESENCE_TTL_MS);
+      try {
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const transport = yield* PresenceTransport;
+              const stream = yield* transport.create(
+                'ws-workspace' as WorkspaceId,
+                store,
+                {
+                  streamsBaseUrl: 'https://api.streams.test',
+                  shardHostSuffix: 'streams.test',
+                  webSocketEnabled: enabled,
+                  auth: (context) => Effect.succeed(JSON.stringify(context)),
+                },
+                1
+              );
+              const options = sdkPresenceOptions.at(-1);
+              expect(options).toMatchObject({
+                streamUrl: expect.stringContaining('https://presence.streams.test/'),
+              });
+              if (enabled)
+                expect(options).toMatchObject({
+                  webSocket: {
+                    enabled: true,
+                    url: 'https://api.streams.test',
+                    authPoolKey: 'ws-workspace',
+                    auth: expect.any(Function),
+                  },
+                });
+              else expect(options).not.toHaveProperty('webSocket');
+              yield* stream.close;
+            }).pipe(Effect.provide(presencePlatformLayer(diagnosticLogger().logger)))
+          )
+        );
+      } finally {
+        store.destroy();
+        vi.unstubAllEnvs();
+      }
+    }
+  );
+});

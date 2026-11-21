@@ -6,8 +6,9 @@ Translation: current
 [中文](loro-ephemeral-presence-channel.zh.md)
 
 A workspace publishes liveness over a Loro ephemeral channel that is separate from durable
-document synchronization: machine heartbeats, active-session status, and "who is viewing this
-session". Readers decide that a machine is online only from a heartbeat whose `updatedAt` is
+document synchronization: machine heartbeats, active-session status, "who is viewing this
+session", and "this user has a focused desktop" (which lets a Host skip that user's mobile
+push). Readers decide that a machine is online only from a heartbeat whose `updatedAt` is
 inside the freshness window. Durable conversation content travels on its own transport and is
 unaffected by anything below.
 

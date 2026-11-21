@@ -6,16 +6,22 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
-import * as sessionLinks from '../packages/shared/src/session-link.ts';
+import * as sessionLinkSchemes from '../packages/shared/src/session-link-schemes.mjs';
+import * as todayTypes from '../packages/shared/src/today-types.ts';
 import { getDesktopCallbackProtocol } from '../apps/electron/src/main/desktop-channel.ts';
 import { withDesktopResourceProtocols } from '../apps/electron/scripts/desktop-protocols.mjs';
 
 const require = createRequire(import.meta.url);
 function loadMain(file, overrides, processContext) {
-  const source = readFileSync(
+  return loadTypeScript(
     new URL(`../apps/electron/src/main/${file}.ts`, import.meta.url),
-    'utf8'
+    overrides,
+    processContext
   );
+}
+
+function loadTypeScript(file, overrides, processContext) {
+  const source = readFileSync(file, 'utf8');
   const code = ts.transpileModule(source, {
     compilerOptions: {
       module: ts.ModuleKind.CommonJS,
@@ -33,6 +39,16 @@ function loadMain(file, overrides, processContext) {
   });
   return exports;
 }
+
+// Node's native TS loader does not resolve the extensionless imports used by
+// the bundled shared source. Load that boundary just like the Electron modules.
+const sessionLinks = loadTypeScript(
+  new URL('../packages/shared/src/session-link.ts', import.meta.url),
+  {
+    './session-link-schemes.mjs': sessionLinkSchemes,
+    './today-types': todayTypes,
+  }
+);
 
 test('common legacy routes reach Stable without loops while chat/new stays in the default app', () => {
   for (const protocol of ['lody-oss', 'ai.lody.nightly']) {

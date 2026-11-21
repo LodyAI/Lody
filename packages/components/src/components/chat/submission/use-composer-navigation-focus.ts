@@ -1,12 +1,13 @@
 import { useCallback, useRef } from 'react';
 import { useRouter, useRouterState } from '@tanstack/react-router';
 import { isNativeIOSAppShell } from '@/lib/native-platform';
+import type { ComposerInputElement } from '@/ui/mention/composer-input';
 
 export const MOBILE_NEW_CHAT_PROMPT_ID = 'chat-prompt-mobile-sheet';
 
 /** Transfer an already-open keyboard; never summon it on a mobile route visit. */
 export function focusComposerAfterNavigation(
-  input: HTMLTextAreaElement | null,
+  input: ComposerInputElement | null,
   usesMobileKeyboard: boolean
 ) {
   if (!input) return false;

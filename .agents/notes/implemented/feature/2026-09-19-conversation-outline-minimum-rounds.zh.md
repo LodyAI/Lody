@@ -1,4 +1,4 @@
-# 对话大纲栏在满十个用户轮次后才出现
+# 对话大纲栏在满四个用户轮次后才出现
 
 Status: implemented
 Translation: current
@@ -9,7 +9,7 @@ Translation: current
 
 对话大纲栏——左侧每轮一格的总览目录——此前在桌面端只要有两轮以上就
 挂载，短会话里那几根刻度只是装饰而非导航。现在改为当对话的用户轮次达到
-`OUTLINE_MIN_USER_ROUNDS`（10）时才挂载。阈值判定放在
+`OUTLINE_MIN_USER_ROUNDS`（4，即超过三轮）时才挂载；阈值在 2026-11-17 前为 10，此后下调，使中等长度的对话也能显示大纲栏。阈值判定放在
 `SessionChatStreamView` 的挂载处而非 `ConversationOutlineRail` 组件内部，
 因此组件本身仍可独立使用（stories、预览），仅保留 `< 2` 的退化兜底。
 
@@ -31,5 +31,5 @@ Translation: current
 `packages/components/tests/conversation-outline.test.ts` 覆盖了
 `countUserDrivenRounds`：常规计数、边界处对首个 agent round 的排除、以及
 空大纲。`ShortStreamHidesRail` story 记录了真实 `SessionChatStreamView`
-中的隐藏状态（四轮不挂载 rail），十四轮的 `InsideTheConversationStream`
+中的隐藏状态（三轮不挂载 rail），十四轮的 `InsideTheConversationStream`
 仍正常显示。

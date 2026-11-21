@@ -20,7 +20,7 @@ export type DeviceCommand =
   | { action: 'exterior'; id: string }
   | { action: 'start'; id: string; quality?: AndroidEmulatorQuality }
   | { action: 'status'; operationId?: string }
-  | { action: 'stop'; operationId: string };
+  | { action: 'stop'; operationId: string; shutdownDevice?: boolean };
 export type DeviceRequest = {
   sessionId: string;
   requestedByUserId: string;

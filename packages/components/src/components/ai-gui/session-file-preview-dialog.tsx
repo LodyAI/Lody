@@ -14,6 +14,7 @@ import { Tabs } from '@lody/ui/tabs';
 import { ReadOnlyHtmlPreview } from '../sessions/read-only-html-preview';
 import { formatFileSize, isHtmlSessionFile } from '@/lib/session-file-presentation';
 import { MarkdownRenderer } from './markdown-renderer';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const isMarkdownFile = (fileName: string): boolean => {
   const ext = fileName.toLowerCase().split('.').pop() ?? '';
@@ -29,7 +30,7 @@ export type SessionFilePreviewPanelProps = {
   mobileSheet?: boolean;
   file: SessionFilePayload;
   status: SessionFilePreviewStatus;
-  onDownload: (file: SessionFilePayload) => void;
+  onDownload?: (file: SessionFilePayload) => void;
   isDownloading?: boolean;
 };
 
@@ -65,7 +66,7 @@ export function SessionFilePreviewPanel({
   const handleCopy = () => {
     if (!rawText) return;
     // Always copy the raw source, regardless of rendered/raw view.
-    void navigator.clipboard?.writeText(rawText).then(
+    void copyTextToClipboard(rawText).then(
       () => setCopied(true),
       () => toast.error(t('sessions.fileCopyFailed', 'Failed to copy file content'))
     );
@@ -133,17 +134,19 @@ export function SessionFilePreviewPanel({
           >
             {copied ? <Check className="size-4 text-emerald-500" /> : <Copy className="size-4" />}
           </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="small"
-            icon
-            onClick={() => onDownload(file)}
-            disabled={isDownloading}
-            aria-label={t('sessions.fileDownload', 'Download')}
-          >
-            {isDownloading ? <Spinner className="size-4" /> : <Download className="size-4" />}
-          </Button>
+          {onDownload && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="small"
+              icon
+              onClick={() => onDownload?.(file)}
+              disabled={isDownloading}
+              aria-label={t('sessions.fileDownload', 'Download')}
+            >
+              {isDownloading ? <Spinner className="size-4" /> : <Download className="size-4" />}
+            </Button>
+          )}
           {/* Divider separates content actions (copy/download) from the window
               action (close), and the close sits inline in the same row instead
               of floating in the corner over the buttons. */}
@@ -173,16 +176,18 @@ export function SessionFilePreviewPanel({
               'Preview shows only the start of this file. Download the full file to see everything.'
             )}
           </span>
-          <Button
-            type="button"
-            variant="secondary"
-            size="small"
-            className="shrink-0"
-            onClick={() => onDownload(file)}
-            disabled={isDownloading}
-          >
-            {t('sessions.fileDownloadFull', 'Download full file')}
-          </Button>
+          {onDownload && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="small"
+              className="shrink-0"
+              onClick={() => onDownload?.(file)}
+              disabled={isDownloading}
+            >
+              {t('sessions.fileDownloadFull', 'Download full file')}
+            </Button>
+          )}
         </div>
       ) : null}
 
@@ -198,9 +203,16 @@ export function SessionFilePreviewPanel({
           <div className="flex flex-col items-center gap-3 py-12 text-sm text-muted-foreground">
             <FileWarning className="size-6 text-muted-foreground/60" aria-hidden="true" />
             <span>{status.message}</span>
-            <Button type="button" variant="secondary" size="small" onClick={() => onDownload(file)}>
-              {t('sessions.fileDownload', 'Download')}
-            </Button>
+            {onDownload && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="small"
+                onClick={() => onDownload?.(file)}
+              >
+                {t('sessions.fileDownload', 'Download')}
+              </Button>
+            )}
           </div>
         ) : renderHtml ? (
           <div {...stylex.props(styles.htmlPreview, mobileSheet && styles.sheetHtmlPreview)}>

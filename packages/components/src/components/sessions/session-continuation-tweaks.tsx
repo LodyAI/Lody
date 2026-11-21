@@ -1,6 +1,8 @@
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
-import { Archive, BatteryCharging, Layers, Sparkles, type LucideIcon } from 'lucide-react';
+import { Archive, BatteryCharging, Layers, Rocket, Sparkles, type LucideIcon } from 'lucide-react';
+import type { AutoDeliverOptions } from '@lody/shared/automations';
+import { AutoDeliveryOptionsFields } from './session-auto-delivery';
 import { Separator } from '@lody/ui/separator';
 import { Switch } from '@lody/ui/switch';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -11,6 +13,7 @@ export type SessionContinuationTweaksValue = {
   recoverCapacity: boolean;
   archiveAfterMerge: boolean;
   compactWhenIdle: boolean;
+  autoDeliver: boolean;
 };
 
 export type SessionContinuationTweakAvailability = {
@@ -26,6 +29,9 @@ export type SessionContinuationTweaksProps = {
   capabilities?: Partial<
     Record<keyof SessionContinuationTweaksValue, SessionContinuationTweakAvailability>
   >;
+  /** Steps chosen for Auto delivery while it is on; shown under its switch. */
+  autoDeliverOptions?: AutoDeliverOptions | null;
+  onAutoDeliverOptionsChange?: (options: AutoDeliverOptions) => void;
   className?: string;
 };
 
@@ -101,6 +107,10 @@ const styles = stylex.create({
   unsupported: {
     color: colors.warning,
   },
+  suboptions: {
+    paddingInlineStart: 34,
+    paddingBottom: space[1.5],
+  },
   footer: {
     marginTop: space[2],
     paddingTop: space[2],
@@ -135,6 +145,14 @@ const ROWS = [
     descriptionKey: 'sessions.continuation.tweaks.compactDescription',
     description: '达到配置的上下文阈值后压缩',
   },
+  {
+    key: 'autoDeliver',
+    icon: Rocket,
+    titleKey: 'sessions.continuation.tweaks.autoDeliver',
+    title: '自动交付',
+    descriptionKey: 'sessions.continuation.tweaks.autoDeliverDescription',
+    description: 'Keeps the current PR moving; off after merge',
+  },
 ] as const satisfies ReadonlyArray<{
   key: keyof SessionContinuationTweaksValue;
   icon: LucideIcon;
@@ -145,7 +163,7 @@ const ROWS = [
 }>;
 
 /**
- * The three per-Session behaviors, kept as small switches rather than a
+ * The per-Session behaviors, kept as small switches rather than a
  * settings page. The Host owns their semantics; this surface says what each one
  * will and will not do, and disables one it cannot support.
  */
@@ -155,6 +173,8 @@ export function SessionContinuationTweaks({
   disabled = false,
   unavailable = false,
   capabilities,
+  autoDeliverOptions,
+  onAutoDeliverOptionsChange,
   className,
 }: SessionContinuationTweaksProps) {
   const { t } = useTranslation();
@@ -176,30 +196,40 @@ export function SessionContinuationTweaks({
         const availability = capabilities?.[row.key];
         const supported = availability?.supported ?? true;
         const Icon = row.icon;
+        const options =
+          row.key === 'autoDeliver' && value.autoDeliver && autoDeliverOptions ? (
+            <div {...stylex.props(styles.suboptions)}>
+              <AutoDeliveryOptionsFields
+                size="mini"
+                value={autoDeliverOptions}
+                disabled={disabled}
+                onChange={(next) => onAutoDeliverOptionsChange?.(next)}
+              />
+            </div>
+          ) : null;
         return (
-          <div
-            key={row.key}
-            {...stylex.props(styles.row)}
-            data-session-continuation-tweak={row.key}
-          >
-            <span {...stylex.props(styles.icon)} aria-hidden="true">
-              <Icon size={14} strokeWidth={1.8} />
-            </span>
-            <span {...stylex.props(styles.copy)}>
-              <span {...stylex.props(styles.title)}>{t(row.titleKey, row.title)}</span>
-              <span {...stylex.props(styles.description, !supported && styles.unsupported)}>
-                {supported
-                  ? t(row.descriptionKey, row.description)
-                  : (availability?.reason ??
-                    t('sessions.continuation.tweaks.unsupported', '当前会话不支持'))}
+          <div key={row.key}>
+            <div {...stylex.props(styles.row)} data-session-continuation-tweak={row.key}>
+              <span {...stylex.props(styles.icon)} aria-hidden="true">
+                <Icon size={14} strokeWidth={1.8} />
               </span>
-            </span>
-            <Switch
-              checked={value[row.key]}
-              disabled={disabled || !supported}
-              onCheckedChange={(checked) => onChange(row.key, checked)}
-              aria-label={t(row.titleKey, row.title)}
-            />
+              <span {...stylex.props(styles.copy)}>
+                <span {...stylex.props(styles.title)}>{t(row.titleKey, row.title)}</span>
+                <span {...stylex.props(styles.description, !supported && styles.unsupported)}>
+                  {supported
+                    ? t(row.descriptionKey, row.description)
+                    : (availability?.reason ??
+                      t('sessions.continuation.tweaks.unsupported', '当前会话不支持'))}
+                </span>
+              </span>
+              <Switch
+                checked={value[row.key]}
+                disabled={disabled || !supported}
+                onCheckedChange={(checked) => onChange(row.key, checked)}
+                aria-label={t(row.titleKey, row.title)}
+              />
+            </div>
+            {options}
           </div>
         );
       })}

@@ -1,3 +1,4 @@
+import { getContextWindowUsageData } from '../../../packages/components/src/lib/session-usage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import crypto from 'crypto';
 import { RequestError } from '@agentclientprotocol/sdk';
@@ -10,6 +11,7 @@ import type {
   SessionHistoryInput,
   SessionFilePayload,
   SessionId,
+  SessionContextWindowUsage,
   WorkspaceId,
 } from '@lody/shared';
 
@@ -167,6 +169,53 @@ const createHandlerHarness = async (
   };
 };
 
+const createContextUsageHarness = async (sessionId = 'context-policy' as SessionId) => {
+  const harness = await createHandlerHarness([sessionId]);
+  const host = harness.handler as unknown as {
+    store: SessionTransientStore;
+    beginConversationTurn(id: SessionId): string;
+    enqueueContextWindowUsageUpdate(id: SessionId, usage: SessionContextWindowUsage): void;
+    flushSessionContextWindowUsage(id: SessionId): Promise<void>;
+    finalizeACPState(id: SessionId, turnId: string): Promise<void>;
+    enqueueACPUpdate(id: SessionId, update: AcpSessionNotification): void;
+    flushACPUpdatesNow(id: SessionId): Promise<void>;
+    handleAgentPermissionRequest(
+      id: SessionId,
+      requestId: string,
+      request: import('@agentclientprotocol/sdk').RequestPermissionRequest
+    ): Promise<unknown>;
+  };
+  const doc = harness.docs.get(sessionId);
+  if (!doc) throw new Error('Missing context doc');
+  const writes = vi.spyOn(harness.repo, 'upsertDocMeta');
+  const client = new AgentClient({
+    sessionId,
+    logger: createSilentLogger(),
+    terminalManager: {} as never,
+    agentConfig: { cliType: 'builtin', agentType: 'antigravity' },
+    onUpdateMessage: () => {},
+    onContextWindowUsageUpdate: (usage) => host.enqueueContextWindowUsageUpdate(sessionId, usage),
+  });
+  return {
+    ...harness,
+    host,
+    sessionId,
+    doc,
+    emitUsage: async (usage: SessionContextWindowUsage) => {
+      await client.sessionUpdate({
+        sessionId: 'native',
+        update: { sessionUpdate: 'usage_update', ...usage },
+      });
+    },
+    drain: async () => {
+      await Promise.all([...host.store.get(sessionId).pendingContextWindowHandlers]);
+    },
+    readUsage: async () =>
+      (await harness.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta?.contextWindowUsage,
+    contextWrites: () => writes.mock.calls.filter(([, meta]) => 'contextWindowUsage' in meta),
+  };
+};
+
 // Keep lifecycle forwarding, finalization, history storage and renderer projection
 // real. Only ACP preparation, the provider and Git observation are synthetic.
 const createRecoveryHarness = async (
@@ -180,6 +229,8 @@ const createRecoveryHarness = async (
     onPrompt?: () => Promise<void>;
     retryError?: Error;
     cleanup?: () => Promise<void>;
+    /** Commands the client holds when the run-config snapshot is written. */
+    commandsAtWrite?: { name: string; description?: string }[];
   } = {}
 ) => {
   const fakeTimersActive = vi.isFakeTimers();
@@ -263,7 +314,6 @@ const createRecoveryHarness = async (
     },
     flushSessionUsage: async () => {},
     persistCodeCollabTurnDiffs: async () => false,
-    updateSessionDiffStats: async () => [],
     detectAndAssociatePR: async () => null,
     syncWorkspaceGitState: async () => {},
     notifySessionCompleted: async () => {},
@@ -297,6 +347,7 @@ const createRecoveryHarness = async (
     session.agentClient = {
       isCreated: () => true,
       getAvailableCommands: () => [],
+      getAvailableCommandsForSession: () => options.commandsAtWrite ?? [],
       getConfigOptions: () => [],
       currentModel: undefined,
       get pendingPromptCompletion() {
@@ -762,6 +813,58 @@ describe('MessageHandler ACP batching', () => {
       expect(h.outcomes.map((fact) => fact.outcome)).toEqual([
         { kind: 'unknown', code: 'agent_disconnected' },
       ]);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('writes the commands observed when the run-config snapshot is persisted', async () => {
+    const h = await createRecoveryHarness({
+      completeNormally: true,
+      updates: [{ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'done' } }],
+      commandsAtWrite: [{ name: 'goal', description: 'goal' }],
+    });
+    try {
+      await h.service.continueSession(h.message);
+      await h.service.drainInboxExecutions();
+      await vi.waitFor(() =>
+        expect(h.doc.mirror?.getState().acpRuntimeConfig).toMatchObject({
+          acpSessionId: 'acp-old',
+          availableCommands: [{ name: 'goal', description: 'goal' }],
+        })
+      );
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('stores commands a standard agent advertises before its first assistant entry', async () => {
+    const h = await createRecoveryHarness();
+    const advertise = (acpSessionId: string, name: string) =>
+      h.manager.emit('onACPUpdateMessage', h.sessionId, {
+        sessionId: acpSessionId,
+        update: {
+          sessionUpdate: 'available_commands_update',
+          availableCommands: [{ name, description: name }],
+        },
+      });
+    try {
+      await h.doc.applyAcpRuntimeConfigPatch(h.message.userTurnId, {
+        acpSessionId: 'acp-old' as ACPSessionId,
+        modelId: 'synthetic-model',
+      });
+      expect(h.host.store.getCurrentACPUpdateTarget(h.sessionId)).toBeUndefined();
+      advertise('acp-detached', 'stale');
+      advertise('acp-old', 'goal');
+
+      await vi.waitFor(() =>
+        expect(h.doc.mirror?.getState().acpRuntimeConfig).toMatchObject({
+          acpSessionId: 'acp-old',
+          modelId: 'synthetic-model',
+          availableCommands: [{ name: 'goal', description: 'goal' }],
+        })
+      );
+      expect(h.host.store.get(h.sessionId).acpUpdateBuffer).toEqual([]);
     } finally {
       await h.close();
     }
@@ -1328,6 +1431,8 @@ describe('MessageHandler ACP batching', () => {
           throw new Error('Turn ended before retry');
         }),
       ]);
+      h.manager.emit('onContextWindowUsageUpdate', h.sessionId, { size: 100_000, used: 1000 });
+      h.manager.emit('onContextWindowUsageUpdate', h.sessionId, { size: 100_000, used: 1001 });
       await h.service.cancelSession({
         type: 'session/cancel',
         sessionId: h.sessionId,
@@ -1345,6 +1450,10 @@ describe('MessageHandler ACP batching', () => {
       await running;
       expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(false);
       expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(false);
+      expect((await h.doc.getMetaState())?.contextWindowUsage).toEqual({
+        size: 100_000,
+        used: 1001,
+      });
       expect(
         (await h.doc.sessionData.history.readAll()).find(
           (entry) => entry.id === h.message.userTurnId
@@ -1575,6 +1684,285 @@ describe('MessageHandler ACP batching', () => {
       }
     }
   );
+
+  it('persists native Antigravity tool identity through start, completion and reopen', async () => {
+    vi.useRealTimers();
+    const sessionId = 'agy-tools' as SessionId;
+    const { repo, docs, handler } = await createHandlerHarness([sessionId]);
+    const doc = docs.get(sessionId);
+    if (!doc) throw new Error('Missing tool doc');
+    const host = handler as unknown as {
+      beginConversationTurn(id: SessionId): string;
+      enqueueACPUpdate(id: SessionId, update: AcpSessionNotification): void;
+      flushACPUpdatesNow(id: SessionId): Promise<void>;
+    };
+    const client = new AgentClient({
+      sessionId,
+      logger: createSilentLogger(),
+      terminalManager: {} as never,
+      agentConfig: { cliType: 'builtin', agentType: 'antigravity' },
+      onUpdateMessage: (update) => host.enqueueACPUpdate(sessionId, update),
+    });
+    (client as unknown as { acpSessionId: ACPSessionId }).acpSessionId = 'native' as ACPSessionId;
+    try {
+      const turnId = host.beginConversationTurn(sessionId);
+      for (const [name, kind, title] of [
+        ['search_web', 'search', 'Search public documentation'],
+        ['invoke_subagent', 'other', 'Run invoke_subagent'],
+      ] as const) {
+        const update = {
+          toolCallId: name,
+          name,
+          args: { query: 'synthetic example' },
+          rawInput: { query: 'synthetic example' },
+          kind,
+          title,
+        };
+        await client.sessionUpdate({
+          sessionId: 'native',
+          update: { ...update, sessionUpdate: 'tool_call', status: 'in_progress' },
+        });
+        await host.flushACPUpdatesNow(sessionId);
+        expect(
+          readItems((await doc.sessionData.history.readAll()).find((t) => t.id === turnId))
+        ).toContainEqual(
+          expect.objectContaining({ toolCallId: name, toolName: name, status: 'in_progress' })
+        );
+        await client.sessionUpdate({
+          sessionId: 'native',
+          update: { ...update, sessionUpdate: 'tool_call_update', status: 'completed' },
+        });
+      }
+      await host.flushACPUpdatesNow(sessionId);
+      const reopened = new SessionDocument(repo, sessionId, async () => {});
+      await reopened.initOffline({ history: [] });
+      const items = readItems(
+        (await reopened.sessionData.history.readAll()).find((t) => t.id === turnId)
+      );
+      expect(items).toEqual([
+        expect.objectContaining({
+          type: 'tool_call',
+          toolName: 'search_web',
+          kind: 'search',
+          status: 'completed',
+        }),
+        expect.objectContaining({
+          type: 'tool_call',
+          toolName: 'invoke_subagent',
+          status: 'completed',
+        }),
+      ]);
+      expect(items.some((item) => item.type === 'subagent_task')).toBe(false);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
+  it('bounds global context usage writes during a minute of streaming and flushes the exact final value', async () => {
+    const h = await createContextUsageHarness();
+    const { sessionId, host, repo, docs, contextWrites } = h;
+    try {
+      const turnId = host.beginConversationTurn(sessionId);
+      for (let i = 0; i < 150; i++) {
+        await h.emitUsage({ size: 100_000, used: 1000 + i * 100 });
+        await vi.advanceTimersByTimeAsync(400);
+      }
+      expect(contextWrites()).toHaveLength(7);
+      expect(
+        (await repo.getDocMeta(getSessionRoomId(sessionId)))?.meta?.contextWindowUsage
+      ).toEqual({
+        size: 100_000,
+        used: 15_900,
+      });
+      host.enqueueContextWindowUsageUpdate(sessionId, { size: 100_000, used: 15_999 });
+      await host.finalizeACPState(sessionId, turnId);
+      expect(contextWrites()).toHaveLength(8);
+      expect((await docs.get(sessionId)?.getMetaState())?.contextWindowUsage).toEqual({
+        size: 100_000,
+        used: 15_999,
+      });
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(contextWrites()).toHaveLength(8);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
+  it.each([100_000, 1_000_000])(
+    'keeps small deltas buffered and accumulates them against the last write (size %i)',
+    async (size) => {
+      const h = await createContextUsageHarness();
+      const threshold = Math.max(1024, size * 0.01);
+      try {
+        await h.emitUsage({ size, used: 0 });
+        await h.drain();
+        expect(await h.readUsage()).toEqual({ size, used: 0 });
+        await h.emitUsage({ size, used: threshold - 1 });
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(await h.readUsage()).toEqual({ size, used: 0 });
+        expect(h.contextWrites()).toHaveLength(1);
+        await h.emitUsage({ size, used: threshold });
+        await h.drain();
+        expect(await h.readUsage()).toEqual({ size, used: threshold });
+        await h.emitUsage({ size, used: threshold + 1 });
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(h.contextWrites()).toHaveLength(2);
+        await h.host.flushSessionContextWindowUsage(h.sessionId);
+        expect(await h.readUsage()).toEqual({ size, used: threshold + 1 });
+        // Capacity changes bypass the delta threshold. Large compaction drops
+        // also publish, with both respecting the running interval.
+        await h.emitUsage({ size: size / 2, used: threshold + 1 });
+        await vi.advanceTimersByTimeAsync(9999);
+        expect(await h.readUsage()).toEqual({ size, used: threshold + 1 });
+        await vi.advanceTimersByTimeAsync(1);
+        expect(await h.readUsage()).toEqual({ size: size / 2, used: threshold + 1 });
+        await h.emitUsage({ size: size / 2, used: 0 });
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(await h.readUsage()).toEqual({ size: size / 2, used: 0 });
+      } finally {
+        await destroyRepoOnRealTimers(h.repo);
+      }
+    }
+  );
+
+  it('keeps the exact final context value after a delayed intermediate write', async () => {
+    const h = await createContextUsageHarness();
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const persist = h.doc.setContextWindowUsage.bind(h.doc);
+    vi.spyOn(h.doc, 'setContextWindowUsage').mockImplementationOnce(async (usage) => {
+      started.resolve();
+      await release.promise;
+      await persist(usage);
+    });
+    let flush: Promise<void> | undefined;
+    try {
+      await h.emitUsage({ size: 100_000, used: 1000 });
+      await started.promise;
+      await h.emitUsage({ size: 100_000, used: 1001 });
+      flush = h.host.flushSessionContextWindowUsage(h.sessionId);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await h.readUsage()).toBeUndefined();
+      release.resolve();
+      await flush;
+      expect(await h.readUsage()).toEqual({ size: 100_000, used: 1001 });
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(await h.readUsage()).toEqual({ size: 100_000, used: 1001 });
+    } finally {
+      release.resolve();
+      await flush;
+      await destroyRepoOnRealTimers(h.repo);
+    }
+  });
+
+  it('allows the next context update to retry a failed first write', async () => {
+    const h = await createContextUsageHarness();
+    vi.spyOn(h.doc, 'setContextWindowUsage').mockRejectedValueOnce(
+      new Error('synthetic write failure')
+    );
+    try {
+      h.host.enqueueContextWindowUsageUpdate(h.sessionId, { size: NaN, used: 0 });
+      await h.emitUsage({ size: 100_000, used: 1000 });
+      await h.drain();
+      expect(await h.readUsage()).toBeUndefined();
+      await h.emitUsage({ size: 100_000, used: 1001 });
+      await h.drain();
+      expect(await h.readUsage()).toEqual({ size: 100_000, used: 1001 });
+    } finally {
+      await destroyRepoOnRealTimers(h.repo);
+    }
+  });
+
+  it('flushes sub-threshold context usage before entering permission wait', async () => {
+    const h = await createContextUsageHarness();
+    let permission: Promise<unknown> | undefined;
+    const turnId = h.host.beginConversationTurn(h.sessionId);
+    try {
+      h.host.enqueueACPUpdate(h.sessionId, {
+        sessionId: h.sessionId,
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'Checking a file' },
+        },
+      });
+      await h.host.flushACPUpdatesNow(h.sessionId);
+      await h.emitUsage({ size: 100_000, used: 1000 });
+      await h.drain();
+      await h.emitUsage({ size: 100_000, used: 1001 });
+      permission = h.host.handleAgentPermissionRequest(h.sessionId, 'context-permission', {
+        sessionId: 'native',
+        options: [{ kind: 'allow_once', optionId: 'allow', name: 'Allow' }],
+        toolCall: {
+          toolCallId: 'context-tool',
+          title: 'Read synthetic file',
+          kind: 'read',
+          status: 'in_progress',
+        },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await h.readUsage()).toEqual({ size: 100_000, used: 1001 });
+      expect((await h.doc.getStatus())?.type).toBe('requestPermission');
+      await h.host.finalizeACPState(h.sessionId, turnId);
+      await expect(permission).resolves.toEqual({ outcome: { outcome: 'cancelled' } });
+    } finally {
+      await h.host.finalizeACPState(h.sessionId, turnId);
+      await permission;
+      await destroyRepoOnRealTimers(h.repo);
+    }
+  });
+
+  it('persists Antigravity context occupancy and capacity for the composer, including zero and compaction', async () => {
+    vi.useRealTimers();
+    const sessionId = 'agy-context' as SessionId;
+    const { repo, docs, handler, sessionManager } = await createHandlerHarness(
+      [sessionId],
+      (logger, document) =>
+        new SessionManager(logger, 't', 'm-1' as MachineId, 'ws-1' as WorkspaceId, document, {
+          cloudPort: createTestCloudPort(),
+        })
+    );
+    const doc = docs.get(sessionId);
+    if (!doc) throw new Error('Missing context doc');
+    const host = handler as unknown as {
+      setupSessionEventHandlers(): void;
+      flushSessionContextWindowUsage(id: SessionId): Promise<void>;
+    };
+    host.setupSessionEventHandlers();
+    const client = new AgentClient({
+      sessionId,
+      logger: createSilentLogger(),
+      terminalManager: {} as never,
+      agentConfig: { cliType: 'builtin', agentType: 'antigravity' },
+      onUpdateMessage: () => {},
+      onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+      onContextWindowUsageUpdate: (usage) =>
+        sessionManager.emit('onContextWindowUsageUpdate', sessionId, usage),
+    });
+    try {
+      for (const context of [
+        { size: 1048576, used: 0 },
+        { size: 1048576, used: 12000 },
+        { size: 524288, used: 4000 },
+      ]) {
+        await client.sessionUpdate({
+          sessionId: 'native',
+          update: { sessionUpdate: 'usage_update', ...context },
+        } as never);
+        await host.flushSessionContextWindowUsage(sessionId);
+        const meta = await doc.getMetaState();
+        expect(meta?.contextWindowUsage).toEqual(context);
+        const stored = await repo.getDocMeta(getSessionRoomId(sessionId));
+        expect(stored?.meta?.contextWindowUsage).toEqual(context);
+        expect(getContextWindowUsageData(meta?.contextWindowUsage)).toMatchObject({
+          usedTokens: context.used,
+          contextWindow: context.size,
+          remainingTokens: context.size - context.used,
+        });
+      }
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
 
   it('routes custom ACP usage with its accounting identity and user attribution', async () => {
     vi.useRealTimers();

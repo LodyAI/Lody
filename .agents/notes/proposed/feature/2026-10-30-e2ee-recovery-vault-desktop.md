@@ -7,8 +7,9 @@ Translation: current
 
 ## Abstract
 
-The core implements vault-v1 recovery, but no product uses it. A user who loses every
-paired device therefore loses their encrypted workspaces. On 2026-10-31 the owner decided
+The desktop recovery host now consumes vault-v1 recovery and supports file/password
+restoration. Installed-device ceremonies and the complete product acceptance described
+here remain separate from host tests. On 2026-10-31 the owner decided
 the six integration questions, relayed by the E2EE coordinator:
 
 - one vault per account;
@@ -32,7 +33,8 @@ than replaces, the six decisions above. Nothing here has been tested on a real d
 ## Problem
 
 The MVP asks users to pair at least two devices. The vault covers the case where no
-device survives, but only `packages/e2ee-core` and the Lab consume it. The
+device survives. The desktop host now consumes the core workflows; this proposal
+retains the wider platform and acceptance requirements. The
 [open contracts note](../architecture/2026-10-15-e2ee-open-contracts.md) lists the vault
 as implemented in core only. [#2125](https://github.com/LodyAI/Lody/pull/2125) adds a
 default-off desktop loop: create the account vault and its file, then check a file. It
@@ -93,6 +95,17 @@ and caps retired vaults at 16.
 - The notification is informational. A hostile service can suppress it, while the R-signed
   admission stays visible in the verified ledger.
 
+## Desktop recovery switch and errors
+
+The desktop runtime enables recovery when `LODY_E2EE_RECOVERY_VAULT` is absent
+or trims to `on`. Explicit `off`, empty and unknown values refuse. This preserves
+the existing default-on desktop path while making a mistyped override refuse.
+Only the structured `e2ee_recovery_vault_disabled` backend refusal maps to the
+public `e2ee_recovery_disabled` result. Transport failures stay unavailable; no raw
+server text leaves main. This switch is not proof of deployed service availability
+or native recovery acceptance. The regression exercises the cloud response through
+the recovery error boundary, including a transport failure.
+
 ## Backend gap
 
 As inspected on 2026-11-05, the private backend implements vault storage, the Recovery
@@ -151,9 +164,9 @@ Run these in order on a Mac. Stop at the first failure.
 1. **Signing.** Build with the profile and new entitlements. `codesign -d --entitlements - Lody.app`
    lists the three keys, `spctl -a -vv Lody.app` accepts it, and it launches after notarization.
    A launch failure here is the main risk.
-2. **Association.** `curl https://app-site-association.cdn-apple.com/a/v1/vault.lody.ai` returns
+2. **Association.** `curl https://app-site-association.cdn-apple.com/a/v1/lody.ai` returns
    the file, and `sudo swcutil show` lists the app against the domain.
-3. **Ceremony.** A minimal addon creates a platform passkey for `vault.lody.ai` with a PRF
+3. **Ceremony.** A minimal addon creates a platform passkey for `lody.ai` with a PRF
    input, anchored to the `BrowserWindow`. The system sheet names the RP, and registration
    reports PRF support.
 4. **PRF.** Assertion returns 32 bytes, the same bytes on a second assertion and on a second
@@ -163,21 +176,16 @@ Run these in order on a Mac. Stop at the first failure.
 If step 1 or 2 fails, Developer ID cannot carry this path. The fallback is the recovery file on
 macOS, with passkeys only on iPhone and the Web surface, which needs an owner decision.
 
-## Web unlock surface: minimal plan
+## Same-origin Web recovery revision
 
-Not started. It follows macOS and iPhone, once those pass on real devices. The approved shape is
-in the [Spec](../../../../specs/e2ee/recovery-vault.md#passkey-unlock). The smallest build:
-
-1. A separate static app on `vault.lody.ai`, served by the Worker that already serves AASA, with
-   no third-party scripts or telemetry, a strict CSP, and its own deployment credentials.
-2. A browser `E2eePasskeyPort` over `navigator.credentials`, reusing `@lody/e2ee-client`. If the
-   browser returns no PRF, the page offers the recovery file on the same surface.
-3. One flow only: sign in, unlock, restore into a browser device C on this origin, then show a
-   pairing code so the regular Web app or another device joins through C.
-4. V is never stored, and V, R and the PRF result never reach the regular Web app.
-
-Open before starting: how sign-in works on this origin without sharing the regular app's session.
-A hostile operator controlling this host can still attempt a ceremony; the Spec accepts this.
+Owner's 2026-11-10 direction supersedes the dedicated-host plan: recovery runs in the
+ordinary `lody.ai` client, with RP `lody.ai`, no device C, cross-page channel or manual
+copy fallback. This expands ceremony trust to the parent domain and subdomains,
+including marketing/analytics code. System verification remains required. The
+[revised Spec](../../../../specs/e2ee/recovery-vault.md#passkey-unlock) was approved by zxch3n on 2026-11-10; this does not enable rollout.
+Temporary plaintext is wiped after settlement; encrypted journals remain durable.
+Existing application ownership is reused: setup borrows only its own reader and
+restore uses the same retained device identity. Failure must not close content readers.
 
 ## Consequences and limits
 
@@ -190,3 +198,103 @@ unchanged. Several things remain unverified:
 - the backend work listed above.
 
 The owner approved the R credential parameters with the Spec revision.
+
+## Browser recovery trade-offs
+
+PRF plus a recovery file remains the owner-approved choice from 2026-11-09.
+The 2026-11-10 same-origin direction trades dedicated-host isolation for direct
+in-app use. Password plus Secret Key would still require a complete KDF/wrapping
+review; a short password alone adds offline guessing exposure.
+
+The following was checked in official public sources on 2026-11-10. This is not
+reverse engineering, device testing or an independent security audit. Implications
+for Lody are design judgments:
+
+| Product                                 | Verified mechanism and source                                                                                                                                                                                                                                                                                                                  | Implication for Lody                                                                                                                                         |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1Password password plus Secret Key path | Its [SRP explanation](https://1password.com/blog/developers-how-we-use-srp-and-you-can-too) distinguishes two-secret derivation from authentication without transmitting the password. Its [Secret Key guide](https://support.1password.com/secret-key-security/) explains strengthening protection of server ciphertext with a random secret. | Borrow local unlocking, without claiming an equivalent model from merely adding a password field. This proposal does not migrate Lody authentication to SRP. |
+| Proton Pass                             | Its [security model](https://proton.me/blog/proton-pass-security-model) describes SRP authentication, password/bcrypt protection of the user key, then vault/item keys.                                                                                                                                                                        | Layered client decryption can work in browsers; its password wrapper does not establish compatibility with Lody recovery formats.                            |
+| MetaMask Extension seed-phrase path     | Its [passkey guide](https://support.metamask.io/configure/wallet/passkeys/) describes a password-protected local vault and passkey wrapping of the local encryption key. Syncing a passkey does not transfer that vault to another installation. Here SRP means Secret Recovery Phrase, not Secure Remote Password.                            | An extension-local vault does not establish ordinary website recovery of cloud workspace keys. No inference about its social-login path.                     |
+| WhatsApp Web linked devices             | Its [multi-device architecture](https://engineering.fb.com/2021/07/14/security/whatsapp-multi-device/) describes independent identities, phone QR linking and independent operation afterward. This is a 2021 architecture source.                                                                                                             | Keep device approval as an alternative; it does not supply first unlock without another device. No claim that every current flow is unchanged.               |
+| WebAuthn PRF                            | The [W3C specification](https://www.w3.org/TR/webauthn-3/#prf-extension) defines per-credential 32-byte pseudorandom outputs usable for encryption.                                                                                                                                                                                            | A normal passkey signature is not a decryption key. Verify actual PRF rather than a browser name.                                                            |
+
+**Ownership and supersession.** This existing proposed note retains the shared native
+and recovery rationale; only its Web plan is superseded. Historical approval records
+remain unchanged. No implemented note is fully replaced.
+
+**Evidence limits.** This work inspected public Specs,
+`packages/e2ee-core/src/internal/recovery/crypto.ts` and the fixed-vector location.
+No unlock or pairing was executed, and neither private deployment nor the Ryugi
+artboard was verified. Earlier product-integration, PR-state and platform-gap
+statements above are historical inspections, not current facts established here.
+
+### Portable recovery host boundary
+
+The explicit restore command owns one prepared identity and its recovered-key Scope.
+It authenticates the package/account before preparation, retains original admission,
+then uses a verified admitted session to install keys. Cancellation/close follows the
+existing owned host drain; no new background owner or replacement path is added.
+Installation failure preserves identity and original for retry; independent bindings
+and already admitted content remain usable. Chromium tests cover bad packages,
+wrong accounts, revoked R, failed installation, exact retry and persistent reopen.
+The private Web entry and deployment remain separate acceptance.
+
+## Restore scheduling
+
+The host calls `restoreVaultWorkspaces` inside its account-bound vault Scope. The
+shared workflow admits at most four workspace lanes; references naming the same
+target remain sequential because they share an identity and restore-progress key.
+Results retain the authenticated index order, independently of completion order.
+An unavailable workspace can no longer prevent another workspace from starting
+its verified restoration. The parent joins child fibers and their finalizers before
+its vault owner can release master-key copies. No detached task or timeout changes
+who owns the original admission. Per-attempt failures remain results and preserve
+the existing retry journal; failures outside an attempt keep their original batch
+failure semantics. The regression uses real crypto, Deferred gates and TestClock.
+
+Password unlock uses an additive, optional `readEntries` capability for the fixed
+eight immutable ciphertext slots (1–8 distinct ids, 256 KiB combined bodies).
+Missing entries stay null and count/id mismatches fail before derivation. Stores
+without the capability retain four concurrent original reads. Cloud adapters fall
+back only for an exact missing endpoint, never authorization or malformed responses.
+Newest-two selection, Argon2id parameters, active-index authentication, rollback
+pins and cleanup are unchanged.
+
+Main's authorized batch setup opens the vault once and admits four distinct
+workspace lanes, preserving same-workspace ordering. Preparation/network waits
+can overlap; shared index mutations retain core's mutex and CAS. Per-item failures
+keep journals and do not undo successful siblings; parent scope joins all work.
+
+Each recovery operation creates an Effect RequestResolver with a 1 ms collection
+window and no cache. Restore stages the first raw history page before package
+network I/O, consumes it once under package-pinned verification, and rereads after
+admission; this lets independent workspaces reach the first batch together.
+Fresh concurrent history requests use the existing
+`historyBatch` endpoint, at most 64 distinct workspace ids per request. Duplicate
+ids go into later batches with their original credentials, cursor and checkpoint;
+responses are checked for count/order and resolved independently. An older server
+that definitively lacks historyBatch uses the equivalent original reads, bounded
+to four in flight. Mutable authority is never reused across rounds or accounts.
+The existing cloud request owner retains auth and 30-second request deadlines.
+The installed RequestResolver forks its batch driver outside the requesting fiber:
+therefore each admitted request waiter is uninterruptible until that bounded batch
+settles. This retains the owning scope on cancellation, rather than releasing a
+vault while its batch still runs. A Deferred regression proves this drain. One
+slow history item can delay its transport batch until the existing deadline;
+per-workspace result/adoption work outside that request remains independent.
+
+Restore's optional observer runs only after verified adoption and attempt cleanup;
+its failure is ignored without affecting the durable result. Main sends non-secret
+outcomes only to the initiating document, with its random operation id, reader
+lifetime and original auth generation checked at delivery. Queue admission and
+final return also reject a changed generation, including same-account re-login.
+The UI subscribes before invoking, detaches on settlement, and fences late callbacks
+and final results on account/port changes or unmount. It renders independent rows
+(keyed by workspace id), so an installed workspace is visible and usable while a
+peer still waits. Admission with missing newer keys stays explicitly partial.
+Leaving the UI does not cancel main's producer, erase originals or claim drain.
+
+Deterministic regressions use Deferred gates, a virtual clock and real restore
+crypto; endpoint tests cover foreign/missing/deleting accounts, malformed bounds
+and oversized replies. These changes do not establish native ceremony or installed
+product acceptance.

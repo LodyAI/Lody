@@ -1,13 +1,22 @@
+import {
+  daemonInstallCommand,
+  daemonUpdateStatusCommand,
+  daemonUpgradeCommand,
+} from './daemon-install';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { fetchCliRuntimeState } from '@lody/cli-supervisor';
 import {
   inspectLocalCliHost,
-  requestLocalCliHostShutdown,
   type LocalCliHostRecord,
 } from '@lody/shared/node/local-cli-host-lease';
 import { version } from '@/pkg';
-import { LODY_LOG_DIR, readPidFileRecord, spawnDaemonRunnerAndAwaitReady } from './daemon-shared';
+import {
+  LODY_LOG_DIR,
+  readPidFileRecord,
+  spawnDaemonRunnerAndAwaitReady,
+  stopDaemonProcess,
+} from './daemon-shared';
 import { flushTelemetry } from '@/instrument';
 import { captureDaemonEvent } from './analytics-events';
 import { fetchLocalProbeHealth } from '@/lib/local-probe-health';
@@ -24,52 +33,6 @@ async function exitDaemonCommand(code: number): Promise<void> {
   // Flush buffered analytics before the one-shot daemon command exits.
   await flushTelemetry();
   process.exit(code);
-}
-
-type StopResult =
-  | { status: 'not_running' }
-  | { status: 'stale_pid_file'; pid: number }
-  | { status: 'stopped'; pid: number; attempts: number }
-  | { status: 'timeout'; pid: number; attempts: number }
-  | { status: 'host_mismatch'; pid: number; host: LocalCliHostRecord }
-  | { status: 'control_error'; pid: number; errorMessage: string };
-
-// The live Host endpoint is the only stop authority. The PID record supplies
-// the control token; PID liveness is never consulted and no signal is sent.
-async function stopDaemonProcess(): Promise<StopResult> {
-  const pidRecord = readPidFileRecord();
-  if (!pidRecord) return { status: 'not_running' };
-  const pid = pidRecord.pid;
-
-  const host = await inspectLocalCliHost(undefined, 500);
-  if (!host) {
-    return { status: 'stale_pid_file', pid };
-  }
-  if (host.mode !== 'daemon' || host.pid !== pid || host.instanceId !== pidRecord.instanceId) {
-    return { status: 'host_mismatch', pid, host };
-  }
-
-  const requested = await requestLocalCliHostShutdown({
-    instanceId: pidRecord.instanceId,
-    token: pidRecord.controlToken,
-    expectedPid: pid,
-    expectedMode: 'daemon',
-  });
-  if (!requested.ok) {
-    return { status: 'control_error', pid, errorMessage: requested.error };
-  }
-
-  // The daemon Supervisor gives the Worker 30 seconds to drain before force
-  // killing it, then waits up to 5 seconds for confirmed exit.
-  const maxAttempts = 80;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    const currentHost = await inspectLocalCliHost(undefined, 500);
-    if (!currentHost || currentHost.instanceId !== pidRecord.instanceId) {
-      return { status: 'stopped', pid, attempts: attempt };
-    }
-  }
-  return { status: 'timeout', pid, attempts: maxAttempts };
 }
 
 type StartResult =
@@ -179,6 +142,9 @@ async function reportDaemonStartBlocked(
 }
 
 export const daemonCommand = new Command('daemon')
+  .addCommand(daemonInstallCommand)
+  .addCommand(daemonUpdateStatusCommand)
+  .addCommand(daemonUpgradeCommand)
   .description('Run lody as a background daemon service')
   .addCommand(
     new Command('start')

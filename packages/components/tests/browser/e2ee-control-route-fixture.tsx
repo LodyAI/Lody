@@ -104,6 +104,7 @@ export async function reopen(paused: 'describe' | 'history') {
         closed.resolve();
       },
       ledgerView: async () => local,
+      status: async () => local.status,
       ingestLedgerRecords: async (_workspace, received) => {
         ingested.push(received.recordsHex);
         return local.status;

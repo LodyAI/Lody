@@ -30,9 +30,10 @@ Member 投影，且没有 GitHub remote 的本地目录不会借用其他 Member
   review 和 Merge 都跟随选中的 PR。Create PR 和 Commit & Push 仍以整个对话为
   范围，因为它们发送的 prompt 会发布所有有改动的 Member。
 - 操作门控复用 `projectRunMetaPatch` 汇总后的 session 级 `workspaceDirty` /
-  `workspaceUnpushed`，行模型不再重复保存 dirty/unpushed。已提交 diff 的回退
+  `workspaceUnpushed`，行模型不再重复保存 dirty/unpushed。工作区 diff 的回退
   移入 `getSessionGitHubState`：只有所有 Member 都报告 diff 时才会写
-  `diffStats`，而非 Git Member 永远没有 diff。消融实验保留这一支，删掉另外
+  `diffStats`。Member 统计现在按照[统计归属](../architecture/2026-11-14-workspace-diff-stat-ownership.zh.md)
+  使用完整工作区比较结果。消融实验保留回退分支，删掉另外
   两处重复 OR，并补上混合项目组的测试。
 - CI 用 PR 图标的颜色表达，不再加第二个圆点：图标形状保留 PR 状态
   （open / draft / merged / closed），绿 / 红 / 黄分别表示 CI 通过 / 失败 /

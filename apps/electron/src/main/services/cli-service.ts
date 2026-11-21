@@ -48,6 +48,10 @@ import {
   makeLocalControlClientAuto,
   makeLocalProbeClientAuto
 } from '@lody/shared/node/local-ipc'
+import type {
+  WorkspaceBundleControlRequest,
+  WorkspaceBundleControlResponse
+} from '@lody/shared/workspace-bundle-control'
 import { getLodyDataDir } from '@lody/shared/node/installation-profile'
 import type {
   LocalProjectControlRequest,
@@ -78,6 +82,7 @@ import {
 import type { BootstrapSession } from './auth-service'
 import { desktopInstallationProfile, isLocalPlatform, mainPlatformKind } from '../platform'
 import { getDesktopLog } from '../desktop-log'
+import { desktopIrohConfig } from './e2ee-iroh-config'
 import { createCliProbeTrace } from '../desktop-log-core'
 import {
   DESKTOP_HOST_ACCESS_DENIED_MESSAGE,
@@ -89,6 +94,7 @@ import type { CliOutputEvent, CliRunResult } from '../types'
 import { resolveLocalSessionControlTimeoutMs } from './local-session-control-budget'
 
 const CLI_OUTPUT_BUFFER_MAX_EVENTS = 2000
+const WORKSPACE_BUNDLE_TIMEOUT_MS = 60 * 60 * 1000
 // How long to wait for the embedded CLI to exit on SIGTERM during app quit before
 // force-killing it after the CLI's seven-second budget. Early exit finishes the wait.
 const CLI_QUIT_GRACE_MS = 10_000
@@ -410,6 +416,19 @@ function buildCliRuntimeEnvOverrides(): NodeJS.ProcessEnv {
   assignEnvIfPresent(env, 'LODY_AUTH_SITE_URL', import.meta.env.VITE_CONVEX_SITE_URL)
   assignEnvIfPresent(env, 'LODY_SERVER_URL', import.meta.env.VITE_SERVER_URL)
   assignEnvIfPresent(env, 'SITE_URL', import.meta.env.VITE_SITE_URL)
+  // The embedded CLI serves encrypted RPC over iroh only with the same relays and
+  // a native module that exists on this host; otherwise it keeps Streams RPC.
+  const iroh = desktopIrohConfig({
+    packaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appPath: app.getAppPath(),
+    env: import.meta.env
+  })
+  if (iroh) {
+    env.LODY_IROH_RELAYS = iroh.relays.urls.join(',')
+    if (iroh.relays.token) env.LODY_IROH_RELAY_TOKEN = iroh.relays.token
+    env.LODY_IROH_NATIVE_PATH = iroh.file
+  }
 
   return env
 }
@@ -482,7 +501,6 @@ function readMachineIdFromCliCredentials(): string | null {
 
 export class CliService {
   private readonly trackedCliChildren = new Map<ChildProcess, ProcessHandleLegacy>()
-  private autoStartSender: WebContents | undefined
   private readonly cliOutputBuffer: CliOutputEvent[] = []
   private readonly cliStateSenders = new Set<WebContents>()
   private cliState: ElectronCliState = {
@@ -640,8 +658,7 @@ export class CliService {
   }
 
   private async buildLaunchPreparation(signal: AbortSignal): Promise<PreparedLaunch> {
-    const sender = this.autoStartSender
-    this.sendCliMeta(sender, '[electron] Preparing CLI autostart\n')
+    this.recordCliMeta('[electron] Preparing CLI autostart\n')
     throwIfAborted(signal)
 
     let bootstrapSession: BootstrapSession | null
@@ -649,8 +666,7 @@ export class CliService {
       bootstrapSession = await this.resolveBootstrapSessionForAutoStart()
       throwIfAborted(signal)
     } catch (error) {
-      this.sendCliMeta(
-        sender,
+      this.recordCliMeta(
         `[electron] Failed to prepare CLI autostart: ${formatUnknownError(error)}\n`
       )
       throw error
@@ -672,7 +688,7 @@ export class CliService {
       envOverrides[CLI_ELECTRON_SESSION_USER_ID_ENV] = bootstrapSession.userId
     }
 
-    const prepared = await this.prepareBundledCli(finalArgs, sender, {
+    const prepared = await this.prepareBundledCli(finalArgs, {
       envOverrides,
       maxOldSpaceMiB: calculateWorkerMaxOldSpaceMiB(totalmem()),
       signal,
@@ -763,7 +779,7 @@ export class CliService {
     }
 
     try {
-      this.sendCliMeta(this.autoStartSender, '[electron] CLI terminate requested\n')
+      this.recordCliMeta('[electron] CLI terminate requested\n')
       await supervisor.stop()
       // Manual termination keeps observing an external CLI only while local
       // agents remain enabled. Disabling the setting is an explicit
@@ -848,7 +864,7 @@ export class CliService {
     if (!this.cliAutoStartEnabled) throw new Error('e2ee_local_agent_disabled')
     return Effect.runPromise(
       this.localControlClient
-        .e2eeActivate(message, { timeoutMs: 30_000 })
+        .e2eeActivate(message, { timeoutMs: 45_000 })
         .pipe(
           Effect.mapError(
             (error) =>
@@ -933,6 +949,19 @@ export class CliService {
         error: error instanceof Error ? error.message : String(error)
       }
     }
+  }
+
+  /** Workspace bundles can take as long as the whole workspace; the daemon replies once. */
+  async sendWorkspaceBundleControl(
+    message: WorkspaceBundleControlRequest
+  ): Promise<WorkspaceBundleControlResponse> {
+    const response = await Effect.runPromise(
+      this.localControlClient.workspaceBundleControl(message, {
+        timeoutMs: WORKSPACE_BUNDLE_TIMEOUT_MS
+      })
+    )
+    if (!response.ok && response.error === 'machine_mismatch') this.clearMachineIdCache()
+    return response
   }
 
   async sendLocalProjectControl(
@@ -1059,7 +1088,6 @@ export class CliService {
   }
 
   autoStart(sender: WebContents | undefined): void {
-    this.autoStartSender = sender
     this.attachCliStateSender(sender)
 
     // Control-only mode deliberately ignores even an externally started CLI.
@@ -1077,40 +1105,33 @@ export class CliService {
     void supervisor.start()
   }
 
-  async run(
-    args: string[],
-    sender: WebContents | undefined,
-    options?: CliRunOptions
-  ): Promise<CliRunResult> {
-    const prepared = await this.prepareBundledCli(args, sender, options)
+  async run(args: string[], options?: CliRunOptions): Promise<CliRunResult> {
+    const prepared = await this.prepareBundledCli(args, options)
     throwIfAborted(options?.signal)
     return await prepared.spawn().result
   }
 
-  private sendCliOutput(sender: WebContents | undefined, event: CliOutputEvent): void {
+  /** Retained only for `getOutputBacklog`; no renderer subscribes to CLI output. */
+  private recordCliOutput(event: CliOutputEvent): void {
     this.cliOutputBuffer.push(event)
     if (this.cliOutputBuffer.length > CLI_OUTPUT_BUFFER_MAX_EVENTS) {
       this.cliOutputBuffer.splice(0, this.cliOutputBuffer.length - CLI_OUTPUT_BUFFER_MAX_EVENTS)
     }
-
-    if (!sender || sender.isDestroyed()) return
-    sender.send('cli.output', event)
   }
 
-  private sendCliMeta(sender: WebContents | undefined, chunk: string): void {
-    this.sendCliOutput(sender, { runId: randomUUID(), stream: 'meta', chunk })
+  private recordCliMeta(chunk: string): void {
+    this.recordCliOutput({ runId: randomUUID(), stream: 'meta', chunk })
   }
 
   private spawnCli(
     command: string,
     args: string[],
     spawnOptions: SpawnOptions,
-    sender: WebContents | undefined,
     options?: CliRunOptions
   ): LaunchHandle {
     throwIfAborted(options?.signal)
     const runId = randomUUID()
-    this.sendCliOutput(sender, {
+    this.recordCliOutput({
       runId,
       stream: 'meta',
       chunk: `$ ${formatCommandForDisplay(command, args)}\n`
@@ -1137,13 +1158,13 @@ export class CliService {
       child.stdout?.on('data', (chunk) => {
         const text = String(chunk)
         stdout = appendOutputTail(stdout, text)
-        this.sendCliOutput(sender, { runId, stream: 'stdout', chunk: text })
+        this.recordCliOutput({ runId, stream: 'stdout', chunk: text })
       })
 
       child.stderr?.on('data', (chunk) => {
         const text = String(chunk)
         stderr = appendOutputTail(stderr, text)
-        this.sendCliOutput(sender, { runId, stream: 'stderr', chunk: text })
+        this.recordCliOutput({ runId, stream: 'stderr', chunk: text })
       })
 
       child.once('error', (error) => {
@@ -1151,7 +1172,7 @@ export class CliService {
       })
       child.once('close', (code, signal) => {
         this.trackedCliChildren.delete(child)
-        this.sendCliOutput(sender, {
+        this.recordCliOutput({
           runId,
           stream: 'meta',
           chunk: `\n[cli exited: ${code ?? 'null'}]\n`
@@ -1210,7 +1231,6 @@ export class CliService {
 
   private async prepareBundledCli(
     args: string[],
-    sender: WebContents | undefined,
     options?: CliRunOptions
   ): Promise<PreparedLaunch> {
     throwIfAborted(options?.signal)
@@ -1250,7 +1270,6 @@ export class CliService {
               windowsHide: true,
               ...(options?.supervisorControl ? { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] } : {})
             },
-            sender,
             options
           ),
           // Only the subcommand: renderer-supplied arguments may carry credentials.

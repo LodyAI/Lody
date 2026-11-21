@@ -16,7 +16,7 @@ export type PromptShortcutAnalyticsScope =
  * frozen references (`mentions`), so `reference_count` is reported instead.
  */
 export function getPromptShortcutAnalyticsProperties(
-  shortcut: Pick<PromptShortcutIndexEntry, 'scope' | 'visibility'>,
+  shortcut: Pick<PromptShortcutIndexEntry, 'scope'>,
   referenceCount: number
 ): Record<string, unknown> {
   const { project, machineId, providerKey } = shortcut.scope;
@@ -32,7 +32,6 @@ export function getPromptShortcutAnalyticsProperties(
   return {
     scope,
     scope_axis_count: [project, machineId, providerKey].filter((axis) => axis !== undefined).length,
-    is_shared: shortcut.visibility === 'workspace',
     reference_count: referenceCount,
   };
 }

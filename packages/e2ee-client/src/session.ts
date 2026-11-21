@@ -1,6 +1,7 @@
-import { makePersonalKeyMaintenance } from './maintenance';
+import { makePersonalKeyMaintenance, type PersonalKeyRoundMode } from './maintenance';
 import {
   Cause,
+  Clock,
   Context,
   Effect,
   Exit,
@@ -12,6 +13,7 @@ import {
   Result,
 } from 'effect';
 import {
+  makeWorkspaceRecovery,
   InstalledEpochHistory,
   InstalledEpochKeys,
   KeyReceiver,
@@ -23,12 +25,16 @@ import {
   WorkspaceControl,
 } from '@lody/e2ee-core';
 import {
+  epochHistoryPacket,
   getCommittedEpochStagingKey,
   requireLedgerContinuation,
   decodeRecord,
+  hashRecordBytes,
   prepareLedgerCommand,
   signLedgerRecord,
   signLedgerSnapshot,
+  signExecutionIntent,
+  verifyDeviceCredentialBinding,
   type LedgerCommand,
   Bytes,
 } from '@lody/e2ee-core/protocol';
@@ -69,15 +75,40 @@ import {
   type PreparedPersonalIdentity,
 } from './installation';
 import { PersonalHostPlatform, PersonalMachineSharing, type PersonalApproval } from './platform';
-import { assertPersonalAdmission } from './admission';
+import { boundedBy } from './deadline';
+import { assertPersonalAdmission, captureHistoryPages } from './admission';
+import { accountPairingMailboxPreview } from './account-requester';
+import type { E2eeAccountPairingMailboxPreview } from '@lody/cloud-api';
+import type { E2eeWorkspaceHistoryPage } from '@lody/cloud-api';
 import { fail } from './errors';
+import type { PersonalRecoverySetupInput } from './recovery-restore';
 import { fromHex, toHex } from './bytes';
+// The subpath, never the package index: this host runs in browsers.
+import {
+  encodeE2eeIntentRecord,
+  scheduleDeclarationSubject,
+} from '@lody/shared/e2ee-execution-intent';
+import type { ScheduleDocument } from '@lody/shared';
 import { encodePersonalInvitation } from './pairing';
+import { decodeMemberKeyPackage, signMemberOffer, verifyAutomaticMemberAdmission } from './member';
+import { irohTargetDevice, makePersonalIrohRoute } from './iroh-route';
+import type { PersonalIrohEndpoint } from './platform';
 
+/** How far ahead of the verified epoch an unverified content frame may point and still
+ * count as ledger lag (Streams faster than the ledger feed) rather than forgery. Desktop
+ * applies the same bound. */
+const LEDGER_LOOKAHEAD_EPOCHS = 4;
+type TurnSyncCell = {
+  current: { readonly length: number; readonly head: Bytes.RecordHash } | null;
+};
+const TurnSyncRef = Context.Reference<TurnSyncCell | null>('@lody/e2ee-client/TurnSyncRef', {
+  defaultValue: () => null,
+});
 /** Private composition. Product callers receive narrow operations, never signer/credential/core services. */
 export const openPersonalSession = Effect.fnUntraced(function* (
   prepared: PreparedPersonalIdentity,
-  approval: PersonalApproval
+  approval: PersonalApproval,
+  recovered: readonly (readonly [number, Bytes.EpochKey])[] = []
 ) {
   const platform = yield* PersonalHostPlatform,
     installation = yield* ClientInstallationStore;
@@ -121,12 +152,44 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       rawLog = Context.get(rawControl, LedgerLog);
     const sync = Object.freeze({
       current: rawSync.current.bind(rawSync),
-      refresh: rawSync.refresh.bind(rawSync),
+      ingest: rawSync.ingest?.bind(rawSync),
+      refresh: () =>
+        Effect.gen(function* () {
+          const cell = yield* TurnSyncRef;
+          if (cell?.current) {
+            const local = yield* Effect.result(rawSync.current());
+            if (
+              Result.isSuccess(local) &&
+              local.success.view.length === cell.current.length &&
+              local.success.view.head.equals(cell.current.head)
+            )
+              return local.success;
+            cell.current = null;
+          }
+          const refreshed = yield* rawSync.refresh();
+          if (cell) cell.current = { length: refreshed.view.length, head: refreshed.view.head };
+          return refreshed;
+        }),
     });
     const log = Object.freeze({
       read: rawLog.read.bind(rawLog),
+      readFrom: rawLog.readFrom?.bind(rawLog),
       appendCas: rawLog.appendCas.bind(rawLog),
     });
+    const refreshCheckpoint = (value: { checkpoint: import('@lody/e2ee-core').LedgerCheckpoint }) =>
+      Effect.gen(function* () {
+        const cell = yield* TurnSyncRef;
+        const local = yield* rawSync.current();
+        if (
+          local.view.length !== value.checkpoint.length ||
+          !local.view.head.equals(value.checkpoint.head)
+        ) {
+          if (cell) cell.current = null;
+          yield* sync.refresh();
+        } else if (cell) {
+          cell.current = { length: local.view.length, head: local.view.head };
+        }
+      });
     const controlPorts = Layer.succeedContext(
       Context.pick(
         LedgerSync,
@@ -136,10 +199,55 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       )(rawControl).pipe(
         Context.add(LedgerSync, sync),
         Context.add(LedgerLog, {
-          appendCas: log.appendCas.bind(log),
+          appendCas: (anchor, point, record) =>
+            Effect.gen(function* () {
+              const cell = yield* TurnSyncRef;
+              if (cell) cell.current = null;
+              yield* log.appendCas(anchor, point, record);
+              if (cell) {
+                const local = yield* Effect.result(rawSync.current());
+                if (Result.isSuccess(local) && local.success.view.length > point.length)
+                  cell.current = {
+                    length: local.success.view.length,
+                    head: local.success.view.head,
+                  };
+              }
+            }),
+          ...(log.readFrom
+            ? {
+                readFrom: (anchor: Bytes.GenesisHash, base: import('@lody/e2ee-core').LedgerView) =>
+                  Effect.gen(function* () {
+                    const cell = yield* TurnSyncRef;
+                    if (
+                      cell?.current &&
+                      cell.current.length === base.length &&
+                      cell.current.head.equals(base.head)
+                    ) {
+                      const local = yield* Effect.result(rawSync.current());
+                      if (
+                        Result.isSuccess(local) &&
+                        local.success.view.length === base.length &&
+                        local.success.view.head.equals(base.head)
+                      )
+                        return {
+                          records: [],
+                          checkpoint: { head: base.head, length: base.length },
+                        };
+                      cell.current = null;
+                    }
+                    const value = yield* log.readFrom!(anchor, base);
+                    yield* refreshCheckpoint(value);
+                    return value;
+                  }).pipe(
+                    Effect.mapError((cause) =>
+                      cause instanceof LedgerLogError ? cause : new LedgerLogError({ cause })
+                    )
+                  ),
+              }
+            : {}),
           read: (anchor) =>
             log.read(anchor).pipe(
-              Effect.tap(() => sync.refresh()),
+              Effect.tap(refreshCheckpoint),
               Effect.mapError((cause) =>
                 cause instanceof LedgerLogError ? cause : new LedgerLogError({ cause })
               )
@@ -155,7 +263,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         ),
     });
     const controlLayer = WorkspaceControl.layer.pipe(
-      Layer.provideMerge(Layer.merge(VerifiedLedger.layer, LedgerSubmission.layer)),
+      Layer.provideMerge(LedgerSubmission.layer.pipe(Layer.provideMerge(VerifiedLedger.layer))),
       Layer.provideMerge(Layer.mergeAll(identity, controlPorts, source))
     );
     const controlServices = yield* Layer.build(controlLayer);
@@ -188,7 +296,15 @@ export const openPersonalSession = Effect.fnUntraced(function* (
     // Readable ledger precedes lazy acquisition of every key store/backend.
     yield* ledger();
     const fibers = yield* Scope.provide(FiberSet.make(), operationsScope),
-      serial = yield* Semaphore.make(1);
+      serial = yield* Semaphore.make(1),
+      recoverySerial = yield* Semaphore.make(1);
+    // Every round held under the serial permit is bounded: a stalled remote call is
+    // interrupted at its deadline and releases the permit, so later refreshes, key rounds
+    // and management are never blocked behind it. Core keeps an interrupted write's
+    // original journaled for its exact resume; nothing is re-signed or regenerated.
+    const bounded = boundedBy(platform.deadlines);
+    const serialRound = <A, E, R>(work: Effect.Effect<A, E, R>) =>
+      serial.withPermit(bounded(Effect.provideService(work, TurnSyncRef, { current: null })));
     const run = <A, E>(effect: Effect.Effect<A, E>, dispose?: (value: A) => void) =>
       Effect.gen(function* () {
         yield* guard;
@@ -218,6 +334,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
     type Keys =
       | Layer.Success<typeof keyLayer>
       | EpochStagingStore
+      | ReceiveJournal
       | EpochCandidateStore
       | KeyMailbox;
     let keyServices: Context.Context<Keys> | undefined;
@@ -288,35 +405,126 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         yield* admitted();
         return value;
       });
-    const keyRound = () =>
-      serial.withPermit(
+    const receiveFromStaging = (
+      ctx: Context.Context<Keys>,
+      view: import('@lody/e2ee-core').LedgerView,
+      epoch: number
+    ) =>
+      Effect.gen(function* () {
+        if (epoch === 0) return undefined;
+        const checked = yield* Effect.result(Context.get(ctx, InstalledEpochKeys).check(epoch));
+        if (Result.isSuccess(checked)) return undefined;
+        const located = getCommittedEpochStagingKey(view, epoch);
+        if (Result.isFailure(located)) {
+          if (view.verification === 'endorsed-snapshot') return undefined;
+          return yield* located.failure;
+        }
+        // Staging availability must not gate the independent verified mailbox path.
+        const group = yield* Context.get(ctx, EpochStagingStore)
+          .readGroup(located.success)
+          .pipe(Effect.catch(() => Effect.succeed(null)));
+        if (
+          group !== null &&
+          group.envelopes.some((row) => row.recipient === toHex(device.publicKey.toBytes()))
+        )
+          yield* Context.get(ctx, KeyReceiver).receiveStagedGroup(group);
+        return undefined;
+      });
+    const receiveStep = (ctx: Context.Context<Keys>) =>
+      Effect.gen(function* () {
+        const view = yield* admitted(),
+          epoch = view.inspectState().epoch.number;
+        const receiver = Context.get(ctx, KeyReceiver);
+        yield* receiveFromStaging(ctx, view, epoch);
+        if (
+          Result.isSuccess(yield* Effect.result(Context.get(ctx, InstalledEpochKeys).check(epoch)))
+        )
+          return { refreshRequired: false };
+        yield* receiver.resume(100, null);
+        const received = yield* receiver.fetchAndInstall(null, 100);
+        return { refreshRequired: received.refreshRequired ?? false };
+      });
+    const keyRound = (mode: PersonalKeyRoundMode = 'full', recipients?: readonly string[]) =>
+      serialRound(
         withKeys((ctx) =>
           Effect.gen(function* () {
             const view = yield* admitted(),
               epoch = view.inspectState().epoch.number;
-            const beforeReceive = Effect.gen(function* () {
-              if (epoch === 0) return undefined;
-              const checked = yield* Effect.result(
-                Context.get(ctx, InstalledEpochKeys).check(epoch)
-              );
-              if (Result.isSuccess(checked)) return undefined;
-              const located = getCommittedEpochStagingKey(view, epoch);
-              if (Result.isFailure(located)) {
-                if (view.verification === 'endorsed-snapshot') return undefined;
-                return yield* located.failure;
-              }
-              // Staging availability must not gate the independent verified mailbox path.
-              const group = yield* Context.get(ctx, EpochStagingStore)
-                .readGroup(located.success)
-                .pipe(Effect.catch(() => Effect.succeed(null)));
-              if (
-                group !== null &&
-                group.envelopes.some((row) => row.recipient === toHex(device.publicKey.toBytes()))
-              )
-                yield* Context.get(ctx, KeyReceiver).receiveStagedGroup(group);
-              return undefined;
-            });
-            return { refreshRequired: yield* maintenance!(epoch, beforeReceive) };
+            if (mode === 'distribute') {
+              // Only this device's deliveries, as on the desktop: reconcile targets,
+              // resume pending sends, acknowledge ended tasks. Receive and repair stay
+              // with a full round; every task remains in the core distribution journal.
+              const distributor = Context.get(ctx, KeyDistributor);
+              yield* distributor.reconcileCurrentEpoch(100, null, recipients);
+              yield* distributor.resumePendingDeliveries(100, null);
+              const ended = yield* distributor.results(100, null);
+              for (const item of ended.items) yield* distributor.acknowledge(item.id);
+              return { refreshRequired: false };
+            }
+            if (mode === 'receive') {
+              // Only this device's own key, from a staged group or the mailbox. Reports,
+              // distribution and repair stay with a full round.
+              return yield* receiveStep(ctx);
+            }
+            return {
+              refreshRequired: yield* maintenance!(
+                epoch,
+                receiveFromStaging(ctx, view, epoch),
+                recipients
+              ),
+            };
+          })
+        )
+      );
+    const updateKeys = () =>
+      run(
+        serialRound(
+          Effect.gen(function* () {
+            yield* sync.refresh();
+            return yield* withKeys((ctx) =>
+              Effect.gen(function* () {
+                const cell = yield* TurnSyncRef;
+                const installed = Context.get(ctx, InstalledEpochKeys);
+                const initialEpoch = (yield* admitted()).inspectState().epoch.number;
+                const missingCurrent = Result.isFailure(
+                  yield* Effect.result(installed.check(initialEpoch))
+                );
+                if (missingCurrent) {
+                  for (let pass = 0; pass < 4; pass++) {
+                    if (!(yield* receiveStep(ctx)).refreshRequired) break;
+                    if (cell) cell.current = null;
+                    yield* sync.refresh();
+                  }
+                }
+                yield* ownSubmission;
+                const activeCandidate = yield* Effect.result(
+                  Context.get(ctx, EpochCandidateStore).active()
+                );
+                const hasCandidate = Result.isSuccess(activeCandidate)
+                  ? activeCandidate.success !== null
+                  : true;
+                const pendingEntry = yield* submission.pending();
+                const publisher = Context.get(ctx, EpochPublisher);
+                if (missingCurrent || hasCandidate || pendingEntry.record !== null) {
+                  yield* Context.get(ctx, InstalledEpochHistory).recover();
+                  const pending = yield* publisher.resume();
+                  if (pending) {
+                    if (pending.outcome === 'Conflict')
+                      yield* Effect.ignore(publisher.cleanupStaged());
+                    yield* publisher.acknowledge(pending);
+                    if (pending.outcome !== 'Committed') return yield* fail('conflict');
+                  }
+                }
+                if ((yield* admitted()).inspectState().epoch.rotationRequired) {
+                  const result = yield* publisher.publish();
+                  if (result.outcome === 'Conflict')
+                    yield* Effect.ignore(publisher.cleanupStaged());
+                  yield* publisher.acknowledge(result);
+                  if (result.outcome !== 'Committed') return yield* fail('conflict');
+                }
+                return undefined;
+              })
+            );
           })
         )
       );
@@ -357,6 +565,36 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           return 'e2ee_key_recipient_ineligible';
         })
       );
+    /** True only for an active member device of this device's own verified ledger, when
+     * either that ledger already holds `epoch` and the installed key store genuinely lacks
+     * it (a rotation not received yet), or the frame is ledger lag: `epoch` is at most
+     * {@link LEDGER_LOOKAHEAD_EPOCHS} ahead of the verified epoch, or at it while its author
+     * is unknown (`unknownAuthority`), because Streams delivered it before the ledger feed.
+     * Unreadable keys, older unknown authors, epochs further ahead and access loss are
+     * never pending. */
+    const keyPending = (epoch: number, unknownAuthority = false) =>
+      withKeys((ctx) =>
+        Effect.gen(function* () {
+          const state = (yield* admitted()).inspectState();
+          const own = state.devices.get(toHex(device.publicKey.toBytes()));
+          if (
+            !Number.isSafeInteger(epoch) ||
+            epoch < 0 ||
+            !own ||
+            !state.members.has(toHex(own.membershipId.toBytes()))
+          )
+            return false;
+          const current = state.epoch.number;
+          if (
+            epoch <= current + LEDGER_LOOKAHEAD_EPOCHS &&
+            (epoch > current || (epoch === current && unknownAuthority))
+          )
+            return true;
+          if (unknownAuthority || epoch > current) return false;
+          const checked = yield* Effect.result(Context.get(ctx, InstalledEpochKeys).check(epoch));
+          return Result.isFailure(checked) && checked.failure.reason === 'missing-key';
+        })
+      );
     const readKey = (epoch: number) =>
       Effect.gen(function* () {
         const ctx = yield* keys();
@@ -372,6 +610,8 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           const installed = Context.get(ctx, InstalledEpochKeys);
           let usableEpoch: number | null = null;
           for (let epoch = state.epoch.number; epoch >= 0; epoch--) {
+            const packet = epochHistoryPacket(view, epoch);
+            if (Result.isFailure(packet) || packet.success.abandoned) continue;
             const checked = yield* Effect.result(installed.check(epoch));
             if (Result.isSuccess(checked)) {
               usableEpoch = epoch;
@@ -439,6 +679,31 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           run(original.openAuthenticated(input), (opened) => opened.plaintext.fill(0)),
       });
     });
+    let irohEndpoint: PersonalIrohEndpoint | undefined;
+    const irohSerial = yield* Semaphore.make(1);
+    const irohWarming = new Set<string>();
+    // Opens once per session: the seed copy goes to the native opener only and is
+    // wiped when it settles. The endpoint closes with the session owner.
+    const irohOwner = () =>
+      irohSerial.withPermit(
+        Effect.gen(function* () {
+          yield* admitted();
+          if (irohEndpoint) return irohEndpoint;
+          const port = platform.iroh;
+          if (!port || !platform.rpc) return yield* fail('unsupported');
+          // Acquisition and its close registration are one uninterruptible step:
+          // an endpoint that settles after the session starts closing still closes.
+          const opened = yield* Scope.provide(
+            Effect.acquireRelease(
+              device.withTransportSeed((seed) => port.open(seed)),
+              (endpoint) => Effect.promise(() => endpoint.close().catch(() => undefined))
+            ),
+            owner
+          );
+          irohEndpoint = opened;
+          return opened;
+        })
+      );
     let rpc: ReturnType<typeof makeE2eeRpcClient> | undefined;
     const rpcSerial = yield* Semaphore.make(1);
     const rpcOwner = () =>
@@ -457,6 +722,12 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             requesterDevice: toHex(device.publicKey.toBytes()),
             originals: store,
             ledger: admitted,
+            signIntent: (request) =>
+              signExecutionIntent({
+                ...request,
+                genesis: prepared.binding.genesis,
+                signer: device,
+              }).pipe(Effect.map((signature) => signature.toBytes())),
             binding: (resource) =>
               makeRealtimeContentBinding({
                 genesis: prepared.binding.genesis,
@@ -474,7 +745,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         })
       );
     const management = (command: LedgerCommand) =>
-      serial.withPermit(
+      serialRound(
         Effect.gen(function* () {
           yield* admitted();
           // An occupied journal must be explicitly resumed/ACKed, never converted to another user intent.
@@ -528,6 +799,14 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             );
           })
         );
+        const personalCounts = new Map<string, number>();
+        const recoveryMembers = new Set<string>();
+        for (const device of state.devices.values()) {
+          const membership = toHex(device.membershipId.toBytes());
+          if (device.kind === 'personal')
+            personalCounts.set(membership, (personalCounts.get(membership) ?? 0) + 1);
+          if (device.kind === 'recovery') recoveryMembers.add(membership);
+        }
         return {
           epoch: state.epoch.number,
           rotationRequired: state.epoch.rotationRequired,
@@ -538,6 +817,13 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           devices: [...state.devices].map(([key, entry]) => ({
             key,
             kind: entry.kind,
+            cryptoUserId: toHex(
+              state.members.get(toHex(entry.membershipId.toBytes()))!.userId.toBytes()
+            ),
+            recoveryDeviceAvailable: recoveryMembers.has(toHex(entry.membershipId.toBytes())),
+            requiresRecoveryConfirmation:
+              entry.kind === 'personal' &&
+              personalCounts.get(toHex(entry.membershipId.toBytes())) === 1,
             machineId: entry.machineId ?? null,
             self: key === toHex(device.publicKey.toBytes()),
             mayRevoke: Result.isSuccess(
@@ -571,7 +857,132 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       });
     // Account pairing, approver side. The shared workflow journals each original and
     // never asks for a second signature over one request.
+    const ingestPage = Effect.fnUntraced(function* (supplied: E2eeWorkspaceHistoryPage) {
+      const page = (yield* Effect.fromResult(captureHistoryPages([supplied])))[0]!;
+      if (
+        page.workspaceId !== prepared.binding.workspaceId ||
+        page.genesisHash !== toHex(prepared.binding.genesis.toBytes())
+      )
+        return yield* fail('scope-mismatch');
+      if (!sync.ingest) {
+        yield* control.refresh();
+        return;
+      }
+      const before = yield* sync.current();
+      const end = page.startIndex + page.recordsHex.length;
+      if (
+        end > page.checkpoint.length ||
+        (page.nextCursor === null) !== (end === page.checkpoint.length)
+      )
+        return yield* fail('invalid-input');
+      // The feed bootstrap requires genesis even when append inlines only its suffix.
+      const bootstrap = before.bootstrap && page.startIndex === 1 && before.view.length === 1;
+      const start = before.bootstrap ? 0 : before.view.length;
+      if (!bootstrap && (page.startIndex > start || end < start)) return yield* fail('conflict');
+      const allRecords = page.recordsHex.map(fromHex);
+      if (!bootstrap && page.startIndex < start) {
+        const overlap = allRecords[start - page.startIndex - 1];
+        if (!overlap || !hashRecordBytes(overlap).equals(before.view.head))
+          return yield* fail('conflict');
+      }
+      const records =
+        !bootstrap && page.startIndex < start
+          ? allRecords.slice(start - page.startIndex)
+          : allRecords;
+      const head = records.length ? hashRecordBytes(records.at(-1)!) : before.view.head;
+      if (
+        page.nextCursor === null &&
+        (end !== page.checkpoint.length || toHex(head.toBytes()) !== page.checkpoint.headHash)
+      )
+        return yield* fail('conflict');
+      yield* sync.ingest(
+        {
+          requestOffset: before.offset,
+          nextOffset: page.position,
+          records: bootstrap ? [fromHex(approval.offer.genesisRecordHex), ...records] : records,
+          upToDate: page.nextCursor === null,
+        },
+        { head, length: end }
+      );
+      yield* ledger();
+      if (page.nextCursor !== null) yield* control.refresh();
+    });
     const accountApproval = {
+      checkpoint: () =>
+        run(
+          serialRound(
+            Effect.gen(function* () {
+              const view = yield* ledger();
+              const state = yield* sync.current();
+              return {
+                headHash: toHex(view.head.toBytes()),
+                length: view.length,
+                ...(state.offset.startsWith('p1:') ? { position: state.offset } : {}),
+              };
+            })
+          )
+        ),
+      ingest: (page: E2eeWorkspaceHistoryPage) => run(serialRound(ingestPage(page))),
+      activateAccountPairing: (preview?: E2eeAccountPairingMailboxPreview) =>
+        run(
+          Effect.gen(function* () {
+            if (preview?.items.length)
+              yield* serialRound(
+                withKeys((ctx) =>
+                  Effect.scoped(
+                    Effect.gen(function* () {
+                      const receiver = yield* Layer.build(
+                        KeyReceiver.layer.pipe(
+                          Layer.provide(
+                            Layer.succeed(
+                              KeyMailbox,
+                              accountPairingMailboxPreview(Context.get(ctx, KeyMailbox), preview)
+                            )
+                          ),
+                          Layer.provide(Layer.succeedContext(ctx)),
+                          Layer.provide(Layer.succeedContext(controlServices))
+                        )
+                      );
+                      // A rejected preview is never evidence; the ordinary receive/repair path remains available.
+                      const currentReceiver = Context.get(receiver, KeyReceiver);
+                      yield* Effect.result(currentReceiver.fetchAndInstall(null, 100));
+                      const epoch = (yield* admitted()).inspectState().epoch.number;
+                      if (
+                        Result.isFailure(
+                          yield* Effect.result(Context.get(ctx, InstalledEpochKeys).check(epoch))
+                        )
+                      )
+                        yield* Effect.result(currentReceiver.fetchAndInstall(null, 100));
+                    })
+                  )
+                )
+              );
+            for (let pass = 0; pass < 2; pass++) {
+              if ((yield* status()).usableEpoch === (yield* admitted()).inspectState().epoch.number)
+                return;
+              const received = yield* Effect.result(keyRound('receive'));
+              if ((yield* status()).usableEpoch === (yield* admitted()).inspectState().epoch.number)
+                return;
+              if (pass === 0) yield* serialRound(control.refresh());
+              else if (Result.isFailure(received)) return yield* Effect.fail(received.failure);
+            }
+          })
+        ),
+
+      prepareDelivery: (recipient: string) =>
+        run(
+          serialRound(
+            withKeys((ctx) => {
+              const distributor = Context.get(ctx, KeyDistributor);
+              return distributor.prepareDelivery
+                ? Effect.map(distributor.prepareDelivery(recipient), ({ id, frame }) => ({
+                    id,
+                    frameHex: toHex(frame),
+                  }))
+                : Effect.succeed(null);
+            })
+          )
+        ),
       /** Signs one personal `AdmitDevice` against the current verified ledger. No network. */
       sign: (row: {
         signingPublicKey: Uint8Array;
@@ -579,7 +990,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         possessionProof: Uint8Array;
       }) =>
         run(
-          serial.withPermit(
+          serialRound(
             Effect.gen(function* () {
               const view = yield* admitted();
               const proposal = yield* Effect.fromResult(
@@ -607,11 +1018,11 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       /** Where a signed original stands after a refresh: in the verified ledger,
        * displaced (its parent is no longer the head and its device is absent), or
        * not yet decided. */
-      settle: (record: Uint8Array) =>
+      settle: (record: Uint8Array, refresh = true) =>
         run(
-          serial.withPermit(
+          serialRound(
             Effect.gen(function* () {
-              yield* control.refresh();
+              if (refresh) yield* control.refresh();
               const { view, signed, admittedDevice } = yield* ownAdmission(record);
               if (admittedDevice) return 'committed' as const;
               return signed.previousHash.equals(view.head)
@@ -667,9 +1078,249 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           )
         ),
     };
+    // Member invitations, admin side. This session's credential authenticates the relay and
+    // never leaves it. Each listed key package is pinned on first sight, so approval signs
+    // exactly the applicant that was shown and a later reply cannot swap it.
+    const memberPreviews = new Map<string, string>();
+    const memberAccess = () => ({
+      workspaceId: prepared.binding.workspaceId,
+      credential: toHex(credential),
+    });
+    const membersPort = () =>
+      platform.members ? Effect.succeed(platform.members) : Effect.fail(fail('unsupported'));
+    const memberProof = (keyPackageHex: string) =>
+      Effect.gen(function* () {
+        const proof = yield* Effect.try({
+          try: () => decodeMemberKeyPackage(keyPackageHex),
+          catch: (cause) => fail('invalid-input', cause),
+        });
+        yield* Effect.fromResult(
+          verifyDeviceCredentialBinding(
+            {
+              genesis: prepared.binding.genesis,
+              pairingSessionId: proof.request.requestId.toBytes(),
+              signingPublicKey: proof.request.signingPublicKey,
+              credentialHash: fromHex(proof.credentialHash),
+            },
+            fromHex(proof.bindingSignature)
+          )
+        ).pipe(Effect.mapError((cause) => fail('invalid-input', cause)));
+        return proof;
+      });
+    const admitMember = (request: import('@lody/e2ee-core/protocol').JoinRequest) =>
+      ({
+        _tag: 'AdmitMember',
+        membershipId: Result.getOrThrow(Bytes.membershipId(request.requestId.toBytes())),
+        request,
+      }) as const;
+    const members = {
+      /** A new invitation endorsed by this device; owner or admin personal devices only. */
+      invite: (mode: 'email' | 'link', email?: string) =>
+        run(
+          Effect.gen(function* () {
+            const port = yield* membersPort();
+            const view = yield* admitted(),
+              state = view.inspectState(),
+              own = state.devices.get(toHex(device.publicKey.toBytes()));
+            const role = own && state.members.get(toHex(own.membershipId.toBytes()))?.role;
+            if (own?.kind !== 'personal' || (role !== 'owner' && role !== 'admin'))
+              return yield* fail('unauthorized');
+            const token = globalThis.crypto.getRandomValues(new Uint8Array(32));
+            // The endorsement signature is what lets another approver recognise this
+            // invitation; a relay-written label never can.
+            const offer = yield* signMemberOffer(
+              {
+                version: 1 as const,
+                workspaceId: prepared.binding.workspaceId,
+                genesisHash: toHex(prepared.binding.genesis.toBytes()),
+                genesisRecordHex: prepared.offer.genesisRecordHex,
+                endorser: toHex(device.publicKey.toBytes()),
+                token: toHex(token),
+                mode,
+                expiresAt: (yield* Clock.currentTimeMillis) + 48 * 60 * 60 * 1000,
+              },
+              device
+            );
+            const result = yield* port.createInvitation(memberAccess(), {
+              offer,
+              ...(email === undefined ? {} : { email }),
+            });
+            // Inviting an email that already has a pending invitation re-sends that one, so
+            // the relay answers with it instead of this new offer. Accept it only with this
+            // workspace's own genesis pins; it never grants anything by itself.
+            const resent =
+              mode === 'email' &&
+              result.offer.mode === 'email' &&
+              result.offer.genesisRecordHex === offer.genesisRecordHex;
+            if (
+              result.offer.workspaceId !== offer.workspaceId ||
+              result.offer.genesisHash !== offer.genesisHash ||
+              (result.offer.token !== offer.token && !resent)
+            )
+              return yield* fail('conflict');
+            return result.offer;
+          })
+        ),
+      /** Waiting applicants this device can admit. A malformed, stale or swapped package is
+       * left out without hiding the others. */
+      pending: () =>
+        run(
+          Effect.gen(function* () {
+            const port = yield* membersPort();
+            yield* admitted();
+            const result = yield* port.pending(memberAccess());
+            const items: typeof result.items = [];
+            for (const item of result.items) {
+              if (item.workspaceId !== prepared.binding.workspaceId) return yield* fail('conflict');
+              const checked = yield* Effect.result(
+                Effect.gen(function* () {
+                  const proof = yield* memberProof(item.keyPackageHex);
+                  const view = yield* admitted();
+                  if (
+                    !view
+                      .inspectState()
+                      .devices.has(toHex(proof.request.signingPublicKey.toBytes()))
+                  )
+                    yield* Effect.fromResult(
+                      prepareLedgerCommand(view, device.publicKey, admitMember(proof.request))
+                    );
+                  // The listed id must be the signed request's own id: the pin is keyed by
+                  // the id an approval names, so no listed entry can stand for another.
+                  const id = toHex(proof.request.requestId.toBytes());
+                  if (item.requestId !== id) return yield* fail('conflict');
+                  const pinned = memberPreviews.get(id);
+                  if (pinned !== undefined && pinned !== item.keyPackageHex)
+                    return yield* fail('conflict');
+                  memberPreviews.set(id, item.keyPackageHex);
+                })
+              );
+              if (Result.isSuccess(checked)) items.push(item);
+            }
+            return { ...result, items };
+          })
+        ),
+      /** The ledger command admitting this listed request, or null when the verified ledger
+       * already admits exactly this device. Automatic mode admits only an applicant whose
+       * signed email invitation this client verifies (`verifyAutomaticMemberAdmission`). */
+      admission: (requestId: string, mode: 'automatic' | 'explicit') =>
+        run(
+          Effect.gen(function* () {
+            const port = yield* membersPort();
+            const material = yield* port.read(memberAccess(), requestId);
+            if (
+              material.workspaceId !== prepared.binding.workspaceId ||
+              material.requestId !== requestId
+            )
+              return yield* fail('conflict');
+            const proof = yield* memberProof(material.keyPackageHex);
+            // The signed request's own id must be the approved id.
+            if (toHex(proof.request.requestId.toBytes()) !== requestId)
+              return yield* fail('conflict');
+            const state = (yield* admitted()).inspectState();
+            const existing = state.devices.get(toHex(proof.request.signingPublicKey.toBytes()));
+            if (existing) {
+              const member = state.members.get(toHex(existing.membershipId.toBytes()));
+              if (
+                !member?.userId.equals(proof.request.userId) ||
+                !existing.encryptionPublicKey.equals(proof.request.encryptionPublicKey)
+              )
+                return yield* fail('conflict');
+              return null;
+            }
+            // Unattended admission only for an invitation this client can verify: signed by a
+            // currently eligible endorser, email-mode, unexpired and not used before. Anything
+            // else stays pending for an explicit approval.
+            if (mode === 'automatic') {
+              const checked = verifyAutomaticMemberAdmission({
+                view: yield* admitted(),
+                workspaceId: prepared.binding.workspaceId,
+                approver: device.publicKey,
+                offer: material.offer,
+                request: proof.request,
+                now: yield* Clock.currentTimeMillis,
+              });
+              // The precise refusal is the product code, so the request shows why it needs
+              // an explicit approval; nothing is signed and nothing is retried here.
+              if (Result.isFailure(checked)) return yield* fail(checked.failure);
+            }
+            // Only the package this session listed and showed for this very request may be signed.
+            if (memberPreviews.get(requestId) !== material.keyPackageHex)
+              return yield* fail('conflict');
+            return admitMember(proof.request);
+          })
+        ),
+      read: (requestId: string) =>
+        run(Effect.flatMap(membersPort(), (port) => port.read(memberAccess(), requestId))),
+      reject: (requestId: string) =>
+        run(Effect.flatMap(membersPort(), (port) => port.reject(memberAccess(), requestId))),
+      revoke: (token: string) =>
+        run(Effect.flatMap(membersPort(), (port) => port.revoke(memberAccess(), token))),
+    };
+    if (recovered.length) {
+      yield* withKeys((ctx) =>
+        Effect.forEach(
+          recovered,
+          ([epoch, key]) => Context.get(ctx, InstalledEpochKeys).saveAndReload(epoch, key),
+          { discard: true }
+        )
+      );
+    }
     return Object.freeze({
       binding: Object.freeze({ ...prepared.binding }),
       accountApproval: Object.freeze(accountApproval),
+      activateAccountPairing: accountApproval.activateAccountPairing,
+      ingest: (page: E2eeWorkspaceHistoryPage) => run(serialRound(ingestPage(page))),
+      members: Object.freeze(members),
+      /** Set up this workspace's recovery without exposing its signer or epoch keys. */
+      setupRecovery: (input: PersonalRecoverySetupInput) =>
+        run(
+          recoverySerial.withPermit(
+            withKeys((ctx) =>
+              Effect.gen(function* () {
+                yield* serialRound(control.refresh());
+                const view = yield* admitted();
+                const workflow = yield* makeWorkspaceRecovery({
+                  vault: input.vault,
+                  local: input.local,
+                  genesis: prepared.binding.genesis,
+                  membershipId: Result.getOrThrow(
+                    Bytes.membershipId(fromHex(prepared.offer.membershipId))
+                  ),
+                  personalSigner: device,
+                  ledger: admitted,
+                  installed: Context.get(ctx, InstalledEpochKeys),
+                  trust: {
+                    source: 'personal-device',
+                    genesisRecord: fromHex(prepared.offer.genesisRecordHex),
+                    head: toHex(view.head.toBytes()),
+                    length: view.length,
+                  },
+                  submitOriginal: (record, registration) =>
+                    input
+                      .submitOriginal(record, registration)
+                      .pipe(Effect.tap(() => serialRound(Effect.interruptible(control.refresh())))),
+                  fetchCurrentEnvelope: (...args) =>
+                    Effect.gen(function* () {
+                      // A failed independent receive/repair must not hide an already delivered R envelope.
+                      yield* Effect.exit(
+                        serialRound(
+                          Effect.interruptible(
+                            Effect.gen(function* () {
+                              const latest = yield* admitted();
+                              return yield* maintenance!(latest.inspectState().epoch.number);
+                            })
+                          )
+                        )
+                      );
+                      return yield* input.fetchCurrentEnvelope(...args);
+                    }),
+                });
+                const result = yield* workflow.setup();
+                return { outcome: result.outcome, recoverable: result.status.recoverable };
+              }).pipe(Effect.scoped)
+            )
+          )
+        ),
       close: () => close,
       ledgerState: () =>
         run(
@@ -698,13 +1349,15 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       managementState: () => run(managementState()),
       readMachineSharing: (machineId: string) =>
         run(
-          Effect.gen(function* () {
-            yield* control.refresh();
-            yield* admitted();
-            const result = yield* (yield* sharingOwner()).read(machineId);
-            yield* admitted();
-            return result;
-          })
+          bounded(
+            Effect.gen(function* () {
+              yield* control.refresh();
+              yield* admitted();
+              const result = yield* (yield* sharingOwner()).read(machineId);
+              yield* admitted();
+              return result;
+            })
+          )
         ),
       updateMachineSharing: (
         machineId: string,
@@ -713,18 +1366,20 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         change: import('@lody/platform').E2eeMachineSharingChange
       ) =>
         run(
-          Effect.gen(function* () {
-            yield* control.refresh();
-            yield* admitted();
-            const result = yield* (yield* sharingOwner()).update(
-              machineId,
-              generation,
-              requestId,
-              change
-            );
-            yield* admitted();
-            return result;
-          })
+          bounded(
+            Effect.gen(function* () {
+              yield* control.refresh();
+              yield* admitted();
+              const result = yield* (yield* sharingOwner()).update(
+                machineId,
+                generation,
+                requestId,
+                change
+              );
+              yield* admitted();
+              return result;
+            })
+          )
         ),
       ledger: () => run(ledger()),
       /** Public signed proof already verified and retained for this approval. */
@@ -737,11 +1392,14 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           )
         ),
       refresh: (timeoutMs?: number) => {
-        const refresh = serial.withPermit(control.refresh().pipe(Effect.andThen(ledger())));
+        const refresh = serialRound(control.refresh().pipe(Effect.andThen(ledger())));
         return run(timeoutMs === undefined ? refresh : refresh.pipe(Effect.timeout(timeoutMs)));
       },
-      keyRound: () => run(keyRound()),
+      keyRound: (mode?: PersonalKeyRoundMode, recipients?: readonly string[]) =>
+        run(keyRound(mode, recipients)),
       keyDeliveryEvidence: (recipient: string) => run(keyDeliveryEvidence(recipient)),
+      keyPending: (epoch: number, unknownAuthority?: boolean) =>
+        run(keyPending(epoch, unknownAuthority)),
       status: () => run(status()),
       document: (
         resource: string,
@@ -751,19 +1409,17 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       execute: (command: LedgerCommand) => run(management(command)),
       resume: () =>
         run(
-          serial.withPermit(
+          serialRound(
             admitted().pipe(Effect.andThen(ownSubmission), Effect.andThen(control.resume()))
           )
         ),
       acknowledge: (result: Parameters<typeof control.acknowledge>[0]) =>
         run(
-          serial.withPermit(
-            ownRecord(result.record).pipe(Effect.andThen(control.acknowledge(result)))
-          )
+          serialRound(ownRecord(result.record).pipe(Effect.andThen(control.acknowledge(result))))
         ),
       removeMember: (membership: import('@lody/e2ee-core/protocol').Bytes.MembershipId) =>
         run(
-          serial.withPermit(
+          serialRound(
             ownSubmission.pipe(
               Effect.andThen(
                 withKeys((ctx) => Context.get(ctx, EpochPublisher).publishRemoving(membership))
@@ -771,19 +1427,30 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             )
           )
         ),
+      abandonEpoch: (baseEpoch: number) =>
+        run(
+          serialRound(
+            ownSubmission.pipe(
+              Effect.andThen(
+                withKeys((ctx) => Context.get(ctx, EpochPublisher).publishAbandoning(baseEpoch))
+              )
+            )
+          )
+        ),
       rotate: () =>
         run(
-          serial.withPermit(
+          serialRound(
             ownSubmission.pipe(
               Effect.andThen(withKeys((ctx) => Context.get(ctx, EpochPublisher).publish()))
             )
           )
         ),
+      updateKeys,
       recoverHistory: () =>
         run(withKeys((ctx) => Context.get(ctx, InstalledEpochHistory).recover())),
       resumeRotation: () =>
         run(
-          serial.withPermit(
+          serialRound(
             ownSubmission.pipe(
               Effect.andThen(withKeys((ctx) => Context.get(ctx, EpochPublisher).resume()))
             )
@@ -791,10 +1458,20 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         ),
       acknowledgeRotation: (result: Parameters<EpochPublisher['Service']['acknowledge']>[0]) =>
         run(
-          serial.withPermit(
+          serialRound(
             ownSubmission.pipe(
               Effect.andThen(
-                withKeys((ctx) => Context.get(ctx, EpochPublisher).acknowledge(result))
+                withKeys((ctx) =>
+                  Effect.gen(function* () {
+                    const publisher = Context.get(ctx, EpochPublisher);
+                    // A lost CAS leaves this device's staged envelope group behind. Core
+                    // deletes it only once a different commitment occupies the epoch;
+                    // cleanup is best effort and never blocks the acknowledgement.
+                    if (result.outcome === 'Conflict')
+                      yield* Effect.ignore(publisher.cleanupStaged());
+                    return yield* publisher.acknowledge(result);
+                  })
+                )
               )
             )
           )
@@ -802,6 +1479,33 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       prepareDispatch: (
         ...args: Parameters<ReturnType<typeof makeE2eeRpcClient>['prepareDispatch']>
       ) => run(Effect.flatMap(rpcOwner(), (r) => r.prepareDispatch(...args))),
+      /** Sign one schedule declaration with this admitted device. The host computes the
+       * definition fingerprint from the document; callers never supply a digest. */
+      signScheduleDeclaration: (
+        document: Pick<ScheduleDocument, 'definition' | 'prompt' | 'message'>,
+        manualRunKey?: string
+      ) =>
+        run(
+          Effect.gen(function* () {
+            yield* admitted();
+            const subject = yield* Effect.try({
+              try: () => scheduleDeclarationSubject(document, manualRunKey),
+              catch: () => fail('invalid-input'),
+            });
+            const signature = yield* signExecutionIntent({
+              ...subject,
+              genesis: prepared.binding.genesis,
+              workspaceId: prepared.binding.workspaceId,
+              contentDigest: fromHex(subject.contentDigest),
+              signer: device,
+            });
+            return encodeE2eeIntentRecord({
+              kind: subject.kind,
+              signer: device.publicKey.toBytes(),
+              signature: signature.toBytes(),
+            });
+          })
+        ),
       acceptResponse: (
         ...args: Parameters<ReturnType<typeof makeE2eeRpcClient>['acceptResponse']>
       ) => run(Effect.flatMap(rpcOwner(), (r) => r.acceptResponse(...args))),
@@ -811,6 +1515,24 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       acceptFeatureResponse: (
         ...args: Parameters<ReturnType<typeof makeE2eeRpcClient>['acceptFeatureResponse']>
       ) => run(Effect.flatMap(rpcOwner(), (r) => r.acceptFeatureResponse(...args))),
+      /** Resolves the machine's route from the admitted ledger; callers run the
+       * returned route's network waits outside every session lock. */
+      irohPath: (machineId: string) =>
+        run(
+          Effect.gen(function* () {
+            const key = irohTargetDevice(yield* admitted(), machineId);
+            if (!key || !irohEndpoint) return undefined;
+            return makePersonalIrohRoute(irohEndpoint, key, irohWarming);
+          })
+        ),
+      irohRoute: (machineId: string) =>
+        run(
+          Effect.gen(function* () {
+            const key = irohTargetDevice(yield* admitted(), machineId);
+            if (!key) return yield* fail('unsupported');
+            return makePersonalIrohRoute(yield* irohOwner(), key, irohWarming);
+          })
+        ),
     });
   });
   return yield* Scope.provide(work, owner).pipe(

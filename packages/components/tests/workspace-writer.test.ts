@@ -1,11 +1,10 @@
+import { createSessionMirror } from '@lody/shared/session-mirror';
 import { describe, expect, it } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
 import { LoroDoc } from 'loro-crdt';
 import {
-  createSessionMirror,
   type SessionMeta,
-  type MinimalVisualAnnotationAnchor,
-} from '@lody/shared';
+  type MinimalVisualAnnotationAnchor} from '@lody/shared';
 
 import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
 import { persistReconciledAgentRole } from '../src/lib/agent-role-schema-reconciliation';
@@ -13,8 +12,7 @@ import {
   AGENT_ROLE_VERSION,
   workspaceFlockKeys,
   type AgentRole,
-  type AcpCapabilityCacheEntry,
-} from '@lody/shared';
+  type AcpCapabilityCacheEntry} from '@lody/shared';
 
 const anchor: MinimalVisualAnnotationAnchor = {
   version: 1,

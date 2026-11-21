@@ -53,6 +53,8 @@ type LocalReconnectLoopOptions = {
     force: boolean;
     triggerReason?: LocalReconnectTriggerReason;
   }) => Promise<void>;
+  /** Override the next wait from current room deadlines; update() may shorten a pending wait. */
+  getRetryDelayMs?: (defaultDelayMs: number) => number;
   onStateChange: () => void;
   onError?: (error: unknown) => void;
   computeDelayMs?: (attempt: number) => number;
@@ -88,6 +90,7 @@ type PendingWait = {
 export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): LocalReconnectLoop {
   const runFork = Effect.runForkWith(options.services ?? Context.empty());
   let pendingWait: PendingWait | null = null;
+  let pendingRetryAtMs = Infinity;
   let backoffResetWait: PendingWait | null = null;
   let retryAttempt = 0;
   let inFlight = false;
@@ -189,11 +192,14 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
     }
 
     cancelBackoffResetWait();
-    if (pendingWait || inFlight) {
-      return;
+    if (inFlight) return;
+    const defaultDelayMs = retryAttempt === 0 ? 0 : computeDelayMs(retryAttempt - 1);
+    const delayMs = options.getRetryDelayMs?.(defaultDelayMs) ?? defaultDelayMs;
+    if (pendingWait) {
+      if (!options.getRetryDelayMs || Date.now() + delayMs >= pendingRetryAtMs) return;
+      cancelPendingWait();
     }
-
-    const delayMs = retryAttempt === 0 ? 0 : computeDelayMs(retryAttempt - 1);
+    pendingRetryAtMs = Date.now() + delayMs;
     const current: PendingWait = { fiber: null, settled: false };
     pendingWait = current;
     const fiber = runFork(

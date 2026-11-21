@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { Switch } from '@lody/ui/switch';
 import {
   developerModeEnabledAtom,
-  e2eeRecoveryVaultEnabledAtom,
   e2eeWorkspaceCreationEnabledAtom,
   inboxBetaEnabledAtom,
   lodyAgentBetaEnabledAtom,
@@ -32,7 +31,6 @@ export function BetaFeaturesSection() {
   const [lodyAgentEnabled, setLodyAgentEnabled] = useAtom(lodyAgentBetaEnabledAtom);
   const [inboxBetaEnabled, setInboxBetaEnabled] = useAtom(inboxBetaEnabledAtom);
   const [e2eeCreationEnabled, setE2eeCreationEnabled] = useAtom(e2eeWorkspaceCreationEnabledAtom);
-  const [recoveryVaultEnabled, setRecoveryVaultEnabled] = useAtom(e2eeRecoveryVaultEnabledAtom);
 
   const [semanticShortcutsEnabled, setSemanticShortcutsEnabled] = useAtom(
     semanticShortcutsBetaEnabledAtom
@@ -43,10 +41,7 @@ export function BetaFeaturesSection() {
 
   return (
     <CompactSection title={t('settings.beta.title', 'Beta features')}>
-      <CompactRow
-        label={t('settings.beta.lodyAgent', 'Lody Agent')}
-        helper={t('settings.beta.lodyAgentHelper', 'Show Lody Agent in Settings.')}
-      >
+      <CompactRow label={t('settings.beta.lodyAgent', 'Lody Agent')}>
         <Switch
           checked={lodyAgentEnabled}
           onCheckedChange={setLodyAgentEnabled}
@@ -55,9 +50,9 @@ export function BetaFeaturesSection() {
       </CompactRow>
       <CompactRow
         label={t('settings.beta.e2eeWorkspace', 'Encrypted workspace creation')}
-        helper={t(
+        info={t(
           'settings.beta.e2eeWorkspaceHelper',
-          'Create a workspace with a device identity and signed permission history. Conversation sync and execution are not available yet. Existing workspaces are unchanged.'
+          'Create a workspace with a device identity and signed permission history. Existing workspaces are unchanged.'
         )}
       >
         <Switch
@@ -67,21 +62,8 @@ export function BetaFeaturesSection() {
         />
       </CompactRow>
       <CompactRow
-        label={t('settings.beta.e2eeRecoveryVault', 'Encrypted workspace recovery file')}
-        helper={t(
-          'settings.beta.e2eeRecoveryVaultHelper',
-          'Show recovery file controls in encrypted workspace security settings. The desktop must also be started with LODY_E2EE_RECOVERY_VAULT=on.'
-        )}
-      >
-        <Switch
-          checked={recoveryVaultEnabled}
-          onCheckedChange={setRecoveryVaultEnabled}
-          aria-label={t('settings.beta.e2eeRecoveryVault', 'Encrypted workspace recovery file')}
-        />
-      </CompactRow>
-      <CompactRow
         label={t('settings.beta.inbox', 'Inbox')}
-        helper={t(
+        info={t(
           'settings.beta.inboxHelper',
           'Show the unfinished mobile Inbox tab. In development — expect rough edges.'
         )}
@@ -95,7 +77,7 @@ export function BetaFeaturesSection() {
 
       <CompactRow
         label={t('settings.beta.semanticShortcuts', 'Pointer-aware close shortcut')}
-        helper={t(
+        info={t(
           'settings.beta.semanticShortcutsHelper',
           'On desktop, close the tab where you last opened content, clicked, typed, or scrolled. Moving the pointer keeps that target; hover selects a region only before an explicit interaction.'
         )}
@@ -109,7 +91,7 @@ export function BetaFeaturesSection() {
 
       <CompactRow
         label={t('settings.experimental.roostHistory', 'Roost history')}
-        helper={t(
+        info={t(
           'settings.experimental.roostHistoryHelper',
           'Use Roost for new conversations. Existing conversations keep their current history backend.'
         )}

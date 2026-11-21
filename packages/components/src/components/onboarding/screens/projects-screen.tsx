@@ -1,3 +1,4 @@
+import { getPersonalGitHubAuthorizationUrl } from '@/components/settings/github-personal-authorization';
 import { Link } from '@tanstack/react-router';
 import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
 import {
@@ -334,6 +335,10 @@ export function ProjectsScreen({ onBack, onSkip, onComplete }: ProjectsScreenPro
     cloudOperations.github.getWorkspaceRepositories,
     workspaceId ? { workspaceId } : 'skip'
   );
+  const personalOperationSettings = useLegacyWorkspaceQuery(
+    cloudOperations.github.getPersonalOperationSettings,
+    workspaceId ? { workspaceId } : 'skip'
+  );
   const createGitHubInstallState = useLegacyWorkspaceAction(
     cloudOperations.github.createGitHubInstallState
   );
@@ -469,6 +474,14 @@ export function ProjectsScreen({ onBack, onSkip, onComplete }: ProjectsScreenPro
 
   const handleConnectGitHub = useCallback(() => {
     if (workspaceId === null || legacyStatus !== 'allowed') return;
+    if (personalOperationSettings === undefined) return;
+    if (personalOperationSettings?.authorization.state !== 'authorized') {
+      if (!workspaceSlug) return;
+      const url = new URL(getPersonalGitHubAuthorizationUrl(workspaceSlug));
+      url.searchParams.set('github_install_error', 'authorization_required');
+      void openExternalUrl(url.toString());
+      return;
+    }
     const startedAtMs = analytics.now();
     analytics.capture('onboarding/operation_started', {
       step: 'projects',
@@ -520,6 +533,7 @@ export function ProjectsScreen({ onBack, onSkip, onComplete }: ProjectsScreenPro
     })();
   }, [
     analytics,
+    personalOperationSettings,
     createGitHubInstallState,
     getConvexErrorMessage,
     isElectron,

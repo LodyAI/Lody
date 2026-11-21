@@ -22,6 +22,13 @@ Older agents advertising `collaboration_mode` retain
 their `default`/`plan` select values; do not rewrite those cached contracts into
 new wire ids. A live `configOptions` snapshot determines the current controls.
 
+A capability snapshot's `configOptions` describe only the model that was current
+when it was taken. A refresh a person asks for on a built-in agent switches the
+probe session to every model and stores each model's own options in
+`acpModelConfigOptions` rows, one stored list shared by every model that reported it; selectors and CLI/MCP validation compose the selected
+model's options from them, falling back to the snapshot for an unrecorded model
+([design](../notes/proposed/architecture/2026-11-11-observed-model-config-options.md)).
+
 Scope: `packages/components/src/components/sessions`. Binding rules and the
 pointer to this page live in
 [that directory's AGENTS.md](../../packages/components/src/components/sessions/AGENTS.md);
@@ -44,12 +51,19 @@ this page is the full text of the rules summarised there.
   modes; provider interaction modes stay inside the run-config dropdown. Both
   are also used by the desktop chat landing; `DesktopRunConfigMenu` receives an
   explicit agent selection/machine scope rather than reading `SessionMeta`.
+  For an explicitly scoped machine, Agent options come from its known config
+  catalog even while presence is offline or pending. A blank child tab can change
+  its draft Agent without waiting for online status; empty scopes stay empty,
+  and existing-conversation locks still apply.
   All side submenus, including Role, anchor to their own trigger rows.
   Option-only panels use top-edge alignment; searchable Model panels lift their
   search header above the row so the option area starts beside it when space permits.
   The shared menu primitive opens toward inline-end
   (right in LTR); horizontal collisions may flip the side, and vertical collisions
-  shift the popup within the viewport. Searchable model menus use the same trigger
+  shift the popup within the viewport. When neither side fits, the product
+  `ui/menu.tsx` measures the submenu as it mounts and switches it to Base UI's
+  side-`shift` mode, so it covers part of the parent instead of being clipped;
+  option widths cap at `--available-width`. Searchable model menus use the same trigger
   anchor while filtering, with dimensions determined by the current results.
   Submenus do not center against the whole parent
   popup or clamp to its bottom. Intent:
@@ -179,10 +193,10 @@ this page is the full text of the rules summarised there.
   deliberately absent: a sentence about what one value allows belongs to the
   Role editor, not to a scan of what is pinned. Its machine is passed
   in rather than looked up, so the pane stays renderable without the workspace's
-  machine-visibility context. Its two
-  panes grow with their content up to 14rem, then scroll
-  independently. Create stays at the bottom of the Role list pane while its
-  rows scroll; it has no separator above it. The detail pane's header flows
+  machine-visibility context. The two-pane submenu has a fixed 14rem height so
+  previewing another Role does not resize it; its panes scroll independently.
+  The compact list grows with its content up to 14rem. Create stays at the bottom
+  of the Role list pane while its rows scroll; it has no separator above it. The detail pane's header flows
   into the pinned values without a divider. The parent, permission, and Role
   menus retain the shared `@lody/ui` popup inset; neither list compensates for
   it with custom horizontal margins. The Role editor is a Dialog and is

@@ -274,8 +274,6 @@ read-only mode.
   GitHub remote shows no repository or PR rather than another Member's.
   Create PR opens one PR for each Member that has changes, and links the PRs to
   each other in their bodies.
-- PR auto-archive fires only after all current PRs reach an enabled terminal
-  state, not when one of them does.
 - Compatibility: `project`, `branchName` and `repoFullName` stay as a projection of
   the first Member for older clients. Only a daemon that advertises this protocol
   capability can create multi-Member conversations.

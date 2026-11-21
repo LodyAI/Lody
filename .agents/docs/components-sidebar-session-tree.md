@@ -100,9 +100,10 @@ Work, wait, unread and send status is still the end slot's alone; +/- totals sta
 
 The opener and unrelated top-level rows keep the exact flat-list alignment; only a child
 widens the shared leading slot from 14px to 26px, which produces the 12px title indent
-without shifting the row background. The node and its hover menu share a 7px centre:
-replacing a disclosure or connector with ⋯ therefore leaves the title in place. The
-context-menu expand/collapse action uses the disclosure's callback, so either route
+without shifting the row background. The slot used to lend that same centre to the row's
+⋯ on hover; the menu now reveals in the end slot immediately before Archive, so a
+disclosure or connector keeps the 7px centre to itself and stays drawn while hovering.
+The context-menu expand/collapse action uses the disclosure's callback, so either route
 changes the same tree state.
 
 The connector is drawn from the slot, but its length encodes the ROW, and it reads the
@@ -145,6 +146,16 @@ end slot still shows one thing at a time: a running row reads `[├─ title ...
 with nothing competing for the right edge and more room for the title. Nothing is lost —
 the diff, branch, and PR detail were already in the desktop hover info card, which is
 where a user goes when they want numbers rather than a glance.
+
+The end slot reserves a 20px column per revealed action (⋯ parks left of Archive)
+and, while any action is revealed, paints itself with the row's own fill —
+`--sidebar-hover`, or `--sidebar-selection` under `aria-current`. Every end-slot
+button, now or added later, shares that opaque layer; nothing beneath it can show
+through, and the ⋯'s pressed tint shades the fill as an inset shadow.
+The fill keys off the row's own Tailwind group only. Rows nested in an outer plain
+`group` (the section lists) use the named `group/row` and pass `rowGroup="row"`;
+matching a plain ancestor `group` would paint every row's slot whenever the pointer
+is anywhere over the list.
 
 The mobile chat rows still keep status on their leading node; their geometry (48px
 indent, a selection checkbox in the same slot, a chevron that has to sit outside the row

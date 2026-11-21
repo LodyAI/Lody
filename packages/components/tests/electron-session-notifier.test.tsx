@@ -68,8 +68,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// The notifier resolves `@lody/shared/notifications` lazily so the boot
+// chunk stays free of the loro graph. Flush the dynamic-import microtask
+// before asserting.
+const flushNotificationLoad = () => act(() => vi.dynamicImportSettled());
+
 describe('desktop legacy compatibility observer', () => {
-  it.each([false, true])('gates idle completion by terminal capability (%s)', (modern) => {
+  it.each([false, true])('gates idle completion by terminal capability (%s)', async (modern) => {
     const machines = modern ? { [getMachineRoomId(session.machineId)]: machine } : {};
     const view = render(<LegacyElectronSessionNotifier {...props} machines={machines} />);
     view.rerender(
@@ -79,14 +84,15 @@ describe('desktop legacy compatibility observer', () => {
         sessions={[{ ...session, status: { type: 'idle' } }]}
       />
     );
-    act(() => {
+    await act(() => {
       vi.advanceTimersByTime(5_000);
     });
+    await flushNotificationLoad();
     expect(bridge.shown.map(({ sessionId, title }) => ({ sessionId, title }))).toEqual(
       modern ? [] : [{ sessionId: 'session', title: 'Synthetic' }]
     );
   });
-  it('drops a pending old-account notification during a scope switch', () => {
+  it('drops a pending old-account notification during a scope switch', async () => {
     const view = render(<LegacyElectronSessionNotifier {...props} />);
     view.rerender(
       <LegacyElectronSessionNotifier
@@ -102,12 +108,13 @@ describe('desktop legacy compatibility observer', () => {
         workspaceSlug="other"
       />
     );
-    act(() => {
+    await act(() => {
       vi.advanceTimersByTime(5_000);
     });
+    await flushNotificationLoad();
     expect(bridge.shown).toEqual([]);
   });
-  it('retains permission alerts for modern peers while completion uses the new consumer', () => {
+  it('retains permission alerts for modern peers while completion uses the new consumer', async () => {
     const machines = { [getMachineRoomId(session.machineId)]: machine };
     const view = render(<LegacyElectronSessionNotifier {...props} machines={machines} />);
     view.rerender(
@@ -117,6 +124,7 @@ describe('desktop legacy compatibility observer', () => {
         sessions={[{ ...session, status: { type: 'requestPermission' } }]}
       />
     );
+    await flushNotificationLoad();
     expect(bridge.shown.map(({ title, body }) => ({ title, body }))).toEqual([
       { title: 'Synthetic', body: 'notifications.copy.conversation.attention' },
     ]);

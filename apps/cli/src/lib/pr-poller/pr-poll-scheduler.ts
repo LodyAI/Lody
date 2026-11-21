@@ -1,9 +1,17 @@
 import { statusRefreshInterval } from './pr-poll-priority';
 import { collectStatusTargets } from './pr-poll-targets';
 import { selectWorkflowHead } from './workflow-runs';
-import { collectViewedSessionIdsFromPresence, getServerNow, type SessionId } from '@lody/shared';
+import {
+  isPullRequestExplicitlyLinked,
+  planPullRequestLinkCheck,
+  collectViewedSessionIdsFromPresence,
+  getServerNow,
+  type LodyPresenceStateMap,
+  type SessionId,
+} from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
+import { reportIfWasmFault } from '@/lib/loro/wasm-runtime-health';
 import { buildPrPollBatchQuery, type PrPollBatchQuery } from './graphql-batch-builder';
 import type {
   GitHubGraphQlClient,
@@ -40,7 +48,11 @@ import {
   type AliveSessionMeta,
   type PrPollSessionEntry,
 } from './pr-poll-targets';
-import { planAssociation, planPullRequestMetaWrite } from './pr-poll-writeback';
+import {
+  planAssociation,
+  planPullRequestMetaWrite,
+  planUnlinkedRemoval,
+} from './pr-poll-writeback';
 import {
   AMBIENT_CREDENTIAL_REFRESH_MS,
   type ResolvedGitHubCredential,
@@ -483,6 +495,23 @@ export class PrPollScheduler {
     return fingerprints;
   }
 
+  /**
+   * Presence only raises viewed Sessions to the high lane. This runs from timers
+   * with no caller to catch for it, so a failed read (a faulted Loro instance
+   * throws here) degrades to "nobody viewing" instead of an uncaught exception.
+   */
+  private readPresenceStates(runtime: WorkspaceRuntime): LodyPresenceStateMap {
+    try {
+      return runtime.handle.getPresenceStates() ?? {};
+    } catch (error) {
+      reportIfWasmFault(error);
+      this.deps.logger.debug(
+        `[pr-poller] Presence read failed for ${runtime.handle.workspaceId}: ${formatErrorMessage(error)}`
+      );
+      return {};
+    }
+  }
+
   /** Facts → schedulable targets: one pure pass over all ready workspaces. */
   private buildTargets(nowMs: number): SchedulableTarget[] {
     const { config } = this.deps;
@@ -491,10 +520,7 @@ export class PrPollScheduler {
       if (!runtime.ready) {
         continue;
       }
-      const viewed = collectViewedSessionIdsFromPresence(
-        runtime.handle.getPresenceStates() ?? {},
-        nowMs
-      );
+      const viewed = collectViewedSessionIdsFromPresence(this.readPresenceStates(runtime), nowMs);
       const highOwners = selectHighOwners(runtime.entries, viewed, nowMs, {
         activityWindowMs: config.activityWindowMs,
         highOwnerCap: config.highOwnerCap,
@@ -512,7 +538,11 @@ export class PrPollScheduler {
               kind: 'status',
               repoFullName: statusTarget.repoFullName,
               lane,
-              desiredIntervalMs: statusRefreshInterval(lane, workflowDemand, config),
+              // A link the provider could not read retries at the slow discovery cadence.
+              desiredIntervalMs:
+                statusTarget.pendingLink === 'unreadable'
+                  ? config.lowDiscoveryIntervalMs
+                  : statusRefreshInterval(lane, workflowDemand, config),
               qualifier: String(statusTarget.prNumber),
               status: statusTarget,
             })
@@ -647,6 +677,7 @@ export class PrPollScheduler {
   }
 
   private async runWake(): Promise<void> {
+    await this.applyLocalUnlinks();
     const nowMs = this.nowMs();
     const targets = this.buildTargets(nowMs);
     this.pruneState(targets);
@@ -677,6 +708,71 @@ export class PrPollScheduler {
     this.scheduleWakeAt(
       computeNextWakeAtMs(this.buildTargets(afterMs), deferredHints, afterMs, MAX_WAKE_INTERVAL_MS)
     );
+  }
+
+  /**
+   * An unlink needs no provider query: drop unlinked URLs from the association
+   * list of every owned Session that still holds one (fresh meta, ownership
+   * revalidated). A failure leaves the URL in the list for the next wake;
+   * readers already hide it.
+   */
+  private async applyLocalUnlinks(): Promise<void> {
+    for (const runtime of this.workspaces.values()) {
+      if (!runtime.ready) continue;
+      for (const { sessionId, meta } of runtime.sessionMetas.values()) {
+        if (meta.parentSessionId || meta.isArchived || !planUnlinkedRemoval(meta)) continue;
+        try {
+          const fresh = await runtime.handle.readOwnerMeta(sessionId);
+          if (!fresh || fresh.isArchived || fresh.machineId !== runtime.handle.machineId) continue;
+          const plan = planUnlinkedRemoval(fresh);
+          if (!plan) continue;
+          const patch: PrPollMetaPatch = {};
+          if (plan.pullRequests) patch.pullRequests = plan.pullRequests;
+          if (plan.pullRequestState) patch.pullRequestState = plan.pullRequestState;
+          await runtime.handle.writeOwnerMeta(sessionId, patch);
+          runtime.sessionMetas.set(sessionId, { sessionId, meta: { ...fresh, ...patch } });
+          this.projectRuntimeEntries(runtime);
+        } catch (error) {
+          this.deps.logger.debug(
+            `[pr-poller] Failed to remove unlinked PRs for session ${sessionId}: ${formatErrorMessage(error)}`
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * Record that explicitly linked PRs could not be read (missing, no access, or
+   * no credential). Only `prLinkCheck:*` keys are written, once per link generation.
+   */
+  private async recordUnreadableLinks(
+    runtime: WorkspaceRuntime,
+    targets: readonly SchedulableTarget[],
+    urls?: ReadonlySet<string>
+  ): Promise<void> {
+    const byOwner = new Map<SessionId, string[]>();
+    for (const target of targets) {
+      const url = target.status?.pendingLink ? target.status.url : null;
+      if (!url || (urls && !urls.has(url))) continue;
+      byOwner.set(target.ownerSessionId, [...(byOwner.get(target.ownerSessionId) ?? []), url]);
+    }
+    for (const [ownerSessionId, ownerUrls] of byOwner) {
+      try {
+        const fresh = await runtime.handle.readOwnerMeta(ownerSessionId);
+        if (!fresh || fresh.isArchived || fresh.machineId !== runtime.handle.machineId) continue;
+        const nowMs = this.nowMs();
+        const linkChecks = ownerUrls.flatMap((url) => {
+          const check = planPullRequestLinkCheck(fresh, url, nowMs);
+          return check ? [check] : [];
+        });
+        if (linkChecks.length > 0)
+          await runtime.handle.writeOwnerMeta(ownerSessionId, { linkChecks });
+      } catch (error) {
+        this.deps.logger.debug(
+          `[pr-poller] Failed to record unreadable PR links for session ${ownerSessionId}: ${formatErrorMessage(error)}`
+        );
+      }
+    }
   }
 
   /** Bound the persisted state to currently-enumerated targets of ready workspaces. */
@@ -764,6 +860,7 @@ export class PrPollScheduler {
       }
       this.markAttempt(batch.targets, nowMs);
       deferredHints.push(nowMs + CREDENTIAL_RETRY_MS);
+      await this.recordUnreadableLinks(runtime, batch.targets);
       return false;
     }
     this.rememberRepoScope(batch, credential.credentialScope, nowMs);
@@ -1102,6 +1199,8 @@ export class PrPollScheduler {
       }
       case 'repo-not-found-or-forbidden':
       case 'token-invalid': {
+        if (outcome.kind === 'repo-not-found-or-forbidden')
+          await this.recordUnreadableLinks(runtime, batch.targets);
         const next = nextRepoCooldown(
           this.state.repoCooldowns[cooldownKey],
           outcome.kind,
@@ -1197,10 +1296,20 @@ export class PrPollScheduler {
     for (const [ownerSessionId, targets] of owners) {
       const observations: PrObservation[] = [];
       const discovered: PrObservation[] = [];
+      const linked: PrObservation[] = [];
+      const unreadableLinks: string[] = [];
       let queriedBranch: string | null = null;
       let memberId: string | undefined;
       for (const target of targets) {
-        if (target.status) {
+        if (target.status?.pendingLink) {
+          const result = results.pullRequests.find(
+            (candidate) => candidate.prNumber === target.status?.prNumber
+          );
+          // The provider's own URL becomes the association entry; a confirmed
+          // null is unreadable and never becomes an association.
+          if (result?.pr) linked.push(result.pr);
+          else if (result?.ok) unreadableLinks.push(target.status.url);
+        } else if (target.status) {
           const result = results.pullRequests.find(
             (candidate) => candidate.prNumber === target.status?.prNumber && candidate.pr
           );
@@ -1224,10 +1333,13 @@ export class PrPollScheduler {
         await this.applyOwner(runtime, ownerSessionId, batch.repoFullName, {
           observations,
           discovered,
+          linked,
           queriedBranch,
           memberId,
         })
       );
+      if (unreadableLinks.length > 0)
+        await this.recordUnreadableLinks(runtime, targets, new Set(unreadableLinks));
     }
     return ownerResults;
   }
@@ -1239,6 +1351,8 @@ export class PrPollScheduler {
     args: {
       observations: PrObservation[];
       discovered: PrObservation[];
+      /** Provider-confirmed explicitly linked PRs not yet associated. */
+      linked?: PrObservation[];
       queriedBranch: string | null;
       memberId?: string;
     }
@@ -1340,6 +1454,53 @@ export class PrPollScheduler {
           )
             return failed;
           newlyAssociated.push(observation);
+        }
+      }
+
+      // Explicit links: the provider confirmed the PR by number. Revalidate the
+      // link on fresh meta (an unlink while the query ran wins), then publish
+      // it and run the same hosted webhook linkage as a discovered PR. Linkage
+      // failure is retried on later rounds while the PR is open.
+      for (const observation of args.linked ?? []) {
+        if (
+          !isPullRequestExplicitlyLinked(freshMeta, observation.url) ||
+          newlyAssociated.some((pr) => pr.url === observation.url)
+        )
+          continue;
+        newlyAssociated.push(observation);
+        this.counters.discoveries += 1;
+        logger.debug(
+          `[pr-poller] Linked PR #${observation.number} (${observation.status}) for session ${ownerSessionId}`
+        );
+      }
+      if (runtime.handle.associatePullRequest) {
+        const linkedOpen = [...(args.linked ?? []), ...args.observations].filter(
+          (pr) =>
+            (pr.status === 'open' || pr.status === 'draft') &&
+            isPullRequestExplicitlyLinked(freshMeta, pr.url) &&
+            !runtime.confirmedAssociations.get(ownerSessionId)?.has(pr.url)
+        );
+        for (const pr of linkedOpen) {
+          let associated = false;
+          try {
+            associated = await runtime.handle.associatePullRequest({
+              repoFullName,
+              prNumber: pr.number,
+              prUrl: pr.url,
+              branch: pr.headRefName,
+              status: pr.status,
+              ownerSessionId,
+            });
+          } catch (error) {
+            logger.debug(
+              `[pr-poller] Webhook association failed for ${pr.url}: ${formatErrorMessage(error)}`
+            );
+          }
+          if (associated)
+            runtime.confirmedAssociations.set(
+              ownerSessionId,
+              new Set([...(runtime.confirmedAssociations.get(ownerSessionId) ?? []), pr.url])
+            );
         }
       }
 

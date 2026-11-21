@@ -8,7 +8,7 @@ export function getEditableTaskText(item: MessageQueueItem): string {
     item.acpSessionConfig?.prompt ?? ''
   );
   const text = extractPromptPreviewFromInputBlocks(blocks);
-  return text || item.acpSessionConfig?.prompt || item.task;
+  return blocks.length ? text : item.task;
 }
 
 export type MessageQueueEditingCallbacks = {

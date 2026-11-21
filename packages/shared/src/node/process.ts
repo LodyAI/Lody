@@ -57,6 +57,8 @@ const formatErrorMessage = (error: unknown): string =>
  */
 export interface NodeProcessApi {
   readonly platform: NodeJS.Platform;
+  /** Application-owned observation; never grants signal authority by itself. */
+  readonly observeTree?: (tree: ProcessTree) => void;
   /** Synchronous like `child_process.spawn`: async failures arrive as `error`. */
   readonly spawn: (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
   /**
@@ -399,6 +401,72 @@ export const childTree = (child: ChildProcess): ProcessTree => {
             : Effect.fail(signalFailed(description, signal, cause))
         )
       ),
+  };
+};
+
+/**
+ * A process known only by its pid, without a handle we spawned: a Host whose
+ * owner explicitly agreed to end it. POSIX reaches that process only, never its
+ * group; Windows `taskkill /T` walks its tree. The caller owns the authority for
+ * this pid, which can be reused once the process exits. A pid of 1 or less
+ * (init, our own group, every process) is never signalled.
+ */
+export const pidTree = (np: NodeProcessApi, pid: number): ProcessTree => {
+  const description = `process ${pid}`;
+  const valid = Number.isSafeInteger(pid) && pid > 1;
+  const refused = (signal: TreeSignal | 0) =>
+    Effect.fail(signalFailed(description, signal, new Error(`Refusing to signal pid ${pid}`)));
+  const probe = Effect.try({
+    try: () => {
+      np.kill(pid, 0);
+      return true;
+    },
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.catch((cause) => {
+      const code = errnoCode(cause);
+      if (code === 'ESRCH') return Effect.succeed(false);
+      if (code === 'EPERM') return Effect.succeed(true);
+      return Effect.fail(signalFailed(description, 0, cause));
+    })
+  );
+  const isAlive = valid ? probe : refused(0);
+  if (np.platform === 'win32') {
+    return {
+      description,
+      isAlive,
+      signal: (signal) =>
+        Effect.gen(function* () {
+          if (!valid) return yield* refused(signal);
+          if (!(yield* isAlive)) return 'gone' as const;
+          const code = yield* runTaskkill(np, [
+            '/PID',
+            String(pid),
+            '/T',
+            ...(signal === 'SIGKILL' ? ['/F'] : []),
+          ]).pipe(Effect.mapError((cause) => signalFailed(description, signal, cause)));
+          if (code === 0) return 'delivered' as const;
+          if (code === TASKKILL_NOT_FOUND) return 'gone' as const;
+          return yield* Effect.fail(
+            signalFailed(description, signal, new Error(`taskkill exited with status ${code}`))
+          );
+        }),
+    };
+  }
+  return {
+    description,
+    isAlive,
+    signal: (signal) =>
+      valid
+        ? Effect.try({ try: () => np.kill(pid, signal), catch: (cause) => cause }).pipe(
+            Effect.as<SignalOutcome>('delivered'),
+            Effect.catch((cause) =>
+              errnoCode(cause) === 'ESRCH'
+                ? Effect.succeed<SignalOutcome>('gone')
+                : Effect.fail(signalFailed(description, signal, cause))
+            )
+          )
+        : refused(signal),
   };
 };
 
@@ -801,6 +869,11 @@ const acquireProcess = Effect.fnUntraced(function* (
     catch: spawnFailed,
   });
   const tree = yield* childProcessTree(child, { processGroup });
+  try {
+    np.observeTree?.(tree);
+  } catch (cause) {
+    setupFailure ??= spawnFailed(cause);
+  }
   return {
     child,
     tree,
@@ -1650,6 +1723,20 @@ export const signalChildTreeNowLegacy = (
     )
   );
 };
+
+/**
+ * End a process known only by pid (see `pidTree`) under `policy`.
+ * @deprecated Only for unmigrated Promise callers. Compose pidTree and
+ * terminateTree in new Effect workflows and execute at the owning entry point.
+ */
+export const terminatePidLegacy = (
+  pid: number,
+  policy: TerminationPolicy,
+  options: ProcessFacadeOptions = {}
+): Promise<void> =>
+  makeProcessRunnerLegacy(options)(
+    Effect.flatMap(NodeProcess, (np) => terminateTree(pidTree(np, pid), policy))
+  );
 
 /**
  * @deprecated Only for unmigrated synchronous callers. Compose isPidAlive in

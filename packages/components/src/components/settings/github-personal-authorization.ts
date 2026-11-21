@@ -1,9 +1,23 @@
+import {
+  currentGitHubInstallationRecovery,
+  restoreGitHubInstallationRecovery,
+} from '@/lib/github-installation-recovery';
 /** Native clients hand off to the browser's authenticated workspace settings. */
-export function getPersonalGitHubAuthorizationUrl(workspaceSlug: string): string {
+export function getPersonalGitHubAuthorizationUrl(
+  workspaceSlug: string,
+  options?: { installation?: boolean }
+): string {
   const siteUrl = import.meta.env.VITE_SITE_URL?.trim() || 'https://lody.ai';
   const url = new URL(`/${encodeURIComponent(workspaceSlug)}/settings/github`, siteUrl);
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
     throw new Error('Invalid GitHub authorization site URL');
+  }
+  if (options?.installation) url.searchParams.set('github_install_error', 'authorization_required');
+  const recovery = currentGitHubInstallationRecovery();
+  if (recovery) {
+    const parsed = new URL(recovery, url);
+    url.search = parsed.search;
+    url.hash = parsed.hash;
   }
   return url.toString();
 }
@@ -26,13 +40,17 @@ export async function createPersonalGitHubProof() {
 
 export function storePersonalGitHubProof(state: string, verifier: string) {
   // One pending grant per user; never move the verifier into a URL or synced state.
-  sessionStorage.setItem(PROOF_KEY, JSON.stringify({ state, verifier }));
+  sessionStorage.setItem(
+    PROOF_KEY,
+    JSON.stringify({ state, verifier, installationRecovery: currentGitHubInstallationRecovery() })
+  );
 }
 
 export function takePersonalGitHubCallback(): {
   state: string;
   code: string;
   verifier: string;
+  installationRecovery?: string;
 } | null {
   const prefix = '#github-personal=';
   if (!window.location.hash.startsWith(prefix)) return null;
@@ -61,7 +79,21 @@ export function takePersonalGitHubCallback(): {
     stored.state !== callback.state ||
     typeof callback.state !== 'string'
   ) {
+    if (
+      stored &&
+      typeof stored === 'object' &&
+      'installationRecovery' in stored &&
+      typeof stored.installationRecovery === 'string'
+    )
+      restoreGitHubInstallationRecovery(stored.installationRecovery);
     throw new Error('Invalid GitHub authorization return');
   }
-  return { state: callback.state, code: callback.code, verifier: stored.verifier };
+  return {
+    state: callback.state,
+    code: callback.code,
+    verifier: stored.verifier,
+    ...('installationRecovery' in stored && typeof stored.installationRecovery === 'string'
+      ? { installationRecovery: stored.installationRecovery }
+      : {}),
+  };
 }

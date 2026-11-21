@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act, useState } from 'react';
 
 import { Menu } from '@lody/ui/menu';
+import { Toast } from '@lody/ui/toast';
 
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -96,6 +95,47 @@ function DrawerMenu({ initiallyOpen }: { initiallyOpen: boolean }) {
 }
 
 describe('drawer floating controls', () => {
+  it.each(['mouse', 'touch'])(
+    'dismissing a global toast keeps the conversation open (%s)',
+    async (pointerType) => {
+      runtime.native = false;
+      const manager = Toast.createManager();
+      function Conversation() {
+        const [open, setOpen] = useState(true);
+        return (
+          <>
+            <Toast.Provider manager={manager} />
+            <Drawer direction="right" open={open} onOpenChange={setOpen} repositionInputs={false}>
+              <DrawerContent aria-describedby={undefined}>
+                <DrawerTitle>Conversation</DrawerTitle>
+                <textarea aria-label="Message" defaultValue="Unsent draft" />
+              </DrawerContent>
+            </Drawer>
+          </>
+        );
+      }
+      await act(async () => root.render(<Conversation />));
+      // Radix arms outside-press handling on the next timer turn.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await act(async () => {
+        manager.add({ title: 'Copied', timeout: 0 });
+      });
+      const close = document.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!;
+      await act(async () => {
+        close.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType }));
+        close.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerType }));
+        close.click();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(document.body.textContent).not.toContain('Copied');
+      const conversation = document.querySelector('[data-slot="drawer-content"]');
+      expect(conversation?.getAttribute('data-state')).toBe('open');
+      expect(conversation?.querySelector('textarea')?.value).toBe('Unsent draft');
+    }
+  );
+
   it.each([false, true])(
     'keeps the mobile diff in the session modal scope (initially open: %s)',
     async (initiallyOpen) => {

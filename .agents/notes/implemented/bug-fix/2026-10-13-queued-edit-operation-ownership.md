@@ -18,18 +18,21 @@ afterward; validation used production components with synthetic data, not a buil
 
 ## Cause and decision
 
-Clicking the next row saves the current editor on blur. Production save callbacks
-write the queue item before awaiting the first row's synchronization acknowledgement.
-The next editor can therefore open while the earlier callback is still pending.
+Clicking the next row saves the current editor on blur. The original production
+save callback wrote the queue item before awaiting the first row's synchronization
+acknowledgement. The next editor could therefore open while the earlier callback was still pending.
 That callback previously cleared local editing state unconditionally, causing the
 synchronized editing flag to reopen the next row with its original text.
 
 `useMessageQueueEditing` assigns an identity to start, cancel, and save operations.
 Completion may change local state only while that identity is current. Unmount
 retires the identity; an obsolete start also stops before its next write. Existing
-queue writes, synchronization, automatic blur-save, and error feedback remain with
-their existing owners. Disabling other rows until acknowledgement would interrupt
-successive edits; preserving operation ownership allows the existing flow to continue.
+queue writes, automatic blur-save, and error feedback remain with their existing
+owners. Start, save and cancel now finish after the local write for every row;
+remote synchronization continues independently. Waiting for it could indefinitely
+disable the editor and confirmation during a stalled connection. Local write
+failures still preserve the draft. Operation ownership remains necessary because
+local writes can also complete after another edit starts.
 
 This complements the [editor focus decision](2026-09-12-composer-click-focus.md)
 without changing its caret or footer behavior.

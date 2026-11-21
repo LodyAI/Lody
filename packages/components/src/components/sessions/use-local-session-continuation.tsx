@@ -7,7 +7,8 @@ import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import type { SessionContinuationView } from './session-continuation';
 import type { SessionContinuationTweaksValue } from './session-continuation-tweaks';
-import type { AutomationSettings } from '@lody/shared/automations';
+import type { AutoDeliverOptions, AutomationSettings } from '@lody/shared/automations';
+import { DEFAULT_AUTO_DELIVER_OPTIONS } from './session-auto-delivery';
 import type { WorkspaceRuntime } from '@/atoms/runtime';
 import type { MachineId, SessionId } from '@lody/shared';
 import type { RemoteAutomationOperation } from '@lody/shared/automations';
@@ -208,17 +209,30 @@ export function useLocalSessionContinuation(requestedTarget: Target | null, visi
         recoverCapacity: current.settings.recoverCapacity === true,
         archiveAfterMerge: current.settings.archiveAfterMerge === true,
         compactWhenIdle: typeof current.settings.compactWhenIdle === 'object',
+        autoDeliver: typeof current.settings.autoDeliver === 'object',
       }
     : null;
+  const autoDeliverOptions =
+    typeof current?.settings?.autoDeliver === 'object' ? current.settings.autoDeliver : null;
+  /** Starts, retunes or (with `false`) stops Auto delivery; the Host keeps its progress. */
+  const setAutoDeliver = useCallback(
+    (setting: AutoDeliverOptions | false) => void send({ type: 'configure', settings: { autoDeliver: setting } }),
+    [send]
+  );
   const setTweak = useCallback(
     (name: keyof SessionContinuationTweaksValue, checked: boolean) => {
       const compact = current?.settings?.compactWhenIdle;
+      const deliver = current?.settings?.autoDeliver;
       const setting =
         name === 'compactWhenIdle' && checked
           ? typeof compact === 'object'
             ? compact
             : { contextTokens: 300_000, cacheTtlMs: 600_000, leadTimeMs: 60_000 }
-          : checked;
+          : name === 'autoDeliver' && checked
+            ? typeof deliver === 'object'
+              ? deliver
+              : DEFAULT_AUTO_DELIVER_OPTIONS
+            : checked;
       void send({ type: 'configure', settings: { [name]: setting } });
     },
     [current, send]
@@ -233,6 +247,8 @@ export function useLocalSessionContinuation(requestedTarget: Target | null, visi
     busy,
     refresh,
     setTweak,
+    autoDeliverOptions,
+    setAutoDeliver,
     cancel: (id: string) => void send({ type: 'cancel', id }),
   };
 }

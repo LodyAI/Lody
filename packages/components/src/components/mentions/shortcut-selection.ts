@@ -1,10 +1,10 @@
 import {
   PromptShortcutError,
   resolveShortcutAvailability,
-  type PromptShortcutIndexEntry,
-  type PromptShortcutRuntime,
   type ShortcutAvailability,
-} from '@lody/shared/prompt-shortcuts';
+} from '@lody/shared/prompt-shortcuts/model';
+import type { PromptShortcutIndexEntry } from '@lody/shared/prompt-shortcuts/catalog';
+import type { PromptShortcutRuntime } from '@lody/shared/prompt-shortcuts/runtime';
 import type { MentionPrepare, PreparedMention } from '@/ui/mention/index';
 import {
   unverifiedShortcutDependency,
@@ -50,8 +50,7 @@ export async function prepareShortcutSelection(input: {
     snapshot.id !== entry.id ||
     snapshot.revision !== entry.revision ||
     snapshot.workspaceId !== entry.workspaceId ||
-    snapshot.ownerUserId !== entry.ownerUserId ||
-    snapshot.visibility !== entry.visibility
+    snapshot.ownerUserId !== entry.ownerUserId
   )
     throw new PromptShortcutError('revision_pending', 'Index and body do not agree');
   const availability = resolveShortcutAvailability({

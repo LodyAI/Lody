@@ -293,7 +293,6 @@ export const tableSurface = stylex.create({
     },
   },
 
-  // ── The pager ────────────────────────────────────────────────────────────
   pager: {
     display: 'flex',
     alignItems: 'center',

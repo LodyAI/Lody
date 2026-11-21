@@ -28,4 +28,4 @@ of provider records or native session IDs. Builtin brand icons remain available.
 
 - `apps/cli/src/agent/setting.ts` and `managed-agent-runtime.ts`.
 - `scripts/generate-acp-registry.mjs`.
-- Official versioned manifest: <https://static.devin.ai/cli/3000.11.3/manifest.json>.
+- Official versioned manifest: <https://static.devin.ai/cli/3000.12.28/manifest.json>.

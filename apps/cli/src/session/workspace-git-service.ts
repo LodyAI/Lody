@@ -1,11 +1,15 @@
 import path from 'node:path';
 import { realpath } from 'node:fs/promises';
-import { SessionProjectRunSchema, resolveSessionFilePath } from '@lody/shared';
-import { getGitDiffStats, isWorkspaceDirty, hasUnpushedCommits } from '@/lib/git/git-diff-stats';
-import { countWorkingTreeTextFileLines } from '@/lib/git/working-tree-line-count';
+import {
+  SessionProjectRunSchema,
+  resolveSessionFilePath,
+  getSessionRoomId,
+  isLoroRepoDocDeleted,
+} from '@lody/shared';
+import { isWorkspaceDirty, hasUnpushedCommits } from '@/lib/git/git-diff-stats';
 import { toShared } from '@/platform/process-options';
 import { localProjectsLegacy } from '@lody/shared/node/local-project';
-import type { SessionId, SessionProjectRun } from '@lody/shared';
+import type { SessionId, SessionProjectRun, SessionMeta, SessionDiffStats } from '@lody/shared';
 import { resolveGitBranch, type SessionExec } from '@/lib/git/resolve-git-branch-name';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import { CommandTimedOut, runCommandTextLegacy } from '@lody/shared/node/process';
@@ -13,8 +17,25 @@ import { CommandTimedOut, runCommandTextLegacy } from '@lody/shared/node/process
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 import type { ISession } from './session-manager';
+import type { WorkspaceDiffSummary } from '@/lib/code-collab/file-index-scan-core';
+import { projectRunMetaPatch } from './project-run-state';
 
 const ownerQueues = new WeakMap<LoroDocumentManager, Map<SessionId, Promise<unknown>>>();
+
+function persistedChange(
+  summary: WorkspaceDiffSummary,
+  previous: SessionDiffStats['allChange'] | undefined
+): SessionDiffStats['allChange'] {
+  const lines = summary.allChange ?? previous ?? { add: 0, del: 0 };
+  return { add: lines.add, del: lines.del, files: summary.files };
+}
+
+function sameChange(
+  previous: SessionDiffStats['allChange'] | undefined,
+  next: SessionDiffStats['allChange']
+): boolean {
+  return previous?.add === next.add && previous.del === next.del && previous.files === next.files;
+}
 
 /** Git checkout facts, without provider API calls or credentials. */
 export class WorkspaceGitService {
@@ -48,6 +69,59 @@ export class WorkspaceGitService {
     } finally {
       if (this.pending.get(ownerId) === next) this.pending.delete(ownerId);
     }
+  }
+
+  /** Only complete Code Collab comparisons author workspace diff totals. */
+  async publishDiffStats(input: {
+    readonly ownerSessionId: SessionId;
+    readonly allChangesDiffStats: WorkspaceDiffSummary | null;
+    readonly memberDiffStats?: Readonly<Record<string, WorkspaceDiffSummary | null>>;
+    readonly signal?: AbortSignal;
+  }): Promise<void> {
+    await this.withOwnerMutation(input.ownerSessionId, async () => {
+      input.signal?.throwIfAborted();
+      const roomId = getSessionRoomId(input.ownerSessionId);
+      const record = await this.deps.workspaceDocument.repo.getDocMeta(roomId);
+      if (!record?.meta || isLoroRepoDocDeleted(record)) return;
+      const meta = record.meta as SessionMeta;
+      let patch: Partial<SessionMeta>;
+      if (meta.projectRun) {
+        const run = structuredClone(meta.projectRun);
+        let changed = false;
+        for (const [id, stats] of Object.entries(input.memberDiffStats ?? {})) {
+          const member = run.members[id as keyof typeof run.members];
+          if (!member || !stats) continue;
+          const next = persistedChange(stats, member.diff);
+          if (sameChange(member.diff, next)) continue;
+          member.diff = next;
+          changed = true;
+        }
+        patch = projectRunMetaPatch(run);
+        // Non-Git directory Members are shared, unisolated folders: count them when
+        // their root resolves, but never let an unavailable one withhold the total.
+        const complete = Object.entries(run.members).every(
+          ([id, member]) =>
+            member.access === 'additional' ||
+            member.access === 'link' ||
+            input.memberDiffStats?.[id] != null
+        );
+        if (complete && input.allChangesDiffStats) {
+          patch.diffStats = {
+            allChange: persistedChange(input.allChangesDiffStats, meta.diffStats?.allChange),
+          };
+        }
+        const next = patch.diffStats?.allChange;
+        const current = meta.diffStats?.allChange;
+        if (!changed && (!next || sameChange(current, next))) return;
+      } else {
+        if (!input.allChangesDiffStats) return;
+        const next = persistedChange(input.allChangesDiffStats, meta.diffStats?.allChange);
+        if (sameChange(meta.diffStats?.allChange, next)) return;
+        patch = { diffStats: { allChange: next } };
+      }
+      input.signal?.throwIfAborted();
+      await this.deps.workspaceDocument.repo.upsertDocMeta(roomId, patch);
+    });
   }
 
   /** The owning daemon only; read the latest snapshot after acquiring the owner queue. */
@@ -142,15 +216,7 @@ export class WorkspaceGitService {
         const resolved = resolveSessionFilePath([{ id: 'main', absolutePath: root }], cwd);
         if (!resolved || resolved.relativePath !== member.path)
           throw new Error('Member path escaped its project group');
-        let observationFailed = false;
-        const git = async (args: string[]) => {
-          try {
-            return await exec('git', args, cwd, false);
-          } catch (error) {
-            if (error instanceof CommandTimedOut) observationFailed = true;
-            throw error;
-          }
-        };
+        const git = (args: string[]) => exec('git', args, cwd, false);
         const repository =
           member.src.kind === 'github'
             ? member.src.repoFullName
@@ -158,17 +224,12 @@ export class WorkspaceGitService {
         if (repository) member.repoFullName = repository;
         const branch = await resolveGitBranch(exec, cwd);
         if (branch.kind === 'branch') member.branch = branch.branch;
-        const [dirty, unpushed, stats] = await Promise.all([
+        const [dirty, unpushed] = await Promise.all([
           isWorkspaceDirty(git),
           hasUnpushedCommits(git),
-          getGitDiffStats(git, {
-            preferredBaseBranch: member.base,
-            countWorkingTreeFileLines: (file) => countWorkingTreeTextFileLines(cwd, file),
-          }).catch(() => null),
         ]);
         if (dirty !== undefined) member.dirty = dirty;
         if (unpushed !== undefined) member.unpushed = unpushed;
-        if (stats && !observationFailed) member.diff = stats.baseDiffStats.allChange;
       } catch (error) {
         this.deps.logger.debug(
           `Project group member observation failed: ${formatErrorMessage(error)}`

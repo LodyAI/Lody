@@ -8,10 +8,10 @@ Translation: current
 
 ## Abstract
 
-Automation was available to Agents through MCP while its Session controls required a separate developer beta opt-in. Supported Sessions show their continuation notes and settings without that UI gate. Automatic recovery remains a per-Session opt-in; encrypted workspaces remain unsupported.
+Automation was available to Agents through MCP while its Session controls required a separate developer beta opt-in. Supported Sessions show their continuation notes and settings without that UI gate. Automatic recovery remains a per-Session opt-in. Encrypted workspaces have local-machine controls only.
 
 ## Boundary
 
-Electron manages local and eligible remote machine automation owners and consults the shared workspace content capability before making requests. The renderer also requires the target daemon’s `sessionAutomations` capability for local IPC or `remoteAutomationControl` for remote control; missing capabilities disable reads and controls without reporting a connection failure. The Agent's MCP server and the Host retain their existing ownership and authorization rules. Removing the old renderer-only preference does not enable any Session policy or migrate persisted automation. Remote control uses the [remote control design](../../proposed/architecture/2026-10-30-remote-session-automation-control.md); encrypted automation remains unsupported.
+Electron manages local and eligible remote machine automation owners and consults the shared workspace content capability before making requests. The renderer also requires the target daemon’s `sessionAutomations` capability for local IPC or `remoteAutomationControl` for remote control; missing capabilities disable reads and controls without reporting a connection failure. The Agent's MCP server and the Host retain their existing ownership and authorization rules. Removing the old renderer-only preference does not enable any Session policy or migrate persisted automation. Remote control uses the [remote control design](../../proposed/architecture/2026-10-30-remote-session-automation-control.md) and follows the shared `rpc` content verdict, so encrypted workspaces have no remote automation control.
 
 The component tests exercise normal-mode waiting, settings and cancellation. Live cross-device and encrypted delivery remain unverified.

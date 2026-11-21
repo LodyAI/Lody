@@ -43,6 +43,8 @@ export type MachineTabListProps = {
   /** Workspace Machines are all shared, so show ownership instead of redundant access state. */
   showOwner?: boolean;
   ownerByUserId?: ReadonlyMap<string, MachineTabOwner>;
+  /** What an empty list says before any filter applies; defaults to no machines connected. */
+  emptyLabel?: string;
 };
 
 export function MachineTabList({
@@ -56,6 +58,7 @@ export function MachineTabList({
   showFilter = true,
   showOwner = false,
   ownerByUserId,
+  emptyLabel,
 }: MachineTabListProps) {
   const { t } = useTranslation();
   const scopeId = useId();
@@ -115,7 +118,7 @@ export function MachineTabList({
           {items.length === 0 && (
             <div data-testid="settings-machines-empty" {...stylex.props(styles.empty)}>
               {totalBeforeFilter === 0
-                ? t('workspace.machines.empty', 'No machines connected')
+                ? (emptyLabel ?? t('workspace.machines.empty', 'No machines connected'))
                 : t(
                     'settings.agent.machineTabs.filter.noMatch',
                     'No machines match these filters.'
@@ -418,10 +421,14 @@ const styles = stylex.create({
     fontWeight: 400,
     color: colors.secondaryLabel,
   },
+  /* `auto`, not 0: mobile Settings mounts this list inside a page ScrollArea
+     whose content has no definite height, where a zero basis with
+     `min-height: 0` collapses the rows to nothing. A bounded parent still
+     shrinks it to fit and scrolls here. */
   scroller: {
     flexGrow: 1,
     flexShrink: 1,
-    flexBasis: 0,
+    flexBasis: 'auto',
     minHeight: 0,
     minWidth: 0,
     overflowY: 'auto',

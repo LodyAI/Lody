@@ -22,6 +22,7 @@ import {
   clearPendingE2eeWorkspace,
   listPendingE2eeWorkspaces,
   savePendingE2eeWorkspace,
+  setPendingE2eeWorkspaceArchived,
 } from '@/lib/e2ee-workspace-storage';
 import { AuthProvider } from '@/providers/convex-provider';
 
@@ -108,8 +109,16 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** Developer preview on: the encryption switch sits below the ordinary fields. */
+/** Developer preview on: the standard / encrypted choice sits below the ordinary fields. */
 export const EncryptionOffered: Story = {};
+
+/** Encrypted chosen: the same cost points and loss warning the desktop page shows. */
+export const EncryptedSelected: Story = {
+  play: async () => {
+    const body = within(document.body);
+    await userEvent.click(await body.findByTestId('mobile-create-workspace-encrypted'));
+  },
+};
 
 /** A saved request reopens locked to its original name and handle. */
 export const ResumeSaved: Story = {
@@ -131,5 +140,25 @@ export const ResumeFailed: Story = {
       await body.findByRole('button', { name: /Continue saved creation|继续已保存的创建请求/ })
     );
     await body.findByRole('alert');
+  },
+};
+
+/** Two saved requests, one archived: the archive stays reachable for restore. */
+export const ArchivedRequest: Story = {
+  beforeEach: () => {
+    clearSaved();
+    const archived = {
+      ...pending,
+      requestId: 'synthetic-request-archived',
+      name: 'Staging check 2',
+      slug: 'staging-check-2',
+    };
+    savePendingE2eeWorkspace(localStorage, pending);
+    savePendingE2eeWorkspace(localStorage, archived);
+    setPendingE2eeWorkspaceArchived(localStorage, archived, true);
+  },
+  play: async () => {
+    const body = within(document.body);
+    await userEvent.click(await body.findByRole('button', { name: /Archived|已归档/ }));
   },
 };

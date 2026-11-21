@@ -5,13 +5,39 @@ import os from 'node:os';
 import { createRequire } from 'node:module';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { Deferred, Effect, Fiber, Result, Scope, Exit, Tracer } from 'effect';
+import { Deferred, Effect, Fiber, Result, Scope, Exit, Tracer, Context, Layer } from 'effect';
 import { SubmissionJournal, LedgerLog, LedgerLogError } from '@lody/e2ee-core/services';
-import { LedgerSubmission } from '@lody/e2ee-core';
+import {
+  Bytes,
+  LedgerFeed,
+  VerifiedLedger,
+  LedgerSubmission,
+  makeWorkspaceRecovery,
+  memoryRecoveryEpochKeys,
+} from '@lody/e2ee-core';
+import { createRecoveryVault } from '../../src/internal/recovery/vault';
+import { canonical, parseCanonical } from '../../src/internal/recovery/crypto';
+import { prepareDeviceAdmission, prepareLedgerCommand } from '../../src/internal/ledger/admission';
+import { signLedgerRecord } from '../../src/internal/ledger/signing';
+import { signLedgerSnapshot, type SnapshotTrust } from '@lody/e2ee-core/protocol';
+import { verifyLedger, restoreVerifiedState, type LedgerView } from '../../src/internal/ledger';
+import { WorkspaceScope, LedgerViewSource, LedgerViewSourceError } from '../../src/services';
+import { sqliteLedgerFeedStore, sqliteLedgerPinStore } from '../../src/adapters/node-sqlite';
 import { submissionLayer, submitRecord, resumeSubmission, acknowledgeSubmission } from './fixture';
 import { sqliteSubmissionJournal } from '@lody/e2ee-core/adapters/node-sqlite';
 import { openSqliteStore } from '@lody/e2ee-core/internal';
-import { anchor, checkpoint, filled, genesis, host, keys, owner, rotate, signed } from './fixture';
+import {
+  anchor,
+  checkpoint,
+  filled,
+  genesis,
+  host,
+  keys,
+  owner,
+  rotate,
+  signed,
+  selfAdmission,
+} from './fixture';
 import { hashRecordBytes } from '../../src/internal/ledger';
 const fixture = () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'p09-'));
@@ -43,6 +69,413 @@ const using = <A, E, R>(
   );
 
 describe('durable submission', () => {
+  it.each([false, true])(
+    'confirms an exact committed original when a ledger subscription advances before the append reply (later record=%s)',
+    async (later) => {
+      const f = fixture();
+      try {
+        const original = rotate();
+        let records = [genesis];
+        let local = Result.getOrThrow(
+          verifyLedger({ anchor, records, checkpoint: checkpoint(records) })
+        );
+        const remote = LedgerLog.of({
+          read: () => Effect.fail(new LedgerLogError({})),
+          readFrom: (_anchor, base) =>
+            Effect.sync(() => ({
+              records: records.slice(base.length),
+              checkpoint: checkpoint(records),
+            })),
+          appendCas: () =>
+            Effect.sync(() => {
+              records = later
+                ? [
+                    genesis,
+                    original,
+                    signed([hashRecordBytes(original).toBytes(), owner.pk, [9, [1]]]),
+                  ]
+                : [genesis, original];
+              local = Result.getOrThrow(
+                verifyLedger({ anchor, records, checkpoint: checkpoint(records) })
+              );
+            }),
+        });
+        await Effect.runPromise(
+          Effect.scoped(
+            using(
+              f,
+              Effect.gen(function* () {
+                const submission = yield* LedgerSubmission;
+                const result = yield* submission.submit(original);
+                expect(result.outcome).toBe('Committed');
+                yield* submission.acknowledge(result);
+                expect((yield* submission.pending()).record).toBeNull();
+              }).pipe(Effect.provide(submissionLayer(anchor))),
+              remote
+            ).pipe(
+              Effect.provideService(VerifiedLedger, {
+                current: () => Effect.sync(() => local),
+                ensureCurrent: () => Effect.void,
+              })
+            )
+          )
+        );
+      } finally {
+        f.close();
+      }
+    }
+  );
+
+  it.each(['committed', 'conflict', 'tampered', 'rollback', 'rate-limited', 'fallback'] as const)(
+    'verifies suffix submission at the owned prefix: %s',
+    async (mode) => {
+      const f = fixture();
+      try {
+        const base = Result.getOrThrow(
+          verifyLedger({ anchor, records: [genesis], checkpoint: checkpoint([genesis]) })
+        );
+        const original = mode === 'rate-limited' ? selfAdmission() : rotate();
+        const competing = rotate(undefined, 22);
+        let records = [genesis];
+        let fullReads = 0,
+          suffixReads = 0;
+        const remote = LedgerLog.of({
+          read: () =>
+            Effect.sync(() => {
+              fullReads++;
+              return { records, checkpoint: checkpoint(records) };
+            }),
+          readFrom: (_anchor, prefix) =>
+            Effect.sync(() => {
+              suffixReads++;
+              expect(prefix.head.equals(base.head)).toBe(true);
+              return { records: records.slice(prefix.length), checkpoint: checkpoint(records) };
+            }),
+          appendCas: () =>
+            Effect.suspend(() => {
+              if (mode === 'rate-limited')
+                return Effect.fail(
+                  new LedgerLogError({ reason: 'self-service-rate-limited', retryAt: 100 })
+                );
+              records = [genesis, mode === 'conflict' ? competing : original];
+              if (mode === 'tampered') {
+                records = records.map((r) => r.slice());
+                records[1]![records[1]!.length - 1] ^= 1;
+              }
+              return Effect.void;
+            }),
+        });
+        const ahead = Result.getOrThrow(
+          verifyLedger({
+            anchor,
+            records: [genesis, competing],
+            checkpoint: checkpoint([genesis, competing]),
+          })
+        );
+        const result = await Effect.runPromise(
+          Effect.scoped(
+            using(
+              f,
+              Effect.gen(function* () {
+                if (mode === 'rollback') {
+                  const journal = yield* SubmissionJournal;
+                  yield* journal.prepare(anchor, original);
+                  yield* journal.observe(anchor, original, null, checkpoint([genesis, competing]));
+                }
+                const submission = yield* LedgerSubmission;
+                const result = yield* Effect.result(submission.submit(original));
+                const pending = yield* submission.pending();
+                if (mode === 'rate-limited') expect(pending.record).toBeNull();
+                else expect(pending.record).toEqual(original);
+                return result;
+              }).pipe(Effect.provide(submissionLayer(anchor))),
+              remote
+            ).pipe(
+              Effect.provideService(VerifiedLedger, {
+                current: () => Effect.succeed(mode === 'fallback' ? ahead : base),
+                ensureCurrent: () => Effect.void,
+              })
+            )
+          )
+        );
+        if (mode === 'committed' || mode === 'fallback' || mode === 'conflict') {
+          expect(Result.isSuccess(result)).toBe(true);
+          if (Result.isSuccess(result))
+            expect(result.success.outcome).toBe(mode === 'conflict' ? 'Conflict' : 'Committed');
+        } else {
+          expect(Result.isFailure(result)).toBe(true);
+          if (mode === 'rollback') expect(errorCode(result)).toBe('rollback');
+          if (mode === 'tampered') expect(errorCode(result)).toBe('bad-signature');
+          if (mode === 'rate-limited') expect(errorCode(result)).toBe('self-service-rate-limited');
+        }
+        expect(fullReads).toBe(mode === 'fallback' ? 2 : 0);
+        expect(suffixReads).toBe(
+          mode === 'fallback' ? 0 : mode === 'rollback' || mode === 'rate-limited' ? 1 : 2
+        );
+      } finally {
+        f.remote.db.close();
+        rmSync(f.dir, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(['displaced', 'registration', 'recoverable'] as const)(
+    'recovers legacy setup at %s after history retention',
+    async (stage) => {
+      const f = fixture();
+      try {
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const ok = Result.getOrThrow;
+              const rows = new Map<string, Uint8Array>();
+              const entries = new Map<
+                string,
+                { entryId: string; revision: number; body: Uint8Array }
+              >();
+              let index: { entryId: string; revision: number; body: Uint8Array } | null = null;
+              const local = {
+                read: (key: string) => Effect.sync(() => rows.get(key) ?? null),
+                compareAndSwap: (key: string, expected: Uint8Array | null, next: Uint8Array) =>
+                  Effect.sync(() => {
+                    expect(rows.get(key) ?? null).toEqual(expected);
+                    rows.set(key, next.slice());
+                    return 'Committed' as const;
+                  }),
+                list: (prefix: string) =>
+                  Effect.sync(() =>
+                    [...rows]
+                      .filter(([key]) => key.startsWith(prefix))
+                      .map(([key, value]) => ({ key, value }))
+                  ),
+              };
+              const { vault } = yield* createRecoveryVault({
+                locator: 'synthetic',
+                local,
+                store: {
+                  putImmutable: (_id, entry) =>
+                    Effect.sync(() => {
+                      entries.set(entry.entryId, entry);
+                    }),
+                  readEntry: (_id, key) => Effect.sync(() => entries.get(key) ?? null),
+                  readIndex: () => Effect.sync(() => index),
+                  compareAndSwapIndex: (_id, _expected, next) =>
+                    Effect.sync(() => {
+                      index = next;
+                      return 'Committed' as const;
+                    }),
+                  deleteUnreferenced: () => Effect.void,
+                },
+              });
+              const signer = {
+                publicKey: ok(Bytes.signingPublicKey(owner.pk)),
+                sign: (bytes: Uint8Array) => Effect.succeed(ok(Bytes.signature(owner.sign(bytes)))),
+              };
+              const installed = memoryRecoveryEpochKeys();
+              yield* Effect.addFinalizer(() => Effect.sync(() => installed.dispose()));
+              let conflict = true;
+              let compactView: LedgerView | undefined;
+              const input = {
+                vault,
+                local,
+                genesis: anchor,
+                membershipId: ok(Bytes.membershipId(filled(10, 16))),
+                personalSigner: signer,
+                installed,
+                ledger: () =>
+                  Effect.sync(() =>
+                    ok(
+                      compactView
+                        ? Result.succeed(compactView)
+                        : verifyLedger({
+                            anchor,
+                            records: f.remote.read(),
+                            checkpoint: checkpoint(f.remote.read()),
+                          })
+                    )
+                  ),
+                trust: {
+                  source: 'synthetic',
+                  genesisRecord: genesis,
+                  head: Buffer.from(hashRecordBytes(genesis).toBytes()).toString('hex'),
+                  length: 1,
+                },
+                fetchCurrentEnvelope: () => Effect.succeed({ pending: true as const }),
+                submitOriginal: (record: Uint8Array) =>
+                  conflict
+                    ? Effect.succeed({ outcome: 'Conflict' as const, record })
+                    : using(
+                        f,
+                        Effect.gen(function* () {
+                          const result = yield* submitRecord(anchor, record);
+                          yield* acknowledgeSubmission(anchor, result);
+                          return result;
+                        })
+                      ),
+              };
+              const workflow = yield* makeWorkspaceRecovery(input);
+              expect((yield* workflow.setup()).outcome).toBe('Conflict');
+              const [key, raw] = [...rows].find(([key]) => key.includes('/workspace/'))!;
+              const legacy = parseCanonical(raw) as Record<string, unknown>;
+              const original = legacy.record as Uint8Array;
+              delete legacy.recordPosition;
+              rows.set(key, canonical(legacy));
+              if (stage !== 'displaced') f.remote.append(original);
+              const view = yield* input.ledger();
+              const peer = keys(2);
+              const command = yield* prepareDeviceAdmission({
+                genesis: anchor,
+                membershipId: input.membershipId,
+                encryptionPublicKey: ok(Bytes.encryptionPublicKey(filled(102))),
+                kind: 'personal',
+                signer: {
+                  publicKey: ok(Bytes.signingPublicKey(peer.pk)),
+                  sign: (bytes) => Effect.succeed(ok(Bytes.signature(peer.sign(bytes)))),
+                },
+              });
+              f.remote.append(
+                yield* signLedgerRecord(
+                  ok(prepareLedgerCommand(view, signer.publicKey, command)),
+                  signer
+                )
+              );
+              if (stage !== 'displaced') {
+                // The original admission landed, but its early hashes are no longer
+                // retained. Exercise both the unfinished and already-finished journal.
+                legacy.stage = stage;
+                rows.set(key, canonical(legacy));
+                let snapOrigin!: {
+                  view: LedgerView;
+                  bytes: Uint8Array;
+                  trust: SnapshotTrust;
+                };
+                for (let n = 0; n < 34; n++) {
+                  const device = keys(n + 3);
+                  const signer = {
+                    publicKey: ok(Bytes.signingPublicKey(device.pk)),
+                    sign: (bytes: Uint8Array) =>
+                      Effect.succeed(ok(Bytes.signature(device.sign(bytes)))),
+                  };
+                  const admission = yield* prepareDeviceAdmission({
+                    genesis: anchor,
+                    membershipId: input.membershipId,
+                    encryptionPublicKey: ok(Bytes.encryptionPublicKey(filled(n + 3))),
+                    kind: 'personal',
+                    signer,
+                  });
+                  for (const command of n === 33
+                    ? [admission]
+                    : [admission, { _tag: 'RevokeDevice', target: signer.publicKey } as const]) {
+                    const view = yield* input.ledger();
+                    f.remote.append(
+                      yield* signLedgerRecord(
+                        ok(prepareLedgerCommand(view, input.personalSigner.publicKey, command)),
+                        input.personalSigner
+                      )
+                    );
+                  }
+                  if (n === 0) {
+                    const snapView = yield* input.ledger();
+                    const endorsed = yield* signLedgerSnapshot({
+                      signer: input.personalSigner,
+                      ledger: () => Effect.succeed(snapView),
+                    });
+                    snapOrigin = {
+                      view: snapView,
+                      bytes: endorsed.snapshot,
+                      trust: {
+                        source: 'external-confirmation',
+                        genesis: anchor,
+                        head: snapView.head,
+                        length: snapView.length,
+                        endorser: input.personalSigner.publicKey,
+                        membershipId: input.membershipId,
+                        role: 'owner',
+                        kind: 'personal',
+                        headSignature: endorsed.headSignature,
+                      },
+                    };
+                  }
+                }
+                const stores = Layer.mergeAll(
+                  sqliteLedgerFeedStore({
+                    path: path.join(f.dir, 'feed.sqlite'),
+                    mode: 'create-or-open',
+                  }),
+                  sqliteLedgerPinStore({
+                    path: path.join(f.dir, 'pin.sqlite'),
+                    mode: 'create-or-open',
+                  })
+                ).pipe(Layer.provideMerge(Layer.succeed(WorkspaceScope, { genesis: anchor })));
+                const context = yield* Layer.build(
+                  LedgerFeed.layer({
+                    origin: {
+                      kind: 'snapshot',
+                      snapshot: {
+                        bytes: snapOrigin.bytes,
+                        trust: snapOrigin.trust,
+                        offset: 'retained:snap',
+                      },
+                    },
+                    expected: { head: snapOrigin.view.head, length: snapOrigin.view.length },
+                    budget: { maxRecords: 1000, maxBytes: 1_000_000 },
+                  }).pipe(Layer.provide(stores))
+                );
+                const feed = Context.get(context, LedgerFeed);
+                yield* feed.accept(
+                  {
+                    requestOffset: 'retained:snap',
+                    nextOffset: 'retained:end',
+                    records: f.remote.read().slice(snapOrigin.view.length),
+                    upToDate: true,
+                  },
+                  checkpoint(f.remote.read())
+                );
+                const verified = VerifiedLedger.layer.pipe(
+                  Layer.provide(stores),
+                  Layer.provide(
+                    Layer.succeed(LedgerViewSource, {
+                      current: () =>
+                        feed.current().pipe(
+                          Effect.map((state) => state.view),
+                          Effect.mapError((cause) => new LedgerViewSourceError({ cause }))
+                        ),
+                    })
+                  )
+                );
+                const saved = yield* feed.rebase().pipe(Effect.provide(verified));
+                compactView = ok(restoreVerifiedState(saved.state));
+                expect(compactView.historyStart).toBeGreaterThan(2);
+                conflict = false;
+                const reopened = yield* makeWorkspaceRecovery(input);
+                // This fixture deliberately holds R's envelope; setup succeeds up to
+                // that independent wait rather than failing on missing old hashes.
+                expect(yield* reopened.setup()).toMatchObject({
+                  outcome: 'Pending',
+                  status: { paired: true },
+                });
+                const completed = parseCanonical(rows.get(key)!) as Record<string, unknown>;
+                expect(completed.record).toBeNull();
+                expect(completed.recordPosition).toBeNull();
+                expect(completed.recoveryDevice).toBeDefined();
+                return;
+              }
+              const reopened = yield* makeWorkspaceRecovery(input);
+              expect((yield* reopened.setup()).outcome).toBe('Conflict');
+              const updated = parseCanonical(rows.get(key)!) as Record<string, unknown>;
+              expect(updated.recordPosition).toBe(3);
+              expect(updated.record).not.toEqual(original);
+              conflict = false;
+              expect((yield* reopened.setup()).status.paired).toBe(true);
+              expect(f.remote.read()).toHaveLength(3);
+            })
+          )
+        );
+      } finally {
+        f.close();
+      }
+    }
+  );
   it('traces pending and acknowledgement while retaining then consuming the committed original', async () => {
     const f = fixture();
     const spans: Tracer.Span[] = [];
@@ -749,3 +1182,92 @@ it('Scope interruption during CAS retains pending; next Scope reopens and recove
       })
     )
   ));
+
+it('retains a previously uncertain original even when a later attempt is explicitly rate limited', async () => {
+  const f = fixture();
+  try {
+    const record = selfAdmission();
+    let limit = false;
+    const remote = LedgerLog.of({
+      ...f.remote.service,
+      appendCas: () =>
+        Effect.fail(
+          limit
+            ? new LedgerLogError({ reason: 'self-service-rate-limited', retryAt: 3600000 })
+            : new LedgerLogError()
+        ),
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          expect(errorCode(yield* Effect.result(submitRecord(anchor, record)))).toBe('unconfirmed');
+          limit = true;
+          expect(errorCode(yield* Effect.result(resumeSubmission(anchor)))).toBe('unconfirmed');
+          const entry = yield* (yield* SubmissionJournal).load(anchor);
+          expect(entry.record).toEqual(record);
+          expect(entry.outcome).toBeNull();
+        }).pipe((work) => using(f, work, remote))
+      )
+    );
+  } finally {
+    f.close();
+  }
+});
+
+it('does not clear a quota-refused slot after another attempt changed its durable revision', async () => {
+  const f = fixture();
+  try {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const journal = yield* SubmissionJournal,
+            record = rotate(),
+            point = checkpoint([genesis]);
+          const created = yield* journal.prepare(anchor, record);
+          const first = yield* journal.observe(anchor, record, null, point);
+          expect(first).toBe(created! + 1);
+          yield* journal.observe(anchor, record, point, point);
+          expect(yield* journal.rejectUnsent(anchor, record, point, first)).toBe(false);
+          expect((yield* journal.load(anchor)).record).toEqual(record);
+        }).pipe(Effect.provide(sqliteSubmissionJournal({ path: f.journal })))
+      )
+    );
+  } finally {
+    f.close();
+  }
+});
+
+it('adds attempt revisions without losing an existing SQLite pending original or its checkpoint', async () => {
+  const f = fixture(),
+    record = selfAdmission();
+  try {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const journal = yield* SubmissionJournal;
+          yield* journal.prepare(anchor, record);
+          yield* journal.observe(anchor, record, null, checkpoint([genesis]));
+        }).pipe(Effect.provide(sqliteSubmissionJournal({ path: f.journal })))
+      )
+    );
+    const db = new Database(f.journal);
+    try {
+      db.exec('ALTER TABLE submission_journal DROP COLUMN revision');
+    } finally {
+      db.close();
+    }
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const journal = yield* SubmissionJournal;
+          const entry = yield* journal.load(anchor);
+          expect(entry.record).toEqual(record);
+          expect(entry.checkpoint).toEqual(checkpoint([genesis]));
+          expect(yield* journal.prepare(anchor, record)).toBeNull();
+        }).pipe(Effect.provide(sqliteSubmissionJournal({ path: f.journal })))
+      )
+    );
+  } finally {
+    f.close();
+  }
+});

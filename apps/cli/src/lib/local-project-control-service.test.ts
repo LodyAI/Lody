@@ -336,6 +336,55 @@ name: imagegen
     }
   });
 
+  it('finds Antigravity user skills through a symlinked config dir and its built-in skills', async () => {
+    const homePath = await createTempProject();
+    try {
+      await mkdir(join(homePath, '.agents', 'skills', 'pr-writer'), { recursive: true });
+      await writeFile(
+        join(homePath, '.agents', 'skills', 'pr-writer', 'SKILL.md'),
+        `---
+name: pr-writer
+---
+`
+      );
+      await mkdir(join(homePath, '.gemini', 'config'), { recursive: true });
+      await symlink(
+        join(homePath, '.agents', 'skills'),
+        join(homePath, '.gemini', 'config', 'skills'),
+        'dir'
+      );
+      const builtin = join(homePath, '.gemini', 'antigravity-cli', 'builtin', 'skills', 'browser');
+      await mkdir(builtin, { recursive: true });
+      await writeFile(
+        join(builtin, 'SKILL.md'),
+        `---
+name: browser
+---
+`
+      );
+
+      const service = new LocalProjectControlService(createLogger());
+      const result = await service.listGlobalSkills({ homePath });
+      const names = (dir: string) =>
+        result.groups
+          .find((group) => group.dir === dir)
+          ?.skills.map((skill) => ({ name: skill.name, absolutePath: skill.absolutePath }));
+
+      expect(names('~/.gemini/config/skills')).toEqual([
+        {
+          name: 'pr-writer',
+          // The scanner resolves the link; the agent reads the same file through it.
+          absolutePath: join(homePath, '.agents', 'skills', 'pr-writer', 'SKILL.md'),
+        },
+      ]);
+      expect(
+        result.groups.find((group) => group.dir === '~/.gemini/antigravity-cli/builtin/skills')
+      ).toMatchObject({ scope: 'system', skills: [{ name: 'browser' }] });
+    } finally {
+      await rm(homePath, { recursive: true, force: true });
+    }
+  });
+
   it('does not scan arbitrary home-relative directories for global skills', async () => {
     const homePath = await createTempProject();
     try {

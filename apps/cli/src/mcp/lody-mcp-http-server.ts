@@ -1,3 +1,4 @@
+import { getCliNodeExecutable } from '@/lib/managed-daemon-release';
 import { toShared } from '@/platform/process-options';
 import type { ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -168,7 +169,7 @@ class McpHttpHostSupervisor {
   private spawnHost(cliEntrypoint: string): ProcessHandleLegacy {
     return startProcessLegacy(
       {
-        command: process.execPath,
+        command: getCliNodeExecutable(),
         args: [cliEntrypoint, '__internal', 'lody-mcp-http-host'],
         options: {
           // stdin held open as the daemon-death signal; fd 3 is the handshake

@@ -193,6 +193,30 @@ void describe('journey registry', () => {
     assert.ok(failures.some((failure) => failure.includes('why the journey is quarantined')));
   });
 
+  void it('accepts only named, non-empty target lists so a runner can select journeys by target', () => {
+    const named = journey({ targets: ['oss-local', 'cloud'] });
+    const bare = journey({ id: 'LODY-TEST-002', actions: [{ id: 'bare.open' }], targets: 'cloud' });
+    const empty = journey({ id: 'LODY-TEST-003', actions: [{ id: 'empty.open' }], targets: [] });
+    const malformed = journey({
+      id: 'LODY-TEST-004',
+      actions: [{ id: 'malformed.open' }],
+      targets: ['Cloud Desktop'],
+    });
+    const failures = validateRegistry({
+      schemaVersion: 1,
+      scoring,
+      journeys: [named, bare, empty, malformed],
+    });
+    assert.deepEqual(
+      failures.filter((failure) => failure.includes('.targets')),
+      [
+        'journeys[1].targets must be a non-empty array of target names',
+        'journeys[2].targets must be a non-empty array of target names',
+        'journeys[3].targets[0] must be a lowercase target name',
+      ]
+    );
+  });
+
   void it('renders active and backlog rows in deterministic id order', () => {
     const active = journey({
       id: 'LODY-ACTIVE-002',

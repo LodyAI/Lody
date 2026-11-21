@@ -16,6 +16,7 @@ import {
   type SessionTurnInputConfig,
 } from '@lody/shared';
 import type { ReplaceEditableTailInput } from '@lody/shared/session-data';
+import { turnExecutionDigest } from '@lody/shared/e2ee-execution-intent';
 import { SessionEditAndResendService } from './session-edit-and-resend-service';
 import { SessionExecutionService } from './session-execution-service';
 import { createSessionBackend } from './session-backend';
@@ -91,6 +92,13 @@ function createHarness(
     /** A compensation whose follow-up step rejects after restoring the range. */
     rollbackError?: Error;
     history?: SessionHistoryInput[];
+    /** Encrypted workspace: the machine's own input signer. */
+    signMachineInput?: (input: {
+      sessionId: string;
+      targetMachineId: string;
+      userTurnId: string;
+      inputConfig: unknown;
+    }) => Promise<string | undefined>;
   } = {}
 ) {
   const events: string[] = [];
@@ -212,6 +220,10 @@ function createHarness(
     workspaceDocument: {
       repo,
       getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      isEncryptedWorkspace: () => options.signMachineInput !== undefined,
+      signMachineInput: async (
+        input: Parameters<NonNullable<typeof options.signMachineInput>>[0]
+      ) => await options.signMachineInput?.(input),
       persistPendingChanges: vi.fn(async (reason: string) => {
         events.push(reason.endsWith('rollback') ? 'persist-rollback' : 'persist');
         if (options.persistError && reason.endsWith('commit')) {
@@ -247,6 +259,10 @@ function createHarness(
     service,
   });
 }
+
+/** A well-formed 131-character record standing in for a signature over `digest`. */
+const fakeIntentRecord = (digest: string | undefined) =>
+  digest ? digest.repeat(3).slice(0, 131) : undefined;
 
 const spec = {
   sessionId,
@@ -324,6 +340,45 @@ describe('SessionEditAndResendService', () => {
         lastHandledUserMsgId: 'user-1',
       })
     );
+  });
+
+  it('signs the encrypted replacement over exactly the input its start will run', async () => {
+    const signed: unknown[] = [];
+    const harness = createHarness({
+      active: true,
+      signMachineInput: async (input) => {
+        signed.push(input);
+        return fakeIntentRecord(turnExecutionDigest(input));
+      },
+    });
+
+    const result = await harness.service.editAndResend(spec);
+    expect(result, JSON.stringify(result)).toMatchObject({ success: true });
+    const stored = harness.sessionData.history.readAll().at(-1);
+    expect(signed).toEqual([
+      expect.objectContaining({
+        sessionId,
+        targetMachineId: machineId,
+        userTurnId: spec.replacementUserTurnId,
+      }),
+    ]);
+    // The start recomputes this digest from the stored row; it must match what was signed.
+    expect(stored).toMatchObject({
+      id: spec.replacementUserTurnId,
+      e2eeIntent: fakeIntentRecord(turnExecutionDigest({ inputConfig: stored?.inputConfig })),
+    });
+  });
+
+  it('refuses an encrypted replacement it cannot sign without touching history', async () => {
+    const harness = createHarness({ signMachineInput: async () => undefined });
+    const before = harness.sessionData.history.readAll().map((entry) => entry.id);
+
+    expect(await harness.service.editAndResend(spec)).toMatchObject({
+      success: false,
+      error: { message: 'e2ee_signature_unavailable' },
+    });
+    expect(harness.sessionData.history.readAll().map((entry) => entry.id)).toEqual(before);
+    expect(harness.repo.upsertDocMeta).not.toHaveBeenCalled();
   });
 
   it('edits and resends while retaining an inert legacy auto-review pointer', async () => {

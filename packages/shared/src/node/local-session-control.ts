@@ -1,3 +1,4 @@
+import { ManagedDaemonUpgradeOptionsSchema } from '../daemon-update';
 import type { LocalSessionControlRequest, LocalSessionControlResponse } from '../message';
 
 const SESSION_IMAGE_MAX_SIZE_BYTES = 5 * 1024 * 1024;
@@ -57,6 +58,10 @@ function isConfigOptionValueRecord(value: unknown): value is Record<string, stri
   return Object.values(value).every(
     (item) => typeof item === 'string' || typeof item === 'boolean'
   );
+}
+
+function isOptionalPositiveInteger(value: unknown): boolean {
+  return typeof value === 'undefined' || (Number.isInteger(value) && Number(value) > 0);
 }
 
 function isOptionalString(value: unknown): boolean {
@@ -466,6 +471,7 @@ function isACPSessionConfig(value: unknown): boolean {
   // import the ESM runtime table. Keep builtin additions aligned with ai.ts and the TS/CJS
   // parity test when changing this feature.
   const isBuiltinAgentType =
+    agentType === 'antigravity' ||
     agentType === 'claude' ||
     agentType === 'codex' ||
     agentType === 'kimi' ||
@@ -558,6 +564,10 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
 
   if (value.type === 'machine/restart' || value.type === 'machine/upgrade') {
     return (
+      (value.restoreMachineId === undefined ||
+        (value.type === 'machine/restart' &&
+          typeof value.restoreMachineId === 'string' &&
+          value.restoreMachineId.trim().length > 0)) &&
       typeof value.machineId === 'string' &&
       typeof value.workspaceId === 'string' &&
       typeof value.requesterUserId === 'string' &&
@@ -566,6 +576,8 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
       value.requestToken.trim().length > 0 &&
       typeof value.requestId === 'string' &&
       value.requestId.trim().length > 0 &&
+      (typeof value.upgrade === 'undefined' ||
+        ManagedDaemonUpgradeOptionsSchema.safeParse(value.upgrade).success) &&
       (value.type === 'machine/restart' ||
         typeof value.targetVersion === 'undefined' ||
         (typeof value.targetVersion === 'string' && value.targetVersion.trim().length > 0))
@@ -591,6 +603,7 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
       typeof value.configId === 'string' &&
       value.configId.trim().length > 0 &&
       (typeof value.force === 'undefined' || typeof value.force === 'boolean') &&
+      (typeof value.readModelOptions === 'undefined' || value.readModelOptions === true) &&
       typeof value.cliType === 'undefined' &&
       typeof value.agentType === 'undefined' &&
       typeof value.customAcp === 'undefined' &&
@@ -670,22 +683,40 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
     );
   }
 
-  if (value.type === 'session/code-collab-host-start') {
-    return (
-      typeof value.machineId === 'string' &&
-      typeof value.workspaceId === 'string' &&
-      typeof value.sessionId === 'string' &&
-      typeof value.requestedByUserId === 'string' &&
-      value.requestedByUserId.trim().length > 0
-    );
-  }
-
   if (value.type === 'session/image-upload') {
     return (
       typeof value.machineId === 'string' &&
       typeof value.sessionId === 'string' &&
       isOptionalString(value.workspaceId) &&
       isStringList(value.paths, { min: 1, max: SESSION_IMAGE_MAX_COUNT })
+    );
+  }
+
+  if (
+    value.type === 'session/image-prepare-local' ||
+    value.type === 'session/image-resolve-local'
+  ) {
+    if (
+      !['machineId', 'workspaceId', 'sessionId'].every(
+        (key) => typeof value[key] === 'string' && value[key].trim().length > 0
+      )
+    )
+      return false;
+    if (value.type === 'session/image-resolve-local') return isSessionImagePayload(value.image);
+    const source = value.source;
+    return (
+      typeof value.imageId === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.imageId) &&
+      typeof value.fileName === 'string' &&
+      value.fileName.trim().length > 0 &&
+      typeof value.mimeType === 'string' &&
+      SESSION_IMAGE_ALLOWED_MIME_TYPES.has(value.mimeType) &&
+      isObjectRecord(source) &&
+      Object.keys(source).length === 1 &&
+      ((typeof source.path === 'string' && source.path.trim().length > 0) ||
+        (typeof source.base64 === 'string' &&
+          source.base64.length > 0 &&
+          source.base64.length <= 27962028))
     );
   }
 
@@ -769,7 +800,8 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
       typeof value.workspaceId === 'string' &&
       typeof value.sessionId === 'string' &&
       typeof value.requestedByUserId === 'string' &&
-      isOptionalString(value.reason)
+      isOptionalString(value.reason) &&
+      (value.stopProcess === undefined || typeof value.stopProcess === 'boolean')
     );
   }
 
@@ -1078,7 +1110,8 @@ export function isLocalSessionControlResponse(
         value.status === 'installed' ||
         value.status === 'unsupported-platform' ||
         value.status === 'incompatible-host' ||
-        value.status === 'error') &&
+        value.status === 'error' ||
+        value.status === 'reading-model-options') &&
       (typeof value.downloadedBytes === 'undefined' ||
         (typeof value.downloadedBytes === 'number' &&
           Number.isInteger(value.downloadedBytes) &&
@@ -1094,22 +1127,12 @@ export function isLocalSessionControlResponse(
       isOptionalString(value.current) &&
       isOptionalString(value.required) &&
       isOptionalString(value.command) &&
-      isOptionalString(value.error)
-    );
-  }
-
-  if (value.type === 'session/code-collab-host-start_response') {
-    return (
-      typeof value.sessionId === 'string' &&
-      typeof value.success === 'boolean' &&
-      (typeof value.status === 'undefined' ||
-        value.status === 'started' ||
-        value.status === 'already-running' ||
-        value.status === 'disabled' ||
-        value.status === 'failed' ||
-        value.status === 'stopped') &&
       isOptionalString(value.error) &&
-      isOptionalString(value.message)
+      isOptionalString(value.configId) &&
+      isOptionalString(value.modelId) &&
+      isOptionalString(value.modelName) &&
+      isOptionalPositiveInteger(value.modelIndex) &&
+      isOptionalPositiveInteger(value.modelCount)
     );
   }
 
@@ -1159,6 +1182,26 @@ export function isLocalSessionControlResponse(
               isSessionFilePayload(item) &&
               typeof item.downloadUrl === 'string'
           )))
+    );
+  }
+
+  if (value.type === 'session/image-prepare-local_response') {
+    return (
+      typeof value.sessionId === 'string' &&
+      typeof value.success === 'boolean' &&
+      isOptionalString(value.error) &&
+      (typeof value.image === 'undefined' || isSessionImagePayload(value.image)) &&
+      (!value.success || isSessionImagePayload(value.image))
+    );
+  }
+
+  if (value.type === 'session/image-resolve-local_response') {
+    return (
+      typeof value.sessionId === 'string' &&
+      typeof value.success === 'boolean' &&
+      isOptionalString(value.error) &&
+      isOptionalString(value.path) &&
+      (!value.success || (typeof value.path === 'string' && value.path.trim().length > 0))
     );
   }
 

@@ -1,3 +1,4 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 import {
   runWithDaemonWorkspace,
   runWithEncryptedCommandAccess,
@@ -13,7 +14,6 @@ import { z } from 'zod';
 import { getSessionCancelProtocolFields } from './session';
 import { CURRENT_MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
-import { createHistoryWriter } from '@lody/shared';
 import { createLoroSessionData } from '@lody/shared/session-data';
 import { appendUserPromptHistory } from './session';
 import { prepareSessionInput } from './session';
@@ -53,6 +53,7 @@ import {
   MachineFlockReadUnavailableError,
   readAgentAcpCapability,
   runSessionOperationWithSyncedMetadata,
+  assertSessionManagementAccess,
   assertSupportedParentDepth,
   confirmDispatchSyncedBestEffort,
   filterAuthorizedMachineMetas,
@@ -82,7 +83,6 @@ import {
   resolveLocalProjectRefOrThrow,
   selectTargetMachineForCreate,
   shouldWaitForSessionCompletion,
-  selectWorkspaceSummary,
   sortSessionMetas,
   toSessionTranscriptEntries,
   updateSessionActivityTimestamps,
@@ -242,7 +242,7 @@ describe('session command helpers', () => {
 
   it('throws when workspace selection is ambiguous', () => {
     expect(() =>
-      selectWorkspaceSummary([
+      commandRuntime.selectWorkspaceSummary([
         { id: 'ws-1', slug: 'alpha', name: 'Alpha', role: 'member' },
         { id: 'ws-2', slug: 'beta', name: 'Beta', role: 'member' },
       ])
@@ -601,6 +601,79 @@ describe('session command helpers', () => {
     ).toBeUndefined();
   });
 
+  it('validates and filters Codex ultrafast speed tiers per target model', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'builtin',
+      agentType: 'codex',
+      modes: [{ id: 'agent', name: 'Agent' }],
+      models: [
+        { modelId: 'gpt-6.2-sol', name: '6.2 Sol' },
+        { modelId: 'gpt-6.2-astra', name: '6.2 Astra' },
+      ],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'gpt-6.2-astra',
+          options: [
+            { value: 'gpt-6.2-sol', name: '6.2 Sol' },
+            { value: 'gpt-6.2-astra', name: '6.2 Astra' },
+          ],
+        },
+        {
+          id: 'fast-mode',
+          name: 'Fast mode',
+          category: 'model_config',
+          type: 'boolean',
+          currentValue: false,
+          options: [],
+        },
+      ],
+      declaredModelControls: {
+        'gpt-6.2-sol': { fastMode: true, speedTiers: ['fast', 'ultrafast'] },
+        'gpt-6.2-astra': { fastMode: true },
+      },
+      fetchedAt: 1,
+    };
+    const target = createSessionMeta({ agentType: 'codex' });
+    expect(() =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: {
+          modelId: 'gpt-6.2-sol',
+          configOptionValues: { 'fast-mode': 'ultrafast' },
+        },
+        target,
+        capability,
+      })
+    ).not.toThrow();
+    expect(() =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: {
+          modelId: 'gpt-6.2-astra',
+          configOptionValues: { 'fast-mode': 'ultrafast' },
+        },
+        target,
+        capability,
+      })
+    ).toThrow(/Invalid speed tier for model gpt-6.2-astra: ultrafast/);
+    expect(
+      filterCompatibleTurnConfigOptionValues(
+        { 'fast-mode': 'ultrafast' },
+        capability,
+        'gpt-6.2-sol'
+      )
+    ).toEqual({ 'fast-mode': 'ultrafast' });
+    expect(
+      filterCompatibleTurnConfigOptionValues(
+        { 'fast-mode': 'ultrafast' },
+        capability,
+        'gpt-6.2-astra'
+      )
+    ).toBeUndefined();
+  });
+
   it('fills omitted chat follow-up selectors from the target turn and keeps explicit overrides', () => {
     const target = createSessionMeta();
     const capability: AcpCapabilityCacheEntry = {
@@ -832,6 +905,53 @@ describe('session command helpers', () => {
     });
   });
 
+  it('validates options against the target model’s own observed list (LodyAI/Lody#1215)', () => {
+    const thoughtLevel = (values: string[]) => ({
+      id: 'thought_level',
+      name: 'Thinking',
+      category: 'thought_level',
+      type: 'select' as const,
+      currentValue: values[0] ?? '',
+      options: values.map((value) => ({ value, name: value })),
+    });
+    // Probed on swe-2-high, whose ladder lacks `low`.
+    const capability: AcpCapabilityCacheEntry = {
+      ...createAcpCapability(),
+      agentType: 'devin',
+      models: [],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'swe-2-high',
+          options: [
+            { value: 'swe-2-high', name: 'SWE 2' },
+            { value: 'fusion', name: 'Fusion' },
+          ],
+        },
+        thoughtLevel(['medium', 'high', 'max']),
+      ],
+    };
+    const resolve = (cache: AcpCapabilityCacheEntry, effort: string) =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: { modelId: 'fusion', configOptionValues: { thought_level: effort } },
+        target: createSessionMeta(),
+        capability: cache,
+      });
+
+    // Unknown target model: dispatched for the agent to decide, as before.
+    expect(resolve(capability, 'low').configOptionValues).toEqual({ thought_level: 'low' });
+    const observed = {
+      ...capability,
+      observedModelConfigOptions: { fusion: [thoughtLevel(['low', 'medium', 'xhigh', 'max'])] },
+    };
+    expect(resolve(observed, 'low').configOptionValues).toEqual({ thought_level: 'low' });
+    // Once the agent has answered for the target model, its list decides.
+    expect(() => resolve(observed, 'high')).toThrow('Invalid reasoning effort for model fusion');
+  });
+
   it('lets explicit selector config options replace inherited top-level selectors', () => {
     const capability: AcpCapabilityCacheEntry = {
       ...createAcpCapability(),
@@ -1035,6 +1155,55 @@ describe('session command helpers', () => {
   });
 
   it.each(['archive', 'restore', 'delete'] as const)(
+    'requires editing authority before CLI %s writes or cleanup',
+    async (operation) => {
+      const repo = await LoroRepo.create({});
+      const id = 'read-only-target' as SessionId;
+      const meta = createSessionMeta({
+        id,
+        isArchived: operation !== 'archive',
+        title: 'Original',
+      });
+      await repo.upsertDocMeta(getSessionRoomId(id), meta);
+      const manager = {
+        repo,
+        syncMetaOrThrow: async () => {},
+        waitUntilMetaSynced: async () => true,
+        cleanSessionDoc: async () => {},
+      } as unknown as Parameters<typeof runSessionOperationWithSyncedMetadata>[0];
+      const auth = { token: 'synthetic', userId: 'reader', machineId: 'caller' } as Parameters<
+        typeof assertSessionManagementAccess
+      >[0]['auth'];
+      const workspace = { id: 'workspace' } as Parameters<
+        typeof assertSessionManagementAccess
+      >[0]['workspace'];
+      let canEdit = false;
+      const run = () =>
+        runWithEncryptedCommandAccess(
+          async () => (canEdit ? { allowed: true } : { allowed: false, reason: 'not_visible' }),
+          () =>
+            runSessionOperationWithSyncedMetadata(manager, id, operation, (targetId) =>
+              assertSessionManagementAccess({ auth, workspace, manager, sessionId: targetId })
+            )
+        );
+      try {
+        await expect(run()).rejects.toMatchObject({
+          code: 'SESSION_MANAGEMENT_DENIED',
+          retryable: false,
+        });
+        expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toEqual(meta);
+        canEdit = true;
+        await run();
+        const entry = await repo.getDocMeta(getSessionRoomId(id));
+        if (operation === 'delete') expect(isLoroRepoDocDeleted(entry)).toBe(true);
+        else expect(entry?.meta.isArchived).toBe(operation === 'archive');
+      } finally {
+        await repo.destroy();
+      }
+    }
+  );
+
+  it.each(['archive', 'restore', 'delete'] as const)(
     'synchronizes the %s snapshot and changes only the selected containment tree',
     async (operation) => {
       const root = createSessionMeta({
@@ -1084,7 +1253,12 @@ describe('session command helpers', () => {
             cleaned.push(id);
           },
         } as unknown as Parameters<typeof runSessionOperationWithSyncedMetadata>[0];
-        const result = runSessionOperationWithSyncedMetadata(manager, root.id, operation);
+        const result = runSessionOperationWithSyncedMetadata(
+          manager,
+          root.id,
+          operation,
+          async () => {}
+        );
         const rejected = expect(result).rejects.toThrow('metadata unavailable');
         await started.promise;
         expect((await repo.getDocMeta(getSessionRoomId(root.id)))?.meta).toEqual(root);
@@ -1094,7 +1268,7 @@ describe('session command helpers', () => {
         expect(cleaned).toEqual([]);
         failSync = false;
         await expect(
-          runSessionOperationWithSyncedMetadata(manager, root.id, operation)
+          runSessionOperationWithSyncedMetadata(manager, root.id, operation, async () => {})
         ).resolves.toEqual([child.id]);
         for (const session of [root, child]) {
           const entry = await repo.getDocMeta(getSessionRoomId(session.id));
@@ -1133,13 +1307,13 @@ describe('session command helpers', () => {
         } as unknown as Parameters<typeof runSessionOperationWithSyncedMetadata>[0];
         const listDoc = vi.spyOn(repo, 'listDoc').mockRejectedValueOnce(new Error('query failed'));
         await expect(
-          runSessionOperationWithSyncedMetadata(manager, root.id, operation)
+          runSessionOperationWithSyncedMetadata(manager, root.id, operation, async () => {})
         ).rejects.toThrow('query failed');
         expect((await repo.getDocMeta(getSessionRoomId(root.id)))?.meta).toEqual(root);
         listDoc.mockRestore();
         await repo.deleteDoc(getSessionRoomId(root.id));
         await expect(
-          runSessionOperationWithSyncedMetadata(manager, root.id, operation)
+          runSessionOperationWithSyncedMetadata(manager, root.id, operation, async () => {})
         ).rejects.toThrow('Session metadata missing');
         expect(isLoroRepoDocDeleted(await repo.getDocMeta(getSessionRoomId(root.id)))).toBe(true);
       } finally {
@@ -1167,12 +1341,12 @@ describe('session command helpers', () => {
       } as unknown as Parameters<typeof runSessionOperationWithSyncedMetadata>[0];
       const deleteDoc = vi.spyOn(repo, 'deleteDoc').mockRejectedValueOnce(new Error('disk full'));
       await expect(
-        runSessionOperationWithSyncedMetadata(manager, root.id, 'delete')
+        runSessionOperationWithSyncedMetadata(manager, root.id, 'delete', async () => {})
       ).rejects.toThrow('disk full');
       for (const session of [root, child])
         expect((await repo.getDocMeta(getSessionRoomId(session.id)))?.meta).toEqual(session);
       deleteDoc.mockRestore();
-      await runSessionOperationWithSyncedMetadata(manager, root.id, 'delete');
+      await runSessionOperationWithSyncedMetadata(manager, root.id, 'delete', async () => {});
       for (const session of [root, child])
         expect(isLoroRepoDocDeleted(await repo.getDocMeta(getSessionRoomId(session.id)))).toBe(
           true

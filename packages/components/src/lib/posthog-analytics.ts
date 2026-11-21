@@ -78,7 +78,11 @@ export const POSTHOG_INIT_PROPERTY_DENYLIST: string[] = POSTHOG_PROPERTY_DENYLIS
 export type PostHogAnalyticsProperties = Record<string, unknown>;
 
 export type PostHogAnalyticsClient = {
-  capture: (eventName: string, properties?: PostHogAnalyticsProperties) => void;
+  capture: (
+    eventName: string,
+    properties?: PostHogAnalyticsProperties,
+    options?: { uuid?: string }
+  ) => unknown;
   group?: (
     groupType: string,
     groupKey: string,
@@ -240,13 +244,15 @@ export function sanitizePostHogProperties(
 export function capturePostHogEvent(
   postHog: PostHogAnalyticsClient | null | undefined,
   eventName: string,
-  properties?: PostHogAnalyticsProperties
-): void {
+  properties?: PostHogAnalyticsProperties,
+  options?: { uuid?: string }
+): unknown {
   if (!postHog) {
     return;
   }
 
-  postHog.capture(eventName, sanitizePostHogProperties(properties));
+  const safe = sanitizePostHogProperties(properties);
+  return options ? postHog.capture(eventName, safe, options) : postHog.capture(eventName, safe);
 }
 
 export function capturePostHogSampled(

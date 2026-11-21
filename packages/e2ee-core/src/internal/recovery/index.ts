@@ -1,19 +1,34 @@
 export {
   RecoveryVaultError,
+  MIN_RECOVERY_PASSWORD_LENGTH,
+  MAX_RECOVERY_PASSWORD_BYTES,
+  DEFAULT_PASSWORD_KDF,
+  MIN_PASSWORD_KDF,
+  MAX_PASSWORD_KDF,
+  normalizeRecoveryPassword,
+  encryptPasswordWrap,
+  decryptPasswordWrap,
   verifiedPasskeyPrf,
   verifiedPasskeyRegistration,
   vaultPrfInput,
   passkeyUserHandle,
   vaultIdFromPasskeyUserHandle,
   disposePrf,
+  type PasswordKdfParams,
   type VerifiedPasskeyPrf,
   type VerifiedPasskeyRegistration,
   type VaultCiphertext,
 } from './crypto';
 export {
+  MAX_VAULT_PASSWORD_GENERATIONS,
+  passwordWrapEntryId,
+  generateRecoveryVaultId,
   createRecoveryVault,
+  createRecoveryVaultWithPasskey,
+  createRecoveryVaultWithPassword,
   openRecoveryVault,
   openRecoveryVaultWithPasskey,
+  openRecoveryVaultWithPassword,
   parseRecoveryFile,
   wipeRecoveryPackage,
   type RecoveryVault,
@@ -22,6 +37,7 @@ export {
   type RecoveryPrivatePackage,
   type RecoveryEntryReference,
   type RecoveryPasskeyReference,
+  type RecoveryPasswordReference,
 } from './vault';
 export { deriveRecoveryAccessCredential, type RecoveryAccessCredential } from './credential';
 export { generateRecoveryPackage, importRecoveryIdentity, type RecoveryIdentity } from './identity';

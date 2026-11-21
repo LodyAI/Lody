@@ -9,11 +9,13 @@ import {
   EyeClosed,
   MessageCircle,
   Pencil,
+  Play,
   LockKeyhole,
   RefreshCw,
   Save,
   Search,
   ShieldAlert,
+  Square,
   WrapText,
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
@@ -21,6 +23,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import {
   getMachineFlockLocalProjects,
+  resolveSessionFilePath,
   type CodeCollabContentUnavailableReason,
   type SessionId,
   type SessionMeta,
@@ -45,6 +48,11 @@ import {
   resolveSessionLocalProjectRootPath,
 } from '@/lib/session-local-file-source';
 import { useSessionFileActions } from '@/hooks/use-session-file-actions';
+import {
+  LocalHtmlPreviewConsentDialog,
+  LocalHtmlPreviewFrame,
+  useLocalHtmlPreview,
+} from './local-html-preview';
 import { chooseSessionFileSurfaceSource } from '@/lib/session-file-source-selection';
 import { resolveEffectiveCodeCollabWorkspaceId } from '@/lib/code-collab-workspace-id';
 import {
@@ -86,14 +94,12 @@ import {
 } from '@/lib/session-file-language';
 import { getOfficePreviewKind } from '@/lib/session-file-office-source';
 import { downloadBytesAsFile } from '@/lib/download-file';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { useCodeCollabLiveText } from '@/hooks/use-code-collab-live-text';
 import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
-import {
-  SessionMonacoTextViewer,
-  type SessionMonacoExternalTextUpdate,
-} from './session-monaco-text-viewer';
+import { LazySessionMonacoTextViewer } from './lazy-session-monaco-text-viewer';
+import type { SessionMonacoExternalTextUpdate } from './session-monaco-text-viewer';
 import {
   useCodeCollabSaveText,
   type SessionFileLiveSyncStatus,
@@ -106,7 +112,7 @@ import { useLatestRef } from '@/hooks/use-latest-ref';
 import {
   buildCodeCollabMonacoUri,
   registerCodeCollabMonacoModelProvider,
-} from '@/lib/session-monaco-language-providers';
+} from '@/lib/code-collab-monaco-model-provider';
 import {
   normalizeSessionMonacoSelectedLines,
   type SessionMonacoSelectedLines,
@@ -117,8 +123,9 @@ import { FamiconsCloudOfflineOutline } from '@/components/icons/famicons-cloud-o
 import { SessionFileErrorState } from './session-file-error-state';
 import { SessionShikiTextViewer } from './session-shiki-text-viewer';
 import { ManagedPreviewSurface } from './managed-preview-surface';
+import { useTextBoundScriptOptIn } from './use-text-bound-script-opt-in';
 
-import { supportsCredentiallessManagedPreviewFrames } from './managed-preview-frame-cache';
+import { getExecutableHtmlPreviewSupport } from './managed-preview-frame-cache';
 import {
   buildStaticHtmlPreviewDocument,
   getStaticHtmlPreviewLogicalUrl,
@@ -1195,22 +1202,66 @@ function SessionFileContentViewImpl({
   );
 
   const isTextFileReady = data.status === 'ready' && data.snapshot.kind === 'text';
-  const supportsHtmlPreview = supportsCredentiallessManagedPreviewFrames();
+  const htmlScriptSupport = getExecutableHtmlPreviewSupport();
+  const isHtmlFile = isHtmlPath(normalizedPath);
   const htmlPreviewSource =
     data.status === 'ready' &&
     data.snapshot.kind === 'text' &&
     data.snapshot.truncated !== true &&
-    isHtmlPath(normalizedPath)
+    isHtmlFile
       ? (latestEditorTextRef.current ?? data.snapshot.text)
       : null;
-  const isHtmlTextFile = htmlPreviewSource !== null;
-  const showHtmlRendered = isActiveSurface && isHtmlTextFile && htmlRenderMode === 'rendered';
+  // WebKit has no credentialless frames, so HTML there runs scripts only after an
+  // explicit opt-in for this exact text; leaving rendered mode revokes it.
+  const {
+    optedIn: htmlScriptsOptedIn,
+    toggle: toggleHtmlScriptsOptIn,
+    revoke: revokeHtmlScriptsOptIn,
+  } = useTextBoundScriptOptIn(htmlPreviewSource);
+  const supportsHtmlPreview =
+    htmlScriptSupport === 'automatic' || (htmlScriptSupport === 'opt-in' && htmlScriptsOptedIn);
+  // Desktop + file on this machine: serve the real file from its own isolated
+  // origin so relative assets load, after a per-entry consent that decides
+  // JavaScript. Everything else keeps the inline srcdoc preview below.
+  const [localHtmlUnavailablePath, setLocalHtmlUnavailablePath] = useState<string | null>(null);
+  const localHtmlHostPath =
+    localHtmlUnavailablePath !== normalizedPath && sessionFileActions.localHost
+      ? sessionFileActions.resolveHostPath(normalizedPath)
+      : null;
+  const canPreviewHtml =
+    htmlPreviewSource !== null ||
+    (isHtmlFile &&
+      localHtmlHostPath !== null &&
+      data.status === 'ready' &&
+      data.snapshot.kind === 'paged-text');
+  const showHtmlRendered = isActiveSurface && canPreviewHtml && htmlRenderMode === 'rendered';
+  const workspaceRoot = sessionFileActions.workspacePath;
+  const nestedWorkspaceFile =
+    workspaceRoot &&
+    localHtmlHostPath &&
+    resolveSessionFilePath(
+      [{ id: 'main', absolutePath: workspaceRoot }],
+      localHtmlHostPath
+    )?.relativePath.includes('/');
+  const handleLocalHtmlCancel = useCallback(() => setHtmlRenderMode('code'), []);
+  const handleLocalHtmlUnavailable = useCallback(
+    () => setLocalHtmlUnavailablePath(normalizedPath),
+    [normalizedPath]
+  );
+  const localHtmlPreview = useLocalHtmlPreview({
+    active: showHtmlRendered,
+    machineId: session.machineId,
+    hostPath: localHtmlHostPath,
+    onCancel: handleLocalHtmlCancel,
+    onUnavailable: handleLocalHtmlUnavailable,
+  });
+  const useLocalHtml = localHtmlPreview.enabled;
   const htmlPreviewDocument = useMemo(
     () =>
-      showHtmlRendered && supportsHtmlPreview && htmlPreviewSource !== null
+      showHtmlRendered && !useLocalHtml && supportsHtmlPreview && htmlPreviewSource !== null
         ? buildStaticHtmlPreviewDocument(htmlPreviewSource)
         : null,
-    [htmlPreviewSource, showHtmlRendered, supportsHtmlPreview]
+    [htmlPreviewSource, showHtmlRendered, supportsHtmlPreview, useLocalHtml]
   );
   const htmlPreviewLogicalUrl = useMemo(
     () => getStaticHtmlPreviewLogicalUrl(normalizedPath),
@@ -1219,12 +1270,13 @@ function SessionFileContentViewImpl({
 
   useEffect(() => {
     if (showHtmlRendered) return;
+    revokeHtmlScriptsOptIn();
     setHtmlAnnotationEnabled(false);
     setHtmlAnnotationAvailable(false);
     setHtmlPreviewLoading(false);
     setHtmlRuntimeError(null);
     setHtmlPreviewCommand(undefined);
-  }, [showHtmlRendered]);
+  }, [revokeHtmlScriptsOptIn, showHtmlRendered]);
 
   const handleHtmlAnnotationAvailabilityChange = useCallback((available: boolean) => {
     setHtmlAnnotationAvailable(available);
@@ -1238,6 +1290,7 @@ function SessionFileContentViewImpl({
   }, []);
   const handleHtmlBrowserStateChange = useCallback(() => undefined, []);
   const handleHtmlNavigationRequest = useCallback(() => {
+    revokeHtmlScriptsOptIn();
     setHtmlAnnotationEnabled(false);
     setHtmlRenderMode('code');
     toast.warning(
@@ -1246,7 +1299,7 @@ function SessionFileContentViewImpl({
         'Navigation is disabled for self-contained HTML previews.'
       )
     );
-  }, [tRef]);
+  }, [revokeHtmlScriptsOptIn, tRef]);
   const isProviderEditorDirty =
     saveStatus.kind === 'pending' ||
     saveStatus.kind === 'saving' ||
@@ -1332,7 +1385,6 @@ function SessionFileContentViewImpl({
     lastCopyMarkdownRequestSeqRef.current = copyMarkdownRequestSeq;
     void handleCopyMarkdown();
   }, [copyMarkdownRequestSeq, data, handleCopyMarkdown, normalizedPath]);
-  const isHtmlFile = isHtmlPath(normalizedPath);
   const handleDownloadHtml = useCallback(() => {
     if (data.status !== 'ready' || data.snapshot.kind !== 'text') return;
     const content = latestEditorTextRef.current ?? data.snapshot.text;
@@ -1451,6 +1503,8 @@ function SessionFileContentViewImpl({
   // so Cmd-click / F12 reach the right provider when multiple files are
   // open. Unregisters on unmount or when the active fileId / provider
   // changes so a stale entry can't intercept a different mount.
+  // The URI is a serialized `code-collab://` string built without
+  // `monaco-editor`; the lazy viewer parses it once its chunk loads.
   const lspModelUri = useMemo(
     () =>
       isLspEnabled && lspFileId ? buildCodeCollabMonacoUri(lspFileId, normalizedPath) : undefined,
@@ -1608,15 +1662,6 @@ function SessionFileContentViewImpl({
         {...(fileErrorActions ? { fileActions: fileErrorActions } : {})}
       />
     );
-  } else if (data.snapshot.kind === 'paged-text') {
-    body = (
-      <PagedFileViewer
-        key={normalizedPath}
-        source={data.snapshot.source}
-        active={isActiveSurface}
-        onOpenExternal={fileErrorActions?.localHost?.onOpen}
-      />
-    );
   } else if (data.snapshot.kind === 'binary') {
     body = (
       <SessionFileBinaryPreview
@@ -1636,6 +1681,34 @@ function SessionFileContentViewImpl({
         onRetry={retryFile}
       />
     );
+  } else if (showHtmlRendered && useLocalHtml) {
+    const state = localHtmlPreview.state;
+    body =
+      state.status === 'ready' ? (
+        <div {...stylex.props(styles.previewFrame)}>
+          <LocalHtmlPreviewFrame
+            key={localHtmlPreview.reloadKey}
+            url={state.url}
+            allowScripts={state.allowScripts}
+            title={normalizedPath}
+          />
+        </div>
+      ) : state.status === 'error' ? (
+        <SessionFileErrorState message={state.message} onRetry={localHtmlPreview.retry} />
+      ) : state.status === 'opening' ? (
+        <div {...stylex.props(styles.centeredState)}>
+          <Spinner {...stylex.props(styles.spinner16)} />
+        </div>
+      ) : null;
+  } else if (data.snapshot.kind === 'paged-text') {
+    body = (
+      <PagedFileViewer
+        key={normalizedPath}
+        source={data.snapshot.source}
+        active={isActiveSurface}
+        onOpenExternal={fileErrorActions?.localHost?.onOpen}
+      />
+    );
   } else if (showHtmlRendered && !supportsHtmlPreview && htmlPreviewSource !== null) {
     body = <ReadOnlyHtmlPreview text={htmlPreviewSource} />;
   } else if (showHtmlRendered && htmlPreviewDocument !== null) {
@@ -1646,6 +1719,7 @@ function SessionFileContentViewImpl({
           viewerUrl={htmlPreviewLogicalUrl}
           logicalUrl={htmlPreviewLogicalUrl}
           documentHtml={htmlPreviewDocument}
+          scriptsOptedIn={htmlScriptsOptedIn}
           annotationEnabled={htmlAnnotationEnabled}
           command={htmlPreviewCommand}
           {...stylex.props(styles.fullSize)}
@@ -1720,7 +1794,7 @@ function SessionFileContentViewImpl({
               />
             ) : (
               <LazyProviderTextMonacoViewer
-                key={lspModelUri?.toString() ?? liveFileId ?? normalizedPath}
+                key={lspModelUri ?? liveFileId ?? normalizedPath}
                 text={resolveProviderEditorMountText(data.snapshot)}
                 language={getSessionFileMonacoLanguageId(
                   normalizedPath,
@@ -1811,6 +1885,7 @@ function SessionFileContentViewImpl({
   // PDF and Office own their scrollports and need a definite height; the outer
   // ScrollArea content wrapper sizes itself from its children instead.
   const bodyUsesNativeScrolling =
+    useLocalHtml ||
     (isTextFileReady && !showSvgRendered && !showMarkdownRendered) ||
     (data.status === 'ready' &&
       data.snapshot.kind === 'binary' &&
@@ -1820,7 +1895,7 @@ function SessionFileContentViewImpl({
   // status bar (which now only carries save/live/offline state). The search
   // button only appears when a Monaco editor is mounted — a rendered SVG/Markdown
   // preview has no editor to search.
-  const showPreviewToggle = isSvgTextFile || isMarkdownTextFile || isHtmlTextFile || isCsvTextFile;
+  const showPreviewToggle = isSvgTextFile || isMarkdownTextFile || canPreviewHtml || isCsvTextFile;
   const filePreviewActive = isSvgTextFile
     ? svgRenderMode === 'rendered'
     : isMarkdownTextFile
@@ -1886,7 +1961,7 @@ function SessionFileContentViewImpl({
                   }
                 }}
                 showLabel={
-                  isHtmlTextFile && supportsHtmlPreview
+                  canPreviewHtml && !localHtmlHostPath && htmlScriptSupport === 'automatic'
                     ? t('sessions.fileViewer.htmlPreview.show', 'Preview HTML (runs scripts)')
                     : t('sessions.fileViewer.preview.show', 'Preview')
                 }
@@ -1912,7 +1987,34 @@ function SessionFileContentViewImpl({
                 <Copy {...stylex.props(styles.icon)} aria-hidden="true" />
               </button>
             ) : null}
-            {showHtmlRendered && supportsHtmlPreview ? (
+            {showHtmlRendered && !useLocalHtml && htmlScriptSupport === 'opt-in' ? (
+              <button
+                type="button"
+                aria-pressed={htmlScriptsOptedIn}
+                onClick={() => {
+                  setHtmlAnnotationEnabled(false);
+                  toggleHtmlScriptsOptIn();
+                }}
+                title={
+                  htmlScriptsOptedIn
+                    ? t('sessions.fileViewer.htmlPreview.stopScripts', 'Stop scripts')
+                    : t('sessions.fileViewer.htmlPreview.runScripts', 'Run scripts')
+                }
+                aria-label={
+                  htmlScriptsOptedIn
+                    ? t('sessions.fileViewer.htmlPreview.stopScripts', 'Stop scripts')
+                    : t('sessions.fileViewer.htmlPreview.runScripts', 'Run scripts')
+                }
+                {...stylex.props(styles.toolButton, htmlScriptsOptedIn && styles.toolButtonActive)}
+              >
+                {htmlScriptsOptedIn ? (
+                  <Square {...stylex.props(styles.icon)} aria-hidden="true" />
+                ) : (
+                  <Play {...stylex.props(styles.icon)} aria-hidden="true" />
+                )}
+              </button>
+            ) : null}
+            {showHtmlRendered && !useLocalHtml && supportsHtmlPreview ? (
               <button
                 type="button"
                 aria-pressed={htmlAnnotationEnabled}
@@ -1928,10 +2030,11 @@ function SessionFileContentViewImpl({
                 <MessageCircle {...stylex.props(styles.icon)} aria-hidden="true" />
               </button>
             ) : null}
-            {showHtmlRendered && supportsHtmlPreview ? (
+            {showHtmlRendered &&
+            (useLocalHtml ? localHtmlPreview.state.status === 'ready' : supportsHtmlPreview) ? (
               <button
                 type="button"
-                onClick={handleReloadHtmlPreview}
+                onClick={useLocalHtml ? localHtmlPreview.reload : handleReloadHtmlPreview}
                 disabled={isRefreshing}
                 title={t('sessions.browser.reload', 'Reload')}
                 aria-label={t('sessions.browser.reload', 'Reload')}
@@ -2087,6 +2190,16 @@ function SessionFileContentViewImpl({
             showProviderConnecting || shouldUseProviderFileContent ? isSessionMachineOffline : false
           }
           t={t}
+        />
+      ) : null}
+      {useLocalHtml && localHtmlPreview.state.status === 'confirming' ? (
+        <LocalHtmlPreviewConsentDialog
+          key={JSON.stringify([localHtmlHostPath, workspaceRoot])}
+          open
+          fileName={normalizedPath.split('/').pop() ?? normalizedPath}
+          workspaceRoot={nestedWorkspaceFile ? workspaceRoot : null}
+          onConfirm={localHtmlPreview.confirm}
+          onCancel={localHtmlPreview.cancel}
         />
       ) : null}
     </div>
@@ -2670,11 +2783,11 @@ function SessionFileLspPanel({
 }
 
 function LazyProviderTextMonacoViewer(props: SessionTextMonacoViewerProps) {
-  return <LazyTextMonacoViewer {...props} />;
+  return <LazySessionMonacoTextViewer {...props} />;
 }
 
 function LazyTextMonacoViewer(props: SessionTextMonacoViewerProps) {
-  return <SessionMonacoTextViewer {...props} />;
+  return <LazySessionMonacoTextViewer {...props} />;
 }
 
 type SessionTextMonacoViewerProps = {
@@ -2701,5 +2814,7 @@ type SessionTextMonacoViewerProps = {
   readonly externalTextUpdate?: SessionMonacoExternalTextUpdate;
   readonly onExternalTextUpdateApplied?: (result: 'applied' | 'no-op') => void;
   readonly findRequestSeq?: number;
-  readonly modelUri?: import('monaco-editor/esm/vs/editor/editor.api.js').Uri;
+  // Serialized `code-collab://` model URI; kept as a string so this module
+  // never needs the `monaco-editor` import.
+  readonly modelUri?: string;
 };

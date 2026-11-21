@@ -61,10 +61,15 @@ const receiveRound = Effect.fnUntraced(function* <E = never, R = never>(
 });
 const distributeRound = Effect.fnUntraced(function* (
   limit: number,
-  pages: WorkspaceKeyRoundCursors
+  pages: WorkspaceKeyRoundCursors,
+  recipients?: readonly string[]
 ) {
   const distributor = yield* KeyDistributor;
-  const scheduled = yield* distributor.reconcileCurrentEpoch(limit, pages.reconciliation ?? null);
+  const scheduled = yield* distributor.reconcileCurrentEpoch(
+    limit,
+    pages.reconciliation ?? null,
+    recipients
+  );
   const delivered = yield* distributor.resumePendingDeliveries(limit, pages.delivered ?? null);
   return {
     scheduled: scheduled.scheduled,
@@ -106,7 +111,8 @@ export class WorkspaceKeyRoundFailure extends Schema.TaggedError<WorkspaceKeyRou
 export const runWorkspaceKeyRound = Effect.fnUntraced(function* <E = never, R = never>(
   limit = 100,
   cursors: WorkspaceKeyRoundCursors = {},
-  beforeReceive?: Effect.Effect<unknown, E, R>
+  beforeReceive?: Effect.Effect<unknown, E, R>,
+  options?: { readonly recipients?: readonly string[] }
 ) {
   if (!Number.isInteger(limit) || limit < 1 || limit > 100)
     return yield* new WorkspaceKeyRoundError({ reason: 'invalid-limit' });
@@ -114,7 +120,7 @@ export const runWorkspaceKeyRound = Effect.fnUntraced(function* <E = never, R = 
     Schema.decodeUnknownResult(WorkspaceKeyRoundCursors)(cursors)
   ).pipe(Effect.mapError(() => new WorkspaceKeyRoundError({ reason: 'invalid-cursor' })));
   const receive = yield* Effect.result(receiveRound(limit, pages, beforeReceive));
-  const distribution = yield* Effect.result(distributeRound(limit, pages));
+  const distribution = yield* Effect.result(distributeRound(limit, pages, options?.recipients));
   const receiver = yield* KeyReceiver;
   const reportsAfterSend = yield* Effect.result(
     receiver.flushReports(limit, pages.reportsAfterSend ?? null)

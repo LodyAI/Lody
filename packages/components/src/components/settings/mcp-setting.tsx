@@ -4,9 +4,9 @@ import { localMachineIdAtom } from '@/atoms/local-probe';
 import { useEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { SettingsPageActions, SettingsPageLead, useSettingsPane } from './settings-page-header';
-import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
+import { SettingsEmptyState, settingsRecordsCard } from './compact-layout';
 import { useAtomValue } from 'jotai';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { Plus, RefreshCw, Trash2, Settings } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
@@ -229,6 +229,12 @@ export function McpSetting() {
   };
 
   const addLabel = t('settings.mcp.add');
+  const addButton = (
+    <Button size="small" variant="secondary" onClick={() => openEditor({ mode: 'add' })}>
+      <Plus {...stylex.props(catalog.icon)} />
+      {addLabel}
+    </Button>
+  );
 
   return (
     <div {...stylex.props(surface.container)}>
@@ -241,14 +247,11 @@ export function McpSetting() {
             {t('settings.mcp.syncing')}
           </span>
         ) : null}
-        <Button size="small" variant="secondary" onClick={() => openEditor({ mode: 'add' })}>
-          <Plus {...stylex.props(catalog.icon)} />
-          {addLabel}
-        </Button>
+        {servers.length > 0 ? addButton : null}
       </SettingsPageActions>
 
       {servers.length === 0 ? (
-        <SettingsEmptyList>{t('settings.mcp.empty')}</SettingsEmptyList>
+        <SettingsEmptyState title={t('settings.mcp.empty')} action={addButton} />
       ) : (
         <div {...stylex.props(settingsRecordsCard)}>
           {servers.map((server, index) => (

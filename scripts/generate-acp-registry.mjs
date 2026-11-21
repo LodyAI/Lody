@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const REGISTRY_URL = 'https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json';
 const EXCLUDED_REMOTE_REGISTRY_AGENT_IDS = new Set([
+  'antigravity-acp',
   'claude-acp',
   'claude-p',
   'codex-acp',
@@ -18,7 +19,7 @@ const EXCLUDED_REMOTE_REGISTRY_AGENT_IDS = new Set([
 ]);
 const OFFICIAL_NPM_REGISTRY = 'https://registry.npmjs.org/';
 const MAX_REGISTRY_ICON_BYTES = 256 * 1024;
-const EXTRA_REMOTE_REGISTRY_ICON_IDS = ['grok-build', 'pi-acp', 'devin', 'dimcode', 'kimi'];
+const EXTRA_REMOTE_REGISTRY_ICON_IDS = ['antigravity-acp', 'grok-build', 'pi-acp', 'devin', 'dimcode', 'kimi'];
 const LOCAL_ONLY_REGISTRY_ICON_IDS = ['reasonix'];
 const INTERACTIVE_CLAUDE_ACP_VERSION = '0.1.5';
 const INTERACTIVE_CLAUDE_REGISTRY_AGENT = {

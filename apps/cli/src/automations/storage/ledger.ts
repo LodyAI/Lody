@@ -1,9 +1,13 @@
 import type { SessionAutomationObservation } from '@/session/automation-observations';
 import { createHash, randomUUID } from 'node:crypto';
+import path from 'node:path';
 import {
   automationResultSchema,
   automationRegistrationSchema,
+  automationRunSchema,
   type AutomationRegistration,
+  type AutomationRun,
+  type AutomationRunExit,
   type AutomationWait,
   type AutomationResult,
   type AutomationEvidence,
@@ -133,6 +137,102 @@ export class AutomationLedger {
       return wait;
     });
   }
+  /** Matching unfinished runs deduplicate, so a repeated request never starts a second process. */
+  registerRun(
+    input: AutomationRun,
+    sessionId: string,
+    userId: string,
+    logDirectory: string,
+    now: number
+  ): AutomationWait {
+    const { reason, ...run } = automationRunSchema.parse(input);
+    return this.connection.withImmediate(() => {
+      const existing = this.waits(userId, sessionId).find(
+        (wait) =>
+          ['waiting', 'checking'].includes(wait.state) &&
+          wait.run &&
+          !wait.run.exit &&
+          isDeepStrictEqual(
+            {
+              command: wait.run.command,
+              args: wait.run.args,
+              cwd: wait.run.cwd,
+              env: wait.run.env,
+            },
+            { command: run.command, args: run.args, cwd: run.cwd, env: run.env }
+          )
+      );
+      if (existing) return existing;
+      const id = randomUUID();
+      const wait: AutomationWait = {
+        id,
+        sessionId,
+        workspaceId: this.workspaceId,
+        ownerUserId: userId,
+        ownerMachineId: this.machineId,
+        reason: reason ?? [run.command, ...run.args].join(' ').slice(0, 2000),
+        // Exit wakes the check at once; the interval only bounds a missed wake.
+        intervalMs: 60_000,
+        run: { ...run, logPath: path.join(logDirectory, `${id}.log`) },
+        state: 'waiting',
+        createdAt: now,
+        updatedAt: now,
+        nextCheckAt: now,
+        checks: 0,
+        consecutiveErrors: 0,
+      };
+      this.writeWait(wait);
+      return wait;
+    });
+  }
+  /** Claims the only start of a run. A claimed run without a live owner reports interruption. */
+  claimRunStart(id: string, now: number): AutomationWait | undefined {
+    return this.connection.withImmediate(() => {
+      const prior = this.wait(id);
+      if (prior?.state !== 'checking' || !prior.run || prior.run.startedAt !== undefined)
+        return undefined;
+      const next = { ...prior, run: { ...prior.run, startedAt: now }, updatedAt: now };
+      this.writeWait(next);
+      return next;
+    });
+  }
+  /** A new owner holds no runs: started, unfinished runs are due for an interruption report. */
+  orphanStartedRuns(now: number): void {
+    this.connection.withImmediate(() => {
+      const rows = this.connection.raw
+        .prepare(`SELECT payload FROM waits WHERE state IN ('waiting','checking')
+        AND json_extract(payload,'$.run.startedAt') IS NOT NULL
+        AND json_extract(payload,'$.run.exit') IS NULL`)
+        .all() as JsonRow[];
+      for (const row of rows) {
+        const wait = JSON.parse(row.payload) as AutomationWait;
+        this.writeWait({ ...wait, state: 'waiting', nextCheckAt: now, updatedAt: now });
+      }
+    });
+  }
+  recordRunPid(id: string, pid: number, now: number): void {
+    this.connection.withImmediate(() => {
+      const prior = this.wait(id);
+      if (!prior?.run || prior.run.exit) return;
+      this.writeWait({ ...prior, run: { ...prior.run, pid }, updatedAt: now });
+    });
+  }
+  /** First observed exit wins and makes the wait due; terminal waits ignore late exits. */
+  recordRunExit(id: string, exit: AutomationRunExit, now: number): AutomationWait | undefined {
+    return this.connection.withImmediate(() => {
+      const prior = this.wait(id);
+      if (!prior?.run || prior.run.exit || !['waiting', 'checking'].includes(prior.state))
+        return undefined;
+      const next = {
+        ...prior,
+        run: { ...prior.run, exit },
+        nextCheckAt: Math.min(prior.nextCheckAt, now),
+        updatedAt: now,
+      };
+      this.writeWait(next);
+      return next;
+    });
+  }
   private writeWait(wait: AutomationWait): void {
     this.connection.raw
       .prepare(`INSERT INTO waits VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET
@@ -240,7 +340,8 @@ export class AutomationLedger {
           'checking',
           {
             state: 'waiting',
-            nextCheckAt: now + wait.intervalMs,
+            // A run exit recorded during this check is due now, not after another interval.
+            nextCheckAt: current.run?.exit ? now : now + wait.intervalMs,
             consecutiveErrors: 0,
             lastError: undefined,
           },
@@ -623,6 +724,24 @@ export class AutomationLedger {
   }
   receipt(id: string): AutomationReceipt | undefined {
     return this.read('receipts', id);
+  }
+  /** Receipts created for one published event, across rule revisions. */
+  eventReceipts(source: string, eventId: string): AutomationReceipt[] {
+    return (
+      this.connection.raw
+        .prepare(
+          "SELECT payload FROM receipts WHERE json_extract(payload,'$.event.source')=? AND json_extract(payload,'$.event.id')=?"
+        )
+        .all(source, eventId) as JsonRow[]
+    ).map((row) => JSON.parse(row.payload) as AutomationReceipt);
+  }
+  /** Whether a rule accepted the event and has not finished handling it. */
+  hasEventDelivery(source: string, eventId: string): boolean {
+    return !!this.connection.raw
+      .prepare(
+        "SELECT 1 FROM deliveries WHERE state='accepted' AND json_extract(payload,'$.event.source')=? AND json_extract(payload,'$.event.id')=? LIMIT 1"
+      )
+      .get(source, eventId);
   }
   activities(limit = 50, before?: number): AutomationReceipt[] {
     return (

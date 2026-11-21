@@ -1,6 +1,6 @@
 import { useAtomValue } from 'jotai';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { getScheduleRoomId, ScheduleRepository, type ScheduleRegistryRow } from '@lody/shared';
+import { getScheduleRoomId, type ScheduleRegistryRow } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import { scheduledMessageText } from './scheduled-message-content';
@@ -89,16 +89,6 @@ export function useScheduledMessageContents(
     }
     const controller = new AbortController();
     let disposed = false;
-    const repository = new ScheduleRepository(runtime.repo, runtime.workspaceId, {
-      protectedContent: runtime.contentMode === 'e2ee',
-    });
-    const readText = async (target: Target) => {
-      try {
-        return scheduledMessageText(await repository.read(target.scheduleId));
-      } catch {
-        return undefined;
-      }
-    };
     const current = new Map<string, string>();
     const pending: Target[] = [];
     for (const target of targetsRef.current) {
@@ -116,6 +106,20 @@ export function useScheduledMessageContents(
     }
 
     void (async () => {
+      // Boot-path file: `loro-mirror` (and `loro-crdt` WASM with it) must
+      // stay out of the initial chunk, so the repository loads lazily here.
+      const { ScheduleRepository } = await import('@lody/shared/schedule-repository');
+      const repository = new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+        protectedContent: runtime.contentMode === 'e2ee',
+        signDeclaration: runtime.signScheduleDeclaration,
+      });
+      const readText = async (target: Target) => {
+        try {
+          return scheduledMessageText(await repository.read(target.scheduleId));
+        } catch {
+          return undefined;
+        }
+      };
       const missing: Target[] = [];
       await forEachWithConcurrency(pending, READ_CONCURRENCY, async (target) => {
         const text = await readText(target);

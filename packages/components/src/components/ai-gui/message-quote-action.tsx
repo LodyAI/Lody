@@ -8,7 +8,10 @@ import { toast } from '@/lib/toast';
 import { useSafeAreaCollisionPadding } from '@/hooks/use-safe-area-insets';
 import { selectedMessageMarkdown } from './message-quote-markdown';
 
-const styles = stylex.create({ floating: { position: 'fixed', zIndex: 80 } });
+const styles = stylex.create({
+  floating: { position: 'fixed', zIndex: 80 },
+});
+
 type Capture = {
   text: string;
   range: Range;
@@ -199,7 +202,8 @@ export function MessageQuoteAction({
       win.visualViewport?.removeEventListener('scroll', schedule);
     };
   }, [enabled, root, safeBottom, safeLeft, safeRight, safeTop]);
-  if (!capture || !root || !enabled) return null;
+  if (!root || !enabled) return null;
+  if (!capture) return null;
   return createPortal(
     <div ref={actionRef} {...stylex.props(styles.floating)}>
       <Button
@@ -259,10 +263,7 @@ export function MessageQuoteAction({
             );
             return;
           }
-          if (onQuoteRef.current(markdown)) {
-            root.ownerDocument.getSelection()?.removeAllRanges();
-            setCapture(null);
-          }
+          if (onQuoteRef.current(markdown)) setCapture(null);
         }}
       >
         <Quote size={14} />

@@ -290,6 +290,20 @@ function topLevelAwaitFixed(options) {
       const bundleAsts = await parseBundleAsts(bundleChunks);
       const bundleInfo = await parseBundleInfo(bundleAsts);
 
+      // Upstream wraps chunks containing dynamic imports too, but propagates
+      // initialization waits only from chunks containing real top-level await.
+      // A static consumer must wait for either kind of wrapped export.
+      const pending = Object.values(bundleInfo).filter((chunk) => chunk.transformNeeded);
+      for (const chunk of pending) {
+        for (const importer of chunk.importedBy) {
+          const consumer = bundleInfo[importer];
+          if (!consumer.transformNeeded) {
+            consumer.transformNeeded = true;
+            pending.push(consumer);
+          }
+        }
+      }
+
       await Promise.all(
         Object.keys(bundleChunks).map(async (moduleName) => {
           if (!bundleInfo[moduleName].transformNeeded) {

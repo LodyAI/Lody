@@ -35,9 +35,8 @@ const CommandDialog = ({
           z-index: 50 (from @diceui/shared's anchored positioner), and the shared dialog's
           `z-[var(--z-dialog)]` resolves to `auto` (that CSS var is never defined). Without
           an explicit z-index the palette renders *under* an open mention popover. Pin the
-          overlay AND content above it via --z-command-palette (registry value 85, with an
-          inline fallback so it works even though the var isn't globally defined).
-          See packages/components/src/lib/editor-overlay-z-index.ts for the layer scale. */}
+          overlay AND content above it via --z-command-palette (with an inline fallback
+          so it works even though the var isn't globally defined). */}
       {/* Fixed, screen-relative height (flex column overrides the dialog's default grid)
           so the panel never resizes or shifts as the result list grows / shrinks / filters —
           the list scrolls inside instead. */}

@@ -23,6 +23,8 @@ import { space } from '@lody/ui/tokens/scales.stylex';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
+import type { AcpModelOptionsRefreshProgress } from '@/hooks/use-refresh-machine-acp-capabilities';
+import { formatModelOptionsProgressText } from './model-options-progress';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
 import { formatLocalizedRelativeTime } from '@/lib/format-relative-time';
@@ -35,19 +37,25 @@ import {
   getAgentRateLimitWindows,
 } from '@/lib/session-usage';
 
-/** The panel, rather than the viewport, decides whether quota fits beside the name. */
-const ROOMY = '@container (min-width: 28rem)';
+/** Refreshes one Provider; `onModelOptionsProgress` names each model whose options are read. */
+export type ProviderRefreshHandler = (
+  config: AgentConfigMeta,
+  options?: { onModelOptionsProgress?: (progress: AcpModelOptionsRefreshProgress) => void }
+) => Promise<void>;
 
 const styles = stylex.create({
-  root: { minWidth: 0, containerType: 'inline-size' },
+  root: { minWidth: 0 },
   row: {
     display: 'grid',
-    gridTemplateColumns: { default: 'minmax(0, 1fr) auto', [ROOMY]: 'minmax(0, 1fr) auto auto' },
+    gridTemplateColumns: 'minmax(0, 1fr) auto',
     alignItems: 'center',
     minWidth: 0,
     paddingInlineEnd: space[4],
   },
   main: { gridColumn: 1, gridRow: 1, gap: '10px', paddingInline: space[4], paddingBlock: space[2] },
+  // When quota follows on the next grid row, the main button's bottom padding
+  // becomes the inter-line gap instead of the row's edge — hand it to `usage`.
+  mainWithUsage: { paddingBlockEnd: 0 },
   mainList: {
     gridColumn: 1,
     gridRow: 1,
@@ -68,17 +76,20 @@ const styles = stylex.create({
   glyph: { width: '16px', height: '16px' },
   glyphList: { width: '20px', height: '20px' },
   body: { flexGrow: 1, minWidth: 0 },
+  // Quota is never worth the name it would squeeze: it takes the line under
+  // the identity, aligned with the name text, and wraps at full row width.
   usage: {
-    gridColumn: { default: '1 / -1', [ROOMY]: '2' },
-    gridRow: { default: 2, [ROOMY]: 1 },
+    gridColumn: '1 / -1',
+    gridRow: 2,
     display: 'flex',
-    justifyContent: { default: 'flex-start', [ROOMY]: 'flex-end' },
-    paddingInlineStart: { default: '50px', [ROOMY]: 0 },
-    paddingBottom: { default: space[2], [ROOMY]: 0 },
+    justifyContent: 'flex-start',
+    paddingInlineStart: '50px',
+    paddingTop: space[1],
+    paddingBottom: space[2],
   },
-  usageList: { paddingInlineStart: { default: '60px', [ROOMY]: 0 } },
+  usageList: { paddingInlineStart: '60px' },
   trailing: {
-    gridColumn: { default: 2, [ROOMY]: 3 },
+    gridColumn: 2,
     gridRow: 1,
     display: 'flex',
     alignItems: 'center',
@@ -100,7 +111,7 @@ export type ProviderRowProps = {
   machine: MachineViewMeta | undefined;
   onEdit: (config: AgentConfigMeta) => void;
   onDelete?: (config: AgentConfigMeta) => Promise<void>;
-  onRefresh?: (config: AgentConfigMeta) => Promise<void>;
+  onRefresh?: ProviderRefreshHandler;
   /**
    * Density: `card` is the compact line of the desktop provider card, `list`
    * the roomier mobile one. Neither draws a surface: the list draws one card
@@ -196,6 +207,7 @@ export function ProviderRow({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [modelProgress, setModelProgress] = useState<AcpModelOptionsRefreshProgress | null>(null);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const binaryProgress = useMachineAcpBinaryProgress(
     runtime,
@@ -223,7 +235,7 @@ export function ProviderRow({
     if (!onRefresh) return;
     try {
       setRefreshing(true);
-      await onRefresh(config);
+      await onRefresh(config, { onModelOptionsProgress: setModelProgress });
       toast.success(
         t('settings.agent.provider.refreshSuccess', 'Refreshed {{name}}', { name: config.name })
       );
@@ -236,6 +248,7 @@ export function ProviderRow({
       );
     } finally {
       setRefreshing(false);
+      setModelProgress(null);
     }
   };
 
@@ -269,8 +282,12 @@ export function ProviderRow({
         <button
           type="button"
           onClick={() => onEdit(config)}
-          {...stylex.props(catalog.rowMain, compact ? styles.main : styles.mainList)}
-          aria-label={t('agents.editConfig', 'Edit config')}
+          {...stylex.props(
+            catalog.rowMain,
+            compact ? styles.main : styles.mainList,
+            hasUsageSummary && styles.mainWithUsage
+          )}
+          aria-label={t('agents.editConfig', 'Edit Config')}
         >
           <div {...stylex.props(styles.icon, !compact && styles.iconList)}>
             <AgentIcon
@@ -350,9 +367,9 @@ export function ProviderRow({
           ) : null}
         </div>
       </div>
-      {refreshing && binaryProgressText ? (
+      {refreshing && (modelProgress || binaryProgressText) ? (
         <div role="status" {...stylex.props(styles.progress)}>
-          {binaryProgressText}
+          {modelProgress ? formatModelOptionsProgressText(t, modelProgress) : binaryProgressText}
         </div>
       ) : null}
       <AlertDialog.Root open={deleteOpen} onOpenChange={setDeleteOpen}>
@@ -427,11 +444,13 @@ export function labelForAgent(cliType: AgentConfigCliType, agentType: string): s
   if (cliType === 'builtin') {
     if (agentType === 'claude') return 'Claude';
     if (agentType === 'codex') return 'Codex';
+    if (agentType === 'antigravity') return 'Antigravity';
     return agentType;
   }
   if (cliType === 'custom') {
     return 'Custom';
   }
+  if (agentType === 'antigravity-acp') return 'Antigravity ACP (Legacy)';
   const registry = REGISTRY_ACP_AGENTS.find((a) => a.id === agentType);
   return registry?.name ?? agentType;
 }

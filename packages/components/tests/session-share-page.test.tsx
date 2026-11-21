@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,6 +17,11 @@ const language = vi.hoisted(() => ({
   changeLanguage: vi.fn(async (next: string) => {
     language.resolvedLanguage = next;
   }),
+}));
+vi.mock('@/i18n', () => ({
+  // The reader's language switch routes through `setAppLanguage` now; the test
+  // owns the resolved language, so delegate straight to its changeLanguage.
+  setAppLanguage: (next: string) => language.changeLanguage(next),
 }));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({

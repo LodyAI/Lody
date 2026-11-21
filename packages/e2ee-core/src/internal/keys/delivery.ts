@@ -48,12 +48,11 @@ export function epochDeliveryId(context: EpochEnvelopeContext) {
   });
 }
 /**
- * Deliver one envelope to the mailbox: reuse the outbox original or prepare and
- * save one, authenticate it against the current ledger, put it and read it
- * back. `Stored` means the read-back matched; `Pending` means retry later.
- * Finite: no scheduler, implicit retry, key publication or install receipt.
+ * Prepare one delivery without mailbox I/O: reuse the outbox original or prepare
+ * and retain it, then authenticate it against the current verified ledger.
+ * It returns ciphertext only; preparation is never delivery or install evidence.
  */
-export const deliverEpochEnvelope = Effect.fnUntraced(function* <E, R>(input: {
+export const prepareEpochDelivery = Effect.fnUntraced(function* <E, R>(input: {
   readonly context: EpochEnvelopeContext;
   readonly ledger: () => Effect.Effect<LedgerView, E, R>;
   readonly prepare?: { readonly key: Bytes.EpochKey; readonly signer: DeviceSigner };
@@ -65,8 +64,7 @@ export const deliverEpochEnvelope = Effect.fnUntraced(function* <E, R>(input: {
     recipient: yield* Effect.fromResult(Bytes.signingPublicKey(input.context.recipient.toBytes())),
   };
   const slot = yield* Effect.fromResult(epochDeliveryId(context));
-  const outbox = own(yield* DeliveryOutbox),
-    mailbox = own(yield* KeyMailbox);
+  const outbox = own(yield* DeliveryOutbox);
   let seen: LedgerView | undefined;
   const currentLedger = () =>
     Effect.gen(function* () {
@@ -99,6 +97,17 @@ export const deliverEpochEnvelope = Effect.fnUntraced(function* <E, R>(input: {
   // Disk and injected transport/storage capabilities cannot establish author permission.
   const view = yield* currentLedger();
   yield* Effect.fromResult(authenticateEpochEnvelope(view, context, frame));
+  return { slot, frame };
+});
+
+/** Send the authenticated outbox original; preparation performs no mailbox I/O. */
+export const deliverEpochEnvelope = Effect.fnUntraced(function* <E, R>(input: {
+  readonly context: EpochEnvelopeContext;
+  readonly ledger: () => Effect.Effect<LedgerView, E, R>;
+  readonly prepare?: { readonly key: Bytes.EpochKey; readonly signer: DeviceSigner };
+}) {
+  const mailbox = own(yield* KeyMailbox);
+  const { slot, frame } = yield* prepareEpochDelivery(input);
   // An unavailable backend leaves the delivery Pending; the caller retries the same
   // original. A refusal (unauthorized, conflict, invalid response) is a failure.
   const unavailable =

@@ -238,7 +238,8 @@ function GlobalShortcutRow({
   const recording = status === 'recording';
   const isOverridden = binding !== defaultBinding;
 
-  let helper: ReactNode = t('settings.keyboardShortcuts.globalHint');
+  let helper: ReactNode;
+  const info = t('settings.keyboardShortcuts.globalHint');
   if (error === 'conflict') {
     helper = (
       <span {...stylex.props(styles.error)}>{t('settings.keyboardShortcuts.globalConflict')}</span>
@@ -259,7 +260,7 @@ function GlobalShortcutRow({
   }
 
   return (
-    <CompactRow label={label} helper={helper} alignTop className={ROW_MARKER}>
+    <CompactRow label={label} helper={helper} info={info} alignTop className={ROW_MARKER}>
       <div {...stylex.props(styles.controls)}>
         <div {...stylex.props(styles.shortcutSlot)}>
           {recording ? (

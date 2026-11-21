@@ -86,11 +86,14 @@ export async function pairRemoteMachineLegacy(options: {
   for (;;) {
     options.signal.throwIfAborted();
     const status = RemoteMachineStatusSchema.parse(await options.claim(body, options.signal));
-    if (
-      status.pairingSessionId !== offer.pairingSessionId ||
-      (status.material && JSON.stringify(status.material) !== JSON.stringify(material))
-    )
+    if (status.pairingSessionId !== offer.pairingSessionId)
       throw new Error('e2ee_pairing_conflict');
+    // Another machine's claim on the same command, before or after ours; never admit it.
+    if (
+      (status.material && JSON.stringify(status.material) !== JSON.stringify(material)) ||
+      (status.status === 'conflict' && status.noAdmissionReserved === true)
+    )
+      throw new Error('e2ee_pairing_claimed_by_another_machine');
     options.show({
       summary,
       protection: material.protection,

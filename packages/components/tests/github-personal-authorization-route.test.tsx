@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   atoms: new Map<string, unknown>(),
   beginArgs: null as Record<string, unknown> | null,
   completeArgs: null as Record<string, unknown> | null,
+  completeWait: null as Promise<void> | null,
   navigate: (options: { hash?: string }) => {
     window.history.replaceState(null, '', `/team/chat${options.hash ? `#${options.hash}` : ''}`);
     return Promise.resolve();
@@ -18,7 +19,12 @@ vi.mock('@tanstack/react-router', () => ({
     ...options,
     useParams: () => ({ workspaceName: 'team' }),
   }),
-  useLocation: () => ({ pathname: '/team/settings/github', search: {} }),
+  useLocation: () => ({
+    pathname: '/team/settings/github',
+    search: {},
+    searchStr: window.location.search,
+    hash: window.location.hash.slice(1),
+  }),
   useNavigate: () => state.navigate,
   Outlet: () => null,
 }));
@@ -59,6 +65,7 @@ vi.mock('@lody/platform/react', () => ({
       throw new Error('network boundary');
     }
     state.completeArgs = args;
+    await state.completeWait;
     return { success: true };
   },
 }));
@@ -82,6 +89,7 @@ beforeEach(() => {
   state.atoms.clear();
   state.beginArgs = null;
   state.completeArgs = null;
+  state.completeWait = null;
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -124,4 +132,56 @@ it('carries the OAuth return through the desktop settings route into the modal h
   });
   expect(window.location.hash).toBe('');
   expect(sessionStorage.length).toBe(0);
+});
+
+it('does not restore a previous installation callback over navigation while OAuth completion is pending', async () => {
+  vi.stubEnv('VITE_CONVEX_SITE_URL', 'https://synthetic.convex.site');
+  let finish!: () => void;
+  state.completeWait = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const retry =
+    'https://synthetic.convex.site/api/github/callback?installation_id=42&setup_action=update&state=install-state';
+  window.history.replaceState(
+    null,
+    '',
+    `/team/settings/github?github_install_error=authorization_required#github-install-retry=${encodeURIComponent(retry)}`
+  );
+  storePersonalGitHubProof('state', 'verifier');
+  window.history.replaceState(
+    null,
+    '',
+    `/team/settings/github#github-personal=${encodeURIComponent(JSON.stringify({ state: 'state', code: 'code' }))}`
+  );
+  await act(async () => root.render(createElement(SettingsHook)));
+  window.history.replaceState(null, '', '/another-team/chat?context=github#new-context');
+  await act(async () => finish());
+  expect(window.location.pathname + window.location.search + window.location.hash).toBe(
+    '/another-team/chat?context=github#new-context'
+  );
+  vi.unstubAllEnvs();
+});
+
+it('restores the same installation retry after OAuth completion for an explicit retry', async () => {
+  vi.stubEnv('VITE_CONVEX_SITE_URL', 'https://synthetic.convex.site');
+  const retry =
+    'https://synthetic.convex.site/api/github/callback?installation_id=42&setup_action=update&state=install-state';
+  const recovery = `?github_install_error=authorization_required#github-install-retry=${encodeURIComponent(retry)}`;
+  window.history.replaceState(null, '', `/team/settings/github${recovery}`);
+  storePersonalGitHubProof('state', 'verifier');
+  window.history.replaceState(
+    null,
+    '',
+    `/team/settings/github#github-personal=${encodeURIComponent(JSON.stringify({ state: 'state', code: 'code' }))}`
+  );
+  await act(async () => root.render(createElement(SettingsHook)));
+  expect(window.location.pathname).toBe('/team/settings/github');
+  expect(window.location.search + window.location.hash).toBe(recovery);
+  expect(state.completeArgs).toEqual({
+    workspaceId: 'workspace',
+    state: 'state',
+    code: 'code',
+    verifier: 'verifier',
+  });
+  vi.unstubAllEnvs();
 });

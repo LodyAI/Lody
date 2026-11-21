@@ -1,1 +1,0 @@
-[Shiroi - Modern Blog System](https://github.com/Innei/Shiroi)

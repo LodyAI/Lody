@@ -13,7 +13,8 @@ export const IPC_INVOKE_SERVICE_GROUPS = [
   'sessionControl',
   'storageGuard',
   'terminal',
-  'updater'
+  'updater',
+  'workspaceBundle'
 ] as const
 
 const INVOKE_SERVICE_GROUP_VALUES = new Set<string>(IPC_INVOKE_SERVICE_GROUPS)
@@ -61,6 +62,10 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'prepareFeatureRpc',
       'acceptFeatureRpcResponse',
       'prepareDispatch',
+      'signScheduleDeclaration',
+      'irohReady',
+      'irohPath',
+      'irohCall',
       'inspectCachedState',
       'readMachineSharing',
       'updateMachineSharing',
@@ -68,6 +73,7 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'contentStreamsToken',
       'removeMember',
       'setMemberRole',
+      'transferOwnership',
       'refresh',
       'prepareCreation',
       'recordCreated',
@@ -83,6 +89,9 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'updateKeys',
       'revokeDevice',
       'createRecoveryVault',
+      'saveRecoveryVaultFile',
+      'setRecoveryPassword',
+      'removeRecoveryPassword',
       'inspectRecoveryFile',
       'recoveryReplacementPlan',
       'beginRecoveryReplacement',
@@ -90,6 +99,7 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'abandonRecoveryReplacement',
       'recentAccountSecurityEvents',
       'setupWorkspaceRecovery',
+      'setupRecoveryForWorkspaces',
       'restoreFromRecoveryFile',
       'recoveryPasskeyAvailable',
       'addRecoveryPasskey',

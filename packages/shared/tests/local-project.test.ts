@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Cause, Deferred, Effect, Exit, Layer, Option } from 'effect';
 
@@ -27,33 +27,46 @@ function makeTempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'lody-local-project-'));
 }
 
+function stripGhSessionBinPath(rawPath: string | undefined): string {
+  return (rawPath ?? '')
+    .split(path.delimiter)
+    .filter((segment) => segment.length > 0 && !segment.includes('gh-session-bin'))
+    .join(path.delimiter);
+}
+
+function buildSanitizedGitEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && !/^(GIT_|SSH_|LODY_GIT_)/.test(key)) {
+      env[key] = value;
+    }
+  }
+  env.PATH = stripGhSessionBinPath(process.env.PATH);
+  env.GIT_CONFIG_NOSYSTEM = '1';
+  env.GIT_CONFIG_GLOBAL = os.devNull;
+  return env;
+}
+
 function runGit(cwd: string, args: string[]): string {
   return execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], {
     cwd,
+    env: buildSanitizedGitEnv(),
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
 }
 
-function runGitWithInput(cwd: string, args: string[], input: string): string {
-  return execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], {
-    cwd,
-    encoding: 'utf8',
-    input,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  }).trim();
-}
+let templateRootDir: string | null = null;
+let templateBaseProjectDir: string | null = null;
+let templateClonedProjectDir: string | null = null;
+let projectSeq = 0;
 
-function createClonedProjectWithUpstreamRemote(baseDir: string): string {
-  const seedDir = path.join(baseDir, 'seed');
-  const remoteDir = path.join(baseDir, 'remote.git');
-  const projectDir = path.join(baseDir, 'git-project');
-  fs.mkdirSync(seedDir);
-
-  runGit(seedDir, ['init', '-b', 'main']);
-  fs.writeFileSync(path.join(seedDir, 'README.md'), '# hello\n', 'utf8');
-  runGit(seedDir, ['add', 'README.md']);
-  runGit(seedDir, [
+function buildBaseGitProjectTemplate(projectDir: string): string {
+  fs.mkdirSync(projectDir, { recursive: true });
+  runGit(projectDir, ['init', '-b', 'main']);
+  fs.writeFileSync(path.join(projectDir, 'README.md'), '# hello\n', 'utf8');
+  runGit(projectDir, ['add', 'README.md']);
+  runGit(projectDir, [
     '-c',
     'user.name=Test',
     '-c',
@@ -62,6 +75,15 @@ function createClonedProjectWithUpstreamRemote(baseDir: string): string {
     '-m',
     'init',
   ]);
+  return projectDir;
+}
+
+function buildClonedProjectTemplate(baseDir: string): string {
+  fs.mkdirSync(baseDir, { recursive: true });
+  const seedDir = path.join(baseDir, 'seed');
+  const remoteDir = path.join(baseDir, 'remote.git');
+  const projectDir = path.join(baseDir, 'git-project');
+  buildBaseGitProjectTemplate(seedDir);
 
   runGit(seedDir, ['checkout', '-b', 'feature/remote-branch']);
   fs.writeFileSync(path.join(seedDir, 'feature.txt'), 'remote branch\n', 'utf8');
@@ -86,25 +108,18 @@ function createClonedProjectWithUpstreamRemote(baseDir: string): string {
   return projectDir;
 }
 
+function createClonedProjectWithUpstreamRemote(baseDir: string): string {
+  const projectDir = path.join(baseDir, 'git-project');
+  fs.cpSync(templateClonedProjectDir!, projectDir, { recursive: true });
+  return projectDir;
+}
+
 function createGitProjectWithRemotes(
   baseDir: string,
   remotes: Array<{ name: string; url: string }>
 ): string {
-  const projectDir = path.join(baseDir, `git-project-${Math.random().toString(36).slice(2)}`);
-  fs.mkdirSync(projectDir);
-
-  runGit(projectDir, ['init', '-b', 'main']);
-  fs.writeFileSync(path.join(projectDir, 'README.md'), '# hello\n', 'utf8');
-  runGit(projectDir, ['add', 'README.md']);
-  runGit(projectDir, [
-    '-c',
-    'user.name=Test',
-    '-c',
-    'user.email=test@example.com',
-    'commit',
-    '-m',
-    'init',
-  ]);
+  const projectDir = path.join(baseDir, `git-project-${++projectSeq}`);
+  fs.cpSync(templateBaseProjectDir!, projectDir, { recursive: true });
 
   for (const remote of remotes) {
     runGit(projectDir, ['remote', 'add', remote.name, remote.url]);
@@ -114,11 +129,27 @@ function createGitProjectWithRemotes(
 }
 
 describe('local-project helpers', () => {
+  beforeAll(() => {
+    templateRootDir = makeTempDir();
+    templateBaseProjectDir = buildBaseGitProjectTemplate(path.join(templateRootDir, 'base'));
+    templateClonedProjectDir = buildClonedProjectTemplate(path.join(templateRootDir, 'cloned'));
+  });
+
+  afterAll(() => {
+    if (!templateRootDir) return;
+    fs.rmSync(templateRootDir, { recursive: true, force: true });
+    templateRootDir = null;
+    templateBaseProjectDir = null;
+    templateClonedProjectDir = null;
+  });
+
   beforeEach(() => {
-    // Keep fixture URLs and repository selection independent of host Git rewrites.
+    // Keep fixture URLs and repository selection independent of host Git rewrites,
+    // and bypass any Lody gh-session-bin Node git wrapper on PATH.
     for (const key of Object.keys(process.env)) {
       if (/^(GIT_|SSH_|LODY_GIT_)/.test(key)) vi.stubEnv(key, undefined);
     }
+    vi.stubEnv('PATH', stripGhSessionBinPath(process.env.PATH));
     vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
     vi.stubEnv('GIT_CONFIG_GLOBAL', os.devNull);
   });
@@ -923,21 +954,7 @@ describe('local-project helpers', () => {
     'blocks checkout when the working tree is dirty',
     async () => {
       tempDir = makeTempDir();
-      const projectDir = path.join(tempDir, 'git-project');
-      fs.mkdirSync(projectDir);
-
-      runGit(projectDir, ['init', '-b', 'main']);
-      fs.writeFileSync(path.join(projectDir, 'README.md'), '# hello\n', 'utf8');
-      runGit(projectDir, ['add', 'README.md']);
-      runGit(projectDir, [
-        '-c',
-        'user.name=Test',
-        '-c',
-        'user.email=test@example.com',
-        'commit',
-        '-m',
-        'init',
-      ]);
+      const projectDir = createGitProjectWithRemotes(tempDir, []);
       runGit(projectDir, ['checkout', '-b', 'feature/local-branch']);
       runGit(projectDir, ['checkout', 'main']);
       fs.writeFileSync(path.join(projectDir, 'untracked.txt'), 'new\n', 'utf8');

@@ -1,3 +1,4 @@
+import { ProductWindowIpcService } from '../product-window-ipc-service'
 import { join } from 'node:path'
 import { getLodyDataDir } from '@lody/shared/node/installation-profile'
 import { mainPlatformKind } from '../../platform'
@@ -8,13 +9,21 @@ import {
   type LocalFilePreviewRequest
 } from '../../services/local-file-preview'
 import type { WebContents } from 'electron'
-import { localFileResources } from '../../services/local-file-resource-protocol'
-import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
+import {
+  localFileResources,
+  localHtmlPreviewSites
+} from '../../services/local-file-resource-protocol'
+import {
+  LocalHtmlPreviewRequestSchema,
+  openLocalHtmlPreview,
+  type LocalHtmlPreviewRequest
+} from '../../services/local-html-preview'
+import { getIpcContext, IpcMethod } from 'electron-ipc-decorator'
 import type { LocalMachineRpcRequest } from '@lody/shared/local-machine-rpc'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 import { assertProductWindowSender } from '../assert-sender'
 
-export class MachineRpcIpc extends IpcService {
+export class MachineRpcIpc extends ProductWindowIpcService {
   static override readonly groupName = 'machineRpc'
 
   @IpcMethod()
@@ -47,6 +56,22 @@ export class MachineRpcIpc extends IpcService {
     return response
   }
 
+  /** Null means the file is not on this desktop; the caller keeps its inline preview. */
+  @IpcMethod()
+  async openHtmlPreview(message: LocalHtmlPreviewRequest) {
+    const parsed = LocalHtmlPreviewRequestSchema.parse(message)
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    const owner = event.sender
+    const generation = getResourceOwner(owner)
+    const machineId = await readFileMachineId(
+      join(getLodyDataDir(mainPlatformKind), 'credentials.json')
+    )
+    if (owner.isDestroyed() || resourceOwners.get(owner.id) !== generation)
+      throw new Error('Preview window closed.')
+    return openLocalHtmlPreview(localHtmlPreviewSites, generation, parsed, machineId)
+  }
+
   @IpcMethod()
   async send(message: LocalMachineRpcRequest) {
     return await getIpcServiceDeps().cliService.sendLocalMachineRpc(message)
@@ -65,13 +90,18 @@ function getResourceOwner(owner: WebContents): number {
   owner.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
     if (!isMainFrame || isInPlace) return
     const previous = resourceOwners.get(owner.id)
-    if (previous !== undefined) localFileResources.releaseOwner(previous)
+    if (previous !== undefined) releaseResources(previous)
     resourceOwners.set(owner.id, ++nextResourceOwner)
   })
   owner.once('destroyed', () => {
     const previous = resourceOwners.get(owner.id)
-    if (previous !== undefined) localFileResources.releaseOwner(previous)
+    if (previous !== undefined) releaseResources(previous)
     resourceOwners.delete(owner.id)
   })
   return generation
+}
+
+function releaseResources(generation: number) {
+  localFileResources.releaseOwner(generation)
+  localHtmlPreviewSites.releaseOwner(generation)
 }

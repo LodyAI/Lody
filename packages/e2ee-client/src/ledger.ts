@@ -19,6 +19,7 @@ import {
   LedgerFeedSource,
   LedgerSync,
   LedgerLog,
+  LedgerLogError,
   LedgerPinStore,
   SubmissionJournal,
   WorkspaceScope,
@@ -77,6 +78,7 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
         log = yield* LedgerLog;
       const readAfter = source.readAfter.bind(source),
         readLog = log.read.bind(log),
+        injectedReadFrom = log.readFrom?.bind(log),
         append = log.appendCas.bind(log);
       let origin: LedgerFeedOrigin, originView: LedgerView;
       if (approval.kind === 'snapshot') {
@@ -106,18 +108,22 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
         LedgerFeed.layer({
           origin,
           expected,
+          // Counts the suffix after the verified origin, not the absolute ledger sequence.
           budget: { maxRecords: 16384, maxBytes: 32 * 1024 * 1024 },
         }).pipe(
           Layer.provide(
-            Layer.merge(
+            Layer.mergeAll(
               Layer.succeed(WorkspaceScope, { genesis }),
-              Layer.succeed(LedgerFeedStore, store)
+              Layer.succeed(LedgerFeedStore, store),
+              Layer.succeed(LedgerFeedSource, source),
+              Layer.succeed(LedgerPinStore, pins)
             )
           )
         )
       );
       const feed = Context.get(services, LedgerFeed);
-      const refresh = Effect.fnUntraced(function* () {
+      const advanceFeed = Effect.fnUntraced(function* () {
+        const suffix: Uint8Array[] = [];
         let total = 0,
           count = 0;
         for (let pageIndex = 0; pageIndex < 256; pageIndex++) {
@@ -133,15 +139,40 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
           }
           if (count > 16384 || total > 32 * 1024 * 1024)
             return yield* new LedgerFeedError({ code: 'read-too-large' });
-          const length =
-            state.view.length +
-            page.records.length -
-            (state.bootstrap && page.records.length ? 1 : 0);
+          const added =
+            state.bootstrap && page.records.length ? page.records.slice(1) : page.records;
+          const length = state.view.length + added.length;
           const head = page.records.length ? hashRecordBytes(page.records.at(-1)) : state.view.head;
           const next = yield* feed.accept(page, { head, length });
-          if (page.upToDate) return next;
+          for (const record of added) suffix.push(new Uint8Array(record));
+          if (page.upToDate) return { next, suffix };
         }
         return yield* new LedgerFeedError({ code: 'read-too-large' });
+      });
+      const refresh = Effect.fnUntraced(function* () {
+        return (yield* advanceFeed()).next;
+      });
+      const readSuffix = Effect.fnUntraced(function* (anchor: Bytes.GenesisHash, base: LedgerView) {
+        if (!anchor.equals(genesis)) return yield* new LedgerLogError({});
+        const start = yield* feed
+          .current()
+          .pipe(Effect.mapError((cause) => new LedgerLogError({ cause })));
+        if (start.view.length !== base.length || !start.view.head.equals(base.head)) {
+          const full = yield* readLog(anchor);
+          if (full.records.length < base.length || full.checkpoint.length < base.length)
+            return yield* new LedgerLogError({});
+          return {
+            records: full.records.slice(base.length),
+            checkpoint: full.checkpoint,
+          };
+        }
+        const { next, suffix } = yield* advanceFeed().pipe(
+          Effect.mapError((cause) => new LedgerLogError({ cause }))
+        );
+        return {
+          records: suffix,
+          checkpoint: { head: next.view.head, length: next.view.length },
+        };
       });
       const current = Effect.fnUntraced(function* () {
         const state = yield* feed.current();
@@ -151,17 +182,43 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
       if (approval.kind === 'history') {
         const local = yield* feed.current();
         if (local.view.length < approval.view.length) {
-          // A missing suffix requires I/O; a conflicting local prefix never does.
           yield* Effect.fromResult(requireLedgerContinuation(local.view, approval.view));
-          yield* refresh();
+          // Acceptance already verified and retained these originals. Feed them
+          // through the same verifier/store instead of downloading them again.
+          for (const page of approval.pages) {
+            const state = yield* feed.current();
+            const start = state.bootstrap ? 0 : state.view.length;
+            const end = page.startIndex + page.recordsHex.length;
+            if (end <= start) continue;
+            if (page.startIndex > start) return yield* fail('conflict');
+            const records = page.recordsHex.slice(start - page.startIndex).map(fromHex);
+            if (!records.length) continue;
+            yield* feed.accept(
+              {
+                requestOffset: state.offset,
+                nextOffset: page.position,
+                records,
+                upToDate: end === approval.view.length,
+              },
+              { head: hashRecordBytes(records.at(-1)!), length: end }
+            );
+          }
         }
         // Re-verified persisted state can satisfy an already installed approval offline.
         yield* current();
       }
-      return Context.make(LedgerSync, { current, refresh }).pipe(
+      return Context.make(LedgerSync, {
+        current,
+        refresh,
+        ingest: (page, checkpoint) => feed.accept(page, checkpoint),
+      }).pipe(
         Context.add(LedgerPinStore, pins),
         Context.add(SubmissionJournal, submissions),
-        Context.add(LedgerLog, { read: readLog, appendCas: append })
+        Context.add(LedgerLog, {
+          read: readLog,
+          readFrom: injectedReadFrom ?? readSuffix,
+          appendCas: append,
+        })
       );
     })
   );

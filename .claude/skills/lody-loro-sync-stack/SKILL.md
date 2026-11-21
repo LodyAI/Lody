@@ -10,7 +10,7 @@ description: The Lody Loro sync stack — how durable document synchronization a
 Lody moves state over Loro Streams on planes with different guarantees. Mixing them
 is the source of the worst bugs in this subsystem.
 
-**Durable documents** — session history, workspace meta, tasks, preview comments.
+**Durable documents** — session history, workspace meta, preview comments (plus legacy task documents from the removed Tasks product).
 Ordered, persisted, replayed from an offset, and never dropped. Owned by
 `StreamsTransportAdapter` (`apps/cli/src/lib/loro/streams-transport.ts`). If a
 reader must receive something, it goes here.
@@ -23,10 +23,10 @@ intermediate update. Everything here is disposable by design.
 Two ephemeral channels exist, on separate stream URLs and therefore separate
 transports and separate queues:
 
-| Channel | Constant | Carries |
-| --- | --- | --- |
-| `presence` | `LODY_PRESENCE_CHANNEL` (`packages/shared/src/presence.ts`) | machine heartbeat, session active status, session-viewing |
-| `machine-monitor` | `packages/shared/src/machine-monitor.ts` | observer-leased device resource snapshots |
+| Channel           | Constant                                                    | Carries                                                                       |
+| ----------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `presence`        | `LODY_PRESENCE_CHANNEL` (`packages/shared/src/presence.ts`) | machine heartbeat, session active status, session-viewing, desktop-foreground |
+| `machine-monitor` | `packages/shared/src/machine-monitor.ts`                    | observer-leased device resource snapshots                                     |
 
 Keep them separate. Machine-monitor snapshots are far larger and more frequent than
 anything the presence channel may carry; merging the two would put that traffic in
@@ -75,7 +75,7 @@ Before adding or changing an ephemeral writer, all four must hold:
    phase change — never by each element of a stream. Per-chunk, per-token,
    per-keystroke, per-frame and per-loop-iteration publication are prohibited
    however small one payload is. Throttle a high-rate source to a fixed ceiling
-   *before* it reaches the channel, so the rate is a property of the publisher.
+   _before_ it reaches the channel, so the rate is a property of the publisher.
 2. **Bounded size.** A small fixed-shape record, every field schema-bounded in
    `packages/shared/src/presence.ts`. No unbounded strings, accumulated text, file
    contents, diffs, transcripts or session-growing collections.
@@ -125,14 +125,14 @@ backlog returns with the next burst.
 Verify against `packages/shared/src/index.ts` before relying on this; bucket ID is
 exactly `lody`.
 
-| Data | Stream ID |
-| --- | --- |
-| Workspace meta | `<workspaceId>:meta` |
-| Session | `<workspaceId>:s:<sessionId>` |
-| Task | `<workspaceId>:tk:<taskId>` |
-| Task index Flock | `<workspaceId>:ti` |
-| Preview comments | `<workspaceId>:pc:<sessionId>` |
-| Code Collab file index | `<workspaceId>:fi:<masterSessionId>` |
+| Data                                                      | Stream ID                            |
+| --------------------------------------------------------- | ------------------------------------ |
+| Workspace meta                                            | `<workspaceId>:meta`                 |
+| Session                                                   | `<workspaceId>:s:<sessionId>`        |
+| Task (legacy, read only for account deletion)             | `<workspaceId>:tk:<taskId>`          |
+| Task index Flock (legacy, read only for account deletion) | `<workspaceId>:ti`                   |
+| Preview comments                                          | `<workspaceId>:pc:<sessionId>`       |
+| Code Collab file index                                    | `<workspaceId>:fi:<masterSessionId>` |
 
 A stream URL is `${gatewayBaseUrl}/ds/${encodeURIComponent('lody')}/${encodeURIComponent(streamId)}`.
 Never concatenate an unencoded stream ID into the path — `:meta` must appear as

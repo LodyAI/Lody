@@ -1,3 +1,4 @@
+import { useSessionOwnerAccess } from './use-session-owner-access';
 import { useSessionManagementGuard } from './use-session-management-guard';
 import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
@@ -25,9 +26,6 @@ import {
   getMachineFlockDeleteLocalProjectIds,
   getMachineFlockLocalProjects,
   getSessionRoomId,
-  buildSessionGroupRenamePatch,
-  buildSessionTabRenamePatch,
-  getSessionCancelRequestMarker,
   machineFlockKeys,
   SessionStatusFactory,
   getLocalProjectHistoryProviderKey,
@@ -43,9 +41,18 @@ import {
   machineSupportsProtocolCapability,
   MACHINE_PROTOCOL_CAPABILITIES,
   OPERATION_INBOX_PROTOCOL_VERSION,
+  buildPinnedSectionLayout,
+  planNewPinPlacement,
+  planTopOrderKey,
+  isPinOrderKey,
+  FractionalIndex,
+  type ManualOrderWrite,
+  type PinPlacementWrite,
+  type PinnedSessionPlacement,
+  getSessionCancelRequestMarker,
 } from '@lody/shared';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 // Default import: `debug` is CJS. Named `{ debug }` breaks Vite 8 / TanStack
 // module-runner interop used by site-docs SSR (UNEXPECTED named-export error).
 import debug from 'debug';
@@ -274,10 +281,7 @@ export type SessionActions = {
   ) => Promise<SessionGoalResponse | null>;
   touchSessionActivity: (sessionId: SessionId) => Promise<void>;
   updateSessionStatus: (sessionId: SessionId, status: SessionStatus) => Promise<void>;
-  /** Renames one tab; never changes its group's sidebar title. */
   updateSessionTitle: (sessionId: SessionId, title: string) => Promise<void>;
-  /** Renames a root Session's conversation group in the sidebar; tabs keep their titles. */
-  updateSessionGroupTitle: (sessionId: SessionId, title: string) => Promise<void>;
   updateSessionMetadata: (sessionId: SessionId, patch: Record<string, unknown>) => Promise<void>;
   /** Reassign `SessionMeta.userId` to another workspace member. */
   transferSessionOwner: (sessionId: SessionId, nextUserId: string) => Promise<void>;
@@ -295,7 +299,39 @@ export type SessionActions = {
   restoreSession: (sessionId: SessionId) => Promise<void>;
   deleteArchivedSession: (sessionId: SessionId) => Promise<void>;
   setSessionPinned: (sessionId: SessionId, isPinned: boolean) => Promise<void>;
+  /** Write planned pin placements (section and order) for pinned conversations. */
+  applySessionPinPlacements: (writes: readonly PinPlacementWrite[]) => Promise<void>;
+  /** Write planned manual order placements for Focus conversations (clearing snooze/settled on target). */
+  applySessionFocusOrder: (
+    writes: readonly ManualOrderWrite[],
+    restoredSessionId?: SessionId
+  ) => Promise<void>;
+  /** Snooze a session until `snoozedUntil` (epoch ms) in the Status view's Later section. */
+  snoozeSession: (
+    sessionId: SessionId,
+    snoozedUntil: number,
+    options?: { includeOpenedSessions?: boolean }
+  ) => Promise<void>;
+  /** Mark a session as settled in the Status view's Settled section. */
+  settleSession: (
+    sessionId: SessionId,
+    options?: { includeOpenedSessions?: boolean }
+  ) => Promise<void>;
+  /** Restore a snoozed or settled session back to Focus. */
+  moveSessionToFocus: (
+    sessionId: SessionId,
+    options?: { includeOpenedSessions?: boolean }
+  ) => Promise<void>;
 };
+
+const toPinnedSessionPlacement = (meta: SessionMeta): PinnedSessionPlacement => ({
+  id: meta.id,
+  pinSectionId: meta.pinSectionId ?? null,
+  orderKey: meta.orderKey ?? null,
+  recency:
+    meta.lastMessageAt ??
+    (typeof meta.createdAt === 'number' ? meta.createdAt : Date.parse(meta.createdAt ?? '') || 0),
+});
 
 const extractSessionStatus = (value: unknown): Session['status'] | undefined => {
   if (!value || typeof value !== 'object') {
@@ -393,6 +429,7 @@ export async function touchSessionActivityMeta(
 }
 
 export function useSessionActions(): SessionActions {
+  const getOwnerAccessReason = useSessionOwnerAccess();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const assertCanManageSessions = useSessionManagementGuard(runtime);
   const roostHistoryEnabled = useAtomValue(roostHistoryFeatureEnabledAtom);
@@ -463,10 +500,24 @@ export function useSessionActions(): SessionActions {
           ? ROOST_SESSION_HISTORY_BACKEND
           : LEGACY_SESSION_HISTORY_BACKEND,
         assertSessionCreateAllowed,
+        assertSessionEditable: (sessionId) => assertCanManageSessions([sessionId]),
         recordWorkspaceActivity,
         publishSessionMeta: setDocMetaByRoomId,
         readSessionMeta: (sessionId) =>
           store.get(sessionMetaCacheAtom)[getSessionRoomId(sessionId)],
+        // Key below every existing orderKey so a new top-level conversation
+        // lands at the top of Status Focus; child Sessions get none (they
+        // render nested under their opener row).
+        planNewSessionOrderKey: () => {
+          let topKey: string | null = null;
+          for (const meta of Object.values(store.get(sessionMetaCacheAtom))) {
+            if (!isPinOrderKey(meta.orderKey)) continue;
+            if (topKey === null || FractionalIndex.compare(meta.orderKey, topKey) < 0) {
+              topKey = meta.orderKey;
+            }
+          }
+          return planTopOrderKey([{ id: '', orderKey: topKey }]);
+        },
         onRpcDelivered: (sessionId, turnId) =>
           store.set(rpcDeliveredTurnsAtom, (previous) =>
             addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, turnId))
@@ -490,6 +541,7 @@ export function useSessionActions(): SessionActions {
       runtime,
       roostHistoryEnabled,
       assertSessionCreateAllowed,
+      assertCanManageSessions,
       recordWorkspaceActivity,
       setDocMetaByRoomId,
       store,
@@ -504,6 +556,27 @@ export function useSessionActions(): SessionActions {
       await runtime.writer.upsertDocMeta(getSessionRoomId(sessionId), patch);
     },
     [runtime, assertCanManageSessions]
+  );
+
+  const assertReadablePreferences = useCallback(
+    (ids: readonly SessionId[]) => assertCanManageSessions(ids, true),
+    [assertCanManageSessions]
+  );
+  const updateSessionPreference = useCallback(
+    async (
+      sessionId: SessionId,
+      patch: {
+        isPinned?: boolean;
+        pinSectionId?: string | undefined;
+        orderKey?: string | undefined;
+        lastReadAt?: number;
+      }
+    ) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      await assertReadablePreferences([sessionId]);
+      await runtime.writer.upsertDocMeta(getSessionRoomId(sessionId), patch);
+    },
+    [runtime, assertReadablePreferences]
   );
 
   const updateSessionStatus = useCallback(
@@ -572,12 +645,17 @@ export function useSessionActions(): SessionActions {
             log('session cancel rpc threw for %s/%s: %o', sessionId, turnId, error);
           });
       }
-      if (cancelId) {
+      if (!interrupt) {
+        // Keep the observed drafts paused before publishing the durable Stop
+        // marker. The immediate RPC above must not wait for a store read.
         await runtime.sendResources.withSessionStore(sessionId, (sessionStore) => {
           sessionStore.setState((draft: SessionDocDraft) => {
-            draft.cancelRequest = { id: cancelId, turnId };
+            for (const item of draft.mq ?? []) item.paused = true;
+            if (cancelId) draft.cancelRequest = { id: cancelId, turnId };
           });
         });
+      }
+      if (cancelId) {
         await runtime.repo.flush();
       }
       await updateSessionMetadata(sessionId, {
@@ -596,6 +674,7 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
+      await assertCanManageSessions([sessionId]);
       const roomId = getSessionRoomId(sessionId);
       const existing = await runtime.repo.getDocMeta(roomId);
       const meta = isLoroRepoDocDeleted(existing)
@@ -613,7 +692,7 @@ export function useSessionActions(): SessionActions {
         userId,
       });
     },
-    [runtime]
+    [runtime, assertCanManageSessions]
   );
 
   const touchSessionActivity = useCallback(
@@ -629,8 +708,21 @@ export function useSessionActions(): SessionActions {
         { lastMessageAt: now, lastReadAt: now },
         assertCanManageSessions
       );
+      const roomId = getSessionRoomId(sessionId);
+      const existing = await runtime.repo.getDocMeta(roomId);
+      const existingMeta = !isLoroRepoDocDeleted(existing)
+        ? (existing?.meta as SessionMeta | undefined)
+        : undefined;
+      const cached = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
+      const meta = existingMeta ?? cached;
+      if (meta?.snoozedUntil !== undefined || meta?.settledAt !== undefined) {
+        await updateSessionMetadata(sessionId, {
+          ...(meta.snoozedUntil !== undefined ? { snoozedUntil: undefined } : {}),
+          ...(meta.settledAt !== undefined ? { settledAt: undefined } : {}),
+        });
+      }
     },
-    [runtime, assertCanManageSessions]
+    [runtime, store, assertCanManageSessions, updateSessionMetadata]
   );
 
   const updateSessionTitle = useCallback(
@@ -645,27 +737,10 @@ export function useSessionActions(): SessionActions {
       const roomId = getSessionRoomId(sessionId);
       const existing = await runtime.repo.getDocMeta(roomId);
       if (isLoroRepoDocDeleted(existing)) return;
-      await updateSessionMetadata(
-        sessionId,
-        buildSessionTabRenamePatch(existing?.meta as SessionMeta | undefined, nextTitle)
-      );
-    },
-    [runtime, updateSessionMetadata]
-  );
-
-  const updateSessionGroupTitle = useCallback(
-    async (sessionId: SessionId, title: string) => {
-      if (!runtime) {
-        throw new Error('Runtime not ready');
-      }
-      const nextTitle = title.trim();
-      if (!nextTitle) {
-        return;
-      }
-      const roomId = getSessionRoomId(sessionId);
-      const existing = await runtime.repo.getDocMeta(roomId);
-      if (isLoroRepoDocDeleted(existing)) return;
-      await updateSessionMetadata(sessionId, buildSessionGroupRenamePatch(nextTitle));
+      await updateSessionMetadata(sessionId, {
+        title: nextTitle,
+        titleSource: 'user',
+      } as Partial<SessionMeta>);
     },
     [runtime, updateSessionMetadata]
   );
@@ -673,8 +748,7 @@ export function useSessionActions(): SessionActions {
   /**
    * Hand a session to another workspace member. `SessionMeta.userId` is the
    * owner: it drives the My/Team scope split, the sidebar author avatar, and
-   * CLI-side owner checks (Code Collab writes, usage attribution). Anyone in
-   * the workspace may transfer, mirroring task owner assignment.
+   * CLI-side owner checks (Code Collab writes, usage attribution). Assignment never changes machine/project sharing.
    */
   const transferSessionOwner = useCallback(
     async (sessionId: SessionId, nextUserId: string) => {
@@ -688,11 +762,15 @@ export function useSessionActions(): SessionActions {
       const roomId = getSessionRoomId(sessionId);
       const existing = await runtime.repo.getDocMeta(roomId);
       if (isLoroRepoDocDeleted(existing)) return;
+      if (!existing) throw new Error('Session not found');
+      await assertCanManageSessions([sessionId]);
+      const reason = getOwnerAccessReason(existing?.meta as SessionMeta, userId);
+      if (reason) throw new Error(reason);
       await updateSessionMetadata(sessionId, {
         userId,
       } as Partial<SessionMeta>);
     },
-    [runtime, updateSessionMetadata]
+    [runtime, updateSessionMetadata, assertCanManageSessions, getOwnerAccessReason]
   );
 
   const markSessionRead = useCallback(
@@ -700,16 +778,22 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const readAt = getFiniteTimestamp(lastMessageAt) ?? getServerNow();
-      await assertCanManageSessions([sessionId]);
+      const now = getServerNow();
+      const baseReadAt = getFiniteTimestamp(lastMessageAt) ?? now;
+      const roomId = getSessionRoomId(sessionId);
+      const cachedMeta = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
+      const snoozedUntil = getFiniteTimestamp(cachedMeta?.snoozedUntil);
+      const expiredSnoozeAt = snoozedUntil !== null && snoozedUntil <= now ? snoozedUntil : 0;
+      const readAt = Math.max(baseReadAt, expiredSnoozeAt);
+      await assertReadablePreferences([sessionId]);
       await touchSessionActivityMeta(
         runtime,
         sessionId,
         { lastReadAt: readAt },
-        assertCanManageSessions
+        assertReadablePreferences
       );
     },
-    [runtime, assertCanManageSessions]
+    [runtime, store, assertReadablePreferences]
   );
 
   const markSessionUnread = useCallback(
@@ -728,16 +812,24 @@ export function useSessionActions(): SessionActions {
       const lastMessageAt =
         getFiniteTimestamp(repoMeta?.lastMessageAt) ??
         getFiniteTimestamp(cachedMeta?.lastMessageAt);
-      if (lastMessageAt === null) return;
+      const now = getServerNow();
+      const snoozedUntil =
+        getFiniteTimestamp(repoMeta?.snoozedUntil) ?? getFiniteTimestamp(cachedMeta?.snoozedUntil);
+      const expiredSnoozeAt = snoozedUntil !== null && snoozedUntil <= now ? snoozedUntil : null;
+      const effectiveLastMessageAt =
+        lastMessageAt !== null && expiredSnoozeAt !== null
+          ? Math.max(lastMessageAt, expiredSnoozeAt)
+          : (lastMessageAt ?? expiredSnoozeAt);
+      if (effectiveLastMessageAt === null) return;
 
-      // Unread is the durable comparison `lastMessageAt > lastReadAt`. Move
-      // only this receipt behind the latest known message; do not touch the
+      // Unread is the durable comparison `effectiveLastMessageAt > lastReadAt`. Move
+      // only this receipt behind the latest known activity; do not touch the
       // activity timestamp, which would reorder the sidebar.
-      await updateSessionMetadata(sessionId, {
-        lastReadAt: lastMessageAt - 1,
+      await updateSessionPreference(sessionId, {
+        lastReadAt: effectiveLastMessageAt - 1,
       } as Partial<SessionMeta>);
     },
-    [runtime, store, updateSessionMetadata]
+    [runtime, store, updateSessionPreference]
   );
 
   const invalidateExternalHistoryCatalog = useCallback(
@@ -1011,11 +1103,184 @@ export function useSessionActions(): SessionActions {
       const roomId = getSessionRoomId(sessionId);
       const existing = await runtime.repo.getDocMeta(roomId);
       if (isLoroRepoDocDeleted(existing)) return;
-      await updateSessionMetadata(sessionId, {
-        isPinned,
-      } as Partial<SessionMeta>);
+      if (!isPinned) {
+        // Unpinning clears pinSectionId while preserving orderKey for Focus ordering.
+        await updateSessionPreference(sessionId, {
+          isPinned: false,
+          pinSectionId: undefined,
+        });
+        return;
+      }
+      const defaultSectionPins = Object.values(store.get(sessionMetaCacheAtom)).filter(
+        (meta) =>
+          meta.isPinned === true && !meta.isArchived && !meta.pinSectionId && meta.id !== sessionId
+      );
+      const { orderKey } = planNewPinPlacement(
+        buildPinnedSectionLayout(
+          defaultSectionPins.map(toPinnedSessionPlacement),
+          [],
+          (placement) => placement
+        )
+      );
+      await updateSessionPreference(sessionId, {
+        isPinned: true,
+        pinSectionId: undefined,
+        orderKey,
+      });
     },
-    [runtime, updateSessionMetadata]
+    [runtime, store, updateSessionPreference]
+  );
+
+  const applySessionPinPlacements = useCallback(
+    async (writes: readonly PinPlacementWrite[]) => {
+      if (!runtime) {
+        throw new Error('Runtime not ready');
+      }
+      for (const write of writes) {
+        await updateSessionPreference(write.sessionId as SessionId, {
+          isPinned: true,
+          pinSectionId: write.pinSectionId,
+          orderKey: write.orderKey,
+        });
+      }
+    },
+    [runtime, updateSessionPreference]
+  );
+
+  // The session plus its opened sub-conversations. Contained Tabs share the
+  // owner's bucket and never render their own status row.
+  const openedSubTreeSessionIds = useCallback(
+    async (sessionId: SessionId) => {
+      if (!runtime) {
+        throw new Error('Runtime not ready');
+      }
+      const tree = await runtime.readSessionOperationTargets(sessionId, 'archive-tree');
+      if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
+        throw new Error('Workspace changed during session operation');
+      }
+      const ids = [sessionId];
+      for (const session of tree.slice(1)) {
+        if (session.parentSessionId === undefined) ids.push(session.id);
+      }
+      return ids;
+    },
+    [runtime, store]
+  );
+
+  const applySessionFocusOrder = useCallback(
+    async (writes: readonly ManualOrderWrite[], restoredSessionId?: SessionId) => {
+      if (!runtime) {
+        throw new Error('Runtime not ready');
+      }
+      // Dragging a parent row into Focus drags its opened sub-conversations
+      // with it; they restore without their own orderKey writes.
+      const restoredIds = new Set<SessionId>(
+        restoredSessionId ? await openedSubTreeSessionIds(restoredSessionId) : []
+      );
+      const now = getServerNow();
+      for (const write of writes) {
+        const targetId = write.sessionId as SessionId;
+        const isRestored = restoredIds.delete(targetId);
+        const roomId = getSessionRoomId(targetId);
+        const existing = await runtime.repo.getDocMeta(roomId);
+        const meta = !isLoroRepoDocDeleted(existing)
+          ? (existing?.meta as SessionMeta | undefined)
+          : undefined;
+        const hasExpiredSnooze = typeof meta?.snoozedUntil === 'number' && meta.snoozedUntil <= now;
+        const existingRestored = getFiniteTimestamp(meta?.focusRestoredAt) ?? 0;
+        await updateSessionMetadata(targetId, {
+          orderKey: write.orderKey,
+          ...(isRestored
+            ? {
+                snoozedUntil: undefined,
+                settledAt: undefined,
+                focusRestoredAt: now,
+              }
+            : hasExpiredSnooze
+              ? {
+                  snoozedUntil: undefined,
+                  focusRestoredAt: Math.max(existingRestored, meta.snoozedUntil!),
+                }
+              : {}),
+        });
+      }
+      for (const restoredId of restoredIds) {
+        await updateSessionMetadata(restoredId, {
+          snoozedUntil: undefined,
+          settledAt: undefined,
+          focusRestoredAt: now,
+        });
+      }
+    },
+    [runtime, openedSubTreeSessionIds, updateSessionMetadata]
+  );
+
+  const snoozeSession = useCallback(
+    async (
+      sessionId: SessionId,
+      snoozedUntil: number,
+      options?: { includeOpenedSessions?: boolean }
+    ) => {
+      const targetIds =
+        options?.includeOpenedSessions === true
+          ? await openedSubTreeSessionIds(sessionId)
+          : [sessionId];
+      for (const target of targetIds) {
+        await updateSessionMetadata(target, {
+          snoozedUntil,
+          settledAt: undefined,
+        });
+      }
+    },
+    [openedSubTreeSessionIds, updateSessionMetadata]
+  );
+
+  const settleSession = useCallback(
+    async (sessionId: SessionId, options?: { includeOpenedSessions?: boolean }) => {
+      if (!runtime) {
+        throw new Error('Runtime not ready');
+      }
+      const targetIds =
+        options?.includeOpenedSessions === true
+          ? await openedSubTreeSessionIds(sessionId)
+          : [sessionId];
+      await assertCanManageSessions(targetIds);
+      for (const target of targetIds) {
+        const roomId = getSessionRoomId(target);
+        const existing = await runtime.repo.getDocMeta(roomId);
+        const repoMeta = !isLoroRepoDocDeleted(existing)
+          ? (existing?.meta as SessionMeta | undefined)
+          : undefined;
+        const cachedMeta = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
+        const lastMessageAt =
+          getFiniteTimestamp(repoMeta?.lastMessageAt) ??
+          getFiniteTimestamp(cachedMeta?.lastMessageAt) ??
+          0;
+        await updateSessionMetadata(target, {
+          settledAt: Math.max(getServerNow(), lastMessageAt),
+          snoozedUntil: undefined,
+        });
+      }
+    },
+    [runtime, store, openedSubTreeSessionIds, assertCanManageSessions, updateSessionMetadata]
+  );
+
+  const moveSessionToFocus = useCallback(
+    async (sessionId: SessionId, options?: { includeOpenedSessions?: boolean }) => {
+      const targetIds =
+        options?.includeOpenedSessions === true
+          ? await openedSubTreeSessionIds(sessionId)
+          : [sessionId];
+      const focusRestoredAt = getServerNow();
+      for (const target of targetIds) {
+        await updateSessionMetadata(target, {
+          snoozedUntil: undefined,
+          settledAt: undefined,
+          focusRestoredAt,
+        });
+      }
+    },
+    [openedSubTreeSessionIds, updateSessionMetadata]
   );
 
   return {
@@ -1029,7 +1294,6 @@ export function useSessionActions(): SessionActions {
     touchSessionActivity,
     updateSessionStatus,
     updateSessionTitle,
-    updateSessionGroupTitle,
     updateSessionMetadata,
     setSessionTabClosed,
     transferSessionOwner,
@@ -1041,5 +1305,10 @@ export function useSessionActions(): SessionActions {
     restoreSession,
     deleteArchivedSession,
     setSessionPinned,
+    applySessionPinPlacements,
+    applySessionFocusOrder,
+    snoozeSession,
+    settleSession,
+    moveSessionToFocus,
   };
 }
