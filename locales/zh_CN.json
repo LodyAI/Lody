@@ -1421,6 +1421,7 @@
   "common.continue": "继续",
   "common.copied": "已复制",
   "common.copy": "复制",
+  "common.copyLink": "复制链接",
   "common.paste": "粘贴",
   "common.undo": "撤销",
   "common.redo": "重做",

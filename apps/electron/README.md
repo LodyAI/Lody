@@ -14,6 +14,10 @@ About. Startup does not replace an existing default; packaged Windows fills an a
 explicit handoff and login callbacks. The shared packaging hook advertises both
 resource and callback protocols; see the [deep-link contract](../../specs/deep-links.md).
 
+In desktop windows, right-click an HTTP or HTTPS link and choose **Copy Link**
+to copy its destination. **Copy** copies the selected text. See the
+[native context menu decision](../../.agents/notes/implemented/bug-fix/2026-09-15-window-context-menu.md).
+
 ## Recommended IDE Setup
 
 - [VSCode](https://code.visualstudio.com/) + [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint) + [Oxc](https://marketplace.visualstudio.com/items?itemName=oxc.oxc-vscode)

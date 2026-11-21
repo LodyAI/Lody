@@ -1421,6 +1421,7 @@
   "common.continue": "Continue",
   "common.copied": "Copied",
   "common.copy": "Copy",
+  "common.copyLink": "Copy Link",
   "common.paste": "Paste",
   "common.undo": "Undo",
   "common.redo": "Redo",

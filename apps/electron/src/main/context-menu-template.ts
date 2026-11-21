@@ -18,14 +18,16 @@ export type ContextMenuRole = 'undo' | 'redo' | 'cut' | 'copy' | 'paste' | 'sele
 export type ContextMenuTemplateItem =
   | { readonly type: 'separator' }
   | { readonly role: ContextMenuRole; readonly label: string; readonly enabled: boolean }
+  | { readonly label: string; readonly click: () => void }
 
-export type ContextMenuLabels = Readonly<Record<ContextMenuRole, string>>
+export type ContextMenuLabels = Readonly<Record<ContextMenuRole | 'copyLink', string>>
 
 /** Structurally compatible with the fields this reads off `Electron.ContextMenuParams`. */
 export type ContextMenuInput = {
   readonly isEditable: boolean
   readonly selectionText: string
   readonly mediaType: string
+  readonly linkURL: string
   readonly editFlags: {
     readonly canUndo: boolean
     readonly canRedo: boolean
@@ -43,7 +45,8 @@ export type ContextMenuInput = {
  */
 export function buildContextMenuTemplate(
   params: ContextMenuInput,
-  labels: ContextMenuLabels
+  labels: ContextMenuLabels,
+  copyLink: (url: string) => void
 ): ContextMenuTemplateItem[] {
   // The image preview draws its own menu from the renderer, which holds the
   // only copy of the bytes (a `blob:` URL main cannot download). Two handlers
@@ -58,8 +61,9 @@ export function buildContextMenuTemplate(
     enabled
   })
 
+  const template: ContextMenuTemplateItem[] = []
   if (params.isEditable) {
-    return [
+    template.push(
       item('undo', params.editFlags.canUndo),
       item('redo', params.editFlags.canRedo),
       { type: 'separator' },
@@ -68,15 +72,15 @@ export function buildContextMenuTemplate(
       item('paste', params.editFlags.canPaste),
       { type: 'separator' },
       item('selectAll', params.editFlags.canSelectAll)
-    ]
+    )
+  } else if (params.selectionText.trim() && params.editFlags.canCopy) {
+    // Select All on read-only content would select the whole window's document.
+    template.push(item('copy', true))
   }
 
-  // Read-only content offers Copy alone. `selectAll` is deliberately absent:
-  // outside a field Chromium selects the whole focused document, so in the app
-  // shell it would sweep up the sidebar and every other panel with the
-  // conversation rather than selecting "this".
-  if (!params.selectionText.trim() || !params.editFlags.canCopy) {
-    return []
+  const { linkURL } = params
+  if (/^https?:\/\//i.test(linkURL)) {
+    template.push({ label: labels.copyLink, click: () => copyLink(linkURL) })
   }
-  return [item('copy', true)]
+  return template
 }
