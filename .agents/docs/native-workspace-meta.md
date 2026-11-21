@@ -255,6 +255,13 @@ open them, so the CLI would never reach its lazy migration; instead it imports
 every Preview comment document in its legacy store when native mode starts
 (the storage inventory lists them, and a published source is skipped).
 
+Legacy agent configuration (`agent-*`) and Machine (`machine-*`) rooms have no
+document bodies: their state is Meta records (`getDocMeta`/`upsertDocMeta`), which
+native Workspace Meta already holds, and current agent configurations live in the
+natively owned Machine Flock. Nothing opens their bodies, so they need no document
+owner. Legacy `session-comment-*` documents are not Sessions and stay on the
+legacy store.
+
 ## Workspace Meta
 
 [`native-workspace-meta.ts`](../../packages/shared/src/node/native-workspace-meta.ts)
@@ -323,7 +330,7 @@ handling; a failed write-back is logged and retried on the next start.
 | 11       | Automation, schedule, `session history` and `observe` reads on the same port                          | 250 (actual ≈140 net) |
 | 12       | Schedule documents (`schedule-*`) on the same owner                                                   | small (actual ≈20)    |
 | 13       | Preview comment documents (`preview-comment-*`) on the same owner                                     | small (actual ≈30)    |
-| —        | Legacy agent/machine documents on the same owner                                                      | small per type        |
+| —        | Legacy agent/machine rooms: Meta records only, covered by slice 1; no document owner needed           | none                  |
 | —        | Cloud replication of native rooms (needs remote Meta design)                                          | separate proposal     |
 
 ## Performance

@@ -27,8 +27,12 @@ export const isNativeFlockDocId = (workspaceId: string, flockDocId: string): boo
 
 const hasPrefix = (docId: string, prefix: string) =>
   docId.startsWith(prefix) && docId.length > prefix.length;
-/** Session documents (`session-*`): read and patched remotely, never held by a renderer. */
-export const isNativeSessionDocId = (docId: string): boolean => hasPrefix(docId, 'session-');
+/**
+ * Session documents (`session-*`): read and patched remotely, never held by a
+ * renderer. Legacy `session-comment-*` documents are not Sessions and stay legacy.
+ */
+export const isNativeSessionDocId = (docId: string): boolean =>
+  hasPrefix(docId, 'session-') && !docId.startsWith('session-comment-');
 /** Schedule documents (`schedule-*`): small, so every process keeps a replica. */
 export const isNativeScheduleDocId = (docId: string): boolean => hasPrefix(docId, 'schedule-');
 /** Preview comment documents (`preview-comment-*`): renderer-only, small, kept as replicas. */
