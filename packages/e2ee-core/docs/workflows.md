@@ -98,6 +98,26 @@ propagates. `recoverLedgerHistory(view, key, startEpoch?)` authenticates the
 starting key against that epoch's verified commitment, including epoch zero;
 omitting `startEpoch` selects the view's current epoch.
 
+## EngineKeyringSync
+
+_Requires `WorkspaceScope`, `DeviceIdentity`, `VerifiedLedger`,
+`InstalledEpochHistory` and `EngineKeyringSink`._
+
+`sync()` makes the native engine's keyring equal to this device's verified
+state: the pinned genesis, every historically admitted device public key (so
+frames by later-revoked authors keep opening), every verified epoch key this
+device holds except abandoned epochs, and the seal epoch. The seal epoch is the
+current epoch when its key is installed, otherwise a retained earlier epoch
+inside `VerifiedLedger`'s fifteen-minute budget. When the device may not write
+(Guest, recovery, removed, or no sealable epoch), its writer's sealing is held
+first; otherwise the platform installs its own seed and sealing is released.
+Every step is idempotent, so callers run `sync` on each trigger (admission, a
+new epoch, a ledger advance, a lost permission, an engine reconnect). This is
+the single exception to "epoch keys have no public byte export"
+(`INVARIANTS.md`): key bytes go only to the sink and are wiped when each call
+settles. The report lists installed and missing epochs, the seal epoch and
+whether the device may write.
+
 ## KeyReceiver
 
 _Requires `WorkspaceScope`, `DeviceIdentity`, `VerifiedLedger`,

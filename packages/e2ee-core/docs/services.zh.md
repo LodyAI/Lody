@@ -137,6 +137,10 @@ ClientKeyCustody 仅提供 status/create/wrap/unwrap/delete。status 不创建�
 生成器、锁定的 DAG-CBOR 库、WebCrypto 与 noble 核对。它们是合成互通检查，不是原生
 保管或 IDB 验收。
 
+### EngineKeyringSink
+
+本机 native 引擎的连接，用引擎内的 keyring 封装和解封本工作区内容。适配器把每次调用绑定到一个引擎命名空间和本进程自己的写入者，密钥只经引擎的二进制秘密帧发送，从不保存、记录或返回。`installEpoch` 借用密钥字节，调用结束后由工作流擦除。`installSigner` 由平台从托管处复制自己的设备种子，库本身从不接触这把私钥。每个请求都是幂等的；`EngineKeyringSinkError` 表示请求被拒或丢失，整次同步可以安全重试。
+
 ## 应用端口
 
 ### WorkspaceScope

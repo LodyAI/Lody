@@ -25,6 +25,7 @@
  */
 export {
   BackendError,
+  EngineKeyringSinkError,
   KeyProtectorError,
   LedgerLogError,
   LedgerViewSourceError,
@@ -69,6 +70,7 @@ export {
   type RepairTaskRow,
 } from './stores';
 export { DeviceIdentity, WorkspaceScope } from './workspace';
+export { EngineKeyringSink } from './engine-keyring';
 export { RecoveryVaultLocalStore, RecoveryVaultStore } from './recovery';
 export {
   ClientCustodyError,

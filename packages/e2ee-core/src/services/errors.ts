@@ -79,3 +79,21 @@ export class KeyProtectorError extends Schema.TaggedError<KeyProtectorError>()(
   'KeyProtectorError',
   { cause: Schema.optional(Schema.Defect()) }
 ) {}
+
+/**
+ * The local native engine connection refused or lost an engine keyring request.
+ *
+ * Retrying the whole {@link EngineKeyringSink} sync is safe: every request is
+ * idempotent. A failure never means the engine holds partial authority; it holds
+ * keys only to seal and open, and an uninstalled key or signer holds its rows.
+ *
+ * @category Errors
+ */
+export class EngineKeyringSinkError extends Schema.TaggedError<EngineKeyringSinkError>()(
+  'EngineKeyringSinkError',
+  {
+    /** Stable request name, for diagnostics only. */
+    operation: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  }
+) {}
