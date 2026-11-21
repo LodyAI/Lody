@@ -725,7 +725,7 @@ describe('queued message images', () => {
       );
     });
 
-    const scroller = container!.querySelector<HTMLElement>('.overflow-y-auto');
+    const scroller = container!.querySelector<HTMLElement>('[data-message-queue-scroll-region]');
     expect(scroller).toBeTruthy();
     expect(scroller!.style.maxHeight).toBe('min(25vh, 240px)');
     // Unset mask properties are '' in some jsdom builds and undefined in others.

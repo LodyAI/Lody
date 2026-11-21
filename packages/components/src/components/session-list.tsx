@@ -1598,11 +1598,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         <div
           className={showMetaLine ? lineBoxClassName : stylex.props(rowStyles.contents).className}
         >
-          <SessionRowLeadingSlot
-            showMenuButton={hasMenuActions}
-            menuLabel={moreActionsLabel}
-            openedByTree={openedByTreeSlot}
-          />
+          <SessionRowLeadingSlot openedByTree={openedByTreeSlot} />
         </div>
         <div {...stylex.props(showMetaLine ? rowStyles.metaColumn : rowStyles.contents)}>
           <div

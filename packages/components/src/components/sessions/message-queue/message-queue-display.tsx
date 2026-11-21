@@ -385,6 +385,7 @@ export function MessageQueueDisplay({
           >
             <div
               ref={scrollRef}
+              data-message-queue-scroll-region=""
               {...stylex.props(queueSurface.list, styles.scrollRegion)}
               style={{ maxHeight: LIST_MAX_HEIGHT }}
             >
