@@ -1,4 +1,6 @@
 import {
+  isPullRequestExplicitlyLinked,
+  isPullRequestUnlinked,
   parseGitHubPullRequestUrl,
   planPullRequestLifecycle,
   readPullRequestLifecycle,
@@ -32,7 +34,9 @@ const isTerminal = (status: PrStatus): boolean => status === 'merged' || status 
 /**
  * Deterministic current-PR selection over associated entries (fresh meta
  * order) and this round's observations. Stable ranking:
- * 1. observed `headRefName` equals the runtime branch;
+ * 1. observed `headRefName` equals the runtime branch, or the Session
+ *    explicitly links the PR (`isLinked`) — a PR the agent created elsewhere
+ *    is as much the Session's own as one on its branch;
  * 2. open/draft over merged/closed (stored status when unobserved);
  * 3. newer observed `updatedAt` (unobserved ranks below any observed);
  * 4. larger PR number;
@@ -43,6 +47,7 @@ export function selectCurrentPullRequestUrl(args: {
   associated: readonly SessionPullRequestMeta[];
   observations: ReadonlyMap<string, PrObservation>;
   runtimeBranch: string | null;
+  isLinked?: (url: string) => boolean;
 }): string | null {
   const { associated, observations, runtimeBranch } = args;
   let best: { url: string; rank: [number, number, number, number, number] } | null = null;
@@ -54,7 +59,10 @@ export function selectCurrentPullRequestUrl(args: {
     const observation = observations.get(pr.url);
     const status = observation?.status ?? pr.status;
     const branchMatch =
-      observation && runtimeBranch && observation.headRefName === runtimeBranch ? 1 : 0;
+      (observation && runtimeBranch && observation.headRefName === runtimeBranch) ||
+      (observation && args.isLinked?.(pr.url))
+        ? 1
+        : 0;
     const open = isTerminal(status) ? 0 : 1;
     const updatedAtMs = observation ? Date.parse(observation.updatedAt) || 0 : -1;
     const prNumber = observation?.number ?? parseGitHubPullRequestUrl(pr.url)?.prNumber ?? -1;
@@ -134,6 +142,8 @@ export function planAssociation(args: {
   }
   const eligible = new Map<string, PrObservation>();
   for (const pr of args.discovered) {
+    // An unlinked PR stays unlinked: branch discovery never adds it back.
+    if (isPullRequestUnlinked(args.meta, pr.url)) continue;
     if (
       (associatedUrls.has(pr.url) &&
         (args.confirmedAssociationUrls ?? associatedUrls).has(pr.url)) ||
@@ -151,6 +161,7 @@ export function planAssociation(args: {
     associated: candidates,
     observations,
     runtimeBranch: args.runtimeBranch,
+    isLinked: (url) => isPullRequestExplicitlyLinked(args.meta, url),
   });
   const winner = currentUrl === null ? undefined : eligible.get(currentUrl);
   if (!winner) {
@@ -180,7 +191,10 @@ export function planPullRequestMetaWrite(args: {
   repoFullName?: string;
   /** This round's observations; applied only to already-associated URLs. */
   observations: readonly PrObservation[];
-  /** Authenticated exact-branch observations eligible for publication. */
+  /**
+   * Authenticated observations eligible for publication: exact-branch
+   * discoveries and provider-confirmed explicit links.
+   */
   newlyAssociated?: readonly PrObservation[];
   runtimeBranch: string | null;
   /** Epoch seconds — stamped as `t` only when a state signal actually changed. */
@@ -248,6 +262,7 @@ export function planPullRequestMetaWrite(args: {
     ),
     observations: observationByUrl,
     runtimeBranch: args.runtimeBranch,
+    isLinked: (url) => isPullRequestExplicitlyLinked(meta, url),
   });
   if (currentUrl !== null) {
     const index = nextPrs.findIndex((pr) => pr.url === currentUrl);
@@ -329,6 +344,28 @@ export function planPullRequestMetaWrite(args: {
     removedStateUrls,
     prunedStateUrls,
   };
+}
+
+/**
+ * Local effect of an unlink: drop unlinked URLs from the association list and
+ * their live state, without any provider query. Null when nothing is unlinked.
+ */
+export function planUnlinkedRemoval(
+  meta: (SessionPullRequestSource & Pick<SessionMeta, 'pullRequestState'>) | undefined
+): Pick<PrMetaWritePlan, 'pullRequests' | 'pullRequestState'> | null {
+  const original = meta?.pullRequests ?? [];
+  const removed = original.filter((pr) => isPullRequestUnlinked(meta, pr.url));
+  if (removed.length === 0) return null;
+  const pullRequests = resolveSessionPullRequests(meta).map((pr) => ({
+    url: pr.url,
+    status: pr.status,
+  }));
+  const state = meta?.pullRequestState ?? {};
+  const removedUrls = new Set(removed.map((pr) => pr.url));
+  const pullRequestState = Object.keys(state).some((url) => removedUrls.has(url))
+    ? Object.fromEntries(Object.entries(state).filter(([url]) => !removedUrls.has(url)))
+    : null;
+  return { pullRequests, pullRequestState };
 }
 
 /**

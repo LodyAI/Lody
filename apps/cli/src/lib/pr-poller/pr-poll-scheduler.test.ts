@@ -153,11 +153,12 @@ class FakeWorkspace {
         this.writeEffect?.();
         this.writtenPatches.push({ sessionId, patch });
         const current = this.metas.get(sessionId) ?? makeMeta();
-        const { lifecycle = [], ...legacyPatch } = patch;
+        const { lifecycle = [], linkChecks = [], ...legacyPatch } = patch;
         this.metas.set(sessionId, {
           ...current,
           ...legacyPatch,
           ...Object.fromEntries(lifecycle.map((write) => [write.field, write.value])),
+          ...Object.fromEntries(linkChecks.map((write) => [write.field, write.value])),
         });
         // A real workspace fires the doc-metadata watcher on writes.
         this.notifyMetaChanged(sessionId);
@@ -1387,6 +1388,130 @@ describe('PrPollScheduler', () => {
 
     expect(calls()).toHaveLength(2); // initial + invalid token; no token-2 request
     expect(calls().some((call) => call.token === 'token-2')).toBe(false);
+  });
+
+  describe('explicit PR links', () => {
+    const linkedUrl = 'https://github.com/owner/repo/pull/3019';
+    const link = (url: string, k: 'l' | 'u' = 'l', t = T0) => ({
+      [`prLink:${url.toLowerCase()}`]: { k, o: 's' as const, t },
+    });
+
+    it('associates a PR the agent created from another branch and links it for hosted webhooks', async () => {
+      const workspace = new FakeWorkspace('ws1');
+      workspace.metas.set(
+        sid('s1'),
+        makeMeta({
+          ...repoSession('owner/repo'),
+          branchName: 'session/68583a0c',
+          ...link(linkedUrl),
+        })
+      );
+      clientHandler = async (batch) => {
+        const result = successOutcome(batch);
+        if (result.kind === 'success')
+          for (const item of result.batch.pullRequests)
+            item.pr = observation(item.prNumber, { headRefName: 'agy-remote-login', ciState: 'p' });
+        return result;
+      };
+      await startWith([workspace]);
+      expect(calls()[0]?.batch.statusAliases.map((alias) => alias.prNumber)).toEqual([3019]);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([
+        { url: linkedUrl, status: 'open' },
+      ]);
+      expect(workspace.metas.get(sid('s1'))?.pullRequestState?.[linkedUrl]?.s).toBe('p');
+      expect(workspace.associateCalls).toMatchObject([
+        { prNumber: 3019, prUrl: linkedUrl, branch: 'agy-remote-login', ownerSessionId: 's1' },
+      ]);
+      // Once associated it is an ordinary status target; the next poll leaves the list as is.
+      await advance(config.lowStatusIntervalMs);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([
+        { url: linkedUrl, status: 'open' },
+      ]);
+    });
+
+    it('keeps an explicitly linked PR current over a newer PR discovered on the runtime branch', async () => {
+      const workspace = new FakeWorkspace('ws1');
+      workspace.metas.set(
+        sid('s1'),
+        makeMeta({ ...repoSession('owner/repo'), pullRequests: [prMeta(11)], ...link(linkedUrl) })
+      );
+      clientHandler = async (batch) => {
+        const result = successOutcome(batch);
+        if (result.kind === 'success')
+          for (const item of result.batch.pullRequests)
+            item.pr = observation(item.prNumber, {
+              headRefName: item.prNumber === 3019 ? 'elsewhere' : 'feat/x',
+              updatedAt: item.prNumber === 3019 ? '2026-07-18T00:00:00Z' : '2026-07-17T00:00:00Z',
+            });
+        return result;
+      };
+      await startWith([workspace]);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests?.map((pr) => pr.url)).toEqual([
+        prMeta(11).url,
+        linkedUrl,
+      ]);
+      // Several open PRs of one Session are all polled.
+      await advance(config.lowStatusIntervalMs);
+      expect(
+        calls()
+          .at(-1)
+          ?.batch.statusAliases.map((alias) => alias.prNumber)
+          .sort()
+      ).toEqual([11, 3019]);
+    });
+
+    it('removes an unlinked PR without querying it and never rediscovers it on the branch', async () => {
+      const workspace = new FakeWorkspace('ws1');
+      workspace.metas.set(
+        sid('s1'),
+        makeMeta({
+          ...repoSession('owner/repo'),
+          pullRequests: [prMeta(11)],
+          ...link(prMeta(11).url, 'u'),
+        })
+      );
+      clientHandler = async (batch) => {
+        const result = successOutcome(batch);
+        if (result.kind === 'success')
+          for (const discovery of result.batch.discoveries) discovery.prs = [observation(11)];
+        return result;
+      };
+      await startWith([workspace]);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([]);
+      expect(calls().every((call) => call.batch.statusAliases.length === 0)).toBe(true);
+      await advance(config.lowDiscoveryIntervalMs);
+      expect(calls().length).toBeGreaterThan(0);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([]);
+      expect(workspace.associateCalls).toEqual([]);
+      // Linking it again overrides the unlink.
+      workspace.metas.set(sid('s1'), {
+        ...workspace.metas.get(sid('s1'))!,
+        ...link(prMeta(11).url, 'l', T0 + 1),
+      });
+      workspace.notifyMetaChanged(sid('s1'));
+      await advance(config.lowDiscoveryIntervalMs);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests?.map((pr) => pr.url)).toEqual([
+        prMeta(11).url,
+      ]);
+    });
+
+    it('records an unreadable link once and never invents an association', async () => {
+      const workspace = new FakeWorkspace('ws1');
+      const missing = 'https://github.com/owner/repo/pull/404';
+      workspace.metas.set(sid('s1'), makeMeta({ ...repoSession('owner/repo'), ...link(missing) }));
+      clientHandler = async (batch) => {
+        const result = successOutcome(batch);
+        if (result.kind === 'success') for (const item of result.batch.pullRequests) item.pr = null;
+        return result;
+      };
+      await startWith([workspace]);
+      const meta = workspace.metas.get(sid('s1'));
+      expect(meta?.pullRequests ?? []).toEqual([]);
+      expect(meta?.[`prLinkCheck:${missing}`]).toEqual({ r: 'u', t: now });
+      const writes = workspace.writtenPatches.length;
+      await advance(config.lowDiscoveryIntervalMs);
+      expect(workspace.writtenPatches.length).toBe(writes);
+    });
   });
 });
 
