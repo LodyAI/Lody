@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url'
 const electronDir = fileURLToPath(new URL('../', import.meta.url))
 const childEnv = {
   ...process.env,
-  LODY_PLATFORM: 'local'
+  LODY_PLATFORM: process.env.VITE_LODY_PLATFORM === 'cloud' ? 'cloud' : 'local',
+  LODY_CLI_INLINE_DEPLOY_ENV: '0'
 }
 
 function getRunner() {

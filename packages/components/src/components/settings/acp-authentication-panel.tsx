@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Check, Copy, ExternalLink, LogIn, Square } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
@@ -975,6 +975,25 @@ export function AcpAuthenticationPanel({
     </>
   );
 
+  const actionMethodId = onlyMethodId ?? advertisedMethods[0]?.id;
+  const actionAuthType = actionMethodId?.endsWith(':oauth')
+    ? 'oauth'
+    : actionMethodId?.endsWith(':api_key')
+      ? 'api_key'
+      : undefined;
+  const actionLabel =
+    actionAuthType === 'oauth'
+      ? t('agents.authentication.signInShort', 'Sign in')
+      : actionAuthType === 'api_key'
+        ? t('lodyAgentConnections.addKey', 'Add API key')
+        : t('agents.authentication.signInShort', 'Sign in');
+  const actionTitle =
+    actionAuthType === 'oauth'
+      ? t('agents.authentication.signInToProvider', 'Sign in to {{provider}}', { provider })
+      : actionAuthType === 'api_key'
+        ? t('lodyAgentConnections.addProviderKey', 'Add {{provider}} API key', { provider })
+        : t('agents.authentication.signInToProvider', 'Sign in to {{provider}}', { provider });
+
   const details = (
     <div {...stylex.props(methodRows ? styles.rowsDetail : styles.detail)}>
       {(methodRows || layout === 'action') && phase === 'authenticated' ? (
@@ -1056,6 +1075,7 @@ export function AcpAuthenticationPanel({
         <AcpAuthenticationAuthorizationView
           provider={provider}
           authorization={authorization}
+          dialog={layout === 'action'}
           authorizationCode={authorizationCode}
           authorizationCodeSubmitted={authorizationCodeSubmitted}
           authorizationCodeUnknown={authorizationCodeUnknown}
@@ -1073,6 +1093,11 @@ export function AcpAuthenticationPanel({
         <AcpAuthenticationInteractionView
           interaction={interaction}
           dialog={layout === 'action'}
+          submitLabel={
+            layout === 'action' && actionMethodId?.endsWith(':api_key')
+              ? t('lodyAgentConnections.saveKey')
+              : t('common.continue', 'Continue')
+          }
           onCancel={() => {
             setActionOpen(false);
             handleCancel();
@@ -1087,7 +1112,6 @@ export function AcpAuthenticationPanel({
     </div>
   );
 
-  const actionMethodId = onlyMethodId ?? advertisedMethods[0]?.id;
   if (layout === 'action' && !actionMethodId) return null;
 
   return (
@@ -1109,7 +1133,7 @@ export function AcpAuthenticationPanel({
             void startAuthenticationFromPersistedConfig(actionMethodId);
           }}
         >
-          {t('lodyAgentConnections.enterKey')}
+          {actionLabel}
         </Button>
       ) : methodRows ? (
         <div {...stylex.props(styles.methodRows)}>
@@ -1170,12 +1194,12 @@ export function AcpAuthenticationPanel({
             <Dialog.Header>
               <Dialog.Title>
                 {layout === 'action'
-                  ? t('lodyAgentConnections.keyTitle', { name: provider })
+                  ? actionTitle
                   : (advertisedMethods.find((method) => method.id === runningMethodId)?.name ??
                     provider)}
               </Dialog.Title>
             </Dialog.Header>
-            {waiting && !interaction ? waitingStatus : null}
+            {waiting && !interaction && !authorization ? waitingStatus : null}
             {details}
             {phase === 'authenticated' ? (
               <Dialog.Footer>
@@ -1194,6 +1218,7 @@ export function AcpAuthenticationPanel({
 export function AcpAuthenticationAuthorizationView({
   provider,
   authorization,
+  dialog = false,
   authorizationCode,
   authorizationCodeSubmitted,
   authorizationCodeUnknown = false,
@@ -1208,6 +1233,7 @@ export function AcpAuthenticationAuthorizationView({
 }: {
   provider: string;
   authorization: AcpAuthorizationDetails;
+  dialog?: boolean;
   authorizationCode: string;
   authorizationCodeSubmitted: boolean;
   authorizationCodeUnknown?: boolean;
@@ -1227,7 +1253,7 @@ export function AcpAuthenticationAuthorizationView({
     : null;
 
   return (
-    <div {...stylex.props(surface.formBlock, styles.block)}>
+    <div {...stylex.props(!dialog && surface.formBlock, styles.block)}>
       <div {...stylex.props(styles.blockHead)}>
         <div {...stylex.props(styles.text)}>
           <p {...stylex.props(styles.title)}>
@@ -1300,7 +1326,9 @@ export function AcpAuthenticationAuthorizationView({
       {authorization.acceptsAuthorizationCode ? (
         <div {...stylex.props(styles.stack)}>
           <UiField.Label htmlFor={authorizationCodeInputId}>
-            {t('agents.authentication.authorizationCode', 'Authorization code')}
+            {remoteSorbet
+              ? t('agents.authentication.authorizationResult', 'Authorization result')
+              : t('agents.authentication.authorizationCode', 'Authorization code')}
           </UiField.Label>
           <div {...stylex.props(styles.submitRow)}>
             <div {...stylex.props(styles.submitInput)}>
@@ -1310,10 +1338,17 @@ export function AcpAuthenticationAuthorizationView({
                 disabled={authorizationCodeSubmitted || authorizationCodeUnknown}
                 autoComplete="one-time-code"
                 spellCheck={false}
-                placeholder={t(
-                  'agents.authentication.authorizationCodePlaceholder',
-                  'Paste the code from the browser'
-                )}
+                placeholder={
+                  remoteSorbet
+                    ? t(
+                        'agents.authentication.authorizationResultPlaceholder',
+                        'Paste the code or final redirect URL'
+                      )
+                    : t(
+                        'agents.authentication.authorizationCodePlaceholder',
+                        'Paste the code from the browser'
+                      )
+                }
                 onChange={(event) => onAuthorizationCodeChange(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && authorizationCode.trim()) {
@@ -1368,10 +1403,12 @@ export function AcpAuthenticationInteractionView({
   onValuesChange,
   onSubmit,
   dialog = false,
+  submitLabel,
   onCancel,
 }: {
   interaction: AuthenticationInteraction;
   dialog?: boolean;
+  submitLabel?: ReactNode;
   onCancel?: () => void;
   values: Record<string, string>;
   submitting: boolean;
@@ -1498,7 +1535,7 @@ export function AcpAuthenticationInteractionView({
             onClick={() => onSubmit({ action: 'accept', content: values })}
           >
             {submitting ? <Spinner size="small" /> : null}
-            {t('lodyAgentConnections.saveKey')}
+            {submitLabel ?? t('common.continue', 'Continue')}
           </Button>
         </Dialog.Footer>
       ) : (

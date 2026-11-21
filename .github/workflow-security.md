@@ -44,5 +44,27 @@ explains why the build is not reproduced from public configuration.
 - The build output leaves the runner only encrypted, through the pinned Buildgraph
   `upload` Action with `BUILDGRAPH_ARTIFACT_KEY`. The only plaintext artifact is the
   per-target index of artifact ID, digest and source SHAs. Run logs stay public.
-- Signing, notarization, update-feed signing, storage and package-registry
-  credentials never enter this repository; the private consumer holds them.
+- This legacy cross-repository build receives no signing, notarization, update-feed,
+  storage or registry credentials. New cloud release workflows use the isolated
+  environments described below.
+
+## Cloud client releases
+
+- Client release entry points run only on trusted `main` or `release`, never on PR
+  events or `pull_request_target`. Every remote Action is pinned to a full commit SHA.
+- `CLIENT_RELEASES_ENABLED` must equal `true` before any release admission proceeds.
+  Keep it disabled until Track A/B integration and owner cutover are complete.
+- Cloud Nightly uses `cloud-nightly` on `main`; Next uses `cloud-staging` on `main`;
+  stable uses `cloud-production` on `release`, with owner-configured required reviewers.
+  Manual production recovery also dispatches from `release` and pins its full SHA.
+- Signing, notarization and storage credentials belong only to consuming steps;
+  workspace installation precedes signing-material creation. npm uses OIDC without
+  a static token. Do not print environment dumps or secret values.
+- Preserve non-canceling release locks, same-run immutable retry artifacts, reserved
+  Nightly versions, immutable-object conflict checks and assets-before-feed ordering.
+  Every client publisher waits for public SEA installation checks for its exact version.
+- Private and public publishers must never write the same channel concurrently.
+  Cutover disables the private writer first; rollback disables the public writer first.
+
+The [migration guide](client-releases.md) records entry points, A/B script contracts,
+configuration and validation limits.

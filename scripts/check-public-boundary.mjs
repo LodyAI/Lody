@@ -104,7 +104,11 @@ async function main() {
       }
     }
     for (const scriptName of Object.keys(manifest.scripts ?? {})) {
-      if (hostedScriptNamePattern.test(scriptName)) {
+      const clientBuild =
+        (file === 'apps/mobile-capacitor/package.json' &&
+          ['staging:ios', 'staging:android'].includes(scriptName)) ||
+        (file === 'apps/electron/package.json' && scriptName === 'build:mac:staging');
+      if (hostedScriptNamePattern.test(scriptName) && !clientBuild) {
         violations.push(`${file}: hosted deployment script ${scriptName} is not public`);
       }
     }

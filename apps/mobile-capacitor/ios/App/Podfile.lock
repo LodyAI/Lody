@@ -1,0 +1,149 @@
+PODS:
+  - BetterAuthCapacitor (0.3.6):
+    - Capacitor
+  - Capacitor (8.2.0):
+    - CapacitorCordova
+  - CapacitorApp (8.1.0):
+    - Capacitor
+  - CapacitorCamera (8.2.6):
+    - Capacitor
+    - IONCameraLib (~> 2.0.0)
+  - CapacitorCordova (8.2.0)
+  - CapacitorDevice (8.0.3):
+    - Capacitor
+  - CapacitorFilesystem (8.1.2):
+    - Capacitor
+    - IONFilesystemLib (~> 1.1.1)
+  - CapacitorKeyboard (8.0.3):
+    - Capacitor
+  - CapacitorPreferences (8.0.1):
+    - Capacitor
+  - CapacitorPushNotifications (8.1.3):
+    - Capacitor
+  - CapacitorShare (8.0.1):
+    - Capacitor
+  - CapacitorSplashScreen (8.0.2):
+    - Capacitor
+  - CordovaPluginsStatic (8.6.2):
+    - CapacitorCordova
+    - OneSignalXCFramework (= 5.5.0)
+  - IONCameraLib (2.0.0)
+  - IONFilesystemLib (1.1.4)
+  - OneSignalXCFramework (5.5.0):
+    - OneSignalXCFramework/OneSignalComplete (= 5.5.0)
+  - OneSignalXCFramework/OneSignal (5.5.0):
+    - OneSignalXCFramework/OneSignalCore
+    - OneSignalXCFramework/OneSignalExtension
+    - OneSignalXCFramework/OneSignalLiveActivities
+    - OneSignalXCFramework/OneSignalNotifications
+    - OneSignalXCFramework/OneSignalOSCore
+    - OneSignalXCFramework/OneSignalOutcomes
+    - OneSignalXCFramework/OneSignalUser
+  - OneSignalXCFramework/OneSignalComplete (5.5.0):
+    - OneSignalXCFramework/OneSignal
+    - OneSignalXCFramework/OneSignalInAppMessages
+    - OneSignalXCFramework/OneSignalLocation
+  - OneSignalXCFramework/OneSignalCore (5.5.0)
+  - OneSignalXCFramework/OneSignalExtension (5.5.0):
+    - OneSignalXCFramework/OneSignalCore
+    - OneSignalXCFramework/OneSignalOutcomes
+  - OneSignalXCFramework/OneSignalInAppMessages (5.5.0):
+    - OneSignalXCFramework/OneSignalCore
+    - OneSignalXCFramework/OneSignalNotifications
+    - OneSignalXCFramework/OneSignalOSCore
+    - OneSignalXCFramework/OneSignalOutcomes
+    - OneSignalXCFramework/OneSignalUser
+  - OneSignalXCFramework/OneSignalLiveActivities (5.5.0):
+    - OneSignalXCFramework/OneSignalCore
+    - OneSignalXCFramework/OneSignalOSCore
+    - OneSignalXCFramework/OneSignalUser
+  - OneSignalXCFramework/OneSignalLocation (5.5.0):
+    - OneSignalXCFramework/OneSignalCore
+    - OneSignalXCFramework/OneSignalNotifications
+    - OneSignalXCFramework/OneSignalOSCore
+    - OneSignalXCFramework/OneSignalUser
+  - OneSignalXCFramework/OneSignalNotifications (5.5.0):
+    - OneSignalXCFramework/OneSignalCore
+    - OneSignalXCFramework/OneSignalExtension
+    - OneSignalXCFramework/OneSignalOutcomes
+  - OneSignalXCFramework/OneSignalOSCore (5.5.0):
+    - OneSignalXCFramework/OneSignalCore
+  - OneSignalXCFramework/OneSignalOutcomes (5.5.0):
+    - OneSignalXCFramework/OneSignalCore
+  - OneSignalXCFramework/OneSignalUser (5.5.0):
+    - OneSignalXCFramework/OneSignalCore
+    - OneSignalXCFramework/OneSignalNotifications
+    - OneSignalXCFramework/OneSignalOSCore
+    - OneSignalXCFramework/OneSignalOutcomes
+
+DEPENDENCIES:
+  - "BetterAuthCapacitor (from `../../../../node_modules/.pnpm/better-auth-capacitor@0.3.6_12a93419187d6cf6854167ecfc878551/node_modules/better-auth-capacitor`)"
+  - "Capacitor (from `../../../../node_modules/.pnpm/@capacitor+ios@8.2.0_@capacitor+core@8.6.2/node_modules/@capacitor/ios`)"
+  - "CapacitorApp (from `../../../../node_modules/.pnpm/@capacitor+app@8.1.0_@capacitor+core@8.6.2/node_modules/@capacitor/app`)"
+  - "CapacitorCamera (from `../../../../node_modules/.pnpm/@capacitor+camera@8.2.6_@capacitor+core@8.6.2/node_modules/@capacitor/camera`)"
+  - "CapacitorCordova (from `../../../../node_modules/.pnpm/@capacitor+ios@8.2.0_@capacitor+core@8.6.2/node_modules/@capacitor/ios`)"
+  - "CapacitorDevice (from `../../../../node_modules/.pnpm/@capacitor+device@8.0.3_@capacitor+core@8.6.2/node_modules/@capacitor/device`)"
+  - "CapacitorFilesystem (from `../../../../node_modules/.pnpm/@capacitor+filesystem@8.1.2_@capacitor+core@8.6.2/node_modules/@capacitor/filesystem`)"
+  - "CapacitorKeyboard (from `../../../../node_modules/.pnpm/@capacitor+keyboard@8.0.3_@capacitor+core@8.6.2/node_modules/@capacitor/keyboard`)"
+  - "CapacitorPreferences (from `../../../../node_modules/.pnpm/@capacitor+preferences@8.0.1_@capacitor+core@8.6.2/node_modules/@capacitor/preferences`)"
+  - "CapacitorPushNotifications (from `../../../../node_modules/.pnpm/@capacitor+push-notifications@8.1.3_@capacitor+core@8.6.2/node_modules/@capacitor/push-notifications`)"
+  - "CapacitorShare (from `../../../../node_modules/.pnpm/@capacitor+share@8.0.1_@capacitor+core@8.6.2/node_modules/@capacitor/share`)"
+  - "CapacitorSplashScreen (from `../../../../node_modules/.pnpm/@capacitor+splash-screen@8.0.2_@capacitor+core@8.6.2/node_modules/@capacitor/splash-screen`)"
+  - CordovaPluginsStatic (from `../capacitor-cordova-ios-plugins`)
+  - OneSignalXCFramework (< 6.0, >= 5.0.0)
+
+SPEC REPOS:
+  trunk:
+    - IONCameraLib
+    - IONFilesystemLib
+    - OneSignalXCFramework
+
+EXTERNAL SOURCES:
+  BetterAuthCapacitor:
+    :path: "../../../../node_modules/.pnpm/better-auth-capacitor@0.3.6_12a93419187d6cf6854167ecfc878551/node_modules/better-auth-capacitor"
+  Capacitor:
+    :path: "../../../../node_modules/.pnpm/@capacitor+ios@8.2.0_@capacitor+core@8.6.2/node_modules/@capacitor/ios"
+  CapacitorApp:
+    :path: "../../../../node_modules/.pnpm/@capacitor+app@8.1.0_@capacitor+core@8.6.2/node_modules/@capacitor/app"
+  CapacitorCamera:
+    :path: "../../../../node_modules/.pnpm/@capacitor+camera@8.2.6_@capacitor+core@8.6.2/node_modules/@capacitor/camera"
+  CapacitorCordova:
+    :path: "../../../../node_modules/.pnpm/@capacitor+ios@8.2.0_@capacitor+core@8.6.2/node_modules/@capacitor/ios"
+  CapacitorDevice:
+    :path: "../../../../node_modules/.pnpm/@capacitor+device@8.0.3_@capacitor+core@8.6.2/node_modules/@capacitor/device"
+  CapacitorFilesystem:
+    :path: "../../../../node_modules/.pnpm/@capacitor+filesystem@8.1.2_@capacitor+core@8.6.2/node_modules/@capacitor/filesystem"
+  CapacitorKeyboard:
+    :path: "../../../../node_modules/.pnpm/@capacitor+keyboard@8.0.3_@capacitor+core@8.6.2/node_modules/@capacitor/keyboard"
+  CapacitorPreferences:
+    :path: "../../../../node_modules/.pnpm/@capacitor+preferences@8.0.1_@capacitor+core@8.6.2/node_modules/@capacitor/preferences"
+  CapacitorPushNotifications:
+    :path: "../../../../node_modules/.pnpm/@capacitor+push-notifications@8.1.3_@capacitor+core@8.6.2/node_modules/@capacitor/push-notifications"
+  CapacitorShare:
+    :path: "../../../../node_modules/.pnpm/@capacitor+share@8.0.1_@capacitor+core@8.6.2/node_modules/@capacitor/share"
+  CapacitorSplashScreen:
+    :path: "../../../../node_modules/.pnpm/@capacitor+splash-screen@8.0.2_@capacitor+core@8.6.2/node_modules/@capacitor/splash-screen"
+  CordovaPluginsStatic:
+    :path: "../capacitor-cordova-ios-plugins"
+
+SPEC CHECKSUMS:
+  BetterAuthCapacitor: 44a9b14d9c60ac5923031d1bdbe7bcc04306dc32
+  Capacitor: 49a454e1cdbd520bc106a220adca7913536a4933
+  CapacitorApp: 449ffe26375e96f8aaaee625ac6e01e5c57c8650
+  CapacitorCamera: 09e51f52c079eaf731a5528a1c3455c074ccc24c
+  CapacitorCordova: a9ac88d84a1f5280f33b349fe50fce1902683ac0
+  CapacitorDevice: 708e742b60a61572cd593e44c809592e8f31da14
+  CapacitorFilesystem: 2db285a1ac6e475cc27cae2e1bea999000f9e2be
+  CapacitorKeyboard: 31c8285d92c9d1410071d52449f16d2c6673b6f4
+  CapacitorPreferences: cca2021f386efb75947c850334447d9ff22b14f1
+  CapacitorPushNotifications: a31b62e18764ab855537dfcdade1e6ecf5aba29f
+  CapacitorShare: 0c58305114538568059bfc07111f22dcb9cb2a82
+  CapacitorSplashScreen: 7bf61c2001557ff9e195e601c6b87344480d3c65
+  CordovaPluginsStatic: bf0817d28b47e3ead3b4162a46dc67121035d8b8
+  IONCameraLib: 729cae576e1a952602ce750a9790b6dc7d7e2e95
+  IONFilesystemLib: e6610c2b260d15e4b9cb9d5e37a87095479b669e
+  OneSignalXCFramework: 943852e7d70d719f73e9669d48620aeec1b93022
+
+PODFILE CHECKSUM: 4cb8145c26abb8310804b2b7595e3516d8a1e8f9
+
+COCOAPODS: 1.17.0

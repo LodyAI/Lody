@@ -1,0 +1,135 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "plugins": [
+    {
+      "type": "linked-versions",
+      "groupName": "lody-clients",
+      "components": ["lody-cli", "lody-electron", "lody-mobile"]
+    }
+  ],
+  "packages": {
+    "apps/cli": {
+      "component": "lody-cli",
+      "package-name": "lody",
+      "release-type": "node",
+      "bump-minor-pre-major": true,
+      "initial-version": "0.2.8",
+      "changelog-path": "CHANGELOG.md",
+      "include-component-in-tag": true,
+      "pull-request-title-pattern": "chore: release ${component} ${version}",
+      "changelog-sections": [
+        {
+          "type": "feat",
+          "section": "Features"
+        },
+        {
+          "type": "fix",
+          "section": "Bug Fixes"
+        },
+        {
+          "type": "perf",
+          "section": "Performance"
+        },
+        {
+          "type": "refactor",
+          "section": "Refactors"
+        },
+        {
+          "type": "docs",
+          "section": "Documentation"
+        },
+        {
+          "type": "deps",
+          "section": "Dependencies"
+        },
+        {
+          "type": "chore",
+          "section": "Chores",
+          "hidden": true
+        }
+      ]
+    },
+    "apps/electron": {
+      "component": "lody-electron",
+      "package-name": "@lody/electron",
+      "release-type": "node",
+      "skip-changelog": true,
+      "bump-minor-pre-major": true,
+      "initial-version": "0.2.8",
+      "include-component-in-tag": true,
+      "pull-request-title-pattern": "chore: release ${component} ${version}",
+      "changelog-sections": [
+        {
+          "type": "feat",
+          "section": "Features"
+        },
+        {
+          "type": "fix",
+          "section": "Bug Fixes"
+        },
+        {
+          "type": "perf",
+          "section": "Performance"
+        },
+        {
+          "type": "refactor",
+          "section": "Refactors"
+        },
+        {
+          "type": "docs",
+          "section": "Documentation"
+        },
+        {
+          "type": "deps",
+          "section": "Dependencies"
+        },
+        {
+          "type": "chore",
+          "section": "Chores",
+          "hidden": true
+        }
+      ]
+    },
+    "apps/mobile-capacitor": {
+      "component": "lody-mobile",
+      "package-name": "@lody/mobile-capacitor",
+      "release-type": "node",
+      "bump-minor-pre-major": true,
+      "initial-version": "0.55.2",
+      "changelog-path": "CHANGELOG.md",
+      "include-component-in-tag": true,
+      "pull-request-title-pattern": "chore: release ${component} ${version}",
+      "changelog-sections": [
+        {
+          "type": "feat",
+          "section": "Features"
+        },
+        {
+          "type": "fix",
+          "section": "Bug Fixes"
+        },
+        {
+          "type": "perf",
+          "section": "Performance"
+        },
+        {
+          "type": "refactor",
+          "section": "Refactors"
+        },
+        {
+          "type": "docs",
+          "section": "Documentation"
+        },
+        {
+          "type": "deps",
+          "section": "Dependencies"
+        },
+        {
+          "type": "chore",
+          "section": "Chores",
+          "hidden": true
+        }
+      ]
+    }
+  }
+}

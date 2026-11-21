@@ -1,0 +1,215 @@
+name: Generate Sparkle appcast
+description: Build a signed Sparkle appcast and deltas from R2-hosted release archives.
+
+inputs:
+  appcast-url:
+    description: Public URL of the environment-specific appcast.xml.
+    required: true
+  archive-dir:
+    description: Temporary directory used by generate_appcast.
+    required: true
+  dist-dir:
+    description: Directory containing the current macOS zip artifacts.
+    required: true
+  archive-pattern:
+    description: Filename pattern selecting exactly one current macOS zip artifact.
+    required: false
+    default: '*.zip'
+  output-dir:
+    description: Directory where the generated feed, deltas, and selected zip are staged.
+    required: false
+    default: ''
+  download-url-prefix:
+    description: Public URL prefix embedded in appcast enclosures.
+    required: true
+  public-key:
+    description: Sparkle Ed25519 public key used to verify prior releases.
+    required: true
+  private-key:
+    description: Sparkle Ed25519 private key used to sign the new feed.
+    required: true
+  allow-missing-appcast:
+    description: Set true only while bootstrapping a new environment's first Sparkle feed.
+    required: false
+    default: 'false'
+  legacy-appcast-sha256:
+    description: Exact reviewed legacy feed digest allowed to migrate without historical delta bases. Staging only.
+    required: false
+    default: ''
+  delta-compression:
+    description: Sparkle delta compression (default preserves its existing compression choice).
+    required: false
+    default: 'default'
+  current-version:
+    description: Packaged display version. Nightly must pass its generated version; stable defaults to the cloud package version.
+    required: false
+    default: ''
+  current-build-version:
+    description: Packaged CFBundleVersion, when different from the display version.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Prepare current archives and verified delta bases
+      shell: bash
+      env:
+        APPCAST_URL: ${{ inputs.appcast-url }}
+        ARCHIVE_DIR: ${{ inputs.archive-dir }}
+        DIST_DIR: ${{ inputs.dist-dir }}
+        ARCHIVE_PATTERN: ${{ inputs.archive-pattern }}
+        PUBLIC_KEY: ${{ inputs.public-key }}
+        ALLOW_MISSING_APPCAST: ${{ inputs.allow-missing-appcast }}
+        SPARKLE_LEGACY_APPCAST_SHA256: ${{ inputs.legacy-appcast-sha256 }}
+        CURRENT_VERSION: ${{ inputs.current-version }}
+        CURRENT_BUILD_VERSION: ${{ inputs.current-build-version }}
+      run: |
+        set -euo pipefail
+        if [[ -n "${SPARKLE_LEGACY_APPCAST_SHA256}" && "${LODY_ENV:-}" != staging ]]; then
+          echo "Legacy appcast migration is restricted to staging" >&2
+          exit 1
+        fi
+        if [[ -d "${ARCHIVE_DIR}" && -n "$(find "${ARCHIVE_DIR}" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+          echo "Sparkle archive directory must be empty" >&2
+          exit 1
+        fi
+        mkdir -p "${ARCHIVE_DIR}"
+        current_archive_count="$(find "${DIST_DIR}" -maxdepth 1 -type f -name "${ARCHIVE_PATTERN}" | wc -l | tr -d ' ')"
+        if [[ "${current_archive_count}" != "1" ]]; then
+          echo "Expected exactly one macOS zip matching ${ARCHIVE_PATTERN}, found ${current_archive_count}"
+          exit 1
+        fi
+        find "${DIST_DIR}" -maxdepth 1 -type f -name "${ARCHIVE_PATTERN}" -exec cp {} "${ARCHIVE_DIR}/" \;
+        current_version="${CURRENT_VERSION}"
+        if [[ -z "${current_version}" ]]; then
+          current_version="$(node -p "require('./apps/electron/package.json').version")"
+        fi
+        node apps/electron/sparkle-delta-bases.mjs \
+          "${APPCAST_URL}" "${ARCHIVE_DIR}" "${PUBLIC_KEY}" \
+          "${current_version}" "${ALLOW_MISSING_APPCAST}" 2 "${CURRENT_BUILD_VERSION}"
+
+    - name: Preserve reviewed legacy appcast
+      if: always() && inputs.legacy-appcast-sha256 != ''
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: sparkle-legacy-staging-appcast
+        path: ${{ inputs.archive-dir }}.legacy-appcast.xml
+        if-no-files-found: ignore
+
+    # Paths derive from archive-dir so parallel invocations in one job never share
+    # files, mounts or GITHUB_ENV state.
+    - name: Fetch verified Sparkle release tools
+      shell: bash
+      env:
+        ARCHIVE_DIR: ${{ inputs.archive-dir }}
+      run: |
+        set -euo pipefail
+        tools_dir="${ARCHIVE_DIR}.tools"
+        tarball="${tools_dir}/Sparkle-2.9.4.tar.xz"
+        mkdir -p "${tools_dir}"
+        curl --fail --silent --show-error --location \
+          --output "${tarball}" \
+          https://github.com/sparkle-project/Sparkle/releases/download/2.9.4/Sparkle-2.9.4.tar.xz
+        echo "ce89daf967db1e1893ed3ebd67575ed82d3902563e3191ca92aaec9164fbdef9  ${tarball}" \
+          | shasum -a 256 -c -
+        tar -xf "${tarball}" -C "${tools_dir}" bin/
+        chmod +x "${tools_dir}"/bin/*
+
+    - name: Sign appcast and generate deltas
+      shell: bash
+      env:
+        ARCHIVE_DIR: ${{ inputs.archive-dir }}
+        DOWNLOAD_URL_PREFIX: ${{ inputs.download-url-prefix }}
+        DELTA_COMPRESSION: ${{ inputs.delta-compression }}
+        SPARKLE_ED_PRIVATE_KEY: ${{ inputs.private-key }}
+        SPARKLE_ED_PUBLIC_KEY: ${{ inputs.public-key }}
+      run: |
+        set -euo pipefail
+        case "${DELTA_COMPRESSION}" in
+          default|lzma|lzfse) ;;
+          *) echo "Unsupported delta compression: ${DELTA_COMPRESSION}" >&2; exit 1 ;;
+        esac
+        # Sparkle's version-pair .ignore markers omit architecture. Isolate its
+        # Foundation cache as well as archives, or one feed can suppress another's delta.
+        export CFFIXED_USER_HOME="${ARCHIVE_DIR}.home"
+        mkdir -p "${CFFIXED_USER_HOME}/Library/Caches"
+        swift -e '
+          import Foundation
+          let root = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"]!
+          let expected = URL(fileURLWithPath: root).appendingPathComponent("Library/Caches")
+          let actual = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+          guard actual.resolvingSymlinksInPath().path == expected.resolvingSymlinksInPath().path else {
+            fatalError("Sparkle cache isolation failed: \(actual.path)")
+          }
+        '
+        device="$(hdiutil attach -nomount ram://16384 | awk '{print $1}')"
+        volume="SparkleKeyRAM-$(basename "${device}")"
+        diskutil erasevolume HFS+ "${volume}" "${device}" >/dev/null
+        key_file="/Volumes/${volume}/ed_private_key"
+        cleanup() {
+          dd if=/dev/urandom of="${key_file}" bs=1024 count=4 conv=notrunc 2>/dev/null || true
+          rm -f "${key_file}" || true
+          hdiutil detach "${device}" >/dev/null || true
+        }
+        trap cleanup EXIT
+        printf '%s' "${SPARKLE_ED_PRIVATE_KEY}" > "${key_file}"
+        unset SPARKLE_ED_PRIVATE_KEY
+        node apps/electron/sparkle-signing.mjs key-pair --private-key-file "${key_file}"
+        printf '%s' 'Lody Sparkle release signing proof v1' > "${ARCHIVE_DIR}.tools/signing-proof.bin"
+        "${ARCHIVE_DIR}.tools/bin/sign_update" --ed-key-file "${key_file}" \
+          "${ARCHIVE_DIR}.tools/signing-proof.bin" > "${ARCHIVE_DIR}.tools/signing-proof.txt"
+        node apps/electron/sparkle-signing.mjs proof \
+          --archive "${ARCHIVE_DIR}.tools/signing-proof.bin" \
+          --signature-file "${ARCHIVE_DIR}.tools/signing-proof.txt"
+        # Report CPU time and peak memory to distinguish computation from I/O pressure.
+        /usr/bin/time -l "${ARCHIVE_DIR}.tools/bin/generate_appcast" \
+          --verbose \
+          --delta-compression "${DELTA_COMPRESSION}" \
+          --ed-key-file "${key_file}" \
+          --download-url-prefix "${DOWNLOAD_URL_PREFIX}" \
+          --embed-release-notes \
+          "${ARCHIVE_DIR}"
+
+    - name: Verify generated archive and delta signatures
+      shell: bash
+      env:
+        ARCHIVE_DIR: ${{ inputs.archive-dir }}
+        DIST_DIR: ${{ inputs.dist-dir }}
+        ARCHIVE_PATTERN: ${{ inputs.archive-pattern }}
+        APPCAST_URL: ${{ inputs.appcast-url }}
+        SPARKLE_ED_PUBLIC_KEY: ${{ inputs.public-key }}
+        CURRENT_VERSION: ${{ inputs.current-version }}
+        CURRENT_BUILD_VERSION: ${{ inputs.current-build-version }}
+      run: |
+        set -euo pipefail
+        current_archive="$(find "${DIST_DIR}" -maxdepth 1 -type f -name "${ARCHIVE_PATTERN}")"
+        current_version="${CURRENT_VERSION}"
+        if [[ -z "${current_version}" ]]; then
+          current_version="$(node -p "require('./apps/electron/package.json').version")"
+        fi
+        node apps/electron/sparkle-signing.mjs outputs \
+          --appcast "${ARCHIVE_DIR}/appcast.xml" \
+          --archive-directory "${ARCHIVE_DIR}" \
+          --appcast-url "${APPCAST_URL}" \
+          --current-filename "$(basename "${current_archive}")" \
+          --current-version "${current_version}" \
+          --current-build-version "${CURRENT_BUILD_VERSION:-${current_version}}"
+
+    - name: Stage generated feed assets
+      shell: bash
+      env:
+        ARCHIVE_DIR: ${{ inputs.archive-dir }}
+        DIST_DIR: ${{ inputs.dist-dir }}
+        ARCHIVE_PATTERN: ${{ inputs.archive-pattern }}
+        CONFIGURED_OUTPUT_DIR: ${{ inputs.output-dir }}
+      run: |
+        set -euo pipefail
+        test -f "${ARCHIVE_DIR}/appcast.xml"
+        output_dir="${CONFIGURED_OUTPUT_DIR:-${DIST_DIR}}"
+        mkdir -p "${output_dir}"
+        cp "${ARCHIVE_DIR}/appcast.xml" "${output_dir}/appcast.xml"
+        find "${ARCHIVE_DIR}" -maxdepth 1 -type f -name '*.delta' -exec cp {} "${output_dir}/" \;
+        if [[ "${output_dir}" != "${DIST_DIR}" ]]; then
+          find "${DIST_DIR}" -maxdepth 1 -type f -name "${ARCHIVE_PATTERN}" -exec cp {} "${output_dir}/" \;
+        fi

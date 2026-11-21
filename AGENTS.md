@@ -85,7 +85,7 @@ when migration facts change.
   shared product code uses `packages/platform` capabilities and ports.
 - Native mobile clients keep independent builds and public cloud protocol clients;
   they must not import private backend code.
-- The OSS desktop is local-only; authenticated product-cloud requests are forbidden.
+- Default desktop builds are local-only; product-cloud requests require explicit cloud composition.
   Public managed-runtime downloads are the exception. Shared packages stay
   platform-neutral; local telemetry is hard-disabled.
 - `packages/acp-extension-kimi` and `packages/acp-extension-pi` stay outside the root

@@ -183,6 +183,7 @@ const rowParts = stylex.create({
   endReserveMultiple: { minWidth: themeSpace[10] },
   emptySlot: { width: 0 },
   rest: { display: 'flex' },
+  restStatus: { width: themeSpace[5], justifyContent: 'center' },
   restFade: {
     transitionProperty: 'opacity',
     transitionDuration: themeDuration[100],
@@ -1163,15 +1164,18 @@ export function SidebarRowEndSlot({
   const sendStatus = useAtomValue(sessionSendStatusAtomFamily(sessionId ?? ''));
   const shortcut = useSidebarRowShortcut(sessionId);
   const sendLabel = useSessionSendLabel(sendStatus);
-  const restContent = shortcut ? (
-    <SidebarShortcutPill index={shortcut.index} platform={shortcut.platform} selected={selected} />
-  ) : hasSessionRowStatus({
+  const showStatus =
+    !shortcut &&
+    hasSessionRowStatus({
       isWaitingPermission,
       needsAttention,
       isWorking: drawWorking,
       hasUnreadMessages,
       sendState: sendStatus?.state,
-    }) ? (
+    });
+  const restContent = shortcut ? (
+    <SidebarShortcutPill index={shortcut.index} platform={shortcut.platform} selected={selected} />
+  ) : showStatus ? (
     <SessionRowStatusIndicator
       isWaitingPermission={isWaitingPermission}
       needsAttention={needsAttention}
@@ -1221,10 +1225,17 @@ export function SidebarRowEndSlot({
       )}
     >
       {hasRest ? (
+        // A status mark centres in one 20px column, the same column the revealed
+        // actions and a folded group's mark centre their 14px icons in, so it
+        // lines up with both instead of sitting 3px right of them.
         <span
           className={clsx(
-            stylex.props(rowParts.rest, Boolean(archive) && rowParts.restFade).className,
-            archive && fadeClassName
+            stylex.props(
+              rowParts.rest,
+              showStatus && rowParts.restStatus,
+              showActions && rowParts.restFade
+            ).className,
+            showActions && fadeClassName
           )}
         >
           {restContent}
