@@ -813,8 +813,6 @@ import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 import { copyTextToClipboard } from '@/lib/clipboard';
 
-// ── Path launcher options for "Open in" split button ──
-
 type ActionId = 'copy-path';
 
 interface ActionOption {
@@ -4060,7 +4058,6 @@ export const SessionChatInterface = memo(
       setActiveSearchResultIndex(0);
     }, []);
 
-    // ── Page-level drag-and-drop ────────────────────────────────────────
     // Two kinds land on the whole conversation, not just on the composer: image
     // and file attachments, and a session dragged out of the sidebar, which
     // becomes a mention of that conversation. Each zone ignores the other's
@@ -5411,7 +5408,6 @@ export const SessionChatInterface = memo(
       [runtime, agentConfigs, session.id, updateSessionMetadata]
     );
 
-    // ── Pin management ──────────────────────────────────────────────────
     const handlePinMessage = useCallback(
       (historyId: string | null) => {
         if (!runtime) {

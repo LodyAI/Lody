@@ -20,10 +20,6 @@ import { useMentionContext } from '@/ui/mention';
 import { getComposerCaretRect, getComposerRangeRects } from '@/ui/mention/composer-input';
 import { Popover } from '@lody/ui/popover';
 
-// ============================================================================
-// Types
-// ============================================================================
-
 type IssueOrPR = {
   number: number;
   url?: string;
@@ -71,10 +67,6 @@ type UseRepoIssuesAndPRsResult = IssuePrMentionData & {
   refresh: (options?: { force?: boolean }) => Promise<void>;
 };
 
-// ============================================================================
-// Cache + Fetch
-// ============================================================================
-
 const MAX_ISSUE_PR_SUGGESTIONS = 50;
 
 const ISSUE_PR_DB_NAME = 'lody:repo-issues-prs';
@@ -105,10 +97,6 @@ export function __resetIssuePrFetchFreshnessForTests() {
   issuePrMemoryCache.clear();
   issuePrInFlightRequests.clear();
 }
-
-// ============================================================================
-// Analytics
-// ============================================================================
 
 function fnv1a32(value: string) {
   let hash = 0x811c9dc5;
@@ -207,10 +195,6 @@ function publishIssuePrCacheEntry(key: string, entry: RepoIssuesAndPRsResult) {
   const listeners = issuePrCacheListeners.get(key);
   listeners?.forEach((listener) => listener(entry));
 }
-
-// ============================================================================
-// Mention Utils
-// ============================================================================
 
 export function buildItemSuggestions(items: IssueOrPR[]): ItemSuggestion[] {
   return items.map((item) => {
@@ -379,10 +363,6 @@ export function extractIssuePRMentionsFromText(
 
   return mentions;
 }
-
-// ============================================================================
-// Data Hook
-// ============================================================================
 
 function toRepoIssuesAndPRsResult(
   repoFullName: string,
@@ -577,10 +557,6 @@ export function useKnownIssuePrItems(repoFullName?: string, isPublic?: boolean) 
   return { knownItems, issuePrData, status: issuePrData.status, error: issuePrData.error };
 }
 
-// ============================================================================
-// Hydrator
-// ============================================================================
-
 export function IssuePrMentionHydrator({
   text,
   knownItems,
@@ -599,10 +575,6 @@ export function IssuePrMentionHydrator({
 
   return null;
 }
-
-// ============================================================================
-// UI Components
-// ============================================================================
 
 function getItemIconMeta(type: 'issue' | 'pr') {
   if (type === 'pr') {

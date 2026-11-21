@@ -215,7 +215,6 @@ export function SessionInfoBar({
 
   const [stage, setStage] = useState<InfoBarItemKey | null>(initialStage ?? defaultKey);
 
-  // ── Recency-driven focus ─────────────────────────────────────────────
   // Each item has a change signature; when it changes after mount, that item
   // takes the stage. Purely last-event-wins, no priority tiers.
   const statusSignature = status

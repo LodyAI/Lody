@@ -33,10 +33,6 @@ export const sidebarScrollTopByWorkspaceAtom = atom<Record<string, number>>({});
  * - Chats section collapsed state
  */
 
-// ============================================================================
-// Chat Scope (My Tasks / Team Tasks)
-// ============================================================================
-
 export type SidebarChatScope = 'my' | 'team';
 
 /**
@@ -48,10 +44,6 @@ export type SidebarChatScope = 'my' | 'team';
  * the complete workspace. An explicit choice remains persisted below.
  */
 export const chatScopeAtom = atomWithStorage<SidebarChatScope>('lody-sidebar-chat-scope', 'team');
-
-// ============================================================================
-// Repo State (Collapse + Ordering)
-// ============================================================================
 
 export type RepoCollapseState = Record<string, boolean>;
 
@@ -141,10 +133,6 @@ export const setRepoOrderAtom = atom(null, (_get, set, order: string[]) => {
   set(repoOrderAtom, order);
 });
 
-// ============================================================================
-// Chats Section Collapsed
-// ============================================================================
-
 /**
  * Chats section collapsed state - persisted to localStorage
  */
@@ -173,10 +161,6 @@ export const pinSectionsCollapsedAtom = atomWithStorage<Record<string, boolean>>
   'lody-sidebar-pin-sections-collapsed',
   {}
 );
-
-// ============================================================================
-// Local Project Collapse State (folders under Local Projects / <Machine> project)
-// ============================================================================
 
 export type LocalProjectCollapseState = Record<string, boolean>;
 
@@ -266,10 +250,6 @@ export function moveLocalProjectOrder(
   return [...nextVisibleOrder, ...persistedOrder.filter((key) => !visibleSet.has(key))];
 }
 
-// ============================================================================
-// Section Collapsed (Local Projects + GitHub Worktrees headers)
-// ============================================================================
-
 /**
  * Local Projects section header collapsed state (per machine section) - persisted.
  * Key: section.machineId ?? section.kind, Value: collapsed (true/false)
@@ -286,10 +266,6 @@ export const githubWorktreesSectionCollapsedAtom = atomWithStorage<boolean>(
   'lody-sidebar-github-worktrees-section-collapsed',
   false
 );
-
-// ============================================================================
-// Sidebar Collapsed (Desktop)
-// ============================================================================
 
 /**
  * Whether the desktop left sidebar is collapsed (fully hidden). Persisted.
@@ -351,10 +327,6 @@ export const sidebarLastWidthAtom = atomWithStorage<number>(
   undefined,
   { getOnInit: true }
 );
-
-// ============================================================================
-// Sidebar Organize Mode (Workspace vs Updated)
-// ============================================================================
 
 export type SidebarOrganizeMode = 'workspace' | 'updated' | 'status';
 
@@ -428,10 +400,6 @@ export const sidebarUpdatedBucketShowFullStateAtom = atomWithStorage<Record<stri
   'lody-sidebar-updated-bucket-show-full',
   {}
 );
-
-// ============================================================================
-// Archive Scope (My Tasks / All Tasks for archive view)
-// ============================================================================
 
 export type ArchiveScopeValue = 'my' | 'team';
 

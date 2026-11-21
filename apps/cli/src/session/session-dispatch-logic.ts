@@ -28,8 +28,6 @@ import {
 } from '@lody/shared';
 import type { SessionDispatchEntry } from './session-dispatch-history';
 
-// ── Snapshot types ──────────────────────────────────────────────────────────
-
 /** All state needed for a dispatch decision, gathered by the I/O shell. */
 export type SessionDispatchSnapshot = {
   meta: SessionMeta;
@@ -83,8 +81,6 @@ export function isActivationAwaitingHistory(
   const status = resolveSessionHistoryStatus(entry);
   return status !== 'handled' && status !== 'failed' && status !== 'canceled';
 }
-
-// ── Action types ────────────────────────────────────────────────────────────
 
 export type DispatchAction =
   | {
@@ -174,8 +170,6 @@ function isImportedAcpReplayUserTurn(entry: SessionDispatchEntry, meta: SessionM
   );
 }
 
-// ── Dispatch decision ───────────────────────────────────────────────────────
-
 /**
  * Given a snapshot of session state, determine what dispatch action to take.
  *
@@ -202,7 +196,6 @@ export function resolveSessionDispatchAction(
     hasRewriteBarrier,
   } = snapshot;
 
-  // ── Step 1: Guard checks ──
   if (!meta || meta.machineId !== machineId) {
     return { type: 'noop', reason: 'not-owned' };
   }
@@ -222,7 +215,6 @@ export function resolveSessionDispatchAction(
     return { type: 'noop', reason: 'active-session' };
   }
 
-  // ── Step 2: Stale status recovery ──
   const statusType = meta.status?.type;
   if (
     statusType === 'running' ||
@@ -232,18 +224,14 @@ export function resolveSessionDispatchAction(
     return { type: 'reset-stale-status', statusType };
   }
 
-  // ── Step 3: Find dispatchable turn ──
   const turn = findNextDispatchableUserTurn(history, meta, workspaceId);
   if (!turn) {
     return { type: 'no-dispatchable-turn' };
   }
 
-  // ── Step 4: Decide create vs continue ──
   const mode = hasReusableSession || resolveDispatchAcpSessionId(meta) ? 'continue' : 'create';
   return { type: 'dispatch', mode, turn };
 }
-
-// ── Cancel decision ─────────────────────────────────────────────────────────
 
 /**
  * Given cancel-related state, determine whether to send a cancel request.
@@ -287,8 +275,6 @@ export function resolveSessionCancelAction(
   }
   return { type: 'cancel', turnId: lastCanceledTurn };
 }
-
-// ── Turn finding ────────────────────────────────────────────────────────────
 
 /**
  * Find the first user turn in history that needs to be dispatched.

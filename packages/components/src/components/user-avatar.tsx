@@ -35,8 +35,6 @@ interface UserAvatarProps {
  */
 export function UserAvatar({ user, size = 'medium', className, showIcon = false }: UserAvatarProps) {
   const avatarImage = useStableAvatarSrc(user?.image);
-
-  // TODO: 为 Lody CLI 添加一个特殊的 fallback
   // 获取用户名首字母作为 fallback
   const getInitials = () => {
     if (!user?.name) return null;

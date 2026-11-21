@@ -15,23 +15,17 @@ export class JsonLinesParser extends Transform {
     _encoding: string,
     callback: TransformCallback
   ): void {
-    // Append new data to buffer
     this.buffer += chunk.toString();
 
-    // Split by newlines but keep last incomplete line in buffer
     const lines = this.buffer.split('\n');
     this.buffer = lines.pop() || '';
 
-    // Parse each complete line
     for (const line of lines) {
       if (line.trim()) {
         try {
           const parsed = JSON.parse(line);
           this.push(parsed);
-        } catch {
-          // TODO: better parse error
-          // console.log("#### error", line);
-        }
+        } catch {}
       }
     }
 
@@ -39,7 +33,6 @@ export class JsonLinesParser extends Transform {
   }
 
   override _flush(callback: TransformCallback): void {
-    // Process any remaining data when stream ends
     if (this.buffer.trim()) {
       try {
         const parsed = JSON.parse(this.buffer);
@@ -51,16 +44,10 @@ export class JsonLinesParser extends Transform {
     callback();
   }
 
-  /**
-   * Reset the parser state
-   */
   reset(): void {
     this.buffer = '';
   }
 
-  /**
-   * Get current buffer content (for debugging)
-   */
   getBuffer(): string {
     return this.buffer;
   }

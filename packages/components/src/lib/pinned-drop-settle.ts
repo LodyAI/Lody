@@ -95,7 +95,6 @@ export function endPinnedDropSettle(): void {
   notify();
 }
 
-// ---------------------------------------------------------------------------
 // Where a drag started: the row's look and the pointer's offset inside it.
 
 export type PinnedDragOrigin = {
@@ -137,7 +136,6 @@ export function takePinnedDragOrigin(sessionId: string): PinnedDragOrigin | null
   return found;
 }
 
-// ---------------------------------------------------------------------------
 // Hover is held off from the drop until the pointer next moves: the landed row
 // sits under a still pointer, and lighting it up then is the jump to avoid.
 
@@ -188,7 +186,6 @@ export function subscribePinnedPointerDrag(listener: () => void): () => void {
   return () => pointerDragListeners.delete(listener);
 }
 
-// ---------------------------------------------------------------------------
 // Where a pointer-dragged pinned row would land right now: the pin section
 // under the pointer and the index among its other rows. Each section reads it
 // to open its gap, exactly as for a native drag over it.

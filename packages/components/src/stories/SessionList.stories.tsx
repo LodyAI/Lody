@@ -746,10 +746,6 @@ export const AllDiffAndPrStates: Story = {
   ),
 };
 
-// ---------------------------------------------------------------------------
-// MCP-opened independent Sessions (`SessionMeta.openedBySessionId`)
-// ---------------------------------------------------------------------------
-
 /**
  * `lody_session_create` records the Session that opened each new one. The
  * sidebar indents those rows under their opener, but they stay INDEPENDENT

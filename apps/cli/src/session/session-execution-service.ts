@@ -1835,8 +1835,6 @@ export class SessionExecutionService {
           ...this.baseSessionAnalyticsProps(sessionId),
           turn_id: turnId,
           ...(typeof totalTurnMs === 'number' ? { total_turn_ms: totalTurnMs } : {}),
-          // TODO(analytics): permission_wait_ms is accumulated in MessageHandler's
-          // SessionTransientStore (state.permissionWaitMs); plumb it here to populate it.
           pr_detected: prDetected,
           diff_file_count: diffFileCount,
           ...(analytics?.dispatchMode ? { dispatch_mode: analytics.dispatchMode } : {}),
