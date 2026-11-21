@@ -208,8 +208,8 @@ folds past 20 rows.
   mark, the existing Spec rule on every surface.
 - Known gaps: no haptics on the iOS WebView, and Chrome refuses vibration before
   the first tap; foldable split panes cannot drag between panes; the phone WebView
-  does not show the count of pinned rows the scope hid; on the WebView and Android
-  the long-press menu opens on release; Android reads the read-only flag once at
+  does not show the count of pinned rows the scope hid; on all three phone surfaces
+  (WebView, Android, iOS) the long-press menu opens on release; Android reads the read-only flag once at
   connect; on a first install on iOS a read-only member sees the actions until the
   member list loads.
 

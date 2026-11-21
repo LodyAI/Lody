@@ -164,7 +164,7 @@ type StatusViewCommand =
 - Android 在前台打开对话时把它标为已读，所以到期唤醒对话的未读状态在那里也会清除。
 - 在进行中排序会清除已到期的稍后时间，连带清除被唤醒行的未读标记，这是每个界面上已有的 Spec 规则。
 - 已知的小缺口：iOS WebView 没有触感反馈，Chrome 在首次轻点之前拒绝震动；折叠屏的分栏之间不能拖拽；
-  手机 WebView 不显示被可见范围隐藏的 pin 行数；WebView 和 Android 的长按菜单在松手时打开；Android
+  手机 WebView 不显示被可见范围隐藏的 pin 行数；三个手机界面（WebView、Android、iOS）的长按菜单都在松手时打开；Android
   只在连接时读取一次只读标记；iOS 首次安装时，只读成员在成员列表加载前能看到这些操作。
 
 ## 验证
