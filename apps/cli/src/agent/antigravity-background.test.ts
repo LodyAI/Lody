@@ -548,8 +548,6 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
     const thought = (text: string) =>
       n({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text } });
 
-    // task-1 backgrounds, model yields visible text, task-1 finishes inside the same turn
-    // (waking a new planner step with thought), then task-2 backgrounds and stays running at end_turn.
     promptOnce([
       tool('cmd-1', 'run_command', 'completed', {
         rawOutput: 'Tool is running as a background task with task id: agy-sess-1/task-1',
@@ -564,7 +562,6 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
     await send(harness, 'Fix and build');
     expect(harness.client.getNativeWork()).toBe('background');
 
-    // Only task-2 remains pending, so a single post-turn wakeup releases the session to idle.
     await vi.advanceTimersByTimeAsync(listPollIntervalMs);
     wakeUp();
     await vi.advanceTimersByTimeAsync(WAKEUP_DONE);
@@ -600,8 +597,6 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
     expect(mockState.listSessions).not.toHaveBeenCalled();
     expect(harness.client.getNativeWork()).toBeNull();
 
-    // When two tasks are dispatched and only one completes via SYSTEM_MESSAGE before a thought chunk,
-    // the second task must remain protected.
     promptOnce([
       tool('cmd-2', 'run_command', 'completed', {
         rawOutput: 'Tool is running as a background task with task id: agy-sess-1/task-2',
@@ -632,7 +627,6 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
     await send(harness, 'Build');
     expect(harness.client.getNativeWork()).toBe('background');
 
-    // task-1 wakes agy (`inWakeup = true`), then the user sends a follow-up before wakeupQuietMs.
     await vi.advanceTimersByTimeAsync(listPollIntervalMs);
     wakeUp();
     await vi.advanceTimersByTimeAsync(listPollIntervalMs * 2);

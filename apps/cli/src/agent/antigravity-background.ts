@@ -174,8 +174,6 @@ export class AntigravitySessionTracker {
 
   /** Reset per-turn state before `session/prompt`; unfinished work carries into the new turn. */
   beginTurn(): void {
-    // If a post-turn wakeup had already started before the user sent a new prompt,
-    // settle that pending item rather than dropping `inWakeup` and leaking its count.
     if (this.inWakeup) {
       this.pending = Math.max(0, this.pending - 1);
     }
@@ -186,7 +184,6 @@ export class AntigravitySessionTracker {
     this.turnStreamPhase = 'idle';
   }
 
-  /** Clear all tracked background work after an explicit user cancel. */
   reset(): void {
     this.turnToolIds = new Set();
     this.pending = 0;
@@ -244,9 +241,6 @@ export class AntigravitySessionTracker {
     }
 
     if (updateType === 'agent_thought_chunk') {
-      // Within a single planner response, thought chunks precede message chunks.
-      // A thought chunk arriving after visible message text with no intervening tool call
-      // means agy woke the model for a completed background task inside the same turn.
       if (this.turnStreamPhase === 'message') {
         this.consumeOldestUnresolvedTurnBackgroundWork();
       }
