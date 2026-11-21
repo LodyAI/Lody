@@ -212,9 +212,9 @@ folds past 20 rows.
   an expired `snoozedUntil` stays, so the row stays where it was put and stays
   unread until it is read. No new field is needed: `focusRestoredAt` is written
   only by these placements and restores, and a snooze always sets `snoozedUntil`
-  in the future, so a re-snoozed row floats again when it expires. Clients older
-  than this rule (native runtime snapshots until they re-vendor, earlier desktop
-  builds) float a placed woken row back to the top; the data is valid both ways.
+  in the future, so a re-snoozed row floats again when it expires. Desktop builds
+  older than this rule (before LodyAI/Lody#3077) float a placed woken row back to
+  the top; the data is valid both ways.
 - Known gaps: no haptics on the iOS WebView, and Chrome refuses vibration before
   the first tap; foldable split panes cannot drag between panes; the phone WebView
   does not show the count of pinned rows the scope hid; on all three phone surfaces
@@ -226,8 +226,7 @@ folds past 20 rows.
 
 Verified:
 
-- Golden vectors (11 layout cases, 33 command cases; the native runtime copies
-  carry the earlier 8 and 28 until they re-vendor) run in `packages/shared`,
+- Golden vectors (11 layout cases, 33 command cases) run in `packages/shared`,
   against the desktop and phone adapters in `packages/components`, in the iOS
   runtime tests and in the Android runtime tests.
 - Desktop: the Storybook end-to-end suite for Focus drops
