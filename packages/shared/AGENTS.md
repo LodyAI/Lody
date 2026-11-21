@@ -134,4 +134,4 @@ Native `local_attachment` inputs require exact submission scope and explicit inh
 
 Shortcut sync preserves handled token/auth causes through SDK refresh, rather than producing new generic exceptions; [diagnostic ownership](../../.agents/notes/implemented/bug-fix/2026-11-17-shortcut-token-retry-diagnostics.md) remains with the client operation.
 
-Session visibility rules live in `session-visibility.ts`. The renderer and Electron main both call them; neither keeps a copy.
+Session visibility rules live in `session-visibility.ts`; the renderer and Electron main share them.
