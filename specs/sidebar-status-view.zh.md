@@ -29,7 +29,7 @@ Translation: current
 - 桌面端「进行中」与「稍后」的行在 hover 槽位提供一键 **标记为已完成**（取代其它视图在该位置的归档按钮）；「已完成」的行在该位置保持归档。「稍后」行的唤醒倒计时位于行最右侧，使用中性配色。
 - 暂缓、标记为已完成或移回进行中时，若对话存在活跃 opened-by 子对话，会先询问是否对子对话执行相同操作——仅作用于当前对话，或整棵 opened-session 树。包含的 Tab 跟随其拥有者所在分区，不会被单独写入，与归档确认展示的子对话统计一致。将行拖入「进行中」时其 opened-by 子对话默认一并恢复、不再询问；仅被拖拽的行写入 `orderKey`。
 - 向「稍后」或「已完成」的对话发送消息时，自动清除 `snoozedUntil` / `settledAt` 并回到「进行中」。
-- 在「进行中」拖拽重排时，会为顶部已到期的稍后条目落地真实 `orderKey` 并清除已过期的 `snoozedUntil`（同时保留 `focusRestoredAt`），保证用户显式拖拽后的顺序稳定生效。将「稍后」或「已完成」中的对话拖入「进行中」时，自动清除暂缓/完成状态并落在松手位置的 `orderKey` 处。
+- 在「进行中」拖拽重排时，会为顶部已到期的稍后条目落地真实 `orderKey`，保证用户显式拖拽后的顺序稳定生效。放置被唤醒的行不会消耗它的唤醒：把 `focusRestoredAt` 记为唤醒时间并保留已过期的 `snoozedUntil`，因此这一行停在被放置的位置，并保持未读，直到对话被打开或在其中发送消息。被唤醒的行只在已过期的 `snoozedUntil` 晚于 `focusRestoredAt` 时浮到「进行中」最前面，所以再次稍后的对话到期时会重新浮上来。将「稍后」或「已完成」中的对话拖入「进行中」时，自动清除暂缓/完成状态并落在松手位置的 `orderKey` 处；被拖入「进行中」的 pin 对话会取消 pin 并同样放置，保留已过期的稍后时间。
 
 ### 手机端
 
@@ -77,7 +77,7 @@ Translation: current
 - 手机：`packages/components/src/components/mobile/`（WebView）；原生共享 runtime 和列表在
   `apps/mobile/ios`、`apps/mobile/android` 子模块里。
 
-已执行的验证：测试样例（8 个布局用例、28 个命令用例）在 `packages/shared/tests/status-view.test.ts`
+已执行的验证：测试样例（11 个布局用例、31 个命令用例；原生 runtime 的副本在重新复制前仍是之前的 8 个和 28 个）在 `packages/shared/tests/status-view.test.ts`
 里运行，也在 `packages/components` 的桌面和手机适配层、iOS 和 Android 的 runtime 测试里运行；Storybook
 端到端测试 `packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`（5 个用例）；手机
 WebView 在 iOS 模拟器和 Android 模拟器上的 Storybook；原生列表在模拟器上用离线测试数据。没有验证：

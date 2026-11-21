@@ -142,9 +142,12 @@ function indexBefore(ids: readonly string[], beforeId: string | null): number {
 
 /**
  * Expired snoozes float at the top of Focus without writes; an explicit drag
- * gives them real keys first, so the drop lands where it was shown. A row
- * dropped in from Later, Settled or the Pinned area is restored (and unpinned)
- * together with its opened sub-conversations, which get no keys of their own.
+ * gives them real keys first, so the drop lands where it was shown. Placing a
+ * woken row records `focusRestoredAt` at its wake-up and keeps the expired
+ * `snoozedUntil`, so it stops floating but stays unread until it is read. A row
+ * dropped in from Later or Settled is restored together with its opened
+ * sub-conversations, which get no keys of their own; a pinned row dropped in is
+ * unpinned and keeps an expired snooze the same way.
  */
 function planFocusMove(
   state: StatusViewState,
@@ -186,14 +189,17 @@ function planFocusMove(
   for (const [id, orderKey] of keyed) {
     const session = pool.get(id)!;
     const patch: StatusViewSessionPatch = { orderKey };
+    const wokeAt = expiredSnoozeTimestamp(session.snoozedUntil, nowMs);
     if (restored.delete(id)) {
-      Object.assign(patch, { snoozedUntil: null, settledAt: null, focusRestoredAt: nowMs });
-    } else {
-      const wokeAt = expiredSnoozeTimestamp(session.snoozedUntil, nowMs);
-      if (wokeAt !== null) {
-        patch.snoozedUntil = null;
-        patch.focusRestoredAt = Math.max(session.focusRestoredAt ?? 0, wokeAt);
-      }
+      const keepWake = id === sessionId && moved.isPinned && wokeAt !== null;
+      Object.assign(
+        patch,
+        keepWake
+          ? { settledAt: null, focusRestoredAt: nowMs }
+          : { snoozedUntil: null, settledAt: null, focusRestoredAt: nowMs }
+      );
+    } else if (wokeAt !== null && wokeAt > (session.focusRestoredAt ?? 0)) {
+      patch.focusRestoredAt = wokeAt;
     }
     if (id === sessionId && moved.isPinned)
       Object.assign(patch, { isPinned: false, pinSectionId: null });

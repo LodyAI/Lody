@@ -6,7 +6,7 @@ import {
   type OpenedBySessionTreeNode,
 } from './opened-by-tree';
 import {
-  expiredSnoozeTimestamp,
+  statusViewWokenAt,
   statusViewActivityAt,
   statusViewTier,
   statusViewTierChangeAt,
@@ -150,7 +150,8 @@ function orderFocus(members: StatusViewSession[], nowMs: number): StatusViewSess
   const woken: StatusViewSession[] = [];
   const regular: StatusViewSession[] = [];
   for (const session of members) {
-    if (expiredSnoozeTimestamp(session.snoozedUntil, nowMs) !== null) woken.push(session);
+    if (statusViewWokenAt(session.snoozedUntil, session.focusRestoredAt, nowMs) !== null)
+      woken.push(session);
     else regular.push(session);
   }
   woken.sort((a, b) => (b.snoozedUntil ?? 0) - (a.snoozedUntil ?? 0) || a.id.localeCompare(b.id));
@@ -193,7 +194,9 @@ function toRows(
       activityAt: rowActivity(session, nowMs),
       unread: statusViewUnread(session, nowMs),
       snoozedUntil: tier === 'later' ? session.snoozedUntil : null,
-      woken: tier === 'focus' && expiredSnoozeTimestamp(session.snoozedUntil, nowMs) !== null,
+      woken:
+        tier === 'focus' &&
+        statusViewWokenAt(session.snoozedUntil, session.focusRestoredAt, nowMs) !== null,
       canManage: session.canManage,
       canPrefer: session.canPrefer,
     };

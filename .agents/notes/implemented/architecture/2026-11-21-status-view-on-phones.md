@@ -115,8 +115,8 @@ move, keys for unkeyed rows above the drop, real keys for expired snoozes when
 Focus is reordered, opened sub-conversations restored with a row dropped into
 Focus, `settledAt = max(now, lastMessageAt)`, and unpinning keeps `orderKey`.
 
-**Golden vectors** — `vectors/layout.json` (8 cases) and `vectors/commands.json`
-(28 cases, fixed `nowMs` and random bytes) run in `packages/shared`, against the
+**Golden vectors** — `vectors/layout.json` (11 cases) and `vectors/commands.json`
+(31 cases, fixed `nowMs` and random bytes) run in `packages/shared`, against the
 desktop and phone-WebView adapters in `packages/components`, in the iOS runtime
 tests and in the Android runtime tests.
 
@@ -204,8 +204,14 @@ folds past 20 rows.
   hosted gateway's admission cannot be inspected from this repository.
 - Android marks a conversation read when it is opened in the foreground, so a woken
   conversation's unread state clears there too.
-- Reordering Focus clears an expired snooze and with it the woken row's unread
-  mark, the existing Spec rule on every surface.
+- Reordering Focus gives a woken row a real key and records `focusRestoredAt` at
+  its wake-up but keeps the expired `snoozedUntil`, so the row stays where it was
+  placed and stays unread until it is opened. No new field is needed:
+  `focusRestoredAt` is written only by an explicit restore, which also clears
+  `snoozedUntil`, and by this placement, and a snooze always sets `snoozedUntil`
+  in the future. Clients older than this rule (native runtime snapshots until they
+  re-vendor, earlier desktop builds) float a placed woken row back to the top;
+  the data is valid both ways.
 - Known gaps: no haptics on the iOS WebView, and Chrome refuses vibration before
   the first tap; foldable split panes cannot drag between panes; the phone WebView
   does not show the count of pinned rows the scope hid; on all three phone surfaces
@@ -217,7 +223,8 @@ folds past 20 rows.
 
 Verified:
 
-- Golden vectors (8 layout cases, 28 command cases) run in `packages/shared`,
+- Golden vectors (11 layout cases, 31 command cases; the native runtime copies
+  carry the earlier 8 and 28 until they re-vendor) run in `packages/shared`,
   against the desktop and phone adapters in `packages/components`, in the iOS
   runtime tests and in the Android runtime tests.
 - Desktop: the Storybook end-to-end suite for Focus drops
