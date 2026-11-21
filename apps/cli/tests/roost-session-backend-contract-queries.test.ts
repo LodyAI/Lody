@@ -8,6 +8,7 @@ import {
   SessionHistoryChangesSchema,
   SessionHistoryReadResponseSchema,
   type MachineId,
+  type SessionHistoryDirectoryPage,
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
@@ -21,9 +22,11 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { createRoostHistoryCache } from '../../../packages/components/src/lib/roost-history-cache';
 import { createRemoteRoostSessionDataFactory } from '../../../packages/components/src/lib/roost-session-bridge';
 import { AGENT_RECEIPTS_TABLE } from '../src/session/roost-content-patches';
+import { RoostHistoryCatchup } from '../src/session/roost-history-catchup';
 import { RoostHistoryGeneration } from '../src/session/roost-history-generation';
 import { loadRoostOwnerSeedLegacy } from '../src/session/roost-writer-identity';
 import { createSessionBackend } from '../src/session/session-backend';
@@ -41,6 +44,39 @@ import {
   nextOrdinal,
   registerRoostNativeBackendSuite,
 } from './roost-session-backend-test-helpers';
+
+function installRendererCache() {
+  // The renderer package owns its browser test dependency.
+  const require = createRequire(
+    new URL('../../../packages/components/package.json', import.meta.url)
+  );
+  const idb = require('fake-indexeddb') as {
+    IDBFactory: new () => IDBFactory;
+    IDBKeyRange: typeof IDBKeyRange;
+  };
+  vi.stubGlobal('indexedDB', new idb.IDBFactory());
+  vi.stubGlobal('IDBKeyRange', idb.IDBKeyRange);
+}
+
+function pauseFirstReceiptPage(sessionId: SessionId) {
+  const delivered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const open = RoostNativeClient.prototype.stream;
+  vi.spyOn(RoostNativeClient.prototype, 'stream').mockImplementation(function (id) {
+    const stream = open.call(this, id);
+    if (id === `lody-session:${sessionId}`) {
+      const readPage = stream.commitMetadataAfter.bind(stream);
+      vi.spyOn(stream, 'commitMetadataAfter').mockImplementationOnce(async (...args) => {
+        const page = await readPage(...args);
+        delivered.resolve();
+        await release.promise;
+        return page;
+      });
+    }
+    return stream;
+  });
+  return { delivered: delivered.promise, release: release.resolve };
+}
 
 registerRoostNativeBackendSuite();
 describe('Production Roost history semantics (replica sync and bounded stream)', () => {
@@ -146,17 +182,7 @@ describe('Production Roost history semantics (replica sync and bounded stream)',
   ])(
     'updates two independent renderer replicas through encrypted RPC without control hints (lostNativeReply=$lostNativeReply, lostReadReplies=$lostReadReplies)',
     async ({ lostNativeReply, lostReadReplies }) => {
-      // The renderer package owns its browser test dependency; the CLI runtime
-      // stays free of IndexedDB dependencies.
-      const rendererRequire = createRequire(
-        new URL('../../../packages/components/package.json', import.meta.url)
-      );
-      const idb = rendererRequire('fake-indexeddb') as {
-        IDBFactory: new () => IDBFactory;
-        IDBKeyRange: typeof IDBKeyRange;
-      };
-      vi.stubGlobal('indexedDB', new idb.IDBFactory());
-      vi.stubGlobal('IDBKeyRange', idb.IDBKeyRange);
+      installRendererCache();
       const fixture = await coldHistoryHandlerFixture(1);
       const sessionId = [...fixture.docs.keys()][0];
       if (!sessionId) throw new Error('Missing synthetic session');
@@ -807,6 +833,507 @@ describe('Production Roost dispatch projection', () => {
       )
     ).toEqual(expected.slice(12, 15));
   });
+
+  it('keeps every catch-up page and changed body readable after the owner advances', async ({
+    onTestFinished,
+  }) => {
+    const fixture = await coldHistoryHandlerFixture(2);
+    const [sessionId, otherSessionId] = [...fixture.docs.keys()];
+    if (!sessionId || !otherSessionId) throw new Error('Missing synthetic sessions');
+    const paused = pauseFirstReceiptPage(sessionId);
+    onTestFinished(paused.release);
+    try {
+      await fixture.ready(sessionId);
+      await fixture.ready(otherSessionId);
+      const write = (operation: 'append' | 'apply_action', payload: Record<string, unknown>) =>
+        fixture.rpc.writeSessionHistoryForRpc(sessionId, operation, payload);
+      expect(await write('append', { entry: nativeUser('cached') })).toMatchObject({
+        success: true,
+      });
+      const base = await fixture.rpc.readSessionHistoryForRpc(sessionId, {
+        kind: 'readLatestPage',
+        withCheckpoint: true,
+        limit: 40,
+      });
+      const baseCheckpoint = (base.result as { checkpoint?: string }).checkpoint;
+      if (!baseCheckpoint) throw new Error('Missing base checkpoint');
+      const doc = fixture.docs.get(sessionId);
+      if (!doc) throw new Error('Missing synthetic document');
+      const backend = await createSessionBackend(doc);
+      await backend.applyHistoryAction({
+        kind: 'user-status',
+        turnId: 'cached',
+        status: 'handled',
+      });
+      for (let index = 0; index < 500; index++) {
+        await backend.appendHistoryTurn(nativeUser(`missing-${index}`));
+      }
+      const active = nativeAssistant('still-writing');
+      await backend.appendHistoryTurn({
+        ...active,
+        items: [{ type: 'text', text: 'captured' }],
+      });
+      const edit = async (text: string) => {
+        expect(
+          await write('apply_action', {
+            action: {
+              kind: 'assistant-items',
+              mode: 'replace',
+              turnId: active.id,
+              items: [{ type: 'text', text }],
+            },
+          })
+        ).toMatchObject({ success: true });
+      };
+      let writeDuringPage: Promise<unknown> | undefined;
+      const hydrate = NodeLodyHistory.prototype.readActiveBranchMessages;
+      vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchMessages').mockImplementation(
+        async function (view, ids) {
+          if (!writeDuringPage && ids.length === 500 && ids[0] === 'missing-0') {
+            writeDuringPage = Promise.all([
+              backend.applyHistoryAction({
+                kind: 'user-status',
+                turnId: 'missing-0',
+                status: 'handled',
+              }),
+              backend.applyAgentBatch({
+                targetAssistantEntryId: active.id,
+                operationIds: ['publication-during-hydration'],
+                notifications: [
+                  {
+                    sessionId,
+                    update: {
+                      sessionUpdate: 'agent_message_chunk',
+                      content: { type: 'text', text: ' and capture' },
+                    },
+                  },
+                ],
+              }),
+              backend.appendHistoryTurn(nativeUser('appended-during-hydration')),
+            ]);
+            void writeDuringPage.catch(() => {});
+          }
+          return hydrate.call(this, view, ids);
+        }
+      );
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const reading = fixture.rpc.readSessionHistoryForRpc(sessionId, {
+        kind: 'readChanges',
+        checkpoint: baseCheckpoint,
+        includeBodiesFrom: 0,
+      });
+      await Promise.race([
+        paused.delivered,
+        reading.then(() => {
+          throw new Error('Expected paged receipt scan');
+        }),
+      ]);
+      await edit('captured during scan');
+      paused.release();
+      const plan = await reading;
+      if (!writeDuringPage) throw new Error('Expected a write during body capture');
+      await writeDuringPage;
+      const published = await backend.history.getPublication?.();
+      expect(plan).toMatchObject({
+        success: true,
+        historyCount: 503,
+        historyRevision: published?.historyRevision,
+      });
+      const changes = SessionHistoryChangesSchema.parse(plan.result);
+      expect(changes).toMatchObject({
+        state: 'ready',
+        checkpoint: published?.checkpoint,
+        from: 1,
+        ids: expect.arrayContaining(['cached', active.id]),
+      });
+      if (changes.state !== 'ready') throw new Error('Expected exact catch-up interval');
+      expect(changes.bodies).toBeUndefined();
+      const range = (from: number, to: number) => ({
+        kind: 'readRange' as const,
+        from,
+        to,
+        atCheckpoint: changes.checkpoint,
+      });
+      await edit('new before first page');
+      const first = await fixture.rpc.readSessionHistoryForRpc(sessionId, range(1, 501));
+      expect(first).toMatchObject({ success: true, historyRevision: plan.historyRevision });
+      expect(first.result).toHaveLength(500);
+      expect((first.result as unknown[])[0]).toMatchObject({
+        state: 'ready',
+        turn: { id: 'missing-0', status: 'handled' },
+      });
+      await edit('new before last page');
+      const last = await fixture.rpc.readSessionHistoryForRpc(sessionId, range(501, 503));
+      expect(last).toMatchObject({
+        success: true,
+        historyRevision: plan.historyRevision,
+        result: [
+          {
+            state: 'ready',
+            turn: { id: active.id, items: [{ text: 'captured during scan and capture' }] },
+          },
+          { state: 'ready', turn: { id: 'appended-during-hydration' } },
+        ],
+      });
+      expect(
+        await fixture.rpc.readSessionHistoryForRpc(sessionId, {
+          kind: 'readTurn',
+          turnId: 'cached',
+          atCheckpoint: changes.checkpoint,
+        })
+      ).toMatchObject({
+        success: true,
+        historyRevision: plan.historyRevision,
+        result: { state: 'ready', turn: { id: 'cached', status: 'handled' } },
+      });
+      expect(
+        await fixture.rpc.readSessionHistoryForRpc(otherSessionId, range(1, 501))
+      ).toMatchObject({ success: false, retryReason: 'superseded' });
+      expect(await fixture.rpc.readSessionHistoryForRpc(sessionId, range(0, 1))).toMatchObject({
+        success: false,
+        retryReason: 'superseded',
+      });
+      const observe = {
+        kind: 'readChanges' as const,
+        checkpoint: baseCheckpoint,
+        includeBodiesFrom: 0,
+        inlineOnly: true as const,
+      };
+      const advertised = await fixture.rpc.readSessionHistoryForRpc(sessionId, observe);
+      expect(advertised.success).toBe(true);
+      const advertisedChanges = SessionHistoryChangesSchema.parse(advertised.result);
+      expect(advertisedChanges.state).toBe('ready');
+      await edit('after the observation');
+      expect(
+        await fixture.rpc.readSessionHistoryForRpc(sessionId, {
+          ...range(1, 501),
+          atCheckpoint: advertisedChanges.checkpoint,
+        })
+      ).toMatchObject({ success: false, retryReason: 'superseded' });
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(await fixture.rpc.readSessionHistoryForRpc(sessionId, range(501, 502))).toMatchObject({
+        success: false,
+        retryReason: 'superseded',
+      });
+    } finally {
+      paused.release();
+      vi.useRealTimers();
+      await fixture.close();
+    }
+  }, 120_000);
+
+  it('resumes body preparation after every reader times out and the owner publishes', async () => {
+    const fixture = await coldHistoryHandlerFixture(1);
+    const sessionId = [...fixture.docs.keys()][0]!;
+    const staged = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    onTestFinished(release.resolve);
+    try {
+      await fixture.ready(sessionId);
+      const active = nativeAssistant('shared-catchup-agent');
+      expect(
+        await fixture.rpc.writeSessionHistoryForRpc(sessionId, 'append', { entry: active })
+      ).toMatchObject({ success: true });
+      const backend = await createSessionBackend(fixture.docs.get(sessionId)!);
+      const initial = await backend.history.getPublication?.();
+      if (!initial) throw new Error('Expected the initial owner checkpoint');
+      for (let index = 0; index < 501; index++)
+        await backend.appendHistoryTurn(nativeUser(`shared-missed-${index}`));
+
+      // Hold the final receipt scan outside the writer queue after staging the pages.
+      const prepare = RoostHistoryCatchup.prototype.prepare;
+      vi.spyOn(RoostHistoryCatchup.prototype, 'prepare').mockImplementation(function (args) {
+        return prepare.call(this, {
+          ...args,
+          finish: async (capture, signal) => {
+            staged.resolve();
+            await release.promise;
+            return args.finish(capture, signal);
+          },
+        });
+      });
+      const hydrate = NodeLodyHistory.prototype.readActiveBranchMessages;
+      let firstPageReads = 0;
+      vi.spyOn(NodeLodyHistory.prototype, 'readActiveBranchMessages').mockImplementation(
+        async function (view, ids) {
+          if (ids.length === 500 && ids[0] === 'shared-missed-0') firstPageReads++;
+          return hydrate.call(this, view, ids);
+        }
+      );
+      const query = {
+        kind: 'readChanges' as const,
+        checkpoint: initial.checkpoint,
+        includeBodiesFrom: 0,
+      };
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const firstAbort = new AbortController();
+      const timeout = new Error('Synthetic 30-second history read timeout');
+      setTimeout(() => firstAbort.abort(timeout), 30_000);
+      const first = fixture.rpc.readSessionHistoryForRpc(sessionId, query, firstAbort.signal);
+      const secondAbort = new AbortController();
+      const second = fixture.rpc.readSessionHistoryForRpc(sessionId, query, secondAbort.signal);
+      await Promise.race([
+        staged.promise,
+        first.then(() => {
+          throw new Error('Expected detached history preparation');
+        }),
+      ]);
+      const disconnected = new Error('Synthetic reader timed out during body preparation');
+      secondAbort.abort(disconnected);
+      expect(await second).toMatchObject({ success: false, error: disconnected.message });
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await first).toMatchObject({ success: false, error: timeout.message });
+
+      await backend.applyAgentBatch({
+        targetAssistantEntryId: active.id,
+        operationIds: ['output-during-retry'],
+        notifications: [
+          {
+            sessionId,
+            update: {
+              sessionUpdate: 'agent_message_chunk',
+              content: { type: 'text', text: 'Agent output after the timeout' },
+            },
+          },
+        ],
+      });
+      const published = await backend.history.getPublication?.();
+      const retry = fixture.rpc.readSessionHistoryForRpc(sessionId, query);
+      release.resolve();
+
+      const plan = await retry;
+      expect(plan).toMatchObject({
+        success: true,
+        historyCount: 502,
+        historyRevision: published?.historyRevision,
+      });
+      const changes = SessionHistoryChangesSchema.parse(plan.result);
+      expect(changes).toMatchObject({
+        state: 'ready',
+        checkpoint: published?.checkpoint,
+        ids: expect.arrayContaining([active.id]),
+      });
+      const [firstPage, lastPage, agent] = await Promise.all([
+        fixture.rpc.readSessionHistoryForRpc(sessionId, {
+          kind: 'readRange',
+          from: 1,
+          to: 501,
+          atCheckpoint: changes.checkpoint,
+        }),
+        fixture.rpc.readSessionHistoryForRpc(sessionId, {
+          kind: 'readRange',
+          from: 501,
+          to: 502,
+          atCheckpoint: changes.checkpoint,
+        }),
+        fixture.rpc.readSessionHistoryForRpc(sessionId, {
+          kind: 'readTurn',
+          turnId: active.id,
+          atCheckpoint: changes.checkpoint,
+        }),
+      ]);
+      expect(firstPage.result).toHaveLength(500);
+      expect(lastPage.result).toMatchObject([{ turn: { id: 'shared-missed-500' } }]);
+      expect(agent.result).toMatchObject({
+        state: 'ready',
+        turn: { items: [{ text: 'Agent output after the timeout' }] },
+      });
+      expect(firstPageReads).toBe(1);
+    } finally {
+      release.resolve();
+      vi.useRealTimers();
+      await fixture.close();
+    }
+  }, 120_000);
+
+  it('commits Agent output while a cancelled history read is between receipt pages', async ({
+    onTestFinished,
+  }) => {
+    const fixture = await coldHistoryHandlerFixture(1);
+    const sessionId = [...fixture.docs.keys()][0];
+    const doc = sessionId && fixture.docs.get(sessionId);
+    if (!sessionId || !doc) throw new Error('Missing synthetic session');
+    const paused = pauseFirstReceiptPage(sessionId);
+    onTestFinished(paused.release);
+    try {
+      await fixture.ready(sessionId);
+      const active = nativeAssistant('writing-during-history-read');
+      expect(
+        await fixture.rpc.writeSessionHistoryForRpc(sessionId, 'append', { entry: active })
+      ).toMatchObject({ success: true });
+      const backend = await createSessionBackend(doc);
+      const checkpoint = await backend.history.getCheckpoint?.();
+      if (!checkpoint) throw new Error('Missing owner checkpoint');
+      for (let index = 0; index < 130; index++)
+        await backend.appendHistoryTurn(nativeUser(`missed-${index}`));
+      const abort = new AbortController();
+      const reading = fixture.rpc.readSessionHistoryForRpc(
+        sessionId,
+        {
+          kind: 'readChanges',
+          checkpoint,
+          includeBodiesFrom: 0,
+          withPatches: true,
+        },
+        abort.signal
+      );
+      await Promise.race([
+        paused.delivered,
+        reading.then(() => {
+          throw new Error('Expected paged receipt scan');
+        }),
+      ]);
+      abort.abort(new Error('Synthetic reader disconnected'));
+      await backend.applyAgentBatch({
+        targetAssistantEntryId: active.id,
+        operationIds: ['output-during-cancelled-read'],
+        notifications: [
+          {
+            sessionId,
+            update: {
+              sessionUpdate: 'agent_message_chunk',
+              content: { type: 'text', text: 'committed' },
+            },
+          },
+        ],
+      });
+      expect(await backend.history.readTurn(active.id)).toMatchObject({
+        state: 'ready',
+        turn: { items: [{ text: 'committed' }] },
+      });
+      paused.release();
+      expect(await reading).toMatchObject({
+        success: false,
+        error: 'Synthetic reader disconnected',
+      });
+    } finally {
+      paused.release();
+      await fixture.close();
+    }
+  });
+
+  it('preserves a reconnecting reader’s cached prefix under another session’s capture pressure', async () => {
+    installRendererCache();
+    const fixture = await coldHistoryHandlerFixture(2);
+    const [busyId, sessionId] = [...fixture.docs.keys()];
+    const busyDoc = busyId && fixture.docs.get(busyId);
+    const doc = sessionId && fixture.docs.get(sessionId);
+    if (!busyId || !sessionId || !busyDoc || !doc) throw new Error('Missing synthetic sessions');
+    let disposeReader = () => {};
+    try {
+      await fixture.ready(busyId);
+      await fixture.ready(sessionId);
+      expect(
+        await fixture.rpc.writeSessionHistoryForRpc(busyId, 'append', {
+          entry: nativeAssistant('busy-agent'),
+        })
+      ).toMatchObject({ success: true });
+      expect(
+        await fixture.rpc.writeSessionHistoryForRpc(sessionId, 'append', {
+          entry: nativeUser('cached-before-disconnect'),
+        })
+      ).toMatchObject({ success: true });
+      const accountId = 'synthetic-cache-pressure';
+      const workspaceId = 'test-workspace' as WorkspaceId;
+      const machineId = 'test-machine' as MachineId;
+      const cache = createRoostHistoryCache(
+        JSON.stringify([accountId, workspaceId, machineId, sessionId])
+      );
+      const before = await fixture.rpc.readSessionHistoryForRpc(sessionId, {
+        kind: 'readLatestPage',
+        limit: 40,
+        withCheckpoint: true,
+      });
+      if (!before.success || before.historyRevision === undefined || !before.pageTurns)
+        throw new Error('Missing initial history page');
+      expect(
+        await cache.acceptPage(
+          before.result as SessionHistoryDirectoryPage,
+          before.pageTurns,
+          before.historyRevision
+        )
+      ).toBe(true);
+      const busy = await createSessionBackend(busyDoc);
+      const backend = await createSessionBackend(doc);
+      const busyCheckpoint = await busy.history.getCheckpoint?.();
+      if (!busyCheckpoint) throw new Error('Missing owner checkpoint');
+      for (let index = 0; index < 501; index++)
+        await Promise.all([
+          busy.appendHistoryTurn(nativeUser(`busy-missed-${index}`)),
+          backend.appendHistoryTurn(nativeUser(`missed-${index}`)),
+        ]);
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      let oldestCapture: string | undefined;
+      for (let index = 0; index < 16; index++) {
+        await busy.applyHistoryAction({
+          kind: 'assistant-items',
+          mode: 'replace',
+          turnId: 'busy-agent',
+          items: [{ type: 'text', text: `Agent output ${index}` }],
+        });
+        const reply = await fixture.rpc.readSessionHistoryForRpc(busyId, {
+          kind: 'readChanges',
+          checkpoint: busyCheckpoint,
+          includeBodiesFrom: 0,
+        });
+        expect(reply.success).toBe(true);
+        const changes = SessionHistoryChangesSchema.parse(reply.result);
+        expect(changes.state).toBe('ready');
+        oldestCapture ??= changes.checkpoint;
+      }
+      // The first capture is still retained after all sixteen owner publications.
+      expect(
+        await fixture.rpc.readSessionHistoryForRpc(busyId, {
+          kind: 'readRange',
+          atCheckpoint: oldestCapture,
+          from: 1,
+          to: 2,
+        })
+      ).toMatchObject({ success: true });
+
+      const target = await backend.history.getCheckpoint?.();
+      if (!target) throw new Error('Missing recovery target');
+      const committed = Promise.withResolvers<void>();
+      let online = true;
+      const reader = createRemoteRoostSessionDataFactory({
+        accountId,
+        workspaceId,
+        machineId,
+        incremental: true,
+        patches: true,
+        requestHistoryRead: async (_machine, id, query) => {
+          if (!online) throw new Error('Synthetic reader offline');
+          return fixture.rpc.readSessionHistoryForRpc(id, query);
+        },
+        requestHistoryWrite: async () => {
+          throw new Error('Unexpected write');
+        },
+      })({ sessionId, doc: new LoroDoc(), backendKind: 'roost' });
+      const observation = reader.history.observe(() => {
+        void cache.getHead().then((head) => {
+          if (head?.checkpoint === target) committed.resolve();
+        }, committed.reject);
+      });
+      disposeReader = () => {
+        observation.unsubscribe();
+        reader.dispose?.();
+      };
+      await observation.initial;
+      await vi.advanceTimersByTimeAsync(0);
+      await committed.promise;
+      online = false;
+      expect(await cache.getHead()).toMatchObject({ checkpoint: target, start: 0, count: 502 });
+      expect(await reader.history.readTurn('cached-before-disconnect')).toMatchObject({
+        state: 'ready',
+      });
+      expect(await reader.history.readTurn('missed-500')).toMatchObject({ state: 'ready' });
+    } finally {
+      disposeReader();
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+      await fixture.close();
+    }
+  }, 120_000);
 
   it('retries a positional read when a foreign body changes during hydration', async () => {
     const fixture = await nativeFixture();
