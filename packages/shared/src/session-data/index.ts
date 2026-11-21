@@ -24,6 +24,7 @@ export {
 export { createLoroSessionData, type LoroSessionData, type LoroSessionDataOptions } from './loro';
 export {
   createRemoteLoroHistoryReader,
+  readRemoteLatestGoal,
   type RemoteListField,
   type RemoteLoroHistoryPort,
   type RemotePathChange,

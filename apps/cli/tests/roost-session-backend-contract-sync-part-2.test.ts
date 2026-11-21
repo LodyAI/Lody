@@ -142,6 +142,7 @@ describe('Production Roost history semantics (projections, patches and goals)', 
     const ports = {
       workspaceDocument: {
         peekSessionDoc: () => undefined,
+        openIdleSessionReader: async () => undefined,
         getOrCreateSessionDoc: async () => ({ getMetaState: async () => ({ latestGoal: legacy }) }),
       },
       getSessionBackend: async () => fixture.backend,

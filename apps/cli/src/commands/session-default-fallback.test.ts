@@ -182,6 +182,7 @@ function createFixture(
       }
     },
     waitUntilMetaSynced: async () => true,
+    openIdleSessionReader: async () => undefined,
     getOrCreateSessionDoc: async (id: SessionId) => {
       const existing = sessions.get(id);
       if (existing) return existing;
