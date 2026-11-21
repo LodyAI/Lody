@@ -72,36 +72,50 @@ describe('Lody Skills MCP server contract', () => {
     );
     expect(client.getServerCapabilities()?.resources).toBeDefined();
     const listed = await client.request({ method: 'skills/list', params: {} }, listingSchema);
-    expect(listed.skills).toHaveLength(1);
-    const entry = skillEntrySchema.parse(listed.skills[0]);
-    const fetched = await client.request(
-      { method: 'skills/get', params: { uri: entry.uri } },
-      z.object({ skill: skillEntrySchema })
-    );
-    expect(fetched.skill).toEqual(entry);
+    expect(listed.skills.map((skill) => skill.frontmatter.name)).toEqual([
+      'lody-automations',
+      'lody-visualize',
+    ]);
     const resourceUris = new Set((await client.listResources()).resources.map((file) => file.uri));
-    for (const file of entry.resources) {
-      expect(resourceUris.has(file.uri)).toBe(true);
-      const result = await client.readResource({ uri: file.uri });
-      const content = z.object({ uri: z.string(), text: z.string() }).parse(result.contents[0]);
-      expect(content.uri).toBe(file.uri);
-      expect(Buffer.byteLength(content.text)).toBe(file.size);
-      expect(`sha256:${createHash('sha256').update(content.text).digest('hex')}`).toBe(file.digest);
-      if (file.uri.endsWith('.md')) {
-        for (const link of content.text.matchAll(/\]\(([^)]+)\)/g)) {
-          const target = new URL(z.string().parse(link[1]), file.uri).href;
-          expect(resourceUris.has(target), `Unreachable skill link: ${target}`).toBe(true);
-          expect((await client.readResource({ uri: target })).contents.length).toBeGreaterThan(0);
+    for (const listedEntry of listed.skills) {
+      const entry = skillEntrySchema.parse(listedEntry);
+      const fetched = await client.request(
+        { method: 'skills/get', params: { uri: entry.uri } },
+        z.object({ skill: skillEntrySchema })
+      );
+      expect(fetched.skill).toEqual(entry);
+      for (const file of entry.resources) {
+        expect(resourceUris.has(file.uri)).toBe(true);
+        const result = await client.readResource({ uri: file.uri });
+        const content = z.object({ uri: z.string(), text: z.string() }).parse(result.contents[0]);
+        expect(content.uri).toBe(file.uri);
+        expect(Buffer.byteLength(content.text)).toBe(file.size);
+        expect(`sha256:${createHash('sha256').update(content.text).digest('hex')}`).toBe(
+          file.digest
+        );
+        if (file.uri.endsWith('.md')) {
+          for (const link of content.text.matchAll(/\]\(([^)]+)\)/g)) {
+            const target = new URL(z.string().parse(link[1]), file.uri).href;
+            expect(resourceUris.has(target), `Unreachable skill link: ${target}`).toBe(true);
+            expect((await client.readResource({ uri: target })).contents.length).toBeGreaterThan(0);
+          }
         }
       }
     }
+  });
+
+  it('points hosts without skill discovery at every listed skill entry', async () => {
+    const { client } = await fixture();
+    const { skills } = await client.request({ method: 'skills/list', params: {} }, listingSchema);
+    const instructions = client.getInstructions() ?? '';
+    for (const skill of skills) expect(instructions).toContain(skill.uri);
   });
 
   it('registers the resource-served example through MCP and evaluates its condition', async () => {
     const { client, registrations } = await fixture();
     expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(['lody_automation']);
     const { skills } = await client.request({ method: 'skills/list', params: {} }, listingSchema);
-    const entry = skills[0];
+    const entry = skills.find((skill) => skill.frontmatter.name === 'lody-automations');
     if (!entry) throw new Error('Missing Automation skill');
     const guide = await readText(client, entry.uri);
     const example = /```json\n([\s\S]*?)\n```/.exec(guide)?.[1];
