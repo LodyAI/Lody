@@ -29,6 +29,7 @@ export type IpcPushMap = {
   'nativeWorkspaceMeta.update': import('./native-workspace-meta-ipc').NativeMetaEvent;
   'nativeWorkspaceMeta.flock': import('./native-workspace-meta-ipc').NativeFlockEvent;
   'nativeWorkspaceMeta.doc': import('./native-workspace-meta-ipc').NativeDocEvent;
+  'nativeWorkspaceMeta.docPaths': import('./native-workspace-meta-ipc').NativeDocPathsEvent;
   'cli.state': ElectronCliState;
   'updater.state': ElectronUpdaterState;
   'storageGuard.state': ElectronStorageGuardState;
@@ -77,6 +78,7 @@ export const IPC_PUSH_CHANNELS = {
   nativeWorkspaceMeta: 'nativeWorkspaceMeta.update',
   nativeFlockDoc: 'nativeWorkspaceMeta.flock',
   nativeDoc: 'nativeWorkspaceMeta.doc',
+  nativeDocPaths: 'nativeWorkspaceMeta.docPaths',
   cliState: 'cli.state',
   updaterState: 'updater.state',
   storageGuardState: 'storageGuard.state',
