@@ -8654,6 +8654,15 @@ export class MessageHandler {
         throw new Error(`Session ${sessionId} does not use Roost history.`);
       }
       const history = backend.history;
+      if (query.kind === 'readOlderRange') {
+        if (!backend.readOlderHistoryRange)
+          throw new Error('Owner history page verification is unavailable');
+        const readSignal = signal
+          ? AbortSignal.any([signal, this.historyOwnerAbort.signal])
+          : this.historyOwnerAbort.signal;
+        await backend.flushLocalWrites();
+        return await backend.readOlderHistoryRange(query, readSignal);
+      }
       if (
         query.kind === 'readMetadata' ||
         query.kind === 'readLatestGoal' ||
@@ -8847,7 +8856,7 @@ export class MessageHandler {
           query.kind === 'readDirectory') &&
           query.atCheckpoint);
       if (
-        (protectedRead || query.kind === 'readSelection') &&
+        (protectedRead || query.kind === 'readSelection' || query.kind === 'readOlderRange') &&
         error instanceof Error &&
         'code' in error &&
         (error.code === 'stale' || error.code === 'superseded')

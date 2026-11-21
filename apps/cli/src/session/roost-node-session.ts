@@ -27,6 +27,7 @@ import {
   isSessionHistoryStatusAwaitingStart,
   createReplayPromptBuilder,
   type SessionHistoryInspectionQuery,
+  type SessionHistoryReadQuery,
   type SessionHistoryReadResponse,
 } from '@lody/shared';
 import {
@@ -1054,7 +1055,7 @@ const createNodeServicesForLease = async (
     );
   };
 
-  const readyTurn = (turn: SessionEntry): SessionTurnRead => ({
+  const readyTurn = (turn: SessionEntry): Extract<SessionTurnRead, { state: 'ready' }> => ({
     state: 'ready',
     turn: clone(turn) as SessionTurn,
   });
@@ -1217,6 +1218,67 @@ const createNodeServicesForLease = async (
     }
     return directoryPageFromBranch({ ...page, messages: [] }, selected);
   };
+  const readOlderHistoryRange = async (
+    query: Extract<SessionHistoryReadQuery, { kind: 'readOlderRange' }>,
+    signal?: AbortSignal
+  ): Promise<SessionHistoryReadResponse> => {
+    const { baseCheckpoint, from, to } = query;
+    const { source, published, turns } = await onOwner(async () => {
+      signal?.throwIfAborted();
+      if (closing || disposed || !history.getPublication) throw staleRead();
+      const published = await history.getPublication();
+      const source = roostHistory;
+      if (!published || to > published.historyCount) throw staleRead();
+      const page = await source.readActiveBranchPage(viewId, { from, limit: to - from });
+      if (
+        !page.complete ||
+        page.startPosition !== from ||
+        page.totalCount !== published.historyCount
+      )
+        throw staleRead();
+      const turns = (await projectBranchPage(page, decodeMessages(page.messages), false)).map(
+        readyTurn
+      );
+      const after = await history.getPublication();
+      if (
+        turns.length !== to - from ||
+        after?.checkpoint !== published.checkpoint ||
+        roostHistory !== source
+      )
+        throw staleRead();
+      return { source, published, turns };
+    });
+    const { checkpoint } = published;
+    if (checkpoint !== baseCheckpoint) {
+      // Verify only the interval through the detached page's publication.
+      // Later writes can continue while this fixed interval is scanned.
+      const changes = await historyChanges.readThroughCheckpoint(
+        baseCheckpoint,
+        checkpoint,
+        signal
+      );
+      if (
+        changes.state !== 'ready' ||
+        changes.checkpoint !== checkpoint ||
+        (changes.from !== undefined && changes.from < to)
+      )
+        throw staleRead();
+      const changed = new Set(changes.ids);
+      if (turns.some((turn) => changed.has(turn.turn.id))) throw staleRead();
+    }
+    await historyGeneration.resolve();
+    signal?.throwIfAborted();
+    if (closing || disposed || source !== historyGeneration.history) throw staleRead();
+    return {
+      type: 'session/history-read_response',
+      sessionId: sessionDoc.sessionId,
+      success: true,
+      historyRevision: published.historyRevision,
+      historyCount: published.historyCount,
+      result: { baseCheckpoint, checkpoint, turns },
+    };
+  };
+
   const readLatestDirectoryPage = (limit: number): Promise<SessionHistoryDirectoryPage> =>
     onOwner(() =>
       readStable(async () =>
@@ -3734,6 +3796,7 @@ const createNodeServicesForLease = async (
     readHistoryInspection,
     readHistoryReplay: (excludeTurnId) =>
       readObservedHistory(() => readReplayFromMembers(roostHistory, excludeTurnId)),
+    readOlderHistoryRange,
     readLatestGoal,
     readLatestUserId,
     foldHistory: (create, visit) =>

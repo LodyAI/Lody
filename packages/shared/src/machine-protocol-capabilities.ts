@@ -130,6 +130,7 @@ export const CODE_COLLAB_DIFF_BLOBS_PROTOCOL_VERSION = 1;
 /** v4 adds purpose-bound member read/edit proofs; older strict payloads are incompatible. */
 export const SESSION_HISTORY_PROTOCOL_VERSION = 4;
 export const SESSION_HISTORY_INCREMENTAL_PROTOCOL_VERSION = 1;
+const SESSION_HISTORY_OLDER_RANGE_PROTOCOL_VERSION = 2;
 export const SESSION_HISTORY_SUBSCRIPTION_PROTOCOL_VERSION = 1;
 export const SESSION_HISTORY_INSPECTION_PROTOCOL_VERSION = 2;
 export const SESSION_HISTORY_PATCHES_PROTOCOL_VERSION = 1;
@@ -259,7 +260,7 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistory]: SESSION_HISTORY_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryPatches]: SESSION_HISTORY_PATCHES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryIncremental]:
-    SESSION_HISTORY_INCREMENTAL_PROTOCOL_VERSION,
+    SESSION_HISTORY_OLDER_RANGE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistorySubscription]:
     SESSION_HISTORY_SUBSCRIPTION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryInspection]:
@@ -639,6 +640,16 @@ export function machineSupportsSessionHistoryIncremental(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryIncremental,
     SESSION_HISTORY_INCREMENTAL_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsSessionHistoryOlderRange(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryIncremental,
+    SESSION_HISTORY_OLDER_RANGE_PROTOCOL_VERSION
   );
 }
 
