@@ -7,13 +7,13 @@ Translation: current
 
 ## Abstract
 
-Builtin Sorbet uses its advertised ACP authentication methods for interactive sign-in, while credential metadata and custom Provider management call `@sorbetai/control` directly in the daemon. Both paths keep secrets on the target machine and use the existing protected Machine RPC or signed E2EE owned-execution boundary. Sorbet owns the shared data directory, locking, atomic replacement, migration, and reference checks; Lody supplies the directory and does not parse its files.
+Builtin Sorbet uses `@sorbetai/control` directly for interactive sign-in, credential metadata, custom Provider management, model refresh, and model catalog reads. Prompts and progress still use the existing protected Machine RPC or signed E2EE owned-execution boundary, keeping secrets on the target machine. Sorbet owns the shared data directory, locking, atomic replacement, migration, and reference checks; Lody supplies the directory and does not parse its files.
 
 ## Decision and evidence
 
-Sorbet sign-in follows the existing ACP authentication lifecycle rather than a provider-specific login command. The connection advertises credential-form version 1 and supports text, secret, and single-select fields. Remote replies are encrypted to the target machine and bound to the request and interaction; secret defaults do not enter retained progress. The behavior tests cover negotiation, form replies, and stale-interaction rejection. Arbitrary forms and terminal authentication methods remain unsupported.
+Sorbet sign-in calls `control.authentication.methods()` and `control.authentication.login()` instead of starting an ACP process. The existing Machine RPC interaction stream carries text, secret, and single-select prompts plus authorization progress. Remote replies are encrypted to the target machine and bound to the request and interaction; secret defaults do not enter retained progress. The behavior tests cover negotiation, form replies, and stale-interaction rejection. Arbitrary forms and terminal authentication methods remain unsupported.
 
-Credential descriptors, logout, and custom Provider operations use the public `@sorbetai/control` package directly. Each operation opens control for `<LodyDataDir>/sorbet`, performs the requested call, and closes the handle. Lody retains the existing Machine RPC `configId` validation and E2EE authorization, but does not duplicate the control API behind another internal interface and no longer starts a temporary ACP process for these management calls.
+Credential descriptors, logout, custom Provider operations, provider refresh, and available-model reads use the public `@sorbetai/control` package directly. Each operation opens control for `<LodyDataDir>/sorbet`, performs the requested call, and closes the handle. Lody retains the existing Machine RPC `configId` validation and E2EE authorization, but does not duplicate the control API behind another internal interface and no longer starts a temporary ACP process for these management calls.
 
 `credentials.list()` returns only provider IDs and credential types. Login persistence and logout remain inside Sorbet, so raw API keys and OAuth credentials do not cross the Host boundary. Custom Provider create, list, and delete use Sorbet's canonical stores and reference checks rather than reading or rewriting `providers.json`.
 
@@ -23,7 +23,7 @@ The Sorbet state directory remains owned by Sorbet. Lody passes the same `<LodyD
 
 ## Consequences
 
-Interactive authentication still uses ACP because that is the advertised agent authentication contract. Account and Provider management no longer pays process startup, initialization, timeout, and teardown costs. A running Node Agent may retain an older in-memory Provider registry until restart or host recomposition, and Sorbet documents a residual cross-process TOCTOU between Provider reference checking and mutation; Lody does not add a parallel lock that would falsely claim to close that gap.
+Sorbet authentication and management no longer pay ACP process startup, initialization, timeout, and teardown costs. Other ACP agents retain their protocol authentication paths. A running Node Agent may retain an older in-memory Provider registry until restart or host recomposition, and Sorbet documents a residual cross-process TOCTOU between Provider reference checking and mutation; Lody does not add a parallel lock that would falsely claim to close that gap.
 
 ## Verification
 

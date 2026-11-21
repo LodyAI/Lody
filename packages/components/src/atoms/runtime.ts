@@ -641,6 +641,17 @@ export type WorkspaceRuntime = {
           >,
           'method' | 'params'
         >
+      | Pick<
+          Extract<
+            import('@lody/shared').LocalMachineRpcRequest,
+            { method: 'sorbet/providers-refresh' }
+          >,
+          'method' | 'params'
+        >
+      | Pick<
+          Extract<import('@lody/shared').LocalMachineRpcRequest, { method: 'sorbet/models-list' }>,
+          'method' | 'params'
+        >
   ) => Promise<import('@lody/shared/local-machine-rpc').SorbetProvidersResult>;
   requestLocalMcpAuthentication: (
     machineId: MachineId,

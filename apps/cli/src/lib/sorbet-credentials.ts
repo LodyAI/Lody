@@ -79,5 +79,26 @@ export function createSorbetCredentialsHandler(
         await control.close();
       }
     },
+    async refreshProviders(configId: AgentConfigId, providerId?: string, signal?: AbortSignal) {
+      await validate(configId);
+      const control = await openSorbetControl({ dataDirectory, signal });
+      try {
+        await control.providers.refresh({
+          ...(providerId ? { providers: [providerId] } : {}),
+          signal,
+        });
+      } finally {
+        await control.close();
+      }
+    },
+    async listModels(configId: AgentConfigId, providerId?: string, signal?: AbortSignal) {
+      await validate(configId);
+      const control = await openSorbetControl({ dataDirectory, signal });
+      try {
+        return [...(await control.providers.availableModels({ providerId, signal }))];
+      } finally {
+        await control.close();
+      }
+    },
   };
 }

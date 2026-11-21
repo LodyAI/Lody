@@ -54,10 +54,11 @@ context/message-flow.md "Upstream".
   remain in Dimcode's own configuration or provider environment. Refresh capabilities
   after upgrading. Existing registry configurations retain their saved launch contract.
   [Sorbet authentication and control](../../../../.agents/notes/implemented/feature/2026-11-02-sorbet-acp-authentication.md)
-  keeps interactive sign-in on the existing protected ACP interaction path. Credential
-  metadata, logout, and custom Provider management call `@sorbetai/control@alpha` directly
-  against the same `<LodyDataDir>/sorbet` directory; no temporary ACP process or duplicate
-  management abstraction sits between the Machine RPC handler and Sorbet. The daemon still
+  sends interactive sign-in, credential metadata, logout, Provider mutations, model refresh,
+  and model catalog reads directly through `@sorbetai/control@alpha` against the same
+  `<LodyDataDir>/sorbet` directory. The existing protected Machine RPC interaction stream carries
+  prompts and progress, but no temporary ACP process or duplicate management abstraction sits
+  between the handler and Sorbet. The daemon still
   verifies the local Provider identity and ignores stored launch overrides. Account management
   is also available through signed E2EE owned execution when the target advertises
   `sorbetCredentialsRemote`; the target verifies the signer belongs to its owner's membership.

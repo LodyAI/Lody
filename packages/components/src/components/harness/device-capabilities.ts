@@ -1,8 +1,7 @@
 /*
- * The Models page reads what the machine's agent actually advertises: its ACP
- * capability cache entry, written by the capability probe into the machine's
- * Flock doc and read here through `useMachineFlockRows`. Nothing is probed on
- * demand from this page — it renders the last probe's answer.
+ * The Models page reads the model catalog returned by Sorbet control through
+ * the harness store. The ACP capability cache remains only for config-option
+ * metadata such as the reasoning-effort selector.
  *
  * What a Sorbet entry can say (see `AcpCapabilityCacheEntry`):
  *   models        — the probe's model list; custom-endpoint models land here
@@ -30,6 +29,7 @@ import {
 import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 
 import { useSorbetTarget } from './sorbet';
+import { availableModels, useHarness } from './store';
 
 /** What the Models page renders one ACP model as, after the modelOption fold. */
 export interface HarnessModel {
@@ -48,9 +48,9 @@ export interface HarnessModel {
 export type DeviceCapabilityStatus = 'no-agent' | 'loading' | 'ready';
 
 export interface DeviceCapabilities {
-  /** The probe's entry for the page's Sorbet config, once seen. */
+  /** The cached ACP entry used only for config-option metadata. */
   capability: AcpCapabilityCacheEntry | undefined;
-  /** The model pool: the model select's options when present, else `models`. */
+  /** The model pool returned by `control.providers.availableModels()`. */
   models: HarnessModel[];
   /** The select that carries the model choice (category 'model'), if any. */
   modelOption: AcpConfigOptionSummary | undefined;
@@ -102,6 +102,7 @@ export function capabilityModels(capability: AcpCapabilityCacheEntry | undefined
 /** The Models page's view of the machine the bridge resolved. */
 export function useDeviceCapabilities(): DeviceCapabilities {
   const target = useSorbetTarget();
+  const harness = useHarness();
   const rows = useMachineFlockRows(target?.machineId as MachineId | null, {
     families: [...ACP_CAPABILITY_ROW_FAMILIES],
   });
@@ -112,10 +113,19 @@ export function useDeviceCapabilities(): DeviceCapabilities {
         : undefined,
     [rows, target]
   );
+  const controlModels = useMemo<HarnessModel[]>(
+    () =>
+      availableModels(harness).map((model) => ({
+        id: model.id,
+        name: model.name,
+        meta: model.context,
+      })),
+    [harness]
+  );
   return useMemo<DeviceCapabilities>(
     () => ({
       capability,
-      models: capabilityModels(capability),
+      models: controlModels,
       modelOption: findOption(
         capability,
         (option) => option.category === 'model' && option.type === 'select'
@@ -124,8 +134,8 @@ export function useDeviceCapabilities(): DeviceCapabilities {
         capability,
         (option) => option.type === 'select' && isAcpThoughtLevelConfigOption(option)
       ),
-      status: !target ? 'no-agent' : capability ? 'ready' : 'loading',
+      status: !target ? 'no-agent' : harness.status === 'loading' ? 'loading' : 'ready',
     }),
-    [capability, target]
+    [capability, controlModels, harness.status, target]
   );
 }

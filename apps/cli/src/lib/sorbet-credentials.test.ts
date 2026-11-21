@@ -18,6 +18,8 @@ function control(overrides: Record<string, unknown> = {}) {
       listCustom: vi.fn(async () => []),
       createCustom: vi.fn(async (provider) => ({ ...provider, id: 'custom' })),
       deleteCustom: vi.fn(async () => {}),
+      refresh: vi.fn(async () => ({ refreshed: [], errors: new Map() })),
+      availableModels: vi.fn(async () => []),
     },
     close: vi.fn(async () => {}),
     ...overrides,
@@ -78,6 +80,8 @@ describe('daemon Sorbet credentials', () => {
         listCustom: vi.fn(async () => [{ ...provider, id: 'custom' }]),
         createCustom: vi.fn(),
         deleteCustom: vi.fn(),
+        refresh: vi.fn(),
+        availableModels: vi.fn(),
       },
     });
     openSorbetControl.mockResolvedValueOnce(create).mockResolvedValueOnce(list);
@@ -87,6 +91,48 @@ describe('daemon Sorbet credentials', () => {
     expect(await handler.listProviders(id)).toEqual([{ ...provider, id: 'custom' }]);
     expect(create.providers.createCustom).toHaveBeenCalledWith(provider, { signal: undefined });
     expect(list.providers.listCustom).toHaveBeenCalledWith({ signal: undefined });
+  });
+
+  it('refreshes Providers and reads the control model catalog', async () => {
+    const config = { id, machineId: machine, cliType: 'builtin', agentType: 'sorbet' };
+    const document = { getAgentConfigForMachineLaunch: async () => config as never };
+    const refresh = control();
+    const models = control({
+      providers: {
+        listCustom: vi.fn(),
+        createCustom: vi.fn(),
+        deleteCustom: vi.fn(),
+        refresh: vi.fn(),
+        availableModels: vi.fn(async () => [
+          {
+            selector: 'example/model',
+            providerId: 'example',
+            modelId: 'model',
+            displayName: 'Model',
+          },
+        ]),
+      },
+    });
+    openSorbetControl.mockResolvedValueOnce(refresh).mockResolvedValueOnce(models);
+    const handler = createSorbetCredentialsHandler(document, machine);
+
+    await handler.refreshProviders(id, 'example');
+    expect(await handler.listModels(id)).toEqual([
+      {
+        selector: 'example/model',
+        providerId: 'example',
+        modelId: 'model',
+        displayName: 'Model',
+      },
+    ]);
+    expect(refresh.providers.refresh).toHaveBeenCalledWith({
+      providers: ['example'],
+      signal: undefined,
+    });
+    expect(models.providers.availableModels).toHaveBeenCalledWith({
+      providerId: undefined,
+      signal: undefined,
+    });
   });
 
   it('closes control after an operation failure', async () => {
@@ -120,6 +166,8 @@ describe('daemon Sorbet credentials', () => {
     await expect(handler.logout(id, 'x')).rejects.toThrow('configuration unavailable');
     await expect(handler.listProviders(id)).rejects.toThrow('configuration unavailable');
     await expect(handler.deleteProvider(id, 'x')).rejects.toThrow('configuration unavailable');
+    await expect(handler.refreshProviders(id)).rejects.toThrow('configuration unavailable');
+    await expect(handler.listModels(id)).rejects.toThrow('configuration unavailable');
     expect(openSorbetControl).not.toHaveBeenCalled();
   });
 });

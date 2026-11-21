@@ -49,6 +49,13 @@ export interface EndpointModel {
   name?: string;
 }
 
+export interface SorbetModel {
+  selector: string;
+  providerId: string;
+  modelId: string;
+  displayName: string;
+}
+
 /** An endpoint the agent stores on the machine, read back with its models. */
 export interface CustomProvider {
   id: string;
@@ -74,6 +81,7 @@ export interface HarnessState {
   activeDevice: string | null;
   credentials: Record<string, Credential>;
   customs: CustomProvider[];
+  models: SorbetModel[];
   status: 'loading' | 'ready' | 'error' | 'unsupported' | 'no-agent' | 'no-runtime';
   profile: HarnessConfig;
   overrides: Record<string, Partial<HarnessConfig>>;
@@ -103,6 +111,7 @@ const initial = (): HarnessState => ({
   activeDevice: null,
   credentials: {},
   customs: [],
+  models: [],
   status: 'loading',
   profile: DEFAULT_PROFILE,
   overrides: {},
@@ -124,7 +133,14 @@ function hydrate() {
     // Credentials and endpoints live on the machine; what was stored is the
     // drawn profile, so remote-owned fields always start empty.
     if (parsed.version === 1)
-      state = { ...initial(), ...parsed, credentials: {}, customs: [], status: 'loading' };
+      state = {
+        ...initial(),
+        ...parsed,
+        credentials: {},
+        customs: [],
+        models: [],
+        status: 'loading',
+      };
   } catch {}
 }
 
@@ -132,7 +148,13 @@ function commit(next: HarnessState) {
   state = next;
   try {
     // Only what the surface owns is persisted; machine-owned lists are a view.
-    const { credentials: _credentials, customs: _customs, status: _status, ...persisted } = next;
+    const {
+      credentials: _credentials,
+      customs: _customs,
+      models: _models,
+      status: _status,
+      ...persisted
+    } = next;
     window.localStorage.setItem(KEY, JSON.stringify(persisted));
   } catch {}
   listeners.forEach((listener) => listener());
@@ -172,16 +194,16 @@ export function overriddenKeys(s: HarnessState, device: string | null): ConfigKe
  * that entry is exactly what the probe that discovered them writes.
  */
 export function availableModels(s: HarnessState) {
-  const custom = s.customs.flatMap((provider) =>
-    provider.models.map((model) => ({
-      id: model.id,
-      provider: provider.id,
-      name: model.name ?? model.id,
-      context: provider.protocol,
+  if (s.models.length > 0) {
+    return s.models.map((model) => ({
+      id: model.selector,
+      provider: model.providerId,
+      name: model.displayName,
+      context: model.modelId,
       tier: 'balanced' as const,
-    }))
-  );
-  return [...MODELS.filter((model) => s.credentials[model.provider]), ...custom];
+    }));
+  }
+  return MODELS.filter((model) => s.credentials[model.provider]);
 }
 
 /**
@@ -205,7 +227,7 @@ export const harness = {
    * The machine's answer to a credentials/providers read. Reconciliation keeps
    * the model picks pointing at providers that still exist.
    */
-  applyRemote(patch: Pick<HarnessState, 'credentials' | 'customs' | 'status'>) {
+  applyRemote(patch: Pick<HarnessState, 'credentials' | 'customs' | 'models' | 'status'>) {
     commit(reconcileModels({ ...state, ...patch }));
   },
 

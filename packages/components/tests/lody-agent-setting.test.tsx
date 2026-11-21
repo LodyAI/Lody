@@ -218,7 +218,7 @@ describe('Lody Agent settings entry', () => {
 describe('Lody Agent connection transport support', () => {
   it('requires remote provider support even when remote credentials are supported', () => {
     const target = machine({
-      sorbetProviders: 1,
+      sorbetProviders: 2,
       sorbetCredentials: 1,
       sorbetCredentialsRemote: 1,
     });
@@ -226,7 +226,7 @@ describe('Lody Agent connection transport support', () => {
     expect(supportsLodyAgentConnections(target, otherMachineId)).toBe(false);
     expect(
       supportsLodyAgentConnections(
-        machine({ sorbetProvidersRemote: 1, sorbetCredentialsRemote: 1 }),
+        machine({ sorbetProvidersRemote: 2, sorbetCredentialsRemote: 1 }),
         otherMachineId
       )
     ).toBe(true);

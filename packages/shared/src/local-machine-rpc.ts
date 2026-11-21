@@ -185,6 +185,15 @@ export const SorbetCustomProviderSchema = SorbetCustomProviderInputSchema.extend
   id: SorbetProviderIdSchema,
 }).strict();
 
+export const SorbetAvailableModelSchema = z
+  .object({
+    selector: z.string().trim().min(1).max(2048),
+    providerId: SorbetProviderIdSchema,
+    modelId: z.string().trim().min(1).max(1024),
+    displayName: z.string().trim().min(1).max(1024),
+  })
+  .strict();
+
 export const SorbetProvidersResultSchema = z.discriminatedUnion('type', [
   z
     .object({
@@ -196,6 +205,13 @@ export const SorbetProvidersResultSchema = z.discriminatedUnion('type', [
     .object({ type: z.literal('sorbet/providers-create'), provider: SorbetCustomProviderSchema })
     .strict(),
   z.object({ type: z.literal('sorbet/providers-delete') }).strict(),
+  z.object({ type: z.literal('sorbet/providers-refresh') }).strict(),
+  z
+    .object({
+      type: z.literal('sorbet/models-list'),
+      models: z.array(SorbetAvailableModelSchema).max(10_000),
+    })
+    .strict(),
 ]);
 
 export type SorbetCustomProviderInput = z.infer<typeof SorbetCustomProviderInputSchema>;
@@ -289,6 +305,18 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
     method: z.literal('sorbet/providers-delete'),
     params: z
       .object({ configId: AgentConfigIdSchema, providerId: SorbetProviderIdSchema })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('sorbet/providers-refresh'),
+    params: z
+      .object({ configId: AgentConfigIdSchema, providerId: SorbetProviderIdSchema.optional() })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('sorbet/models-list'),
+    params: z
+      .object({ configId: AgentConfigIdSchema, providerId: SorbetProviderIdSchema.optional() })
       .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({

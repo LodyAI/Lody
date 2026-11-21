@@ -4,14 +4,14 @@
  * Machine RPC (`sorbet/credentials-*`, `sorbet/providers-*`) and mirrors the
  * descriptors into the harness store so every panel can render them. Secrets
  * never cross the wire — a credential here is `{ providerId, type }`, and a
- * key the user types goes straight into the agent's own sign-in flow
- * (`AcpAuthenticationPanel`, method `sorbet:<providerId>:api_key`).
+ * key the user types goes through the protected authentication interaction
+ * into `control.authentication.login()` on the target machine.
  *
  * What the bridge resolves, in order: which machine the page is scoped to,
  * which agent config on it is Sorbet (`cliType === 'builtin'`,
  * `agentType === 'sorbet'`, lowest id like the old Lody Agent page), whether
- * the machine speaks the two store protocols, then both lists — read in turn,
- * because each read starts its own agent process on one data directory.
+ * the machine speaks the control protocols, then credentials, Providers, and
+ * the available model catalog from the shared Sorbet data directory.
  */
 import { useAtom, useAtomValue } from 'jotai';
 import {
@@ -26,6 +26,7 @@ import {
 } from 'react';
 import {
   machineSupportsProtocolCapability,
+  SORBET_PROVIDERS_PROTOCOL_VERSION,
   type AgentConfigId,
   type AgentConfigMeta,
   type MachineId,
@@ -120,7 +121,13 @@ export function supportsSorbetStores(machine: MachineViewMeta, localMachineId: M
   const local = machine.id === localMachineId;
   const supports = (capability: 'sorbetCredentials' | 'sorbetProviders') =>
     machineSupportsProtocolCapability(machine, local ? capability : `${capability}Remote`, 1);
-  return supports('sorbetProviders') && supports('sorbetCredentials');
+  return (
+    machineSupportsProtocolCapability(
+      machine,
+      local ? 'sorbetProviders' : 'sorbetProvidersRemote',
+      SORBET_PROVIDERS_PROTOCOL_VERSION
+    ) && supports('sorbetCredentials')
+  );
 }
 
 /** The wire name for a stored key; the harness calls the same thing `key`. */
@@ -138,7 +145,7 @@ export interface SorbetActions {
   deleteEndpoint: (providerId: string) => Promise<void>;
   /** A Provider write changes the agent's advertised methods, not just the list. */
   reprobe: () => Promise<void>;
-  refresh: () => void;
+  refresh: () => Promise<void>;
 }
 
 const unavailable = () => Promise.reject(new Error('Lody Agent is unavailable'));
@@ -147,7 +154,7 @@ const noopActions: SorbetActions = {
   createEndpoint: unavailable,
   deleteEndpoint: unavailable,
   reprobe: unavailable,
-  refresh: () => {},
+  refresh: async () => {},
 };
 
 /**
@@ -182,6 +189,7 @@ export function SorbetBridge({ children }: { children: ReactNode }) {
     const empty = {
       credentials: {} as HarnessState['credentials'],
       customs: [] as HarnessState['customs'],
+      models: [] as HarnessState['models'],
     };
     if (isLoading) {
       harness.applyRemote({ ...empty, status: 'loading' });
@@ -201,8 +209,8 @@ export function SorbetBridge({ children }: { children: ReactNode }) {
     }
     harness.applyRemote({ ...empty, status: 'loading' });
     void (async () => {
-      // One list per request: each call runs its own bounded Sorbet process on
-      // the target machine, so they go in turn rather than racing the store.
+      // Keep the related control reads ordered so the surface commits one
+      // coherent generation after a machine switch.
       let credentials: HarnessState['credentials'] | null = null;
       try {
         const result = await runtime.requestLocalSorbetCredentials(target.machineId, {
@@ -250,12 +258,24 @@ export function SorbetBridge({ children }: { children: ReactNode }) {
         // Same: reported through status, not by blanking the page.
       }
       if (generation.current !== current) return;
+      let models: HarnessState['models'] | null = null;
+      try {
+        const result = await runtime.requestLocalSorbetProviders(target.machineId, {
+          method: 'sorbet/models-list',
+          params: { configId: target.configId },
+        });
+        if (result.type === 'sorbet/models-list') models = result.models;
+      } catch {
+        // Model catalog failures are surfaced with the rest of the control read.
+      }
+      if (generation.current !== current) return;
       harness.applyRemote({
         // A list that failed to read shows nothing rather than stale
         // connections: rows would offer actions on records that may be gone.
         credentials: credentials ?? {},
         customs: customs ?? [],
-        status: credentials && customs ? 'ready' : 'error',
+        models: models ?? [],
+        status: credentials && customs && models ? 'ready' : 'error',
       });
     })();
     return () => {
@@ -326,7 +346,16 @@ export function SorbetBridge({ children }: { children: ReactNode }) {
         }
       },
       reprobe,
-      refresh: reread,
+      refresh: async () => {
+        try {
+          await runtime.requestLocalSorbetProviders(machineId, {
+            method: 'sorbet/providers-refresh',
+            params: { configId },
+          });
+        } finally {
+          reread();
+        }
+      },
     };
   }, [runtime, machineIdRef, configIdRef, reread, reprobe]);
 
