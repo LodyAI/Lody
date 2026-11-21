@@ -196,3 +196,94 @@ void test('invalid version input never falls back to the workflow run number', (
   ])
     assert.throws(() => nightlyVersionBase(base), /base version/u)
 })
+
+void test('first public reservation advances both legacy R2 records using only their public source', async () => {
+  for (const sameRunId of [false, true]) {
+    const store = memoryStore()
+    const next = candidate(600)
+    const legacy = {
+      schema: 1,
+      privateSha: 'e'.repeat(40),
+      ossSha: candidate(500).sourceSha,
+      buildNumber: '500',
+      runId: sameRunId ? next.runId : '100',
+      builtAt: '2026-09-28T00:00:00.000Z',
+      trigger: { repository: 'loro-dev/lody', sha: 'e'.repeat(40) }
+    }
+    const version = '0.102.0-nightly.7'
+    await store.put(
+      NIGHTLY_VERSION_KEY,
+      Buffer.from(JSON.stringify({ schema: 1, candidate: legacy, version }))
+    )
+    await store.put(
+      'version.json',
+      Buffer.from(
+        JSON.stringify({
+          schema: 1,
+          channel: 'nightly',
+          candidate: legacy,
+          version,
+          versionScheme: NIGHTLY_VERSION_SCHEME
+        })
+      )
+    )
+    const publicOnlyApi = async (endpoint) => {
+      assert.ok(endpoint.startsWith('repos/LodyAI/Lody/'))
+      assert.ok(
+        !endpoint.includes(legacy.privateSha),
+        'Private SHA must never enter a public compare request'
+      )
+      return api(endpoint)
+    }
+    const result = await reserveNightlyVersion({
+      store,
+      candidate: next,
+      baseVersion: '0.101.0',
+      api: publicOnlyApi
+    })
+    assert.deepEqual(result, { publish: true, version: '0.102.0-nightly.8' })
+    assert.deepEqual(JSON.parse(await store.get(NIGHTLY_VERSION_KEY)).candidate, next)
+    const snapshot = new Map(store.objects)
+    assert.deepEqual(
+      await reserveNightlyVersion({
+        store,
+        candidate: next,
+        baseVersion: '0.101.0',
+        api: publicOnlyApi
+      }),
+      result
+    )
+    assert.deepEqual(store.objects, snapshot, 'Exact retry must not change the reservation')
+  }
+})
+
+void test('legacy R2 reservations still reject a divergent public source without writing', async () => {
+  const store = memoryStore()
+  const legacy = {
+    schema: 1,
+    privateSha: 'e'.repeat(40),
+    ossSha: candidate(500).sourceSha,
+    buildNumber: '500',
+    runId: '100',
+    builtAt: '2026-09-28T00:00:00.000Z',
+    trigger: { repository: 'loro-dev/lody', sha: 'e'.repeat(40) }
+  }
+  await store.put(
+    NIGHTLY_VERSION_KEY,
+    Buffer.from(JSON.stringify({ schema: 1, candidate: legacy, version: '0.102.0-nightly.7' }))
+  )
+  const snapshot = new Map(store.objects)
+  await assert.rejects(
+    reserveNightlyVersion({
+      store,
+      candidate: candidate(600),
+      baseVersion: '0.101.0',
+      api: async (endpoint) => {
+        assert.ok(!endpoint.includes(legacy.privateSha))
+        return { status: 'diverged', merge_base_commit: { sha: 'd'.repeat(40) } }
+      }
+    }),
+    /ancestor/u
+  )
+  assert.deepEqual(store.objects, snapshot)
+})

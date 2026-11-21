@@ -31,7 +31,14 @@
     "build:linux": "pnpm run build && node scripts/package-electron.mjs --linux",
     "format:check": "oxfmt --check",
     "build:app:test": "node scripts/build-test-app.mjs",
-    "test:release": "node --test *.test.mjs"
+    "test:release": "node --test *.test.mjs",
+    "build:mac:release": "node scripts/cloud-release.mjs production --mac --arm64 --x64",
+    "build:mac:staging": "node scripts/cloud-release.mjs staging --mac",
+    "build:linux:arm64": "pnpm run build && node scripts/package-electron.mjs --linux AppImage deb --arm64",
+    "package:nightly:mac": "node package-electron.mjs --production --mac --arm64 --x64 --publish never",
+    "package:nightly:win": "node package-electron.mjs --production --win --x64 --publish never",
+    "package:nightly:linux": "node package-electron.mjs --production --linux --x64 --publish never",
+    "package:nightly:linux-arm64": "node package-electron.mjs --production --linux AppImage deb --arm64 --publish never"
   },
   "dependencies": {
     "@better-auth/electron": "catalog:",

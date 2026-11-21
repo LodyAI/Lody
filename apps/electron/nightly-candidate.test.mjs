@@ -156,3 +156,21 @@ test('cutover accepts a monotonic native build override and fences historical re
     'superseded-build'
   )
 })
+
+test('Track C public schema-1 wire candidates export the single public source and reject mismatched SHA pairs', async () => {
+  const canonical = await resolveNightlyCandidate(options)
+  const { sourceSha, ...rest } = canonical
+  const wire = { ...rest, privateSha: sourceSha, ossSha: sourceSha }
+  assert.equal(validateNightlyCandidate(wire), wire)
+  assert.equal(nightlyCandidateEnvironment(wire).LODY_SOURCE_SHA, sourceSha)
+  assert.equal(
+    (
+      await inspectNightlyPublication({
+        candidate: wire,
+        api: async () => ({ object: { sha: sourceSha } })
+      })
+    ).publish,
+    true
+  )
+  assert.throws(() => validateNightlyCandidate({ ...wire, privateSha: sha('b') }))
+})

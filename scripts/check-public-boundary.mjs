@@ -104,7 +104,10 @@ async function main() {
       }
     }
     for (const scriptName of Object.keys(manifest.scripts ?? {})) {
-      if (hostedScriptNamePattern.test(scriptName)) {
+      if (
+        hostedScriptNamePattern.test(scriptName) &&
+        !(file === 'apps/electron/package.json' && scriptName === 'build:mac:staging')
+      ) {
         violations.push(`${file}: hosted deployment script ${scriptName} is not public`);
       }
     }

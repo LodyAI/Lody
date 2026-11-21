@@ -59,6 +59,15 @@ function triggerFromContext(context, event) {
 }
 
 export function validateNightlyCandidate(candidate) {
+  // Track C retains schema 1's wire fields; both must identify the public source.
+  if (candidate?.sourceSha === undefined) {
+    validateStoredNightlyCandidate(candidate)
+    assert.equal(candidate.trigger.repository, REPOSITORY)
+    assert.equal(candidate.privateSha, candidate.ossSha)
+    assert.equal(candidate.ossSha, candidate.trigger.sha)
+    return candidate
+  }
+
   assert.deepEqual(Object.keys(candidate).sort(), [
     'buildNumber',
     'builtAt',
@@ -74,7 +83,11 @@ export function validateNightlyCandidate(candidate) {
     throw new Error('Invalid candidate trigger repository')
   }
   requireSha(candidate.trigger.sha)
-  assert.equal(candidate.sourceSha, candidate.trigger.sha, 'Candidate source differs from trigger')
+  assert.equal(
+    candidate.sourceSha ?? candidate.ossSha,
+    candidate.trigger.sha,
+    'Candidate source differs from trigger'
+  )
   return candidate
 }
 
@@ -115,7 +128,7 @@ export async function resolveNightlyCandidate({ context, event, api, previous, n
       'Candidate build number changed'
     )
     assert.deepEqual(previous.trigger, trigger, 'Candidate trigger changed')
-    assert.equal(previous.sourceSha, trigger.sha, 'Candidate merge SHA changed')
+    assert.equal(previous.sourceSha ?? previous.ossSha, trigger.sha, 'Candidate merge SHA changed')
     return previous
   }
   if (context.runAttempt !== '1') {
@@ -137,16 +150,20 @@ export async function inspectNightlyPublication({ candidate, published, api }) {
   validateNightlyCandidate(candidate)
   if (published !== undefined) {
     validateStoredNightlyCandidate(published)
-    if ((published.sourceSha ?? published.ossSha) === candidate.sourceSha) {
+    if ((published.sourceSha ?? published.ossSha) === (candidate.sourceSha ?? candidate.ossSha)) {
       return { publish: false, reason: 'already-published' }
     }
     if (Number(candidate.buildNumber) <= Number(published.buildNumber)) {
       return { publish: false, reason: 'superseded-build' }
     }
-    await requireAncestor(api, published.sourceSha ?? published.ossSha, candidate.sourceSha)
+    await requireAncestor(
+      api,
+      published.sourceSha ?? published.ossSha,
+      candidate.sourceSha ?? candidate.ossSha
+    )
   }
   const head = requireSha((await api(`repos/${REPOSITORY}/git/ref/heads/main`)).object?.sha)
-  await requireAncestor(api, candidate.sourceSha, head)
+  await requireAncestor(api, candidate.sourceSha ?? candidate.ossSha, head)
   return { publish: true, reason: 'eligible' }
 }
 
@@ -155,7 +172,7 @@ export function nightlyCandidateEnvironment(candidate) {
   return {
     LODY_ENV: 'production',
     LODY_RELEASE_CHANNEL: 'nightly',
-    LODY_SOURCE_SHA: candidate.sourceSha,
+    LODY_SOURCE_SHA: candidate.sourceSha ?? candidate.ossSha,
     LODY_NIGHTLY_BUILD_NUMBER: candidate.buildNumber,
     LODY_BUILD_RUN_ID: candidate.runId,
     LODY_BUILD_TIMESTAMP: candidate.builtAt
@@ -231,7 +248,10 @@ async function main() {
     )
   }
   if (process.env.GITHUB_OUTPUT) {
-    await appendFile(process.env.GITHUB_OUTPUT, `source-sha=${candidate.sourceSha}\n`)
+    await appendFile(
+      process.env.GITHUB_OUTPUT,
+      `source-sha=${candidate.sourceSha ?? candidate.ossSha}\n`
+    )
   }
   console.log(JSON.stringify(candidate, null, 2))
 }
