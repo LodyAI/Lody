@@ -2360,6 +2360,19 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       machineId,
       'Local Codex'
     );
+    const machineFlock = await manager.repo.openFlockDoc(
+      getMachineFlockDocId(workspaceId, machineId)
+    );
+    writeMachineFlockRowToFlock(machineFlock.flock, {
+      key: machineFlockKeys.acpCapability(targetAgentConfigId),
+      value: {
+        cliType: 'builtin',
+        agentType: 'codex',
+        modes: [{ id: 'agent-auto-review', name: 'Auto' }],
+        models: [{ modelId: 'gpt-5', name: 'GPT-5' }],
+        fetchedAt: 1,
+      },
+    });
     const targetSessionId = '33333333-3333-4333-8333-333333333333' as SessionId;
     await manager.repo.upsertDocMeta(getSessionRoomId(targetSessionId), {
       id: targetSessionId,
@@ -2411,18 +2424,17 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     });
 
     vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
-    const syncMetaSpy = vi
-      .spyOn(manager, 'syncMetaOrThrow')
-      .mockRejectedValue(new Error('ECONNRESET: Streams offline'));
-    const syncDocSpy = vi
-      .spyOn(manager, 'syncDocOrThrow')
-      .mockRejectedValue(new Error('ECONNRESET: Streams offline'));
-    const syncFlockSpy = vi
-      .spyOn(manager, 'syncFlockDocOrThrow')
-      .mockRejectedValue(new Error('ECONNRESET: Streams offline'));
+    vi.spyOn(manager, 'syncMetaOrThrow').mockRejectedValue(
+      new Error('ECONNRESET: Streams offline')
+    );
+    vi.spyOn(manager, 'syncDocOrThrow').mockRejectedValue(new Error('ECONNRESET: Streams offline'));
+    vi.spyOn(manager, 'syncFlockDocOrThrow').mockRejectedValue(
+      new Error('ECONNRESET: Streams offline')
+    );
     const dispatched: Array<{
       sessionId: SessionId;
       inputId?: string;
+      modelId?: string;
       mcpServerIds?: string[];
     }> = [];
     let accessVerdict:
@@ -2443,11 +2455,16 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         },
         dispatchSession: async (
           targetId: SessionId,
-          input?: { inputId: string; userId: string; config?: { mcpServerIds?: string[] } }
+          input?: {
+            inputId: string;
+            userId: string;
+            config?: { modelId?: string; mcpServerIds?: string[] };
+          }
         ) => {
           dispatched.push({
             sessionId: targetId,
             inputId: input?.inputId,
+            modelId: input?.config?.modelId,
             mcpServerIds: input?.config?.mcpServerIds,
           });
         },
@@ -2468,13 +2485,11 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       state: 'active',
       items: [{ status: 'active', inputDurable: true, target: { sessionId: targetSessionId } }],
     });
-    expect(syncMetaSpy).not.toHaveBeenCalled();
-    expect(syncDocSpy).not.toHaveBeenCalled();
-    expect(syncFlockSpy).not.toHaveBeenCalled();
     expect(dispatched).toEqual([
       {
         sessionId: targetSessionId,
         inputId: parsedSent.items[0].target.userTurnId,
+        modelId: 'gpt-5',
         mcpServerIds: ['inherited-mcp'],
       },
     ]);
@@ -2494,15 +2509,13 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       id: 'local-cloud-chat-1',
       state: 'active',
     });
-    expect(syncMetaSpy).not.toHaveBeenCalled();
-    expect(syncDocSpy).not.toHaveBeenCalled();
-    expect(syncFlockSpy).not.toHaveBeenCalled();
 
     const created = await runWithDaemonWorkspace(cloudDaemon, () =>
       executeDaemonSessionTool(context(), 'lody_session_create', {
         operationId: 'local-cloud-create-1',
         prompt: 'start local child',
         agentConfigId: targetAgentConfigId,
+        modelId: 'gpt-5',
         useCurrentSessionAsParent: true,
       })
     );
@@ -2513,9 +2526,40 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       state: 'active',
       items: [{ status: 'active', inputDurable: true }],
     });
-    expect(syncMetaSpy).not.toHaveBeenCalled();
-    expect(syncDocSpy).not.toHaveBeenCalled();
-    expect(syncFlockSpy).not.toHaveBeenCalled();
+    expect(dispatched.at(-1)).toMatchObject({
+      sessionId: parsedCreated.items[0].target.sessionId,
+      inputId: parsedCreated.items[0].target.userTurnId,
+      modelId: 'gpt-5',
+    });
+
+    const missingConfigResult = await runWithDaemonWorkspace(cloudDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_create', {
+        operationId: 'local-cloud-create-missing-config',
+        prompt: 'start with unseen config',
+        agentConfigId: 'unseen-remote-agent-config',
+        useCurrentSessionAsParent: true,
+      })
+    );
+    expect(missingConfigResult.isError).toBe(true);
+    expect(JSON.parse(missingConfigResult.content[0]?.text ?? '{}')).toMatchObject({
+      ok: false,
+      error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+    });
+
+    const missingModelResult = await runWithDaemonWorkspace(cloudDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_create', {
+        operationId: 'local-cloud-create-missing-model',
+        prompt: 'start with unseen model',
+        agentConfigId: targetAgentConfigId,
+        modelId: 'unseen-model-next',
+        useCurrentSessionAsParent: true,
+      })
+    );
+    expect(missingModelResult.isError).toBe(true);
+    expect(JSON.parse(missingModelResult.content[0]?.text ?? '{}')).toMatchObject({
+      ok: false,
+      error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+    });
 
     const remoteResult = await runWithDaemonWorkspace(cloudDaemon, () =>
       executeDaemonSessionTool(context(), 'lody_session_chat', {
@@ -2530,9 +2574,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       ok: false,
       error: { code: 'SYNC_UNAVAILABLE', retryable: true },
     });
-    expect(syncMetaSpy).toHaveBeenCalledTimes(1);
 
-    syncMetaSpy.mockClear();
     drivingUserId = 'collaborator-user-id';
     const collaboratorResult = await runWithDaemonWorkspace(cloudDaemon, () =>
       executeDaemonSessionTool(context(), 'lody_session_chat', {
@@ -2547,9 +2589,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       ok: false,
       error: { code: 'SYNC_UNAVAILABLE', retryable: true },
     });
-    expect(syncMetaSpy).toHaveBeenCalledTimes(1);
 
-    syncMetaSpy.mockClear();
     drivingUserId = ownerUserId;
     accessVerdict = { status: 'revoked' };
     const revokedResult = await runWithDaemonWorkspace(cloudDaemon, () =>
@@ -2561,7 +2601,6 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       })
     );
     expect(revokedResult.isError).toBe(true);
-    expect(syncMetaSpy).not.toHaveBeenCalled();
   });
 
   it('rejects calls outside the daemon workspace scope', async () => {

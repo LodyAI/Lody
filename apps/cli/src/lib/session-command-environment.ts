@@ -234,7 +234,7 @@ export async function resolveDaemonTarget(args: {
   };
 }
 
-export async function isBoundDaemonMachineFlockAuthoritative(
+export async function shouldReadBoundDaemonMachineFlockLocally(
   manager: LoroDocumentManager,
   workspaceId: WorkspaceId,
   machineId: MachineId

@@ -7,11 +7,12 @@ import {
 } from '@/lib/workspace-mcp-store';
 import {
   getDaemonWorkspace,
-  isBoundDaemonMachineFlockAuthoritative,
   readEncryptedMachineAccess,
   resolveDaemonTarget,
+  shouldReadBoundDaemonMachineFlockLocally,
   type DaemonTargetResolution,
 } from '@/lib/session-command-environment';
+import { FlockSyncUnavailableError } from '@/lib/loro/flock-sync-errors';
 import type { SessionSteerResponse } from '@lody/shared';
 import { normalizeMcpServerIdSelection, resolveSessionConversationConfig } from '@lody/shared';
 import type { SessionLiveActivity } from '@lody/shared/local-machine-rpc';
@@ -1241,8 +1242,14 @@ async function syncMachineFlockDocsForRead(
   const logger = getLogger('session');
   const results = await Promise.all(
     Array.from(new Set(machineIds)).map(async (machineId): Promise<MachineFlockFreshness> => {
-      if (await isBoundDaemonMachineFlockAuthoritative(manager, workspaceId, machineId)) {
-        return { confirmed: true };
+      if (await shouldReadBoundDaemonMachineFlockLocally(manager, workspaceId, machineId)) {
+        return {
+          confirmed: false,
+          error: new FlockSyncUnavailableError({
+            message: `Machine Flock read used the local daemon replica without remote confirmation (${reason}:${machineId})`,
+            reason: 'local-replica-unconfirmed',
+          }),
+        };
       }
       try {
         await manager.syncFlockDocOrThrow(getMachineFlockDocId(workspaceId, machineId), {
