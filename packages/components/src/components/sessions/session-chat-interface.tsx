@@ -14,6 +14,7 @@ import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator
 import { useLocalSessionContinuation } from './use-local-session-continuation';
 import { SessionContinuationNote } from './session-continuation-note';
 import { SessionContinuationTweaks } from './session-continuation-tweaks';
+import { AutoDeliveryDialog, SessionAutoDeliveryNote } from './session-auto-delivery';
 import { useStableNow } from '@/hooks/use-stable-now';
 import type { DocumentSelection } from '@/lib/document-selection';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
@@ -180,6 +181,8 @@ import {
   type McpServerId,
   type ScheduleDocument,
   type SessionPullRequestView,
+  type SessionPullRequestLinkListItem,
+  resolveSessionPullRequestLinkList,
 } from '@lody/shared';
 import { encryptedRemoteEditAndResendAvailable } from '../../lib/encrypted-machine-controls';
 import { useIsMobile } from '../../hooks/use-mobile';
@@ -291,6 +294,10 @@ import { useSessionActions } from '@/hooks/use-session-actions';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import type { WorkspaceMember } from '@/hooks/use-workspace-members';
 import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-session-dialog';
+import {
+  unlinkSessionPullRequestFromUi,
+  type SessionPullRequestLinksProps,
+} from './session-pr-links';
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
 import { SessionInfoDialog, type SessionInfoPullRequest } from './session-info-dialog';
@@ -2785,6 +2792,12 @@ export const SessionChatInterface = memo(
       isVisible
     );
     const continuationNow = useStableNow(10_000).getTime();
+    // Auto delivery reads the PR poller, which encrypted workspaces do not run.
+    const autoDeliverSupported = runtime?.contentMode !== 'e2ee';
+    const canAutoDeliver =
+      autoDeliverSupported && !!continuation.value && !continuation.value.autoDeliver;
+    const [autoDeliveryDialogOpen, setAutoDeliveryDialogOpen] = useState(false);
+    const autoDeliveryStatus = session.autoDelivery ?? null;
     // Session-scoped UI state below stores the session it belongs to and is read
     // only for that session: this instance can outlive a switch (the desktop
     // toolbar is not keyed), and a late async write must not reach the next one.
@@ -3236,6 +3249,34 @@ export const SessionChatInterface = memo(
       settleSession,
       moveSessionToFocus,
     } = useSessionActions();
+    // Linked pull requests: the user unlinks through their own records (the reconciler
+    // alone publishes `pullRequests`). Rows open the primary PR's tab, others on GitHub.
+    const prOwnerMeta = workspaceSession ?? session;
+    const prLinkItems = useMemo(
+      () => resolveSessionPullRequestLinkList(prOwnerMeta, activeProjectRepository),
+      [prOwnerMeta, activeProjectRepository]
+    );
+    const writePrLink = useStableCallback(async (patch: Record<string, unknown>) => {
+      if (!prSessionId) throw new Error('Session is not ready');
+      await updateSessionMetadata(prSessionId, patch);
+    });
+    const unlinkPrFromUi = useStableCallback(async (url: string) => {
+      await unlinkSessionPullRequestFromUi(prOwnerMeta, url, writePrLink).catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : String(error))
+      );
+    });
+    const openLinkedPr = useStableCallback((item: SessionPullRequestLinkListItem) => {
+      if (item.kind === 'associated' && item.primary && prLinkHandler) prLinkHandler();
+      else void openExternalUrl(item.url);
+    });
+    const prLinks = useMemo<SessionPullRequestLinksProps>(
+      () => ({
+        items: prLinkItems,
+        onOpen: openLinkedPr,
+        onUnlink: unlinkPrFromUi,
+      }),
+      [prLinkItems, openLinkedPr, unlinkPrFromUi]
+    );
     const settleSessionWithConfirmation = useSettleSessionWithConfirmation(settleSession);
     const snoozeSessionWithConfirmation = useSnoozeSessionWithConfirmation(snoozeSession);
     const moveToFocusWithConfirmation = useMoveToFocusWithConfirmation(moveSessionToFocus);
@@ -6161,6 +6202,7 @@ export const SessionChatInterface = memo(
         prCiState: latestPrState?.s,
         prMergeState: latestPrState?.m,
         prStatus: effectivePrStatus,
+        canAutoDeliver,
       }).map((actionId) => {
         const disabledForHydration = shouldDisableSessionInfoBarGitHubActionForHydration(
           actionId,
@@ -6221,6 +6263,13 @@ export const SessionChatInterface = memo(
               onMerge: handleMergePullRequest,
               onSelectMethod: setPreferredPrMergeMethod,
             };
+          case 'auto-deliver':
+            return {
+              id: actionId,
+              label: t('sessions.autoDelivery.title', 'Auto delivery'),
+              onClick: () => setAutoDeliveryDialogOpen(true),
+              disabled: continuation.busy || continuation.settingsUnavailable,
+            };
           default: {
             const unsupportedActionId: never = actionId;
             throw new Error(`Unsupported Info Bar action: ${unsupportedActionId}`);
@@ -6228,6 +6277,9 @@ export const SessionChatInterface = memo(
         }
       });
     }, [
+      canAutoDeliver,
+      continuation.busy,
+      continuation.settingsUnavailable,
       canShowGitHubActions,
       hasHostedGitHub,
       handleCommitAndPush,
@@ -7328,7 +7380,16 @@ export const SessionChatInterface = memo(
                     'Quota recovery support could not be confirmed for this provider.'
                   ),
                 },
+                autoDeliver: {
+                  supported: autoDeliverSupported || continuation.value.autoDeliver,
+                  reason: t(
+                    'sessions.autoDelivery.encryptedUnavailable',
+                    'Encrypted workspaces do not observe pull requests yet.'
+                  ),
+                },
               }}
+              autoDeliverOptions={continuation.autoDeliverOptions}
+              onAutoDeliverOptionsChange={continuation.setAutoDeliver}
             />
           ) : undefined
         }
@@ -7504,6 +7565,17 @@ export const SessionChatInterface = memo(
       <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>
         <SessionLinkProvider enabled={!!onNavigateSession}>
           {plaintextCopyConfirmation}
+          {autoDeliveryDialogOpen ? (
+            <AutoDeliveryDialog
+              open
+              busy={continuation.busy}
+              onOpenChange={setAutoDeliveryDialogOpen}
+              onStart={(options) => {
+                continuation.setAutoDeliver(options);
+                setAutoDeliveryDialogOpen(false);
+              }}
+            />
+          ) : null}
           {toolbar?.container &&
             createPortal(
               <SessionConversationPage className={toolbar.className} hideMessageArea>
@@ -7657,6 +7729,22 @@ export const SessionChatInterface = memo(
                                   unsentFirstMessage ? undefined : (
                                     <>
                                       {pendingMessages.trailingContent}
+                                      {autoDeliveryStatus ? (
+                                        <ConversationColumn
+                                          {...stylex.props(styles.continuationNotesColumn)}
+                                        >
+                                          <SessionAutoDeliveryNote
+                                            status={autoDeliveryStatus}
+                                            busy={continuation.busy}
+                                            onTurnOff={
+                                              continuation.value?.autoDeliver
+                                                ? () => continuation.setAutoDeliver(false)
+                                                : undefined
+                                            }
+                                            onDismiss={() => continuation.setAutoDeliver(false)}
+                                          />
+                                        </ConversationColumn>
+                                      ) : null}
                                       {continuation.views.length > 0 ? (
                                         // The stream's trailing row is full-bleed, so the
                                         // note mounts its own conversation column like every
@@ -7846,6 +7934,7 @@ export const SessionChatInterface = memo(
                         onOpenPr={prLinkHandler}
                         prHistory={canShowGitHubActions ? pullRequestHistory : undefined}
                         onOpenHistoryPr={openHistoryPr}
+                        prLinks={canShowGitHubActions ? prLinks : undefined}
                         contextActions={infoBarContextActions}
                         onOpenAllChanges={onOpenAllChanges}
                         // Opener + every Session/Tab created here: the in-stream

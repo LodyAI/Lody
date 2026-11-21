@@ -6,8 +6,7 @@ import type { SessionHistory } from '@lody/shared';
 import {
   resolveSessionAcpRuntimeConfig,
   resolveSessionConversationConfig,
-  resolveSessionConversationSourceFence,
-} from '@lody/shared';
+  resolveSessionConversationSourceFence} from '@lody/shared';
 import {
   createLoroSessionData,
   setFieldTo,

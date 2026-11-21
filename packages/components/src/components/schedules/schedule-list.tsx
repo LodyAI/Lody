@@ -18,7 +18,6 @@ import {
   ListFilter,
   MessageSquare,
   MoreHorizontal,
-  PanelLeft,
   Pause,
   Play,
   Plus,
@@ -36,11 +35,16 @@ import { Menu } from '@lody/ui/menu';
 import { Popover } from '@lody/ui/popover';
 import { Skeleton } from '@lody/ui/skeleton';
 import { Tooltip } from '@lody/ui/tooltip';
-import { navigationSidebarVisibleAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
+import { mainPageAtWindowEdgeAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { withClassName } from '@/lib/stylex';
+<<<<<<< HEAD
+=======
+import { cn } from '@/lib/utils';
+import { SidebarHistoryControls } from '../sidebar-history-controls';
+>>>>>>> origin/main
 import {
   WINDOW_DRAG_EXEMPT_CLASS,
   useMacTrafficLightRowPadClass,
@@ -944,7 +948,8 @@ export function ScheduleListView({
 }) {
   const { t, i18n } = useTranslation();
   const isMobile = useIsMobile();
-  const isLeftSidebarHidden = !useAtomValue(navigationSidebarVisibleAtom);
+  // Hidden sidebar and no pinned Today in front: this page owns the window's left edge.
+  const isLeftSidebarHidden = useAtomValue(mainPageAtWindowEdgeAtom);
   const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const isElectronFullscreen = useElectronFullscreen();
   const windowDrag = useWindowDragRegionClass();
@@ -1135,6 +1140,7 @@ export function ScheduleListView({
             data-beside-traffic-lights={besideTrafficLights ? '' : undefined}
           >
             {showSidebarToggle ? (
+<<<<<<< HEAD
               <Button
                 type="button"
                 variant="ghost"
@@ -1147,6 +1153,15 @@ export function ScheduleListView({
               >
                 <PanelLeft {...stylex.props(styles.glyph)} />
               </Button>
+=======
+              <SidebarHistoryControls
+                onToggleSidebar={() => showNavigationSidebar()}
+                className={cn(
+                  stylex.props(styles.sidebarToggle).className,
+                  WINDOW_DRAG_EXEMPT_CLASS
+                )}
+              />
+>>>>>>> origin/main
             ) : null}
             <h1 {...stylex.props(styles.pageTitle)}>{t('schedules.title', 'Schedules')}</h1>
             <Input

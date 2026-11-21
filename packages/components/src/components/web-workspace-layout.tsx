@@ -57,6 +57,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
   const compact = useIsCompactDesktop();
   const todayEnabled = useAtomValue(todayFeatureEnabledAtom);
   const todayPinned = useAtomValue(todayPinnedAtom);
+  const todayColumnShown = !compact && todayEnabled && todayPinned;
   const division = useVerticalDivision();
   // Effective on-screen visibility: compact may auto-suppress the sidebar even
   // while the persisted preference says open — see atoms/layout-state.ts.
@@ -168,7 +169,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
           <DesktopSidebarContent pathname={pathname} fitDivision={fold !== null} />
         </div>
       )}
-      {!compact && todayEnabled && todayPinned ? (
+      {todayColumnShown ? (
         // Outside the pathname-keyed boundary: navigating the main area keeps Today mounted.
         <ErrorBoundary name="TodayColumn" variant="section">
           <Suspense fallback={null}>
@@ -189,7 +190,11 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
       >
         <WindowDragStrip />
         <ErrorBoundary name="AppContent" variant="section" resetKeys={[pathname]}>
-          <WorkspaceCard anchored={sidebarVisible && !compact}>{children}</WorkspaceCard>
+          {/* Beside a pinned Today card the main card anchors to it, as it does to the
+              sidebar: the Today card's own rim keeps 4px of ground between them. */}
+          <WorkspaceCard anchored={(sidebarVisible || todayColumnShown) && !compact}>
+            {children}
+          </WorkspaceCard>
         </ErrorBoundary>
       </FocusScope>
     </div>

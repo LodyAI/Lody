@@ -38,6 +38,7 @@ import {
   SquareArrowOutUpRight,
 } from 'lucide-react';
 import { CuidaSidebarExpandOutline } from '@lody/ui';
+import { SidebarHistoryControls } from '../sidebar-history-controls';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
@@ -115,7 +116,7 @@ import {
 } from '@/ui/window-drag-region';
 import {
   getZenAwarePanelToggleState,
-  navigationSidebarVisibleAtom,
+  mainPageAtWindowEdgeAtom,
   showNavigationSidebarAtom,
   zenLayoutModeAtom,
   zenRightPanelAtom,
@@ -1304,7 +1305,8 @@ const SessionDetail = ({
   const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const pendingSessionLink = useAtomValue(pendingSessionLinkAtom);
   const clearPendingSessionLink = useSetAtom(pendingSessionLinkAtom);
-  const isLeftSidebarHidden = !useAtomValue(navigationSidebarVisibleAtom);
+  // Hidden sidebar and no pinned Today in front: this page owns the window's left edge.
+  const isLeftSidebarHidden = useAtomValue(mainPageAtWindowEdgeAtom);
   const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const exportAllowed = useWorkspaceFeature('export');
   const previewAllowed = useWorkspaceFeature('remote-preview');
@@ -7164,18 +7166,9 @@ const SessionDetail = ({
     ? { main: 75, sidebar: 25 }
     : { main: 60, sidebar: 40 };
 
+  // The hidden sidebar's own header controls: Toggle, Back and Forward.
   const leftSidebarExpandButton = isLeftSidebarHidden ? (
-    <Button
-      type="button"
-      variant="ghost"
-      size="small"
-      icon
-      onClick={() => showNavigationSidebar()}
-      aria-label={t('sessions.leftSidebar.show', 'Show navigation sidebar')}
-      className={stylex.props(detailStyles.shrink).className}
-    >
-      <CuidaSidebarExpandOutline {...stylex.props(detailStyles.icon16)} aria-hidden="true" />
-    </Button>
+    <SidebarHistoryControls onToggleSidebar={() => showNavigationSidebar()} />
   ) : null;
 
   const desktopHeaderToolbar = <div ref={setDesktopToolbarContainer} />;

@@ -1008,7 +1008,12 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           isWaitingPermission={item.isWaitingPermission}
           isWorking={item.isWorking}
           hasUnreadMessages={item.hasUnreadMessages}
+<<<<<<< HEAD
           fadeClassName={stylex.props(updatedStyles.fade).className}
+=======
+          fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
+          rowGroup="row"
+>>>>>>> origin/main
           restIcon={
             showPr || showMergeablePill || isMobile || item.sharing?.visibility === 'private' ? (
               <span

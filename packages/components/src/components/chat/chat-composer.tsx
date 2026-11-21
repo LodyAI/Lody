@@ -532,6 +532,7 @@ const modalStyles = stylex.create({
     flexDirection: 'column',
     gap: space[3],
   },
+<<<<<<< HEAD
   textarea: {
     minHeight: '132px',
     borderWidth: 0,
@@ -539,28 +540,42 @@ const modalStyles = stylex.create({
     paddingBlock: 0,
     resize: 'none',
   },
+=======
+  // One row, like a create dialog's property bar (Linear): it never wraps.
+  // Running short, the project label truncates to its minimum first; past
+  // that (desktop windows go down to 400px) the row scrolls sideways, its
+  // scrollbar hidden. The block padding keeps the pills' lift and focus rings
+  // inside the scroll box.
+>>>>>>> origin/main
   pills: {
     display: 'flex',
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
     alignItems: 'center',
     columnGap: space[1.5],
-    rowGap: space[1.5],
     minWidth: 0,
     userSelect: 'none',
+    overflowX: 'auto',
+    overflowY: 'hidden',
+    scrollbarWidth: 'none',
+    '::-webkit-scrollbar': { display: 'none' },
+    paddingBlock: '3px',
+    marginBlock: '-3px',
+    paddingInline: '3px',
+    marginInline: '-3px',
   },
-  // The run-config group sizes to its content, so it follows the scope pills
-  // on their line and wraps to its own as one piece. It is not the footer's
-  // `composer-face` container: a pill row is never the narrow footer whose
-  // labels that container hides, and a long model name truncates instead.
+  // The run-config group follows the scope pills on their line at its own
+  // size; only a model name long enough to take over half the row truncates.
+  // It is not the footer's `composer-face` container, whose narrow form hides
+  // labels.
   face: {
     display: 'flex',
     flexWrap: 'nowrap',
     alignItems: 'center',
     columnGap: space[1.5],
     flexGrow: 0,
-    flexShrink: 1,
+    flexShrink: 0,
     minWidth: 0,
-    maxWidth: '100%',
+    maxWidth: '50%',
     overflow: 'hidden',
   },
   // Ruled off across the whole panel: the negative inline margin is the

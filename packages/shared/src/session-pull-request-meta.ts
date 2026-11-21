@@ -52,6 +52,50 @@ export function normalizeSessionPullRequestMeta(value: unknown): SessionPullRequ
   return { url, status };
 }
 
+<<<<<<< HEAD
+=======
+/**
+ * Auto delivery progress. `pr`: waiting for the requested pull request; `ci`:
+ * waiting for checks; `fix`/`conflict`/`merge`: the matching request was sent;
+ * `ready`: checks passed and merge is left to the user; `stalled`: Lody stopped
+ * and needs the user, with `reason`.
+ */
+export type SessionAutoDeliveryState =
+  | 'pr'
+  | 'ci'
+  | 'fix'
+  | 'conflict'
+  | 'merge'
+  | 'ready'
+  | 'merged'
+  | 'stalled';
+
+export type SessionAutoDeliveryStallReason =
+  | 'ci_failed'
+  | 'ci_limit'
+  | 'conflicts'
+  | 'conflict_limit'
+  | 'no_new_commit'
+  | 'merge_blocked'
+  | 'merge_behind'
+  | 'merge_failed'
+  | 'pr_closed'
+  | 'pr_draft'
+  | 'pr_not_created'
+  | 'multiple_prs'
+  | 'stopped'
+  | 'request_failed';
+
+export type SessionAutoDelivery = {
+  state: SessionAutoDeliveryState;
+  /** 1-based count of the current kind of request (`fix` or `conflict`). */
+  attempt?: number;
+  reason?: SessionAutoDeliveryStallReason;
+  prUrl?: string;
+  updatedAt: number;
+};
+
+>>>>>>> origin/main
 /** Rollup CI state of a PR's head commit: success/failure/pending/error/expected. */
 export type SessionPullRequestCiState = 's' | 'f' | 'p' | 'e' | 'x';
 
@@ -105,3 +149,24 @@ export type SessionPullRequestLifecycle = { s: PrStatus; u: number };
 export type SessionPullRequestLifecycleFields = {
   [field: `prLifecycle:${string}`]: SessionPullRequestLifecycle | undefined;
 };
+<<<<<<< HEAD
+=======
+
+/**
+ * Explicit link intent for one pull request, stored at
+ * `prLink:<case-folded canonical URL>`. `k`: linked / unlinked; `o`: who wrote it
+ * (the managed `gh` shim, the user, or the agent through a Lody tool); `t`: epoch
+ * milliseconds of the write. Membership/order still come only from `pullRequests`.
+ */
+export type SessionPullRequestLink = { k: 'l' | 'u'; o: 's' | 'u' | 'a'; t: number };
+/** Reconciler result for a linked URL it could not read: `u` = unreadable at `t` (epoch ms). */
+export type SessionPullRequestLinkCheck = { r: 'u'; t: number };
+export type SessionPullRequestLinkFields = {
+  [field: `prLink:${string}`]: SessionPullRequestLink | undefined;
+  [field: `prLinkCheck:${string}`]: SessionPullRequestLinkCheck | undefined;
+};
+
+/** Per-PR records stored as top-level Session metadata keys (lifecycle and links). */
+export type SessionPullRequestRecordFields = SessionPullRequestLifecycleFields &
+  SessionPullRequestLinkFields;
+>>>>>>> origin/main

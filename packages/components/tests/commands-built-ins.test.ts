@@ -43,6 +43,9 @@ describe('commands-built-ins', () => {
       expect(commands.getDefaultKeybindingsFor('session.toggleTerminal')).toEqual([]);
       expect(commands.getDefaultKeybindingsFor('workspace.openSettings')).toEqual(['Mod+,']);
       expect(commands.getDefaultKeybindingsFor('layout.toggleZenMode')).toEqual(['Mod+.']);
+      // Open Today belongs to the Today experiment: not a built-in, so it is not listed
+      // while the experiment is off (TodayCommandPlaceholder lists it while on).
+      expect(commands.get('today.open')).toBeUndefined();
       // Cyclers with no default binding stay rebindable from the settings page.
       expect(commands.getDefaultKeybindingsFor('session.cycleProvider')).toEqual([]);
       expect(commands.getDefaultKeybindingsFor('mention.toggleSessionProjectScope')).toEqual([]);

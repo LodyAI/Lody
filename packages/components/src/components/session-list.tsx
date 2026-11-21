@@ -626,6 +626,8 @@ export type SessionListRow = {
   isWaitingPermission: boolean;
   /** The latest turn ended in failure (`hasFailedLatestTurn`), child Tabs rolled in. */
   hasFailedTurn?: boolean;
+  /** Auto delivery stopped for this conversation's PR and needs the person. */
+  deliveryStalled?: boolean;
   isPinned?: boolean;
   isWorktree?: boolean;
   externalHistoryProvider?: LocalProjectHistoryProvider | null;

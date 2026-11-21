@@ -234,21 +234,36 @@ function SettingsInnerContent({
  *     outer drill is already animating; skip the inner one.
  *   - `hasMounted === true` and `consumeMobileBackNavigation()`
  *     returns true → this mount is the destination of a back-nav
- *     (the back chip / edge swipe set the flag), so skip the
- *     forward-direction slide-in.
+ *     (the back chip / edge swipe set the flag): play the parallax
+ *     reveal under the sliding-off page instead of a forward push.
  *   - Otherwise → forward navigation, run the drill.
  */
 function SettingsInnerBody({ children, hasMounted }: { children: ReactNode; hasMounted: boolean }) {
-  const [skipDrill] = useState(() => {
-    if (!hasMounted) return true;
-    return consumeMobileBackNavigation();
+  const [entrance] = useState<'none' | 'reveal' | 'push'>(() => {
+    if (!hasMounted) return 'none';
+    return consumeMobileBackNavigation() ? 'reveal' : 'push';
   });
 
   const bodyProps = stylex.props(styles.body);
   return (
     <div
+<<<<<<< HEAD
       {...bodyProps}
       className={clsx(bodyProps.className, skipDrill ? undefined : 'mobile-drill-in')}
+=======
+      className={cn(
+        'relative flex h-full min-h-0 flex-col',
+        /* Bottom safe-area padding so the last setting row clears the
+           home-indicator (iOS) / navigation bar (Android) on native.
+           Konsta's `pb-safe-*` resolves to `--k-safe-area-bottom + N`,
+           giving us a small breathing buffer beyond the system inset.
+           Pages with their own scroll regions (agent-config) opt out
+           by overriding inside their own component. */
+        'pb-safe-4',
+        entrance === 'push' && 'mobile-drill-in',
+        entrance === 'reveal' && 'mobile-drill-reveal'
+      )}
+>>>>>>> origin/main
     >
       {children}
     </div>

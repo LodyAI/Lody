@@ -537,7 +537,7 @@ export function SessionSendProgressRing({ progress }: { progress?: number }) {
 /**
  * ③ The 14px status mark, rendered at the row's TRAILING edge inside
  * {@link SidebarRowEndSlot}. Single-mark priority:
- * `sendFailed > waitingPermission > isWorking > sending > hasUnread`. A failed
+ * `sendFailed > waitingPermission > needsAttention > isWorking > sending > hasUnread`. A failed
  * local send outranks everything because nothing else will retry it; an upload
  * in progress yields to the agent's own activity. Returns `null` when the
  * session is idle and read, which is what lets the end slot fall back to its
@@ -551,6 +551,7 @@ export function SessionSendProgressRing({ progress }: { progress?: number }) {
  */
 export function SessionRowStatusIndicator({
   isWaitingPermission,
+  needsAttention,
   isWorking,
   hasUnreadMessages,
   sendState,
@@ -558,6 +559,8 @@ export function SessionRowStatusIndicator({
   sendLabel,
 }: {
   isWaitingPermission?: boolean;
+  /** Something Lody ran for this session stopped and needs the person (Auto delivery). */
+  needsAttention?: boolean;
   isWorking?: boolean;
   hasUnreadMessages?: boolean;
   /** Renderer-local state of this session's held (in-memory) sends. */
@@ -574,7 +577,13 @@ export function SessionRowStatusIndicator({
     icon = <CircleAlert {...stylex.props(rowParts.destructiveGlyph)} strokeWidth={2.25} />;
     label = sendLabel;
   } else if (isWaitingPermission === true) {
+<<<<<<< HEAD
     icon = <Hand {...stylex.props(rowParts.primaryGlyph)} />;
+=======
+    icon = <Hand className="h-3 w-3 text-primary" />;
+  } else if (needsAttention === true && isWorking !== true) {
+    icon = <CircleAlert className="h-3 w-3 text-status-warning" strokeWidth={2.25} />;
+>>>>>>> origin/main
   } else if (isWorking !== true && sendState === 'sending') {
     icon = <SessionSendProgressRing progress={sendProgress} />;
     label = sendLabel;
@@ -608,11 +617,14 @@ export function SessionRowStatusIndicator({
 /** True when {@link SessionRowStatusIndicator} would draw a mark for this row. */
 function hasSessionRowStatus({
   isWaitingPermission,
+  needsAttention,
   isWorking,
   hasUnreadMessages,
   sendState,
-}: SessionRowStatusFlags): boolean {
-  return Boolean(isWaitingPermission || isWorking || hasUnreadMessages || sendState);
+}: SessionRowStatusFlags & { needsAttention?: boolean }): boolean {
+  return Boolean(
+    isWaitingPermission || needsAttention || isWorking || hasUnreadMessages || sendState
+  );
 }
 
 /**
@@ -1080,6 +1092,19 @@ export function SidebarRowActionButton({
   );
 }
 
+// Revealed end-slot fills, one per row group scope. Each set names only its
+// own scope so an unrelated ancestor `group` can never reveal the fill.
+const PLAIN_ROW_GROUP_FILL = cn(
+  'group-hover:bg-sidebar-hover group-data-[menu-open]:bg-sidebar-hover',
+  '[.group:hover[aria-current=page]_&]:bg-sidebar-selection',
+  '[.group[data-menu-open][aria-current=page]_&]:bg-sidebar-selection'
+);
+const NAMED_ROW_GROUP_FILL = cn(
+  'group-hover/row:bg-sidebar-hover group-data-[menu-open]/row:bg-sidebar-hover',
+  '[.group\\/row:hover[aria-current=page]_&]:bg-sidebar-selection',
+  '[.group\\/row[data-menu-open][aria-current=page]_&]:bg-sidebar-selection'
+);
+
 /**
  * ③ The final slot at the row's right edge, and the row's ONE status channel.
  *
@@ -1101,13 +1126,19 @@ export function SidebarRowEndSlot({
   sessionId,
   selected = false,
   isWaitingPermission,
+  needsAttention,
   isWorking,
   hasUnreadMessages,
   restIcon,
   menu,
   archive,
   /** Fade the rest icon while hovering (match the row's group, e.g. 'group-hover/row:opacity-0'). */
+<<<<<<< HEAD
   fadeClassName = stylex.props(rowParts.fade).className,
+=======
+  fadeClassName = 'group-hover:opacity-0 group-data-[menu-open]:opacity-0',
+  rowGroup = 'group',
+>>>>>>> origin/main
 }: {
   /**
    * Reads this session's local send status here, in the leaf, so upload
@@ -1117,6 +1148,7 @@ export function SidebarRowEndSlot({
   /** Whether the hosting row is currently selected, used to tune pill contrast. */
   selected?: boolean;
   isWaitingPermission?: boolean;
+  needsAttention?: boolean;
   isWorking?: boolean;
   hasUnreadMessages?: boolean;
   restIcon?: ReactNode;
@@ -1124,6 +1156,13 @@ export function SidebarRowEndSlot({
   menu?: ReactNode;
   archive?: ReactNode;
   fadeClassName?: string;
+  /**
+   * The row's own Tailwind group: plain `group`, or the named `group/row` used
+   * where the row sits inside an outer plain `group` (a section list). The
+   * revealed fill must key off the row only — matching any ancestor `group`
+   * would paint every row's slot whenever the pointer is over the list.
+   */
+  rowGroup?: 'group' | 'row';
 }) {
   // The end slot outlives the status mark, so the hand-over hold lives here.
   const drawWorking = useWorkingHandOver(isWorking === true, hasUnreadMessages === true);
@@ -1134,12 +1173,14 @@ export function SidebarRowEndSlot({
     <SidebarShortcutPill index={shortcut.index} platform={shortcut.platform} selected={selected} />
   ) : hasSessionRowStatus({
       isWaitingPermission,
+      needsAttention,
       isWorking: drawWorking,
       hasUnreadMessages,
       sendState: sendStatus?.state,
     }) ? (
     <SessionRowStatusIndicator
       isWaitingPermission={isWaitingPermission}
+      needsAttention={needsAttention}
       isWorking={drawWorking}
       hasUnreadMessages={hasUnreadMessages}
       sendState={sendStatus?.state}
@@ -1168,7 +1209,19 @@ export function SidebarRowEndSlot({
     // one ancestor selector to win over the plain hover fill.
     <div
       data-session-row-end-slot=""
+<<<<<<< HEAD
       {...stylex.props(rowParts.endSlot, reserve ? rowParts.endReserve : rowParts.emptySlot)}
+=======
+      className={cn(
+        'relative flex h-5 shrink-0 items-center justify-end pointer-events-none',
+        reserve ? (actionColumns > 1 ? 'min-w-10' : 'min-w-5') : 'w-0',
+        showActions &&
+          cn(
+            'transition-colors duration-100',
+            rowGroup === 'row' ? NAMED_ROW_GROUP_FILL : PLAIN_ROW_GROUP_FILL
+          )
+      )}
+>>>>>>> origin/main
     >
       {hasRest ? (
         <span

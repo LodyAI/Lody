@@ -21,6 +21,7 @@ import { TodayMention } from './today-session-mention';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
 import type { TodayPageStoreCache } from '../../providers/today-page-store-cache';
 import { formatTodayHeading } from './today-stream';
+import { todayOutline } from './outline.stylex';
 
 const styles = stylex.create({
   section: { display: 'flex', flexDirection: 'column', gap: space[1], paddingBlock: space[3] },
@@ -42,13 +43,17 @@ const styles = stylex.create({
     gap: space[1],
     minHeight: 28,
     borderRadius: radius.mini,
-    // Hang the fold toggle in the margin so the bullet dot lines up with the
-    // date heading: toggle 16 + gap 4 + the dot's inset in its 16px box (5).
-    marginInlineStart: -25,
+    // Hang the fold toggle in the margin (`todayOutline.foldOverhang`).
+    marginInlineStart: `calc(-1 * ${todayOutline.foldOverhang})`,
   },
+  // 12px wide and flush against the bullet box (the negative end margin takes
+  // back the row gap), so its centre is 14px left of the dot's. It shows only
+  // while its line is hovered, focused from the keyboard or being edited; a
+  // folded node keeps its ringed dot as the resting cue.
   fold: {
-    width: 16,
+    width: 12,
     height: 28,
+    marginInlineEnd: `calc(-1 * ${space[1]})`,
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -58,7 +63,15 @@ const styles = stylex.create({
     padding: 0,
     cursor: 'pointer',
     flexShrink: 0,
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(':hover')]: 1,
+      ':focus-visible': 1,
+    },
+    transitionProperty: 'opacity',
+    transitionDuration: '100ms',
   },
+  foldShown: { opacity: 1 },
   foldHidden: { visibility: 'hidden' },
   foldOpen: { transform: 'rotate(90deg)' },
   bullet: {
@@ -208,6 +221,7 @@ function TodayRow(props: {
   return (
     <div
       {...stylex.props(
+        stylex.defaultMarker(),
         styles.row,
         selected && styles.blockSelected,
         selected && props.joinsPrevious && styles.joinTop,
@@ -223,6 +237,7 @@ function TodayRow(props: {
         type="button"
         {...stylex.props(
           styles.fold,
+          active && styles.foldShown,
           !node?.hasChildren && styles.foldHidden,
           node?.hasChildren && !node.collapsed && styles.foldOpen
         )}

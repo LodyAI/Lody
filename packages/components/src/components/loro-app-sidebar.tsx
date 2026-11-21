@@ -36,6 +36,7 @@ import { useLocation, useRouter } from '@tanstack/react-router';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { todayFeatureEnabledAtom } from '@/atoms/settings';
 import { useOpenToday } from '@/components/today/use-open-today';
+import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import {
   findFreshSessionPresenceState,
   machineSupportsLocalProjectRemovalProtocol,
@@ -2063,6 +2064,22 @@ export function LoroAppSidebar({
 
   const todayEnabled = useAtomValue(todayFeatureEnabledAtom);
   const openToday = useOpenToday();
+  // Open Today from anywhere; rebindable in Settings > Keyboard shortcuts.
+  // Registered only while the experiment is on, over `TodayCommandPlaceholder`.
+  useCommand(
+    {
+      id: 'today.open',
+      title: t('commands.today.open', 'Open Today'),
+      titleKey: 'commands.today.open',
+      category: 'Navigation',
+      keybindings: getCommandKeybindings('today.open'),
+      when: () => Boolean(workspaceSlug),
+      run: () => {
+        if (workspaceSlug) openToday({ workspaceSlug, sameWorkspace: true });
+      },
+    },
+    todayEnabled
+  );
   const activeNav = useMemo(() => {
     if (isArchiveRoute(location.pathname, workspaceSlug)) return 'archive';
     if (workspaceSlug && location.pathname.startsWith(`/${workspaceSlug}/schedules`))
@@ -2894,6 +2911,7 @@ export function LoroAppSidebar({
         isOffline: task.isOffline,
         isWaitingPermission: task.isWaitingPermission,
         hasFailedTurn: task.hasFailedTurn,
+        deliveryStalled: task.deliveryStalled,
         externalHistoryProvider: task.externalHistoryProvider ?? null,
         owner: task.owner ?? null,
         openedBySessionId: task.openedBySessionId ?? null,
@@ -2922,6 +2940,7 @@ export function LoroAppSidebar({
         isOffline: task.isOffline,
         isWaitingPermission: task.isWaitingPermission,
         hasFailedTurn: task.hasFailedTurn,
+        deliveryStalled: task.deliveryStalled,
         prStatus: task.prStatus,
         prCiState: task.prCiState,
         prReadiness: task.prReadiness,
@@ -2961,6 +2980,7 @@ export function LoroAppSidebar({
         isOffline: task.isOffline,
         isWaitingPermission: task.isWaitingPermission,
         hasFailedTurn: task.hasFailedTurn,
+        deliveryStalled: task.deliveryStalled,
         prStatus: task.prStatus,
         prCiState: task.prCiState,
         prReadiness: task.prReadiness,
@@ -3015,6 +3035,7 @@ export function LoroAppSidebar({
             isOffline,
             isWaitingPermission: activity.isWaitingPermission,
             hasFailedTurn: activity.hasFailedTurn,
+            deliveryStalled: session.autoDelivery?.state === 'stalled',
             prStatus: prInfo.status,
             prCiState: prInfo.ciState,
             prReadiness: prInfo.readiness,

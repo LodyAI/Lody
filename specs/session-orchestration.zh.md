@@ -35,7 +35,7 @@ Spec。
 
 编排 Agent 会向仍在工作的会话补充纠正或新信息。只要目标的 agent 接受 steer，无论在本机还是另一台
 Machine 上运行，`lody_session_chat` 和
-`lody_session_chat_many` 就把输入 steer 进当前 turn，不受用户排队或引导偏好
+`lody_session_chat`（单条或批量模式）就把输入 steer 进当前 turn，不受用户排队或引导偏好
 影响，也不管当前 turn 由谁发起。目标 agent 无法确认 steer 时，输入排队成为它的
 下一个普通 turn。被 steer 的输入有自己的回复，作为它自己的 Operation 结果。
 
@@ -92,7 +92,7 @@ steer 请求再独立等待五秒响应，与 UI 一致。建连超时回退后�
   `SESSION_ID_AMBIGUOUS` 失败，并列出最多八个带 ID 和标题的候选。
 - **排队输入。** 请求方可以列出、撤回或替换自己尚未开始的排队输入。已开始的输入
   返回 `ALREADY_STARTED`，这条路径从不取消它。
-- **Machine 资源。** `lody_machine_list` 报告 agent 额度及恢复时间和磁盘用量。Lody
+- **Machine 资源。** `lody_catalog` 的 `machines` 操作报告 agent 额度及恢复时间和磁盘用量。Lody
   不管理也不报告 agent 自己持有的锁。
 
 这些新增能力通过设计避免错误，而不是增加关卡。不确定的观测降级为 `unknown` 或提示
@@ -104,7 +104,7 @@ steer 请求再独立等待五秒响应，与 UI 一致。建连超时回退后�
 
 ## 会话创建配置
 
-编排 Agent 可以通过 `lody_session_create` 和 `lody_session_create_many`
+编排 Agent 可以通过 `lody_session_create`（单条或批量模式）
 选择目标 Agent 公布支持的配置，无需创建 Agent Role。可选的 `modeId`
 使用 ACP mode id；`configOptionValues` 使用真实 option id，值为字符串或布尔值。
 所有公布的 option 均可选择，包括没有类别的权限项。发现接口返回 mode 和 option

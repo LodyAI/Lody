@@ -21,7 +21,7 @@ import { installFocusModality } from '@lody/ui/focus-modality';
 import { I18nextProvider } from 'react-i18next';
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
-import { resources, defaultNS } from '../src/i18n';
+import { resources, defaultNS, ensureLanguageResources } from '../src/i18n';
 
 const styles = stylex.create({
   canvas: {
@@ -158,7 +158,21 @@ const preview: Preview = {
       const locale = context.globals.locale || 'en';
 
       useEffect(() => {
-        void i18next.changeLanguage(locale);
+        /* zh_CN is lazy-loaded; switching before its bundle arrives falls
+           back to English (see `setAppLanguage`). */
+        let cancelled = false;
+        ensureLanguageResources(locale).then(
+          () => {
+            if (!cancelled) void i18next.changeLanguage(locale);
+          },
+          (error: unknown) => {
+            /* Surface the failed bundle instead of silently staying in English. */
+            console.error(`Storybook could not load the ${locale} locale bundle`, error);
+          }
+        );
+        return () => {
+          cancelled = true;
+        };
       }, [locale]);
 
       return (

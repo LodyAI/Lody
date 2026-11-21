@@ -45,8 +45,7 @@ import {
   type SessionId,
   type SessionMeta,
   type SessionToCreate,
-  type WorkspaceId,
-} from '@lody/shared';
+  type WorkspaceId} from '@lody/shared';
 import {
   CLOUD_PLATFORM_CAPABILITIES,
   createStaticStore,

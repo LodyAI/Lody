@@ -31,7 +31,15 @@ before touching gestures.
   `MOBILE_TURN_ACTION_LEADING_INSET_PX` (>= `EDGE_ZONE_PX`, pinned by
   `tests/assistant-turn-action-inset.test.ts`) with a duration label nothing may
   precede, whose width survives an unknown duration.
+<<<<<<< HEAD
 - Full-screen right drawers clear the left edge in their direction styles.
+=======
+- Full-screen right drawers need `border-l-0!`; plain `border-0` loses to Vaul.
+- Every back affordance that leaves a drill page (header chip, edge swipe) goes
+  through `useMobileDrillExit`, so the page slides off over its destination;
+  calling the route `onBack` directly unmounts it and the destination pops in.
+  A page reachable by that Back calls `useMobileBackRevealClass` on mount.
+>>>>>>> origin/main
 
 ## Home and chat lists
 

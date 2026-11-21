@@ -152,6 +152,10 @@ and, while any action is revealed, paints itself with the row's own fill —
 `--sidebar-hover`, or `--sidebar-selection` under `aria-current`. Every end-slot
 button, now or added later, shares that opaque layer; nothing beneath it can show
 through, and the ⋯'s pressed tint shades the fill as an inset shadow.
+The fill keys off the row's own Tailwind group only. Rows nested in an outer plain
+`group` (the section lists) use the named `group/row` and pass `rowGroup="row"`;
+matching a plain ancestor `group` would paint every row's slot whenever the pointer
+is anywhere over the list.
 
 The mobile chat rows still keep status on their leading node; their geometry (48px
 indent, a selection checkbox in the same slot, a chevron that has to sit outside the row

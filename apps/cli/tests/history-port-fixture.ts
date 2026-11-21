@@ -6,6 +6,10 @@ import {
   pickDirectoryScalars,
   pickDirectoryInputConfig,
 } from '../../../packages/shared/src/session-data/directory';
+<<<<<<< HEAD
+=======
+;
+>>>>>>> origin/main
 import type { LoroDoc } from 'loro-crdt';
 import { applyHistoryAction } from '../../../packages/shared/src/session-data/history-actions';
 import type { SessionData, SessionEntry, HistoryAction } from '@lody/shared/session-data';

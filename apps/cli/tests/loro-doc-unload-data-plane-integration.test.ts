@@ -51,8 +51,7 @@ import {
   type SessionDoc,
   type SessionHistoryInput,
   type SessionId,
-  type WorkspaceId,
-} from '@lody/shared';
+  type WorkspaceId} from '@lody/shared';
 
 import {
   applyLocalPlatformEnv,

@@ -5,7 +5,7 @@ import { control, space, text } from '@lody/ui/tokens/scales.stylex';
 import { Dialog } from '@/ui/dialog';
 
 /** The panel width of "Convert to task": a create form, wider than a question. */
-export const TODAY_CONVERT_DIALOG_WIDTH = '44rem';
+export const TODAY_CONVERT_DIALOG_WIDTH = '48rem';
 
 const styles = stylex.create({
   // One control tall, so the crumbs centre on the panel's close cross, which

@@ -7,7 +7,13 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroMap } from 'loro-crdt';
 import { createLoroSessionData } from '@lody/shared/session-data';
+<<<<<<< HEAD
 import { resolveSessionAcpRuntimeConfig, resolveSessionConversationConfig } from '@lody/shared';
+=======
+import {
+  resolveSessionAcpRuntimeConfig,
+  resolveSessionConversationConfig} from '@lody/shared';
+>>>>>>> origin/main
 import {
   useConversationVersion,
   useConversationTail,

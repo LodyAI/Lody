@@ -9,6 +9,7 @@ export type ShortcutCommandId =
   | 'layout.toggleZenMode'
   | 'workspace.openSettings'
   | 'session.new'
+  | 'today.open'
   | 'session.archiveCurrent'
   | 'sidebar.toggle'
   | 'session.toggleCurrentPinned'
@@ -67,6 +68,11 @@ export const COMMAND_SHORTCUTS: Record<ShortcutCommandId, CommandKeybindings> = 
   // keyboard-shortcuts settings page (instead of an invisible native-menu accelerator).
   'workspace.openSettings': ['Mod+,'],
   'session.new': [electron('Mod+n'), web('Mod+Alt+n')],
+  // Open Today (experimental; specs/today-outline.md). D for Daily, as Roam and Tana
+  // bind their daily page. Free in browsers (only "Bookmark all tabs", which yields to
+  // preventDefault), unlike ⌘D (bookmark; duplicate-line in editors) or ⌘⌥D (macOS
+  // Dock toggle; AltGr+D on Windows layouts).
+  'today.open': ['Mod+Shift+d'],
   'session.archiveCurrent': ['Mod+Alt+a'],
   'sidebar.toggle': ['Mod+b'],
   'session.toggleCurrentPinned': ['Mod+Alt+p'],

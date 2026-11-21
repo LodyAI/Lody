@@ -37,6 +37,7 @@ import {
   type SessionSyncIndicatorVariant,
 } from './session-syncing-indicator';
 import { SessionMachineInfo } from './session-machine-info';
+<<<<<<< HEAD
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
   themeDuration,
@@ -45,6 +46,9 @@ import {
   themeRadius,
   themeSpace,
 } from '../../style/theme-scale.stylex';
+=======
+import type { SessionPullRequestLinksProps } from './session-pr-links';
+>>>>>>> origin/main
 
 export type InfoBarItemKey = 'status' | 'goal' | 'schedule' | 'scheduleSource' | 'context';
 
@@ -86,6 +90,8 @@ export type SessionInfoBarProps = {
    *  PR marker into a history list. */
   prHistory?: readonly SessionPullRequestView[];
   onOpenHistoryPr?: (view: SessionPullRequestView) => void;
+  /** Linked pull requests; the PR marker opens this list when set. */
+  prLinks?: SessionPullRequestLinksProps;
   /** Agent-driven PR/worktree actions shown inside the context stage. */
   contextActions?: readonly ContextChipAction[];
   /** Open the complete working-tree diff from the context diffstat. */
@@ -293,6 +299,7 @@ export function SessionInfoBar({
   onOpenPr,
   prHistory,
   onOpenHistoryPr,
+  prLinks,
   contextActions,
   onOpenAllChanges,
   relations,
@@ -458,6 +465,7 @@ export function SessionInfoBar({
             onOpenPr={onOpenPr}
             prHistory={prHistory}
             onOpenHistoryPr={onOpenHistoryPr}
+            prLinks={prLinks}
             actions={contextActions}
             onOpenAllChanges={onOpenAllChanges}
             diffStat={diffStat}

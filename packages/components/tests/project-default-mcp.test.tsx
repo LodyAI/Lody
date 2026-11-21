@@ -22,8 +22,7 @@ import {
   type McpServerId,
   type ProjectRef,
   type WorkspaceId,
-  type WorkspaceMcpServerMeta,
-} from '@lody/shared';
+  type WorkspaceMcpServerMeta} from '@lody/shared';
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import { ProjectDefaultMcpTab } from '../src/components/settings/project-default-mcp-tab';
 import { putProjectMcpDefault } from '../src/lib/workspace-catalog-write';

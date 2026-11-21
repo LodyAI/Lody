@@ -51,6 +51,32 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
     ).toEqual(['create-pr', 'create-draft-pr']);
   });
 
+  it('offers Auto delivery last, only where there is something to deliver and the agent is idle', () => {
+    const enabled = { ...BASE_INPUT, canAutoDeliver: true };
+    expect(resolveSessionInfoBarGitHubActionIds({ ...enabled, hasChanges: true })).toEqual([
+      'create-pr',
+      'create-draft-pr',
+      'auto-deliver',
+    ]);
+    expect(
+      resolveSessionInfoBarGitHubActionIds({
+        ...enabled,
+        hasExistingPr: true,
+        prStatus: 'open',
+        prCiState: 'f',
+        prMergeState: 'c',
+      })
+    ).toEqual(['fix-ci-errors', 'merge', 'auto-deliver']);
+    for (const prStatus of ['draft', 'merged', 'closed'] as const)
+      expect(
+        resolveSessionInfoBarGitHubActionIds({ ...enabled, hasExistingPr: true, prStatus })
+      ).not.toContain('auto-deliver');
+    expect(resolveSessionInfoBarGitHubActionIds(enabled)).toEqual([]);
+    expect(
+      resolveSessionInfoBarGitHubActionIds({ ...enabled, hasChanges: true, isAgentBusy: true })
+    ).toEqual([]);
+  });
+
   it('does not offer Create PR before the workspace has any changes', () => {
     expect(resolveSessionInfoBarGitHubActionIds(BASE_INPUT)).toEqual([]);
   });

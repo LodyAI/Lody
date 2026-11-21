@@ -922,6 +922,45 @@ describe('Today block selection on the surface', () => {
     ctx.surface.remove();
   });
 
+  it('a conversation dropped in the gutter beside the readable column lands in the day at that height', async () => {
+    const ctx = await setup();
+    const rect = (left: number, top: number, right: number, bottom: number) =>
+      ({
+        left,
+        top,
+        right,
+        bottom,
+        width: right - left,
+        height: bottom - top,
+        x: left,
+        y: top,
+      }) as DOMRect;
+    const day = document.createElement('section');
+    day.dataset.todayDate = '2026-11-20';
+    day.getBoundingClientRect = () => rect(440, 0, 1160, 100);
+    ctx.ids.forEach((id, index) => {
+      const row = document.createElement('div');
+      row.dataset.todayNode = id;
+      row.getBoundingClientRect = () => rect(440, index * 28, 1160, index * 28 + 28);
+      day.append(row);
+    });
+    ctx.surface.append(day);
+    ctx.controller.registerDay('2026-11-20' as never, ctx.store);
+    // Nothing of the day is under the pointer: it is in the gutter, left of the column.
+    const elementsFromPoint = document.elementsFromPoint;
+    document.elementsFromPoint = () => [ctx.surface];
+    try {
+      ctx.controller.dropExternal('s1', 100, 50);
+    } finally {
+      document.elementsFromPoint = elementsFromPoint;
+    }
+    expect(
+      ctx.store.getSnapshot().visible.map((node) => node.mentions[0]?.id ?? node.text)
+    ).toEqual(['a', 'b', 's1']);
+    ctx.controller.dispose();
+    ctx.surface.remove();
+  });
+
   it('a page pinned and released before its acquire lands is not left held', async () => {
     const ctx = await setup();
     ctx.controller.selectBlocks(ctx.store, [ctx.ids[0]!]);
@@ -932,5 +971,60 @@ describe('Today block selection on the surface', () => {
     await ctx.cache.releaseIdle();
     expect(ctx.unloaded).toEqual([ctx.docId]);
     ctx.surface.remove();
+  });
+});
+
+describe('Open Today command', () => {
+  it('is listed only while the Today experiment is on, and never masks the mounted command', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const { createStore, Provider } = await import('jotai');
+    const { experimentalFeaturesEnabledAtom, todayExperimentEnabledAtom, todayFeatureEnabledAtom } =
+      await import('../src/atoms/settings');
+    const { TodayCommandPlaceholder } = await import('../src/components/today/today-command');
+    const { commands, getCommandKeybindings, useCommand } = await import('../src/lib/commands');
+    const { useAtomValue } = await import('jotai');
+    let opened = 0;
+    // Stands in for the sidebar: the real command, mounted after the placeholder.
+    function RealTodayCommand() {
+      const enabled = useAtomValue(todayFeatureEnabledAtom);
+      useCommand(
+        {
+          id: 'today.open',
+          title: 'Open Today',
+          category: 'Navigation',
+          keybindings: getCommandKeybindings('today.open'),
+          run: () => {
+            opened += 1;
+          },
+        },
+        enabled
+      );
+      return null;
+    }
+    const store = createStore();
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(
+        createElement(
+          Provider,
+          { store },
+          createElement(TodayCommandPlaceholder),
+          createElement(RealTodayCommand)
+        )
+      )
+    );
+    expect(commands.list().some((command) => command.id === 'today.open')).toBe(false);
+    await act(async () => {
+      store.set(experimentalFeaturesEnabledAtom, true);
+      store.set(todayExperimentEnabledAtom, true);
+    });
+    expect(commands.get('today.open')?.title).toBe('Open Today');
+    expect(commands.getDefaultKeybindingsFor('today.open')).toEqual(['Mod+Shift+d']);
+    expect(commands.execute('today.open')).toBe(true);
+    expect(opened).toBe(1);
+    await act(async () => store.set(todayExperimentEnabledAtom, false));
+    expect(commands.list().some((command) => command.id === 'today.open')).toBe(false);
+    act(() => root.unmount());
   });
 });

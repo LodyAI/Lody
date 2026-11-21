@@ -1,5 +1,7 @@
 import {
   parseGitHubPullRequestUrl,
+  parsePullRequestUrl,
+  readSessionPullRequestLinks,
   resolveSessionPullRequests,
   type SessionPullRequestSource,
   resolveProjectGitHubRepo,
@@ -27,6 +29,12 @@ export type PrPollStatusTarget = {
   repoFullName: string;
   prNumber: number;
   status: PrStatus;
+  /**
+   * An explicitly linked PR not yet in `pullRequests`: queried by number so a
+   * valid provider result can be associated. `unreadable` once a check failed
+   * for this link generation (retried at the slower discovery cadence).
+   */
+  pendingLink?: 'checking' | 'unreadable';
 };
 
 /**
@@ -165,6 +173,16 @@ export function computePrPollMetaSignature(
   return [
     meta.machineId ?? '',
     meta.parentSessionId ?? '',
+    // Raw membership: an unlinked URL still in the list needs a local removal.
+    (meta.pullRequests ?? []).map((pr) => pr.url).join('\u0001'),
+    JSON.stringify(
+      readSessionPullRequestLinks(meta).map((link) => [
+        link.key,
+        link.state,
+        link.at,
+        link.unreadableAt,
+      ])
+    ),
     meta.isArchived ? '1' : '0',
     meta.lastMessageAt ?? '',
     resolveDiscoveryBranch(meta) ?? '',
@@ -331,6 +349,21 @@ export function collectStatusTargets(
             ),
           }
         : {}),
+    });
+  }
+  const associatedKeys = new Set(
+    resolved.map((pr) => parsePullRequestUrl(pr.url)?.key ?? pr.url.toLowerCase())
+  );
+  for (const link of readSessionPullRequestLinks(ownerMeta)) {
+    const parts = link.supported ? parsePullRequestUrl(link.url) : null;
+    if (link.state !== 'linked' || !parts || associatedKeys.has(parts.key)) continue;
+    associatedKeys.add(parts.key);
+    targets.push({
+      url: parts.canonicalUrl,
+      repoFullName: parts.repoFullName,
+      prNumber: parts.number,
+      status: 'open',
+      pendingLink: link.unreadableAt === null ? 'checking' : 'unreadable',
     });
   }
   return targets;

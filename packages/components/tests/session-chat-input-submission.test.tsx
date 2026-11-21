@@ -36,8 +36,7 @@ import type {
   McpServerId,
   SessionMeta,
   SessionInputBlock,
-  WorkspaceMcpServerMeta,
-} from '@lody/shared';
+  WorkspaceMcpServerMeta} from '@lody/shared';
 
 const scheduleMachine = vi.hoisted(() => ({ value: null as MachineMeta | null }));
 vi.mock('../src/hooks/use-resolved-machine-meta', () => ({

@@ -4,8 +4,11 @@ import './session-monaco-text-viewer.css';
 
 import { useEffect, useMemo, useRef } from 'react';
 import { useAtomValue } from 'jotai';
+<<<<<<< HEAD
 import * as stylex from '@stylexjs/stylex';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
+=======
+>>>>>>> origin/main
 import { extendedCodeLanguagesEnabledAtom, fileViewerWordWrapAtom } from '@/atoms/settings';
 import { configureSessionMonacoWorkers } from '@/lib/session-monaco-workers';
 import { ensureSessionMonacoLanguages } from '@/lib/session-monaco-languages';

@@ -4,13 +4,16 @@ import {
   buildAgentMessageAuthor,
   parseSessionNotification,
   HistoryWriteError,
-  targetLocalHistoryTargets,
-} from '@lody/shared';
+  targetLocalHistoryTargets} from '@lody/shared';
 import { createSessionAgentWrites } from '../src/lib/loro/session-agent-writes';
 import { describe, expect, it, vi } from 'vitest';
 import { Loro, isContainer, LoroList, LoroMap } from 'loro-crdt';
 import type { SessionHistory } from '@lody/shared';
 import type { SessionId } from '@lody/shared/ids';
+<<<<<<< HEAD
+=======
+;
+>>>>>>> origin/main
 import {
   createLoroSessionData as createStoredSession,
   pageVisibleTranscript,

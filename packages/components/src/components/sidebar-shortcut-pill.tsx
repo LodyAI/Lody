@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { atom, useAtomValue } from 'jotai';
-import { Command } from 'lucide-react';
+import { ArrowBigUp, ChevronUp, Command, Option, type LucideIcon } from 'lucide-react';
 import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import {
   MAX_SIDEBAR_SHORTCUT_SLOTS,
@@ -12,6 +12,7 @@ import {
   type SidebarSessionShortcut,
   type SidebarShortcutPlatform,
 } from '@/atoms/sidebar-shortcuts';
+import { formatKeyParts } from '@/lib/commands';
 import { sidebar } from './sidebar.tokens.stylex';
 
 const REDUCED_MOTION = '@media (prefers-reduced-motion: reduce)';
@@ -110,6 +111,55 @@ export function SidebarShortcutPill({
         <span>Control</span>
       )}
       <span>{index}</span>
+    </kbd>
+  );
+}
+
+// macOS modifier glyphs drawn as icons, as the ⌘ pill does: some system fonts
+// paint ⇧ and friends in colour.
+const MODIFIER_ICONS: Record<string, LucideIcon> = {
+  '⌘': Command,
+  '⇧': ArrowBigUp,
+  '⌥': Option,
+  '⌃': ChevronUp,
+};
+
+/**
+ * The same pill for any command binding (registry syntax), e.g. `⌘ ⇧ D` on
+ * macOS, `Ctrl Shift D` elsewhere: the sidebar's navigation rows show it at
+ * their end while hovered, focused, or while the modifier is held.
+ */
+export function SidebarBindingPill({
+  binding,
+  selected = false,
+  animate = false,
+}: {
+  binding: string;
+  selected?: boolean;
+  animate?: boolean;
+}) {
+  const parts = formatKeyParts(binding);
+  if (parts.length === 0) return null;
+  const mac = parts.some((part) => part in MODIFIER_ICONS);
+  return (
+    <kbd
+      aria-hidden="true"
+      data-sidebar-binding-pill={binding}
+      {...stylex.props(
+        styles.pill,
+        mac ? styles.macGap : styles.windowsGap,
+        selected && styles.selected,
+        animate && styles.animated
+      )}
+    >
+      {parts.map((part, index) => {
+        const Icon = MODIFIER_ICONS[part];
+        return Icon ? (
+          <Icon key={index} {...stylex.props(styles.icon)} strokeWidth={2} aria-hidden="true" />
+        ) : (
+          <span key={index}>{part}</span>
+        );
+      })}
     </kbd>
   );
 }

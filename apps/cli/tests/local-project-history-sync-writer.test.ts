@@ -16,8 +16,7 @@ import {
   type MachineId,
   type SessionId,
   type SessionMeta,
-  type WorkspaceId,
-} from '@lody/shared';
+  type WorkspaceId} from '@lody/shared';
 import {
   HASH_VERSION_V1,
   hashHistoryEntryForVersion,

@@ -910,7 +910,13 @@ function MobileTextPreview({
   }
 
   return (
+<<<<<<< HEAD
     <div className={clsx(stylex.props(styles.codePreview).className, bottomClearanceClassName)}>
+=======
+    <div
+      className={cn('min-h-0 flex-1 overflow-hidden overscroll-contain', bottomClearanceClassName)}
+    >
+>>>>>>> origin/main
       <LazySessionMonacoTextViewer
         key={path}
         text={text}

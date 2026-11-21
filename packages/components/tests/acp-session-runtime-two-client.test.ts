@@ -13,8 +13,7 @@ import {
   type SessionId,
   type AgentConfigId,
   type MachineMeta,
-  type AcpCommandSummary,
-} from '@lody/shared';
+  type AcpCommandSummary} from '@lody/shared';
 import { useAvailableCommands } from '../src/hooks/use-available-commands';
 import {
   EMPTY_ACP_SESSION_USER_CONFIG_EDITS,

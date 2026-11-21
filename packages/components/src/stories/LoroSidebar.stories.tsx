@@ -1,9 +1,24 @@
+<<<<<<< HEAD
 import * as stylex from '@stylexjs/stylex';
+=======
+import {
+  commands,
+  getCommandKeybindings,
+  registerBuiltInCommands,
+  unregisterBuiltInCommands,
+} from '@/lib/commands';
+import { __resetPlatformCacheForTests } from '@/lib/commands/platform';
+>>>>>>> origin/main
 import type { Meta, StoryObj } from '@storybook/react';
+import { TodayColumnSash, TodayPinnedCard } from '@/components/today/today-pinned-column';
+import { TodayToolbar } from '@/components/today/today-view';
+import todayDayStreamMeta, { TodayWithEarlierDay } from './TodayDayStream.stories';
+
+const TodayDayStreamDemo = todayDayStreamMeta.component!;
 import { E2eeOfflineSummaryText } from '@/components/e2ee-offline-window';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtom } from 'jotai';
-import { FolderPlus } from 'lucide-react';
+import { CalendarDays, FolderPlus, MoreHorizontal, PinOff } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import type {
   LoroSidebarChatScope,
@@ -421,10 +436,12 @@ type Story = StoryObj<typeof meta>;
 
 type StoryLayoutProps = Parameters<typeof LoroSidebar>[0] & {
   storyContent?: ReactNode;
+  /** Between the sidebar and the page card, as the shell places pinned Today. */
+  besideSidebar?: ReactNode;
   fullApp?: boolean;
 };
 
-function StoryLayout({ storyContent, fullApp = false, ...args }: StoryLayoutProps) {
+function StoryLayout({ storyContent, besideSidebar, fullApp = false, ...args }: StoryLayoutProps) {
   const [activeNav, setActiveNav] = useState<LoroSidebarNavKey>(args.activeNav ?? 'home');
   const [workspaceId, setWorkspaceId] = useState(args.currentWorkspaceId);
   const baseSessionListProps = args.sessionListProps ?? demoTaskListProps;
@@ -599,6 +616,7 @@ function StoryLayout({ storyContent, fullApp = false, ...args }: StoryLayoutProp
   return (
     <div {...stylex.props(storyLayout.row)}>
       {sidebar}
+      {besideSidebar}
       <WorkspaceCard>
         {fullApp ? <main {...stylex.props(storyLayout.element)}>{content}</main> : content}
       </WorkspaceCard>
@@ -788,6 +806,43 @@ export const NarrowThreeColumn: Story = {
   args: Default.args,
 };
 
+/**
+ * Today pinned beside the sidebar: its own page card, set into the window
+ * ground like the main card, with 4px of ground between the two.
+ */
+export const PinnedToday: Story = {
+  render: (args) => (
+    <StoryLayout
+      {...args}
+      besideSidebar={
+        <TodayPinnedCard
+          width={360}
+          anchored
+          label="Today"
+          sash={<TodayColumnSash width={360} onWidthChange={() => {}} label="Resize Today" />}
+        >
+          <TodayToolbar pinned title={null}>
+            <Button variant="ghost" size="small" icon aria-label="Pick a date">
+              <CalendarDays size={16} strokeWidth={1.5} />
+            </Button>
+            <Button variant="ghost" size="small" icon aria-label="Unpin Today">
+              <PinOff size={16} strokeWidth={1.5} />
+            </Button>
+            <Button variant="ghost" size="small" icon aria-label="More">
+              <MoreHorizontal size={16} strokeWidth={1.5} />
+            </Button>
+          </TodayToolbar>
+          <TodayDayStreamDemo dates={TodayWithEarlierDay.args!.dates!} />
+        </TodayPinnedCard>
+      }
+    />
+  ),
+  args: {
+    ...Default.args!,
+    onTodayClicked: () => {},
+  },
+};
+
 export const WorkspaceSyncing: Story = {
   render: (args) => <StoryLayout {...args} />,
   args: {
@@ -844,6 +899,55 @@ export const ElectronMacOSCollapseToggle: Story = {
     // Pins the collapse toggle to the macOS traffic-light centerline (y=23,
     // see `trafficLightPosition` in apps/electron/src/main/window.ts).
     isElectronMacOS: true,
+  },
+};
+
+/**
+ * Desktop macOS with the registry's built-in commands, so navigation rows have
+ * live bindings: hover New chat, Today or Search to see the shortcut pill.
+ */
+function WithDesktopCommands(props: { children: ReactNode }) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const host = window as {
+      __LODY_ELECTRON__?: boolean;
+      __LODY_PLATFORM__?: { os?: string };
+    };
+    const previous = { electron: host.__LODY_ELECTRON__, platform: host.__LODY_PLATFORM__ };
+    host.__LODY_ELECTRON__ = true;
+    host.__LODY_PLATFORM__ = { os: 'darwin' };
+    __resetPlatformCacheForTests();
+    registerBuiltInCommands();
+    // As TodayCommandPlaceholder does with the experiment on.
+    const releaseToday = commands.register({
+      id: 'today.open',
+      title: 'Open Today',
+      category: 'Navigation',
+      keybindings: getCommandKeybindings('today.open'),
+      when: () => false,
+      run: () => {},
+    });
+    setReady(true);
+    return () => {
+      releaseToday();
+      unregisterBuiltInCommands();
+      host.__LODY_ELECTRON__ = previous.electron;
+      host.__LODY_PLATFORM__ = previous.platform;
+      __resetPlatformCacheForTests();
+    };
+  }, []);
+  return ready ? props.children : null;
+}
+
+export const NavigationShortcuts: Story = {
+  render: (args) => (
+    <WithDesktopCommands>
+      <WithProjectsLayout {...args} />
+    </WithDesktopCommands>
+  ),
+  args: {
+    ...Default.args!,
+    onTodayClicked: () => {},
   },
 };
 

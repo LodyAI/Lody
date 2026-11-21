@@ -15,6 +15,10 @@ import {
   type SessionPullRequestCiState,
 } from '@lody/shared';
 import { getSessionGitHubState } from '@/lib/session-github-state';
+import {
+  linkedPullRequestsMeta,
+  useStoryPullRequestLinks,
+} from './SessionPullRequestLinks.stories';
 import { resolveSessionInfoBarGitHubActionIds } from '@/components/sessions/session-info-action-state';
 import { SessionInfoBar, type SessionInfoBarProps } from '@/components/sessions/session-info-bar';
 import type { SessionMachineInfo } from '@/components/sessions/session-machine-info';
@@ -166,6 +170,7 @@ function StoryHarness({
   workspaceLocation = null,
   pr = openPr,
   prHistory,
+  prLinks,
   diffStat = { add: 128, del: 42 },
   width = 760,
   initialStage,
@@ -192,6 +197,7 @@ function StoryHarness({
   } | null;
   pr?: SessionPullRequestMeta | null;
   prHistory?: SessionInfoBarProps['prHistory'];
+  prLinks?: SessionInfoBarProps['prLinks'];
   diffStat?: SessionInfoBarProps['diffStat'];
   width?: number;
   initialStage?: 'status' | 'goal' | 'schedule' | 'context';
@@ -250,6 +256,7 @@ function StoryHarness({
         pr={pr}
         onOpenPr={fn()}
         prHistory={prHistory}
+        prLinks={prLinks}
         onOpenHistoryPr={fn()}
         contextActions={contextActions}
         onOpenAllChanges={fn()}
@@ -426,6 +433,29 @@ export const PrHistory: Story = {
     pr: prHistoryMeta.pullRequests![2],
     prHistory: getSessionGitHubState(prHistoryMeta).pullRequestHistory,
   },
+};
+
+/** Linked pull requests: the PR marker lists every PR the Session holds, with link and unlink. */
+function LinkedPullRequestsBar(props: Parameters<typeof StoryHarness>[0]) {
+  const links = useStoryPullRequestLinks(linkedPullRequestsMeta);
+  const state = getSessionGitHubState(linkedPullRequestsMeta);
+  return (
+    <StoryHarness
+      {...props}
+      projectName="LodyAI/Lody"
+      branch="session/68583a0c"
+      pr={state.latestPr}
+      prCiState={state.latestPrState?.s}
+      prLinks={links}
+    />
+  );
+}
+export const LinkedPullRequests: Story = {
+  render: (args) => <LinkedPullRequestsBar {...args} />,
+};
+export const LinkedPullRequestsDark: Story = {
+  ...LinkedPullRequests,
+  globals: { theme: 'dark' },
 };
 
 function ObservationHarness({ ownerMeta }: { ownerMeta: SessionMeta }) {

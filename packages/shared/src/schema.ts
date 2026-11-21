@@ -50,7 +50,12 @@ import type { messageQueueItemSchema, sessionDocSchema } from './session-doc-sch
 // pulling in the loro-mirror/loro-crdt graph through this file.
 export * from './session-pull-request-meta';
 import type {
+<<<<<<< HEAD
   SessionPullRequestLifecycleFields,
+=======
+  SessionAutoDelivery,
+  SessionPullRequestRecordFields,
+>>>>>>> origin/main
   SessionPullRequestMeta,
   SessionPullRequestStateMeta,
 } from './session-pull-request-meta';
@@ -627,7 +632,7 @@ export function isScheduleImportFenced(
   return fence?.workspaceId === workspaceId && fence.activationId === activationId;
 }
 
-export type SessionMeta = SessionPullRequestLifecycleFields & {
+export type SessionMeta = SessionPullRequestRecordFields & {
   /** Latest assistant's actual model; null means no assistant history, absent means unknown. */
   lastModel?: { modelId?: string; name?: string } | null;
   id: SessionId;
@@ -774,6 +779,11 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
    * the author's latest work?" must check BOTH.
    */
   workspaceUnpushed?: boolean;
+  /**
+   * Auto delivery progress for this Session's pull request. The owning machine
+   * writes it at each transition only; absent or null while Auto delivery is off.
+   */
+  autoDelivery?: SessionAutoDelivery | null;
   /** If set, this session is a child tab of another session and shares its workspace directory. */
   parentSessionId?: SessionId;
   /**

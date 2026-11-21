@@ -84,7 +84,6 @@ import {
   GitBranch,
   LockKeyhole,
   Monitor,
-  PanelLeft,
   RefreshCw,
   X,
 } from 'lucide-react';
@@ -93,6 +92,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { field } from '@lody/ui/field/field.tokens.stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
+import { SidebarHistoryControls } from '../sidebar-history-controls';
 import { PiProviderMigrationCard } from './pi-provider-migration-card';
 
 import {
@@ -110,7 +110,7 @@ import {
   mobileKeyboardActionAtom,
   runtimeInitializingAtom,
   setMobileDrawerOpenAtom,
-  navigationSidebarVisibleAtom,
+  mainPageAtWindowEdgeAtom,
   showNavigationSidebarAtom,
   userAtom,
   workspaceReposCacheAtomFamily,
@@ -1324,7 +1324,8 @@ function WorkspaceChatLanding({
   } = useSessionActions();
   const openMobileDrawer = useSetAtom(setMobileDrawerOpenAtom);
   const setBugReportDialogOpen = useSetAtom(bugReportDialogOpenAtom);
-  const isLeftSidebarHidden = !useAtomValue(navigationSidebarVisibleAtom);
+  // Hidden sidebar and no pinned Today in front: this page owns the window's left edge.
+  const isLeftSidebarHidden = useAtomValue(mainPageAtWindowEdgeAtom);
   const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const visibleLocalMachineId = useMemo(() => {
     const machineId = localProbeResult?.machineId as MachineId | undefined;
@@ -4108,7 +4109,9 @@ function WorkspaceChatLanding({
       labelOf={projectMemberLabel}
     />
   ) : branchSelectorNode || topWorktreeNode ? (
-    <div {...stylex.props(composerSurface.contextPill)}>
+    <div
+      {...stylex.props(composerSurface.contextPill, isEmbedded && composerSurface.contextPillFixed)}
+    >
       {branchSelectorNode}
       {branchSelectorNode && topWorktreeNode ? (
         <span aria-hidden="true" {...stylex.props(composerSurface.contextPillDivider)} />
@@ -4467,11 +4470,20 @@ function WorkspaceChatLanding({
         </Button>
       )}
     >
-      {/* Embedded, the scope pills share one wrapping row with the run config. */}
+      {/* Embedded, the scope pills are items of the composer's one property row,
+          beside the run config, so each pill shrinks by its own rule. */}
       <div
+<<<<<<< HEAD
         {...stylex.props(
           isEmbedded ? landingStyles.topSelectorRowEmbedded : landingStyles.topSelectorRow
         )}
+=======
+        className={
+          isEmbedded
+            ? 'contents'
+            : 'flex w-full min-w-0 items-center gap-2'
+        }
+>>>>>>> origin/main
       >
         <DesktopMachineMenu
           value={desktopSelectedMachineId}
@@ -4483,23 +4495,27 @@ function WorkspaceChatLanding({
           disabled={isInitialDataLoading}
           onAddMachine={handleAddMachine}
         />
-        <UnifiedProjectSelectorView
-          value={desktopProjectSelection}
-          onChange={handleDesktopProjectChange}
-          localProjects={desktopLocalProjectOptions}
-          projectGroups={desktopProjectGroupOptions}
-          repositories={repositories}
-          latestMessageAtByRepo={mobileSheetRecency.byRepo}
-          onConnectGitRepo={handleConnectGitRepo}
-          onAddLocalProject={handleAddLocalProject}
-          onCreateProject={handleCreateProject}
-          onEditProjectGroup={handleEditProjectGroup}
-          onShareLocalProjectWithTeam={
-            showProjectSharing ? handleShareLocalProjectWithTeam : undefined
-          }
-          getShareErrorMessage={getProjectShareErrorMessage}
-          renderLimit={UNIFIED_PROJECT_OPTION_RENDER_LIMIT}
-        />
+        {/* Embedded, the project label is the one that gives way first, but
+            never below its icon and a few characters. */}
+        <div className={isEmbedded ? 'flex min-w-[4.5rem] shrink' : 'contents'}>
+          <UnifiedProjectSelectorView
+            value={desktopProjectSelection}
+            onChange={handleDesktopProjectChange}
+            localProjects={desktopLocalProjectOptions}
+            projectGroups={desktopProjectGroupOptions}
+            repositories={repositories}
+            latestMessageAtByRepo={mobileSheetRecency.byRepo}
+            onConnectGitRepo={handleConnectGitRepo}
+            onAddLocalProject={handleAddLocalProject}
+            onCreateProject={handleCreateProject}
+            onEditProjectGroup={handleEditProjectGroup}
+            onShareLocalProjectWithTeam={
+              showProjectSharing ? handleShareLocalProjectWithTeam : undefined
+            }
+            getShareErrorMessage={getProjectShareErrorMessage}
+            renderLimit={UNIFIED_PROJECT_OPTION_RENDER_LIMIT}
+          />
+        </div>
         {localGitStateRetryNode}
         {branchWorktreePill}
       </div>
@@ -7515,6 +7531,7 @@ function WorkspaceChatLanding({
         onOpenMobileDrawer={() => openMobileDrawer(true)}
         leftSidebarExpandSlot={
           !isMobile && isLeftSidebarHidden ? (
+<<<<<<< HEAD
             <Button
               type="button"
               variant="ghost"
@@ -7528,6 +7545,9 @@ function WorkspaceChatLanding({
             >
               <PanelLeft {...stylex.props(landingStyles.glyph16)} />
             </Button>
+=======
+            <SidebarHistoryControls onToggleSidebar={() => showNavigationSidebar()} />
+>>>>>>> origin/main
           ) : null
         }
         resetKeys={[workspaceId, workspaceSlug, contextType, isMobile]}

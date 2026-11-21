@@ -1,7 +1,16 @@
 import * as stylex from '@stylexjs/stylex';
 import { CalendarDays, ChevronLeft, ChevronRight, MoreHorizontal, Pin, PinOff } from 'lucide-react';
-import { useAtomValue, useStore } from 'jotai';
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
+import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
+import { todayFullWidthAtom } from '@/atoms/sidebar-state';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   buildTodayLink,
@@ -19,6 +28,18 @@ import { Popover } from '@lody/ui/popover';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { userAtom } from '@/atoms';
+import { navigationSidebarVisibleAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
+import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
+import { isNativeAppShell } from '@/lib/native-platform';
+import { withClassName } from '@/lib/stylex';
+import {
+  WINDOW_DRAG_EXEMPT_CLASS,
+  useMacTrafficLightRowPadClass,
+  useWindowDragRegionClass,
+  useWindowsCaptionPadClass,
+  useWindowsCaptionRowPadClass,
+} from '@/ui/window-drag-region';
+import { SidebarHistoryControls } from '../sidebar-history-controls';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { runtimeAtom } from '@/atoms/runtime';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
@@ -41,6 +62,7 @@ import { useTodayEditor } from './editor/today-editor-context';
 import { TodayEditorContext } from './editor/today-editor-context';
 import { TodayEditorController } from './editor/today-editor-controller';
 import { TodayDaySection } from './today-day-section';
+import { todayOutline } from './outline.stylex';
 import { TodayConvertDialog } from './today-convert-dialog';
 import { TodayMentionStatusMenuHost } from './today-mention-status-menu';
 import { buildConvertPrompt, todayMentionMarkdown } from './editor/block-selection';
@@ -50,6 +72,9 @@ import { buildDayStream, localTodayDate, todayDateToLocalDate } from './today-st
 import { useTodayClock } from './use-today-clock';
 
 export type TodayViewTarget = { member?: string; date?: string };
+
+/** Default max width of the Today page's text column, in px. */
+export const TODAY_READABLE_WIDTH = 720;
 
 const styles = stylex.create({
   root: {
@@ -61,11 +86,21 @@ const styles = stylex.create({
   },
   toolbar: {
     display: 'flex',
+    flexShrink: 0,
     alignItems: 'center',
     gap: space[1],
     paddingInline: space[4],
-    paddingBlock: space[2],
   },
+  /* Page or pinned column, the toolbar is the window-top row: the session tab
+     bar's 44px, so its controls line up with every other page's header. */
+  windowRowToolbar: { boxSizing: 'border-box', height: '2.75rem' },
+  // Clears the macOS traffic lights while the navigation sidebar is hidden.
+  toolbarBesideTrafficLights: { paddingLeft: '96px' },
+  // The card's rim puts the row 1px below the 4px frame step the macOS row
+  // padding assumes; without this the controls centre at y=24, a pixel under
+  // the traffic lights and the sidebar header's controls at y=23.
+  toolbarOnTrafficLightLine: { marginTop: -1 },
+  controls: { display: 'flex', alignItems: 'center', gap: space[1] },
   title: {
     flex: 1,
     minWidth: 0,
@@ -79,9 +114,27 @@ const styles = stylex.create({
     flex: 1,
     minHeight: 0,
     overflowY: 'auto',
-    paddingInline: space[6],
+    // The fold toggles hang left of the text: keep a full gutter beside them too.
+    paddingInlineStart: `calc(${space[6]} + ${todayOutline.foldOverhang})`,
+    paddingInlineEnd: space[6],
     paddingBottom: space[8],
   },
+  // The pinned column is narrow: a tighter end gutter.
+  scrollerPinned: { paddingInlineEnd: space[4] },
+  // Pinned with the sidebar hidden, the column is the window's leftmost
+  // surface and lines up with the macOS close button (x 16–30): the bullet
+  // dots centre on its right edge (x=30), which puts the fold toggles' centre
+  // on its left edge (x=16). The text column starts at the dot's left edge
+  // (30 - 3); the card's content edge starts 5px in (4px of window ground plus
+  // the rim, as laid out).
+  scrollerAtWindowEdge: {
+    paddingInlineStart: 'calc(30px - 3px - 5px)',
+  },
+  // The readable column (Obsidian 700px, Notion ~708px, AFFiNE ~752px of
+  // text): centred, shrinking with the window inside the scroller's gutters.
+  // The scroller stays full width, so its scrollbar, drops and clicks beside
+  // the column keep working.
+  column: { maxWidth: TODAY_READABLE_WIDTH, marginInline: 'auto' },
   back: {
     position: 'absolute',
     insetInline: 0,
@@ -153,8 +206,10 @@ export function TodayView(props: {
   const self = useAtomValue(userAtom)?.id ?? null;
   const userId = props.target.member ?? self;
   const today = useTodayClock();
+  const sidebarVisible = useAtomValue(navigationSidebarVisibleAtom);
   const anchor = props.target.date ? (parseTodayDate(props.target.date) ?? undefined) : undefined;
   const [registered, setRegistered] = useState<readonly TodayDate[]>([]);
+  const [fullWidth, setFullWidth] = useAtom(todayFullWidthAtom);
   const [empty, setEmpty] = useState<ReadonlySet<TodayDate>>(new Set());
   const { members, isMultiMember } = useWorkspaceMembers();
 
@@ -212,10 +267,12 @@ export function TodayView(props: {
   return (
     <TodayEditorContext.Provider value={controller}>
       <div {...stylex.props(styles.root)} data-testid="today-view">
-        <div {...stylex.props(styles.toolbar)}>
-          <span {...stylex.props(styles.title)}>
-            {memberName ? t('today.memberTitle', '{{name}}’s Today', { name: memberName }) : null}
-          </span>
+        <TodayToolbar
+          pinned={props.pinned ?? false}
+          title={
+            memberName ? t('today.memberTitle', '{{name}}’s Today', { name: memberName }) : null
+          }
+        >
           <TodayCalendar
             today={today}
             selected={anchor ?? today}
@@ -238,14 +295,18 @@ export function TodayView(props: {
               }
               onClick={props.onTogglePin}
             >
-              {props.pinned ? <PinOff size={16} /> : <Pin size={16} />}
+              {props.pinned ? (
+                <PinOff size={16} strokeWidth={1.5} />
+              ) : (
+                <Pin size={16} strokeWidth={1.5} />
+              )}
             </Button>
           ) : null}
           <Menu.Root>
             <Menu.Trigger
               render={
                 <Button variant="ghost" size="small" icon aria-label={t('today.more', 'More')}>
-                  <MoreHorizontal size={16} />
+                  <MoreHorizontal size={16} strokeWidth={1.5} />
                 </Button>
               }
             />
@@ -272,6 +333,15 @@ export function TodayView(props: {
                   </Menu.Content>
                 </Menu.Submenu>
               ) : null}
+              {props.pinned ? null : (
+                <Menu.CheckboxItem
+                  checked={fullWidth}
+                  indicatorSide="end"
+                  onCheckedChange={(checked) => setFullWidth(checked)}
+                >
+                  {t('today.fullWidth', 'Full width')}
+                </Menu.CheckboxItem>
+              )}
               <Menu.Item
                 onClick={() => {
                   void writeTextToClipboard(
@@ -285,8 +355,12 @@ export function TodayView(props: {
               </Menu.Item>
             </Menu.Content>
           </Menu.Root>
-        </div>
-        <TodayOutlineSurface controller={controller}>
+        </TodayToolbar>
+        <TodayOutlineSurface
+          controller={controller}
+          fullWidth={props.pinned || fullWidth}
+          placement={props.pinned ? (sidebarVisible ? 'pinned' : 'pinnedAtWindowEdge') : 'page'}
+        >
           {days.map((date, index) => (
             <TodayDaySection
               key={`${userId}:${date}`}
@@ -321,9 +395,68 @@ export function TodayView(props: {
   );
 }
 
+/**
+ * The Today toolbar. The full page's row is the window top: it sits under the
+ * workspace's window drag strip, so its controls are drag-exempt or Electron
+ * swallows their clicks, and while the navigation sidebar is hidden it carries
+ * the sidebar's toggle and Back/Forward, which would otherwise be unreachable.
+ * The pinned column is not at the window top and needs none of this.
+ */
+export function TodayToolbar(props: { pinned: boolean; title: ReactNode; children: ReactNode }) {
+  const sidebarVisible = useAtomValue(navigationSidebarVisibleAtom);
+  const showSidebar = useSetAtom(showNavigationSidebarAtom);
+  const fullscreen = useElectronFullscreen();
+  const dragClass = useWindowDragRegionClass();
+  const captionPadClass = useWindowsCaptionPadClass();
+  const captionRowPadClass = useWindowsCaptionRowPadClass();
+  const trafficLightRowPadClass = useMacTrafficLightRowPadClass({
+    insideWorkspaceFrame: true,
+    includeDesktopWeb: true,
+  });
+  const page = !props.pinned;
+  // Both forms sit in a page card's window-top row and line up with its
+  // controls; only the page is window chrome (drag region, caption buttons).
+  const exemptClassName = page && dragClass ? WINDOW_DRAG_EXEMPT_CLASS : undefined;
+  const besideTrafficLights =
+    !sidebarVisible && !isNativeAppShell() && isMacOSElectronRenderer() && !fullscreen;
+  const chromeClassName = (
+    page
+      ? [dragClass, captionPadClass, captionRowPadClass, trafficLightRowPadClass]
+      : [captionRowPadClass, trafficLightRowPadClass]
+  )
+    .filter(Boolean)
+    .join(' ');
+  return (
+    <div
+      {...withClassName(
+        stylex.props(
+          styles.toolbar,
+          styles.windowRowToolbar,
+          besideTrafficLights && styles.toolbarBesideTrafficLights,
+          trafficLightRowPadClass !== undefined && styles.toolbarOnTrafficLightLine
+        ),
+        chromeClassName
+      )}
+      data-testid="today-toolbar"
+    >
+      {/* With the sidebar hidden, Today (page or pinned column) is the window's
+          leftmost surface and carries the sidebar toggle and Back/Forward. */}
+      {!sidebarVisible ? (
+        <SidebarHistoryControls onToggleSidebar={showSidebar} className={exemptClassName} />
+      ) : null}
+      <span {...stylex.props(styles.title)}>{props.title}</span>
+      <div {...withClassName(stylex.props(styles.controls), exemptClassName)}>{props.children}</div>
+    </div>
+  );
+}
+
 /** The scroll surface: focus, keys and clipboard for block selection. */
 export function TodayOutlineSurface(props: {
   controller: TodayEditorController | null;
+  /** Span the whole width instead of the readable column (the pinned column is narrow anyway). */
+  fullWidth?: boolean;
+  /** Where the surface sits: its gutters follow (default `page`). */
+  placement?: 'page' | 'pinned' | 'pinnedAtWindowEdge';
   children: React.ReactNode;
 }) {
   const { controller } = props;
@@ -343,7 +476,11 @@ export function TodayOutlineSurface(props: {
   }, [controller]);
   return (
     <div
-      {...stylex.props(styles.scroller)}
+      {...stylex.props(
+        styles.scroller,
+        props.placement !== undefined && props.placement !== 'page' && styles.scrollerPinned,
+        props.placement === 'pinnedAtWindowEdge' && styles.scrollerAtWindowEdge
+      )}
       ref={(element) => {
         surfaceRef.current = element;
         controller?.attachSurface(element);
@@ -381,7 +518,7 @@ export function TodayOutlineSurface(props: {
         if (event.target === event.currentTarget) controller?.onBlockPaste(event.nativeEvent);
       }}
     >
-      {props.children}
+      <div {...stylex.props(!props.fullWidth && styles.column)}>{props.children}</div>
       <TodayDragLayer />
     </div>
   );
@@ -763,7 +900,7 @@ function TodayCalendar(props: {
       <Popover.Trigger
         render={
           <Button variant="ghost" size="small" icon aria-label={t('today.calendar', 'Pick a date')}>
-            <CalendarDays size={16} />
+            <CalendarDays size={16} strokeWidth={1.5} />
           </Button>
         }
       />
