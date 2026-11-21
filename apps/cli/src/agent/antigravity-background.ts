@@ -60,7 +60,8 @@ export interface AntigravityMonitorState {
  */
 const ASYNC_DISPATCH_TOOL_NAMES = new Set(['invoke_subagent', 'send_message', 'swarm']);
 
-const BG_TASK_PLACEHOLDER_PATTERN = /Tool is running as a background task with task id:\s*\S+/i;
+const BG_TASK_PLACEHOLDER_PATTERN = /Tool is running as a background task with task id:\s*(\S+)/i;
+const SYSTEM_MESSAGE_SENDER_PATTERN = /<SYSTEM_MESSAGE>[\s\S]*?\bsender=(\S+)/i;
 
 interface KnownTool {
   status: string;
@@ -68,7 +69,11 @@ interface KnownTool {
   daemon: boolean;
   hasOutput: boolean;
   placeholder: boolean;
+  taskId?: string;
+  resolved: boolean;
 }
+
+type TurnStreamPhase = 'idle' | 'thought' | 'message' | 'tool';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -100,6 +105,34 @@ function outputTexts(raw: Record<string, unknown>): unknown[] {
   return texts;
 }
 
+function extractPlaceholderTaskId(raw: Record<string, unknown>): string | undefined {
+  for (const text of outputTexts(raw)) {
+    if (typeof text !== 'string') continue;
+    const match = BG_TASK_PLACEHOLDER_PATTERN.exec(text);
+    if (match?.[1]) return match[1];
+  }
+  return undefined;
+}
+
+function chunkText(raw: Record<string, unknown>): string {
+  const content = raw.content;
+  if (typeof content === 'string') return content;
+  if (isRecord(content) && typeof content.text === 'string') return content.text;
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => {
+        if (!isRecord(item)) return '';
+        if (typeof item.text === 'string') return item.text;
+        if (isRecord(item.content) && typeof item.content.text === 'string') {
+          return item.content.text;
+        }
+        return '';
+      })
+      .join('');
+  }
+  return '';
+}
+
 function hasOutput(raw: Record<string, unknown>): boolean {
   const output = raw.rawOutput;
   const hasRaw =
@@ -129,6 +162,7 @@ export class AntigravitySessionTracker {
   private lastActivityAtMs = 0;
   private inWakeup = false;
   private expiredPendingWork = false;
+  private turnStreamPhase: TurnStreamPhase = 'idle';
 
   constructor(timings?: Partial<AntigravityPollTimings>) {
     this.timings = { ...DEFAULT_ANTIGRAVITY_POLL_TIMINGS, ...timings };
@@ -140,35 +174,84 @@ export class AntigravitySessionTracker {
 
   /** Reset per-turn state before `session/prompt`; unfinished work carries into the new turn. */
   beginTurn(): void {
+    // If a post-turn wakeup had already started before the user sent a new prompt,
+    // settle that pending item rather than dropping `inWakeup` and leaking its count.
+    if (this.inWakeup) {
+      this.pending = Math.max(0, this.pending - 1);
+    }
     this.turnToolIds = new Set();
     this.turnEndedAtMs = null;
     this.inWakeup = false;
     this.expiredPendingWork = false;
+    this.turnStreamPhase = 'idle';
   }
 
-  /** Record a tool notification Lody received live on stdout. */
+  /** Clear all tracked background work after an explicit user cancel. */
+  reset(): void {
+    this.turnToolIds = new Set();
+    this.pending = 0;
+    this.turnEndedAtMs = null;
+    this.lastActivityAtMs = 0;
+    this.inWakeup = false;
+    this.expiredPendingWork = false;
+    this.turnStreamPhase = 'idle';
+  }
+
+  /** Record a live notification Lody received on stdout during a turn. */
   observeLive(notification: acp.SessionNotification): void {
     const raw = notification.update as unknown as Record<string, unknown>;
-    if (
-      (raw.sessionUpdate !== 'tool_call' && raw.sessionUpdate !== 'tool_call_update') ||
-      typeof raw.toolCallId !== 'string'
-    ) {
+    const updateType = raw.sessionUpdate;
+    if (updateType === 'tool_call' || updateType === 'tool_call_update') {
+      if (typeof raw.toolCallId !== 'string') return;
+      const prev = this.tools.get(raw.toolCallId);
+      const outputChanged = raw.rawOutput !== undefined || raw.content !== undefined;
+      const placeholderTaskId = outputChanged ? extractPlaceholderTaskId(raw) : prev?.taskId;
+      const placeholder = outputChanged
+        ? placeholderTaskId !== undefined
+        : (prev?.placeholder ?? false);
+      this.tools.set(raw.toolCallId, {
+        status: typeof raw.status === 'string' ? raw.status : (prev?.status ?? ''),
+        name: toolName(raw) ?? prev?.name,
+        daemon: (prev?.daemon ?? false) || isDaemonTool(raw),
+        hasOutput: (prev?.hasOutput ?? false) || hasOutput(raw),
+        placeholder,
+        taskId: placeholder ? placeholderTaskId : undefined,
+        resolved: prev?.resolved ?? false,
+      });
+      this.turnToolIds.add(raw.toolCallId);
+      this.turnStreamPhase = 'tool';
       return;
     }
-    const prev = this.tools.get(raw.toolCallId);
-    const outputChanged = raw.rawOutput !== undefined || raw.content !== undefined;
-    this.tools.set(raw.toolCallId, {
-      status: typeof raw.status === 'string' ? raw.status : (prev?.status ?? ''),
-      name: toolName(raw) ?? prev?.name,
-      daemon: (prev?.daemon ?? false) || isDaemonTool(raw),
-      hasOutput: (prev?.hasOutput ?? false) || hasOutput(raw),
-      placeholder: outputChanged
-        ? outputTexts(raw).some(
-            (text) => typeof text === 'string' && BG_TASK_PLACEHOLDER_PATTERN.test(text)
-          )
-        : (prev?.placeholder ?? false),
-    });
-    this.turnToolIds.add(raw.toolCallId);
+
+    if (updateType === 'user_message_chunk') {
+      const text = chunkText(raw);
+      const match = SYSTEM_MESSAGE_SENDER_PATTERN.exec(text);
+      const sender = match?.[1];
+      if (sender && sender !== 'system') {
+        if (!this.resolveTurnBackgroundToolByTaskId(sender)) {
+          this.consumeOldestUnresolvedTurnBackgroundWork();
+        }
+        this.turnStreamPhase = 'idle';
+      }
+      return;
+    }
+
+    if (updateType === 'agent_message_chunk') {
+      if (chunkText(raw).length > 0) {
+        this.turnStreamPhase = 'message';
+      }
+      return;
+    }
+
+    if (updateType === 'agent_thought_chunk') {
+      // Within a single planner response, thought chunks precede message chunks.
+      // A thought chunk arriving after visible message text with no intervening tool call
+      // means agy woke the model for a completed background task inside the same turn.
+      if (this.turnStreamPhase === 'message') {
+        this.consumeOldestUnresolvedTurnBackgroundWork();
+      }
+      this.turnStreamPhase = 'thought';
+    }
   }
 
   /**
@@ -221,20 +304,47 @@ export class AntigravitySessionTracker {
     return this.expiredPendingWork;
   }
 
+  private isUnresolvedBackgroundTool(tool: KnownTool): boolean {
+    if (tool.daemon || tool.resolved || tool.status === 'failed' || tool.status === 'cancelled') {
+      return false;
+    }
+    const silentWorkflow =
+      tool.name === 'run_workflow' && tool.status === 'completed' && !tool.hasOutput;
+    return (
+      tool.status === 'pending' ||
+      tool.status === 'in_progress' ||
+      tool.placeholder ||
+      silentWorkflow ||
+      (tool.name !== undefined && ASYNC_DISPATCH_TOOL_NAMES.has(tool.name))
+    );
+  }
+
+  private resolveTurnBackgroundToolByTaskId(taskId: string): boolean {
+    for (const id of this.turnToolIds) {
+      const tool = this.tools.get(id);
+      if (tool && !tool.resolved && tool.taskId === taskId) {
+        tool.resolved = true;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private consumeOldestUnresolvedTurnBackgroundWork(): void {
+    for (const id of this.turnToolIds) {
+      const tool = this.tools.get(id);
+      if (tool && this.isUnresolvedBackgroundTool(tool)) {
+        tool.resolved = true;
+        return;
+      }
+    }
+  }
+
   private countTurnBackgroundWork(): number {
     let count = 0;
     for (const id of this.turnToolIds) {
       const tool = this.tools.get(id);
-      if (!tool || tool.daemon || tool.status === 'failed') continue;
-      const silentWorkflow =
-        tool.name === 'run_workflow' && tool.status === 'completed' && !tool.hasOutput;
-      if (
-        tool.status === 'pending' ||
-        tool.status === 'in_progress' ||
-        tool.placeholder ||
-        silentWorkflow ||
-        (tool.name !== undefined && ASYNC_DISPATCH_TOOL_NAMES.has(tool.name))
-      ) {
+      if (tool && this.isUnresolvedBackgroundTool(tool)) {
         count += 1;
       }
     }

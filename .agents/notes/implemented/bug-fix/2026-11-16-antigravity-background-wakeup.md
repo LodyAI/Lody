@@ -34,21 +34,28 @@ The fix stays inside `apps/cli/src/agent/` (`antigravity-background.ts` and
 [Session GC respects native agent work](2026-10-18-gc-respects-native-agent-work.md):
 the turn ends at `end_turn`, and `sessionActivity` keeps the process alive.
 
-- **Pending work at `end_turn`.** From the tool notifications streamed live during the
-  turn, Lody counts one pending item for each tool that is still `pending` or
-  `in_progress`, whose output is agy's "running as a background task" placeholder, or
+- **Pending work at `end_turn`.** From the notifications streamed live during the
+  turn, Lody counts one pending item for each unresolved tool that is still `pending`
+  or `in_progress`, whose output is agy's "running as a background task" placeholder, or
   that dispatches work reporting only by waking the model (`invoke_subagent`,
   `send_message`, `swarm`, a `run_workflow` with no output). agy keeps a `schedule`
-  `in_progress` until it fires, so timers need no special case. `IsDaemon: true` and
-  failed tools are not counted. No agy tool arguments are parsed.
+  `in_progress` until it fires, so timers need no special case. `IsDaemon: true`,
+  failed, and cancelled tools are not counted. No agy tool arguments are parsed.
+  Because agy delivers in-turn background completions via `<SYSTEM_MESSAGE>` without
+  updating the original placeholder `tool_call`, Lody resolves an in-turn item when it
+  sees a `<SYSTEM_MESSAGE>` `user_message_chunk` (matched by `sender=<taskId>` when
+  present) or a new `agent_thought_chunk` after visible `agent_message_chunk` text
+  with no intervening tool call.
 - **Release by activity.** While items are pending, Lody polls `session/list` every
   2 seconds and reports `background`, or `running` while `updatedAt` is moving. A
   burst of `updatedAt` changes followed by 30 seconds of stillness counts as one item
-  finished. Lody reports idle when no item remains, and after 24 hours at most,
-  matching the Core `background` cap. If `session/list` is missing or keeps failing,
-  the monitor keeps protecting until the cap.
+  finished. Lody reports idle when no item remains, on explicit `session/cancel`, and
+  after 24 hours at most, matching the Core `background` cap. If `session/list` is
+  missing or keeps failing, the monitor keeps protecting until the cap.
 - **Across turns.** Items still pending when the user sends another message carry
-  into that turn, so earlier background work stays protected.
+  into that turn, so earlier background work stays protected. If a post-turn wakeup
+  burst was already in progress when the new turn starts, that item settles before
+  carrying the remainder.
 - **`cwd`.** Lody negotiates the `realpath` of the workdir as the Antigravity ACP
   `cwd`; agy compares edit targets by realpath, so a symlinked workdir otherwise made
   in-workspace edits ask for permission.

@@ -2912,7 +2912,13 @@ export class AgentClient implements acp.Client {
 
   async cancel(sessionId: ACPSessionId) {
     this.ensureSessionMatch(sessionId);
-    return await this.connection?.cancel({ sessionId });
+    const result = await this.connection?.cancel({ sessionId });
+    if (this.antigravityTracker && this.acpSessionId === sessionId) {
+      this.stopAntigravityMonitor();
+      this.antigravityTracker.reset();
+      this.setAntigravityNativeActivity(sessionId, 'idle', 0);
+    }
+    return result;
   }
 
   async closeSession(sessionId: ACPSessionId, timeoutMs: number = 5000): Promise<boolean> {

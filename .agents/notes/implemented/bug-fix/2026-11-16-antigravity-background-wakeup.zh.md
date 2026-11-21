@@ -29,17 +29,21 @@ Core `sessionActivity` 扩展，所以 Lody 看到的是空闲会话，`SessionG
 [Session GC 尊重原生 Agent 的工作](2026-10-18-gc-respects-native-agent-work.zh.md)
 的原生工作契约：turn 在 `end_turn` 结束，由 `sessionActivity` 保持进程存活。
 
-- **`end_turn` 时的待完成项。** 根据 turn 中实时收到的工具通知，下列工具各计一项：仍处于
+- **`end_turn` 时的待完成项。** 根据 turn 中实时收到的通知，下列未解决工具各计一项：仍处于
   `pending` 或 `in_progress` 的工具；输出为 agy「running as a background task」占位文本的
   工具；派出只能靠唤醒模型报告结果的工作的工具（`invoke_subagent`、`send_message`、
   `swarm`、没有输出的 `run_workflow`）。agy 会让 `schedule` 一直保持 `in_progress`
-  直到触发，所以定时器不需要特殊处理。`IsDaemon: true` 与失败的工具不计入。不解析
-  agy 工具参数。
+  直到触发，所以定时器不需要特殊处理。`IsDaemon: true`、失败与取消的工具不计入。不解析
+  agy 工具参数。由于 agy 在同 turn 内通过 `<SYSTEM_MESSAGE>` 投递后台任务完成通知而不会
+  更新原占位 `tool_call`，当 Lody 收到带 `sender` 的 `<SYSTEM_MESSAGE>` `user_message_chunk`
+  （优先按 `taskId` 精确匹配），或在可见 `agent_message_chunk` 之后、无工具调用介入的情况下
+  收到新的 `agent_thought_chunk` 时，会将对应同 turn 后台项标记为已解决。
 - **按活动释放。** 存在待完成项时，Lody 每 2 秒查询一次 `session/list`，上报
   `background`，`updatedAt` 变化期间上报 `running`。一段 `updatedAt` 变化之后保持
-  30 秒不变，计为完成一项。没有剩余项时上报空闲；最长 24 小时，与 Core `background`
-  上限一致。如果没有 `session/list` 或它持续失败，监视器会一直保护到上限。
-- **跨 turn。** 用户发出新消息时仍未完成的项会延续到新 turn，之前的后台工作继续受保护。
+  30 秒不变，计为完成一项。没有剩余项时、显式 `session/cancel` 时上报空闲；最长 24 小时，
+  与 Core `background` 上限一致。如果没有 `session/list` 或它持续失败，监视器会一直保护到上限。
+- **跨 turn。** 用户发出新消息时仍未完成的项会延续到新 turn，之前的后台工作继续受保护；
+  如果新 turn 开始时已有一轮 turn 后唤醒正在进行，则会先结算该项再延续其余项。
 - **`cwd`。** Lody 把工作目录的 `realpath` 作为 Antigravity ACP 的 `cwd` 协商；agy 按
   realpath 比较编辑目标，否则符号链接工作目录下的工作区内编辑也会要求审批。
 
