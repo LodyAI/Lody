@@ -20,11 +20,10 @@
  *   node scripts/check-comment-ratchet.mjs --dump <dir>  list comments under dir
  */
 
+import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-
-import { listRepositoryFiles } from './repository-files.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const baselinePath = path.join(repoRoot, 'scripts', 'comment-ratchet-baseline.json');
@@ -239,8 +238,22 @@ function countFile(source) {
   return { counted: counted.size, exempt: exempt.size, jsdocLines };
 }
 
+// Tracked files only (`--cached`): the baseline must not shift when
+// install/codegen leaves untracked sources, or when the apps/mobile native
+// client submodules happen to be checked out. Native submodule sources live in
+// their own repositories and are out of this ratchet's scope.
+function listTrackedFiles(root) {
+  return execFileSync('git', ['ls-files', '--cached', '-z'], {
+    cwd: root,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  })
+    .split('\0')
+    .filter(Boolean);
+}
+
 export function collectCounts(root = repoRoot) {
-  const files = listRepositoryFiles(root).filter((rel) => {
+  const files = listTrackedFiles(root).filter((rel) => {
     const ext = path.extname(rel);
     if (!scanExtensions.has(ext)) return false;
     if (!scanRoots.some((r) => rel === r || rel.startsWith(`${r}/`))) return false;
