@@ -1,4 +1,8 @@
-import { CodeCollabOpenDiffManifestResponseSchema, type SessionId } from '@lody/shared';
+import {
+  CodeCollabOpenDiffManifestResponseSchema,
+  type SessionId,
+  type SessionMeta,
+} from '@lody/shared';
 import { writeFileSync } from 'node:fs';
 import { mkdir, readdir, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -17,6 +21,9 @@ import {
   SESSION_ID,
   withWorkspace,
 } from '../../../tests/code-collab-v2-service-helpers';
+import type { LoroDocumentManager } from '@/lib/loro/doc';
+import type { Logger } from '@/utils/logger';
+import { WorkspaceGitService } from '../../session/workspace-git-service';
 import { CodeCollabV2DiffStore } from './code-collab-v2-diff-store';
 import {
   CodeCollabV2Service,
@@ -106,6 +113,64 @@ it('does not rescan for watcher events confined to .gitignore paths', async () =
       await writeFile(path.join(workspaceRoot, 'unreported.ts'), 'x\n');
       await refreshWatched(SESSION_ID, workspaceRoot, null);
       expect(Object.keys(publish.published.at(-1)?.fileIndex ?? {})).toContain('unreported.ts');
+    } finally {
+      await service.dispose();
+    }
+  });
+});
+
+it('persists All Changes totals after a workspace watch refresh', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    await initGitRepoWithCommit(workspaceRoot);
+    await writeFile(path.join(workspaceRoot, 'README.md'), 'base\n');
+    await gitCommitAll(workspaceRoot, 'baseline');
+
+    let meta: Partial<SessionMeta> = {};
+    const upsertDocMeta = vi.fn(async (_room: string, patch: Partial<SessionMeta>) => {
+      meta = { ...meta, ...patch };
+    });
+    const workspaceDocument = {
+      repo: {
+        getDocMeta: async () => ({ meta }),
+        upsertDocMeta,
+      },
+    } as unknown as LoroDocumentManager;
+    const workspaceGit = new WorkspaceGitService({
+      logger: { debug() {} } as unknown as Logger,
+      workspaceDocument,
+    });
+    const publish = collectPublishedSharedStates();
+    const service = new CodeCollabV2Service({
+      resolveWorkspace: makeResolver(workspaceRoot),
+      publishFileIndex: async (state) => {
+        await publish.publishFileIndex(state);
+        if (state.persistAllChangesDiffStats) await workspaceGit.publishDiffStats(state);
+      },
+    });
+    const refreshWatched = (
+      service as unknown as {
+        refreshWatchedWorkspace: (
+          ownerSessionId: SessionId,
+          watchRoot: string,
+          dirtyPaths: ReadonlySet<string> | null
+        ) => Promise<void>;
+      }
+    ).refreshWatchedWorkspace.bind(service);
+    try {
+      await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
+      expect(meta.diffStats).toEqual({ allChange: { add: 0, del: 0, files: 0 } });
+
+      await writeFile(path.join(workspaceRoot, 'README.md'), 'changed\n');
+      await refreshWatched(SESSION_ID, workspaceRoot, new Set(['README.md']));
+      expect(publish.published.at(-1)).toMatchObject({
+        persistAllChangesDiffStats: true,
+        allChangesDiffStats: { files: 1, allChange: { add: 1, del: 1 } },
+      });
+      expect(meta.diffStats).toEqual({ allChange: { add: 1, del: 1, files: 1 } });
+
+      const writesAfterChange = upsertDocMeta.mock.calls.length;
+      await refreshWatched(SESSION_ID, workspaceRoot, new Set(['README.md']));
+      expect(upsertDocMeta).toHaveBeenCalledTimes(writesAfterChange);
     } finally {
       await service.dispose();
     }
