@@ -16,7 +16,8 @@ import {
  *
  * Structure lives in the `outline` LoroTree; each node's data map holds a
  * `text` LoroText created in the same commit as the node and `collapsed: true`
- * when folded. A conversation mention is one U+FFFC character of that text
+ * when folded, and `todo: 'todo' | 'done'` when the node is a to-do (absent
+ * for plain text). A conversation mention is one U+FFFC character of that text
  * carrying the `mention = {kind, id}` mark (expand `none`). Unknown root
  * containers and data keys are ignored. Every structural operation validates
  * first, then mutates and commits once, because a Loro transaction cannot be
@@ -45,6 +46,17 @@ export type TodayRichText = { text: string; mentions: TodayMention[] };
 
 export type TodayNodeId = TreeID;
 
+/** A to-do node's state; a plain node has none. */
+export type TodayTodoState = 'todo' | 'done';
+const TODO_STATES: readonly unknown[] = ['todo', 'done'];
+export const isTodayTodoState = (value: unknown): value is TodayTodoState =>
+  TODO_STATES.includes(value);
+/** The cycle `Mod+Enter` walks: plain text, to-do, done, plain text. */
+export const nextTodayTodoState = (
+  state: TodayTodoState | undefined
+): TodayTodoState | undefined =>
+  state === undefined ? 'todo' : state === 'todo' ? 'done' : undefined;
+
 export type TodayNodeView = {
   id: TodayNodeId;
   parentId: TodayNodeId | null;
@@ -53,6 +65,7 @@ export type TodayNodeView = {
   mentions: readonly TodayMention[];
   collapsed: boolean;
   hasChildren: boolean;
+  todo?: TodayTodoState;
 };
 
 export type TodayPageSnapshot = {
@@ -66,6 +79,7 @@ export type TodayFragment = {
   text: string;
   mentions?: TodayMention[];
   collapsed?: boolean;
+  todo?: TodayTodoState;
   children: TodayFragment[];
 };
 
@@ -97,6 +111,10 @@ export type TodayOutline = {
   moveUp(ids: readonly TodayNodeId[]): boolean;
   moveDown(ids: readonly TodayNodeId[]): boolean;
   moveTo(ids: readonly TodayNodeId[], target: TodayMoveTarget): boolean;
+  /** Advance each node from its own state: plain, to-do, done, plain. One undo step. */
+  cycleTodo(ids: readonly TodayNodeId[]): boolean;
+  /** Set every node's to-do state (`undefined`: plain text). One undo step. */
+  setTodo(ids: readonly TodayNodeId[], state: TodayTodoState | undefined): boolean;
   /**
    * Fold or unfold a node for this viewer and in the document. Not an undo
    * step (its commit uses a `sys:` origin).
@@ -301,6 +319,16 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
     return text ? readTodayText(text) : { text: '', mentions: [] };
   };
   const isCollapsed = (node: Node) => viewFolds.get(node.id as string) ?? docFold(node);
+  const todoOf = (node: Node): TodayTodoState | undefined => {
+    const value = node.data.get('todo');
+    return isTodayTodoState(value) ? value : undefined;
+  };
+  const writeTodo = (node: Node, state: TodayTodoState | undefined) => {
+    if (todoOf(node) === state) return false;
+    if (state) node.data.set('todo', state);
+    else node.data.delete('todo');
+    return true;
+  };
   const childrenOf = (parent: Node | undefined): Node[] =>
     parent ? (parent.children() ?? []) : tree.roots();
   const siblingsOf = (node: Node) => childrenOf(node.parent());
@@ -308,6 +336,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
 
   const view = (node: Node, depth: number, children = childrenOf(node)): TodayNodeView => {
     const rich = readRich(node);
+    const todo = todoOf(node);
     return {
       id: node.id,
       parentId: node.parent()?.id ?? null,
@@ -316,6 +345,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       mentions: rich.mentions,
       collapsed: isCollapsed(node),
       hasChildren: children.length > 0,
+      ...(todo ? { todo } : {}),
     };
   };
 
@@ -342,13 +372,19 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
   const create = (
     parent: Node | undefined,
     index: number | undefined,
-    content: { text?: string; mentions?: TodayMention[]; collapsed?: boolean }
+    content: {
+      text?: string;
+      mentions?: TodayMention[];
+      collapsed?: boolean;
+      todo?: TodayTodoState;
+    }
   ): Node => {
     const node = parent ? parent.createNode(index) : tree.createNode(undefined, index);
     const text = node.data.setContainer('text', new LoroText());
     if (content.text)
       insertTodayRich(text, 0, { text: content.text, mentions: content.mentions ?? [] });
     if (content.collapsed) node.data.set('collapsed', true);
+    if (isTodayTodoState(content.todo)) node.data.set('todo', content.todo);
     return node;
   };
 
@@ -450,6 +486,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       text: rich.text,
       ...(rich.mentions.length > 0 ? { mentions: rich.mentions } : {}),
       ...(isCollapsed(node) ? { collapsed: true } : {}),
+      ...(todoOf(node) ? { todo: todoOf(node) } : {}),
       children: childrenOf(node).map(toFragment),
     };
   };
@@ -493,12 +530,14 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       const text = node && textOf(node);
       if (!node || !text) return null;
       const length = text.length;
+      // A to-do's new line is a to-do too, not yet done.
+      const todo = todoOf(node) ? ('todo' as const) : undefined;
       if (offset <= 0 && length > 0) {
-        create(node.parent(), indexOf(node), {});
+        create(node.parent(), indexOf(node), { todo });
         commit();
         return { nodeId: id, offset: 0 };
       }
-      const right = sliceTodayRich(readTodayText(text), offset);
+      const right = { ...sliceTodayRich(readTodayText(text), offset), todo };
       if (right.text) text.delete(offset, length - offset);
       const intoChildren = childrenOf(node).length > 0 && !isCollapsed(node);
       const created = intoChildren
@@ -511,6 +550,11 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
     enterOnEmpty: (id) => {
       const node = live(id);
       if (!node) return null;
+      // Enter on an empty to-do ends the list: the line turns back into text.
+      if (writeTodo(node, undefined)) {
+        commit();
+        return { nodeId: id, offset: 0 };
+      }
       const parent = node.parent();
       const siblings = siblingsOf(node);
       if (parent && siblings.at(-1)?.id === node.id) {
@@ -629,6 +673,23 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       }
       commit();
       return true;
+    },
+
+    cycleTodo: (ids) => {
+      const nodes = liveAll(ids);
+      if (!nodes || nodes.length === 0) return false;
+      for (const node of nodes) writeTodo(node, nextTodayTodoState(todoOf(node)));
+      commit();
+      return true;
+    },
+
+    setTodo: (ids, state) => {
+      const nodes = liveAll(ids);
+      if (!nodes) return false;
+      let changed = false;
+      for (const node of nodes) changed = writeTodo(node, state) || changed;
+      if (changed) commit();
+      return changed;
     },
 
     setCollapsed: (id, collapsed) => {
@@ -760,6 +821,8 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
 
 const FENCE_PATTERN = /^(```|~~~)/;
 const BULLET_PATTERN = /^[-*+•]\s+/;
+/** A Markdown task marker after the bullet: `[ ]` to-do, `[x]` done. */
+const TASK_PATTERN = /^\[([ xX])\]\s+/;
 
 function indentWidth(line: string): number {
   let width = 0;
@@ -781,9 +844,9 @@ export function parseTodayPasteText(input: string): TodayFragment[] {
   const lines = input.replace(/\r\n?/g, '\n').replaceAll(TODAY_MENTION_CHAR, '').split('\n');
   const roots: TodayFragment[] = [];
   const stack: { indent: number; fragment: TodayFragment }[] = [];
-  const place = (indent: number, text: string) => {
+  const place = (indent: number, text: string, todo?: TodayTodoState) => {
     while (stack.length && stack.at(-1)!.indent >= indent) stack.pop();
-    const fragment: TodayFragment = { text, children: [] };
+    const fragment: TodayFragment = { text, ...(todo ? { todo } : {}), children: [] };
     (stack.at(-1)?.fragment.children ?? roots).push(fragment);
     stack.push({ indent, fragment });
   };
@@ -806,7 +869,10 @@ export function parseTodayPasteText(input: string): TodayFragment[] {
       index = end;
       continue;
     }
-    place(indent, trimmed.replace(BULLET_PATTERN, ''));
+    const unbulleted = trimmed.replace(BULLET_PATTERN, '');
+    const task = unbulleted === trimmed ? null : TASK_PATTERN.exec(unbulleted);
+    if (task) place(indent, unbulleted.slice(task[0].length), task[1] === ' ' ? 'todo' : 'done');
+    else place(indent, unbulleted);
   }
   return roots;
 }

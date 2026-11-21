@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { ChevronRight } from 'lucide-react';
+import { Check, ChevronRight } from 'lucide-react';
 import {
   Fragment,
   useCallback,
@@ -108,8 +108,61 @@ const styles = stylex.create({
     justifyContent: 'center',
     flexShrink: 0,
   },
+  // The bullet is a control (click: select the node and show its actions; drag:
+  // move it): a halo under the pointer says so, as Logseq and Workflowy do.
+  halo: {
+    width: 16,
+    height: 16,
+    borderRadius: radius.full,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    // Above the bullet's hit area, so the circle itself takes the hover.
+    position: 'relative',
+    pointerEvents: 'auto',
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    transitionProperty: 'background-color',
+    transitionDuration: '100ms',
+  },
   dot: { width: 6, height: 6, borderRadius: radius.full, backgroundColor: colors.secondaryLabel },
   dotFolded: { boxShadow: `0 0 0 4px ${colors.selectedFill}` },
+  // An empty line shows no dot until its row is hovered (or it is being
+  // edited or selected), so blank lines read as space, not as items.
+  dotQuiet: {
+    opacity: { default: 0, [stylex.when.ancestor(':hover')]: 1 },
+    transitionProperty: 'opacity',
+    transitionDuration: '100ms',
+  },
+  // A to-do's checkbox sits between the bullet and the text, so the bullet
+  // stays the one handle every node has.
+  check: {
+    width: 16,
+    height: 28,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    cursor: 'pointer',
+  },
+  checkBox: {
+    boxSizing: 'border-box',
+    width: 14,
+    height: 14,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderStyle: 'solid',
+    borderColor: { default: colors.tertiaryLabel, ':hover': colors.secondaryLabel },
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: colors.onAccent,
+  },
+  checkBoxDone: {
+    backgroundColor: colors.accent,
+    borderColor: { default: colors.accent, ':hover': colors.accent },
+  },
+  // Done reads like a settled conversation's mention: struck and dimmed.
+  textDone: { color: colors.secondaryLabel, textDecorationLine: 'line-through' },
   text: {
     flex: 1,
     minWidth: 0,
@@ -129,7 +182,7 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   editable: { outline: 'none', cursor: 'text' },
-  handle: { cursor: 'grab', touchAction: 'none' },
+  handle: { cursor: 'pointer', touchAction: 'none' },
   blockSelected: { backgroundColor: `color-mix(in srgb, ${colors.accent} 14%, transparent)` },
   joinTop: { borderTopLeftRadius: 0, borderTopRightRadius: 0 },
   joinBottom: { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
@@ -244,6 +297,9 @@ function TodayRow(props: {
   const controller = useTodayEditor();
   const active = !!node && !!controller?.isActive(store, node.id);
   const selected = !!node && !!controller?.isBlockSelected(store, node.id);
+  const done = node?.todo === 'done';
+  // Nothing to mark yet: no text, no children, not a to-do.
+  const blank = !!node && !node.text.trim() && !node.hasChildren && !node.todo;
   return (
     <div
       {...stylex.props(
@@ -285,14 +341,39 @@ function TodayRow(props: {
       </button>
       <span
         {...stylex.props(styles.bullet, styles.handle)}
+        data-today-bullet
         onPointerDown={(event) => {
           if (!controller || !node || event.button !== 0) return;
           event.preventDefault();
           controller.beginNodeDrag(store, node.id, event.currentTarget, event);
         }}
       >
-        <span {...stylex.props(styles.dot, node?.collapsed && styles.dotFolded)} />
+        <span {...stylex.props(styles.halo)}>
+          <span
+            {...stylex.props(
+              styles.dot,
+              node?.collapsed && styles.dotFolded,
+              blank && !active && !selected && styles.dotQuiet
+            )}
+            data-today-dot={blank && !active && !selected ? 'quiet' : undefined}
+          />
+        </span>
       </span>
+      {node?.todo ? (
+        <span
+          {...stylex.props(styles.check)}
+          role="checkbox"
+          aria-checked={done}
+          aria-label={t('today.todo.done', 'Done')}
+          // The press must not take focus (and the caret) from the editor.
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => controller?.toggleDone(store, node.id)}
+        >
+          <span {...stylex.props(styles.checkBox, done && styles.checkBoxDone)}>
+            {done ? <Check size={10} strokeWidth={3.5} /> : null}
+          </span>
+        </span>
+      ) : null}
       {active && controller ? (
         <>
           <div
@@ -303,7 +384,7 @@ function TodayRow(props: {
             spellCheck={false}
             role="textbox"
             aria-multiline
-            {...stylex.props(styles.text, styles.editable)}
+            {...stylex.props(styles.text, styles.editable, done && styles.textDone)}
             onPointerDown={(event) => {
               if (!node || event.button !== 0 || event.metaKey || event.ctrlKey) return;
               if (event.shiftKey || event.altKey || event.detail > 1) return;
@@ -315,7 +396,11 @@ function TodayRow(props: {
       ) : (
         <div
           key="static"
-          {...stylex.props(styles.text, (!node || !node.text) && styles.placeholder)}
+          {...stylex.props(
+            styles.text,
+            (!node || !node.text) && styles.placeholder,
+            done && styles.textDone
+          )}
           onPointerDown={(event) => {
             if (!controller || event.button !== 0 || event.metaKey || event.ctrlKey) return;
             if (event.altKey) return;

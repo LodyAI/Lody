@@ -17,7 +17,6 @@ import {
   getSessionRoomId,
   parseTodayDate,
   readTodayText,
-  TODAY_MENTION_CHAR,
   type SessionId,
   type TodayDate,
   type TodayRichText,
@@ -64,6 +63,7 @@ import { TodayEditorController } from './editor/today-editor-controller';
 import { TodayDaySection } from './today-day-section';
 import { todayOutline } from './outline.stylex';
 import { TodayConvertDialog } from './today-convert-dialog';
+import { TodaySelectionBar } from './today-selection-bar';
 import { TodayMentionStatusMenuHost } from './today-mention-status-menu';
 import { buildConvertPrompt, todayMentionMarkdown } from './editor/block-selection';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
@@ -118,6 +118,9 @@ const styles = stylex.create({
     paddingInlineStart: `calc(${space[6]} + ${todayOutline.foldOverhang})`,
     paddingInlineEnd: space[6],
     paddingBottom: space[8],
+    // The surface takes focus while blocks are selected (it owns their keys);
+    // the selected rows show that, not the app's keyboard focus ring.
+    boxShadow: { ':focus-visible': 'none' },
   },
   // The pinned column is narrow: a tighter end gutter.
   scrollerPinned: { paddingInlineEnd: space[4] },
@@ -648,7 +651,6 @@ const pickerStyles = stylex.create({
     cursor: 'pointer',
   },
   highlighted: { backgroundColor: colors.hoverFill },
-  disabled: { color: colors.tertiaryLabel, cursor: 'default' },
   empty: { padding: space[2], fontSize: text.footnoteSize, color: colors.tertiaryLabel },
 });
 
@@ -728,7 +730,7 @@ export type TodayConvertDialogComponent = ComponentType<{
 }>;
 
 /**
- * The bullet menu and "Convert to task". Only an accepted conversation changes
+ * The selection bar and "Convert to task". Only an accepted conversation changes
  * the node: unchanged since the dialog opened, the line becomes the mention
  * (children stay, folded); edited meanwhile, the mention is prefixed; a node
  * deleted meanwhile gets a mention node appended to the page instead. The dialog is replaceable so Storybook
@@ -740,12 +742,6 @@ export function TodayNodeActions(props: {
 }) {
   const controller = useTodayEditor();
   const ConvertDialog = props.ConvertDialog ?? TodayConvertDialog;
-  const [nodeMenu, setNodeMenu] = useState<{
-    store: TodayPageStore;
-    nodeId: TodayNodeId;
-    x: number;
-    y: number;
-  } | null>(null);
   const [converting, setConverting] = useState<{
     store: TodayPageStore;
     nodeId: TodayNodeId;
@@ -753,35 +749,15 @@ export function TodayNodeActions(props: {
     /** The node's text when the dialog opened: unchanged, the line becomes the mention. */
     snapshot: TodayRichText;
   } | null>(null);
-  useEffect(() => {
-    if (!controller) return undefined;
-    controller.onNodeMenu = (store, nodeId, anchor) => {
-      const rect = anchor.getBoundingClientRect();
-      // Select the node (its subtree shows selected) so the menu's actions,
-      // such as Convert to task, visibly cover everything they will take.
-      controller.selectBlocks(store, [nodeId]);
-      setNodeMenu({ store, nodeId, x: rect.left, y: rect.bottom + 4 });
-    };
-    return () => {
-      controller.onNodeMenu = null;
-    };
-  }, [controller]);
   return (
     <>
-      {nodeMenu ? (
-        <TodayNodeMenu
-          {...nodeMenu}
-          onClose={() => {
-            setNodeMenu(null);
-            controller?.clearBlockSelection();
-          }}
-          onConvert={() => {
-            const { store, nodeId } = nodeMenu;
+      {/* The dialog covers the selection it was opened from. */}
+      {converting ? null : (
+        <TodaySelectionBar
+          onConvert={(store, nodeId) => {
             const [fragment] = store.outline.extract([nodeId]);
             const text = store.outline.getText(nodeId);
-            setNodeMenu(null);
             if (!fragment || !text || !controller) return;
-            controller.deactivate();
             setConverting({
               store,
               nodeId,
@@ -790,7 +766,7 @@ export function TodayNodeActions(props: {
             });
           }}
         />
-      ) : null}
+      )}
       <ConvertDialog
         open={converting !== null}
         prompt={converting?.prompt ?? ''}
@@ -820,53 +796,6 @@ export function TodayNodeActions(props: {
         }}
       />
     </>
-  );
-}
-
-/** The bullet menu: actions on one node. */
-function TodayNodeMenu(props: {
-  store: TodayPageStore;
-  nodeId: TodayNodeId;
-  x: number;
-  y: number;
-  onClose: () => void;
-  onConvert: () => void;
-}) {
-  const { t } = useTranslation();
-  const node = props.store.outline.getNode(props.nodeId);
-  const ref = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const close = (event: Event) => {
-      if (event instanceof KeyboardEvent && event.key !== 'Escape') return;
-      if (event instanceof PointerEvent && ref.current?.contains(event.target as Node)) return;
-      props.onClose();
-    };
-    window.addEventListener('pointerdown', close, true);
-    window.addEventListener('keydown', close, true);
-    return () => {
-      window.removeEventListener('pointerdown', close, true);
-      window.removeEventListener('keydown', close, true);
-    };
-  }, [props]);
-  // Offered when the node says something besides its mentions.
-  const canConvert = !!node && node.text.replaceAll(TODAY_MENTION_CHAR, '').trim().length > 0;
-  return (
-    <div
-      ref={ref}
-      role="menu"
-      {...stylex.props(pickerStyles.menu)}
-      style={{ left: props.x, top: props.y }}
-    >
-      <button
-        type="button"
-        role="menuitem"
-        disabled={!canConvert}
-        {...stylex.props(pickerStyles.item, !canConvert && pickerStyles.disabled)}
-        onClick={props.onConvert}
-      >
-        {t('today.convertToTask', 'Convert to task')}
-      </button>
-    </div>
   );
 }
 

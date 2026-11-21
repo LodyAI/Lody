@@ -98,6 +98,42 @@ describe('Today block selection', () => {
   });
 });
 
+describe('Today to-dos in the clipboard and on block keys', () => {
+  it('copies to-dos as Markdown tasks and pastes both forms back with their state', () => {
+    const { model, id } = outline('- [ ] a\n  - [x] a1\nb');
+    const fragments = model.extract([id('a'), id('b')]);
+    const text = serializeTodayFragments(fragments, () => '');
+    expect(text).toBe('- [ ] a\n  - [x] a1\n- b');
+    const state = (parsed: ReturnType<typeof parseTodayClipboard>) =>
+      parsed!.map((fragment) => [fragment.todo, fragment.children.map((child) => child.todo)]);
+    expect(state(parseTodayClipboard({ text }))).toEqual([
+      ['todo', ['done']],
+      [undefined, []],
+    ]);
+    expect(state(parseTodayClipboard({ json: JSON.stringify({ v: 2, fragments }) }))).toEqual([
+      ['todo', ['done']],
+      [undefined, []],
+    ]);
+  });
+
+  it('Mod+Enter cycles the to-do state; plain Enter still edits', () => {
+    const key = (mods: Partial<KeyboardEvent>) => ({
+      key: 'Enter',
+      shiftKey: false,
+      altKey: false,
+      metaKey: false,
+      ctrlKey: false,
+      isComposing: false,
+      keyCode: 13,
+      ...mods,
+    });
+    expect(resolveBlockKey(key({ metaKey: true }), 'mac')).toEqual({ type: 'cycle-todo' });
+    expect(resolveBlockKey(key({ ctrlKey: true }), 'other')).toEqual({ type: 'cycle-todo' });
+    expect(resolveBlockKey(key({ metaKey: true, isComposing: true }), 'mac')).toBeNull();
+    expect(resolveBlockKey(key({}), 'mac')).toEqual({ type: 'edit' });
+  });
+});
+
 describe('Today convert-to-task prompt', () => {
   it('is the node text followed by its children as an indented list, folded ones included', async () => {
     const { buildConvertPrompt } = await import('../src/components/today/editor/block-selection');

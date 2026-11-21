@@ -99,6 +99,16 @@ any time; when off it changes none of the app's existing behavior.
   Today.
 - Pasting multi-line text splits lines into sibling nodes, inferring hierarchy from indentation; a code block
   stays one node.
+- To-dos (user decision): `Mod+Enter` cycles a node through plain text → to-do → done → plain text; with a block
+  selection every selected row advances from its own state, as one undo step. A to-do shows a checkbox between its
+  bullet and its text; clicking it swaps to-do and done, and a done node's text is struck through and dimmed. Enter in
+  a to-do starts another unchecked to-do, and Enter on an empty to-do turns it back into text. Copies write Markdown
+  task markers (`- [ ]`, `- [x]`), and pasting reads them back.
+- Selection bar (user decision): once the pointer is released, a block selection shows a small bar floating above
+  it (below when its top is scrolled out of view) with the to-do step, Convert to task, Copy and Delete. The bar never
+  takes focus, so the selection's keys keep working. Clicking a bullet selects its node and so brings up the bar.
+- A bullet shows a halo under the pointer, marking it as a control. A line with no text, no children and no to-do
+  state hides its dot until its row is hovered, edited or selected (user decision).
 - Fold state is stored in the page document and synced with it, and a page opens with its stored folds; but a
   peer folding or unfolding a node does not change the view of someone already looking at the page until they
   fold or unfold that node themselves (user decision). Folding is not an undo step.
@@ -106,8 +116,8 @@ any time; when off it changes none of the app's existing behavior.
 
 ### Node drag and drop
 
-- The bullet is the drag handle. Moving more than 5px starts a drag; otherwise it is a click that opens the node
-  menu.
+- The bullet is the drag handle. Moving more than 5px starts a drag; otherwise it is a click that selects the node
+  and shows the selection bar.
 - There is a single kind of drop target: an insertion line between two visible nodes, with depth chosen by the
   pointer's horizontal position; the node lands at the depth the line shows. A node with children, or folded,
   moves with its whole subtree; dragging a selected node carries every selected block. When the drop would make
@@ -157,7 +167,7 @@ any time; when off it changes none of the app's existing behavior.
 
 ### Convert to task
 
-- A plain node's menu has "Convert to task", which opens the new-conversation page's own component in a dialog
+- The selection bar has "Convert to task" while one node (with its subtree) is selected, which opens the new-conversation page's own component in a dialog
   without leaving Today, so everything that page supports (project groups, attachments, Agent Roles, …) is
   available:
   - The prompt is pre-filled with the node's text and all its children (including folded ones), joined by
@@ -165,7 +175,7 @@ any time; when off it changes none of the app's existing behavior.
   - Machine, project, agent config and other defaults match the new-conversation page (the last choice); nothing
     is inherited from the outline context.
   - The dialog uses its own draft and leaves the page's draft untouched. Enter sends (not during IME composition).
-- Opening a node's bullet menu shows the node and its subtree as selected: what Convert to task will take.
+- A selected node shows its subtree as selected too: what Convert to task will take.
 - On success, if the node's text is unchanged, the line becomes a line holding only the new conversation's
   mention, its original children kept under it, folded; if the text was edited meanwhile, the mention is inserted
   at the line start without overwriting the edit. On failure the original node is unchanged. When pinned, the new conversation also opens in the main area on the
@@ -189,7 +199,9 @@ any time; when off it changes none of the app's existing behavior.
   subscription and heals inside the SDK, as session rooms do. Opening a page that holds local content but was never
   registered registers it then, so one failure cannot leave notes local-only.
 - Page content: a `LoroTree` holds the outline structure (fractional-index ordering); each node's data holds a
-  `LoroText` for its text (conversation mentions are marked characters in it), and fold state is stored alongside.
+  `LoroText` for its text (conversation mentions are marked characters in it); fold state and the to-do state
+  (`todo: 'todo' | 'done'`, absent for plain text) are stored alongside. A client that does not know the to-do key
+  ignores it and shows the node as text.
 - Data is workspace-shared: every member can read and write every member's Today; neither the UI nor the sync
   layer distinguishes the page owner.
 - Encrypted workspaces: document rooms are encrypted by docId automatically and the meta flock is protected too,
@@ -218,7 +230,7 @@ any time; when off it changes none of the app's existing behavior.
 
 ## Out of scope
 
-- `Cmd+Enter` done, inline formatting, images.
+- Inline formatting, images. Hiding or archiving done nodes; completing a parent does not touch its children.
 - Dragging across dates, a "move to date" action.
 - Remote cursors and presence, restricting edits to the page owner.
 - Agents reading or writing Today, mobile and native clients.

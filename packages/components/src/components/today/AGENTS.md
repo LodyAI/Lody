@@ -10,6 +10,10 @@ Behavior: [Today Spec](../../../../../specs/today-outline.md). Files: [README.md
 - Text reaches LoroText only through `bindLoroText` and the page undo (`editText`);
   structural edits go through `TodayOutline` inside `undo.structural`. Lexical history stays off.
 - Outline keys are guarded against IME composition (`isComposing`, keyCode 229, `Process`).
+  Nothing is written while a composition is open, so disposing a binding writes what it still held:
+  leaving a node mid-composition must never drop the preedit.
+- Node actions live in the selection bar, which never takes focus (the surface keeps the selection's keys);
+  a to-do state changes only through `TodayOutline.cycleTodo`/`setTodo` inside `undo.structural`.
 - Viewing a day never creates it remotely: a page joins its room only once registered.
   A failed registration or join retries with backoff (capped at 5 minutes) while the page is open,
   and typing never cuts a join's backoff short. Never leave a page with local content unregistered,

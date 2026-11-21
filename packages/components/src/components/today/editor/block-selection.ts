@@ -1,5 +1,6 @@
 import {
   TODAY_MENTION_CHAR,
+  isTodayTodoState,
   parseTodayPasteText,
   type TodayFragment,
   type TodayMention,
@@ -61,6 +62,7 @@ export type BlockIntent =
   | { type: 'move-up' }
   | { type: 'move-down' }
   | { type: 'select-all' }
+  | { type: 'cycle-todo' }
   | { type: 'undo' }
   | { type: 'redo' };
 
@@ -75,6 +77,7 @@ export function resolveBlockKey(
     case 'Escape':
       return { type: 'clear' };
     case 'Enter':
+      if (mod && !event.shiftKey && !event.altKey) return { type: 'cycle-todo' };
       return mod || event.shiftKey ? null : { type: 'edit' };
     case 'Backspace':
     case 'Delete':
@@ -151,7 +154,10 @@ export function todayRichToPlain(
   return out;
 }
 
-/** Plain-text form: `- ` bullets, two spaces per level, mentions as links. */
+/**
+ * Plain-text form: `- ` bullets, two spaces per level, mentions as links, and
+ * Markdown task markers (`- [ ]`, `- [x]`) for to-dos.
+ */
 export function serializeTodayFragments(
   fragments: readonly TodayFragment[],
   mentionText: TodayMentionText,
@@ -161,7 +167,8 @@ export function serializeTodayFragments(
     .map((fragment) => {
       const label = todayRichToPlain(fragment, mentionText);
       const indent = '  '.repeat(depth);
-      const line = `${indent}- ${label.replace(/\n/g, `\n${indent}  `)}`;
+      const marker = fragment.todo ? (fragment.todo === 'done' ? '[x] ' : '[ ] ') : '';
+      const line = `${indent}- ${marker}${label.replace(/\n/g, `\n${indent}  `)}`;
       const children = serializeTodayFragments(fragment.children, mentionText, depth + 1);
       return children ? `${line}\n${children}` : line;
     })
@@ -197,6 +204,7 @@ function readFragment(value: unknown): TodayFragment | null {
     text: fragment.text,
     ...(mentions && mentions.length > 0 ? { mentions: mentions as TodayMention[] } : {}),
     ...collapsed,
+    ...(isTodayTodoState(fragment.todo) ? { todo: fragment.todo } : {}),
     children,
   };
 }

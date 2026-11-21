@@ -53,7 +53,8 @@ export function $readTodayEditorRich(): TodayRichText {
  *
  * Outbound: each committed editor change becomes one rich LoroText splice
  * (positions compare character and mention) through the page undo (so typing groups into undo steps). Nothing is written while an
- * IME composition is open.
+ * IME composition is open; disposing the binding writes whatever the
+ * composition still held.
  * Inbound: any LoroText change the editor does not already show (a peer, an
  * undo, a structural op on this node) realigns the editor to the text and
  * moves the caret through the event delta. During composition inbound deltas
@@ -104,14 +105,14 @@ export function bindLoroText(options: {
     tag: INBOUND_TAGS,
   });
 
-  const stopEditor = editor.registerUpdateListener(({ editorState, tags }) => {
-    if (tags.has(COLLABORATION_TAG) || composing()) return;
-    const next = editorState.read($readTodayEditorRich);
+  /** Write what the editor shows and the text does not hold yet, as one rich splice. */
+  const commit = (showPeerEdits: boolean) => {
+    const next = editorRich();
     let splice = safeRichDiff(base, next);
     const pending = buffered;
     if (!splice) {
       // A composition ended without a change: show what peers wrote meanwhile.
-      if (pending.length > 0) realign(pending);
+      if (showPeerEdits && pending.length > 0) realign(pending);
       return;
     }
     buffered = [];
@@ -136,8 +137,13 @@ export function bindLoroText(options: {
       writing = false;
     }
     // Peer edits were held during the composition: show them, moving the caret past them.
-    if (pending.length > 0) realign(pending);
+    if (showPeerEdits && pending.length > 0) realign(pending);
     else base = next;
+  };
+
+  const stopEditor = editor.registerUpdateListener(({ tags }) => {
+    if (tags.has(COLLABORATION_TAG) || composing()) return;
+    commit(true);
   });
 
   // A composition can end with no editor change (cancelled, or the same text):
@@ -172,6 +178,10 @@ export function bindLoroText(options: {
       stopEditor();
       stopRoot();
       stopText();
+      // Leaving a node while an IME still composes (a click on another node)
+      // ends the composition with no further editor update: keep its text, as
+      // a browser commits the preedit on blur.
+      if (!text.isDeleted()) commit(false);
     },
   };
 }

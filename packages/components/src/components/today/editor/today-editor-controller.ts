@@ -151,9 +151,8 @@ export class TodayEditorController {
   private dropIndicator: TodayDropIndicator | null = null;
   private dragGhost: TodayDragGhost | null = null;
   private cancelSettle: (() => void) | null = null;
-  /** Opens the node menu for a bullet clicked without dragging (wired by the host). */
-  onNodeMenu: ((store: TodayPageStore, nodeId: TodayNodeId, anchor: HTMLElement) => void) | null =
-    null;
+  /** A drag-selection is under way: the selection bar waits for the release. */
+  private pointerSelecting = false;
   /** Workspace whose session links may be pasted into a node. */
   workspaceId: string | null = null;
   /** Plain-text form of a mention in copies and the Convert to task prompt (set by the host). */
@@ -300,6 +299,12 @@ export class TodayEditorController {
   getEditorRoot() {
     return this.root;
   }
+  getSurface() {
+    return this.surface;
+  }
+  isSelectingByPointer() {
+    return this.pointerSelecting;
+  }
   getDropIndicator() {
     return this.dropIndicator;
   }
@@ -392,7 +397,7 @@ export class TodayEditorController {
 
   /**
    * Bullet pressed: after 5px it drags the node (or the whole block selection
-   * it belongs to) within its day; a press without movement opens the menu.
+   * it belongs to) within its day; a press without movement selects the node.
    */
   beginNodeDrag(
     store: TodayPageStore,
@@ -450,7 +455,11 @@ export class TodayEditorController {
         );
       } else if (wasDragging) this.notify();
       if (drop) this.dropAt(store, drop, ids);
-      if (commit && !wasDragging) this.onNodeMenu?.(store, nodeId, bullet);
+      // A click selects the node (its subtree shows selected), which brings up
+      // the selection bar; a node already in the selection keeps it whole.
+      if (commit && !wasDragging && !this.isBlockSelected(store, nodeId)) {
+        this.selectBlocks(store, [nodeId]);
+      }
     };
     const move = (event: PointerEvent) => {
       // The release happened where we could not see it (another window or app):
@@ -759,6 +768,9 @@ export class TodayEditorController {
           visible.map((node) => node.id)
         );
         return true;
+      case 'cycle-todo':
+        this.cycleSelectionTodo();
+        return true;
       case 'indent':
       case 'outdent':
       case 'move-up':
@@ -784,6 +796,46 @@ export class TodayEditorController {
     );
     if (cut) this.deleteBlocks(store, roots);
     return true;
+  }
+
+  /**
+   * Mod+Enter (or the selection bar) on selected blocks: each selected row
+   * advances from its own state. Rows only shown selected under a selected
+   * parent keep theirs.
+   */
+  cycleSelectionTodo() {
+    const selection = this.selection;
+    if (!selection) return;
+    const { store, ids } = selection;
+    store.undo.structural(() => store.outline.cycleTodo(ids));
+  }
+
+  /** The checkbox of a to-do row: to-do and done swap. */
+  toggleDone(store: TodayPageStore, nodeId: TodayNodeId) {
+    const state = store.outline.getNode(nodeId)?.todo;
+    if (!state) return;
+    store.undo.structural(() =>
+      store.outline.setTodo([nodeId], state === 'done' ? 'todo' : 'done')
+    );
+  }
+
+  /**
+   * Copy the selected blocks (the selection bar) through the surface's own
+   * `copy` event, so the clipboard gets the same text and structured payload
+   * as the keyboard shortcut.
+   */
+  copySelection() {
+    if (!this.selection || !this.surface) return;
+    this.surface.focus({ preventScroll: true });
+    this.surface.ownerDocument.execCommand('copy');
+  }
+
+  /** Delete the selected blocks with their subtrees (the selection bar). */
+  deleteSelection() {
+    const selection = this.selection;
+    if (!selection) return;
+    const { store } = selection;
+    this.deleteBlocks(store, topLevelSelection(store.getSnapshot().visible, selection.ids));
   }
 
   private deleteBlocks(store: TodayPageStore, roots: TodayNodeId[]) {
@@ -944,7 +996,10 @@ export class TodayEditorController {
       window.removeEventListener('pointerup', stop);
       window.removeEventListener('blur', stop);
       this.stopPointer = null;
+      this.pointerSelecting = false;
+      if (this.selection) this.notify();
     };
+    this.pointerSelecting = true;
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', stop);
     window.addEventListener('blur', stop);
@@ -1207,6 +1262,9 @@ export class TodayEditorController {
         return this.focusNeighbour(store, nodeId, 1, 'start');
       case 'block-select':
         return this.selectBlocks(store, [nodeId]);
+      case 'cycle-todo':
+        store.undo.structural(() => outline.cycleTodo([nodeId]));
+        return keepCaret();
       case 'extend-text':
         this.editor.update(() => $setSelectionOffsets(intent.anchor, intent.focus), {
           discrete: true,
