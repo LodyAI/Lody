@@ -139,7 +139,7 @@ async function exportRoostTurns(docId: string, input: ExportWorkspaceBundleInput
     writer.addGap({
       id: docId,
       kind: 'roost',
-      reason: 'Roost conversation bodies cannot be read here',
+      reason: 'Roost session bodies cannot be read here',
     });
     return;
   }

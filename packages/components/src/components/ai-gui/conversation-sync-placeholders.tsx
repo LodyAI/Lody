@@ -20,7 +20,7 @@ export function ConversationSkeleton() {
     <ConversationColumn
       className="flex flex-col gap-6 py-2"
       role="status"
-      aria-label={t('sessions.contentSync.loadingConversation', 'Loading conversation')}
+      aria-label={t('sessions.contentSync.loadingConversation', 'Loading session')}
       data-conversation-skeleton=""
     >
       {SKELETON_TURNS.map((turn, index) => (

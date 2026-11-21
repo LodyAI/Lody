@@ -156,7 +156,7 @@ export function sessionShareErrorMessage(
     case 'size':
       return t(
         'sharing.error.size',
-        'The selected content exceeds a sharing size limit: each conversation history can be up to {{historyMiB}} MiB, each image {{imageMB}} MB, and the whole share {{packageMiB}} MiB. Try fewer sub-conversations or images.',
+        'The selected content exceeds a sharing size limit: each session history can be up to {{historyMiB}} MiB, each image {{imageMB}} MB, and the whole share {{packageMiB}} MiB. Try fewer sub-sessions or images.',
         {
           historyMiB: SHARE_LIMITS.historyBytes / 1024 ** 2,
           imageMB: SHARE_LIMITS.imageBytes / 1_000_000,
@@ -166,37 +166,37 @@ export function sessionShareErrorMessage(
     case 'conversationLimit':
       return t(
         'sharing.error.conversationLimit',
-        'Select between 1 and {{limit}} conversations, including the main conversation. Reduce the selected sub-conversations and try again.',
+        'Select between 1 and {{limit}} sessions, including the main session. Reduce the selected sub-sessions and try again.',
         { limit: SHARE_LIMITS.conversations }
       );
     case 'attachmentLimit':
       return t(
         'sharing.error.attachmentLimit',
-        'Each share can include up to {{limit}} images. Select fewer conversations with images and try again.',
+        'Each share can include up to {{limit}} images. Select fewer sessions with images and try again.',
         { limit: SHARE_LIMITS.attachments }
       );
     case 'imageLimit':
       return t(
         'sharing.error.imageLimit',
-        'Each image can be up to {{limit}} MB. Use smaller images or select fewer conversations with oversized images, then retry.',
+        'Each image can be up to {{limit}} MB. Use smaller images or select fewer sessions with oversized images, then retry.',
         { limit: SHARE_LIMITS.imageBytes / 1_000_000 }
       );
     case 'historyLimit':
       return t(
         'sharing.error.historyLimit',
-        'A single conversation history can be up to {{limit}} MiB. Choose a shorter conversation and try again.',
+        'A single session history can be up to {{limit}} MiB. Choose a shorter session and try again.',
         { limit: SHARE_LIMITS.historyBytes / 1024 ** 2 }
       );
     case 'packageLimit':
       return t(
         'sharing.error.packageLimit',
-        'The whole share can be up to {{limit}} MiB. Reduce the selected sub-conversations or images and try again.',
+        'The whole share can be up to {{limit}} MiB. Reduce the selected sub-sessions or images and try again.',
         { limit: SHARE_LIMITS.deploymentBytes / 1024 ** 2 }
       );
     case 'selection':
       return t(
         'sharing.error.selection',
-        'Some selected conversations are unavailable. Close and reopen sharing, check the selected conversations, and try again.'
+        'Some selected sessions are unavailable. Close and reopen sharing, check the selected sessions, and try again.'
       );
     case 'credential':
       return t(
@@ -206,22 +206,22 @@ export function sessionShareErrorMessage(
     case 'content':
       return t(
         'sharing.error.content',
-        'The conversation could not be prepared for sharing. Reload the app and try again. If it keeps failing, report the issue.'
+        'The session could not be prepared for sharing. Reload the app and try again. If it keeps failing, report the issue.'
       );
     case 'captureTimeout':
       return t(
         'sharing.error.captureTimeout',
-        'Loading the conversations and images took too long. Check your connection and let the conversations finish syncing, then retry or select fewer sub-conversations.'
+        'Loading the sessions and images took too long. Check your connection and let the sessions finish syncing, then retry or select fewer sub-sessions.'
       );
     case 'attachment':
       return t(
         'sharing.error.attachment',
-        'An image could not be loaded for sharing. Check that the images open in the original conversation and that your connection is working, then retry.'
+        'An image could not be loaded for sharing. Check that the images open in the original session and that your connection is working, then retry.'
       );
     case 'capture':
       return t(
         'sharing.error.capture',
-        'Could not load the conversations for sharing. Check your connection, wait for the conversations to sync, and try again.'
+        'Could not load the sessions for sharing. Check your connection, wait for the sessions to sync, and try again.'
       );
     case 'prepare':
       return t(

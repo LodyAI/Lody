@@ -407,7 +407,7 @@ export function AppearanceSettingsView({
           label={t('settings.fontLigatures.label', 'Font ligatures')}
           info={t(
             'settings.fontLigatures.helper',
-            'Applies to conversation, code, and tool output.'
+            'Applies to session text, code, and tool output.'
           )}
         >
           <Switch

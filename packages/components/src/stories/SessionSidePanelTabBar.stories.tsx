@@ -46,7 +46,7 @@ const INITIAL_TABS: SessionSidePanelTabItem[] = [
     closeable: true,
     dirty: true,
   },
-  { id: 'diff:turn-1', label: 'Conversation Diff', kind: 'diff', closeable: true },
+  { id: 'diff:turn-1', label: 'Session Diff', kind: 'diff', closeable: true },
 ];
 
 function SidePanelTabBarStory() {

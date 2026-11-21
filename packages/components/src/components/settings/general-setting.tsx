@@ -699,7 +699,7 @@ export function GeneralSettingsComponent() {
 
         {/* Settings are grouped by what they are about, so no group is one row
           and no row needs a sentence to say where it applies. */}
-        <CompactSection title={t('settings.general.sections.conversations', 'Conversations')}>
+        <CompactSection title={t('settings.general.sections.conversations', 'Sessions')}>
           <CompactRow
             label={t(
               'settings.general.sessions.queuedMessageBehavior.label',

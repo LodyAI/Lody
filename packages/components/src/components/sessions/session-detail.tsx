@@ -3068,7 +3068,7 @@ const SessionDetail = ({
           toast.info(
             t(
               'archive.localProject.restoreUnavailable',
-              'Re-add this local project to restore its conversations.'
+              'Re-add this local project to restore its sessions.'
             )
           );
           return;
@@ -3076,7 +3076,7 @@ const SessionDetail = ({
         console.error('Failed to reopen session tab', error);
         toast.error(
           restoresArchivedChild
-            ? t('archive.restoreFailed', 'Failed to restore conversation.')
+            ? t('archive.restoreFailed', 'Failed to restore session.')
             : t('sessions.tabReopenFailed', 'Could not reopen this tab')
         );
       }
@@ -3208,13 +3208,13 @@ const SessionDetail = ({
         toast.info(
           t(
             'archive.localProject.restoreUnavailable',
-            'Re-add this local project to restore its conversations.'
+            'Re-add this local project to restore its sessions.'
           )
         );
         return;
       }
       console.error('Failed to restore archived conversation', error);
-      toast.error(t('archive.restoreFailed', 'Failed to restore conversation.'));
+      toast.error(t('archive.restoreFailed', 'Failed to restore session.'));
     }
   }, [activeSession, restoreSession, t]);
 
@@ -3323,7 +3323,7 @@ const SessionDetail = ({
       );
       setPendingSessionShare(null);
     } catch (error) {
-      toast.error(t('sessions.sharing.shareFailed', "Couldn't share this conversation"), {
+      toast.error(t('sessions.sharing.shareFailed', "Couldn't share this session"), {
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -3394,7 +3394,7 @@ const SessionDetail = ({
       toast.error(
         t(
           'sessions.copyConversationHistoryUnavailable',
-          'Conversation history is unavailable for this tab'
+          'Session history is unavailable for this tab'
         )
       );
       return;
@@ -3422,7 +3422,7 @@ const SessionDetail = ({
       !activeChatRef ||
       !('startShareImageSelection' in activeChatRef)
     ) {
-      toast.error(t('sessions.shareImage.empty', 'No conversation to share'));
+      toast.error(t('sessions.shareImage.empty', 'No session to share'));
       return;
     }
     activeChatRef.startShareImageSelection(shareData.messages, (messages) => {
@@ -4400,7 +4400,7 @@ const SessionDetail = ({
     (sourceSessionId: string, targetSessionId: SessionId) => {
       if (!takePendingFork(sourceSessionId, targetSessionId)) return;
       toast.error(
-        t('sessions.forkOpenFailed', 'Session forked, but its conversation could not be loaded')
+        t('sessions.forkOpenFailed', 'Session forked, but the new session could not be loaded')
       );
     },
     [t, takePendingFork]
@@ -4466,7 +4466,7 @@ const SessionDetail = ({
     const archivedTarget = closedConversations.find((item) => item.id === exactId);
     if (archivedTarget && isArchivedOutsideWorkspace(archivedTarget, isWorkspaceArchived)) {
       clearPendingSessionLink(null);
-      toast.error(t('deepLink.archived', 'Restore this archived conversation before opening it.'));
+      toast.error(t('deepLink.archived', 'Restore this archived session before opening it.'));
       return;
     }
     if (!allOrderedSessionTabIdSet.has(exactId) && exactId !== sessionId) {
@@ -5777,7 +5777,7 @@ const SessionDetail = ({
             : () => {
                 void handleShareAsImage().catch((error: unknown) => {
                   console.error('Failed to load conversation for image sharing', error);
-                  toast.error(t('sessions.shareImage.empty', 'No conversation to share'));
+                  toast.error(t('sessions.shareImage.empty', 'No session to share'));
                 });
               },
       },
@@ -5850,7 +5850,7 @@ const SessionDetail = ({
     return (
       <LoadingPlaceholder
         title={t('sessions.route.loadingTitle', 'Loading session')}
-        description={t('sessions.route.loadingDescription', 'Preparing conversation history.')}
+        description={t('sessions.route.loadingDescription', 'Preparing session history.')}
       />
     );
   }
@@ -5867,7 +5867,7 @@ const SessionDetail = ({
     return (
       <LoadingPlaceholder
         title={t('sessions.route.loadingTitle', 'Loading session')}
-        description={t('sessions.route.loadingDescription', 'Preparing conversation history.')}
+        description={t('sessions.route.loadingDescription', 'Preparing session history.')}
       />
     );
   }
@@ -5886,10 +5886,10 @@ const SessionDetail = ({
         <>
           <Spinner className="h-5 w-5 text-muted-foreground" />
           <p {...stylex.props(detailStyles.loadingText)}>
-            {t('sessions.tabWaitingForSync', 'Waiting for this conversation to sync…')}
+            {t('sessions.tabWaitingForSync', 'Waiting for this session to sync…')}
           </p>
           <Button variant="ghost" size="small" onClick={() => handleSessionTabSelect(sessionId)}>
-            {t('sessions.tabBackToMain', 'Back to main conversation')}
+            {t('sessions.tabBackToMain', 'Back to main session')}
           </Button>
         </>
       ) : null}
@@ -6325,7 +6325,7 @@ const SessionDetail = ({
         onClick: () => {
           void handleShareAsImage().catch((error: unknown) => {
             console.error('Failed to load conversation for image sharing', error);
-            toast.error(t('sessions.shareImage.empty', 'No conversation to share'));
+            toast.error(t('sessions.shareImage.empty', 'No session to share'));
           });
         },
       });

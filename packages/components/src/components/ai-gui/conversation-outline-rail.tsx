@@ -611,7 +611,7 @@ export function ConversationOutlineRail({
 
   const rail = (
     <nav
-      aria-label={t('sessions.outline.railLabel', 'Conversation outline')}
+      aria-label={t('sessions.outline.railLabel', 'Session outline')}
       // Low contrast at rest so the rail reads as a margin marker, not chrome;
       // the whole strip lifts together on hover so a single tick never has to
       // be found before it becomes visible.

@@ -1129,7 +1129,7 @@ export function ClosedTabsPopover({
     [archivedSessions]
   );
   const hasUnread = archivedSessions.some(closedSessionHasUnreadMessages);
-  const triggerLabel = t('sessions.tabs.closedTabs', 'Closed conversations');
+  const triggerLabel = t('sessions.tabs.closedTabs', 'Closed sessions');
 
   return (
     <Popover.Root>
@@ -1164,13 +1164,13 @@ export function ClosedTabsPopover({
           }
         />
         <Tooltip.Content side="bottom">
-          {t('sessions.tabs.closedTabs', 'Closed conversations')}
+          {t('sessions.tabs.closedTabs', 'Closed sessions')}
         </Tooltip.Content>
       </Tooltip.Root>
       <Popover.Content align="end" className="w-72 p-0" sideOffset={4}>
         <div {...stylex.props(styles.popoverHeader)}>
           <p {...stylex.props(styles.popoverTitle)}>
-            {t('sessions.tabs.closedTabs', 'Closed conversations')}
+            {t('sessions.tabs.closedTabs', 'Closed sessions')}
           </p>
         </div>
         <ScrollArea viewportClassName={stylex.props(styles.popoverScroll).className}>
@@ -1182,7 +1182,7 @@ export function ClosedTabsPopover({
               const ActionIcon = restoresArchive ? ArchiveRestore : Undo2;
               const actionLabel = restoresArchive
                 ? t('archive.restore', 'Restore session')
-                : t('sessions.tabs.reopenTab', 'Reopen conversation');
+                : t('sessions.tabs.reopenTab', 'Reopen session');
               return (
                 <button
                   key={session.id}

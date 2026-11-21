@@ -292,7 +292,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
 
   const publishLabel = active
     ? t('sharing.static.update', 'Update share')
-    : t('sharing.static.share', 'Share conversation');
+    : t('sharing.static.share', 'Share session');
   const retrying = !!props.error && hasPending;
 
   const body = (() => {
@@ -329,7 +329,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
             })
           : phase === 'publishing'
             ? t('sharing.static.phasePublishing', 'Publishing…')
-            : t('sharing.static.phaseCapturing', 'Freezing this conversation…');
+            : t('sharing.static.phaseCapturing', 'Freezing this session…');
       return (
         <div {...stylex.props(styles.body, embedded && styles.bodyEmbedded)}>
           <p role="status" {...stylex.props(styles.status)}>
@@ -382,18 +382,18 @@ export function SessionShareManager(props: SessionShareManagerProps) {
       <div {...stylex.props(styles.body, embedded && styles.bodyEmbedded)}>
         {embedded ? (
           <Note>
-            {t('sharing.static.publicNotice', 'Anyone with the link can view this conversation.')}
+            {t('sharing.static.publicNotice', 'Anyone with the link can view this session.')}
           </Note>
         ) : active ? (
           <div {...stylex.props(styles.lead, styles.prose)}>
             <Globe {...stylex.props(styles.leadIcon)} aria-hidden />
             <span>
-              {t('sharing.static.publicNotice', 'Anyone with the link can view this conversation.')}
+              {t('sharing.static.publicNotice', 'Anyone with the link can view this session.')}
             </span>
           </div>
         ) : (
           <p {...stylex.props(styles.prose)}>
-            {t('sharing.static.publicNotice', 'Anyone with the link can view this conversation.')}
+            {t('sharing.static.publicNotice', 'Anyone with the link can view this session.')}
           </p>
         )}
         {active && props.shareLink && (
@@ -435,10 +435,10 @@ export function SessionShareManager(props: SessionShareManagerProps) {
               {includeChildren === 'indeterminate'
                 ? t(
                     'sharing.static.includeChildrenPartial',
-                    'Also share sub-conversations ({{selected}} of {{count}})',
+                    'Also share sub-sessions ({{selected}} of {{count}})',
                     { selected: selectedChildren, count: shareableChildren.length }
                   )
-                : t('sharing.static.includeChildren', 'Also share {{count}} sub-conversations', {
+                : t('sharing.static.includeChildren', 'Also share {{count}} sub-sessions', {
                     count: shareableChildren.length,
                   })}
             </span>
@@ -446,7 +446,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
         )}
         {children.length >= SHARE_LIMITS.conversations && (
           <Note>
-            {t('sharing.static.limit', 'A share can contain at most {{count}} conversations.', {
+            {t('sharing.static.limit', 'A share can contain at most {{count}} sessions.', {
               count: SHARE_LIMITS.conversations,
             })}
           </Note>
@@ -461,7 +461,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
           <Note>
             {t(
               'sharing.static.sourceUnavailable',
-              'The selected source conversations are unavailable. The published copy is unchanged.'
+              'The selected source sessions are unavailable. The published copy is unchanged.'
             )}
           </Note>
         )}

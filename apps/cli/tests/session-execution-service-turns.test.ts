@@ -1161,7 +1161,7 @@ describe('SessionExecutionService', () => {
       name: 'refuses a context-free fallback when history has not synced',
       errors: [new Error('acp_resume_failed: session unavailable')],
       expectedReason: 'session_restore_failed',
-      expectedMessage: expect.stringContaining('has not synced the earlier conversation'),
+      expectedMessage: expect.stringContaining('has not synced the earlier session'),
       resumeSessionId: 'acp-existing' as ACPSessionId,
       history: [],
       // The fallback must not even be attempted: creating it would persist a

@@ -2023,7 +2023,7 @@ export function LoroAppSidebar({
     try {
       await shareSessionWithTeam(pending.sharing);
     } catch (error) {
-      toast.error(t('sessions.sharing.shareFailed', "Couldn't share this conversation"), {
+      toast.error(t('sessions.sharing.shareFailed', "Couldn't share this session"), {
         description: error instanceof Error ? error.message : String(error),
       });
       setIsSharingSession(false);

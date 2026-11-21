@@ -58,7 +58,7 @@ export class SessionRelationLifecyclePage {
     await this.openRowMenu(this.activeRowById(resources.rootSessionId));
     await this.page.getByRole('menuitem', { name: /^(Archive Session|归档会话)$/u }).click();
     const confirmation = this.page.getByRole('alertdialog', {
-      name: /^(Archive sub-conversations too\?|同时归档子对话？)$/u,
+      name: /^(Archive sub-sessions too\?|同时归档子对话？)$/u,
     });
     await expect(confirmation).toBeVisible();
     await confirmation.getByRole('button', { name: /^(Archive all|全部归档)$/u }).click();

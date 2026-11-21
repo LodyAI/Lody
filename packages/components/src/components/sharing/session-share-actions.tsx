@@ -91,7 +91,7 @@ export function SessionShareActions({
               onClick={() => void copyAgentPrompt()}
               title={t(
                 'sharing.agentAccessNotice',
-                'Anyone receiving this prompt can read the shared conversations and images.'
+                'Anyone receiving this prompt can read the shared sessions and images.'
               )}
             >
               <MessageSquare {...stylex.props(shareSurface.glyphSmall)} aria-hidden />
@@ -111,7 +111,7 @@ export function SessionShareActions({
           <p {...stylex.props(styles.notice)}>
             {t(
               'sharing.agentAccessNotice',
-              'Anyone receiving this prompt can read the shared conversations and images.'
+              'Anyone receiving this prompt can read the shared sessions and images.'
             )}
           </p>
         )}

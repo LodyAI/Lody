@@ -1760,7 +1760,7 @@ export function ArchiveView() {
   const removedProjectGroupLabel = t('archive.localProject.removedGroup', 'Removed local project');
   const restoreUnavailableLabel = t(
     'archive.localProject.restoreUnavailable',
-    'Re-add this local project to restore its conversations.'
+    'Re-add this local project to restore its sessions.'
   );
 
   // Build member lookup map for creator avatars
@@ -1932,7 +1932,7 @@ export function ArchiveView() {
         return;
       }
       console.error('Failed to restore archived conversation', error);
-      toast.error(t('archive.restoreFailed', 'Failed to restore conversation.'));
+      toast.error(t('archive.restoreFailed', 'Failed to restore session.'));
     });
   };
 

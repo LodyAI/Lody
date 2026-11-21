@@ -1949,7 +1949,7 @@ export function SessionHeaderMenu({
                     ? undefined
                     : t(
                         'sessions.copyConversationHistoryUnavailable',
-                        'Conversation history is unavailable for this tab'
+                        'Session history is unavailable for this tab'
                       ))
                 }
                 icon={FileText}
@@ -4245,9 +4245,7 @@ export const SessionChatInterface = memo(
             reason: 'empty_history',
             history_count: 0,
           });
-          toast.error(
-            t('sessions.copyConversationHistoryEmpty', 'No conversation history to copy')
-          );
+          toast.error(t('sessions.copyConversationHistoryEmpty', 'No session history to copy'));
           return;
         }
 
@@ -4306,7 +4304,7 @@ export const SessionChatInterface = memo(
             error_message: error instanceof Error ? error.message : String(error),
           });
           toast.error(
-            t('sessions.copyConversationHistoryFailed', 'Failed to copy conversation history')
+            t('sessions.copyConversationHistoryFailed', 'Failed to copy session history')
           );
         }
       },

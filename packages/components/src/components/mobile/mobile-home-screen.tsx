@@ -674,7 +674,7 @@ function PrivateResourceHelpSheet({
           <DrawerTitle className="text-base font-semibold text-foreground">{title}</DrawerTitle>
           <DrawerDescription className="mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
             {labels.privateHelpDescription ??
-              'Private machines, local projects, and their conversations are hidden from teammates. Share a machine in device settings or a project in project settings.'}
+              'Private machines, local projects, and their sessions are hidden from teammates. Share a machine in device settings or a project in project settings.'}
           </DrawerDescription>
           <button
             type="button"

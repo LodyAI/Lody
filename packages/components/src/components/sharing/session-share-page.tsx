@@ -372,9 +372,7 @@ function ShareConversationPane({
       await copyTextToClipboard(markdown);
       toast.success(describeCopiedConversation(stats, t));
     } catch {
-      toast.error(
-        t('sessions.copyConversationHistoryFailed', 'Failed to copy conversation history')
-      );
+      toast.error(t('sessions.copyConversationHistoryFailed', 'Failed to copy session history'));
     } finally {
       setCopying(false);
     }
@@ -390,7 +388,7 @@ function ShareConversationPane({
             items={tabs.map((tab) => ({ key: tab.id, label: tab.title }))}
             activeKey={conversationId}
             onSelect={onSelect}
-            ariaLabel={t('sharing.conversations', 'Shared conversations')}
+            ariaLabel={t('sharing.conversations', 'Shared sessions')}
             className={stylex.props(styles.tabStrip).className}
             itemClassName={stylex.props(styles.tabItem).className}
           />
@@ -425,7 +423,7 @@ function ShareConversationPane({
               emptyState={
                 <p role="status" {...stylex.props(styles.paneNote, styles.paneNoteCentered)}>
                   {snapshot.status === 'loading'
-                    ? t('sharing.loading', 'Loading shared conversation…')
+                    ? t('sharing.loading', 'Loading shared session…')
                     : t('sharing.empty', 'No messages yet')}
                 </p>
               }
@@ -536,7 +534,7 @@ export function SessionShareSurface(props: {
   if (!manifest || !sessionId)
     return (
       <main role="status" {...stylex.props(styles.state, styles.stateLoading)}>
-        {t('sharing.loading', 'Loading shared conversation…')}
+        {t('sharing.loading', 'Loading shared session…')}
       </main>
     );
   const endTreeResize = (handle: HTMLElement, pointerId: number) => {
@@ -551,7 +549,7 @@ export function SessionShareSurface(props: {
   };
   const panes = resolveSharePanes(manifest, sessionId);
   const hasTree = manifest.conversations.filter((entry) => !entry.parentConversationId).length > 1;
-  const title = (value: string) => value || t('sharing.defaultTitle', 'Shared conversation');
+  const title = (value: string) => value || t('sharing.defaultTitle', 'Shared session');
   const treeRows = () => (
     // The connector in `session-row-leading-slot.tsx` reaches half the row's
     // free height above and below the 14px slot, plus the list's 1px gap. Rows
@@ -608,7 +606,7 @@ export function SessionShareSurface(props: {
                   icon
                   variant="ghost"
                   aria-expanded={treeVisible}
-                  aria-label={t('sharing.toggleTree', 'Toggle conversation tree')}
+                  aria-label={t('sharing.toggleTree', 'Toggle session tree')}
                   onClick={() => setTreeVisible((value) => !value)}
                 >
                   <PanelLeft {...stylex.props(styles.glyph)} />
@@ -619,7 +617,7 @@ export function SessionShareSurface(props: {
                   icon
                   variant="ghost"
                   aria-expanded={treeSheetOpen}
-                  aria-label={t('sharing.toggleTree', 'Toggle conversation tree')}
+                  aria-label={t('sharing.toggleTree', 'Toggle session tree')}
                   onClick={() => setTreeSheetOpen(true)}
                 >
                   <PanelLeft {...stylex.props(styles.glyph)} />
@@ -643,7 +641,7 @@ export function SessionShareSurface(props: {
           // of reflowing to nothing on the way. A drag drops the transition —
           // animating every pointer move would trail the cursor.
           <nav
-            aria-label={t('sharing.conversationTree', 'Conversation tree')}
+            aria-label={t('sharing.conversationTree', 'Session tree')}
             inert={!treeVisible || undefined}
             {...stylex.props(styles.treeClip, resizingTree && styles.treeClipResizing)}
             style={{ width: treeVisible ? treeWidth : 0 }}
@@ -662,7 +660,7 @@ export function SessionShareSurface(props: {
             <div
               role="separator"
               aria-orientation="vertical"
-              aria-label={t('sharing.resizeTree', 'Resize the conversation tree')}
+              aria-label={t('sharing.resizeTree', 'Resize the session tree')}
               aria-valuenow={treeWidth}
               aria-valuemin={TREE_MIN_WIDTH}
               aria-valuemax={treeMaxWidth}
@@ -715,12 +713,9 @@ export function SessionShareSurface(props: {
       </div>
       {hasTree && (
         <Drawer.Root side="start" open={treeSheetOpen} onOpenChange={setTreeSheetOpen}>
-          <Drawer.Content
-            side="start"
-            aria-label={t('sharing.conversationTree', 'Conversation tree')}
-          >
+          <Drawer.Content side="start" aria-label={t('sharing.conversationTree', 'Session tree')}>
             {/* The drawer's own heading, beside its close cross. */}
-            <Drawer.Title>{t('sharing.conversationTree', 'Conversation tree')}</Drawer.Title>
+            <Drawer.Title>{t('sharing.conversationTree', 'Session tree')}</Drawer.Title>
             {treeRows()}
           </Drawer.Content>
         </Drawer.Root>

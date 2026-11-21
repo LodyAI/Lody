@@ -161,7 +161,7 @@ export const ConfirmStop: Story = {
     const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(
       await page.findByRole('button', {
-        name: /Stop all conversation collaboration|终止全部对话协作/,
+        name: /Stop all session collaboration|终止全部对话协作/,
       })
     );
   },

@@ -11,7 +11,7 @@ const plan: WorkspaceBundlePlan = {
   sourceWorkspaceId: 'lw_source',
   targetWorkspaceId: 'lw_target',
   gaps: [
-    { id: 'session-roost', kind: 'roost', reason: 'Roost conversation bodies cannot be read here' },
+    { id: 'session-roost', kind: 'roost', reason: 'Roost session bodies cannot be read here' },
   ],
   rooms: [
     {

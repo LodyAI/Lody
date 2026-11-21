@@ -166,7 +166,7 @@ describe('static share presentation', () => {
       )!;
     const openTree = (id: string) =>
       act(async () => {
-        const nav = container.querySelector('nav[aria-label="Conversation tree"]')!;
+        const nav = container.querySelector('nav[aria-label="Session tree"]')!;
         [...nav.querySelectorAll<HTMLButtonElement>('button')]
           .find((node) => node.textContent === id)!
           .click();
@@ -209,8 +209,7 @@ describe('static share presentation', () => {
       readAttachment: vi.fn(),
     });
     const marked = () =>
-      container.querySelector('nav[aria-label="Conversation tree"] [aria-current="page"]')
-        ?.textContent;
+      container.querySelector('nav[aria-label="Session tree"] [aria-current="page"]')?.textContent;
     try {
       await act(async () =>
         root.render(
@@ -231,11 +230,7 @@ describe('static share presentation', () => {
       // the independent conversation the visitor is reading inside.
       expect(marked()).toBe('Main');
       await act(async () =>
-        [
-          ...container.querySelectorAll<HTMLButtonElement>(
-            'nav[aria-label="Conversation tree"] button'
-          ),
-        ]
+        [...container.querySelectorAll<HTMLButtonElement>('nav[aria-label="Session tree"] button')]
           .find((node) => node.textContent === 'Review')!
           .click()
       );
@@ -292,7 +287,7 @@ describe('static share presentation', () => {
 
   it('places opened conversations in a collapsible tree and every child in the one pane', async () => {
     await render();
-    const tree = container.querySelector('nav[aria-label="Conversation tree"]')!;
+    const tree = container.querySelector('nav[aria-label="Session tree"]')!;
     expect(tree.textContent).toContain('Main');
     expect(tree.textContent).toContain('Review');
     expect(tree.textContent).not.toContain('Notes');
@@ -320,7 +315,7 @@ describe('static share presentation', () => {
     // Wide and narrow each own a toggle so CSS, not a viewport hook, decides
     // which is live; the narrow one opens the tree over the conversation.
     const toggles = [
-      ...container.querySelectorAll<HTMLButtonElement>('[aria-label="Toggle conversation tree"]'),
+      ...container.querySelectorAll<HTMLButtonElement>('[aria-label="Toggle session tree"]'),
     ];
     expect(toggles).toHaveLength(2);
     const drawerToggle = toggles[1]!;

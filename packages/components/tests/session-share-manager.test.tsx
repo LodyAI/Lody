@@ -100,7 +100,7 @@ describe('static share dialog steps', () => {
     await render();
     const box = container.querySelector<HTMLButtonElement>('[role="checkbox"]')!;
     expect(box.getAttribute('aria-checked')).toBe('mixed');
-    expect(container.textContent).toContain('Also share sub-conversations (1 of 2)');
+    expect(container.textContent).toContain('Also share sub-sessions (1 of 2)');
     await act(async () => box.click());
     expect(props.onSelect).toHaveBeenCalledWith(['root', 'child', 'child-2']);
   });

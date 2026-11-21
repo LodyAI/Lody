@@ -160,7 +160,7 @@ export function MobileSessionTabSheet({
         <DrawerTitle className="sr-only">{title}</DrawerTitle>
         <DrawerDescription className="sr-only">{title}</DrawerDescription>
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(16px+var(--safe-area-bottom,0px))] pt-3">
-          <GroupLabel>{t('sessions.tabs.conversationsGroup', 'Conversations')}</GroupLabel>
+          <GroupLabel>{t('sessions.tabs.conversationsGroup', 'Sessions')}</GroupLabel>
           <GroupCard>
             {conversations.map((c) => (
               <div key={c.id} className="flex items-center">
@@ -241,7 +241,7 @@ export function MobileSessionTabSheet({
                         aria-label={
                           a.restoresArchive
                             ? t('archive.restore', 'Restore session')
-                            : t('sessions.tabs.reopenTab', 'Reopen conversation')
+                            : t('sessions.tabs.reopenTab', 'Reopen session')
                         }
                         className={cn(
                           rowClassName,

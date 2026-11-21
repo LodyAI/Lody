@@ -172,7 +172,7 @@ export class SessionCreateBillingError extends Error {
  */
 export class ArchivedLocalProjectRestoreUnavailableError extends Error {
   constructor() {
-    super('Re-add this local project to restore its conversations.');
+    super('Re-add this local project to restore its sessions.');
     this.name = 'ArchivedLocalProjectRestoreUnavailableError';
   }
 }
@@ -946,7 +946,7 @@ export function useSessionActions(): SessionActions {
           )
         )
           throw new Error(
-            'Update every machine in this conversation tree before controlling collaboration'
+            'Update every machine in this session tree before controlling collaboration'
           );
       }
       if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {

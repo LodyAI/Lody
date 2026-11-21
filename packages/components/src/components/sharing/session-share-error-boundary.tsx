@@ -11,7 +11,7 @@ export function SessionShareReadError() {
         layout="window"
         illustration="broken"
         role="alert"
-        title={t('sharing.renderError', 'This conversation could not be displayed')}
+        title={t('sharing.renderError', 'This session could not be displayed')}
         description={t(
           'sharing.renderErrorDetail',
           'The shared document may contain unsupported content. Try reloading the page.'

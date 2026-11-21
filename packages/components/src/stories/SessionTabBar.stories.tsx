@@ -810,8 +810,6 @@ export const ClosedTabUnread: Story = {
     },
   },
   play: async ({ canvasElement }) => {
-    await userEvent.click(
-      within(canvasElement).getByRole('button', { name: /Closed conversations/ })
-    );
+    await userEvent.click(within(canvasElement).getByRole('button', { name: /Closed sessions/ }));
   },
 };

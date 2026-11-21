@@ -9,7 +9,12 @@ import { Spinner } from '@lody/ui/spinner';
 import { Switch } from '@lody/ui/switch';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text as uiText } from '@lody/ui/tokens/scales.stylex';
-import { getEffectiveDefaultMcpIds, getProjectMcpKey, type McpServerId, type WorkspaceMcpServerMeta } from '@lody/shared';
+import {
+  getEffectiveDefaultMcpIds,
+  getProjectMcpKey,
+  type McpServerId,
+  type WorkspaceMcpServerMeta,
+} from '@lody/shared';
 import {
   putProjectMcpDefault,
   resolveProjectMcpDefaultManagement,
@@ -152,7 +157,7 @@ export function ProjectDefaultMcpView({
                 disabled={readOnlyReason !== null || saving}
                 aria-label={t(
                   'workspace.projects.defaultMcp.toggle',
-                  'Start new conversations with {{name}}',
+                  'Start new sessions with {{name}}',
                   {
                     name: server.name,
                   }
@@ -186,20 +191,20 @@ export function ProjectDefaultMcpTab({
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'failed'>('idle');
 
   const setServerEnabled = async (id: McpServerId, enabled: boolean) => {
-      // The first edit writes the whole effective list with this change, so a
-      // project that customizes one switch keeps every other default it had.
-      const next = enabled
-        ? [...selectedIds.filter((selected) => selected !== id), id]
-        : selectedIds.filter((selected) => selected !== id);
-      setSaveState('saving');
-      try {
-        if (!runtime) throw new Error('Workspace runtime is unavailable');
-        await putProjectMcpDefault(runtime, target, access, next);
-        setSaveState('idle');
-      } catch (error) {
-        setSaveState('failed');
-        console.error('Failed to save project default MCP servers', error);
-      }
+    // The first edit writes the whole effective list with this change, so a
+    // project that customizes one switch keeps every other default it had.
+    const next = enabled
+      ? [...selectedIds.filter((selected) => selected !== id), id]
+      : selectedIds.filter((selected) => selected !== id);
+    setSaveState('saving');
+    try {
+      if (!runtime) throw new Error('Workspace runtime is unavailable');
+      await putProjectMcpDefault(runtime, target, access, next);
+      setSaveState('idle');
+    } catch (error) {
+      setSaveState('failed');
+      console.error('Failed to save project default MCP servers', error);
+    }
   };
 
   const status: 'ready' | 'failed' | 'loading' = catalog.loaded

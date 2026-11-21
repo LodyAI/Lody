@@ -335,7 +335,7 @@ export const UnconfirmedRoostInput: Story = {
         inputState: 'unknown',
         persisted: true,
         error:
-          'The conversation machine has not confirmed this message. Check the original send result.',
+          'The session machine has not confirmed this message. Check the original send result.',
       }),
     ],
   },

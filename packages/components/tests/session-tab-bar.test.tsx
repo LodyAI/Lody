@@ -177,14 +177,14 @@ describe('session-tab-bar', () => {
       expect(container.querySelector('output')?.textContent).toMatch(/^draft:/);
       // Output the user has not read stays discoverable through the closed list.
       const closedTabs = container.querySelector<HTMLButtonElement>(
-        '[aria-label="Closed conversations: Unread messages"]'
+        '[aria-label="Closed sessions: Unread messages"]'
       )!;
       expect(closedTabs.querySelector('[data-closed-tabs-unread]')).not.toBeNull();
       await act(async () => closedTabs.click());
       expect(document.querySelector('[aria-label="Unread messages"]')).not.toBeNull();
       await act(async () =>
         document
-          .querySelector<HTMLButtonElement>('[aria-label="Reopen conversation: Main session"]')!
+          .querySelector<HTMLButtonElement>('[aria-label="Reopen session: Main session"]')!
           .click()
       );
       expect(container.querySelector('#session-tab-session-parent')).not.toBeNull();
@@ -219,12 +219,10 @@ describe('session-tab-bar', () => {
       // Review-only: no new conversation can start until the workspace is restored.
       expect(container.querySelector('[aria-label="New tab"]')).toBeNull();
       await act(async () =>
-        container.querySelector<HTMLButtonElement>('[aria-label="Closed conversations"]')!.click()
+        container.querySelector<HTMLButtonElement>('[aria-label="Closed sessions"]')!.click()
       );
       // Reopening a closed tab of an archived workspace does not restore it.
-      expect(
-        document.querySelector('[aria-label="Reopen conversation: Child session"]')
-      ).not.toBeNull();
+      expect(document.querySelector('[aria-label="Reopen session: Child session"]')).not.toBeNull();
       expect(document.querySelector('[aria-label^="Restore session"]')).toBeNull();
     });
 
@@ -238,14 +236,12 @@ describe('session-tab-bar', () => {
       };
       await renderTabBar([], parentSession, vi.fn(), [archivedChild, closedChild]);
       await act(async () =>
-        container.querySelector<HTMLButtonElement>('[aria-label="Closed conversations"]')!.click()
+        container.querySelector<HTMLButtonElement>('[aria-label="Closed sessions"]')!.click()
       );
       expect(
         document.querySelector('[aria-label="Restore session: Child session"]')
       ).not.toBeNull();
-      expect(
-        document.querySelector('[aria-label="Reopen conversation: Closed child"]')
-      ).not.toBeNull();
+      expect(document.querySelector('[aria-label="Reopen session: Closed child"]')).not.toBeNull();
     });
 
     it('waits for hydration and reuses an existing draft without replacing its input', async () => {

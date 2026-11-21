@@ -89,7 +89,7 @@ describe('machine-batch-update-dialog', () => {
       });
       await act(async () => button('Update 1 machines')?.click());
       await flush();
-      expect(document.body.textContent).toContain('Waiting until no conversation is running');
+      expect(document.body.textContent).toContain('Waiting until no session is running');
 
       // The forced/idle switch takes the machine offline and cancels its sessions:
       // the parent rebuilds both the machine list and the probe callback.
@@ -141,10 +141,10 @@ describe('machine-batch-update-dialog', () => {
       await render({ open: true, machines: [studio(true)], probe });
       await act(async () => button('Update 1 machines')?.click());
       await flush();
-      expect(document.body.textContent).toContain('Waiting until no conversation is running');
+      expect(document.body.textContent).toContain('Waiting until no session is running');
       await render({ open: false, machines: [studio(true)], probe });
       await render({ open: true, machines: [studio(true)], probe });
-      expect(document.body.textContent).toContain('Waiting until no conversation is running');
+      expect(document.body.textContent).toContain('Waiting until no session is running');
       expect(button('Update 1 machines')).toBeUndefined();
     });
   });

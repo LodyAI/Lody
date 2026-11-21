@@ -146,8 +146,8 @@ export const notificationMessages = {
     'notifications.copy.schedule.permission': 'Scheduled task needs approval',
     'notifications.copy.schedule.question': 'Scheduled task needs an answer',
     'notifications.copy.schedule.attention': 'Scheduled task needs attention',
-    'notifications.copy.untitled': 'Untitled conversation',
-    'notifications.copy.openConversation': 'Open conversation to view details.',
+    'notifications.copy.untitled': 'Untitled session',
+    'notifications.copy.openConversation': 'Open session to view details.',
   },
   zh: {
     'notifications.copy.conversation.failed': '执行失败',

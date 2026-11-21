@@ -63,12 +63,12 @@ export function getSessionSharingDescription(
   const project = state.projectName ?? t('sessions.sharing.thisProject', 'this project');
 
   if (state.visibility === 'unknown') {
-    return t('sessions.sharing.checkingDescription', 'Checking who can open this conversation.');
+    return t('sessions.sharing.checkingDescription', 'Checking who can open this session.');
   }
   if (state.visibility === 'team') {
     return t(
       'sessions.sharing.teamDescription',
-      'Everyone in this workspace can open this conversation.'
+      'Everyone in this workspace can open this session.'
     );
   }
 
@@ -93,7 +93,7 @@ export function getSessionSharingDescription(
         'This device is not registered for team access.'
       );
     default:
-      return t('sessions.sharing.privateDescription', 'Only you can open this conversation.');
+      return t('sessions.sharing.privateDescription', 'Only you can open this session.');
   }
 }
 
@@ -103,7 +103,7 @@ export function getSessionShareDialogDescription(
 ): string {
   return t(
     'sessions.access.confirmRead',
-    'Teammates can read this conversation and reference it in their own sessions.'
+    'Teammates can read this session and reference it in their own sessions.'
   );
 }
 
@@ -177,7 +177,7 @@ export function SessionArchivedBadge({ className }: { className?: string }) {
   const label = t('sessions.archived', 'Archived');
   const description = t(
     'sessions.archivedDescription',
-    'This conversation is archived. Restore it to continue chatting.'
+    'This session is archived. Restore it to continue chatting.'
   );
 
   return (
@@ -872,14 +872,14 @@ function getProjectShareDialogDescription(
   if (state.privateReason === 'project') {
     return t(
       'workspace.projects.confirmShareProject',
-      'Teammates will be able to open and continue every conversation in {{project}}.',
+      'Teammates will be able to open and continue every session in {{project}}.',
       { project }
     );
   }
 
   return t(
     'workspace.projects.confirmShareProjectAndMachine',
-    'This also shares {{machine}}, which teammates need to open and continue every conversation in {{project}}.',
+    'This also shares {{machine}}, which teammates need to open and continue every session in {{project}}.',
     { machine, project }
   );
 }

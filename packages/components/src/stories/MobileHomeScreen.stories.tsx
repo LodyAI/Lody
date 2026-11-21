@@ -159,7 +159,7 @@ const inboxItems: MobileInboxItem[] = [
     description: 'Approval needed: Run tests',
     updatedAt: now - hour,
     unread: true,
-    actionLabel: 'Open conversation',
+    actionLabel: 'Open session',
   },
   {
     id: 'session-complete',
@@ -167,7 +167,7 @@ const inboxItems: MobileInboxItem[] = [
     title: 'GitHub 授权仓库列表',
     description: 'Session completed.',
     updatedAt: now - 4 * hour,
-    actionLabel: 'Open conversation',
+    actionLabel: 'Open session',
   },
 ];
 

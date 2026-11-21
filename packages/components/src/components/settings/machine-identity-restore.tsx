@@ -36,7 +36,7 @@ export function MachineIdentityRestore({
         label={t('settings.identityRestore.title', 'Restore old machine identity')}
         info={t(
           'settings.identityRestore.help',
-          'Reconnect this daemon to its old conversations after losing local configuration. Deleted files and agent state are not restored.'
+          'Reconnect this daemon to its old sessions after losing local configuration. Deleted files and agent state are not restored.'
         )}
       >
         <Button variant="secondary" size="small" onClick={() => setConfirm(true)}>
@@ -57,7 +57,7 @@ export function MachineIdentityRestore({
             <AlertDialog.Description>
               {t(
                 'settings.identityRestore.confirm',
-                'Only continue if no machine is running with the old identity. Its dedicated machine credentials will be revoked. This daemon will restart; its newer conversations stay under the current identity.'
+                'Only continue if no machine is running with the old identity. Its dedicated machine credentials will be revoked. This daemon will restart; its newer sessions stay under the current identity.'
               )}
               {encryptedWorkspace ? (
                 <>

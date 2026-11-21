@@ -251,7 +251,7 @@ function encryptedRefusalMessage(
     case 'e2ee_signature_invalid':
       return 'e2ee_signature_invalid: This encrypted turn does not match its signature, so it will not run.';
     case 'e2ee_scope_mismatch':
-      return 'e2ee_scope_mismatch: This encrypted turn was signed for another conversation or machine, so it will not run here.';
+      return 'e2ee_scope_mismatch: This encrypted turn was signed for another session or machine, so it will not run here.';
   }
 }
 
@@ -280,7 +280,7 @@ const REPLAYABLE_HISTORY_SYNC_TIMEOUT_MS = SYNC_CONFIRMATION_TIMEOUT_MS;
  */
 const CONTEXT_FREE_RESTORE_MESSAGE =
   'The agent session could not be resumed, and this machine has not synced the earlier ' +
-  'conversation yet, so there was nothing to restore the context from. The turn was not ' +
+  'session yet, so there was nothing to restore the context from. The turn was not ' +
   'started — retry once the session finishes syncing so the agent keeps its history.';
 
 /**
@@ -292,7 +292,7 @@ const SILENT_TURN_FAILURE_MESSAGE =
   'The agent ended the turn without producing any output. The model call most likely failed ' +
   'upstream (a context-length or rate-limit rejection is the usual cause) and the agent ' +
   'reported it as a normal completion instead of an error. Retry your message, or start a ' +
-  'new session if this conversation has grown too long.';
+  'new session if this session has grown too long.';
 
 type TurnFinalizationEffects = {
   finalizeACPState: (sessionId: SessionId, turnId?: string) => Promise<void>;

@@ -505,7 +505,7 @@ export function ScheduleProposalNotice({
       'schedules.proposal.machineMismatch',
       'That Agent does not run on the named machine.'
     ),
-    no_agent: t('schedules.proposal.noAgent', 'This conversation has no Agent to run with.'),
+    no_agent: t('schedules.proposal.noAgent', 'This session has no Agent to run with.'),
   };
   const reasons = problem ? [problemText[problem]] : [...editProblems, ...blockers];
   const rows: [string, string][] = [

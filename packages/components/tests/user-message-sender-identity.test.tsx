@@ -183,8 +183,8 @@ describe('user message sender identity', () => {
       '[data-testid="user-message-source-session-link"]'
     );
     expect(sourceButton).toBeTruthy();
-    expect(sourceButton?.textContent).toBe('Open source conversation');
-    expect(sourceButton?.getAttribute('aria-label')).toBe('Open source conversation');
+    expect(sourceButton?.textContent).toBe('Open source session');
+    expect(sourceButton?.getAttribute('aria-label')).toBe('Open source session');
 
     await click(sourceButton!);
     expect(onNavigateSession).toHaveBeenCalledTimes(1);
@@ -202,7 +202,7 @@ describe('user message sender identity', () => {
     );
     expect(updatedButton?.textContent).toBe('Coordinate PR #789 fix');
     expect(updatedButton?.getAttribute('aria-label')).toBe(
-      'Open source conversation: Coordinate PR #789 fix'
+      'Open source session: Coordinate PR #789 fix'
     );
   });
 
