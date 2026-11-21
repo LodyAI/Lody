@@ -631,6 +631,46 @@ export async function importLegacyRoom(
   return 'imported';
 }
 
+/** Whether a source's replica of a room was already migrated. */
+export async function isLegacyRoomPublished(
+  client: RepoClient,
+  namespace: string,
+  room: RoomKey,
+  source: string
+) {
+  await client.createRoom(namespace, MIGRATIONS_ROOM, 'plaintext');
+  return (await client.flockGet(namespace, MIGRATIONS_ROOM, [room.kind, room.id, source])).found;
+}
+
+/**
+ * Returns every source of every room and document to legacy ownership after a
+ * write-back: enabling the native mode again re-imports each replica, CLI and
+ * renderers alike, including edits made while the mode was off.
+ */
+export async function clearMigrationMarkers(client: RepoClient, namespace: string) {
+  await client.createRoom(namespace, MIGRATIONS_ROOM, 'plaintext');
+  let start: (string | number)[] | undefined;
+  for (;;) {
+    const page = await client.flockScanPage(
+      namespace,
+      MIGRATIONS_ROOM,
+      start ? { start: { bound: 'exclusive', key: start } } : {},
+      PAGE_BUDGET
+    );
+    const live = page.entries.filter((entry) => !entry.deleted);
+    if (live.length > 0)
+      await client.flockBatch(
+        namespace,
+        MIGRATIONS_ROOM,
+        live.map((entry) => ({ op: 'delete' as const, key: entry.key as (string | number)[] }))
+      );
+    if (page.eof) return;
+    const last = page.entries.at(-1);
+    if (!last) throw new Error('native_repo_page_without_progress');
+    start = last.key as (string | number)[];
+  }
+}
+
 /**
  * Returns a source to legacy ownership: its marker is removed, so enabling the
  * native mode again re-imports that replica (an LWW merge of its newer edits).

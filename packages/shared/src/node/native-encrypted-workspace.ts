@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdir, open, readdir, readFile, rename, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { createLodyWorkspaceRoutes, type RepoClient } from '@loro-dev/loro-repo-client';
@@ -144,6 +145,25 @@ export async function finishPendingNativeWipes(client: RepoClient, dataDir: stri
     const pendingWipe = nativePendingWipeMarker(dataDir, workspaceId);
     await finishNativeWipe({ client, workspaceId, pendingWipe }).catch(() => {});
   }
+}
+
+/**
+ * Rows of an encrypted workspace this installation's engine has not uploaded yet.
+ * While any remain, turning the native switch off does not take effect for that
+ * workspace: the legacy path never reads the namespace, so the rows would never
+ * upload. Nothing is started when the engine was never used here.
+ */
+export async function nativeEncryptedPendingUpload(
+  dataDir: string,
+  workspaceId: string,
+  connect: () => Promise<{ client: RepoClient }>
+): Promise<number> {
+  if (!existsSync(dataDir)) return 0;
+  const { client } = await connect();
+  const statuses = await client
+    .getRemoteStatus(workspaceId, NATIVE_CONTENT_REMOTE_ID)
+    .catch(() => [] as Awaited<ReturnType<RepoClient['getRemoteStatus']>>);
+  return statuses.reduce((total, status) => total + status.pendingOutbox, 0);
 }
 
 export interface NativeEncryptedWorkspace {

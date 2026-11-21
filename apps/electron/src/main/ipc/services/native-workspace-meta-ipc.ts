@@ -3,11 +3,15 @@ import { getIpcContext, IpcMethod } from 'electron-ipc-decorator'
 import {
   connectNativeRepo,
   importLegacyRoom,
+  isLegacyRoomPublished,
   isNativeEncryptedWorkspaceEnabled,
   isNativeWorkspaceMetaEnabled,
   nativeRepoDataDir
 } from '@lody/shared/node/native-repo'
-import { finishPendingNativeWipes } from '@lody/shared/node/native-encrypted-workspace'
+import {
+  finishPendingNativeWipes,
+  nativeEncryptedPendingUpload
+} from '@lody/shared/node/native-encrypted-workspace'
 import { commitFlockPayloads, observeNativeFlockDoc } from '@lody/shared/node/native-flock-docs'
 import {
   commitDocUpdates,
@@ -39,6 +43,7 @@ import {
   isNativeFlockDocId,
   NativeMetaCommitSchema,
   NativeMetaImportSchema,
+  NativeMetaLegacyCheckSchema,
   NativeMetaOpenSchema,
   NativeMetaReleaseSchema,
   type NativeMetaCommand
@@ -62,8 +67,14 @@ class NotCommitted extends Error {}
  * Cloud builds serve encrypted workspaces only (specs/native-engine-cloud-e2ee.md,
  * phase 1), behind their own switch.
  */
-const encryptedMode = () => !isLocalPlatform() && isNativeEncryptedWorkspaceEnabled()
-const enabled = () => isNativeWorkspaceMetaEnabled() && (isLocalPlatform() || encryptedMode())
+/** Encrypted workspaces kept native with the switch off until their rows upload. */
+const uploading = new Set<string>()
+const encryptedMode = (workspaceId?: string) =>
+  !isLocalPlatform() &&
+  (isNativeEncryptedWorkspaceEnabled() || (!!workspaceId && uploading.has(workspaceId)))
+const enabled = (workspaceId?: string) =>
+  (isNativeWorkspaceMetaEnabled() && (isLocalPlatform() || isNativeEncryptedWorkspaceEnabled())) ||
+  (!isLocalPlatform() && !!workspaceId && uploading.has(workspaceId))
 
 /**
  * Local: the single local workspace. Cloud: this window's E2EE reader lease for the
@@ -74,10 +85,10 @@ async function admit(
   workspaceId: string,
   flockDocId?: string
 ): Promise<NativeEncryptedAccess | undefined> {
-  if (!enabled()) throw new Error('native_meta_disabled')
+  if (!enabled(workspaceId)) throw new Error('native_meta_disabled')
   if (flockDocId !== undefined && !isNativeFlockDocId(workspaceId, flockDocId))
     throw new Error('native_meta_scope_denied')
-  if (encryptedMode())
+  if (encryptedMode(workspaceId))
     return admitNativeEncryptedReader(getIpcContext().event.sender.id, workspaceId, await connect())
   const snapshot = await readLocalPlatformSnapshot()
   if (snapshot?.workspace.workspaceId !== workspaceId) throw new Error('native_meta_scope_denied')
@@ -99,8 +110,8 @@ async function admitDoc(workspaceId: string, docId: string, mode: 'read' | 'writ
 }
 
 /** Encrypted namespaces bootstrap from the cloud; nothing local is imported into them. */
-function refuseEncryptedImport() {
-  if (encryptedMode()) throw new Error('native_meta_scope_denied')
+function refuseEncryptedImport(workspaceId: string) {
+  if (encryptedMode(workspaceId)) throw new Error('native_meta_scope_denied')
 }
 
 let swept: Promise<unknown> | undefined
@@ -109,7 +120,7 @@ const connect = async () => {
     launcher: bundledNativeRepoHostLauncher,
     dataDir: nativeRepoDataDir(isLocalPlatform() ? 'local' : 'cloud')
   })
-  if (encryptedMode())
+  if (!isLocalPlatform())
     await (swept ??= finishPendingNativeWipes(connection.client, connection.dataDir))
   return connection
 }
@@ -123,7 +134,7 @@ export function removeNativeWorkspace(
   workspaceId: string,
   reason: 'member_removed' | 'device_revoked'
 ) {
-  if (!enabled() || !encryptedMode()) return Promise.resolve()
+  if (!enabled(workspaceId) || !encryptedMode(workspaceId)) return Promise.resolve()
   return removeNativeEncryptedWorkspace(workspaceId, reason, connect)
 }
 
@@ -175,9 +186,22 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
 
   @IpcMethod()
   async available(input: unknown) {
-    if (!enabled()) return false
     const { workspaceId } = NativeMetaOpenSchema.pick({ workspaceId: true }).parse(input)
-    if (encryptedMode())
+    if (!enabled(workspaceId) && !isLocalPlatform() && !uploading.has(workspaceId)) {
+      const pending = await nativeEncryptedPendingUpload(
+        nativeRepoDataDir('cloud'),
+        workspaceId,
+        connect
+      ).catch(() => 0)
+      if (pending > 0) {
+        uploading.add(workspaceId)
+        console.warn('[native-meta] switch is off; the workspace stays native until it uploads', {
+          pending
+        })
+      }
+    }
+    if (!enabled(workspaceId)) return false
+    if (encryptedMode(workspaceId))
       return admit(workspaceId).then(
         () => true,
         (error: unknown) => {
@@ -237,11 +261,20 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
     })
   }
 
+  /** Whether this window's legacy Meta and Flock replicas still need importing. */
+  @IpcMethod()
+  async needsLegacy(input: unknown) {
+    const { workspaceId, source } = NativeMetaLegacyCheckSchema.parse(input)
+    if (await admit(workspaceId)) return false
+    const { client } = await connect()
+    return !(await isLegacyRoomPublished(client, workspaceId, { kind: 'meta', id: 'meta' }, source))
+  }
+
   @IpcMethod()
   async importLegacy(input: unknown) {
     const { workspaceId, flockDocId, source, bundle } = NativeMetaImportSchema.parse(input)
     await admit(workspaceId, flockDocId)
-    refuseEncryptedImport()
+    refuseEncryptedImport(workspaceId)
     const { client } = await connect()
     const room =
       flockDocId === undefined
@@ -363,7 +396,7 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
   async importLegacyDoc(input: unknown) {
     const { workspaceId, docId, source, snapshot, version } = NativeDocLegacySchema.parse(input)
     await admit(workspaceId)
-    refuseEncryptedImport()
+    refuseEncryptedImport(workspaceId)
     const { client } = await connect()
     return importLegacyDoc(client, workspaceId, docId, source, async () => ({
       snapshot,

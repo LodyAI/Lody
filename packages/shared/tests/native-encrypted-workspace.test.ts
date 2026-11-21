@@ -13,6 +13,7 @@ import { commitDocUpdates, createDocRoom } from '../src/node/native-docs';
 import {
   attachNativeEncryptedWorkspace,
   NATIVE_CONTENT_REMOTE_ID,
+  nativeEncryptedPendingUpload,
   nativePendingWipeMarker,
   type NativePendingWipe,
 } from '../src/node/native-encrypted-workspace';
@@ -157,6 +158,25 @@ describe('native encrypted workspace', () => {
     expect(body.length).toBeGreaterThan(0);
     expect(body.includes('sealed-in-a')).toBe(false);
     expect(body.includes(Buffer.from('LSCE'))).toBe(true);
+  }, 60_000);
+
+  it('reports rows not yet uploaded, so the switch cannot strand them, and starts nothing where the engine was never used', async () => {
+    const a = await device('a', 'http://127.0.0.1:9');
+    const wa = await a.attach();
+    cleanups.push(async () => wa.close());
+    await createDocRoom(a.client, ws, room.id);
+    await write(a.client, 'not-uploaded');
+    const connect = async () => ({ client: a.client });
+    expect(await nativeEncryptedPendingUpload(a.dataDir, ws, connect)).toBeGreaterThan(0);
+    let connected = false;
+    const unused = join(tmpdir(), `lody-native-never-${process.pid}`);
+    expect(
+      await nativeEncryptedPendingUpload(unused, ws, async () => {
+        connected = true;
+        return { client: a.client };
+      })
+    ).toBe(0);
+    expect(connected).toBe(false);
   }, 60_000);
 
   it('opens without a content token, keeps local writes, and uploads them once one is issued', async () => {
