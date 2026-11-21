@@ -169,6 +169,8 @@ import {
 import { findProgressMessageId } from '@lody/shared/session-data';
 import { Cause, Clock, Data, Effect, Exit, Fiber, Random, Scope } from 'effect';
 import { createHash, randomUUID } from 'node:crypto';
+import { stat } from 'node:fs/promises';
+import { join as joinPath } from 'node:path';
 import { getCodexProfileStore, type ResolvedCodexProfile } from '../agent/codex-profile-store';
 import {
   getACPErrorUserMessage,
@@ -8419,6 +8421,14 @@ export class SessionExecutionService {
                   (id) => self.deps.sessionManager.resolveLocalProjectRootPath(id)
                 )
               : undefined;
+            // A file stat, not a git process: `.git` is a directory in a clone and a file in
+            // a worktree. Failure only omits the PR-link sentence.
+            const gitRepository =
+              project?.kind === 'github' ||
+              (await stat(joinPath(session.getWorkdir(), '.git')).then(
+                () => true,
+                () => false
+              ));
             const sessionInputBlocks = resolveSessionExecutionInputBlocks({
               ...agentConfig,
               prompt: buildPrompt(
@@ -8430,6 +8440,7 @@ export class SessionExecutionService {
                   branchToRename,
                   projectRun,
                   projectFileRoots,
+                  gitRepository,
                 }
               ),
             });

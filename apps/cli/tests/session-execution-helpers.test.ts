@@ -13,6 +13,17 @@ describe('session execution prompt helpers', () => {
     );
   });
 
+  it('adds the approved PR-link sentence only when the working directory has git', () => {
+    const sentence =
+      'A pull or merge request this Session opened without gh pr create is linked to it with lody_session_manage action pr_link.';
+    const withGit = buildPrompt('fix it', undefined, undefined, undefined, { gitRepository: true });
+    expect(withGit.endsWith(`which resumes this Session when they exit. ${sentence}`)).toBe(true);
+    expect(buildPrompt('fix it', undefined, undefined, undefined, { gitRepository: false })).not.toContain(
+      'pr_link'
+    );
+    expect(buildPrompt('fix it')).not.toContain('pr_link');
+  });
+
   it('injects the frozen project group instructions and ordered member directories', () => {
     const projectRun = SessionProjectRunSchema.parse({
       id: 'd835a1ee-4f85-4e15-9dca-2bca912e36bf',

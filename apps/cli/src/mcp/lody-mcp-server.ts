@@ -1,7 +1,17 @@
 import { canReadSessionForCliRequester } from '@/lib/cloud-cli-port';
 import { LODY_AUTH_URL } from '@/utils/const';
-import { isContainedSession } from '@lody/shared';
-import { createToolHelpServer, LODY_HELP_INSTRUCTIONS } from './tool-help';
+import { isContainedSession, type ScheduleCommand } from '@lody/shared';
+import {
+  createSessionPullRequestLinks,
+  type SessionPullRequestLinkResult,
+} from '@/lib/session-pr-links';
+import {
+  actionToolInputSchema,
+  createToolHelpServer,
+  defineToolAction,
+  LODY_HELP_INSTRUCTIONS,
+  runToolAction,
+} from './tool-help';
 import { resolveSessionPullRequests } from '@lody/shared';
 import { turnNotificationAudience } from '@/lib/notifications/turn-notification-audience';
 import { registerAgentRoleTools } from './agent-role-tools';
@@ -28,7 +38,7 @@ import { resolveSessionLinkId } from '@lody/shared/session-link';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'path';
-import { McpServer } from '@modelcontextprotocol/server';
+import { McpServer, type CallToolResult } from '@modelcontextprotocol/server';
 import { Effect } from 'effect';
 import { z } from 'zod';
 import { requestSessionShare } from '@/lib/session-share-delivery';
@@ -161,7 +171,7 @@ import {
   runWithOperationStoreBusyRetry,
   OperationListQuerySchema,
 } from '@/orchestration/operation-store';
-import { registerScheduleTools } from './schedule-tools';
+import { registerScheduleTool, scheduleCatalogAction } from './schedule-tools';
 import { registerAutomationTools } from './automation-tools';
 import { LODY_SKILL_INSTRUCTIONS, registerLodySkills } from './skills/server';
 import { truncateSessionHistoryText as truncateUtf8HeadTail } from '@/mcp/session-history-page';
@@ -176,7 +186,7 @@ import {
 } from '@/mcp/workspace-mcp-configure';
 import { captureSessionCommandEvent } from '@/commands/analytics-events';
 import { captureCli, initCliAnalytics } from '@/lib/analytics/posthog';
-import { registerDiscoveryTools } from './discovery-tools';
+import { discoveryCatalogActions } from './discovery-tools';
 import { createResourceDiscovery } from '@/lib/resource-discovery-runtime';
 import {
   agentConfigQuotaResetAt,
@@ -218,9 +228,9 @@ const SESSION_CANCEL_TOOL_NAME = 'lody_session_cancel';
 const SESSION_LIST_TOOL_NAME = 'lody_session_list';
 const SESSION_STATUS_MANY_TOOL_NAME = 'lody_session_status_many';
 const SESSION_HISTORY_TOOL_NAME = 'lody_session_history';
-const SESSION_ARCHIVE_TOOL_NAME = 'lody_session_archive';
-const SESSION_RENAME_TOOL_NAME = 'lody_session_rename';
 const OPERATION_TOOL_NAME = 'lody_operation';
+const CATALOG_TOOL_NAME = 'lody_catalog';
+const SESSION_MANAGE_TOOL_NAME = 'lody_session_manage';
 const OPERATION_CANCEL_TOOL_NAME = 'lody_operation_cancel';
 const SESSION_FILE_MAX_SIZE_MB = Math.floor(SESSION_FILE_MAX_SIZE_BYTES / (1024 * 1024));
 const SESSION_CONTROL_TIMEOUT_MS = 30_000;
@@ -1134,6 +1144,10 @@ const SessionRenameCombinedToolInputSchema = z
       'items' in value ? SessionRenameManyToolInputSchema : SessionRenameToolInputSchema
     )
   );
+
+const SessionPullRequestLinkInputSchema = z
+  .object({ url: z.string().trim().min(1).max(2048).describe('Pull request URL.') })
+  .strict();
 
 const SessionStatusManyToolInputSchema = z
   .object({
@@ -4862,8 +4876,8 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
   );
   const toolServer = createToolHelpServer(server);
   registerLodySkills(server);
-  registerScheduleTools(toolServer, {
-    execute: async (command) => {
+  const scheduleDeps = {
+    execute: async (command: ScheduleCommand) => {
       const ctx = getSessionContext();
       const { sendDaemonScheduleCommand } = await import('@/lib/schedules/schedule-command-client');
       return sendDaemonScheduleCommand(command, {
@@ -4873,7 +4887,8 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
         socketPath: ctx.localControlSocketPath,
       });
     },
-  });
+  };
+  registerScheduleTool(toolServer, scheduleDeps);
 
   registerAutomationTools(toolServer, async (command) => {
     const ctx = getSessionContext();
@@ -4963,23 +4978,45 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     mcpErrorResult
   );
 
-  registerDiscoveryTools(registerSessionTool, async (read) => {
-    const ctx = getSessionContext();
-    const source = await resolveInvokingTurnSource();
-    const auth = getCliAuthContextOrThrow('mcp');
-    const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
-    return withWorkspaceManager(auth, workspace, 'mcp-discovery', async (manager) =>
-      read(
-        await createResourceDiscovery({
-          manager,
-          auth,
-          workspaceId: workspace.id as WorkspaceId,
-          delegatedRequester: { userId: source.userId },
-          selectedMcpServerIds: source.inputConfig.mcpServerIds,
-        })
-      )
-    );
-  });
+  const catalogActions = {
+    ...discoveryCatalogActions(async (read) => {
+      const ctx = getSessionContext();
+      const source = await resolveInvokingTurnSource();
+      const auth = getCliAuthContextOrThrow('mcp');
+      const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
+      return withWorkspaceManager(auth, workspace, 'mcp-discovery', async (manager) =>
+        read(
+          await createResourceDiscovery({
+            manager,
+            auth,
+            workspaceId: workspace.id as WorkspaceId,
+            delegatedRequester: { userId: source.userId },
+            selectedMcpServerIds: source.inputConfig.mcpServerIds,
+          })
+        )
+      );
+    }),
+    // Schedule reads use the schedule command client from this process, as before.
+    schedules: scheduleCatalogAction(scheduleDeps),
+  };
+  registerSessionTool(
+    CATALOG_TOOL_NAME,
+    {
+      summary:
+        'Read-only workspace listings: machines, projects, MCP servers, agent configs, agent Roles and Schedules.',
+      title: 'Read the Lody workspace catalog',
+      description:
+        'Read-only listings of workspace resources, each an action: machines, projects, mcp_servers, agent_configs, agent_roles and schedules. agent_configs, agent_roles and schedules also read one item by id. Every list pages with nextCursor (schedules use offset). Nothing is changed.',
+      inputSchema: actionToolInputSchema(
+        catalogActions,
+        'machines, projects, mcp_servers, agent_configs, agent_roles or schedules.'
+      ),
+      actions: catalogActions,
+      annotations: { readOnlyHint: true },
+      executeLocally: (input) => input.action === 'schedules',
+    },
+    (input) => runToolAction(catalogActions, input)
+  );
 
   toolServer.registerTool(
     FEEDBACK_TOOL_NAME,
@@ -5007,17 +5044,13 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     }
   );
 
-  toolServer.registerTool(
-    'lody_session_share',
-    {
-      summary:
-        'Request user-approved static conversation sharing; returns a bearer link after consent.',
-      title: 'Request a conversation share',
-      description:
-        'Request a static share only when the user asks to share. Supply a short purpose for the consent card. The user approves once in Lody; the client then automatically publishes and returns the complete bearer URL to you. The card explicitly discloses this. Supply a stable requestId; repeat this call with the same requestId, purpose and targets while pending or confirmed to receive the result, including after a timeout. shareRequestId is a server record ID, never a retry key. The current conversation is always included. Do not retry cancelled or expired requests with a new ID without a new user request. This tool cannot approve, upload, reset or revoke shares.',
-      inputSchema: SessionShareToolInputSchema,
-    },
-    async (args, extra) => {
+  const shareAction = defineToolAction({
+    summary:
+      'Request user-approved static conversation sharing; returns a bearer link after consent.',
+    description:
+      'Request a static share only when the user asks to share. Supply a short purpose for the consent card. The user approves once in Lody; the client then automatically publishes and returns the complete bearer URL to you. The card explicitly discloses this. Supply a stable requestId; repeat this call with the same requestId, purpose and targets while pending or confirmed to receive the result, including after a timeout. shareRequestId is a server record ID, never a retry key. The current conversation is always included. Do not retry cancelled or expired requests with a new ID without a new user request. This tool cannot approve, upload, reset or revoke shares.',
+    inputSchema: SessionShareToolInputSchema,
+    run: async (args, extra) => {
       try {
         const port = getCommandSessionSharingPort();
         if (!port) throw new Error('Sharing is unavailable on this platform');
@@ -5037,14 +5070,14 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
               sessionIds: [...new Set([ctx.sessionId, ...(args.sessionIds ?? [])])],
             },
             getCliAuthContextOrThrow('mcp').userId,
-            extra.mcpReq.signal
+            extra?.mcpReq.signal
           )
         );
       } catch (error) {
         return mcpErrorResult(error);
       }
-    }
-  );
+    },
+  });
 
   registerSessionTool(
     MCP_CONFIGURE_TOOL_NAME,
@@ -5277,7 +5310,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
         'Discover this Session/worktree mode and available machine, project and agent configuration choices.',
       title: 'List session create options',
       description:
-        'Discover current Session and sparse create candidates: online machines, current/default agent config with accepted runConfig, current local project; repos require repoQuery. current.workContext: local worktree:true marks project/session worktree mode; absent means neither marks it. github uses a worktree; chat has no project. local rootPath is the original directory; current.git.branchName is the recorded session branch. Searches cap at 20; use lody_machine_list, lody_project_list, lody_agent_config and lody_agent_role for paging.',
+        'Discover current Session and sparse create candidates: online machines, current/default agent config with accepted runConfig, current local project; repos require repoQuery. current.workContext: local worktree:true marks project/session worktree mode; absent means neither marks it. github uses a worktree; chat has no project. local rootPath is the original directory; current.git.branchName is the recorded session branch. Searches cap at 20; use lody_catalog actions machines, projects, agent_configs and agent_roles for paging.',
       inputSchema: SessionCreateOptionsToolInputSchema,
     },
     async (args: SessionCreateOptionsToolInput) => {
@@ -5542,97 +5575,120 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     }
   );
 
-  registerSessionTool(
-    OPERATION_TOOL_NAME,
-    {
-      summary:
-        'Inspect your asynchronous requests: one snapshot by operationId, an announced completion batch by batchId, or a list.',
-      title: 'Read Lody Operations',
+  const readOperations = async (
+    input: z.output<typeof OperationToolInputSchema>
+  ): Promise<CallToolResult> => {
+    try {
+      const ctx = getSessionContext();
+      if (input.operationId !== undefined) {
+        const args = OperationGetToolInputSchema.parse(input);
+        return jsonTextResult(
+          await snapshotOperation(ctx.sessionId as SessionId, args.operationId)
+        );
+      }
+      if (input.batchId !== undefined) {
+        const args = OperationBatchGetToolInputSchema.parse(input);
+        const invoking = await resolveInvokingTurnSource();
+        return jsonTextResult(
+          await withOperationStore((store) => {
+            const scope = {
+              workspaceId: getMcpWorkspaceId(ctx),
+              sessionId: ctx.sessionId,
+              userId: invoking.userId,
+            };
+            const batch = store.inbox.getBatch(args.batchId, scope);
+            if (!batch)
+              throw new LodyOperationStoreError('BATCH_NOT_FOUND', 'Batch not found.', false);
+            const page = discoveryCursor(
+              { cursor: args.cursor, limit: args.limit },
+              JSON.stringify([scope, args.batchId])
+            );
+            const position = page.after?.split(':') ?? ['0', '0'];
+            if (position.length !== 2) throw new Error('Invalid batch cursor');
+            const after = z.coerce.number().int().nonnegative().parse(position[0]);
+            const offset = z.coerce.number().int().nonnegative().parse(position[1]);
+            const candidates = store.inbox.members(
+              batch,
+              offset ? after - 1 : after,
+              page.limit + 1
+            );
+            if (offset && candidates[0]?.sequence !== after)
+              throw new Error('Invalid batch content cursor');
+            const { items, hasMore, next } = batchPage(candidates, page.limit, offset);
+            return {
+              batchId: batch.batchId,
+              total: batch.memberCount,
+              state: batch.state,
+              items,
+              hasMore,
+              ...(next ? { nextCursor: page.encode(next) } : {}),
+            };
+          })
+        );
+      }
+      const args = OperationListQuerySchema.parse(input);
+      const source = await resolveInvokingTurnSource();
+      return jsonTextResult(
+        await withOperationStore((store) =>
+          store.listForRequester(
+            {
+              workspaceId: getMcpWorkspaceId(ctx) as WorkspaceId,
+              requesterSessionId: ctx.sessionId as SessionId,
+              requesterUserId: source.userId,
+            },
+            args
+          )
+        )
+      );
+    } catch (error) {
+      return mcpErrorResult(error);
+    }
+  };
+  const operationActions = {
+    get: defineToolAction({
+      summary: 'One asynchronous request snapshot by operationId; a snapshot, not a wait.',
+      description:
+        'Read one durable Operation snapshot owned by the current Session. Use the operationId returned by create/chat, including an adopted existing id. This reads state; it does not resume, resend or wait for work. OPERATION_NOT_FOUND requires checking the id and requester Session, not automatically starting duplicate work.\n\n' +
+        OPERATION_SNAPSHOT_GUIDANCE,
+      inputSchema: OperationGetToolInputSchema,
+      run: (args) => readOperations(args),
+    }),
+    batch: defineToolAction({
+      summary: 'A page of an announced completion batch by batchId (limit up to 50).',
       description: [
-        'Three read-only modes, chosen by the arguments: operationId reads one Operation snapshot; batchId reads a page of an announced completion batch (cursor, limit up to 50, default 20); neither lists Operation summaries (state, cursor, limit up to 100, default 20). Mixing modes is rejected. None of them waits, resumes or resends work.',
-        'operationId mode: read one durable Operation snapshot owned by the current Session. Use the operationId returned by create/chat, including an adopted existing id. This reads state; it does not resume, resend or wait for work. OPERATION_NOT_FOUND requires checking the id and requester Session, not automatically starting duplicate work.\n\n' +
-          OPERATION_SNAPSHOT_GUIDANCE,
-
-        'List mode: durable Operation summaries owned by the current Session and invoking user on this machine. Use it to find operationIds or inspect recovery state, not to discover every Session task in the workspace. Optional state filter and opaque keyset pagination; keep filters unchanged when following nextCursor.',
-        'This is a summary directory. Pass operationId for one Operation completion and batchId for an announced completion batch. Finished is an orchestration state, not a success flag; inspect completion and per-item outcomes. An empty page in this requester scope does not prove another Session never started work.',
-        'Results are saved before automatic delivery at the next permitted input boundary. Do not poll this list or recreate work merely because a notification has not arrived.',
-
-        'batchId mode: read a fixed completion batch announced to the invoking Session/user. Use its batchId from the completion notification, not an operationId or Session id. This recovers members omitted from an inline batch preview; it starts no task and does not acknowledge or consume the batch.',
+        'Read a fixed completion batch announced to the invoking Session/user. Use its batchId from the completion notification, not an operationId or Session id. This recovers members omitted from an inline batch preview; it starts no task and does not acknowledge or consume the batch.',
         'Reply: {batchId,total,state,items,hasMore,nextCursor?}. total counts batch members, not pages/fragments. state is the batch delivery lifecycle, not task success. Each complete member carries sequence, operationId and completion; inspect completion.type and each result item status. Membership is fixed: work completed later belongs to another batch.',
         'Pagination: keep batchId and use the returned opaque nextCursor while hasMore=true. A page can hold fewer than limit members because replies are bounded to 128 KiB. Do not restart completed work to retrieve omitted results.',
         'Large members: encoding=member-json returns sequence, operationId, offset, totalChars and jsonChunk. Group fragments by batchId/sequence, concatenate in offset order, verify all totalChars arrived, then JSON.parse once. offset/totalChars count JavaScript UTF-16 code units, not bytes. A later page can continue the same member; a fragment is not a standalone completion. Already-truncated text inside the reconstructed completion is not restored by paging; read target Session history if needed.',
         'Failure: BATCH_NOT_FOUND means this batch is unavailable in the current requester scope. Invalid or cross-batch cursors must be replaced by starting this same batch without cursor, not by creating another task.',
       ].join('\n\n'),
+      inputSchema: OperationBatchGetToolInputSchema,
+      run: (args) => readOperations(args),
+    }),
+    list: defineToolAction({
+      summary: 'Summaries of requests this conversation and user started, active or finished.',
+      description: [
+        'Durable Operation summaries owned by the current Session and invoking user on this machine. Use it to find operationIds or inspect recovery state, not to discover every Session task in the workspace. Optional state filter and opaque keyset pagination; keep filters unchanged when following nextCursor.',
+        'This is a summary directory. Use action get for one Operation completion and action batch for an announced completion batch. Finished is an orchestration state, not a success flag; inspect completion and per-item outcomes. An empty page in this requester scope does not prove another Session never started work.',
+        'Results are saved before automatic delivery at the next permitted input boundary. Do not poll this list or recreate work merely because a notification has not arrived.',
+      ].join('\n\n'),
+      inputSchema: OperationListQuerySchema,
+      run: (args) => readOperations(args),
+    }),
+  };
+  registerSessionTool(
+    OPERATION_TOOL_NAME,
+    {
+      summary:
+        'Inspect your asynchronous requests: one snapshot, an announced completion batch, or a list.',
+      title: 'Read Lody Operations',
+      description:
+        'Read-only actions: get (one Operation snapshot by operationId), batch (a page of an announced completion batch by batchId) and list (Operation summaries). None of them waits, resumes or resends work. Cancel with lody_operation_cancel.',
       annotations: { readOnlyHint: true },
-      inputSchema: OperationToolInputSchema,
+      inputSchema: actionToolInputSchema(operationActions, 'get, batch or list.'),
+      actions: operationActions,
     },
-    async (input) => {
-      try {
-        const ctx = getSessionContext();
-        if (input.operationId !== undefined) {
-          const args = OperationGetToolInputSchema.parse(input);
-          return jsonTextResult(
-            await snapshotOperation(ctx.sessionId as SessionId, args.operationId)
-          );
-        }
-        if (input.batchId !== undefined) {
-          const args = OperationBatchGetToolInputSchema.parse(input);
-          const invoking = await resolveInvokingTurnSource();
-          return jsonTextResult(
-            await withOperationStore((store) => {
-              const scope = {
-                workspaceId: getMcpWorkspaceId(ctx),
-                sessionId: ctx.sessionId,
-                userId: invoking.userId,
-              };
-              const batch = store.inbox.getBatch(args.batchId, scope);
-              if (!batch)
-                throw new LodyOperationStoreError('BATCH_NOT_FOUND', 'Batch not found.', false);
-              const page = discoveryCursor(
-                { cursor: args.cursor, limit: args.limit },
-                JSON.stringify([scope, args.batchId])
-              );
-              const position = page.after?.split(':') ?? ['0', '0'];
-              if (position.length !== 2) throw new Error('Invalid batch cursor');
-              const after = z.coerce.number().int().nonnegative().parse(position[0]);
-              const offset = z.coerce.number().int().nonnegative().parse(position[1]);
-              const candidates = store.inbox.members(
-                batch,
-                offset ? after - 1 : after,
-                page.limit + 1
-              );
-              if (offset && candidates[0]?.sequence !== after)
-                throw new Error('Invalid batch content cursor');
-              const { items, hasMore, next } = batchPage(candidates, page.limit, offset);
-              return {
-                batchId: batch.batchId,
-                total: batch.memberCount,
-                state: batch.state,
-                items,
-                hasMore,
-                ...(next ? { nextCursor: page.encode(next) } : {}),
-              };
-            })
-          );
-        }
-        const args = OperationListQuerySchema.parse(input);
-        const source = await resolveInvokingTurnSource();
-        return jsonTextResult(
-          await withOperationStore((store) =>
-            store.listForRequester(
-              {
-                workspaceId: getMcpWorkspaceId(ctx) as WorkspaceId,
-                requesterSessionId: ctx.sessionId as SessionId,
-                requesterUserId: source.userId,
-              },
-              args
-            )
-          )
-        );
-      } catch (error) {
-        return mcpErrorResult(error);
-      }
-    }
+    (input) => runToolAction(operationActions, input)
   );
 
   registerSessionTool(
@@ -5684,16 +5740,12 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     }
   );
 
-  registerSessionTool(
-    SESSION_RENAME_TOOL_NAME,
-    {
-      summary: 'Set the title of one Session, or of several with isolated per-item failures.',
-      title: 'Rename Lody sessions',
-      description:
-        'Set the title of one Session. Omit sessionId (or pass current) to rename the current Session. The durable rename is treated as a user-directed title and is not replaced by later automatic title generation.\n\nBatch mode: pass items instead of sessionId/title to set titles for 1-20 Sessions. Session ids must be unique. The reply is {items}; results preserve input order and failures are isolated per item; successful renames remain applied when another item fails.',
-      inputSchema: SessionRenameCombinedToolInputSchema,
-    },
-    async (input) => {
+  const renameAction = defineToolAction({
+    summary: 'Set the title of one Session, or of several with isolated per-item failures.',
+    description:
+      'Set the title of one Session. Omit sessionId (or pass current) to rename the current Session. The durable rename is treated as a user-directed title and is not replaced by later automatic title generation.\n\nBatch mode: pass items instead of sessionId/title to set titles for 1-20 Sessions. Session ids must be unique. The reply is {items}; results preserve input order and failures are isolated per item; successful renames remain applied when another item fails.',
+    inputSchema: SessionRenameCombinedToolInputSchema,
+    run: async (input) => {
       try {
         if ('items' in input) {
           const batch: SessionRenameManyToolInput = SessionRenameManyToolInputSchema.parse(input);
@@ -5710,20 +5762,16 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
       } catch (error) {
         return mcpErrorResult(error);
       }
-    }
-  );
-
-  registerSessionTool(
-    SESSION_ARCHIVE_TOOL_NAME,
-    {
-      summary:
-        'Archive selected conversations and contained Tabs; independently opened conversations are excluded.',
-      title: 'Archive Lody sessions',
-      description:
-        'Idempotently archive one Session with sessionId, or 1-20 Sessions with sessionIds; provide exactly one field. Batch ids must be unique. Batch results preserve input order and failures are isolated per item; successful archives remain applied. Each target includes its contained child Tabs. Independently opened Sessions (openedBySessionId) are not archived. Pending Operation Deliveries remain pending until a human restores the Session.',
-      inputSchema: SessionArchiveToolInputSchema,
     },
-    async (args: SessionArchiveToolInput) => {
+  });
+
+  const archiveAction = defineToolAction({
+    summary:
+      'Archive selected conversations and contained Tabs; independently opened conversations are excluded.',
+    description:
+      'Idempotently archive one Session with sessionId, or 1-20 Sessions with sessionIds; provide exactly one field. Batch ids must be unique. Batch results preserve input order and failures are isolated per item; successful archives remain applied. Each target includes its contained child Tabs. Independently opened Sessions (openedBySessionId) are not archived. Pending Operation Deliveries remain pending until a human restores the Session.',
+    inputSchema: SessionArchiveToolInputSchema,
+    run: async (args: SessionArchiveToolInput) => {
       try {
         const ctx = getSessionContext();
         const auth = getCliAuthContextOrThrow('mcp');
@@ -5771,7 +5819,91 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
       } catch (error) {
         return mcpErrorResult(error);
       }
-    }
+    },
+  });
+
+  // PR links act only on the calling Session, resolved from the MCP session context and
+  // never from an argument, through the daemon link operations with source `agent`.
+  const sessionPullRequestLinks = () => {
+    const daemon = getDaemonWorkspace();
+    if (!daemon) throw new Error('Session pull request links require the Lody daemon');
+    return createSessionPullRequestLinks({
+      store: daemon.manager.repo,
+      machineId: daemon.machineId,
+    });
+  };
+  const linkResult = (result: SessionPullRequestLinkResult) =>
+    jsonTextResult(result, 'reason' in result);
+  const PR_LINK_FACTS =
+    'Acts only on the calling Session (a child Tab resolves to its owner Session). A link is intent: the PR reconciler shows the PR after its provider confirms it. Only github.com pull request URLs are supported today; other URLs return reason unsupported. Other refusals: session_archived, not_this_machine, session_not_found, limit (32 links per Session).';
+  const prLinkAction = defineToolAction({
+    summary: 'Link a pull request (PR) this Session opened to it.',
+    description: `Link a pull request URL to the calling Session. Use it for a PR this Session opened without gh pr create (which links automatically), for example through a web page, an API or another tool. ${PR_LINK_FACTS} Linking an already linked URL is a no-op success.`,
+    inputSchema: SessionPullRequestLinkInputSchema,
+    run: async ({ url }) => {
+      try {
+        return linkResult(
+          await sessionPullRequestLinks().link(getSessionContext().sessionId, url, 'agent')
+        );
+      } catch (error) {
+        return mcpErrorResult(error);
+      }
+    },
+  });
+  const prUnlinkAction = defineToolAction({
+    summary: 'Unlink a pull request (PR) from this Session.',
+    description: `Unlink a pull request URL from the calling Session, so Lody stops showing it for this Session. A later link of the same URL wins. ${PR_LINK_FACTS}`,
+    inputSchema: SessionPullRequestLinkInputSchema,
+    run: async ({ url }) => {
+      try {
+        return linkResult(
+          await sessionPullRequestLinks().unlink(getSessionContext().sessionId, url, 'agent')
+        );
+      } catch (error) {
+        return mcpErrorResult(error);
+      }
+    },
+  });
+  const prListAction = defineToolAction({
+    summary: 'List the pull requests (PRs) linked to or found for this Session.',
+    description:
+      'List every pull request the calling Session holds, the primary first. A linked PR the provider has not confirmed yet is listed as pending with a reason. Acts only on the calling Session; returns an empty list for an archived or unknown Session.',
+    inputSchema: z.object({}).strict(),
+    run: async () => {
+      try {
+        return jsonTextResult({
+          items: await sessionPullRequestLinks().list(getSessionContext().sessionId),
+        });
+      } catch (error) {
+        return mcpErrorResult(error);
+      }
+    },
+  });
+  const sessionManageActions = {
+    rename: renameAction,
+    archive: archiveAction,
+    share: shareAction,
+    pr_link: prLinkAction,
+    pr_unlink: prUnlinkAction,
+    pr_list: prListAction,
+  };
+  registerSessionTool(
+    SESSION_MANAGE_TOOL_NAME,
+    {
+      summary:
+        'Manage Sessions: rename, archive, request a share link, and link, unlink or list pull requests (PR) of this Session.',
+      title: 'Manage Lody sessions',
+      description:
+        'Actions: rename (one Session or a batch), archive (one or a batch), share (a user-approved static share link), and pr_link, pr_unlink and pr_list, which link, unlink or list the pull requests (PRs, merge requests) of the calling Session only.',
+      inputSchema: actionToolInputSchema(
+        sessionManageActions,
+        'rename, archive, share, pr_link, pr_unlink or pr_list.'
+      ),
+      actions: sessionManageActions,
+      // Sharing needs this request's abort signal and the CLI account, as before.
+      executeLocally: (input) => input.action === 'share',
+    },
+    (input, extra) => runToolAction(sessionManageActions, input, extra)
   );
 
   registerSessionTool(

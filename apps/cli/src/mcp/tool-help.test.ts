@@ -4,7 +4,12 @@ import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { createToolHelpServer } from './tool-help';
+import {
+  actionToolInputSchema,
+  createToolHelpServer,
+  defineToolAction,
+  runToolAction,
+} from './tool-help';
 import { createSessionToolRegistrar, type SessionToolHandlers } from './session-tool-router';
 
 describe('Lody command help over MCP', () => {
@@ -168,6 +173,115 @@ describe('Lody command help over MCP', () => {
         })
       ).not.toMatchObject({ isError: true });
       expect(workspaces).toEqual(['synthetic-project']);
+    } finally {
+      await Promise.all([client.close(), server.close()]);
+    }
+  });
+
+  it('publishes an action tool thinly, serves each action from help and validates its real schema', async () => {
+    const server = new McpServer({ name: 'lody-action-help-test', version: '1' });
+    const renamed: string[] = [];
+    const actions = {
+      rename: defineToolAction({
+        summary: 'Rename one Session.',
+        description: 'Set a user-directed title.',
+        inputSchema: z.object({ title: z.string().trim().min(1).max(200) }).strict(),
+        run: async ({ title }) => {
+          renamed.push(title);
+          return { content: [{ type: 'text', text: 'renamed' }] };
+        },
+      }),
+      pr_list: defineToolAction({
+        summary: 'List pull requests of this Session.',
+        description: 'Primary first.',
+        inputSchema: z.object({}).strict(),
+        run: async () => ({ content: [{ type: 'text', text: '[]' }] }),
+      }),
+    };
+    createToolHelpServer(server).registerTool(
+      'lody_session_manage',
+      {
+        summary: 'Manage Sessions.',
+        description: 'Actions: rename and pr_list.',
+        inputSchema: actionToolInputSchema(actions, 'rename or pr_list.'),
+        actions,
+      },
+      (input) => runToolAction(actions, input)
+    );
+    const client = new Client({ name: 'action-help-test', version: '1' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    const help = async (args: Record<string, unknown>) => {
+      const result = CallToolResultSchema.parse(
+        await client.callTool({ name: 'lody_help', arguments: args })
+      );
+      const block = result.content.find((item) => item.type === 'text');
+      if (!block || block.type !== 'text') throw new Error('Missing help');
+      return { isError: result.isError === true, text: block.text };
+    };
+    try {
+      const tool = (await client.listTools()).tools.find(
+        ({ name }) => name === 'lody_session_manage'
+      );
+      // Eager: only the action enum and an open arguments object; per-action fields are help-only.
+      expect(tool?.inputSchema).toEqual({
+        type: 'object',
+        properties: {
+          action: {
+            description: 'rename or pr_list.',
+            type: 'string',
+            enum: ['rename', 'pr_list'],
+          },
+          arguments: {
+            description: 'Fields of the chosen action; lody_help({command, action}) lists them.',
+            type: 'object',
+            propertyNames: { type: 'string' },
+            additionalProperties: {},
+          },
+        },
+        required: ['action'],
+        additionalProperties: false,
+      });
+      expect(JSON.stringify(tool)).not.toContain('title');
+
+      const full = JSON.parse((await help({ command: 'lody_session_manage' })).text);
+      expect(full.actions.map((entry: { action: string }) => entry.action)).toEqual([
+        'rename',
+        'pr_list',
+      ]);
+      expect(
+        JSON.parse((await help({ command: 'lody_session_manage', action: 'rename' })).text)
+      ).toMatchObject({
+        action: 'rename',
+        description: 'Set a user-directed title.',
+        argumentsSchema: { properties: { title: { maxLength: 200 } }, required: ['title'] },
+      });
+      expect(await help({ command: 'lody_session_manage', action: 'delete' })).toEqual({
+        isError: true,
+        text: 'Unknown action. lody_session_manage actions: rename, pr_list.',
+      });
+      expect((await help({ action: 'rename' })).isError).toBe(true);
+
+      for (const args of [
+        { action: 'rename' },
+        { action: 'rename', arguments: { title: '  ' } },
+        { action: 'rename', arguments: { title: 'x', sessionId: 'other' } },
+        { action: 'delete', arguments: {} },
+      ]) {
+        const invalid = CallToolResultSchema.parse(
+          await client.callTool({ name: 'lody_session_manage', arguments: args })
+        );
+        expect(invalid.isError).toBe(true);
+        expect(JSON.stringify(invalid.content)).toContain(
+          'lody_help({command:\\"lody_session_manage\\"})'
+        );
+      }
+      expect(renamed).toEqual([]);
+      await client.callTool({
+        name: 'lody_session_manage',
+        arguments: { action: 'rename', arguments: { title: ' Review ' } },
+      });
+      expect(renamed).toEqual(['Review']);
     } finally {
       await Promise.all([client.close(), server.close()]);
     }

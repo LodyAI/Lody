@@ -288,6 +288,9 @@ describe('gh pr create reports the created PR to its Session', () => {
           'https://github.com/owner/repo/pull/42 was not linked to this Session'
         )
       );
+      expect(h.stderr).toHaveBeenCalledWith(
+        expect.stringContaining('lody_session_manage action pr_link')
+      );
     }
   );
 

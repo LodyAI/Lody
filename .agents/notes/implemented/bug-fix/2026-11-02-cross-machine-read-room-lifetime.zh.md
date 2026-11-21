@@ -9,7 +9,7 @@ Issue: [#2194](https://github.com/LodyAI/Lody/issues/2194)
 ## 摘要
 
 Daemon 上的 MCP 读取如果涉及其他 Machine 的数据（不带 Machine 过滤的
-`lody_agent_role`（列表模式）、`lody_session_list`、`lody_session_status_many`、
+`lody_catalog` 的 `agent_roles` 操作、`lody_session_list`、`lody_session_status_many`、
 `lody_session_history`），会 join 那台 Machine 的 Flock 或 Session room，并一直保持到进程结束。
 如果这个 room 的首次同步始终完不成，每次 120 s 的 `initial_sync_timeout` 都会让 Streams
 聚合状态变成 `disconnected`。恢复逻辑随即重连整个工作区、重新 join 这个 room、重扫当前 Machine 的会话，
