@@ -190,8 +190,10 @@ ids instead of opening a replica.
   stay primitive, declared streaming fields are texts, and `mq` is a movable list
   whose items expose `$cid`. A test compares the containers and JSON with what the
   HistoryWriter and the Mirror write. Control changes (queue rows by `$cid`,
-  receipts, Stop) are diffed from an optimistic state and applied at the version
-  they were computed on (`rebase`). History commands the renderer uses
+  receipts, Stop) commit in order: each is diffed from the state the previous one's
+  reload confirmed and applied at the head that state was read at (`rebase`). The
+  optimistic state replays the writes not yet settled over the confirmed one, so a
+  refused write simply drops out. History commands the renderer uses
   (`appendTurn`, `replaceTurn`, `respondPermission`, `user-status`) reuse the
   HistoryWriter's planners and validation on the stored JSON of the turns they
   touch; appends are `rebase`, edits `cas` with bounded retries. Positional diffs
@@ -623,9 +625,15 @@ for a loaded room; RSS deltas below 20 MB are within measurement noise.
   Sessions read in cycles reached 412–699 MB against a live set of about 312 MB.
   The engine now trims after unloading rooms (loro-repo #326): 337–375 MB, flat
   across cycles. Other allocators were not measured.
-- A commit already sent when the host dies is an unknown outcome. Per the SDK
-  contract this latches that repo's metadata writes until it is recreated; reads
-  continue. Commits attempted while disconnected are certain non-commits.
+- A Meta commit is classified by whether its write was sent. Everything before it
+  (opening the observation, the read-set read, a disconnected client) is a certain
+  non-commit (`ExternalMetadataNotCommittedError`). An `ENGINE_HANDING_OFF` refusal
+  of the conditional batch applied nothing: the commit waits (30 s at most) for the
+  connection to the successor and retries. A batch that returned a transaction id is
+  committed; after a lost connection it is confirmed by the reload that follows,
+  rather than by the old subscription. Only a batch sent when the host dies, with no
+  reply, is an unknown outcome, which per the SDK contract latches that repo's
+  metadata writes until it is recreated; reads continue.
 - No signed installer, real-window acceptance or platforms other than Linux x64
   have been exercised (see Pending acceptance).
 
