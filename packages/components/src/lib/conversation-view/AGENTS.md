@@ -57,7 +57,9 @@
   together with an owner-issued checkpoint. Negotiate `sessionHistoryIncremental`
   independently; verified catch-up patches only changed rows, including revision gaps.
   Coherent checkpoint replies may advance behind newer hints; keep catching up.
-  Body-only edits retain directory cursor validity.
+  Body-only edits retain directory cursor validity. An in-flight older page may
+  join the current cache head when adjacent changes prove that its positions
+  and turn IDs remained unchanged.
   Independently negotiate `sessionHistorySubscription`. Active bridges receive
   durable owner checkpoints and apply inline deltas only at an exact cached base.
   Renewals resume at the cached checkpoint. A reader adopts each committed checkpoint

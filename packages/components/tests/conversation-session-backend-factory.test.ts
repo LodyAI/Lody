@@ -2076,6 +2076,134 @@ it.each(['edit', 'append'] as const)(
   }
 );
 
+it.each([false, true])(
+  'loads a pending older page through shared tail edits (older turn also edited: %s)',
+  async (editOlder) => {
+    const h = await cachedRecoveryFixture('in-flight-older-' + editOlder, 41, 1);
+    const timers = controlledRefreshTimers();
+    const older = h.entries[0]!;
+    const tail = h.entries.at(-1)!;
+    const gate = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const patched = {
+      ...older,
+      items: [{ type: 'text' as const, text: 'edited earlier turn' }],
+    };
+    let revision = 1;
+    const open = () => {
+      const online = Promise.withResolvers<(revision: number) => void>();
+      let applied = Promise.withResolvers<void>();
+      const data = createRemoteRoostSessionDataFactory({
+        workspaceId: h.workspaceId,
+        machineId: h.machineId,
+        incremental: true,
+        live: true,
+        subscribeHistory: async (_machine, _session, _open, publish, signal) => {
+          const done = Promise.withResolvers<void>();
+          signal.addEventListener('abort', () => done.resolve(), { once: true });
+          online.resolve((next) => publish({ checkpoint: `checkpoint-${next}`, revision: next }));
+          await done.promise;
+        },
+        requestHistoryRead: async (_machine, _session, query) => {
+          if (query.kind === 'readRange') {
+            expect([query.from, query.to]).toEqual([0, 1]);
+            const target = Number(query.atCheckpoint?.split('-').at(-1));
+            started.resolve();
+            await gate.promise;
+            return h.reply(target, [
+              { state: 'ready', turn: editOlder && target > 1 ? patched : older },
+            ]).responses[0]!;
+          }
+          if (query.kind !== 'readChanges') throw new Error('Unexpected owner read');
+          return h.reply(revision, {
+            state: 'ready',
+            checkpoint: `checkpoint-${revision}`,
+            ids: editOlder && revision === 2 ? [tail.id, older.id] : [tail.id],
+            bodies: {
+              changed: [
+                { ...tail, items: [{ type: 'text', text: `Agent output ${revision}` }] },
+                ...(editOlder && revision === 2 ? [patched] : []),
+              ],
+              suffix: [],
+            },
+          }).responses[0]!;
+        },
+        requestHistoryWrite: async () => {
+          throw new Error('Unexpected write');
+        },
+      })({ sessionId: h.sessionId, doc: h.doc, backendKind: 'roost' });
+      const history = {
+        ...data.history,
+        observe: (listener: (change: SessionDataChange) => void) =>
+          data.history.observe((change) => {
+            listener(change);
+            if (change.kind === 'changed' && change.ids.includes(tail.id)) applied.resolve();
+          }),
+      };
+      return {
+        data,
+        history,
+        publish: online.promise,
+        nextChange() {
+          applied = Promise.withResolvers();
+          return applied.promise;
+        },
+      };
+    };
+    const source = open();
+    const observation = source.history.observe(() => {});
+    const destination = open();
+    const view = createConversationViewFromReader(destination.history, {
+      sessionId: h.sessionId,
+      tailKeep: 0,
+      scheduleIdle: () => () => {},
+    });
+    try {
+      const [publishSource, publishDestination] = await Promise.all([
+        source.publish,
+        destination.publish,
+      ]);
+      const loading = view.loadOlder!();
+      const outcome = loading.catch((error: Error) => error.name);
+      await started.promise;
+      for (const next of [2, 3]) {
+        const applied = source.nextChange();
+        revision = next;
+        publishSource(next);
+        (await timers.next()).callback();
+        await applied;
+      }
+      const adopted = destination.nextChange();
+      publishDestination(revision);
+      await adopted;
+      gate.resolve();
+
+      if (editOlder) {
+        expect(await outcome).toBe('HistoryRefreshSupersededError');
+        expect(view.indexOf(older.id)).toBe(-1);
+        expect(await h.cache.readRows(0, 1)).toBeUndefined();
+        expect(await view.loadOlder!()).toBe(true);
+      } else {
+        expect(await outcome).toBe(true);
+      }
+      expect(view.indexOf(older.id)).toBe(0);
+      expect(await destination.history.readTurn(older.id)).toEqual({
+        state: 'ready',
+        turn: editOlder ? patched : older,
+      });
+      expect(await h.cache.getHead()).toMatchObject({ checkpoint: 'checkpoint-3', start: 0 });
+    } finally {
+      gate.resolve();
+      view.dispose();
+      observation.unsubscribe();
+      source.data.dispose();
+      destination.data.dispose();
+      h.cache.dispose();
+      timers.restore();
+    }
+  }
+);
+
 it.each([1, 9])(
   'adopts a shared history reset at revision %i in both open windows',
   async (revision) => {

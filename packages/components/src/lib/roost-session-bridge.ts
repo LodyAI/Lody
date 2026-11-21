@@ -46,6 +46,7 @@ import {
   createRoostHistoryCache,
   parseRoostCacheCursor,
   roostCacheCursor,
+  roostCachedChangesSince,
   type RoostCachedHead,
 } from './roost-history-cache';
 import type { ConversationSessionDataFactory } from './conversation-view/create-conversation-session';
@@ -563,7 +564,7 @@ const createRoostSessionDataFactoryFromTransport =
     const adoptCachedHead = (head: RoostCachedHead) => {
       if (!head.checkpoint || head.checkpoint === appliedCheckpoint) return;
       const previousCount = observedHistoryCount ?? 0;
-      const change = head.change?.baseCheckpoint === appliedCheckpoint ? head.change : undefined;
+      const changes = appliedCheckpoint ? roostCachedChangesSince(head, appliedCheckpoint) : undefined;
       appliedCheckpoint = head.checkpoint;
       // A different reader committed this projection. Fence reads and cursors
       // from the previous local view, including a retired owner generation.
@@ -576,17 +577,27 @@ const createRoostSessionDataFactoryFromTransport =
       hasIncrementalCheckpoint = true;
       displayedCacheRevision = head.revision;
       seenCacheRevision = head.revision;
-      if (!change) {
+      if (!changes) {
         bodies.clear();
         notifyAppliedChanges(0, Math.max(previousCount, head.count), []);
         return;
       }
-      for (const id of change.ids) bodies.delete(id);
-      if (change.from !== undefined) {
-        for (const [id, entry] of bodies)
-          if (entry.position === undefined || entry.position >= change.from) bodies.delete(id);
+      const ids = new Set<string>();
+      let from = Infinity;
+      let count = head.count;
+      for (const change of changes) {
+        from = Math.min(from, change.from ?? Infinity);
+        count = Math.max(count, change.previousCount);
+        for (const id of change.ids) {
+          ids.add(id);
+          bodies.delete(id);
+        }
       }
-      notifyAppliedChanges(change.from, Math.max(change.previousCount, head.count), change.ids);
+      if (from < Infinity) {
+        for (const [id, entry] of bodies)
+          if (entry.position === undefined || entry.position >= from) bodies.delete(id);
+      }
+      notifyAppliedChanges(from < Infinity ? from : undefined, count, [...ids]);
     };
     const notifyChanged = (
       change?: SessionHistoryChange | null,
@@ -699,16 +710,18 @@ const createRoostSessionDataFactoryFromTransport =
       }
       if (before) {
         if (incrementalEnabled() && localHead?.checkpoint && !replacingSnapshot) {
-          // A durable cursor already names an absolute edge. Read that window
-          // directly at its checkpoint instead of walking from the latest page.
+          // Reconcile an exact page against the cache transaction that will
+          // install it. A tail publication alone does not invalidate its rows.
           const from = Math.max(0, before.end - query.limit);
-          const response = await readOwner({
+          const response = await transport.readHistory({
             kind: 'readRange',
             from,
             to: before.end,
             atCheckpoint: localHead.checkpoint,
           });
           if (
+            disposed ||
+            replacingSnapshot ||
             response.historyRevision !== localHead.revision ||
             response.historyCount !== localHead.count ||
             !Array.isArray(response.result) ||
@@ -720,18 +733,8 @@ const createRoostSessionDataFactoryFromTransport =
             if (read.state !== 'ready') throw new Error('Roost cached page body is unavailable');
             return read.turn as SessionHistoryInput;
           });
-          const page: SessionHistoryDirectoryPage = {
-            checkpoint: localHead.checkpoint,
-            startPosition: from,
-            totalCount: localHead.count,
-            rows: turns.map((turn, index) =>
-              createRoostDirectoryRow(from + index, turn as SessionEntry)
-            ),
-            hasMoreOlder: from > 0,
-            cursor: from > 0 ? roostCacheCursor(localHead.revision, from) : null,
-          };
-          await cached(() => cache.acceptPage(page, turns, localHead.revision));
-          turns.forEach((turn, index) => rememberBody(turn, from + index));
+          const page = await cached(() => cache.retainOlderPage(localHead, from, turns));
+          if (!page || disposed || replacingSnapshot) throw new HistoryRefreshSupersededError();
           return { page, directoryEpoch };
         }
         // A durable cursor survives owner restarts. Resolve its absolute edge
