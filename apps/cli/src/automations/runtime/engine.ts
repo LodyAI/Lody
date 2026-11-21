@@ -229,7 +229,7 @@ export class Automations extends Context.Service<
             ledger.update(
               receipt.id,
               receipt.state,
-              { state: 'submitting', attempts: receipt.attempts + 1, retryAt: undefined },
+              { state: 'submitting', attempts: receipt.attempts + 1, retryAt: now + 15_000 },
               now
             )
           );
@@ -330,34 +330,20 @@ export class Automations extends Context.Service<
                 ),
               { concurrency: 4, discard: true }
             );
-            const after = yield* Clock.currentTimeMillis;
-            if (
-              ledger.dueWaits(after, 1).length ||
-              ledger.deliveries(1).length ||
-              ledger.pending(after, 1).length
-            )
-              yield* wake;
           })
         );
         yield* Effect.forever(
-          Queue.take(signal).pipe(
-            Effect.andThen(pass),
+          Effect.gen(function* () {
+            const now = yield* Clock.currentTimeMillis;
+            const due = yield* Effect.try(() => ledger.nextDueAt(now)).pipe(
+              Effect.catch(() => Effect.succeed(undefined))
+            );
+            const delay = Math.max(0, Math.min(due ?? Number.MAX_SAFE_INTEGER, now + 15_000) - now);
+            yield* Queue.take(signal).pipe(Effect.raceFirst(Effect.sleep(delay)));
+            yield* pass;
+          }).pipe(
             Effect.catchCause((cause) =>
               Cause.hasInterrupts(cause) ? Effect.failCause(cause) : host.report(cause)
-            )
-          )
-        ).pipe(Effect.forkScoped);
-        let lastMaintenance = 0;
-        yield* Effect.forever(
-          Effect.sleep('1 second').pipe(
-            Effect.andThen(
-              Effect.gen(function* () {
-                const now = yield* Clock.currentTimeMillis;
-                if (now - lastMaintenance >= 15_000 || ledger.dueWaits(now, 1).length) {
-                  lastMaintenance = now;
-                  yield* wake;
-                }
-              })
             )
           )
         ).pipe(Effect.forkScoped);

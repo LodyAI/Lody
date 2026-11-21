@@ -50,6 +50,25 @@ import {
 } from '@/lib/prepared-session-input';
 import { automationIdentity, type AutomationLedger } from '../storage/ledger';
 import type { ActionResult, ActionAuthorization } from '../runtime/engine';
+
+const durableSessionDenials = new Set([
+  'invocation_revoked',
+  'authorization_revoked',
+  'target_not_granted',
+  'target_permission_revoked',
+  'target_deleted',
+  'pending_work_target_mismatch',
+  'pending_work_binding_changed',
+  'pending_work_superseded',
+  'pending_work_ended',
+  'pending_work_already_claimed',
+  'workflow_target_changed',
+]);
+// 'no' verdicts only new authority or target state could lift; callers converge, never re-verify.
+export const isDurableSessionDenial = (observation: ActionAuthorization): boolean =>
+  observation.terminalState !== undefined ||
+  durableSessionDenials.has(observation.reason) ||
+  observation.reason.startsWith('guard:');
 import { pullRequestCheckpointId } from '../sources/pull-requests';
 import { providerBindingFingerprint } from '@/session/automation-observations';
 import { retainsAutomationGrant } from './authorization';
@@ -580,7 +599,7 @@ export class AutomationSessionActionsLegacy {
     );
     const meta = record?.meta as SessionMeta | undefined;
     if (record && isLoroRepoDocDeleted(record))
-      return { state: 'blocked', reason: 'target_deleted' };
+      return { state: 'cancelled', reason: 'target_deleted' };
     if (!meta) {
       if (
         receipt.prepared?.kind === 'create' &&
@@ -617,6 +636,9 @@ export class AutomationSessionActionsLegacy {
       if (read.turn.status !== 'prepared') return { state: 'queued' };
     }
     if ((await backend.getMessageQueue()).some((item) => item.operationId === receipt.id)) {
+      const verdict = await this.authorize(receipt);
+      if (verdict.value === 'no' && isDurableSessionDenial(verdict))
+        return { state: 'cancelling', reason: verdict.reason, retryAt: Date.now() };
       // The process may have stopped after writing the row but before publishing
       // its activation. Re-signal the same row; never enqueue a second input.
       await this.signalQueue(doc);
