@@ -241,7 +241,7 @@ it('returns an explicit Inbox error before opening storage, then accepts calls a
   let available = false;
   const handlers: SessionToolHandlers = new Map();
   const server = buildSessionToolServer(handlers);
-  const handler = handlers.get('lody_operation_get');
+  const handler = handlers.get('lody_operation');
   if (!handler) throw new Error('operation_get handler missing');
   const call = () =>
     runWithMcpSessionContext(
@@ -1404,7 +1404,7 @@ describe('scoped completed work batch reader', () => {
       store.inbox.accept(input);
       const batch = store.inbox.prepare(input, 'owner')!;
       mocks.operationInbox.mockReturnValue(store.inbox);
-      const handler = handlers.get('lody_operation_batch_get')!;
+      const handler = handlers.get('lody_operation')!;
       const decode = (result: Awaited<ReturnType<typeof handler>>) =>
         JSON.parse((result.content[0] as { text: string }).text);
       const first = decode(await handler({ batchId: batch.batchId, limit: 1 }));

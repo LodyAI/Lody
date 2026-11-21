@@ -43,7 +43,7 @@ export function registerAgentRoleTools(
     'lody_agent_role_update',
     {
       summary: 'Propose instruction/name edits to a saved agent Role; user Save is required.',
-      description: `Propose changes to a Role you manage. Read it with lody_agent_role_get first. Omitted patch fields stay unchanged; empty description or promptPrefix clears that field. Other Role configuration is preserved. ${consent}`,
+      description: `Propose changes to a Role you manage. Read it with lody_agent_role({id}) first. Omitted patch fields stay unchanged; empty description or promptPrefix clears that field. Other Role configuration is preserved. ${consent}`,
       inputSchema: AgentRoleUpdateProposalSchema,
     },
     (args) => call({ action: 'update', ...args })

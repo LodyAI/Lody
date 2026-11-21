@@ -27,7 +27,20 @@ describe('Lody command help over MCP', () => {
         summary,
         title: 'Create a Lody session',
         description,
-        inputSchema: z.object({ projectId: z.string().trim().min(1) }).strict(),
+        inputSchema: z
+          .object({
+            projectId: z.string().trim().min(1).describe('Registered project id.'),
+            workContext: z
+              .object({
+                kind: z.enum(['chat', 'local']).describe('Directory choice; rules in help.'),
+                description: z.string().max(80).optional().describe('A field named description.'),
+                at: z.string().datetime().optional(),
+              })
+              .strict()
+              .optional()
+              .describe('Independent directory.'),
+          })
+          .strict(),
       },
       async ({ projectId }) => {
         if (projectId === 'unavailable') {
@@ -47,12 +60,26 @@ describe('Lody command help over MCP', () => {
     try {
       const { tools: catalog } = await client.listTools();
       const create = catalog.find(({ name }) => name === 'lody_session_create');
-      expect(create?.description).toBe(
-        `${summary} Before execution, read lody_help({command:"lody_session_create"}); reuse only if full help remains in context.`
-      );
-      expect(create?.description).toContain('lody_help');
+      // The help-first rule is stated once in server instructions, not per tool.
+      expect(create?.description).toBe(summary);
       expect(create?.description).not.toContain('original project directory');
-      expect(create?.inputSchema).toMatchObject({
+      // Eager schema: structure, bounds and top-level phrases only; nested prose is help-only.
+      expect(create?.inputSchema).toEqual({
+        type: 'object',
+        properties: {
+          projectId: { description: 'Registered project id.', type: 'string', minLength: 1 },
+          workContext: {
+            description: 'Independent directory.',
+            type: 'object',
+            properties: {
+              kind: { type: 'string', enum: ['chat', 'local'] },
+              description: { type: 'string', maxLength: 80 },
+              at: { type: 'string', format: 'date-time' },
+            },
+            required: ['kind'],
+            additionalProperties: false,
+          },
+        },
         required: ['projectId'],
         additionalProperties: false,
       });
@@ -67,7 +94,16 @@ describe('Lody command help over MCP', () => {
       expect(JSON.parse(text.text)).toMatchObject({
         command: 'lody_session_create',
         description,
-        inputSchema: create?.inputSchema,
+        inputSchema: {
+          properties: {
+            workContext: {
+              properties: {
+                kind: { description: 'Directory choice; rules in help.' },
+                description: { description: 'A field named description.' },
+              },
+            },
+          },
+        },
       });
       const index = CallToolResultSchema.parse(
         await client.callTool({ name: 'lody_help', arguments: {} })
