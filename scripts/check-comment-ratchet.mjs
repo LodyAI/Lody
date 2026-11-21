@@ -260,13 +260,15 @@ function resolveScanSource(root) {
   if (process.env.CI !== 'true' && process.env.GITHUB_ACTIONS !== 'true')
     return { kind: 'worktree' };
   try {
-    const line = execFileSync('git', ['rev-list', '--parents', '-n', '1', 'HEAD'], {
+    // `rev-list --parents` hides parents at the shallow-fetch boundary; the
+    // commit object headers keep them, so parse `parent` lines directly.
+    const commit = execFileSync('git', ['cat-file', '-p', 'HEAD'], {
       cwd: root,
       encoding: 'utf8',
-    }).trim();
-    const parents = line.split(/\s+/);
-    if (parents.length < 3) return { kind: 'worktree' };
-    const prHead = parents[2];
+    });
+    const parents = [...commit.matchAll(/^parent (\S+)$/gm)].map((m) => m[1]);
+    if (parents.length < 2) return { kind: 'worktree' };
+    const prHead = parents[1];
     try {
       execFileSync('git', ['cat-file', '-e', `${prHead}^{commit}`], { cwd: root });
     } catch {
