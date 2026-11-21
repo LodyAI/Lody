@@ -11,7 +11,7 @@ Every Agent that Lody starts loads the whole Lody MCP tool list, and clients tha
 not defer schemas pay for it on every turn. After single/batch and get/list pairs were
 merged (40 to 30 tools), the owner approved turning low-frequency families into action
 tools whose eager schema is only an `action` enum and an `arguments` object, with the
-per-action detail served by `lody_help`. That gives 21 tools and 27,541 bytes. Reads stay
+per-action detail served by `lody_help`. That gives 21 tools and 27,769 bytes. Reads stay
 in read-only tools, so this costs two tools more than the design's estimate of about 19.
 The same change gives agents `pr_link` / `pr_unlink` / `pr_list` for their own Session,
 plus one owner-approved prompt sentence for git working directories, worded by
@@ -77,8 +77,8 @@ on Linux; iOS preview is absent there.
 | Revision | Tools | `tools/list` bytes |
 | --- | --- | --- |
 | main 0f24fb82c | 40 | 51,355 |
-| merged pairs (#3022) | 30 | 35,368 |
-| action tools | 21 | 27,541 |
+| merged pairs (#3022) | 30 | 35,596 |
+| action tools | 21 | 27,769 |
 
 ## Verification
 

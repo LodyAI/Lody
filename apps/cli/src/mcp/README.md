@@ -118,8 +118,8 @@ low-frequency families are action tools
 
 Persisted Operation kinds (`session_create_many`, `session_chat_many`) are internal and
 did not change. Measured with an in-memory client against `buildLodyMcpServer()` on
-Linux: 40 tools and 51,355 bytes on 0f24fb82c; 30 tools and 35,368 bytes after the merges;
-21 tools and 27,541 bytes with action tools. Dynamic tool lists (`tools/list_changed`) and
+Linux: 40 tools and 51,355 bytes on 0f24fb82c; 30 tools and 35,596 bytes after the merges
+(#3022 as merged); 21 tools and 27,769 bytes with action tools. Dynamic tool lists (`tools/list_changed`) and
 a search/execute meta-tool were rejected: some clients ignore list changes, a changing list
 breaks prompt caches, and one execute tool loses per-tool permissions and read-only
 annotations. `lody-mcp-server.test.ts` guards the exact published names and the read-only set.
