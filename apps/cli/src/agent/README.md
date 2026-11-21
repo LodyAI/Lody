@@ -580,7 +580,18 @@ five seconds. Unconfirmed process release retains its owner and prevents a secon
 
 [Ownership decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md).
 
-Provider quota refresh uses `queryLocalAcpRateLimits`: initialize a separately owned ACP process, verify Core `rateLimits.query`, query without a session, and await process-tree cleanup. The official registry Antigravity server uses `antigravity-quota.ts` instead when Core query support is absent: create a scratch session with no MCP servers, wait for its advertised `usage` command, and parse the official `/usage` reply into named weekly and five-hour windows. Its existing launcher and account environment are preserved; no separate CLI or credential reader is used. Missing commands, unavailable/malformed quota, cancellation and timeout preserve cached quota. The session execution service owns Provider coalescing and guarded Flock publication. See the [quota refresh decision](../../../../.agents/notes/implemented/architecture/2026-10-13-provider-quota-refresh.md).
+`queryProviderRateLimits` selects the quota reader. The ACP path uses `queryLocalAcpRateLimits`: initialize a separately owned ACP process, verify Core `rateLimits.query`, query without a session, and await process-tree cleanup. The official registry Antigravity server uses `antigravity-quota.ts` instead when Core query support is absent: create a scratch session with no MCP servers, wait for its advertised `usage` command, and parse the official `/usage` reply into named weekly and five-hour windows. Its existing launcher and account environment are preserved; no separate CLI or credential reader is used. Missing commands, unavailable/malformed quota, cancellation and timeout preserve cached quota. The session execution service owns Provider coalescing and guarded Flock publication. See the [quota refresh decision](../../../../.agents/notes/implemented/architecture/2026-10-13-provider-quota-refresh.md).
+
+Official registry Copilot uses `copilot-quota.ts` to read account quota through
+SDK-mode `account.getQuota`. The reader reuses the resolved executable, package
+version, launcher, arguments and account environment. It replaces `--acp` with
+`--headless --stdio` and creates no session or model turn. Lody projects its own
+query capability for `github-copilot-cli`; custom namesakes receive no compatibility
+claim. Only finite `premium_interactions.remainingPercentage` becomes subscription
+quota. Counts, unlimited buckets, overage and reset dates are omitted. The existing
+startup gate, query deadline, bounded output, cleanup custody and Provider cache
+remain authoritative. Both capability refreshes and real sessions normalize this
+compatibility capability.
 
 Account eligibility for both renderer display and daemon refresh lives in
 [`subscription-quota.ts`](../../../../packages/shared/src/subscription-quota.ts).
