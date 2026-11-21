@@ -94,7 +94,11 @@ already covered on disk), before Repo owns the document. Plaintext mode, workspa
 scope, room and the mounted transport's stream URL must match. A covered checkpoint
 is inserted only when no foreground cursor exists; offsets and timestamps cannot
 order two cursors. Web Locks serialize this conditional write with ordinary saves
-across callers sharing a database. Without Web Locks, adoption is skipped. Existing
+across callers sharing a database. Without Web Locks, adoption is skipped. If acquiring
+the lock fails before the callback runs, ordinary saves and deletes proceed without
+it: their document durability barrier already holds, so an adoption lock failure must
+not disable synchronization. Conditional adoption still requires the lock, and an
+operation that ran is never retried. Existing
 live documents never adopt progress. Failure keeps ordinary bootstrap available.
 The cursor records contain remote replay progress, not producer acknowledgments;
 local operations outside the server lower bound still upload normally. Cache

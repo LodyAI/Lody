@@ -575,7 +575,7 @@ describe('cold cloud snapshot checkpoint adoption', () => {
     }
   });
 
-  it.each(['legacy', 'scope', 'room', 'plane', 'stream', 'uncovered'] as const)(
+  it.each(['legacy', 'scope', 'room', 'plane', 'stream', 'uncovered', 'snapshot-version'] as const)(
     'ignores a %s checkpoint while preserving snapshot fallback',
     async (kind) => {
       const f = fixture();
@@ -588,6 +588,7 @@ describe('cold cloud snapshot checkpoint adoption', () => {
           ...f.row.cloudCheckpoint!.cursor,
           streamUrl: 'https://other.example.com/ds/bucket/session-one',
         };
+      else if (kind === 'snapshot-version') f.row.cloudCheckpoint!.snapshotVersion = { '1': 999 };
       else
         f.row.cloudCheckpoint!.cursor = {
           ...f.row.cloudCheckpoint!.cursor,
