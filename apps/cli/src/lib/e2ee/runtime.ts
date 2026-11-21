@@ -12,6 +12,7 @@ import {
   KeyRepair,
   LedgerFeed,
   VerifiedLedger,
+  EngineKeyringSync,
 } from '@lody/e2ee-core';
 import {
   epochHistoryPacket,
@@ -29,6 +30,7 @@ import type { E2eeIntentSigningRequest } from '@lody/loro-streams-rpc/e2ee-clien
 import {
   CandidateProtector,
   DeviceIdentity,
+  EngineKeyringSink,
   InstalledKeyStore,
   KeyProtector,
   KeyMailbox,
@@ -698,6 +700,31 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
             ),
         readEpochKey: (epoch) => history.read(epoch),
       }).pipe(Effect.provideService(VerifiedLedger, verified)),
+    /**
+     * Installs this machine's verified state into the native engine keyring through
+     * `sink` (core `EngineKeyringSync`): genesis, admitted devices, epoch keys, the seal
+     * epoch, and its own writer or a hold. Idempotent; key bytes reach only `sink`.
+     */
+    syncEngineKeyring: (sink: EngineKeyringSink['Service']) =>
+      guard().pipe(
+        Effect.andThen(
+          Effect.scoped(
+            Effect.flatMap(
+              Layer.build(
+                EngineKeyringSync.layer.pipe(
+                  Layer.provide(
+                    Layer.mergeAll(
+                      Layer.succeedContext(context),
+                      Layer.succeed(EngineKeyringSink, sink)
+                    )
+                  )
+                )
+              ),
+              (built) => Context.get(built, EngineKeyringSync).sync()
+            )
+          )
+        )
+      ),
     /** This device's execution intent signature (owner decision 2026-11-10). */
     signExecutionIntent: (request: E2eeIntentSigningRequest) =>
       guard().pipe(

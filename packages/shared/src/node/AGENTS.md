@@ -164,3 +164,5 @@ Control, probe and Loro data-plane requests require the private daemon token bef
   before any of its rooms is created, because room encryption is fixed at creation.
   Only `attachNativeEncryptedWorkspace` connects it to the cloud, after the caller's
   content-open admission; a pending wipe is finished before anything else opens it.
+  Every local write to it names this process's writer (`nativeWriteOptions`), and a
+  replica's local edits import with `nativeLocalImportOptions` so they upload.

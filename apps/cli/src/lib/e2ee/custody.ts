@@ -480,6 +480,12 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
       signingKey: Parameters<typeof custody.withTransportSeed>[1],
       open: (seed: Uint8Array) => Promise<A>
     ) => custody.withTransportSeed(genesis, signingKey, open, 'machine'),
+    /** Machine seed for the native engine keyring's writer only; see node custody `withEngineSeed`. */
+    withEngineSeed: <A>(
+      genesis: Parameters<typeof custody.withEngineSeed>[0],
+      signingKey: Parameters<typeof custody.withEngineSeed>[1],
+      install: (seed: Uint8Array) => Promise<A>
+    ) => custody.withEngineSeed(genesis, signingKey, install, 'machine'),
     prepareDeviceCredential: custody.prepareDeviceCredential,
     deviceCredential: custody.deviceCredential,
     installed: custody.installed,

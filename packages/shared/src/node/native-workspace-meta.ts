@@ -15,7 +15,12 @@ import type {
   RepoDocMeta,
   RepoFlockDocMeta,
 } from 'loro-repo';
-import { nativeRoomEncryption, observeFlock, type FlockObservation } from './native-repo';
+import {
+  nativeRoomEncryption,
+  nativeWriteOptions,
+  observeFlock,
+  type FlockObservation,
+} from './native-repo';
 
 /**
  * Native Workspace Meta uses the legacy Meta Flock layout unchanged, so the
@@ -279,7 +284,15 @@ export function createNativeWorkspaceMeta(
       if (ops.length === 0) return { outcome: 'committed' as const, revision };
       let txId: number;
       try {
-        txId = (await client.flockBatchConditional(namespace, META_ROOM, ops, read.readSet)).txId;
+        txId = (
+          await client.flockBatchConditional(
+            namespace,
+            META_ROOM,
+            ops,
+            read.readSet,
+            nativeWriteOptions(client, namespace)
+          )
+        ).txId;
       } catch (error) {
         if (error instanceof RepoRpcError && error.code === 'precondition_failed') continue;
         throw error;
