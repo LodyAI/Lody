@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=overlaps-content"
+    />
+    <title>Lody</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #eef5ff;
+        color: #11233f;
+        font:
+          16px -apple-system,
+          system-ui;
+      }
+      main {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: calc(env(safe-area-inset-top) + 8px) 12px
+          calc(max(env(safe-area-inset-bottom), var(--native-keyboard-height, 0px)) + 8px);
+      }
+      h1 {
+        font-size: 18px;
+        margin: 0;
+        flex-shrink: 0;
+      }
+      pre {
+        white-space: pre-wrap;
+        font:
+          13px ui-monospace,
+          monospace;
+        margin: 0;
+        min-height: 0;
+        overflow: auto;
+        flex: 1;
+      }
+      textarea {
+        flex: 0 0 56px;
+        width: 100%;
+        resize: none;
+        font-size: 16px;
+        border: 2px solid #1763c4;
+        border-radius: 10px;
+        padding: 8px;
+        background: white;
+        color: #11233f;
+      }
+      #safe-probe {
+        position: fixed;
+        pointer-events: none;
+        padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+          env(safe-area-inset-left);
+      }
+      button {
+        flex-shrink: 0;
+        min-height: 30px;
+        font-size: 14px;
+        border: 1px solid #1763c4;
+        border-radius: 6px;
+        background: white;
+        color: #11233f;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="safe-probe"></div>
+    <main>
+      <h1>Native viewport integration check</h1>
+      <pre id="report" aria-live="polite"></pre>
+      <textarea
+        id="draft"
+        aria-label="Synthetic draft"
+        placeholder="Type a synthetic draft, then fold or rotate"
+      ></textarea>
+      <button id="dismiss" type="button">Dismiss keyboard</button>
+    </main>
+    <script>
+      var loadCount = Number(sessionStorage.getItem('lody-viewport-qa-loads') || 0) + 1;
+      sessionStorage.setItem('lody-viewport-qa-loads', String(loadCount));
+      var draft = document.getElementById('draft');
+      var report = document.getElementById('report');
+      var resizeCount = 0;
+      var lastSnapshot = '';
+      var queued = false;
+      function measure() {
+        queued = false;
+        var safe = getComputedStyle(document.getElementById('safe-probe'));
+        var keyboard =
+          parseFloat(
+            getComputedStyle(document.documentElement).getPropertyValue('--native-keyboard-height')
+          ) || 0;
+        var rect = draft.getBoundingClientRect();
+        var data = {
+          nativeOwner: window.__LODY_NATIVE_VIEWPORT__ === true,
+          viewport: [innerWidth, innerHeight],
+          safeArea: [safe.paddingTop, safe.paddingRight, safe.paddingBottom, safe.paddingLeft],
+          keyboard: keyboard,
+          inputBottom: Math.round(rect.bottom * 100) / 100,
+          keyboardGap: Math.round((innerHeight - keyboard - rect.bottom) * 100) / 100,
+          draftLength: draft.value.length,
+          documentLoads: loadCount,
+          resizeEvents: resizeCount,
+        };
+        var snapshot = JSON.stringify(data);
+        report.textContent = JSON.stringify(data, null, 2);
+        if (snapshot !== lastSnapshot) {
+          lastSnapshot = snapshot;
+          console.log('LODY_VIEWPORT_QA ' + snapshot);
+        }
+      }
+      function schedule() {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(measure);
+      }
+      window.addEventListener('resize', function () {
+        resizeCount += 1;
+        schedule();
+      });
+      window.addEventListener('lody:keyboard-resize', schedule);
+      if (window.visualViewport) window.visualViewport.addEventListener('resize', schedule);
+      draft.addEventListener('input', schedule);
+      draft.addEventListener('focus', schedule);
+      draft.addEventListener('blur', schedule);
+      document.getElementById('dismiss').addEventListener('click', function () {
+        draft.blur();
+      });
+      new ResizeObserver(schedule).observe(document.documentElement);
+      schedule();
+    </script>
+  </body>
+</html>

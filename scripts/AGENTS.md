@@ -10,6 +10,7 @@ maintenance commands here.
   direction. Shared frontend features use platform descriptors; CLI runtime
   roots consume injected ports and do not construct cloud SDK clients.
 - Keep the allowlist small and limited to deliberate adapter/composition files.
+  Capacitor staging commands may build/sync the client; they never deploy a service.
   A new violation should normally be fixed at its dependency boundary, not
   appended to the allowlist.
 - `check-code-collab-imports.mjs` protects Code Collab ownership boundaries.

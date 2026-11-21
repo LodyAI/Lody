@@ -14,7 +14,7 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
   request ordinary Session archive through the local Host authority; this requires
   no product-cloud port. [Contract](../../apps/cli/src/automations/README.md).
 - Shared packages stay platform-neutral. The public Electron composition
-  selects `local` explicitly; private Web/mobile entries and cloud composition
+  selects `local` explicitly; Web, Capacitor mobile entries and cloud composition
   roots may inject `cloud` without forking those shared packages.
 - The OSS desktop entry is local-only and must not make authenticated product-cloud requests;
   public managed-runtime artifact downloads are the explicit exception.
