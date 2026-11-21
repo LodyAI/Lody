@@ -1,10 +1,25 @@
 import { type ComponentProps, type ReactElement, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
+import { tooltip as tooltipTokens } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import { Copy, Folder } from 'lucide-react';
 
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
 import { Menu } from '@/ui/menu';
 import { Tooltip } from '@/ui/armed-overlays';
+
+const styles = stylex.create({
+  descriptionTooltip: {
+    [tooltipTokens.text]: 'var(--text-xs)',
+    [tooltipTokens.leading]: 'var(--leading-snug)',
+    [tooltipTokens.maxWidth]: 'calc(var(--spacing) * 64)',
+  },
+  pendingStatus: {
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
 
 export type SessionForkDestination = 'shared' | 'new-worktree';
 
@@ -74,7 +89,11 @@ export function SessionForkOptionTooltip({
     <Tooltip.Provider>
       <Tooltip.Root>
         <Tooltip.Trigger delay={400} render={children} />
-        <Tooltip.Content side={side} sideOffset={8} className="max-w-64 text-xs leading-snug">
+        <Tooltip.Content
+          side={side}
+          sideOffset={8}
+          className={stylex.props(styles.descriptionTooltip).className}
+        >
           {description}
         </Tooltip.Content>
       </Tooltip.Root>
@@ -102,7 +121,7 @@ function DestinationRow({
       icon={icon}
       disabled={disabled}
       endContent={
-        status ? <span className="text-xs text-muted-foreground">{status}</span> : undefined
+        status ? <span {...stylex.props(styles.pendingStatus)}>{status}</span> : undefined
       }
       onClick={onSelect}
     >

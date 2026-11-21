@@ -892,64 +892,66 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
           <ChevronDown size={14} aria-hidden="true" />
         </Collapsible.Trigger>
         <Collapsible.Panel keepMounted>
-      <div {...stylex.props(styles.history)}>
-        <Accordion.Root multiple>
-          {history.records.map((record, position) => {
-            const event = overview.events[position];
-            return (
-              <Accordion.Item key={record.hash} value={record.hash}>
-                <Accordion.Trigger>
-                  <span {...stylex.props(styles.eventRow)}>
-                    <span {...stylex.props(styles.eventIndex)}>{record.index + 1}</span>
-                    <span {...stylex.props(styles.eventText)}>
-                      {eventSentence(t, names.name, event)}
-                    </span>
-                  </span>
-                </Accordion.Trigger>
-                <Accordion.Panel>
-                  <div {...stylex.props(styles.panel)}>
-                    <dl {...stylex.props(styles.fields)}>
-                      <dt {...stylex.props(styles.fieldName)}>{t('e2ee.control.operation')}</dt>
-                      <dd {...stylex.props(styles.muted)}>{t(`e2ee.events.${event.type}`)}</dd>
-                      <dt {...stylex.props(styles.fieldName)}>{t('e2ee.fields.hash')}</dt>
-                      <dd {...stylex.props(styles.value)}>{record.hash}</dd>
-                      {Object.entries(ledgerRecordFields(record.body)).map(([key, value]) => (
-                        <div key={key} {...stylex.props(styles.fieldPair)}>
-                          <dt {...stylex.props(styles.fieldName)}>{t(`e2ee.fields.${key}`)}</dt>
-                          <dd {...stylex.props(styles.value)}>
-                            {value === null
-                              ? t('e2ee.fields.noExpiry')
-                              : key === 'role' || key === 'kind'
-                                ? t(`e2ee.values.${value}`)
-                                : value}
-                          </dd>
-                        </div>
-                      ))}
-                    </dl>
-                    <details>
-                      <summary {...stylex.props(styles.rawToggle)}>{t('e2ee.control.raw')}</summary>
-                      <pre {...stylex.props(styles.raw)}>{record.rawHex}</pre>
-                    </details>
-                  </div>
-                </Accordion.Panel>
-              </Accordion.Item>
-            );
-          })}
-        </Accordion.Root>
-      </div>
-      {history.page.nextCursor !== null && history.upgradeRequiredAt === undefined && (
-        <div {...stylex.props(styles.footer)}>
-          <Button
-            size="small"
-            variant="secondary"
-            disabled={props.loading}
-            onClick={props.onLoadMore}
-          >
-            {t('e2ee.control.loadMore')}
-          </Button>
-          {history.continuityPending && <span>{t('e2ee.control.continuityPending')}</span>}
-        </div>
-      )}
+          <div {...stylex.props(styles.history)}>
+            <Accordion.Root multiple>
+              {history.records.map((record, position) => {
+                const event = overview.events[position];
+                return (
+                  <Accordion.Item key={record.hash} value={record.hash}>
+                    <Accordion.Trigger>
+                      <span {...stylex.props(styles.eventRow)}>
+                        <span {...stylex.props(styles.eventIndex)}>{record.index + 1}</span>
+                        <span {...stylex.props(styles.eventText)}>
+                          {eventSentence(t, names.name, event)}
+                        </span>
+                      </span>
+                    </Accordion.Trigger>
+                    <Accordion.Panel>
+                      <div {...stylex.props(styles.panel)}>
+                        <dl {...stylex.props(styles.fields)}>
+                          <dt {...stylex.props(styles.fieldName)}>{t('e2ee.control.operation')}</dt>
+                          <dd {...stylex.props(styles.muted)}>{t(`e2ee.events.${event.type}`)}</dd>
+                          <dt {...stylex.props(styles.fieldName)}>{t('e2ee.fields.hash')}</dt>
+                          <dd {...stylex.props(styles.value)}>{record.hash}</dd>
+                          {Object.entries(ledgerRecordFields(record.body)).map(([key, value]) => (
+                            <div key={key} {...stylex.props(styles.fieldPair)}>
+                              <dt {...stylex.props(styles.fieldName)}>{t(`e2ee.fields.${key}`)}</dt>
+                              <dd {...stylex.props(styles.value)}>
+                                {value === null
+                                  ? t('e2ee.fields.noExpiry')
+                                  : key === 'role' || key === 'kind'
+                                    ? t(`e2ee.values.${value}`)
+                                    : value}
+                              </dd>
+                            </div>
+                          ))}
+                        </dl>
+                        <details>
+                          <summary {...stylex.props(styles.rawToggle)}>
+                            {t('e2ee.control.raw')}
+                          </summary>
+                          <pre {...stylex.props(styles.raw)}>{record.rawHex}</pre>
+                        </details>
+                      </div>
+                    </Accordion.Panel>
+                  </Accordion.Item>
+                );
+              })}
+            </Accordion.Root>
+          </div>
+          {history.page.nextCursor !== null && history.upgradeRequiredAt === undefined && (
+            <div {...stylex.props(styles.footer)}>
+              <Button
+                size="small"
+                variant="secondary"
+                disabled={props.loading}
+                onClick={props.onLoadMore}
+              >
+                {t('e2ee.control.loadMore')}
+              </Button>
+              {history.continuityPending && <span>{t('e2ee.control.continuityPending')}</span>}
+            </div>
+          )}
         </Collapsible.Panel>
       </Collapsible.Root>
     </section>

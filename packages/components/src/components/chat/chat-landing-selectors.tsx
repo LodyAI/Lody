@@ -10,7 +10,6 @@ import type {
   AcpConfigOptionSelector,
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
-import { cn } from '@/lib/utils';
 import { type MachineId } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
 import { useOnlineMachines } from '@/hooks/use-online-machines';
@@ -18,6 +17,10 @@ import { useOnlineMachines } from '@/hooks/use-online-machines';
 export type ChatLandingTone = 'light' | 'dark';
 
 const MODE_ICON_STROKE_WIDTH = 1.5;
+
+const styles = stylex.create({
+  machineTrigger: { maxWidth: 160 },
+});
 
 /**
  * Get icon for permission mode
@@ -170,7 +173,9 @@ export interface BranchSelectorProps {
   loading?: boolean;
   loadingText?: string;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   contentClassName?: string;
+  contentXstyle?: stylex.StyleXStyles;
 }
 
 /**
@@ -187,7 +192,9 @@ export function BranchSelector({
   loading = false,
   loadingText = 'Loading branches...',
   className,
+  xstyle,
   contentClassName,
+  contentXstyle,
 }: BranchSelectorProps) {
   return (
     <OptionSelector
@@ -206,12 +213,11 @@ export function BranchSelector({
       appearance="toolbar"
       size="sm"
       className={className}
-      contentClassName={cn(
-        // Branch names get long (feat/…); give the desktop list more room. The 100vw
-        // term keeps narrow mobile surfaces viewport-bound.
-        'min-w-[20rem] max-w-[min(36rem,calc(100vw-2rem))]',
-        contentClassName
-      )}
+      xstyle={xstyle}
+      contentClassName={contentClassName}
+      contentXstyle={contentXstyle}
+      contentMinWidth="20rem"
+      contentMaxWidth="min(36rem, calc(100vw - 2rem))"
       renderTriggerValue={(option) => (
         <>
           {loading ? (
@@ -253,6 +259,7 @@ export interface MachineSelectorProps {
    */
   loading?: boolean;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   /** Restrict selectable machines to these IDs. */
   allowedMachineIds?: MachineId[];
 }
@@ -267,6 +274,7 @@ export function MachineSelector({
   disabled = false,
   loading = false,
   className,
+  xstyle,
   allowedMachineIds,
 }: MachineSelectorProps) {
   const { t } = useTranslation();
@@ -299,8 +307,9 @@ export function MachineSelector({
       emptyText={t('chat.machineSelector.emptyText', 'No machines online')}
       appearance="toolbar"
       size="sm"
-      className={cn('max-w-[160px]', className)}
-      contentClassName="w-56"
+      className={className}
+      xstyle={[styles.machineTrigger, xstyle]}
+      contentWidth="calc(var(--spacing) * 56)"
       renderTriggerValue={(option) => (
         <>
           {loading ? (

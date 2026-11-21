@@ -258,7 +258,17 @@ import {
 } from '@/lib/session-path-launchers';
 import { withClassName } from '@/lib/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
+import { button as buttonTokens } from '@lody/ui/button/button.tokens.stylex';
+import {
+  messageActionButtonTheme,
+  messageActionInkTheme,
+  messageActionLabelTheme,
+  messageActionMutedInkTheme,
+} from '../../style/message-action-button.stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontSize, themeLineHeight, themeSpace } from '../../style/theme-scale.stylex';
 import * as stylex from '@stylexjs/stylex';
+import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import type { SessionSharingState } from '@/lib/session-sharing';
 import {
   SessionAccessControl,
@@ -272,6 +282,8 @@ import {
 import { Drawer } from '@lody/ui/drawer';
 import { Badge } from '@lody/ui/badge';
 import { Input } from '@lody/ui/input';
+import { field as searchFieldTokens } from '@lody/ui/field/field.tokens.stylex';
+import { tooltip as searchTooltipTokens } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import { Separator } from '@lody/ui/separator';
 import { Tooltip } from '@lody/ui/tooltip';
 import { useSessionDoc } from '@/hooks/use-session-doc';
@@ -280,6 +292,7 @@ import { getSessionRunConfigDraftTargetKey } from '@/atoms/session-run-config-dr
 import { sessionProjectMemberSelectionAtomFamily } from '@/atoms/session-project-member-selection';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
+import type { WorkspaceMember } from '@/hooks/use-workspace-members';
 import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-session-dialog';
 import {
   unlinkSessionPullRequestFromUi,
@@ -287,11 +300,7 @@ import {
 } from './session-pr-links';
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
-import {
-  SessionInfoDialog,
-  type SessionInfoPullRequest,
-  type SessionOwnerMenuState,
-} from './session-info-dialog';
+import { SessionInfoDialog, type SessionInfoPullRequest } from './session-info-dialog';
 import { SessionInfoBar } from './session-info-bar';
 import { SessionPreviewPreload } from './session-preview-preload';
 import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
@@ -455,6 +464,53 @@ void import('loro-repo')
   .catch(() => {});
 
 const styles = stylex.create({
+  shrink: { flexShrink: 0 },
+  muted: { color: 'hsl(var(--muted-foreground) / 1)' },
+  badgeEnd: { marginLeft: 'auto' },
+  historyDrawer: {
+    maxWidth: { default: null, '@media (min-width: 40rem)': '28rem' },
+  },
+  continuationMenu: { width: '290px', padding: '12px' },
+  headerMenuItem: {
+    minHeight: 'calc(var(--spacing) * 8)',
+    paddingBlock: 'calc(var(--spacing) * 1.5)',
+  },
+  searchButton: {
+    borderRadius: 'var(--radius-md)',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionDuration: 'var(--default-transition-duration, 150ms)',
+    transitionTimingFunction:
+      'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
+  },
+  searchButtonDisabled: {
+    color: {
+      default: buttonTokens.ghostLabel,
+      ':disabled': 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 40%, transparent)',
+    },
+    // The 40%-alpha ink already reads as disabled; stacking the Button's own
+    // `:disabled` opacity on top dims it twice. Neutralize the element opacity.
+    opacity: { default: null, ':disabled': 1 },
+  },
+  searchInput: {
+    borderWidth: 0,
+    borderStyle: 'solid',
+    paddingBlock: 'calc(var(--spacing) * 0)',
+    letterSpacing: 'var(--tracking-tight)',
+    boxShadow: { default: 'none', ':focus-visible': 'none', ':focus-within': 'none' },
+    '::-webkit-search-cancel-button': { display: 'none' },
+  },
+  searchSeparator: {
+    marginInline: 'calc(var(--spacing) * 0.5)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+  },
+  tooltipPadding: {
+    [tooltip.text]: 'var(--text-xs)',
+    [tooltip.leading]: 'var(--text-xs--line-height)',
+    [tooltip.maxWidth]: 'calc(var(--spacing) * 64)',
+    [tooltip.paddingX]: 'calc(var(--spacing) * 2.5)',
+    [tooltip.paddingY]: 'calc(var(--spacing) * 2)',
+  },
   historyTriggerIcon: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
   historyTriggerIconSpaced: { marginRight: 'calc(var(--spacing) * 2)' },
   historySubtitle: {
@@ -485,7 +541,7 @@ const styles = stylex.create({
     color: 'inherit',
     textAlign: 'left',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: 'var(--default-transition-duration, 150ms)',
     transitionTimingFunction:
       'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
@@ -615,6 +671,21 @@ const styles = stylex.create({
   menuTrailingIcon: { marginLeft: 'auto' },
   menuCopyIcon: { width: 'calc(var(--spacing) * 3)', height: 'calc(var(--spacing) * 3)' },
   menuBranchIcon: { marginTop: 'calc(var(--spacing) * 0.5)' },
+  menuText: { minWidth: 0, flex: '1 1 0%' },
+  menuTextTruncated: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  menuTextBlock: { display: 'block' },
+  menuTextNormal: { fontWeight: 400 },
+  menuBranchValue: {
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  menuBaseBranch: {
+    fontSize: '0.68rem',
+    lineHeight: 'calc(var(--spacing) * 4)',
+    color: colors.secondaryLabel,
+  },
   menuForkStatus: {
     flexShrink: 0,
     fontSize: '0.75rem',
@@ -668,7 +739,7 @@ const styles = stylex.create({
     boxShadow: '0 4px 12px -4px rgba(15,23,42,0.16), 0 1px 2px rgba(15,23,42,0.06)',
     backdropFilter: 'blur(var(--blur-md))',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: 'var(--default-transition-duration, 150ms)',
     transitionTimingFunction:
       'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
@@ -683,7 +754,7 @@ const styles = stylex.create({
   searchIcon: {
     color: 'hsl(var(--muted-foreground) / 0.8)',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: 'var(--default-transition-duration, 150ms)',
     transitionTimingFunction:
       'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
@@ -700,13 +771,38 @@ const styles = stylex.create({
     letterSpacing: 'var(--tracking-tight)',
     color: colors.secondaryLabel,
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: 'var(--default-transition-duration, 150ms)',
     transitionTimingFunction:
       'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
   },
   searchCountNoResults: { color: 'hsl(var(--destructive) / 0.9)' },
   searchActions: { display: 'flex', alignItems: 'center', gap: '1px' },
+  searchInputLayout: { minWidth: 0, flex: '1 1 0%' },
+  searchInputTokens: {
+    [searchFieldTokens.background]: 'transparent',
+    [searchFieldTokens.paddingXMedium]: 'calc(var(--spacing) * 1.5)',
+    [searchFieldTokens.text]: '13px',
+    [searchFieldTokens.placeholder]: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 70%, transparent)',
+    },
+  },
+  searchTooltipTokens: {
+    [searchTooltipTokens.paddingX]: 'calc(var(--spacing) * 2)',
+    [searchTooltipTokens.paddingY]: 'calc(var(--spacing) * 1)',
+    [searchTooltipTokens.text]: '11px',
+  },
+  searchTooltipLayout: { display: 'flex', alignItems: 'center', gap: themeSpace[1.5] },
+  searchSeparatorLayout: { height: themeSpace[4] },
+  forkWorktreeGlyph: { width: '100%', height: '100%' },
+  forkStatus: {
+    flexShrink: 0,
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
   headerPills: {
     display: {
       default: 'none',
@@ -743,7 +839,7 @@ const styles = stylex.create({
     },
     outlineStyle: 'none',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: 'var(--default-transition-duration, 150ms)',
     transitionTimingFunction:
       'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
@@ -755,19 +851,9 @@ const styles = stylex.create({
       default: null,
       '@media (forced-colors: active)': '2px',
     },
-    '--tw-ring-shadow': {
-      default: null,
-      ':focus-visible':
-        'var(--tw-ring-inset,) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor)',
-    },
-    '--tw-ring-color': {
-      default: null,
-      ':focus-visible': 'hsl(var(--ring) / 0.5)',
-    },
     boxShadow: {
       default: null,
-      ':focus-visible':
-        'var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)',
+      ':focus-visible': 'none',
     },
   },
   headerLauncherPrimary: {
@@ -1156,7 +1242,7 @@ export function SessionHistoryButton({
       variant={compact ? 'ghost' : 'secondary'}
       size="small"
       icon={compact}
-      className="shrink-0"
+
       disabled={historySessions.length === 0}
     >
       <History
@@ -1169,7 +1255,7 @@ export function SessionHistoryButton({
   return (
     <Drawer.Root side={isMobile ? 'bottom' : 'end'} open={open} onOpenChange={setOpen}>
       <Drawer.Trigger render={trigger} />
-      <Drawer.Content side={isMobile ? 'bottom' : 'end'} className="sm:max-w-md">
+      <Drawer.Content side={isMobile ? 'bottom' : 'end'} xstyle={styles.historyDrawer}>
         <Drawer.Header>
           <Drawer.Title>{t('sessions.history', 'History')}</Drawer.Title>
           <p {...stylex.props(styles.historySubtitle)}>{t('sessions.newSession.title')}</p>
@@ -1310,6 +1396,21 @@ export function SessionProjectInfo({
 }
 
 /**
+ * Owner-transfer state for the "···" menu. Only resolved on multi-member
+ * workspaces — a solo workspace has nobody to hand the session to, so the
+ * caller passes `undefined` and the submenu never renders.
+ */
+export type SessionOwnerMenuState = {
+  members: WorkspaceMember[];
+  getDisabledReason?: (userId: string) => string | null;
+  /** Current `SessionMeta.userId`; may name someone who already left. */
+  ownerUserId: string;
+  onChangeOwner: (userId: string) => void | Promise<void>;
+  /** Member whose write is still in flight — keeps the row from looking inert. */
+  pendingUserId?: string | null;
+};
+
+/**
  * Navigation across the presentation-only "opened by" relationship (see
  * `lib/session-opened-by-tree.ts`). Both directions live here so an
  * MCP-opened independent Session can walk back to the Session that created it,
@@ -1328,8 +1429,6 @@ export type SessionOpenedByMenuState = {
   onOpenSession: (target: SessionNavigationTarget) => void;
 };
 
-const SESSION_HEADER_MENU_CONTENT_CLASS =
-  'min-w-[200px] max-w-[290px] [&_[role=menuitem]]:min-h-8 [&_[role=menuitem]]:py-1.5';
 /** Session header "···" menu — context, visibility, sharing, and session actions. */
 export function SessionHeaderMenu({
   session,
@@ -1496,6 +1595,7 @@ export function SessionHeaderMenu({
       <>
         {openedBySession ? (
           <Menu.Item
+            xstyle={styles.headerMenuItem}
             disabled={!openedBySession.target}
             onClick={() => {
               if (openedBySession.target) {
@@ -1510,10 +1610,10 @@ export function SessionHeaderMenu({
         ) : null}
         {openedSessions.length > 0 ? (
           <Menu.Submenu>
-            <Menu.SubmenuTrigger icon={GitBranchPlus}>
+            <Menu.SubmenuTrigger xstyle={styles.headerMenuItem} icon={GitBranchPlus}>
               {t('sessions.openedBy.openedSessions', 'Opened sessions')} ({openedSessions.length})
             </Menu.SubmenuTrigger>
-            <Menu.Content className="max-h-72 min-w-[200px] max-w-[280px] overflow-y-auto">
+            <Menu.Content maxHeight="calc(var(--spacing) * 72)" minWidth={200} maxWidth={280}>
               {openedSessions.map((opened) => (
                 <Menu.Item
                   key={opened.sessionId}
@@ -1539,14 +1639,16 @@ export function SessionHeaderMenu({
     });
     if (openInIde.options.length === 1) {
       return (
-        <Menu.Item icon={SelectedIcon} onClick={openInIde.onOpen}>
+        <Menu.Item xstyle={styles.headerMenuItem} icon={SelectedIcon} onClick={openInIde.onOpen}>
           {openLabel}
         </Menu.Item>
       );
     }
     return (
       <Menu.Submenu>
-        <Menu.SubmenuTrigger icon={SelectedIcon}>{openLabel}</Menu.SubmenuTrigger>
+        <Menu.SubmenuTrigger xstyle={styles.headerMenuItem} icon={SelectedIcon}>
+          {openLabel}
+        </Menu.SubmenuTrigger>
         <Menu.Content>
           <Menu.RadioGroup
             value={getPathLauncherId(openInIde.selected)}
@@ -1604,7 +1706,11 @@ export function SessionHeaderMenu({
             <Button
               variant="ghost"
               icon
-              className="h-7 w-7 shrink-0 text-muted-foreground"
+              height="calc(var(--spacing) * 7)"
+              width="calc(var(--spacing) * 7)"
+              className={
+                stylex.props(messageActionLabelTheme, messageActionMutedInkTheme).className
+              }
               aria-label={t('sessions.moreActions', 'More actions')}
             >
               <Ellipsis {...stylex.props(styles.historyTriggerIcon)} />
@@ -1614,13 +1720,15 @@ export function SessionHeaderMenu({
           <Button
             variant="ghost"
             icon
-            className="h-7 w-7 shrink-0 text-muted-foreground"
+            height="calc(var(--spacing) * 7)"
+            width="calc(var(--spacing) * 7)"
+            xstyle={[styles.shrink, styles.muted]}
             aria-label={t('sessions.moreActions', 'More actions')}
           >
             <Ellipsis {...stylex.props(styles.historyTriggerIcon)} />
           </Button>
         </Menu.Trigger>
-        <Menu.Content align="end" className={SESSION_HEADER_MENU_CONTENT_CLASS}>
+        <Menu.Content align="end" minWidth={200} maxWidth={290}>
           {/* Where the session lives (repository, branch, PR, machine, path,
               access, owner) opens in one dialog instead of stacking rows here. */}
           {!compact && hasSessionInfo ? (
@@ -1635,6 +1743,7 @@ export function SessionHeaderMenu({
               controls. A trailing Switch, not a checkmark; the row stays open
               so the flip is visible. */}
           <Menu.Item
+            xstyle={styles.headerMenuItem}
             closeOnClick={false}
             onClick={() => setConversationWide(!conversationWide)}
             icon={MoveHorizontal}
@@ -1647,7 +1756,7 @@ export function SessionHeaderMenu({
                 onCheckedChange={(checked) => setConversationWide(checked === true)}
                 onClick={(event) => event.stopPropagation()}
                 aria-label={t('sessions.fullWidth', 'Full width')}
-                className="shrink-0"
+                className={stylex.props(styles.shrink).className}
               />
             }
           >
@@ -1669,6 +1778,7 @@ export function SessionHeaderMenu({
 
           {onOpenSearch && (
             <Menu.Item
+              xstyle={styles.headerMenuItem}
               icon={Search}
               onClick={() => {
                 void onOpenSearch();
@@ -1681,11 +1791,12 @@ export function SessionHeaderMenu({
           {onFork || (onCopyConversationHistory && !exportReason) ? (
             <Menu.Submenu>
               <Menu.SubmenuTrigger
+                xstyle={styles.headerMenuItem}
                 icon={isForking ? <Spinner size="small" label={null} /> : GitFork}
               >
                 {t('sessions.forkSession', 'Fork session')}
               </Menu.SubmenuTrigger>
-              <Menu.Content className="min-w-[13rem]">
+              <Menu.Content minWidth="13rem">
                 {onFork &&
                   !isArchived &&
                   getSessionForkDestinationOptions(t, forkWorktreeAvailability).map((option) => {
@@ -1699,16 +1810,14 @@ export function SessionHeaderMenu({
                         }}
                         icon={
                           option.id === 'new-worktree' ? (
-                            <WorktreeIcon className="h-full w-full" />
+                            <WorktreeIcon {...stylex.props(styles.forkWorktreeGlyph)} />
                           ) : (
                             <Folder size="100%" />
                           )
                         }
                         endContent={
                           option.status ? (
-                            <span className="shrink-0 text-xs text-muted-foreground">
-                              {option.status}
-                            </span>
+                            <span {...stylex.props(styles.forkStatus)}>{option.status}</span>
                           ) : undefined
                         }
                       >
@@ -1902,8 +2011,10 @@ export function SessionHeaderMenu({
           </Menu.Submenu>
 
           <Menu.Submenu>
-            <Menu.SubmenuTrigger icon={Copy}>{t('sessions.copy', 'Copy')}</Menu.SubmenuTrigger>
-            <Menu.Content className="min-w-[200px]">
+            <Menu.SubmenuTrigger xstyle={styles.headerMenuItem} icon={Copy}>
+              {t('sessions.copy', 'Copy')}
+            </Menu.SubmenuTrigger>
+            <Menu.Content minWidth={200}>
               {showBaseBranchContext ? (
                 <>
                   <Menu.Item
@@ -1971,6 +2082,22 @@ export function SessionHeaderMenu({
             </Menu.Content>
           </Menu.Submenu>
 
+          <Menu.Item
+            xstyle={styles.headerMenuItem}
+            disabled={!!exportReason || !onShareAsImage}
+            title={exportReason}
+            onClick={() => {
+              onShareAsImage?.();
+            }}
+            icon={Image}
+          >
+            {exportReason ? (
+              <WorkspaceFeatureReasonText reason={exportReason} />
+            ) : (
+              t('sessions.shareAsImage', 'Share as image…')
+            )}
+          </Menu.Item>
+
           {rpcReason ? (
             <Menu.Item disabled>
               <WorkspaceFeatureReasonText reason={rpcReason} />
@@ -1989,6 +2116,7 @@ export function SessionHeaderMenu({
                   <Menu.Separator />
                   {onRestore && (
                     <Menu.Item
+                      xstyle={styles.headerMenuItem}
                       onClick={() => {
                         void onRestore();
                       }}
@@ -1999,6 +2127,7 @@ export function SessionHeaderMenu({
                   )}
                   {onDelete && (
                     <Menu.Item
+                      xstyle={styles.headerMenuItem}
                       tone="destructive"
                       onClick={() => {
                         void onDelete();
@@ -2014,6 +2143,7 @@ export function SessionHeaderMenu({
                 <>
                   <Menu.Separator />
                   <Menu.Item
+                    xstyle={styles.headerMenuItem}
                     onClick={() => {
                       void onArchive();
                     }}
@@ -2096,7 +2226,10 @@ export function SessionSearchBar({
         type="button"
         variant="ghost"
         icon
-        className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:pointer-events-none disabled:text-muted-foreground/40"
+        height="calc(var(--spacing) * 6)"
+        width="calc(var(--spacing) * 6)"
+        className={stylex.props(messageActionButtonTheme, messageActionInkTheme).className}
+        xstyle={[styles.searchButton, styles.searchButtonDisabled]}
         disabled={!hasResults}
         onClick={onClick}
         aria-label={label}
@@ -2108,7 +2241,10 @@ export function SessionSearchBar({
     return (
       <Tooltip.Root>
         <Tooltip.Trigger delay={400} render={button} />
-        <Tooltip.Content side="bottom" className="flex items-center gap-1.5 px-2 py-1 text-[11px]">
+        <Tooltip.Content
+          side="bottom"
+          className={stylex.props(styles.searchTooltipLayout, styles.searchTooltipTokens).className}
+        >
           <span>{label}</span>
           <span {...stylex.props(styles.searchShortcut)}>{shortcut}</span>
         </Tooltip.Content>
@@ -2142,7 +2278,8 @@ export function SessionSearchBar({
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={t('sessions.findInConversation', 'Find in session')}
           aria-label={t('sessions.findInConversation', 'Find in session')}
-          className="h-7 min-w-0 flex-1 border-0 bg-transparent px-1.5 py-0 text-[13px] tracking-tight shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 [&::-webkit-search-cancel-button]:hidden"
+          controlHeight="calc(var(--spacing) * 7)"
+          xstyle={[styles.searchInputLayout, styles.searchInputTokens, styles.searchInput]}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.preventDefault();
@@ -2173,7 +2310,10 @@ export function SessionSearchBar({
           </span>
         )}
 
-        <Separator orientation="vertical" className="mx-0.5 h-4 bg-border/60" />
+        <Separator
+          orientation="vertical"
+          xstyle={[styles.searchSeparatorLayout, styles.searchSeparator]}
+        />
 
         <div {...stylex.props(styles.searchActions)}>
           {renderNavButton(
@@ -2191,7 +2331,12 @@ export function SessionSearchBar({
                   type="button"
                   variant="ghost"
                   icon
-                  className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+                  height="calc(var(--spacing) * 6)"
+                  width="calc(var(--spacing) * 6)"
+                  className={
+                    stylex.props(messageActionButtonTheme, messageActionInkTheme).className
+                  }
+                  xstyle={styles.searchButton}
                   onClick={onClose}
                   aria-label={t('common.close', 'Close')}
                 >
@@ -2201,7 +2346,9 @@ export function SessionSearchBar({
             />
             <Tooltip.Content
               side="bottom"
-              className="flex items-center gap-1.5 px-2 py-1 text-[11px]"
+              className={
+                stylex.props(styles.searchTooltipLayout, styles.searchTooltipTokens).className
+              }
             >
               <span>{t('common.close', 'Close')}</span>
               <span {...stylex.props(styles.searchShortcut)}>Esc</span>
@@ -7689,7 +7836,7 @@ export const SessionChatInterface = memo(
                       {/* Requests and their editor must survive virtual row eviction. */}
                       {workspaceId && (
                         <div {...stylex.props(styles.shareRequestsScroller)}>
-                          <ConversationColumn {...stylex.props(styles.shareRequestsColumn)}>
+                          <ConversationColumn xstyle={styles.shareRequestsColumn}>
                             <SessionShareRequestCards
                               workspaceId={workspaceId}
                               session={session}

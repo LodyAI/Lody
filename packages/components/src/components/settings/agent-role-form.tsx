@@ -101,6 +101,7 @@ export type AgentRoleFormProps = {
   onSubmit: () => void;
   onCancel: () => void;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   /** Memory choices for the active machine's target. */
   memoryPicker?: ReactNode;
   /** Shown on a machine tab the Role does not run on yet. */
@@ -134,6 +135,7 @@ export function AgentRoleForm({
   onSubmit,
   onCancel,
   className,
+  xstyle,
   memoryPicker,
   addTargetPanel,
   tab = 'configuration',
@@ -160,7 +162,7 @@ export function AgentRoleForm({
   const hasError = (code: AgentRoleFormError) => errors.includes(code);
 
   return (
-    <form {...withClassName(stylex.props(catalog.editorForm), className)} onSubmit={submit}>
+    <form {...withClassName(stylex.props(catalog.editorForm, xstyle), className)} onSubmit={submit}>
       <div {...withClassName(stylex.props(catalog.editorBody), 'scrollbar-pro')}>
         {tab === 'configuration' ? (
           <>

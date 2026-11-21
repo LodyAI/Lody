@@ -26,9 +26,11 @@ type DescriptionBaseProps = ComponentProps<typeof BaseAlertDialog.Description>;
 export type AlertDialogContentProps = ModalContentProps;
 
 export interface AlertDialogTitleProps extends Omit<TitleBaseProps, 'className'> {
+  xstyle?: stylex.StyleXStyles;
   className?: string;
 }
 export interface AlertDialogDescriptionProps extends Omit<DescriptionBaseProps, 'className'> {
+  xstyle?: stylex.StyleXStyles;
   className?: string;
 }
 
@@ -52,6 +54,8 @@ export const AlertDialogContent = forwardRef<HTMLDivElement, AlertDialogContentP
       backdropClassName,
       noAnimation,
       width,
+      padding = 'default',
+      gap = 'default',
       centerOn,
       style,
       ...rest
@@ -81,6 +85,8 @@ export const AlertDialogContent = forwardRef<HTMLDivElement, AlertDialogContentP
             appendClassName(
               stylex.props(
                 modal.popup,
+                padding === 'none' && modal.noPadding,
+                gap === 'none' && modal.noGap,
                 isHidden(state.transitionStatus) && modal.popupHidden,
                 noAnimation && modal.noTransition
               ).className,
@@ -99,14 +105,21 @@ export const AlertDialogContent = forwardRef<HTMLDivElement, AlertDialogContentP
 
 /** The question. Base UI wires it to the panel's accessible name. */
 export const AlertDialogTitle = forwardRef<HTMLHeadingElement, AlertDialogTitleProps>(
-  function AlertDialogTitle({ className, ...rest }, ref) {
-    const sx = stylex.props(modal.title);
+  function AlertDialogTitle({ className, xstyle, ...rest }, ref) {
+    const sx = stylex.props(modal.title, xstyle);
     return (
       <BaseAlertDialog.Title
         ref={ref}
         {...rest}
         className={appendClassName(sx.className, className)}
-        style={sx.style}
+        style={
+          xstyle
+            ? (state) => ({
+                ...sx.style,
+                ...(typeof rest.style === 'function' ? rest.style(state) : rest.style),
+              })
+            : sx.style
+        }
       />
     );
   }
@@ -114,14 +127,21 @@ export const AlertDialogTitle = forwardRef<HTMLHeadingElement, AlertDialogTitleP
 
 /** What is at stake in the question; the accessible description. */
 export const AlertDialogDescription = forwardRef<HTMLParagraphElement, AlertDialogDescriptionProps>(
-  function AlertDialogDescription({ className, ...rest }, ref) {
-    const sx = stylex.props(modal.description);
+  function AlertDialogDescription({ className, xstyle, ...rest }, ref) {
+    const sx = stylex.props(modal.description, xstyle);
     return (
       <BaseAlertDialog.Description
         ref={ref}
         {...rest}
         className={appendClassName(sx.className, className)}
-        style={sx.style}
+        style={
+          xstyle
+            ? (state) => ({
+                ...sx.style,
+                ...(typeof rest.style === 'function' ? rest.style(state) : rest.style),
+              })
+            : sx.style
+        }
       />
     );
   }

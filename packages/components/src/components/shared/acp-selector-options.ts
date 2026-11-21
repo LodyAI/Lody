@@ -623,7 +623,9 @@ const normalizeFastModeSelectors = (
   const existingIndex = selectors.findIndex(isAnySpeedControlSelector);
   const existing = existingIndex >= 0 ? selectors[existingIndex] : undefined;
   if (declaredTiers.length === 0) {
-    return existing ? selectors.filter((selector) => !isAnySpeedControlSelector(selector)) : selectors;
+    return existing
+      ? selectors.filter((selector) => !isAnySpeedControlSelector(selector))
+      : selectors;
   }
 
   const configId = existing?.configId ?? getBuiltinModelControlBinding(options)?.fastConfigId;
@@ -632,7 +634,9 @@ const normalizeFastModeSelectors = (
     if (!configId) return selectors;
     const nextSelector = buildSpeedTierSelectSelector(configId, declaredTiers, existing);
     if (existingIndex >= 0) {
-      return selectors.map((selector, index) => (index === existingIndex ? nextSelector : selector));
+      return selectors.map((selector, index) =>
+        index === existingIndex ? nextSelector : selector
+      );
     }
     return [...selectors, nextSelector];
   }
@@ -648,7 +652,9 @@ const normalizeFastModeSelectors = (
     options: [],
   };
   if (existingIndex >= 0) {
-    return selectors.map((selector, index) => (index === existingIndex ? toggleSelector : selector));
+    return selectors.map((selector, index) =>
+      index === existingIndex ? toggleSelector : selector
+    );
   }
   return [...selectors, toggleSelector];
 };

@@ -59,8 +59,17 @@ export interface OptionSelectorProps<TValue extends string | number = string> {
   appearance?: OptionSelectorAppearance;
   /** Layout only (width, flex); the trigger's look is `appearance`'s. */
   className?: string;
+  /** Styles compose with the trigger's own surface. */
+  xstyle?: stylex.StyleXStyles;
+  /** Styles for the trigger's owned value wrapper and default label. */
+  valueXstyle?: stylex.StyleXStyles;
+  labelXstyle?: stylex.StyleXStyles;
   /** Layout only (width); the popup's look is the floating rung's. */
   contentClassName?: string;
+  contentXstyle?: stylex.StyleXStyles;
+  contentWidth?: string | number;
+  contentMinWidth?: string | number;
+  contentMaxWidth?: string | number;
   disabled?: boolean;
   searchable?: boolean;
   searchPlaceholder?: string;
@@ -114,7 +123,14 @@ export function OptionSelector<TValue extends string | number = string>({
   placeholderIcon,
   appearance = 'field',
   className,
+  xstyle,
+  valueXstyle,
+  labelXstyle,
   contentClassName,
+  contentXstyle,
+  contentWidth,
+  contentMinWidth,
+  contentMaxWidth,
   disabled = false,
   searchable = false,
   searchPlaceholder,
@@ -135,7 +151,7 @@ export function OptionSelector<TValue extends string | number = string>({
   const isOpen = isControlled ? open : internalOpen;
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const didSelectItemRef = useRef(false);
-  const [contentWidth, setContentWidth] = useState<number | undefined>(undefined);
+  const [triggerWidth, setTriggerWidth] = useState<number | undefined>(undefined);
   // Tracks search input changes so we can reset scroll position.
   const [searchToken, setSearchToken] = useState(0);
   // The row under the keyboard or pointer, as cmdk reports it: StyleX cannot read
@@ -219,7 +235,7 @@ export function OptionSelector<TValue extends string | number = string>({
   useLayoutEffect(() => {
     const element = triggerRef.current;
     if (!element) return undefined;
-    const updateWidth = () => setContentWidth(element.offsetWidth);
+    const updateWidth = () => setTriggerWidth(element.offsetWidth);
     updateWidth();
 
     if (typeof ResizeObserver !== 'undefined') {
@@ -267,7 +283,9 @@ export function OptionSelector<TValue extends string | number = string>({
   ) : (
     <>
       {renderIcon(selectedOption)}
-      <span {...stylex.props(surface.truncate)}>{selectedOption?.label ?? placeholder ?? ''}</span>
+      <span {...stylex.props(surface.truncate, labelXstyle)}>
+        {selectedOption?.label ?? placeholder ?? ''}
+      </span>
     </>
   );
 
@@ -332,6 +350,7 @@ export function OptionSelector<TValue extends string | number = string>({
         ref={triggerRef}
         type="button"
         disabled={disabled}
+        style={stylex.props(xstyle).style}
         className={(state) =>
           withClassName(
             stylex.props(
@@ -339,17 +358,22 @@ export function OptionSelector<TValue extends string | number = string>({
               isField && fieldSizes[size],
               !isField && size === 'sm' && surface.triggerSmall,
               isField && !selectedOption && surface.fieldPlaceholder,
-              !isField && state.open && surface.triggerOpen
+              !isField && state.open && surface.triggerOpen,
+              xstyle
             ),
             className
           ).className ?? ''
         }
       >
-        <span {...stylex.props(surface.value)}>{triggerContent}</span>
+        <span {...stylex.props(surface.value, valueXstyle)}>{triggerContent}</span>
         {showChevron ? <ChevronDown {...stylex.props(surface.chevron)} aria-hidden="true" /> : null}
       </Popover.Trigger>
       <Popover.Content
         className={contentClassName}
+        xstyle={contentXstyle}
+        width={contentWidth}
+        minWidth={contentMinWidth}
+        maxWidth={contentMaxWidth}
         container={portalContainer}
         align={align}
         side={side}
@@ -358,7 +382,7 @@ export function OptionSelector<TValue extends string | number = string>({
             ? { side: 'none', align: 'none', fallbackAxisSide: 'none' }
             : undefined
         }
-        style={{ minWidth: contentWidth ? `${contentWidth}px` : undefined }}
+        style={{ minWidth: triggerWidth ? `${triggerWidth}px` : undefined }}
         initialFocus={!autoFocusOnOpen ? false : undefined}
         finalFocus={() => {
           const didSelectItem = didSelectItemRef.current;

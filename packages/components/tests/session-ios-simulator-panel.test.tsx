@@ -557,7 +557,9 @@ describe('SessionIosSimulatorPanel controls', () => {
     const viewer = await connectControlViewer();
     const toggle = labelled('Show/hide simulator keyboard')!;
     await act(async () => toggle.click());
-    expect(viewer.requests.map((r) => r.control)).toEqual([{ kind: 'button', button: 'software-keyboard' }]);
+    expect(viewer.requests.map((r) => r.control)).toEqual([
+      { kind: 'button', button: 'software-keyboard' },
+    ]);
     expect(toggle.disabled).toBe(true);
     await viewer.reply({ success: false, error: 'unavailable' });
     expect(toggle.disabled).toBe(false);
@@ -1260,7 +1262,9 @@ describe('SessionDevicePreviewPanel in-memory cache across conversation switches
           })
         );
         expect(
-          container.querySelector('[data-testid="ios-simulator-device"]')?.getAttribute('data-turns')
+          container
+            .querySelector('[data-testid="ios-simulator-device"]')
+            ?.getAttribute('data-turns')
         ).toBe('1');
 
         // 2. Switch to Session B — Session A iframe is parked alive, port stays open
@@ -1275,7 +1279,9 @@ describe('SessionDevicePreviewPanel in-memory cache across conversation switches
         expect(initCount.value).toBe(1);
         expect(portA.peer?.closed).not.toBe(true);
         expect(
-          container.querySelector('[data-testid="ios-simulator-device"]')?.getAttribute('data-turns')
+          container
+            .querySelector('[data-testid="ios-simulator-device"]')
+            ?.getAttribute('data-turns')
         ).toBe('1');
 
         // 4. Explicit Stop preview destroys the cached iframe and closes the MessagePort
@@ -1292,7 +1298,12 @@ describe('SessionDevicePreviewPanel in-memory cache across conversation switches
   it('offers split Stop preview options when machine advertises iosSimulatorShutdown and sends shutdownDevice only from menu', async () => {
     const machine = createFakeMachine({
       devices: [device({ udid: 'dev-1', name: 'iPhone 16', state: 'Booted' })],
-      preview: preview({ phase: 'ready', udid: 'dev-1', operationId: 'op-shutdown', viewerUrl: VIEWER_URL }),
+      preview: preview({
+        phase: 'ready',
+        udid: 'dev-1',
+        operationId: 'op-shutdown',
+        viewerUrl: VIEWER_URL,
+      }),
     });
     await renderPanel({
       machine,
@@ -1329,14 +1340,23 @@ describe('SessionDevicePreviewPanel in-memory cache across conversation switches
   it('omits shutdown menu when machine does not advertise iosSimulatorShutdown', async () => {
     const machine = createFakeMachine({
       devices: [device({ udid: 'dev-1', name: 'iPhone 16', state: 'Booted' })],
-      preview: preview({ phase: 'ready', udid: 'dev-1', operationId: 'op-legacy', viewerUrl: VIEWER_URL }),
+      preview: preview({
+        phase: 'ready',
+        udid: 'dev-1',
+        operationId: 'op-legacy',
+        viewerUrl: VIEWER_URL,
+      }),
     });
     await renderPanel({
       machine,
       meta: macMeta({ iosSimulator: 1 }),
     });
 
-    expect(container.querySelector('[data-testid="device-preview-disconnect-button"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="device-preview-disconnect-button-menu"]')).toBeNull();
+    expect(
+      container.querySelector('[data-testid="device-preview-disconnect-button"]')
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="device-preview-disconnect-button-menu"]')
+    ).toBeNull();
   });
 });

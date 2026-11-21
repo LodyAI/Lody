@@ -36,7 +36,7 @@ import { space } from '@lody/ui/tokens/scales.stylex';
 import { McpConnectionForm, type McpConnectionFormValue } from './mcp-connection-form';
 import { McpAuthenticationPanel } from './mcp-authentication-panel';
 import {
-  SETTINGS_EDITOR_DIALOG_LAYOUT,
+  settingsEditorDialogStyles,
   SETTINGS_EDITOR_DIALOG_WIDTH,
   settingsCatalog as catalog,
   settingsSurface as surface,
@@ -251,7 +251,11 @@ export function McpSetting() {
       </SettingsPageActions>
 
       {servers.length === 0 ? (
-        <SettingsEmptyState title={t('settings.mcp.empty')} action={addButton} />
+        <SettingsEmptyState
+          title={t('settings.mcp.empty')}
+          description={t('settings.mcp.emptyHint')}
+          action={addButton}
+        />
       ) : (
         <div {...stylex.props(settingsRecordsCard)}>
           {servers.map((server, index) => (
@@ -288,7 +292,7 @@ export function McpSetting() {
         <Dialog.Content
           width={SETTINGS_EDITOR_DIALOG_WIDTH}
           centerOn={settingsPane}
-          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+          xstyle={settingsEditorDialogStyles.panel}
         >
           <Dialog.Header>
             <Dialog.Title>

@@ -40,7 +40,9 @@ export function CustomSnoozeDialog({
   const { t } = useTranslation();
   const safeNow = now instanceof Date ? now : new Date();
   const [openFor, setOpenFor] = useState<CustomSnoozeDialogTarget | null>(null);
-  const [value, setValue] = useState(() => toLocalDateTimeInputValue(defaultCustomSnoozeMs(safeNow)));
+  const [value, setValue] = useState(() =>
+    toLocalDateTimeInputValue(defaultCustomSnoozeMs(safeNow))
+  );
 
   if (target !== openFor) {
     setOpenFor(target);

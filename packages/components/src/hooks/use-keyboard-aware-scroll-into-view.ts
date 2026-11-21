@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, type CSSProperties, type RefObject } from 'react';
+import * as stylex from '@stylexjs/stylex';
 
 /**
  * Keeps the focused control inside a scroll container visible above the native
@@ -87,13 +88,15 @@ export function useKeyboardAwareScrollIntoView(containerRef: RefObject<HTMLEleme
 }
 
 /* One lift for every sheet that can put a field on screen. */
-const KEYBOARD_LIFT_CLASS = 'bottom-[var(--native-keyboard-height,0px)]!';
+const sheetStyles = stylex.create({
+  keyboardLift: { bottom: 'var(--native-keyboard-height,0px)' },
+});
 
 export type KeyboardAwareSheet = {
   /** Goes on the sheet's scrolling body, which the hook keeps focus centered in. */
   scrollRef: RefObject<HTMLDivElement | null>;
   /** Goes on the drawer/dialog content: lifts the whole sheet off the keyboard. */
-  contentClassName: string;
+  contentXstyle: stylex.StyleXStyles;
   /** Goes on the scrolling body: caps it to the visible region and pads it. */
   scrollStyle: CSSProperties;
 };
@@ -130,7 +133,7 @@ export function useKeyboardAwareSheet({
   return useMemo(
     () => ({
       scrollRef,
-      contentClassName: KEYBOARD_LIFT_CLASS,
+      contentXstyle: sheetStyles.keyboardLift,
       scrollStyle: {
         maxHeight: `calc(100dvh - var(--native-keyboard-height, 0px) - ${chromeHeight})`,
         // The safe area is already covered by the keyboard once it is up, so

@@ -1431,9 +1431,7 @@ describe('encrypted file and preview routing', () => {
       expect.objectContaining({ operation: { action: 'revoke', stopProcess: true } }),
       'test-login-token'
     );
-    expect(rpcRevoke).toHaveBeenLastCalledWith(
-      expect.objectContaining({ stopProcess: true })
-    );
+    expect(rpcRevoke).toHaveBeenLastCalledWith(expect.objectContaining({ stopProcess: true }));
   });
 
   it('forks an encrypted session through the protected feature channel, never ordinary RPC', async () => {

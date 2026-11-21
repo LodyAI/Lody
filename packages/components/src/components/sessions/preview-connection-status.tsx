@@ -345,9 +345,8 @@ function usePreviewStatusPresentation({
 
 function StatusGlyph({ kind, fill = false }: { kind: PreviewStatusKind; fill?: boolean }) {
   const glyphStyle = stylex.props(fill ? styles.statusIconFill : styles.statusIcon);
-  const spinnerClassName = cn('shrink-0', fill ? 'h-full w-full' : 'h-3.5 w-3.5');
   if (kind === 'connecting' || kind === 'checking') {
-    return <Spinner label={null} className={spinnerClassName} />;
+    return <Spinner label={null} diameter={fill ? '100%' : 'calc(var(--spacing) * 3.5)'} />;
   }
   if (kind === 'local') return <Monitor {...glyphStyle} aria-hidden />;
   if (kind === 'active') return <RadioTower {...glyphStyle} aria-hidden />;
@@ -524,8 +523,8 @@ export function PreviewConnectionStatus(props: PreviewConnectionStatusProps) {
             />
             <Tooltip.Content side="bottom">{presentation.title}</Tooltip.Content>
           </Tooltip.Root>
-          <Popover.Content align="end" sideOffset={6} className="w-72">
-            <Popover.Title className="sr-only">{accessibleName}</Popover.Title>
+          <Popover.Content align="end" sideOffset={6} width="calc(var(--spacing) * 72)">
+            <Popover.Title visuallyHidden>{accessibleName}</Popover.Title>
             <PreviewStatusContent presentation={presentation} />
           </Popover.Content>
         </Popover.Root>

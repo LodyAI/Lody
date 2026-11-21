@@ -153,9 +153,7 @@ export function SessionInfoDialog({
 
   const showBaseBranch = Boolean(baseBranch && baseBranch !== currentBranch);
   const branch = currentBranch || baseBranch || '';
-  const prMeta = pullRequest
-    ? (PR_STATUS_META[pullRequest.status] ?? PR_STATUS_META.open)
-    : null;
+  const prMeta = pullRequest ? (PR_STATUS_META[pullRequest.status] ?? PR_STATUS_META.open) : null;
   const ownerMember = owner?.members.find((member) => member.userId === owner.ownerUserId);
 
   return (
@@ -273,7 +271,11 @@ export function SessionInfoDialog({
             >
               {ownerMember ? (
                 <UserAvatar
-                  user={{ id: ownerMember.userId, name: ownerMember.name, image: ownerMember.image }}
+                  user={{
+                    id: ownerMember.userId,
+                    name: ownerMember.name,
+                    image: ownerMember.image,
+                  }}
                   size="mini"
                   className="shrink-0"
                 />

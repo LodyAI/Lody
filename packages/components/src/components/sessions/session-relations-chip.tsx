@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import { Button } from '@lody/ui/button';
 import { Popover } from '@lody/ui/popover';
 import { ScrollArea } from '@lody/ui/scroll-area';
@@ -31,6 +39,71 @@ import { useWorkingHandOver } from '@/ui/working-status-mark';
 import { PopoverActionChip } from './info-chip';
 
 const styles = stylex.create({
+  relationRow: { display: 'flex', minWidth: 0, gap: themeSpace[1] },
+  children: { marginLeft: '14px' },
+  child: { position: 'relative', paddingLeft: themeSpace[4], paddingTop: themeSpace[1] },
+  trunk: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    width: '1px',
+    backgroundColor: themeColors.border,
+  },
+  trunkEnd: { height: '18px' },
+  trunkContinued: { bottom: 0 },
+  branch: {
+    position: 'absolute',
+    left: 0,
+    top: '18px',
+    height: '1px',
+    width: themeSpace[3],
+    backgroundColor: themeColors.border,
+  },
+  pill: {
+    display: 'flex',
+    height: themeSpace[7],
+    minWidth: '18ch',
+    flex: '1 1 0%',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.md,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    paddingInline: themeSpace[2],
+    textAlign: 'left',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  current: {
+    borderColor: 'hsl(var(--foreground) / 0.15)',
+    backgroundColor: colors.selectedFill,
+    fontWeight: themeFontWeight.medium,
+  },
+  other: {
+    borderColor: 'hsl(var(--border) / 0.6)',
+    backgroundColor: { default: null, ':hover': 'hsl(var(--muted-foreground) / 0.1)' },
+  },
+  agent: {
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
+  title: {
+    minWidth: 0,
+    width: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: themeColors.foreground,
+  },
   header: {
     display: 'flex',
     alignItems: 'center',
@@ -48,14 +121,7 @@ const styles = stylex.create({
   tree: { maxHeight: 320, overflowY: 'auto', padding: space[1.5] },
   scroll: { minWidth: 0, width: '100%' },
   hiddenTrack: { display: 'none' },
-  // Pills share the row's width equally and only overflow into the
-  // horizontal scroll once they reach `pill.minWidth`.
   row: { display: 'flex', gap: space[1], padding: `calc(${space[1]} / 2)` },
-  pill: { flex: '1 1 0', minWidth: '18ch' },
-  // A zero intrinsic width keeps long titles from widening the scroll
-  // content (`fit-content`); the title still grows into the pill and truncates.
-  title: { width: 0 },
-  current: { backgroundColor: colors.selectedFill },
   fade: (left: string, right: string) => ({
     maskImage: `linear-gradient(to right, transparent, black ${left}, black calc(100% - ${right}), transparent)`,
   }),
@@ -312,7 +378,7 @@ function RelationTreeRow({
         viewportStyle={fadeProps.style}
         scrollbarClassName={stylex.props(styles.hiddenTrack).className}
       >
-        <div ref={contentRef} {...stylex.props(styles.row)}>
+        <div ref={contentRef} {...stylex.props(styles.relationRow, styles.row)}>
           <RelationPill
             session={node.session}
             target={{ sessionId: rootId }}
@@ -332,17 +398,17 @@ function RelationTreeRow({
       </ScrollArea>
       {node.children.length > 0 ? (
         // The trunk sits under the parent row's agent icon.
-        <div className="ml-[14px]">
+        <div {...stylex.props(styles.children)}>
           {node.children.map((child, index) => (
-            <div key={child.session.id} className="relative pl-4 pt-1">
+            <div key={child.session.id} {...stylex.props(styles.child)}>
               <span
                 aria-hidden="true"
-                className={cn(
-                  'absolute left-0 top-0 w-px bg-border',
-                  index === node.children.length - 1 ? 'h-[18px]' : 'bottom-0'
+                {...stylex.props(
+                  styles.trunk,
+                  index === node.children.length - 1 ? styles.trunkEnd : styles.trunkContinued
                 )}
               />
-              <span aria-hidden="true" className="absolute left-0 top-[18px] h-px w-3 bg-border" />
+              <span aria-hidden="true" {...stylex.props(styles.branch)} />
               <RelationTreeRow
                 node={child}
                 currentSessionId={currentSessionId}
@@ -381,26 +447,15 @@ function RelationPill({
       aria-current={isCurrent ? 'page' : undefined}
       data-session-relation-row={session.id}
       onClick={() => onOpenSession(target)}
-      className={cn(
-        'flex h-7 items-center gap-2 rounded-md border border-border/60 px-2 text-left text-xs transition-colors',
-        stylex.props(styles.pill, isCurrent && styles.current).className,
-        !isCurrent && 'hover:bg-muted-foreground/10'
-      )}
+      {...stylex.props(styles.pill, isCurrent ? styles.current : styles.other)}
     >
       <AgentIcon
         cliType={session.cliType}
         agentType={session.agentType}
         env={agentConfig?.env ?? getSessionLaunchConfigLegacyFields(session)?.env}
-        className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+        {...stylex.props(styles.agent)}
       />
-      <span
-        className={cn(
-          'min-w-0 flex-1 truncate text-foreground',
-          stylex.props(styles.title).className
-        )}
-      >
-        {title}
-      </span>
+      <span {...stylex.props(styles.title)}>{title}</span>
       {/* `waiting > working > unread`, tested in that order. */}
       <SessionRowStatusIndicator
         isWaitingPermission={liveStatus?.type === 'requestPermission'}

@@ -182,7 +182,9 @@ function SessionIosSimulatorPanelController({
     () => initialSnapshot?.catalog ?? { phase: 'loading' }
   );
   const [refreshing, setRefreshing] = useState(false);
-  const [status, setStatus] = useState<IosSimulatorPanelStatus>(() => initialSnapshot?.status ?? IDLE);
+  const [status, setStatus] = useState<IosSimulatorPanelStatus>(
+    () => initialSnapshot?.status ?? IDLE
+  );
   const statusRef = useRef(status);
   statusRef.current = status;
   const [viewerState, setViewerState] = useState<IosSimulatorViewerState | null>(
@@ -720,7 +722,10 @@ function SessionIosSimulatorPanelController({
                 appearance: true,
                 'open-url': false,
               }
-            : getIosSimulatorControlAvailability(hardware, !!statusDevice && machineSupportsIosSimulatorControls(machine, 2)),
+            : getIosSimulatorControlAvailability(
+                hardware,
+                !!statusDevice && machineSupportsIosSimulatorControls(machine, 2)
+              ),
         pendingControl,
         capturing,
         canAttach: Boolean(onAttachScreenshot),

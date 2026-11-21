@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { composeStories } from '@storybook/react';
 
@@ -5,6 +6,21 @@ import * as AccountSettingsStories from './AccountSettings.stories';
 import * as AccountMachinesOverviewStories from './AccountMachinesOverview.stories';
 import * as AgentRoleFormStories from './AgentRoleForm.stories';
 import * as GeneralSettingsStories from './GeneralSettings.stories';
+const storyLayout = stylex.create({
+  grid: {
+    display: 'grid',
+    'grid-template-columns': 'minmax(0,1fr) minmax(0,1.25fr)',
+    gap: 'calc(var(--spacing) * 8)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+  stack: {
+    display: 'flex',
+    'min-width': 'calc(var(--spacing) * 0)',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 6)',
+  },
+});
 
 const { OwnerView } = composeStories(AccountSettingsStories);
 const { Default: MachinesOverview } = composeStories(AccountMachinesOverviewStories);
@@ -19,15 +35,12 @@ const { Desktop: General } = composeStories(GeneralSettingsStories);
  */
 function SettingsMaterialStudy() {
   return (
-    <div
-      data-settings-surface=""
-      className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] gap-8 bg-background p-8"
-    >
-      <div className="flex min-w-0 flex-col gap-6">
+    <div data-settings-surface="" {...stylex.props(storyLayout.grid)}>
+      <div {...stylex.props(storyLayout.stack)}>
         <General />
         <OwnerView />
       </div>
-      <div className="flex min-w-0 flex-col gap-6">
+      <div {...stylex.props(storyLayout.stack)}>
         <MachinesOverview />
         <RoleForm />
       </div>

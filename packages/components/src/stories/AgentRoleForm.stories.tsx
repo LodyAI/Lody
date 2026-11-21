@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Button } from '@lody/ui/button';
@@ -10,6 +11,23 @@ import {
   type AgentRoleFormValue,
   type AgentRoleTargetFormValue,
 } from '@/lib/agent-role-form';
+const storyLayout = stylex.create({
+  form: { minHeight: 0, flex: '1 1 0%' },
+  stack: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    height: '620px',
+    width: '620px',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 4)',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+});
 
 const machines = [
   { machineId: 'machine-1' as MachineId, label: 'Studio', online: true },
@@ -107,6 +125,7 @@ const meta = {
   title: 'Settings/AgentRoleForm',
   component: StatefulAgentRoleForm,
   args: {
+    xstyle: storyLayout.form,
     value: configured,
     onChange: () => undefined,
     machines,
@@ -117,14 +136,13 @@ const meta = {
     onSubmit: () => undefined,
     onCancel: () => undefined,
     addTargetPanel,
-    className: 'min-h-0 flex-1',
   },
   decorators: [
     // Mirrors the settings dialog that hosts the form: a fixed-height panel the
     // form's own scroll body and sticky footer size themselves against. The
     // panel pads its content; the form has no padding of its own.
     (Story) => (
-      <div className="mx-auto flex h-[620px] w-[620px] flex-col gap-4 overflow-hidden rounded-lg border bg-background p-4">
+      <div {...stylex.props(storyLayout.stack)}>
         <Story />
       </div>
     ),

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useEffect, useMemo, useState } from 'react';
 import { StatsSettingsView } from '@/components/settings/stats-setting-pure';
@@ -11,6 +12,12 @@ import type {
   SettingsUsageRange,
   SettingsUsageTimelineData,
 } from '@/components/settings/settings-data-cache';
+const storyLayout = stylex.create({
+  section: {
+    'margin-inline': 'auto',
+    'max-width': '56rem',
+  },
+});
 
 /* Deterministic pseudo-usage so the charts render a believable shape without
    Math.random (stable across story reloads / visual regression). */
@@ -211,7 +218,7 @@ function Harness({
   const resolved = !loadingNow && !noWorkspace;
 
   return (
-    <div className="mx-auto max-w-4xl">
+    <div {...stylex.props(storyLayout.section)}>
       <StatsSettingsView
         workspaceName="Acme Robotics"
         range={range}

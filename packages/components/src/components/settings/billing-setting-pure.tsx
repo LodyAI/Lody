@@ -1,5 +1,5 @@
 import type { ReferralCheckoutOffer, ReferralPolicy } from '@lody/cloud-api';
-import { text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { control, text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -97,7 +97,7 @@ const styles = stylex.create({
     fontFamily: 'inherit',
     fontSize: 'inherit',
     cursor: { default: 'pointer', ':disabled': 'default' },
-    opacity: { default: 1, ':hover': 0.8, ':disabled': 0.6 },
+    opacity: { default: 1, ':hover': 0.8, ':disabled': control.disabledOpacity },
   },
   glyphSmall: { width: '12px', height: '12px', flexShrink: 0 },
   danger: { color: colors.destructive },
@@ -239,7 +239,7 @@ const styles = stylex.create({
     fontFamily: 'inherit',
     fontSize: uiText.footnoteSize,
     cursor: { default: 'pointer', ':disabled': 'default' },
-    opacity: { default: 1, ':disabled': 0.6 },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
   },
   quietActionDanger: { color: { default: colors.secondaryLabel, ':hover': colors.destructive } },
 });

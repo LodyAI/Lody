@@ -50,11 +50,11 @@ const SessionDetailRoute = () => {
     <AppThemeShell>
       <Suspense fallback={null}>
         <SessionDetail
-        sessionId={sessionId as SessionId}
-        urlTab={search.tab}
-        urlPrNumber={search.pr}
-        urlBrowser={search.browser}
-        urlSimulator={search.simulator}
+          sessionId={sessionId as SessionId}
+          urlTab={search.tab}
+          urlPrNumber={search.pr}
+          urlBrowser={search.browser}
+          urlSimulator={search.simulator}
         />
       </Suspense>
     </AppThemeShell>

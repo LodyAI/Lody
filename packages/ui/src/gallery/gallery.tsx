@@ -74,7 +74,7 @@ import { table as tableTokens } from '../table/table.tokens.stylex';
 import { chip } from '../tooltip/chip';
 import { Tooltip } from '../tooltip/tooltip';
 import { tooltip as tooltipTokens } from '../tooltip/tooltip.tokens.stylex';
-import { colors, shadow, sheen } from '../tokens/colors.stylex';
+import { colors, media, shadow, sheen } from '../tokens/colors.stylex';
 import { control, corner, duration, ease, radius, space, text, z } from '../tokens/scales.stylex';
 import {
   Board,
@@ -153,6 +153,29 @@ const styles = stylex.create({
   floating: { backgroundColor: colors.raisedBackground, boxShadow: shadow.popover },
   modal: { backgroundColor: colors.elevatedBackground, boxShadow: shadow.large },
   textSample: { display: 'flex', flexDirection: 'column', gap: space[1] },
+  mediaSample: { display: 'flex', flexDirection: 'column', gap: space[2] },
+  mediaFrame: {
+    position: 'relative',
+    width: '100%',
+    maxWidth: '320px',
+    aspectRatio: '8 / 3',
+    overflow: 'hidden',
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+  },
+  mediaImage: { display: 'block', width: '100%', height: '100%', objectFit: 'cover' },
+  mediaCaption: {
+    position: 'absolute',
+    insetInline: 0,
+    bottom: 0,
+    padding: space[2],
+    backgroundColor: media.scrim,
+    color: media.label,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+  },
+  mediaCaptionText: { margin: 0 },
+
   separatorRow: { display: 'flex', flexDirection: 'column', gap: 0 },
   separatorText: {
     paddingBlock: space[2],
@@ -561,6 +584,7 @@ const styles = stylex.create({
     fontWeight: 500,
     letterSpacing: text.controlTracking,
   },
+  fieldLabelWeightExample: { [field.labelWeight]: '620' },
   focusReplica: {
     display: 'flex',
     alignItems: 'center',
@@ -1008,6 +1032,53 @@ const SAMPLE_FACE =
       '</svg>'
   );
 
+// Bright, dark and saturated pixels exercise image contrast without a network asset.
+const MEDIA_CONTRAST_IMAGE =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 120">' +
+      '<path fill="#fff" d="M0 0h80v120H0z"/>' +
+      '<path fill="#000" d="M80 0h80v120H80z"/>' +
+      '<path fill="#ffd400" d="M160 0h80v120h-80z"/>' +
+      '<path fill="#0078ff" d="M240 0h80v120h-80z"/>' +
+      '</svg>'
+  );
+
+function MediaContrastSample() {
+  const scrim = useMeasured<HTMLDivElement>('background-color');
+  const label = useMeasured<HTMLParagraphElement>('color');
+  return (
+    <div {...stylex.props(styles.mediaSample)} data-media-contrast-sample>
+      <div {...stylex.props(styles.mediaFrame)}>
+        <img
+          {...stylex.props(styles.mediaImage)}
+          src={MEDIA_CONTRAST_IMAGE}
+          alt="White, black, yellow and blue image regions"
+        />
+        <div ref={scrim.ref} {...stylex.props(styles.mediaCaption)} data-media-caption>
+          <p ref={label.ref} {...stylex.props(styles.mediaCaptionText)}>
+            Image caption · Uploading 42%
+          </p>
+        </div>
+      </div>
+      <Rows>
+        <Row>
+          <LegendKey>media.scrim</LegendKey>
+          <span {...stylex.props(styles.readout)} data-media-scrim-readout>
+            {scrim.value}
+          </span>
+        </Row>
+        <Row>
+          <LegendKey>media.label</LegendKey>
+          <span {...stylex.props(styles.readout)} data-media-label-readout>
+            {label.value}
+          </span>
+        </Row>
+      </Rows>
+    </div>
+  );
+}
+
 const STRIP_SIZES: { name: string; size: TabsSize }[] = [
   { name: 'small · 28', size: 'small' },
   { name: 'medium · 32', size: 'medium' },
@@ -1079,7 +1150,7 @@ const FIELD_SIZES = [
   { name: 'large · 36', size: 'large' as const },
 ];
 
-const BUTTON_VARIANTS = ['primary', 'secondary', 'ghost', 'destructive', 'link'] as const;
+const BUTTON_VARIANTS = ['primary', 'secondary', 'ghost', 'solid', 'destructive', 'link'] as const;
 const BUTTON_SIZES = ['mini', 'small', 'medium', 'large'] as const;
 
 /** A stand-in for a caller's glyph on a row that removes something. */
@@ -1207,6 +1278,20 @@ function ControlRow({
   );
 }
 
+/** The shared state read from a real native disabled control. */
+function ControlDisabledRow() {
+  const { ref, value } = useMeasured<HTMLButtonElement>('opacity');
+  return (
+    <Row>
+      <LegendKey>control.disabledOpacity</LegendKey>
+      <Button ref={ref} disabled variant="secondary" data-token="control.disabledOpacity">
+        Disabled action
+      </Button>
+      <span {...stylex.props(styles.readout)}>{value}</span>
+    </Row>
+  );
+}
+
 function TypeRow({
   name,
   size,
@@ -1262,6 +1347,27 @@ function FieldRow({
   );
 }
 
+function FieldLabelWeightRow({ custom = false }: { custom?: boolean }) {
+  const { ref, value } = useMeasured<HTMLLabelElement>('font-weight');
+  return (
+    <FieldRow
+      legend={custom ? 'field.labelWeight · local override' : 'field.labelWeight'}
+      readout={value}
+    >
+      <Field.Root>
+        <Field.Label
+          ref={ref}
+          className={custom ? stylex.props(styles.fieldLabelWeightExample).className : undefined}
+          data-field-label-weight={custom ? 'custom' : 'default'}
+        >
+          Session title
+        </Field.Label>
+        <Input placeholder="Describe the task" />
+      </Field.Root>
+    </FieldRow>
+  );
+}
+
 function FieldSizeRow({ name, size }: { name: string; size: 'small' | 'medium' | 'large' }) {
   const { ref, value } = useMeasured<HTMLInputElement>('height');
   return (
@@ -1270,6 +1376,48 @@ function FieldSizeRow({ name, size }: { name: string; size: 'small' | 'medium' |
         <Field.Label>Session title</Field.Label>
         <Input ref={ref} size={size} placeholder="Describe the task" />
       </Field.Root>
+    </FieldRow>
+  );
+}
+
+function FieldHeightRow({ password = false }: { password?: boolean }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [custom, setCustom] = useState(true);
+  const [height, setHeight] = useState('');
+  useEffect(() => {
+    const shell = ref.current?.parentElement;
+    if (shell) setHeight(getComputedStyle(shell).height);
+  }, [custom]);
+  return (
+    <FieldRow
+      legend={password ? 'password · controlHeight' : 'input · controlHeight'}
+      readout={height}
+    >
+      <div
+        data-gallery-field-height={password ? 'password' : 'leading'}
+        {...stylex.props(styles.textSample)}
+      >
+        <Field.Root>
+          <Field.Label>{password ? 'Secret' : 'Command'}</Field.Label>
+          {password ? (
+            <PasswordInput
+              ref={ref}
+              controlHeight={custom ? 40 : undefined}
+              defaultValue="Retained secret"
+            />
+          ) : (
+            <Input
+              ref={ref}
+              controlHeight={custom ? 40 : undefined}
+              leading="/"
+              defaultValue="Retained command"
+            />
+          )}
+        </Field.Root>
+        <Button variant="secondary" size="small" onClick={() => setCustom((value) => !value)}>
+          {custom ? 'Use named height' : 'Use 40px height'}
+        </Button>
+      </div>
     </FieldRow>
   );
 }
@@ -1840,17 +1988,36 @@ function SessionMenu() {
   );
 }
 
-function CompactMenu() {
+function CompactMenu({ bounded = false }: { bounded?: boolean }) {
+  const [positioner, setPositioner] = useState<HTMLDivElement | null>(null);
+  const [readout, setReadout] = useState('Open to measure');
+  useEffect(() => {
+    const panel = positioner?.querySelector('[role="menu"]');
+    if (!panel) return;
+    const css = getComputedStyle(panel);
+    setReadout(`min ${css.minWidth} · max ${css.maxWidth} · height ≤ ${css.maxHeight}`);
+  }, [positioner]);
   return (
-    <Menu.Root>
-      <Menu.Trigger render={<Button variant="secondary" />}>Two choices</Menu.Trigger>
-      <Menu.Content width="compact">
-        <Menu.CheckboxItem indicatorSide="end" defaultChecked>
-          Online
-        </Menu.CheckboxItem>
-        <Menu.CheckboxItem indicatorSide="end">My machines</Menu.CheckboxItem>
-      </Menu.Content>
-    </Menu.Root>
+    <div>
+      <Menu.Root>
+        <Menu.Trigger render={<Button variant="secondary" />}>
+          {bounded ? 'Bounded menu' : 'Two choices'}
+        </Menu.Trigger>
+        <Menu.Content
+          ref={setPositioner}
+          width="compact"
+          minWidth={bounded ? 190 : undefined}
+          maxWidth={bounded ? 280 : undefined}
+          maxHeight={bounded ? 128 : undefined}
+        >
+          <Menu.CheckboxItem indicatorSide="end" defaultChecked>
+            Online
+          </Menu.CheckboxItem>
+          <Menu.CheckboxItem indicatorSide="end">My machines</Menu.CheckboxItem>
+        </Menu.Content>
+      </Menu.Root>
+      {bounded ? <span {...stylex.props(styles.readout)}>{readout}</span> : null}
+    </div>
   );
 }
 
@@ -1962,6 +2129,165 @@ function FilterPopover() {
         </Cluster>
       </Popover.Content>
     </Popover.Root>
+  );
+}
+
+function LayoutPopover({
+  padding,
+  gap,
+  sized = false,
+  hiddenTitle = false,
+}: {
+  padding: 'default' | 'none';
+  gap: 'default' | 'none';
+  sized?: boolean;
+  hiddenTitle?: boolean;
+}) {
+  const [positioner, setPositioner] = useState<HTMLDivElement | null>(null);
+  const [readout, setReadout] = useState('Open to measure');
+  useEffect(() => {
+    const panel = positioner?.querySelector('[role="dialog"]');
+    if (!panel) return;
+    const css = getComputedStyle(panel);
+    setReadout(
+      sized
+        ? `width ${css.width} · min ${css.minWidth} · max ${css.maxWidth} · height ≤ ${css.maxHeight}`
+        : `padding ${css.paddingTop} · gap ${css.rowGap}`
+    );
+  }, [positioner, sized]);
+  return (
+    <div>
+      <Popover.Root>
+        <Popover.Trigger render={<Button variant="secondary" size="small" />}>
+          {hiddenTitle
+            ? 'Popover with accessible title'
+            : sized
+              ? 'Sized popover'
+              : `padding ${padding} · gap ${gap}`}
+        </Popover.Trigger>
+        <Popover.Content
+          ref={setPositioner}
+          padding={padding}
+          gap={gap}
+          width={sized ? 240 : undefined}
+          minWidth={sized ? 200 : undefined}
+          maxWidth={sized ? 280 : undefined}
+          maxHeight={sized ? 160 : undefined}
+        >
+          <Popover.Title visuallyHidden={hiddenTitle || undefined}>Embedded content</Popover.Title>
+          <span>First content block</span>
+          <span>Second content block</span>
+          <Popover.Close render={<Button size="small" />}>Close</Popover.Close>
+        </Popover.Content>
+      </Popover.Root>
+      <span {...stylex.props(styles.readout)}>{readout}</span>
+    </div>
+  );
+}
+
+function ModalTitleWeightSample({ drawer = false }: { drawer?: boolean }) {
+  const [weight, setWeight] = useState<number | 'initial' | 'inherit' | undefined>(550);
+  const [node, setNode] = useState<HTMLHeadingElement | null>(null);
+  const [readout, setReadout] = useState('Open to inspect the title');
+  const Modal = drawer ? Drawer : Dialog;
+  useEffect(() => {
+    if (!node) return undefined;
+    const measure = () => setReadout(getComputedStyle(node).fontWeight);
+    const settledWeight = (event: TransitionEvent) => {
+      if (event.target === node && event.propertyName === 'font-weight') measure();
+    };
+    node.addEventListener('transitionend', settledWeight);
+    measure();
+    return () => node.removeEventListener('transitionend', settledWeight);
+  }, [node, weight]);
+  return (
+    <div>
+      <Modal.Root>
+        <Modal.Trigger render={<Button variant="secondary" size="small" />}>
+          {drawer ? 'Drawer title weight' : 'Dialog title weight'}
+        </Modal.Trigger>
+        <Modal.Content>
+          <div style={{ fontWeight: 333 }}>
+            <Modal.Title
+              ref={setNode}
+              fontWeight={weight}
+              data-modal-title-weight-sample={drawer ? 'drawer' : 'dialog'}
+            >
+              Custom title weight
+            </Modal.Title>
+          </div>
+          <Modal.Description>The readout comes from the rendered heading.</Modal.Description>
+          <Cluster>
+            <Button onClick={() => setWeight(550)}>Custom 550</Button>
+            <Button onClick={() => setWeight('initial')}>Initial weight</Button>
+            <Button onClick={() => setWeight('inherit')}>Inherited weight</Button>
+            <Button onClick={() => setWeight(undefined)}>Default weight</Button>
+          </Cluster>
+          <Modal.Close render={<Button variant="secondary" />}>Close title weight</Modal.Close>
+        </Modal.Content>
+      </Modal.Root>
+      <span {...stylex.props(styles.readout)}>{readout}</span>
+    </div>
+  );
+}
+
+function HiddenDialogNames() {
+  const [hidden, setHidden] = useState(true);
+  const title = useRef<HTMLHeadingElement>(null);
+  const description = useRef<HTMLParagraphElement>(null);
+  const [readout, setReadout] = useState('Open to inspect the accessible name');
+  return (
+    <div>
+      <Dialog.Root>
+        <Dialog.Trigger render={<Button variant="secondary" size="small" />}>
+          Dialog with accessible title
+        </Dialog.Trigger>
+        <Dialog.Content>
+          <Dialog.Title ref={title} data-hidden-dialog-title visuallyHidden={hidden || undefined}>
+            Accessible dialog title
+          </Dialog.Title>
+          <Dialog.Description
+            ref={description}
+            data-hidden-dialog-description
+            visuallyHidden={hidden || undefined}
+          >
+            Accessible dialog description
+          </Dialog.Description>
+          <p>The title and description stay available to assistive technology.</p>
+          <Button
+            size="small"
+            onClick={() => {
+              setHidden((value) => !value);
+              setReadout(`Title ${title.current?.id}; description ${description.current?.id}`);
+            }}
+          >
+            {hidden ? 'Show title and description' : 'Hide title and description'}
+          </Button>
+        </Dialog.Content>
+      </Dialog.Root>
+      <span {...stylex.props(styles.readout)}>{readout}</span>
+    </div>
+  );
+}
+
+function HiddenDialogHeader() {
+  const [hidden, setHidden] = useState(true);
+  return (
+    <Dialog.Root>
+      <Dialog.Trigger render={<Button variant="secondary" size="small" />}>
+        Dialog with accessible header
+      </Dialog.Trigger>
+      <Dialog.Content>
+        <Dialog.Header data-hidden-header-sample visuallyHidden={hidden || undefined}>
+          <Dialog.Title>Accessible header title</Dialog.Title>
+          <Dialog.Description>Accessible header description</Dialog.Description>
+        </Dialog.Header>
+        <p>The header keeps the panel's name and description mounted.</p>
+        <Button size="small" onClick={() => setHidden((value) => !value)}>
+          {hidden ? 'Show header' : 'Hide header'}
+        </Button>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 
@@ -2144,6 +2470,58 @@ function FilterDrawer({ side, inset }: { side: DrawerSide; inset?: boolean }) {
   );
 }
 
+/** Actual modal panels: spacing is measured from the node the reader opens. */
+function ModalSpacingExample({ alert = false }: { alert?: boolean }) {
+  const [layout, setLayout] = useState<'default' | 'padding' | 'gap' | 'both'>('both');
+  const [panel, setPanel] = useState<HTMLDivElement | null>(null);
+  const [readout, setReadout] = useState('Open to measure');
+  const Modal = alert ? AlertDialog : Dialog;
+  const padding = layout === 'padding' || layout === 'both' ? 'none' : undefined;
+  const gap = layout === 'gap' || layout === 'both' ? 'none' : undefined;
+  useEffect(() => {
+    if (!panel) return;
+    const css = getComputedStyle(panel);
+    setReadout(`padding ${css.paddingTop} · gap ${css.rowGap}`);
+  }, [panel, padding, gap]);
+  return (
+    <div>
+      <Modal.Root>
+        <Modal.Trigger render={<Button variant="secondary" />}>
+          {alert ? 'Alert spacing' : 'Dialog spacing'}
+        </Modal.Trigger>
+        <Modal.Content ref={setPanel} padding={padding} gap={gap}>
+          <Modal.Header>
+            <Modal.Title>Embedded content spacing</Modal.Title>
+            <Modal.Description>Padding and gap can belong to the content.</Modal.Description>
+          </Modal.Header>
+          <Field.Root>
+            <Field.Label>Retained value</Field.Label>
+            <Input defaultValue="Edit this value" />
+          </Field.Root>
+          <Cluster>
+            <Button size="small" onClick={() => setLayout('padding')}>
+              Zero padding
+            </Button>
+            <Button size="small" onClick={() => setLayout('gap')}>
+              Zero gap
+            </Button>
+            <Button size="small" onClick={() => setLayout('both')}>
+              Zero both
+            </Button>
+            <Button size="small" onClick={() => setLayout('default')}>
+              Default spacing
+            </Button>
+          </Cluster>
+          <Modal.Footer>
+            <Modal.Close render={<Button variant="secondary" />}>Close spacing sample</Modal.Close>
+          </Modal.Footer>
+        </Modal.Content>
+      </Modal.Root>
+      <span {...stylex.props(styles.readout)}>{readout}</span>
+    </div>
+  );
+}
+
 /** The three ways onto the modal rung, each one a reader can actually open. */
 function ModalTriggers() {
   return (
@@ -2192,6 +2570,13 @@ function ModalTriggers() {
               </AlertDialog.Footer>
             </AlertDialog.Content>
           </AlertDialog.Root>
+        </Cluster>
+      </Row>
+      <Row>
+        <LegendKey>panel padding / gap</LegendKey>
+        <Cluster>
+          <ModalSpacingExample />
+          <ModalSpacingExample alert />
         </Cluster>
       </Row>
       <Row>
@@ -2591,18 +2976,75 @@ function ProgressRow({ name, value }: { name: string; value: number | null }) {
   );
 }
 
+function SkeletonRingSample() {
+  const [step, setStep] = useState(0);
+  const stroke = [undefined, 6, 0, undefined][step];
+  return (
+    <div data-skeleton-ring-demo data-ring-step={step}>
+      <Skeleton shape="ring" width={48} strokeWidth={stroke} data-skeleton-ring-owner>
+        <Skeleton width={8} height={8} data-skeleton-ring-child />
+      </Skeleton>
+      <Button size="small" variant="secondary" onClick={() => setStep((value) => (value + 1) % 4)}>
+        Next ring stroke
+      </Button>
+      <span {...stylex.props(styles.readout)}>stroke {stroke ?? 'default 2'}px</span>
+    </div>
+  );
+}
+
+function SkeletonInlineSample() {
+  const [step, setStep] = useState(0);
+  const inline = [undefined, true, false][step];
+  return (
+    <div data-skeleton-inline-demo data-inline-step={step}>
+      <span>
+        Loading <Skeleton inline={inline} width={48} height={12} data-skeleton-inline-owner />{' '}
+        summary
+      </span>
+      <Button size="small" variant="secondary" onClick={() => setStep((value) => (value + 1) % 3)}>
+        Next skeleton display
+      </Button>
+      <span {...stylex.props(styles.readout)}>inline {String(inline)}</span>
+    </div>
+  );
+}
+
 function SkeletonRow() {
   return (
-    <Row>
-      <LegendKey>skeleton</LegendKey>
-      <div {...stylex.props(styles.skeletonBlock)}>
-        <Skeleton shape="circle" width={32} height={32} />
-        <div {...stylex.props(styles.skeletonLines)}>
-          <Skeleton width="100%" />
-          <Skeleton width="60%" />
+    <>
+      <Row>
+        <LegendKey>skeleton</LegendKey>
+        <div {...stylex.props(styles.skeletonBlock)}>
+          <Skeleton shape="circle" width={32} height={32} />
+          <div {...stylex.props(styles.skeletonLines)}>
+            <Skeleton width="100%" />
+            <Skeleton width="60%" />
+          </div>
         </div>
-      </div>
-    </Row>
+      </Row>
+      <Row>
+        <LegendKey>skeleton ring</LegendKey>
+        <SkeletonRingSample />
+      </Row>
+      <Row>
+        <LegendKey>skeleton bar</LegendKey>
+        <Cluster>
+          <Skeleton shape="bar" width={48} data-skeleton-bar-default />
+          <Skeleton shape="bar" width={24} height={48} />
+        </Cluster>
+      </Row>
+      <Row>
+        <LegendKey>skeleton tile</LegendKey>
+        <Cluster>
+          <Skeleton shape="tile" width={72} height={40} data-skeleton-tile-rectangle />
+          <Skeleton shape="tile" width={72} data-skeleton-tile-default />
+        </Cluster>
+      </Row>
+      <Row>
+        <LegendKey>skeleton inline</LegendKey>
+        <SkeletonInlineSample />
+      </Row>
+    </>
   );
 }
 
@@ -2614,6 +3056,7 @@ function SpinnerRow() {
         <Spinner size="small" />
         <Spinner size="medium" />
         <Spinner size="large" />
+        <Spinner diameter={14} />
         <Button variant="secondary" size="small">
           <Spinner size="small" label={null} />
           Saving
@@ -3047,6 +3490,26 @@ function CardRow() {
             </Button>
             <Button size="small">Save</Button>
           </Card.Footer>
+        </Card.Root>
+      </div>
+    </Row>
+  );
+}
+
+function CardTypographyRow() {
+  return (
+    <Row>
+      <LegendKey>title type</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock, styles.pageRung)}>
+        <Card.Root>
+          <Card.Header>
+            <Card.Title as="h4" fontWeight={550} letterSpacing="0.04em">
+              Custom title typography
+            </Card.Title>
+            <Card.Description>
+              Explicit type belongs to this title; other cards keep their defaults.
+            </Card.Description>
+          </Card.Header>
         </Card.Root>
       </div>
     </Row>
@@ -3722,6 +4185,62 @@ function ButtonFocusRow() {
   );
 }
 
+function ButtonLayoutSample({ icon = false }: { icon?: boolean }) {
+  const [node, setNode] = useState<HTMLElement | null>(null);
+  const [readout, setReadout] = useState('');
+  useEffect(() => {
+    if (!node) return;
+    const css = getComputedStyle(node);
+    setReadout(`width ${css.width} · height ${css.height}`);
+  }, [node]);
+  return (
+    <Sample name={icon ? 'Icon box' : 'Text box'} measured={readout}>
+      <Button
+        ref={setNode}
+        variant="secondary"
+        icon={icon}
+        width={icon ? 24 : 120}
+        height={icon ? 24 : 28}
+        aria-label={icon ? 'Custom attachment box' : undefined}
+      >
+        {icon ? <PlusGlyph /> : 'Custom box'}
+      </Button>
+    </Sample>
+  );
+}
+
+function ButtonWeightSample() {
+  const [weight, setWeight] = useState<number | 'initial' | 'inherit' | undefined>(550);
+  const [node, setNode] = useState<HTMLElement | null>(null);
+  const [readout, setReadout] = useState('');
+  useEffect(() => {
+    if (node) setReadout(getComputedStyle(node).fontWeight);
+  }, [node, weight]);
+  return (
+    <Sample name="Label weight" measured={readout}>
+      <Cluster>
+        <span style={{ fontWeight: 333 }}>
+          <Button ref={setNode} variant="secondary" fontWeight={weight} data-button-weight-sample>
+            Custom weight
+          </Button>
+        </span>
+        <Button variant="ghost" onClick={() => setWeight(0)}>
+          Zero weight
+        </Button>
+        <Button variant="ghost" onClick={() => setWeight('initial')}>
+          Initial weight
+        </Button>
+        <Button variant="ghost" onClick={() => setWeight('inherit')}>
+          Inherited weight
+        </Button>
+        <Button variant="ghost" onClick={() => setWeight(undefined)}>
+          Default weight
+        </Button>
+      </Cluster>
+    </Sample>
+  );
+}
+
 function FocusRingRow() {
   const { ref, value } = useMeasured<HTMLDivElement>('box-shadow');
   return (
@@ -3793,6 +4312,15 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               <Swatch key={token.name} {...token} />
             ))}
           </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Text over images"
+        rule="An image can be white, black or colored in either palette. Non-interactive captions and upload status pair the fixed media.scrim with media.label; ordinary controls and UI surfaces keep their own roles."
+      >
+        <PaletteSplit palettes={palettes}>
+          <MediaContrastSample />
         </PaletteSplit>
       </Section>
 
@@ -3890,14 +4418,15 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
       </Section>
 
       <Section
-        title="Control sizes"
-        rule="28 / 32 / 36. Default 32; 36 only for empty states and onboarding. Icon-only buttons are square at the size's height."
+        title="Controls"
+        rule="28 / 32 / 36. Default 32; 36 only for empty states and onboarding. Icon-only buttons are square at the size's height. Disabled controls share one 45% state."
       >
         <PaletteSplit palettes={palettes}>
           <Rows>
             {CONTROL_SIZES.map((token) => (
               <ControlRow key={token.name} {...token} />
             ))}
+            <ControlDisabledRow />
           </Rows>
         </PaletteSplit>
       </Section>
@@ -3981,7 +4510,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
 
       <Section
         title="Button · states, tone, shape, icons"
-        rule="Disabled is 45% opacity on the whole control, not a colour. Destructive tone tints a quiet variant; the destructive variant fills. The focus ring is a box-shadow composed with the variant's own edge, never an outline."
+        rule="Disabled is 45% opacity on the whole control, not a colour. Destructive tone tints quiet variants; primary and solid keep their ink, while destructive fills. The focus ring is a box-shadow composed with the variant's own edge, never an outline."
       >
         <PaletteSplit palettes={palettes}>
           <Rows>
@@ -3994,6 +4523,9 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
                 </Button>
                 <Button variant="ghost" disabled>
                   Ghost
+                </Button>
+                <Button variant="solid" disabled>
+                  Solid
                 </Button>
                 <Button variant="destructive" disabled>
                   Delete
@@ -4011,6 +4543,9 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
                 </Button>
                 <Button variant="link" tone="destructive">
                   Remove
+                </Button>
+                <Button variant="solid" tone="destructive" data-solid-gallery-tone>
+                  Solid
                 </Button>
                 <Button variant="destructive">Delete session</Button>
               </Cluster>
@@ -4049,6 +4584,14 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
                   <Button variant="secondary">Week</Button>
                   <Button variant="secondary">Month</Button>
                 </ButtonGroup>
+                <ButtonGroup data-solid-gallery-group>
+                  <Button variant="solid" size="small">
+                    Send
+                  </Button>
+                  <Button variant="solid" size="small" icon aria-label="Solid action options">
+                    <PlusGlyph />
+                  </Button>
+                </ButtonGroup>
               </Cluster>
             </Row>
             <Row>
@@ -4072,6 +4615,14 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               </Cluster>
             </Row>
             <ButtonFocusRow />
+            <Row>
+              <LegendKey>layout constraints</LegendKey>
+              <Cluster>
+                <ButtonLayoutSample />
+                <ButtonWeightSample />
+                <ButtonLayoutSample icon />
+              </Cluster>
+            </Row>
             <Row>
               <LegendKey>render</LegendKey>
               <Cluster>
@@ -4111,11 +4662,17 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
             <FieldRow legend="disabled">
               <Field.Root name="title" disabled>
                 <Field.Label>Session title</Field.Label>
-                <Input defaultValue="Rebuild the composer" />
+                <Input
+                  defaultValue="Rebuild the composer"
+                  trailing={<Badge>Locked</Badge>}
+                  data-gallery-input-trailing
+                />
                 <Field.Description>Locked while the session runs.</Field.Description>
               </Field.Root>
             </FieldRow>
             <FocusRingRow />
+            <FieldLabelWeightRow />
+            <FieldLabelWeightRow custom />
           </Rows>
           <Grid>
             {FIELD_COLORS.map((token) => (
@@ -4134,13 +4691,14 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
 
       <Section
         title="Field · sizes and Textarea"
-        rule="28 / 32 / 36, the same ladder as Button, with radius small at 28 and medium at 32 and 36. Textarea is the same well at the medium radius and grows downward. What a value belongs with — an emoji before a name, the / before a command — goes in the leading slot inside the same well, a square the well’s height less its inset, rather than beside it as a second control with a second edge."
+        rule="28 / 32 / 36, the same ladder as Button, with radius small at 28 and medium at 32 and 36. Textarea is the same well at the medium radius and grows downward. What a value belongs with — an emoji before a name, the / before a command — goes in the leading slot inside the same well. Its square follows the named height and inset, including when controlHeight changes the outer well. A trailing status keeps its intrinsic width inside that same well."
       >
         <PaletteSplit palettes={palettes}>
           <Rows>
             {FIELD_SIZES.map((entry) => (
               <FieldSizeRow key={entry.size} {...entry} />
             ))}
+            <FieldHeightRow />
             <FieldRow legend="input · leading">
               <Field.Root name="role">
                 <Field.Label>Role</Field.Label>
@@ -4150,7 +4708,13 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
             <FieldRow legend="input · leading text">
               <Field.Root name="command">
                 <Field.Label>Slash command</Field.Label>
-                <Input size="large" leading="/" placeholder="review-pr" />
+                <Input
+                  size="large"
+                  leading="/"
+                  trailing={<Badge>Available for review</Badge>}
+                  placeholder="review-pr"
+                  data-gallery-input-trailing
+                />
               </Field.Root>
             </FieldRow>
             <FieldRow legend="textarea">
@@ -4312,6 +4876,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
             {PASSWORD_SIZES.map((entry) => (
               <PasswordSizeRow key={entry.size} {...entry} />
             ))}
+            <FieldHeightRow password />
             <FieldRow legend={'password \u00b7 invalid'}>
               <Field.Root invalid>
                 <Field.Label>Password</Field.Label>
@@ -4458,6 +5023,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               <Cluster>
                 <SessionMenu />
                 <CompactMenu />
+                <CompactMenu bounded />
               </Cluster>
             </Row>
             <Row>
@@ -4467,7 +5033,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
                   <ContextMenu.Trigger>
                     <div {...stylex.props(styles.contextArea)}>Right-click this area</div>
                   </ContextMenu.Trigger>
-                  <ContextMenu.Content>
+                  <ContextMenu.Content minWidth={180} maxWidth={280} maxHeight={128}>
                     <ContextMenu.Item inset>Rename</ContextMenu.Item>
                     <ContextMenu.Item inset>Duplicate</ContextMenu.Item>
                     <ContextMenu.Separator />
@@ -4517,6 +5083,16 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               </Cluster>
             </Row>
             <Row>
+              <LegendKey>popover layout</LegendKey>
+              <Cluster>
+                <LayoutPopover padding="none" gap="default" />
+                <LayoutPopover padding="default" gap="none" />
+                <LayoutPopover padding="none" gap="none" />
+                <LayoutPopover padding="default" gap="default" sized />
+                <LayoutPopover padding="default" gap="default" hiddenTitle />
+              </Cluster>
+            </Row>
+            <Row>
               <LegendKey>preview card</LegendKey>
               <Cluster>
                 <BranchPreviewCard />
@@ -4534,6 +5110,15 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
         <PaletteSplit palettes={palettes}>
           <Rows>
             <ModalTriggers />
+            <Row>
+              <LegendKey>accessible name</LegendKey>
+              <Cluster>
+                <HiddenDialogNames />
+                <ModalTitleWeightSample />
+                <ModalTitleWeightSample drawer />
+                <HiddenDialogHeader />
+              </Cluster>
+            </Row>
             <DialogReplica />
             <ModalDimensions />
             <Row>
@@ -4774,6 +5359,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
         <PaletteSplit palettes={palettes}>
           <Rows>
             <CardRow />
+            <CardTypographyRow />
             <InteractiveCardRow />
             <CardDimensions />
           </Rows>

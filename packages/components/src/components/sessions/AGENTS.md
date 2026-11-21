@@ -19,6 +19,14 @@ Read parent rules and linked context.
 - `Change owner` writes the OWNER `SessionMeta.userId`, never sharing;
   candidates need machine/project access.
 
+## Opener provenance
+
+- Keep `openedBySessionId` (precise opener) distinct from `openedByRowSessionId`
+  (row). `buildSidebarOpenerRowResolver` in `session-list-rows.ts` walks
+  `parentSessionId` to root using sidebar `allActiveSessions`, never visible rows.
+  Preserve the precise opener and independent child workspace; `parentSessionId`
+  children stay out of `sessionListAtom` rows.
+
 ## [Shell, side panel, side chats](../../../../../.agents/docs/sessions-side-panel.md)
 
 - Desktop file/diff/browser/PR viewers are closeable right-panel tabs; never split
@@ -60,7 +68,7 @@ Read parent rules and linked context.
   `nativeKeyboardInset`. Wide sessions inherit root padding once.
 - Message-list crash fallback preserves the composer and copies the shared report
   with the original error and React component stacks.
-- Read receipts require per-surface `isVisible`, active foreground window, and page interaction, never mere mounting.
+- Read receipts require per-surface `isVisible`, foreground and interaction; not mounting alone.
 - Every user management action uses `useSessionActions`; its shared guard checks current Repo metadata for every affected target before side effects, including contained/opened sessions.
 - Read-only sessions require authoritative root grants matching the current Meta machine. Mount only the independent reader, preserving preferences, Markdown and references. Never expose machine controls or management. [Boundary](../../../../../specs/session-access.md).
 - Window-top history headers reuse the shared drag-region helper and exempt interactive controls, so workspace drag strips cannot cover their buttons.

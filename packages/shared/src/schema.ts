@@ -50,6 +50,7 @@ import type { messageQueueItemSchema, sessionDocSchema } from './session-doc-sch
 // pulling in the loro-mirror/loro-crdt graph through this file.
 export * from './session-pull-request-meta';
 import type {
+  SessionPullRequestLifecycleFields,
   SessionAutoDelivery,
   SessionPullRequestRecordFields,
   SessionPullRequestMeta,

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { fn, userEvent, within } from 'storybook/test';
@@ -8,6 +9,40 @@ import {
   type MobileChatListRowActions,
 } from '@/components/mobile/mobile-chat-list';
 import type { MobileConversationItem } from '@/components/mobile/mobile-project-screen';
+const phoneFrame = stylex.create({
+  frame: {
+    height: { default: '100dvh', '@media (min-width: 40rem)': '852px' },
+    width: { default: '100%', '@media (min-width: 40rem)': '393px' },
+    borderRadius: { default: null, '@media (min-width: 40rem)': '34px' },
+    backgroundColor: 'hsl(var(--background) / 1)',
+    boxShadow: '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 25px 50px -12px rgb(0 0 0 / 0.25)',
+    overflowY: 'auto',
+    paddingBottom: 'calc(var(--spacing) * 12)',
+  },
+});
+
+const storyViewport = stylex.create({
+  canvas: {
+    display: 'flex',
+    minHeight: '100dvh',
+    alignItems: 'center',
+    justifyContent: 'center',
+    '--story-device-canvas-components': '92.3% 0.003 48.717',
+    backgroundColor: 'oklch(var(--story-device-canvas-components))',
+    padding: { default: '0px', '@media (min-width: 40rem)': 'calc(var(--spacing) * 6)' },
+  },
+});
+
+const storyLayout = stylex.create({
+  canvas: {
+    'padding-inline': 'calc(var(--spacing) * 5)',
+    'padding-top': 'calc(var(--spacing) * 6)',
+    'padding-bottom': 'calc(var(--spacing) * 1)',
+    'font-size': 'var(--text-xl)',
+    'line-height': 'var(--text-xl--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+  },
+});
 
 const hour = 60 * 60 * 1000;
 const now = Date.now();
@@ -335,9 +370,9 @@ function StoryShell({
     : undefined;
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
-      <div className="h-dvh w-full overflow-y-auto bg-background pb-12 shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]">
-        <div className="px-5 pb-1 pt-6 text-xl font-semibold">对话</div>
+    <div {...stylex.props(storyViewport.canvas)}>
+      <div {...stylex.props(phoneFrame.frame)}>
+        <div {...stylex.props(storyLayout.canvas)}>对话</div>
         <MobileChatList
           chats={chats}
           groupBy={groupBy}

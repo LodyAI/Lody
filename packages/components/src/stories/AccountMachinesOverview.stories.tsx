@@ -1,9 +1,15 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { AgentConfigMeta, MachineId } from '@lody/shared';
 import {
   AccountMachinesOverviewView,
   type AccountMachineOverviewItem,
 } from '@/components/settings/account-machines-overview';
+const storyLayout = stylex.create({
+  frame: {
+    width: 'min(900px, 95vw)',
+  },
+});
 
 const macId = 'machine-macbook' as MachineId;
 const serverId = 'machine-server' as MachineId;
@@ -78,7 +84,7 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <div className="w-[min(900px,95vw)]">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),

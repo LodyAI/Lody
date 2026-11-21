@@ -220,10 +220,7 @@ function StatusViewPlayground({
     [pinnedLayout]
   );
 
-  const updatedItems = useMemo(
-    () => sessions.filter((s) => !s.isPinned).map(toItem),
-    [sessions]
-  );
+  const updatedItems = useMemo(() => sessions.filter((s) => !s.isPinned).map(toItem), [sessions]);
 
   const applyPinWrites = useCallback((writes: readonly PinPlacementWrite[]) => {
     const byId = new Map(writes.map((w) => [w.sessionId, w]));
@@ -332,34 +329,31 @@ function StatusViewPlayground({
     [sessions]
   );
 
-  const handleTogglePin = useCallback(
-    (sessionId: string, nextPinned: boolean) => {
-      setSessions((prev) =>
-        prev.map((s) => {
-          if (s.id !== sessionId) return s;
-          if (!nextPinned) {
-            return { ...s, isPinned: false, pinSectionId: undefined };
-          }
-          const { orderKey } = planNewPinPlacement(
-            buildPinnedSectionLayout(
-              prev
-                .filter((entry) => entry.isPinned && !entry.pinSectionId && entry.id !== sessionId)
-                .map((entry) => ({
-                  id: entry.id,
-                  pinSectionId: null,
-                  orderKey: entry.orderKey ?? null,
-                  recency: entry.latestMessageAt,
-                })),
-              [],
-              (p) => p
-            )
-          );
-          return { ...s, isPinned: true, pinSectionId: undefined, orderKey };
-        })
-      );
-    },
-    []
-  );
+  const handleTogglePin = useCallback((sessionId: string, nextPinned: boolean) => {
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== sessionId) return s;
+        if (!nextPinned) {
+          return { ...s, isPinned: false, pinSectionId: undefined };
+        }
+        const { orderKey } = planNewPinPlacement(
+          buildPinnedSectionLayout(
+            prev
+              .filter((entry) => entry.isPinned && !entry.pinSectionId && entry.id !== sessionId)
+              .map((entry) => ({
+                id: entry.id,
+                pinSectionId: null,
+                orderKey: entry.orderKey ?? null,
+                recency: entry.latestMessageAt,
+              })),
+            [],
+            (p) => p
+          )
+        );
+        return { ...s, isPinned: true, pinSectionId: undefined, orderKey };
+      })
+    );
+  }, []);
 
   const selected = sessions.find((s) => s.id === selectedId);
 
@@ -407,7 +401,12 @@ function StatusViewPlayground({
           setSessions((prev) =>
             prev.map((s) =>
               s.id === id
-                ? { ...s, snoozedUntil: undefined, settledAt: undefined, focusRestoredAt: Date.now() }
+                ? {
+                    ...s,
+                    snoozedUntil: undefined,
+                    settledAt: undefined,
+                    focusRestoredAt: Date.now(),
+                  }
                 : s
             )
           )

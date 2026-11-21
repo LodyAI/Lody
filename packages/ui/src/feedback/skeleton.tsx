@@ -4,23 +4,31 @@ import { appendClassName } from '../internal/class-name';
 import { feedbackSurface as surface } from './surface';
 
 /** What has not arrived: a line of text, a block of something, or a face. */
-export type SkeletonShape = 'line' | 'block' | 'circle';
+export type SkeletonShape = 'line' | 'block' | 'circle' | 'ring' | 'bar' | 'tile';
 
 export interface SkeletonProps extends Omit<
   ComponentProps<'div'>,
   'className' | 'width' | 'height'
 > {
   shape?: SkeletonShape;
+  /** Let a text placeholder participate in its surrounding line. */
+  inline?: boolean;
   /** How much room it holds. A number is pixels; a string is a CSS length. */
   width?: string | number;
   height?: string | number;
+  /** Ring contour thickness. A number is pixels; omission keeps the 2px contour. */
+  strokeWidth?: string | number;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }
 
 const SHAPES = {
   line: surface.skeletonLine,
   block: surface.skeletonBlock,
   circle: surface.skeletonCircle,
+  ring: surface.skeletonRing,
+  bar: surface.skeletonBar,
+  tile: surface.skeletonTile,
 } as const;
 
 /**
@@ -30,10 +38,9 @@ const SHAPES = {
  * dynamic style resolves to an inline value, which nothing has to win against.
  */
 const dyn = stylex.create({
-  size: (width: string | number | undefined, height: string | number | undefined) => ({
-    width,
-    height,
-  }),
+  width: (width: string | number) => ({ width }),
+  height: (height: string | number) => ({ height }),
+  strokeWidth: (strokeWidth: string | number) => ({ borderWidth: strokeWidth }),
 });
 
 /**
@@ -51,13 +58,17 @@ const dyn = stylex.create({
  * hidden from a screen reader for the same reason.
  */
 export const Skeleton = forwardRef<HTMLDivElement, SkeletonProps>(function Skeleton(
-  { shape = 'line', width, height, className, ...rest },
+  { shape = 'line', inline, width, height, strokeWidth, className, xstyle, ...rest },
   ref
 ) {
   const sx = stylex.props(
     surface.skeleton,
     SHAPES[shape],
-    (width != null || height != null) && dyn.size(width, height)
+    inline === true && surface.skeletonInline,
+    width != null && dyn.width(width),
+    height != null && dyn.height(height),
+    shape === 'ring' && strokeWidth != null && dyn.strokeWidth(strokeWidth),
+    xstyle
   );
   return (
     <div
@@ -65,7 +76,7 @@ export const Skeleton = forwardRef<HTMLDivElement, SkeletonProps>(function Skele
       aria-hidden="true"
       {...rest}
       className={appendClassName(sx.className, className)}
-      style={sx.style}
+      style={xstyle ? { ...sx.style, ...rest.style } : sx.style}
     />
   );
 });

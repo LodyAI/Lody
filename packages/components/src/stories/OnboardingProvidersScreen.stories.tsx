@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useCallback, useState } from 'react';
 import { fn } from 'storybook/test';
@@ -10,14 +11,28 @@ import {
   type ProviderTestActivity,
   type ProviderTestStatus,
 } from '@/components/onboarding';
+const storyLayout = stylex.create({
+  frame: {
+    position: 'relative',
+    'min-height': '760px',
+    width: '100%',
+  },
+  row: {
+    position: 'relative',
+    'z-index': '10',
+    display: 'flex',
+    'min-height': '760px',
+    'align-items': 'center',
+    'justify-content': 'center',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+});
 
 function ProvidersPreviewWrapper({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative min-h-[760px] w-full">
+    <div {...stylex.props(storyLayout.frame)}>
       <OnboardingBackdrop />
-      <div className="relative z-10 flex min-h-[760px] items-center justify-center p-8">
-        {children}
-      </div>
+      <div {...stylex.props(storyLayout.row)}>{children}</div>
     </div>
   );
 }

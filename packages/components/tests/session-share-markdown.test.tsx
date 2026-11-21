@@ -584,10 +584,7 @@ describe('Markdown session links', () => {
       root.render(
         withTestI18n(
           <SessionLinkProvider enabled>
-            <MessageTextWithChips
-              text={`See ${mentionLink} now`}
-              spans={[mentionSpan()]}
-            />
+            <MessageTextWithChips text={`See ${mentionLink} now`} spans={[mentionSpan()]} />
           </SessionLinkProvider>,
           testI18n
         )
@@ -611,10 +608,7 @@ describe('Markdown session links', () => {
     { name: 'corrupt target', target: 'not an id' },
   ])('keeps a transcript session chip inert: %j', async (test) => {
     const body = (
-      <MessageTextWithChips
-        text={`See ${mentionLink} now`}
-        spans={[mentionSpan(test.target)]}
-      />
+      <MessageTextWithChips text={`See ${mentionLink} now`} spans={[mentionSpan(test.target)]} />
     );
     await act(async () =>
       root.render(
