@@ -169,14 +169,9 @@ export function configureSessionPolicies(
 }
 
 /** Preserve an enabled recovery setting created before overload observations existed. */
-export function upgradeCapacityPolicies(
-  ledger: AutomationLedger,
-  userId: string,
-  now: number
-): void {
+export function upgradeCapacityPolicies(ledger: AutomationLedger, now: number): void {
   for (const rule of ledger.rules()) {
     if (
-      rule.ownerUserId === userId &&
       rule.ownerMachineId === ledger.machineId &&
       rule.handler.kind === 'policy' &&
       rule.handler.policy === 'recover-capacity' &&
@@ -186,7 +181,7 @@ export function upgradeCapacityPolicies(
       configureSessionPolicies(
         ledger,
         rule.scope.sessionId,
-        userId,
+        rule.ownerUserId,
         { recoverCapacity: rule.enabled },
         now
       );

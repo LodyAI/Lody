@@ -6,9 +6,8 @@ Parent `AGENTS.md` files also apply.
 Settings owns the workspace catalog surfaces (Providers, MCP servers, Agent
 Roles). Before saving a catalog row, follow the durability rule in
 [shared source contracts](../../../../shared/src/AGENTS.md#workspace-mcp--roles).
-Lody Agent connections and Sorbet endpoints follow
-[Lody Agent setup](README.md#lody-agent-setup) and the
-[harness surface](../harness/AGENTS.md).
+Lody Agent connections, Sorbet endpoints and [the harness surface](../harness/AGENTS.md)
+follow [Lody Agent setup](README.md#lody-agent-setup).
 
 ## Layout and components
 

@@ -12,6 +12,7 @@ import { localMachineIdAtom } from '../src/atoms/local-probe';
 import { runtimeAtom } from '../src/atoms/runtime';
 import { installCloudHttpPort } from '../src/lib/cloud-http-port';
 import { SessionLimitContinueAction } from '../src/components/schedules/quota-continue-action';
+import { SessionReadonlyContext } from '../src/components/ai-gui/session-readonly-context';
 import {
   findClaudeSessionLimit,
   isClaudeSessionLimitMessage,
@@ -136,6 +137,33 @@ describe('Claude quota recovery action', () => {
       } as never);
       await render();
       expect(container.textContent).toContain('Enable automatic recovery');
+    } finally {
+      uninstall();
+    }
+  });
+  it('offers recovery to a teammate editing a Session on another machine, never to a reader', async () => {
+    getDefaultStore().set(userAtom, { id: 'teammate' } as never);
+    getDefaultStore().set(localMachineIdAtom, 'other-machine' as never);
+    const uninstall = installCloudHttpPort({
+      authBaseUrl: 'https://synthetic.invalid',
+      serverBaseUrl: null,
+      mintAutomationControlProof: async () => {
+        throw new Error('not minted in this test');
+      },
+    });
+    try {
+      await render();
+      expect(container.textContent).toContain('Enable automatic recovery');
+      await act(async () =>
+        root.render(
+          <SessionReadonlyContext.Provider
+            value={{ renderImage: () => null, renderFiles: () => null }}
+          >
+            <SessionLimitContinueAction session={{ ...session }} entryId="failure" />
+          </SessionReadonlyContext.Provider>
+        )
+      );
+      expect(container.textContent).toBe('');
     } finally {
       uninstall();
     }

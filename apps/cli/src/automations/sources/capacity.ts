@@ -86,11 +86,13 @@ export function observeCapacity(
     const available =
       evaluateCapacity(observation, { ...binding, modelId: observation.modelId }, now).value ===
       'yes';
-    const wasAvailable =
-      evaluateCapacity(before, { ...binding, modelId: observation.modelId }, now).value === 'yes';
+    // 'unknown' evidence (unobserved, stale or fingerprint drift) is a baseline gap, not a recovery.
+    const wasUnavailable =
+      evaluateCapacity(before, { ...binding, modelId: observation.modelId }, now).value === 'no';
     ledger.recordCapacity(
       observation,
-      available && !wasAvailable
+      now,
+      available && wasUnavailable
         ? {
             id: automationIdentity(
               binding.bindingId,
