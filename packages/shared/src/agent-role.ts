@@ -106,10 +106,6 @@ const isFiniteNumber = (value: unknown): value is number =>
 export const isAgentRoleVisibility = (value: unknown): value is AgentRoleVisibility =>
   value === 'private' || value === 'workspace';
 
-// ---------------------------------------------------------------------------
-// Name, emoji, and the mention token derived from them
-// ---------------------------------------------------------------------------
-
 /** Long enough to stay readable inline, short enough not to dominate a prompt. */
 export const AGENT_ROLE_MENTION_SLUG_MAX_LENGTH = 40;
 export const AGENT_ROLE_NAME_MAX_LENGTH = 60;
@@ -184,10 +180,6 @@ export const normalizeAgentRoleEmoji = (value: unknown): string | undefined => {
   const capped = Array.from(stripped).slice(0, AGENT_ROLE_EMOJI_MAX_LENGTH).join('');
   return capped || undefined;
 };
-
-// ---------------------------------------------------------------------------
-// Run config
-// ---------------------------------------------------------------------------
 
 /**
  * Option keys a Role may never persist.
@@ -264,10 +256,6 @@ const serializeRunConfig = (value: AgentRoleRunConfig): string => {
 
 const runConfigsEqual = (left: AgentRoleRunConfig, right: AgentRoleRunConfig): boolean =>
   serializeRunConfig(left) === serializeRunConfig(right);
-
-// ---------------------------------------------------------------------------
-// Role validation
-// ---------------------------------------------------------------------------
 
 const isStoredRunConfig = (value: unknown): boolean =>
   value === undefined ||
@@ -544,10 +532,6 @@ export const isAgentRoleContentEqual = (left: AgentRole, right: AgentRole): bool
   );
 };
 
-// ---------------------------------------------------------------------------
-// Visibility and ownership
-// ---------------------------------------------------------------------------
-
 /**
  * The authoritative trusted-UI discovery rule for Settings and the mention menu.
  */
@@ -562,10 +546,6 @@ export const listAccessibleAgentRoles = (
   roles: readonly AgentRole[],
   userId: string | null | undefined
 ): AgentRole[] => roles.filter((role) => canReadAgentRole(role, userId));
-
-// ---------------------------------------------------------------------------
-// Availability
-// ---------------------------------------------------------------------------
 
 export type AgentRoleUnavailableReason =
   | 'memory_unsupported'

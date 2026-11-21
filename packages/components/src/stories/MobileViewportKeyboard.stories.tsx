@@ -52,7 +52,9 @@ const keyboardStory = stylex.create({
     marginInline: 'auto',
     overflow: 'hidden',
     borderRadius: '2rem',
-    borderWidth:"2px",borderStyle:"solid",borderColor:"var(--color-zinc-600)",
+    borderWidth: '2px',
+    borderStyle: 'solid',
+    borderColor: 'var(--color-zinc-600)',
     backgroundColor: 'var(--color-black)',
   },
   keyboard: {
@@ -125,8 +127,6 @@ const storyLayout = stylex.create({
   },
 });
 
-// ─── Shared constants & helpers ─────────────────────────────────────────────
-
 const selectorStyles = stylex.create({
   tag: {
     width: 'auto',
@@ -168,7 +168,6 @@ const selectorStyles = stylex.create({
     whiteSpace: 'nowrap',
   },
 });
-
 const STORY_WORKSPACE_ID = 'workspace-storybook' as WorkspaceId;
 const STORY_MACHINE_ID = 'machine-storybook' as MachineId;
 const STORY_AGENT_CONFIG_ID = 'agent-storybook' as AgentConfigId;
@@ -370,8 +369,6 @@ function ChatLandingContent({ rootFamily = 'mobile' }: { rootFamily?: WorkspaceR
   );
 }
 
-// ─── Desktop preview shell (simulated keyboard) ────────────────────────────
-
 /**
  * For desktop browsers: wraps content in a phone-shaped frame and simulates
  * keyboard open/close on focus/blur.
@@ -442,8 +439,6 @@ function DesktopPreviewShell({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-
-// ─── Story config ───────────────────────────────────────────────────────────
 
 const meta = {
   title: 'Mobile/ViewportKeyboard',

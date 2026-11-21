@@ -171,7 +171,7 @@ test('computeLocalTestWaves bounds hybrid worker pools and scales on workstation
 });
 
 test('runBoundaryChecks preserves deterministic script order and reports non-zero exits', async () => {
-  assert.equal(BOUNDARY_CHECK_SCRIPTS.length, 9);
+  assert.equal(BOUNDARY_CHECK_SCRIPTS.length, 10);
   const passResult = await runBoundaryChecks({
     scripts: ['a.mjs', 'b.mjs', 'c.mjs'],
     concurrency: 2,

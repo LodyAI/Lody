@@ -1344,7 +1344,6 @@ function WorkspaceChatLanding({
   const hasLocalProjects = visibleLocalProjectMap.size > 0;
   const localProjectCount = visibleLocalProjectMap.size;
 
-  // ── Context type (Local Projects vs GitHub Worktrees) ──
   const [contextType, setContextType] = useState<SessionContextType>(
     () =>
       preSelectedContext ??
@@ -1353,7 +1352,6 @@ function WorkspaceChatLanding({
   );
   const analyticsProjectKind = contextType === 'chat' ? null : contextType;
 
-  // ── Project group (multi-repository) selection ──
   const { projects: workspaceProjects } = useWorkspaceProjects();
   const [selectedProjectGroupId, setSelectedProjectGroupId] = useState<string | null>(
     preSelectedProjectGroupId
@@ -1369,7 +1367,6 @@ function WorkspaceChatLanding({
     [selectedProjectGroupId, workspaceProjects]
   );
 
-  // ── Prompt state (shared across contexts) ──
   const chatLandingStateOwnerKey = userId ?? null;
   const chatLandingDraftKey = embedding
     ? buildChatLandingSurfaceDraftKey(chatLandingStateOwnerKey, embedding.surface, workspaceSlug)
@@ -1447,10 +1444,8 @@ function WorkspaceChatLanding({
     });
   }, [setSessionState]);
 
-  // ── Machine & Agent selection ──
   const [selectedMachineId, setSelectedMachineId] = useState<MachineId | null>(null);
 
-  // ── Project group availability on the selected machine ──
   // Which machines hold a copy of each repository, as their daemons publish it.
   const projectRepositoryCopies = useMemo(
     () => buildProjectRepositoryCopyIndex(visibleLocalProjects.registeredProjects.values()),
@@ -1534,7 +1529,6 @@ function WorkspaceChatLanding({
      mobile create flow existed and was an actively confusing UX
      (settings ≠ where you go to create something new). */
   const [mobileCreateWorkspaceOpen, setMobileCreateWorkspaceOpen] = useState(false);
-  // ── GitHub context state ──
   const [selectedRepo, setSelectedRepo] = useState<string | undefined>(undefined);
   const selectedRepoWorktreeSetup = useMemo(() => {
     if (!selectedRepo) return undefined;
@@ -1562,7 +1556,6 @@ function WorkspaceChatLanding({
     });
   }, []);
 
-  // ── Local project context state ──
   const [selectedLocalProject, setSelectedLocalProject] = useState<LocalProjectSelection | null>(
     null
   );
@@ -1575,7 +1568,6 @@ function WorkspaceChatLanding({
     useState<LocalProjectWorkdirModeSelection | null>(null);
   const [loadingLocalGitState, setLoadingLocalGitState] = useState(false);
 
-  // ── Common refs ──
   const promptTextareaRef = useRef<ComposerInputElement>(null);
   // Scope root for the keyboard-nav controller (arrow roving over the desktop landing's
   // config + composer column). Mobile/touch keeps native focus behavior.
@@ -1882,7 +1874,6 @@ function WorkspaceChatLanding({
     return () => cancelAnimationFrame(id);
   }, []);
 
-  // ── Apply pre-selection from search params ──
   const preSelectionKey = buildChatLandingPreSelectionKey({
     context: preSelectedProjectGroupId ? 'group' : preSelectedContext,
     machine: preSelectedMachine,
@@ -1940,7 +1931,6 @@ function WorkspaceChatLanding({
     handleSelectedLocalProjectChange,
   ]);
 
-  // ── Mirror the effective selection back into the URL ──
   // The composer owns the selection once pre-selection is applied. When the
   // URL names a selection, it must keep telling the truth: steering or
   // clearing the composer would otherwise leave a stale project in the URL,
@@ -1991,7 +1981,6 @@ function WorkspaceChatLanding({
     onSelectionUrlSync(selectionSearch);
   }, [onSelectionUrlSync, urlNamesSelection, preSelectionKey, selectionSearch]);
 
-  // ── Machine-owner authorization check for local projects ──
   useEffect(() => {
     if (contextType !== 'local' || !selectedLocalProject) return;
     const machineMeta = machines.get(selectedLocalProject.machineId);
@@ -2057,7 +2046,6 @@ function WorkspaceChatLanding({
     handleSelectedLocalProjectChange,
   ]);
 
-  // ── Auto-switch to available tab if current is disabled ──
   useEffect(() => {
     if (repositories === undefined) return; // Wait for repos to load
     if (machines.size === 0) return; // Wait for machine data to load
@@ -2082,7 +2070,6 @@ function WorkspaceChatLanding({
     visibleLocalProjectsLoading,
   ]);
 
-  // ── Agent/Mode/Model config ──
   const selectedConfig = useMemo<AgentConfigMeta | undefined>(
     () =>
       selectedAgent ? executorConfigs.find((cfg) => cfg.id === selectedAgent.agentId) : undefined,
@@ -2459,7 +2446,6 @@ function WorkspaceChatLanding({
       : null,
   });
 
-  // ── Machine online check (context-dependent) ──
   const hasAnyOnlineMachine = useMemo(() => {
     return getChatLandingHasAnyOnlineMachine({
       localMachineId: visibleLocalMachineId,
@@ -2478,7 +2464,6 @@ function WorkspaceChatLanding({
   }, [machines, onlineMachineIds]);
   const hasNoMachine = !hasAnyOnlineMachine;
 
-  // ── Sync selectedMachineId from selectedAgent (e.g. when restored from defaults) ──
   // Skip sync when the machine was explicitly changed by the user via handleMachineChange.
   const machineChangedByUserRef = useRef(false);
   useEffect(() => {
@@ -2497,7 +2482,6 @@ function WorkspaceChatLanding({
     }
   }, [contextType, selectedAgent?.machineId, selectedLocalProjectMachineId, selectedMachineId]);
 
-  // ── Handle explicit machine change: auto-select an agent owned by the new machine ──
   const handleMachineChange = useCallback(
     (machineId: MachineId) => {
       machineChangedByUserRef.current = true;
@@ -2649,7 +2633,6 @@ function WorkspaceChatLanding({
     [machinePairing, machinePairingStatus]
   );
 
-  // ── Selectable machines: reachable AND own at least one configured agent. ──
   // The hook uses this to ensure the current selection still resolves; falling
   // back to a valid default when machines stream in late (e.g. relogin) or go
   // offline.
@@ -2688,7 +2671,6 @@ function WorkspaceChatLanding({
     hasSelectableMachine: selectableMachines.size > 0,
   });
 
-  // ── Defaults loading (all contexts) ──
   const { defaultsReady, repoDefaultsReady } = useChatLandingDefaults({
     workspaceId,
     shouldRestoreContextType,
@@ -2715,7 +2697,6 @@ function WorkspaceChatLanding({
     selectedAgentRoleId: agentRoleRestored ? (activeAgentRole?.id ?? null) : undefined,
   });
 
-  // ── Auto-select first repo when none selected ──
   useEffect(() => {
     if (!repoDefaultsReady) return;
     if (contextType !== 'github' || selectedRepo) return;
@@ -2723,7 +2704,6 @@ function WorkspaceChatLanding({
     if (firstRepo) setSelectedRepo(firstRepo.fullName);
   }, [contextType, repoDefaultsReady, repositories, selectedRepo]);
 
-  // ── Auto-select first local project when none selected ──
   useEffect(() => {
     if (!defaultsReady) return;
     if (contextType !== 'local' || selectedLocalProject) return;
@@ -2778,7 +2758,6 @@ function WorkspaceChatLanding({
     visibleLocalProjectsLoading,
   ]);
 
-  // ── Local project: auto-select agent when machine changes ──
   useEffect(() => {
     if (contextType !== 'local' || !selectedLocalProject) return;
 
@@ -2806,7 +2785,6 @@ function WorkspaceChatLanding({
     }
   }, [contextType, executorConfigs, machines, selectedAgent, selectedLocalProject, workspaceId]);
 
-  // ── PostHog tracking ──
   useEffect(() => {
     // The page funnel counts page views; an embedded landing is not one.
     if (isEmbedded) return;
@@ -2865,7 +2843,6 @@ function WorkspaceChatLanding({
     workspaceId,
   ]);
 
-  // ── GitHub branch loading ──
   useLayoutEffect(() => {
     if (contextType !== 'github') return undefined;
     if (!workspaceId || !selectedRepo) {
@@ -3093,7 +3070,6 @@ function WorkspaceChatLanding({
   const gitStateLoadInputsRef = useRef(gitStateLoadInputs);
   gitStateLoadInputsRef.current = gitStateLoadInputs;
 
-  // ── Local project git capability loading ──
   useEffect(() => {
     if (contextType !== 'local') return undefined;
     const load = gitStateLoadInputsRef.current;
@@ -3233,7 +3209,6 @@ function WorkspaceChatLanding({
     };
   }, [contextType, localGitStateLoadKey]);
 
-  // ── GitHub repo resolution for local projects ──
   const resolveSelectedLocalProjectGitHubRepo = useCallback(
     (gitStateOverride?: LocalProjectGitState | null): string | null => {
       const effectiveLocalGitState = gitStateOverride ?? activeLocalGitState;
@@ -3243,7 +3218,6 @@ function WorkspaceChatLanding({
     [activeLocalGitState, selectedLocalProject]
   );
 
-  // ── Branch options (context-dependent) ──
   const branchOptions = useMemo<AcpSessionSelectOption[]>(() => {
     if (contextType === 'local') {
       if (!activeLocalGitState?.git) {
@@ -3269,7 +3243,6 @@ function WorkspaceChatLanding({
   const setCurrentBranch =
     contextType === 'local' ? handleSelectedLocalBranchChange : setSelectedBranch;
 
-  // ── Prompt keydown ──
   const handlePromptKeyDown = (event: KeyboardEvent<ComposerInputElement>) => {
     if (event.key !== 'Enter' || isImeComposingKeyboardEvent(event)) return;
     if (
@@ -3437,7 +3410,6 @@ function WorkspaceChatLanding({
     ]
   );
 
-  // ── Submit ──
   const handleSubmit = async (withoutMcp = false) => {
     if (submitting) return;
     const submitStartedAtMs = getPerformanceNowMs();
@@ -3969,7 +3941,6 @@ function WorkspaceChatLanding({
     }
   };
 
-  // ── Selector nodes ──
   // Only constrain to selectedMachineId unless it is definitely offline or gone.
   const selectedMachineOnlineStatus = useMachineOnlineStatus(selectedMachineId);
   const selectedMachineState = useMemo(
@@ -4809,7 +4780,6 @@ function WorkspaceChatLanding({
     </ErrorBoundary>
   );
 
-  // ── Hints ──
   const hasNoAgentConfig = executorConfigs.length === 0;
   const hintType: ChatLandingHintType = getChatLandingHintType({
     hasNoMachine,
@@ -4833,7 +4803,6 @@ function WorkspaceChatLanding({
     openSettings('agents');
   };
 
-  // ── Mention source ──
   const isSelectedRepoPublic = useMemo(() => {
     if (!selectedRepo) return undefined;
     const repo = freshRepositories?.find((r) => r.fullName === selectedRepo);
@@ -4963,7 +4932,6 @@ function WorkspaceChatLanding({
           : null,
       });
 
-  // ── Title ──
   // Rotate the landing heading once per (UTC) day: stable within a day, no
   // flicker across re-renders, no Math.random().
   const headings = [t('chat.heading'), t('chat.heading2')];

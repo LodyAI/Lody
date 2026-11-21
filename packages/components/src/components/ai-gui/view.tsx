@@ -1525,7 +1525,6 @@ function useSessionCopyWorkspaceId(): string | undefined {
   return readonlyPresentation ? undefined : (workspaceId ?? undefined);
 }
 
-// ── Expand/collapse state cache ──────────────────────────────────────────────
 // Survives virtual-scroll unmount/remount so expand/collapse state is not lost
 // when the user scrolls a message out of the VList buffer and back.
 interface BubbleExpandState {

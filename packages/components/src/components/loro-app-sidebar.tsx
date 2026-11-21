@@ -690,10 +690,6 @@ const isElectronMacOS =
 
 const isElectron = typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true;
 
-// ---------------------------------------------------------------------------
-// Extracted memoized sub-components for local project sidebar sections
-// ---------------------------------------------------------------------------
-
 type LocalProjectSessionItemProps = {
   session: SessionMeta;
   isWorking: boolean;

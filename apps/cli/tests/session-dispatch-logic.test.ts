@@ -49,8 +49,6 @@ const snap = (overrides: Partial<SessionDispatchSnapshot> = {}): SessionDispatch
   ...overrides,
 });
 
-// ── resolveSessionDispatchAction ────────────────────────────────────────────
-
 describe('resolveSessionDispatchAction', () => {
   it('never replays consumed steer processing after restart, but still dispatches the newer input', () => {
     const consumed = {
@@ -200,8 +198,6 @@ describe('resolveSessionDispatchAction', () => {
   });
 });
 
-// ── resolveSessionCancelAction ──────────────────────────────────────────────
-
 describe('resolveSessionCancelAction', () => {
   it('returns noop when meta is undefined', () => {
     const action = resolveSessionCancelAction(undefined, undefined, MACHINE);
@@ -258,8 +254,6 @@ describe('resolveSessionCancelAction', () => {
     expect(action).toEqual({ type: 'cancel', turnId: 'turn-y' });
   });
 });
-
-// ── findNextDispatchableUserTurn ─────────────────────────────────────────────
 
 describe('findNextDispatchableUserTurn', () => {
   it.each(['handled', 'failed', 'canceled'] as const)(

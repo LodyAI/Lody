@@ -536,7 +536,6 @@ function SessionIosSimulatorPanelController({
     [live, refreshCatalog]
   );
 
-  // ---------------------------------------------------------------------------
   // Native controls, screenshots and the view. All of it acts on this Session's
   // ready preview, through its exact operation.
 

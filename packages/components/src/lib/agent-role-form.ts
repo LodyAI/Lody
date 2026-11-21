@@ -459,10 +459,6 @@ export const carryAgentRoleOptionsToModel = (
   return carried;
 };
 
-// ---------------------------------------------------------------------------
-// Capability compatibility
-// ---------------------------------------------------------------------------
-
 export type AgentRoleRunConfigIssue =
   /** The agent's capabilities are unknown, so nothing can be judged compatible. */
   | { kind: 'capabilities_unknown' }
@@ -527,10 +523,6 @@ export const findAgentRoleRunConfigIssues = (
 export const selectAuthorableAgentRoleConfigOptions = <T extends { configId: string }>(
   selectors: readonly T[]
 ): T[] => selectors.filter((selector) => !isSensitiveAgentRoleConfigOptionKey(selector.configId));
-
-// ---------------------------------------------------------------------------
-// Row summary
-// ---------------------------------------------------------------------------
 
 /**
  * What a Role's row says it will run, in reading order: model, reasoning, then
