@@ -53,7 +53,8 @@ The [internal MCP loading decision](../notes/implemented/architecture/2026-10-30
 records the measured scope and why process isolation is retained.
 
 The CLI's own `version` comes from `@/pkg` because each build composition aliases it to the
-manifest that actually gets published (cloud builds point it at the private composing package). A
+manifest that actually gets published (`apps/cli/package.json` for both explicit cloud and
+default local builds). A
 relative `../package.json` import bakes the stale OSS version into the published bundle — that is
 what made `lody@0.82.1 --version` print `0.76.0`. The package `name` stays `lody` in every
 composition.

@@ -1,0 +1,4 @@
+# Requested Xcode runner label; availability must be confirmed before cutover.
+self-hosted-runner:
+  labels:
+    - xcode-27
