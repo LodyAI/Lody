@@ -1,5 +1,3 @@
-// Executes the actual installer and frozen native capsule. No cloud, credentials,
-// user services or daemon start; the Windows-only task probe cleans its own task.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

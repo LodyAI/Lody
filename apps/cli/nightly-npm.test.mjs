@@ -169,7 +169,6 @@ void test('staging and pnpm packing keep the nightly version and resolve catalog
     stdio: 'pipe',
   });
   const tarball = join(directory, `lody-${version}.tgz`);
-  // Reuse the lifecycle's pnpm instead of a potentially different PATH version.
   const runner = resolvePnpmRunner();
   execFileSync(runner.command, [...runner.args, 'pack', '--out', tarball], {
     cwd: join(cloud, '.publish/lody'),

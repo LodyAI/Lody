@@ -8,7 +8,6 @@ import {
 export const NIGHTLY_VERSION_KEY = '_nightly-version.json'
 export const NIGHTLY_VERSION_SCHEME = 'minor-cycle'
 
-// Keep admission/prepare dependency-free; main may carry a canonical Next version.
 const component = '(0|[1-9]\\d{0,7})'
 const basePattern = new RegExp(
   `^${component}\\.${component}\\.${component}(?:-next\\.${component})?$`,
@@ -91,7 +90,6 @@ export async function reserveNightlyVersion({ store, candidate, baseVersion, api
   if (previous !== undefined) {
     if (Number(candidate.buildNumber) <= Number(previous.candidate.buildNumber))
       return { publish: false, reason: 'superseded-reservation' }
-    // An unpublished newer source pair also fences off late events for older history.
     await inspectNightlyPublication({ candidate, published: previous.candidate, api })
   }
   const sequence =
@@ -103,7 +101,6 @@ export async function reserveNightlyVersion({ store, candidate, baseVersion, api
   }
   const record = { schema: 1, candidate, version }
   const bytes = Buffer.from(`${JSON.stringify(record)}\n`)
-  // Never roll this back with feeds: failed builds/uploads have already consumed the number.
   await store.put(NIGHTLY_VERSION_KEY, bytes)
   assert.deepEqual(
     await store.get(NIGHTLY_VERSION_KEY),

@@ -371,7 +371,6 @@ void test('resolveLinuxNightlyArtifactArch selects canonical installer labels', 
   assert.equal(resolveLinuxNightlyArtifactArch(['--x64']), 'x64')
   assert.equal(resolveLinuxNightlyArtifactArch(['--linux', '--arm64']), 'arm64')
   assert.equal(resolveLinuxNightlyArtifactArch(['--linux', '--x64']), 'x64')
-  // Mac dual-arch packaging must not throw; Linux artifact arch is unused there.
   assert.equal(resolveLinuxNightlyArtifactArch(['--mac', '--arm64', '--x64']), 'x64')
   assert.throws(
     () => resolveLinuxNightlyArtifactArch(['--linux', '--arm64', '--x64']),

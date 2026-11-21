@@ -16,9 +16,6 @@ function decodeKey(value, lengths, label) {
   return bytes
 }
 
-// Sparkle's old export contains an expanded Ed25519 secret, not a PKCS8 seed.
-// Its public suffix alone cannot prove the secret is valid. The release action
-// must additionally sign a challenge using sign_update and verify that output.
 export function validateSparkleKeyPair({ privateKey, publicKey }) {
   const secret = decodeKey(privateKey, [32, 96], 'private key')
   const expected = decodeKey(publicKey, [32], 'public key')
@@ -42,7 +39,6 @@ export function validateSparkleKeyPair({ privateKey, publicKey }) {
 
 export function verifySparkleSigningProof({ archive, signingOutput, publicKey }) {
   decodeKey(publicKey, [32], 'public key')
-  // sign_update emits enclosure attributes, rather than a complete XML document.
   const item = readAppcastItems(
     `<rss><channel><item><enclosure ${signingOutput.trim()} /></item></channel></rss>`
   )[0]
@@ -108,8 +104,6 @@ export async function verifySparkleOutputs({
       const rawUrl = enclosure['@_url']
       if (typeof rawUrl !== 'string') throw new Error('Missing Sparkle enclosure URL')
       const url = new URL(rawUrl)
-      // Sparkle names deltas "<CFBundleName><new>-<old>.delta" (for example
-      // "Lody Nightly1.1.60-1.1.58.delta") and percent-encodes the space.
       let filename
       try {
         filename = decodeURIComponent(path.posix.basename(url.pathname))
@@ -142,8 +136,6 @@ export async function verifySparkleOutputs({
       }
       if (seen.has(filename)) throw new Error(`Duplicate Sparkle enclosure: ${filename}`)
       seen.add(filename)
-      // Retained appcast history can exceed the two downloaded delta bases.
-      // Verify historical bytes when staged, but require every current output.
       if (!isCurrent && !localFiles.has(filename)) continue
       const file = path.join(archiveDirectory, filename)
       if (!(await lstat(file)).isFile())
@@ -154,7 +146,6 @@ export async function verifySparkleOutputs({
   }
   if (currentCount !== 1)
     throw new Error('Sparkle appcast must contain exactly one current release')
-  // A generated delta omitted from the feed must not silently enter publication.
   for (const filename of localFiles) {
     if (/\.(?:zip|delta)$/u.test(filename) && !verified.has(filename)) {
       throw new Error(`Generated Sparkle archive is absent from appcast: ${filename}`)

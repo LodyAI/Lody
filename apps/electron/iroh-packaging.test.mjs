@@ -33,7 +33,6 @@ test('relay builds ship the module for every selected architecture into resource
       assert.throws(() => irohPackagingPlan({ ...selection, ...change }))
     const plan = irohPackagingPlan(selection)
     const config = {}
-    // A missing architecture fails before packaging starts.
     mkdirSync(path.join(directory, 'arm64'))
     writeFileSync(path.join(directory, 'arm64', 'lody-iroh.darwin-arm64.node'), '')
     assert.throws(() => applyIrohPackaging({ config, plan }), /x64/)

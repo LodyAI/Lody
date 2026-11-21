@@ -17,8 +17,6 @@ async function requireAncestor(api, base, head) {
     'Nightly source is not an ancestor'
   )
 }
-// Native version: (1 + floor(n / 10000)).floor(n / 100) % 100.n % 100.
-// Apple permits four/two/two digits; these also fit Windows WORD components.
 export const MAX_NIGHTLY_BUILD_NUMBER = 99_989_999
 
 function requirePositiveInteger(value, maximum = Number.MAX_SAFE_INTEGER, name = 'Integer') {
@@ -59,7 +57,6 @@ function triggerFromContext(context, event) {
 }
 
 export function validateNightlyCandidate(candidate) {
-  // Track C retains schema 1's wire fields; both must identify the public source.
   if (candidate?.sourceSha === undefined) {
     validateStoredNightlyCandidate(candidate)
     assert.equal(candidate.trigger.repository, REPOSITORY)

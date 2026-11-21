@@ -36,8 +36,6 @@ async function describeApk(filename) {
   return { size: info.size, sha256: await hashFile(filename) }
 }
 
-// The builder verifies the actual packaged manifest and signature before freezing bytes.
-// Publication verifies those same bytes and the source/version binding on every retry.
 export function inspectAndroidApk(filename) {
   execFileSync(process.env.APKSIGNER, ['verify', '--verbose', filename], { stdio: 'pipe' })
   const manifest = (field) =>
@@ -94,8 +92,6 @@ export async function verifyNightlyAndroid({ directory, candidate, displayVersio
   return manifest
 }
 
-// This single mutable manifest is independent of the desktop feed transaction.
-// The workflow-wide Nightly lock still serializes candidates and their retries.
 export async function publishNightlyAndroid({ directory, candidate, displayVersion, store, api }) {
   await assertNightlyVersionReservation({ store, candidate, displayVersion })
   const previous = await store.get(NIGHTLY_ANDROID_METADATA_KEY)

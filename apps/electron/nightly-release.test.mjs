@@ -151,7 +151,6 @@ function metadata(label) {
 void test('metadata transaction recovers crashes before and after every durable mutation', async () => {
   for (const bootstrap of [false, true]) {
     for (const phase of ['before', 'after']) {
-      // Journal + all live metadata writes + journal removal.
       for (let failure = 1; failure <= NIGHTLY_METADATA_KEYS.length + 2; failure += 1) {
         const before = bootstrap ? {} : metadata('old')
         const after = metadata('new')
@@ -284,7 +283,6 @@ async function fixture(t, build = candidate, version = baseVersion) {
     const zip = `${stem}-${architecture}-nightly.zip`
     const bytes = await readFile(path.join(dist, zip))
     await writeFile(path.join(dist, architecture, zip), bytes)
-    // Sparkle 2.9.4 derives delta names from the .app basename, including its space.
     const delta = `Lody Nightly${fixtureProfile.nativeVersion}-1.0.41.delta`
     const deltaBytes = Buffer.from(`synthetic delta ${architecture}`)
     await writeFile(path.join(dist, architecture, delta), deltaBytes)
@@ -369,7 +367,6 @@ void test('artifact entry points reject invalid candidates before accessing arti
     { ...candidate, trigger: { ...candidate.trigger, repository: 'untrusted/repository' } }
   ]) {
     for (const entryPoint of [stageNightlyArtifacts, verifyNightlyArtifacts]) {
-      // No paths: if candidate admission is lost, artifact I/O fails instead.
       await assert.rejects(
         entryPoint({ candidate: invalid, baseVersion, baseUrl }),
         /Unsupported Nightly candidate schema|Invalid candidate trigger repository/u
@@ -660,7 +657,6 @@ void test('immutable uploads run with bounded concurrency and stop scheduling af
   assert.deepEqual(started, [1, 2, 3])
   gates.get(3).reject(new Error('upload failed'))
   await settled()
-  // The in-flight item still settles before the failure surfaces; nothing new starts.
   run.catch((error) => (observe = error))
   await settled()
   assert.equal(observe, undefined)

@@ -137,8 +137,6 @@ export function cloudRendererCspHtmlPlugin(options: { env: CloudRendererEnvironm
     required: false
   })
 
-  // Required origins are non-null by construction. Keeping readHttpOrigin's
-  // nullable return makes optional sources explicit at each call site.
   if (!convexSiteOrigin || !convexDeployOrigin || !serverOrigin) {
     throw new Error('Electron cloud CSP required-origin validation failed')
   }
@@ -162,8 +160,6 @@ export function cloudRendererCspHtmlPlugin(options: { env: CloudRendererEnvironm
     name: 'lody-electron-cloud-renderer-csp',
     enforce: 'pre',
     transformIndexHtml(html, context) {
-      // Standalone recovery/image pages keep their public, isolated policies.
-      // Neither initializes cloud clients; the image frame must not gain them.
       if (context.path.endsWith('/recovery.html') || context.path.endsWith('/pr-image.html')) {
         return html
       }

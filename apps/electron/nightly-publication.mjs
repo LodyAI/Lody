@@ -38,7 +38,6 @@ function readJournal(bytes) {
   if (journal.schema !== 1) throw new Error('Unsupported Nightly transaction journal')
   validateStoredNightlyCandidate(journal.candidate)
   const keys = Object.keys(journal.entries).sort()
-  // Recover an interrupted pre-ARM64 transaction before introducing the new feed.
   const expectedKeys = NIGHTLY_METADATA_KEYS.filter(
     (key) => key !== 'nightly-linux-arm64.yml' || keys.includes(key)
   )
@@ -80,8 +79,6 @@ export async function recoverNightlyMetadata(store) {
     equalBytes(current.get(key), decode(journal.entries[key].after))
   )
   if (!committed) {
-    // Keep the journal until every prior object is restored and read back. A crash
-    // during rollback is recoverable by the same routine on the next invocation.
     for (const key of keys) {
       const before = decode(journal.entries[key].before)
       if (!equalBytes(current.get(key), before)) await verifyWrite(store, key, before)
@@ -107,8 +104,6 @@ export async function commitNightlyMetadata({ store, candidate, metadata }) {
     entries[key] = { before: encode(await store.get(key)), after: encode(metadata[key]) }
   }
   const journal = Buffer.from(JSON.stringify({ schema: 1, candidate, entries }))
-  // All backups are durable before the first live feed changes. No multi-object
-  // atomicity is implied; version.json is written last as the commit marker.
   await verifyWrite(store, NIGHTLY_JOURNAL_KEY, journal)
   try {
     for (const key of NIGHTLY_METADATA_KEYS) await verifyWrite(store, key, metadata[key])

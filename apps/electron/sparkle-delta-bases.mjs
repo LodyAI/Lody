@@ -24,7 +24,6 @@ function readXmlString(value, label) {
 }
 
 export function readAppcastItems(xml) {
-  // Feeds need only ordinary XML. Do not expand DTD-defined or external entities.
   if (typeof xml !== 'string' || XMLValidator.validate(xml) !== true) {
     throw new Error('Invalid Sparkle appcast XML')
   }
@@ -76,9 +75,6 @@ export function findSparkleDeltaBases(
   const filenames = new Map()
 
   for (const item of readAppcastItems(xml)) {
-    // generate_appcast writes version elements. Older feeds used attributes on
-    // the main enclosure; only that enclosure is a legacy fallback, never a
-    // nested informational-update/delta attribute or text in release notes.
     const enclosures = item.enclosure ?? []
     const mainEnclosure = enclosures[0]
     const displayVersion = readXmlString(
@@ -273,7 +269,6 @@ async function downloadAndVerifyArchive(entry, archiveDirectory, appcastUrl, pub
       } catch (error) {
         await rm(temporaryDestination, { force: true })
         const diagnostic = `Sparkle delta base ${entry.filename} (${entry.url}), attempt ${attempt}/${ARCHIVE_ATTEMPTS}, ${io.now() - started}ms elapsed, ${receivedBytes}/${entry.length} bytes received: ${error.name}: ${error.message}`
-        // Node may report AbortError (rather than TimeoutError) when the body times out.
         const timedOut = error.name === 'AbortError' && signal.reason?.name === 'TimeoutError'
         if (
           attempt === ARCHIVE_ATTEMPTS ||
@@ -283,7 +278,6 @@ async function downloadAndVerifyArchive(entry, archiveDirectory, appcastUrl, pub
         }
         io.log(`[sparkle] ${diagnostic}; retrying in ${attempt * 1000}ms`)
       } finally {
-        // Release rejected HTTP responses before waiting or starting another request.
         if (response?.body && !response.body.locked) await response.body.cancel().catch(() => {})
       }
       await io.wait(attempt * 1000)
@@ -359,9 +353,6 @@ export async function fetchSparkleDeltaBases({
     createHash('sha256').update(feedBytes).digest('hex') ===
       expectedLegacyAppcastSha256.toLowerCase()
   ) {
-    // The caller scopes this opt-in to the reviewed staging feed. The pin admits
-    // discarding these exact bytes, not trusting any historical archive (signed
-    // or unsigned). Still reject malformed XML and a colliding current release.
     findSparkleDeltaBases(xml, appcastUrl, 0, currentVersion, currentBuildVersion)
     const backupPath = `${path.resolve(archiveDirectory)}.legacy-appcast.xml`
     await writeFile(backupPath, feedBytes)
@@ -371,8 +362,6 @@ export async function fetchSparkleDeltaBases({
     )
     return []
   }
-  // A stale pin grants no exception: subsequent signed releases use the normal
-  // verification path, and changed unsigned or invalid history still fails.
   await writeFile(path.join(archiveDirectory, 'appcast.xml'), xml, 'utf8')
   const entries = findSparkleDeltaBases(
     xml,

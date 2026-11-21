@@ -67,7 +67,6 @@ export function applyPasskeyPackaging({ config, plan, repoRoot, generatedDirecto
     })
   )
   execFileSync('plutil', ['-convert', 'xml1', entitlements])
-  // Scope all additions to mac. Helpers retain the public inherit entitlement file.
   config.mac = {
     ...config.mac,
     entitlements,

@@ -1,7 +1,3 @@
-// Builds the public iroh Node-API module for each selected architecture of one
-// platform into an addon directory for iroh-packaging.mjs:
-//   node apps/electron/build-iroh.mjs --out <dir> [--arm64] [--x64]
-// Needs a Rust toolchain with the matching targets (`rustup target add ...`).
 import { execFileSync } from 'node:child_process'
 import { copyFileSync, mkdirSync } from 'node:fs'
 import path from 'node:path'

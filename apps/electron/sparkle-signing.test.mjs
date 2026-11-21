@@ -92,7 +92,6 @@ async function fixture(t) {
   const enclosure = async (filename) => {
     const bytes = Buffer.from(`release bytes for ${filename}`)
     await writeFile(path.join(archiveDirectory, filename), bytes)
-    // Sparkle names deltas "<CFBundleName><new>-<old>.delta" and percent-encodes the URL.
     return `<enclosure url="${base}${encodeURIComponent(filename)}" sparkle:edSignature="${sign(null, bytes, key.privateKey).toString('base64')}" length="${bytes.length}" />`
   }
   const current = await enclosure('Lody-2-arm64.zip')

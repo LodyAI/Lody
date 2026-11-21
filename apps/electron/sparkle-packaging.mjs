@@ -64,7 +64,6 @@ export function resolveCloudElectronUpdateConfig({
       `Electron ${environment} update URL must identify the ${environment} environment: ${parsedUrl.href}`
     )
   }
-  // A production backend is shared; its update feeds must never be shared.
   const nightlyPath = parsedUrl.pathname.split('/').includes('nightly')
   if ((selectedReleaseChannel === 'nightly') !== nightlyPath) {
     throw new Error('Only Nightly update URLs must contain a /nightly path segment')

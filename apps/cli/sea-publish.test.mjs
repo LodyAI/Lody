@@ -169,7 +169,6 @@ test('a transient pre-freeze failure can retry without rebuilding an existing fr
     },
   ];
   assert.equal(selectDaemonBuildArtifact({ ...input, jobs, runAttempt: 2 }), 0);
-  // An upstream failure may have skipped the entire reusable build job.
   assert.equal(
     selectDaemonBuildArtifact({
       ...input,

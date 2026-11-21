@@ -55,7 +55,6 @@ void test('the effective Nightly builder config registers only Nightly and prese
   assert.equal(config.mac.icon, 'resources/icon-nightly.png')
   assert.equal(config.linux.icon, 'resources/icon-nightly.png')
   assert.deepEqual(config.linux.target, ['AppImage', 'snap', 'deb'])
-  // Linux targets pass native architecture aliases into electron-builder's macro expander.
   const { expandMacro } = builderRequire('app-builder-lib/out/util/macroExpander.js')
   for (const [target, nativeArch, extension] of [
     ['appImage', 'x86_64', 'AppImage'],

@@ -47,7 +47,6 @@ test(
   () => {
     const directory = mkdtempSync(path.join(tmpdir(), 'passkey-package-test-'))
     try {
-      // Minimal Mach-O header for lipo architecture validation; no executable code or credentials.
       const header = Buffer.alloc(32)
       header.writeUInt32LE(0xfeedfacf, 0)
       header.writeUInt32LE(0x100000c, 4)

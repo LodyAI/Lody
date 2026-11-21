@@ -25,7 +25,6 @@ import { cloudRendererCspHtmlPlugin } from './renderer-csp'
 import { resolveCloudElectronUpdateConfig } from './sparkle-packaging.mjs'
 import { resolveElectronReleaseProfile } from './release-profile.mjs'
 
-// Kept inline until the shared session-share helper lands with Track A.
 function resolveSessionShareOrigin(env: Record<string, string | undefined>) {
   const value = env.VITE_SESSION_SHARE_ORIGIN?.trim() || 'https://share.lody.ai'
   try {
@@ -58,8 +57,6 @@ function getGitCommitHash(): string {
   }
 }
 
-// Use the same package version as package-electron.mjs; Nightly overrides are
-// resolved once below and shared by the renderer and packaging manifest.
 function getAppVersion(): string {
   return JSON.parse(fs.readFileSync(resolve(__dirname, 'package.json'), 'utf8')).version
 }
@@ -86,7 +83,6 @@ function loadBuildEnv(buildMode: string): Record<string, string> {
 }
 
 function applyEnvToProcess(env: Record<string, string>): void {
-  // Bun may pre-inject local .env values into process.env. Reset VITE_* first.
   for (const key of Object.keys(process.env)) {
     if (key.startsWith('VITE_')) {
       delete process.env[key]
@@ -116,8 +112,6 @@ export default function cloudConfig({ mode }: { command: string; mode: string })
     environment: buildMode === 'staging' ? 'staging' : 'production',
     baseVersion: getAppVersion()
   })
-  // A retry must describe the frozen candidate, not the checkout or wall clock
-  // of the process rebuilding it. Stable and development retain their defaults.
   const buildDate = releaseProfile.builtAt ?? new Date().toISOString()
   const gitCommit = releaseProfile.sourceSha ?? getGitCommitHash()
   const declaredEnvironment = (buildEnv.VITE_LODY_ENV || process.env.LODY_ENV)?.trim()
@@ -153,7 +147,6 @@ export default function cloudConfig({ mode }: { command: string; mode: string })
   }
 
   {
-    // Build should be deterministic and use only the selected build mode env (no .env.local leakage).
     applyEnvToProcess(buildEnv)
   }
 
@@ -194,30 +187,16 @@ export default function cloudConfig({ mode }: { command: string; mode: string })
       build: {
         outDir: resolve(electronDir, 'out/main'),
         lib: {
-          // Older pinned public revisions predate the afterPack main probe.
-          // Enable its entry together with the public source/hook on adoption,
-          // keeping this cloud fix buildable before that separate gitlink change.
           entry: fs.existsSync(resolve(electronDir, 'src/main/native-storage-smoke.mts'))
             ? {
                 index: resolve(electronDir, 'src/main/index.ts'),
                 'native-storage-smoke': resolve(electronDir, 'src/main/native-storage-smoke.mts')
               }
             : resolve(electronDir, 'src/main/index.ts'),
-          // The composition package is ESM, but the public Electron package's
-          // runtime contract is out/main/index.js (CommonJS).
           formats: ['cjs']
         },
         externalizeDeps: {
           exclude: ['@lody/cli-supervisor', '@lody/shared', 'effect'],
-          // The cloud composition has no runtime dependencies of its own.
-          // Native SQLite must resolve from the packaged public app's manifest;
-          // bundling replaces its dynamic addon loader with a throwing stub. The
-          // Devframe UI/plugin packages resolve runtime assets relative to the
-          // installed package (`dist/client`, `dist/renderer`, zigpty
-          // prebuilds) — bundling retargets those lookups at out/main, where
-          // they do not exist, and Devbar startup fails with DF8109. They ship
-          // in the packaged node_modules via the public app's manifest, so
-          // externalize them and let `import()` resolve them in place.
           include: [
             'better-sqlite3',
             '@devframes/hub-ui',
@@ -258,14 +237,8 @@ export default function cloudConfig({ mode }: { command: string; mode: string })
         __OSS_GIT_COMMIT__: JSON.stringify(releaseProfile.sourceSha ?? null)
       },
       resolve: {
-        // Monorepo + source-aliasing can cause multiple React copies (invalid hook call).
-        // Force all React imports (including from workspace packages) to resolve to the renderer's React.
-        // Also dedupe `convex` to ensure hooks (useQuery/useMutation/etc.) see the same provider context.
         dedupe: ['react', 'react-dom', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'convex'],
         alias: [
-          // Production browser-conditioned resolution would pick loro-crdt's
-          // browser entry, which sync-compiles WASM (and trips the guard in
-          // loroCrdtWasmUrlWorkaround). Force the bundler entry like web/mobile.
           ...loroCrdtBundlerAlias(),
           ...rendererBundleAliases(),
           {
@@ -290,36 +263,21 @@ export default function cloudConfig({ mode }: { command: string; mode: string })
         exclude: ['@loro-dev/streams-crdt', '@loro-dev/streams-crdt/zstd']
       },
       server: {
-        // Prefer IPv4: Electron has failed with ERR_FAILED against
-        // `localhost` when Vite only binds the IPv6 loopback.
         host: process.env.LODY_ELECTRON_RENDERER_HOST || '127.0.0.1',
-        // Optional override when 5173 is already taken (other monorepos / apps).
-        // Example: LODY_ELECTRON_RENDERER_PORT=5180 pnpm exec electron-vite dev ...
         port: Number(process.env.LODY_ELECTRON_RENDERER_PORT) || undefined,
         strictPort: Boolean(process.env.LODY_ELECTRON_RENDERER_PORT),
         fs: {
-          // Setting an explicit allow list disables Vite's automatic workspace-root
-          // allowance, so preserve the public workspace and add only the outer
-          // pnpm dependency store used by the private cloud composition.
           allow: [searchForWorkspaceRoot(electronDir), resolve(repoRoot, 'node_modules')]
         }
       },
       build: {
         outDir: resolve(electronDir, 'out/renderer'),
         emptyOutDir: true,
-        // electron-vite defaults to unminified renderer output.
         minify: 'esbuild',
         sourcemap: false,
         rollupOptions: {
-          // Build both the main app (`index.html`) and the standalone recovery
-          // page (`recovery.html`). The recovery page is loaded by the main
-          // process when the main renderer fails (did-fail-load,
-          // render-process-gone, preload-error) so it cannot share a bundle
-          // with code paths that might themselves crash on boot.
           input: {
             index: resolve(electronDir, 'src/renderer/index.html'),
-            // The Devbar opt-in entry ships its own loopback-permitting CSP;
-            // the cloud CSP transform appends cloud origins on top of it.
             devbar: resolve(electronDir, 'src/renderer/devbar.html'),
             recovery: resolve(electronDir, 'src/renderer/recovery.html'),
             prImage: resolve(electronDir, 'src/renderer/pr-image.html')
@@ -327,8 +285,6 @@ export default function cloudConfig({ mode }: { command: string; mode: string })
           output: {
             onlyExplicitManualChunks: true,
             manualChunks(id) {
-              // Keep Pele in the same guarded lazy chunk
-              // as the Web and public Electron renderers.
               if (isMermaidRuntimeDependency(id)) {
                 return 'mermaid-deps'
               }
@@ -337,7 +293,6 @@ export default function cloudConfig({ mode }: { command: string; mode: string })
           }
         }
       },
-      // Tailwind via Vite plugin so @fontsource url() assets emit.
       plugins: [
         cloudRendererCspHtmlPlugin({
           env: runtimeEnv
@@ -347,9 +302,6 @@ export default function cloudConfig({ mode }: { command: string; mode: string })
         loroCrdtWasmUrlWorkaround(),
         react(),
         wasm(),
-        // Keep the picker offline-capable in the private Electron composition too.
-        // Without this dev middleware, Vite's SPA fallback returns index.html for
-        // `/emojibase/*`, which frimousse then tries to parse as JSON.
         emojibaseAssetsPlugin(),
         mermaidLazyBoundaryGuardPlugin(),
         bootShellPlugin()

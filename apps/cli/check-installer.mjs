@@ -21,7 +21,6 @@ export async function checkSourceDaemonInstaller({
 }) {
   if (!['stable', 'next', 'nightly'].includes(channel))
     throw new Error('Invalid installer channel');
-  // Historical recovery sources still use npx and do not depend on this rollout.
   if (!fs.existsSync(path.join(sourceRoot, 'packages/components/src/lib/daemon-installation.ts')))
     return { status: 'legacy' };
   const origin =

@@ -21,16 +21,8 @@ const DEPENDENCY_BLOCKS = [
   'peerDependencies',
 ];
 
-// `catalog:` is deliberately left in place: the staged directory is not a pnpm
-// workspace member, so nothing here can resolve it, but `pnpm publish` walks up
-// to the root `pnpm-workspace.yaml` and rewrites it while packing. Publishing
-// these artifacts with plain `npm publish` ships the literal `catalog:` string
-// and makes the package uninstallable, which is what broke lody 0.77.0-0.77.2.
 const UNRESOLVABLE_PROTOCOL = /^(?:link|portal|file):/u;
 
-// `workspace:` is the one protocol `pnpm publish` cannot rewrite from an
-// unlinked directory. These dependencies are all bundled into `dist` by the CLI
-// build, so dropping them is correct rather than merely convenient.
 function removeWorkspaceDependencies(packageJson) {
   let removedCount = 0;
 

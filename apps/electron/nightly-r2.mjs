@@ -89,7 +89,6 @@ export function createNightlyR2Store(env = process.env) {
       return result.stdout.trim() ? JSON.parse(result.stdout) : {}
     } catch (error) {
       if (allowMissing && /\((?:NoSuchKey|404)\)/u.test(error.stderr ?? '')) return null
-      // Never echo inherited environment or arbitrary remote error bodies.
       // eslint-disable-next-line preserve-caught-error -- Remote diagnostics must not enter release logs.
       throw new Error(`R2 ${operation} failed for ${key}`)
     }

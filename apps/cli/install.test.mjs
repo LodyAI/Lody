@@ -110,7 +110,6 @@ test(
         fs.readFileSync(path.join(f.root, 'invocation')).toString().split('\0').slice(0, -1),
         ['daemon', 'install', '--start', '--autostart', '--replace']
       );
-      // A pairing credential is never silently dropped: rejected before any download.
       fs.rmSync(path.join(f.root, 'requests'));
       const dropped = f.run(['--auth', 'synthetic', '--no-start']);
       assert.notEqual(dropped.status, 0);

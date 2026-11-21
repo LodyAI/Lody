@@ -29,8 +29,6 @@ export function irohPackagingPlan({ relays, addonDirectory, platform, architectu
       arch,
       file: path.resolve(addonDirectory, arch, `lody-iroh.${platform}-${arch}.node`)
     })),
-    // electron-builder expands ${arch} per packaged architecture. The public main
-    // process loads `<resources>/lody-iroh.<platform>-<arch>.node`, outside ASAR.
     resource: {
       from: path.resolve(addonDirectory, '${arch}', `lody-iroh.${platform}-\${arch}.node`),
       to: `lody-iroh.${platform}-\${arch}.node`

@@ -91,7 +91,6 @@ export async function publishDaemonRelease({ directory, source, version, channel
       }
     }
   }
-  // All six immutable sets are present before the first mutable pointer moves.
   for (const entry of staged) {
     const key = `runtimes/${entry.manifest.distribution}/channels/${entry.platform}/${channel}.json`;
     const current = await store.get(key);

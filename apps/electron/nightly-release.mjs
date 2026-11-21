@@ -46,8 +46,6 @@ export async function mapWithConcurrency(items, limit, fn) {
 }
 
 export async function verifyNightlyStablePrerequisite({ store, ...options }) {
-  // A missing support floor or unavailable Stable endpoint must not strand a
-  // previously interrupted Nightly metadata transaction.
   await recoverNightlyMetadata(store)
   return verifyCompatibleStableRelease(options)
 }
@@ -66,7 +64,6 @@ export async function prepareNightlyPublication({ store, candidate, api, allowBo
   for (const key of NIGHTLY_METADATA_KEYS) {
     const bytes = key === 'version.json' ? previous : await store.get(key)
     const exists = bytes !== null
-    // Existing releases predate the ARM64 feed. Require it once advertised.
     if (key === 'nightly-linux-arm64.yml' && !exists && !release?.assets?.[key]) continue
     if (exists !== (previous !== null))
       throw new Error('Incomplete Nightly feeds without a recoverable transaction')
@@ -93,7 +90,6 @@ export async function prepareNightlyPublication({ store, candidate, api, allowBo
 
 export async function prepareNightlyBuild(options) {
   const result = await prepareNightlyPublication(options)
-  // Desktop success must not suppress retries of the other platforms.
   if (!result.publish && result.reason !== 'already-published') return result
   await inspectNightlyPublication({ candidate: options.candidate, api: options.api })
   return { ...result, ...(await reserveNightlyVersion(options)) }
@@ -112,7 +108,6 @@ export async function publishNightlyRelease({
   minimumStableVersion
 }) {
   parseCompatibleStableVersion(minimumStableVersion)
-  // Loading YAML/XML dependencies is unnecessary in the dependency-free prepare job.
   const { verifyNightlyArtifacts } = await import('./nightly-artifacts.mjs')
   const { default: semver } = await import('semver')
   const initial = await prepareNightlyPublication({ store, candidate, api, allowBootstrap })
@@ -142,7 +137,6 @@ export async function publishNightlyRelease({
   const assets = {}
   const metadata = {}
   const downloads = []
-  // Validate the entire matrix before writing the first remote object.
   for (const manifest of manifests) {
     for (const [key, file] of Object.entries(manifest.files)) {
       assert.equal(assets[key], undefined, `Duplicate cross-platform asset ${key}`)
@@ -160,7 +154,6 @@ export async function publishNightlyRelease({
       }
     }
   }
-  // Immutable keys are distinct and independent; feeds move only after every upload settles.
   await mapWithConcurrency(immutables, IMMUTABLE_UPLOAD_CONCURRENCY, ({ key, filename, sha256 }) =>
     store.ensureImmutable(key, filename, sha256)
   )
@@ -183,7 +176,6 @@ export async function publishNightlyRelease({
       2
     )}\n`
   )
-  // Uploads can take minutes. Recheck published ordering and accepted history before moving feeds.
   const latest = await prepareNightlyPublication({ store, candidate, api, allowBootstrap })
   if (!latest.publish) return latest
   await assertNightlyVersionReservation({ store, candidate, displayVersion })
@@ -197,8 +189,6 @@ async function main() {
   const api = githubApi(process.env.GH_TOKEN)
   let result
   const store = createNightlyR2Store()
-  // This does not infer compatibility from a version number. The environment
-  // owner sets the floor only after real cross-channel acceptance succeeds.
   const minimumStableVersion = await verifyNightlyStablePrerequisite({
     store,
     minimumVersion: process.env.NIGHTLY_MINIMUM_STABLE_VERSION,

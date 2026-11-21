@@ -83,7 +83,6 @@ export function createCloudPackagingPlan({
     'apps/electron/resources/cli/lody-desktop-build.json'
   )
   if (releaseProfile.channel === 'nightly' || existsSync(bundledCliProfilePath)) {
-    // Validate the staged copy that will ship, not just the CLI's source dist.
     const bundledCliProfile = JSON.parse(readFileSync(bundledCliProfilePath, 'utf8'))
     assertBuiltReleaseProfile(releaseProfile, bundledCliProfile)
   }
@@ -133,7 +132,6 @@ export function createCloudPackagingPlan({
     generatedConfig,
     electronBuilderArguments,
     macPackaging,
-    // A prepackaged app was already packed (and Sparkle-rebuilt) by the public build.
     prepackaged: electronBuilderArguments.includes('--prepackaged'),
     sparkleArch,
     updateConfig,

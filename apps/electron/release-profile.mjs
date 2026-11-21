@@ -24,7 +24,6 @@ export function resolveElectronReleaseProfile({ environment, baseVersion, env = 
   validateNightlyBuildIdentity({ buildNumber, sourceSha, builtAt, runId })
   const version = validateNightlyVersion(env.LODY_NIGHTLY_VERSION, baseVersion)
   const number = Number(buildNumber)
-  // Respect Apple's four/two/two digit limits as well as Windows WORD components.
   const nativeVersion = `${1 + Math.floor(number / 10000)}.${Math.floor(number / 100) % 100}.${number % 100}`
   return { channel, version, buildNumber, nativeVersion, sourceSha, builtAt, runId }
 }
@@ -44,13 +43,10 @@ export function resolveLinuxNightlyArtifactArch(args = []) {
   const isLinux = args.includes('--linux')
   const hasArm64 = args.includes('--arm64')
   const hasX64 = args.includes('--x64')
-  // Mac Nightly packages both arches in one invocation (--mac --arm64 --x64).
-  // Only Linux packaging is one-arch-per-call; its artifact names ignore ${arch}.
   if (isLinux && hasArm64 && hasX64) {
     throw new Error('Nightly Linux packaging builds one architecture per invocation')
   }
   if (isLinux && hasArm64) return 'arm64'
-  // Default, --x64, and non-Linux (mac/win): keep historical x64 Linux labels.
   return 'x64'
 }
 
@@ -63,9 +59,6 @@ export function nightlyBuilderOverrides(profile, { linuxArtifactArch = 'x64' } =
     )
   }
   const artifactName = 'Lody-${version}-${arch}-nightly.${ext}'
-  // Bake the canonical arch into the template. electron-builder's ${arch} macro
-  // expands Linux targets to native aliases (x86_64/amd64), which would break
-  // staging, updates, and download mirrors that expect x64/arm64.
   const linuxArtifactName = `Lody-\${version}-${linuxArtifactArch}-nightly.\${ext}`
   return {
     appId: 'ai.lody.desktop.nightly',
@@ -79,7 +72,6 @@ export function nightlyBuilderOverrides(profile, { linuxArtifactArch = 'x64' } =
     protocols: [{ name: 'Lody Nightly', schemes: ['ai.lody.nightly'] }],
     win: {
       executableName: 'lody-nightly',
-      // Windows needs a full-bleed square; the shared icon has macOS-style padding.
       icon: fileURLToPath(new URL('./resources/icon-nightly-win.png', import.meta.url))
     },
     nsis: {

@@ -174,8 +174,6 @@ export function createElectronBuilderConfig({
   }
   if (releaseProfile?.channel !== 'nightly') return config
 
-  // electron-builder concatenates arrays across `extends`, including protocols.
-  // Materialize the base here so Nightly cannot also register Stable's scheme.
   const base = parseYaml(readFileSync(baseConfigPath, 'utf8'))
   const overrides = nightlyBuilderOverrides(releaseProfile, { linuxArtifactArch })
   const result = { ...base, ...config, ...overrides }

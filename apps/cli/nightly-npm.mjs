@@ -10,7 +10,6 @@ import { validateNightlyVersion } from '../electron/nightly-version.mjs';
 const registry = 'https://registry.npmjs.org';
 const integrity = (bytes) => `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
 
-// Only this workflow writes the nightly tag, under lody-desktop-nightly.
 export function publicationAction(metadata, version, expectedIntegrity) {
   validateNightlyVersion(version);
   assert.equal(metadata.name, 'lody');
@@ -56,7 +55,6 @@ export async function publishNightlyNpm({
   if (!response.ok) throw new Error(`Cannot inspect npm package: HTTP ${response.status}`);
   const action = publicationAction(await response.json(), version, expectedIntegrity);
   if (action === 'publish') {
-    // pnpm pack already resolved catalog: ranges before freezing this artifact.
     run(
       'pnpm',
       [

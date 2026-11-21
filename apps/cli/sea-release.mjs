@@ -1,4 +1,3 @@
-// Cloud composition only. The public repository owns the SEA codec/build tool.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -77,7 +76,6 @@ if (phase === 'stage') {
         Buffer.from(process.env.MACOS_CERTIFICATE_P12_BASE64, 'base64'),
         { mode: 0o600 }
       );
-      // Apple codesign requires a searchable identity even with explicit --keychain.
       execFileSync('security', ['create-keychain', '-p', password, keychain], { stdio: 'pipe' });
       removeSigningKeychainFromSearch = makeMacSigningKeychainSearchable(keychain, (args) =>
         execFileSync('security', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
@@ -246,8 +244,6 @@ try {
     } finally {
       fs.rmSync(probeDirectory, { recursive: true, force: true });
     }
-    // Preserve the official Node executable unchanged: cache identity must not
-    // change with signing timestamps on every nightly run.
     const final = {
       capsule: config.output,
       node: config.node,
@@ -257,7 +253,6 @@ try {
     const finalConfig = path.join(output, 'finalize.json');
     fs.writeFileSync(finalConfig, JSON.stringify(final));
     run(process.execPath, [path.join(scripts, 'finalize.mjs'), finalConfig]);
-    // Freeze all platform bytes and identity before R2 publication or retries.
     fs.writeFileSync(
       path.join(final.outputDir, 'identity.json'),
       JSON.stringify({
