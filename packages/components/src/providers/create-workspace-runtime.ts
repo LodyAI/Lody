@@ -290,7 +290,7 @@ export type WorkspaceE2eeTransport = {
   ) => Promise<string[]>;
 };
 type RuntimeDeps = {
-  /** Explicit opt-in; otherwise use VITE_LORO_STREAMS_WS_ENABLED. */
+  /** Explicit override; otherwise WS is on unless VITE_LORO_STREAMS_WS_ENABLED turns it off. */
   streamsWebSocketEnabled?: boolean;
   content: WorkspaceStreamsContent;
   /** Provisional cloud runtimes may read/write locally, but cannot attach a

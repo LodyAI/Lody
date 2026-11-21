@@ -28,8 +28,8 @@ const workspaceId = 'workspace-1' as WorkspaceId;
 const sessionId = 'session-1' as SessionId;
 
 describe('loro streams helpers', () => {
-  it.each([undefined, '', 'false', '0', 'TRUE', 'yes', true])(
-    'keeps WS disabled for non opt-in environment %s',
+  it.each(['false', '0', 'off', 'no', 'FALSE', ' Off '])(
+    'turns WS off for the explicit environment %s',
     (value) => {
       expect(
         loroStreamsWebSocketOptions(
@@ -38,14 +38,23 @@ describe('loro streams helpers', () => {
           'workspace'
         )
       ).toEqual({});
+      expect(isLoroStreamsWebSocketEnabled(true, value)).toBe(true);
     }
   );
-  it.each(['1', 'true'])(
-    'accepts explicit WS environment %s, with explicit false taking precedence',
+  it.each([undefined, '', '1', 'true', 'TRUE', 'yes', true])(
+    'keeps WS on by default for environment %s, with explicit false taking precedence',
     (value) => {
       expect(isLoroStreamsWebSocketEnabled(undefined, value)).toBe(true);
+      expect(
+        loroStreamsWebSocketOptions(
+          isLoroStreamsWebSocketEnabled(undefined, value),
+          'https://gateway.test',
+          'workspace'
+        )
+      ).toEqual({
+        webSocket: { enabled: true, url: 'https://gateway.test', authPoolKey: 'workspace' },
+      });
       expect(isLoroStreamsWebSocketEnabled(false, value)).toBe(false);
-      expect(isLoroStreamsWebSocketEnabled(true, '0')).toBe(true);
     }
   );
   it('lets a Convex isolate bundle and execute protocol helpers without loading snapshot compression', async () => {

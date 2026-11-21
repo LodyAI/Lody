@@ -470,12 +470,12 @@ remain available for earlier commands that explicitly requested cleanup. Behavio
 
 ## Streams WebSocket rollout
 
-Foreground workspace runtimes default to HTTP. An explicit
+Foreground workspace runtimes default to the WebSocket. An explicit
 `streamsWebSocketEnabled` overrides `VITE_LORO_STREAMS_WS_ENABLED`; the environment
-opts in only with `true` or `1`. Durable and ephemeral transports then forward
+turns it off with `false`, `0`, `off` or `no` (the rollback switch). Durable and ephemeral transports then forward
 `webSocket: { enabled: true, url: streamsBaseUrl, authPoolKey: workspaceId }`.
 Presence retains its sharded HTTP URL for fallback. Disposable eager-sync workers
 receive no WS option. The pinned `loro-repo` 0.26.0, `@loro-dev/streams-crdt` 0.22.1,
 and `@loro-dev/streams-client` 0.14.0 packages implement URL override and Repo
-forwarding while keeping WS default off. Physical connection reuse is not proven by
+forwarding; the SDKs keep WS off unless the caller passes these options. Physical connection reuse is not proven by
 HTTP compatibility tests.
