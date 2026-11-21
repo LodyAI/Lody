@@ -47,10 +47,13 @@ const styles = stylex.create({
     marginInlineStart: `calc(-1 * ${todayOutline.foldOverhang})`,
   },
   // 12px wide and flush against the bullet box (the negative end margin takes
-  // back the row gap), so its centre is 14px left of the dot's. It shows only
+  // back the row gap), so its centre is 14px left of the dot's. Its hit area
+  // reaches 6px further left into the empty margin; only the glyph rotates, so
+  // an open toggle's box never turns sideways over the bullet. It shows only
   // while its line is hovered, focused from the keyboard or being edited; a
   // folded node keeps its ringed dot as the resting cue.
   fold: {
+    position: 'relative',
     width: 12,
     height: 28,
     marginInlineEnd: `calc(-1 * ${space[1]})`,
@@ -70,6 +73,14 @@ const styles = stylex.create({
     },
     transitionProperty: 'opacity',
     transitionDuration: '100ms',
+    '::before': {
+      content: '""',
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      left: -6,
+      right: 0,
+    },
   },
   foldShown: { opacity: 1 },
   foldHidden: { visibility: 'hidden' },
@@ -238,8 +249,7 @@ function TodayRow(props: {
         {...stylex.props(
           styles.fold,
           active && styles.foldShown,
-          !node?.hasChildren && styles.foldHidden,
-          node?.hasChildren && !node.collapsed && styles.foldOpen
+          !node?.hasChildren && styles.foldHidden
         )}
         aria-label={node?.collapsed ? t('today.expand', 'Expand') : t('today.collapse', 'Collapse')}
         tabIndex={-1}
@@ -249,7 +259,10 @@ function TodayRow(props: {
           store.outline.setCollapsed(node.id, !node.collapsed);
         }}
       >
-        <ChevronRight size={12} />
+        <ChevronRight
+          size={12}
+          {...stylex.props(node?.hasChildren && !node.collapsed && styles.foldOpen)}
+        />
       </button>
       <span
         {...stylex.props(styles.bullet, styles.handle)}
