@@ -14,7 +14,6 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   Blocks,
   Boxes,
-  ChevronRight,
   KeyRound,
   MonitorSmartphone,
   Plus,

@@ -1,4 +1,9 @@
 {
+  "lodyAgentConnections.addKey": "添加 API 密钥",
+  "lodyAgentConnections.addProviderKey": "添加 {{provider}} API 密钥",
+  "agents.authentication.signInToProvider": "登录 {{provider}}",
+  "agents.authentication.authorizationResult": "授权结果",
+  "agents.authentication.authorizationResultPlaceholder": "粘贴授权码或最终跳转网址",
   "e2ee.recovery.restoreWorking": "{{name}}：正在恢复…",
   "e2ee.deviceIdentity.modelUnknown": "型号未识别",
   "e2ee.deviceIdentity.osVersionUnavailable": "系统版本暂缺",
