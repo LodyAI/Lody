@@ -736,7 +736,6 @@ describe('LodyOperationCoordinator', () => {
     harness.coordinator.start();
     try {
       await slowCatchUpEntered;
-      // Fast wake completes without waiting for the blocked remote catch-up fiber.
       await harness.coordinator.wake('check-local-op');
       const inspectStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
       try {
@@ -780,7 +779,6 @@ describe('LodyOperationCoordinator', () => {
       expect(attempts).toBe(1);
       expect(harness.materializeTarget).not.toHaveBeenCalled();
 
-      // Effect timeout fires at 8,000ms and arms the 1,000ms backoff retry.
       await vi.advanceTimersByTimeAsync(8_000);
       await harness.coordinator.idle();
       expect(harness.materializeTarget).not.toHaveBeenCalled();

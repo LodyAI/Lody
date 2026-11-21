@@ -4386,9 +4386,7 @@ export async function sendSessionChatResult(
     bypassSessionQuota?: boolean;
     /** Agent chat: steer a running turn instead of queueing behind it. */
     steerActiveTurn?: boolean;
-    /** Caller already satisfied pre-write workspace metadata freshness. */
     workspaceMetaPrewriteSatisfied?: boolean;
-    /** Target metadata already validated in this same request scope. */
     prevalidatedTarget?: SessionMeta;
   },
   delegatedRequester?: DelegatedSessionRequester,

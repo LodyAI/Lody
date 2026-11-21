@@ -9,11 +9,6 @@ import type { HistoryAction, SessionTurnRead } from '@lody/shared/session-data';
 import { Context, Data, Effect } from 'effect';
 import type { InboxBatch } from './inbox/model';
 
-/**
- * Bounded remote catch-up budget for a single item materialization attempt.
- * A timeout is uncertainty (never permanent absence): the item arms its own
- * exponential backoff retry while unrelated Operations continue unhindered.
- */
 export const TARGET_CATCH_UP_TIMEOUT_MS = 8_000;
 
 export class TargetCatchUpTimeoutError extends Data.TaggedError('TargetCatchUpTimeoutError')<{

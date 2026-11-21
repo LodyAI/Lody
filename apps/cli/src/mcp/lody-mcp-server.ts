@@ -3767,8 +3767,6 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
     const invoking = await resolveInvokingTurnContext(currentSession, manager);
     let resolvedSessionId = await createSessionIdResolver(manager)(args.sessionId);
     let targetSession = await readCurrentSessionMeta(manager, resolvedSessionId as SessionId);
-    // Resolve idempotent retries before any remote target sync so network blips
-    // never block returning an already-accepted Operation snapshot.
     const buildRetryLookupCommand = (sessionId: string) => {
       const canonical = {
         sessionId,

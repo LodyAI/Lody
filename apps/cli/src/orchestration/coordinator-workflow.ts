@@ -543,8 +543,6 @@ export class CoordinatorWorkflow {
             }
             return item;
           }
-          // Run catch-up and materialization in a scoped per-item fiber so a slow
-          // remote target never head-of-line blocks unrelated Operations or Inbox wakes.
           yield* FiberMap.run(
             this.materializations,
             materialKey,
