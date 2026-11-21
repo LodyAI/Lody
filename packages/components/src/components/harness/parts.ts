@@ -213,6 +213,7 @@ export const parts = stylex.create({
   },
   segItemSm: { height: '24px', padding: '0 9px', fontSize: '12px' },
   segItemActive: { color: hx.ink },
+  segDisabled: { opacity: 0.5 },
   segLabel: { position: 'relative', display: 'inline-flex', alignItems: 'center', gap: '5px' },
 
   /** The device switcher's row menu items, and the menu itself. */

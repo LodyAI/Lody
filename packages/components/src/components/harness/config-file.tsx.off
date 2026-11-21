@@ -12,6 +12,7 @@ import { CLI, PROVIDERS } from './catalog';
 import { CopyIcon, useCopy } from './primitives';
 import { parts } from './parts';
 import type { HarnessConfig, HarnessState } from './store';
+import { useHarnessDevices } from './machines';
 import { fileStyles as s } from './config-file.styles';
 
 type Line = { key: string; text: string; kind?: 'comment' | 'section' | 'blank' };
@@ -19,9 +20,13 @@ type Line = { key: string; text: string; kind?: 'comment' | 'section' | 'blank' 
 const str = (v: string) => `"${v}"`;
 const list = (v: string[]) => `[${v.map(str).join(', ')}]`;
 
-function toLines(config: HarnessConfig, state: HarnessState, device: string | null): Line[] {
+function toLines(
+  config: HarnessConfig,
+  state: HarnessState,
+  device: string | null,
+  deviceName: string | null
+): Line[] {
   const providers = PROVIDERS.filter((p) => state.credentials[p.id]).map((p) => p.id);
-  const deviceName = state.devices.find((d) => d.id === device)?.name;
   return [
     {
       key: 'c0',
@@ -60,7 +65,12 @@ export function ConfigFile({
   device: string | null;
   compact?: boolean;
 }) {
-  const lines = useMemo(() => toLines(config, state, device), [config, state, device]);
+  const { devices } = useHarnessDevices();
+  const deviceName = devices.find((d) => d.id === device)?.name ?? null;
+  const lines = useMemo(
+    () => toLines(config, state, device, deviceName),
+    [config, state, device, deviceName]
+  );
   const previous = useRef<Map<string, string> | null>(null);
   const [flash, setFlash] = useState<ReadonlySet<string>>(new Set());
   const { copied, copy } = useCopy();

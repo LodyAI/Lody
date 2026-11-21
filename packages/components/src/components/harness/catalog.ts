@@ -1,9 +1,8 @@
 /*
- * Static catalogue for the harness surface: what can be paired, signed in to,
- * injected and allowed. Every screen reads from here, so swapping this for the
- * real registry (providers, models, plugins, machine list) is one file.
- *
- * Nothing here talks to a backend yet: the port wires the design first.
+ * Static catalogue for the harness surface: how a machine can join, which
+ * providers it can sign in to, and what can be injected and allowed. The
+ * machine list itself is live (see machines.tsx); this file holds only the
+ * copy and the drawn types.
  */
 
 /** The product the copy and shell name. */
@@ -13,16 +12,19 @@ export const CLI = 'lody';
 export type DeviceKind = 'laptop' | 'desktop' | 'server' | 'cloud';
 export type DeviceStatus = 'online' | 'idle' | 'offline';
 
+/**
+ * The drawn machine row. `id` is the machine's `MachineId` — the harness
+ * store keys selection and per-device overrides by it. `MachineViewMeta`
+ * carries no `arch`, so the drawn "System" fact is the OS label alone.
+ */
 export interface Device {
   id: string;
   name: string;
   kind: DeviceKind;
   os: string;
-  arch: string;
   host: string;
   version: string;
   status: DeviceStatus;
-  pairedAt: number;
 }
 
 export type PairMethod = 'local' | 'remote' | 'cloud';
@@ -33,6 +35,8 @@ export const PAIR_METHODS: {
   body: string;
   tag?: string;
   kind: DeviceKind;
+  /** Hidden methods keep their code but are not offered in the picker. */
+  hidden?: boolean;
 }[] = [
   {
     id: 'local',
@@ -47,44 +51,15 @@ export const PAIR_METHODS: {
     body: 'A workstation, homelab box or VM. Pair it with one terminal command.',
     kind: 'server',
   },
+  // Hidden until there is a cloud-VM backend to call; CloudPair stays in pair.tsx.
   {
     id: 'cloud',
     title: 'Cloud sandbox',
     body: 'An isolated VM we host for you. Ready in about 20 seconds.',
     kind: 'cloud',
+    hidden: true,
   },
 ];
-
-/** The device each pairing method produces in this demo. */
-export const PAIR_RESULT: Record<PairMethod, Omit<Device, 'id' | 'pairedAt'>> = {
-  local: {
-    name: 'MacBook Pro',
-    kind: 'laptop',
-    os: 'macOS 16.1',
-    arch: 'arm64',
-    host: 'ada-mbp.local',
-    version: '2.14.0',
-    status: 'online',
-  },
-  remote: {
-    name: 'build-box',
-    kind: 'server',
-    os: 'Ubuntu 24.04',
-    arch: 'x86_64',
-    host: '10.0.4.21',
-    version: '2.14.0',
-    status: 'online',
-  },
-  cloud: {
-    name: 'Sandbox · iad-1',
-    kind: 'cloud',
-    os: 'Linux 6.12',
-    arch: 'x86_64',
-    host: 'sbx-7f3k.lody.dev',
-    version: '2.14.0',
-    status: 'online',
-  },
-};
 
 export type AuthMethod = 'oauth' | 'key' | 'local';
 
@@ -469,4 +444,9 @@ export const GUARDED_ACTIONS: { id: string; label: string }[] = [
   { id: 'deploy', label: 'Deploy' },
 ];
 
-export type Effort = 'low' | 'medium' | 'high';
+/**
+ * The stored effort pick. The values an agent advertises are its own
+ * (`minimal`..`max` on some, `low`..`ultra` on others), so this is any option
+ * value — the classic ladder stays as the type's documentation.
+ */
+export type Effort = string;

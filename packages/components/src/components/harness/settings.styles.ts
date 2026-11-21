@@ -149,6 +149,12 @@ export const settingsStyles = stylex.create({
       boxShadow: `0 0 0 1px ${hx.accent}, 0 0 0 4px ${hx.accentSoft}`,
     },
   },
+  /** The name drawn as a button that enters rename mode. */
+  deviceNameButton: {
+    textAlign: 'start',
+    cursor: 'text',
+  },
+
   deviceMeta: {
     display: 'flex',
     alignItems: 'center',

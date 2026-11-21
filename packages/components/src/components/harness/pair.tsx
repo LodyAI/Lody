@@ -4,18 +4,36 @@
  *
  * Each method resolves into the same success moment, so the user learns one
  * pattern: pick where the agent runs → do one thing → see the device arrive.
+ *
+ * What is real here: 'This computer' surfaces the desktop machine
+ * (`localMachineIdAtom`); 'Remote machine' runs the E2EE pairing offer —
+ * `beginRemoteMachinePairing` produces the command the user pastes, and
+ * `inspectRemoteMachinePairing` polls until the CLI claims, at which point
+ * `approveRemoteMachinePairing` admits it. 'Cloud sandbox' has no backend
+ * yet: the panel is drawn, but its action is inert rather than fake.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowRight, Terminal } from 'lucide-react';
+import { useAtomValue } from 'jotai';
+import type { E2eeWorkspaceRuntime } from '@lody/platform';
+import { usePlatform } from '@lody/platform/react';
+import type { MachineId, MachineViewMeta } from '@lody/shared';
+import type { RemoteMachineStatus } from '@lody/shared/e2ee-remote-pairing';
 
-import { BRAND, CLI, PAIR_METHODS, PAIR_RESULT, type DeviceKind, type PairMethod } from './catalog';
+import { localMachineIdAtom } from '@/atoms/local-probe';
+import { getMachineMetaMapAtom } from '@/atoms/machines';
+import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
+import { useOptionalAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
+import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
+import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
+
+import { BRAND, PAIR_METHODS, type DeviceKind, type PairMethod } from './catalog';
 import {
   Button,
   DeviceGlyph,
   DrawnCheck,
-  Segmented,
   Spinner,
   StatusDot,
   soft,
@@ -24,53 +42,138 @@ import {
   CopyIcon,
 } from './primitives';
 import { parts } from './parts';
+import { machineKind, machineToDevice } from './machines';
 import { harness } from './store';
 import { pairStyles as s } from './pair.styles';
 
 type Phase = 'idle' | 'working' | 'done';
+
+/** The port the remote flow needs; `runtime` carries the pairing methods,
+ * not the `e2eeWorkspaces` port itself (they live on the runtime). */
+type RemotePairingRuntime = Required<
+  Pick<
+    E2eeWorkspaceRuntime,
+    | 'beginRemoteMachinePairing'
+    | 'inspectRemoteMachinePairing'
+    | 'approveRemoteMachinePairing'
+    | 'cancelRemoteMachinePairing'
+  >
+>;
+/** `inspect` replies add the human-readable summary the status lacks. */
+type RemoteInspection = RemoteMachineStatus & { summary: string | null };
+
+/**
+ * The desktop machine's meta for the 'This computer' card — the same index
+ * the device list reads, so the card and the row agree on the name.
+ */
+function useLocalMachine(): MachineViewMeta | null {
+  const localMachineId = useAtomValue(localMachineIdAtom);
+  const authed = useOptionalAuthenticatedConvex();
+  if (!authed) {
+    // eslint-disable-next-line react-hooks/rules-of-hooks -- one branch per mount
+    const machines = useAtomValue(getMachineMetaMapAtom);
+    return localMachineId ? (machines.get(localMachineId) ?? null) : null;
+  }
+  // eslint-disable-next-line react-hooks/rules-of-hooks -- the branch is stable
+  const { machines } = useVisibleMachineMetas();
+  return localMachineId ? (machines.get(localMachineId) ?? null) : null;
+}
+
+/**
+ * Whether the remote flow can run: an E2EE workspace and the platform's
+ * `e2eeWorkspaces.runtime` carrying all four pairing methods. Anything less
+ * leaves the card unavailable rather than faking a command.
+ */
+function useE2eePairingPort(): {
+  runtime: RemotePairingRuntime | null;
+  workspaceId: string | null;
+  reason: string | null;
+} {
+  const platform = usePlatform();
+  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const runtime = platform.e2eeWorkspaces?.runtime ?? null;
+  const hasMethods =
+    !!runtime?.beginRemoteMachinePairing &&
+    !!runtime?.inspectRemoteMachinePairing &&
+    !!runtime?.approveRemoteMachinePairing &&
+    !!runtime?.cancelRemoteMachinePairing;
+  const ready = !!workspaceId && hasMethods;
+  return {
+    runtime: ready ? (runtime as RemotePairingRuntime) : null,
+    workspaceId: ready ? workspaceId : null,
+    reason: ready ? null : !workspaceId ? 'Not in a workspace' : 'E2EE workspaces only',
+  };
+}
 
 export function PairPanel({
   onPaired,
   onMethod,
   onPhase,
 }: {
-  onPaired?: (device: string) => void;
+  /** Called with the real `MachineId` once the machine is admitted. */
+  onPaired?: (machineId: MachineId) => void;
   onMethod?: (method: PairMethod | null) => void;
   onPhase?: (phase: Phase) => void;
 }) {
   const [method, setMethod] = useState<PairMethod | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
+  const [pairedId, setPairedId] = useState<MachineId | null>(null);
+  const localMachine = useLocalMachine();
+  const e2ee = useE2eePairingPort();
+  const localStatus = useMachineOnlineStatus(localMachine?.id);
 
   useEffect(() => onMethod?.(method), [method, onMethod]);
   useEffect(() => onPhase?.(phase), [phase, onPhase]);
 
-  const complete = () => {
-    if (!method) return;
+  // The success moment: the id is already a real machine, so the sheet
+  // selects it and reports it — nothing is minted into the store.
+  const complete = (machineId: MachineId) => {
+    setPairedId(machineId);
     setPhase('done');
-    window.setTimeout(() => {
-      const id = harness.pair(method);
-      onPaired?.(id);
-    }, 1150);
+    harness.select(machineId);
+    window.setTimeout(() => onPaired?.(machineId), 1150);
   };
+
+  const localAvailable = !!localMachine;
+  const availability = (option: PairMethod): string | null =>
+    option === 'local' && !localAvailable
+      ? 'Desktop app only'
+      : option === 'remote' && !e2ee.runtime
+        ? (e2ee.reason ?? 'Unavailable')
+        : option === 'cloud'
+          ? 'Not yet available'
+          : null;
+
+  const pairedDevice =
+    method === 'local' && localMachine
+      ? {
+          kind: machineKind(localMachine),
+          name: localMachine.name || 'This computer',
+          detail: 'this machine',
+        }
+      : {
+          kind: 'server' as DeviceKind,
+          name: pairedId ?? 'Machine',
+          detail: 'end-to-end encrypted',
+        };
 
   return (
     <div {...stylex.props(s.pair)}>
       <div {...stylex.props(s.methods)} role="radiogroup" aria-label="Where should the agent run?">
-        {PAIR_METHODS.map((option, index) => {
+        {PAIR_METHODS.filter((option) => !option.hidden).map((option, index) => {
           const active = method === option.id;
+          const unavailable = availability(option.id);
+          const disabled = (phase !== 'idle' && !active) || !!unavailable;
           return (
             <motion.button
               key={option.id}
               type="button"
               role="radio"
               aria-checked={active}
-              {...stylex.props(
-                s.method,
-                active && s.methodActive,
-                phase !== 'idle' && !active && s.methodDisabled
-              )}
-              disabled={phase !== 'idle' && !active}
-              onClick={() => phase === 'idle' && setMethod(option.id)}
+              title={unavailable ?? undefined}
+              {...stylex.props(s.method, active && s.methodActive, disabled && s.methodDisabled)}
+              disabled={disabled}
+              onClick={() => phase === 'idle' && !unavailable && setMethod(option.id)}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ ...soft, delay: 0.12 + index * 0.05 }}
@@ -80,7 +183,9 @@ export function PairPanel({
               </span>
               <span {...stylex.props(s.methodTitle)}>
                 {option.title}
-                {option.tag ? (
+                {unavailable ? (
+                  <span {...stylex.props(parts.tag)}>{unavailable}</span>
+                ) : option.tag ? (
                   <span {...stylex.props(parts.tag, parts.tagOk)}>
                     <StatusDot status="live" />
                     {option.tag}
@@ -110,16 +215,29 @@ export function PairPanel({
             <div {...stylex.props(s.inner)}>
               {phase === 'done' ? (
                 <Paired
-                  kind={PAIR_RESULT[method].kind}
-                  name={PAIR_RESULT[method].name}
-                  host={PAIR_RESULT[method].host}
+                  kind={pairedDevice.kind}
+                  name={pairedDevice.name}
+                  detail={pairedDevice.detail}
                 />
               ) : method === 'local' ? (
-                <LocalPair phase={phase} onStart={() => setPhase('working')} onDone={complete} />
+                <LocalPair
+                  phase={phase}
+                  machine={localMachine}
+                  status={localStatus}
+                  onStart={() => setPhase('working')}
+                  onDone={complete}
+                />
               ) : method === 'remote' ? (
-                <RemotePair onStart={() => setPhase('working')} onDone={complete} />
+                e2ee.runtime && e2ee.workspaceId ? (
+                  <RemotePair
+                    workspaceId={e2ee.workspaceId}
+                    runtime={e2ee.runtime}
+                    onStart={() => setPhase('working')}
+                    onDone={complete}
+                  />
+                ) : null
               ) : (
-                <CloudPair phase={phase} onStart={() => setPhase('working')} onDone={complete} />
+                <CloudPair />
               )}
             </div>
           </motion.div>
@@ -129,7 +247,7 @@ export function PairPanel({
   );
 }
 
-function Paired({ kind, name, host }: { kind: DeviceKind; name: string; host: string }) {
+function Paired({ kind, name, detail }: { kind: DeviceKind; name: string; detail: string }) {
   return (
     <motion.div
       {...stylex.props(s.paired)}
@@ -145,9 +263,7 @@ function Paired({ kind, name, host }: { kind: DeviceKind; name: string; host: st
       </span>
       <span>
         <strong {...stylex.props(s.pairedTitle)}>{name} is connected</strong>
-        <small {...stylex.props(s.pairedMeta)}>
-          {host} · end-to-end encrypted · setting up the harness…
-        </small>
+        <small {...stylex.props(s.pairedMeta)}>{detail} · setting up the harness…</small>
       </span>
     </motion.div>
   );
@@ -155,27 +271,41 @@ function Paired({ kind, name, host }: { kind: DeviceKind; name: string; host: st
 
 function LocalPair({
   phase,
+  machine,
+  status,
   onStart,
   onDone,
 }: {
   phase: Phase;
+  machine: MachineViewMeta | null;
+  status: 'online' | 'offline' | 'unknown';
   onStart: () => void;
-  onDone: () => void;
+  onDone: (machineId: MachineId) => void;
 }) {
+  // The machine is already paired in reality — the card just selects it, so
+  // the "working" beat is only long enough to let the check draw in.
   useEffect(() => {
-    if (phase !== 'working') return;
-    const timer = window.setTimeout(onDone, 1300);
+    if (phase !== 'working' || !machine) return;
+    const timer = window.setTimeout(() => onDone(machine.id), 1300);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase]);
+  }, [phase, machine?.id]);
 
-  const device = PAIR_RESULT.local;
+  if (!machine) {
+    return (
+      <p {...stylex.props(s.lede)}>
+        This device can only run agents inside the {BRAND} desktop app.
+      </p>
+    );
+  }
+
+  const device = machineToDevice(machine, status);
   return (
     <div {...stylex.props(s.split)}>
       <div {...stylex.props(s.facts)}>
         <Fact label="Device" value={device.name} />
-        <Fact label="System" value={`${device.os} · ${device.arch}`} />
-        <Fact label="Runtime" value={`${BRAND} Desktop ${device.version}`} />
+        <Fact label="System" value={device.os || '—'} />
+        <Fact label="Runtime" value={device.version ? `${BRAND} ${device.version}` : BRAND} />
       </div>
       <Button variant="primary" size="lg" onClick={onStart} disabled={phase === 'working'}>
         {phase === 'working' ? (
@@ -192,57 +322,176 @@ function LocalPair({
   );
 }
 
-/** A six-character code that expires; the CLI exchanges it for a device key. */
-function usePairCode() {
-  return useMemo(() => {
-    const alphabet = 'ACDEFGHJKMNPQRTUVWXY34679';
-    const pick = () => alphabet[Math.floor(Math.random() * alphabet.length)];
-    return `${pick()}${pick()}${pick()}-${pick()}${pick()}${pick()}`;
-  }, []);
-}
+const POLL_MS = 2000;
+const TERMINAL = new Set<RemoteMachineStatus['status']>(['expired', 'conflict', 'cancelled']);
 
-const CODE_TTL = 600;
-
-function RemotePair({ onStart, onDone }: { onStart: () => void; onDone: () => void }) {
-  const code = usePairCode();
-  const [via, setVia] = useState<'cli' | 'ssh'>('cli');
-  const [left, setLeft] = useState(CODE_TTL);
-  const [heard, setHeard] = useState(false);
-  const [host, setHost] = useState('');
+/**
+ * The remote offer: begin → the real command → inspect until the remote CLI
+ * claims → approve → admitted. Every label the listen line shows is a literal
+ * wire status; the TTL ring reads the offer's own `expiresAt`.
+ */
+function RemotePair({
+  workspaceId,
+  runtime,
+  onStart,
+  onDone,
+}: {
+  workspaceId: string;
+  runtime: RemotePairingRuntime;
+  onStart: () => void;
+  onDone: (machineId: MachineId) => void;
+}) {
+  const [offer, setOffer] = useState<{
+    pairingSessionId: string;
+    command: string;
+    offeredAt: number;
+  } | null>(null);
+  const [beginError, setBeginError] = useState<Error | null>(null);
+  const [status, setStatus] = useState<RemoteInspection | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const { copied, copy } = useCopy();
-  const command = `curl -fsSL https://get.${CLI}.dev | sh && ${CLI} pair ${code}`;
+  const active = useRef(true);
+  const approving = useRef(false);
+  const doneRef = useRef(false);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setLeft((seconds) => Math.max(0, seconds - 1)), 1000);
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
+
+  // There is nothing to show before the command exists, so begin fires on
+  // mount; the reply already carries the first status.
+  useEffect(() => {
+    let cancelled = false;
+    runtime.beginRemoteMachinePairing!(workspaceId)
+      .then((result) => {
+        if (cancelled || !active.current) return;
+        setOffer({
+          pairingSessionId: result.pairingSessionId,
+          command: result.command,
+          offeredAt: Date.now(),
+        });
+        setStatus({ ...result, summary: null });
+      })
+      .catch((error) => {
+        if (!cancelled && active.current) {
+          setBeginError(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [runtime, workspaceId]);
+
+  // Claimed → approve once. The harness admits on sight: the user committed
+  // by starting this flow, and the summary is still passed through so the
+  // CLI compares the same material the control page would show.
+  useEffect(() => {
+    if (!offer || !status || status.status !== 'claimed' || !status.summary) return;
+    if (approving.current) return;
+    approving.current = true;
+    onStart();
+    void (async () => {
+      try {
+        await runtime.approveRemoteMachinePairing!(
+          workspaceId,
+          offer.pairingSessionId,
+          status.summary!
+        );
+      } catch {
+        // The next inspect answers with the wire truth; nothing is faked.
+      } finally {
+        approving.current = false;
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offer?.pairingSessionId, status?.status, status?.summary, runtime, workspaceId, onStart]);
+
+  // Poll inspect on a fixed interval until a terminal status or unmount.
+  useEffect(() => {
+    if (!offer) return;
+    let cancelled = false;
+    let timer: number | null = null;
+    const tick = async () => {
+      try {
+        const next = await runtime.inspectRemoteMachinePairing!(
+          workspaceId,
+          offer.pairingSessionId
+        );
+        if (cancelled || !active.current || doneRef.current) return;
+        setStatus(next);
+        if (!TERMINAL.has(next.status)) timer = window.setTimeout(tick, POLL_MS);
+      } catch {
+        if (!cancelled && !doneRef.current) timer = window.setTimeout(tick, POLL_MS);
+      }
+    };
+    timer = window.setTimeout(tick, POLL_MS);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offer?.pairingSessionId, runtime, workspaceId]);
+
+  const machineId = status?.material?.machineId ?? null;
+
+  // admitted/ready: the machine is real — select it and let the list show it.
+  useEffect(() => {
+    if (doneRef.current || !machineId || !status) return;
+    if (status.status !== 'admitted' && status.status !== 'ready') return;
+    doneRef.current = true;
+    onDone(machineId as MachineId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status?.status, machineId]);
+
+  // A pending offer must not outlive the sheet that created it.
+  useEffect(
+    () => () => {
+      if (offer && !doneRef.current) {
+        runtime.cancelRemoteMachinePairing!(workspaceId, offer.pairingSessionId).catch(() => {});
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [offer?.pairingSessionId, runtime, workspaceId]
+  );
+
+  // The TTL ring reads the offer's real expiry, ticking once a second.
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
 
-  // Demo stand-in for the server push: a device "checks in" after the copy.
-  useEffect(() => {
-    if (!heard) return;
-    onStart();
-    const timer = window.setTimeout(onDone, 2600);
-    return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [heard]);
+  const expiresAt = status?.expiresAt ?? null;
+  const leftSeconds = expiresAt ? Math.max(0, Math.ceil((expiresAt - now) / 1000)) : null;
+  // The ring scales to the offer's own lifetime (expiry minus when it was
+  // issued), so it does not stretch as `now` ticks.
+  const ttlTotal =
+    offer && expiresAt ? Math.max(1, Math.ceil((expiresAt - offer.offeredAt) / 1000)) : 600;
+  const mm = leftSeconds === null ? '--' : String(Math.floor(leftSeconds / 60)).padStart(2, '0');
+  const ss = leftSeconds === null ? '--' : String(leftSeconds % 60).padStart(2, '0');
 
-  const mm = String(Math.floor(left / 60)).padStart(1, '0');
-  const ss = String(left % 60).padStart(2, '0');
+  const claimed = !!status && ['claimed', 'admitting', 'admitted', 'ready'].includes(status.status);
+  const machineLabel =
+    status?.material?.machineId ?? (status?.summary ? 'The claimed machine' : null);
+  const locationText =
+    [status?.location?.city, status?.location?.country].filter(Boolean).join(', ') || null;
+
+  if (beginError) {
+    return (
+      <div {...stylex.props(s.remote)}>
+        <p {...stylex.props(s.lede)}>Could not create a pairing offer: {beginError.message}</p>
+      </div>
+    );
+  }
 
   return (
     <div {...stylex.props(s.remote)}>
       <div {...stylex.props(s.remoteHead)}>
-        <Segmented
-          size="sm"
-          label="Pairing method"
-          value={via}
-          onChange={setVia}
-          options={[
-            { id: 'cli', label: 'One command' },
-            { id: 'ssh', label: 'Over SSH' },
-          ]}
-        />
-        <span {...stylex.props(s.ttl)} title="The code expires">
+        {/* The SSH sub-tab had no RPC behind it; one command is the only flow. */}
+        <span {...stylex.props(s.lede)}>One command</span>
+        <span {...stylex.props(s.ttl)} title="The offer expires">
           <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
             <circle
               cx="8"
@@ -260,7 +509,7 @@ function RemotePair({ onStart, onDone }: { onStart: () => void; onDone: () => vo
               fill="none"
               stroke="currentColor"
               strokeWidth="2"
-              strokeDasharray={`${(left / CODE_TTL) * 37.7} 37.7`}
+              strokeDasharray={`${((leftSeconds ?? 0) / Math.max(1, ttlTotal)) * 37.7} 37.7`}
               transform="rotate(-90 8 8)"
               strokeLinecap="round"
             />
@@ -269,195 +518,77 @@ function RemotePair({ onStart, onDone }: { onStart: () => void; onDone: () => vo
         </span>
       </div>
 
-      {via === 'cli' ? (
-        <>
-          <p {...stylex.props(s.lede)}>
-            Run this on the machine you want to add. It installs the runtime and claims this code.
-          </p>
-          <div {...stylex.props(s.cmd)}>
-            <Terminal size={14} {...stylex.props(s.cmdIcon)} />
-            <code {...stylex.props(s.cmdCode)}>
-              <span {...stylex.props(s.cmdDim)}>
-                curl -fsSL https://get.{CLI}.dev | sh &amp;&amp;{' '}
-              </span>
-              {CLI} pair <span {...stylex.props(s.cmdToken)}>{code}</span>
-            </code>
-            <button
-              type="button"
-              {...stylex.props(parts.iconBtn, s.cmdAction)}
-              aria-label="Copy command"
-              onClick={() => {
-                copy(command);
-                setHeard(true);
-              }}
-            >
-              <CopyIcon copied={copied} />
-            </button>
-          </div>
-        </>
-      ) : (
-        <form
-          {...stylex.props(s.ssh)}
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (host.trim()) setHeard(true);
-          }}
+      <p {...stylex.props(s.lede)}>
+        Run this on the machine you want to add. It installs the runtime and claims this offer.
+      </p>
+      <div {...stylex.props(s.cmd)}>
+        <Terminal size={14} {...stylex.props(s.cmdIcon)} />
+        <code {...stylex.props(s.cmdCode)}>
+          {offer?.command ?? 'Preparing the pairing command…'}
+        </code>
+        <button
+          type="button"
+          {...stylex.props(parts.iconBtn, s.cmdAction)}
+          aria-label="Copy command"
+          disabled={!offer}
+          onClick={() => offer && copy(offer.command)}
         >
-          <p {...stylex.props(s.lede)}>
-            We'll SSH in once with your agent's key, install the runtime, then disconnect.
-          </p>
-          <div {...stylex.props(s.sshRow)}>
-            <input
-              {...stylex.props(parts.input, parts.inputMono)}
-              placeholder="user@10.0.4.21"
-              value={host}
-              onChange={(event) => setHost(event.target.value)}
-              aria-label="SSH destination"
-              spellCheck={false}
-              autoFocus
-            />
-            <Button type="submit" variant="primary" disabled={!host.trim() || heard}>
-              Connect
-            </Button>
-          </div>
-        </form>
-      )}
+          <CopyIcon copied={copied} />
+        </button>
+      </div>
 
       <div {...stylex.props(s.listen)}>
         <span {...stylex.props(s.radar)} aria-hidden="true">
-          <i {...stylex.props(s.radarRing, heard && s.radarRingHeard)} />
-          <i {...stylex.props(s.radarRing, s.radarRingSecond, heard && s.radarRingHeard)} />
+          <i {...stylex.props(s.radarRing, claimed && s.radarRingHeard)} />
+          <i {...stylex.props(s.radarRing, s.radarRingSecond, claimed && s.radarRingHeard)} />
           <StatusDot status="live" />
         </span>
         <AnimatePresence mode="wait" initial={false}>
           <motion.span
-            key={heard ? 'heard' : 'wait'}
+            key={status?.status ?? 'waiting'}
             {...stylex.props(s.listenText)}
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.18 }}
           >
-            {heard ? (
+            {status?.status === 'expired' ? (
+              'This offer expired — close and reopen to get a new command.'
+            ) : status?.status === 'conflict' ? (
+              'Another admission is in progress — finish it first.'
+            ) : status?.status === 'cancelled' ? (
+              'Offer cancelled.'
+            ) : claimed ? (
               <>
-                <b {...stylex.props(s.listenStrong)}>build-box</b> answered · verifying fingerprint…
+                <b {...stylex.props(s.listenStrong)}>{machineLabel ?? 'Machine'}</b>
+                {status?.status === 'ready'
+                  ? ' is admitted'
+                  : status?.status === 'admitted'
+                    ? ' admitted · finishing…'
+                    : ' claimed this offer · admitting…'}
+                {locationText ? ` · ${locationText}` : ''}
               </>
             ) : (
-              <>Listening for a device to claim {code}</>
+              'Listening for a machine to claim this offer'
             )}
           </motion.span>
         </AnimatePresence>
-        {heard ? null : (
-          <button type="button" {...stylex.props(parts.link)} onClick={() => setHeard(true)}>
-            Simulate
-          </button>
-        )}
       </div>
     </div>
   );
 }
 
-const CLOUD_STEPS = [
-  'Allocating VM',
-  'Booting image',
-  'Installing runtime',
-  'Opening secure tunnel',
-];
-
-function CloudPair({
-  phase,
-  onStart,
-  onDone,
-}: {
-  phase: Phase;
-  onStart: () => void;
-  onDone: () => void;
-}) {
-  const [region, setRegion] = useState<'iad' | 'sfo' | 'fra'>('iad');
-  const [size, setSize] = useState<'s' | 'm' | 'l'>('m');
-  const [at, setAt] = useState(-1);
-
-  useEffect(() => {
-    if (phase !== 'working') return;
-    if (at >= CLOUD_STEPS.length) {
-      onDone();
-      return;
-    }
-    const timer = window.setTimeout(() => setAt((index) => index + 1), at < 0 ? 200 : 650);
-    return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, at]);
-
-  if (phase === 'working') {
-    return (
-      <ol {...stylex.props(s.boot)}>
-        {CLOUD_STEPS.map((step, index) => {
-          const state = index < at ? 'done' : index === at ? 'active' : 'todo';
-          return (
-            <li
-              key={step}
-              {...stylex.props(
-                s.bootItem,
-                state === 'done' && s.bootItemDone,
-                state === 'active' && s.bootItemActive
-              )}
-            >
-              <span
-                {...stylex.props(
-                  s.stepIcon,
-                  state === 'done' && s.stepIconDone,
-                  state === 'active' && s.stepIconActive
-                )}
-              >
-                {state === 'done' ? (
-                  <DrawnCheck size={11} />
-                ) : state === 'active' ? (
-                  <Spinner size={12} />
-                ) : null}
-              </span>
-              {step}
-            </li>
-          );
-        })}
-      </ol>
-    );
-  }
-
+/**
+ * There is no cloud-VM RPC to call yet, so the drawn panel is honest about
+ * it: the fields stay as drawn, but the action is disabled instead of faking
+ * a boot sequence.
+ */
+function CloudPair() {
   return (
     <div {...stylex.props(s.cloud)}>
-      <div {...stylex.props(s.cloudFields)}>
-        <label {...stylex.props(s.cloudField)}>
-          <span {...stylex.props(s.cloudFieldLabel)}>Region</span>
-          <Segmented
-            size="sm"
-            label="Region"
-            value={region}
-            onChange={setRegion}
-            options={[
-              { id: 'iad', label: 'US East' },
-              { id: 'sfo', label: 'US West' },
-              { id: 'fra', label: 'Europe' },
-            ]}
-          />
-        </label>
-        <label {...stylex.props(s.cloudField)}>
-          <span {...stylex.props(s.cloudFieldLabel)}>Size</span>
-          <Segmented
-            size="sm"
-            label="Size"
-            value={size}
-            onChange={setSize}
-            options={[
-              { id: 's', label: '2 vCPU' },
-              { id: 'm', label: '4 vCPU' },
-              { id: 'l', label: '8 vCPU' },
-            ]}
-          />
-        </label>
-      </div>
-      <Button variant="primary" size="lg" onClick={onStart}>
-        Create sandbox <ArrowRight size={14} />
-      </Button>
+      <p {...stylex.props(s.lede)}>
+        Cloud sandboxes are not available yet — this build cannot create one.
+      </p>
     </div>
   );
 }

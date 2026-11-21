@@ -20,16 +20,16 @@ beforeEach(() => {
 });
 
 describe('harness store', () => {
-  it('pairs a device, selects it and writes the profile', () => {
-    const id = harness.pair('local');
+  it('selects a machine and writes the profile', () => {
+    harness.select('machine-a');
 
-    expect(getHarness().devices).toHaveLength(1);
-    expect(getHarness().activeDevice).toBe(id);
-    expect(effectiveConfig(getHarness(), id).plugins).toEqual(PLUGIN_PRESETS.recommended);
+    expect(getHarness().activeDevice).toBe('machine-a');
+    expect(effectiveConfig(getHarness(), 'machine-a').plugins).toEqual(PLUGIN_PRESETS.recommended);
   });
 
   it('keeps a device override only while it differs from the profile', () => {
-    const id = harness.pair('local');
+    const id = 'machine-a';
+    harness.select(id);
     harness.set({ device: id }, 'autonomy', 'auto');
     expect(overriddenKeys(getHarness(), id)).toEqual(['autonomy']);
 
@@ -40,7 +40,8 @@ describe('harness store', () => {
   });
 
   it('applies a profile edit to a device that overrides something else', () => {
-    const id = harness.pair('local');
+    const id = 'machine-a';
+    harness.select(id);
     harness.set({ device: id }, 'autonomy', 'auto');
     harness.set('profile', 'network', 'on');
 
@@ -52,36 +53,48 @@ describe('harness store', () => {
     expect(effectiveConfig(getHarness(), id).autonomy).toBe(getHarness().profile.autonomy);
   });
 
-  it('replaces a model whose provider was disconnected', () => {
-    harness.connect('anthropic', 'key', 'sk-ant-test');
+  it('replaces a model whose provider leaves the machine read', () => {
     const anthropicModel = MODELS.find((model) => model.provider === 'anthropic')!;
+    // What the machine reported last: anthropic had a key, now it is gone.
+    harness.applyRemote({
+      credentials: {
+        anthropic: {
+          provider: 'anthropic',
+          method: 'key',
+          account: 'API key',
+          addedAt: Date.now(),
+        },
+      },
+      customs: [],
+      status: 'ready',
+    });
     harness.set('profile', 'mainModel', anthropicModel.id);
 
-    harness.disconnect('anthropic');
+    harness.applyRemote({ credentials: {}, customs: [], status: 'ready' });
 
     const config = getHarness().profile;
-    expect(['', ...MODELS.filter((m) => m.provider !== 'anthropic').map((m) => m.id)]).toContain(
-      config.mainModel
-    );
+    // The machine no longer reports the provider, so the pick clears instead
+    // of pointing at a model the agent cannot serve.
+    expect(config.mainModel).toBe('');
   });
 
-  it('drops the overrides of an unpaired device and selects another', () => {
-    const first = harness.pair('local');
-    const second = harness.pair('remote');
-    harness.set({ device: second }, 'autonomy', 'auto');
+  it('drops the overrides of a departed machine and selects another', () => {
+    harness.select('machine-a');
+    harness.set({ device: 'machine-b' }, 'autonomy', 'auto');
 
-    harness.unpair(second);
+    harness.forgetDevice('machine-b');
 
-    expect(getHarness().devices.map((device) => device.id)).toEqual([first]);
-    expect(getHarness().activeDevice).toBe(first);
-    expect(getHarness().overrides).not.toHaveProperty(second);
+    expect(getHarness().activeDevice).toBe('machine-a');
+    expect(getHarness().overrides).not.toHaveProperty('machine-b');
   });
 
-  it('persists the paired device so a reload keeps the harness', async () => {
-    const id = harness.pair('local');
+  it('persists the selection so a reload keeps the harness', async () => {
+    harness.select('machine-a');
     await Promise.resolve();
 
     const stored = JSON.parse(window.localStorage.getItem('lody-harness-v1') ?? '{}');
-    expect(stored.devices.map((device: { id: string }) => device.id)).toEqual([id]);
+    expect(stored.activeDevice).toBe('machine-a');
+    // Machine-owned lists are a live view, never persisted.
+    expect(stored.devices).toBeUndefined();
   });
 });

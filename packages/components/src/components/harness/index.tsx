@@ -15,33 +15,32 @@ import { createPortal } from 'react-dom';
 import * as stylex from '@stylexjs/stylex';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, ChevronsUpDown, Plus, Settings2, X } from 'lucide-react';
-import { Button } from '@lody/ui';
+import { Button, Select } from '@lody/ui';
 
 import { SettingsPageActions } from '@/components/settings/settings-page-header';
 
 import { BRAND, type PairMethod } from './catalog';
+import { useHarnessDevices } from './machines';
 import { PairPanel, type PairPhase } from './pair';
 import { DeviceGlyph, Kbd, StatusDot, soft, spring } from './primitives';
 import { parts } from './parts';
 import { Settings, type HarnessPage, type HarnessStage } from './settings';
 import { Setup } from './setup';
-import { getHarness, harness, overriddenKeys, useHarness } from './store';
+import { SorbetBridge, useHarnessMachine } from './sorbet';
+import { harness, overriddenKeys, useHarness } from './store';
 import { shell } from './shell.styles';
 
 export type { HarnessPage } from './settings';
 
 export function Harness() {
   const state = useHarness();
+  const { devices } = useHarnessDevices();
   const [page, setPage] = useState<HarnessPage>('providers');
   const [pairing, setPairing] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
-  const stage: HarnessStage = !state.devices.length
-    ? 'empty'
-    : !state.setupDone
-      ? 'setup'
-      : 'settings';
+  const stage: HarnessStage = !devices.length ? 'empty' : !state.setupDone ? 'setup' : 'settings';
 
   // Pairing a device opens the wizard once; dismissing it leaves the reminder
   // on the overview instead of reopening on every render.
@@ -74,81 +73,116 @@ export function Harness() {
   }, [toast]);
 
   return (
-    <div {...stylex.props(shell.surface)}>
-      {/*
-       * Which device the surface is scoped to is a page-level target, so it
-       * sits in the settings pane's own header beside the page title — not in
-       * the harness's tab row, where it competed with the pages.
-       */}
-      <SettingsPageActions>
-        {state.devices.length ? (
-          // The switcher sits outside the harness surface; its menu draws with
-          // the sheet's own tokens because they are module-scoped, not inherited.
-          <div>
-            <DeviceSwitcher onPair={() => setPairing(true)} onManage={() => setPage('devices')} />
-          </div>
-        ) : (
-          <Button size="small" variant="secondary" onClick={() => setPairing(true)}>
-            <Plus size={13} /> Pair a device
-          </Button>
-        )}
-      </SettingsPageActions>
+    <SorbetBridge>
+      <div {...stylex.props(shell.surface)}>
+        {/*
+         * Which device the surface is scoped to is a page-level target, so it
+         * sits in the settings pane's own header beside the page title — not in
+         * the harness's tab row, where it competed with the pages.
+         */}
+        <SettingsPageActions>
+          <MachinePicker />
+          {devices.length ? (
+            // The switcher sits outside the harness surface; its menu draws with
+            // the sheet's own tokens because they are module-scoped, not inherited.
+            <div>
+              <DeviceSwitcher onPair={() => setPairing(true)} onManage={() => setPage('devices')} />
+            </div>
+          ) : (
+            <Button size="small" variant="secondary" onClick={() => setPairing(true)}>
+              <Plus size={13} /> Pair a device
+            </Button>
+          )}
+        </SettingsPageActions>
 
-      <div {...stylex.props(shell.body)}>
-        {stage === 'setup' && setupOpen ? (
-          <SetupPage
-            onSkip={() => {
-              harness.finish();
-              setSetupOpen(false);
-            }}
-          />
-        ) : (
-          <Settings
-            stage={stage}
-            page={page}
-            onPage={setPage}
-            onPair={() => setPairing(true)}
-            renderEmpty={() => <Empty />}
-          />
-        )}
+        <div {...stylex.props(shell.body)}>
+          {stage === 'setup' && setupOpen ? (
+            <SetupPage
+              onSkip={() => {
+                harness.finish();
+                setSetupOpen(false);
+              }}
+            />
+          ) : (
+            <Settings
+              stage={stage}
+              page={page}
+              onPage={setPage}
+              onPair={() => setPairing(true)}
+              renderEmpty={() => <Empty />}
+            />
+          )}
+        </div>
+
+        <PairSheet
+          open={pairing}
+          onClose={() => setPairing(false)}
+          onPaired={(id) => {
+            setPairing(false);
+            const device = devices.find((d) => d.id === id);
+            setToast(`${device?.name ?? 'Device'} paired · inherits your profile`);
+          }}
+        />
+
+        <AnimatePresence>
+          {toast ? (
+            <motion.div
+              {...stylex.props(shell.toast)}
+              role="status"
+              initial={{ opacity: 0, y: 12, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.98 }}
+              transition={spring}
+            >
+              <span {...stylex.props(shell.toastIcon)}>
+                <Check size={12} strokeWidth={2.6} />
+              </span>
+              {toast}
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
       </div>
+    </SorbetBridge>
+  );
+}
 
-      <PairSheet
-        open={pairing}
-        onClose={() => setPairing(false)}
-        onPaired={(id) => {
-          setPairing(false);
-          const device = getHarness().devices.find((d) => d.id === id);
-          setToast(`${device?.name ?? 'Device'} paired · inherits your profile`);
-        }}
-      />
-
-      <AnimatePresence>
-        {toast ? (
-          <motion.div
-            {...stylex.props(shell.toast)}
-            role="status"
-            initial={{ opacity: 0, y: 12, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.98 }}
-            transition={spring}
-          >
-            <span {...stylex.props(shell.toastIcon)}>
-              <Check size={12} strokeWidth={2.6} />
-            </span>
-            {toast}
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
-    </div>
+/**
+ * Which machine's agent the Providers page reads and writes. It rides in the
+ * same header slot as the device switcher and appears only when the choice
+ * exists — the old Lody Agent page uses the same picker.
+ */
+function MachinePicker() {
+  const { machines, machineId, select } = useHarnessMachine();
+  if (machines.size < 2 || !machineId) return null;
+  const ids = [...machines.keys()];
+  return (
+    <Select.Root
+      items={ids.map((id) => ({ value: id, label: machines.get(id)?.name ?? id }))}
+      value={machineId}
+      onValueChange={(next) => {
+        if (next) select(next as typeof machineId);
+      }}
+    >
+      <Select.Trigger size="small" aria-label="Machine">
+        <Select.Value />
+      </Select.Trigger>
+      <Select.Content>
+        {ids.map((id) => (
+          <Select.Item key={id} value={id}>
+            {machines.get(id)?.name ?? id}
+          </Select.Item>
+        ))}
+      </Select.Content>
+    </Select.Root>
   );
 }
 
 function DeviceSwitcher({ onPair, onManage }: { onPair: () => void; onManage: () => void }) {
   const state = useHarness();
+  const { devices, activeDevice, select } = useHarnessDevices();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const active = state.devices.find((d) => d.id === state.activeDevice) ?? state.devices[0];
+  const active = devices.find((d) => d.id === activeDevice) ?? devices[0];
 
   useEffect(() => {
     if (!open) return;
@@ -206,7 +240,7 @@ function DeviceSwitcher({ onPair, onManage }: { onPair: () => void; onManage: ()
             transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
           >
             <div {...stylex.props(parts.popLabel)}>Run agents on</div>
-            {state.devices.map((device) => {
+            {devices.map((device) => {
               const overrides = overriddenKeys(state, device.id).length;
               return (
                 <button
@@ -216,7 +250,7 @@ function DeviceSwitcher({ onPair, onManage }: { onPair: () => void; onManage: ()
                   aria-checked={device.id === active.id}
                   {...stylex.props(parts.popItem, parts.popItemDevice)}
                   onClick={() => {
-                    harness.select(device.id);
+                    select(device.id as Parameters<typeof select>[0]);
                     setOpen(false);
                   }}
                 >
@@ -229,7 +263,7 @@ function DeviceSwitcher({ onPair, onManage }: { onPair: () => void; onManage: ()
                   <span {...stylex.props(parts.popTwo)}>
                     <span {...stylex.props(parts.popTwoName)}>{device.name}</span>
                     <span {...stylex.props(parts.popTwoMeta)}>
-                      {device.os} ·{' '}
+                      {device.os ? `${device.os} · ` : ''}
                       {overrides ? `${overrides} override${overrides > 1 ? 's' : ''}` : 'profile'}
                     </span>
                   </span>

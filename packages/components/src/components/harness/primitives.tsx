@@ -93,17 +93,26 @@ export function Segmented<T extends string>({
   onChange,
   label,
   size = 'md',
+  disabled = false,
 }: {
-  value: T;
+  /** `null` selects nothing: no option is checked and the thumb hides. */
+  value: T | null;
   options: { id: T; label: ReactNode }[];
   onChange: (next: T) => void;
   label: string;
   size?: 'sm' | 'md';
+  disabled?: boolean;
 }) {
   const { containerRef, register, box } = useSlidingSelection(value);
   return (
-    <div ref={containerRef} {...stylex.props(parts.seg)} role="radiogroup" aria-label={label}>
-      <SelectionIndicator box={box} variant="thumb" radius={6} />
+    <div
+      ref={containerRef}
+      {...stylex.props(parts.seg, disabled && parts.segDisabled)}
+      role="radiogroup"
+      aria-label={label}
+      aria-disabled={disabled || undefined}
+    >
+      <SelectionIndicator box={disabled ? null : box} variant="thumb" radius={6} />
       {options.map((option) => {
         const active = option.id === value;
         return (
@@ -113,6 +122,7 @@ export function Segmented<T extends string>({
             type="button"
             role="radio"
             aria-checked={active}
+            disabled={disabled}
             {...stylex.props(
               parts.segItem,
               size === 'sm' && parts.segItemSm,

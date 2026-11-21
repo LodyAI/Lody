@@ -22,6 +22,7 @@ import {
 import { Button, DrawnCheck, Kbd, Spinner, soft } from './primitives';
 import { parts } from './parts';
 import { panelStyles as panel } from './panels.styles';
+import { useActiveDevice } from './machines';
 import { harness, useHarness } from './store';
 import { setupStyles as s } from './setup.styles';
 
@@ -63,7 +64,7 @@ export function Setup({ onSkip }: { onSkip?: () => void } = {}) {
   const step = Math.min(state.setupStep, STEPS.length - 1);
   const [dir, setDir] = useState(1);
   const [checked, setChecked] = useState(false);
-  const device = state.devices.find((d) => d.id === state.activeDevice) ?? state.devices[0];
+  const { device } = useActiveDevice();
   const current = STEPS[step];
   const [measure, bodyHeight] = useHeight();
 

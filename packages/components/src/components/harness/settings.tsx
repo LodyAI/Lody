@@ -7,6 +7,7 @@
  * lives in the pane's body and keeps its own navigation, so the device the
  * surface is scoped to and the page being edited are always visible.
  */
+import { useAtomValue } from 'jotai';
 import { useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -14,7 +15,6 @@ import {
   Blocks,
   Boxes,
   ChevronRight,
-  FileCode2,
   KeyRound,
   MonitorSmartphone,
   Plus,
@@ -22,9 +22,21 @@ import {
   Trash2,
   type LucideIcon,
 } from 'lucide-react';
+import type { MachineId, MachineViewMeta } from '@lody/shared';
 
-import { ConfigFile } from './config-file';
+import { localMachineIdAtom } from '@/atoms/local-probe';
+import { presumedOnlineMachineIdsAtom } from '@/atoms/presence';
+import { useMachineActions } from '@/hooks/use-machine-actions';
+import { canDeleteOfflineMachine } from '@/lib/machine-deletion';
+
 import { ModelsPanel, PermissionsPanel, PluginsPanel, ProvidersPanel, Section } from './panels';
+import {
+  useActiveDevice,
+  useDeviceManagement,
+  useDeviceStatus,
+  useHarnessDevices,
+} from './machines';
+import type { Device } from './catalog';
 import {
   Button,
   DeviceGlyph,
@@ -35,10 +47,10 @@ import {
   useSlidingSelection,
 } from './primitives';
 import { parts } from './parts';
-import { effectiveConfig, harness, overriddenKeys, useHarness, type Scope } from './store';
+import { harness, overriddenKeys, useHarness, type Scope } from './store';
 import { settingsStyles } from './settings.styles';
 
-export type HarnessPage = 'devices' | 'providers' | 'models' | 'plugins' | 'permissions' | 'file';
+export type HarnessPage = 'devices' | 'providers' | 'models' | 'plugins' | 'permissions';
 
 export interface NavItem {
   id: HarnessPage;
@@ -52,11 +64,10 @@ const NAV: NavItem[] = [
   { id: 'plugins', label: 'Plugins', icon: Blocks },
   { id: 'permissions', label: 'Permissions', icon: ShieldCheck },
   { id: 'devices', label: 'Devices', icon: MonitorSmartphone },
-  { id: 'file', label: 'Config file', icon: FileCode2 },
 ];
 
 /** Pages whose values can differ per device. */
-const SCOPED = new Set(['models', 'plugins', 'permissions', 'file']);
+const SCOPED = new Set(['models', 'plugins', 'permissions']);
 
 /**
  * The pairing/empty and setup states a harness page can be in. `settings` is
@@ -79,7 +90,7 @@ export function Settings({
   renderEmpty?: () => ReactNode;
 }) {
   const state = useHarness();
-  const device = state.devices.find((d) => d.id === state.activeDevice) ?? null;
+  const { device, devices } = useActiveDevice();
   const [scopeKind, setScopeKind] = useState<'profile' | 'device'>('profile');
   const scope: Scope = scopeKind === 'device' && device ? { device: device.id } : 'profile';
   const overrides = device ? overriddenKeys(state, device.id).length : 0;
@@ -94,7 +105,7 @@ export function Settings({
             items={NAV}
             page={page}
             onPage={onPage}
-            deviceCount={state.devices.length}
+            deviceCount={devices.length}
             register={tabs.register}
           />
         </div>
@@ -131,7 +142,7 @@ export function Settings({
                 />
                 <span {...stylex.props(settingsStyles.scopeHint)}>
                   {scopeKind === 'profile'
-                    ? `Applies to all ${state.devices.length} device${state.devices.length > 1 ? 's' : ''}${overrides ? ` · ${overrides} override${overrides > 1 ? 's' : ''} on ${device.name}` : ''}`
+                    ? `Applies to all ${devices.length} device${devices.length > 1 ? 's' : ''}${overrides ? ` · ${overrides} override${overrides > 1 ? 's' : ''} on ${device.name}` : ''}`
                     : overrides
                       ? `${overrides} override${overrides > 1 ? 's' : ''} on ${device.name} · the rest comes from the profile`
                       : `Nothing overridden yet · only ${device.name}`}
@@ -154,10 +165,8 @@ export function Settings({
             ) : page === 'devices' ? (
               <Devices onPair={onPair} />
             ) : page === 'providers' ? (
-              <Section
-                title="Providers"
-                hint="Account-wide. Every device signs requests with these credentials."
-              >
+              <Section title="Providers" hint="Which agents and endpoints sign requests.">
+                <ProvidersStatus />
                 <ProvidersPanel />
               </Section>
             ) : page === 'models' ? (
@@ -180,17 +189,6 @@ export function Settings({
                 hint="How much the agent does on its own, and where it can reach."
               >
                 <PermissionsPanel scope={scope} />
-              </Section>
-            ) : page === 'file' ? (
-              <Section
-                title="Config file"
-                hint="The same settings as code. Commit it to share a harness with your team."
-              >
-                <ConfigFile
-                  config={effectiveConfig(state, scope === 'profile' ? null : scope.device)}
-                  state={state}
-                  device={scope === 'profile' ? null : scope.device}
-                />
               </Section>
             ) : null}
           </motion.div>
@@ -241,11 +239,33 @@ function NavRows({
   );
 }
 
+/**
+ * What the machine read is doing right now, one line above the provider rows.
+ * A ready read needs no line — the rows are the answer.
+ */
+function ProvidersStatus() {
+  const state = useHarness();
+  const text =
+    state.status === 'loading'
+      ? 'Reading connections from this machine…'
+      : state.status === 'error'
+        ? 'Could not read this machine’s connections.'
+        : state.status === 'unsupported'
+          ? 'This machine’s daemon is older; update it to manage connections.'
+          : state.status === 'no-agent'
+            ? 'Lody Agent is not set up on this machine yet.'
+            : state.status === 'no-runtime'
+              ? 'The workspace runtime is unavailable.'
+              : null;
+  if (!text) return null;
+  return <p {...stylex.props(parts.provMeta)}>{text}</p>;
+}
+
 /* ── devices ───────────────────────────────────────────────────────────── */
 
 function Devices({ onPair }: { onPair: () => void }) {
   const state = useHarness();
-  const [confirm, setConfirm] = useState<string | null>(null);
+  const { devices, machines, activeDevice, select, isLoading } = useHarnessDevices();
 
   return (
     <Section
@@ -259,90 +279,25 @@ function Devices({ onPair }: { onPair: () => void }) {
     >
       <div {...stylex.props(settingsStyles.devices)}>
         <AnimatePresence initial={false}>
-          {state.devices.map((device) => {
-            const overrides = overriddenKeys(state, device.id);
-            const active = device.id === state.activeDevice;
-            return (
-              <motion.div
-                key={device.id}
-                layout
-                {...stylex.props(settingsStyles.device, active && settingsStyles.deviceActive)}
-                initial={{ opacity: 0, scale: 0.97 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.97 }}
-                transition={soft}
-              >
-                <div {...stylex.props(settingsStyles.deviceTop)}>
-                  <span {...stylex.props(settingsStyles.deviceGlyph)}>
-                    <DeviceGlyph kind={device.kind} size={28} />
-                  </span>
-                  {active ? (
-                    <span {...stylex.props(parts.tag, parts.tagOk)}>Selected</span>
-                  ) : (
-                    <Button size="sm" variant="ghost" onClick={() => harness.select(device.id)}>
-                      Select
-                    </Button>
-                  )}
-                </div>
-                <input
-                  {...stylex.props(settingsStyles.deviceName)}
-                  defaultValue={device.name}
-                  aria-label="Device name"
-                  onBlur={(event) => harness.rename(device.id, event.target.value)}
-                  onKeyDown={(event) => event.key === 'Enter' && event.currentTarget.blur()}
-                />
-                <div {...stylex.props(settingsStyles.deviceMeta)}>
-                  <span {...stylex.props(settingsStyles.deviceMetaDot)}>
-                    <StatusDot status={device.status} />
-                  </span>{' '}
-                  Online · {device.host}
-                </div>
-                <dl {...stylex.props(settingsStyles.deviceFacts)}>
-                  <div {...stylex.props(settingsStyles.deviceFact)}>
-                    <dt {...stylex.props(settingsStyles.deviceFactLabel)}>System</dt>
-                    <dd {...stylex.props(settingsStyles.deviceFactValue)}>
-                      {device.os} · {device.arch}
-                    </dd>
-                  </div>
-                  <div {...stylex.props(settingsStyles.deviceFact)}>
-                    <dt {...stylex.props(settingsStyles.deviceFactLabel)}>Runtime</dt>
-                    <dd {...stylex.props(settingsStyles.deviceFactValue)}>v{device.version}</dd>
-                  </div>
-                  <div {...stylex.props(settingsStyles.deviceFact)}>
-                    <dt {...stylex.props(settingsStyles.deviceFactLabel)}>Config</dt>
-                    <dd {...stylex.props(settingsStyles.deviceFactValue)}>
-                      {overrides.length
-                        ? `Profile + ${overrides.length} override${overrides.length > 1 ? 's' : ''}`
-                        : 'Profile'}
-                    </dd>
-                  </div>
-                </dl>
-                <div {...stylex.props(settingsStyles.deviceFoot)}>
-                  {confirm === device.id ? (
-                    <>
-                      <span {...stylex.props(settingsStyles.deviceFootText)}>
-                        Unpair and revoke its key?
-                      </span>
-                      <Button size="sm" variant="ghost" onClick={() => setConfirm(null)}>
-                        Keep
-                      </Button>
-                      <Button size="sm" variant="danger" onClick={() => harness.unpair(device.id)}>
-                        Unpair
-                      </Button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      {...stylex.props(parts.link, parts.linkDanger)}
-                      onClick={() => setConfirm(device.id)}
-                    >
-                      <Trash2 size={12} /> Unpair
-                    </button>
-                  )}
-                </div>
-              </motion.div>
-            );
-          })}
+          {!isLoading && !devices.length ? (
+            <motion.p
+              {...stylex.props(settingsStyles.deviceAddHint)}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+            >
+              No machines are paired to this workspace yet.
+            </motion.p>
+          ) : null}
+          {devices.map((device) => (
+            <DeviceCard
+              key={device.id}
+              device={device}
+              machine={machines.get(device.id as MachineId)}
+              active={device.id === activeDevice}
+              overrides={overriddenKeys(state, device.id)}
+              onSelect={() => select(device.id as MachineId)}
+            />
+          ))}
         </AnimatePresence>
         <motion.button
           layout
@@ -361,5 +316,180 @@ function Devices({ onPair }: { onPair: () => void }) {
         </motion.button>
       </div>
     </Section>
+  );
+}
+
+/** A word the machine's meta line can show; 'unknown' never claims offline. */
+const ONLINE_WORD = {
+  online: 'Online',
+  offline: 'Offline',
+  unknown: 'Status unknown',
+} as const;
+
+function DeviceCard({
+  device,
+  machine,
+  active,
+  overrides,
+  onSelect,
+}: {
+  device: Device;
+  machine: MachineViewMeta | undefined;
+  active: boolean;
+  overrides: string[];
+  onSelect: () => void;
+}) {
+  const online = useDeviceStatus(device.id as MachineId);
+  const { accountId, canManageOthers } = useDeviceManagement();
+  const localMachineId = useAtomValue(localMachineIdAtom);
+  const presumedOnline = useAtomValue(presumedOnlineMachineIdsAtom);
+  const [confirm, setConfirm] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const actions = useMachineActions({
+    currentUserId: accountId,
+    localMachineId,
+    canManageAllMachines: canManageOthers,
+  });
+
+  // Rename is a machine-doc write; unpair is the same offline-machine delete
+  // the machine settings page gates — an online machine can never be removed.
+  const canUnpair =
+    !!machine &&
+    canDeleteOfflineMachine({
+      machine,
+      isOnline: presumedOnline.has(device.id as MachineId),
+      currentUserId: accountId,
+      localMachineId,
+      canManageAllMachines: canManageOthers,
+    });
+
+  const rename = async (name: string) => {
+    setEditing(false);
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === device.name) return;
+    setPending(true);
+    try {
+      await actions.renameMachine(device.id as MachineId, trimmed);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const unpair = async () => {
+    setPending(true);
+    try {
+      await actions.deleteMachine(machine!);
+      // The row disappears with the doc; drop its overrides and selection.
+      harness.forgetDevice(device.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      setConfirm(false);
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <motion.div
+      layout
+      {...stylex.props(settingsStyles.device, active && settingsStyles.deviceActive)}
+      initial={{ opacity: 0, scale: 0.97 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.97 }}
+      transition={soft}
+    >
+      <div {...stylex.props(settingsStyles.deviceTop)}>
+        <span {...stylex.props(settingsStyles.deviceGlyph)}>
+          <DeviceGlyph kind={device.kind} size={28} />
+        </span>
+        {active ? (
+          <span {...stylex.props(parts.tag, parts.tagOk)}>Selected</span>
+        ) : (
+          <Button size="sm" variant="ghost" onClick={onSelect}>
+            Select
+          </Button>
+        )}
+      </div>
+      {editing ? (
+        <input
+          {...stylex.props(settingsStyles.deviceName)}
+          defaultValue={device.name}
+          aria-label="Device name"
+          autoFocus
+          disabled={pending}
+          onBlur={(event) => void rename(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') event.currentTarget.blur();
+            if (event.key === 'Escape') {
+              event.currentTarget.value = device.name;
+              event.currentTarget.blur();
+            }
+          }}
+        />
+      ) : (
+        <button
+          type="button"
+          {...stylex.props(settingsStyles.deviceName, settingsStyles.deviceNameButton)}
+          title="Rename"
+          onClick={() => setEditing(true)}
+        >
+          {device.name}
+        </button>
+      )}
+      <div {...stylex.props(settingsStyles.deviceMeta)}>
+        <span {...stylex.props(settingsStyles.deviceMetaDot)}>
+          <StatusDot
+            status={online === 'online' ? 'online' : online === 'offline' ? 'offline' : 'idle'}
+          />
+        </span>{' '}
+        {ONLINE_WORD[online]} · {device.host}
+      </div>
+      <dl {...stylex.props(settingsStyles.deviceFacts)}>
+        <div {...stylex.props(settingsStyles.deviceFact)}>
+          <dt {...stylex.props(settingsStyles.deviceFactLabel)}>System</dt>
+          <dd {...stylex.props(settingsStyles.deviceFactValue)}>{device.os || '—'}</dd>
+        </div>
+        <div {...stylex.props(settingsStyles.deviceFact)}>
+          <dt {...stylex.props(settingsStyles.deviceFactLabel)}>Runtime</dt>
+          <dd {...stylex.props(settingsStyles.deviceFactValue)}>
+            {device.version ? `v${device.version}` : '—'}
+          </dd>
+        </div>
+        <div {...stylex.props(settingsStyles.deviceFact)}>
+          <dt {...stylex.props(settingsStyles.deviceFactLabel)}>Config</dt>
+          <dd {...stylex.props(settingsStyles.deviceFactValue)}>
+            {overrides.length
+              ? `Profile + ${overrides.length} override${overrides.length > 1 ? 's' : ''}`
+              : 'Profile'}
+          </dd>
+        </div>
+      </dl>
+      {error ? <p {...stylex.props(settingsStyles.deviceFootText)}>{error}</p> : null}
+      <div {...stylex.props(settingsStyles.deviceFoot)}>
+        {confirm ? (
+          <>
+            <span {...stylex.props(settingsStyles.deviceFootText)}>Unpair and revoke its key?</span>
+            <Button size="sm" variant="ghost" onClick={() => setConfirm(false)}>
+              Keep
+            </Button>
+            <Button size="sm" variant="danger" disabled={pending} onClick={() => void unpair()}>
+              Unpair
+            </Button>
+          </>
+        ) : canUnpair ? (
+          <button
+            type="button"
+            {...stylex.props(parts.link, parts.linkDanger)}
+            onClick={() => setConfirm(true)}
+          >
+            <Trash2 size={12} /> Unpair
+          </button>
+        ) : null}
+      </div>
+    </motion.div>
   );
 }

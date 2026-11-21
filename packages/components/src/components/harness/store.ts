@@ -5,21 +5,19 @@
  *
  * Config model: the profile applies to every device. A device can override any
  * key; the effective config is `{ ...profile, ...overrides[device] }`.
- * Credentials belong to the account and are synced to all devices.
+ * Credentials and endpoints belong to the machine's agent and are a live view,
+ * written by `applyRemote`, never persisted.
  */
 import { useSyncExternalStore } from 'react';
 
 import {
   MODELS,
-  PAIR_RESULT,
   PLUGIN_PRESETS,
-  type AuthMethod,
   type Autonomy,
-  type Device,
   type Effort,
   type FsScope,
   type Network,
-  type PairMethod,
+  type AuthMethod,
 } from './catalog';
 
 export interface HarnessConfig {
@@ -41,11 +39,8 @@ export interface Credential {
   method: AuthMethod;
   account: string;
   addedAt: number;
-  /** A user-defined endpoint keeps the URL it was added with. */
-  baseUrl?: string;
 }
 
-/** A provider the user added: OpenAI/Anthropic-compatible base URL plus a model. */
 /** The wire protocols a user-defined endpoint can speak. */
 export type EndpointProtocol = 'anthropic-messages' | 'openai-responses' | 'openai-completions';
 
@@ -54,21 +49,32 @@ export interface EndpointModel {
   name?: string;
 }
 
+/** An endpoint the agent stores on the machine, read back with its models. */
 export interface CustomProvider {
   id: string;
   name: string;
   protocol: EndpointProtocol;
   baseUrl: string;
-  /** Discovered from the endpoint; editable afterwards, never typed up front. */
+  /** What the endpoint reported it serves; the agent discovers, Lody shows. */
   models: EndpointModel[];
 }
 
+/**
+ * What the last machine read produced. `credentials` and `customs` belong to
+ * Sorbet on the machine: they arrive over RPC and are written here by
+ * `applyRemote`, never persisted — reload re-reads, it does not replay.
+ */
 export interface HarnessState {
   version: 1;
-  devices: Device[];
+  /**
+   * The selected machine's `MachineId`. The rows themselves are a live view
+   * of the workspace's machines (see machines.tsx); the store never holds
+   * them — pairing surfaces a real machine rather than minting a fake row.
+   */
   activeDevice: string | null;
   credentials: Record<string, Credential>;
   customs: CustomProvider[];
+  status: 'loading' | 'ready' | 'error' | 'unsupported' | 'no-agent' | 'no-runtime';
   profile: HarnessConfig;
   overrides: Record<string, Partial<HarnessConfig>>;
   setupDone: boolean;
@@ -94,10 +100,10 @@ const DEFAULT_PROFILE: HarnessConfig = {
 
 const initial = (): HarnessState => ({
   version: 1,
-  devices: [],
   activeDevice: null,
   credentials: {},
   customs: [],
+  status: 'loading',
   profile: DEFAULT_PROFILE,
   overrides: {},
   setupDone: false,
@@ -115,14 +121,19 @@ function hydrate() {
     const raw = window.localStorage.getItem(KEY);
     if (!raw) return;
     const parsed = JSON.parse(raw) as HarnessState;
-    if (parsed.version === 1) state = { ...initial(), ...parsed };
+    // Credentials and endpoints live on the machine; what was stored is the
+    // drawn profile, so remote-owned fields always start empty.
+    if (parsed.version === 1)
+      state = { ...initial(), ...parsed, credentials: {}, customs: [], status: 'loading' };
   } catch {}
 }
 
 function commit(next: HarnessState) {
   state = next;
   try {
-    window.localStorage.setItem(KEY, JSON.stringify(next));
+    // Only what the surface owns is persisted; machine-owned lists are a view.
+    const { credentials: _credentials, customs: _customs, status: _status, ...persisted } = next;
+    window.localStorage.setItem(KEY, JSON.stringify(persisted));
   } catch {}
   listeners.forEach((listener) => listener());
 }
@@ -154,153 +165,66 @@ export function overriddenKeys(s: HarnessState, device: string | null): ConfigKe
   return device ? (Object.keys(s.overrides[device] ?? {}) as ConfigKey[]) : [];
 }
 
+/**
+ * The static-catalogue model pool — kept for reconciling legacy picks. The
+ * Models page itself reads the machine's ACP capability entry instead
+ * (`device-capabilities.ts`); an endpoint's models still count here because
+ * that entry is exactly what the probe that discovered them writes.
+ */
 export function availableModels(s: HarnessState) {
-  const custom = s.customs
-    .filter((provider) => s.credentials[provider.id])
-    .flatMap((provider) =>
-      provider.models.map((model) => ({
-        id: model.id,
-        provider: provider.id,
-        name: model.name ?? model.id,
-        context: provider.protocol,
-        tier: 'balanced' as const,
-      }))
-    );
+  const custom = s.customs.flatMap((provider) =>
+    provider.models.map((model) => ({
+      id: model.id,
+      provider: provider.id,
+      name: model.name ?? model.id,
+      context: provider.protocol,
+      tier: 'balanced' as const,
+    }))
+  );
   return [...MODELS.filter((model) => s.credentials[model.provider]), ...custom];
 }
 
-/** Best model for a role among the connected providers. */
-function pickModel(s: HarnessState, role: 'main' | 'sub'): string {
-  const pool = availableModels(s);
-  const order =
-    role === 'main'
-      ? ['frontier', 'balanced', 'local', 'fast']
-      : ['fast', 'balanced', 'local', 'frontier'];
-  for (const tier of order) {
-    const hit = pool.find((model) => model.tier === tier);
-    if (hit) return hit.id;
-  }
-  return '';
-}
-
-/** Keep model picks valid after providers change. */
+/**
+ * A model pick stays valid while its provider is still in the machine's last
+ * read — the Models page's real pool comes from the capability probe, which
+ * only exists because a provider signed in. Unknown ids clear; the page shows
+ * the list with nothing selected rather than a pick it cannot name.
+ */
 function reconcileModels(s: HarnessState): HarnessState {
   const valid = new Set(availableModels(s).map((model) => model.id));
   const profile = { ...s.profile };
-  if (!valid.has(profile.mainModel)) profile.mainModel = pickModel(s, 'main');
-  if (!valid.has(profile.subModel)) profile.subModel = pickModel(s, 'sub');
+  if (profile.mainModel && !valid.has(profile.mainModel)) profile.mainModel = '';
+  if (profile.subModel && !valid.has(profile.subModel)) profile.subModel = '';
   return { ...s, profile };
 }
 
 /* ── actions ───────────────────────────────────────────────────────────── */
 
-const uid = () => Math.random().toString(36).slice(2, 8);
-
 export const harness = {
-  pair(method: PairMethod): string {
-    const base = PAIR_RESULT[method];
-    const taken = state.devices.filter((device) => device.name.startsWith(base.name)).length;
-    const device: Device = {
-      ...base,
-      name: taken ? `${base.name} ${taken + 1}` : base.name,
-      id: `dev_${uid()}`,
-      pairedAt: Date.now(),
-    };
-    commit({ ...state, devices: [...state.devices, device], activeDevice: device.id });
-    return device.id;
+  /**
+   * The machine's answer to a credentials/providers read. Reconciliation keeps
+   * the model picks pointing at providers that still exist.
+   */
+  applyRemote(patch: Pick<HarnessState, 'credentials' | 'customs' | 'status'>) {
+    commit(reconcileModels({ ...state, ...patch }));
   },
 
   select(device: string) {
     commit({ ...state, activeDevice: device });
   },
 
-  rename(device: string, name: string) {
-    commit({
-      ...state,
-      devices: state.devices.map((d) =>
-        d.id === device ? { ...d, name: name.trim() || d.name } : d
-      ),
-    });
-  },
-
-  unpair(device: string) {
-    const devices = state.devices.filter((d) => d.id !== device);
+  /**
+   * Per-device overrides are keyed by `MachineId`; the machine doc owns the
+   * name and the row. Call this when a machine leaves the workspace so its
+   * overrides do not linger under an id another surface can no longer scope.
+   */
+  forgetDevice(device: string) {
     const { [device]: _gone, ...overrides } = state.overrides;
     commit({
       ...state,
-      devices,
       overrides,
-      activeDevice: state.activeDevice === device ? (devices[0]?.id ?? null) : state.activeDevice,
+      activeDevice: state.activeDevice === device ? null : state.activeDevice,
     });
-  },
-
-  /** Adds a user-defined endpoint and connects it in one step. */
-  addCustom(input: {
-    name: string;
-    protocol: EndpointProtocol;
-    baseUrl: string;
-    key: string;
-  }): string {
-    const id = `custom_${uid()}`;
-    const custom: CustomProvider = {
-      id,
-      name: input.name,
-      protocol: input.protocol,
-      baseUrl: input.baseUrl,
-      models: [],
-    };
-    const credentials = {
-      ...state.credentials,
-      [id]: {
-        provider: id,
-        method: 'key' as AuthMethod,
-        account: `Key ${input.key.slice(0, 6)}…${input.key.slice(-4)}`,
-        addedAt: Date.now(),
-        baseUrl: input.baseUrl,
-      },
-    };
-    commit(reconcileModels({ ...state, customs: [...state.customs, custom], credentials }));
-    return id;
-  },
-
-  /** The endpoint's models are discovered, then edited here. */
-  setCustomModels(id: string, models: EndpointModel[]) {
-    commit({
-      ...state,
-      customs: state.customs.map((provider) =>
-        provider.id === id ? { ...provider, models } : provider
-      ),
-    });
-  },
-
-  removeCustom(id: string) {
-    const { [id]: _credential, ...credentials } = state.credentials;
-    commit(
-      reconcileModels({
-        ...state,
-        customs: state.customs.filter((provider) => provider.id !== id),
-        credentials,
-      })
-    );
-  },
-
-  connect(provider: string, method: AuthMethod, account: string, baseUrl?: string) {
-    const credentials = {
-      ...state.credentials,
-      [provider]: {
-        provider,
-        method,
-        account,
-        addedAt: Date.now(),
-        ...(baseUrl ? { baseUrl } : {}),
-      },
-    };
-    commit(reconcileModels({ ...state, credentials }));
-  },
-
-  disconnect(provider: string) {
-    const { [provider]: _gone, ...credentials } = state.credentials;
-    commit(reconcileModels({ ...state, credentials }));
   },
 
   set<K extends ConfigKey>(scope: Scope, key: K, value: HarnessConfig[K]) {

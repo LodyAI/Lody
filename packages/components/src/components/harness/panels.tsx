@@ -6,22 +6,13 @@
  * Every panel takes a `scope`: the shared profile, or one device. In device
  * scope a value that differs from the profile is marked and can be reset.
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { AnimatePresence, motion } from 'framer-motion';
-import {
-  Check,
-  Globe,
-  HardDrive,
-  KeyRound,
-  Lock,
-  LogOut,
-  Plus,
-  Search,
-  Trash2,
-  X,
-} from 'lucide-react';
-import { Input, PasswordInput, Select } from '@lody/ui';
+import { Globe, HardDrive, Lock, LogOut, Plus, Search, Trash2 } from 'lucide-react';
+import { Input, Select } from '@lody/ui';
+
+import { AcpAuthenticationPanel } from '@/components/settings/acp-authentication-panel';
 
 import {
   AUTONOMY,
@@ -48,11 +39,12 @@ import {
   soft,
   spring,
 } from './primitives';
+import { useDeviceCapabilities, type HarnessModel } from './device-capabilities';
 import { parts } from './parts';
 import { panelStyles as ps } from './panels.styles';
 import { settingsStyles as page } from './settings.styles';
+import { sorbet, useSorbetTarget } from './sorbet';
 import {
-  availableModels,
   effectiveConfig,
   harness,
   overriddenKeys,
@@ -63,7 +55,7 @@ import {
   type CustomProvider,
   type EndpointProtocol,
 } from './store';
-import { discoverEndpointModels, ENDPOINT_PROTOCOLS, PROTOCOL_LABEL } from './endpoint-models';
+import { ENDPOINT_PROTOCOLS, PROTOCOL_LABEL } from './endpoint-models';
 
 function useScoped(scope: Scope) {
   const state = useHarness();
@@ -159,7 +151,6 @@ const PROVIDER_GROUPS: { kind: ProviderKind; label: string; hint: string }[] = [
 export function ProvidersPanel() {
   const state = useHarness();
   const [adding, setAdding] = useState(false);
-  const connected = Object.keys(state.credentials).length;
 
   return (
     <div {...stylex.props(parts.panel)}>
@@ -205,85 +196,43 @@ export function ProvidersPanel() {
       })}
       <p {...stylex.props(parts.footnote)}>
         <Lock size={12} {...stylex.props(parts.footnoteGlyph)} />
-        {connected
-          ? 'Credentials live in your account vault and are synced to each device over the encrypted pairing channel.'
-          : 'Connect at least one. Credentials live in your account vault, never in the repo.'}
+        Credentials live in the agent's own store on this machine; Lody never sees the secret.
       </p>
     </div>
   );
 }
 
-type Flow = 'idle' | 'oauth' | 'key' | 'verifying' | 'scanning';
-
-const FAKE_ACCOUNT: Record<string, string> = {
-  anthropic: 'ada@studio.dev · Max',
-  openai: 'ada@studio.dev · Pro',
-  google: 'ada@studio.dev',
-  ollama: '2 models on this device',
-};
+/**
+ * The button that opens the agent's own sign-in for one method. The panel draws
+ * the key field or the browser hand-off itself — the key never passes through
+ * this row — and the agent's store answers the next read, which settles the row.
+ */
+function SignInAction({ provider, method }: { provider: Provider; method: 'api_key' | 'oauth' }) {
+  const target = useSorbetTarget();
+  if (!target) return null;
+  return (
+    <AcpAuthenticationPanel
+      machineId={target.machineId}
+      configId={target.configId}
+      cliType={target.config.cliType}
+      agentType={target.config.agentType}
+      providerName={provider.name}
+      runtimeOverrides={target.config.runtimeOverrides}
+      env={target.config.env}
+      compact
+      layout="action"
+      onlyMethodId={`sorbet:${provider.id}:${method}`}
+      onAuthenticated={sorbet.refresh}
+    />
+  );
+}
 
 function ProviderRow({ provider, ruled }: { provider: Provider; ruled: boolean }) {
   const state = useHarness();
   const credential = state.credentials[provider.id];
-  const [flow, setFlow] = useState<Flow>('idle');
-  const [key, setKey] = useState('');
-  const [error, setError] = useState('');
-  const [endpointId, setEndpointId] = useState(
-    provider.endpoints?.[0]?.id ?? (provider.allowCustomEndpoint ? 'custom' : '')
-  );
-  const [customUrl, setCustomUrl] = useState('');
-  const timer = useRef<number>(0);
-
-  const picksEndpoint = Boolean(provider.endpoints?.length || provider.allowCustomEndpoint);
-  const endpointUrl =
-    endpointId === 'custom'
-      ? customUrl.trim()
-      : (provider.endpoints?.find((endpoint) => endpoint.id === endpointId)?.url ?? '');
-
-  useEffect(() => () => window.clearTimeout(timer.current), []);
-
-  const settle = (
-    method: 'oauth' | 'key' | 'local',
-    account: string,
-    delay: number,
-    baseUrl?: string
-  ) => {
-    timer.current = window.setTimeout(() => {
-      harness.connect(provider.id, method, account, baseUrl);
-      setFlow('idle');
-      setKey('');
-    }, delay);
-  };
-
-  const verify = () => {
-    if (provider.keyPattern && !provider.keyPattern.test(key.trim())) {
-      setError(`That doesn't look like a ${provider.name} key (${provider.keyHint})`);
-      return;
-    }
-    if (picksEndpoint && !/^https?:\/\/\S+$/.test(endpointUrl)) {
-      setError('That base URL is not an HTTP(S) address.');
-      return;
-    }
-    setError('');
-    setFlow('verifying');
-    settle(
-      'key',
-      endpointUrl
-        ? `${new URL(endpointUrl).host} · Key ${key.trim().slice(0, 6)}…${key.trim().slice(-4)}`
-        : `Key ${key.trim().slice(0, 6)}…${key.trim().slice(-4)}`,
-      1100,
-      endpointUrl || undefined
-    );
-  };
+  const [pending, setPending] = useState(false);
 
   const providerModels = MODELS.filter((model) => model.provider === provider.id).length;
-  const endpointOptions = [
-    ...(provider.endpoints ?? []).map((endpoint) => ({
-      value: endpoint.id,
-      label: endpoint.label,
-    })),
-    ...(provider.allowCustomEndpoint ? [{ value: 'custom', label: 'Custom base URL…' }] : []),
-  ];
 
   return (
     <div {...stylex.props(parts.prov, ruled && parts.listRuled, credential && parts.provConnected)}>
@@ -311,9 +260,7 @@ function ProviderRow({ provider, ruled }: { provider: Provider; ruled: boolean }
           </AnimatePresence>
         </div>
         <div {...stylex.props(parts.provSub)}>
-          {credential
-            ? `${credential.account} · ${credential.baseUrl ?? `${providerModels} models`}`
-            : provider.blurb}
+          {credential ? `${credential.account} · ${providerModels} models` : provider.blurb}
         </div>
         {provider.runtime || provider.endpoints?.length ? (
           <div {...stylex.props(parts.provMeta)}>
@@ -339,166 +286,35 @@ function ProviderRow({ provider, ruled }: { provider: Provider; ruled: boolean }
             {...stylex.props(parts.iconBtn)}
             aria-label={`Disconnect ${provider.name}`}
             title="Disconnect"
-            onClick={() => harness.disconnect(provider.id)}
+            disabled={pending}
+            onClick={() => {
+              setPending(true);
+              sorbet.disconnect(provider.id).finally(() => setPending(false));
+            }}
           >
             <LogOut size={13} />
           </button>
-        ) : flow === 'idle' ? (
+        ) : (
           <>
             {provider.auth.includes('key') ? (
-              <Button
-                size="sm"
-                variant={provider.auth.includes('oauth') ? 'ghost' : 'secondary'}
-                onClick={() => setFlow('key')}
-              >
-                <KeyRound size={13} /> API key
-              </Button>
+              <SignInAction provider={provider} method="api_key" />
             ) : null}
             {provider.auth.includes('oauth') ? (
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => {
-                  setFlow('oauth');
-                  settle('oauth', FAKE_ACCOUNT[provider.id] ?? 'Signed in', 1800);
-                }}
-              >
-                Sign in
-              </Button>
+              <SignInAction provider={provider} method="oauth" />
             ) : null}
+            {/*
+             * Detecting a local runtime has no Sorbet RPC — Sorbet reports a
+             * `local` credential once it finds one. The button stays visible
+             * as the design drew it but does nothing until that lands.
+             */}
             {provider.auth.includes('local') ? (
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => {
-                  setFlow('scanning');
-                  settle('local', FAKE_ACCOUNT.ollama, 1300);
-                }}
-              >
+              <Button size="sm" variant="secondary" disabled title="Detection is not available yet">
                 <Search size={13} /> Detect
               </Button>
             ) : null}
           </>
-        ) : flow === 'oauth' || flow === 'scanning' ? (
-          <span {...stylex.props(parts.provWait)}>
-            <Spinner size={13} />
-            {flow === 'oauth' ? 'Finish in your browser' : 'Scanning device'}
-            <button
-              type="button"
-              {...stylex.props(parts.link)}
-              onClick={() => {
-                window.clearTimeout(timer.current);
-                setFlow('idle');
-              }}
-            >
-              Cancel
-            </button>
-          </span>
-        ) : null}
+        )}
       </div>
-
-      <AnimatePresence initial={false}>
-        {(flow === 'key' || flow === 'verifying') && !credential ? (
-          <motion.form
-            {...stylex.props(parts.provKey)}
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={soft}
-            onSubmit={(event) => {
-              event.preventDefault();
-              verify();
-            }}
-          >
-            {picksEndpoint ? (
-              <div {...stylex.props(parts.provKeyRow)}>
-                <Select.Root
-                  items={endpointOptions}
-                  value={endpointId}
-                  onValueChange={(value) => {
-                    setEndpointId(String(value));
-                    setError('');
-                  }}
-                >
-                  <Select.Trigger size="small">
-                    <Select.Value />
-                  </Select.Trigger>
-                  <Select.Content>
-                    {endpointOptions.map((option) => (
-                      <Select.Item key={option.value} value={option.value}>
-                        {option.label}
-                      </Select.Item>
-                    ))}
-                  </Select.Content>
-                </Select.Root>
-                {endpointId === 'custom' ? (
-                  <Input
-                    size="small"
-                    value={customUrl}
-                    placeholder="https://gateway.example/v1"
-                    aria-label="Base URL"
-                    disabled={flow === 'verifying'}
-                    onValueChange={(value) => {
-                      setCustomUrl(value);
-                      setError('');
-                    }}
-                  />
-                ) : null}
-              </div>
-            ) : null}
-
-            <div {...stylex.props(parts.provKeyRow)}>
-              <PasswordInput
-                size="small"
-                value={key}
-                placeholder={provider.keyHint}
-                autoComplete="off"
-                aria-label={`${provider.name} API key`}
-                aria-invalid={!!error}
-                disabled={flow === 'verifying'}
-                onValueChange={(value) => {
-                  setKey(value);
-                  setError('');
-                }}
-              />
-              <Button
-                type="submit"
-                variant="primary"
-                size="sm"
-                disabled={!key.trim() || flow === 'verifying'}
-              >
-                {flow === 'verifying' ? (
-                  <>
-                    <Spinner size={12} /> Verifying
-                  </>
-                ) : (
-                  'Verify'
-                )}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setFlow('idle')}
-                disabled={flow === 'verifying'}
-              >
-                Cancel
-              </Button>
-            </div>
-            <AnimatePresence initial={false}>
-              {error ? (
-                <motion.p
-                  {...stylex.props(parts.error)}
-                  initial={{ opacity: 0, y: -2 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                >
-                  {error}
-                </motion.p>
-              ) : null}
-            </AnimatePresence>
-          </motion.form>
-        ) : null}
-      </AnimatePresence>
     </div>
   );
 }
@@ -506,17 +322,9 @@ function ProviderRow({ provider, ruled }: { provider: Provider; ruled: boolean }
 /** A provider the user added: its base URL is the row's subtitle, its models the chips. */
 function CustomRow({ custom, ruled }: { custom: CustomProvider; ruled: boolean }) {
   const state = useHarness();
-  const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState('');
   const credential = state.credentials[custom.id];
-
-  const addModel = () => {
-    const id = draft.trim();
-    if (!id || custom.models.some((model) => model.id === id)) return;
-    harness.setCustomModels(custom.id, [...custom.models, { id }]);
-    setDraft('');
-    setAdding(false);
-  };
+  // Model picks land on the agent's own list; they are not edited here — the
+  // next read reflects what the endpoint actually serves.
 
   return (
     <div {...stylex.props(parts.prov, ruled && parts.listRuled, credential && parts.provConnected)}>
@@ -544,53 +352,38 @@ function CustomRow({ custom, ruled }: { custom: CustomProvider; ruled: boolean }
             custom.models.map((model) => (
               <span key={model.id} {...stylex.props(ps.modelChip)}>
                 {model.name ?? model.id}
-                <button
-                  type="button"
-                  aria-label={`Remove ${model.id}`}
-                  {...stylex.props(ps.modelChipRemove)}
-                  onClick={() =>
-                    harness.setCustomModels(
-                      custom.id,
-                      custom.models.filter((item) => item.id !== model.id)
-                    )
-                  }
-                >
-                  <X size={10} />
-                </button>
               </span>
             ))
           ) : (
             <span {...stylex.props(parts.provMeta)}>No models discovered yet</span>
           )}
-          {adding ? (
-            <input
-              {...stylex.props(ps.modelInput)}
-              value={draft}
-              autoFocus
-              placeholder="model id"
-              spellCheck={false}
-              aria-label="Model id"
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') addModel();
-                if (event.key === 'Escape') setAdding(false);
-              }}
-              onBlur={addModel}
-            />
-          ) : (
-            <button type="button" {...stylex.props(ps.modelAdd)} onClick={() => setAdding(true)}>
-              <Plus size={11} /> model
-            </button>
-          )}
         </div>
       </div>
       <div {...stylex.props(parts.provActions)}>
+        {credential ? null : (
+          <SignInAction
+            provider={
+              {
+                id: custom.id,
+                name: custom.name,
+                mark: custom.name[0] ?? 'E',
+                tint: '#64748b',
+                kind: 'custom',
+                auth: ['key'],
+                blurb: custom.baseUrl,
+              } as Provider
+            }
+            method="api_key"
+          />
+        )}
         <button
           type="button"
           {...stylex.props(parts.iconBtn)}
           aria-label={`Remove ${custom.name}`}
           title="Remove"
-          onClick={() => harness.removeCustom(custom.id)}
+          onClick={() => {
+            void sorbet.deleteEndpoint(custom.id);
+          }}
         >
           <Trash2 size={13} />
         </button>
@@ -608,32 +401,31 @@ function AddEndpointForm({ onDone }: { onDone: () => void }) {
   const [name, setName] = useState('');
   const [protocol, setProtocol] = useState<EndpointProtocol>('openai-completions');
   const [baseUrl, setBaseUrl] = useState('https://');
-  const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  const valid = name.trim() && /^https?:\/\/\S+$/.test(baseUrl.trim()) && key.trim();
+  const valid = name.trim() && /^https?:\/\/\S+$/.test(baseUrl.trim());
 
   const submit = async () => {
     if (!valid || busy) return;
     setBusy(true);
     setError('');
     try {
-      const models = await discoverEndpointModels({
-        protocol,
-        baseUrl: baseUrl.trim(),
-        key: key.trim(),
-      });
-      const id = harness.addCustom({
+      // Sorbet assigns the endpoint's id and can discover its models; the key
+      // is the sign-in the row then offers on its own.
+      await sorbet.createEndpoint({
         name: name.trim(),
         protocol,
         baseUrl: baseUrl.trim(),
-        key: key.trim(),
       });
-      if (models.length) harness.setCustomModels(id, models);
+      try {
+        await sorbet.reprobe();
+      } catch {
+        // The endpoint is stored; its sign-in method simply lands on the next probe.
+      }
       onDone();
     } catch {
-      setError('Could not reach the endpoint. Add it anyway and set its models by hand.');
+      setError('Could not reach the agent. The endpoint is not stored.');
     } finally {
       setBusy(false);
     }
@@ -681,21 +473,13 @@ function AddEndpointForm({ onDone }: { onDone: () => void }) {
           <span {...stylex.props(ps.fieldLabel)}>Base URL</span>
           <Input size="small" value={baseUrl} onValueChange={(value) => setBaseUrl(value)} />
         </label>
-        <label {...stylex.props(ps.field)}>
-          <span {...stylex.props(ps.fieldLabel)}>API key</span>
-          <PasswordInput
-            size="small"
-            value={key}
-            autoComplete="off"
-            onValueChange={(value) => setKey(value)}
-            labels={{ show: 'Show the key', hide: 'Hide the key' }}
-          />
-        </label>
       </div>
 
       <div {...stylex.props(ps.endpointFoot)}>
         <span {...stylex.props(parts.provMeta)}>
-          {busy ? 'Reading the models it serves…' : 'Models are read from the endpoint.'}
+          {busy
+            ? 'Saving on this machine…'
+            : 'The endpoint is stored on the agent; its row then takes the key.'}
         </span>
         {error ? (
           <span {...stylex.props(parts.error)} role="alert">
@@ -725,10 +509,24 @@ function AddEndpointForm({ onDone }: { onDone: () => void }) {
 
 export function ModelsPanel({ scope }: { scope: Scope }) {
   const { state, config, set } = useScoped(scope);
-  const pool = availableModels(state);
+  const capabilities = useDeviceCapabilities();
   const connected = Object.keys(state.credentials).length;
+  const effortOption =
+    capabilities.effortOption?.type === 'select' && capabilities.effortOption.options.length
+      ? capabilities.effortOption
+      : null;
+  // The agent's current effort is the initial pick until the user chooses one;
+  // a stored pick the agent does not advertise selects nothing rather than
+  // pointing at the wrong rung.
+  const effortValue: string | null =
+    effortOption &&
+    (effortOption.options.some((option) => option.value === config.effort)
+      ? config.effort
+      : typeof effortOption.currentValue === 'string'
+        ? effortOption.currentValue
+        : config.effort);
 
-  if (!pool.length) {
+  if (!capabilities.models.length) {
     return (
       <div {...stylex.props(parts.panel)}>
         <div {...stylex.props(parts.emptyInline)}>
@@ -760,18 +558,30 @@ export function ModelsPanel({ scope }: { scope: Scope }) {
         <div {...stylex.props(parts.listRuled)}>
           <Row
             title="Reasoning effort"
-            hint="Higher thinks longer before acting; slower and costlier."
+            hint={
+              effortOption
+                ? 'Higher thinks longer before acting; slower and costlier.'
+                : 'Not advertised by this agent.'
+            }
             badge={<Override scope={scope} keys={['effort']} />}
           >
             <Segmented
               label="Reasoning effort"
-              value={config.effort}
+              value={effortValue}
               onChange={(v) => set('effort', v)}
-              options={[
-                { id: 'low', label: 'Low' },
-                { id: 'medium', label: 'Medium' },
-                { id: 'high', label: 'High' },
-              ]}
+              disabled={!effortOption}
+              options={
+                effortOption
+                  ? effortOption.options.map((option) => ({
+                      id: option.value,
+                      label: option.name,
+                    }))
+                  : [
+                      { id: 'low', label: 'Low' },
+                      { id: 'medium', label: 'Medium' },
+                      { id: 'high', label: 'High' },
+                    ]
+              }
             />
           </Row>
         </div>
@@ -799,69 +609,95 @@ export function ModelsPanel({ scope }: { scope: Scope }) {
 }
 
 /**
- * The model picker, in the shape the harness drew it: the provider's mark and
- * the window on the closed control, then one group per provider with the tier
- * and context beside each model. The list is the design system's Select; the
- * content is the one that belongs to choosing a model.
+ * The model picker, in the shape the harness drew it: a mark and a detail on
+ * the closed control, then one group per provider the models name. The pool is
+ * the agent's real list — its model select when it advertises one, else the
+ * probe's model list — so an option's own group becomes the provider group,
+ * and ungrouped ids are read back to the catalogue's providers by prefix.
  */
 function ModelSelect({ value, onChange }: { value: string; onChange: (id: string) => void }) {
-  const state = useHarness();
-  const pool = availableModels(state);
-  const current = pool.find((model) => model.id === value);
-  // User-defined endpoints are providers too, so the list is the static ones
-  // plus whatever the user added.
-  const connected: Provider[] = [
-    ...PROVIDERS.filter((provider) => state.credentials[provider.id]),
-    ...state.customs
-      .filter((provider) => state.credentials[provider.id])
-      .map(
-        (provider) =>
-          ({
-            id: provider.id,
-            name: provider.name,
-            mark: provider.name[0] ?? 'E',
-            tint: '#64748b',
-            kind: 'custom',
-            auth: ['key'],
-            blurb: provider.baseUrl,
-          }) as Provider
-      ),
-  ];
-  const currentProvider = connected.find((provider) => provider.id === current?.provider);
-  const items = pool.map((model) => ({ value: model.id, label: model.name }));
+  const { models } = useDeviceCapabilities();
+  const current = models.find((model) => model.id === value);
+  const groups = modelGroups(models);
+  const currentGroup = current
+    ? groups.find((group) => group.key === modelGroupKey(current))
+    : null;
+  const items = models.map((model) => ({ value: model.id, label: model.name }));
 
   return (
     <Select.Root items={items} value={value} onValueChange={(next) => onChange(String(next))}>
       <Select.Trigger size="small">
-        {currentProvider ? <ProviderMark provider={currentProvider} size={16} /> : null}
-        <Select.Value />
-        {current ? <span {...stylex.props(ps.modelMeta)}>{current.context}</span> : null}
+        {currentGroup?.provider ? (
+          <ProviderMark provider={currentGroup.provider} size={16} />
+        ) : null}
+        <Select.Value placeholder="Connect a provider first" />
+        {current?.meta ? <span {...stylex.props(ps.modelMeta)}>{current.meta}</span> : null}
       </Select.Trigger>
       <Select.Content align="end">
-        {connected.map((provider) => (
-          <Select.Group key={provider.id}>
-            <Select.GroupLabel>{provider.name}</Select.GroupLabel>
-            {pool
-              .filter((model) => model.provider === provider.id)
-              .map((model) => (
-                <Select.Item
-                  key={model.id}
-                  value={model.id}
-                  endContent={
-                    <span {...stylex.props(ps.modelMeta)}>
-                      {model.tier} · {model.context}
-                    </span>
-                  }
-                >
-                  <ProviderMark provider={provider} size={14} />
-                  {model.name}
-                </Select.Item>
-              ))}
+        {groups.map((group) => (
+          <Select.Group key={group.key}>
+            <Select.GroupLabel>{group.label}</Select.GroupLabel>
+            {group.models.map((model) => (
+              <Select.Item
+                key={model.id}
+                value={model.id}
+                endContent={
+                  model.meta ? <span {...stylex.props(ps.modelMeta)}>{model.meta}</span> : undefined
+                }
+              >
+                {group.provider ? <ProviderMark provider={group.provider} size={14} /> : null}
+                {model.name}
+              </Select.Item>
+            ))}
           </Select.Group>
         ))}
       </Select.Content>
     </Select.Root>
   );
+}
+
+/**
+ * Which catalogue provider a model id belongs to. Sorbet's ids are
+ * `provider/model` (`anthropic/claude-opus-4-5`); a bare id still matches the
+ * catalogue's own models. Ungrouped entries get one shared group — ACP does
+ * not name the provider, so inventing one would be a guess.
+ */
+const modelProvider = (id: string): Provider | undefined => {
+  const owner = id.split('/')[0];
+  return (
+    PROVIDERS.find((provider) => provider.id === owner) ??
+    PROVIDERS.find((provider) => provider.id === MODELS.find((model) => model.id === id)?.provider)
+  );
+};
+
+const modelGroupKey = (model: HarnessModel): string =>
+  model.group ?? modelProvider(model.id)?.id ?? 'models';
+
+interface ModelGroup {
+  key: string;
+  label: string;
+  provider?: Provider;
+  models: HarnessModel[];
+}
+
+/** The select's groups, in pool order: real group names first, catalogue providers, then the rest. */
+function modelGroups(models: HarnessModel[]): ModelGroup[] {
+  const groups = new Map<string, ModelGroup>();
+  for (const model of models) {
+    const key = modelGroupKey(model);
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        key,
+        label: model.group ?? modelProvider(model.id)?.name ?? 'Models',
+        provider: model.group ? undefined : modelProvider(model.id),
+        models: [],
+      };
+      groups.set(key, group);
+    }
+    group.models.push(model);
+  }
+  return [...groups.values()];
 }
 
 /* ── plugins ───────────────────────────────────────────────────────────── */
