@@ -20,6 +20,8 @@ export type AutomationSessionAdmission = {
   origin: AutomationOrigin;
 };
 
+export type SessionEditAccess = 'yes' | 'no' | 'unknown';
+
 /** Existing Session owner; Automations cannot commit lifecycle changes through metadata alone. */
 export class SessionAutomationAuthority {
   constructor(
@@ -31,6 +33,7 @@ export class SessionAutomationAuthority {
       hasGoal(sessionId: SessionId): Promise<boolean>;
       nativeActivity(sessionId: SessionId): 'idle' | 'running' | 'background' | 'unknown';
       author(sessionId: SessionId): string | undefined;
+      canEdit(sessionId: SessionId, userId: string): Promise<SessionEditAccess>;
     }
   ) {}
 
@@ -52,6 +55,9 @@ export class SessionAutomationAuthority {
   }
   author(sessionId: SessionId): string | undefined {
     return this.deps.author(sessionId);
+  }
+  canEdit(sessionId: SessionId, userId: string): Promise<SessionEditAccess> {
+    return this.deps.canEdit(sessionId, userId);
   }
   setAdmission(
     admit: ((args: AutomationSessionAdmission) => Promise<boolean>) | undefined,
@@ -103,7 +109,9 @@ export class SessionAutomationAuthority {
   ): Promise<ConditionObservation> {
     if (meta.machineId !== this.deps.machineId)
       return { value: 'unknown', reason: 'owner_unavailable' };
-    if (meta.userId !== userId) return { value: 'no', reason: 'permission_denied' };
+    const access = await this.deps.canEdit(meta.id, userId);
+    if (access === 'no') return { value: 'no', reason: 'permission_denied' };
+    if (access === 'unknown') return { value: 'unknown', reason: 'permission_unconfirmed' };
     const execution = this.deps.execution.getExecutionSnapshot(meta.id);
     if (this.deps.execution.hasBlockedAutomationExecution(meta.id) || execution.releaseBlocked)
       return { value: 'unknown', reason: 'execution_release_unconfirmed' };

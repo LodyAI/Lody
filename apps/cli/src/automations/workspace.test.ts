@@ -13,6 +13,7 @@ import { getSessionRoomId, type SessionId } from '@lody/shared';
 import {
   remoteAutomationSecretEnvelopeSchema,
   type RemoteAutomationIntent,
+  type RemoteAutomationOperation,
 } from '@lody/shared/automations';
 import type { AutomationSessionAdmission } from '@/session/session-automation-authority';
 import type { SessionTurnInputConfig } from '@lody/shared';
@@ -70,8 +71,12 @@ async function workspaceFixture(
     close: async () => {},
   };
   let admit: ((args: AutomationSessionAdmission) => Promise<boolean>) | undefined;
+  const editors = new Set(['user']);
+  const authors = new Map([['session-a', 'user']]);
   const authority = {
-    author: (sessionId: string) => (sessionId === 'session-a' ? 'user' : undefined),
+    author: (sessionId: string) => authors.get(sessionId),
+    canEdit: async (_sessionId: string, userId: string) =>
+      editors.has(userId) ? ('yes' as const) : ('no' as const),
     setPendingWork: noop,
     setObservations: noop,
     setAdmission: (check: typeof admit) => {
@@ -126,7 +131,12 @@ async function workspaceFixture(
     logger,
   });
   owners.push(handle);
-  return Object.assign(handle, { testRoot: root, testDocument: doc });
+  return Object.assign(handle, {
+    testRoot: root,
+    testDocument: doc,
+    testEditors: editors,
+    testAuthors: authors,
+  });
 }
 describe('Automation control authority', () => {
   it('executes a registered condition in the Session workspace', async () => {
@@ -427,7 +437,76 @@ describe('Automation control authority', () => {
       })
     ).rejects.toThrow('AUTOMATION_REMOTE_AUTH_UNAVAILABLE');
   });
-  it('rechecks Session ownership after verification and admits a proof at most once', async () => {
+  it('lets a teammate who can edit the Session manage its automations remotely as the author', async () => {
+    const host = await workspaceFixture(
+      { id: 'session-a', machineId: 'machine', userId: 'teammate', collaborationStopped: false },
+      undefined,
+      async () => ({ requesterUserId: 'teammate', expiresAt: Date.now() + 60_000 })
+    );
+    host.testEditors.add('teammate');
+    const nonce = host.remoteControlNonce;
+    if (!nonce) throw new Error('missing remote nonce');
+    const responseKey = (await createRpcSecretRecipient()).publicKey;
+    const remote = (operation: RemoteAutomationOperation) =>
+      host.remoteControl({
+        sessionId: 'session-a',
+        requesterUserId: 'teammate',
+        responseKey,
+        operation,
+        proof: { runtimeNonce: nonce, requestId: crypto.randomUUID(), requestToken: 'valid' },
+      });
+    const ownerWait = host.ledger.registerWait(
+      { program: '() => false', intervalMs: 30_000 },
+      'session-a',
+      'user',
+      1
+    );
+    expect(await remote({ type: 'configure', settings: { recoverCapacity: true } })).toMatchObject({
+      type: 'settings',
+      settings: { recoverCapacity: true },
+    });
+    expect(host.ledger.rules().find((rule) => rule.name === 'recover-capacity')).toMatchObject({
+      ownerUserId: 'teammate',
+    });
+    expect(await remote({ type: 'list' })).toMatchObject({
+      waits: [expect.objectContaining({ id: ownerWait.id })],
+    });
+    expect(await remote({ type: 'cancel', id: ownerWait.id })).toEqual({ type: 'cancel' });
+    expect(host.ledger.wait(ownerWait.id)?.state).toBe('cancelled');
+  });
+  it('keeps a workspace member without edit access out of the Session automations', async () => {
+    const host = await workspaceFixture(undefined, undefined, async () => ({
+      requesterUserId: 'reader',
+      expiresAt: Date.now() + 60_000,
+    }));
+    const nonce = host.remoteControlNonce;
+    if (!nonce) throw new Error('missing remote nonce');
+    const responseKey = (await createRpcSecretRecipient()).publicKey;
+    const wait = host.ledger.registerWait(
+      { program: '() => false', intervalMs: 30_000 },
+      'session-a',
+      'user',
+      1
+    );
+    for (const operation of [
+      { type: 'list' },
+      { type: 'configure', settings: { recoverCapacity: true } },
+      { type: 'cancel', id: wait.id },
+    ] satisfies RemoteAutomationOperation[]) {
+      await expect(
+        host.remoteControl({
+          sessionId: 'session-a',
+          requesterUserId: 'reader',
+          responseKey,
+          operation,
+          proof: { runtimeNonce: nonce, requestId: crypto.randomUUID(), requestToken: 'valid' },
+        })
+      ).rejects.toThrow('AUTOMATION_PERMISSION_DENIED');
+    }
+    expect(host.ledger.rules().filter((rule) => rule.name === 'recover-capacity')).toEqual([]);
+    expect(host.ledger.wait(wait.id)?.state).toBe('waiting');
+  });
+  it('rechecks the requester’s edit access after verification and admits a proof at most once', async () => {
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
     const meta = {
@@ -439,12 +518,13 @@ describe('Automation control authority', () => {
     const host = await workspaceFixture(meta, undefined, async () => {
       entered.resolve();
       await release.promise;
-      return { requesterUserId: 'user', expiresAt: Date.now() + 60_000 };
+      return { requesterUserId: 'teammate', expiresAt: Date.now() + 60_000 };
     });
+    host.testEditors.add('teammate');
     if (!host.remoteControlNonce) throw new Error('missing remote nonce');
     const input = {
       sessionId: 'session-a',
-      requesterUserId: 'user',
+      requesterUserId: 'teammate',
       responseKey: (await createRpcSecretRecipient()).publicKey,
       operation: { type: 'configure' as const, settings: { recoverCapacity: true } },
       proof: {
@@ -456,7 +536,7 @@ describe('Automation control authority', () => {
     const first = host.remoteControl(input);
     const duplicate = host.remoteControl(input);
     await entered.promise;
-    meta.userId = 'other';
+    host.testEditors.delete('teammate');
     release.resolve();
     const results = await Promise.allSettled([first, duplicate]);
     expect(results.every((item) => item.status === 'rejected')).toBe(true);
@@ -695,6 +775,28 @@ describe('Automation control authority', () => {
     await expect(host.command({ type: 'list' }, 'inactive-session')).rejects.toThrow(
       'AUTOMATION_ACTIVE_AUTHOR_REQUIRED'
     );
+  });
+  it('lets an Agent working for a teammate manage automations in a Session the teammate can edit', async () => {
+    const host = await workspaceFixture({
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'teammate',
+      collaborationStopped: false,
+    });
+    host.testEditors.add('teammate');
+    host.testAuthors.set('session-a', 'teammate');
+    const wait = (await host.command(
+      { type: 'register', program: '() => false', intervalMs: 30_000 },
+      'session-a'
+    )) as { id: string };
+    expect(host.ledger.wait(wait.id)?.ownerUserId).toBe('teammate');
+    expect(await host.command({ type: 'list', sessionId: 'session-a' }, 'session-a')).toEqual([
+      expect.objectContaining({ id: wait.id }),
+    ]);
+    host.testEditors.delete('teammate');
+    await expect(
+      host.command({ type: 'list', sessionId: 'session-a' }, 'session-a')
+    ).rejects.toThrow('AUTOMATION_PERMISSION_DENIED');
   });
   it('joins a failed command during shutdown without blocking unrelated resource cleanup', async () => {
     const host = await workspaceFixture();

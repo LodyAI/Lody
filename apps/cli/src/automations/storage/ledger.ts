@@ -242,12 +242,12 @@ export class AutomationLedger {
   wait(id: string): AutomationWait | undefined {
     return this.read('waits', id);
   }
-  waits(userId: string, sessionId?: string): AutomationWait[] {
+  waits(userId: string | undefined, sessionId?: string): AutomationWait[] {
     return (
       this.connection.raw
-        .prepare(`SELECT payload FROM waits WHERE json_extract(payload,'$.ownerUserId')=?
+        .prepare(`SELECT payload FROM waits WHERE (? IS NULL OR json_extract(payload,'$.ownerUserId')=?)
       AND (? IS NULL OR json_extract(payload,'$.sessionId')=?) ORDER BY json_extract(payload,'$.createdAt') DESC,id`)
-        .all(userId, sessionId ?? null, sessionId ?? null) as JsonRow[]
+        .all(userId ?? null, userId ?? null, sessionId ?? null, sessionId ?? null) as JsonRow[]
     ).map((row) => JSON.parse(row.payload) as AutomationWait);
   }
   dueWaits(now: number, limit = 4): AutomationWait[] {
@@ -778,7 +778,7 @@ export class AutomationLedger {
     return !!receipt || !!work || !!wait;
   }
   activityPage(
-    userId: string,
+    userId: string | undefined,
     sessionId: string | undefined,
     limit: number,
     before?: { updatedAt: number; id: string }
@@ -789,11 +789,12 @@ export class AutomationLedger {
       UNION ALL SELECT 'handler' AS kind,id,COALESCE(json_extract(payload,'$.updatedAt'),0) AS updatedAt,payload FROM deliveries
       UNION ALL SELECT 'work' AS kind,id,COALESCE(json_extract(payload,'$.updatedAt'),0) AS updatedAt,payload FROM work
       UNION ALL SELECT 'release' AS kind,id,json_extract(payload,'$.observedAt') AS updatedAt,payload FROM turn_observations
-    ) WHERE COALESCE(json_extract(payload,'$.rule.ownerUserId'),json_extract(payload,'$.ownerUserId'),json_extract(payload,'$.userId'))=?
+    ) WHERE (? IS NULL OR COALESCE(json_extract(payload,'$.rule.ownerUserId'),json_extract(payload,'$.ownerUserId'),json_extract(payload,'$.userId'))=?)
       AND (? IS NULL OR COALESCE(json_extract(payload,'$.rule.scope.sessionId'),json_extract(payload,'$.sessionId'))=?)
       AND (updatedAt<? OR (updatedAt=? AND id>?)) ORDER BY updatedAt DESC,id LIMIT ?`)
       .all(
-        userId,
+        userId ?? null,
+        userId ?? null,
         sessionId ?? null,
         sessionId ?? null,
         before?.updatedAt ?? Number.MAX_SAFE_INTEGER,
@@ -970,26 +971,25 @@ export class AutomationLedger {
   configureSession(
     action: () => void,
     sessionId: string,
-    userId: string,
     turnId: string | undefined,
     now: number
   ): void {
     this.connection.withImmediate(() => {
       action();
-      if (turnId) this.activateCurrentCapacityFailure(sessionId, userId, turnId, now);
+      if (turnId) this.activateCurrentCapacityFailure(sessionId, turnId, now);
     });
   }
-  activateCurrentCapacityFailure(
-    sessionId: string,
-    userId: string,
-    turnId: string,
-    now: number
-  ): void {
+  activateCurrentCapacityFailure(sessionId: string, turnId: string, now: number): void {
     this.connection.withImmediate(() => {
-      const work = this.sessionWork(sessionId, userId).find(
-        (item) =>
-          item.turnId === turnId && item.state === 'blocked_on_capacity' && !item.invocationId
-      );
+      const work = (
+        this.connection.raw
+          .prepare(
+            "SELECT payload FROM work WHERE json_extract(payload,'$.sessionId')=? AND json_extract(payload,'$.turnId')=?"
+          )
+          .all(sessionId, turnId) as JsonRow[]
+      )
+        .map((row) => JSON.parse(row.payload) as PendingWork)
+        .find((item) => item.state === 'blocked_on_capacity' && !item.invocationId);
       if (!work) return;
       const existing = this.connection.raw
         .prepare(

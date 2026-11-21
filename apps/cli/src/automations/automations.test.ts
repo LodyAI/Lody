@@ -142,14 +142,14 @@ describe('Automation durability', () => {
       data: { workId: work.id, bindingId: work.bindingId },
     });
     configureSessionPolicies(ledger, 'session', 'user', { recoverCapacity: true }, 101);
-    ledger.activateCurrentCapacityFailure('session', 'user', 'newer', 102);
+    ledger.activateCurrentCapacityFailure('session', 'newer', 102);
     expect(ledger.deliveries()).toHaveLength(0);
-    ledger.activateCurrentCapacityFailure('session', 'user', 'current', 103);
+    ledger.activateCurrentCapacityFailure('session', 'current', 103);
     expect(ledger.deliveries()).toHaveLength(1);
     expect(ledger.deliveries()[0]?.event.data.workId).toBe(work.id);
     ledger.close();
     const reopened = open();
-    reopened.activateCurrentCapacityFailure('session', 'user', 'current', 104);
+    reopened.activateCurrentCapacityFailure('session', 'current', 104);
     expect(reopened.deliveries()).toHaveLength(1);
   });
 
@@ -162,7 +162,6 @@ describe('Automation durability', () => {
           throw new Error('activation failed');
         },
         'session',
-        'user',
         'current',
         100
       )
@@ -203,6 +202,19 @@ describe('Automation durability', () => {
     }
     expect(ledger.sessionEvents('session', -1, 200)).toHaveLength(2);
     expect(ledger.stagedTurns(100)).toEqual([]);
+  });
+
+  it('observes a turn a teammate sent in a Session on this machine', async () => {
+    const { ledger } = fixture();
+    ledger.stageTurn({ ...fact(1), userId: 'teammate' });
+    await reconcileSessionTurnsLegacy(
+      ledger,
+      manager,
+      () => 'normal',
+      () => {},
+      100
+    );
+    expect(ledger.sessionEvents('session', -1, 200)).toMatchObject([{ subject: 'input-1' }]);
   });
 
   it('retries pending release and failed reads across restart without starving the next batch', async () => {
@@ -1532,7 +1544,9 @@ describe('Scoped observations and admission evidence', () => {
       manager: {
         repo: { getDocMeta: async () => ({ meta }) },
       } as unknown as import('@/lib/loro/doc').LoroDocumentManager,
-      authority: {} as import('@/session/session-automation-authority').SessionAutomationAuthority,
+      authority: {
+        canEdit: async () => 'yes',
+      } as unknown as import('@/session/session-automation-authority').SessionAutomationAuthority,
     };
     expect(
       await readAutomationContext({
