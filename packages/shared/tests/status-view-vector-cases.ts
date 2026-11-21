@@ -337,6 +337,28 @@ export const COMMAND_CASES: CommandCase[] = [
     command: { type: 'move', sessionId: 'pinned-row', to: { area: 'focus' }, beforeId: 'f2' },
   },
   {
+    name: 'move-in-focus-over-read-only-unkeyed-row-is-refused',
+    description:
+      'A drop below a row without a key that the member cannot manage would have to write that row, so the move plans nothing.',
+    state: state([
+      session('k1', { orderKey: K1 }),
+      session('ro-unkeyed', { canManage: false }),
+      session('mine'),
+    ]),
+    command: { type: 'move', sessionId: 'k1', to: { area: 'focus' }, beforeId: null },
+  },
+  {
+    name: 'move-in-focus-leaves-read-only-woken-row-unkeyed',
+    description:
+      'A woken row the member cannot manage keeps floating at the top without a key; the move still lands.',
+    state: state([
+      session('ro-woken', { canManage: false, snoozedUntil: NOW - HOUR }),
+      session('f1', { orderKey: K1 }),
+      session('f2', { orderKey: K2 }),
+    ]),
+    command: { type: 'move', sessionId: 'f2', to: { area: 'focus' }, beforeId: 'f1' },
+  },
+  {
     name: 'move-into-section-keys-unkeyed-rows-above',
     description:
       'Dropping below rows without keys gives those above the drop keys first, in their current order.',

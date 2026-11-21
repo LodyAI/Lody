@@ -60,6 +60,11 @@ import {
 } from '@lody/shared';
 import { useWorkspaceCatalog } from '@/hooks/use-workspace-catalog';
 import { useStatusViewWritable } from '@/hooks/use-status-view-writable';
+import {
+  focusDropBeforeId,
+  pinnedDropBeforeId,
+  sectionDropBeforeId,
+} from '@/lib/status-view-state';
 import type { SidebarPinSectionActions, SidebarPinnedSection } from './sidebar-pinned-sections';
 import { useTranslation } from 'react-i18next';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -2939,45 +2944,43 @@ export function LoroAppSidebar({
   const reportStatusViewError = useCallback((error: unknown) => {
     toast.error(error instanceof Error ? error.message : String(error));
   }, []);
-  /** Plans against what the sidebar shows; the shared planner resolves the drop by neighbor. */
+  /**
+   * Plans against what the sidebar shows. A drop the planner refuses (it would
+   * reorder conversations this member cannot manage) says so instead of
+   * snapping back silently.
+   */
   const runSidebarStatusViewCommand = useCallback(
-    (command: StatusViewCommand) => runStatusViewCommand(command, statusViewInputRef.current),
-    [runStatusViewCommand]
+    async (command: StatusViewCommand) => {
+      const writes = await runStatusViewCommand(command, statusViewInputRef.current);
+      if (command.type === 'move' && writes.length === 0) {
+        throw new Error(t('sidebar.status.moveRefused'));
+      }
+      return writes;
+    },
+    [runStatusViewCommand, t]
   );
   const pinSectionActions = useMemo<SidebarPinSectionActions | undefined>(() => {
     if (!runtime || !statusViewWritable) return undefined;
-    /** The pinned row a drop at `toIndex` lands in front of; carried opened rows never count. */
-    const pinnedBefore = (sectionId: string | null, itemId: string, toIndex: number) => {
-      const entry =
-        statusLayoutRef.current.pinned.find((candidate) => candidate.sectionId === sectionId) ??
-        statusLayoutRef.current.pinned[0];
-      const pinnedIds = new Set(
-        statusViewInputRef.current.sessions
-          .filter((session) => session.isPinned)
-          .map((session) => session.id)
-      );
-      const ids = flattenStatusViewRows(entry?.rows ?? [])
-        .map((row) => row.id)
-        .filter((id) => pinnedIds.has(id) && id !== itemId);
-      return ids[Math.max(0, toIndex)] ?? null;
-    };
     return {
       onDropItem: (itemId, sectionId, toIndex) => {
         void runSidebarStatusViewCommand({
           type: 'move',
           sessionId: itemId,
           to: { area: 'pinned', sectionId },
-          beforeId: pinnedBefore(sectionId, itemId, toIndex),
+          beforeId: pinnedDropBeforeId(
+            statusLayoutRef.current,
+            statusViewInputRef.current.sessions,
+            sectionId,
+            itemId,
+            toIndex
+          ),
         }).catch(reportStatusViewError);
       },
       onMoveSection: (sectionId, toIndex) => {
-        const others = statusLayoutRef.current.pinned
-          .flatMap((entry) => (entry.sectionId === null ? [] : [entry.sectionId]))
-          .filter((id) => id !== sectionId);
         void runSidebarStatusViewCommand({
           type: 'moveSection',
           sectionId,
-          beforeId: others[toIndex] ?? null,
+          beforeId: sectionDropBeforeId(statusLayoutRef.current, sectionId, toIndex),
         }).catch(reportStatusViewError);
       },
       onCreateSection: async (name, moveItemId) => {
@@ -4075,15 +4078,11 @@ export function LoroAppSidebar({
 
   const handleDropFocusItem = useCallback(
     (sessionId: string, toIndex: number) => {
-      // `toIndex` counts top-level Focus rows without the dragged one.
-      const others = statusLayoutRef.current.focus
-        .map((row) => row.id)
-        .filter((id) => id !== sessionId);
       void runSidebarStatusViewCommand({
         type: 'move',
         sessionId,
         to: { area: 'focus' },
-        beforeId: others[Math.max(0, toIndex)] ?? null,
+        beforeId: focusDropBeforeId(statusLayoutRef.current, sessionId, toIndex),
       }).catch(reportStatusViewError);
     },
     [reportStatusViewError, runSidebarStatusViewCommand]

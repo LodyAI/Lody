@@ -94,7 +94,10 @@ navigation, and `hooks/use-session-actions.ts` performs the planned writes. Focu
 mounted while empty as a drop target, only Settled folds behind Show all, and tier
 collapse and Show all share Updated's persisted per-bucket maps. Members who cannot
 write shared state (an encrypted workspace's Guest, a read-only membership) are not
-offered Status actions or section management (`hooks/use-status-view-writable.ts`).
+offered Status actions or section management (`hooks/use-status-view-writable.ts`). A
+drop the planner refuses because it would reorder conversations the member cannot manage
+snaps back with a notice rather than silently. `lib/status-view-state.ts` turns a drop slot
+into the neighbor the planner takes, for the sidebar and the Storybook playgrounds alike.
 
 ## Entry points and layout
 

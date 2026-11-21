@@ -2173,6 +2173,175 @@
       ]
     },
     {
+      "name": "move-in-focus-over-read-only-unkeyed-row-is-refused",
+      "description": "A drop below a row without a key that the member cannot manage would have to write that row, so the move plans nothing.",
+      "state": {
+        "sessions": [
+          {
+            "id": "k1",
+            "title": "k1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "ro-unkeyed",
+            "title": "ro-unkeyed",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": false,
+            "canPrefer": true
+          },
+          {
+            "id": "mine",
+            "title": "mine",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "move",
+        "sessionId": "k1",
+        "to": {
+          "area": "focus"
+        },
+        "beforeId": null
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "move-in-focus-leaves-read-only-woken-row-unkeyed",
+      "description": "A woken row the member cannot manage keeps floating at the top without a key; the move still lands.",
+      "state": {
+        "sessions": [
+          {
+            "id": "ro-woken",
+            "title": "ro-woken",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795215600000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": false,
+            "canPrefer": true
+          },
+          {
+            "id": "f1",
+            "title": "f1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f2",
+            "title": "f2",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "move",
+        "sessionId": "f2",
+        "to": {
+          "area": "focus"
+        },
+        "beforeId": "f1"
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "f2",
+          "access": "manage",
+          "patch": {
+            "orderKey": "7E80112233"
+          }
+        }
+      ]
+    },
+    {
       "name": "move-into-section-keys-unkeyed-rows-above",
       "description": "Dropping below rows without keys gives those above the drop keys first, in their current order.",
       "state": {
