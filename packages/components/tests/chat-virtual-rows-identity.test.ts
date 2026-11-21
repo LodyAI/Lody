@@ -5,7 +5,11 @@ import {
   getCoordinatorMessageSearchBlockId,
   getMessageItemPrefix,
 } from '../src/lib/session-chat-search';
-import { buildChatVirtualRows, type ChatStreamItem } from '../src/components/ai-gui/view';
+import {
+  buildChatVirtualRows,
+  resolveActiveCoordinatorStatus,
+  type ChatStreamItem,
+} from '../src/components/ai-gui/view';
 
 // Guards the per-turn row cache behind view.tsx `buildChatVirtualRows`: rows for
 // unchanged turns must be reference-stable across rebuilds, or the shallow-compare
@@ -28,7 +32,7 @@ const toolCall = (): MessageContent =>
 
 const makeMessage = (
   id: string,
-  role: 'user' | 'assistant',
+  role: 'user' | 'assistant' | 'system',
   items: MessageContent[],
   finished?: boolean
 ): SessionHistoryParsed =>
@@ -302,5 +306,160 @@ describe('coordinator conversation bubbles and search', () => {
       getCoordinatorMessageSearchBlockId('coord-turn-1', 4),
       getCoordinatorMessageSearchBlockId('coord-turn-1', 6),
     ]);
+  });
+
+  it('shows instant fallback status before the first coordinator output, switches to explicit status, and avoids end-of-turn or stale-daemon flashes', () => {
+    const defaultWorkingLabel = '正在看…';
+    const userTurn = wrap(makeMessage('u-1', 'user', [text('帮我看看 PR 状态')], true));
+
+    // 1. Optimistic send / empty history / trailing user turn -> immediate fallback pill
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [],
+        localUserMessagesCount: 1,
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toEqual({ label: '正在看…', tone: 'primary' });
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn],
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toEqual({ label: '正在看…', tone: 'primary' });
+
+    // 2. Assistant turn started (thinking / lookup tools) before first bubble or status -> fallback pill
+    const thinkingTurn = wrap(
+      makeMessage('a-1', 'assistant', [{ type: 'thought', text: 'Planning' }, toolCall()], false)
+    );
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, thinkingTurn],
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toEqual({ label: '正在看…', tone: 'primary' });
+
+    // 3. Explicit status + opening bubble, even with a trailing `operation_progress` system row -> explicit phrase
+    const dispatchingTurn = wrap(
+      makeMessage(
+        'a-1',
+        'assistant',
+        [
+          { type: 'coordinator_message', id: 'b-open', body: '收到，我去查一下并派发任务。' },
+          { type: 'coordinator_status', status: '正在派发子对话…' },
+        ],
+        false
+      )
+    );
+    const progressSystemRow = wrap(
+      makeMessage(
+        'sys-progress',
+        'system',
+        [
+          {
+            type: 'operation_progress',
+            operationId: 'op-1',
+            operationKind: 'session_create',
+            items: [
+              {
+                target: { sessionId: 'child-1' as SessionId, userTurnId: 'cu-1' },
+                status: 'running',
+              },
+            ],
+          } as unknown as MessageContent,
+        ],
+        true
+      )
+    );
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, dispatchingTurn, progressSystemRow],
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toEqual({ label: '正在派发子对话…', tone: 'primary' });
+
+    // 4. Direct bubble reply with no explicit status -> hides pill while turn wraps up
+    const directReplyTurn = wrap(
+      makeMessage(
+        'a-1',
+        'assistant',
+        [{ type: 'coordinator_message', id: 'b-ans', body: '目前没有未合并的 PR。' }],
+        false
+      )
+    );
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, directReplyTurn],
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toBeNull();
+
+    // 5. Finished assistant turn + trailing passive `operation_progress` while presence drains -> no flash
+    const finishedTurn = wrap(
+      makeMessage(
+        'a-1',
+        'assistant',
+        [
+          { type: 'coordinator_status', status: '正在派发子对话…' },
+          { type: 'coordinator_message', id: 'b-done', body: '已交给天才程序员处理。' },
+        ],
+        true
+      )
+    );
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, finishedTurn, progressSystemRow],
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toBeNull();
+
+    // 6. Async completion receipt wakes coordinator before new assistant row arrives -> fallback pill
+    const completionReceiptRow = wrap(
+      makeMessage(
+        'sys-complete',
+        'system',
+        [
+          {
+            type: 'operation_completion',
+            deliveryId: 'del-1',
+            operationId: 'op-1',
+            operationKind: 'session_create',
+            completion: {},
+          } as unknown as MessageContent,
+        ],
+        true
+      )
+    );
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, finishedTurn, progressSystemRow, completionReceiptRow],
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toEqual({ label: '正在看…', tone: 'primary' });
+
+    // 7. Crashed/idle daemon (`agentActivityLabel: null`) with unfinished turn in history -> never sticks
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, dispatchingTurn],
+        agentActivityLabel: null,
+        defaultWorkingLabel,
+      })
+    ).toBeNull();
+
+    // 8. Permission / question warnings always surface with warning tone
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, directReplyTurn],
+        agentActivityLabel: '等待授权',
+        agentActivityTone: 'warning',
+        defaultWorkingLabel,
+      })
+    ).toEqual({ label: '等待授权', tone: 'warning' });
   });
 });

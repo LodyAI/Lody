@@ -6913,6 +6913,7 @@
   "projectMode.board.acceptFailed": "Could not accept the task",
   "projectMode.changes.label": "Changes",
   "projectMode.changes.details": "Details",
+  "projectMode.coordinator.defaultStatus": "Looking into it…",
   "settings.general.suppressMobilePushWhenFocused.label": "Pause phone notifications while using this computer",
   "settings.general.suppressMobilePushWhenFocused.helper": "While Lody is focused on this computer, finished tasks skip your phone. Permission requests and questions still notify.",
   "sidebar.pinSections.createTitle": "New Section",

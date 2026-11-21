@@ -6900,6 +6900,7 @@
   "projectMode.board.acceptFailed": "验收没有成功",
   "projectMode.changes.label": "本次变更",
   "projectMode.changes.details": "详情",
+  "projectMode.coordinator.defaultStatus": "正在看…",
   "settings.general.suppressMobilePushWhenFocused.label": "使用这台电脑时暂停手机通知",
   "settings.general.suppressMobilePushWhenFocused.helper": "Lody 在这台电脑上处于焦点时，任务完成不再推送到手机。授权请求和提问仍会通知。",
   "sidebar.pinSections.createTitle": "新建分组",

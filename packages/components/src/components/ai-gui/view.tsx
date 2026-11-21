@@ -2042,7 +2042,7 @@ export const SessionChatStreamView = forwardRef<
     // a collapsed activity group carries the status itself: that label
     // shimmers and no separate status row is added below it.
     const liveGroupHeaderRowKey = useMemo(() => {
-      if (!agentActivityLabel || !agentActivityShimmer) return null;
+      if (coordinatorBubbles || !agentActivityLabel || !agentActivityShimmer) return null;
       for (let index = virtualRows.length - 1; index >= 0; index -= 1) {
         const row = virtualRows[index];
         if (row?.type !== 'assistant') return null;
@@ -2054,7 +2054,7 @@ export const SessionChatStreamView = forwardRef<
           : null;
       }
       return null;
-    }, [agentActivityLabel, agentActivityShimmer, virtualRows]);
+    }, [agentActivityLabel, agentActivityShimmer, coordinatorBubbles, virtualRows]);
     // Keep the live status inside the final expanding assistant row's measurement
     // boundary. Streaming Markdown can grow between list commits; a separate
     // absolute status row would retain the previous offset until ResizeObserver
@@ -2063,7 +2063,7 @@ export const SessionChatStreamView = forwardRef<
     // back to those specialized rows. A collapsed live activity group owns the
     // label itself above.
     const liveStatusRowKey = useMemo(() => {
-      if (!agentActivityLabel || liveGroupHeaderRowKey !== null) return null;
+      if (coordinatorBubbles || !agentActivityLabel || liveGroupHeaderRowKey !== null) return null;
       const lastIndex = virtualRows.length - 1;
       const last = virtualRows[lastIndex];
       if (last?.type !== 'assistant' || last.item.message.finished === true) return null;
@@ -2086,62 +2086,46 @@ export const SessionChatStreamView = forwardRef<
         return beforeTrailingFooter.key;
       }
       return last.key;
-    }, [agentActivityLabel, liveGroupHeaderRowKey, virtualRows]);
+    }, [agentActivityLabel, coordinatorBubbles, liveGroupHeaderRowKey, virtualRows]);
     const liveTurnStatus = useMemo<AgentActivityStatusProps | null>(
       () =>
-        agentActivityLabel
+        !coordinatorBubbles && agentActivityLabel
           ? { label: agentActivityLabel, tone: agentActivityTone, shimmer: agentActivityShimmer }
           : null,
-      [agentActivityLabel, agentActivityShimmer, agentActivityTone]
+      [agentActivityLabel, agentActivityShimmer, agentActivityTone, coordinatorBubbles]
     );
     const shouldShowAgentActivityRow =
       shouldShowAgentActivity && liveGroupHeaderRowKey === null && liveStatusRowKey === null;
-    const activeCoordinatorStatus = useMemo(() => {
-      if (!coordinatorBubbles) return null;
-      let unfinishedAssistant: SessionHistoryParsed | null = null;
-      for (let i = items.length - 1; i >= 0; i -= 1) {
-        const candidate = items[i];
-        if (!candidate || candidate.type !== 'message') continue;
-        if (candidate.message.role === 'user') break;
-        if (
-          candidate.message.role === 'assistant' &&
-          candidate.message.finished !== true &&
-          typeof candidate.message.endedAt !== 'number'
-        ) {
-          unfinishedAssistant = candidate.message;
-          break;
-        }
-      }
-      let explicitStatus: string | null = null;
-      if (unfinishedAssistant) {
-        for (let i = unfinishedAssistant.items.length - 1; i >= 0; i -= 1) {
-          const entry = unfinishedAssistant.items[i];
-          if (entry?.type === 'coordinator_status') {
-            explicitStatus = entry.status.trim() || null;
-            break;
-          }
-        }
-      }
-      if (agentActivityTone === 'warning' && agentActivityLabel) {
-        return { label: agentActivityLabel, tone: agentActivityTone };
-      }
-      // Coordinator conversations show only explicit `lody_coordinator_set_status`
-      // updates while the turn is actively working, never regular harness startup,
-      // ACP initialization, thinking/working or finalization labels.
-      if (!unfinishedAssistant || !shouldShowAgentActivity || !explicitStatus) {
-        return null;
-      }
-      return { label: explicitStatus, tone: agentActivityTone };
-    }, [
-      agentActivityLabel,
-      agentActivityTone,
-      coordinatorBubbles,
-      items,
-      shouldShowAgentActivity,
-    ]);
+    const coordinatorDefaultWorkingLabel = t(
+      'projectMode.coordinator.defaultStatus',
+      'Looking into it…'
+    );
+    const activeCoordinatorStatus = useMemo(
+      () =>
+        coordinatorBubbles
+          ? resolveActiveCoordinatorStatus({
+              items,
+              localUserMessagesCount: localUserMessages?.length ?? 0,
+              agentActivityLabel,
+              agentActivityTone,
+              defaultWorkingLabel: coordinatorDefaultWorkingLabel,
+            })
+          : null,
+      [
+        agentActivityLabel,
+        agentActivityTone,
+        coordinatorBubbles,
+        coordinatorDefaultWorkingLabel,
+        items,
+        localUserMessages?.length,
+      ]
+    );
     const hasActivityRow = coordinatorBubbles
       ? activeCoordinatorStatus !== null
       : Boolean(shouldShowAgentActivityRow && agentActivityLabel);
+    const isScrollToLatestWorking = coordinatorBubbles
+      ? Boolean(activeCoordinatorStatus && activeCoordinatorStatus.tone !== 'warning')
+      : Boolean(agentActivityLabel && agentActivityShimmer);
     const leadingRowCount = leadingContent == null ? 0 : 1;
 
     /**
@@ -2621,15 +2605,27 @@ export const SessionChatStreamView = forwardRef<
                     {leadingContent}
                   </div>
                 )}
-                {agentActivityLabel && (
-                  <div className="shrink-0 pt-2">
-                    <AgentActivityRow
-                      label={agentActivityLabel}
-                      tone={agentActivityTone}
-                      shimmer={agentActivityShimmer}
-                      conversationFontSize={conversationFontSize}
-                    />
-                  </div>
+                {coordinatorBubbles ? (
+                  activeCoordinatorStatus ? (
+                    <div className="shrink-0 pt-2">
+                      <CoordinatorWorkingRow
+                        label={activeCoordinatorStatus.label}
+                        tone={activeCoordinatorStatus.tone}
+                        conversationFontSize={conversationFontSize}
+                      />
+                    </div>
+                  ) : null
+                ) : (
+                  agentActivityLabel && (
+                    <div className="shrink-0 pt-2">
+                      <AgentActivityRow
+                        label={agentActivityLabel}
+                        tone={agentActivityTone}
+                        shimmer={agentActivityShimmer}
+                        conversationFontSize={conversationFontSize}
+                      />
+                    </div>
+                  )
                 )}
                 <div className="min-h-0 flex-1">
                   {emptyState ?? (
@@ -2857,7 +2853,7 @@ export const SessionChatStreamView = forwardRef<
                       onClick={scrollToBottom}
                       aria-label={t('sessions.scrollToLatest')}
                     >
-                      {agentActivityLabel && agentActivityShimmer ? (
+                      {isScrollToLatestWorking ? (
                         <Spinner
                           {...stylex.props(
                             scrollToLatestStyles.icon,
@@ -2869,9 +2865,7 @@ export const SessionChatStreamView = forwardRef<
                       <ArrowDown
                         {...stylex.props(
                           scrollToLatestStyles.icon,
-                          !!agentActivityLabel &&
-                            agentActivityShimmer &&
-                            scrollToLatestStyles.workingArrow
+                          isScrollToLatestWorking && scrollToLatestStyles.workingArrow
                         )}
                         aria-hidden="true"
                       />
@@ -6751,6 +6745,114 @@ function CoordinatorReplyBubble({
       </div>
     </div>
   );
+}
+
+export type ActiveCoordinatorStatus = {
+  readonly label: string;
+  readonly tone: AgentActivityTone;
+};
+
+/**
+ * Resolves the coordinator's live working pill.
+ *
+ * - Before the coordinator emits its first bubble or explicit status in an
+ *   active round (optimistic send, pending dispatch, ACP startup/resume, or
+ *   initial model reasoning), immediately show `defaultWorkingLabel` so the
+ *   user gets instant feedback without mechanical harness jargon.
+ * - Once `lody_coordinator_set_status` sets a non-empty phrase, show that phrase.
+ * - Once the coordinator has emitted at least one visible bubble and has no
+ *   active explicit status (or cleared it), hide the pill; also stay hidden
+ *   after the assistant turn finishes while presence drains, even if a passive
+ *   `operation_progress` row sits at the tail of history.
+ */
+export function resolveActiveCoordinatorStatus({
+  items,
+  localUserMessagesCount = 0,
+  agentActivityLabel,
+  agentActivityTone = 'primary',
+  defaultWorkingLabel,
+}: {
+  items: readonly ChatStreamItem[];
+  localUserMessagesCount?: number;
+  agentActivityLabel?: string | null;
+  agentActivityTone?: AgentActivityTone;
+  defaultWorkingLabel: string;
+}): ActiveCoordinatorStatus | null {
+  if (agentActivityTone === 'warning' && agentActivityLabel) {
+    return { label: agentActivityLabel, tone: 'warning' };
+  }
+  if (!agentActivityLabel) {
+    return null;
+  }
+  if (localUserMessagesCount > 0) {
+    return { label: defaultWorkingLabel, tone: agentActivityTone };
+  }
+
+  let unfinishedAssistant: SessionHistoryParsed | null = null;
+  let sawFinishedAssistant = false;
+  let sawWakeAfterFinishedAssistant = false;
+
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const candidate = items[i];
+    if (!candidate || candidate.type !== 'message') continue;
+    const msg = candidate.message;
+    if (msg.role === 'user') {
+      break;
+    }
+    if (msg.role === 'assistant') {
+      if (msg.finished !== true && typeof msg.endedAt !== 'number') {
+        unfinishedAssistant = msg;
+      } else {
+        sawFinishedAssistant = true;
+      }
+      break;
+    }
+    if (msg.role === 'system') {
+      const isWakeReceipt = msg.items.some(
+        (item) =>
+          item.type === 'operation_completion' || item.type === 'operation_completion_batch'
+      );
+      if (isWakeReceipt) {
+        sawWakeAfterFinishedAssistant = true;
+      }
+    }
+  }
+
+  if (!unfinishedAssistant) {
+    if (sawFinishedAssistant && !sawWakeAfterFinishedAssistant) {
+      return null;
+    }
+    return { label: defaultWorkingLabel, tone: agentActivityTone };
+  }
+
+  let explicitStatus: string | null = null;
+  let hasStatusEntry = false;
+  let hasVisibleCoordinatorMessage = false;
+  for (let i = unfinishedAssistant.items.length - 1; i >= 0; i -= 1) {
+    const entry = unfinishedAssistant.items[i];
+    if (!entry) continue;
+    if (!hasStatusEntry && entry.type === 'coordinator_status') {
+      hasStatusEntry = true;
+      explicitStatus = entry.status.trim() || null;
+    }
+    if (
+      !hasVisibleCoordinatorMessage &&
+      entry.type === 'coordinator_message' &&
+      (entry.body.trim().length > 0 ||
+        (entry.images?.length ?? 0) > 0 ||
+        (entry.files?.length ?? 0) > 0)
+    ) {
+      hasVisibleCoordinatorMessage = true;
+    }
+  }
+
+  if (explicitStatus) {
+    return { label: explicitStatus, tone: agentActivityTone };
+  }
+  if (!hasVisibleCoordinatorMessage) {
+    return { label: defaultWorkingLabel, tone: agentActivityTone };
+  }
+  return null;
 }
 
 /**

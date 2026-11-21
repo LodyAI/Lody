@@ -210,17 +210,24 @@ How you talk to the user
 - Each `lody_coordinator_send_message` call becomes one chat bubble. Keep each bubble
   brief and natural, like messaging a colleague: share only intents, questions,
   decisions, and outcomes—never your step-by-step reasoning, tool calls, or raw process.
-- Do not stay silent until the end and send only a final conclusion. Whenever you are
-  about to look something up, check status, or prepare and hand off work, first send a
-  short bubble telling the user what you intend to do next; once you have checked or
-  dispatched it, send a follow-up bubble with the outcome. When no further lookup or
-  action is needed (such as asking a clarifying question or giving a direct reply), one
-  bubble is enough.
-- As soon as you begin working in a turn—and whenever you move to a new step such as
-  looking up a path, checking Roles, inspecting status, or dispatching tasks—call
-  `lody_coordinator_set_status` with a short phrase in the user's language (for example,
-  "正在查找合适的 Role…" or "Checking task status…") so the user sees a live working
-  indicator while waiting.
+- Respond immediately; never leave the user waiting in silence:
+  - Direct reply, clarifying question, or completion report (no lookup or handoff needed):
+    call `lody_coordinator_send_message` right away and end your turn. Do not send a
+    separate acknowledgement bubble first.
+  - Any turn that needs `lody_help`, Role discovery, status checks, quick file lookups, or
+    handing off work: keep initial thinking minimal—decide only your immediate next step,
+    and in your VERY FIRST tool-call batch call `lody_coordinator_send_message` (one short
+    sentence telling the user what you are about to do, such as "收到，我先看下合适的 Role
+    马上安排。" or "I'll check the running tasks right now.") together with
+    `lody_coordinator_set_status` (a short live status phrase in the user's language, such
+    as "正在查找合适的 Role…" or "Checking task status…"). Never call `lody_help`,
+    `lody_agent_role_list`, `lody_session_status_many`, or search/read tools before
+    sending that opening bubble and status; you may include your first `lody_help` or
+    lookup call in the same parallel batch.
+- Update `lody_coordinator_set_status` whenever you move to a new step (such as
+  dispatching tasks). Once you have checked or dispatched the work, send a follow-up
+  bubble via `lody_coordinator_send_message` with the outcome, clear status (pass `""`) or
+  end your turn.
 - `lody_coordinator_send_message` and `lody_coordinator_set_status` can be called
   directly without calling `lody_help` first.
 
@@ -324,7 +331,7 @@ Step 1, built at the owner's request; the four open questions were settled on th
 
 - Task states are derived: Needs you, In progress, To review, Accepted. A finished task stays in To review until the user accepts it (`SessionMeta.coordinatorTaskAcceptedAt` on the task's own metadata); new activity after acceptance sends it back. Task numbers follow creation order among the coordinator's conversations, archived ones included, so a number never moves.
 - In the coordinator's own conversation, every system row about child conversations (creation progress, completion receipts and batches) renders as one "Changes" line listing the tasks it touched with their current state; "Details" shows the original row. History, model input and receipts are unchanged.
-- Plain assistant text, thoughts, tool calls, work duration and regular harness lifecycle labels (starting, ACP initialization, thinking/working, finalizing) stay hidden in the coordinator's conversation. Instead, coordinator conversations receive two dedicated MCP tools (exempt from `lody_help`): `lody_coordinator_send_message` (each call appends one independent Markdown chat bubble, so the coordinator communicates its immediate intent first and follows up with outcomes like a colleague) and `lody_coordinator_set_status` (renders a live dynamic working pill on the coordinator's rail only while an explicit coordinator status is active; `coordinatorSessions` v2).
+- Plain assistant text, thoughts, tool calls, work duration and regular harness lifecycle labels (starting, ACP initialization, thinking/working, finalizing) stay hidden in the coordinator's conversation. Instead, coordinator conversations receive two dedicated MCP tools (exempt from `lody_help`): `lody_coordinator_send_message` (each call appends one independent Markdown chat bubble, with optional zero-copy image/file attachments, so the coordinator communicates its immediate intent first and follows up with outcomes like a colleague) and `lody_coordinator_set_status` (renders a live dynamic working pill on the coordinator's rail; before the first bubble or explicit status arrives in an active round, the UI immediately shows a conversational fallback pill such as "Looking into it…" / "正在看…" so there is no silent gap, switching to explicit status phrases once emitted and hiding as soon as the round settles; `coordinatorSessions` v2).
 - Accepting a task also archives its conversation (the owner's request) while keeping it in the right-hand board's `Accepted` group, which starts collapsed; every group on the right-hand board is collapsible. Conversations on the right-hand board that have an associated pull request show a PR status badge (`#number` + status/CI/mergeable) whose menu exposes all available PR actions directly in place (squash/merge/rebase merge, mark ready for review, resolve conflicts, close/reopen PR, delete branch, copy branch name, open PR tab in the right panel, and open on GitHub), and panel-hosted child conversations also open their PR in a right-panel tab. The coordinator conversation's "Changes" strips resolve archived tasks so their titles, task numbers (`T1`, `T2`…) and `Accepted` state stay intact. Clicking session links, GitHub pull request links or external HTTP(S) links inside the coordinator conversation opens them as tabs in the right-hand panel instead of navigating away from the coordinator. The earlier to-do card inside the coordinator conversation was removed in favor of the right-hand board.
 - The board lists only the coordinator's own tasks; conversations started by hand in the same project stay in the ordinary sidebar (the owner's request). This replaces the earlier "Created manually" rows.
 - A reply was answered with a new conversation instead of being forwarded. The receipts the coordinator reads carry each task's session id, so the cause was the prompt: "every task gets a new independent conversation" read as applying to replies, and the follow-up rule was one line late in the list. The prompt now decides first whether a message continues an existing task and sends it there with `lody_session_chat`, and only then creates new work.

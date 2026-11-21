@@ -265,6 +265,11 @@ const streamItems: ChatStreamItem[] = [
   ]),
 ].map((item, turnIndex) => ({ ...item, turnIndex }));
 
+const startingStreamItems: ChatStreamItem[] = [
+  ...streamItems,
+  turnItem('turn-3', 'user', 1, [{ type: 'text', text: '帮我看下还需要做什么？' }]),
+].map((item, turnIndex) => ({ ...item, turnIndex }));
+
 const workingStreamItems: ChatStreamItem[] = [
   ...streamItems,
   turnItem('turn-3', 'user', 1, [{ type: 'text', text: '现在另外两个任务进展到哪了？' }]),
@@ -292,11 +297,13 @@ function ConversationPage({
   title,
   items,
   placeholder,
+  agentActivityLabel = null,
 }: {
   sessionId: SessionId;
   title: string;
   items: ChatStreamItem[];
   placeholder: string;
+  agentActivityLabel?: string | null;
 }) {
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const [prompt, setPrompt] = useState('');
@@ -310,6 +317,7 @@ function ConversationPage({
             <SessionChatStreamView
               sessionId={sessionId}
               items={items}
+              agentActivityLabel={agentActivityLabel}
               className="h-full"
               renderMessageRow={({ message, sessionId: id }) => (
                 <MessageRowView message={message} sessionId={id} />
@@ -388,7 +396,11 @@ const CHILD_TAB = `side-session:${childId}`;
  * left and the session's own right panel, whose resident first tab is the board.
  * A board row opens that conversation as another panel tab.
  */
-function CoordinatorPage({ working = false }: { working?: boolean }) {
+function CoordinatorPage({
+  mode = 'idle',
+}: {
+  mode?: 'idle' | 'starting' | 'working';
+}) {
   const [openedChild, setOpenedChild] = useState(true);
   const [activeTab, setActiveTab] = useState(BOARD_TAB);
   const tabs: SessionSidePanelTabItem[] = [
@@ -421,7 +433,14 @@ function CoordinatorPage({ working = false }: { working?: boolean }) {
           <ConversationPage
             sessionId={coordinatorId}
             title="项目协调者 · lody"
-            items={working ? workingStreamItems : streamItems}
+            items={
+              mode === 'working'
+                ? workingStreamItems
+                : mode === 'starting'
+                  ? startingStreamItems
+                  : streamItems
+            }
+            agentActivityLabel={mode === 'idle' ? null : '正在看…'}
             placeholder="告诉协调者你想做什么"
           />
         </CoordinatorConversationPreviewProvider>
@@ -472,14 +491,16 @@ function CoordinatorPage({ working = false }: { working?: boolean }) {
 function ProjectModePage({
   page = 'coordinator',
 }: {
-  page?: 'coordinator' | 'working' | 'start';
+  page?: 'coordinator' | 'starting' | 'working' | 'start';
 }) {
   const [view, setView] = useState<SidebarProjectView>('projects');
   const [selectedId, setSelectedId] = useState<string | null>(coordinatorProjectKeyId(project));
   const content = useMemo(
     () =>
-      page === 'coordinator' || page === 'working' ? (
-        <CoordinatorPage working={page === 'working'} />
+      page === 'coordinator' || page === 'starting' || page === 'working' ? (
+        <CoordinatorPage
+          mode={page === 'working' ? 'working' : page === 'starting' ? 'starting' : 'idle'}
+        />
       ) : (
         <ProjectWorkspace
           main={
@@ -537,6 +558,10 @@ type Story = StoryObj<typeof meta>;
 export const LightZhCn: Story = { globals: { theme: 'light', locale: 'zh_CN' } };
 export const DarkZhCn: Story = { globals: { theme: 'dark', locale: 'zh_CN' } };
 export const LightEn: Story = { globals: { theme: 'light', locale: 'en' } };
+export const StartingZhCn: Story = {
+  args: { page: 'starting' },
+  globals: { theme: 'light', locale: 'zh_CN' },
+};
 export const WorkingZhCn: Story = {
   args: { page: 'working' },
   globals: { theme: 'light', locale: 'zh_CN' },

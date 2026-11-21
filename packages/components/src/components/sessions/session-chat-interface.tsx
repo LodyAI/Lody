@@ -4631,14 +4631,22 @@ export const SessionChatInterface = memo(
       permissionSessionHistory
     );
     const isCoordinatorConversation = isCoordinatorSession(session);
+    const coordinatorDefaultStatusLabel = t(
+      'projectMode.coordinator.defaultStatus',
+      'Looking into it…'
+    );
     const agentActivityLabel = isCoordinatorConversation
       ? isSessionActive
         ? isAwaitingQuestion
           ? t('sessions.statusIndicator.waitingForAnswer')
           : liveSessionStatus?.type === 'requestPermission'
             ? t('sessions.statusIndicator.requestPermission')
-            : null
-        : null
+            : isFinalizing
+              ? null
+              : coordinatorDefaultStatusLabel
+        : (hasPendingDispatch || pendingMessages.isSending) && statusStripState == null
+          ? coordinatorDefaultStatusLabel
+          : null
       : initStatusLabel && !isEmptyConversation
         ? initStatusLabel
         : isSessionActive
