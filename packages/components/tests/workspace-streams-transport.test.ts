@@ -12,7 +12,7 @@ import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
  */
 import 'fake-indexeddb/auto';
 import { createPrivateKey, sign } from 'node:crypto';
-import { Result } from 'effect';
+import { Effect, Exit, Result, Scope } from 'effect';
 import {
   Bytes,
   contentSigningBytes,
@@ -24,7 +24,12 @@ import {
   verifyContentSignature,
   type ContentScope,
 } from '@lody/e2ee-core/protocol';
-import { hashRecordBytes, recordSigningBytes, verifyLedger } from '@lody/e2ee-core/protocol';
+import {
+  commitEpochKey,
+  hashRecordBytes,
+  recordSigningBytes,
+  verifyLedger,
+} from '@lody/e2ee-core/protocol';
 import { encodeCbor } from '@lody/e2ee-core/protocol';
 import { encodeStreamsRoomAdditionalData } from 'loro-repo/transport/streams';
 import { InMemoryRemoteCursorStore, PayloadProtectionError } from '@loro-dev/streams-crdt';
@@ -38,6 +43,8 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
+import { ContentKeyring } from '@loro-dev/loro-repo-engine';
+import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams';
 import {
   encryptedWorkspaceResolver,
   encryptedWorkspaceRoom,
@@ -1922,6 +1929,237 @@ const cryptoContent = (provider?: PayloadProtectionProvider): WorkspaceStreamsCo
   });
 
 describe('P10 public crypto and published SDK preparation', () => {
+  it.each(['doc', 'flock'] as const)(
+    'the native engine keyring opens the %s frames this client writes, and this client reads frames the keyring seals',
+    async (kind) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const server = createByteServer();
+      const writer = await openTab(`native-keyring-w-${++sequence}` as WorkspaceId);
+      const reader = await openTab(`native-keyring-r-${sequence}` as WorkspaceId);
+      reader.workspaceId = writer.workspaceId;
+      const id =
+        kind === 'doc'
+          ? getScheduleRoomId('message')
+          : getScheduleRegistryFlockDocId(writer.workspaceId);
+      // The product seal/open path: core's Loro Streams binding, not a synthetic provider.
+      const descriptor = encryptedWorkspaceRoom(
+        writer.workspaceId,
+        kind === 'doc' ? { kind: 'doc', docId: id } : { kind: 'flock', flockDocId: id }
+      );
+      // syntheticAuthority's genesis carries a placeholder epoch-key commitment; core's
+      // binding checks the real one, so this ledger commits the installed epoch-0 key.
+      const epochKeyBytes = new Uint8Array(32).fill(0x55);
+      const genesisBody = [
+        ...syntheticGenesisBody.slice(0, 5),
+        commitEpochKey(
+          Result.getOrThrow(Bytes.genesisHash(new Uint8Array(32))),
+          0,
+          Result.getOrThrow(Bytes.epochKey(epochKeyBytes))
+        )
+          .pipe(Result.getOrThrow)
+          .toBytes(),
+      ];
+      const genesisRecord = Result.getOrThrow(
+        encodeCbor([
+          genesisBody,
+          new Uint8Array(
+            sign(
+              null,
+              recordSigningBytes(Result.getOrThrow(encodeCbor(genesisBody))),
+              syntheticPrivateKey
+            )
+          ),
+        ])
+      );
+      const authority = Result.getOrThrow(
+        verifyLedger({
+          anchor: Result.getOrThrow(Bytes.genesisHash(hashRecordBytes(genesisRecord).toBytes())),
+          records: [genesisRecord],
+          checkpoint: { head: hashRecordBytes(genesisRecord), length: 1 },
+        })
+      );
+      const bindingScope = await Effect.runPromise(Scope.make());
+      const binding = await Effect.runPromise(
+        Scope.provide(
+          makeStreamsUpdateBinding({
+            genesis: authority.genesis,
+            resource: descriptor.resource,
+            model: descriptor.model,
+            writeEpoch: 0,
+            signer: {
+              publicKey: syntheticSigner,
+              sign: (message) =>
+                Effect.succeed(
+                  Result.getOrThrow(
+                    Bytes.signature(new Uint8Array(sign(null, message, syntheticPrivateKey)))
+                  )
+                ),
+            },
+            ledger: () => Effect.succeed(authority),
+            readEpochKey: () => Effect.sync(() => Result.getOrThrow(Bytes.epochKey(epochKeyBytes))),
+          }),
+          bindingScope
+        )
+      );
+      const provider: PayloadProtectionProvider = {
+        maxSealOverheadBytes: binding.maxSealOverheadBytes,
+        seal: (input) => Effect.runPromise(binding.seal(input)),
+        open: (input) => Effect.runPromise(binding.open(input)),
+      };
+      const content = protectedContent({
+        resolve: encryptedWorkspaceResolver(writer.workspaceId, () => provider),
+        snapshotUpload: { canUpload: () => true, debounceMs: 10, minBytesSinceRemoteSnapshot: 0 },
+      });
+      const sdkRoom =
+        kind === 'doc'
+          ? ({ kind: 'doc', docId: id } as const)
+          : ({ kind: 'flock', flockDocId: id } as const);
+      const engineRoom = { kind: kind === 'doc' ? ('loro_doc' as const) : ('flock' as const), id };
+      // The engine as main would configure it for this workspace: genesis, the admitted
+      // device and the installed epoch key (the RFC 8032 seed behind syntheticPrivateKey).
+      const keyring = new ContentKeyring();
+      keyring.configureNamespace('ws', authority.genesis.toBytes());
+      keyring.configureWriterSigner(
+        'ws',
+        'self',
+        Uint8Array.from(
+          Buffer.from('9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60', 'hex')
+        )
+      );
+      keyring.installEpochKey('ws', 0, new Uint8Array(32).fill(0x55));
+      const roomAad = (envelopePrefix: Uint8Array) =>
+        encodeStreamsRoomAdditionalData(
+          'trusted-workspace-identity',
+          sdkRoom,
+          Uint8Array.from(
+            Buffer.concat([
+              Buffer.from('loro-streams-crdt-payload-protection/v2\0'),
+              envelopePrefix,
+            ])
+          )
+        );
+      const openWithEngine = (envelope: Uint8Array, continuationOffset: string | null) => {
+        const headerLength = (envelope[6]! << 8) | envelope[7]!;
+        const prefixLength = 10 + headerLength;
+        return keyring.open({
+          namespace: 'ws',
+          room: engineRoom,
+          payloadKind: envelope[5] === 2 ? 'snapshot' : 'update_batch',
+          continuationOffset,
+          header: envelope.slice(10, prefixLength),
+          sealed: envelope.slice(prefixLength),
+          additionalData: roomAad(envelope.slice(0, prefixLength)),
+        });
+      };
+      // streams-crdt frames: append bodies and update-batch plaintexts are u32be-length items.
+      const items = (batch: Uint8Array) => {
+        const out: Uint8Array[] = [];
+        for (let at = 0; at < batch.byteLength;) {
+          const length = new DataView(batch.buffer, batch.byteOffset + at).getUint32(0);
+          out.push(batch.slice(at + 4, at + 4 + length));
+          at += 4 + length;
+        }
+        return out;
+      };
+
+      // 1. What this client puts on the wire opens in the engine keyring.
+      const path =
+        kind === 'doc'
+          ? new URL(docUrl(writer.workspaceId, id)).pathname
+          : `/ds/${LORO_STREAMS_BUCKET_ID}/${encodeURIComponent(id)}`;
+      const transport = transportFor(writer, content);
+      const fromClient = new LoroDoc();
+      let written: unknown;
+      if (kind === 'doc') {
+        const doc = (await writer.repo.openPersistedDoc(id)).doc;
+        const sub = transport.joinDocRoom(id, doc);
+        await settle(sub.firstSyncedWithRemote);
+        doc.getMap('schedule').set('prompt', 'Written by the JS client');
+        doc.commit();
+        await settle(sub.waitUntilSynced());
+        await vi.advanceTimersByTimeAsync(10);
+        await server.snapshotReady;
+        for (const batch of server.room(path).batches)
+          for (const envelope of items(batch))
+            for (const update of items(openWithEngine(envelope, null))) fromClient.import(update);
+        written = doc.toJSON();
+        expect(fromClient.toJSON()).toEqual(written);
+      } else {
+        const flock = (await writer.repo.openFlockDoc(id)).flock;
+        const sub = transport.joinFlockDocRoom(id, flock);
+        await settle(sub.firstSyncedWithRemote);
+        flock.put(['schedule', 'message'], { title: 'Written by the JS client', enabled: true });
+        await settle(sub.waitUntilSynced());
+        await vi.advanceTimersByTimeAsync(10);
+        await server.snapshotReady;
+        const fromClientFlock = new Flock();
+        for (const batch of server.room(path).batches)
+          for (const envelope of items(batch))
+            for (const bundle of items(openWithEngine(envelope, null)))
+              fromClientFlock.importJson(JSON.parse(new TextDecoder().decode(bundle)));
+        expect(fromClientFlock.get(['schedule', 'message'])).toEqual(
+          flock.get(['schedule', 'message'])
+        );
+      }
+      const snapshot = server.room(path).snapshot!;
+      expect(openWithEngine(snapshot.body, snapshot.offset).byteLength).toBeGreaterThan(0);
+
+      // 2. A frame the engine keyring seals is read by this client.
+      const envelopeFor = (update: Uint8Array) => {
+        const plaintext = new Uint8Array(4 + update.byteLength);
+        new DataView(plaintext.buffer).setUint32(0, update.byteLength);
+        plaintext.set(update, 4);
+        const prefix = Uint8Array.of(0x4c, 0x53, 0x43, 0x45, 2, 1, 0, 1, 0, 0, 3);
+        const sealed = keyring.seal({
+          namespace: 'ws',
+          room: engineRoom,
+          payloadKind: 'update_batch',
+          writer: 'self',
+          continuationOffset: null,
+          contextAad: (() => {
+            const full = roomAad(prefix);
+            return full.slice(0, full.byteLength - 4 - 40 - prefix.byteLength);
+          })(),
+          plaintext,
+        });
+        expect(sealed.header).toEqual(Uint8Array.of(3));
+        const envelope = Buffer.concat([prefix, sealed.sealed]);
+        const item = Buffer.alloc(4);
+        item.writeUInt32BE(envelope.byteLength);
+        return Uint8Array.from(Buffer.concat([item, envelope]));
+      };
+      if (kind === 'doc') {
+        const engineDoc = new LoroDoc();
+        engineDoc.import(fromClient.export({ mode: 'snapshot' }));
+        engineDoc.getMap('schedule').set('prompt', 'Sealed by the native engine');
+        engineDoc.commit();
+        server
+          .room(path)
+          .batches.push(
+            envelopeFor(engineDoc.export({ mode: 'update', from: fromClient.version() }))
+          );
+        const remote = (await reader.repo.openPersistedDoc(id)).doc;
+        expect((await transportFor(reader, content).syncDoc(id, remote)).ok).toBe(true);
+        expect(remote.getMap('schedule').get('prompt')).toBe('Sealed by the native engine');
+      } else {
+        const engineFlock = new Flock();
+        engineFlock.put(['schedule', 'engine'], { title: 'Sealed by the native engine' });
+        server
+          .room(path)
+          .batches.push(
+            envelopeFor(new TextEncoder().encode(JSON.stringify(engineFlock.exportJson())))
+          );
+        const remote = (await reader.repo.openFlockDoc(id)).flock;
+        expect((await transportFor(reader, content).syncFlockDoc(id, remote)).ok).toBe(true);
+        expect(remote.get(['schedule', 'engine'])).toEqual({
+          title: 'Sealed by the native engine',
+        });
+      }
+      await reader.repo.destroy();
+      openTabs.delete(reader);
+      await Effect.runPromise(Scope.close(bindingScope, Exit.void));
+    }
+  );
   it.each(['doc', 'flock'] as const)(
     'syncs the schedule %s through the production encrypted selector, signed snapshots and durable storage',
     async (kind) => {

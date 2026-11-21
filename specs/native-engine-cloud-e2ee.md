@@ -302,23 +302,24 @@ A WASM build of the engine is not part of this design.
 
 ## SDK primitives
 
-They are ordered by what they block. The names are drafts. The SDK stays free
-of Lody domain concepts.
+They are ordered by what they block, and named as implemented in loro-dev/loro-repo. The
+SDK stays free of Lody domain concepts. "Branch" means pushed for review and not yet
+merged.
 
-| ID | Blocks | Primitive (draft) |
-| -- | ------ | ----------------- |
-| K0 | E2EE | **Host-resident keyring.** Today `ContentKeyring` runs in the napi client process, and the host protocol has no install request. Add install requests in binary frames: `keyringConfigure(ns, genesis)`, `keyringInstallEpoch`, `keyringSetSigner(ns, writer, seed)`, `keyringAdmit` and `keyringClear`. The host zeroizes on clear, drop, handoff and exit, and no request returns key material. |
-| K1 | E2EE | **Writer-bound connections.** Only the connection that installed writer W's seed may write or seal as W. |
-| K2 | E2EE | **Seal policy separate from admission:** `keyringSetSealEpoch(ns, epoch)` and `keyringHoldSealing(ns, writer)` / `release`. A hold keeps admission and older epochs, unlike `revokeWriterPubkey`. |
-| S1 | cloud | Per-room live interest and pull: `setRoomInterest(ns, rooms, {live})` and `syncRooms(ns, rooms)`. Fix the binary Loro-update subscription so that it counts as interest. |
-| S2 | cloud | The token reply carries `{token, expiresAt?, baseUrl?, bucket?, shardUrls?}`. Refresh the token before it expires. Encrypted content tokens last 8 minutes and carry their own bucket. |
-| S3 | cloud, E2EE | Snapshot upload policy per remote: `{debounceMs, minBytes, maxBytes}`, a pushed `setSnapshotUpload(ns, allowed)` gate, and `uploadSnapshotNow(ns, room)` for repair requests. Snapshot bytes must match the legacy codec. |
-| S4 | cloud | Remote imports are never rejected by a local `docSchema`. Verify this first; add the primitive only if it fails. |
-| E1 | E2EE | `dropNamespace(ns)`: drain, close and durably delete a namespace's database and outbox. A durable reply confirms completion. |
-| N2 | — | Streaming live transport (SSE or WebSocket) instead of long-poll. |
+| ID | Blocks | Primitive | State |
+| -- | ------ | --------- | ----- |
+| K0 | E2EE | **Host-resident keyring.** `keyringConfigure(ns, genesis)`, `keyringAdmit`, `keyringClear` and the seal-policy calls are JSON requests. `keyringInstallEpoch` and `keyringSetSigner(ns, writer, seed)` travel only in binary secret frames. The host zeroizes on clear, drop, handoff and exit, and no request returns key material. | #335 |
+| K1 | E2EE | **Writer-bound connections.** Only the connection that installed writer W's seed may write as W, change W's seal policy or reinstall W. Its close removes the seed, so W's rows wait. | #336 |
+| K2 | E2EE | **Seal policy separate from admission:** `setSealEpoch`, `holdSealing` / `releaseSealing` and `removeWriterSigner`, which keeps the public key admitted. Host forms: `keyringSetSealEpoch`, `keyringHoldSealing`, `keyringReleaseSealing`, `keyringRemoveSigner`. | #333 |
+| S1 | cloud | Binary Loro-update and path subscriptions count as live interest. `holdRoomInterest(ns, rooms)` keeps rooms live until `release()`. `syncRooms(ns, rooms, remoteId?)` pulls only those rooms. | branch `lody/room-interest` |
+| S2 | cloud | An auth provider may return `{ token, expiresInMs }`. The engine refreshes the token thirty seconds before expiry, or at half its lifetime if shorter. The caller still configures the bucket and gateway from its first token response with `configureRemote`. Endpoint fields in the reply were left out because rewriting a remote during a refresh would change stream identity mid-sync. | branch `lody/token-expiry` (on S1) |
+| S3 | cloud, E2EE | `setSnapshotPolicy(ns, { enabled, quietMs, minUpdateBytes, maxUpdateBytes })`, held in engine memory, and `uploadSnapshotNow(ns, room)` for repair requests. The snapshot codec already matches Lody's: zstd frames, with raw frames still readable. | branch `lody/snapshot-policy` (on S2) |
+| S4 | cloud | Remote imports are never rejected by a local `docSchema`. Verified in code and covered by a test; no primitive was needed. | branch `lody/schema-remote-import` (on S3) |
+| E1 | E2EE | `dropNamespace(ns)`: drain, close and durably delete a namespace's database and outbox. A durable reply confirms completion. | #338 |
+| N2 | — | Streaming live transport (SSE or WebSocket) instead of long-poll. | not started |
 
 The npm releases must contain every primitive the shipping build uses. 0.1.0
-predates most of them.
+predates them all.
 
 ## Delivery plan
 
