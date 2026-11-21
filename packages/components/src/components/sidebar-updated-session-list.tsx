@@ -1488,7 +1488,6 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             isWorking={item.isWorking}
             hasUnreadMessages={item.hasUnreadMessages}
             fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
-            rowGroup="row"
             restIcon={
               snoozeCountdown ||
               showPr ||
