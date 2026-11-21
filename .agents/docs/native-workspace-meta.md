@@ -126,6 +126,29 @@ whose changes were all committed keeps its bytes (loro-repo
 asks the owner only for the ops past that version (`exportLoroSince`; through
 main, `openDoc` with `since`).
 
+### Remote Session reads (no local replica)
+
+[`remote-loro.ts`](../../packages/shared/src/session-data/remote-loro.ts) is a
+`SessionHistoryReader` over a Session document that stays in the engine. It reads
+directory pages with one bounded list-field read (`readDocListFields`: the
+directory scalars and send-configuration keys of items `[start, end)`, aligned per
+item), turn bodies with one subpath read, and observes `doc_subscribe_paths`
+(changed container paths and list shapes, never contents) on the shared
+observation lifecycle. List edits and id edits become structural ranges; other
+edits become changed turn ids. Its directory rows equal the in-process reader's.
+The native port is `createNativeRemoteHistoryPort` in
+[`native-docs.ts`](../../packages/shared/src/node/native-docs.ts). Composition is
+not wired yet: the Session document also holds the control-plane roots the
+renderer writes (`mq`, `humanInputReceipts`, `cancelRequest`, ...).
+
+Measured choices: JSONPath (`LoroDoc.jsonpath`) was not used for the batch read —
+per-item projections drop absent fields, so results do not align; the first query
+on a loaded 100k-item document costs about 150 ms whatever it selects; filters cost
+0.5–0.8 s; and results are unbounded. Changed paths come from the document's own
+events (0.01–0.1 ms per commit at 100k items), not `LoroDoc::diff` between versions
+(160–1,150 ms). `subscribeJsonpath` only signals that a path may have changed, with
+no position, so it cannot name changed turns.
+
 ## Workspace Meta
 
 [`native-workspace-meta.ts`](../../packages/shared/src/node/native-workspace-meta.ts)
@@ -274,6 +297,17 @@ about 250 ms, and the import the rest. A reopen in the same process asks only fo
 newer ops. The SDK framer fix (`lody/framer-chunks`) is required: without it the
 client recopied its receive buffer per socket chunk, and a 38.5 MB open took
 10–12 s.
+
+Remote reader (no replica), same composition through `createConversationViewFromReader`,
+`LODY_SESSION_FIRST_SCREEN_PATHS=remote`; _cold_ follows a host restart. Total ms,
+best of two runs: 1,000 turns 82 cold / 20 warm; 10,000 turns 73 / 31; 100,000
+turns 798 / 250. The opening process holds no document; the engine host adds
+about 83 MB for a loaded 100k-turn room. Two costs remain at 100k: the engine's
+first load of the room (about 340 ms), and the view's dense per-position rows
+(74 ms and 23.5 MB with an instant reader, repeated for each applied page). The
+cold load needed the engine compaction fix (`lody/compact-by-bytes`): a migrated
+snapshot stayed update-encoded, and the first read after a restart took 6.0 s and
+1.18 GB.
 
 Memory with one 100k-turn Session open: the replica adds about 65–90 MB to the
 opening process (in-process measurement 87.5 MB), and the engine host 10–15 MB

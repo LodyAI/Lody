@@ -15,6 +15,13 @@ import {
 const notCommitted = (reason: string) => new ExternalMetadataNotCommittedError(reason);
 import { Flock } from '@loro-dev/flock-wasm';
 import { createNativeFlockDocs } from '../src/node/native-flock-docs';
+import { createNativeDocs, createNativeRemoteHistoryPort } from '../src/node/native-docs';
+import {
+  createLoroSessionData,
+  createRemoteLoroHistoryReader,
+  type SessionDataChange,
+} from '../src/session-data';
+import type { SessionHistory, SessionId } from '../src';
 import {
   connectNativeRepo,
   importLegacyRoom,
@@ -323,5 +330,86 @@ describe('natively owned named Flock documents', () => {
       (await connection.client.exportFlockRaw(ns, { kind: 'flock', id: CATALOG })).bytes
     );
     expect(native.get(['row'])).toBe('offline');
+  });
+});
+
+describe('remote Session history reader', () => {
+  const DOC = 'session-remote';
+  const turn = (index: number, extra: Partial<SessionHistory> = {}): SessionHistory =>
+    ({
+      id: `turn-${index}`,
+      role: index % 2 === 0 ? 'user' : 'assistant',
+      timestamp: '2026-01-01T00:00:00Z',
+      items: [{ type: 'text', text: `body ${index}` }],
+      fileDiff: [],
+      ...(index % 2 === 0
+        ? { inputConfig: { prompt: 'secret prompt', agentRoleId: 'role-a', mcpServerIds: [] } }
+        : { userTurnId: `turn-${index - 1}` }),
+      ...extra,
+    }) as SessionHistory;
+  const until = async (check: () => boolean) => {
+    while (!check()) await new Promise((resolve) => setImmediate(resolve));
+  };
+
+  /** The daemon's writing replica and a second process's remote reader. */
+  async function open() {
+    const { dataDir, connection } = await setup();
+    const repo = await LoroRepo.create({
+      externalDocs: createNativeDocs(connection.client, ns, (id) => id === DOC),
+    });
+    cleanups.push(() => repo.destroy());
+    const { doc } = await repo.openPersistedDoc(DOC);
+    const data = createLoroSessionData({ sessionId: 'remote' as SessionId, doc });
+    const commit = () => repo.persistDocNow(DOC, doc);
+    const remote = createRemoteLoroHistoryReader(
+      createNativeRemoteHistoryPort(await peer(dataDir), ns, DOC)
+    );
+    return { data, commit, remote };
+  }
+
+  it('reads the latest page, turns and outputs as the in-process reader does', async () => {
+    const { data, commit, remote } = await open();
+    for (let i = 0; i < 90; i++) await data.commands.appendTurn(turn(i));
+    await commit();
+    const local = await data.history.readLatestDirectoryPage!(40);
+    const page = await remote.readLatestDirectoryPage!(40);
+    const facts = (rows: typeof page.rows) =>
+      rows.map((row) => ({ ...row, inputConfig: row.inputConfig }));
+    expect(facts(page.rows)).toEqual(facts(local.rows));
+    expect(page).toMatchObject({ startPosition: 50, totalCount: 90, hasMoreOlder: true });
+    expect(JSON.stringify(page.rows)).not.toContain('secret prompt');
+    const older = await remote.readOlderDirectoryPage!(page.cursor!, 40);
+    expect(older.rows.map((row) => row.turnId)).toEqual(
+      Array.from({ length: 40 }, (_, i) => `turn-${10 + i}`)
+    );
+    expect(await remote.readTurn('turn-3')).toEqual(data.history.readTurn('turn-3'));
+    expect(await remote.readTurn('turn-404')).toEqual({ state: 'missing' });
+    expect(await remote.readTurnOutput('turn-88')).toEqual(data.history.readTurnOutput('turn-88'));
+  });
+
+  it('notifies appends structurally and field edits by turn id, never by content', async () => {
+    const { data, commit, remote } = await open();
+    for (let i = 0; i < 4; i++) await data.commands.appendTurn(turn(i));
+    await commit();
+    const changes: SessionDataChange[] = [];
+    const observation = remote.observe((change) => changes.push(change));
+    await observation.initial;
+    await remote.readLatestDirectoryPage!(40);
+
+    await data.commands.appendTurn(turn(4));
+    await commit();
+    await until(() => changes.some((change) => change.kind === 'structure'));
+    expect(changes).toEqual([{ kind: 'structure', from: 4, to: 5 }]);
+
+    await data.commands.applyHistoryAction({
+      kind: 'user-status',
+      turnId: 'turn-2',
+      status: 'failed',
+    });
+    await commit();
+    await until(() => changes.some((change) => change.kind === 'changed'));
+    expect(changes.at(-1)).toEqual({ kind: 'changed', ids: ['turn-2'] });
+    expect((await remote.readTurn('turn-2')).state).toBe('ready');
+    observation.unsubscribe();
   });
 });
