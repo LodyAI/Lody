@@ -72,8 +72,9 @@ owns the long-term directory contract, and both stay active.
   reopened the stale replica was rejected because the merge reuses the same LWW
   import and needs no compatibility handling. A commit already sent when the host dies latches that repo's
   Meta writes until it is recreated (SDK contract).
-- A Session first screen is proportional to history: 236 ms at 10,000 turns and
-  3.6 s at 100,000. The cost is the Session reader's whole-history directory, which
-  the legacy path shares, and the engine's whole-snapshot transfer. A windowed
-  directory and on-demand document loading are the next slice.
+- The Session reader now pages its directory, as Roost's does, so first screens
+  hold the 200 ms target up to 10,000 turns and on reopen. A cold open of a
+  100,000-turn Session still loads the whole document (1.6 s native, 0.33 s
+  legacy). Closing that gap needs either segmented history, a storage format
+  change, or SDK transfer work, and is an open owner decision.
 - Cloud and encrypted workspaces are out of scope: the OSS desktop is local-only.

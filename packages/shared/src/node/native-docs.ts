@@ -107,16 +107,19 @@ export async function observeNativeDoc(
   client: RepoClient,
   namespace: string,
   docId: string,
-  listener: Parameters<typeof observeLoroDoc>[3]
+  listener: Parameters<typeof observeLoroDoc>[3],
+  since?: Readonly<Record<string, number>>
 ) {
   await client.createRoom(namespace, docRoom(docId), 'plaintext');
-  return observeLoroDoc(client, namespace, docRoom(docId), listener);
+  return observeLoroDoc(client, namespace, docRoom(docId), listener, since);
 }
 
 /**
  * Owner of selected Loro documents for a LoroRepo in this process. Each open
  * replica has one update observation on the shared connection; a reload after
- * reconnect delivers the whole snapshot again, which imports as an update.
+ * reconnect delivers the snapshot again, which imports as an update. A repo
+ * reopening a document it retained passes its version and receives only the
+ * newer ops.
  * `legacy` migrates this process's own replica of a document on first open.
  */
 export function createNativeDocs(
@@ -129,25 +132,33 @@ export function createNativeDocs(
   return {
     capability: CAPABILITY,
     owns,
-    async open(docId, onUpdate): Promise<ExternalDocFeed> {
+    async open(docId, onUpdate, known): Promise<ExternalDocFeed> {
       if (legacy)
         await importLegacyDoc(client, namespace, docId, legacy.source, () => legacy.load(docId));
-      let snapshot: Uint8Array | undefined;
-      const observation = await observeNativeDoc(client, namespace, docId, (event) => {
-        if (event.kind === 'snapshot') {
-          if (snapshot === undefined) snapshot = event.file;
-          else onUpdate(event.file);
-        } else if (event.kind === 'changes') {
-          for (const update of event.updates) onUpdate(update);
-        }
-      });
+      let first: Uint8Array | undefined;
+      const observation = await observeNativeDoc(
+        client,
+        namespace,
+        docId,
+        (event) => {
+          if (event.kind === 'snapshot') {
+            if (first === undefined) first = event.file;
+            else onUpdate(event.file);
+          } else if (event.kind === 'changes') {
+            for (const update of event.updates) onUpdate(update);
+          }
+        },
+        known?.version
+      );
       try {
         await observation.ready;
       } catch (error) {
         await observation.release().catch(() => {});
         throw error;
       }
-      return { snapshot, close: () => observation.release() };
+      const close = () => observation.release();
+      if (!first?.byteLength) return { close };
+      return known ? { update: first, close } : { snapshot: first, close };
     },
     async commit(docId, updates) {
       if (!marked.has(docId)) {

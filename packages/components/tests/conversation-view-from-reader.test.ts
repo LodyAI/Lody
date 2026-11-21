@@ -6,7 +6,8 @@ import type { SessionHistory } from '@lody/shared';
 import {
   resolveSessionAcpRuntimeConfig,
   resolveSessionConversationConfig,
-  resolveSessionConversationSourceFence} from '@lody/shared';
+  resolveSessionConversationSourceFence,
+} from '@lody/shared';
 import {
   createLoroSessionData,
   setFieldTo,
@@ -458,6 +459,8 @@ describe.each(backends)('createConversationViewFromReader over $name', (backend)
     const { view, idle, mutateHistory } = harness;
     try {
       await settle(idle, view);
+      const directory = view.acquireDirectory!();
+      await directory.ready;
       const captured = Array.from({ length: 8 }, (_, i) => view.index(i)!.id);
       const range = view.acquireRange(0, 8);
       await range.ready;
@@ -482,6 +485,7 @@ describe.each(backends)('createConversationViewFromReader over $name', (backend)
       for (let i = 0; i < view.turnCount; i += 1) if (view.isHydrated(i)) hydrated += 1;
       expect(hydrated).toBeLessThanOrEqual(6);
       expect(view.isHydrated(view.turnCount - 1)).toBe(true);
+      directory.release();
       view.dispose();
     } finally {
       harness.teardown();
