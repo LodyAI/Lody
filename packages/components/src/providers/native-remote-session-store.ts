@@ -7,7 +7,7 @@ import {
   shareObservation,
   type SessionData,
 } from '@lody/shared/session-data';
-import { sessionDocSchema } from '@lody/shared';
+import { sessionDocSchema } from '@lody/shared/session-doc-schemas';
 import type { SessionDocState, SessionDocStore } from '@/atoms/runtime';
 import { createConversationViewFromReader } from '@/lib/conversation-view/create-conversation-view-from-reader';
 import type { CreateConversationViewFromReaderOptions } from '@/lib/conversation-view/create-conversation-view-from-reader';

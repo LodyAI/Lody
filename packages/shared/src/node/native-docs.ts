@@ -6,7 +6,7 @@ import {
   type RemoteSessionDocPort,
 } from '../session-data/remote-document';
 import { engineDocSchemaFromMirror } from '../session-data/engine-doc-schema';
-import { sessionDocSchema } from '../schema';
+import { sessionDocSchema } from '../session-doc-schemas';
 import { MIGRATIONS_ROOM, observeLoroDoc, observeLoroPaths } from './native-repo';
 
 /** Type-only loro-repo use keeps its WASM out of the Electron main bundle. */

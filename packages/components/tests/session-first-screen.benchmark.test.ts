@@ -18,7 +18,7 @@ import {
   createRemoteLoroHistoryReader,
   shareObservation,
 } from '@lody/shared/session-data';
-import { sessionDocSchema } from '@lody/shared';
+import { sessionDocSchema } from '@lody/shared/session-doc-schemas';
 import { createConversationViewFromReader } from '../src/lib/conversation-view/create-conversation-view-from-reader';
 import { createConversationSession } from '../src/lib/conversation-view';
 import type { IdleScheduler } from '../src/lib/conversation-view/create-conversation-view-from-reader';
